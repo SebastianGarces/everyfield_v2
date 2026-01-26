@@ -1,6 +1,6 @@
 # Wiki Article Checklist
 
-This is a living document tracking all wiki articles derived from the [Launch Playbook](../launch-playbook.md). Use this to manage context and resume work on incomplete articles.
+This is a living document tracking all wiki articles derived from the [Launch Playbook](../launch-playbook.md) and aligned with the [Wiki FRD](../features/wiki/frd.md). Use this to manage context and resume work on incomplete articles.
 
 **Status Key:**
 - ✅ Done
@@ -15,7 +15,7 @@ Track MDX components needed for articles. Create these after articles are comple
 
 | Component | Purpose | Status |
 |-----------|---------|--------|
-| `<Callout>` | Tips, warnings, scripture, insights | ⬜ Not Started |
+| `<Callout>` | Tips, warnings, scripture, insights | ✅ Done |
 | `<PhaseIndicator>` | Visual badge showing launch phase | ⬜ Not Started |
 | `<Checklist>` | Interactive checklist with local storage | ⬜ Not Started |
 | `<Timeline>` | Visual timeline for processes | ⬜ Not Started |
@@ -27,166 +27,215 @@ Track MDX components needed for articles. Create these after articles are comple
 
 ---
 
-## Phase 1: Vision & Core Group Formation
-
-### Introduction & Foundations
+## Getting Started (Meta Content)
 
 | # | Article | File Path | Status |
 |---|---------|-----------|--------|
-| 1.1 | Welcome to the Launch Playbook | `wiki/phase-1/introduction/welcome-to-the-launch-playbook.mdx` | ✅ |
-| 1.2 | Launch Process Goals | `wiki/phase-1/introduction/launch-process-goals.mdx` | ✅ |
-| 1.3 | 8 Critical Success Factors Overview | `wiki/phase-1/introduction/8-critical-success-factors-overview.mdx` | ✅ |
-| 1.4 | The 4 C's: Committed, Compelled, Contagious, Courageous | `wiki/phase-1/introduction/the-4-cs.mdx` | ✅ |
+| GS.1 | Welcome to the Launch Playbook | `wiki/getting-started/welcome-to-the-launch-playbook.mdx` | ✅ |
+| GS.2 | Launch Process Goals | `wiki/getting-started/launch-process-goals.mdx` | ✅ |
 
-### Core Group Development
+---
+
+## Phase 0: Discovery
 
 | # | Article | File Path | Status |
 |---|---------|-----------|--------|
-| 2.1 | What is a Core Group? | `wiki/phase-1/core-group/what-is-a-core-group.mdx` | ⬜ |
-| 2.2 | The Core Group Funnel | `wiki/phase-1/core-group/the-core-group-funnel.mdx` | ⬜ |
-| 2.3 | Core Group Assignments | `wiki/phase-1/core-group/core-group-assignments.mdx` | ⬜ |
-| 2.4 | Core Group Meeting Format | `wiki/phase-1/core-group/core-group-meeting-format.mdx` | ⬜ |
-| 2.5 | Growing Your Core Group | `wiki/phase-1/core-group/growing-your-core-group.mdx` | ⬜ |
+| 0.1 | Is Church Planting Your Calling? | `wiki/discovery/is-church-planting-your-calling.mdx` | ⬜ |
+| 0.2 | Understanding the 4 Pillars | `wiki/discovery/understanding-the-4-pillars.mdx` | ⬜ |
+| 0.3 | Defining Your Church Values | `wiki/discovery/defining-your-church-values.mdx` | ⬜ |
+| 0.4 | The Worship/Walk/Work Model | `wiki/discovery/the-worship-walk-work-model.mdx` | ⬜ |
+| 0.5 | Setting Your Initial Goals | `wiki/discovery/setting-your-initial-goals.mdx` | ⬜ |
+| 0.6 | Finding a Coach/Mentor | `wiki/discovery/finding-a-coach-mentor.mdx` | ⬜ |
+
+---
+
+## Phase 1: Core Group Development
 
 ### Vision Meetings
 
 | # | Article | File Path | Status |
 |---|---------|-----------|--------|
-| 3.1 | What is a Vision Meeting? | `wiki/phase-1/vision-meetings/what-is-a-vision-meeting.mdx` | ⬜ |
-| 3.2 | 8 Critical Success Factors for Vision Meetings | `wiki/phase-1/vision-meetings/8-critical-success-factors-for-vision-meetings.mdx` | ✅ |
-| 3.3 | Planning Your Vision Meeting | `wiki/phase-1/vision-meetings/planning-your-vision-meeting.mdx` | ⬜ |
-| 3.4 | Vision Meeting Agenda Deep Dive | `wiki/phase-1/vision-meetings/vision-meeting-agenda-deep-dive.mdx` | ⬜ |
-| 3.5 | The Vision Meeting Kit | `wiki/phase-1/vision-meetings/the-vision-meeting-kit.mdx` | ⬜ |
-| 3.6 | Invitation Strategies | `wiki/phase-1/vision-meetings/invitation-strategies.mdx` | ⬜ |
-| 3.7 | Running the Meeting | `wiki/phase-1/vision-meetings/running-the-meeting.mdx` | ⬜ |
-| 3.8 | Your First Vision Meeting: A Step-by-Step Guide | `wiki/phase-1/vision-meetings/your-first-vision-meeting.mdx` | ⬜ |
+| 1.1 | What is a Vision Meeting? | `wiki/core-group/vision-meetings/what-is-a-vision-meeting.mdx` | ⬜ |
+| 1.2 | 8 Critical Success Factors for Vision Meetings | `wiki/core-group/vision-meetings/8-critical-success-factors-for-vision-meetings.mdx` | ⬜ |
+| 1.3 | Planning Your Vision Meeting | `wiki/core-group/vision-meetings/planning-your-vision-meeting.mdx` | ⬜ |
+| 1.4 | Vision Meeting Agenda Deep Dive | `wiki/core-group/vision-meetings/vision-meeting-agenda-deep-dive.mdx` | ⬜ |
+| 1.5 | The Vision Meeting Kit | `wiki/core-group/vision-meetings/the-vision-meeting-kit.mdx` | ⬜ |
+| 1.6 | Invitation Strategies | `wiki/core-group/vision-meetings/invitation-strategies.mdx` | ⬜ |
+| 1.7 | Running the Meeting | `wiki/core-group/vision-meetings/running-the-meeting.mdx` | ⬜ |
+| 1.8 | Your First Vision Meeting: A Step-by-Step Guide | `wiki/core-group/vision-meetings/your-first-vision-meeting.mdx` | ⬜ |
+
+### Building Your Core Group
+
+| # | Article | File Path | Status |
+|---|---------|-----------|--------|
+| 1.9 | What is a Core Group? | `wiki/core-group/building-your-core-group/what-is-a-core-group.mdx` | ⬜ |
+| 1.10 | The Core Group Funnel | `wiki/core-group/building-your-core-group/the-core-group-funnel.mdx` | ⬜ |
+| 1.11 | Core Group Assignments | `wiki/core-group/building-your-core-group/core-group-assignments.mdx` | ⬜ |
+| 1.12 | Core Group Meeting Format | `wiki/core-group/building-your-core-group/core-group-meeting-format.mdx` | ⬜ |
+| 1.13 | Growing Your Core Group | `wiki/core-group/building-your-core-group/growing-your-core-group.mdx` | ⬜ |
 
 ### Follow Up
 
 | # | Article | File Path | Status |
 |---|---------|-----------|--------|
-| 4.1 | The Importance of Great Follow Up | `wiki/phase-1/follow-up/the-importance-of-great-follow-up.mdx` | ⬜ |
-| 4.2 | The 4 Reasons Follow Up is Vital | `wiki/phase-1/follow-up/4-reasons-follow-up-is-vital.mdx` | ⬜ |
-| 4.3 | Interviewing for Fit | `wiki/phase-1/follow-up/interviewing-for-fit.mdx` | ⬜ |
-| 4.4 | Database Management for Follow Up | `wiki/phase-1/follow-up/database-management.mdx` | ⬜ |
+| 1.14 | The Importance of Great Follow Up | `wiki/core-group/follow-up/the-importance-of-great-follow-up.mdx` | ⬜ |
+| 1.15 | The 4 Reasons Follow Up is Vital | `wiki/core-group/follow-up/4-reasons-follow-up-is-vital.mdx` | ⬜ |
+| 1.16 | Interviewing for Fit | `wiki/core-group/follow-up/interviewing-for-fit.mdx` | ⬜ |
+| 1.17 | Database Management for Follow Up | `wiki/core-group/follow-up/database-management.mdx` | ⬜ |
 
 ### Formalize Commitment
 
 | # | Article | File Path | Status |
 |---|---------|-----------|--------|
-| 5.1 | Why Formalized Commitment Matters | `wiki/phase-1/commitment/why-formalized-commitment-matters.mdx` | ⬜ |
-| 5.2 | The Three Key Documents | `wiki/phase-1/commitment/the-three-key-documents.mdx` | ⬜ |
-| 5.3 | Core Group Commitments Explained | `wiki/phase-1/commitment/core-group-commitments-explained.mdx` | ⬜ |
+| 1.18 | Why Formalized Commitment Matters | `wiki/core-group/commitment/why-formalized-commitment-matters.mdx` | ⬜ |
+| 1.19 | The Three Key Documents | `wiki/core-group/commitment/the-three-key-documents.mdx` | ⬜ |
+| 1.20 | Core Group Commitments Explained | `wiki/core-group/commitment/core-group-commitments-explained.mdx` | ⬜ |
 
 ---
 
-## Phase 2: Launch Team & Training
+## Phase 2: Launch Team Formation
 
 ### Targeted Launch Date
 
 | # | Article | File Path | Status |
 |---|---------|-----------|--------|
-| 6.1 | Setting Your Launch Date | `wiki/phase-2/launch-date/setting-your-launch-date.mdx` | ⬜ |
-| 6.2 | Best Seasons to Launch | `wiki/phase-2/launch-date/best-seasons-to-launch.mdx` | ⬜ |
-| 6.3 | Variables That Drive Your Launch Date | `wiki/phase-2/launch-date/variables-that-drive-your-launch-date.mdx` | ⬜ |
-| 6.4 | Transitioning from Core Group to Launch Team | `wiki/phase-2/launch-date/transitioning-to-launch-team.mdx` | ⬜ |
-
-### Training & Preparation
-
-| # | Article | File Path | Status |
-|---|---------|-----------|--------|
-| 7.1 | Mission Focus: Training and Preparation Overview | `wiki/phase-2/training/training-overview.mdx` | ⬜ |
-| 7.2 | Goals by Launch Sunday | `wiki/phase-2/training/goals-by-launch-sunday.mdx` | ⬜ |
-| 7.3 | Launch Team Meeting Objectives | `wiki/phase-2/training/launch-team-meeting-objectives.mdx` | ⬜ |
+| 2.1 | Setting Your Launch Date | `wiki/launch-team/launch-date/setting-your-launch-date.mdx` | ⬜ |
+| 2.2 | Best Seasons to Launch | `wiki/launch-team/launch-date/best-seasons-to-launch.mdx` | ⬜ |
+| 2.3 | Variables That Drive Your Launch Date | `wiki/launch-team/launch-date/variables-that-drive-your-launch-date.mdx` | ⬜ |
+| 2.4 | Transitioning from Core Group to Launch Team | `wiki/launch-team/launch-date/transitioning-to-launch-team.mdx` | ⬜ |
 
 ### Key Leadership Roles
 
 | # | Article | File Path | Status |
 |---|---------|-----------|--------|
-| 8.1 | Key Leadership Roles Overview | `wiki/phase-2/leadership/key-leadership-roles-overview.mdx` | ⬜ |
-| 8.2 | The Senior Pastor Role | `wiki/phase-2/leadership/senior-pastor-role.mdx` | ⬜ |
-| 8.3 | The Launch Coordinator Role | `wiki/phase-2/leadership/launch-coordinator-role.mdx` | ⬜ |
-| 8.4 | The Worship Leader Role | `wiki/phase-2/leadership/worship-leader-role.mdx` | ⬜ |
-| 8.5 | The Children's Ministry Leader Role | `wiki/phase-2/leadership/childrens-ministry-leader-role.mdx` | ⬜ |
-| 8.6 | The Facilities Leader Role | `wiki/phase-2/leadership/facilities-leader-role.mdx` | ⬜ |
-| 8.7 | The Assimilation Leaders Role | `wiki/phase-2/leadership/assimilation-leaders-role.mdx` | ⬜ |
-| 8.8 | The Small Group Leader Role | `wiki/phase-2/leadership/small-group-leader-role.mdx` | ⬜ |
-| 8.9 | The Promotion Leader Role | `wiki/phase-2/leadership/promotion-leader-role.mdx` | ⬜ |
-| 8.10 | The Technology Leader Role | `wiki/phase-2/leadership/technology-leader-role.mdx` | ⬜ |
-| 8.11 | The Prayer Leader Role | `wiki/phase-2/leadership/prayer-leader-role.mdx` | ⬜ |
+| 2.5 | Key Leadership Roles Overview | `wiki/launch-team/leadership/key-leadership-roles-overview.mdx` | ⬜ |
+| 2.6 | The Senior Pastor Role | `wiki/launch-team/leadership/senior-pastor-role.mdx` | ⬜ |
+| 2.7 | The Launch Coordinator Role | `wiki/launch-team/leadership/launch-coordinator-role.mdx` | ⬜ |
+| 2.8 | The Worship Leader Role | `wiki/launch-team/leadership/worship-leader-role.mdx` | ⬜ |
+| 2.9 | The Children's Ministry Leader Role | `wiki/launch-team/leadership/childrens-ministry-leader-role.mdx` | ⬜ |
+| 2.10 | The Facilities Leader Role | `wiki/launch-team/leadership/facilities-leader-role.mdx` | ⬜ |
+| 2.11 | The Assimilation Leaders Role | `wiki/launch-team/leadership/assimilation-leaders-role.mdx` | ⬜ |
+| 2.12 | The Small Group Leader Role | `wiki/launch-team/leadership/small-group-leader-role.mdx` | ⬜ |
+| 2.13 | The Promotion Leader Role | `wiki/launch-team/leadership/promotion-leader-role.mdx` | ⬜ |
+| 2.14 | The Technology Leader Role | `wiki/launch-team/leadership/technology-leader-role.mdx` | ⬜ |
+| 2.15 | The Prayer Leader Role | `wiki/launch-team/leadership/prayer-leader-role.mdx` | ⬜ |
 
 ### Project Management
 
 | # | Article | File Path | Status |
 |---|---------|-----------|--------|
-| 9.1 | Launch Coordinator Responsibilities | `wiki/phase-2/project-management/launch-coordinator-responsibilities.mdx` | ⬜ |
-| 9.2 | Building Your Gantt Chart | `wiki/phase-2/project-management/building-your-gantt-chart.mdx` | ⬜ |
-| 9.3 | Managing Timelines and Critical Pathways | `wiki/phase-2/project-management/managing-timelines.mdx` | ⬜ |
+| 2.16 | Launch Coordinator Responsibilities | `wiki/launch-team/project-management/launch-coordinator-responsibilities.mdx` | ⬜ |
+| 2.17 | Building Your Gantt Chart | `wiki/launch-team/project-management/building-your-gantt-chart.mdx` | ⬜ |
+| 2.18 | Managing Timelines and Critical Pathways | `wiki/launch-team/project-management/managing-timelines.mdx` | ⬜ |
 
 ---
 
-## Phase 3: Pre-Launch & Launch
-
-### Preparation for Launch Sunday
+## Phase 3: Training & Preparation
 
 | # | Article | File Path | Status |
 |---|---------|-----------|--------|
-| 10.1 | The Final 3-4 Weeks | `wiki/phase-3/pre-launch/the-final-3-4-weeks.mdx` | ⬜ |
-| 10.2 | Operations: Set-up and Tear-down | `wiki/phase-3/pre-launch/operations-setup-teardown.mdx` | ⬜ |
-| 10.3 | In-Service Training Day | `wiki/phase-3/pre-launch/in-service-training-day.mdx` | ⬜ |
-| 10.4 | Launch Team Spiritual Preparation | `wiki/phase-3/pre-launch/launch-team-spiritual-preparation.mdx` | ⬜ |
-| 10.5 | Pre-Launch Services | `wiki/phase-3/pre-launch/pre-launch-services.mdx` | ⬜ |
-| 10.6 | The Promotion Plan | `wiki/phase-3/pre-launch/the-promotion-plan.mdx` | ⬜ |
-
-### Launch Sunday
-
-| # | Article | File Path | Status |
-|---|---------|-----------|--------|
-| 11.1 | The 5 Priority Details for Launch Sunday | `wiki/phase-3/launch-sunday/5-priority-details.mdx` | ⬜ |
-| 11.2 | Ministry Checklists for Launch Day | `wiki/phase-3/launch-sunday/ministry-checklists.mdx` | ⬜ |
-| 11.3 | Video and Photography Capture | `wiki/phase-3/launch-sunday/video-photography-capture.mdx` | ⬜ |
-| 11.4 | Partner Organization Coordination | `wiki/phase-3/launch-sunday/partner-organization-coordination.mdx` | ⬜ |
-| 11.5 | After-Service Celebration | `wiki/phase-3/launch-sunday/after-service-celebration.mdx` | ⬜ |
+| 3.1 | Training Programs Overview | `wiki/training/training-programs-overview.mdx` | ⬜ |
+| 3.2 | Goals by Launch Sunday | `wiki/training/goals-by-launch-sunday.mdx` | ⬜ |
+| 3.3 | Launch Team Meeting Objectives | `wiki/training/launch-team-meeting-objectives.mdx` | ⬜ |
+| 3.4 | Peak Performance Training Series | `wiki/training/peak-performance-training-series.mdx` | ⬜ |
+| 3.5 | Small Group 101 | `wiki/training/small-group-101.mdx` | ⬜ |
+| 3.6 | Boot Camp Overview | `wiki/training/boot-camp-overview.mdx` | ⬜ |
+| 3.7 | Ministry-Specific Training | `wiki/training/ministry-specific-training.mdx` | ⬜ |
 
 ---
 
-## Phase 4: Administrative
+## Phase 4: Pre-Launch
+
+| # | Article | File Path | Status |
+|---|---------|-----------|--------|
+| 4.1 | The Final 3-4 Weeks | `wiki/pre-launch/the-final-3-4-weeks.mdx` | ⬜ |
+| 4.2 | Operations: Set-up and Tear-down | `wiki/pre-launch/operations-setup-teardown.mdx` | ⬜ |
+| 4.3 | In-Service Training Day | `wiki/pre-launch/in-service-training-day.mdx` | ⬜ |
+| 4.4 | Launch Team Spiritual Preparation | `wiki/pre-launch/launch-team-spiritual-preparation.mdx` | ⬜ |
+| 4.5 | Pre-Launch Services | `wiki/pre-launch/pre-launch-services.mdx` | ⬜ |
+| 4.6 | The Promotion Plan | `wiki/pre-launch/the-promotion-plan.mdx` | ⬜ |
+| 4.7 | Promotion Channels Guide | `wiki/pre-launch/promotion-channels-guide.mdx` | ⬜ |
+| 4.8 | Final Checklist Review | `wiki/pre-launch/final-checklist-review.mdx` | ⬜ |
+
+---
+
+## Phase 5: Launch Sunday
+
+| # | Article | File Path | Status |
+|---|---------|-----------|--------|
+| 5.1 | Launch Day Guide | `wiki/launch-sunday/launch-day-guide.mdx` | ⬜ |
+| 5.2 | The 5 Priority Details for Launch Sunday | `wiki/launch-sunday/5-priority-details.mdx` | ⬜ |
+| 5.3 | Ministry Checklists for Launch Day | `wiki/launch-sunday/ministry-checklists.mdx` | ⬜ |
+| 5.4 | Video and Photography Capture | `wiki/launch-sunday/video-photography-capture.mdx` | ⬜ |
+| 5.5 | Partner Organization Coordination | `wiki/launch-sunday/partner-organization-coordination.mdx` | ⬜ |
+| 5.6 | After-Service Celebration | `wiki/launch-sunday/after-service-celebration.mdx` | ⬜ |
+
+---
+
+## Phase 6: Post-Launch
+
+| # | Article | File Path | Status |
+|---|---------|-----------|--------|
+| 6.1 | Establishing Weekly Rhythms | `wiki/post-launch/establishing-weekly-rhythms.mdx` | ⬜ |
+| 6.2 | The Guest Assimilation Journey | `wiki/post-launch/the-guest-assimilation-journey.mdx` | ⬜ |
+| 6.3 | 48-Hour Guest Follow-Up | `wiki/post-launch/48-hour-guest-follow-up.mdx` | ⬜ |
+| 6.4 | Small Group Launch | `wiki/post-launch/small-group-launch.mdx` | ⬜ |
+| 6.5 | Party with the Pastor | `wiki/post-launch/party-with-the-pastor.mdx` | ⬜ |
+| 6.6 | Financial Sustainability | `wiki/post-launch/financial-sustainability.mdx` | ⬜ |
+| 6.7 | Growth Metrics to Track | `wiki/post-launch/growth-metrics-to-track.mdx` | ⬜ |
+
+---
+
+## Frameworks & Concepts
+
+| # | Article | File Path | Status |
+|---|---------|-----------|--------|
+| F.1 | 8 Critical Success Factors Overview | `wiki/frameworks/8-critical-success-factors-overview.mdx` | ✅ |
+| F.2 | The 4 C's: Committed, Compelled, Contagious, Courageous | `wiki/frameworks/the-4-cs.mdx` | ✅ |
+| F.3 | The Ministry Funnel (Worship/Walk/Work) | `wiki/frameworks/the-ministry-funnel.mdx` | ⬜ |
+| F.4 | The 4 Pillars | `wiki/frameworks/the-4-pillars.mdx` | ⬜ |
+| F.5 | Meeting Objectives: Inspire, Instill, Inform | `wiki/frameworks/meeting-objectives.mdx` | ⬜ |
+| F.6 | The 5 Interview Criteria | `wiki/frameworks/the-5-interview-criteria.mdx` | ⬜ |
+
+---
+
+## Administrative
 
 ### Legal
 
 | # | Article | File Path | Status |
 |---|---------|-----------|--------|
-| 12.1 | Setting Up a Not-for-Profit Corporation | `wiki/phase-4/legal/setting-up-nonprofit-corporation.mdx` | ⬜ |
-| 12.2 | Setting Up a 501(c)(3) | `wiki/phase-4/legal/setting-up-501c3.mdx` | ⬜ |
+| A.1 | Setting Up a Not-for-Profit Corporation | `wiki/administrative/legal/setting-up-nonprofit-corporation.mdx` | ⬜ |
+| A.2 | Setting Up a 501(c)(3) | `wiki/administrative/legal/setting-up-501c3.mdx` | ⬜ |
 
 ### Financial Management
 
 | # | Article | File Path | Status |
 |---|---------|-----------|--------|
-| 13.1 | First Year Budget Planning | `wiki/phase-4/financial/first-year-budget-planning.mdx` | ⬜ |
-| 13.2 | Principles of Financial Accountability | `wiki/phase-4/financial/principles-of-financial-accountability.mdx` | ⬜ |
-| 13.3 | Collections: Handling Cash and Checks | `wiki/phase-4/financial/collections-handling-cash-checks.mdx` | ⬜ |
-| 13.4 | Counting Procedures | `wiki/phase-4/financial/counting-procedures.mdx` | ⬜ |
-| 13.5 | Disbursements and Approvals | `wiki/phase-4/financial/disbursements-and-approvals.mdx` | ⬜ |
-| 13.6 | Designated Giving Policies | `wiki/phase-4/financial/designated-giving-policies.mdx` | ⬜ |
+| A.3 | First Year Budget Planning | `wiki/administrative/financial/first-year-budget-planning.mdx` | ⬜ |
+| A.4 | Principles of Financial Accountability | `wiki/administrative/financial/principles-of-financial-accountability.mdx` | ⬜ |
+| A.5 | Collections: Handling Cash and Checks | `wiki/administrative/financial/collections-handling-cash-checks.mdx` | ⬜ |
+| A.6 | Counting Procedures | `wiki/administrative/financial/counting-procedures.mdx` | ⬜ |
+| A.7 | Disbursements and Approvals | `wiki/administrative/financial/disbursements-and-approvals.mdx` | ⬜ |
+| A.8 | Designated Giving Policies | `wiki/administrative/financial/designated-giving-policies.mdx` | ⬜ |
 
 ### Purchasing & Equipment
 
 | # | Article | File Path | Status |
 |---|---------|-----------|--------|
-| 14.1 | Acquiring Portable Church Equipment | `wiki/phase-4/purchasing/acquiring-portable-church-equipment.mdx` | ⬜ |
-| 14.2 | Main PA System Guide | `wiki/phase-4/purchasing/main-pa-system-guide.mdx` | ⬜ |
-| 14.3 | Video Projection System Guide | `wiki/phase-4/purchasing/video-projection-system-guide.mdx` | ⬜ |
-| 14.4 | Lighting Equipment Guide | `wiki/phase-4/purchasing/lighting-equipment-guide.mdx` | ⬜ |
-| 14.5 | Staging and Signage Guide | `wiki/phase-4/purchasing/staging-signage-guide.mdx` | ⬜ |
-| 14.6 | Children's Ministry Equipment | `wiki/phase-4/purchasing/childrens-ministry-equipment.mdx` | ⬜ |
+| A.9 | Acquiring Portable Church Equipment | `wiki/administrative/purchasing/acquiring-portable-church-equipment.mdx` | ⬜ |
+| A.10 | Main PA System Guide | `wiki/administrative/purchasing/main-pa-system-guide.mdx` | ⬜ |
+| A.11 | Video Projection System Guide | `wiki/administrative/purchasing/video-projection-system-guide.mdx` | ⬜ |
+| A.12 | Lighting Equipment Guide | `wiki/administrative/purchasing/lighting-equipment-guide.mdx` | ⬜ |
+| A.13 | Staging and Signage Guide | `wiki/administrative/purchasing/staging-signage-guide.mdx` | ⬜ |
+| A.14 | Children's Ministry Equipment | `wiki/administrative/purchasing/childrens-ministry-equipment.mdx` | ⬜ |
 
 ### Technology
 
 | # | Article | File Path | Status |
 |---|---------|-----------|--------|
-| 15.1 | Setting Up Your Website | `wiki/phase-4/technology/setting-up-your-website.mdx` | ⬜ |
-| 15.2 | Choosing Assimilation Software | `wiki/phase-4/technology/choosing-assimilation-software.mdx` | ⬜ |
+| A.15 | Setting Up Your Website | `wiki/administrative/technology/setting-up-your-website.mdx` | ⬜ |
+| A.16 | Choosing Assimilation Software | `wiki/administrative/technology/choosing-assimilation-software.mdx` | ⬜ |
 
 ---
 
@@ -194,28 +243,64 @@ Track MDX components needed for articles. Create these after articles are comple
 
 | # | Template | File Path | Status |
 |---|----------|-----------|--------|
-| T1 | Vision Meeting Agenda Template | `wiki/templates/vision-meeting-agenda.mdx` | ⬜ |
-| T2 | Vision Meeting Kit Checklist | `wiki/templates/vision-meeting-kit-checklist.mdx` | ⬜ |
-| T3 | Response Card Template | `wiki/templates/response-card.mdx` | ⬜ |
-| T4 | Guest Sign-in Sheet | `wiki/templates/guest-sign-in-sheet.mdx` | ⬜ |
-| T5 | Core Group Commitment Card | `wiki/templates/core-group-commitment-card.mdx` | ⬜ |
-| T6 | Vision Meeting Self-Assessment | `wiki/templates/vision-meeting-self-assessment.mdx` | ⬜ |
-| T7 | Follow Up Interview Questions | `wiki/templates/follow-up-interview-questions.mdx` | ⬜ |
-| T8 | Launch Sunday Checklist | `wiki/templates/launch-sunday-checklist.mdx` | ⬜ |
-| T9 | Ministry Team Checklists | `wiki/templates/ministry-team-checklists.mdx` | ⬜ |
+| T.1 | Vision Meeting Agenda Template | `wiki/templates/vision-meeting-agenda.mdx` | ⬜ |
+| T.2 | Vision Meeting Kit Checklist | `wiki/templates/vision-meeting-kit-checklist.mdx` | ⬜ |
+| T.3 | Response Card Template | `wiki/templates/response-card.mdx` | ⬜ |
+| T.4 | Guest Sign-in Sheet | `wiki/templates/guest-sign-in-sheet.mdx` | ⬜ |
+| T.5 | Core Group Commitment Card | `wiki/templates/core-group-commitment-card.mdx` | ⬜ |
+| T.6 | Vision Meeting Self-Assessment | `wiki/templates/vision-meeting-self-assessment.mdx` | ⬜ |
+| T.7 | Follow Up Interview Questions | `wiki/templates/follow-up-interview-questions.mdx` | ⬜ |
+| T.8 | Launch Sunday Checklist | `wiki/templates/launch-sunday-checklist.mdx` | ⬜ |
+| T.9 | Ministry Team Checklists | `wiki/templates/ministry-team-checklists.mdx` | ⬜ |
 
 ---
 
 ## Progress Summary
 
-| Phase | Total | Done | In Progress | Not Started |
-|-------|-------|------|-------------|-------------|
-| Phase 1: Vision & Core Group | 20 | 5 | 0 | 15 |
-| Phase 2: Launch Team & Training | 18 | 0 | 0 | 18 |
-| Phase 3: Pre-Launch & Launch | 11 | 0 | 0 | 11 |
-| Phase 4: Administrative | 14 | 0 | 0 | 14 |
+| Section | Total | Done | In Progress | Not Started |
+|---------|-------|------|-------------|-------------|
+| Getting Started | 2 | 2 | 0 | 0 |
+| Phase 0: Discovery | 6 | 0 | 0 | 6 |
+| Phase 1: Core Group | 20 | 0 | 0 | 20 |
+| Phase 2: Launch Team | 18 | 0 | 0 | 18 |
+| Phase 3: Training | 7 | 0 | 0 | 7 |
+| Phase 4: Pre-Launch | 8 | 0 | 0 | 8 |
+| Phase 5: Launch Sunday | 6 | 0 | 0 | 6 |
+| Phase 6: Post-Launch | 7 | 0 | 0 | 7 |
+| Frameworks & Concepts | 6 | 2 | 0 | 4 |
+| Administrative | 16 | 0 | 0 | 16 |
 | Templates | 9 | 0 | 0 | 9 |
-| **TOTAL** | **72** | **5** | **0** | **67** |
+| **TOTAL** | **105** | **4** | **0** | **101** |
+
+---
+
+## Directory Structure
+
+```
+wiki/
+├── getting-started/           # Meta content about the wiki
+├── discovery/                 # Phase 0
+├── core-group/                # Phase 1
+│   ├── vision-meetings/
+│   ├── building-your-core-group/
+│   ├── follow-up/
+│   └── commitment/
+├── launch-team/               # Phase 2
+│   ├── launch-date/
+│   ├── leadership/
+│   └── project-management/
+├── training/                  # Phase 3
+├── pre-launch/                # Phase 4
+├── launch-sunday/             # Phase 5
+├── post-launch/               # Phase 6
+├── frameworks/                # Cross-phase concepts
+├── administrative/            # Not phase-tied
+│   ├── legal/
+│   ├── financial/
+│   ├── purchasing/
+│   └── technology/
+└── templates/                 # Downloadable resources
+```
 
 ---
 
@@ -225,3 +310,4 @@ Track MDX components needed for articles. Create these after articles are comple
 2. **Update as you go**: Mark articles as 🚧 when starting, ✅ when complete
 3. **Component tracking**: Note any new components needed as you write articles
 4. **Cross-references**: Update Related Articles sections once linked articles exist
+5. **Frontmatter**: Each article uses frontmatter to specify `section`, `phase` (number or null), `category`, `type`, `order`, and `read_time`

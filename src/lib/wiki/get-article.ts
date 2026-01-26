@@ -42,8 +42,11 @@ function parseFrontmatter(content: string): {
 /**
  * Infer category from article metadata
  */
-function inferCategory(phase: number, section: string): ArticleCategory {
-  const referenceSections = ["ministry-teams", "frameworks", "administrative"];
+function inferCategory(phase: number | null, section: string): ArticleCategory {
+  if (section === "getting-started") return "getting-started";
+  if (section === "frameworks") return "frameworks";
+
+  const referenceSections = ["ministry-teams", "administrative"];
   if (referenceSections.includes(section)) return "reference";
 
   const resourceSections = ["templates", "training-library"];
@@ -62,14 +65,14 @@ export async function getArticle(slug: string): Promise<Article | null> {
     const fileContent = await fs.readFile(filePath, "utf-8");
     const { data, content } = parseFrontmatter(fileContent);
 
-    const phase = parseInt(data.phase || "0", 10);
+    const phase = data.phase ? parseInt(data.phase, 10) : null;
     const section = data.section || "";
 
     return {
       slug,
       title: data.title || slug,
       type: (data.type as ArticleMeta["type"]) || "reference",
-      phase,
+      phase: phase ?? 0,
       section,
       order: parseInt(data.order || "999", 10),
       readTime: parseInt(data.read_time || "5", 10),

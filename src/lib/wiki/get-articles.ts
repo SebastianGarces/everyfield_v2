@@ -39,9 +39,12 @@ function fileToSlug(filename: string): string {
 /**
  * Infer category from article metadata
  */
-function inferCategory(phase: number, section: string): ArticleCategory {
+function inferCategory(phase: number | null, section: string): ArticleCategory {
+  if (section === "getting-started") return "getting-started";
+  if (section === "frameworks") return "frameworks";
+
   // Reference sections
-  const referenceSections = ["ministry-teams", "frameworks", "administrative"];
+  const referenceSections = ["ministry-teams", "administrative"];
   if (referenceSections.includes(section)) return "reference";
 
   // Resources sections
@@ -158,6 +161,43 @@ export async function getWikiNavigation(): Promise<NavGroup[]> {
   // Build NavGroup array
   const groups: NavGroup[] = [];
 
+  // GETTING STARTED - meta content about the wiki
+  const gettingStartedContent = categoryMap.get("getting-started");
+  if (gettingStartedContent && gettingStartedContent.size > 0) {
+    const items: ArticleNavSection["items"] = [];
+
+    for (const [, sectionMap] of gettingStartedContent) {
+      for (const [, sectionData] of sectionMap) {
+        const sortedArticles = sectionData.articles.sort((a, b) => {
+          if (a.order !== b.order) return a.order - b.order;
+          return a.title.localeCompare(b.title);
+        });
+
+        for (const article of sortedArticles) {
+          items.push({
+            title: article.title,
+            slug: article.slug,
+            href: `/wiki/${article.slug}`,
+          });
+        }
+      }
+    }
+
+    if (items.length > 0) {
+      groups.push({
+        title: "Getting Started",
+        slug: "getting-started",
+        sections: [
+          {
+            title: "Introduction",
+            slug: "getting-started",
+            items,
+          },
+        ],
+      });
+    }
+  }
+
   // THE JOURNEY - phases 0-6
   const journeyPhases = categoryMap.get("journey");
   if (journeyPhases && journeyPhases.size > 0) {
@@ -202,7 +242,44 @@ export async function getWikiNavigation(): Promise<NavGroup[]> {
     });
   }
 
-  // REFERENCE - ministry teams, frameworks, administrative
+  // FRAMEWORKS & CONCEPTS
+  const frameworksContent = categoryMap.get("frameworks");
+  if (frameworksContent && frameworksContent.size > 0) {
+    const items: ArticleNavSection["items"] = [];
+
+    for (const [, sectionMap] of frameworksContent) {
+      for (const [, sectionData] of sectionMap) {
+        const sortedArticles = sectionData.articles.sort((a, b) => {
+          if (a.order !== b.order) return a.order - b.order;
+          return a.title.localeCompare(b.title);
+        });
+
+        for (const article of sortedArticles) {
+          items.push({
+            title: article.title,
+            slug: article.slug,
+            href: `/wiki/${article.slug}`,
+          });
+        }
+      }
+    }
+
+    if (items.length > 0) {
+      groups.push({
+        title: "Frameworks & Concepts",
+        slug: "frameworks",
+        sections: [
+          {
+            title: "Core Frameworks",
+            slug: "frameworks",
+            items,
+          },
+        ],
+      });
+    }
+  }
+
+  // REFERENCE - ministry teams, administrative
   const referenceContent = categoryMap.get("reference");
   if (referenceContent && referenceContent.size > 0) {
     const sections: ArticleNavSection[] = [];

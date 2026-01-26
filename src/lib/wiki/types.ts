@@ -1,6 +1,11 @@
 export type ArticleType = "overview" | "reference" | "how-to" | "tutorial";
 
-export type ArticleCategory = "journey" | "reference" | "resources";
+export type ArticleCategory =
+  | "journey"
+  | "reference"
+  | "resources"
+  | "getting-started"
+  | "frameworks";
 
 export type ArticleMeta = {
   slug: string;
