@@ -50,3 +50,6 @@ Thumbs.db
 .agents
 .cursor
 .codex
+
+# Working feature (ephemeral planning workspace)
+working-feature
