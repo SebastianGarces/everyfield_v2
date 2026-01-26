@@ -6,14 +6,14 @@ export default async function WikiLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const navigation = await getWikiNavigation();
+  const groups = await getWikiNavigation();
 
   return (
     <div className="flex h-full">
       {/* Sidebar */}
       <aside className="hidden w-72 shrink-0 border-r bg-muted/30 lg:block">
         <div className="h-full overflow-y-auto px-4 py-4">
-          <WikiSidebar sections={navigation} />
+          <WikiSidebar groups={groups} />
         </div>
       </aside>
 

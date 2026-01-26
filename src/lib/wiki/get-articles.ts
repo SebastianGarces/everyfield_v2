@@ -1,6 +1,6 @@
 import fs from "fs/promises";
 import path from "path";
-import type { ArticleMeta, ArticleNavSection } from "./types";
+import type { ArticleMeta, ArticleCategory, ArticleNavSection, NavGroup } from "./types";
 
 const WIKI_DIR = path.join(process.cwd(), "wiki");
 
@@ -37,6 +37,22 @@ function fileToSlug(filename: string): string {
 }
 
 /**
+ * Infer category from article metadata
+ */
+function inferCategory(phase: number, section: string): ArticleCategory {
+  // Reference sections
+  const referenceSections = ["ministry-teams", "frameworks", "administrative"];
+  if (referenceSections.includes(section)) return "reference";
+
+  // Resources sections
+  const resourceSections = ["templates", "training-library"];
+  if (resourceSections.includes(section)) return "resources";
+
+  // Phases 0-6 are journey content
+  return "journey";
+}
+
+/**
  * Recursively scan directory for MDX files
  */
 async function scanDirectory(
@@ -60,16 +76,21 @@ async function scanDirectory(
         const frontmatter = parseFrontmatter(content);
 
         const slug = fileToSlug(relativePath);
+        const phase = parseInt(frontmatter.phase || "0", 10);
+        const section = frontmatter.section || "";
 
         articles.push({
           slug,
           title: frontmatter.title || slug,
           type: (frontmatter.type as ArticleMeta["type"]) || "reference",
-          phase: parseInt(frontmatter.phase || "0", 10),
-          section: frontmatter.section || "",
+          phase,
+          section,
           order: parseInt(frontmatter.order || "999", 10),
           readTime: parseInt(frontmatter.read_time || "5", 10),
           description: frontmatter.description || "",
+          category:
+            (frontmatter.category as ArticleCategory) ||
+            inferCategory(phase, section),
         });
       }
     }
@@ -89,20 +110,36 @@ export async function getArticles(): Promise<ArticleMeta[]> {
 }
 
 /**
- * Build navigation structure from articles
+ * Get articles that match a path prefix
+ * e.g., "phase-1" returns all articles in phase 1
+ * e.g., "phase-1/introduction" returns all articles in that section
  */
-export async function getWikiNavigation(): Promise<ArticleNavSection[]> {
+export async function getArticlesByPrefix(prefix: string): Promise<ArticleMeta[]> {
+  const articles = await getArticles();
+  return articles.filter((article) => article.slug.startsWith(prefix + "/"));
+}
+
+/**
+ * Build navigation structure from articles, grouped by category
+ */
+export async function getWikiNavigation(): Promise<NavGroup[]> {
   const articles = await getArticles();
 
-  // Group articles by phase and section
-  const phaseMap = new Map<
-    string,
-    Map<string, { title: string; articles: ArticleMeta[] }>
+  // Group articles by category, then phase/section
+  const categoryMap = new Map<
+    ArticleCategory,
+    Map<string, Map<string, { title: string; articles: ArticleMeta[] }>>
   >();
 
   for (const article of articles) {
+    const category = article.category;
     const phaseKey = `phase-${article.phase}`;
 
+    if (!categoryMap.has(category)) {
+      categoryMap.set(category, new Map());
+    }
+
+    const phaseMap = categoryMap.get(category)!;
     if (!phaseMap.has(phaseKey)) {
       phaseMap.set(phaseKey, new Map());
     }
@@ -118,45 +155,120 @@ export async function getWikiNavigation(): Promise<ArticleNavSection[]> {
     sectionMap.get(article.section)!.articles.push(article);
   }
 
-  // Convert to navigation structure
-  const sections: ArticleNavSection[] = [];
+  // Build NavGroup array
+  const groups: NavGroup[] = [];
 
-  // Sort phases
-  const sortedPhases = Array.from(phaseMap.keys()).sort();
+  // THE JOURNEY - phases 0-6
+  const journeyPhases = categoryMap.get("journey");
+  if (journeyPhases && journeyPhases.size > 0) {
+    const sections: ArticleNavSection[] = [];
+    const sortedPhases = Array.from(journeyPhases.keys()).sort();
 
-  for (const phaseKey of sortedPhases) {
-    const phaseNum = parseInt(phaseKey.replace("phase-", ""), 10);
-    const sectionMap = phaseMap.get(phaseKey)!;
+    for (const phaseKey of sortedPhases) {
+      const phaseNum = parseInt(phaseKey.replace("phase-", ""), 10);
+      const sectionMap = journeyPhases.get(phaseKey)!;
 
-    const items: ArticleNavSection["items"] = [];
+      const items: ArticleNavSection["items"] = [];
 
-    for (const [sectionSlug, sectionData] of sectionMap) {
-      // Sort articles within section by order, then by title
-      const sortedArticles = sectionData.articles.sort((a, b) => {
-        if (a.order !== b.order) return a.order - b.order;
-        return a.title.localeCompare(b.title);
-      });
+      for (const [sectionSlug, sectionData] of sectionMap) {
+        const sortedArticles = sectionData.articles.sort((a, b) => {
+          if (a.order !== b.order) return a.order - b.order;
+          return a.title.localeCompare(b.title);
+        });
 
-      items.push({
-        title: sectionData.title,
-        slug: sectionSlug,
-        href: `/wiki/${phaseKey}/${sectionSlug}`,
-        children: sortedArticles.map((article) => ({
-          title: article.title,
-          slug: article.slug,
-          href: `/wiki/${article.slug}`,
-        })),
+        items.push({
+          title: sectionData.title,
+          slug: sectionSlug,
+          href: `/wiki/${phaseKey}/${sectionSlug}`,
+          children: sortedArticles.map((article) => ({
+            title: article.title,
+            slug: article.slug,
+            href: `/wiki/${article.slug}`,
+          })),
+        });
+      }
+
+      sections.push({
+        title: `Phase ${phaseNum}: ${getPhaseName(phaseNum)}`,
+        slug: phaseKey,
+        items,
       });
     }
 
-    sections.push({
-      title: `Phase ${phaseNum}: ${getPhaseName(phaseNum)}`,
-      slug: phaseKey,
-      items,
+    groups.push({
+      title: "The Journey",
+      slug: "journey",
+      sections,
     });
   }
 
-  return sections;
+  // REFERENCE - ministry teams, frameworks, administrative
+  const referenceContent = categoryMap.get("reference");
+  if (referenceContent && referenceContent.size > 0) {
+    const sections: ArticleNavSection[] = [];
+
+    for (const [, sectionMap] of referenceContent) {
+      for (const [sectionSlug, sectionData] of sectionMap) {
+        const sortedArticles = sectionData.articles.sort((a, b) => {
+          if (a.order !== b.order) return a.order - b.order;
+          return a.title.localeCompare(b.title);
+        });
+
+        sections.push({
+          title: sectionData.title,
+          slug: sectionSlug,
+          items: sortedArticles.map((article) => ({
+            title: article.title,
+            slug: article.slug,
+            href: `/wiki/${article.slug}`,
+          })),
+        });
+      }
+    }
+
+    if (sections.length > 0) {
+      groups.push({
+        title: "Reference",
+        slug: "reference",
+        sections,
+      });
+    }
+  }
+
+  // RESOURCES - templates, training library
+  const resourcesContent = categoryMap.get("resources");
+  if (resourcesContent && resourcesContent.size > 0) {
+    const sections: ArticleNavSection[] = [];
+
+    for (const [, sectionMap] of resourcesContent) {
+      for (const [sectionSlug, sectionData] of sectionMap) {
+        const sortedArticles = sectionData.articles.sort((a, b) => {
+          if (a.order !== b.order) return a.order - b.order;
+          return a.title.localeCompare(b.title);
+        });
+
+        sections.push({
+          title: sectionData.title,
+          slug: sectionSlug,
+          items: sortedArticles.map((article) => ({
+            title: article.title,
+            slug: article.slug,
+            href: `/wiki/${article.slug}`,
+          })),
+        });
+      }
+    }
+
+    if (sections.length > 0) {
+      groups.push({
+        title: "Resources",
+        slug: "resources",
+        sections,
+      });
+    }
+  }
+
+  return groups;
 }
 
 function formatSectionTitle(section: string): string {

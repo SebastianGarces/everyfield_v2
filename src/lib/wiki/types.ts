@@ -1,5 +1,7 @@
 export type ArticleType = "overview" | "reference" | "how-to" | "tutorial";
 
+export type ArticleCategory = "journey" | "reference" | "resources";
+
 export type ArticleMeta = {
   slug: string;
   title: string;
@@ -9,6 +11,7 @@ export type ArticleMeta = {
   order: number;
   readTime: number;
   description: string;
+  category: ArticleCategory;
 };
 
 export type Article = ArticleMeta & {
@@ -28,4 +31,10 @@ export type ArticleNavSection = {
   title: string;
   slug: string;
   items: ArticleNavItem[];
+};
+
+export type NavGroup = {
+  title: string;
+  slug: string;
+  sections: ArticleNavSection[];
 };

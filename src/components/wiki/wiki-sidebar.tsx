@@ -2,32 +2,102 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Search, Bookmark, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { ArticleNavSection } from "@/lib/wiki/types";
+import type { ArticleNavSection, NavGroup } from "@/lib/wiki/types";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { Separator } from "@/components/ui/separator";
 
 interface WikiSidebarProps {
-  sections: ArticleNavSection[];
+  groups: NavGroup[];
 }
 
-export function WikiSidebar({ sections }: WikiSidebarProps) {
+export function WikiSidebar({ groups }: WikiSidebarProps) {
   const pathname = usePathname();
 
   return (
-    <nav className="space-y-4">
-      {sections.map((section) => (
-        <SidebarSection
-          key={section.slug}
-          section={section}
-          pathname={pathname}
-        />
+    <nav className="space-y-6">
+      {/* Search placeholder */}
+      <div className="relative">
+        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+        <div className="h-9 w-full rounded-md border border-input bg-background px-8 py-2 text-sm text-muted-foreground">
+          Search coming soon...
+        </div>
+      </div>
+
+      {groups.map((group, index) => (
+        <div key={group.slug}>
+          {index > 0 && <Separator className="mb-6" />}
+          <SidebarGroup group={group} pathname={pathname} />
+        </div>
       ))}
+
+      {/* Resources placeholder if no resources group exists */}
+      {!groups.some((g) => g.slug === "resources") && (
+        <>
+          <Separator />
+          <div>
+            <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Resources
+            </div>
+            <div className="space-y-1 text-sm text-muted-foreground">
+              <div className="flex items-center gap-2 rounded-md px-2 py-1.5 opacity-50">
+                <span>Templates & Downloads</span>
+                <span className="text-xs">(coming soon)</span>
+              </div>
+              <div className="flex items-center gap-2 rounded-md px-2 py-1.5 opacity-50">
+                <span>Training Library</span>
+                <span className="text-xs">(coming soon)</span>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Bookmarks and Recently Viewed placeholders */}
+      <Separator />
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground opacity-50">
+          <Bookmark className="h-4 w-4" />
+          <span>My Bookmarks</span>
+          <span className="text-xs">(coming soon)</span>
+        </div>
+        <div className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground opacity-50">
+          <Clock className="h-4 w-4" />
+          <span>Recently Viewed</span>
+          <span className="text-xs">(coming soon)</span>
+        </div>
+      </div>
     </nav>
+  );
+}
+
+function SidebarGroup({
+  group,
+  pathname,
+}: {
+  group: NavGroup;
+  pathname: string;
+}) {
+  return (
+    <div>
+      <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        {group.title}
+      </div>
+      <div className="space-y-2">
+        {group.sections.map((section) => (
+          <SidebarSection
+            key={section.slug}
+            section={section}
+            pathname={pathname}
+          />
+        ))}
+      </div>
+    </div>
   );
 }
 
