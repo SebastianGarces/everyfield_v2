@@ -22,6 +22,7 @@
     "docker:down": "docker compose down"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.0.2",
     "@node-rs/argon2": "^2.0.2",
     "@radix-ui/react-avatar": "^1.1.11",
     "@radix-ui/react-collapsible": "^1.1.12",
@@ -39,7 +40,6 @@
     "lucide-react": "^0.563.0",
     "next": "^16.1.4",
     "next-mdx-remote": "^5.0.0",
-    "postgres": "^3.4.8",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "remark-gfm": "^4.0.1",

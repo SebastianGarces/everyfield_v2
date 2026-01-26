@@ -10,9 +10,9 @@
  *   bun run scripts/seed-dev-db.ts --clean-only  # Only clean, don't seed
  */
 
-import { drizzle } from "drizzle-orm/postgres-js";
-import postgres from "postgres";
-import { sql } from "drizzle-orm";
+import { neon } from "@neondatabase/serverless";
+import { config } from "dotenv";
+import { drizzle } from "drizzle-orm/neon-http";
 import {
   churches,
   users,
@@ -21,6 +21,9 @@ import {
   type NewUser,
 } from "../src/db/schema";
 import { hashPassword } from "../src/lib/auth/password";
+
+// Load environment variables for scripts
+config({ path: ".env.local" });
 
 // Parse command line args
 const cleanOnly = process.argv.includes("--clean-only");
@@ -32,8 +35,8 @@ if (!connectionString) {
   process.exit(1);
 }
 
-const client = postgres(connectionString, { prepare: false });
-const db = drizzle(client);
+const sql = neon(connectionString);
+const db = drizzle(sql);
 
 // ============================================================================
 // Password Hashing (matches app hashing)
