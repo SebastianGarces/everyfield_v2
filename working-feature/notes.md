@@ -1,29 +1,29 @@
-# Zod Validation Layer - Implementation Notes
+# User Sidenav Dropdown Fixes - Implementation Notes
 
-**FRD:** N/A (Infrastructure improvement)
+**FRD:** N/A (Bug fix / behavior correction)
 **Date Started:** 2026-01-26
 
 ## Goal
 
-Add Zod as the validation layer across the app, replacing manual validation logic with type-safe schemas.
+Fix the user dropdown in the sidenav to use actual logout functionality and display real user data instead of hardcoded placeholders.
 
 ## Key Decisions
 
-- Use Zod for all form validation in server actions
-- Create reusable validation schemas in `src/lib/validations/`
-- Schemas will mirror database constraints where applicable
-- Use `zod` parse errors to generate user-friendly field errors
+- Use the existing `logout()` server action from `@/lib/auth/actions`
+- Pass user data from dashboard layout (where session is validated) down to AppSidebar
+- Generate initials from user's name (or fallback to email)
 
 ## Constraints
 
-- Must maintain existing error response shape (fieldErrors pattern)
-- Keep validation logic colocated with where it's used (or in shared validations folder)
+- `NavUser` is a client component (uses `useSidebar` hook)
+- `logout()` is a server action - can be called from client components
+- Dashboard layout is a server component - can fetch session data
 
 ## Open Questions
 
-- None currently
+- None
 
 ## Out of Scope
 
-- API route validation (none exist yet)
-- Client-side form validation (can add later with react-hook-form)
+- User profile/settings page implementation
+- Avatar image support (only initials for now)

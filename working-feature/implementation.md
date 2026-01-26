@@ -1,55 +1,75 @@
-# Zod Validation Layer - Implementation Plan
+# User Sidenav Dropdown Fixes - Implementation Plan
 
-**FRD:** N/A (Infrastructure improvement)
-**Scope:** Full app validation setup
+**FRD:** N/A (Bug fix / behavior correction)
+**Scope:** Fix logout functionality and pass real user data
 
 ## Requirements Covered
 
-- Add Zod to tech stack documentation
-- Create validation schemas for auth actions
-- Replace manual validation in login/register actions
+1. Replace logout Link with actual logout server action call
+2. Pass authenticated user data to AppSidebar component
+3. Display user's actual name and email in the dropdown
 
 ## Implementation Steps
 
-### Phase 1: Setup
+### Phase 1: Fix Logout Functionality
 
-- [x] Install Zod dependency
-- [x] Update system-architecture.md to include Zod in tech stack
-- [x] Create `src/lib/validations/` directory structure
+- [x] Update `nav-user.tsx` to import the `logout` server action
+- [x] Replace the `<Link href="/logout">` with a form that calls the logout action
+- [x] Use a form with server action (proper pattern for mutations)
 
-### Phase 2: Auth Validation Schemas
+### Phase 2: Pass User Data to Sidebar
 
-- [x] Create `src/lib/validations/auth.ts` with login and register schemas
-- [x] Update `src/app/(auth)/login/actions.ts` to use Zod
-- [x] Update `src/app/(auth)/register/actions.ts` to use Zod
+- [x] Update dashboard layout to fetch current session/user
+- [x] Update `AppSidebar` to accept user prop
+- [x] Remove placeholder user data from `app-sidebar.tsx`
+- [x] Create helper function to generate initials from name/email
 
 ## File Changes
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `product-docs/system-architecture.md` | Modify | Add Zod to tech stack table |
-| `src/lib/validations/index.ts` | Create | Export all validation schemas and utils |
-| `src/lib/validations/auth.ts` | Create | Login and register schemas |
-| `src/lib/validations/utils.ts` | Create | Reusable `extractFieldErrors` utility |
-| `src/app/(auth)/login/actions.ts` | Modify | Use Zod for validation |
-| `src/app/(auth)/register/actions.ts` | Modify | Use Zod for validation |
+| `src/components/nav-user.tsx` | Modify | Replace logout Link with form calling server action |
+| `src/components/app-sidebar.tsx` | Modify | Accept user prop, remove placeholder data |
+| `src/app/(dashboard)/layout.tsx` | Modify | Fetch user session and pass to AppSidebar |
 
-## Validation Schemas
+## Components
 
-### Auth Schemas
+### NavUser Props (updated)
 
 ```typescript
-// Login
-{
-  email: z.string().email("Please enter a valid email address"),
-  password: z.string().min(1, "Please enter your password"),
-}
+type NavUserProps = {
+  user: {
+    name: string;
+    email: string;
+    initials: string;
+  };
+};
+```
 
-// Register
-{
-  email: z.string().email("Please enter a valid email address"),
-  password: z.string().min(8, "Password must be at least 8 characters"),
-  name: z.string().min(1, "Please enter your name").transform(v => v.trim()),
-  role: z.enum(["planter", "coach", "team_member", "network_admin"]).optional().default("planter"),
+### AppSidebar Props (new)
+
+```typescript
+type AppSidebarProps = React.ComponentProps<typeof Sidebar> & {
+  user: {
+    name: string;
+    email: string;
+    initials: string;
+  };
+};
+```
+
+## Helper Function
+
+```typescript
+function getInitials(name: string | null, email: string): string {
+  if (name) {
+    return name
+      .split(' ')
+      .map(part => part[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2);
+  }
+  return email.substring(0, 2).toUpperCase();
 }
 ```

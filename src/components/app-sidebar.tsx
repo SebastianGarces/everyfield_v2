@@ -18,14 +18,15 @@ import {
 } from "@/components/ui/sidebar";
 import { mainNavItems } from "@/lib/navigation";
 
-// Placeholder user data - will be replaced with actual auth data
-const placeholderUser = {
-  name: "Church Planter",
-  email: "planter@example.com",
-  initials: "CP",
+type AppSidebarProps = React.ComponentProps<typeof Sidebar> & {
+  user: {
+    name: string;
+    email: string;
+    initials: string;
+  };
 };
 
-export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+export function AppSidebar({ user, ...props }: AppSidebarProps) {
   return (
     <Sidebar collapsible="icon" {...props}>
       <SidebarHeader>
@@ -49,7 +50,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <NavMain items={mainNavItems} />
       </SidebarContent>
       <SidebarFooter>
-        <NavUser user={placeholderUser} />
+        <NavUser user={user} />
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>
