@@ -15,7 +15,7 @@ export default async function DashboardPage() {
     : null;
 
   return (
-    <div className="flex items-start justify-between gap-4">
+    <div className="flex items-start justify-between gap-4 p-4">
       <div>
         <h1 className="mb-6 text-3xl font-bold">Dashboard</h1>
         <DashboardClient user={clientUser} />

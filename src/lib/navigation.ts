@@ -35,7 +35,6 @@ export const mainNavItems: NavItem[] = [
     title: "Wiki",
     href: "/wiki",
     icon: BookOpenText,
-    isDisabled: true,
   },
   {
     title: "People & CRM",
