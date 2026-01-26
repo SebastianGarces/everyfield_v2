@@ -46,6 +46,7 @@ Thumbs.db
 # Misc
 *.pem
 
+# AI Agents
 .agents
-
 .cursor
+.codex

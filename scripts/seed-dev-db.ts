@@ -20,6 +20,7 @@ import {
   type NewChurch,
   type NewUser,
 } from "../src/db/schema";
+import { hashPassword } from "../src/lib/auth/password";
 
 // Parse command line args
 const cleanOnly = process.argv.includes("--clean-only");
@@ -35,16 +36,8 @@ const client = postgres(connectionString, { prepare: false });
 const db = drizzle(client);
 
 // ============================================================================
-// Password Hashing (simple for dev - use proper hashing in production)
+// Password Hashing (matches app hashing)
 // ============================================================================
-
-async function hashPassword(password: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
-}
 
 // ============================================================================
 // Cleanup Procedure

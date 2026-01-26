@@ -25,3 +25,6 @@ export {
   getSessionToken,
   getSessionCookieOptions,
 } from "./cookies";
+
+// Password utilities
+export { hashPassword, verifyPassword } from "./password";
