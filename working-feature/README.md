@@ -79,3 +79,4 @@ Or ask the AI to reset the directory for you as part of the starter prompt.
 1. **Do not modify FRDs** - The FRD is the source of truth. Note issues in `notes.md`.
 2. **Reset before new features** - Always start fresh.
 3. **This is ephemeral** - Don't rely on this directory for history.
+4. **Pause for review** - After creating `notes.md` and `implementation.md`, stop and wait for user review before proceeding with implementation.
