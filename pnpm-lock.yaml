@@ -82,6 +82,9 @@ devDependencies:
   '@eslint/js':
     specifier: ^9.39.2
     version: 9.39.2
+  '@types/mdx':
+    specifier: ^2.0.13
+    version: 2.0.13
   '@types/node':
     specifier: ^22
     version: 22.19.7
@@ -2572,7 +2575,6 @@ packages:
 
   /@types/mdx@2.0.13:
     resolution: {integrity: sha512-+OWZQfAYyio6YkJb3HLxDrvnx6SWWDbC0zVPfBRzUk0/nqoDyf6dNxQi3eArPe8rJ473nobTMQ/8Zk+LxJ+Yuw==}
-    dev: false
 
   /@types/ms@2.1.0:
     resolution: {integrity: sha512-GsCCIZDE/p3i96vtEqx+7dBUGXrc7zeSK3wwPHIaRThS+9OhWIXRqzs4d6k1SVU8g91DrNRWxWUGhp5KXQb2VA==}
