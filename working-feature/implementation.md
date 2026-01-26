@@ -1,106 +1,55 @@
-# App Layout - Implementation Plan
+# Zod Validation Layer - Implementation Plan
 
-**FRD:** `product-docs/features/wiki/frd.md` (for navigation requirements)
-**Scope:** Initial layout with sidebar, ready for Wiki's hierarchical navigation
+**FRD:** N/A (Infrastructure improvement)
+**Scope:** Full app validation setup
 
 ## Requirements Covered
 
-- W-003: Hierarchical navigation with collapsible sections
-- W-008: Breadcrumb navigation (structure prepared)
-- UI/UX: Sticky side navigation on desktop, collapsible mobile navigation
+- Add Zod to tech stack documentation
+- Create validation schemas for auth actions
+- Replace manual validation in login/register actions
 
 ## Implementation Steps
 
-### Phase 1: Install shadcn Sidebar Component
+### Phase 1: Setup
 
-- [x] Run `pnpm dlx shadcn@latest add sidebar` to install sidebar and dependencies
-- [x] Verify sidebar component installed in `src/components/ui/`
-- [x] Verify required dependencies (separator, tooltip, collapsible, breadcrumb, dropdown-menu, avatar) are installed
+- [x] Install Zod dependency
+- [x] Update system-architecture.md to include Zod in tech stack
+- [x] Create `src/lib/validations/` directory structure
 
-### Phase 2: Create App Sidebar Component
+### Phase 2: Auth Validation Schemas
 
-- [x] Create `src/components/app-sidebar.tsx` - main sidebar component
-- [x] Create `src/components/nav-main.tsx` - primary navigation with collapsible sections
-- [x] Create `src/components/nav-user.tsx` - user menu in sidebar footer
-
-### Phase 3: Update Dashboard Layout
-
-- [x] Update `src/app/(dashboard)/layout.tsx` with SidebarProvider and structure
-- [x] Add SidebarInset for main content area
-- [x] Add header with SidebarTrigger and breadcrumb placeholder
-- [x] Implement cookie-based sidebar state persistence
-
-### Phase 4: Define Navigation Data
-
-- [x] Navigation data already existed in `src/lib/navigation.ts`
-- [x] Structure navigation to support Wiki's deep hierarchy (already done)
-- [x] Add icons for each navigation section (using lucide-react) (already done)
+- [x] Create `src/lib/validations/auth.ts` with login and register schemas
+- [x] Update `src/app/(auth)/login/actions.ts` to use Zod
+- [x] Update `src/app/(auth)/register/actions.ts` to use Zod
 
 ## File Changes
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `src/components/ui/sidebar.tsx` | Create (via CLI) | shadcn sidebar component |
-| `src/components/ui/separator.tsx` | Create (via CLI) | Required by sidebar |
-| `src/components/ui/tooltip.tsx` | Create (via CLI) | Required by sidebar |
-| `src/components/ui/sheet.tsx` | Create (via CLI) | Required for mobile sidebar |
-| `src/components/ui/skeleton.tsx` | Create (via CLI) | For loading states |
-| `src/components/app-sidebar.tsx` | Create | Main app sidebar |
-| `src/components/nav-main.tsx` | Create | Primary navigation component |
-| `src/components/nav-user.tsx` | Create | User menu component |
-| `src/app/(dashboard)/layout.tsx` | Modify | Add sidebar provider and structure |
-| `src/lib/navigation.ts` | Modify | Add navigation types and data |
+| `product-docs/system-architecture.md` | Modify | Add Zod to tech stack table |
+| `src/lib/validations/index.ts` | Create | Export all validation schemas and utils |
+| `src/lib/validations/auth.ts` | Create | Login and register schemas |
+| `src/lib/validations/utils.ts` | Create | Reusable `extractFieldErrors` utility |
+| `src/app/(auth)/login/actions.ts` | Modify | Use Zod for validation |
+| `src/app/(auth)/register/actions.ts` | Modify | Use Zod for validation |
 
-## Navigation Data Structure
+## Validation Schemas
+
+### Auth Schemas
 
 ```typescript
-type NavItem = {
-  title: string
-  url: string
-  icon: LucideIcon
-  isActive?: boolean
-  items?: {
-    title: string
-    url: string
-    items?: { title: string; url: string }[] // For wiki's deep nesting
-  }[]
+// Login
+{
+  email: z.string().email("Please enter a valid email address"),
+  password: z.string().min(1, "Please enter your password"),
 }
-```
 
-## Sidebar Structure
-
-```
-┌─────────────────────────────┐
-│  SidebarHeader              │
-│  ├── App Logo/Name          │
-│  └── Church Switcher (TBD)  │
-├─────────────────────────────┤
-│  SidebarContent             │
-│  ├── SidebarGroup: Main     │
-│  │   ├── Dashboard          │
-│  │   ├── Wiki (collapsible) │
-│  │   │   ├── The Journey    │
-│  │   │   ├── Reference      │
-│  │   │   └── Resources      │
-│  │   ├── People             │
-│  │   ├── Vision Meetings    │
-│  │   └── ...                │
-│  └── SidebarGroup: Settings │
-│      └── Settings           │
-├─────────────────────────────┤
-│  SidebarFooter              │
-│  └── User Menu (dropdown)   │
-└─────────────────────────────┘
-```
-
-## Layout Structure
-
-```
-┌─────────────────────────────────────────────┐
-│  SidebarProvider                            │
-│  ├── AppSidebar                             │
-│  └── SidebarInset                           │
-│      ├── header (SidebarTrigger + Breadcrumb│
-│      └── main (children)                    │
-└─────────────────────────────────────────────┘
+// Register
+{
+  email: z.string().email("Please enter a valid email address"),
+  password: z.string().min(8, "Password must be at least 8 characters"),
+  name: z.string().min(1, "Please enter your name").transform(v => v.trim()),
+  role: z.enum(["planter", "coach", "team_member", "network_admin"]).optional().default("planter"),
+}
 ```

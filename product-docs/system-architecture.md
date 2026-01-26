@@ -183,6 +183,7 @@ Document uploads, template storage, export generation (PDF, XLSX). All files sco
 | **Styling** | Tailwind CSS v4+ | Utility-first, pairs with shadcn |
 | **Database** | PostgreSQL | Relational, RLS support, complex queries |
 | **ORM** | Drizzle | Type-safe, lightweight, native RLS support |
+| **Validation** | Zod | Runtime type validation, schema-first, TypeScript integration |
 | **Authentication** | Custom (session-based) | No third-party dependency; follows Lucia/Copenhagen patterns |
 | **Authorization** | RBAC | Role-based access control per user type |
 | **Multi-tenancy** | Row-Level Security | PostgreSQL RLS policies on `church_id` |

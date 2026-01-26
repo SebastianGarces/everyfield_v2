@@ -10,6 +10,7 @@ import {
   createSession,
   setSessionCookie,
 } from "@/lib/auth";
+import { loginSchema, extractFieldErrors } from "@/lib/validations";
 
 export type LoginState = {
   error?: string;
@@ -23,23 +24,20 @@ export async function login(
   _prevState: LoginState,
   formData: FormData
 ): Promise<LoginState> {
-  const email = formData.get("email") as string;
-  const password = formData.get("password") as string;
+  const result = loginSchema.safeParse({
+    email: formData.get("email"),
+    password: formData.get("password"),
+  });
 
-  // Validate inputs
-  const fieldErrors: LoginState["fieldErrors"] = {};
-
-  if (!email || !email.includes("@")) {
-    fieldErrors.email = "Please enter a valid email address";
+  if (!result.success) {
+    return {
+      fieldErrors: extractFieldErrors<NonNullable<LoginState["fieldErrors"]>>(
+        result.error
+      ),
+    };
   }
 
-  if (!password) {
-    fieldErrors.password = "Please enter your password";
-  }
-
-  if (Object.keys(fieldErrors).length > 0) {
-    return { fieldErrors };
-  }
+  const { email, password } = result.data;
 
   // Find user by email
   const [user] = await db
