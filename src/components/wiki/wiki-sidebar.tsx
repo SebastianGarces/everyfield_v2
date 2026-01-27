@@ -121,11 +121,11 @@ function SidebarSection({
 
   return (
     <Collapsible defaultOpen={hasActiveChild}>
-      <CollapsibleTrigger className="group text-foreground hover:text-foreground/80 flex w-full items-center gap-1 py-0.5 text-left text-sm font-medium">
+      <CollapsibleTrigger className="group text-foreground hover:text-foreground/80 flex w-full items-center gap-1 py-1 text-left text-sm font-medium">
         <ChevronRight className="h-3.5 w-3.5 shrink-0 transition-transform duration-200 group-data-[state=open]:rotate-90" />
         <span>{section.title}</span>
       </CollapsibleTrigger>
-      <CollapsibleContent className="mt-0.5 space-y-px">
+      <CollapsibleContent className="mt-1 space-y-0.5">
         {section.items.map((item) => (
           <SidebarItem key={item.slug} item={item} pathname={pathname} />
         ))}
@@ -152,14 +152,14 @@ function SidebarItem({
       <Collapsible defaultOpen={hasActiveChild || isActive}>
         <CollapsibleTrigger
           className={cn(
-            "group text-muted-foreground hover:bg-muted hover:text-foreground flex w-full items-center gap-1 rounded px-2 py-0.5 text-left text-sm",
+            "group text-foreground/80 hover:text-foreground flex w-full items-center gap-1 rounded px-2 py-1 text-left text-xs font-medium uppercase tracking-wide",
             (isActive || hasActiveChild) && "text-foreground"
           )}
         >
           <ChevronRight className="h-3 w-3 shrink-0 transition-transform duration-200 group-data-[state=open]:rotate-90" />
           <span>{item.title}</span>
         </CollapsibleTrigger>
-        <CollapsibleContent className="space-y-px">
+        <CollapsibleContent className="space-y-0.5">
           {item.children!.map((child) => (
             <SidebarItem key={child.slug} item={child} pathname={pathname} />
           ))}
@@ -172,8 +172,8 @@ function SidebarItem({
     <Link
       href={item.href}
       className={cn(
-        "text-muted-foreground hover:bg-muted hover:text-foreground block rounded px-2 py-0.5 text-sm",
-        isActive && "bg-muted text-foreground font-medium"
+        "text-muted-foreground hover:bg-muted hover:text-foreground block rounded px-2 py-1 text-sm",
+        isActive && "bg-muted text-foreground font-medium border-l-[5px] border-ef rounded-l-none"
       )}
     >
       {item.title}

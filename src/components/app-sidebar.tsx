@@ -1,8 +1,8 @@
 "use client";
 
-import * as React from "react";
 import { Sprout } from "lucide-react";
 import Link from "next/link";
+import * as React from "react";
 
 import { NavMain } from "@/components/nav-main";
 import { NavUser } from "@/components/nav-user";
@@ -34,7 +34,7 @@ export function AppSidebar({ user, ...props }: AppSidebarProps) {
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
               <Link href="/dashboard">
-                <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
+                <div className="bg-ef text-ef-dark flex aspect-square size-8 items-center justify-center rounded-lg">
                   <Sprout className="size-4" />
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
