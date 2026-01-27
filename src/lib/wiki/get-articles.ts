@@ -9,9 +9,12 @@ export async function getArticles(): Promise<ArticleMeta[]> {
   const dbArticles = await getAllPublishedArticles();
 
   return dbArticles.map((article) => {
-    // Extract section from slug (e.g., "discovery/defining-your-church-values" -> "discovery")
-    const sectionSlug = article.slug.split("/")[0] ?? "";
-    return toArticleMeta(article, sectionSlug);
+    // Extract section from slug:
+    // - "discovery/article-name" (2 parts) -> section = "_root" (no sub-section)
+    // - "core-group/vision-meetings/article" (3 parts) -> section = "vision-meetings"
+    const slugParts = article.slug.split("/");
+    const sectionSlug = slugParts.length > 2 ? slugParts[1] : "_root";
+    return toArticleMeta(article, sectionSlug ?? "_root");
   });
 }
 
@@ -110,6 +113,7 @@ export async function getWikiNavigation(): Promise<NavGroup[]> {
     for (const phaseKey of sortedPhases) {
       const phaseNum = parseInt(phaseKey.replace("phase-", ""), 10);
       const sectionMap = journeyPhases.get(phaseKey)!;
+      const phaseSlugPrefix = getPhaseSlugPrefix(phaseNum);
 
       const items: ArticleNavSection["items"] = [];
 
@@ -119,16 +123,28 @@ export async function getWikiNavigation(): Promise<NavGroup[]> {
           return a.title.localeCompare(b.title);
         });
 
-        items.push({
-          title: sectionData.title,
-          slug: sectionSlug,
-          href: `/wiki/${phaseKey}/${sectionSlug}`,
-          children: sortedArticles.map((article) => ({
-            title: article.title,
-            slug: article.slug,
-            href: `/wiki/${article.slug}`,
-          })),
-        });
+        if (sectionSlug === "_root") {
+          // No sub-section - add articles directly to items
+          for (const article of sortedArticles) {
+            items.push({
+              title: article.title,
+              slug: article.slug,
+              href: `/wiki/${article.slug}`,
+            });
+          }
+        } else {
+          // Has sub-section - create nested group
+          items.push({
+            title: sectionData.title,
+            slug: sectionSlug,
+            href: `/wiki/${phaseSlugPrefix}/${sectionSlug}`,
+            children: sortedArticles.map((article) => ({
+              title: article.title,
+              slug: article.slug,
+              href: `/wiki/${article.slug}`,
+            })),
+          });
+        }
       }
 
       sections.push({
@@ -269,4 +285,17 @@ function getPhaseName(phase: number): string {
     6: "Post-Launch",
   };
   return names[phase] || "Unknown";
+}
+
+function getPhaseSlugPrefix(phase: number): string {
+  const prefixes: Record<number, string> = {
+    0: "discovery",
+    1: "core-group",
+    2: "launch-team",
+    3: "training",
+    4: "pre-launch",
+    5: "launch-sunday",
+    6: "post-launch",
+  };
+  return prefixes[phase] || "unknown";
 }

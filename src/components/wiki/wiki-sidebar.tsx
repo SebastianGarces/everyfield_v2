@@ -12,11 +12,20 @@ import { Bookmark, ChevronRight, Clock, Search } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-interface WikiSidebarProps {
-  groups: NavGroup[];
+interface RecentlyViewedItem {
+  slug: string;
+  title: string;
+  status: string;
+  scrollPosition: number | null;
+  lastViewedAt: Date;
 }
 
-export function WikiSidebar({ groups }: WikiSidebarProps) {
+interface WikiSidebarProps {
+  groups: NavGroup[];
+  recentlyViewed?: RecentlyViewedItem[];
+}
+
+export function WikiSidebar({ groups, recentlyViewed = [] }: WikiSidebarProps) {
   const pathname = usePathname();
 
   return (
@@ -58,9 +67,9 @@ export function WikiSidebar({ groups }: WikiSidebarProps) {
         </>
       )}
 
-      {/* Bookmarks and Recently Viewed placeholders */}
+      {/* Bookmarks placeholder */}
       <Separator />
-      <div className="space-y-0.5">
+      <div className="space-y-2">
         <div className="text-muted-foreground flex items-center justify-between gap-2 rounded-md px-2 py-1 text-sm opacity-50">
           <div className="flex items-center gap-2">
             <Bookmark className="h-4 w-4" />
@@ -68,13 +77,40 @@ export function WikiSidebar({ groups }: WikiSidebarProps) {
           </div>
           <span className="text-xs">(coming soon)</span>
         </div>
-        <div className="text-muted-foreground flex items-center justify-between gap-2 rounded-md px-2 py-1 text-sm opacity-50">
-          <div className="flex items-center gap-2">
-            <Clock className="h-4 w-4" />
-            <span>Recently Viewed</span>
+
+        {/* Recently Viewed */}
+        {recentlyViewed.length > 0 ? (
+          <div>
+            <div className="flex items-center gap-2 px-2 py-1 text-sm text-muted-foreground">
+              <Clock className="h-4 w-4" />
+              <span>Recently Viewed</span>
+            </div>
+            <div className="mt-1 space-y-0.5">
+              {recentlyViewed.map((item) => (
+                <Link
+                  key={item.slug}
+                  href={`/wiki/${item.slug}`}
+                  className={cn(
+                    "block truncate rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-muted hover:text-foreground",
+                    pathname === `/wiki/${item.slug}` &&
+                      "bg-muted text-foreground font-medium"
+                  )}
+                  title={item.title}
+                >
+                  {item.title}
+                </Link>
+              ))}
+            </div>
           </div>
-          <span className="text-xs">(coming soon)</span>
-        </div>
+        ) : (
+          <div className="text-muted-foreground flex items-center justify-between gap-2 rounded-md px-2 py-1 text-sm opacity-50">
+            <div className="flex items-center gap-2">
+              <Clock className="h-4 w-4" />
+              <span>Recently Viewed</span>
+            </div>
+            <span className="text-xs">(none yet)</span>
+          </div>
+        )}
       </div>
     </nav>
   );

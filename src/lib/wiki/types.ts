@@ -57,6 +57,8 @@ export function toArticle(dbArticle: WikiArticle, sectionSlug: string): Article 
  * Convert database WikiArticle to ArticleMeta (without content)
  */
 export function toArticleMeta(dbArticle: WikiArticle, sectionSlug: string): ArticleMeta {
+  // Use the first part of slug for category inference
+  const topLevelFolder = dbArticle.slug.split("/")[0] ?? "";
   return {
     slug: dbArticle.slug,
     title: dbArticle.title,
@@ -66,7 +68,7 @@ export function toArticleMeta(dbArticle: WikiArticle, sectionSlug: string): Arti
     order: dbArticle.sortOrder,
     readTime: dbArticle.readTimeMinutes ?? 5,
     description: dbArticle.excerpt ?? "",
-    category: inferCategory(dbArticle.phase, sectionSlug),
+    category: inferCategory(dbArticle.phase, topLevelFolder),
   };
 }
 
@@ -87,17 +89,17 @@ function normalizeContentType(contentType: WikiContentType): ArticleType {
 }
 
 /**
- * Infer category from phase and section
+ * Infer category from phase and top-level folder
  */
-function inferCategory(phase: number | null, section: string): ArticleCategory {
-  if (section === "getting-started") return "getting-started";
-  if (section === "frameworks") return "frameworks";
+function inferCategory(phase: number | null, topLevelFolder: string): ArticleCategory {
+  if (topLevelFolder === "getting-started") return "getting-started";
+  if (topLevelFolder === "frameworks") return "frameworks";
 
-  const referenceSections = ["ministry-teams", "administrative"];
-  if (referenceSections.includes(section)) return "reference";
+  const referenceFolders = ["ministry-teams", "administrative"];
+  if (referenceFolders.includes(topLevelFolder)) return "reference";
 
-  const resourceSections = ["templates", "training-library"];
-  if (resourceSections.includes(section)) return "resources";
+  const resourceFolders = ["templates", "training-library"];
+  if (resourceFolders.includes(topLevelFolder)) return "resources";
 
   return "journey";
 }

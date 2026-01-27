@@ -7,12 +7,16 @@ import {
   getBreadcrumbs,
   getArticles,
   getArticlesByPrefix,
+  getArticlesProgress,
 } from "@/lib/wiki";
 import { WikiBreadcrumb } from "@/components/wiki/wiki-breadcrumb";
+import { ProgressTracker } from "@/components/wiki/progress-tracker";
+import { ArticleProgressBadge } from "@/components/wiki/article-progress-badge";
 import type { ArticleMeta } from "@/lib/wiki/types";
+import type { WikiProgressStatus } from "@/db/schema";
 
-// ISR: Revalidate pages every hour (can also be triggered on-demand via API)
-export const revalidate = 3600;
+// Force dynamic rendering for progress data
+export const dynamic = "force-dynamic";
 
 type Props = {
   params: Promise<{ slug: string[] }>;
@@ -95,37 +99,39 @@ async function ArticleView({ article }: { article: ArticleMeta & { content: stri
   const breadcrumbs = getBreadcrumbs(article.slug, article.title);
 
   return (
-    <article className="space-y-6">
-      <WikiBreadcrumb items={breadcrumbs} />
+    <ProgressTracker slug={article.slug}>
+      <article className="space-y-6">
+        <WikiBreadcrumb items={breadcrumbs} />
 
-      <header className="space-y-4 border-b pb-6">
-        <h1 className="text-3xl font-bold tracking-tight">{article.title}</h1>
+        <header className="space-y-4 border-b pb-6">
+          <h1 className="text-3xl font-bold tracking-tight">{article.title}</h1>
 
-        {article.description && (
-          <p className="text-lg text-muted-foreground">{article.description}</p>
-        )}
+          {article.description && (
+            <p className="text-lg text-muted-foreground">{article.description}</p>
+          )}
 
-        <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
-          <div className="flex items-center gap-1.5">
-            <FileText className="h-4 w-4" />
-            <span className="capitalize">{article.type}</span>
+          <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
+            <div className="flex items-center gap-1.5">
+              <FileText className="h-4 w-4" />
+              <span className="capitalize">{article.type}</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Clock className="h-4 w-4" />
+              <span>{article.readTime} min read</span>
+            </div>
           </div>
-          <div className="flex items-center gap-1.5">
-            <Clock className="h-4 w-4" />
-            <span>{article.readTime} min read</span>
-          </div>
+        </header>
+
+        <div className="prose prose-neutral dark:prose-invert max-w-none">
+          {content}
         </div>
-      </header>
-
-      <div className="prose prose-neutral dark:prose-invert max-w-none">
-        {content}
-      </div>
-    </article>
+      </article>
+    </ProgressTracker>
   );
 }
 
 // Section index view component
-function SectionIndexView({
+async function SectionIndexView({
   slugPath,
   articles,
 }: {
@@ -134,6 +140,9 @@ function SectionIndexView({
 }) {
   const title = formatPathTitle(slugPath);
   const breadcrumbs = getSectionBreadcrumbs(slugPath);
+
+  // Fetch progress for all articles in this section
+  const progressMap = await getArticlesProgress(articles.map((a) => a.slug));
 
   // Group articles by section if we're at phase level
   const isPhaseLevel = slugPath.split("/").length === 1;
@@ -159,20 +168,26 @@ function SectionIndexView({
           {Object.entries(groupedArticles).map(([section, sectionArticles]) => (
             <div key={section} className="space-y-3">
               <h2 className="text-xl font-semibold">{formatSectionTitle(section)}</h2>
-              <ArticleList articles={sectionArticles} />
+              <ArticleList articles={sectionArticles} progressMap={progressMap} />
             </div>
           ))}
         </div>
       ) : (
         // Section-level view: flat list
-        <ArticleList articles={articles} />
+        <ArticleList articles={articles} progressMap={progressMap} />
       )}
     </div>
   );
 }
 
 // Article list component
-function ArticleList({ articles }: { articles: ArticleMeta[] }) {
+function ArticleList({
+  articles,
+  progressMap,
+}: {
+  articles: ArticleMeta[];
+  progressMap: Map<string, { status: WikiProgressStatus; scrollPosition: number | null }>;
+}) {
   const sortedArticles = [...articles].sort((a, b) => {
     if (a.order !== b.order) return a.order - b.order;
     return a.title.localeCompare(b.title);
@@ -180,33 +195,40 @@ function ArticleList({ articles }: { articles: ArticleMeta[] }) {
 
   return (
     <div className="grid gap-3">
-      {sortedArticles.map((article) => (
-        <Link
-          key={article.slug}
-          href={`/wiki/${article.slug}`}
-          className="group flex items-center justify-between rounded-lg border p-4 transition-colors hover:bg-muted/50"
-        >
-          <div className="space-y-1">
-            <h3 className="font-medium group-hover:text-primary">
-              {article.title}
-            </h3>
-            {article.description && (
-              <p className="text-sm text-muted-foreground line-clamp-1">
-                {article.description}
-              </p>
-            )}
-          </div>
-          <div className="ml-4 flex shrink-0 items-center gap-3">
-            <span className="rounded-full bg-muted px-2 py-0.5 text-xs capitalize">
-              {article.type}
-            </span>
-            <span className="text-xs text-muted-foreground">
-              {article.readTime} min
-            </span>
-            <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground" />
-          </div>
-        </Link>
-      ))}
+      {sortedArticles.map((article) => {
+        const progress = progressMap.get(article.slug);
+        return (
+          <Link
+            key={article.slug}
+            href={`/wiki/${article.slug}`}
+            className="group flex items-center justify-between rounded-lg border p-4 transition-colors hover:bg-muted/50"
+          >
+            <div className="space-y-1">
+              <h3 className="font-medium group-hover:text-primary">
+                {article.title}
+              </h3>
+              {article.description && (
+                <p className="text-sm text-muted-foreground line-clamp-1">
+                  {article.description}
+                </p>
+              )}
+              <ArticleProgressBadge
+                status={progress?.status ?? "not_started"}
+                className="mt-2"
+              />
+            </div>
+            <div className="ml-4 flex shrink-0 items-center gap-3">
+              <span className="rounded-full bg-muted px-2 py-0.5 text-xs capitalize">
+                {article.type}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {article.readTime} min
+              </span>
+              <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground" />
+            </div>
+          </Link>
+        );
+      })}
     </div>
   );
 }

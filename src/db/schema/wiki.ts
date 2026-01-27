@@ -3,12 +3,14 @@ import {
   uuid,
   text,
   integer,
+  real,
   timestamp,
   index,
   uniqueIndex,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { churches } from "./church";
+import { users } from "./user";
 
 /**
  * Wiki sections for navigation hierarchy
@@ -101,3 +103,49 @@ export const wikiArticles = pgTable(
 
 export type WikiArticle = typeof wikiArticles.$inferSelect;
 export type NewWikiArticle = typeof wikiArticles.$inferInsert;
+
+/**
+ * Progress status enum values
+ */
+export const wikiProgressStatuses = [
+  "not_started",
+  "in_progress",
+  "completed",
+] as const;
+
+export type WikiProgressStatus = (typeof wikiProgressStatuses)[number];
+
+/**
+ * Wiki progress - tracks user reading progress per article
+ *
+ * article_slug is used instead of article_id because articles are file-based (MDX)
+ */
+export const wikiProgress = pgTable(
+  "wiki_progress",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    articleSlug: text("article_slug").notNull(),
+    status: text("status", { enum: wikiProgressStatuses })
+      .default("not_started")
+      .notNull(),
+    scrollPosition: real("scroll_position").default(0),
+    lastViewedAt: timestamp("last_viewed_at").defaultNow().notNull(),
+    completedAt: timestamp("completed_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("wiki_progress_user_article_idx").on(
+      table.userId,
+      table.articleSlug
+    ),
+    index("wiki_progress_user_idx").on(table.userId),
+    index("wiki_progress_last_viewed_idx").on(table.userId, table.lastViewedAt),
+  ]
+);
+
+export type WikiProgress = typeof wikiProgress.$inferSelect;
+export type NewWikiProgress = typeof wikiProgress.$inferInsert;

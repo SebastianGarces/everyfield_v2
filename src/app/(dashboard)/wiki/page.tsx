@@ -1,9 +1,13 @@
 import Link from "next/link";
-import { BookOpen, Compass, Rocket } from "lucide-react";
-import { getArticles } from "@/lib/wiki";
+import { BarChart3, BookOpen, Compass, Rocket } from "lucide-react";
+import { getArticles, getArticlesProgress } from "@/lib/wiki";
 import { getCurrentUserChurch } from "@/lib/auth";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { PhaseTimeline } from "@/components/wiki/phase-timeline";
+import { ArticleProgressBadge } from "@/components/wiki/article-progress-badge";
+
+// Force dynamic rendering for progress data
+export const dynamic = "force-dynamic";
 
 const PHASE_NAMES: Record<number, string> = {
   0: "Discovery",
@@ -27,6 +31,16 @@ export default async function WikiPage() {
   // Get articles for the current phase
   const phaseArticles = articles.filter((a) => a.phase === currentPhase);
 
+  // Get progress for all phase articles to filter out completed ones
+  const progressMap = await getArticlesProgress(
+    phaseArticles.map((a) => a.slug)
+  );
+
+  // Filter out completed articles and take first 6
+  const displayedArticles = phaseArticles
+    .filter((a) => progressMap.get(a.slug)?.status !== "completed")
+    .slice(0, 6);
+
   return (
     <div className="space-y-10">
       {/* Hero */}
@@ -40,7 +54,7 @@ export default async function WikiPage() {
       </div>
 
       {/* Quick Start Cards */}
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-3">
         <Link href="/wiki/getting-started/welcome-to-the-launch-playbook">
           <Card className="h-full transition-colors hover:bg-muted/50">
             <CardHeader>
@@ -60,6 +74,18 @@ export default async function WikiPage() {
               <CardTitle>What Phase Am I In?</CardTitle>
               <CardDescription>
                 Learn about the phases and where you are in the journey.
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        </Link>
+
+        <Link href="/wiki/progress">
+          <Card className="h-full transition-colors hover:bg-muted/50">
+            <CardHeader>
+              <BarChart3 className="mb-2 h-8 w-8 text-primary" />
+              <CardTitle>My Progress</CardTitle>
+              <CardDescription>
+                Track your reading progress across all wiki content.
               </CardDescription>
             </CardHeader>
           </Card>
@@ -94,30 +120,37 @@ export default async function WikiPage() {
             </h2>
           </div>
           <div className="grid gap-3">
-            {phaseArticles.slice(0, 6).map((article) => (
-              <Link
-                key={article.slug}
-                href={`/wiki/${article.slug}`}
-                className="group block rounded-lg border p-4 transition-colors hover:bg-muted/50"
-              >
-                <div className="flex items-start justify-between">
-                  <div className="space-y-1">
-                    <h3 className="font-medium group-hover:text-primary">
-                      {article.title}
-                    </h3>
-                    <p className="text-sm text-muted-foreground line-clamp-2">
-                      {article.description}
-                    </p>
+            {displayedArticles.map((article) => {
+              const progress = progressMap.get(article.slug);
+              return (
+                <Link
+                  key={article.slug}
+                  href={`/wiki/${article.slug}`}
+                  className="group block rounded-lg border p-4 transition-colors hover:bg-muted/50"
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="space-y-1">
+                      <h3 className="font-medium group-hover:text-primary">
+                        {article.title}
+                      </h3>
+                      <p className="text-sm text-muted-foreground line-clamp-2">
+                        {article.description}
+                      </p>
+                      <ArticleProgressBadge
+                        status={progress?.status ?? "not_started"}
+                        className="mt-2"
+                      />
+                    </div>
+                    <div className="ml-4 flex shrink-0 flex-col items-end gap-1 text-xs text-muted-foreground">
+                      <span className="rounded-full bg-muted px-2 py-0.5 capitalize">
+                        {article.type}
+                      </span>
+                      <span>{article.readTime} min</span>
+                    </div>
                   </div>
-                  <div className="ml-4 flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
-                    <span className="rounded-full bg-muted px-2 py-0.5 capitalize">
-                      {article.type}
-                    </span>
-                    <span>{article.readTime} min</span>
-                  </div>
-                </div>
-              </Link>
-            ))}
+                </Link>
+              );
+            })}
           </div>
           {phaseArticles.length > 6 && (
             <p className="text-sm text-muted-foreground">

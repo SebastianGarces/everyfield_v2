@@ -15,6 +15,13 @@
       "when": 1769546343332,
       "tag": "0001_vengeful_lockheed",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1769552705779,
+      "tag": "0002_mixed_hemingway",
+      "breakpoints": true
     }
   ]
 }
