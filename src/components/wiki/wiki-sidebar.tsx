@@ -1,16 +1,16 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { ChevronRight, Search, Bookmark, Clock } from "lucide-react";
-import { cn } from "@/lib/utils";
-import type { ArticleNavSection, NavGroup } from "@/lib/wiki/types";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
+import type { ArticleNavSection, NavGroup } from "@/lib/wiki/types";
+import { Bookmark, ChevronRight, Clock, Search } from "lucide-react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 interface WikiSidebarProps {
   groups: NavGroup[];
@@ -23,8 +23,8 @@ export function WikiSidebar({ groups }: WikiSidebarProps) {
     <nav className="space-y-3">
       {/* Search placeholder */}
       <div className="relative">
-        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-        <div className="h-9 w-full rounded-md border border-input bg-background px-8 py-2 text-sm text-muted-foreground">
+        <Search className="text-muted-foreground absolute top-2.5 left-2.5 h-4 w-4" />
+        <div className="border-input bg-background text-muted-foreground h-9 w-full rounded-md border px-8 py-2 text-sm">
           Search coming soon...
         </div>
       </div>
@@ -41,15 +41,15 @@ export function WikiSidebar({ groups }: WikiSidebarProps) {
         <>
           <Separator />
           <div>
-            <div className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <div className="text-muted-foreground mb-1.5 text-xs font-semibold tracking-wider uppercase">
               Resources
             </div>
-            <div className="space-y-0.5 text-sm text-muted-foreground">
-              <div className="flex items-center gap-2 rounded-md px-2 py-1 opacity-50">
+            <div className="text-muted-foreground space-y-0.5 text-sm">
+              <div className="flex items-center justify-between gap-2 rounded-md px-2 py-1 opacity-50">
                 <span>Templates & Downloads</span>
                 <span className="text-xs">(coming soon)</span>
               </div>
-              <div className="flex items-center gap-2 rounded-md px-2 py-1 opacity-50">
+              <div className="flex items-center justify-between gap-2 rounded-md px-2 py-1 opacity-50">
                 <span>Training Library</span>
                 <span className="text-xs">(coming soon)</span>
               </div>
@@ -61,14 +61,18 @@ export function WikiSidebar({ groups }: WikiSidebarProps) {
       {/* Bookmarks and Recently Viewed placeholders */}
       <Separator />
       <div className="space-y-0.5">
-        <div className="flex items-center gap-2 rounded-md px-2 py-1 text-sm text-muted-foreground opacity-50">
-          <Bookmark className="h-4 w-4" />
-          <span>My Bookmarks</span>
+        <div className="text-muted-foreground flex items-center justify-between gap-2 rounded-md px-2 py-1 text-sm opacity-50">
+          <div className="flex items-center gap-2">
+            <Bookmark className="h-4 w-4" />
+            <span>My Bookmarks</span>
+          </div>
           <span className="text-xs">(coming soon)</span>
         </div>
-        <div className="flex items-center gap-2 rounded-md px-2 py-1 text-sm text-muted-foreground opacity-50">
-          <Clock className="h-4 w-4" />
-          <span>Recently Viewed</span>
+        <div className="text-muted-foreground flex items-center justify-between gap-2 rounded-md px-2 py-1 text-sm opacity-50">
+          <div className="flex items-center gap-2">
+            <Clock className="h-4 w-4" />
+            <span>Recently Viewed</span>
+          </div>
           <span className="text-xs">(coming soon)</span>
         </div>
       </div>
@@ -85,7 +89,7 @@ function SidebarGroup({
 }) {
   return (
     <div>
-      <div className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+      <div className="text-muted-foreground mb-1.5 text-xs font-semibold tracking-wider uppercase">
         {group.title}
       </div>
       <div className="space-y-1">
@@ -117,7 +121,7 @@ function SidebarSection({
 
   return (
     <Collapsible defaultOpen={hasActiveChild}>
-      <CollapsibleTrigger className="group flex w-full items-center gap-1 py-0.5 text-left text-sm font-medium text-foreground hover:text-foreground/80">
+      <CollapsibleTrigger className="group text-foreground hover:text-foreground/80 flex w-full items-center gap-1 py-0.5 text-left text-sm font-medium">
         <ChevronRight className="h-3.5 w-3.5 shrink-0 transition-transform duration-200 group-data-[state=open]:rotate-90" />
         <span>{section.title}</span>
       </CollapsibleTrigger>
@@ -148,7 +152,7 @@ function SidebarItem({
       <Collapsible defaultOpen={hasActiveChild || isActive}>
         <CollapsibleTrigger
           className={cn(
-            "group flex w-full items-center gap-1 rounded px-2 py-0.5 text-left text-sm text-muted-foreground hover:bg-muted hover:text-foreground",
+            "group text-muted-foreground hover:bg-muted hover:text-foreground flex w-full items-center gap-1 rounded px-2 py-0.5 text-left text-sm",
             (isActive || hasActiveChild) && "text-foreground"
           )}
         >
@@ -168,8 +172,8 @@ function SidebarItem({
     <Link
       href={item.href}
       className={cn(
-        "block rounded px-2 py-0.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground",
-        isActive && "bg-muted font-medium text-foreground"
+        "text-muted-foreground hover:bg-muted hover:text-foreground block rounded px-2 py-0.5 text-sm",
+        isActive && "bg-muted text-foreground font-medium"
       )}
     >
       {item.title}

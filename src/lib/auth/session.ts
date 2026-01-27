@@ -1,7 +1,7 @@
 import { cache } from "react";
 import { eq, and, gt, lt } from "drizzle-orm";
 import { db } from "@/db";
-import { sessions, users, type Session, type User } from "@/db/schema";
+import { sessions, users, churches, type Session, type User, type Church } from "@/db/schema";
 
 // Constants
 const SESSION_EXPIRY_DAYS = 30;
@@ -278,3 +278,25 @@ export async function verifySession(): Promise<SessionValidationResult> {
 
   return result as SessionValidationResult;
 }
+
+/**
+ * Get the current user's church (cached per request)
+ * Returns null if user is not authenticated or has no church
+ */
+export const getCurrentUserChurch = cache(
+  async (): Promise<Church | null> => {
+    const { user } = await getCurrentSession();
+
+    if (!user?.churchId) {
+      return null;
+    }
+
+    const [church] = await db
+      .select()
+      .from(churches)
+      .where(eq(churches.id, user.churchId))
+      .limit(1);
+
+    return church ?? null;
+  }
+);

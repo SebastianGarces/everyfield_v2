@@ -11,6 +11,7 @@ export {
   isSessionFresh,
   cleanupExpiredSessions,
   getCurrentSession,
+  getCurrentUserChurch,
   verifySession,
   type SessionMetadata,
   type SessionValidationResult,
