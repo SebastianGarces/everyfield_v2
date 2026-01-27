@@ -49,8 +49,6 @@ Thumbs.db
 *.pem
 
 # AI Agents
-.agents
-.cursor
 .codex
 
 # Working feature (ephemeral planning workspace)
