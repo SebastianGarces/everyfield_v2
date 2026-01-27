@@ -4,8 +4,46 @@ import type { NextRequest } from "next/server";
 const SESSION_COOKIE_NAME = "session";
 const SESSION_EXPIRY_SECONDS = 30 * 24 * 60 * 60; // 30 days
 
+// Routes that authenticated users should be redirected away from
+const AUTH_ROUTES = ["/login", "/register"];
+
+// Routes that require authentication
+const PROTECTED_ROUTE_PREFIXES = ["/dashboard", "/wiki"];
+
+function isAuthRoute(pathname: string): boolean {
+  return pathname === "/" || AUTH_ROUTES.includes(pathname);
+}
+
+function isProtectedRoute(pathname: string): boolean {
+  return PROTECTED_ROUTE_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
+  );
+}
+
 export function proxy(request: NextRequest): NextResponse {
-  // 1. CSRF protection for non-GET requests
+  const { pathname } = request.nextUrl;
+  const hasSessionCookie = request.cookies.has(SESSION_COOKIE_NAME);
+
+  // 1. Auth routing for GET requests
+  if (request.method === "GET") {
+    // Authenticated user on auth routes → redirect to dashboard (or redirect param)
+    if (hasSessionCookie && isAuthRoute(pathname)) {
+      const redirectTo =
+        request.nextUrl.searchParams.get("redirect") || "/dashboard";
+      // Prevent open redirect by ensuring redirectTo starts with /
+      const safeRedirect = redirectTo.startsWith("/") ? redirectTo : "/dashboard";
+      return NextResponse.redirect(new URL(safeRedirect, request.url));
+    }
+
+    // Unauthenticated user on protected routes → redirect to login
+    if (!hasSessionCookie && isProtectedRoute(pathname)) {
+      const loginUrl = new URL("/login", request.url);
+      loginUrl.searchParams.set("redirect", pathname);
+      return NextResponse.redirect(loginUrl);
+    }
+  }
+
+  // 2. CSRF protection for non-GET requests
   if (request.method !== "GET") {
     const originHeader = request.headers.get("Origin");
     const hostHeader = request.headers.get("Host");
@@ -24,7 +62,7 @@ export function proxy(request: NextRequest): NextResponse {
     }
   }
 
-  // 2. Extend session cookie on GET requests only
+  // 3. Extend session cookie on GET requests only
   // We only extend on GET because we can't detect if a server action set a new cookie
   if (request.method === "GET") {
     const response = NextResponse.next();

@@ -64,5 +64,12 @@ export async function login(
   // Set session cookie
   await setSessionCookie(token, session.expiresAt);
 
-  redirect("/dashboard");
+  // Get redirect path from form, default to dashboard
+  const redirectTo = formData.get("redirect");
+  const redirectPath =
+    typeof redirectTo === "string" && redirectTo.startsWith("/")
+      ? redirectTo
+      : "/dashboard";
+
+  redirect(redirectPath);
 }
