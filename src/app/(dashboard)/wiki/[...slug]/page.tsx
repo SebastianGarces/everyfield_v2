@@ -11,6 +11,9 @@ import {
 import { WikiBreadcrumb } from "@/components/wiki/wiki-breadcrumb";
 import type { ArticleMeta } from "@/lib/wiki/types";
 
+// ISR: Revalidate pages every hour (can also be triggered on-demand via API)
+export const revalidate = 3600;
+
 type Props = {
   params: Promise<{ slug: string[] }>;
 };

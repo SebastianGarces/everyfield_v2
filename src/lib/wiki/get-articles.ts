@@ -1,115 +1,18 @@
-import fs from "fs/promises";
-import path from "path";
 import type { ArticleMeta, ArticleCategory, ArticleNavSection, NavGroup } from "./types";
-
-const WIKI_DIR = path.join(process.cwd(), "wiki");
-
-/**
- * Parse the comment-style frontmatter from MDX files
- * Format: {/* key: value */
-// */}
-function parseFrontmatter(content: string): Record<string, string> {
-  const match = content.match(/^\{\/\*\s*([\s\S]*?)\s*\*\/\}/);
-  if (!match) return {};
-
-  const frontmatterText = match[1];
-  const result: Record<string, string> = {};
-
-  for (const line of frontmatterText.split("\n")) {
-    const colonIndex = line.indexOf(":");
-    if (colonIndex === -1) continue;
-
-    const key = line.slice(0, colonIndex).trim();
-    const value = line.slice(colonIndex + 1).trim();
-    if (key && value) {
-      result[key] = value;
-    }
-  }
-
-  return result;
-}
-
-/**
- * Convert filename to URL-friendly slug
- */
-function fileToSlug(filename: string): string {
-  return filename.replace(/\.mdx?$/, "");
-}
-
-/**
- * Infer category from article metadata
- */
-function inferCategory(phase: number | null, section: string): ArticleCategory {
-  if (section === "getting-started") return "getting-started";
-  if (section === "frameworks") return "frameworks";
-
-  // Reference sections
-  const referenceSections = ["ministry-teams", "administrative"];
-  if (referenceSections.includes(section)) return "reference";
-
-  // Resources sections
-  const resourceSections = ["templates", "training-library"];
-  if (resourceSections.includes(section)) return "resources";
-
-  // Phases 0-6 are journey content
-  return "journey";
-}
-
-/**
- * Recursively scan directory for MDX files
- */
-async function scanDirectory(
-  dir: string,
-  basePath: string = ""
-): Promise<ArticleMeta[]> {
-  const articles: ArticleMeta[] = [];
-
-  try {
-    const entries = await fs.readdir(dir, { withFileTypes: true });
-
-    for (const entry of entries) {
-      const fullPath = path.join(dir, entry.name);
-      const relativePath = basePath ? `${basePath}/${entry.name}` : entry.name;
-
-      if (entry.isDirectory()) {
-        const nested = await scanDirectory(fullPath, relativePath);
-        articles.push(...nested);
-      } else if (entry.name.endsWith(".mdx")) {
-        const content = await fs.readFile(fullPath, "utf-8");
-        const frontmatter = parseFrontmatter(content);
-
-        const slug = fileToSlug(relativePath);
-        const phase = parseInt(frontmatter.phase || "0", 10);
-        const section = frontmatter.section || "";
-
-        articles.push({
-          slug,
-          title: frontmatter.title || slug,
-          type: (frontmatter.type as ArticleMeta["type"]) || "reference",
-          phase,
-          section,
-          order: parseInt(frontmatter.order || "999", 10),
-          readTime: parseInt(frontmatter.read_time || "5", 10),
-          description: frontmatter.description || "",
-          category:
-            (frontmatter.category as ArticleCategory) ||
-            inferCategory(phase, section),
-        });
-      }
-    }
-  } catch {
-    // Directory doesn't exist or can't be read
-    return [];
-  }
-
-  return articles;
-}
+import { toArticleMeta } from "./types";
+import { getAllPublishedArticles } from "./service";
 
 /**
  * Get all wiki articles with metadata
  */
 export async function getArticles(): Promise<ArticleMeta[]> {
-  return scanDirectory(WIKI_DIR);
+  const dbArticles = await getAllPublishedArticles();
+
+  return dbArticles.map((article) => {
+    // Extract section from slug (e.g., "discovery/defining-your-church-values" -> "discovery")
+    const sectionSlug = article.slug.split("/")[0] ?? "";
+    return toArticleMeta(article, sectionSlug);
+  });
 }
 
 /**

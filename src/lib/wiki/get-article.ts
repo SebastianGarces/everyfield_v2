@@ -1,89 +1,24 @@
-import fs from "fs/promises";
-import path from "path";
 import { compileMDX } from "next-mdx-remote/rsc";
 import remarkGfm from "remark-gfm";
-import type { Article, ArticleMeta, ArticleCategory } from "./types";
+import type { Article } from "./types";
+import { toArticle } from "./types";
+import { getArticleBySlug } from "./service";
 import { mdxComponents } from "@/components/wiki/mdx-components";
-
-const WIKI_DIR = path.join(process.cwd(), "wiki");
-
-/**
- * Parse the comment-style frontmatter from MDX files
- */
-function parseFrontmatter(content: string): {
-  data: Record<string, string>;
-  content: string;
-} {
-  const match = content.match(/^\{\/\*\s*([\s\S]*?)\s*\*\/\}/);
-  if (!match) {
-    return { data: {}, content };
-  }
-
-  const frontmatterText = match[1];
-  const data: Record<string, string> = {};
-
-  for (const line of frontmatterText.split("\n")) {
-    const colonIndex = line.indexOf(":");
-    if (colonIndex === -1) continue;
-
-    const key = line.slice(0, colonIndex).trim();
-    const value = line.slice(colonIndex + 1).trim();
-    if (key && value) {
-      data[key] = value;
-    }
-  }
-
-  // Remove frontmatter from content
-  const contentWithoutFrontmatter = content.slice(match[0].length).trim();
-
-  return { data, content: contentWithoutFrontmatter };
-}
-
-/**
- * Infer category from article metadata
- */
-function inferCategory(phase: number | null, section: string): ArticleCategory {
-  if (section === "getting-started") return "getting-started";
-  if (section === "frameworks") return "frameworks";
-
-  const referenceSections = ["ministry-teams", "administrative"];
-  if (referenceSections.includes(section)) return "reference";
-
-  const resourceSections = ["templates", "training-library"];
-  if (resourceSections.includes(section)) return "resources";
-
-  return "journey";
-}
 
 /**
  * Get a single article by slug
  */
 export async function getArticle(slug: string): Promise<Article | null> {
-  const filePath = path.join(WIKI_DIR, `${slug}.mdx`);
+  const dbArticle = await getArticleBySlug(slug, null);
 
-  try {
-    const fileContent = await fs.readFile(filePath, "utf-8");
-    const { data, content } = parseFrontmatter(fileContent);
-
-    const phase = data.phase ? parseInt(data.phase, 10) : null;
-    const section = data.section || "";
-
-    return {
-      slug,
-      title: data.title || slug,
-      type: (data.type as ArticleMeta["type"]) || "reference",
-      phase: phase ?? 0,
-      section,
-      order: parseInt(data.order || "999", 10),
-      readTime: parseInt(data.read_time || "5", 10),
-      description: data.description || "",
-      category:
-        (data.category as ArticleCategory) || inferCategory(phase, section),
-      content,
-    };
-  } catch {
+  if (!dbArticle) {
     return null;
   }
+
+  // Extract section from slug (e.g., "discovery/defining-your-church-values" -> "discovery")
+  const sectionSlug = slug.split("/")[0] ?? "";
+
+  return toArticle(dbArticle, sectionSlug);
 }
 
 /**
