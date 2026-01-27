@@ -148,14 +148,14 @@ Track MDX components needed for articles. Create these after articles are comple
 
 | # | Article | File Path | Status |
 |---|---------|-----------|--------|
-| 4.1 | The Final 3-4 Weeks | `wiki/pre-launch/the-final-3-4-weeks.mdx` | ⬜ |
-| 4.2 | Operations: Set-up and Tear-down | `wiki/pre-launch/operations-setup-teardown.mdx` | ⬜ |
-| 4.3 | In-Service Training Day | `wiki/pre-launch/in-service-training-day.mdx` | ⬜ |
-| 4.4 | Launch Team Spiritual Preparation | `wiki/pre-launch/launch-team-spiritual-preparation.mdx` | ⬜ |
-| 4.5 | Pre-Launch Services | `wiki/pre-launch/pre-launch-services.mdx` | ⬜ |
-| 4.6 | The Promotion Plan | `wiki/pre-launch/the-promotion-plan.mdx` | ⬜ |
-| 4.7 | Promotion Channels Guide | `wiki/pre-launch/promotion-channels-guide.mdx` | ⬜ |
-| 4.8 | Final Checklist Review | `wiki/pre-launch/final-checklist-review.mdx` | ⬜ |
+| 4.1 | The Final 3-4 Weeks | `wiki/pre-launch/the-final-3-4-weeks.mdx` | ✅ |
+| 4.2 | Operations: Set-up and Tear-down | `wiki/pre-launch/operations-setup-teardown.mdx` | ✅ |
+| 4.3 | In-Service Training Day | `wiki/pre-launch/in-service-training-day.mdx` | ✅ |
+| 4.4 | Launch Team Spiritual Preparation | `wiki/pre-launch/launch-team-spiritual-preparation.mdx` | ✅ |
+| 4.5 | Pre-Launch Services | `wiki/pre-launch/pre-launch-services.mdx` | ✅ |
+| 4.6 | The Promotion Plan | `wiki/pre-launch/the-promotion-plan.mdx` | ✅ |
+| 4.7 | Promotion Channels Guide | `wiki/pre-launch/promotion-channels-guide.mdx` | ✅ |
+| 4.8 | Final Checklist Review | `wiki/pre-launch/final-checklist-review.mdx` | ✅ |
 
 ---
 
@@ -163,12 +163,12 @@ Track MDX components needed for articles. Create these after articles are comple
 
 | # | Article | File Path | Status |
 |---|---------|-----------|--------|
-| 5.1 | Launch Day Guide | `wiki/launch-sunday/launch-day-guide.mdx` | ⬜ |
-| 5.2 | The 5 Priority Details for Launch Sunday | `wiki/launch-sunday/5-priority-details.mdx` | ⬜ |
-| 5.3 | Ministry Checklists for Launch Day | `wiki/launch-sunday/ministry-checklists.mdx` | ⬜ |
-| 5.4 | Video and Photography Capture | `wiki/launch-sunday/video-photography-capture.mdx` | ⬜ |
-| 5.5 | Partner Organization Coordination | `wiki/launch-sunday/partner-organization-coordination.mdx` | ⬜ |
-| 5.6 | After-Service Celebration | `wiki/launch-sunday/after-service-celebration.mdx` | ⬜ |
+| 5.1 | Launch Day Guide | `wiki/launch-sunday/launch-day-guide.mdx` | ✅ |
+| 5.2 | The 5 Priority Details for Launch Sunday | `wiki/launch-sunday/5-priority-details.mdx` | ✅ |
+| 5.3 | Ministry Checklists for Launch Day | `wiki/launch-sunday/ministry-checklists.mdx` | ✅ |
+| 5.4 | Video and Photography Capture | `wiki/launch-sunday/video-photography-capture.mdx` | ✅ |
+| 5.5 | Partner Organization Coordination | `wiki/launch-sunday/partner-organization-coordination.mdx` | ✅ |
+| 5.6 | After-Service Celebration | `wiki/launch-sunday/after-service-celebration.mdx` | ✅ |
 
 ---
 
@@ -176,13 +176,13 @@ Track MDX components needed for articles. Create these after articles are comple
 
 | # | Article | File Path | Status |
 |---|---------|-----------|--------|
-| 6.1 | Establishing Weekly Rhythms | `wiki/post-launch/establishing-weekly-rhythms.mdx` | ⬜ |
-| 6.2 | The Guest Assimilation Journey | `wiki/post-launch/the-guest-assimilation-journey.mdx` | ⬜ |
-| 6.3 | 48-Hour Guest Follow-Up | `wiki/post-launch/48-hour-guest-follow-up.mdx` | ⬜ |
-| 6.4 | Small Group Launch | `wiki/post-launch/small-group-launch.mdx` | ⬜ |
-| 6.5 | Party with the Pastor | `wiki/post-launch/party-with-the-pastor.mdx` | ⬜ |
-| 6.6 | Financial Sustainability | `wiki/post-launch/financial-sustainability.mdx` | ⬜ |
-| 6.7 | Growth Metrics to Track | `wiki/post-launch/growth-metrics-to-track.mdx` | ⬜ |
+| 6.1 | Establishing Weekly Rhythms | `wiki/post-launch/establishing-weekly-rhythms.mdx` | ✅ |
+| 6.2 | The Guest Assimilation Journey | `wiki/post-launch/the-guest-assimilation-journey.mdx` | ✅ |
+| 6.3 | 48-Hour Guest Follow-Up | `wiki/post-launch/48-hour-guest-follow-up.mdx` | ✅ |
+| 6.4 | Small Group Launch | `wiki/post-launch/small-group-launch.mdx` | ✅ |
+| 6.5 | Party with the Pastor | `wiki/post-launch/party-with-the-pastor.mdx` | ✅ |
+| 6.6 | Financial Sustainability | `wiki/post-launch/financial-sustainability.mdx` | ✅ |
+| 6.7 | Growth Metrics to Track | `wiki/post-launch/growth-metrics-to-track.mdx` | ✅ |
 
 ---
 
@@ -192,10 +192,10 @@ Track MDX components needed for articles. Create these after articles are comple
 |---|---------|-----------|--------|
 | F.1 | 8 Critical Success Factors Overview | `wiki/frameworks/8-critical-success-factors-overview.mdx` | ✅ |
 | F.2 | The 4 C's: Committed, Compelled, Contagious, Courageous | `wiki/frameworks/the-4-cs.mdx` | ✅ |
-| F.3 | The Ministry Funnel (Worship/Walk/Work) | `wiki/frameworks/the-ministry-funnel.mdx` | ⬜ |
-| F.4 | The 4 Pillars | `wiki/frameworks/the-4-pillars.mdx` | ⬜ |
-| F.5 | Meeting Objectives: Inspire, Instill, Inform | `wiki/frameworks/meeting-objectives.mdx` | ⬜ |
-| F.6 | The 5 Interview Criteria | `wiki/frameworks/the-5-interview-criteria.mdx` | ⬜ |
+| F.3 | The Ministry Funnel (Worship/Walk/Work) | `wiki/frameworks/the-ministry-funnel.mdx` | ✅ |
+| F.4 | The 4 Pillars | `wiki/frameworks/the-4-pillars.mdx` | ✅ |
+| F.5 | Meeting Objectives: Inspire, Instill, Inform | `wiki/frameworks/meeting-objectives.mdx` | ✅ |
+| F.6 | The 5 Interview Criteria | `wiki/frameworks/the-5-interview-criteria.mdx` | ✅ |
 
 ---
 
@@ -205,37 +205,37 @@ Track MDX components needed for articles. Create these after articles are comple
 
 | # | Article | File Path | Status |
 |---|---------|-----------|--------|
-| A.1 | Setting Up a Not-for-Profit Corporation | `wiki/administrative/legal/setting-up-nonprofit-corporation.mdx` | ⬜ |
-| A.2 | Setting Up a 501(c)(3) | `wiki/administrative/legal/setting-up-501c3.mdx` | ⬜ |
+| A.1 | Setting Up a Not-for-Profit Corporation | `wiki/administrative/legal/setting-up-nonprofit-corporation.mdx` | ✅ |
+| A.2 | Setting Up a 501(c)(3) | `wiki/administrative/legal/setting-up-501c3.mdx` | ✅ |
 
 ### Financial Management
 
 | # | Article | File Path | Status |
 |---|---------|-----------|--------|
-| A.3 | First Year Budget Planning | `wiki/administrative/financial/first-year-budget-planning.mdx` | ⬜ |
-| A.4 | Principles of Financial Accountability | `wiki/administrative/financial/principles-of-financial-accountability.mdx` | ⬜ |
-| A.5 | Collections: Handling Cash and Checks | `wiki/administrative/financial/collections-handling-cash-checks.mdx` | ⬜ |
-| A.6 | Counting Procedures | `wiki/administrative/financial/counting-procedures.mdx` | ⬜ |
-| A.7 | Disbursements and Approvals | `wiki/administrative/financial/disbursements-and-approvals.mdx` | ⬜ |
-| A.8 | Designated Giving Policies | `wiki/administrative/financial/designated-giving-policies.mdx` | ⬜ |
+| A.3 | First Year Budget Planning | `wiki/administrative/financial/first-year-budget-planning.mdx` | ✅ |
+| A.4 | Principles of Financial Accountability | `wiki/administrative/financial/principles-of-financial-accountability.mdx` | ✅ |
+| A.5 | Collections: Handling Cash and Checks | `wiki/administrative/financial/collections-handling-cash-checks.mdx` | ✅ |
+| A.6 | Counting Procedures | `wiki/administrative/financial/counting-procedures.mdx` | ✅ |
+| A.7 | Disbursements and Approvals | `wiki/administrative/financial/disbursements-and-approvals.mdx` | ✅ |
+| A.8 | Designated Giving Policies | `wiki/administrative/financial/designated-giving-policies.mdx` | ✅ |
 
 ### Purchasing & Equipment
 
 | # | Article | File Path | Status |
 |---|---------|-----------|--------|
-| A.9 | Acquiring Portable Church Equipment | `wiki/administrative/purchasing/acquiring-portable-church-equipment.mdx` | ⬜ |
-| A.10 | Main PA System Guide | `wiki/administrative/purchasing/main-pa-system-guide.mdx` | ⬜ |
-| A.11 | Video Projection System Guide | `wiki/administrative/purchasing/video-projection-system-guide.mdx` | ⬜ |
-| A.12 | Lighting Equipment Guide | `wiki/administrative/purchasing/lighting-equipment-guide.mdx` | ⬜ |
-| A.13 | Staging and Signage Guide | `wiki/administrative/purchasing/staging-signage-guide.mdx` | ⬜ |
-| A.14 | Children's Ministry Equipment | `wiki/administrative/purchasing/childrens-ministry-equipment.mdx` | ⬜ |
+| A.9 | Acquiring Portable Church Equipment | `wiki/administrative/purchasing/acquiring-portable-church-equipment.mdx` | ✅ |
+| A.10 | Main PA System Guide | `wiki/administrative/purchasing/main-pa-system-guide.mdx` | ✅ |
+| A.11 | Video Projection System Guide | `wiki/administrative/purchasing/video-projection-system-guide.mdx` | ✅ |
+| A.12 | Lighting Equipment Guide | `wiki/administrative/purchasing/lighting-equipment-guide.mdx` | ✅ |
+| A.13 | Staging and Signage Guide | `wiki/administrative/purchasing/staging-signage-guide.mdx` | ✅ |
+| A.14 | Children's Ministry Equipment | `wiki/administrative/purchasing/childrens-ministry-equipment.mdx` | ✅ |
 
 ### Technology
 
 | # | Article | File Path | Status |
 |---|---------|-----------|--------|
-| A.15 | Setting Up Your Website | `wiki/administrative/technology/setting-up-your-website.mdx` | ⬜ |
-| A.16 | Choosing Assimilation Software | `wiki/administrative/technology/choosing-assimilation-software.mdx` | ⬜ |
+| A.15 | Setting Up Your Website | `wiki/administrative/technology/setting-up-your-website.mdx` | ✅ |
+| A.16 | Choosing Assimilation Software | `wiki/administrative/technology/choosing-assimilation-software.mdx` | ✅ |
 
 ---
 
@@ -264,13 +264,13 @@ Track MDX components needed for articles. Create these after articles are comple
 | Phase 1: Core Group | 20 | 20 | 0 | 0 |
 | Phase 2: Launch Team | 18 | 18 | 0 | 0 |
 | Phase 3: Training | 7 | 7 | 0 | 0 |
-| Phase 4: Pre-Launch | 8 | 0 | 0 | 8 |
-| Phase 5: Launch Sunday | 6 | 0 | 0 | 6 |
-| Phase 6: Post-Launch | 7 | 0 | 0 | 7 |
-| Frameworks & Concepts | 6 | 2 | 0 | 4 |
-| Administrative | 16 | 0 | 0 | 16 |
+| Phase 4: Pre-Launch | 8 | 8 | 0 | 0 |
+| Phase 5: Launch Sunday | 6 | 6 | 0 | 0 |
+| Phase 6: Post-Launch | 7 | 7 | 0 | 0 |
+| Frameworks & Concepts | 6 | 6 | 0 | 0 |
+| Administrative | 16 | 16 | 0 | 0 |
 | Templates | 9 | 0 | 0 | 9 |
-| **TOTAL** | **105** | **55** | **0** | **50** |
+| **TOTAL** | **105** | **96** | **0** | **9** |
 
 ---
 
