@@ -40,12 +40,12 @@ Track MDX components needed for articles. Create these after articles are comple
 
 | # | Article | File Path | Status |
 |---|---------|-----------|--------|
-| 0.1 | Is Church Planting Your Calling? | `wiki/discovery/is-church-planting-your-calling.mdx` | ⬜ |
-| 0.2 | Understanding the 4 Pillars | `wiki/discovery/understanding-the-4-pillars.mdx` | ⬜ |
-| 0.3 | Defining Your Church Values | `wiki/discovery/defining-your-church-values.mdx` | ⬜ |
-| 0.4 | The Worship/Walk/Work Model | `wiki/discovery/the-worship-walk-work-model.mdx` | ⬜ |
-| 0.5 | Setting Your Initial Goals | `wiki/discovery/setting-your-initial-goals.mdx` | ⬜ |
-| 0.6 | Finding a Coach/Mentor | `wiki/discovery/finding-a-coach-mentor.mdx` | ⬜ |
+| 0.1 | Is Church Planting Your Calling? | `wiki/discovery/is-church-planting-your-calling.mdx` | ✅ |
+| 0.2 | Understanding the 4 Pillars | `wiki/discovery/understanding-the-4-pillars.mdx` | ✅ |
+| 0.3 | Defining Your Church Values | `wiki/discovery/defining-your-church-values.mdx` | ✅ |
+| 0.4 | The Worship/Walk/Work/Witness Model | `wiki/discovery/the-worship-walk-work-witness-model.mdx` | ✅ |
+| 0.5 | Setting Your Initial Goals | `wiki/discovery/setting-your-initial-goals.mdx` | ✅ |
+| 0.6 | Finding a Coach/Mentor | `wiki/discovery/finding-a-coach-mentor.mdx` | ✅ |
 
 ---
 
@@ -260,7 +260,7 @@ Track MDX components needed for articles. Create these after articles are comple
 | Section | Total | Done | In Progress | Not Started |
 |---------|-------|------|-------------|-------------|
 | Getting Started | 2 | 2 | 0 | 0 |
-| Phase 0: Discovery | 6 | 0 | 0 | 6 |
+| Phase 0: Discovery | 6 | 6 | 0 | 0 |
 | Phase 1: Core Group | 20 | 0 | 0 | 20 |
 | Phase 2: Launch Team | 18 | 0 | 0 | 18 |
 | Phase 3: Training | 7 | 0 | 0 | 7 |
@@ -270,7 +270,7 @@ Track MDX components needed for articles. Create these after articles are comple
 | Frameworks & Concepts | 6 | 2 | 0 | 4 |
 | Administrative | 16 | 0 | 0 | 16 |
 | Templates | 9 | 0 | 0 | 9 |
-| **TOTAL** | **105** | **4** | **0** | **101** |
+| **TOTAL** | **105** | **10** | **0** | **95** |
 
 ---
 
