@@ -304,10 +304,123 @@ wiki/
 
 ---
 
+## Frontmatter Reference
+
+Every wiki article **must** include complete frontmatter at the top of the file inside a JSX comment block. Missing or incorrect frontmatter will cause display issues.
+
+### Required Frontmatter Format
+
+**For journey content (Phases 0-6):**
+```mdx
+{/*
+title: Article Title Here
+type: reference
+phase: 0
+section: discovery
+order: 1
+read_time: 8
+description: A clear 1-2 sentence description of what this article covers.
+category: journey
+*/}
+```
+
+**For non-phase content (getting-started, frameworks, resources):**
+```mdx
+{/*
+title: Article Title Here
+type: overview
+section: getting-started
+order: 1
+read_time: 5
+description: A clear 1-2 sentence description of what this article covers.
+category: getting-started
+*/}
+```
+
+Note: The `phase` attribute is **omitted entirely** for non-phase content—do not set it to null or leave it empty.
+
+### Frontmatter Attributes
+
+| Attribute | Required | Type | Description |
+|-----------|----------|------|-------------|
+| `title` | ✅ Yes | string | The display title of the article |
+| `type` | ✅ Yes | enum | Article type (see values below) |
+| `phase` | ⚠️ Conditional | number | Launch phase number (0-6). **Required for journey content. Omit entirely for non-phase content.** |
+| `section` | ✅ Yes | string | Directory/section slug (e.g., `discovery`, `frameworks`) |
+| `order` | ✅ Yes | number | Sort order within the section (starts at 1) |
+| `read_time` | ✅ Yes | number | Estimated reading time in minutes |
+| `description` | ✅ Yes | string | Brief description for navigation/SEO (1-2 sentences) |
+| `category` | ✅ Yes | enum | Content category (see values below) |
+
+### Accepted Values
+
+**`type`** - What kind of article is this?
+| Value | When to Use |
+|-------|-------------|
+| `overview` | Introductory/welcome content that orients the reader |
+| `reference` | Conceptual content explaining frameworks, models, or principles |
+| `guide` | Step-by-step guidance for completing a task or making a decision |
+| `how-to` | Practical instructions for specific actions |
+| `tutorial` | Detailed walkthrough with examples |
+
+**`category`** - Where does this content fit?
+| Value | When to Use |
+|-------|-------------|
+| `getting-started` | Meta content about using the wiki |
+| `journey` | Phase-based content (Phases 0-6) |
+| `frameworks` | Cross-phase concepts and models |
+| `reference` | Administrative and supporting content |
+| `resources` | Templates and downloadable materials |
+
+**`phase`** - Which launch phase?
+| Value | Phase |
+|-------|-------|
+| *(omit)* | Non-phase content (getting-started, frameworks, resources) — leave attribute out entirely |
+| `0` | Discovery |
+| `1` | Core Group Development |
+| `2` | Launch Team Formation |
+| `3` | Training & Preparation |
+| `4` | Pre-Launch |
+| `5` | Launch Sunday |
+| `6` | Post-Launch |
+
+---
+
+## Article Completion Checklist
+
+Before marking any article as ✅ Done, verify ALL of the following:
+
+### Frontmatter Verification
+- [ ] `title` is set and matches the article heading
+- [ ] `type` uses a valid value (`overview`, `reference`, `guide`, `how-to`, `tutorial`)
+- [ ] `phase` is set to correct number (0-6) for journey content, OR omitted entirely for non-phase content
+- [ ] `section` matches the directory slug the article is in
+- [ ] `order` is set to position article correctly in navigation
+- [ ] `read_time` is set (estimate based on word count: ~200 words/minute)
+- [ ] `description` is a clear 1-2 sentence summary
+- [ ] `category` uses a valid value (`getting-started`, `journey`, `frameworks`, `reference`, `resources`)
+
+### Content Verification
+- [ ] Article begins with a compelling introduction
+- [ ] Content is complete and covers the topic thoroughly
+- [ ] Uses appropriate `<Callout>` components for tips, warnings, scripture, insights
+- [ ] Includes relevant tables, lists, or visual structure where helpful
+- [ ] Ends with a Related Articles section linking to relevant content
+- [ ] Ends with a scripture callout when appropriate
+- [ ] No placeholder text or TODO comments remain
+
+### Quality Check
+- [ ] Read through the entire article for typos and clarity
+- [ ] Verify all internal links use correct paths (`/wiki/section/article-slug`)
+- [ ] Confirm formatting renders correctly (headings, lists, tables)
+
+---
+
 ## Usage Notes
 
 1. **Context Management**: When resuming work, load only this checklist and the specific article(s) you're working on
 2. **Update as you go**: Mark articles as 🚧 when starting, ✅ when complete
 3. **Component tracking**: Note any new components needed as you write articles
 4. **Cross-references**: Update Related Articles sections once linked articles exist
-5. **Frontmatter**: Each article uses frontmatter to specify `section`, `phase` (number or null), `category`, `type`, `order`, and `read_time`
+5. **Frontmatter first**: Always complete frontmatter before writing content
+6. **Double-check before done**: Use the Article Completion Checklist above before marking any article complete

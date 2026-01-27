@@ -1,4 +1,4 @@
-export type ArticleType = "overview" | "reference" | "how-to" | "tutorial";
+export type ArticleType = "overview" | "reference" | "guide" | "how-to" | "tutorial";
 
 export type ArticleCategory =
   | "journey"

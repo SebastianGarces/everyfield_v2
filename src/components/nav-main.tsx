@@ -49,7 +49,12 @@ export function NavMain({ items }: { items: NavItem[] }) {
                     >
                       {item.icon && <item.icon />}
                       <span>{item.title}</span>
-                      <ChevronRight className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
+                      {item.isDisabled && (
+                        <span className="ml-auto text-[10px] font-medium text-muted-foreground">
+                          COMING SOON
+                        </span>
+                      )}
+                      <ChevronRight className={`${item.isDisabled ? "ml-2" : "ml-auto"} transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90`} />
                     </SidebarMenuButton>
                   </CollapsibleTrigger>
                   <CollapsibleContent>
@@ -100,6 +105,11 @@ export function NavMain({ items }: { items: NavItem[] }) {
                 >
                   {item.icon && <item.icon />}
                   <span>{item.title}</span>
+                  {item.isDisabled && (
+                    <span className="ml-auto text-[10px] font-medium text-muted-foreground">
+                      COMING SOON
+                    </span>
+                  )}
                 </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
