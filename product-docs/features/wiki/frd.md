@@ -898,7 +898,8 @@ System logs download for analytics
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | id | UUID | Yes | Primary key |
-| slug | String | Yes | URL-friendly identifier (unique) |
+| church_id | UUID (FK) | No | Reference to Church; `null` = global (platform-wide), value = church-specific |
+| slug | String | Yes | URL-friendly identifier (unique within scope) |
 | title | String | Yes | Article title |
 | content | Rich Text | Yes | Article body (Markdown/MDX) |
 | excerpt | Text | No | Short description for previews |
@@ -914,6 +915,12 @@ System logs download for analytics
 | published_at | Timestamp | No | Publication date |
 | created_at | Timestamp | Yes | Creation timestamp |
 | updated_at | Timestamp | Yes | Last update timestamp |
+
+**Content Scope:**
+- `church_id = null`: Global articles (Launch Playbook content, platform-wide resources) visible to all users
+- `church_id = <uuid>`: Church-specific articles visible only to users of that church
+
+**Query pattern:** `WHERE church_id IS NULL OR church_id = :current_church_id`
 
 ---
 
@@ -1156,7 +1163,7 @@ The wiki should appear contextually throughout the platform:
 
 3. **Coach overlay:** Should coaches be able to add notes/annotations to articles visible only to their planters?
 
-4. **Network customization:** Can networks customize certain articles or add network-specific content?
+4. **Network customization:** ~~Can networks customize certain articles or add network-specific content?~~ **Resolved:** WikiArticle supports `church_id` scoping (null = global, value = church-specific). Network-level scoping deferred to future enhancement if needed.
 
 5. **Print/Export:** Should users be able to export entire sections as PDF for offline reference?
 

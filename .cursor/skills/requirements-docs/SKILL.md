@@ -10,6 +10,7 @@ description: Rules for writing and editing EveryField requirements documentation
 - Use this skill when creating or editing files in `product-docs/`
 - Use when writing or revising Feature Requirements Documents (FRDs)
 - Use when updating Product Brief, System Architecture, or PRD
+- Use when updating feature implementation checklists
 - Use when asked to refactor, correct, or audit documentation
 
 ## Purpose
@@ -165,6 +166,55 @@ Defines one valid execution strategy for an FRD.
 * May change without changing the FRD
 * Must conform to Architecture + FRD
 * Must not introduce new requirements
+
+---
+
+### 6. Feature Implementation Checklists
+
+**Location**
+
+```
+product-docs/features/<feature-name>/checklist.md
+```
+
+**Purpose:**
+Tracks implementation progress for a feature. This is the **working document** that gets updated as features are built, keeping the FRD stable as the source of truth.
+
+**Required Structure**
+
+```markdown
+# <Feature Name> – Implementation Checklist
+
+## Must Have
+- [ ] Requirement ID: Description
+- [x] Requirement ID: Description (completed)
+
+## Should Have
+- [ ] Requirement ID: Description
+
+## Nice to Have
+- [ ] Requirement ID: Description
+```
+
+**Rules**
+
+* One checklist per feature, alongside its FRD
+* Items should reference requirement IDs from the FRD (e.g., `W-001`, `W-011`)
+* Update the checklist as work progresses—not the FRD
+* Mark items with `[x]` when complete
+* Add notes or sub-tasks as needed for implementation details
+
+**Allowed Content**
+
+* Checkbox items mirroring FRD requirements
+* Implementation notes and sub-tasks
+* Links to PRs or commits
+* Dates or version tags for completion
+
+**Forbidden Content**
+
+* New requirements not in the FRD (add to FRD first)
+* Detailed specs or behavior definitions (belongs in FRD)
 
 ---
 

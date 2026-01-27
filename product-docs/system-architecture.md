@@ -47,7 +47,7 @@ EveryField follows a feature-based modular architecture where each feature (F1-F
 
 These are the **only** shared entities that features may depend on: **Church**, **User**, **Person**, **Phase**. All other models are feature-owned.
 
-**Key invariant:** All feature data MUST include `church_id` and enforce row-level isolation.
+**Key invariant:** All feature data MUST include `church_id` and enforce row-level isolation. Exception: platform-wide content (e.g., global Wiki articles) uses nullable `church_id` where `null` = visible to all.
 
 For detailed contracts, referencing rules, and cross-feature invariants, see **[Core Data Contracts](./core-data-contracts.md)**.
 

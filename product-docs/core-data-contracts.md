@@ -76,6 +76,8 @@ Features **reference shared entities by ID only**—never duplicate profile fiel
 - Coach/Network Admin roles may have cross-church read access for assigned churches only
 - No cross-tenant data leakage in queries, exports, or search results
 
+**Exception for platform-wide content:** Features with shared/global content (e.g., Wiki) may use nullable `church_id` where `null` indicates platform-wide visibility. Query pattern: `WHERE church_id IS NULL OR church_id = :current_church_id`.
+
 ### Audit Expectations
 
 | Requirement | Scope |
