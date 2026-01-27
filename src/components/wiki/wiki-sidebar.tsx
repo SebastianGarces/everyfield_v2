@@ -172,8 +172,8 @@ function SidebarItem({
     <Link
       href={item.href}
       className={cn(
-        "text-muted-foreground hover:bg-muted hover:text-foreground block rounded px-2 py-1 text-sm",
-        isActive && "bg-muted text-foreground font-medium border-l-[5px] border-ef rounded-l-none"
+        "relative text-muted-foreground hover:bg-muted hover:text-foreground block rounded px-2 py-1 text-sm before:absolute before:left-0 before:top-0 before:h-full before:w-[4px] before:bg-transparent",
+        isActive && "bg-muted text-foreground font-medium before:bg-ef"
       )}
     >
       {item.title}
