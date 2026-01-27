@@ -183,9 +183,11 @@ When an implementation task is completed:
    - Types: `feat`, `fix`, `refactor`, `style`, `docs`, `test`, `chore`
    - Wait for user confirmation or edits to the message
 
-4. **After commit message confirmed**: Execute the git commit following the **Selective Commit Protocol** below.
+4. **Update checklists**: Before committing, update:
+   - `working-feature/implementation.md` - check off completed items
+   - `product-docs/features/<feature-name>/checklist.md` - mark implemented requirements as complete (if checklist exists)
 
-5. **Update implementation.md**: Check off completed items in the implementation plan
+5. **After commit message confirmed**: Execute the git commit following the **Selective Commit Protocol** below.
 
 ### Selective Commit Protocol
 

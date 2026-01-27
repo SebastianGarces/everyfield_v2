@@ -13,14 +13,17 @@
   - Nested navigation structure (groups > sections > articles)
 - [ ] W-004: Full-text search across all wiki content
   - Placeholder in sidebar ("Search coming soon...")
-  - Requires DB migration or search index
-- [ ] W-005: Current phase indicator
-  - Requires user/church context integration
-- [ ] W-006: Phase-relevant recommendations
-  - Home page shows Phase 1 articles statically
-  - Needs dynamic filtering based on user's current phase
-- [ ] W-007: Article progress tracking (not started/in progress/completed)
-  - Requires `WikiProgress` table (DB migration)
+  - Requires search index implementation
+- [x] W-005: Current phase indicator
+  - Phase badge shown on wiki home page
+  - Phase timeline shows current position
+- [x] W-006: Phase-relevant recommendations
+  - "Recommended for You" section filters by user's current phase
+  - Completed articles filtered out from recommendations
+- [x] W-007: Article progress tracking (not started/in progress/completed)
+  - `wiki_progress` table tracks user reading progress
+  - Status badges on article cards (Not started/Started/Complete)
+  - `/wiki/progress` page shows overall and per-section progress
 - [x] W-008: Breadcrumb navigation
   - `WikiBreadcrumb` component implemented
   - `getBreadcrumbs()` helper in lib
@@ -34,15 +37,16 @@
 - [ ] W-011: Bookmarking
   - Placeholder in sidebar ("coming soon")
   - Requires `WikiBookmark` table (DB migration)
-- [ ] W-012: Reading progress (save scroll position)
-  - Requires `WikiProgress.scroll_position` (DB migration)
+- [x] W-012: Reading progress (save scroll position)
+  - `wiki_progress.scroll_position` tracks reading position
+  - "Continue Reading" card on progress page shows last position
 - [x] W-013: Time estimates (read time per article)
   - `readTime` parsed from frontmatter
   - Displayed in article header and list views
 - [ ] W-014: Table of contents (right-side TOC)
-- [ ] W-015: Recently viewed
-  - Placeholder in sidebar ("coming soon")
-  - Requires `WikiProgress.updated_at` tracking (DB migration)
+- [x] W-015: Recently viewed
+  - "Recently Viewed" section in sidebar shows last 5 articles
+  - Updates dynamically as user visits articles
 - [ ] W-016: Article feedback (thumbs up/down)
 - [ ] W-017: Contextual surfacing in other features
 - [ ] W-018: Download as PDF
