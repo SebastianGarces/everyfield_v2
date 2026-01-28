@@ -10,6 +10,26 @@ const AUTH_ROUTES = ["/login", "/register"];
 // Routes that require authentication
 const PROTECTED_ROUTE_PREFIXES = ["/dashboard", "/wiki"];
 
+// Social media and search engine crawler user agents
+// These need access to pages for metadata/OG tag scraping
+const CRAWLER_USER_AGENTS = [
+  "facebookexternalhit",
+  "twitterbot",
+  "linkedinbot",
+  "slackbot",
+  "telegrambot",
+  "whatsapp",
+  "applebot", // iMessage link previews
+  "googlebot",
+  "bingbot",
+  "discordbot",
+];
+
+function isCrawler(userAgent: string): boolean {
+  const ua = userAgent.toLowerCase();
+  return CRAWLER_USER_AGENTS.some((crawler) => ua.includes(crawler));
+}
+
 function isAuthRoute(pathname: string): boolean {
   return pathname === "/" || AUTH_ROUTES.includes(pathname);
 }
@@ -36,10 +56,18 @@ export function proxy(request: NextRequest): NextResponse {
     }
 
     // Unauthenticated user on protected routes → redirect to login
+    // Exception: Allow crawlers through for metadata/OG tag scraping
     if (!hasSessionCookie && isProtectedRoute(pathname)) {
-      const loginUrl = new URL("/login", request.url);
-      loginUrl.searchParams.set("redirect", pathname);
-      return NextResponse.redirect(loginUrl);
+      const userAgent = request.headers.get("user-agent") || "";
+      if (!isCrawler(userAgent)) {
+        const loginUrl = new URL("/login", request.url);
+        loginUrl.searchParams.set("redirect", pathname);
+        return NextResponse.redirect(loginUrl);
+      }
+      // Crawler detected - allow through and set header for layout to check
+      const response = NextResponse.next();
+      response.headers.set("x-is-crawler", "true");
+      return response;
     }
   }
 

@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { AppSidebar } from "@/components/app-sidebar";
@@ -34,6 +34,13 @@ export default async function DashboardLayout({
   children: React.ReactNode;
 }) {
   const { user } = await getCurrentSession();
+  const headersList = await headers();
+  const isCrawler = headersList.get("x-is-crawler") === "true";
+
+  // For crawlers without auth, render minimal shell for metadata scraping only
+  if (!user && isCrawler) {
+    return <>{children}</>;
+  }
 
   if (!user) {
     redirect("/login");
