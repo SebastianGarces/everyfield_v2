@@ -188,11 +188,16 @@ async function SectionIndexView({
     getBookmarkedSlugs(articleSlugs),
   ]);
 
-  // Group articles by section if we're at phase level
-  const isPhaseLevel = slugPath.split("/").length === 1;
-  const groupedArticles = isPhaseLevel
-    ? groupArticlesBySection(articles)
-    : null;
+  // Group articles by section if at top level and there are meaningful sub-sections
+  const isTopLevel = slugPath.split("/").length === 1;
+  const grouped = isTopLevel ? groupArticlesBySection(articles) : null;
+  
+  // Only use grouping if there are actual sub-sections (not just "_root")
+  const hasRealSections = grouped && (
+    Object.keys(grouped).length > 1 || 
+    (Object.keys(grouped).length === 1 && !grouped["_root"])
+  );
+  const groupedArticles = hasRealSections ? grouped : null;
 
   return (
     <div className="space-y-6">
