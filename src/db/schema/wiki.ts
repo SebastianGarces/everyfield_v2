@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   pgTable,
   uuid,
@@ -98,6 +99,15 @@ export const wikiArticles = pgTable(
     index("wiki_articles_status_idx").on(table.status),
     index("wiki_articles_section_idx").on(table.sectionId),
     index("wiki_articles_phase_idx").on(table.phase),
+    // Full-text search index with weighted fields (title > excerpt > content)
+    index("wiki_articles_search_idx").using(
+      "gin",
+      sql`(
+        setweight(to_tsvector('english', ${table.title}), 'A') ||
+        setweight(to_tsvector('english', coalesce(${table.excerpt}, '')), 'B') ||
+        setweight(to_tsvector('english', ${table.content}), 'C')
+      )`
+    ),
   ]
 );
 

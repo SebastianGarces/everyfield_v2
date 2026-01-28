@@ -11,9 +11,10 @@
 - [x] W-003: Hierarchical navigation with collapsible sections
   - `WikiSidebar` with collapsible sections via Radix Collapsible
   - Nested navigation structure (groups > sections > articles)
-- [ ] W-004: Full-text search across all wiki content
-  - Placeholder in sidebar ("Search coming soon...")
-  - Requires search index implementation
+- [x] W-004: Full-text search across all wiki content
+  - PostgreSQL FTS with GIN index (weighted: title > excerpt > content)
+  - Command palette (Cmd+K) using shadcn Command component
+  - Supports websearch syntax (AND, OR, phrases, exclusion)
 - [x] W-005: Current phase indicator
   - Phase badge shown on wiki home page
   - Phase timeline shows current position
@@ -34,9 +35,10 @@
 
 ## Should Have
 
-- [ ] W-011: Bookmarking
-  - Placeholder in sidebar ("coming soon")
-  - Requires `WikiBookmark` table (DB migration)
+- [x] W-011: Bookmarking
+  - `BookmarkButton` component toggles bookmark state
+  - `BookmarkIndicator` shows bookmark status in lists
+  - `wiki_bookmark` table stores user bookmarks
 - [x] W-012: Reading progress (save scroll position)
   - `wiki_progress.scroll_position` tracks reading position
   - "Continue Reading" card on progress page shows last position

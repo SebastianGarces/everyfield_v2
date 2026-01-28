@@ -4,3 +4,4 @@ export * from "./get-articles";
 export * from "./get-article";
 export * from "./progress";
 export * from "./bookmarks";
+export * from "./search";

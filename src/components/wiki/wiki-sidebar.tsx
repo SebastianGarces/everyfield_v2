@@ -8,9 +8,10 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import type { ArticleNavSection, NavGroup } from "@/lib/wiki/types";
-import { Bookmark, ChevronRight, Clock, Search } from "lucide-react";
+import { Bookmark, ChevronRight, Clock } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { WikiSearchTrigger } from "./wiki-search";
 
 interface RecentlyViewedItem {
   slug: string;
@@ -41,13 +42,8 @@ export function WikiSidebar({
 
   return (
     <nav className="space-y-3">
-      {/* Search placeholder */}
-      <div className="relative">
-        <Search className="text-muted-foreground absolute top-2.5 left-2.5 h-4 w-4" />
-        <div className="border-input bg-background text-muted-foreground h-9 w-full rounded-md border px-8 py-2 text-sm">
-          Search coming soon...
-        </div>
-      </div>
+      {/* Search */}
+      <WikiSearchTrigger />
 
       {groups.map((group, index) => (
         <div key={group.slug}>
