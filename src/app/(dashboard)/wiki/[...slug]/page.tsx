@@ -63,38 +63,45 @@ export async function generateMetadata({ params }: Props) {
   // Try to get article first
   const article = await getArticle(slugPath);
   if (article) {
+    const title = `EveryField | ${article.title}`;
+    const description = article.description || appDescription;
     return {
-      title: article.title,
-      description: article.description || appDescription,
+      title,
+      description,
       openGraph: {
-        title: article.title,
-        description: article.description || appDescription,
+        title,
+        description,
         type: "article",
         url: `/wiki/${slugPath}`,
+        images: ["/og-image.png"],
       },
       twitter: {
         card: "summary_large_image",
-        title: article.title,
-        description: article.description || appDescription,
+        title,
+        description,
+        images: ["/og-image.png"],
       },
     };
   }
 
   // Otherwise, generate metadata for section index
-  const title = formatPathTitle(slugPath);
-  const description = `Browse articles in ${title}`;
+  const sectionTitle = formatPathTitle(slugPath);
+  const title = `EveryField | ${sectionTitle}`;
+  const description = `Browse articles in ${sectionTitle}`;
   return {
-    title: `${title} - Wiki`,
+    title,
     description,
     openGraph: {
-      title: `${title} - Wiki`,
+      title,
       description,
       url: `/wiki/${slugPath}`,
+      images: ["/og-image.png"],
     },
     twitter: {
       card: "summary_large_image",
-      title: `${title} - Wiki`,
+      title,
       description,
+      images: ["/og-image.png"],
     },
   };
 }
