@@ -78,32 +78,20 @@ export function WikiSearch({ open, onOpenChange }: WikiSearchProps) {
     };
   }, []);
 
-  // Handle dialog open/close - reset state on open, not close
-  const handleOpenChange = useCallback(
-    (newOpen: boolean) => {
-      if (newOpen) {
-        // Reset state when opening
-        setQuery("");
-        setResults([]);
-        setHasSearched(false);
-        setIsSearching(false);
-        setIsNavigating(false);
-      }
-      onOpenChange(newOpen);
-    },
-    [onOpenChange]
-  );
-
   const handleSelect = useCallback(
     (slug: string) => {
-      // Start navigation immediately
-      router.push(`/wiki/${slug}`);
-      // Then hide and close
+      // Hide immediately via CSS, then close and navigate
       setIsNavigating(true);
       onOpenChange(false);
+      router.push(`/wiki/${slug}`);
     },
     [onOpenChange, router]
   );
+
+  // When navigating, render nothing to prevent any flash
+  if (isNavigating) {
+    return null;
+  }
 
   // Format content type for display
   const formatContentType = (type: string) => {
@@ -124,13 +112,8 @@ export function WikiSearch({ open, onOpenChange }: WikiSearchProps) {
     return `Phase ${phase}`;
   };
 
-  // Hide dialog immediately when navigating to prevent flash
-  if (isNavigating) {
-    return null;
-  }
-
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogHeader className="sr-only">
         <DialogTitle>Search Wiki</DialogTitle>
         <DialogDescription>Search for articles in the wiki</DialogDescription>
@@ -235,34 +218,56 @@ export function WikiSearch({ open, onOpenChange }: WikiSearchProps) {
 /**
  * Trigger button for opening the wiki search
  * Shows search icon and keyboard shortcut
+ *
+ * Uses the key pattern from React docs to reset WikiSearch state on each open:
+ * https://react.dev/learn/you-might-not-need-an-effect#resetting-all-state-when-a-prop-changes
  */
 export function WikiSearchTrigger() {
   const [open, setOpen] = useState(false);
+  // Increment key each time we open to force fresh state in WikiSearch
+  const [searchKey, setSearchKey] = useState(0);
+
+  const handleOpen = useCallback(() => {
+    setSearchKey((k) => k + 1);
+    setOpen(true);
+  }, []);
+
+  const handleOpenChange = useCallback((newOpen: boolean) => {
+    if (newOpen) {
+      // Opening - increment key to reset WikiSearch state
+      setSearchKey((k) => k + 1);
+    }
+    setOpen(newOpen);
+  }, []);
 
   // Global keyboard shortcut (Cmd+K or Ctrl+K)
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        setOpen((prev) => !prev);
+        if (!open) {
+          handleOpen();
+        } else {
+          setOpen(false);
+        }
       }
     };
 
     document.addEventListener("keydown", down);
     return () => document.removeEventListener("keydown", down);
-  }, []);
+  }, [open, handleOpen]);
 
   return (
     <>
       <button
-        onClick={() => setOpen(true)}
+        onClick={handleOpen}
         className="border-input bg-background text-muted-foreground hover:bg-accent hover:text-accent-foreground relative flex h-9 w-full items-center gap-2 rounded-md border px-3 text-sm"
       >
         <Search className="h-4 w-4 shrink-0" />
         <span className="flex-1 text-left">Search...</span>
         <Kbd className="hidden sm:inline-flex">⌘K</Kbd>
       </button>
-      <WikiSearch open={open} onOpenChange={setOpen} />
+      <WikiSearch key={searchKey} open={open} onOpenChange={handleOpenChange} />
     </>
   );
 }
