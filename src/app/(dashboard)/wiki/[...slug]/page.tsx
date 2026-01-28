@@ -70,9 +70,10 @@ export async function generateMetadata({ params }: Props) {
         title: article.title,
         description: article.description || appDescription,
         type: "article",
+        url: `/wiki/${slugPath}`,
       },
       twitter: {
-        card: "summary",
+        card: "summary_large_image",
         title: article.title,
         description: article.description || appDescription,
       },
@@ -88,9 +89,10 @@ export async function generateMetadata({ params }: Props) {
     openGraph: {
       title: `${title} - Wiki`,
       description,
+      url: `/wiki/${slugPath}`,
     },
     twitter: {
-      card: "summary",
+      card: "summary_large_image",
       title: `${title} - Wiki`,
       description,
     },

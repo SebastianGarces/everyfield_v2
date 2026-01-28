@@ -12,16 +12,29 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const baseUrl = "https://everyfield.app";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(baseUrl),
   title: "EveryField",
   description: "Navigate your church plant from calling to launch",
   openGraph: {
     siteName: "EveryField",
     locale: "en_US",
     type: "website",
+    url: baseUrl,
+    images: [
+      {
+        url: "/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "EveryField",
+      },
+    ],
   },
   twitter: {
-    card: "summary",
+    card: "summary_large_image",
+    images: ["/og-image.png"],
   },
 };
 
