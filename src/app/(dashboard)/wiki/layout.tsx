@@ -1,4 +1,4 @@
-import { getWikiNavigation, getRecentlyViewed } from "@/lib/wiki";
+import { getWikiNavigation, getRecentlyViewed, getBookmarks } from "@/lib/wiki";
 import { WikiSidebar } from "@/components/wiki/wiki-sidebar";
 
 // Force dynamic rendering for recently viewed data
@@ -9,9 +9,10 @@ export default async function WikiLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const [groups, recentlyViewed] = await Promise.all([
+  const [groups, recentlyViewed, bookmarks] = await Promise.all([
     getWikiNavigation(),
     getRecentlyViewed(5),
+    getBookmarks(10),
   ]);
 
   return (
@@ -19,7 +20,11 @@ export default async function WikiLayout({
       {/* Sidebar */}
       <aside className="hidden w-72 shrink-0 border-r bg-muted/30 lg:block">
         <div className="h-full overflow-y-auto px-4 py-4">
-          <WikiSidebar groups={groups} recentlyViewed={recentlyViewed} />
+          <WikiSidebar
+            groups={groups}
+            recentlyViewed={recentlyViewed}
+            bookmarks={bookmarks}
+          />
         </div>
       </aside>
 

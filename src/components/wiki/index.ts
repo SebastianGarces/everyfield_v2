@@ -4,3 +4,5 @@ export * from "./wiki-breadcrumb";
 export * from "./wiki-sidebar";
 export * from "./progress-tracker";
 export * from "./article-progress-badge";
+export * from "./bookmark-button";
+export * from "./bookmark-indicator";

@@ -8,10 +8,14 @@ import {
   getArticles,
   getArticlesByPrefix,
   getArticlesProgress,
+  isBookmarked,
+  getBookmarkedSlugs,
 } from "@/lib/wiki";
 import { WikiBreadcrumb } from "@/components/wiki/wiki-breadcrumb";
 import { ProgressTracker } from "@/components/wiki/progress-tracker";
 import { ArticleProgressBadge } from "@/components/wiki/article-progress-badge";
+import { BookmarkButton } from "@/components/wiki/bookmark-button";
+import { BookmarkIndicator } from "@/components/wiki/bookmark-indicator";
 import type { ArticleMeta } from "@/lib/wiki/types";
 import type { WikiProgressStatus } from "@/db/schema";
 
@@ -95,7 +99,10 @@ export default async function WikiPage({ params }: Props) {
 
 // Article view component
 async function ArticleView({ article }: { article: ArticleMeta & { content: string } }) {
-  const content = await compileArticle(article);
+  const [content, bookmarked] = await Promise.all([
+    compileArticle(article),
+    isBookmarked(article.slug),
+  ]);
   const breadcrumbs = getBreadcrumbs(article.slug, article.title);
 
   return (
@@ -104,7 +111,10 @@ async function ArticleView({ article }: { article: ArticleMeta & { content: stri
         <WikiBreadcrumb items={breadcrumbs} />
 
         <header className="space-y-4 border-b pb-6">
-          <h1 className="text-3xl font-bold tracking-tight">{article.title}</h1>
+          <div className="flex items-start justify-between gap-4">
+            <h1 className="text-3xl font-bold tracking-tight">{article.title}</h1>
+            <BookmarkButton slug={article.slug} initialBookmarked={bookmarked} />
+          </div>
 
           {article.description && (
             <p className="text-lg text-muted-foreground">{article.description}</p>
@@ -141,8 +151,12 @@ async function SectionIndexView({
   const title = formatPathTitle(slugPath);
   const breadcrumbs = getSectionBreadcrumbs(slugPath);
 
-  // Fetch progress for all articles in this section
-  const progressMap = await getArticlesProgress(articles.map((a) => a.slug));
+  // Fetch progress and bookmarks for all articles in this section
+  const articleSlugs = articles.map((a) => a.slug);
+  const [progressMap, bookmarkedSlugs] = await Promise.all([
+    getArticlesProgress(articleSlugs),
+    getBookmarkedSlugs(articleSlugs),
+  ]);
 
   // Group articles by section if we're at phase level
   const isPhaseLevel = slugPath.split("/").length === 1;
@@ -168,13 +182,21 @@ async function SectionIndexView({
           {Object.entries(groupedArticles).map(([section, sectionArticles]) => (
             <div key={section} className="space-y-3">
               <h2 className="text-xl font-semibold">{formatSectionTitle(section)}</h2>
-              <ArticleList articles={sectionArticles} progressMap={progressMap} />
+              <ArticleList
+                articles={sectionArticles}
+                progressMap={progressMap}
+                bookmarkedSlugs={bookmarkedSlugs}
+              />
             </div>
           ))}
         </div>
       ) : (
         // Section-level view: flat list
-        <ArticleList articles={articles} progressMap={progressMap} />
+        <ArticleList
+          articles={articles}
+          progressMap={progressMap}
+          bookmarkedSlugs={bookmarkedSlugs}
+        />
       )}
     </div>
   );
@@ -184,9 +206,11 @@ async function SectionIndexView({
 function ArticleList({
   articles,
   progressMap,
+  bookmarkedSlugs,
 }: {
   articles: ArticleMeta[];
   progressMap: Map<string, { status: WikiProgressStatus; scrollPosition: number | null }>;
+  bookmarkedSlugs: Set<string>;
 }) {
   const sortedArticles = [...articles].sort((a, b) => {
     if (a.order !== b.order) return a.order - b.order;
@@ -197,6 +221,7 @@ function ArticleList({
     <div className="grid gap-3">
       {sortedArticles.map((article) => {
         const progress = progressMap.get(article.slug);
+        const isBookmarked = bookmarkedSlugs.has(article.slug);
         return (
           <Link
             key={article.slug}
@@ -212,10 +237,12 @@ function ArticleList({
                   {article.description}
                 </p>
               )}
-              <ArticleProgressBadge
-                status={progress?.status ?? "not_started"}
-                className="mt-2"
-              />
+              <div className="mt-2 flex items-center gap-2">
+                {isBookmarked && <BookmarkIndicator />}
+                <ArticleProgressBadge
+                  status={progress?.status ?? "not_started"}
+                />
+              </div>
             </div>
             <div className="ml-4 flex shrink-0 items-center gap-3">
               <span className="rounded-full bg-muted px-2 py-0.5 text-xs capitalize">

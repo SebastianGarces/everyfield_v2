@@ -20,12 +20,23 @@ interface RecentlyViewedItem {
   lastViewedAt: Date;
 }
 
+interface BookmarkItem {
+  slug: string;
+  title: string;
+  createdAt: Date;
+}
+
 interface WikiSidebarProps {
   groups: NavGroup[];
   recentlyViewed?: RecentlyViewedItem[];
+  bookmarks?: BookmarkItem[];
 }
 
-export function WikiSidebar({ groups, recentlyViewed = [] }: WikiSidebarProps) {
+export function WikiSidebar({
+  groups,
+  recentlyViewed = [],
+  bookmarks = [],
+}: WikiSidebarProps) {
   const pathname = usePathname();
 
   return (
@@ -67,21 +78,46 @@ export function WikiSidebar({ groups, recentlyViewed = [] }: WikiSidebarProps) {
         </>
       )}
 
-      {/* Bookmarks placeholder */}
+      {/* Bookmarks */}
       <Separator />
       <div className="space-y-2">
-        <div className="text-muted-foreground flex items-center justify-between gap-2 rounded-md px-2 py-1 text-sm opacity-50">
-          <div className="flex items-center gap-2">
-            <Bookmark className="h-4 w-4" />
-            <span>My Bookmarks</span>
+        {bookmarks.length > 0 ? (
+          <div>
+            <div className="flex items-center gap-2 px-2 py-1 text-sm font-medium text-foreground">
+              <Bookmark className="h-4 w-4" />
+              <span>My Bookmarks</span>
+            </div>
+            <div className="mt-1 space-y-0.5">
+              {bookmarks.map((item) => (
+                <Link
+                  key={item.slug}
+                  href={`/wiki/${item.slug}`}
+                  className={cn(
+                    "block truncate rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-muted hover:text-foreground",
+                    pathname === `/wiki/${item.slug}` &&
+                      "bg-muted text-foreground font-medium"
+                  )}
+                  title={item.title}
+                >
+                  {item.title}
+                </Link>
+              ))}
+            </div>
           </div>
-          <span className="text-xs">(coming soon)</span>
-        </div>
+        ) : (
+          <div className="flex items-center justify-between gap-2 rounded-md px-2 py-1 text-sm">
+            <div className="flex items-center gap-2 font-medium text-foreground">
+              <Bookmark className="h-4 w-4" />
+              <span>My Bookmarks</span>
+            </div>
+            <span className="text-xs text-muted-foreground">(none yet)</span>
+          </div>
+        )}
 
         {/* Recently Viewed */}
         {recentlyViewed.length > 0 ? (
           <div>
-            <div className="flex items-center gap-2 px-2 py-1 text-sm text-muted-foreground">
+            <div className="flex items-center gap-2 px-2 py-1 text-sm font-medium text-foreground">
               <Clock className="h-4 w-4" />
               <span>Recently Viewed</span>
             </div>
@@ -103,12 +139,12 @@ export function WikiSidebar({ groups, recentlyViewed = [] }: WikiSidebarProps) {
             </div>
           </div>
         ) : (
-          <div className="text-muted-foreground flex items-center justify-between gap-2 rounded-md px-2 py-1 text-sm opacity-50">
-            <div className="flex items-center gap-2">
+          <div className="flex items-center justify-between gap-2 rounded-md px-2 py-1 text-sm">
+            <div className="flex items-center gap-2 font-medium text-foreground">
               <Clock className="h-4 w-4" />
               <span>Recently Viewed</span>
             </div>
-            <span className="text-xs">(none yet)</span>
+            <span className="text-xs text-muted-foreground">(none yet)</span>
           </div>
         )}
       </div>

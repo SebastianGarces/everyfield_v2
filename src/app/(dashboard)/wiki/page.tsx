@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { BarChart3, BookOpen, Compass, Rocket } from "lucide-react";
-import { getArticles, getArticlesProgress } from "@/lib/wiki";
+import { getArticles, getArticlesProgress, getBookmarkedSlugs } from "@/lib/wiki";
 import { getCurrentUserChurch } from "@/lib/auth";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { PhaseTimeline } from "@/components/wiki/phase-timeline";
 import { ArticleProgressBadge } from "@/components/wiki/article-progress-badge";
+import { BookmarkIndicator } from "@/components/wiki/bookmark-indicator";
 
 // Force dynamic rendering for progress data
 export const dynamic = "force-dynamic";
@@ -31,10 +32,12 @@ export default async function WikiPage() {
   // Get articles for the current phase
   const phaseArticles = articles.filter((a) => a.phase === currentPhase);
 
-  // Get progress for all phase articles to filter out completed ones
-  const progressMap = await getArticlesProgress(
-    phaseArticles.map((a) => a.slug)
-  );
+  // Get progress and bookmarks for all phase articles
+  const articleSlugs = phaseArticles.map((a) => a.slug);
+  const [progressMap, bookmarkedSlugs] = await Promise.all([
+    getArticlesProgress(articleSlugs),
+    getBookmarkedSlugs(articleSlugs),
+  ]);
 
   // Filter out completed articles and take first 6
   const displayedArticles = phaseArticles
@@ -122,6 +125,7 @@ export default async function WikiPage() {
           <div className="grid gap-3">
             {displayedArticles.map((article) => {
               const progress = progressMap.get(article.slug);
+              const isBookmarked = bookmarkedSlugs.has(article.slug);
               return (
                 <Link
                   key={article.slug}
@@ -136,10 +140,12 @@ export default async function WikiPage() {
                       <p className="text-sm text-muted-foreground line-clamp-2">
                         {article.description}
                       </p>
-                      <ArticleProgressBadge
-                        status={progress?.status ?? "not_started"}
-                        className="mt-2"
-                      />
+                      <div className="mt-2 flex items-center gap-2">
+                        {isBookmarked && <BookmarkIndicator />}
+                        <ArticleProgressBadge
+                          status={progress?.status ?? "not_started"}
+                        />
+                      </div>
                     </div>
                     <div className="ml-4 flex shrink-0 flex-col items-end gap-1 text-xs text-muted-foreground">
                       <span className="rounded-full bg-muted px-2 py-0.5 capitalize">

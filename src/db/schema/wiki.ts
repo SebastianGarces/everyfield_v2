@@ -149,3 +149,30 @@ export const wikiProgress = pgTable(
 
 export type WikiProgress = typeof wikiProgress.$inferSelect;
 export type NewWikiProgress = typeof wikiProgress.$inferInsert;
+
+/**
+ * Wiki bookmarks - tracks user bookmarked articles
+ *
+ * article_slug is used instead of article_id because articles are file-based (MDX)
+ */
+export const wikiBookmarks = pgTable(
+  "wiki_bookmarks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    articleSlug: text("article_slug").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("wiki_bookmarks_user_article_idx").on(
+      table.userId,
+      table.articleSlug
+    ),
+    index("wiki_bookmarks_user_idx").on(table.userId),
+  ]
+);
+
+export type WikiBookmark = typeof wikiBookmarks.$inferSelect;
+export type NewWikiBookmark = typeof wikiBookmarks.$inferInsert;
