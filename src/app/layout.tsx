@@ -14,7 +14,15 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "EveryField",
-  description: "Church planting management platform",
+  description: "Navigate your church plant from calling to launch",
+  openGraph: {
+    siteName: "EveryField",
+    locale: "en_US",
+    type: "website",
+  },
+  twitter: {
+    card: "summary",
+  },
 };
 
 export default function RootLayout({

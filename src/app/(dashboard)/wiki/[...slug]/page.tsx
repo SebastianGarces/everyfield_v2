@@ -58,21 +58,42 @@ export async function generateStaticParams() {
 export async function generateMetadata({ params }: Props) {
   const { slug } = await params;
   const slugPath = slug.join("/");
+  const appDescription = "Navigate your church plant from calling to launch";
 
   // Try to get article first
   const article = await getArticle(slugPath);
   if (article) {
     return {
       title: article.title,
-      description: article.description,
+      description: article.description || appDescription,
+      openGraph: {
+        title: article.title,
+        description: article.description || appDescription,
+        type: "article",
+      },
+      twitter: {
+        card: "summary",
+        title: article.title,
+        description: article.description || appDescription,
+      },
     };
   }
 
   // Otherwise, generate metadata for section index
   const title = formatPathTitle(slugPath);
+  const description = `Browse articles in ${title}`;
   return {
     title: `${title} - Wiki`,
-    description: `Browse articles in ${title}`,
+    description,
+    openGraph: {
+      title: `${title} - Wiki`,
+      description,
+    },
+    twitter: {
+      card: "summary",
+      title: `${title} - Wiki`,
+      description,
+    },
   };
 }
 
