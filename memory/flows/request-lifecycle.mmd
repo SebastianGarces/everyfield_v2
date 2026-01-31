@@ -1,0 +1,40 @@
+%%{init: {'theme': 'neutral'}}%%
+flowchart TD
+    subgraph request [Dashboard Request Lifecycle]
+        REQ1[Browser request to /dashboard/*]
+        REQ2["DashboardLayout - dashboard/layout.tsx"]
+        REQ3["getCurrentSession - session.ts"]
+        REQ4{User authenticated?}
+        REQ5{Is crawler?}
+        REQ6[Render minimal shell]
+        REQ7[redirect to /login]
+        REQ8[Read sidebar_state cookie]
+        REQ9[Build sidebarUser object]
+        REQ10[Render SidebarProvider + AppSidebar]
+        REQ11[Render children in SidebarInset]
+        
+        REQ1 --> REQ2 --> REQ3 --> REQ4
+        REQ4 -->|no| REQ5
+        REQ5 -->|yes| REQ6
+        REQ5 -->|no| REQ7
+        REQ4 -->|yes| REQ8 --> REQ9 --> REQ10 --> REQ11
+    end
+
+    subgraph db [Database Access Pattern]
+        DB1["db instance - db/index.ts"]
+        DB2["neon serverless driver"]
+        DB3["drizzle with schema"]
+        DB4[Query execution]
+        
+        DB1 --> DB2 --> DB3 --> DB4
+    end
+
+    subgraph sidebar [Sidebar State]
+        SB1["AppSidebar - app-sidebar.tsx"]
+        SB2["mainNavItems - navigation.ts"]
+        SB3["NavMain + NavUser components"]
+        
+        SB1 --> SB2 --> SB3
+    end
+
+    REQ10 --> SB1

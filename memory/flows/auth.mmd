@@ -1,0 +1,49 @@
+%%{init: {'theme': 'neutral'}}%%
+flowchart TD
+    subgraph login [Login Flow]
+        L1[User submits form]
+        L2["login - login/actions.ts"]
+        L3["Zod validation - validations/auth.ts"]
+        L4["Find user by email"]
+        L5["verifyPassword - password.ts"]
+        L6["generateSessionToken - session.ts"]
+        L7["createSession - session.ts"]
+        L8["setSessionCookie - cookies.ts"]
+        L9[Redirect to /dashboard]
+        
+        L1 --> L2 --> L3
+        L3 -->|valid| L4
+        L3 -->|invalid| LE1[Return fieldErrors]
+        L4 -->|not found| LE2[Return error]
+        L4 -->|found| L5
+        L5 -->|invalid| LE2
+        L5 -->|valid| L6 --> L7 --> L8 --> L9
+    end
+
+    subgraph validate [Session Validation]
+        V1["getSessionToken - cookies.ts"]
+        V2["hashToken SHA-256 - session.ts"]
+        V3["DB lookup sessions JOIN users"]
+        V4{Expired?}
+        V5{Within refresh threshold?}
+        V6[Delete session]
+        V7[Extend expiry 30 days]
+        V8["Return session and user"]
+        
+        V1 --> V2 --> V3
+        V3 -->|not found| VE1[Return null]
+        V3 -->|found| V4
+        V4 -->|yes| V6 --> VE1
+        V4 -->|no| V5
+        V5 -->|yes| V7 --> V8
+        V5 -->|no| V8
+    end
+
+    subgraph cached [Request Dedup]
+        C1["getCurrentSession - React.cache wrapper"]
+        C2[First call: validate]
+        C3[Subsequent calls: cached result]
+        
+        C1 --> C2
+        C1 --> C3
+    end

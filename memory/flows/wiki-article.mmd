@@ -1,0 +1,57 @@
+%%{init: {'theme': 'neutral'}}%%
+flowchart TD
+    subgraph retrieval [Article Retrieval]
+        R1["Route /wiki/[...slug]"]
+        R2["getArticle - get-article.ts"]
+        R3["getArticleBySlug - service.ts"]
+        R4["DB: wiki_articles WHERE slug"]
+        R5["toArticle - types.ts"]
+        R6["compileArticle - next-mdx-remote"]
+        R7[Render ArticleView]
+        
+        R1 --> R2 --> R3 --> R4
+        R4 -->|not found| R8[Try section index]
+        R4 -->|found| R5 --> R6 --> R7
+        R8 -->|no articles| R9[notFound]
+        R8 -->|has articles| R10[Render SectionIndexView]
+    end
+
+    subgraph search [Search Flow]
+        S1["searchWikiArticles - wiki/actions.ts"]
+        S2["searchArticles - search.ts"]
+        S3["websearch_to_tsquery - PG FTS"]
+        S4["ts_rank weighted: title A, excerpt B, content C"]
+        S5[Return top 10 results]
+        
+        S1 --> S2 --> S3 --> S4 --> S5
+    end
+
+    subgraph progress [Progress Tracking]
+        P1["recordView - progress.ts"]
+        P2["getCurrentSession - session.ts"]
+        P3{Already completed?}
+        P4[Update lastViewedAt only]
+        P5[Set status in_progress]
+        P6["revalidatePath /wiki layout"]
+        
+        P1 --> P2
+        P2 -->|no session| PE1[Return null]
+        P2 -->|session| P3
+        P3 -->|yes| P4 --> P6
+        P3 -->|no| P5 --> P6
+    end
+
+    subgraph bookmarks [Bookmark Flow]
+        B1["toggleBookmark - bookmarks.ts"]
+        B2[getCurrentSession]
+        B3{Exists?}
+        B4[DELETE from wiki_bookmarks]
+        B5[INSERT into wiki_bookmarks]
+        B6["revalidatePath /wiki layout"]
+        
+        B1 --> B2
+        B2 -->|no session| BE1[Throw Unauthorized]
+        B2 -->|session| B3
+        B3 -->|yes| B4 --> B6
+        B3 -->|no| B5 --> B6
+    end

@@ -1,19 +1,20 @@
 ---
 name: work-in-progress
-description: Use to plan current task.
+description: Use to plan and execute current feature implementation.
 ---
 
 # WIP – Working Feature Implementation Skill
 
 ## When to Use
 
-- When starting implementation work on a feature
-- When the user references `working-feature/` directory
-- When asked to plan or prepare implementation for an FRD
+* When starting implementation work on a feature
+* When the user references `working-feature/` directory
+* When asked to plan or prepare implementation for an FRD
 
 ## Purpose
 
-The `working-feature/` directory is an ephemeral workspace for planning and executing feature implementation. It provides structure without requiring version control of planning artifacts.
+The `working-feature/` directory is an ephemeral workspace for planning and executing feature implementation.
+It provides structure without requiring version control of planning artifacts.
 
 ## Directory Structure
 
@@ -31,17 +32,42 @@ working-feature/
 When beginning work on a feature:
 
 1. Reset the directory (keep only `README.md`)
-2. Create `notes.md` with the header template
-3. Create `implementation.md` with the implementation template
-4. **STOP and wait for user review** before proceeding with implementation
+2. Create `notes.md` using the template below
+3. Create `implementation.md` using the template below
+4. Apply **Risk Gate** (see below)
 
-### 2. notes.md Template
+## Risk Gate (IMPORTANT)
+
+Determine risk level before proceeding.
+
+**High-risk changes** (STOP and wait for approval):
+
+* Database schema or migrations
+* Auth / permissions / roles
+* Payments or billing
+* Multi-tenant boundaries
+* Security-sensitive data flows
+
+**Low / medium-risk changes**:
+
+* UI changes
+* Local logic refactors
+* Non-breaking API changes
+* Internal tooling
+
+### Behavior
+
+* **High risk** → STOP after planning and wait for explicit approval
+* **Low / medium risk** → Proceed after plan unless user says “stop”
+
+## notes.md Template
 
 ```markdown
-# [Feature Name] - Implementation Notes
+# [Feature Name] – Implementation Notes
 
 **FRD:** `product-docs/features/<feature-name>/frd.md`
 **Date Started:** YYYY-MM-DD
+**Risk Level:** Low / Medium / High
 
 ## Goal
 
@@ -49,32 +75,54 @@ When beginning work on a feature:
 
 ## Key Decisions
 
-- 
+-
 
 ## Constraints
 
-- 
+-
+
+## Acceptance Criteria
+
+- [ ] What must be true for this to be considered done
+
+## Verification
+
+- Commands to run
+- Manual checks (if any)
 
 ## Open Questions
 
-- 
+-
 
 ## Out of Scope
 
-- 
+-
+
+## FRD Issues (if any)
+
+- Gaps, ambiguities, or inconsistencies found in FRD
 ```
 
-### 3. implementation.md Template
+## implementation.md Template
 
 ```markdown
-# [Feature Name] - Implementation Plan
+# [Feature Name] – Implementation Plan
 
 **FRD:** `product-docs/features/<feature-name>/frd.md`
-**Scope:** [MVP / Full / Specific requirements]
+**Scope:** MVP / Full / Specific requirements
 
 ## Requirements Covered
 
-[List requirement IDs from FRD being implemented, e.g., P-001 through P-012]
+[List requirement IDs from FRD, e.g., P-001 through P-012]
+
+## Scope Capsule (copy into Cursor)
+
+Goal: <1 sentence>
+Allowed files: <explicit list>
+Forbidden: anything else
+Output: unified diff only, ±3 lines context, no commentary
+Ask: 1 question if blocked
+Run: <verification commands>
 
 ## Implementation Steps
 
@@ -91,11 +139,11 @@ When beginning work on a feature:
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `path/to/file` | Create | Description |
+| `path/to/file` | Create / Update | Description |
 
 ## Database Schema
 
-[If applicable]
+[If applicable – include migration steps]
 
 ## API Routes
 
@@ -104,21 +152,27 @@ When beginning work on a feature:
 ## Components
 
 [If applicable]
+
+## Rollout / Rollback (if needed)
+
+- Rollout:
+- Rollback:
 ```
 
 ## Rules
 
 ### Pause for Review
 
-After creating `notes.md` and `implementation.md`, **always stop and wait for user review** before proceeding with any implementation work. Do not begin coding until the user explicitly approves the plan.
+* If **High risk** (per Risk Gate): STOP after creating `notes.md` and `implementation.md` and wait for explicit user approval.
+* If **Low / Medium risk**: proceed after planning unless user says “stop”.
 
 ### DO NOT Modify FRDs
 
-The FRD is the **source of truth**. Implementation planning happens in `working-feature/`, not by editing FRDs.
+The FRD is the source of truth.
 
-- If the FRD has errors or gaps, note them in `notes.md` under "FRD Issues"
-- Propose FRD changes separately, not during implementation
-- Implementation must conform to FRD requirements
+* If the FRD has errors or gaps, note them in `notes.md` under **FRD Issues**
+* Propose FRD changes separately, not during implementation
+* Implementation must conform to FRD requirements
 
 ### Reset Before New Features
 
@@ -132,92 +186,170 @@ cd working-feature && find . -type f ! -name 'README.md' -delete
 
 When working on implementation, load:
 
-1. `working-feature/notes.md`
-2. `working-feature/implementation.md`
-3. The target FRD (read-only reference)
-4. `product-docs/system-architecture.md` (for tech stack and constraints)
+1. **`memory/entrypoints.md`** - First, to understand flow entry points
+2. **Relevant `memory/flows/*.mmd`** - For the area being modified
+3. **Relevant `memory/contracts/*.md`** - For interface details
+4. `working-feature/notes.md`
+5. `working-feature/implementation.md`
+6. The target FRD (read-only reference)
+7. `product-docs/system-architecture.md` (for tech stack and constraints)
 
 Do NOT load other FRDs unless there is a cross-feature dependency.
+Do NOT open source files if memory provides sufficient context (see `.agents/memory-first.md`).
 
 ### Keep notes.md Light
 
 `notes.md` is for:
 
-- High-level decisions
-- Constraints discovered during implementation
-- Questions to resolve
-- Things explicitly out of scope
-- FRD issues (if any found)
+* High-level decisions
+* Constraints discovered during implementation
+* Acceptance + verification
+* Questions to resolve
+* Things explicitly out of scope
+* FRD issues (if any found)
 
 NOT for:
 
-- Detailed implementation steps (use `implementation.md`)
-- Code snippets (use `implementation.md`)
+* Detailed implementation steps (use `implementation.md`)
+* Code snippets (use `implementation.md`)
 
 ### Keep implementation.md Actionable
 
 `implementation.md` should be:
 
-- Specific enough to execute
-- Organized in phases/steps
-- Updated as work progresses (check off completed items)
-- Include file paths, schema definitions, component names
+* Specific enough to execute
+* Organized in phases/steps
+* Updated as work progresses (check off completed items)
+* Include file paths, schema definitions, component names
+
+### Token Efficient Output Defaults
+
+* Prefer **unified diffs** / patches
+* Do not restate unchanged code
+* No explanations unless explicitly asked
+* Do not widen scope or add “nice-to-haves” unless requested
+* If blocked, ask **exactly one** short question
+
+## Memory Maintenance
+
+The `memory/` directory contains summarized context for AI agents. Keep it accurate and minimal.
+
+### What Belongs in Memory
+
+Reference `.agents/memory-first.md` for full specification. Memory contains:
+
+- **Entrypoints** - Flow entry points with file:symbol references
+- **Flows** - Mermaid diagrams of control/data flow
+- **Contracts** - API routes, DB schema, config summaries
+- **Invariants** - Rules that must not be violated
+
+### During Planning
+
+After creating `notes.md` and `implementation.md`, determine if planned changes impact:
+
+- [ ] Entrypoints (new routes, actions, triggers)
+- [ ] Flows (control flow changes)
+- [ ] Contracts (schema, API, config)
+- [ ] Invariants (security, tenancy, auth)
+
+If yes, add explicit checklist items to `implementation.md` for updating relevant `memory/*` files.
+
+### During Execution
+
+If implementation changes any of the following, update memory **in the same phase** (not after):
+
+- New or modified routes/actions
+- Database schema changes
+- API contract changes
+- Config/env var changes
+- Auth or tenancy behavior
+
+### Before Commit (Memory Check)
+
+1. Review touched areas against memory contents
+2. If changes imply memory drift, ensure memory was updated
+3. If no drift, add to `notes.md` under a "Memory" subsection:
+   ```
+   ## Memory
+   Memory unchanged - no impact on entrypoints, flows, contracts, or invariants.
+   ```
+
+### Memory Quality Rules
+
+- **Do NOT dump code** into memory - summarize + link to file paths
+- **Keep it small** - total budget ≤50 KB
+- **Anchor nodes** in Mermaid diagrams to `file:function()` or `file route`
+- **Split diagrams** if they grow too large (>50 lines)
+- Prefer adding diagrams only when they prevent future file reads
+
+---
 
 ## Completion Workflow
 
-### After Each Implementation Step
+### After Each Phase
 
-When an implementation task is completed:
+When a phase is completed:
 
-1. **Ask for confirmation**: "Is this change complete, or do we need to continue with more changes?"
+1. Ask:
 
-2. **If continuing**: Proceed with the next implementation step from `implementation.md`
+   * “Phase complete — continue to next phase or adjust plan?”
 
-3. **If done**:
-   - Propose a commit message following this format:
+2. If continuing: proceed with the next phase from `implementation.md`
+
+3. If done:
+
+   * Propose a commit message following this format:
+
      ```
      <type>: <short summary>
-     
+
      <optional body explaining what and why>
      ```
-   - Types: `feat`, `fix`, `refactor`, `style`, `docs`, `test`, `chore`
-   - Wait for user confirmation or edits to the message
 
-4. **Update checklists**: Before committing, update:
-   - `working-feature/implementation.md` - check off completed items
-   - `product-docs/features/<feature-name>/checklist.md` - mark implemented requirements as complete (if checklist exists)
+   * Types: `feat`, `fix`, `refactor`, `style`, `docs`, `test`, `chore`
 
-5. **After commit message confirmed**: Execute the git commit following the **Selective Commit Protocol** below.
+   * Wait for user confirmation or edits to the message
 
-### Selective Commit Protocol
+4. Update checklists before committing:
+
+   * `working-feature/implementation.md` (check off completed items)
+   * `product-docs/features/<feature-name>/checklist.md` (if checklist exists)
+
+5. After commit message confirmed: execute the git commit following the Selective Commit Protocol below.
+
+## Selective Commit Protocol
 
 **IMPORTANT**: Multiple LLM agents may be working in this repository simultaneously. Only commit files directly related to the current task.
 
-1. **Run `git status`** to see all modified, staged, and untracked files.
+1. Run `git status` to see all modified, staged, and untracked files.
 
-2. **Identify task-related files**: Determine which files were modified as part of THIS task only.
+2. Identify task-related files: determine which files were modified as part of THIS task only.
 
-3. **Check for unrelated changes**: If there are modified files NOT related to the current task:
-   - List the unrelated files to the user
-   - Ask: "These files were also modified but appear unrelated to this task: `[file list]`. Do you want to include them in this commit, or commit only the task-related files?"
-   - Wait for user response before proceeding
+3. Check for unrelated changes: if there are modified files NOT related to the current task:
 
-4. **Stage selectively**: Only stage the files the user confirms:
+   * List the unrelated files to the user
+   * Ask: “These files were also modified but appear unrelated to this task: `[file list]`. Do you want to include them in this commit, or commit only the task-related files?”
+   * Wait for user response before proceeding
+
+4. Stage selectively: only stage the files the user confirms:
+
    ```bash
    git add <file1> <file2> ...
    ```
+
    Do NOT use `git add -A` or `git add .` unless the user explicitly confirms all changes should be included.
 
-5. **Commit**:
+5. Commit:
+
    ```bash
    git commit -m "<confirmed message>"
    ```
 
 ## Resetting the Directory
 
-When the user asks to "reset" or "start fresh" on a new feature:
+When the user asks to “reset” or “start fresh” on a new feature:
 
-1. Delete all files in `working-feature/` **except** `README.md`
+1. Delete all files in `working-feature/` except `README.md`
 2. Create fresh `notes.md` using the template
 3. Create fresh `implementation.md` using the template
 4. Populate based on the target FRD
