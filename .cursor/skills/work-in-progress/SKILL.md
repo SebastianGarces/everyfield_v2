@@ -16,6 +16,23 @@ description: Use to plan and execute current feature implementation.
 The `working-feature/` directory is an ephemeral workspace for planning and executing feature implementation.
 It provides structure without requiring version control of planning artifacts.
 
+## Available Agents
+
+Delegate to specialized agents based on the task:
+
+| Agent | Use For |
+|-------|---------|
+| `architect` | Implementation plans, FRDs, system design, documentation |
+| `frontend` | Components, pages, layouts, UI, client/server decisions |
+| `backend` | API routes, database schemas, queries, Server Actions |
+| `code-reviewer` | Pre-commit review, security, performance, simplicity |
+
+**Delegation guidelines:**
+- Use `architect` when creating `implementation.md` or making architectural decisions
+- Use `frontend` for UI components and React/Next.js client work
+- Use `backend` for data layer, API routes, and server-side logic
+- Use `code-reviewer` before committing any code changes
+
 ## Directory Structure
 
 ```
@@ -33,8 +50,23 @@ When beginning work on a feature:
 
 1. Reset the directory (keep only `README.md`)
 2. Create `notes.md` using the template below
-3. Create `implementation.md` using the template below
+3. Delegate to `architect` agent to create `implementation.md`
 4. Apply **Risk Gate** (see below)
+
+### 2. Executing Implementation
+
+1. Load context (see Context Loading below)
+2. Work through phases in `implementation.md`
+3. Delegate to appropriate agent:
+   - Frontend work → `frontend` agent
+   - Backend work → `backend` agent
+4. Update memory if contracts/flows change
+
+### 3. Before Committing
+
+1. Run `code-reviewer` agent on changes
+2. Address any critical issues
+3. Follow Completion Workflow
 
 ## Risk Gate (IMPORTANT)
 
@@ -58,7 +90,7 @@ Determine risk level before proceeding.
 ### Behavior
 
 * **High risk** → STOP after planning and wait for explicit approval
-* **Low / medium risk** → Proceed after plan unless user says “stop”
+* **Low / medium risk** → Proceed after plan unless user says "stop"
 
 ## notes.md Template
 
@@ -105,66 +137,25 @@ Determine risk level before proceeding.
 
 ## implementation.md Template
 
-```markdown
-# [Feature Name] – Implementation Plan
+Delegate creation of this document to the `architect` agent, providing:
+- The target FRD path
+- Scope (MVP / Full / Specific requirements)
+- Any constraints from `notes.md`
 
-**FRD:** `product-docs/features/<feature-name>/frd.md`
-**Scope:** MVP / Full / Specific requirements
-
-## Requirements Covered
-
-[List requirement IDs from FRD, e.g., P-001 through P-012]
-
-## Scope Capsule (copy into Cursor)
-
-Goal: <1 sentence>
-Allowed files: <explicit list>
-Forbidden: anything else
-Output: unified diff only, ±3 lines context, no commentary
-Ask: 1 question if blocked
-Run: <verification commands>
-
-## Implementation Steps
-
-### Phase 1: [Name]
-
-- [ ] Step 1
-- [ ] Step 2
-
-### Phase 2: [Name]
-
-- [ ] Step 1
-
-## File Changes
-
-| File | Change Type | Description |
-|------|-------------|-------------|
-| `path/to/file` | Create / Update | Description |
-
-## Database Schema
-
-[If applicable – include migration steps]
-
-## API Routes
-
-[If applicable]
-
-## Components
-
-[If applicable]
-
-## Rollout / Rollback (if needed)
-
-- Rollout:
-- Rollback:
-```
+The architect will create a detailed plan including:
+- Requirements covered
+- Implementation phases and steps
+- File changes table
+- Database schema (if applicable)
+- API routes (if applicable)
+- Components (if applicable)
 
 ## Rules
 
 ### Pause for Review
 
 * If **High risk** (per Risk Gate): STOP after creating `notes.md` and `implementation.md` and wait for explicit user approval.
-* If **Low / Medium risk**: proceed after planning unless user says “stop”.
+* If **Low / Medium risk**: proceed after planning unless user says "stop".
 
 ### DO NOT Modify FRDs
 
@@ -195,39 +186,14 @@ When working on implementation, load:
 7. `product-docs/system-architecture.md` (for tech stack and constraints)
 
 Do NOT load other FRDs unless there is a cross-feature dependency.
-Do NOT open source files if memory provides sufficient context (see `.agents/memory-first.md`).
-
-### Keep notes.md Light
-
-`notes.md` is for:
-
-* High-level decisions
-* Constraints discovered during implementation
-* Acceptance + verification
-* Questions to resolve
-* Things explicitly out of scope
-* FRD issues (if any found)
-
-NOT for:
-
-* Detailed implementation steps (use `implementation.md`)
-* Code snippets (use `implementation.md`)
-
-### Keep implementation.md Actionable
-
-`implementation.md` should be:
-
-* Specific enough to execute
-* Organized in phases/steps
-* Updated as work progresses (check off completed items)
-* Include file paths, schema definitions, component names
+Do NOT open source files if memory provides sufficient context.
 
 ### Token Efficient Output Defaults
 
 * Prefer **unified diffs** / patches
 * Do not restate unchanged code
 * No explanations unless explicitly asked
-* Do not widen scope or add “nice-to-haves” unless requested
+* Do not widen scope or add "nice-to-haves" unless requested
 * If blocked, ask **exactly one** short question
 
 ## Memory Maintenance
@@ -235,8 +201,6 @@ NOT for:
 The `memory/` directory contains summarized context for AI agents. Keep it accurate and minimal.
 
 ### What Belongs in Memory
-
-Reference `.agents/memory-first.md` for full specification. Memory contains:
 
 - **Entrypoints** - Flow entry points with file:symbol references
 - **Flows** - Mermaid diagrams of control/data flow
@@ -290,32 +254,31 @@ If implementation changes any of the following, update memory **in the same phas
 
 When a phase is completed:
 
-1. Ask:
-
-   * “Phase complete — continue to next phase or adjust plan?”
+1. Ask: "Phase complete — continue to next phase or adjust plan?"
 
 2. If continuing: proceed with the next phase from `implementation.md`
 
-3. If done:
+3. If done: run `code-reviewer` agent before committing
 
-   * Propose a commit message following this format:
+### Before Commit
 
-     ```
-     <type>: <short summary>
+1. **Run code-reviewer agent** on all changes
+2. Address any critical issues raised
+3. Propose a commit message:
 
-     <optional body explaining what and why>
-     ```
+   ```
+   <type>: <short summary>
 
-   * Types: `feat`, `fix`, `refactor`, `style`, `docs`, `test`, `chore`
+   <optional body explaining what and why>
+   ```
 
-   * Wait for user confirmation or edits to the message
+   Types: `feat`, `fix`, `refactor`, `style`, `docs`, `test`, `chore`
 
-4. Update checklists before committing:
-
+4. Update checklists:
    * `working-feature/implementation.md` (check off completed items)
-   * `product-docs/features/<feature-name>/checklist.md` (if checklist exists)
+   * `product-docs/features/<feature-name>/checklist.md` (if exists)
 
-5. After commit message confirmed: execute the git commit following the Selective Commit Protocol below.
+5. Follow Selective Commit Protocol below
 
 ## Selective Commit Protocol
 
@@ -328,7 +291,7 @@ When a phase is completed:
 3. Check for unrelated changes: if there are modified files NOT related to the current task:
 
    * List the unrelated files to the user
-   * Ask: “These files were also modified but appear unrelated to this task: `[file list]`. Do you want to include them in this commit, or commit only the task-related files?”
+   * Ask: "These files were also modified but appear unrelated to this task: `[file list]`. Do you want to include them in this commit, or commit only the task-related files?"
    * Wait for user response before proceeding
 
 4. Stage selectively: only stage the files the user confirms:
@@ -339,17 +302,13 @@ When a phase is completed:
 
    Do NOT use `git add -A` or `git add .` unless the user explicitly confirms all changes should be included.
 
-5. Commit:
-
-   ```bash
-   git commit -m "<confirmed message>"
-   ```
+5. Commit with the confirmed message.
 
 ## Resetting the Directory
 
-When the user asks to “reset” or “start fresh” on a new feature:
+When the user asks to "reset" or "start fresh" on a new feature:
 
 1. Delete all files in `working-feature/` except `README.md`
 2. Create fresh `notes.md` using the template
-3. Create fresh `implementation.md` using the template
+3. Delegate to `architect` agent to create `implementation.md`
 4. Populate based on the target FRD
