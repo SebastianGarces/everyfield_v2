@@ -100,16 +100,35 @@ Manages church progression through the 6-phase journey.
 
 ### Authentication & Authorization
 
-| User Type | Scope |
-|-----------|-------|
-| Planter | Own church data |
-| Coach | Read access to assigned planters' churches |
-| Team Member | Feature-limited access within own church |
-| Network Admin | Network-wide read + analytics |
+#### Hierarchical Tenant Model
+
+```
+SendingNetwork (optional)
+    └── SendingChurch (optional)
+        └── Church (the plant)
+            └── Users (planter, coach, team members)
+```
+
+A church plant may be:
+- Independent (no sending relationship)
+- Sent by a church only
+- Sent by a church within a network
+- Directly under a network
+
+#### User Roles and Scope
+
+| User Type | Scope | Access |
+|-----------|-------|--------|
+| Planter | Own church | Full CRUD on church data |
+| Coach | Assigned churches | Read access to assigned planters' data |
+| Team Member | Own church | Feature-limited access |
+| Sending Church Admin | Sent churches | Aggregate analytics + drill-down with consent |
+| Network Admin | Network churches | Network-wide analytics + aggregate dashboards |
 
 **Invariants:**
 - Church-scoped data isolation via row-level security
 - Role determines feature access; church_id determines data access
+- Oversight users (sending church/network) see aggregated data; detailed drill-down requires planter consent or coach relationship
 
 ---
 
@@ -149,9 +168,21 @@ Document uploads, template storage, export generation (PDF, XLSX). All files sco
 
 ### Multi-Tenancy
 
-- All data scoped to `church_id` (architectural invariant)
+**Hierarchical Scoping:**
+- All feature data scoped to `church_id` (architectural invariant)
+- Churches optionally belong to `sending_church_id` and/or `sending_network_id`
 - Row-level security enforced at database layer
-- Coach cross-church access limited to assigned planters
+
+**Access Patterns:**
+- Planters/Team Members: Single church scope
+- Coaches: Multiple assigned churches (explicit relationship)
+- Sending Church Admins: All churches with matching `sending_church_id`
+- Network Admins: All churches with matching `sending_network_id`
+
+**Privacy:**
+- Oversight users see aggregate metrics by default
+- Person-level data (names, contact info) requires consent or coach relationship
+- Planters control what data is visible to their sending organization
 
 ### Security
 

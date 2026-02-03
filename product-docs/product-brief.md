@@ -1,7 +1,7 @@
 # EveryField - Product Brief
 
-**Version:** 1.0  
-**Date:** January 25, 2026  
+**Version:** 1.1  
+**Date:** February 3, 2026  
 **Source Document:** Launch Playbook v1.2 (Harvest Bible Fellowship)
 
 ---
@@ -26,12 +26,34 @@ A single platform where church planters can **learn**, **plan**, **execute**, an
 
 ## Target Users
 
+### Primary Users (Church Level)
+
 | User Type | Description |
 |-----------|-------------|
 | **Potential Planter** | Someone exploring whether church planting is their calling |
 | **Active Planter** | Someone actively working toward launching a church |
 | **Coach/Mentor** | Experienced leaders providing oversight to planters |
 | **Core Group Member** | Committed individuals who are part of the launch team |
+
+### Oversight Users (Network/Sending Level)
+
+| User Type | Description | Scale |
+|-----------|-------------|-------|
+| **Sending Church Admin** | Staff at a church that sends planters (may send 1 plant every few years) | 1-5 plants |
+| **Sending Network Admin** | Staff at a church planting network (e.g., Send Network, ARC) | 10-1000+ plants |
+
+### User Hierarchy
+
+```
+Sending Network
+    └── Sending Church(es)
+        └── Church Plant(s)
+            ├── Planter
+            ├── Coach
+            └── Core Group Members
+```
+
+**Key insight:** Both large networks (Send Network sending 1000+ churches/year) and small sending churches (sending one plant every few years) need visibility into their planters' progress. The platform must serve both scales with appropriate dashboards and analytics.
 
 ---
 
@@ -153,6 +175,20 @@ The platform consists of the following features, each documented in a separate F
 - 8 Critical Success Factors scores
 - Launch attendance vs. Core Group size ratio
 
+### Network/Sending Church Metrics
+
+Oversight users (sending networks and sending churches) need aggregate visibility across their planters:
+
+| Metric Category | Examples |
+|-----------------|----------|
+| **Portfolio Health** | Plants by phase, plants at risk, plants on track |
+| **Aggregate Progress** | Total Core Group members across all plants, average conversion rates |
+| **Comparative Analytics** | Plant performance vs. network averages, time-in-phase benchmarks |
+| **Coach Effectiveness** | Plants per coach, coach load balancing |
+| **Financial Overview** | Aggregate giving trends, budget health across portfolio |
+
+**Data access principle:** Oversight users see aggregated/anonymized data by default. Detailed drill-down requires explicit planter consent or coach relationship.
+
 ---
 
 ## Non-Goals
@@ -169,19 +205,23 @@ The following are explicitly out of scope for EveryField:
 
 ## Open Questions
 
-1. **Multi-tenancy Model:** Will this support multiple church planting networks with their own branding, or is it a single-network platform?
+1. **Member Self-Service:** Should Core Group members have their own login to update info, view training, see team assignments? (Planned for future)
 
-2. **Coach Visibility:** Should coaches have dashboards showing all their assigned planters' progress?
+---
 
-3. **Mobile Priority:** Is native mobile app required for certain functions (like Vision Meeting check-in), or is mobile-responsive web sufficient?
+## Resolved Decisions
 
-4. **Offline Needs:** Do planters need offline access for Vision Meetings or other field activities?
-
-5. **Content Customization:** Can networks customize wiki content and templates, or is it standardized?
-
-6. **Member Self-Service:** Should Core Group members have their own login to update info, view training, see team assignments?
-
-7. **Data Migration:** Do planters have existing data in spreadsheets or other tools that needs to be imported?
+| Decision | Resolution | Date |
+|----------|------------|------|
+| Multi-tenancy model | Hierarchical: Networks → Sending Churches → Church Plants. Support both large networks (1000+ plants) and small sending churches (1-5 plants) | Feb 3, 2026 |
+| Coach visibility | Yes, coaches see dashboards for all assigned planters | Feb 3, 2026 |
+| Data migration | Yes, support CSV import for existing contacts (see F2 FRD) | Feb 3, 2026 |
+| Pricing model | Free: Wiki + Phase 0 ideation tools. Paid: Create a church, unlock all features | Feb 3, 2026 |
+| Mobile priority | Mobile-responsive web sufficient for now; revisit after user feedback | Feb 3, 2026 |
+| Offline access | Not required for MVP | Feb 3, 2026 |
+| Content customization | Yes, supported via `church_id` on wiki articles. Global articles (null) visible to all; network/church-specific articles scoped to their users. Already implemented in schema. | Feb 3, 2026 |
+| Network branding | No - not planned | Feb 3, 2026 |
+| Network benchmarking | Yes - networks should see comparative analytics across their plants | Feb 3, 2026 |
 
 ---
 

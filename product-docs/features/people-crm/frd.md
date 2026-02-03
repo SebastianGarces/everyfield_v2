@@ -1,8 +1,8 @@
 # F2: People / CRM Management
 ## Feature Requirements Document (FRD)
 
-**Version:** 1.1  
-**Date:** January 25, 2026  
+**Version:** 1.2  
+**Date:** February 3, 2026  
 **Feature Code:** F2
 
 ---
@@ -55,17 +55,24 @@ People / CRM Management tracks all individuals from initial contact through comm
 | P-021 | Team assignment visibility | Show ministry team assignments on person profile |
 | P-022 | Training status display | Show training completion on person profile |
 
-### Nice to Have (Future)
+### Should Have (continued)
 
 | ID | Requirement | Description |
 |----|-------------|-------------|
 | P-023 | Household grouping | Link family members together |
-| P-024 | Photo support | Profile photos for contacts |
-| P-025 | External ChMS sync | Bidirectional sync with Planning Center, Breeze, etc. |
-| P-026 | Bulk export | Export contacts to CSV |
-| P-027 | Custom fields | Church-defined additional fields |
-| P-028 | Communication preferences | Track preferred contact method |
-| P-029 | Birthday/anniversary tracking | Date tracking for personal outreach |
+| P-024 | Photo support | Profile photos for contacts (avatars in lists, larger on profile) |
+| P-025 | Potential duplicates view | Dedicated section showing potential duplicate records for user review |
+
+### Nice to Have (Future)
+
+| ID | Requirement | Description |
+|----|-------------|-------------|
+| P-026 | External ChMS sync | Bidirectional sync with Planning Center, Breeze, etc. |
+| P-027 | Bulk export | Export contacts to CSV |
+| P-028 | Custom fields | Church-defined additional fields |
+| P-029 | Communication preferences | Track preferred contact method |
+| P-030 | Birthday/anniversary tracking | Date tracking for personal outreach |
+| P-031 | Group orientations | Support orientation events similar to Vision Meetings for `committed` → `core_group` transition |
 
 ---
 
@@ -116,13 +123,13 @@ The primary landing page for managing contacts.
 
 ### 2. Pipeline View
 
-Visual pipeline showing members at each stage.
+Visual kanban showing members at each stage. The pipeline displays the six primary pipeline stages as columns. "Launch Team" and "Leader" statuses are milestone badges on Core Group members rather than separate columns.
 
 **Layout:**
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│  People Pipeline                                                             │
+│  People Pipeline                                           [Configure ⚙]     │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │  Prospect    Attendee    Following Up   Interviewed   Committed   Core Group │
@@ -131,25 +138,42 @@ Visual pipeline showing members at each stage.
 │                                                                              │
 │  ┌──────┐   ┌──────┐      ┌──────┐      ┌──────┐     ┌──────┐     ┌──────┐  │
 │  │ John │   │Sarah │      │ Mike │      │ Lisa │     │ Tom  │     │ Amy  │  │
-│  │Smith │   │Brown │      │Jones │      │Davis │     │White │     │Lee   │  │
+│  │Smith │   │Brown │      │Jones │      │Davis │     │White │     │ 🚀   │  │
 │  └──────┘   └──────┘      └──────┘      └──────┘     └──────┘     └──────┘  │
 │  ┌──────┐   ┌──────┐      ┌──────┐      ┌──────┐     ┌──────┐     ┌──────┐  │
-│  │ Jane │   │ ...  │      │ ...  │      │ ...  │     │ ...  │     │ ...  │  │
-│  │ Doe  │   │      │      │      │      │      │     │      │     │      │  │
+│  │ Jane │   │ ...  │      │ ...  │      │ ...  │     │ ...  │     │ Dan  │  │
+│  │ Doe  │   │      │      │      │      │      │     │      │     │ ⭐🚀 │  │
 │  └──────┘   └──────┘      └──────┘      └──────┘     └──────┘     └──────┘  │
 │                                                                              │
 │  ─────────────────────────────────────────────────────────────────────────   │
 │  Conversion Rates:  Prospect→Attendee: 67%  |  Attendee→Committed: 45%      │
 │                     Committed→Core Group: 92%                               │
+│                                                                              │
+│  Legend: 🚀 = Launch Team   ⭐ = Leader                                      │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
+**Kanban Columns (6):**
+
+| Column | Description |
+|--------|-------------|
+| Prospect | Initial contacts, not yet attended a meeting |
+| Attendee | Has attended at least one Vision Meeting |
+| Following Up | Active follow-up in progress |
+| Interviewed | Interview completed (any result) |
+| Committed | Signed commitment card |
+| Core Group | Active Core Group member |
+
+**Status Badges (shown on Core Group cards):**
+- 🚀 **Launch Team** - Assigned to ministry team (Phase 2+)
+- ⭐ **Leader** - Has leadership role on ministry team
+
 **Features:**
-- Drag-and-drop between stages
+- Drag-and-drop between stages (triggers status change events)
 - Count per stage with visual sizing
 - Conversion rate display between stages
 - Click card to view person detail
-- Filter pipeline by source or date range
+- Filter pipeline by source, date range, or team assignment
 
 ---
 
@@ -224,7 +248,49 @@ Complete profile for an individual.
 
 ---
 
-### 5. 4 C's Assessment Screen
+### 5. Quick Add Form
+
+Simplified form for rapid contact entry when users need to add multiple people quickly.
+
+**Layout:**
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  Quick Add Person                                               [Full Form →]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  First Name *        Last Name *                                             │
+│  [____________]      [____________]                                          │
+│                                                                              │
+│  Email               Phone                                                   │
+│  [____________]      [____________]                                          │
+│                                                                              │
+│  Source: [Personal Referral ▼]                                               │
+│                                                                              │
+│                                    [Cancel]  [Save & Add Another]  [Save]   │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Fields:**
+
+| Field | Type | Required | Default |
+|-------|------|----------|---------|
+| First Name | Text | Yes | — |
+| Last Name | Text | Yes | — |
+| Email | Email | No | — |
+| Phone | Phone | No | — |
+| Source | Dropdown | No | "Other" |
+
+**Behavior:**
+- Status defaults to "Prospect"
+- "Save & Add Another" clears the form and keeps it open for the next entry
+- "Full Form →" link opens the complete Person Add/Edit Form
+- No validation beyond required fields
+
+---
+
+### 6. 4 C's Assessment Screen
 
 Assessment form for Core Group member qualities.
 
@@ -277,7 +343,7 @@ Assessment form for Core Group member qualities.
 
 ---
 
-### 6. Interview Screen
+### 7. Interview Screen
 
 Capture interview using the 5 criteria.
 
@@ -325,6 +391,46 @@ Capture interview using the 5 criteria.
 
 ---
 
+### 8. Commitment Recording Screen
+
+Record when a person signs a commitment card.
+
+**Layout:**
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  Record Commitment: Sarah Johnson                                            │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  Commitment Type *                                                           │
+│  ○ Core Group Commitment                                                     │
+│  ○ Launch Team Commitment                                                    │
+│                                                                              │
+│  Date Signed *                                                               │
+│  [January 22, 2026      📅]                                                  │
+│                                                                              │
+│  Witnessed By                                                                │
+│  [Pastor John Smith ▼]                                                       │
+│                                                                              │
+│  Upload Signed Document (optional)                                           │
+│  [Choose file...] or drag and drop                                          │
+│                                                                              │
+│  Notes                                                                       │
+│  [___________________________________________________________]              │
+│  [___________________________________________________________]              │
+│                                                                              │
+│                                                          [Cancel] [Save]    │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Behavior:**
+- Recording a commitment automatically advances person status to "Committed"
+- Witness field populated with church team members (optional)
+- Document upload stores scanned commitment card
+
+---
+
 ## Workflows
 
 ### Workflow 1: Adding a New Contact
@@ -355,32 +461,41 @@ Redirect to Person Detail View
 
 ---
 
-### Workflow 2: Progressing a Person Through Pipeline
+### Workflow 2: Automatic Status Progression
 
-**Trigger:** Person attends Vision Meeting / completes follow-up / etc.
+**Trigger:** Action recorded in this or another feature (Vision Meeting attendance, interview completed, commitment signed, team assigned, etc.)
 
 **Steps:**
 
 ```
-[Status change event]
+[Triggering action occurs]
+├── F3: Person marked as attended Vision Meeting
+├── F2: Interview form saved
+├── F2: Commitment recorded
+├── F8: Person assigned to ministry team
+└── etc.
     ↓
-[Person Detail View] OR [Pipeline drag-drop]
+[Event emitted by source feature]
     ↓
-Change status to next stage
+[F2 receives event and evaluates status]
     ↓
-System prompts for stage-specific actions:
-├── Prospect → Attendee: Log attendance
-├── Attendee → Following Up: Create follow-up task
-├── Following Up → Interviewed: Complete interview form
-├── Interviewed → Qualified: Interview passes criteria
-├── Qualified → Committed: Commitment card signed
-└── Committed → Core Group: Orientation complete
+If action implies status advancement:
     ↓
-Save status change
+    Auto-advance status (may skip intermediate statuses)
     ↓
-Activity logged in timeline
+    Emit `person.status.changed` event
     ↓
-Metrics updated (dashboard, pipeline counts)
+    Activity logged in timeline
+    ↓
+    Metrics updated (dashboard, pipeline counts)
+
+[Manual Override Path]
+    ↓
+[Pipeline drag-drop] OR [Person Detail → Edit Status]
+    ↓
+Confirm manual status change
+    ↓
+Activity logged: "Status manually changed by [User]"
 ```
 
 ---
@@ -442,6 +557,10 @@ Set overall assessment:
     ↓
 [Save Interview]
     ↓
+`interview.completed` event emitted
+    ↓
+Person auto-advances to `interviewed` status
+    ↓
 If Qualified:
     ↓
     System suggests: "Proceed to commitment conversation?"
@@ -451,7 +570,37 @@ If Qualified:
 
 ---
 
-### Workflow 5: Bulk Import
+### Workflow 5: Recording Commitment
+
+**Trigger:** Person signs commitment card
+
+**Steps:**
+
+```
+[Person Detail View] → [Overview Tab]
+    ↓
+Click "Record Commitment"
+    ↓
+[Commitment form opens]
+    ↓
+Select commitment type (Core Group / Launch Team)
+    ↓
+Enter signed date
+    ↓
+[Optional]: Select witness, upload document, add notes
+    ↓
+[Save Commitment]
+    ↓
+`commitment.recorded` event emitted
+    ↓
+Person auto-advances to `committed` status
+    ↓
+Activity logged in timeline
+```
+
+---
+
+### Workflow 6: Bulk Import
 
 **Trigger:** User has existing contacts to import
 
@@ -486,6 +635,112 @@ Import summary displayed
 
 > **Note:** This feature owns the `Person` entity and the entities below. The `Person` entity's stable contract (fields other features may depend on) is defined in [Core Data Contracts](../../core-data-contracts.md). All tables include `church_id` for tenant scoping per architectural requirements.
 
+### Person Status Enum
+
+Canonical status values for pipeline progression:
+
+| Value | Description | Kanban Column |
+|-------|-------------|---------------|
+| `prospect` | Initial contact, not yet attended a meeting | Prospect |
+| `attendee` | Has attended at least one Vision Meeting | Attendee |
+| `following_up` | Active follow-up in progress | Following Up |
+| `interviewed` | Interview completed (any result) | Interviewed |
+| `committed` | Signed commitment card | Committed |
+| `core_group` | Active Core Group member | Core Group |
+| `launch_team` | Core Group member assigned to ministry team | Core Group (with badge) |
+| `leader` | Has leadership role on ministry team | Core Group (with badge) |
+
+---
+
+### Person (Feature-Owned Fields)
+
+This feature owns the `Person` entity. The stable contract fields (`id`, `church_id`, `first_name`, `last_name`, `status`) are defined in [Core Data Contracts](../../core-data-contracts.md). The full schema includes:
+
+| Field | Type | Required | Contract | Description |
+|-------|------|----------|----------|-------------|
+| id | UUID | Yes | Core | Primary key |
+| church_id | UUID (FK) | Yes | Core | Tenant scope |
+| first_name | String | Yes | Core | First name |
+| last_name | String | Yes | Core | Last name |
+| status | Enum | Yes | Core | Pipeline position (see enum above) |
+| email | Email | No | F2-owned | Email address |
+| phone | String | No | F2-owned | Phone number |
+| address_line1 | String | No | F2-owned | Street address |
+| address_line2 | String | No | F2-owned | Apt/Suite |
+| city | String | No | F2-owned | City |
+| state | String | No | F2-owned | State/Province |
+| postal_code | String | No | F2-owned | ZIP/Postal code |
+| country | String | No | F2-owned | Country (default: "US") |
+| source | Enum | No | F2-owned | How they were reached |
+| source_details | String | No | F2-owned | Referrer name or specifics |
+| notes | Text | No | F2-owned | General notes |
+| photo_url | String | No | F2-owned | URL to profile photo |
+| household_id | UUID (FK) | No | F2-owned | Reference to Household |
+| household_role | Enum | No | F2-owned | Role in household |
+| created_at | Timestamp | Yes | F2-owned | Creation timestamp |
+| updated_at | Timestamp | Yes | F2-owned | Last update timestamp |
+| created_by | UUID (FK) | Yes | F2-owned | Reference to User |
+| deleted_at | Timestamp | No | F2-owned | Soft delete timestamp |
+
+**Source Enum Values:** `personal_referral`, `social_media`, `vision_meeting`, `website`, `event`, `partner_church`, `other`
+
+**Household Role Enum Values:** `head`, `spouse`, `child`, `other`
+
+---
+
+### Household
+
+Groups family members together.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| id | UUID | Yes | Primary key |
+| church_id | UUID (FK) | Yes | Tenant scope |
+| name | String | Yes | Household name (typically family surname) |
+| address_line1 | String | No | Shared street address |
+| address_line2 | String | No | Apt/Suite |
+| city | String | No | City |
+| state | String | No | State/Province |
+| postal_code | String | No | ZIP/Postal code |
+| country | String | No | Country (default: "US") |
+| created_at | Timestamp | Yes | Creation timestamp |
+| updated_at | Timestamp | Yes | Last update timestamp |
+
+**Behavior:**
+- When a household address is updated, optionally propagate to all household members
+- Person can belong to at most one household
+- Deleting a household unlinks members but doesn't delete them
+
+---
+
+### PersonTag
+
+Junction table for person tags.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| id | UUID | Yes | Primary key |
+| church_id | UUID (FK) | Yes | Tenant scope |
+| person_id | UUID (FK) | Yes | Reference to Person |
+| tag_id | UUID (FK) | Yes | Reference to Tag |
+| created_at | Timestamp | Yes | Creation timestamp |
+
+---
+
+### Tag
+
+Church-defined tags for categorizing people.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| id | UUID | Yes | Primary key |
+| church_id | UUID (FK) | Yes | Tenant scope |
+| name | String | Yes | Tag name |
+| color | String | No | Display color (hex) |
+| created_at | Timestamp | Yes | Creation timestamp |
+
+---
+
 ### Assessment
 
 4 C's assessment records.
@@ -493,6 +748,7 @@ Import summary displayed
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | id | UUID | Yes | Primary key |
+| church_id | UUID (FK) | Yes | Tenant scope |
 | person_id | UUID (FK) | Yes | Reference to Person |
 | assessed_by | UUID (FK) | Yes | Reference to User |
 | committed_score | Integer | Yes | 1-5 rating |
@@ -516,6 +772,7 @@ Member qualification interview records.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | id | UUID | Yes | Primary key |
+| church_id | UUID (FK) | Yes | Tenant scope |
 | person_id | UUID (FK) | Yes | Reference to Person |
 | interviewed_by | UUID (FK) | Yes | Reference to User |
 | interview_date | Date | Yes | Date of interview |
@@ -542,6 +799,7 @@ Signed commitment records.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | id | UUID | Yes | Primary key |
+| church_id | UUID (FK) | Yes | Tenant scope |
 | person_id | UUID (FK) | Yes | Reference to Person |
 | commitment_type | Enum | Yes | `core_group` / `launch_team` |
 | signed_date | Date | Yes | Date commitment signed |
@@ -559,6 +817,7 @@ Track skills and gifts for matching to team roles.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | id | UUID | Yes | Primary key |
+| church_id | UUID (FK) | Yes | Tenant scope |
 | person_id | UUID (FK) | Yes | Reference to Person |
 | skill_category | Enum | Yes | `worship` / `tech` / `admin` / `teaching` / `hospitality` / `leadership` / `other` |
 | skill_name | String | Yes | Specific skill |
@@ -574,9 +833,12 @@ This feature integrates with cross-cutting services defined in [System Architect
 
 ### Inbound (This Feature Consumes)
 
-| Data | Contract | Source |
-|------|----------|--------|
-| **User identity** | Read `user.id` for audit trails (`created_by`, `assessed_by`) | Auth Service |
+| Event/Data | Contract | Source | Action |
+|------------|----------|--------|--------|
+| **User identity** | Read `user.id` for audit trails | Auth Service | Populate `created_by`, `assessed_by`, etc. |
+| **`vision_meeting.attendance.recorded`** | `{ person_id, meeting_id, church_id }` | F3 (Vision Meeting) | Auto-advance `prospect` → `attendee` |
+| **`team.member.assigned`** | `{ person_id, team_id, role, church_id }` | F8 (Ministry Teams) | Auto-advance `core_group` → `launch_team` |
+| **`team.leader.assigned`** | `{ person_id, team_id, role, church_id }` | F8 (Ministry Teams) | Auto-advance to `leader` |
 
 ### Outbound (This Feature Provides)
 
@@ -590,16 +852,78 @@ This feature integrates with cross-cutting services defined in [System Architect
 
 ## Status Progression Rules
 
-| From Status | To Status | Requirements |
-|-------------|-----------|--------------|
-| Prospect | Attendee | Attended at least one Vision Meeting |
-| Attendee | Following Up | Follow-up initiated (call, text, email) |
-| Following Up | Interviewed | Interview completed |
-| Interviewed | Qualified | Interview result is "qualified" |
-| Qualified | Committed | Commitment card signed |
-| Committed | Core Group | Orientation complete, active participation |
-| Core Group | Launch Team | Phase 2 entered, assigned to ministry team |
-| Launch Team | Leader | Assigned leadership role on ministry team |
+Status changes are **event-driven** and happen automatically when triggering actions occur. Manual override is available for edge cases but the system encourages action-based progression.
+
+### Progression Flow Diagram
+
+```mermaid
+stateDiagram-v2
+    [*] --> prospect: Person created
+    
+    prospect --> attendee: vision_meeting.attendance.recorded
+    
+    attendee --> following_up: follow_up.initiated
+    
+    following_up --> interviewed: interview.completed
+    
+    interviewed --> committed: commitment.recorded
+    note right of interviewed: Interview result stored\nbut doesn't gate progression
+    
+    committed --> core_group: orientation.completed
+    
+    core_group --> launch_team: team.member.assigned
+    
+    launch_team --> leader: team.leader.assigned
+    
+    note right of core_group: launch_team and leader\nare badge states shown\non Core Group cards
+```
+
+### Automatic Progression Triggers
+
+| Transition | Trigger Event | Trigger Action | Auto/Manual |
+|------------|---------------|----------------|-------------|
+| → `prospect` | `person.created` | Person added to system | Auto |
+| `prospect` → `attendee` | `vision_meeting.attendance.recorded` | Person marked as attended in F3 | **Auto** |
+| `attendee` → `following_up` | `follow_up.initiated` | Note/task created with follow-up tag | Auto |
+| `following_up` → `interviewed` | `interview.completed` | Interview form saved (any result) | **Auto** |
+| `interviewed` → `committed` | `commitment.recorded` | Commitment card recorded | **Auto** |
+| `committed` → `core_group` | `orientation.completed` | Orientation checklist completed | Auto |
+| `core_group` → `launch_team` | `team.member.assigned` | Person assigned to ministry team in F8 | **Auto** |
+| `launch_team` → `leader` | `team.leader.assigned` | Person given leadership role in F8 | **Auto** |
+
+### Design Philosophy
+
+1. **Actions drive status, not manual selection** - Planters focus on doing the work (recording attendance, conducting interviews, assigning teams), and the system reflects progress automatically.
+
+2. **No hard gates, but logical ordering** - The system doesn't prevent recording an interview for a prospect, but it will auto-advance through intermediate statuses when actions occur out of order. For example, if you record a commitment for a prospect, they advance through all intermediate stages.
+
+3. **Manual override available** - Pipeline drag-and-drop allows manual status changes for edge cases (e.g., someone who was a Core Group member at another church plant).
+
+4. **Guidance, not restriction** - The UI suggests next actions based on current status but doesn't block alternative workflows.
+
+### Status Validation Rules
+
+These soft validations warn but don't block:
+
+| Action | Warning If |
+|--------|------------|
+| Record Interview | Person has not attended a Vision Meeting |
+| Record Commitment | Person has not been interviewed |
+| Conduct 4 C's Assessment | Person is not yet `core_group` or higher |
+
+### Out-of-Order Handling
+
+When an action occurs that would skip statuses:
+
+```
+Example: Commitment recorded for a Prospect
+
+1. System detects current_status = prospect
+2. Commitment requires interviewed → committed transition
+3. System auto-advances: prospect → attendee → following_up → interviewed → committed
+4. Activity timeline shows: "Status advanced to Committed (via commitment recording)"
+5. Skipped intermediate actions can still be recorded retroactively
+```
 
 ---
 
@@ -624,12 +948,28 @@ This feature integrates with cross-cutting services defined in [System Architect
 
 ## Open Questions
 
-1. **Duplicate handling:** How aggressive should duplicate detection be? Match on email only, or fuzzy match on name + phone?
+*No open questions at this time. All major decisions resolved.*
 
-2. **External sync:** Should People sync bidirectionally with external ChMS tools, or one-way export only?
+---
 
-3. **Privacy:** What data retention policies apply? Can contacts request deletion?
+## Deferred Decisions
 
-4. **Household grouping:** Should family members be linked/grouped together?
+| Topic | Status | Notes |
+|-------|--------|-------|
+| External ChMS integration | Deferred to user feedback | Planning Center Online (PCO) likely first target. Scope TBD - likely auto-migration of People to PCO, etc. |
 
-5. **Photo storage:** Should profile photos be supported? What size/format constraints?
+---
+
+## Resolved Decisions
+
+| Decision | Resolution | Date |
+|----------|------------|------|
+| Automatic vs. manual status progression | Event-driven automatic progression with manual override available | Feb 3, 2026 |
+| Pipeline view columns vs. all statuses | 6 kanban columns; `launch_team` and `leader` shown as badges on Core Group cards | Feb 3, 2026 |
+| Quick Add behavior | Minimal fields (name required, email/phone/source optional), defaults to Prospect status | Feb 3, 2026 |
+| Phase restrictions on features | Phases guide but don't restrict; soft warnings for out-of-order actions | Feb 3, 2026 |
+| Duplicate handling | Email match = immediate flag; fuzzy match on name + phone = potential duplicate. Dedicated "Potential Duplicates" section for user review with merge/delete/keep actions | Feb 3, 2026 |
+| Data retention | Soft delete only; retain until deletion requested. Permanent deletion deferred to first user request | Feb 3, 2026 |
+| Household grouping | Yes, include in MVP. Link family members together (see Household entity below) | Feb 3, 2026 |
+| Photo storage | Yes, support profile photos. Small avatars (48-64px) in lists, larger (128-256px) on profile. Keep file sizes small | Feb 3, 2026 |
+| Orientation completion | Manual confirmation for MVP. Future: support group orientations similar to Vision Meetings | Feb 3, 2026 |

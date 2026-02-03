@@ -1,7 +1,7 @@
 # EveryField - Core Data Contracts
 
-**Version:** 1.0  
-**Date:** January 25, 2026
+**Version:** 1.1  
+**Date:** February 3, 2026
 
 ---
 
@@ -13,20 +13,54 @@ This document defines shared entity contracts and cross-feature rules. It specif
 
 ## Shared Entities
 
+### SendingNetwork
+
+Church planting networks that oversee multiple sending churches and/or church plants.
+
+| Field | Type | Contract |
+|-------|------|----------|
+| `id` | UUID | Primary key |
+| `name` | String | Network name (e.g., "Send Network", "ARC") |
+
+### SendingChurch
+
+Churches that send planters. May belong to a network or operate independently.
+
+| Field | Type | Contract |
+|-------|------|----------|
+| `id` | UUID | Primary key |
+| `name` | String | Church name |
+| `sending_network_id` | UUID (FK) | Optional; parent network |
+
 ### Church
+
+The church plant being launched. The primary tenant entity.
 
 | Field | Type | Contract |
 |-------|------|----------|
 | `id` | UUID | Primary key; referenced by all feature data |
+| `name` | String | Church plant name |
 | `current_phase` | Enum (0-6) | Drives phase-aware UI/logic across features |
+| `sending_church_id` | UUID (FK) | Optional; the church that sent this plant |
+| `sending_network_id` | UUID (FK) | Optional; direct network relationship (if no sending church) |
+
+**Hierarchy note:** A church plant may have:
+- No sending relationship (independent)
+- Only `sending_church_id` (sent by independent church)
+- Both `sending_church_id` and inherited network (sent by church in network)
+- Only `sending_network_id` (directly under network, no sending church)
 
 ### User
 
 | Field | Type | Contract |
 |-------|------|----------|
 | `id` | UUID | Primary key |
-| `church_id` | UUID (FK) | Nullable for coaches/network admins |
-| `role` | Enum | `planter` / `coach` / `team_member` / `network_admin` |
+| `church_id` | UUID (FK) | Nullable for oversight roles |
+| `sending_church_id` | UUID (FK) | Nullable; for sending church admins |
+| `sending_network_id` | UUID (FK) | Nullable; for network admins |
+| `role` | Enum | See role enum below |
+
+**Role Enum:** `planter` / `coach` / `team_member` / `sending_church_admin` / `network_admin`
 
 ### Person
 
@@ -109,8 +143,8 @@ Events follow `entity.action` pattern:
 
 | Owner | Entities | Dependents May |
 |-------|----------|----------------|
-| **Core** | Church, User, Phase | Read all fields |
-| **F2 (People/CRM)** | Person | Read; write attendance/assignment via own tables |
+| **Core** | SendingNetwork, SendingChurch, Church, User, Phase | Read all fields |
+| **F2 (People/CRM)** | Person, Household | Read; write attendance/assignment via own tables |
 
 Features own their domain tables and reference shared entities by ID. See [System Architecture](./system-architecture.md) for full ownership map.
 
