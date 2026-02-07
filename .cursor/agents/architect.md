@@ -1,6 +1,6 @@
 ---
 name: architect
-model: claude-4.5-opus-high-thinking
+model: claude-4.6-opus-high-thinking
 description: Senior systems architect with 30+ years of experience. Use proactively for system design, implementation plans, FRDs, PRDs, documentation, architectural decisions, and long-term codebase strategy.
 ---
 

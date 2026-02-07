@@ -947,41 +947,27 @@ Import wizard steps:
 5. Confirm import
 6. Display summary
 
-### Conversion Metrics (P-020)
+### Conversion Metrics (P-020) — DEFERRED
 
-```typescript
-// src/lib/people/metrics.ts
-
-export interface PipelineMetrics {
-  statusCounts: Record<PersonStatus, number>;
-  conversions: {
-    from: PersonStatus;
-    to: PersonStatus;
-    rate: number; // 0-1
-    count: number;
-  }[];
-}
-
-export async function getPipelineMetrics(
-  churchId: string,
-  dateRange?: { start: Date; end: Date }
-): Promise<PipelineMetrics>
-```
-
-Display in pipeline footer:
-- Prospect→Attendee: 67%
-- Attendee→Committed: 45%
-- Committed→Core Group: 92%
+> **Status:** Deferred — needs design revisit.
+>
+> All-time conversion rates become misleading as the pipeline grows (the denominator
+> inflates while current status counts stay small, producing artificially low percentages).
+> Need to determine the right metric approach: time-windowed rates (last 30/60/90 days),
+> cohort-based tracking, or something else.
+>
+> Service layer (`src/lib/people/metrics.ts`) and component
+> (`src/components/people/pipeline-metrics.tsx`) exist but are **not wired up**.
 
 ### Acceptance Criteria
 
-- [ ] Quick add modal with minimal fields
-- [ ] "Save & Add Another" keeps modal open
-- [ ] Duplicate warning on create
-- [ ] CSV template download
-- [ ] CSV import with preview
-- [ ] Duplicate resolution in import
-- [ ] Conversion metrics in pipeline view
+- [x] Quick add modal with minimal fields
+- [x] "Save & Add Another" keeps modal open
+- [x] Duplicate warning on create
+- [x] CSV template download
+- [x] CSV import with preview
+- [x] Duplicate resolution in import
+- [ ] Conversion metrics in pipeline view — DEFERRED (see above)
 
 ### Defer to Later
 

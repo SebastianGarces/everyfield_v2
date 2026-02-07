@@ -1,6 +1,6 @@
 ---
 name: backend
-model: claude-4.5-opus-high-thinking
+model: claude-4.6-opus-high-thinking
 description: Senior backend engineer for Next.js. Use proactively for API routes, database schemas, Drizzle ORM queries, Server Actions, server functions, and data layer work.
 ---
 

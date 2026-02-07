@@ -40,7 +40,6 @@ export const mainNavItems: NavItem[] = [
     title: "People & CRM",
     href: "/people",
     icon: Users,
-    isDisabled: true,
   },
   {
     title: "Vision Meetings",

@@ -1,11 +1,20 @@
-import Link from "next/link";
-import { BarChart3, BookOpen, Compass, Rocket } from "lucide-react";
-import { getArticles, getArticlesProgress, getBookmarkedSlugs } from "@/lib/wiki";
-import { getCurrentUserChurch } from "@/lib/auth";
-import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { PhaseTimeline } from "@/components/wiki/phase-timeline";
+import {
+  Card,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { ArticleProgressBadge } from "@/components/wiki/article-progress-badge";
 import { BookmarkIndicator } from "@/components/wiki/bookmark-indicator";
+import { PhaseTimeline } from "@/components/wiki/phase-timeline";
+import { getCurrentUserChurch } from "@/lib/auth";
+import {
+  getArticles,
+  getArticlesProgress,
+  getBookmarkedSlugs,
+} from "@/lib/wiki";
+import { BarChart3, BookOpen, Compass, Rocket } from "lucide-react";
+import Link from "next/link";
 
 // Force dynamic rendering for progress data
 export const dynamic = "force-dynamic";
@@ -51,7 +60,7 @@ export default async function WikiPage() {
         <h1 className="text-4xl font-bold tracking-tight">
           Welcome to the Wiki
         </h1>
-        <p className="text-lg text-muted-foreground">
+        <p className="text-muted-foreground text-lg">
           Your comprehensive guide to launching a healthy, fruitful church.
         </p>
       </div>
@@ -59,9 +68,9 @@ export default async function WikiPage() {
       {/* Quick Start Cards */}
       <div className="grid gap-4 md:grid-cols-3">
         <Link href="/wiki/getting-started/welcome-to-the-launch-playbook">
-          <Card className="h-full transition-colors hover:bg-muted/50">
+          <Card className="hover:bg-muted/50 h-full transition-colors">
             <CardHeader>
-              <Rocket className="mb-2 h-8 w-8 text-primary" />
+              <Rocket className="text-primary mb-2 h-8 w-8" />
               <CardTitle>Quick Start</CardTitle>
               <CardDescription>
                 New to EveryField? Start here to get oriented.
@@ -71,9 +80,9 @@ export default async function WikiPage() {
         </Link>
 
         <Link href="/wiki/getting-started/launch-process-goals">
-          <Card className="h-full transition-colors hover:bg-muted/50">
+          <Card className="hover:bg-muted/50 h-full transition-colors">
             <CardHeader>
-              <Compass className="mb-2 h-8 w-8 text-primary" />
+              <Compass className="text-primary mb-2 h-8 w-8" />
               <CardTitle>What Phase Am I In?</CardTitle>
               <CardDescription>
                 Learn about the phases and where you are in the journey.
@@ -83,9 +92,9 @@ export default async function WikiPage() {
         </Link>
 
         <Link href="/wiki/progress">
-          <Card className="h-full transition-colors hover:bg-muted/50">
+          <Card className="hover:bg-muted/50 h-full transition-colors">
             <CardHeader>
-              <BarChart3 className="mb-2 h-8 w-8 text-primary" />
+              <BarChart3 className="text-primary mb-2 h-8 w-8" />
               <CardTitle>My Progress</CardTitle>
               <CardDescription>
                 Track your reading progress across all wiki content.
@@ -98,12 +107,12 @@ export default async function WikiPage() {
       {/* The Journey - Phase Timeline */}
       <div className="space-y-4">
         <h2 className="text-2xl font-semibold tracking-tight">The Journey</h2>
-        <div className="rounded-lg border bg-muted/30 p-6">
+        <div className="bg-muted/40 rounded-lg border p-6">
           <PhaseTimeline currentPhase={currentPhase} />
           <div className="mt-4 text-center">
-            <p className="text-sm text-muted-foreground">
+            <p className="text-muted-foreground text-sm">
               You are currently in{" "}
-              <span className="font-medium text-foreground">
+              <span className="text-foreground font-medium">
                 Phase {currentPhase}: {PHASE_NAMES[currentPhase]}
               </span>
             </p>
@@ -117,7 +126,7 @@ export default async function WikiPage() {
           <div className="flex items-center justify-between">
             <h2 className="text-2xl font-semibold tracking-tight">
               Recommended for You
-              <span className="ml-2 text-lg font-normal text-muted-foreground">
+              <span className="text-muted-foreground ml-2 text-lg font-normal">
                 (Phase {currentPhase}: {PHASE_NAMES[currentPhase]})
               </span>
             </h2>
@@ -130,14 +139,14 @@ export default async function WikiPage() {
                 <Link
                   key={article.slug}
                   href={`/wiki/${article.slug}`}
-                  className="group block rounded-lg border p-4 transition-colors hover:bg-muted/50"
+                  className="group hover:bg-muted/50 block rounded-lg border p-4 transition-colors"
                 >
                   <div className="flex items-start justify-between">
                     <div className="space-y-1">
-                      <h3 className="font-medium group-hover:text-primary">
+                      <h3 className="group-hover:text-primary font-medium">
                         {article.title}
                       </h3>
-                      <p className="text-sm text-muted-foreground line-clamp-2">
+                      <p className="text-muted-foreground line-clamp-2 text-sm">
                         {article.description}
                       </p>
                       <div className="mt-2 flex items-center gap-2">
@@ -147,8 +156,8 @@ export default async function WikiPage() {
                         />
                       </div>
                     </div>
-                    <div className="ml-4 flex shrink-0 flex-col items-end gap-1 text-xs text-muted-foreground">
-                      <span className="rounded-full bg-muted px-2 py-0.5 capitalize">
+                    <div className="text-muted-foreground ml-4 flex shrink-0 flex-col items-end gap-1 text-xs">
+                      <span className="bg-muted rounded-full px-2 py-0.5 capitalize">
                         {article.type}
                       </span>
                       <span>{article.readTime} min</span>
@@ -159,7 +168,7 @@ export default async function WikiPage() {
             })}
           </div>
           {phaseArticles.length > 6 && (
-            <p className="text-sm text-muted-foreground">
+            <p className="text-muted-foreground text-sm">
               View more Phase {currentPhase} articles in the sidebar navigation.
             </p>
           )}
@@ -169,9 +178,9 @@ export default async function WikiPage() {
       {/* Empty State */}
       {articles.length === 0 && (
         <div className="rounded-lg border border-dashed p-8 text-center">
-          <BookOpen className="mx-auto h-12 w-12 text-muted-foreground" />
+          <BookOpen className="text-muted-foreground mx-auto h-12 w-12" />
           <h3 className="mt-4 text-lg font-medium">No articles yet</h3>
-          <p className="mt-2 text-sm text-muted-foreground">
+          <p className="text-muted-foreground mt-2 text-sm">
             Wiki articles will appear here once they&apos;re added to the wiki
             directory.
           </p>

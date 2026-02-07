@@ -9,6 +9,7 @@
 | [contracts/api.md](contracts/api.md) | API routes and actions |
 | [contracts/db.md](contracts/db.md) | Database schema |
 | [contracts/config.md](contracts/config.md) | Environment and config |
+| [contracts/data-patterns.md](contracts/data-patterns.md) | Client/server data sync patterns |
 | [flows/auth.mmd](flows/auth.mmd) | Authentication flow |
 | [flows/wiki-article.mmd](flows/wiki-article.mmd) | Wiki article retrieval |
 | [flows/request-lifecycle.mmd](flows/request-lifecycle.mmd) | Dashboard request lifecycle |

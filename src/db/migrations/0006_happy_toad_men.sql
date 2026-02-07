@@ -1,0 +1,1 @@
+ALTER TABLE "persons" ADD COLUMN "pipeline_sort_order" integer DEFAULT 0 NOT NULL;

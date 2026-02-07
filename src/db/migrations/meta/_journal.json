@@ -36,6 +36,20 @@
       "when": 1769580613358,
       "tag": "0004_talented_wild_pack",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1770145236918,
+      "tag": "0005_aromatic_pretty_boy",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1770356532964,
+      "tag": "0006_happy_toad_men",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,47 @@
+graph TD
+    Core["Core Infrastructure\nAuth, Multi-tenancy, Phase Engine"]
+
+    F1["F1: Wiki"]
+    F2["F2: People/CRM"]
+    F5["F5: Task Management"]
+    F6["F6: Document Templates"]
+    F7["F7: Financial Tracking"]
+    F10["F10: Facility Management"]
+
+    F3["F3: Vision Meeting"]
+    F8["F8: Ministry Teams"]
+    F9["F9: Communication Hub"]
+
+    F4["F4: Progress Dashboard"]
+
+    %% Wave 0 → Wave 1: Core to Foundation
+    Core --> F1
+    Core --> F2
+    Core --> F5
+    Core --> F6
+    Core --> F7
+    Core --> F10
+
+    %% Wave 1 → Wave 2: Hard dependencies on F2
+    F2 -->|hard| F3
+    F2 -->|hard| F8
+    F2 -->|hard| F9
+
+    %% Wave 2/3 → Wave 4: Dashboard aggregation
+    F2 -.->|soft| F4
+    F3 -.->|soft| F4
+    F5 -.->|soft| F4
+    F7 -.->|soft| F4
+    F8 -.->|soft| F4
+
+    %% Soft: Cross-feature integrations
+    F3 -.->|soft| F5
+    F10 -.->|soft| F5
+    F8 -.->|soft| F9
+    F1 -.->|soft| F6
+    F3 -.->|soft| F6
+    F7 -.->|soft| F6
+
+    %% Soft: Event-driven status progression
+    F3 -.->|"event: status progression"| F2
+    F8 -.->|"event: status progression"| F2

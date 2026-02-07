@@ -2,6 +2,34 @@
 
 IMPORTANT: Prefer retrieval-led reasoning over pre-training-led reasoning for ALL project-specific tasks.
 
+## UI Components (shadcn/ui)
+
+**CRITICAL:** When you need a new UI component, use the shadcn CLI - do NOT write components manually:
+
+```bash
+pnpm dlx shadcn@latest add <component-name>
+```
+
+Examples:
+- Need a checkbox? Run `pnpm dlx shadcn@latest add checkbox`
+- Need a popover? Run `pnpm dlx shadcn@latest add popover`
+- Need multiple? Run `pnpm dlx shadcn@latest add checkbox popover tabs`
+
+This ensures:
+1. Correct dependencies are installed automatically
+2. Components match the project's shadcn configuration (new-york style)
+3. Consistent patterns across all UI components
+
+Available components: https://ui.shadcn.com/docs/components
+
+## Cursor Pointer Rule
+
+**CRITICAL:** Every clickable element MUST have `cursor-pointer`. This includes buttons, links, tabs, checkboxes, radio buttons, select triggers, clickable cards, and any element with an `onClick` handler. Never ship an interactive element without `cursor-pointer`.
+
+- Native `<button>` and `<a>` tags get this from `globals.css`
+- shadcn components (Button, TabsTrigger, SelectTrigger, etc.) must include it in their className
+- Custom clickable elements (`<div onClick={...}>`) must always add `cursor-pointer`
+
 ## Knowledge Routing
 
 | Task | Read First |

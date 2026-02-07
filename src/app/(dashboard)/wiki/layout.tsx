@@ -1,5 +1,5 @@
-import { getWikiNavigation, getRecentlyViewed, getBookmarks } from "@/lib/wiki";
 import { WikiSidebar } from "@/components/wiki/wiki-sidebar";
+import { getBookmarks, getRecentlyViewed, getWikiNavigation } from "@/lib/wiki";
 
 // Force dynamic rendering for recently viewed data
 export const dynamic = "force-dynamic";
@@ -18,7 +18,7 @@ export default async function WikiLayout({
   return (
     <div className="flex h-full">
       {/* Sidebar */}
-      <aside className="hidden w-72 shrink-0 border-r bg-muted/30 lg:block">
+      <aside className="bg-card hidden w-72 shrink-0 border-r lg:block">
         <div className="h-full overflow-y-auto px-4 py-4">
           <WikiSidebar
             groups={groups}
@@ -29,8 +29,10 @@ export default async function WikiLayout({
       </aside>
 
       {/* Main content */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-3xl px-8 py-10">{children}</div>
+      <div className="flex-1 overflow-y-auto p-6">
+        <div className="bg-card mx-auto max-w-3xl rounded-xl px-8 py-10 shadow-sm">
+          {children}
+        </div>
       </div>
     </div>
   );

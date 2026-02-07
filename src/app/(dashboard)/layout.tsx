@@ -2,19 +2,13 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { AppSidebar } from "@/components/app-sidebar";
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbList,
-  BreadcrumbPage,
-} from "@/components/ui/breadcrumb";
-import { Separator } from "@/components/ui/separator";
+import { DashboardHeader, HeaderProvider } from "@/components/header";
 import {
   SidebarInset,
   SidebarProvider,
-  SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { getCurrentSession } from "@/lib/auth";
+import { WikiGuide } from "@/components/wiki-guide";
 
 function getInitials(name: string | null, email: string): string {
   if (name) {
@@ -59,21 +53,11 @@ export default async function DashboardLayout({
     <SidebarProvider defaultOpen={defaultOpen}>
       <AppSidebar user={sidebarUser} />
       <SidebarInset className="flex h-screen flex-col overflow-hidden">
-        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
-          <SidebarTrigger className="-ml-1" />
-          <Separator
-            orientation="vertical"
-            className="mr-2 data-[orientation=vertical]:h-4"
-          />
-          <Breadcrumb>
-            <BreadcrumbList>
-              <BreadcrumbItem>
-                <BreadcrumbPage>Dashboard</BreadcrumbPage>
-              </BreadcrumbItem>
-            </BreadcrumbList>
-          </Breadcrumb>
-        </header>
-        <main className="flex-1 overflow-auto">{children}</main>
+        <HeaderProvider>
+          <DashboardHeader />
+          <main className="flex-1 overflow-auto">{children}</main>
+          <WikiGuide />
+        </HeaderProvider>
       </SidebarInset>
     </SidebarProvider>
   );

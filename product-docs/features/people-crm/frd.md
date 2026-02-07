@@ -957,6 +957,7 @@ Example: Commitment recorded for a Prospect
 | Topic | Status | Notes |
 |-------|--------|-------|
 | External ChMS integration | Deferred to user feedback | Planning Center Online (PCO) likely first target. Scope TBD - likely auto-migration of People to PCO, etc. |
+| P-020: Conversion metrics | Deferred - needs redesign | All-time conversion rates become misleading as the pipeline grows (denominator inflates while current counts stay small). Need to determine the right metric: time-windowed rates (last 30/60/90 days), cohort-based tracking (people who entered a stage in a period), or a different approach entirely. Service layer (`src/lib/people/metrics.ts`) and component (`src/components/people/pipeline-metrics.tsx`) exist but are not wired up. |
 
 ---
 

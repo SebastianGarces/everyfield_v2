@@ -53,3 +53,18 @@ Stable truths that must not be violated.
 - Multiple calls in same request hit cache, not DB
 
 **Source:** `src/lib/auth/session.ts:254`
+
+## Client/Server Data Synchronization
+
+- **NEVER store server data in useState** - This is an anti-pattern that leads to stale data
+- **NEVER use useEffect for data sync** - useEffect is for side effects only (subscriptions, DOM, external systems)
+- **Use useOptimistic for instant UI feedback** - React's built-in hook for optimistic updates
+- **Server actions call refresh() from next/cache** - Not client calling router.refresh()
+- Server data flows through props from server components to client components
+
+**Patterns:**
+- useOptimistic: Instant UI updates, server reconciles via refresh() (e.g., `ActivityTimelineClient`)
+- Props-only: No local state, use props directly (e.g., `TagPicker`)
+- Legitimate client state: UI state, pagination cursors, drag-and-drop (e.g., `PipelineView`)
+
+**Source:** `memory/contracts/data-patterns.md`
