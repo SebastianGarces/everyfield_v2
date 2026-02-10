@@ -1,30 +1,41 @@
-import { Button } from "@/components/ui/button";
-import { logout } from "@/lib/auth/actions";
 import { getCurrentSession } from "@/lib/auth";
-import DashboardClient from "./dashboard-client";
+import { redirect } from "next/navigation";
+import { ChurchCreatedConfetti } from "./church-created-confetti";
+import { CreateChurchCard } from "./create-church-card";
 
-export default async function DashboardPage() {
-  const { user } = await getCurrentSession();
-  const clientUser = user
-    ? {
-        id: user.id,
-        email: user.email,
-        name: user.name ?? null,
-        role: user.role,
-      }
-    : null;
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ churchCreated?: string }>;
+}) {
+  const [{ user }, resolvedSearchParams] = await Promise.all([
+    getCurrentSession(),
+    searchParams,
+  ]);
+  const { churchCreated } = resolvedSearchParams;
+
+  // Redirect oversight users to their dedicated dashboard
+  if (user?.role === "sending_church_admin" || user?.role === "network_admin") {
+    redirect("/oversight");
+  }
+
+  const needsChurch = user?.role === "planter" && !user.churchId;
 
   return (
-    <div className="flex items-start justify-between gap-4 p-4">
-      <div>
-        <h1 className="mb-6 text-3xl font-bold">Dashboard</h1>
-        <DashboardClient user={clientUser} />
-      </div>
-      <form action={logout}>
-        <Button type="submit" variant="outline">
-          Log out
-        </Button>
-      </form>
+    <div className="p-6">
+      {churchCreated === "true" && <ChurchCreatedConfetti />}
+      {needsChurch ? (
+        <div className="flex min-h-[60vh] items-center justify-center">
+          <CreateChurchCard />
+        </div>
+      ) : (
+        <div>
+          <h1 className="text-3xl font-bold">Dashboard</h1>
+          <p className="text-muted-foreground mt-1">
+            Welcome back{user?.name ? `, ${user.name}` : ""}.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

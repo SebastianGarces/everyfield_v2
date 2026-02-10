@@ -3,12 +3,9 @@ import { redirect } from "next/navigation";
 
 import { AppSidebar } from "@/components/app-sidebar";
 import { DashboardHeader, HeaderProvider } from "@/components/header";
-import {
-  SidebarInset,
-  SidebarProvider,
-} from "@/components/ui/sidebar";
-import { getCurrentSession } from "@/lib/auth";
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { WikiGuide } from "@/components/wiki-guide";
+import { getCurrentSession } from "@/lib/auth";
 
 function getInitials(name: string | null, email: string): string {
   if (name) {
@@ -47,16 +44,20 @@ export default async function DashboardLayout({
     name: user.name || user.email.split("@")[0],
     email: user.email,
     initials: getInitials(user.name, user.email),
+    role: user.role,
   };
+
+  const isOversightUser =
+    user.role === "sending_church_admin" || user.role === "network_admin";
 
   return (
     <SidebarProvider defaultOpen={defaultOpen}>
-      <AppSidebar user={sidebarUser} />
+      <AppSidebar user={sidebarUser} hasChurch={!!user.churchId} />
       <SidebarInset className="flex h-screen flex-col overflow-hidden">
         <HeaderProvider>
           <DashboardHeader />
           <main className="flex-1 overflow-auto">{children}</main>
-          <WikiGuide />
+          {!isOversightUser && <WikiGuide />}
         </HeaderProvider>
       </SidebarInset>
     </SidebarProvider>

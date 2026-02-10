@@ -885,7 +885,7 @@ export async function createInterviewAction(
 /**
  * Create a commitment record for a person.
  * Handles file upload if a document is provided.
- * Logs commitment_recorded activity and auto-advances to 'committed' status.
+ * Logs commitment_recorded activity and auto-advances to 'core_group' status.
  */
 export async function createCommitmentAction(
   formData: FormData
@@ -974,9 +974,9 @@ export async function createCommitmentAction(
       performedBy: user.id,
     });
 
-    // Auto-advance to 'committed' status
+    // Auto-advance to 'core_group' status (commitment = Core Group entry)
     // changeStatus handles activity logging and event emission
-    await changeStatus(user.churchId, personId, user.id, "committed");
+    await changeStatus(user.churchId, personId, user.id, "core_group");
 
     revalidatePath(`/people/${personId}`);
     revalidatePath(`/people/${personId}/assessments`);

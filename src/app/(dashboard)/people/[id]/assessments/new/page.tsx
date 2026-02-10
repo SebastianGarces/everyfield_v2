@@ -23,7 +23,7 @@ export default async function NewAssessmentPage({
   const { user } = await verifySession();
 
   if (!user.churchId) {
-    redirect("/login");
+    redirect("/dashboard");
   }
 
   const { id } = await params;
@@ -44,9 +44,7 @@ export default async function NewAssessmentPage({
               </Link>
             </Button>
             <div>
-              <CardTitle className="text-2xl">
-                4 C&apos;s Assessment
-              </CardTitle>
+              <CardTitle className="text-2xl">4 C&apos;s Assessment</CardTitle>
               <CardDescription>
                 {person.firstName} {person.lastName}
               </CardDescription>

@@ -443,6 +443,25 @@ This feature is **read-only** and aggregates metrics via events and queries. It 
 
 ---
 
+## Oversight Access Patterns
+
+### Coach Access
+Coaches see the full dashboard view for each assigned church — the same view the planter sees. The coach dashboard (D-018) provides a multi-planter overview showing phase, Core Group size, exit criteria progress, and health indicators for all assigned planters.
+
+### Sending Church Admin Access
+Sending church admins see a portfolio dashboard showing all churches they have sent, including current phase, key aggregate metrics, and health indicators. Each metric's visibility is controlled by the corresponding feature's privacy toggle (e.g., people counts require `share_people`, meeting metrics require `share_meetings`).
+
+### Network Admin Access
+Network admins see a network-wide dashboard with plants by phase, aggregate health scores, and comparative analytics. Each metric's visibility is controlled by the corresponding feature's privacy toggle for each planter.
+
+### Privacy Controls
+- The dashboard aggregates data from other features. Each metric's visibility is controlled by the corresponding feature's privacy toggle
+- Phase information and wiki progress are always visible (not subject to privacy toggles)
+- Feature-specific metrics (people counts, meeting stats, task completion) respect their respective `share_*` toggles
+- If a privacy toggle is off, the corresponding dashboard metric shows as "Not shared" rather than hidden, so oversight roles know data exists but is not accessible
+
+---
+
 ## Open Questions
 
 1. **Customization:** Can planters customize which metrics appear prominently?

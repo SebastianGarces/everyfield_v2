@@ -31,7 +31,7 @@ export default async function PeoplePage({ searchParams }: PeoplePageProps) {
   const { user } = await verifySession();
 
   if (!user.churchId) {
-    redirect("/login");
+    redirect("/dashboard");
   }
 
   const params = await searchParams;
@@ -90,59 +90,59 @@ export default async function PeoplePage({ searchParams }: PeoplePageProps) {
 
   return (
     <>
-    <HeaderBreadcrumbs items={[{ label: "People & CRM" }]} />
-    <div className="flex h-full flex-col">
-      <div className="bg-card space-y-6 p-6 pb-4 shadow-sm">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">People</h1>
-            <p className="text-foreground/50">
-              Manage your contacts and pipeline
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <ImportWizard />
-            <QuickAddForm />
-            <Button asChild>
-              <Link href="/people/new">
-                <Plus className="mr-2 h-4 w-4" />
-                Add Person
-              </Link>
-            </Button>
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div className="flex flex-1 flex-col gap-4 md:flex-row md:items-center">
-            {!isPipelineView && (
-              <>
-                <PeopleSearch />
-                <PeopleFilters availableTags={availableTags} />
-              </>
-            )}
+      <HeaderBreadcrumbs items={[{ label: "People & CRM" }]} />
+      <div className="flex h-full flex-col">
+        <div className="bg-card space-y-6 p-6 pb-4 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight">People</h1>
+              <p className="text-foreground/50">
+                Manage your contacts and pipeline
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <ImportWizard />
+              <QuickAddForm />
+              <Button asChild>
+                <Link href="/people/new">
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add Person
+                </Link>
+              </Button>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <ViewToggle currentView={view} />
-            <div className="text-foreground/50 text-sm font-medium">
-              {total} total
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex flex-1 flex-col gap-4 md:flex-row md:items-center">
+              {!isPipelineView && (
+                <>
+                  <PeopleSearch />
+                  <PeopleFilters availableTags={availableTags} />
+                </>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <ViewToggle currentView={view} />
+              <div className="text-foreground/50 text-sm font-medium">
+                {total} total
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <div className="flex-1 overflow-auto p-6">
-        {isPipelineView && pipelineData ? (
-          <PipelineWrapper data={pipelineData} />
-        ) : (
-          <PeopleList
-            people={listResult.people}
-            total={listResult.total}
-            nextCursor={listResult.nextCursor}
-          />
-        )}
+        <div className="flex-1 overflow-auto p-6">
+          {isPipelineView && pipelineData ? (
+            <PipelineWrapper data={pipelineData} />
+          ) : (
+            <PeopleList
+              people={listResult.people}
+              total={listResult.total}
+              nextCursor={listResult.nextCursor}
+            />
+          )}
+        </div>
       </div>
-    </div>
     </>
   );
 }

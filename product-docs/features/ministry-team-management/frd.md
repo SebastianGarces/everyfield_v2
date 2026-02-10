@@ -1,8 +1,8 @@
 # F8: Ministry Team Management
 ## Feature Requirements Document (FRD)
 
-**Version:** 1.1  
-**Date:** January 25, 2026  
+**Version:** 1.4  
+**Date:** February 9, 2026  
 **Parent Document:** [Product Brief](../../product-brief.md)  
 **Architecture:** [System Architecture](../../system-architecture.md)  
 **Shared Contracts:** [Core Data Contracts](../../core-data-contracts.md)  
@@ -12,7 +12,18 @@
 
 ## Overview
 
-Ministry Team Management enables church planters to organize, staff, and track the ministry teams essential for a successful church launch. This feature manages the 10 core ministry teams from formation through launch and beyond, providing visibility into team health, staffing status, training completion, and team communication.
+Ministry Team Management enables church planters to organize, staff, and track the ministry teams essential for a successful church launch. This feature manages the 10 core ministry teams (plus custom teams) from formation through launch and beyond, providing visibility into team health, staffing status, and training completion. Team communication is handled via the Communication Hub (F9).
+
+## User-Visible Behavior
+
+- Planters can always see and manage all 10 core ministry teams in one dashboard.
+- Each team has a detail workspace for members, roles, responsibilities, training, and meetings.
+- Staffing progress is visible at team and aggregate levels (filled vs open roles).
+- Assignment actions update both team views and related person profiles.
+- Alerts surface under-staffed teams and low readiness conditions.
+- Phase-aware guidance reflects launch progress:
+  - Phase transition gating follows the 8 primary ministry responsibilities (per Product Brief/System Architecture).
+  - Senior Pastor and Launch Coordinator remain first-class tracked teams for operational readiness, but are not additional blockers for the Phase 2 -> 3 gate.
 
 ### Core Ministry Teams
 
@@ -47,6 +58,7 @@ Ministry Team Management enables church planters to organize, staff, and track t
 | MT-008 | Team dashboard | Overview of all teams with health indicators |
 | MT-009 | Basic metrics | Staffing percentage per team |
 | MT-010 | Person-team linking | Show team assignments on person profile |
+| MT-019 | Custom team creation | Create additional teams beyond the 10 core |
 
 ### Should Have
 
@@ -54,13 +66,12 @@ Ministry Team Management enables church planters to organize, staff, and track t
 |----|-------------|-------------|
 | MT-011 | Training tracking | Track required training completion per role |
 | MT-012 | Training completion matrix | Grid view of team members vs training programs |
-| MT-013 | Team meeting scheduling | Schedule and track team meetings |
-| MT-014 | Meeting attendance | Record attendance at team meetings |
-| MT-015 | Team communication | Send messages to team members via Communication Hub |
+| MT-013 | Team meeting scheduling | Schedule and track team meetings via the Meetings feature (F3) with `type = team_meeting`. Accessible from the team detail Meetings tab. |
+| MT-014 | Meeting attendance | Record attendance at team meetings via the Meetings feature (F3). |
+| MT-015 | Team communication | Send messages to team members via Communication Hub (F9). F8 does not own a Communication tab; users navigate to F9 for messaging. |
 | MT-016 | Health scoring | Calculate team health from staffing, training, attendance |
 | MT-017 | Alert thresholds | Visual alerts for understaffed teams |
 | MT-018 | Org chart view | Hierarchical visualization of team structure |
-| MT-019 | Custom team creation | Create additional teams beyond the 10 core |
 | MT-020 | Role assignment warnings | Alert when person is on multiple teams |
 
 ### Nice to Have (Future)
@@ -157,15 +168,13 @@ Deep dive into a single ministry team.
 - "Schedule Training" action
 
 #### Tab: Meetings
+- Displays meetings from the Meetings feature (F3) filtered by this team (`type = team_meeting`, `team_id` matching)
 - Upcoming meetings list
 - Past meetings with attendance records
-- Quick add: "Schedule Meeting"
-- Meeting templates specific to this team
+- Quick add: "Schedule Meeting" (creates a team meeting in F3 with this team pre-selected)
+- Meeting cards link to the unified meeting detail view in F3
 
-#### Tab: Communication
-- Team message history
-- Compose new message to team
-- Announcement templates
+> **Note:** Team meetings are managed through the Meetings feature (F3) and displayed here as a filtered view. Team communication is handled via the Communication Hub (F9). There is no Communication tab in this feature.
 
 ---
 
@@ -252,7 +261,7 @@ Aggregate view of all teams' health metrics.
 
 ### 7. Role Templates Library
 
-Pre-built role definitions based on Launch Playbook.
+Global template library of pre-built role definitions based on the Launch Playbook. Templates are code-defined (not stored in the database) and planters import them on demand into their church's team roles. Templates are not auto-seeded; planters choose which roles to import for each team.
 
 **Organized by Team:**
 
@@ -348,11 +357,14 @@ For each of 10 core teams:
     ↓
 Dashboard updates with staffing status
     ↓
-[Exit Criteria Check]: All teams have leaders assigned
+[Exit Criteria Check]:
+ - Required phase gate: Leaders assigned for the 8 primary ministry responsibilities
+ - Operational readiness target: Leaders assigned for all 10 tracked teams
 ```
 
 **Success Criteria:**
-- All 10 core teams have designated leaders
+- Phase gate requirement satisfied for the 8 primary ministry responsibilities
+- All 10 tracked teams have designated leaders (recommended operational target)
 - Basic role structure defined for each team
 - Dashboard shows accurate staffing percentages
 
@@ -428,6 +440,8 @@ As training completes:
 
 **Trigger:** User clicks "Schedule Meeting" on Meetings tab
 
+Team meetings are created through the unified Meetings feature (F3) with `type = team_meeting` and `team_id` linking to this team. The meeting form is pre-populated with the team context.
+
 **Steps:**
 
 ```
@@ -435,29 +449,27 @@ As training completes:
     ↓
 Click "Schedule Meeting"
     ↓
-[Meeting Form]:
-├── Select meeting type (template or custom)
+[F3 Meeting Form] (pre-filled with type = team_meeting, team_id = this team):
+├── Select meeting subtype (regular, training, planning, special, rehearsal)
 ├── Set date/time
 ├── Set location
-├── Add/edit agenda (template pre-filled or custom)
-├── Select attendees (default: all team members)
-└── Add notes/description
+├── Add notes/description
     ↓
-Save meeting
+Save meeting (created in F3 as a ChurchMeeting)
     ↓
 System actions:
-├── Calendar event created
-├── Notifications sent to all attendees
-├── Meeting appears in team's meeting list
-└── Reminder scheduled (configurable)
+├── Guest list auto-populated from team roster (VM-027)
+├── Meeting appears in both the team's Meetings tab and the main Meetings list
+├── [Should Have] Email invitations sent to guest list via Communication Hub (F9)
+├── [Should Have] Reminder scheduled via Communication Hub (F9)
 ```
 
-**Meeting Type Templates:**
-- Regular Team Meeting
-- Training Session
-- Planning Meeting
-- Special Event
-- Pre-Launch Rehearsal
+**Meeting Subtype Templates (mapped to `meeting_subtype` enum):**
+- Regular Team Meeting -> `regular`
+- Training Session -> `training`
+- Planning Meeting -> `planning`
+- Special Event -> `special`
+- Pre-Launch Rehearsal -> `rehearsal`
 
 ---
 
@@ -494,36 +506,16 @@ Update dashboard health indicators
 
 ---
 
-### Workflow 6: Team Communication
+## Acceptance Criteria
 
-**Trigger:** User navigates to Communication tab and clicks "New Message"
-
-**Steps:**
-
-```
-[Team Detail View] → [Communication Tab]
-    ↓
-Click "New Message"
-    ↓
-[Compose Message form]:
-├── Select template OR write custom message
-├── Select recipients:
-│   ├── All team members
-│   ├── Select specific members
-│   └── Leader only
-├── Select channel: In-app / Email / SMS
-└── Schedule send OR send immediately
-    ↓
-Send/Schedule
-    ↓
-System actions:
-├── Message logged in Communication entity
-├── Emits `communication.send` event (Communication Hub subscribes)
-├── Delivery status tracked
-└── Message appears in team communication history
-```
-
----
+- AC-001 (MT-001, MT-008): Dashboard displays all 10 core teams with staffing status for each team.
+- AC-002 (MT-002): Selecting a team opens a detail view with Members & Roles, Responsibilities, Training, and Meetings tabs.
+- AC-003 (MT-003, MT-005): User can assign a person to a team role from the person directory; duplicate active assignment to the same role is blocked.
+- AC-004 (MT-004, MT-007): User can add/edit roles and import predefined role templates by team.
+- AC-005 (MT-006, MT-009): Staffing metrics update after assignment changes and remain visible at team and aggregate levels.
+- AC-006 (MT-010): Team assignments are visible from the corresponding person profile.
+- AC-007 (Phase coherence): In Phase 2, the workflow distinguishes required 8-role phase gating from the 10-team operational readiness target.
+- AC-008 (Contract coherence): All feature-owned entities include `church_id`, and emitted events include `church_id`, `timestamp`, and `triggered_by`.
 
 ## Data Model
 
@@ -543,6 +535,7 @@ System actions:
 | reports_to_team_id | UUID (FK) | No | Reference to parent MinistryTeam |
 | phase_introduced | Enum | Yes | Phase 0-6 |
 | status | Enum | Yes | `forming` / `active` / `paused` |
+| created_by | UUID (FK) | Yes | Reference to User |
 | created_at | Timestamp | Yes | Creation timestamp |
 | updated_at | Timestamp | Yes | Last update timestamp |
 
@@ -553,6 +546,7 @@ System actions:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | id | UUID | Yes | Primary key |
+| church_id | UUID (FK) | Yes | Reference to Church (tenant scope) |
 | team_id | UUID (FK) | Yes | Reference to MinistryTeam |
 | name | String | Yes | Role name |
 | description | Text | No | Role responsibilities |
@@ -563,6 +557,7 @@ System actions:
 | desired_skills | String[] | No | Array of skill/gift tags |
 | sort_order | Integer | No | Display order |
 | status | Enum | Yes | `open` / `filled` |
+| created_by | UUID (FK) | Yes | Reference to User |
 | created_at | Timestamp | Yes | Creation timestamp |
 | updated_at | Timestamp | Yes | Last update timestamp |
 
@@ -573,6 +568,7 @@ System actions:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | id | UUID | Yes | Primary key |
+| church_id | UUID (FK) | Yes | Reference to Church (tenant scope) |
 | team_id | UUID (FK) | Yes | Reference to MinistryTeam |
 | person_id | UUID (FK) | Yes | Reference to Person |
 | role_id | UUID (FK) | Yes | Reference to TeamRole |
@@ -580,46 +576,55 @@ System actions:
 | end_date | Date | No | When assignment ended (if applicable) |
 | status | Enum | Yes | `active` / `inactive` / `pending` |
 | notes | Text | No | Assignment notes |
+| created_by | UUID (FK) | Yes | Reference to User (assigner) |
 | created_at | Timestamp | Yes | Creation timestamp |
 | updated_at | Timestamp | Yes | Last update timestamp |
 
 **Constraints:**
 - Unique constraint on (team_id, person_id, role_id, status='active')
 - Person can have multiple memberships (different teams/roles)
+- `church_id` on TeamMembership must match related TeamRole, MinistryTeam, and Person
 
 ---
 
-### TeamMeeting
+> **Note:** Team meetings and attendance are now managed through the unified Meetings feature (F3) using `ChurchMeeting` with `type = team_meeting` and `team_id` linking to the MinistryTeam. The `TeamMeeting` and `TeamMeetingAttendance` entities previously defined here have been superseded by `ChurchMeeting` and `MeetingAttendance` in F3.
+
+---
+
+### TrainingProgram
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | id | UUID | Yes | Primary key |
-| team_id | UUID (FK) | Yes | Reference to MinistryTeam |
-| title | String | Yes | Meeting title |
-| meeting_type | Enum | Yes | `regular` / `training` / `planning` / `special` |
-| datetime | Timestamp | Yes | Meeting date and time |
-| duration_minutes | Integer | No | Expected duration |
-| location | String | No | Meeting location |
-| agenda | Text | No | Meeting agenda (rich text) |
-| notes | Text | No | Post-meeting notes (rich text) |
+| church_id | UUID (FK) | Yes | Reference to Church (tenant scope) |
+| team_id | UUID (FK) | No | Reference to MinistryTeam (null = cross-team program) |
+| name | String | Yes | Program name (e.g., "Child Safety Training") |
+| description | Text | No | Program details |
+| is_required | Boolean | Yes | Whether completion is mandatory. Default: false |
 | created_by | UUID (FK) | Yes | Reference to User |
 | created_at | Timestamp | Yes | Creation timestamp |
 | updated_at | Timestamp | Yes | Last update timestamp |
 
 ---
 
-### TeamMeetingAttendance
+### TrainingCompletion
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | id | UUID | Yes | Primary key |
-| meeting_id | UUID (FK) | Yes | Reference to TeamMeeting |
+| church_id | UUID (FK) | Yes | Reference to Church (tenant scope) |
 | person_id | UUID (FK) | Yes | Reference to Person |
-| status | Enum | Yes | `attended` / `absent` / `excused` |
+| training_program_id | UUID (FK) | Yes | Reference to TrainingProgram |
+| completed_at | Timestamp | Yes | When training was completed |
+| verified_by | UUID (FK) | No | Reference to User who verified completion |
+| notes | Text | No | Completion notes |
+| created_by | UUID (FK) | Yes | Reference to User |
 | created_at | Timestamp | Yes | Creation timestamp |
+| updated_at | Timestamp | Yes | Last update timestamp |
 
 **Constraints:**
-- Unique constraint on (meeting_id, person_id)
+- Unique constraint on (person_id, training_program_id)
+- `church_id` on TrainingCompletion must match related TrainingProgram and Person
 
 ---
 
@@ -632,16 +637,18 @@ This feature integrates with other platform capabilities via events and shared e
 | Contract | Description |
 |----------|-------------|
 | **Person lookup** | Queries Person by `person_id`; expects `id`, `first_name`, `last_name`, `status` |
-| **`phase.changed` event** | Subscribes to adjust phase-aware UI and team responsibilities |
+| **Skills/gifts lookup** | Queries `skillsInventory` by `person_id`; expects `skillCategory`, `skillName`, `proficiency` |
+| **Assessment lookup** | Queries Assessment by `person_id`; expects 4 C's scores for Assignment Modal preview |
+| **Background check status** | Reads `Person.background_check_status` (Children's Ministry). Dependency: F2 must add this field. |
+| **`phase.changed` event** | Subscribes to adjust phase-aware UI and team responsibilities; expects `church_id`, `timestamp`, `triggered_by` |
 
 ### Outbound (This Feature Emits)
 
 | Event | Payload | Subscribers May |
 |-------|---------|-----------------|
-| `team.member.assigned` | `{ team_id, person_id, role_id, church_id }` | Create onboarding tasks, update dashboards |
-| `team.staffing.changed` | `{ team_id, filled_count, total_count, church_id }` | Update readiness metrics |
-| `training.scheduled` | `{ team_id, person_ids[], training_type, datetime, church_id }` | Create calendar events, tasks |
-| `communication.send` | `{ recipients[], message, channel, church_id }` | Deliver via email/SMS |
+| `team.member.assigned` | `{ team_id, person_id, role_id, church_id, timestamp, triggered_by }` | Create onboarding tasks, update dashboards |
+| `team.staffing.changed` | `{ team_id, filled_count, total_count, church_id, timestamp, triggered_by }` | Update readiness metrics |
+| `training.scheduled` | `{ team_id, person_ids[], training_type, datetime, church_id, timestamp, triggered_by }` | Create calendar events, tasks |
 
 ### Shared Entity References
 
@@ -686,9 +693,9 @@ Per [Core Data Contracts](../../core-data-contracts.md):
 
 ---
 
-## UI/UX Requirements
+## Non-Functional Requirements
 
-### General
+### UI/UX
 - Responsive design supporting desktop and mobile
 - Progressive disclosure: simple view first, expand for details
 - Phase awareness: show/hide content based on current phase
@@ -716,6 +723,23 @@ Per [Core Data Contracts](../../core-data-contracts.md):
 
 ---
 
+## Authorization
+
+| Role | Scope | Permissions |
+|------|-------|-------------|
+| **Planter** | All teams | Full CRUD on all teams, roles, memberships, meetings, training |
+| **Team Leader** | Own team only | Assign/remove members, edit roles, schedule meetings, record attendance, manage training within the team they lead |
+| **Team Member** | Own teams (read) | View team details and own assignments. No write access. |
+| **Coach** | Assigned church (read) | Read-only access to team dashboards for assigned planters |
+
+**Enforcement rules:**
+- Team leader status is determined by `MinistryTeam.leader_id` matching the Person record linked to the current User.
+- A user who is team leader for multiple teams has write access to each of those teams.
+- Planters always have full access regardless of team leader assignment.
+- Write operations validate the user's role and team leader status before proceeding.
+
+---
+
 ## Success Metrics
 
 ### Feature Adoption
@@ -735,6 +759,26 @@ Per [Core Data Contracts](../../core-data-contracts.md):
 
 ---
 
+## Oversight Access Patterns
+
+### Coach Access
+- Can view team rosters, meeting records, and team health for assigned churches
+
+### Sending Church Admin Access
+- Aggregate team metrics only: teams formed count, staffing completion %, team health scores
+- Subject to `share_ministry_teams` privacy toggle
+
+### Network Admin Access
+- Aggregate team metrics across all plants in the network
+- Subject to `share_ministry_teams` privacy toggle
+
+### Privacy Controls
+- Planter controls visibility via per-feature privacy toggle in church privacy settings
+- Privacy toggle for this feature: `share_ministry_teams`
+- Default: `false` (not shared until planter opts in)
+
+---
+
 ## Open Questions
 
 1. **Member self-service:** Should team members have their own login to view assignments, update availability, and access team communications?
@@ -743,7 +787,7 @@ Per [Core Data Contracts](../../core-data-contracts.md):
 
 3. **Bench concept:** Should there be a "bench" or "interested" status for people considering a team but not yet assigned to a role?
 
-4. **Permission model:** Can team leaders edit roles and make assignments, or is this Senior Pastor only?
+4. ~~**Permission model:** Can team leaders edit roles and make assignments, or is this Senior Pastor only?~~ **Resolved:** Team leaders can manage their own team (assign members, edit roles). Planters have full access to all teams. See Authorization section.
 
 5. **Historical tracking:** How long should we retain team membership history after someone leaves a role?
 
@@ -753,13 +797,13 @@ Per [Core Data Contracts](../../core-data-contracts.md):
 
 ## Future Enhancements
 
-### Phase 2 (Post-MVP)
+### Release 2 (Post-MVP)
 - Service scheduling and rotation management
 - Volunteer availability and scheduling preferences
 - Automated scheduling based on availability
 - Team performance analytics and insights
 
-### Phase 3 (Long-term)
+### Release 3 (Long-term)
 - Integration with external volunteer management tools
 - Advanced reporting and trend analysis
 - Team communication via integrated chat

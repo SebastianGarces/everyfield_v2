@@ -12,14 +12,13 @@ import type { StatusTransition } from "./types";
 
 /**
  * The ordered progression of statuses.
- * Index represents the progression order (0 = earliest, 7 = latest)
+ * Index represents the progression order (0 = earliest, 6 = latest)
  */
 const STATUS_ORDER: PersonStatus[] = [
   "prospect",
   "attendee",
   "following_up",
   "interviewed",
-  "committed",
   "core_group",
   "launch_team",
   "leader",
@@ -33,7 +32,6 @@ export const STATUS_LABELS: Record<PersonStatus, string> = {
   attendee: "Attendee",
   following_up: "Following Up",
   interviewed: "Interviewed",
-  committed: "Committed",
   core_group: "Core Group",
   launch_team: "Launch Team",
   leader: "Leader",
@@ -136,7 +134,7 @@ export function validateStatusTransition(
     }
 
     if (
-      to === "committed" &&
+      to === "core_group" &&
       getStatusIndex(from) < getStatusIndex("interviewed")
     ) {
       warnings.push(
@@ -145,8 +143,8 @@ export function validateStatusTransition(
     }
 
     if (
-      (to === "core_group" || to === "launch_team" || to === "leader") &&
-      getStatusIndex(from) < getStatusIndex("committed")
+      (to === "launch_team" || to === "leader") &&
+      getStatusIndex(from) < getStatusIndex("core_group")
     ) {
       warnings.push(
         "This person hasn't signed a commitment yet. Core Group members typically sign commitment cards."

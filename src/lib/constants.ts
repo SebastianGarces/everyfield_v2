@@ -16,5 +16,6 @@ export const USER_ROLES = {
   planter: "Church Planter",
   coach: "Coach",
   team_member: "Team Member",
+  sending_church_admin: "Sending Church Admin",
   network_admin: "Network Admin",
 } as const;

@@ -575,6 +575,26 @@ This feature integrates with cross-cutting services defined in [System Architect
 
 ---
 
+## Oversight Access Patterns
+
+### Coach Access
+- Can view budget, giving records, and financial health for assigned churches
+
+### Sending Church Admin Access
+- Aggregate financial metrics only: total giving, budget health percentage, giving trend
+- Subject to `share_financials` privacy toggle
+
+### Network Admin Access
+- Aggregate financial metrics across all plants in the network
+- Subject to `share_financials` privacy toggle
+
+### Privacy Controls
+- Planter controls visibility via per-feature privacy toggle in church privacy settings
+- Privacy toggle for this feature: `share_financials`
+- Default: `false` (not shared until planter opts in)
+
+---
+
 ## Open Questions
 
 1. **Individual tracking:** Should there be an optional mode for tracking individual giving (with appropriate privacy controls)?

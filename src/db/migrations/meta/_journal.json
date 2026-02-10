@@ -50,6 +50,55 @@
       "when": 1770356532964,
       "tag": "0006_happy_toad_men",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1770499699831,
+      "tag": "0007_rainy_lady_mastermind",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1770500288319,
+      "tag": "0008_shiny_young_avengers",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1770500550295,
+      "tag": "0009_violet_changeling",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1770508800000,
+      "tag": "0010_remove_committed_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1770595200000,
+      "tag": "0011_unified_meetings",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1770668985188,
+      "tag": "0012_communication_hub",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1770755400000,
+      "tag": "0013_schema_hardening",
+      "breakpoints": true
     }
   ]
 }

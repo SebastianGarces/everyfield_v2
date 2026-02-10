@@ -4,16 +4,47 @@ ORM: Drizzle | DB: PostgreSQL (Neon serverless)
 
 **Connection:** `src/db/index.ts`
 
+## Hierarchy Tables
+
+### sending_networks
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | uuid | PK, auto |
+| name | varchar(255) | required |
+| created_at | timestamp | |
+| updated_at | timestamp | |
+
+**Source:** `src/db/schema/sending-network.ts`
+
+---
+
+### sending_churches
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | uuid | PK, auto |
+| name | varchar(255) | required |
+| sending_network_id | uuid | FK → sending_networks, nullable |
+| created_at | timestamp | |
+| updated_at | timestamp | |
+
+**Source:** `src/db/schema/sending-church.ts`
+
+---
+
 ## Core Tables
 
 ### churches
-Multi-tenant root entity.
+Multi-tenant root entity (church plant).
 
 | Column | Type | Notes |
 |--------|------|-------|
 | id | uuid | PK, auto |
 | name | varchar(255) | required |
 | current_phase | int | default 0 |
+| sending_church_id | uuid | FK → sending_churches, nullable |
+| sending_network_id | uuid | FK → sending_networks, nullable |
 | created_at | timestamp | |
 | updated_at | timestamp | |
 
@@ -29,8 +60,10 @@ Multi-tenant root entity.
 | email | varchar(255) | unique, required |
 | password_hash | varchar(255) | Argon2id |
 | name | varchar(255) | nullable |
-| role | varchar(50) | planter/coach/team_member/network_admin |
+| role | varchar(50) | planter/coach/team_member/sending_church_admin/network_admin |
 | church_id | uuid | FK → churches, nullable |
+| sending_church_id | uuid | FK → sending_churches, nullable |
+| sending_network_id | uuid | FK → sending_networks, nullable |
 | created_at | timestamp | |
 | updated_at | timestamp | |
 
@@ -320,3 +353,216 @@ Activity timeline for people.
 **Activity Types:** status_changed, note_added, person_created, person_updated, interview_completed, assessment_completed, commitment_recorded, tag_added, tag_removed
 
 **Source:** `src/db/schema/people.ts`
+
+---
+
+## Access Control Tables
+
+### coach_assignments
+Links coaches to church plants they oversee.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | uuid | PK, auto |
+| coach_user_id | uuid | FK → users, required |
+| church_id | uuid | FK → churches, required |
+| assigned_at | timestamp | |
+| status | varchar(20) | active/inactive, default "active" |
+
+**Unique:** (coach_user_id, church_id)
+**Indexes:** coach_user_id, church_id
+
+**Source:** `src/db/schema/coach-assignment.ts`
+
+---
+
+### organization_invitations
+Tracks invitations between hierarchy entities.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | uuid | PK, auto |
+| type | varchar(40) | church_to_sending_church/sending_church_to_network/church_to_network |
+| inviter_user_id | uuid | FK → users, required |
+| target_church_id | uuid | FK → churches, nullable |
+| target_sending_church_id | uuid | FK → sending_churches, nullable |
+| sending_church_id | uuid | FK → sending_churches, nullable |
+| sending_network_id | uuid | FK → sending_networks, nullable |
+| status | varchar(20) | pending/accepted/declined/expired/revoked |
+| responded_by | uuid | FK → users, nullable |
+| responded_at | timestamp | nullable |
+| created_at | timestamp | |
+| expires_at | timestamp | nullable |
+
+**Indexes:** target_church_id, target_sending_church_id, status, inviter_user_id
+
+**Source:** `src/db/schema/organization-invitation.ts`
+
+---
+
+### church_privacy_settings
+Per-feature privacy toggles controlling oversight access.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | uuid | PK, auto |
+| church_id | uuid | FK → churches, unique |
+| share_people | boolean | default false |
+| share_meetings | boolean | default false |
+| share_tasks | boolean | default false |
+| share_financials | boolean | default false |
+| share_ministry_teams | boolean | default false |
+| share_facilities | boolean | default false |
+| updated_at | timestamp | |
+| updated_by | uuid | FK → users, nullable |
+
+**Source:** `src/db/schema/church-privacy-settings.ts`
+
+---
+
+## Vision Meeting Tables
+
+### locations
+Venue/location records for meetings.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | uuid | PK, auto |
+| church_id | uuid | FK → churches, required |
+| name | varchar(255) | required |
+| address | varchar(500) | required |
+| contact_name | varchar(255) | nullable |
+| contact_phone | varchar(50) | nullable |
+| contact_email | varchar(255) | nullable |
+| cost | varchar(50) | e.g., "$150/use" |
+| capacity | int | nullable |
+| notes | text | |
+| is_active | boolean | default true |
+| created_at | timestamp | |
+| updated_at | timestamp | |
+
+**Indexes:** church_id
+
+**Source:** `src/db/schema/vision-meetings.ts`
+
+---
+
+### vision_meetings
+Main meeting records with auto-numbered meetings per church.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | uuid | PK, auto |
+| church_id | uuid | FK → churches, required |
+| meeting_number | int | auto-assigned, unique per church |
+| datetime | timestamp | required |
+| location_id | uuid | FK → locations, nullable |
+| location_name | varchar(255) | snapshot/ad-hoc |
+| location_address | varchar(500) | snapshot/ad-hoc |
+| estimated_attendance | int | nullable |
+| actual_attendance | int | nullable, set on finalize |
+| status | varchar(50) | planning/ready/in_progress/completed/cancelled |
+| notes | text | |
+| agenda | jsonb | nullable |
+| created_by | uuid | FK → users, required |
+| created_at | timestamp | |
+| updated_at | timestamp | |
+
+**Unique:** (church_id, meeting_number)
+**Indexes:** church_id, status
+
+**Source:** `src/db/schema/vision-meetings.ts`
+
+---
+
+### vision_meeting_attendance
+Who attended each meeting.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | uuid | PK, auto |
+| church_id | uuid | FK → churches, required |
+| meeting_id | uuid | FK → vision_meetings, cascade delete |
+| person_id | uuid | FK → persons, cascade delete |
+| attendance_type | varchar(50) | first_time/returning/core_group |
+| invited_by_id | uuid | FK → persons, nullable |
+| response_status | varchar(50) | interested/ready_commit/questions/not_interested |
+| notes | text | |
+| created_at | timestamp | |
+| updated_at | timestamp | |
+
+**Unique:** (meeting_id, person_id)
+**Indexes:** meeting_id, person_id
+
+**Source:** `src/db/schema/vision-meetings.ts`
+
+---
+
+### invitations
+Tracks who invited whom to each meeting.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | uuid | PK, auto |
+| church_id | uuid | FK → churches, required |
+| meeting_id | uuid | FK → vision_meetings, cascade delete |
+| inviter_id | uuid | FK → persons, required |
+| invitee_name | varchar(255) | nullable |
+| invitee_id | uuid | FK → persons, nullable |
+| status | varchar(50) | invited/confirmed/maybe/declined/attended/no_show |
+| created_at | timestamp | |
+| updated_at | timestamp | |
+
+**Indexes:** meeting_id
+
+**Source:** `src/db/schema/vision-meetings.ts`
+
+---
+
+### meeting_evaluations
+Post-meeting evaluation with 8 quality factor scores.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | uuid | PK, auto |
+| church_id | uuid | FK → churches, required |
+| meeting_id | uuid | FK → vision_meetings, cascade delete |
+| attendance_score | int | 1-5 |
+| location_score | int | 1-5 |
+| logistics_score | int | 1-5 |
+| agenda_score | int | 1-5 |
+| vibe_score | int | 1-5 |
+| message_score | int | 1-5 |
+| close_score | int | 1-5 |
+| next_steps_score | int | 1-5 |
+| total_score | varchar(10) | average, e.g., "4.2" |
+| notes | text | |
+| evaluated_by | uuid | FK → users, required |
+| created_at | timestamp | |
+| updated_at | timestamp | |
+
+**Unique:** (meeting_id) — one evaluation per meeting
+
+**Source:** `src/db/schema/vision-meetings.ts`
+
+---
+
+### meeting_checklist_items
+Preparation checklist items auto-populated from kit template.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | uuid | PK, auto |
+| church_id | uuid | FK → churches, required |
+| meeting_id | uuid | FK → vision_meetings, cascade delete |
+| item_name | varchar(255) | required |
+| category | varchar(50) | essential/materials/setup/av/organization |
+| is_checked | boolean | default false |
+| notes | text | |
+| assigned_to | uuid | FK → persons, nullable |
+| created_at | timestamp | |
+| updated_at | timestamp | |
+
+**Indexes:** meeting_id
+
+**Source:** `src/db/schema/vision-meetings.ts`

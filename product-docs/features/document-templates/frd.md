@@ -497,6 +497,24 @@ This feature exposes and consumes the following integration points. For system-w
 
 ---
 
+## Oversight Access Patterns
+
+### Coach Access
+- Can view generated documents for assigned churches
+
+### Sending Church Admin Access
+- Can see which templates have been used by their plants
+- No document content access
+
+### Network Admin Access
+- Can see template usage statistics across network
+
+### Privacy Controls
+- Document template usage data is not considered sensitive and is not subject to privacy toggles
+- Network-level template sharing (templates visible to all plants in a network) is a future enhancement
+
+---
+
 ## Open Questions
 
 1. **Custom templates:** Should planters be able to create and save custom templates?

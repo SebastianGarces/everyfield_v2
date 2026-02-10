@@ -5,6 +5,7 @@ import {
   Activity,
   ClipboardCheck,
   LayoutDashboard,
+  MessageSquare,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -12,7 +13,7 @@ import Link from "next/link";
 
 interface PersonTabsProps {
   personId: string;
-  activeTab: "overview" | "activity" | "assessments" | "teams";
+  activeTab: "overview" | "activity" | "assessments" | "teams" | "communication";
 }
 
 export function PersonTabs({ personId, activeTab }: PersonTabsProps) {
@@ -45,6 +46,12 @@ export function PersonTabs({ personId, activeTab }: PersonTabsProps) {
       label: "Teams & Training",
       href: `/people/${personId}/teams`,
       icon: Users,
+    },
+    {
+      id: "communication",
+      label: "Communication",
+      href: `/people/${personId}/communication`,
+      icon: MessageSquare,
     },
   ];
 

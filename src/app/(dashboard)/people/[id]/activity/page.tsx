@@ -11,7 +11,7 @@ export default async function ActivityPage({ params }: ActivityPageProps) {
   const { user } = await verifySession();
 
   if (!user.churchId) {
-    redirect("/login");
+    redirect("/dashboard");
   }
 
   const { id } = await params;

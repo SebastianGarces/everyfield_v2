@@ -11,6 +11,7 @@ import type {
   PersonUpdateInput,
 } from "@/lib/validations/people";
 import { and, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
+import { emitPersonCreated } from "./events";
 
 // ============================================================================
 // Types
@@ -225,6 +226,8 @@ export async function createPerson(
   };
 
   const [person] = await db.insert(persons).values(values).returning();
+
+  await emitPersonCreated(person);
 
   return person;
 }

@@ -15,7 +15,7 @@ export default async function PersonLayout({
   const { user } = await verifySession();
 
   if (!user.churchId) {
-    redirect("/login");
+    redirect("/dashboard");
   }
 
   const { id } = await params;

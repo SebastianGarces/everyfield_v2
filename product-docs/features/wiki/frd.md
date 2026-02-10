@@ -823,7 +823,7 @@ User can still access all phases (no content locked)
 **Steps:**
 
 ```
-[User is in Vision Meeting Management (F3)]
+[User is in Meetings (F3)]
     ↓
 [Contextual help icon appears]
     ↓
@@ -1152,6 +1152,24 @@ The wiki should appear contextually throughout the platform:
 - Network-specific customizations
 - User-contributed tips and learnings
 - Content versioning and changelog
+
+---
+
+## Oversight Access Patterns
+
+### Coach Access
+Coaches can view wiki progress and bookmarks for their assigned churches. This includes per-article completion status, overall phase completion percentages, and bookmark lists. Access is read-only.
+
+### Sending Church Admin Access
+Sending church admins can see aggregate wiki completion rates across their plants — specifically, the percentage of articles completed per phase for each church plant they have sent.
+
+### Network Admin Access
+Network admins can see aggregate wiki completion rates across all plants in their network, enabling comparison of content engagement across the portfolio.
+
+### Privacy Controls
+- Wiki data is **not subject to privacy toggles** since it tracks content consumption, not church-specific operational data
+- Wiki progress metrics (articles read, phase completion %) are always visible to oversight roles
+- No per-feature privacy toggle is needed for wiki
 
 ---
 

@@ -70,7 +70,6 @@ export function CommitmentForm({ person, onSuccess }: CommitmentFormProps) {
     "attendee",
     "following_up",
     "interviewed",
-    "committed",
     "core_group",
     "launch_team",
     "leader",
@@ -130,7 +129,7 @@ export function CommitmentForm({ person, onSuccess }: CommitmentFormProps) {
 
       if (result.success) {
         toast.success("Commitment recorded", {
-          description: "Person has been advanced to Committed status.",
+          description: "Person has been advanced to Core Group status.",
         });
         onSuccess?.();
         router.push(`/people/${person.id}/assessments?tab=commitments`);

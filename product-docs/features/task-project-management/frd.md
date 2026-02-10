@@ -626,6 +626,25 @@ This feature integrates with cross-cutting services defined in [System Architect
 
 ---
 
+## Oversight Access Patterns
+
+### Coach Access
+Coaches can view task lists, milestones, and the project timeline (GANTT view) for their assigned churches. This includes task status, due dates, overdue counts, and milestone progress. Access is read-only.
+
+### Sending Church Admin Access
+Sending church admins can see aggregate task completion rates and milestone progress — percentage of tasks completed on time, overdue task counts, and milestone achievement status. No individual task details are visible. Subject to the planter's `share_tasks` privacy toggle.
+
+### Network Admin Access
+Network admins can see aggregate task metrics across all plants in their network — completion rates, milestone progress, and on-time performance benchmarks. Subject to each planter's `share_tasks` privacy toggle.
+
+### Privacy Controls
+- Planter controls visibility via per-feature privacy toggle in church privacy settings
+- Privacy toggle for this feature: `share_tasks`
+- Default: `false` (not shared until planter opts in)
+- When `share_tasks` is `false`, sending church admins and network admins see no data for this feature
+
+---
+
 ## Open Questions
 
 1. **Calendar sync:** Should tasks sync bidirectionally with Google Calendar / Outlook?

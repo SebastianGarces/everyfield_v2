@@ -72,7 +72,6 @@ People / CRM Management tracks all individuals from initial contact through comm
 | P-028 | Custom fields | Church-defined additional fields |
 | P-029 | Communication preferences | Track preferred contact method |
 | P-030 | Birthday/anniversary tracking | Date tracking for personal outreach |
-| P-031 | Group orientations | Support orientation events similar to Vision Meetings for `committed` → `core_group` transition |
 
 ---
 
@@ -123,7 +122,7 @@ The primary landing page for managing contacts.
 
 ### 2. Pipeline View
 
-Visual kanban showing members at each stage. The pipeline displays the six primary pipeline stages as columns. "Launch Team" and "Leader" statuses are milestone badges on Core Group members rather than separate columns.
+Visual kanban showing members at each stage. The pipeline displays the five primary pipeline stages as columns. "Launch Team" and "Leader" statuses are milestone badges on Core Group members rather than separate columns.
 
 **Layout:**
 
@@ -132,22 +131,21 @@ Visual kanban showing members at each stage. The pipeline displays the six prima
 │  People Pipeline                                           [Configure ⚙]     │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
-│  Prospect    Attendee    Following Up   Interviewed   Committed   Core Group │
-│  ────────    ────────    ────────────   ───────────   ─────────   ────────── │
-│     12          8            15              5            23          42     │
+│  Prospect    Attendee    Following Up   Interviewed   Core Group             │
+│  ────────    ────────    ────────────   ───────────   ──────────             │
+│     12          8            15              5            65                 │
 │                                                                              │
-│  ┌──────┐   ┌──────┐      ┌──────┐      ┌──────┐     ┌──────┐     ┌──────┐  │
-│  │ John │   │Sarah │      │ Mike │      │ Lisa │     │ Tom  │     │ Amy  │  │
-│  │Smith │   │Brown │      │Jones │      │Davis │     │White │     │ 🚀   │  │
-│  └──────┘   └──────┘      └──────┘      └──────┘     └──────┘     └──────┘  │
-│  ┌──────┐   ┌──────┐      ┌──────┐      ┌──────┐     ┌──────┐     ┌──────┐  │
-│  │ Jane │   │ ...  │      │ ...  │      │ ...  │     │ ...  │     │ Dan  │  │
-│  │ Doe  │   │      │      │      │      │      │     │      │     │ ⭐🚀 │  │
-│  └──────┘   └──────┘      └──────┘      └──────┘     └──────┘     └──────┘  │
+│  ┌──────┐   ┌──────┐      ┌──────┐      ┌──────┐     ┌──────┐              │
+│  │ John │   │Sarah │      │ Mike │      │ Lisa │     │ Amy  │              │
+│  │Smith │   │Brown │      │Jones │      │Davis │     │ 🚀   │              │
+│  └──────┘   └──────┘      └──────┘      └──────┘     └──────┘              │
+│  ┌──────┐   ┌──────┐      ┌──────┐      ┌──────┐     ┌──────┐              │
+│  │ Jane │   │ ...  │      │ ...  │      │ ...  │     │ Dan  │              │
+│  │ Doe  │   │      │      │      │      │      │     │ ⭐🚀 │              │
+│  └──────┘   └──────┘      └──────┘      └──────┘     └──────┘              │
 │                                                                              │
 │  ─────────────────────────────────────────────────────────────────────────   │
-│  Conversion Rates:  Prospect→Attendee: 67%  |  Attendee→Committed: 45%      │
-│                     Committed→Core Group: 92%                               │
+│  Conversion Rates:  Prospect→Attendee: 67%  |  Interviewed→Core Group: 45%  │
 │                                                                              │
 │  Legend: 🚀 = Launch Team   ⭐ = Leader                                      │
 └──────────────────────────────────────────────────────────────────────────────┘
@@ -866,16 +864,14 @@ stateDiagram-v2
     
     following_up --> interviewed: interview.completed
     
-    interviewed --> committed: commitment.recorded
+    interviewed --> core_group: commitment.recorded
     note right of interviewed: Interview result stored\nbut doesn't gate progression
-    
-    committed --> core_group: orientation.completed
     
     core_group --> launch_team: team.member.assigned
     
     launch_team --> leader: team.leader.assigned
     
-    note right of core_group: launch_team and leader\nare badge states shown\non Core Group cards
+    note right of core_group: Commitment card = Core Group entry.\nlaunch_team and leader are badge\nstates shown on Core Group cards
 ```
 
 ### Automatic Progression Triggers
@@ -886,8 +882,7 @@ stateDiagram-v2
 | `prospect` → `attendee` | `vision_meeting.attendance.recorded` | Person marked as attended in F3 | **Auto** |
 | `attendee` → `following_up` | `follow_up.initiated` | Note/task created with follow-up tag | Auto |
 | `following_up` → `interviewed` | `interview.completed` | Interview form saved (any result) | **Auto** |
-| `interviewed` → `committed` | `commitment.recorded` | Commitment card recorded | **Auto** |
-| `committed` → `core_group` | `orientation.completed` | Orientation checklist completed | Auto |
+| `interviewed` → `core_group` | `commitment.recorded` | Commitment card recorded (= Core Group entry) | **Auto** |
 | `core_group` → `launch_team` | `team.member.assigned` | Person assigned to ministry team in F8 | **Auto** |
 | `launch_team` → `leader` | `team.leader.assigned` | Person given leadership role in F8 | **Auto** |
 
@@ -919,9 +914,9 @@ When an action occurs that would skip statuses:
 Example: Commitment recorded for a Prospect
 
 1. System detects current_status = prospect
-2. Commitment requires interviewed → committed transition
-3. System auto-advances: prospect → attendee → following_up → interviewed → committed
-4. Activity timeline shows: "Status advanced to Committed (via commitment recording)"
+2. Commitment triggers interviewed → core_group transition
+3. System auto-advances: prospect → attendee → following_up → interviewed → core_group
+4. Activity timeline shows: "Status advanced to Core Group (via commitment recording)"
 5. Skipped intermediate actions can still be recorded retroactively
 ```
 
@@ -946,6 +941,25 @@ Example: Commitment recorded for a Prospect
 
 ---
 
+## Oversight Access Patterns
+
+### Coach Access
+Coaches have read-only access to the full people list, pipeline view, assessments, interviews, and commitment records for their assigned churches. Coaches see the same data as planters but cannot create, edit, or delete records.
+
+### Sending Church Admin Access
+Sending church admins can see **aggregate counts only** — total prospects, total committed, pipeline stage counts, and high-level conversion metrics. No individual person records (names, contact info, assessments) are visible. Subject to the planter's `share_people` privacy toggle.
+
+### Network Admin Access
+Network admins can see aggregate people/pipeline counts across all plants in their network. No individual person records are visible. Subject to each planter's `share_people` privacy toggle.
+
+### Privacy Controls
+- Planter controls visibility via per-feature privacy toggle in church privacy settings
+- Privacy toggle for this feature: `share_people`
+- Default: `false` (not shared until planter opts in)
+- When `share_people` is `false`, sending church admins and network admins see no data for this feature
+
+---
+
 ## Open Questions
 
 *No open questions at this time. All major decisions resolved.*
@@ -966,11 +980,11 @@ Example: Commitment recorded for a Prospect
 | Decision | Resolution | Date |
 |----------|------------|------|
 | Automatic vs. manual status progression | Event-driven automatic progression with manual override available | Feb 3, 2026 |
-| Pipeline view columns vs. all statuses | 6 kanban columns; `launch_team` and `leader` shown as badges on Core Group cards | Feb 3, 2026 |
+| Pipeline view columns vs. all statuses | 5 kanban columns; `launch_team` and `leader` shown as badges on Core Group cards | Feb 3, 2026 |
 | Quick Add behavior | Minimal fields (name required, email/phone/source optional), defaults to Prospect status | Feb 3, 2026 |
 | Phase restrictions on features | Phases guide but don't restrict; soft warnings for out-of-order actions | Feb 3, 2026 |
 | Duplicate handling | Email match = immediate flag; fuzzy match on name + phone = potential duplicate. Dedicated "Potential Duplicates" section for user review with merge/delete/keep actions | Feb 3, 2026 |
 | Data retention | Soft delete only; retain until deletion requested. Permanent deletion deferred to first user request | Feb 3, 2026 |
 | Household grouping | Yes, include in MVP. Link family members together (see Household entity below) | Feb 3, 2026 |
 | Photo storage | Yes, support profile photos. Small avatars (48-64px) in lists, larger (128-256px) on profile. Keep file sizes small | Feb 3, 2026 |
-| Orientation completion | Manual confirmation for MVP. Future: support group orientations similar to Vision Meetings | Feb 3, 2026 |
+| Committed status removed | Commitment card recording directly advances to `core_group`. The `committed` status was redundant — per the Launch Playbook, signing the commitment IS joining the Core Group. Orientations are a meeting type with no pipeline effect. | Feb 8, 2026 |

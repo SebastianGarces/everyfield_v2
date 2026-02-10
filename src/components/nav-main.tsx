@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Rocket } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -9,6 +9,11 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@/components/ui/hover-card";
 import {
   SidebarGroup,
   SidebarGroupLabel,
@@ -21,16 +26,32 @@ import {
 } from "@/components/ui/sidebar";
 import { type NavItem } from "@/lib/navigation";
 
-export function NavMain({ items }: { items: NavItem[] }) {
+export function NavMain({
+  items,
+  label = "Platform",
+  hasChurch = true,
+}: {
+  items: NavItem[];
+  label?: string;
+  hasChurch?: boolean;
+}) {
   const pathname = usePathname();
 
   return (
     <SidebarGroup>
-      <SidebarGroupLabel>Platform</SidebarGroupLabel>
+      <SidebarGroupLabel>{label}</SidebarGroupLabel>
       <SidebarMenu>
         {items.map((item) => {
           const isActive = item.href ? pathname.startsWith(item.href) : false;
           const hasSubItems = item.items && item.items.length > 0;
+          const needsChurch = item.requiresChurch && !hasChurch;
+          const isEffectivelyDisabled = item.isDisabled || needsChurch;
+
+          const disabledLabel = item.isDisabled
+            ? "COMING SOON"
+            : needsChurch
+              ? "CHURCH REQUIRED"
+              : null;
 
           if (hasSubItems) {
             return (
@@ -45,16 +66,18 @@ export function NavMain({ items }: { items: NavItem[] }) {
                     <SidebarMenuButton
                       tooltip={item.title}
                       isActive={isActive}
-                      disabled={item.isDisabled}
+                      disabled={isEffectivelyDisabled}
                     >
                       {item.icon && <item.icon />}
                       <span>{item.title}</span>
-                      {item.isDisabled && (
-                        <span className="ml-auto text-[10px] font-medium text-muted-foreground">
-                          COMING SOON
+                      {disabledLabel && (
+                        <span className="text-muted-foreground ml-auto text-[10px] font-medium">
+                          {disabledLabel}
                         </span>
                       )}
-                      <ChevronRight className={`${item.isDisabled ? "ml-2" : "ml-auto"} transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90`} />
+                      <ChevronRight
+                        className={`${isEffectivelyDisabled ? "ml-2" : "ml-auto"} transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90`}
+                      />
                     </SidebarMenuButton>
                   </CollapsibleTrigger>
                   <CollapsibleContent>
@@ -88,6 +111,59 @@ export function NavMain({ items }: { items: NavItem[] }) {
             );
           }
 
+          // Wrap church-required disabled items in a hover card
+          if (needsChurch) {
+            return (
+              <SidebarMenuItem key={item.title}>
+                <HoverCard openDelay={200} closeDelay={100}>
+                  <HoverCardTrigger asChild>
+                    <SidebarMenuButton
+                      isActive={false}
+                      aria-disabled="true"
+                      className="pointer-events-auto cursor-not-allowed opacity-50"
+                    >
+                      {item.icon && <item.icon />}
+                      <span>{item.title}</span>
+                    </SidebarMenuButton>
+                  </HoverCardTrigger>
+                  <HoverCardContent
+                    side="right"
+                    sideOffset={8}
+                    className="w-72"
+                  >
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2">
+                        <Rocket className="text-primary h-4 w-4" />
+                        <p className="text-sm font-semibold">
+                          Get started with {item.title}
+                        </p>
+                      </div>
+                      <p className="text-muted-foreground text-sm">
+                        Create your church plant from the dashboard to unlock{" "}
+                        {item.title} and all other planting tools.
+                      </p>
+                      <div className="flex items-center gap-3 text-xs">
+                        <Link
+                          href="/dashboard"
+                          className="text-primary cursor-pointer font-medium hover:underline"
+                        >
+                          Go to Dashboard
+                        </Link>
+                        <span className="text-muted-foreground">·</span>
+                        <Link
+                          href="/wiki"
+                          className="text-muted-foreground cursor-pointer hover:underline"
+                        >
+                          Explore the Wiki
+                        </Link>
+                      </div>
+                    </div>
+                  </HoverCardContent>
+                </HoverCard>
+              </SidebarMenuItem>
+            );
+          }
+
           return (
             <SidebarMenuItem key={item.title}>
               <SidebarMenuButton
@@ -106,7 +182,7 @@ export function NavMain({ items }: { items: NavItem[] }) {
                   {item.icon && <item.icon />}
                   <span>{item.title}</span>
                   {item.isDisabled && (
-                    <span className="ml-auto text-[10px] font-medium text-muted-foreground">
+                    <span className="text-muted-foreground ml-auto text-[10px] font-medium">
                       COMING SOON
                     </span>
                   )}

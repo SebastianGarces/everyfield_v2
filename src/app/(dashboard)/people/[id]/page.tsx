@@ -17,7 +17,7 @@ export default async function PersonDetailPage({
   const { user } = await verifySession();
 
   if (!user.churchId) {
-    redirect("/login");
+    redirect("/dashboard");
   }
 
   const { id } = await params;

@@ -22,7 +22,6 @@ export const personStatuses = [
   "attendee",
   "following_up",
   "interviewed",
-  "committed",
   "core_group",
   "launch_team",
   "leader",

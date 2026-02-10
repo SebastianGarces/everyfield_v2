@@ -24,8 +24,7 @@ const KEY_TRANSITIONS: { from: PersonStatus; to: PersonStatus }[] = [
   { from: "prospect", to: "attendee" },
   { from: "attendee", to: "following_up" },
   { from: "following_up", to: "interviewed" },
-  { from: "interviewed", to: "committed" },
-  { from: "committed", to: "core_group" },
+  { from: "interviewed", to: "core_group" },
 ];
 
 /**
@@ -49,8 +48,6 @@ export async function getPipelineMetrics(
   for (const row of statusCountRows) {
     statusCounts[row.status] = row.count;
   }
-
-  console.log("[Metrics] Status counts:", statusCounts);
 
   // 2. Get conversion rates from activity log
   // Query status_changed activities and count transitions
@@ -91,12 +88,6 @@ export async function getPipelineMetrics(
     transitionCounts[key] = (transitionCounts[key] ?? 0) + 1;
   }
 
-  console.log(
-    "[Metrics] Status change activities found:",
-    statusActivities.length
-  );
-  console.log("[Metrics] Forward transition counts:", transitionCounts);
-
   // Calculate conversion rates for key transitions
   // Rate = people who transitioned forward / total who were ever in source status
   // Total = people currently in "from" + people who moved forward out of "from"
@@ -115,14 +106,6 @@ export async function getPipelineMetrics(
 
     return { from, to, rate, count, total };
   });
-
-  console.log(
-    "[Metrics] Conversions:",
-    conversions.map(
-      (c) =>
-        `${c.from}->${c.to}: ${Math.round(c.rate * 100)}% (${c.count}/${c.total})`
-    )
-  );
 
   return { statusCounts, conversions };
 }

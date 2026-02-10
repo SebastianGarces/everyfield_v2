@@ -3,11 +3,14 @@ import {
   BookOpenText,
   Building2,
   CalendarCheck,
+  Church,
   FileText,
   LayoutDashboard,
   ListChecks,
   MessageSquare,
+  Network,
   PiggyBank,
+  Settings,
   Users,
   UsersRound,
 } from "lucide-react";
@@ -18,6 +21,7 @@ export type NavItem = {
   icon?: LucideIcon;
   items?: NavItem[];
   isDisabled?: boolean;
+  requiresChurch?: boolean;
 };
 
 export type NavSection = {
@@ -40,12 +44,13 @@ export const mainNavItems: NavItem[] = [
     title: "People & CRM",
     href: "/people",
     icon: Users,
+    requiresChurch: true,
   },
   {
-    title: "Vision Meetings",
-    href: "/vision-meetings",
+    title: "Meetings",
+    href: "/meetings",
     icon: CalendarCheck,
-    isDisabled: true,
+    requiresChurch: true,
   },
   {
     title: "Tasks",
@@ -69,19 +74,78 @@ export const mainNavItems: NavItem[] = [
     title: "Ministry Teams",
     href: "/teams",
     icon: UsersRound,
-    isDisabled: true,
+    requiresChurch: true,
   },
   {
     title: "Communication",
     href: "/communication",
     icon: MessageSquare,
-    isDisabled: true,
+    requiresChurch: true,
   },
   {
     title: "Facilities",
     href: "/facilities",
     icon: Building2,
     isDisabled: true,
+  },
+];
+
+/**
+ * Navigation items shown to sending church admins.
+ * These appear instead of the planter-focused mainNavItems.
+ */
+export const sendingChurchNavItems: NavItem[] = [
+  {
+    title: "Portfolio",
+    href: "/oversight",
+    icon: LayoutDashboard,
+  },
+  {
+    title: "Church Plants",
+    href: "/oversight/plants",
+    icon: Church,
+  },
+  {
+    title: "Invitations",
+    href: "/oversight/invitations",
+    icon: Users,
+  },
+  {
+    title: "Settings",
+    href: "/oversight/settings",
+    icon: Settings,
+  },
+];
+
+/**
+ * Navigation items shown to network admins.
+ * These appear instead of the planter-focused mainNavItems.
+ */
+export const networkAdminNavItems: NavItem[] = [
+  {
+    title: "Network Overview",
+    href: "/oversight",
+    icon: LayoutDashboard,
+  },
+  {
+    title: "Sending Churches",
+    href: "/oversight/sending-churches",
+    icon: Church,
+  },
+  {
+    title: "Church Plants",
+    href: "/oversight/plants",
+    icon: Network,
+  },
+  {
+    title: "Invitations",
+    href: "/oversight/invitations",
+    icon: Users,
+  },
+  {
+    title: "Settings",
+    href: "/oversight/settings",
+    icon: Settings,
   },
 ];
 

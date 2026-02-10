@@ -115,7 +115,6 @@ export function AssessmentForm({ person, onSuccess }: AssessmentFormProps) {
     "attendee",
     "following_up",
     "interviewed",
-    "committed",
     "core_group",
     "launch_team",
     "leader",

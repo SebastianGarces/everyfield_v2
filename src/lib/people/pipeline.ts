@@ -45,11 +45,6 @@ const PIPELINE_COLUMNS: PipelineColumnDef[] = [
     statuses: ["interviewed"],
   },
   {
-    id: "committed",
-    title: "Committed",
-    statuses: ["committed"],
-  },
-  {
     id: "core_group",
     title: "Core Group",
     statuses: ["core_group", "launch_team", "leader"],

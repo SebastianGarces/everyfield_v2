@@ -12,7 +12,7 @@ import { PersonTabs } from "./person-tabs";
 
 interface PersonProfileShellProps {
   person: Person;
-  activeTab: "overview" | "activity" | "assessments" | "teams";
+  activeTab: "overview" | "activity" | "assessments" | "teams" | "communication";
   household?: Household | null;
   children: React.ReactNode;
 }

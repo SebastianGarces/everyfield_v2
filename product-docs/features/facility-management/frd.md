@@ -645,6 +645,27 @@ This feature integrates with cross-cutting services defined in [System Architect
 
 ---
 
+## Oversight Access Patterns
+
+### Coach Access
+- Can view facility search status, site visits, and venue evaluations for assigned churches
+
+### Sending Church Admin Access
+- Aggregate facility metrics only: venues evaluated count, venue status
+- Subject to `share_facilities` privacy toggle
+
+### Network Admin Access
+- Aggregate facility metrics across all plants in the network
+- Network venue sharing (sharing venue information across network) is a future enhancement
+- Subject to `share_facilities` privacy toggle
+
+### Privacy Controls
+- Planter controls visibility via per-feature privacy toggle in church privacy settings
+- Privacy toggle for this feature: `share_facilities`
+- Default: `false` (not shared until planter opts in)
+
+---
+
 ## Open Questions
 
 1. **Venue discovery:** Should the platform integrate with venue databases or listing services?

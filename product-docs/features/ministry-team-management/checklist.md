@@ -12,6 +12,7 @@
 - [ ] MT-008: Team dashboard with health indicators
 - [ ] MT-009: Basic metrics (staffing percentage)
 - [ ] MT-010: Person-team linking (show on person profile)
+- [ ] MT-019: Custom team creation (beyond 10 core)
 
 ## Should Have
 
@@ -19,11 +20,10 @@
 - [ ] MT-012: Training completion matrix (team members vs training)
 - [ ] MT-013: Team meeting scheduling
 - [ ] MT-014: Meeting attendance recording
-- [ ] MT-015: Team communication via Communication Hub
+- [ ] MT-015: Team communication via Communication Hub (F9)
 - [ ] MT-016: Health scoring (staffing, training, attendance)
 - [ ] MT-017: Alert thresholds for understaffed teams
 - [ ] MT-018: Org chart view (hierarchical visualization)
-- [ ] MT-019: Custom team creation (beyond 10 core)
 - [ ] MT-020: Role assignment warnings (multiple teams)
 
 ## Nice to Have

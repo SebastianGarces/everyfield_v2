@@ -1,8 +1,8 @@
 # F9: Communication Hub
 ## Feature Requirements Document (FRD)
 
-**Version:** 1.0  
-**Date:** January 25, 2026  
+**Version:** 1.1  
+**Date:** February 9, 2026  
 **Feature Code:** F9
 
 ---
@@ -18,6 +18,8 @@
 ## Overview
 
 The Communication Hub provides centralized communication capabilities with team members and prospects. It combines message templates, communication history tracking, and delivery through integrated services (email, SMS).
+
+The Communication Hub also serves as a **delivery service** for other features. Features like Meetings (F3) can request email delivery through the Communication Hub using templates and merge fields, rather than implementing their own email infrastructure. This keeps all communication centralized with unified delivery tracking and per-person communication history.
 
 **Important:** The platform provides the workflow and templates; actual message delivery leverages integrated external services.
 
@@ -495,6 +497,41 @@ Message logged against:
 
 ---
 
+### Workflow 5: Feature-Triggered Communication
+
+**Trigger:** Another feature (e.g., Meetings) requests email delivery for a list of recipients
+
+**Steps:**
+
+```
+[Feature context] → [Send Invitations / Send Reminder]
+    ↓
+Feature provides:
+├── Recipient list (person IDs from guest list, team roster, etc.)
+├── Template category hint (e.g., meeting_invitation, meeting_reminder)
+├── Merge field data (meeting title, date, location, type, etc.)
+    ↓
+Communication Hub:
+├── Auto-select template by category (or allow user to pick)
+├── Pre-fill merge fields from feature context
+├── Render personalized message per recipient
+├── Optional: user previews before sending
+    ↓
+[Send]
+    ↓
+Emails delivered via integration service
+    ↓
+Delivery status tracked per recipient
+    ↓
+Communication logged to each recipient's history
+    ↓
+Calling feature notified of send completion (e.g., update invited_at timestamp)
+```
+
+**Key principle:** The calling feature owns the "who" and "why" (guest list, meeting context). The Communication Hub owns the "how" (templates, rendering, delivery, tracking). This keeps email delivery centralized while allowing any feature to trigger sends.
+
+---
+
 ## Data Model
 
 ### Communication
@@ -545,7 +582,7 @@ Message logged against:
 | church_id | UUID (FK) | No | Reference to Church (null for system templates) |
 | name | String | Yes | Template name |
 | description | Text | No | Template description |
-| category | Enum | Yes | `vision_meeting` / `follow_up` / `core_group` / `team` / `announcement` / `other` |
+| category | Enum | Yes | `meeting_invitation` / `meeting_reminder` / `follow_up` / `core_group` / `team` / `announcement` / `launch` / `other` |
 | channel | Enum | Yes | `email` / `sms` / `both` |
 | subject | String | No | Email subject template |
 | body | Text | Yes | Message body template |
@@ -577,10 +614,11 @@ General notes attached to any entity.
 
 | Category | Purpose | Examples |
 |----------|---------|----------|
-| Vision Meeting | Invitation and reminders | Invitation, Reminder, Recap |
+| Meeting Invitation | Invitation to any meeting type | Vision meeting invite, Orientation invite, Team meeting invite |
+| Meeting Reminder | Pre-meeting reminders for guest list | Day-before reminder, Same-day reminder |
 | Follow-Up | Post-meeting contact | Interested, Committed, Questions, Not Interested |
 | Core Group | Member communication | Welcome, Announcements, Reminders |
-| Team | Ministry team messages | Meeting reminder, Training reminder |
+| Team | Ministry team messages | Training reminder, Team announcement |
 | Launch | Pre-launch and launch | Countdown, Launch invitation |
 | Announcement | General announcements | News, Updates, Events |
 
@@ -588,16 +626,30 @@ General notes attached to any entity.
 
 ## Merge Fields
 
+### Person Fields
+
 | Field | Description | Source |
 |-------|-------------|--------|
 | `{{first_name}}` | Recipient's first name | Person.first_name |
 | `{{last_name}}` | Recipient's last name | Person.last_name |
 | `{{full_name}}` | Full name | Person.first_name + last_name |
+
+### Church Fields
+
+| Field | Description | Source |
+|-------|-------------|--------|
 | `{{church_name}}` | Church name | Church.name |
 | `{{pastor_name}}` | Senior Pastor name | Church profile |
-| `{{meeting_date}}` | Vision Meeting date | VisionMeeting.datetime |
-| `{{meeting_location}}` | Meeting location | VisionMeeting.location |
 | `{{launch_date}}` | Launch Sunday date | Church.launch_date |
+
+### Meeting Fields (available when triggered from Meetings feature)
+
+| Field | Description | Source |
+|-------|-------------|--------|
+| `{{meeting_title}}` | Meeting title or auto-generated name (e.g., "Vision Meeting #12") | ChurchMeeting.title |
+| `{{meeting_type}}` | Meeting type label (Vision Meeting, Orientation, Team Meeting) | ChurchMeeting.type |
+| `{{meeting_date}}` | Meeting date and time | ChurchMeeting.datetime |
+| `{{meeting_location}}` | Meeting location name and address | ChurchMeeting.location_name |
 
 ---
 
@@ -607,9 +659,10 @@ General notes attached to any entity.
 
 | Data | Contract | Source |
 |------|----------|--------|
-| **Person records** | Read `Person.id`, `first_name`, `last_name`, email, phone for recipient selection and merge fields | People/CRM |
-| **Team membership** | Read team roster by `team_id` → list of `person_id` for group messaging | Ministry Teams |
-| **Task completion events** | Receive `task.completed` event with `person_id` to prompt follow-up communication | Task Management |
+| **Person records** | Read `Person.id`, `first_name`, `last_name`, email, phone for recipient selection and merge fields | People/CRM (F2) |
+| **Team membership** | Read team roster by `team_id` -> list of `person_id` for group messaging | Ministry Teams (F8) |
+| **Task completion events** | Receive `task.completed` event with `person_id` to prompt follow-up communication | Task Management (F5) |
+| **Meeting invitation requests** | Receive meeting details (title, datetime, location, type) and guest list (person IDs) to compose and send invitation emails using meeting templates | Meetings (F3) |
 
 ### Outbound (this feature provides)
 
@@ -642,6 +695,24 @@ General notes attached to any entity.
 ### Engagement
 - Messages sent per user per week
 - Communication frequency per contact
+
+---
+
+## Oversight Access Patterns
+
+### Coach Access
+- Can view communication logs and notes for assigned churches (read-only)
+
+### Sending Church Admin Access
+- No access to communication content
+- Communication is considered private by nature and is not subject to privacy toggles
+
+### Network Admin Access
+- No access to communication content
+- Not subject to privacy toggles
+
+### Privacy Controls
+- Communication content (messages, notes) is inherently private and is never shared with oversight users, regardless of privacy settings
 
 ---
 

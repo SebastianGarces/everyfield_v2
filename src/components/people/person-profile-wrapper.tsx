@@ -6,7 +6,7 @@ import { PersonProfileShell } from "./person-profile-shell";
 
 interface PersonProfileWrapperProps {
   personId: string;
-  activeTab: "overview" | "activity" | "assessments" | "teams";
+  activeTab: "overview" | "activity" | "assessments" | "teams" | "communication";
   children: React.ReactNode;
 }
 
@@ -25,7 +25,7 @@ export async function PersonProfileWrapper({
   const { user } = await verifySession();
 
   if (!user.churchId) {
-    redirect("/login");
+    redirect("/dashboard");
   }
 
   const person = await getPerson(user.churchId, personId);

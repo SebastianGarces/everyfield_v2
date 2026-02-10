@@ -1,4 +1,8 @@
-import type { Person, PersonStatus } from "@/db/schema";
+import { db } from "@/db";
+import { persons, type Person, type PersonStatus } from "@/db/schema";
+import { and, eq, isNull } from "drizzle-orm";
+import { eventBus } from "@/lib/events/event-bus";
+import { changeStatus } from "./status";
 
 // ============================================================================
 // Event Types
@@ -28,191 +32,234 @@ export interface PersonStatusChangedEvent {
 }
 
 // ============================================================================
-// Event Emission (Stubs)
+// Event Emission
 // ============================================================================
 
 /**
  * Emit an event when a person is created.
- * Currently stubbed - logs to console in development.
- * Will be replaced with actual event bus when integrated with other features.
  */
 export async function emitPersonCreated(person: Person): Promise<void> {
-  const event: PersonCreatedEvent = {
+  await eventBus.emit<PersonCreatedEvent>({
     type: "person.created",
     personId: person.id,
     churchId: person.churchId,
     status: person.status,
     timestamp: new Date(),
-  };
-
-  // Stub: Log to console in dev
-  if (process.env.NODE_ENV === "development") {
-    console.log("[EVENT] person.created", event);
-  }
-
-  // TODO: Replace with actual event emission when event system is built
-  // await eventBus.emit(event);
+  });
 }
 
 /**
  * Emit an event when a person's status changes.
- * Currently stubbed - logs to console in development.
- * Will be replaced with actual event bus when integrated with other features.
  */
 export async function emitPersonStatusChanged(
   person: Person,
   oldStatus: PersonStatus,
   newStatus: PersonStatus
 ): Promise<void> {
-  const event: PersonStatusChangedEvent = {
+  await eventBus.emit<PersonStatusChangedEvent>({
     type: "person.status.changed",
     personId: person.id,
     churchId: person.churchId,
     oldStatus,
     newStatus,
     timestamp: new Date(),
-  };
-
-  // Stub: Log to console in dev
-  if (process.env.NODE_ENV === "development") {
-    console.log("[EVENT] person.status.changed", event);
-  }
-
-  // TODO: Replace with actual event emission when event system is built
-  // await eventBus.emit(event);
+  });
 }
 
 // ============================================================================
-// Inbound Event Handlers (Deferred - Depends on F3/F8)
+// Inbound Event Handlers
 // ============================================================================
 
 /**
  * Handle vision meeting attendance event from F3.
- * Auto-advances person from prospect to attendee.
+ * Auto-advances person from prospect to attendee when they attend a Vision Meeting.
  *
- * DEFERRED: This handler will be implemented when F3 (Vision Meetings) is built.
- *
- * @throws Error - Not implemented yet
+ * Only advances if current status is "prospect". Other statuses are left unchanged
+ * since the person is already further along the pipeline.
  */
 export async function handleVisionMeetingAttendance(
   personId: string,
   meetingId: string,
   churchId: string
 ): Promise<void> {
-  // Log the attempted call for debugging
-  console.warn("[DEFERRED] handleVisionMeetingAttendance called", {
-    personId,
-    meetingId,
-    churchId,
+  const person = await db.query.persons.findFirst({
+    where: and(
+      eq(persons.churchId, churchId),
+      eq(persons.id, personId),
+      isNull(persons.deletedAt)
+    ),
   });
 
-  throw new Error(
-    "Not implemented - depends on F3 (Vision Meetings). " +
-      "Use manual status change until F3 is built."
-  );
+  if (!person) {
+    console.warn(
+      `[EVENT] handleVisionMeetingAttendance: person ${personId} not found`
+    );
+    return;
+  }
+
+  // Only auto-advance prospects to attendee
+  if (person.status !== "prospect") {
+    if (process.env.NODE_ENV === "development") {
+      console.log(
+        `[EVENT] Person ${personId} is "${person.status}", not advancing (only prospects are auto-advanced)`
+      );
+    }
+    return;
+  }
+
+  try {
+    await changeStatus(
+      churchId,
+      personId,
+      person.createdBy,
+      "attendee",
+      "Auto-advanced from vision meeting attendance"
+    );
+    if (process.env.NODE_ENV === "development") {
+      console.log(
+        `[EVENT] Auto-advanced person ${personId} from prospect to attendee (meeting ${meetingId})`
+      );
+    }
+  } catch (error) {
+    console.error(
+      `[EVENT] Failed to auto-advance person ${personId}:`,
+      error
+    );
+  }
 }
 
 /**
  * Handle team member assignment event from F8.
- * Auto-advances person from core_group to launch_team.
+ * Auto-advances person from core_group to launch_team when assigned to a ministry team.
  *
- * DEFERRED: This handler will be implemented when F8 (Ministry Teams) is built.
- *
- * @throws Error - Not implemented yet
+ * Only advances if current status is "core_group". Other statuses are left unchanged
+ * since the person is either not yet at core_group or already beyond launch_team.
  */
 export async function handleTeamMemberAssigned(
   personId: string,
   teamId: string,
-  role: string,
+  roleId: string,
   churchId: string
 ): Promise<void> {
-  // Log the attempted call for debugging
-  console.warn("[DEFERRED] handleTeamMemberAssigned called", {
-    personId,
-    teamId,
-    role,
-    churchId,
+  const person = await db.query.persons.findFirst({
+    where: and(
+      eq(persons.churchId, churchId),
+      eq(persons.id, personId),
+      isNull(persons.deletedAt)
+    ),
   });
 
-  throw new Error(
-    "Not implemented - depends on F8 (Ministry Teams). " +
-      "Use manual status change until F8 is built."
-  );
+  if (!person) {
+    console.warn(
+      `[EVENT] handleTeamMemberAssigned: person ${personId} not found`
+    );
+    return;
+  }
+
+  // Only auto-advance core_group members to launch_team
+  if (person.status !== "core_group") {
+    if (process.env.NODE_ENV === "development") {
+      console.log(
+        `[EVENT] Person ${personId} is "${person.status}", not advancing to launch_team (only core_group members are auto-advanced)`
+      );
+    }
+    return;
+  }
+
+  try {
+    await changeStatus(
+      churchId,
+      personId,
+      person.createdBy,
+      "launch_team",
+      `Auto-advanced from team assignment (team: ${teamId}, role: ${roleId})`
+    );
+    if (process.env.NODE_ENV === "development") {
+      console.log(
+        `[EVENT] Auto-advanced person ${personId} from core_group to launch_team (team ${teamId})`
+      );
+    }
+  } catch (error) {
+    console.error(
+      `[EVENT] Failed to auto-advance person ${personId} to launch_team:`,
+      error
+    );
+  }
 }
 
 /**
  * Handle team leader assignment event from F8.
- * Auto-advances person from launch_team to leader.
+ * Auto-advances person to leader status when assigned as team leader or
+ * assigned to a leadership role.
  *
- * DEFERRED: This handler will be implemented when F8 (Ministry Teams) is built.
- *
- * @throws Error - Not implemented yet
+ * Advances from launch_team to leader. If person is at core_group, they
+ * will first be advanced to launch_team by the team.member.assigned handler,
+ * and then to leader by this handler.
  */
 export async function handleTeamLeaderAssigned(
   personId: string,
   teamId: string,
   churchId: string
 ): Promise<void> {
-  // Log the attempted call for debugging
-  console.warn("[DEFERRED] handleTeamLeaderAssigned called", {
-    personId,
-    teamId,
-    churchId,
+  const person = await db.query.persons.findFirst({
+    where: and(
+      eq(persons.churchId, churchId),
+      eq(persons.id, personId),
+      isNull(persons.deletedAt)
+    ),
   });
 
-  throw new Error(
-    "Not implemented - depends on F8 (Ministry Teams). " +
-      "Use manual status change until F8 is built."
-  );
+  if (!person) {
+    console.warn(
+      `[EVENT] handleTeamLeaderAssigned: person ${personId} not found`
+    );
+    return;
+  }
+
+  // Only auto-advance launch_team members to leader
+  if (person.status !== "launch_team") {
+    if (process.env.NODE_ENV === "development") {
+      console.log(
+        `[EVENT] Person ${personId} is "${person.status}", not advancing to leader (only launch_team members are auto-advanced)`
+      );
+    }
+    return;
+  }
+
+  try {
+    await changeStatus(
+      churchId,
+      personId,
+      person.createdBy,
+      "leader",
+      `Auto-advanced from team leader assignment (team: ${teamId})`
+    );
+    if (process.env.NODE_ENV === "development") {
+      console.log(
+        `[EVENT] Auto-advanced person ${personId} from launch_team to leader (team ${teamId})`
+      );
+    }
+  } catch (error) {
+    console.error(
+      `[EVENT] Failed to auto-advance person ${personId} to leader:`,
+      error
+    );
+  }
 }
 
 /**
  * Handle follow-up initiated event.
  * Auto-advances person from attendee to following_up.
  *
- * This can be triggered when a note with follow-up tag is created.
- *
- * DEFERRED: This handler will be fully implemented when task/follow-up system is built.
- *
- * @throws Error - Not implemented yet
+ * DEFERRED: Will be implemented when task/follow-up system (F5) is built.
  */
 export async function handleFollowUpInitiated(
   personId: string,
   churchId: string,
   _noteId?: string
 ): Promise<void> {
-  // Log the attempted call for debugging
-  console.warn("[DEFERRED] handleFollowUpInitiated called", {
+  console.warn("[DEFERRED] handleFollowUpInitiated called — no subscriber registered yet", {
     personId,
     churchId,
   });
-
-  throw new Error(
-    "Not implemented - depends on follow-up/task system. " +
-      "Use manual status change until the feature is built."
-  );
-}
-
-/**
- * Handle orientation completed event.
- * Auto-advances person from committed to core_group.
- *
- * DEFERRED: This handler will be implemented when orientation tracking is built.
- *
- * @throws Error - Not implemented yet
- */
-export async function handleOrientationCompleted(
-  personId: string,
-  churchId: string
-): Promise<void> {
-  // Log the attempted call for debugging
-  console.warn("[DEFERRED] handleOrientationCompleted called", {
-    personId,
-    churchId,
-  });
-
-  throw new Error(
-    "Not implemented - depends on orientation tracking system. " +
-      "Use manual status change until the feature is built."
-  );
 }

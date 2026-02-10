@@ -14,7 +14,7 @@ export default async function NewPersonPage() {
   const { user } = await verifySession();
 
   if (!user.churchId) {
-    redirect("/login");
+    redirect("/dashboard");
   }
 
   return (
@@ -29,9 +29,7 @@ export default async function NewPersonPage() {
         <Card>
           <CardHeader>
             <CardTitle className="text-2xl">Add Person</CardTitle>
-            <CardDescription>
-              Add a new person to your contacts
-            </CardDescription>
+            <CardDescription>Add a new person to your contacts</CardDescription>
           </CardHeader>
           <CardContent>
             <PersonForm mode="create" />

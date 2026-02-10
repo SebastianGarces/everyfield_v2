@@ -68,6 +68,69 @@
 
 ---
 
+## Invitations / Associations
+
+| Flow | Entrypoint | Trigger |
+|------|-----------|---------|
+| Create invitation | `src/lib/invitations/service.ts:createInvitation()` | Oversight admin action |
+| Accept invitation | `src/lib/invitations/service.ts:acceptInvitation()` | Target user action |
+| Decline invitation | `src/lib/invitations/service.ts:declineInvitation()` | Target user action |
+| Revoke invitation | `src/lib/invitations/service.ts:revokeInvitation()` | Inviter action |
+| Disassociate | `src/lib/invitations/service.ts:disassociate*()` | User action |
+
+**Primary modules:** `src/lib/invitations/`, `src/db/schema/organization-invitation.ts`
+
+**Key deps:** `organization_invitations`, `churches`, `sending_churches` tables
+
+---
+
+## Access Control
+
+| Flow | Entrypoint | Trigger |
+|------|-----------|---------|
+| Resolve accessible churches | `src/lib/auth/access.ts:getAccessibleChurchIds()` | Any cross-church query |
+| Check church access | `src/lib/auth/access.ts:requireChurchAccess()` | Before data access |
+| Check feature privacy | `src/lib/auth/access.ts:canAccessFeatureData()` | Before returning data to oversight |
+| Role guard | `src/lib/auth/access.ts:requireRole()` | Server actions |
+
+**Primary modules:** `src/lib/auth/access.ts`, `src/db/schema/coach-assignment.ts`, `src/db/schema/church-privacy-settings.ts`
+
+---
+
+## Vision Meetings
+
+| Flow | Entrypoint | Trigger |
+|------|-----------|---------|
+| Meeting list | `src/app/(dashboard)/vision-meetings/page.tsx` | Route `/vision-meetings` |
+| Schedule meeting | `src/app/(dashboard)/vision-meetings/new/page.tsx` | Route `/vision-meetings/new` |
+| Meeting detail | `src/app/(dashboard)/vision-meetings/[id]/page.tsx` | Route `/vision-meetings/[id]` |
+| Attendance capture | `src/app/(dashboard)/vision-meetings/[id]/attendance/page.tsx` | Route `/vision-meetings/[id]/attendance` |
+| Analytics | `src/app/(dashboard)/vision-meetings/[id]/analytics/page.tsx` | Route `/vision-meetings/[id]/analytics` |
+| Evaluation | `src/app/(dashboard)/vision-meetings/[id]/evaluation/page.tsx` | Route `/vision-meetings/[id]/evaluation` |
+| Logistics | `src/app/(dashboard)/vision-meetings/[id]/logistics/page.tsx` | Route `/vision-meetings/[id]/logistics` |
+| Invitations | `src/app/(dashboard)/vision-meetings/[id]/invitations/page.tsx` | Route `/vision-meetings/[id]/invitations` |
+| Create meeting | `src/app/(dashboard)/vision-meetings/actions.ts:createMeetingAction()` | Form submit |
+| Update meeting | `src/app/(dashboard)/vision-meetings/actions.ts:updateMeetingAction()` | Form submit |
+| Delete meeting | `src/app/(dashboard)/vision-meetings/actions.ts:deleteMeetingAction()` | User action |
+| Update status | `src/app/(dashboard)/vision-meetings/actions.ts:updateMeetingStatusAction()` | Status button |
+| Add attendee | `src/app/(dashboard)/vision-meetings/actions.ts:addAttendeeAction()` | User action |
+| Quick add attendee | `src/app/(dashboard)/vision-meetings/actions.ts:quickAddAttendeeAction()` | Form submit |
+| Remove attendee | `src/app/(dashboard)/vision-meetings/actions.ts:removeAttendeeAction()` | User action |
+| Finalize attendance | `src/app/(dashboard)/vision-meetings/actions.ts:finalizeAttendanceAction()` | Button click |
+| Create location | `src/app/(dashboard)/vision-meetings/actions.ts:createLocationAction()` | Form submit |
+| Create invitation | `src/app/(dashboard)/vision-meetings/actions.ts:createInvitationAction()` | Form submit |
+| Update invitation status | `src/app/(dashboard)/vision-meetings/actions.ts:updateInvitationStatusAction()` | Dropdown change |
+| Create evaluation | `src/app/(dashboard)/vision-meetings/actions.ts:createEvaluationAction()` | Form submit |
+| Toggle checklist | `src/app/(dashboard)/vision-meetings/actions.ts:toggleChecklistItemAction()` | Checkbox click |
+
+**Primary modules:** `src/lib/vision-meetings/`, `src/components/vision-meetings/`, `src/db/schema/vision-meetings.ts`
+
+**Key deps:** `locations`, `vision_meetings`, `vision_meeting_attendance`, `invitations`, `meeting_evaluations`, `meeting_checklist_items` tables
+
+**Events:** `meeting.attendance.recorded` → F2 handler (prospect → attendee), `meeting.attendance.finalized` → F5 (deferred), `meeting.completed` → F4 (deferred)
+
+---
+
 ## API Routes
 
 | Route | File | Method |

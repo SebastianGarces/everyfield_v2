@@ -1,6 +1,7 @@
 import { db } from "@/db";
 import { personActivities, persons, type NewPerson } from "@/db/schema";
 import { personCreateSchema } from "@/lib/validations/people";
+import { emitPersonCreated } from "./events";
 import { checkForDuplicates } from "./duplicates";
 import type { ImportPreview, ImportRow, ImportSummary } from "./types";
 
@@ -327,10 +328,9 @@ export async function executeBulkImport(
         notes: data.notes || null,
       };
 
-      const [person] = await db
-        .insert(persons)
-        .values(values)
-        .returning({ id: persons.id });
+      const [person] = await db.insert(persons).values(values).returning();
+
+      await emitPersonCreated(person);
 
       // Log activity for person creation
       await db.insert(personActivities).values({

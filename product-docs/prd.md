@@ -27,8 +27,8 @@ product-docs/
     │   └── frd.md                # F1: Wiki / Knowledge Base
     ├── people-crm/
     │   └── frd.md                # F2: People / CRM Management
-    ├── vision-meeting-management/
-    │   └── frd.md                # F3: Vision Meeting Management
+    ├── meetings/
+    │   └── frd.md                # F3: Meetings
     ├── progress-dashboard/
     │   └── frd.md                # F4: Progress Dashboard
     ├── task-project-management/
@@ -99,7 +99,7 @@ Each feature has its own FRD defining *what that feature must do*. FRDs are inde
 |------|---------|--------------|
 | F1 | [Wiki / Knowledge Base](./features/wiki/frd.md) | Educational resource with structured guidance |
 | F2 | [People / CRM Management](./features/people-crm/frd.md) | Contact and relationship tracking |
-| F3 | [Vision Meeting Management](./features/vision-meeting-management/frd.md) | Meeting planning, execution, follow-up |
+| F3 | [Meetings](./features/meetings/frd.md) | Plan, execute, and track all meeting types (Vision Meetings, Orientations, Team Meetings) |
 | F4 | [Progress Dashboard](./features/progress-dashboard/frd.md) | Visual progress and health indicators |
 | F5 | [Task & Project Management](./features/task-project-management/frd.md) | Tasks, checklists, timeline |
 | F6 | [Document Templates & Generation](./features/document-templates/frd.md) | Template library and document generation |

@@ -1,7 +1,7 @@
 # EveryField - Product Brief
 
-**Version:** 1.1  
-**Date:** February 3, 2026  
+**Version:** 1.2  
+**Date:** February 7, 2026  
 **Source Document:** Launch Playbook v1.2 (Harvest Bible Fellowship)
 
 ---
@@ -45,15 +45,39 @@ A single platform where church planters can **learn**, **plan**, **execute**, an
 ### User Hierarchy
 
 ```
-Sending Network
-    └── Sending Church(es)
+Sending Network (optional)
+    └── Sending Church(es) (optional)
         └── Church Plant(s)
             ├── Planter
             ├── Coach
             └── Core Group Members
 ```
 
+**Key design principle: All relationships are optional and mutable.** Every entity in the hierarchy can exist independently and be associated later:
+
+- A **church plant** may sign up and operate with no sending church or network affiliation. At any point, the planter can accept an invitation to join a sending church or network.
+- A **sending church** may sign up independently with no network affiliation. It can later accept an invitation to join a sending network.
+- A **sending network** exists at the top of the hierarchy and can invite sending churches or church plants directly.
+
+All hierarchical relationships (sending_church_id, sending_network_id) are nullable to support independent operation and late association.
+
 **Key insight:** Both large networks (Send Network sending 1000+ churches/year) and small sending churches (sending one plant every few years) need visibility into their planters' progress. The platform must serve both scales with appropriate dashboards and analytics.
+
+### Three Independent Signup Paths
+
+| Path | User | Creates | Starts With |
+|------|------|---------|-------------|
+| **A: Planter** | Church planter | Account + Church Plant | No affiliations; full platform access immediately |
+| **B: Sending Church** | Sending church admin | Account + SendingChurch entity | No network affiliation; can invite planters |
+| **C: Network** | Network admin | Account + SendingNetwork entity | Can invite sending churches and/or church plants |
+
+### Association Model
+
+Associations between entities are managed through an invitation system:
+
+- **Oversight invites, target accepts.** The sending church admin or network admin initiates the invitation. The planter (or sending church admin) must accept or decline.
+- Associations can be created at any time (late association) and removed (disassociation), with full audit logging.
+- Coach assignment is planter-initiated: the planter invites their coach.
 
 ---
 
@@ -143,7 +167,7 @@ The platform consists of the following features, each documented in a separate F
 |------|---------|-------------|
 | F1 | Wiki / Knowledge Base | Educational resource with structured guidance and best practices |
 | F2 | People / CRM Management | Track individuals from initial contact through committed team member |
-| F3 | Vision Meeting Management | Plan, execute, and track Vision Meetings |
+| F3 | Meetings | Plan, execute, and track all meeting types (Vision Meetings, Orientations, Team Meetings) |
 | F4 | Progress Dashboard | Visual representation of launch progress and health indicators |
 | F5 | Task & Project Management | Track all tasks with templates and timeline visualization |
 | F6 | Document Templates & Generation | Ready-to-use templates for critical documents |
@@ -187,7 +211,7 @@ Oversight users (sending networks and sending churches) need aggregate visibilit
 | **Coach Effectiveness** | Plants per coach, coach load balancing |
 | **Financial Overview** | Aggregate giving trends, budget health across portfolio |
 
-**Data access principle:** Oversight users see aggregated/anonymized data by default. Detailed drill-down requires explicit planter consent or coach relationship.
+**Data access principle:** Oversight users (sending church admins, network admins) see aggregate metrics only. No individual person records or drill-down. Planters control visibility at the feature level via per-feature privacy toggles (e.g., "share financial data with sending church"). Consent-gated drill-down is deferred to a future iteration.
 
 ---
 
@@ -222,6 +246,14 @@ The following are explicitly out of scope for EveryField:
 | Content customization | Yes, supported via `church_id` on wiki articles. Global articles (null) visible to all; network/church-specific articles scoped to their users. Already implemented in schema. | Feb 3, 2026 |
 | Network branding | No - not planned | Feb 3, 2026 |
 | Network benchmarking | Yes - networks should see comparative analytics across their plants | Feb 3, 2026 |
+| All relationships optional and mutable | Church plants, sending churches, and networks can all exist independently. Associations can be created or removed at any time via the invitation system. | Feb 7, 2026 |
+| Three independent signup paths | Planters, sending church admins, and network admins each have their own signup flow that creates the appropriate entity with no required affiliations. | Feb 7, 2026 |
+| Association direction | Oversight invites, target accepts. Sending church admins invite planters; network admins invite sending churches or church plants. | Feb 7, 2026 |
+| Coach assignment | Planter-initiated. The planter invites their coach. May change once networks/sending churches provide feedback. | Feb 7, 2026 |
+| Per-feature privacy controls | Planters control visibility at the feature level (e.g., toggle "share financial data with sending church"). Not all-or-nothing. | Feb 7, 2026 |
+| SendingChurch as separate entity | SendingChurch is a separate table from Church (church plants). Sending churches don't go through the 6-phase journey and have fundamentally different needs. | Feb 7, 2026 |
+| Oversight metrics scope | Network/sending church admins see aggregate metrics only. No individual person records or drill-down. Consent-gated drill-down deferred to future iteration. | Feb 7, 2026 |
+| Full hierarchy ships together | The full Network -> Sending Church -> Church Plant model ships together. Networks and sending churches are the GTM channel for acquiring planters. | Feb 7, 2026 |
 
 ---
 

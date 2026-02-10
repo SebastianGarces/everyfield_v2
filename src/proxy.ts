@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 
 const SESSION_COOKIE_NAME = "session";
 const SESSION_EXPIRY_SECONDS = 30 * 24 * 60 * 60; // 30 days
@@ -8,7 +8,7 @@ const SESSION_EXPIRY_SECONDS = 30 * 24 * 60 * 60; // 30 days
 const AUTH_ROUTES = ["/login", "/register"];
 
 // Routes that require authentication
-const PROTECTED_ROUTE_PREFIXES = ["/dashboard", "/wiki"];
+const PROTECTED_ROUTE_PREFIXES = ["/dashboard", "/wiki", "/oversight"];
 
 // Social media and search engine crawler user agents
 // These need access to pages for metadata/OG tag scraping
@@ -51,7 +51,9 @@ export function proxy(request: NextRequest): NextResponse {
       const redirectTo =
         request.nextUrl.searchParams.get("redirect") || "/dashboard";
       // Prevent open redirect by ensuring redirectTo starts with /
-      const safeRedirect = redirectTo.startsWith("/") ? redirectTo : "/dashboard";
+      const safeRedirect = redirectTo.startsWith("/")
+        ? redirectTo
+        : "/dashboard";
       return NextResponse.redirect(new URL(safeRedirect, request.url));
     }
 

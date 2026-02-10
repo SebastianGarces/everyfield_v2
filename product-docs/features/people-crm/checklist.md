@@ -63,7 +63,7 @@
 - [x] P-005b: Implement email search
 - [x] P-005c: Implement phone search
 - [x] P-005d: Implement status filter
-- [ ] P-005e: Implement tag filter (Phase 7)
+- [x] P-005e: Implement tag filter (Phase 7)
 - [x] P-005f: Implement source filter
 - [x] P-005g: Create `src/lib/people/search.ts` service
 
@@ -263,12 +263,12 @@
 - [ ] P-024c: Display larger photo on profile (128-256px)
 
 ### Team Assignment Visibility (P-021)
-- [ ] P-021: DEFERRED - Display team assignments (depends on F8)
-- [ ] P-021a: Create placeholder Teams & Training tab
-- [ ] P-021b: Stub team display component
+- [ ] P-021: DEFERRED - Display live team assignments (depends on F8)
+- [x] P-021a: Create placeholder Teams & Training tab
+- [x] P-021b: Stub team display component
 
 ### Training Status Display (P-022)
-- [ ] P-022: DEFERRED - Display training completion (depends on F8)
+- [ ] P-022: DEFERRED - Display live training completion (depends on F8)
 
 ---
 
@@ -276,13 +276,35 @@
 
 ### Event Emission
 - [ ] Create event emitter utility
-- [ ] Emit `person.created` on person creation
-- [ ] Emit `person.status.changed` on status changes
+- [x] Emit `person.created` on person creation
+- [x] Emit `person.status.changed` on status changes
 
 ### Inbound Event Handlers (DEFERRED)
 - [ ] DEFERRED: Handle `vision_meeting.attendance.recorded` from F3
 - [ ] DEFERRED: Handle `team.member.assigned` from F8
 - [ ] DEFERRED: Handle `team.leader.assigned` from F8
+
+---
+
+## Remaining Work Classification
+
+### True TODOs (Unblocked, F2 Scope)
+
+- [ ] P-016d: Filter by skills in list view (future)
+- [ ] P-024a: Add photo upload to person form
+- [ ] P-024b: Display avatar in list views (48-64px)
+- [ ] P-024c: Display larger photo on profile (128-256px)
+- [ ] Create event emitter utility
+
+### Deferred TODOs (Blocked by Dependencies or Intentional Deferral)
+
+- [ ] P-012h: `vision_meeting.attendance.recorded` handler (depends on F3)
+- [ ] P-012i: `team.member.assigned` handler (depends on F8)
+- [ ] P-012j: `team.leader.assigned` handler (depends on F8)
+- [ ] P-018d: Potential duplicates view for batch review (deferred)
+- [ ] P-020c: Display conversion metrics in pipeline footer (deferred pending design revisit)
+- [ ] P-021: Display live team assignments (depends on F8)
+- [ ] P-022: Display live training completion (depends on F8)
 
 ---
 
@@ -293,7 +315,6 @@
 - [ ] P-028: Custom fields (church-defined)
 - [ ] P-029: Communication preferences
 - [ ] P-030: Birthday/anniversary tracking
-- [ ] P-031: Group orientations support
 
 ---
 

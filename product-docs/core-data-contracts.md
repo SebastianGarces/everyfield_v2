@@ -1,7 +1,7 @@
 # EveryField - Core Data Contracts
 
-**Version:** 1.1  
-**Date:** February 3, 2026
+**Version:** 1.2  
+**Date:** February 7, 2026
 
 ---
 
@@ -15,22 +15,26 @@ This document defines shared entity contracts and cross-feature rules. It specif
 
 ### SendingNetwork
 
-Church planting networks that oversee multiple sending churches and/or church plants.
+Church planting networks that oversee multiple sending churches and/or church plants. May exist independently at the top of the hierarchy.
 
 | Field | Type | Contract |
 |-------|------|----------|
 | `id` | UUID | Primary key |
 | `name` | String | Network name (e.g., "Send Network", "ARC") |
+| `created_at` | Timestamp | |
+| `updated_at` | Timestamp | |
 
 ### SendingChurch
 
-Churches that send planters. May belong to a network or operate independently.
+Churches that send planters. A separate entity from Church (church plants) because sending churches do not go through the 6-phase journey. May belong to a network or operate independently.
 
 | Field | Type | Contract |
 |-------|------|----------|
 | `id` | UUID | Primary key |
 | `name` | String | Church name |
-| `sending_network_id` | UUID (FK) | Optional; parent network |
+| `sending_network_id` | UUID (FK) | Optional; parent network. Nullable because a sending church can exist independently. |
+| `created_at` | Timestamp | |
+| `updated_at` | Timestamp | |
 
 ### Church
 
@@ -78,6 +82,54 @@ The church plant being launched. The primary tenant entity.
 |-------|------|----------|
 | `id` | Enum (0-6) | Phase identifier |
 | `exit_criteria` | JSON | Conditions for progression (Phase Engine evaluates) |
+
+### CoachAssignment
+
+Links a coach user to the church plants they oversee. A coach can be assigned to multiple churches.
+
+| Field | Type | Contract |
+|-------|------|----------|
+| `id` | UUID | Primary key |
+| `coach_user_id` | UUID (FK) | References User; must have role `coach` |
+| `church_id` | UUID (FK) | References Church; the plant being coached |
+| `assigned_at` | Timestamp | When the assignment was created |
+| `status` | Enum | `active` / `inactive` |
+
+### OrganizationInvitation
+
+Tracks invitations between hierarchy entities (network invites sending church, sending church invites plant, etc.).
+
+| Field | Type | Contract |
+|-------|------|----------|
+| `id` | UUID | Primary key |
+| `type` | Enum | `church_to_sending_church` / `sending_church_to_network` / `church_to_network` |
+| `inviter_user_id` | UUID (FK) | The oversight admin who sent the invitation |
+| `target_church_id` | UUID (FK) | Nullable; for church plant invitations |
+| `target_sending_church_id` | UUID (FK) | Nullable; for sending church invitations to join a network |
+| `sending_church_id` | UUID (FK) | Nullable; the sending church doing the inviting |
+| `sending_network_id` | UUID (FK) | Nullable; the network doing the inviting |
+| `status` | Enum | `pending` / `accepted` / `declined` / `expired` / `revoked` |
+| `responded_by` | UUID (FK) | Nullable; the user who accepted/declined |
+| `responded_at` | Timestamp | Nullable |
+| `created_at` | Timestamp | |
+| `expires_at` | Timestamp | |
+
+### ChurchPrivacySettings
+
+Controls which feature data a church plant shares with oversight users (sending church admin, network admin). One row per church plant. All toggles default to `false` (opt-in sharing).
+
+| Field | Type | Contract |
+|-------|------|----------|
+| `id` | UUID | Primary key |
+| `church_id` | UUID (FK) | Unique; one row per church plant |
+| `share_people` | Boolean | Share People/CRM aggregate data |
+| `share_meetings` | Boolean | Share Meeting metrics |
+| `share_tasks` | Boolean | Share Task progress |
+| `share_financials` | Boolean | Share Financial data |
+| `share_ministry_teams` | Boolean | Share Ministry Team health |
+| `share_facilities` | Boolean | Share Facility data |
+| `updated_at` | Timestamp | |
+| `updated_by` | UUID (FK) | User who last changed settings |
 
 ---
 
@@ -143,7 +195,7 @@ Events follow `entity.action` pattern:
 
 | Owner | Entities | Dependents May |
 |-------|----------|----------------|
-| **Core** | SendingNetwork, SendingChurch, Church, User, Phase | Read all fields |
+| **Core** | SendingNetwork, SendingChurch, Church, User, Phase, CoachAssignment, OrganizationInvitation, ChurchPrivacySettings | Read all fields |
 | **F2 (People/CRM)** | Person, Household | Read; write attendance/assignment via own tables |
 
 Features own their domain tables and reference shared entities by ID. See [System Architecture](./system-architecture.md) for full ownership map.

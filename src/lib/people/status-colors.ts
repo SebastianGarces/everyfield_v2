@@ -35,11 +35,6 @@ export const STATUS_BADGE_CONFIG: Record<PersonStatus, StatusBadgeConfig> = {
     className: "bg-purple-500 hover:bg-purple-600",
     variant: "default",
   },
-  committed: {
-    label: "Committed",
-    className: "bg-green-500 hover:bg-green-600",
-    variant: "default",
-  },
   core_group: {
     label: "Core Group",
     className: "bg-emerald-600 hover:bg-emerald-700",
@@ -68,8 +63,7 @@ export const STATUS_DESCRIPTIONS: Record<PersonStatus, string> = {
   attendee: "Actively attending services or events.",
   following_up: "In the follow-up process with a team member.",
   interviewed: "Has completed an interview with leadership.",
-  committed: "Has signed a commitment card.",
-  core_group: "Active member of the core group.",
+  core_group: "Active member of the Core Group. Has signed a commitment card.",
   launch_team: "Part of the church launch team.",
   leader: "Serving in a leadership role.",
 };

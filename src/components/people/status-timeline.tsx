@@ -13,7 +13,6 @@ const STATUS_STEPS: { id: PersonStatus; label: string }[] = [
   { id: "attendee", label: "Attendee" },
   { id: "following_up", label: "Following Up" },
   { id: "interviewed", label: "Interviewed" },
-  { id: "committed", label: "Committed" },
   { id: "core_group", label: "Core Group" },
 ];
 
