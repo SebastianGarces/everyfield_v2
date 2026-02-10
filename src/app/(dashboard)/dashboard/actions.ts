@@ -3,7 +3,7 @@
 import { db } from "@/db";
 import { churches, churchPrivacySettings, users } from "@/db/schema";
 import { verifySession } from "@/lib/auth/session";
-import { and, eq, isNull } from "drizzle-orm";
+import { eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
@@ -48,34 +48,25 @@ export async function createChurch(
     };
   }
 
-  // Create church + link user + privacy settings in a transaction
-  // The WHERE clause guards against double-submit race conditions
-  const church = await db.transaction(async (tx) => {
-    const [newChurch] = await tx
-      .insert(churches)
-      .values({ name })
-      .returning();
+  // Create church, link user, and create privacy settings.
+  // The isNull(users.churchId) guard prevents double-submit race conditions.
+  const [church] = await db.insert(churches).values({ name }).returning();
 
-    // Guard: only link if user still has no church (prevents double-submit)
-    const [updated] = await tx
-      .update(users)
-      .set({ churchId: newChurch.id })
-      .where(
-        and(eq(users.id, user.id), isNull(users.churchId))
-      )
-      .returning();
+  const [updated] = await db
+    .update(users)
+    .set({ churchId: church.id })
+    .where(isNull(users.churchId))
+    .returning();
 
-    if (!updated) {
-      // Another request already created a church — rollback
-      throw new Error("Church already created");
-    }
+  if (!updated) {
+    // Another request already linked a church — clean up the orphan
+    await db.delete(churches).where(eq(churches.id, church.id));
+    return { error: "Church already created" };
+  }
 
-    await tx.insert(churchPrivacySettings).values({
-      churchId: newChurch.id,
-      updatedBy: user.id,
-    });
-
-    return newChurch;
+  await db.insert(churchPrivacySettings).values({
+    churchId: church.id,
+    updatedBy: user.id,
   });
 
   revalidatePath("/", "layout");
