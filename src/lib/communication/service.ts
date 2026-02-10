@@ -16,7 +16,7 @@ import {
   type CommunicationRecipient,
   type RecipientStatus,
 } from "@/db/schema/communication";
-import { persons } from "@/db/schema/people";
+import { persons, type PersonStatus } from "@/db/schema/people";
 import { churches } from "@/db/schema/church";
 import { churchMeetings } from "@/db/schema/meetings";
 import { resend, EMAIL_FROM } from "@/lib/email/client";
@@ -590,7 +590,7 @@ export async function getRecipientsByGroup(
   churchId: string,
   group: string
 ): Promise<string[]> {
-  let statusFilter: string[];
+  let statusFilter: PersonStatus[];
 
   switch (group) {
     case "core_group":

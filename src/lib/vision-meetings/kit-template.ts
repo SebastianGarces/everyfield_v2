@@ -1,4 +1,4 @@
-import type { ChecklistCategory } from "@/db/schema";
+import type { ChecklistCategory } from "@/db/schema/vision-meetings";
 
 export interface KitTemplateItem {
   itemName: string;

@@ -5,9 +5,11 @@ import type {
   Location,
   MeetingChecklistItem,
   MeetingEvaluation,
+} from "@/db/schema";
+import type {
   VisionMeeting,
   VisionMeetingAttendance,
-} from "@/db/schema";
+} from "@/db/schema/vision-meetings";
 import { verifySession } from "@/lib/auth/session";
 import { createPerson } from "@/lib/people/service";
 import {

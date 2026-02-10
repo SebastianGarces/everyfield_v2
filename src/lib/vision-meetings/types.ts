@@ -19,7 +19,7 @@ export type {
   ResponseStatus,
   VisionMeeting,
   VisionMeetingAttendance,
-} from "@/db/schema";
+} from "@/db/schema/vision-meetings";
 
 // Re-export enum arrays for use in components
 export {
@@ -28,7 +28,7 @@ export {
   invitationStatuses,
   meetingStatuses,
   responseStatuses,
-} from "@/db/schema";
+} from "@/db/schema/vision-meetings";
 
 // ============================================================================
 // Extended Types
@@ -38,7 +38,7 @@ import type {
   Location,
   VisionMeeting,
   VisionMeetingAttendance,
-} from "@/db/schema";
+} from "@/db/schema/vision-meetings";
 
 /**
  * Meeting with attendance counts for list views

@@ -35,6 +35,8 @@ export const attendanceTypes = [
 export type AttendanceType = (typeof attendanceTypes)[number];
 
 export const responseStatuses = [
+  "confirmed",
+  "declined",
   "interested",
   "ready_commit",
   "questions",

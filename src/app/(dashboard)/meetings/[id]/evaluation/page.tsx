@@ -28,12 +28,12 @@ export default async function EvaluationPage({ params }: EvaluationPageProps) {
       {evaluation ? (
         <EvaluationSummary
           evaluation={evaluation}
-          meetingNumber={meeting.meetingNumber}
+          meetingNumber={meeting.meetingNumber ?? 0}
         />
       ) : (
         <EvaluationForm
           meetingId={meeting.id}
-          meetingNumber={meeting.meetingNumber}
+          meetingNumber={meeting.meetingNumber ?? 0}
         />
       )}
     </div>

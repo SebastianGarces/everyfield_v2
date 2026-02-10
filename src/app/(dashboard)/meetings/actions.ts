@@ -603,6 +603,8 @@ export async function quickAddPersonToGuestListAction(
       lastName,
       email,
       phone,
+      country: "US",
+      status: "prospect",
     });
 
     // Add to guest list
@@ -705,6 +707,7 @@ export async function quickAddWalkInAction(
       lastName,
       email,
       phone,
+      country: "US",
       status: "prospect",
     });
 

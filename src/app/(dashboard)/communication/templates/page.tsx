@@ -30,15 +30,13 @@ export default async function TemplatesPage() {
   const templates = await getTemplates(user.churchId);
 
   // Group by category
-  const grouped = templates.reduce(
-    (acc, t) => {
-      const cat = t.category as TemplateCategory;
-      if (!acc[cat]) acc[cat] = [];
-      acc[cat].push(t);
-      return acc;
-    },
-    {} as Record<string, typeof templates>
-  );
+  type Template = (typeof templates)[number];
+  const grouped: Record<string, Template[]> = {};
+  for (const t of templates) {
+    const cat = t.category as TemplateCategory;
+    if (!grouped[cat]) grouped[cat] = [];
+    grouped[cat].push(t);
+  }
 
   return (
     <>

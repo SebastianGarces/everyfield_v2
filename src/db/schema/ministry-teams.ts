@@ -66,10 +66,7 @@ export const ministryTeams = pgTable(
     description: text("description"),
     icon: varchar("icon", { length: 50 }),
     leaderId: uuid("leader_id").references(() => persons.id),
-    reportsToTeamId: uuid("reports_to_team_id").references(
-      () => ministryTeams.id,
-      { onDelete: "set null" }
-    ),
+    reportsToTeamId: uuid("reports_to_team_id"),
     phaseIntroduced: varchar("phase_introduced", { length: 10 })
       .$type<PhaseIntroduced>()
       .notNull()
@@ -109,10 +106,7 @@ export const teamRoles = pgTable(
       .notNull(),
     name: varchar("name", { length: 255 }).notNull(),
     description: text("description"),
-    reportsToRoleId: uuid("reports_to_role_id").references(
-      () => teamRoles.id,
-      { onDelete: "set null" }
-    ),
+    reportsToRoleId: uuid("reports_to_role_id"),
     isLeadershipRole: boolean("is_leadership_role").default(false).notNull(),
     timeCommitment: varchar("time_commitment", {
       length: 10,

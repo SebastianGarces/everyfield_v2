@@ -1,9 +1,9 @@
 import { db } from "@/db";
+import { persons } from "@/db/schema";
 import {
   locations,
   meetingChecklistItems,
   meetingEvaluations,
-  persons,
   visionMeetingAttendance,
   visionMeetings,
   type MeetingChecklistItem,
@@ -12,7 +12,7 @@ import {
   type NewLocation,
   type NewVisionMeeting,
   type VisionMeeting,
-} from "@/db/schema";
+} from "@/db/schema/vision-meetings";
 import type {
   AttendanceCreateInput,
   ChecklistItemUpdateInput,

@@ -1,4 +1,4 @@
-import type { AttendanceType } from "@/db/schema";
+import type { AttendanceType } from "@/db/schema/vision-meetings";
 import { eventBus } from "@/lib/events/event-bus";
 
 // ============================================================================

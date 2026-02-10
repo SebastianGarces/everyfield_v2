@@ -86,10 +86,7 @@ export const messageTemplates = pgTable(
     bodyHtml: text("body_html"),
     mergeFields: jsonb("merge_fields").$type<string[]>(),
     isSystem: boolean("is_system").default(false).notNull(),
-    sourceTemplateId: uuid("source_template_id").references(
-      () => messageTemplates.id,
-      { onDelete: "set null" }
-    ),
+    sourceTemplateId: uuid("source_template_id"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },

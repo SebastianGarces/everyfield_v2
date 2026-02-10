@@ -46,11 +46,11 @@ export async function POST(req: NextRequest) {
       event = resend.webhooks.verify({
         payload,
         headers: {
-          "svix-id": req.headers.get("svix-id"),
-          "svix-timestamp": req.headers.get("svix-timestamp"),
-          "svix-signature": req.headers.get("svix-signature"),
+          id: req.headers.get("svix-id") ?? "",
+          timestamp: req.headers.get("svix-timestamp") ?? "",
+          signature: req.headers.get("svix-signature") ?? "",
         },
-        secret: process.env.RESEND_WEBHOOK_SECRET,
+        webhookSecret: process.env.RESEND_WEBHOOK_SECRET!,
       }) as WebhookEvent;
     } catch {
       console.error("[WEBHOOK] Signature verification failed");

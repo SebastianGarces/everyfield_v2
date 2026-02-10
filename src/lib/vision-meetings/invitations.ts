@@ -1,10 +1,10 @@
 import { db } from "@/db";
+import { persons } from "@/db/schema";
 import {
   invitations,
-  persons,
   type Invitation,
   type InvitationStatus,
-} from "@/db/schema";
+} from "@/db/schema/vision-meetings";
 import type { InvitationCreateInput } from "@/lib/validations/vision-meetings";
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { InvitationLeaderboardEntry, InvitationSummary } from "./types";

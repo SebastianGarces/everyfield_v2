@@ -71,7 +71,7 @@ export function TemplateEditor({ template }: TemplateEditorProps) {
   };
 
   const handleInsertMergeField = (token: string) => {
-    setBody((prev) => prev + token);
+    setBody((prev: string) => prev + token);
   };
 
   return (
