@@ -1,6 +1,10 @@
 "use client";
 
 import { renderTemplate, getSampleData } from "@/lib/communication/merge";
+import {
+  CONFIRM_PLACEHOLDER,
+  DECLINE_PLACEHOLDER,
+} from "@/lib/email/components/communication-email";
 
 interface EmailPreviewProps {
   subject: string;
@@ -8,10 +12,79 @@ interface EmailPreviewProps {
   mergeData?: Record<string, string>;
 }
 
+// HTML for the styled RSVP buttons shown in the preview
+const CONFIRM_BUTTON_HTML = `<div style="text-align: center; margin: 24px 0;">
+  <span style="display: inline-block; background-color: #96e31c; color: #181d19; font-weight: 600; font-size: 16px; padding: 12px 32px; border-radius: 6px; margin-right: 12px;">I'll be there</span>
+  <span style="display: inline-block; background-color: #f3f4f6; color: #4b5563; font-weight: 500; font-size: 16px; padding: 12px 32px; border-radius: 6px; border: 1px solid #d1d5db;">Can't make it</span>
+</div>`;
+
+const CONFIRM_ONLY_BUTTON_HTML = `<div style="text-align: center; margin: 24px 0;">
+  <span style="display: inline-block; background-color: #96e31c; color: #181d19; font-weight: 600; font-size: 16px; padding: 12px 32px; border-radius: 6px;">I'll be there</span>
+</div>`;
+
+const DECLINE_ONLY_BUTTON_HTML = `<div style="text-align: center; margin: 24px 0;">
+  <span style="display: inline-block; background-color: #f3f4f6; color: #4b5563; font-weight: 500; font-size: 16px; padding: 12px 32px; border-radius: 6px; border: 1px solid #d1d5db;">Can't make it</span>
+</div>`;
+
+/**
+ * Replace RSVP placeholder tokens with styled button HTML for the preview.
+ * Handles the case where both placeholders appear on adjacent lines.
+ */
+function renderRsvpButtons(html: string): string {
+  const hasConfirm = html.includes(CONFIRM_PLACEHOLDER);
+  const hasDecline = html.includes(DECLINE_PLACEHOLDER);
+
+  if (hasConfirm && hasDecline) {
+    // Both present — check if they're on adjacent lines (separated by <br>)
+    // Replace the confirm placeholder line + decline placeholder line with a single button row
+    // Use [^<>]* to avoid consuming < or > from surrounding <br> tags
+    const combinedPattern = new RegExp(
+      `[^<>]*${escapeRegex(CONFIRM_PLACEHOLDER)}[^<>]*(?:<br>)+[^<>]*${escapeRegex(DECLINE_PLACEHOLDER)}[^<>]*`,
+    );
+
+    if (combinedPattern.test(html)) {
+      return html.replace(combinedPattern, CONFIRM_BUTTON_HTML);
+    }
+
+    // If they're in separate paragraphs, replace individually
+    let result = html;
+    result = result.replace(
+      new RegExp(`[^<>]*${escapeRegex(CONFIRM_PLACEHOLDER)}[^<>]*`),
+      CONFIRM_ONLY_BUTTON_HTML
+    );
+    result = result.replace(
+      new RegExp(`[^<>]*${escapeRegex(DECLINE_PLACEHOLDER)}[^<>]*`),
+      DECLINE_ONLY_BUTTON_HTML
+    );
+    return result;
+  }
+
+  if (hasConfirm) {
+    return html.replace(
+      new RegExp(`[^<>]*${escapeRegex(CONFIRM_PLACEHOLDER)}[^<>]*`),
+      CONFIRM_ONLY_BUTTON_HTML
+    );
+  }
+
+  if (hasDecline) {
+    return html.replace(
+      new RegExp(`[^<>]*${escapeRegex(DECLINE_PLACEHOLDER)}[^<>]*`),
+      DECLINE_ONLY_BUTTON_HTML
+    );
+  }
+
+  return html;
+}
+
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 /**
  * Live email preview component.
  * Renders subject + body with merge fields replaced by sample data.
  * Highlights unresolved {{...}} tokens in red.
+ * Renders {{confirm_link}} / {{decline_link}} as styled RSVP buttons.
  */
 export function EmailPreview({
   subject,
@@ -31,9 +104,10 @@ export function EmailPreview({
   };
 
   const displaySubject = highlightUnresolved(renderedSubject);
-  const displayBody = highlightUnresolved(
-    renderedBody.replace(/\n/g, "<br>")
-  );
+
+  // Convert newlines to <br>, highlight unresolved fields, then render RSVP buttons
+  let displayBody = highlightUnresolved(renderedBody.replace(/\n/g, "<br>"));
+  displayBody = renderRsvpButtons(displayBody);
 
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-lg border">

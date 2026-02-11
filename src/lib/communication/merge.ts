@@ -105,20 +105,23 @@ export const MERGE_FIELDS: MergeFieldDefinition[] = [
     group: "meeting",
     sampleValue: "Community Center, 123 Main St",
   },
-  // Confirmation links (auto-injected when sending for a meeting)
+  // Confirmation buttons (auto-injected when sending for a meeting)
+  // These render as styled CTA buttons in the email — place on their own line
   {
     name: "confirm_link",
-    label: "Confirm Link",
-    description: "RSVP confirmation link (auto-generated for meetings)",
+    label: "Confirm Button",
+    description:
+      "RSVP confirm button (renders as a styled green button in the email)",
     group: "meeting",
-    sampleValue: "#",
+    sampleValue: "__EF_CONFIRM__",
   },
   {
     name: "decline_link",
-    label: "Decline Link",
-    description: "RSVP decline link (auto-generated for meetings)",
+    label: "Decline Button",
+    description:
+      "RSVP decline button (renders as a styled gray button in the email)",
     group: "meeting",
-    sampleValue: "#",
+    sampleValue: "__EF_DECLINE__",
   },
 ];
 

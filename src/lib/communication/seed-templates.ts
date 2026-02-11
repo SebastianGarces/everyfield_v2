@@ -42,8 +42,8 @@ We'd love for you to join us and learn more about what God is doing through our 
 
 Please let us know if you can make it:
 
-✅ I'll be there: {{confirm_link}}
-❌ Can't make it: {{decline_link}}
+{{confirm_link}}
+{{decline_link}}
 
 Looking forward to seeing you!
 
@@ -75,8 +75,8 @@ Just a friendly reminder that our {{meeting_type}} is coming up soon!
 
 We're looking forward to having you there. If your plans have changed, please let us know:
 
-✅ I'll be there: {{confirm_link}}
-❌ Can't make it: {{decline_link}}
+{{confirm_link}}
+{{decline_link}}
 
 See you soon!
 
@@ -158,8 +158,8 @@ This is a great opportunity to learn more about our church plant, our values, an
 
 Let us know if you can make it:
 
-✅ I'll be there: {{confirm_link}}
-❌ Can't make it: {{decline_link}}
+{{confirm_link}}
+{{decline_link}}
 
 See you there!
 
@@ -214,7 +214,19 @@ async function seed() {
       .limit(1);
 
     if (existing) {
-      console.log(`[SEED] Skipping "${template.name}" — already exists`);
+      // Update existing system template with latest content
+      await db
+        .update(messageTemplates)
+        .set({
+          description: template.description,
+          category: template.category,
+          channel: template.channel,
+          subject: template.subject,
+          body: template.body,
+          mergeFields: template.mergeFields,
+        })
+        .where(eq(messageTemplates.id, existing.id));
+      console.log(`[SEED] Updated "${template.name}"`);
       continue;
     }
 

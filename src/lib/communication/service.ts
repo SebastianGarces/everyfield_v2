@@ -19,7 +19,13 @@ import {
 import { persons, type PersonStatus } from "@/db/schema/people";
 import { churches } from "@/db/schema/church";
 import { churchMeetings } from "@/db/schema/meetings";
+import { render } from "@react-email/components";
 import { resend, EMAIL_FROM } from "@/lib/email/client";
+import {
+  CommunicationEmail,
+  CONFIRM_PLACEHOLDER,
+  DECLINE_PLACEHOLDER,
+} from "@/lib/email/components/communication-email";
 import {
   renderTemplate,
   buildPersonMergeData,
@@ -150,13 +156,15 @@ export async function sendCommunication(
     if (!person.email) continue;
 
     const personMergeData = buildPersonMergeData(person);
-    let mergeData = {
+    const mergeData = {
       ...churchMergeData,
       ...meetingMergeData,
       ...personMergeData,
     };
 
     // Generate confirmation tokens if this is meeting-linked
+    let confirmUrl: string | undefined;
+    let declineUrl: string | undefined;
     if (meeting) {
       const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
       const token = await createConfirmationToken(
@@ -164,8 +172,11 @@ export async function sendCommunication(
         meeting.id,
         person.id
       );
-      mergeData.confirm_link = `${appUrl}/rsvp/${token}`;
-      mergeData.decline_link = `${appUrl}/rsvp/${token}?action=decline`;
+      confirmUrl = `${appUrl}/rsvp/${token}`;
+      declineUrl = `${appUrl}/rsvp/${token}?action=decline`;
+      // Use placeholders in merge data so CommunicationEmail can render buttons
+      mergeData.confirm_link = CONFIRM_PLACEHOLDER;
+      mergeData.decline_link = DECLINE_PLACEHOLDER;
     }
 
     const renderedSubject = input.subject
@@ -173,12 +184,30 @@ export async function sendCommunication(
       : "";
     const renderedBody = renderTemplate(input.body, mergeData);
 
+    const html = await render(
+      CommunicationEmail({
+        body: renderedBody,
+        confirmUrl,
+        declineUrl,
+        churchName: church.name,
+        previewText: renderedSubject,
+      })
+    );
+
+    const text = await render(
+      CommunicationEmail({
+        body: renderedBody,
+        churchName: church.name,
+      }),
+      { plainText: true }
+    );
+
     emailBatch.push({
       from: EMAIL_FROM,
       to: [person.email],
       subject: renderedSubject,
-      html: wrapInEmailLayout(renderedBody),
-      text: renderedBody,
+      html,
+      text,
     });
 
     recipientRecords.push({
@@ -656,26 +685,3 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
   return chunks;
 }
 
-/**
- * Wrap plain-text body in a minimal HTML email layout.
- * Converts newlines to <br> tags.
- */
-function wrapInEmailLayout(body: string): string {
-  const htmlBody = body
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\n/g, "<br>");
-
-  return `<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; background-color: #f9fafb;">
-  <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
-    <div style="background: white; border-radius: 8px; padding: 32px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-      <p style="font-size: 16px; color: #4b5563; line-height: 1.6; margin: 0;">${htmlBody}</p>
-    </div>
-  </div>
-</body>
-</html>`;
-}

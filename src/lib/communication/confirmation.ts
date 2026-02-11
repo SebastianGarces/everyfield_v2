@@ -78,7 +78,7 @@ export async function createConfirmationToken(
     return existing.token;
   }
 
-  const token = randomBytes(32).toString("base64url");
+  const token = randomBytes(12).toString("base64url");
   const expiresAt = new Date();
   expiresAt.setDate(expiresAt.getDate() + expiresInDays);
 
