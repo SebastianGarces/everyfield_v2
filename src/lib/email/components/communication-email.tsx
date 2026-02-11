@@ -30,6 +30,59 @@ interface CommunicationEmailProps {
 }
 
 /**
+ * Segment types produced by parsing the body text.
+ * "text" segments render as Text components; "buttons" renders the RSVP CTA row.
+ */
+type Segment =
+  | { type: "text"; lines: string[] }
+  | { type: "buttons" };
+
+/**
+ * Parse the email body into segments: consecutive text lines are grouped
+ * together, and RSVP placeholder lines become button segments.
+ * Normalizes line endings (\r\n → \n) and collapses blank lines into
+ * paragraph breaks within text segments.
+ */
+function parseBody(body: string): Segment[] {
+  const normalized = body.replace(/\r\n/g, "\n");
+  const lines = normalized.split("\n");
+  const segments: Segment[] = [];
+  let currentTextLines: string[] = [];
+
+  const flushText = () => {
+    if (currentTextLines.length > 0) {
+      segments.push({ type: "text", lines: [...currentTextLines] });
+      currentTextLines = [];
+    }
+  };
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    // Line is a confirm or decline placeholder → flush text, emit buttons
+    if (trimmed === CONFIRM_PLACEHOLDER || trimmed === DECLINE_PLACEHOLDER) {
+      // Only emit buttons once (when we see the first placeholder)
+      if (
+        segments.length === 0 ||
+        segments[segments.length - 1].type !== "buttons"
+      ) {
+        // If previous text lines ended with blank lines, keep them as spacing
+        // but flush before the button row
+        flushText();
+        segments.push({ type: "buttons" });
+      }
+      continue;
+    }
+
+    // Regular text line (including blank lines for paragraph spacing)
+    currentTextLines.push(line);
+  }
+
+  flushText();
+  return segments;
+}
+
+/**
  * React Email component for user-composed Communication Hub emails.
  *
  * Takes pre-rendered plain text (after merge field replacement) and wraps it
@@ -43,8 +96,7 @@ export function CommunicationEmail({
   churchName,
   previewText,
 }: CommunicationEmailProps) {
-  // Split body into paragraphs by double newlines
-  const paragraphs = body.split(/\n\n+/);
+  const segments = parseBody(body);
 
   return (
     <Html>
@@ -53,13 +105,8 @@ export function CommunicationEmail({
       <Body style={bodyStyle}>
         <Container style={container}>
           <Section style={content}>
-            {paragraphs.map((paragraph, i) => {
-              // Check if this paragraph contains the RSVP placeholders
-              const hasConfirm = paragraph.includes(CONFIRM_PLACEHOLDER);
-              const hasDecline = paragraph.includes(DECLINE_PLACEHOLDER);
-
-              // Both placeholders on separate lines within the same paragraph
-              if (hasConfirm && hasDecline && confirmUrl && declineUrl) {
+            {segments.map((segment, i) => {
+              if (segment.type === "buttons" && confirmUrl && declineUrl) {
                 return (
                   <Section key={i} style={buttonSection}>
                     <Button href={confirmUrl} style={confirmButton}>
@@ -72,41 +119,40 @@ export function CommunicationEmail({
                 );
               }
 
-              // Only confirm placeholder
-              if (hasConfirm && confirmUrl) {
-                return (
-                  <Section key={i} style={buttonSection}>
-                    <Button href={confirmUrl} style={confirmButton}>
-                      I&apos;ll be there
-                    </Button>
-                  </Section>
-                );
+              if (segment.type === "buttons") {
+                // Placeholders present but no URLs — skip
+                return null;
               }
 
-              // Only decline placeholder
-              if (hasDecline && declineUrl) {
-                return (
-                  <Section key={i} style={buttonSection}>
-                    <Button href={declineUrl} style={declineButton}>
-                      Can&apos;t make it
-                    </Button>
-                  </Section>
-                );
+              // Text segment: split into paragraphs by blank lines,
+              // render each paragraph as a Text component
+              const paragraphs: string[][] = [];
+              let currentParagraph: string[] = [];
+
+              for (const line of segment.lines) {
+                if (line.trim() === "") {
+                  if (currentParagraph.length > 0) {
+                    paragraphs.push(currentParagraph);
+                    currentParagraph = [];
+                  }
+                } else {
+                  currentParagraph.push(line);
+                }
+              }
+              if (currentParagraph.length > 0) {
+                paragraphs.push(currentParagraph);
               }
 
-              // Regular text paragraph — convert single newlines to line breaks
-              // React Email Text components handle whitespace properly
-              const lines = paragraph.split("\n");
-              return (
-                <Text key={i} style={text}>
-                  {lines.map((line, j) => (
-                    <span key={j}>
+              return paragraphs.map((paraLines, j) => (
+                <Text key={`${i}-${j}`} style={text}>
+                  {paraLines.map((line, k) => (
+                    <span key={k}>
                       {line}
-                      {j < lines.length - 1 && <br />}
+                      {k < paraLines.length - 1 && <br />}
                     </span>
                   ))}
                 </Text>
-              );
+              ));
             })}
           </Section>
           <Hr style={hr} />
