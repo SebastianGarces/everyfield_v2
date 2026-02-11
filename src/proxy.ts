@@ -10,6 +10,9 @@ const AUTH_ROUTES = ["/login", "/register"];
 // Routes that require authentication
 const PROTECTED_ROUTE_PREFIXES = ["/dashboard", "/wiki", "/oversight"];
 
+// Webhook routes that bypass CSRF protection (they use their own signature verification)
+const WEBHOOK_ROUTES = ["/api/webhooks/resend"];
+
 // Social media and search engine crawler user agents
 // These need access to pages for metadata/OG tag scraping
 const CRAWLER_USER_AGENTS = [
@@ -73,8 +76,8 @@ export function proxy(request: NextRequest): NextResponse {
     }
   }
 
-  // 2. CSRF protection for non-GET requests
-  if (request.method !== "GET") {
+  // 2. CSRF protection for non-GET requests (skip for webhook routes)
+  if (request.method !== "GET" && !WEBHOOK_ROUTES.includes(pathname)) {
     const originHeader = request.headers.get("Origin");
     const hostHeader = request.headers.get("Host");
 
