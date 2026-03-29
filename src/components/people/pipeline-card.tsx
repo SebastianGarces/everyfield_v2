@@ -15,7 +15,7 @@ import {
 } from "@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge";
 import { setCustomNativeDragPreview } from "@atlaskit/pragmatic-drag-and-drop/element/set-custom-native-drag-preview";
 import { pointerOutsideOfPreview } from "@atlaskit/pragmatic-drag-and-drop/element/pointer-outside-of-preview";
-import { Rocket, Star } from "lucide-react";
+import { AlertTriangle, Clock, Rocket, Star } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -79,12 +79,45 @@ const idle: CardState = { type: "idle" };
 // Component
 // ============================================================================
 
+interface InactivityThresholds {
+  warningDays: number;
+  alertDays: number;
+}
+
 interface PipelineCardProps {
   person: PersonWithTags;
   columnId: string;
+  inactivityThresholds?: InactivityThresholds;
 }
 
-export function PipelineCard({ person, columnId }: PipelineCardProps) {
+/**
+ * Compute inactivity info for a person.
+ * Uses lastActivityAt from person_activities, falls back to person.createdAt.
+ */
+function getInactivityInfo(
+  person: PersonWithTags,
+  thresholds?: InactivityThresholds
+): { level: "none" | "warning" | "alert"; daysSince: number } | null {
+  if (!thresholds) return null;
+
+  const referenceDate = person.lastActivityAt
+    ? new Date(person.lastActivityAt)
+    : person.createdAt;
+
+  const now = new Date();
+  const diffMs = now.getTime() - referenceDate.getTime();
+  const daysSince = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+  if (daysSince >= thresholds.alertDays) {
+    return { level: "alert", daysSince };
+  }
+  if (daysSince >= thresholds.warningDays) {
+    return { level: "warning", daysSince };
+  }
+  return null;
+}
+
+export function PipelineCard({ person, columnId, inactivityThresholds }: PipelineCardProps) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [state, setState] = useState<CardState>(idle);
 
@@ -148,6 +181,7 @@ export function PipelineCard({ person, columnId }: PipelineCardProps) {
   }, [person, columnId]);
 
   const isDragging = state.type === "dragging";
+  const inactivity = getInactivityInfo(person, inactivityThresholds);
 
   return (
     <>
@@ -180,21 +214,39 @@ export function PipelineCard({ person, columnId }: PipelineCardProps) {
               isDragging && "ring-2 ring-primary/30"
             )}
           >
-            {/* Row 1: Name + status icon */}
+            {/* Row 1: Name + status/inactivity icons */}
             <div className="flex items-center justify-between gap-2">
               <span className="truncate text-sm font-medium leading-tight">
                 {person.firstName} {person.lastName}
               </span>
-              {person.status === "leader" && (
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-400">
-                  <Star className="h-3 w-3 fill-current" />
-                </span>
-              )}
-              {person.status === "launch_team" && (
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400">
-                  <Rocket className="h-3 w-3 fill-current" />
-                </span>
-              )}
+              <div className="flex shrink-0 items-center gap-1">
+                {inactivity && inactivity.level === "alert" && (
+                  <span
+                    className="flex h-5 w-5 items-center justify-center rounded-full bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400"
+                    title={`No activity in ${inactivity.daysSince} days`}
+                  >
+                    <AlertTriangle className="h-3 w-3" />
+                  </span>
+                )}
+                {inactivity && inactivity.level === "warning" && (
+                  <span
+                    className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 text-amber-600 dark:bg-amber-900/40 dark:text-amber-400"
+                    title={`No activity in ${inactivity.daysSince} days`}
+                  >
+                    <Clock className="h-3 w-3" />
+                  </span>
+                )}
+                {person.status === "leader" && (
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-400">
+                    <Star className="h-3 w-3 fill-current" />
+                  </span>
+                )}
+                {person.status === "launch_team" && (
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400">
+                    <Rocket className="h-3 w-3 fill-current" />
+                  </span>
+                )}
+              </div>
             </div>
 
             {/* Row 2: Email + source */}

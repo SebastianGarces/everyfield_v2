@@ -15,22 +15,21 @@ import { useState } from "react";
 
 interface LocationPickerProps {
   locations: Location[];
-  selectedLocationId?: string;
-  onLocationChange: (locationId: string | undefined) => void;
+  defaultLocationId?: string;
   defaultLocationName?: string;
   defaultLocationAddress?: string;
 }
 
 export function LocationPicker({
   locations,
-  selectedLocationId,
-  onLocationChange,
+  defaultLocationId,
   defaultLocationName,
   defaultLocationAddress,
 }: LocationPickerProps) {
   const [mode, setMode] = useState<"select" | "new">(
-    selectedLocationId || !defaultLocationName ? "select" : "new"
+    defaultLocationId || !defaultLocationName ? "select" : "new"
   );
+  const [locationId, setLocationId] = useState<string>(defaultLocationId ?? "");
 
   return (
     <div className="space-y-3">
@@ -53,7 +52,7 @@ export function LocationPicker({
           type="button"
           onClick={() => {
             setMode("new");
-            onLocationChange(undefined);
+            setLocationId("");
           }}
           className={`cursor-pointer rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
             mode === "new"
@@ -68,16 +67,12 @@ export function LocationPicker({
 
       {mode === "select" ? (
         <div className="space-y-2">
-          <input
-            type="hidden"
-            name="locationId"
-            value={selectedLocationId ?? ""}
-          />
+          <input type="hidden" name="locationId" value={locationId} />
           <Select
-            value={selectedLocationId ?? ""}
-            onValueChange={(value) => onLocationChange(value || undefined)}
+            value={locationId}
+            onValueChange={setLocationId}
           >
-            <SelectTrigger className="cursor-pointer">
+            <SelectTrigger className="w-full cursor-pointer">
               <SelectValue placeholder="Select a saved location" />
             </SelectTrigger>
             <SelectContent>
@@ -87,7 +82,7 @@ export function LocationPicker({
                   value={loc.id}
                   className="cursor-pointer"
                 >
-                  {loc.name} - {loc.address}
+                  <span className="truncate">{loc.name} — {loc.address}</span>
                 </SelectItem>
               ))}
               {locations.length === 0 && (

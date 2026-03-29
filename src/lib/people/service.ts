@@ -1,5 +1,6 @@
 import { db } from "@/db";
 import {
+  personActivities,
   persons,
   type NewPerson,
   type Person,
@@ -185,6 +186,53 @@ export async function listPeople(
     people: resultPeople,
     total,
     nextCursor,
+  };
+}
+
+// ============================================================================
+// Note Queries
+// ============================================================================
+
+/**
+ * Get the latest note for a person from person_activities.
+ * Returns the note text and metadata, or null if no notes exist.
+ */
+export async function getLatestPersonNote(
+  personId: string
+): Promise<{
+  note: string;
+  meetingId?: string;
+  meetingType?: string;
+  createdAt: Date;
+} | null> {
+  const [row] = await db
+    .select({
+      metadata: personActivities.metadata,
+      createdAt: personActivities.createdAt,
+    })
+    .from(personActivities)
+    .where(
+      and(
+        eq(personActivities.personId, personId),
+        eq(personActivities.activityType, "note_added")
+      )
+    )
+    .orderBy(desc(personActivities.createdAt))
+    .limit(1);
+
+  if (!row) return null;
+
+  const meta = row.metadata as Record<string, unknown> | null;
+  const noteText =
+    (meta?.note as string) ?? (meta?.content as string) ?? "";
+
+  if (!noteText) return null;
+
+  return {
+    note: noteText,
+    meetingId: meta?.meetingId as string | undefined,
+    meetingType: meta?.meetingType as string | undefined,
+    createdAt: row.createdAt,
   };
 }
 

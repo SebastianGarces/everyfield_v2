@@ -55,6 +55,7 @@ import type { Household, Person, PersonActivity, Tag } from "@/db/schema";
  */
 export type PersonWithTags = Person & {
   tags: Tag[];
+  lastActivityAt?: Date | null;
 };
 
 /**

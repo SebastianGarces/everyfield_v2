@@ -19,8 +19,18 @@ import {
   handleTeamLeaderAssigned,
 } from "@/lib/people/events";
 
+// Handlers owned by F5 (Task Management)
+import {
+  handleMeetingAttendanceFinalized,
+  autoCompleteTasksByEvent,
+} from "@/lib/tasks/events";
+
 // Event types from producers
-import type { MeetingAttendanceRecordedEvent } from "@/lib/meetings/events";
+import type {
+  MeetingAttendanceRecordedEvent,
+  MeetingAttendanceFinalizedEvent,
+  MeetingEvaluationCompletedEvent,
+} from "@/lib/meetings/events";
 import type {
   TeamMemberAssignedEvent,
   TeamLeaderAssignedEvent,
@@ -98,12 +108,46 @@ export function registerSubscriptions(bus: EventBusLike): void {
   );
 
   // --------------------------------------------------------------------------
+  // F3 (Meetings) -> F5 (Task Management)
+  // --------------------------------------------------------------------------
+
+  // When attendance is finalized for a vision meeting, create follow-up tasks
+  // for all attendees (48h due) and a meeting evaluation task (24h due).
+  bus.on<MeetingAttendanceFinalizedEvent>(
+    "meeting.attendance.finalized",
+    async (event) => {
+      await handleMeetingAttendanceFinalized(
+        event.meetingId,
+        event.meetingType,
+        event.churchId,
+        event.attendeeIds
+      );
+    }
+  );
+
+  // --------------------------------------------------------------------------
+  // F3 (Meetings) -> F5 (Task Management) — Auto-completion
+  // --------------------------------------------------------------------------
+
+  // When a meeting evaluation is submitted, auto-complete the corresponding
+  // evaluation task (matched by completion_event + related_id).
+  bus.on<MeetingEvaluationCompletedEvent>(
+    "meeting.evaluation.completed",
+    async (event) => {
+      await autoCompleteTasksByEvent(
+        "meeting.evaluation.completed",
+        event.meetingId,
+        event.churchId
+      );
+    }
+  );
+
+  // --------------------------------------------------------------------------
   // Future subscriptions (no handlers yet)
   // --------------------------------------------------------------------------
 
-  // meeting.attendance.finalized -> F5 (Task Management): create follow-up tasks
   // person.created -> welcome workflows
-  // person.status.changed -> dashboard updates, trigger follow-up tasks
+  // person.status.changed -> dashboard updates
   // team.staffing.changed -> dashboard readiness metrics
   // training.scheduled -> calendar events, task creation
 

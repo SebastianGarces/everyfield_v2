@@ -56,7 +56,7 @@ export const mainNavItems: NavItem[] = [
     title: "Tasks",
     href: "/tasks",
     icon: ListChecks,
-    isDisabled: true,
+    requiresChurch: true,
   },
   {
     title: "Documents",

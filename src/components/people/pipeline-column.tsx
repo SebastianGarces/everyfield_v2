@@ -36,12 +36,18 @@ export function isColumnData(
 // Component
 // ============================================================================
 
+interface InactivityThresholds {
+  warningDays: number;
+  alertDays: number;
+}
+
 interface PipelineColumnProps {
   column: PipelineColumnType;
   people: PersonWithTags[];
+  inactivityThresholds?: InactivityThresholds;
 }
 
-export function PipelineColumn({ column, people }: PipelineColumnProps) {
+export function PipelineColumn({ column, people, inactivityThresholds }: PipelineColumnProps) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [isDraggedOver, setIsDraggedOver] = useState(false);
 
@@ -109,6 +115,7 @@ export function PipelineColumn({ column, people }: PipelineColumnProps) {
               key={person.id}
               person={person}
               columnId={column.id}
+              inactivityThresholds={inactivityThresholds}
             />
           ))
         )}

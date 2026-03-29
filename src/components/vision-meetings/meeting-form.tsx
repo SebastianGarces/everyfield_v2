@@ -14,46 +14,42 @@ import type { VisionMeeting } from "@/db/schema/vision-meetings";
 import type { ActionResult } from "@/lib/vision-meetings/types";
 import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useRef } from "react";
 import { LocationPicker } from "./location-picker";
 
 interface MeetingFormProps {
   meeting?: VisionMeeting;
   locations: Location[];
   mode?: "create" | "edit";
+  onSuccess?: () => void;
 }
 
 export function MeetingForm({
   meeting,
   locations,
   mode = "create",
+  onSuccess,
 }: MeetingFormProps) {
   const router = useRouter();
-  const [selectedLocationId, setSelectedLocationId] = useState<
-    string | undefined
-  >(meeting?.locationId ?? undefined);
+  const isEdit = mode === "edit";
 
-  const action = async (
-    _prevState: ActionResult<VisionMeeting> | null,
-    formData: FormData
-  ) => {
-    if (mode === "edit" && meeting) {
-      return updateMeetingAction(meeting.id, formData);
-    }
-    return createMeetingAction(formData);
-  };
+  // Pass server actions directly to useActionState.
+  // Create action redirects server-side; update action uses bind for meetingId.
+  const serverAction = isEdit && meeting
+    ? updateMeetingAction.bind(null, meeting.id)
+    : createMeetingAction;
 
-  const [state, formAction, isPending] = useActionState(action, null);
+  const [state, formAction, isPending] = useActionState(serverAction, null);
 
+  // Close the dialog after a successful edit. Create mode is handled
+  // server-side via redirect(), so no client-side navigation needed.
+  const hasCalledSuccess = useRef(false);
   useEffect(() => {
-    if (state?.success) {
-      if (mode === "create" && state.data) {
-        router.push(`/vision-meetings/${state.data.id}`);
-      } else if (mode === "edit" && meeting) {
-        router.push(`/vision-meetings/${meeting.id}`);
-      }
+    if (state?.success && isEdit && !hasCalledSuccess.current) {
+      hasCalledSuccess.current = true;
+      onSuccess?.();
     }
-  }, [state, router, mode, meeting]);
+  }, [state, isEdit, onSuccess]);
 
   // Format datetime for input
   const defaultDatetime = meeting?.datetime
@@ -61,7 +57,7 @@ export function MeetingForm({
     : "";
 
   return (
-    <form action={formAction} className="space-y-6">
+    <form action={formAction} className="min-w-0 space-y-6">
       {state && !state.success && (
         <Alert variant="destructive">
           <AlertDescription>{state.error}</AlertDescription>
@@ -89,8 +85,7 @@ export function MeetingForm({
       {/* Location Picker */}
       <LocationPicker
         locations={locations}
-        selectedLocationId={selectedLocationId}
-        onLocationChange={setSelectedLocationId}
+        defaultLocationId={meeting?.locationId ?? undefined}
         defaultLocationName={meeting?.locationName ?? undefined}
         defaultLocationAddress={meeting?.locationAddress ?? undefined}
       />

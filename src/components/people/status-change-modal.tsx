@@ -186,23 +186,12 @@ export function StatusChangeModal({
               </div>
             )}
 
-          {/* Reason - Required for backward, optional otherwise */}
+          {/* Reason - Required for all status changes */}
           {hasChanges && (
             <div className="space-y-2">
               <Label htmlFor="reason">
-                {isMovingBackward ? (
-                  <>
-                    Reason for moving backward{" "}
-                    <span className="text-amber-600 dark:text-amber-400">
-                      (recommended)
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    Reason for change{" "}
-                    <span className="text-muted-foreground">(optional)</span>
-                  </>
-                )}
+                Reason for change{" "}
+                <span className="text-destructive">*</span>
               </Label>
               <Textarea
                 id="reason"
@@ -247,7 +236,7 @@ export function StatusChangeModal({
           <Button
             type="button"
             onClick={handleSubmit}
-            disabled={!hasChanges || isPending}
+            disabled={!hasChanges || isPending || !reason.trim()}
           >
             {isPending ? "Updating..." : "Update Status"}
           </Button>

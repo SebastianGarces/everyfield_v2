@@ -17,6 +17,11 @@ import { StatusConfirmationModal } from "./status-confirmation-modal";
 // Types
 // ============================================================================
 
+interface InactivityThresholds {
+  warningDays: number;
+  alertDays: number;
+}
+
 interface PipelineViewProps {
   data: PipelineData;
   onStatusChange: (
@@ -25,6 +30,7 @@ interface PipelineViewProps {
     reason?: string
   ) => Promise<void>;
   onReorder: (orderedPersonIds: string[]) => Promise<void>;
+  inactivityThresholds?: InactivityThresholds;
 }
 
 interface PendingTransition {
@@ -64,6 +70,7 @@ export function PipelineView({
   data,
   onStatusChange,
   onReorder,
+  inactivityThresholds,
 }: PipelineViewProps) {
   const [items, setItems] = useState<Record<string, PersonWithTags[]>>(
     data.people
@@ -381,6 +388,7 @@ export function PipelineView({
             key={column.id}
             column={column}
             people={items[column.id] || []}
+            inactivityThresholds={inactivityThresholds}
           />
         ))}
       </div>

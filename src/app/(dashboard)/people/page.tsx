@@ -15,6 +15,7 @@ import {
 } from "@/components/people";
 import { Button } from "@/components/ui/button";
 import { verifySession } from "@/lib/auth/session";
+import { getCurrentUserChurch } from "@/lib/auth/session";
 import { getPipelineData } from "@/lib/people/pipeline";
 import { listPeople } from "@/lib/people/service";
 import { listTags } from "@/lib/people/tags";
@@ -66,8 +67,8 @@ export default async function PeoplePage({ searchParams }: PeoplePageProps) {
   // Fetch data based on view
   const isPipelineView = view === "pipeline";
 
-  // For pipeline view, get pipeline data; for list view, get paginated list
-  const [listResult, pipelineData, availableTags] = await Promise.all([
+  // For pipeline view, get pipeline data + church thresholds; for list view, get paginated list
+  const [listResult, pipelineData, availableTags, church] = await Promise.all([
     !isPipelineView
       ? listPeople(user.churchId, {
           cursor,
@@ -80,6 +81,7 @@ export default async function PeoplePage({ searchParams }: PeoplePageProps) {
       : Promise.resolve({ people: [], total: 0, nextCursor: null }),
     isPipelineView ? getPipelineData(user.churchId) : Promise.resolve(null),
     listTags(user.churchId),
+    isPipelineView ? getCurrentUserChurch() : Promise.resolve(null),
   ]);
 
   // Calculate total for display
@@ -133,7 +135,13 @@ export default async function PeoplePage({ searchParams }: PeoplePageProps) {
 
         <div className="flex-1 overflow-auto p-6">
           {isPipelineView && pipelineData ? (
-            <PipelineWrapper data={pipelineData} />
+            <PipelineWrapper
+              data={pipelineData}
+              inactivityThresholds={{
+                warningDays: church?.inactivityWarningDays ?? 7,
+                alertDays: church?.inactivityAlertDays ?? 14,
+              }}
+            />
           ) : (
             <PeopleList
               people={listResult.people}

@@ -22,14 +22,27 @@ export interface MeetingAttendanceRecordedEvent {
 /**
  * Event payload for meeting.attendance.finalized
  * Emitted once when all attendance is finalized for a meeting.
- * F5 (Task Management) subscribes to create follow-up tasks for new attendees.
+ * F5 (Task Management) subscribes to create follow-up tasks for all attendees.
  */
 export interface MeetingAttendanceFinalizedEvent {
   type: "meeting.attendance.finalized";
   meetingId: string;
   churchId: string;
-  newAttendeeIds: string[];
+  attendeeIds: string[];
   totalAttendance: number;
+  timestamp: Date;
+}
+
+/**
+ * Event payload for meeting.evaluation.completed
+ * Emitted when a meeting evaluation is submitted.
+ * F5 (Task Management) subscribes to auto-complete the evaluation task.
+ */
+export interface MeetingEvaluationCompletedEvent {
+  type: "meeting.evaluation.completed";
+  meetingId: string;
+  churchId: string;
+  evaluatedById: string;
   timestamp: Date;
 }
 
@@ -73,20 +86,38 @@ export async function emitAttendanceRecorded(
 
 /**
  * Emit an event when attendance is finalized for a meeting.
- * F5 (Task Management) subscribes to create follow-up tasks for new attendees.
+ * F5 (Task Management) subscribes to create follow-up tasks for all attendees.
  */
 export async function emitAttendanceFinalized(
   meetingId: string,
   churchId: string,
-  newAttendeeIds: string[],
+  attendeeIds: string[],
   totalAttendance: number
 ): Promise<void> {
   await eventBus.emit<MeetingAttendanceFinalizedEvent>({
     type: "meeting.attendance.finalized",
     meetingId,
     churchId,
-    newAttendeeIds,
+    attendeeIds,
     totalAttendance,
+    timestamp: new Date(),
+  });
+}
+
+/**
+ * Emit an event when a meeting evaluation is submitted.
+ * F5 (Task Management) subscribes to auto-complete the evaluation task.
+ */
+export async function emitEvaluationCompleted(
+  meetingId: string,
+  churchId: string,
+  evaluatedById: string
+): Promise<void> {
+  await eventBus.emit<MeetingEvaluationCompletedEvent>({
+    type: "meeting.evaluation.completed",
+    meetingId,
+    churchId,
+    evaluatedById,
     timestamp: new Date(),
   });
 }

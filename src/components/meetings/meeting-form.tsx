@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ interface MeetingFormProps {
   mode?: "create" | "edit";
   defaultType?: MeetingType;
   defaultTeamId?: string;
+  onSuccess?: () => void;
 }
 
 const meetingTypeOptions: { value: MeetingType; label: string }[] = [
@@ -45,59 +46,39 @@ export function MeetingForm({
   mode = "create",
   defaultType,
   defaultTeamId,
+  onSuccess,
 }: MeetingFormProps) {
   const router = useRouter();
-  const [selectedLocationId, setSelectedLocationId] = useState<string | undefined>(
-    meeting?.locationId ?? undefined
-  );
+  const isEdit = mode === "edit";
+  // meetingType drives conditional rendering (team fields, title, duration)
   const [meetingType, setMeetingType] = useState<MeetingType>(
     meeting?.type ?? defaultType ?? "vision_meeting"
   );
-  const [teamId, setTeamId] = useState<string>(
-    meeting?.teamId ?? defaultTeamId ?? ""
-  );
-  const [subtype, setSubtype] = useState<string>(
-    meeting?.meetingSubtype ?? "regular"
-  );
 
-  const action = async (
-    _prevState: ActionResult<ChurchMeeting> | null,
-    formData: FormData
-  ) => {
-    // Inject values that come from state
-    formData.set("type", meetingType);
-    if (meetingType === "team_meeting" && teamId) {
-      formData.set("teamId", teamId);
-      formData.set("meetingSubtype", subtype);
-    }
-    if (selectedLocationId) {
-      formData.set("locationId", selectedLocationId);
-    }
+  // Pass server actions directly to useActionState.
+  // Create action redirects server-side; update action uses bind for meetingId.
+  const serverAction = isEdit && meeting
+    ? updateMeetingAction.bind(null, meeting.id)
+    : createMeetingAction;
 
-    if (mode === "edit" && meeting) {
-      return updateMeetingAction(meeting.id, formData);
-    }
-    return createMeetingAction(formData);
-  };
+  const [state, formAction, isPending] = useActionState(serverAction, null);
 
-  const [state, formAction, isPending] = useActionState(action, null);
-
+  // Close the dialog after a successful edit. Create mode is handled
+  // server-side via redirect(), so no client-side navigation needed.
+  const hasCalledSuccess = useRef(false);
   useEffect(() => {
-    if (state?.success) {
-      if (mode === "create" && state.data) {
-        router.push(`/meetings/${state.data.id}`);
-      } else if (mode === "edit" && meeting) {
-        router.push(`/meetings/${meeting.id}`);
-      }
+    if (state?.success && isEdit && !hasCalledSuccess.current) {
+      hasCalledSuccess.current = true;
+      onSuccess?.();
     }
-  }, [state, router, mode, meeting]);
+  }, [state, isEdit, onSuccess]);
 
   const defaultDatetime = meeting?.datetime
     ? new Date(meeting.datetime).toISOString().slice(0, 16)
     : "";
 
   return (
-    <form action={formAction} className="space-y-6">
+    <form action={formAction} className="min-w-0 space-y-6">
       {state && !state.success && (
         <Alert variant="destructive">
           <AlertDescription>{state.error}</AlertDescription>
@@ -105,10 +86,14 @@ export function MeetingForm({
       )}
 
       {/* Meeting Type (only in create mode) */}
-      {mode === "create" && (
+      {mode === "create" ? (
         <div className="space-y-2">
           <Label>Meeting Type *</Label>
-          <Select value={meetingType} onValueChange={(v) => setMeetingType(v as MeetingType)}>
+          <Select
+            name="type"
+            value={meetingType}
+            onValueChange={(v) => setMeetingType(v as MeetingType)}
+          >
             <SelectTrigger className="cursor-pointer">
               <SelectValue />
             </SelectTrigger>
@@ -121,6 +106,8 @@ export function MeetingForm({
             </SelectContent>
           </Select>
         </div>
+      ) : (
+        <input type="hidden" name="type" value={meetingType} />
       )}
 
       {/* Team selector (team meetings only) */}
@@ -128,7 +115,7 @@ export function MeetingForm({
         <>
           <div className="space-y-2">
             <Label>Team *</Label>
-            <Select value={teamId} onValueChange={setTeamId}>
+            <Select name="teamId" defaultValue={meeting?.teamId ?? defaultTeamId ?? ""}>
               <SelectTrigger className="cursor-pointer">
                 <SelectValue placeholder="Select a team" />
               </SelectTrigger>
@@ -143,7 +130,7 @@ export function MeetingForm({
           </div>
           <div className="space-y-2">
             <Label>Meeting Subtype</Label>
-            <Select value={subtype} onValueChange={setSubtype}>
+            <Select name="meetingSubtype" defaultValue={meeting?.meetingSubtype ?? "regular"}>
               <SelectTrigger className="cursor-pointer">
                 <SelectValue />
               </SelectTrigger>
@@ -191,8 +178,7 @@ export function MeetingForm({
       {/* Location Picker */}
       <LocationPicker
         locations={locations}
-        selectedLocationId={selectedLocationId}
-        onLocationChange={setSelectedLocationId}
+        defaultLocationId={meeting?.locationId ?? undefined}
         defaultLocationName={meeting?.locationName ?? undefined}
         defaultLocationAddress={meeting?.locationAddress ?? undefined}
       />

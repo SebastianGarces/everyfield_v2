@@ -1,12 +1,13 @@
 import { db } from "@/db";
 import {
+  personActivities,
   persons,
   personTags,
   tags,
   type PersonStatus,
   type Tag,
 } from "@/db/schema";
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { PersonWithTags, PipelineColumn, PipelineData } from "./types";
 
 // ============================================================================
@@ -73,7 +74,13 @@ function getColumnIdForStatus(status: PersonStatus): string {
  * Includes tags for each person
  */
 export async function getPipelineData(churchId: string): Promise<PipelineData> {
-  // Query all non-deleted people for the church
+  // Query all non-deleted people for the church, with last activity timestamp
+  const lastActivitySubquery = sql<Date | null>`(
+    SELECT MAX(${personActivities.createdAt})
+    FROM ${personActivities}
+    WHERE ${personActivities.personId} = ${persons.id}
+  )`;
+
   const peopleRows = await db
     .select({
       id: persons.id,
@@ -100,6 +107,7 @@ export async function getPipelineData(churchId: string): Promise<PipelineData> {
       updatedAt: persons.updatedAt,
       pipelineSortOrder: persons.pipelineSortOrder,
       deletedAt: persons.deletedAt,
+      lastActivityAt: lastActivitySubquery,
     })
     .from(persons)
     .where(and(eq(persons.churchId, churchId), isNull(persons.deletedAt)))

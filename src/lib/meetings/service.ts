@@ -27,6 +27,7 @@ import { and, asc, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import {
   emitAttendanceRecorded,
   emitAttendanceFinalized,
+  emitEvaluationCompleted,
   emitMeetingCompleted,
 } from "./events";
 import { kitTemplate } from "./kit-template";
@@ -697,9 +698,7 @@ export async function finalizeAttendance(
   // Only count people marked as "attended" (toggled via checkbox)
   const attendedRecords = allRecords.filter((r) => r.status === "attended");
   const total = attendedRecords.length;
-  const newAttendeeIds = attendedRecords
-    .filter((r) => r.attendanceType === "first_time")
-    .map((r) => r.personId);
+  const attendeeIds = attendedRecords.map((r) => r.personId);
 
   // Update meeting's actual attendance count
   await db
@@ -729,7 +728,7 @@ export async function finalizeAttendance(
     meetingId,
     meeting.type,
     churchId,
-    newAttendeeIds,
+    attendeeIds,
     total
   );
 }
@@ -825,6 +824,9 @@ export async function createEvaluation(
       notes: data.notes ?? null,
     })
     .returning();
+
+  // Emit evaluation completed event for task auto-completion
+  await emitEvaluationCompleted(meetingId, churchId, userId);
 
   return evaluation;
 }

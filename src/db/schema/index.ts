@@ -11,3 +11,5 @@ export * from "./church-privacy-settings";
 export * from "./ministry-teams";
 export * from "./meetings";
 export * from "./communication";
+export * from "./tasks";
+export * from "./feedback";

@@ -8,11 +8,17 @@ import type { PersonStatus, PipelineData } from "@/lib/people/types";
 import { useRouter } from "next/navigation";
 import { PipelineView } from "./pipeline-view";
 
-interface PipelineWrapperProps {
-  data: PipelineData;
+export interface InactivityThresholds {
+  warningDays: number;
+  alertDays: number;
 }
 
-export function PipelineWrapper({ data }: PipelineWrapperProps) {
+interface PipelineWrapperProps {
+  data: PipelineData;
+  inactivityThresholds?: InactivityThresholds;
+}
+
+export function PipelineWrapper({ data, inactivityThresholds }: PipelineWrapperProps) {
   const router = useRouter();
 
   const handleStatusChange = async (
@@ -47,6 +53,7 @@ export function PipelineWrapper({ data }: PipelineWrapperProps) {
       data={data}
       onStatusChange={handleStatusChange}
       onReorder={handleReorder}
+      inactivityThresholds={inactivityThresholds}
     />
   );
 }

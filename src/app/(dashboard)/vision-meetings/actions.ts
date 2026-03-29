@@ -46,6 +46,7 @@ import {
 } from "@/lib/vision-meetings/service";
 import type { ActionResult } from "@/lib/vision-meetings/types";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 
 /**
  * Helper to extract form data into an object
@@ -73,8 +74,11 @@ function formDataToObject(formData: FormData): Record<string, unknown> {
  * Create a new vision meeting
  */
 export async function createMeetingAction(
+  prevState: ActionResult<VisionMeeting> | null,
   formData: FormData
 ): Promise<ActionResult<VisionMeeting>> {
+  let meetingId: string;
+
   try {
     // Verify session - throws if unauthorized
     const { user } = await verifySession();
@@ -107,11 +111,7 @@ export async function createMeetingAction(
 
     // Revalidate the meetings list
     revalidatePath("/vision-meetings");
-
-    return {
-      success: true,
-      data: meeting,
-    };
+    meetingId = meeting.id;
   } catch (error) {
     console.error("createMeetingAction error:", error);
 
@@ -127,6 +127,8 @@ export async function createMeetingAction(
       error: "An unexpected error occurred while creating the meeting",
     };
   }
+
+  redirect(`/vision-meetings/${meetingId}`);
 }
 
 /**
@@ -134,6 +136,7 @@ export async function createMeetingAction(
  */
 export async function updateMeetingAction(
   meetingId: string,
+  prevState: ActionResult<VisionMeeting> | null,
   formData: FormData
 ): Promise<ActionResult<VisionMeeting>> {
   try {

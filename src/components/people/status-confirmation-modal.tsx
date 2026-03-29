@@ -107,22 +107,11 @@ export function StatusConfirmationModal({
             </div>
           )}
 
-          {/* Reason - Recommended for backward, optional otherwise */}
+          {/* Reason - Required for all status changes */}
           <div className="space-y-2">
             <Label htmlFor="reason">
-              {isMovingBackward ? (
-                <>
-                  Reason for change{" "}
-                  <span className="text-amber-600 dark:text-amber-400">
-                    (recommended)
-                  </span>
-                </>
-              ) : (
-                <>
-                  Reason for change{" "}
-                  <span className="text-muted-foreground">(optional)</span>
-                </>
-              )}
+              Reason for change{" "}
+              <span className="text-destructive">*</span>
             </Label>
             <Textarea
               id="reason"
@@ -150,7 +139,11 @@ export function StatusConfirmationModal({
           >
             Cancel
           </Button>
-          <Button type="button" onClick={handleSubmit}>
+          <Button
+            type="button"
+            onClick={handleSubmit}
+            disabled={!reason.trim()}
+          >
             Update Status
           </Button>
         </DialogFooter>

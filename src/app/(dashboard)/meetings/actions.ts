@@ -3,6 +3,7 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { meetingAttendance } from "@/db/schema/meetings";
+import { personActivities } from "@/db/schema/people";
 import type {
   ChurchMeeting,
   Invitation,
@@ -49,6 +50,7 @@ import {
 } from "@/lib/meetings/service";
 import type { ActionResult } from "@/lib/meetings/types";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 
 /**
  * Helper to extract form data into an object
@@ -72,8 +74,11 @@ function formDataToObject(formData: FormData): Record<string, unknown> {
 // ============================================================================
 
 export async function createMeetingAction(
+  prevState: ActionResult<ChurchMeeting> | null,
   formData: FormData
 ): Promise<ActionResult<ChurchMeeting>> {
+  let meetingId: string;
+
   try {
     const { user } = await verifySession();
 
@@ -94,8 +99,7 @@ export async function createMeetingAction(
 
     const meeting = await createMeeting(user.churchId, user.id, parsed.data);
     revalidatePath("/meetings");
-
-    return { success: true, data: meeting };
+    meetingId = meeting.id;
   } catch (error) {
     console.error("createMeetingAction error:", error);
     if (error instanceof Error && error.message === "Unauthorized") {
@@ -103,10 +107,13 @@ export async function createMeetingAction(
     }
     return { success: false, error: "An unexpected error occurred while creating the meeting" };
   }
+
+  redirect(`/meetings/${meetingId}`);
 }
 
 export async function updateMeetingAction(
   meetingId: string,
+  prevState: ActionResult<ChurchMeeting> | null,
   formData: FormData
 ): Promise<ActionResult<ChurchMeeting>> {
   try {
@@ -726,5 +733,54 @@ export async function quickAddWalkInAction(
   } catch (error) {
     console.error("quickAddWalkInAction error:", error);
     return { success: false, error: "Failed to add walk-in" };
+  }
+}
+
+// ============================================================================
+// Attendee Note Action
+// ============================================================================
+
+/**
+ * Add a note for an individual attendee during meeting evaluation.
+ * Creates a person_activities record with activityType "note_added"
+ * and metadata linking to the meeting.
+ */
+export async function addAttendeeNoteAction(
+  personId: string,
+  meetingId: string,
+  meetingType: string,
+  note: string
+): Promise<ActionResult<null>> {
+  try {
+    const { user } = await verifySession();
+    if (!user.churchId) return { success: false, error: "No church" };
+
+    const trimmedNote = note.trim();
+    if (!trimmedNote) {
+      return { success: false, error: "Note cannot be empty" };
+    }
+
+    if (trimmedNote.length > 5000) {
+      return { success: false, error: "Note must be under 5000 characters" };
+    }
+
+    await db.insert(personActivities).values({
+      churchId: user.churchId,
+      personId,
+      activityType: "note_added",
+      metadata: {
+        note: trimmedNote,
+        meetingId,
+        meetingType,
+      },
+      performedBy: user.id,
+    });
+
+    revalidatePath(`/meetings/${meetingId}/evaluation`);
+    revalidatePath(`/people/${personId}`);
+    return { success: true, data: null };
+  } catch (error) {
+    console.error("addAttendeeNoteAction error:", error);
+    return { success: false, error: "Failed to save note" };
   }
 }

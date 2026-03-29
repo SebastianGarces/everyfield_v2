@@ -24,6 +24,7 @@ import { and, asc, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import {
   emitAttendanceFinalized,
   emitAttendanceRecorded,
+  emitEvaluationCompleted,
   emitMeetingCompleted,
 } from "./events";
 import { kitTemplate } from "./kit-template";
@@ -586,9 +587,7 @@ export async function finalizeAttendance(
     );
 
   const total = records.length;
-  const newAttendeeIds = records
-    .filter((r) => r.attendanceType === "first_time")
-    .map((r) => r.personId);
+  const attendeeIds = records.map((r) => r.personId);
 
   // Update meeting's actual attendance count
   await db
@@ -612,7 +611,7 @@ export async function finalizeAttendance(
   }
 
   // Emit finalized event (F5 subscribes to create follow-up tasks)
-  await emitAttendanceFinalized(meetingId, churchId, newAttendeeIds, total);
+  await emitAttendanceFinalized(meetingId, churchId, attendeeIds, total);
 }
 
 // ============================================================================
@@ -660,6 +659,9 @@ export async function createEvaluation(
       notes: data.notes ?? null,
     })
     .returning();
+
+  // Emit evaluation completed event for task auto-completion
+  await emitEvaluationCompleted(meetingId, churchId, userId);
 
   return evaluation;
 }

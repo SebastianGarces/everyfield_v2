@@ -4,6 +4,7 @@ import { Sprout } from "lucide-react";
 import Link from "next/link";
 import * as React from "react";
 
+import { FeedbackButton } from "@/components/feedback/feedback-button";
 import { NavMain } from "@/components/nav-main";
 import { NavUser } from "@/components/nav-user";
 import {
@@ -89,6 +90,7 @@ export function AppSidebar({ user, hasChurch, ...props }: AppSidebarProps) {
         />
       </SidebarContent>
       <SidebarFooter>
+        <FeedbackButton />
         <NavUser user={user} />
       </SidebarFooter>
       <SidebarRail />

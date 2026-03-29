@@ -99,6 +99,34 @@
       "when": 1770755400000,
       "tag": "0013_schema_hardening",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1771107096823,
+      "tag": "0014_task_management",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1771110967195,
+      "tag": "0015_task_completion_event",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1771112665213,
+      "tag": "0016_feedback",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1771116573693,
+      "tag": "0017_inactivity_thresholds",
+      "breakpoints": true
     }
   ]
 }
