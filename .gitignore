@@ -50,6 +50,7 @@ Thumbs.db
 
 # AI Agents
 .codex
+scratchpad/
 
 # Working feature (ephemeral planning workspace)
 working-feature
