@@ -3,6 +3,7 @@ export * from "./sending-church";
 export * from "./church";
 export * from "./people";
 export * from "./session";
+export * from "./api-token";
 export * from "./user";
 export * from "./wiki";
 export * from "./coach-assignment";
