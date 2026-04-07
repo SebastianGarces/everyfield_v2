@@ -45,6 +45,7 @@ export const PlannerResponseSchema = PlannerModelResponseSchema.extend({
   readyToCreate: z.boolean(),
   interpretation: z
     .object({
+      dateLabel: z.string().optional(),
       datetimeLabel: z.string().optional(),
       locationLabel: z.string().optional(),
     })

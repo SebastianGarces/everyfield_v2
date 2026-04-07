@@ -4,6 +4,7 @@ import {
   buildAssistantMessage,
   buildRelativeDateAnchors,
   maybeApplyDeterministicLocationResolution,
+  maybePreventImplicitDateTimeAssumptions,
   maybeApplyDeterministicSchedulingDateTime,
 } from "./vision-meeting-planner";
 import {
@@ -57,6 +58,50 @@ test("maybeApplyDeterministicSchedulingDateTime resolves next Monday at 7 PM in 
   });
 
   assert.equal(result.datetime, "2026-04-14T00:00:00.000Z");
+});
+
+test("maybePreventImplicitDateTimeAssumptions clears a model-guessed midnight when the user only gave a date", () => {
+  const result = maybePreventImplicitDateTimeAssumptions({
+    currentDraft: {
+      ...initialVisionMeetingDraft,
+      datetime: "2026-04-08T05:00:00.000Z",
+    },
+    previousDraft: initialVisionMeetingDraft,
+    messages: [
+      {
+        id: "u1",
+        role: "user",
+        content: "Meeting tomorrow at the high school, 35 ppl",
+      },
+    ],
+    timezone: "America/Chicago",
+  });
+
+  assert.equal(result.draft.datetime, null);
+  assert.equal(result.pendingDateLabel, "Wednesday, April 8, 2026");
+  assert.equal(result.requiresTimeClarification, true);
+});
+
+test("maybePreventImplicitDateTimeAssumptions keeps an explicit midnight time", () => {
+  const result = maybePreventImplicitDateTimeAssumptions({
+    currentDraft: {
+      ...initialVisionMeetingDraft,
+      datetime: "2026-04-08T05:00:00.000Z",
+    },
+    previousDraft: initialVisionMeetingDraft,
+    messages: [
+      {
+        id: "u1",
+        role: "user",
+        content: "Meeting tomorrow at midnight at the high school",
+      },
+    ],
+    timezone: "America/Chicago",
+  });
+
+  assert.equal(result.draft.datetime, "2026-04-08T05:00:00.000Z");
+  assert.equal(result.pendingDateLabel, undefined);
+  assert.equal(result.requiresTimeClarification, false);
 });
 
 test("maybeApplyDeterministicLocationResolution matches a saved location by name from the user message", () => {
@@ -172,12 +217,15 @@ test("buildAssistantMessage asks the user to choose between saved locations when
     missingFields: ["location"],
     readyToCreate: false,
     draft: initialVisionMeetingDraft,
+    pendingDateLabel: undefined,
     requiresSavedLocationClarification: true,
+    requiresTimeClarification: false,
     suggestedSavedLocations: [
       "North Ridgeville High School",
       "Community Center",
     ],
     interpretation: {
+      dateLabel: undefined,
       datetimeLabel: "Wednesday, April 8, 2026 at 4:00 PM CDT",
     },
   });
@@ -196,9 +244,12 @@ test("buildAssistantMessage asks for an address when the location name is known 
       ...initialVisionMeetingDraft,
       locationName: "North Ridgeville High School",
     },
+    pendingDateLabel: undefined,
     requiresSavedLocationClarification: false,
+    requiresTimeClarification: false,
     suggestedSavedLocations: [],
     interpretation: {
+      dateLabel: undefined,
       datetimeLabel: "Monday, April 13, 2026 at 7:00 PM CDT",
     },
   });
@@ -206,5 +257,32 @@ test("buildAssistantMessage asks for an address when the location name is known 
   assert.equal(
     message,
     "I have the location name set to North Ridgeville High School. What address should I use?"
+  );
+});
+
+test("buildAssistantMessage asks for a time when the date is known but time is missing", () => {
+  const message = buildAssistantMessage({
+    missingFields: ["datetime"],
+    readyToCreate: false,
+    draft: {
+      ...initialVisionMeetingDraft,
+      locationId: "11111111-1111-4111-8111-111111111111",
+      locationName: "North Ridgeville High School",
+      locationAddress: "123 Center Ridge Rd, North Ridgeville, OH 44039",
+    },
+    pendingDateLabel: "Wednesday, April 8, 2026",
+    requiresSavedLocationClarification: false,
+    requiresTimeClarification: true,
+    suggestedSavedLocations: [],
+    interpretation: {
+      dateLabel: "Wednesday, April 8, 2026",
+      locationLabel:
+        "North Ridgeville High School, 123 Center Ridge Rd, North Ridgeville, OH 44039",
+    },
+  });
+
+  assert.equal(
+    message,
+    "I have the date set for Wednesday, April 8, 2026 and the location set to North Ridgeville High School, 123 Center Ridge Rd, North Ridgeville, OH 44039. What time should I use?"
   );
 });

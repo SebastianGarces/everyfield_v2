@@ -110,6 +110,12 @@ type DeterministicLocationResolution = {
   suggestedSavedLocations: string[];
 };
 
+type DeterministicDateTimeClarification = {
+  draft: VisionMeetingDraft;
+  pendingDateLabel?: string;
+  requiresTimeClarification: boolean;
+};
+
 type LocalDateParts = {
   year: number;
   month: number;
@@ -144,6 +150,34 @@ function isDefaultLocationReference(value: string | null | undefined) {
 
 function getSavedLocationSuggestions(savedLocations: PlannerSavedLocation[]) {
   return savedLocations.slice(0, 3).map((location) => location.name);
+}
+
+function formatDateOnlyLabel(datetime: string, timezone: string) {
+  return new Date(datetime).toLocaleDateString("en-US", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    timeZone: timezone,
+  });
+}
+
+function clearDraftDateTime(draft: VisionMeetingDraft): VisionMeetingDraft {
+  return {
+    ...draft,
+    datetime: null,
+  };
+}
+
+function hasExplicitDateReference(message: string) {
+  return (
+    extractSchedulingDateIntent(message) !== null ||
+    /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/i.test(
+      message
+    ) ||
+    /\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b/.test(message) ||
+    /\b\d{4}-\d{2}-\d{2}\b/.test(message)
+  );
 }
 
 function rankSavedLocationMatch(
@@ -472,6 +506,15 @@ function extractSchedulingDateIntent(message: string): {
 
 function extractSchedulingTimeIntent(message: string) {
   const normalizedMessage = message.toLowerCase();
+
+  if (/\bmidnight\b/.test(normalizedMessage)) {
+    return { hour: 0, minute: 0 };
+  }
+
+  if (/\bnoon\b/.test(normalizedMessage)) {
+    return { hour: 12, minute: 0 };
+  }
+
   const twelveHourMatch = normalizedMessage.match(
     /\b(?:at\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/
   );
@@ -661,13 +704,64 @@ export function maybeApplyDeterministicSchedulingDateTime(params: {
   };
 }
 
+export function maybePreventImplicitDateTimeAssumptions(params: {
+  currentDraft: VisionMeetingDraft;
+  previousDraft: VisionMeetingDraft;
+  messages: PlannerMessage[];
+  timezone: string;
+}): DeterministicDateTimeClarification {
+  const latestUserMessage = [...params.messages]
+    .reverse()
+    .find((message) => message.role === "user")?.content;
+
+  if (!latestUserMessage || !params.currentDraft.datetime) {
+    return {
+      draft: params.currentDraft,
+      requiresTimeClarification: false,
+    };
+  }
+
+  if (extractSchedulingTimeIntent(latestUserMessage)) {
+    return {
+      draft: params.currentDraft,
+      requiresTimeClarification: false,
+    };
+  }
+
+  if (params.currentDraft.datetime === params.previousDraft.datetime) {
+    return {
+      draft: params.currentDraft,
+      requiresTimeClarification: false,
+    };
+  }
+
+  if (!hasExplicitDateReference(latestUserMessage)) {
+    return {
+      draft: clearDraftDateTime(params.currentDraft),
+      requiresTimeClarification: false,
+    };
+  }
+
+  return {
+    draft: clearDraftDateTime(params.currentDraft),
+    pendingDateLabel: formatDateOnlyLabel(
+      params.currentDraft.datetime,
+      params.timezone
+    ),
+    requiresTimeClarification: true,
+  };
+}
+
 export function buildAssistantMessage(params: {
   missingFields: Array<"datetime" | "location">;
   readyToCreate: boolean;
   draft: VisionMeetingDraft;
+  pendingDateLabel?: string;
   requiresSavedLocationClarification: boolean;
+  requiresTimeClarification: boolean;
   suggestedSavedLocations: string[];
   interpretation: {
+    dateLabel?: string;
     datetimeLabel?: string;
     locationLabel?: string;
   };
@@ -677,6 +771,10 @@ export function buildAssistantMessage(params: {
     const missingLocation = params.missingFields.includes("location");
 
     if (missingDateTime && missingLocation) {
+      if (params.pendingDateLabel) {
+        return `I have the date set for ${params.pendingDateLabel}. What time and location should I use?`;
+      }
+
       return "I still need the date, time, and location for this vision meeting.";
     }
 
@@ -699,6 +797,14 @@ export function buildAssistantMessage(params: {
     }
 
     if (missingDateTime) {
+      if (params.requiresTimeClarification && params.pendingDateLabel) {
+        if (params.interpretation.locationLabel) {
+          return `I have the date set for ${params.pendingDateLabel} and the location set to ${params.interpretation.locationLabel}. What time should I use?`;
+        }
+
+        return `I have the date set for ${params.pendingDateLabel}. What time should I use?`;
+      }
+
       return `I have the location set to ${params.interpretation.locationLabel ?? "the selected location"}. What date and time should I use?`;
     }
 
@@ -789,14 +895,21 @@ export async function runVisionMeetingPlanner(input: {
         now,
         timezone: PLANNER_TIMEZONE,
       });
-      const locationResolution = maybeApplyDeterministicLocationResolution({
+      const dateTimeClarification = maybePreventImplicitDateTimeAssumptions({
         currentDraft: draftWithDateTime,
+        previousDraft: input.draft,
+        messages: input.messages,
+        timezone: PLANNER_TIMEZONE,
+      });
+      const locationResolution = maybeApplyDeterministicLocationResolution({
+        currentDraft: dateTimeClarification.draft,
         messages: input.messages,
         savedLocations: input.savedLocations,
       });
       const draft = locationResolution.draft;
       const state = computePlannerState(draft);
       const interpretation = {
+        dateLabel: dateTimeClarification.pendingDateLabel,
         datetimeLabel: draft.datetime
           ? new Date(draft.datetime).toLocaleString("en-US", {
               weekday: "long",
@@ -820,8 +933,11 @@ export async function runVisionMeetingPlanner(input: {
           missingFields: state.missingFields,
           readyToCreate: state.readyToCreate,
           draft,
+          pendingDateLabel: dateTimeClarification.pendingDateLabel,
           requiresSavedLocationClarification:
             locationResolution.requiresSavedLocationClarification,
+          requiresTimeClarification:
+            dateTimeClarification.requiresTimeClarification,
           suggestedSavedLocations: locationResolution.suggestedSavedLocations,
           interpretation,
         }),

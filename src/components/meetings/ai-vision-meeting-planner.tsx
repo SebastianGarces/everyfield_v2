@@ -296,7 +296,11 @@ export function AiVisionMeetingPlanner() {
             <p className="text-muted-foreground text-xs uppercase">
               Date & Time
             </p>
-            <p>{renderValue(interpretation?.datetimeLabel)}</p>
+            <p>
+              {renderValue(
+                interpretation?.datetimeLabel ?? interpretation?.dateLabel
+              )}
+            </p>
           </div>
 
           <div className="space-y-1">
