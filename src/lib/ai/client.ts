@@ -51,7 +51,7 @@ export async function generateStructuredObject<T>(
 ): Promise<T> {
   const { apiKey, model } = getAiConfig();
 
-  const response = await fetch("https://api.openai.com/v1/responses", {
+  const response = await fetch("https://openrouter.ai/api/v1/responses", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -85,7 +85,7 @@ export async function generateStructuredObject<T>(
   const payload = (await response.json()) as OpenAIResponsesApiOutput;
 
   if (!response.ok) {
-    throw new Error(payload.error?.message ?? "OpenAI request failed");
+    throw new Error(payload.error?.message ?? "OpenRouter request failed");
   }
 
   for (const output of payload.output ?? []) {

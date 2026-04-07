@@ -25,7 +25,7 @@ export default async function NewMeetingPage({
   const params = await searchParams;
   const defaultType = (params.type as MeetingType) || undefined;
   const defaultTeamId = params.teamId as string | undefined;
-  const aiPlannerEnabled = Boolean(process.env.OPENAI_API_KEY);
+  const aiPlannerEnabled = Boolean(process.env.OPENROUTER_API_KEY);
   const supportsAiPlanner =
     defaultType === undefined || defaultType === "vision_meeting";
   const showAiPlanner = aiPlannerEnabled && supportsAiPlanner;
@@ -61,7 +61,7 @@ export default async function NewMeetingPage({
                 AI planner not configured
               </AlertTitle>
               <AlertDescription className="text-yellow-800">
-                Set <code>OPENAI_API_KEY</code> in your local environment to
+                Set <code>OPENROUTER_API_KEY</code> in your local environment to
                 enable the AI vision meeting planner. The manual form is still
                 available below.
               </AlertDescription>

@@ -105,7 +105,7 @@ aiPlannerRoute.openapi(
     } catch (error) {
       if (
         error instanceof Error &&
-        error.message.startsWith("Missing OPENAI_")
+        error.message.startsWith("Missing OPENROUTER_")
       ) {
         return c.json({ error: "AI planner is not configured" }, 503);
       }
