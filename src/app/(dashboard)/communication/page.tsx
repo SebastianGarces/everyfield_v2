@@ -7,7 +7,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { verifySession } from "@/lib/auth/session";
-import { getCommunications, resolveSubjects } from "@/lib/communication/service";
+import {
+  getCommunications,
+  resolveSubjects,
+} from "@/lib/communication/service";
 import { getTemplates } from "@/lib/communication/templates";
 import { formatDistanceToNow } from "date-fns";
 
@@ -32,12 +35,13 @@ export default async function CommunicationPage() {
     ]);
 
   // Resolve merge field variables in subjects for display
-  const resolvedSubjectMap = await resolveSubjects(user.churchId, recentMessages);
+  const resolvedSubjectMap = await resolveSubjects(
+    user.churchId,
+    recentMessages
+  );
 
   // Quick action templates (show first 4 system/popular templates)
-  const quickActions = templates
-    .filter((t) => t.isSystem)
-    .slice(0, 4);
+  const quickActions = templates.filter((t) => t.isSystem).slice(0, 4);
 
   const sentThisWeek = recentMessages.filter((m) => {
     if (!m.sentAt) return false;
@@ -175,7 +179,9 @@ export default async function CommunicationPage() {
                       <CardContent className="flex items-center justify-between p-4">
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-medium">
-                            {resolvedSubjectMap.get(msg.id) ?? msg.subject ?? "(No subject)"}
+                            {resolvedSubjectMap.get(msg.id) ??
+                              msg.subject ??
+                              "(No subject)"}
                           </p>
                           <p className="text-muted-foreground mt-1 text-sm">
                             {msg.recipientCount ?? 0} recipient

@@ -182,7 +182,7 @@ export function AttendanceCapture({
         <Card>
           <CardContent className="pt-4 text-center">
             <p className="text-xl font-bold">{attendedCount}</p>
-            <p className="text-xs text-muted-foreground">Attended</p>
+            <p className="text-muted-foreground text-xs">Attended</p>
           </CardContent>
         </Card>
         <Card>
@@ -190,7 +190,7 @@ export function AttendanceCapture({
             <p className="text-xl font-bold text-green-600">
               {summary.firstTime}
             </p>
-            <p className="text-xs text-muted-foreground">First Time</p>
+            <p className="text-muted-foreground text-xs">First Time</p>
           </CardContent>
         </Card>
         <Card>
@@ -198,7 +198,7 @@ export function AttendanceCapture({
             <p className="text-xl font-bold text-blue-600">
               {summary.returning}
             </p>
-            <p className="text-xs text-muted-foreground">Returning</p>
+            <p className="text-muted-foreground text-xs">Returning</p>
           </CardContent>
         </Card>
         <Card>
@@ -206,7 +206,7 @@ export function AttendanceCapture({
             <p className="text-xl font-bold text-purple-600">
               {summary.coreGroup}
             </p>
-            <p className="text-xs text-muted-foreground">Core Group</p>
+            <p className="text-muted-foreground text-xs">Core Group</p>
           </CardContent>
         </Card>
       </div>
@@ -316,7 +316,7 @@ export function AttendanceCapture({
         {showWalkIn && (
           <CardContent>
             <div className="relative">
-              <Search className="text-muted-foreground absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2" />
+              <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
               <Input
                 value={searchQuery}
                 onChange={(e) => handleSearch(e.target.value)}
@@ -343,7 +343,7 @@ export function AttendanceCapture({
                           </span>
                         )}
                       </div>
-                      <Plus className="h-4 w-4 text-muted-foreground" />
+                      <Plus className="text-muted-foreground h-4 w-4" />
                     </button>
                   ))}
                 </div>
@@ -382,7 +382,7 @@ export function AttendanceCapture({
           ) : (
             <div className="divide-y">
               {/* Table header */}
-              <div className="grid grid-cols-12 gap-4 pb-2 text-xs font-medium uppercase text-muted-foreground">
+              <div className="text-muted-foreground grid grid-cols-12 gap-4 pb-2 text-xs font-medium uppercase">
                 <div className="col-span-1 text-center">Here</div>
                 <div className="col-span-4">Name</div>
                 <div className="col-span-3">Contact</div>
@@ -406,10 +406,7 @@ export function AttendanceCapture({
                       <Checkbox
                         checked={isAttended}
                         onCheckedChange={() =>
-                          handleToggle(
-                            guest.personId,
-                            guest.attendanceStatus
-                          )
+                          handleToggle(guest.personId, guest.attendanceStatus)
                         }
                         disabled={isPending}
                         className="cursor-pointer"
@@ -428,17 +425,14 @@ export function AttendanceCapture({
                     </div>
 
                     {/* Contact */}
-                    <div className="col-span-3 truncate text-sm text-muted-foreground">
+                    <div className="text-muted-foreground col-span-3 truncate text-sm">
                       {guest.email || guest.phone || "—"}
                     </div>
 
                     {/* RSVP */}
                     <div className="col-span-2">
                       {rsvp ? (
-                        <Badge
-                          className={rsvp.className}
-                          variant="secondary"
-                        >
+                        <Badge className={rsvp.className} variant="secondary">
                           <rsvp.icon className="mr-1 h-3 w-3" />
                           {rsvp.label}
                         </Badge>
@@ -460,9 +454,7 @@ export function AttendanceCapture({
                           Attended
                         </Badge>
                       ) : (
-                        <span className="text-xs text-muted-foreground">
-                          —
-                        </span>
+                        <span className="text-muted-foreground text-xs">—</span>
                       )}
                     </div>
                   </div>
@@ -476,7 +468,7 @@ export function AttendanceCapture({
       {/* Finalize Button */}
       {guests.length > 0 && (
         <div className="flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">
+          <p className="text-muted-foreground text-sm">
             {attendedCount} of {guests.length} marked as attended
           </p>
           <Button

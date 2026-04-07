@@ -191,8 +191,7 @@ export async function assignTeamLeaderAction(
   } catch (error) {
     if (error instanceof Error && error.message === "Unauthorized")
       return { success: false, error: "You must be logged in" };
-    if (error instanceof Error)
-      return { success: false, error: error.message };
+    if (error instanceof Error) return { success: false, error: error.message };
     return { success: false, error: "Failed to assign leader" };
   }
 }
@@ -268,12 +267,7 @@ export async function createRoleAction(
       };
     }
 
-    const role = await createRole(
-      user.churchId,
-      teamId,
-      user.id,
-      parsed.data
-    );
+    const role = await createRole(user.churchId, teamId, user.id, parsed.data);
     revalidatePath(`/teams/${teamId}`);
     return { success: true, data: role };
   } catch (error) {
@@ -321,9 +315,7 @@ export async function updateRoleAction(
   }
 }
 
-export async function deleteRoleAction(
-  roleId: string
-): Promise<ActionResult> {
+export async function deleteRoleAction(roleId: string): Promise<ActionResult> {
   try {
     const { user } = await verifySession();
     if (!user.churchId)
@@ -335,8 +327,7 @@ export async function deleteRoleAction(
   } catch (error) {
     if (error instanceof Error && error.message === "Unauthorized")
       return { success: false, error: "You must be logged in" };
-    if (error instanceof Error)
-      return { success: false, error: error.message };
+    if (error instanceof Error) return { success: false, error: error.message };
     return { success: false, error: "Failed to delete role" };
   }
 }
@@ -407,8 +398,7 @@ export async function assignMemberAction(
   } catch (error) {
     if (error instanceof Error && error.message === "Unauthorized")
       return { success: false, error: "You must be logged in" };
-    if (error instanceof Error)
-      return { success: false, error: error.message };
+    if (error instanceof Error) return { success: false, error: error.message };
     return { success: false, error: "Failed to assign member" };
   }
 }
@@ -427,8 +417,7 @@ export async function removeMemberAction(
   } catch (error) {
     if (error instanceof Error && error.message === "Unauthorized")
       return { success: false, error: "You must be logged in" };
-    if (error instanceof Error)
-      return { success: false, error: error.message };
+    if (error instanceof Error) return { success: false, error: error.message };
     return { success: false, error: "Failed to remove member" };
   }
 }
@@ -479,7 +468,10 @@ export async function listMeetingsAction(
     if (!user.churchId)
       return { success: false, error: "No church associated" };
 
-    const result = await listUnifiedMeetings(user.churchId, { teamId, limit: 50 });
+    const result = await listUnifiedMeetings(user.churchId, {
+      teamId,
+      limit: 50,
+    });
     return { success: true, data: result.meetings };
   } catch (error) {
     if (error instanceof Error && error.message === "Unauthorized")
@@ -525,7 +517,11 @@ export async function createMeetingAction(
       };
     }
 
-    const meeting = await createUnifiedMeeting(user.churchId, user.id, parsed.data);
+    const meeting = await createUnifiedMeeting(
+      user.churchId,
+      user.id,
+      parsed.data
+    );
     revalidatePath(`/teams/${teamId}/meetings`);
     revalidatePath("/meetings");
     return { success: true, data: meeting };
@@ -538,7 +534,9 @@ export async function createMeetingAction(
 
 export async function recordAttendanceAction(
   meetingId: string,
-  data: { records: { personId: string; status: "attended" | "absent" | "excused" }[] }
+  data: {
+    records: { personId: string; status: "attended" | "absent" | "excused" }[];
+  }
 ): Promise<ActionResult> {
   try {
     const { user } = await verifySession();
@@ -630,9 +628,10 @@ export async function createTrainingProgramAction(
   }
 }
 
-export async function markTrainingCompleteAction(
-  data: { personId: string; programId: string }
-): Promise<ActionResult<TrainingCompletion>> {
+export async function markTrainingCompleteAction(data: {
+  personId: string;
+  programId: string;
+}): Promise<ActionResult<TrainingCompletion>> {
   try {
     const { user } = await verifySession();
     if (!user.churchId)
@@ -657,8 +656,7 @@ export async function markTrainingCompleteAction(
   } catch (error) {
     if (error instanceof Error && error.message === "Unauthorized")
       return { success: false, error: "You must be logged in" };
-    if (error instanceof Error)
-      return { success: false, error: error.message };
+    if (error instanceof Error) return { success: false, error: error.message };
     return { success: false, error: "Failed to mark complete" };
   }
 }

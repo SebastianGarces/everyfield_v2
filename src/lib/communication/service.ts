@@ -242,7 +242,11 @@ export async function sendCommunication(
       const { data, error } = await resend.emails.send(emailBatch[0]);
       if (error) {
         console.error("[COMM] Single send failed:", error);
-        await updateRecipientStatus(insertedRecipients[0].id, "failed", error.message);
+        await updateRecipientStatus(
+          insertedRecipients[0].id,
+          "failed",
+          error.message
+        );
       } else if (data?.id) {
         await db
           .update(communicationRecipients)
@@ -386,7 +390,7 @@ export async function resolveSubjects(
     }
     const mergeData: Record<string, string> = {
       ...churchData,
-      ...(comm.meetingId ? meetingMap.get(comm.meetingId) ?? {} : {}),
+      ...(comm.meetingId ? (meetingMap.get(comm.meetingId) ?? {}) : {}),
     };
     result.set(comm.id, renderTemplate(comm.subject, mergeData));
   }
@@ -420,7 +424,10 @@ export async function getCommunication(
     total: recipients.length,
     sent: recipients.filter((r) => r.status !== "pending").length,
     delivered: recipients.filter(
-      (r) => r.status === "delivered" || r.status === "opened" || r.status === "clicked"
+      (r) =>
+        r.status === "delivered" ||
+        r.status === "opened" ||
+        r.status === "clicked"
     ).length,
     opened: recipients.filter(
       (r) => r.status === "opened" || r.status === "clicked"
@@ -684,4 +691,3 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
   }
   return chunks;
 }
-

@@ -61,8 +61,7 @@ Looking forward to seeing you!
   },
   {
     name: "Vision Meeting Reminder",
-    description:
-      "Reminder sent 24-48 hours before a vision meeting.",
+    description: "Reminder sent 24-48 hours before a vision meeting.",
     category: "meeting_reminder" as const,
     channel: "email" as const,
     subject: "Reminder: {{meeting_title}} is coming up — {{church_name}}",
@@ -94,8 +93,7 @@ See you soon!
   },
   {
     name: "Vision Meeting Follow-Up — Attended",
-    description:
-      "Follow-up sent to people who attended the vision meeting.",
+    description: "Follow-up sent to people who attended the vision meeting.",
     category: "follow_up" as const,
     channel: "email" as const,
     subject: "Thank You for Attending — {{church_name}}",
@@ -108,16 +106,11 @@ We hope you got a sense of the vision God has given us for {{church_name}}. If y
 We'd love to stay connected!
 
 — {{church_name}}`,
-    mergeFields: [
-      "first_name",
-      "meeting_type",
-      "church_name",
-    ],
+    mergeFields: ["first_name", "meeting_type", "church_name"],
   },
   {
     name: "Vision Meeting Follow-Up — No Show",
-    description:
-      "Follow-up sent to people who confirmed but didn't attend.",
+    description: "Follow-up sent to people who confirmed but didn't attend.",
     category: "follow_up" as const,
     channel: "email" as const,
     subject: "We Missed You! — {{church_name}}",
@@ -130,11 +123,7 @@ We'd love to share what we covered and keep you in the loop about upcoming event
 Just reply to this email — we'd love to hear from you!
 
 — {{church_name}}`,
-    mergeFields: [
-      "first_name",
-      "meeting_type",
-      "church_name",
-    ],
+    mergeFields: ["first_name", "meeting_type", "church_name"],
   },
 
   // ---------------------------------------------------------------------------
@@ -142,8 +131,7 @@ Just reply to this email — we'd love to hear from you!
   // ---------------------------------------------------------------------------
   {
     name: "Orientation Invitation",
-    description:
-      "Invite core group members to an orientation session.",
+    description: "Invite core group members to an orientation session.",
     category: "meeting_invitation" as const,
     channel: "email" as const,
     subject: "Orientation: {{meeting_title}} — {{church_name}}",
@@ -180,8 +168,7 @@ See you there!
   // ---------------------------------------------------------------------------
   {
     name: "General Announcement",
-    description:
-      "Blank announcement template for church-wide communications.",
+    description: "Blank announcement template for church-wide communications.",
     category: "announcement" as const,
     channel: "email" as const,
     subject: "{{church_name}} — Update",
@@ -190,10 +177,7 @@ See you there!
 [Write your announcement here]
 
 — {{church_name}}`,
-    mergeFields: [
-      "first_name",
-      "church_name",
-    ],
+    mergeFields: ["first_name", "church_name"],
   },
 ];
 

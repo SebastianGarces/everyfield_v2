@@ -36,7 +36,10 @@ export async function getTemplates(
   filters?: TemplateFilters
 ): Promise<MessageTemplate[]> {
   const conditions = [
-    or(eq(messageTemplates.isSystem, true), eq(messageTemplates.churchId, churchId)),
+    or(
+      eq(messageTemplates.isSystem, true),
+      eq(messageTemplates.churchId, churchId)
+    ),
   ];
 
   if (filters?.category) {

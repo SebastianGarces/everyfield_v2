@@ -1,10 +1,4 @@
-import {
-  pgTable,
-  uuid,
-  boolean,
-  timestamp,
-  unique,
-} from "drizzle-orm/pg-core";
+import { pgTable, uuid, boolean, timestamp, unique } from "drizzle-orm/pg-core";
 import { churches } from "./church";
 import { users } from "./user";
 
@@ -16,9 +10,7 @@ export const churchPrivacySettings = pgTable(
       .references(() => churches.id)
       .notNull(),
     sharePeople: boolean("share_people").default(false).notNull(),
-    shareMeetings: boolean("share_meetings")
-      .default(false)
-      .notNull(),
+    shareMeetings: boolean("share_meetings").default(false).notNull(),
     shareTasks: boolean("share_tasks").default(false).notNull(),
     shareFinancials: boolean("share_financials").default(false).notNull(),
     shareMinistryTeams: boolean("share_ministry_teams")

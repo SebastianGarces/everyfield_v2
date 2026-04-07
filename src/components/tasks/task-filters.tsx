@@ -132,9 +132,7 @@ export function TaskFilters({ currentView, showCompleted }: TaskFiltersProps) {
             ? "bg-primary text-primary-foreground"
             : "hover:bg-muted"
         )}
-        onClick={() =>
-          updateParam("completed", showCompleted ? null : "true")
-        }
+        onClick={() => updateParam("completed", showCompleted ? null : "true")}
       >
         Show Completed
       </button>
@@ -150,7 +148,9 @@ export function TaskFilters({ currentView, showCompleted }: TaskFiltersProps) {
           <SelectValue placeholder="Status" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="all" className="cursor-pointer">All Statuses</SelectItem>
+          <SelectItem value="all" className="cursor-pointer">
+            All Statuses
+          </SelectItem>
           {taskStatuses
             .filter((s) => s !== "complete")
             .map((s) => (
@@ -170,7 +170,9 @@ export function TaskFilters({ currentView, showCompleted }: TaskFiltersProps) {
           <SelectValue placeholder="Priority" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="all" className="cursor-pointer">All Priorities</SelectItem>
+          <SelectItem value="all" className="cursor-pointer">
+            All Priorities
+          </SelectItem>
           {taskPriorities.map((p) => (
             <SelectItem key={p} value={p} className="cursor-pointer">
               {PRIORITY_LABELS[p] ?? p}
@@ -188,7 +190,9 @@ export function TaskFilters({ currentView, showCompleted }: TaskFiltersProps) {
           <SelectValue placeholder="Category" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="all" className="cursor-pointer">All Categories</SelectItem>
+          <SelectItem value="all" className="cursor-pointer">
+            All Categories
+          </SelectItem>
           {taskCategories.map((c) => (
             <SelectItem key={c} value={c} className="cursor-pointer">
               {CATEGORY_LABELS[c] ?? c}

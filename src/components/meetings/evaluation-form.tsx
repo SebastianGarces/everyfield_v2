@@ -91,7 +91,7 @@ export function EvaluationForm({
         <h2 className="text-xl font-bold">
           Evaluate Vision Meeting #{meetingNumber}
         </h2>
-        <p className="text-sm text-muted-foreground mt-1">
+        <p className="text-muted-foreground mt-1 text-sm">
           Rate each quality factor from 1 (poor) to 5 (excellent).
         </p>
       </div>
@@ -109,7 +109,7 @@ export function EvaluationForm({
               <div className="flex items-start justify-between">
                 <div className="space-y-0.5">
                   <Label className="text-sm font-medium">{factor.label}</Label>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-muted-foreground text-xs">
                     {factor.description}
                   </p>
                 </div>
@@ -145,7 +145,7 @@ export function EvaluationForm({
       </div>
 
       {totalScore && (
-        <div className="text-center py-2">
+        <div className="py-2 text-center">
           <span className="text-3xl font-bold">{totalScore}</span>
           <span className="text-muted-foreground text-lg">/5.0</span>
         </div>

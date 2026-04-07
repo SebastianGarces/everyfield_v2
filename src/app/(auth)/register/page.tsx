@@ -89,7 +89,10 @@ export default function RegisterPage() {
                   key={type}
                   className="border-input has-data-[state=checked]:border-primary has-data-[state=checked]:bg-primary/5 flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors"
                 >
-                  <RadioGroupItem value={type} className="mt-0.5 cursor-pointer" />
+                  <RadioGroupItem
+                    value={type}
+                    className="mt-0.5 cursor-pointer"
+                  />
                   <div className="space-y-0.5">
                     <div className="text-sm font-medium">{cfg.label}</div>
                     <div className="text-muted-foreground text-xs">

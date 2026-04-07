@@ -46,8 +46,7 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
     ? ([categoryParam].flat() as TaskCategory[])
     : undefined;
 
-  const cursor =
-    typeof params.cursor === "string" ? params.cursor : undefined;
+  const cursor = typeof params.cursor === "string" ? params.cursor : undefined;
 
   // Fetch tasks and counts in parallel
   const [result, counts] = await Promise.all([
@@ -62,10 +61,7 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
       sortDir: "asc",
       limit: 50,
     }),
-    getTaskCounts(
-      user.churchId,
-      view === "my_tasks" ? user.id : undefined
-    ),
+    getTaskCounts(user.churchId, view === "my_tasks" ? user.id : undefined),
   ]);
 
   // Pre-fetch person notes for person-related tasks

@@ -146,9 +146,7 @@ export function FeedbackButton() {
               </div>
 
               {/* Page context */}
-              <p className="text-muted-foreground text-xs">
-                Page: {pathname}
-              </p>
+              <p className="text-muted-foreground text-xs">Page: {pathname}</p>
 
               <DialogFooter>
                 <Button

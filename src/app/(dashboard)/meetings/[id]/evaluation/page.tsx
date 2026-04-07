@@ -1,10 +1,17 @@
 import { redirect } from "next/navigation";
 import { verifySession } from "@/lib/auth/session";
-import { getMeeting, getEvaluation, listAttendees } from "@/lib/meetings/service";
+import {
+  getMeeting,
+  getEvaluation,
+  listAttendees,
+} from "@/lib/meetings/service";
 import { notFound } from "next/navigation";
 import { EvaluationForm } from "@/components/meetings/evaluation-form";
 import { EvaluationSummary } from "@/components/meetings/evaluation-summary";
-import { AttendeeNotes, type AttendeeForNotes } from "@/components/meetings/attendee-notes";
+import {
+  AttendeeNotes,
+  type AttendeeForNotes,
+} from "@/components/meetings/attendee-notes";
 
 export const dynamic = "force-dynamic";
 

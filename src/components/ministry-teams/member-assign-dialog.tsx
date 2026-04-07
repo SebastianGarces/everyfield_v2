@@ -107,7 +107,7 @@ export function MemberAssignDialog({
         {!selectedPerson ? (
           <div className="space-y-3">
             <div className="relative">
-              <Search className="text-muted-foreground absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2" />
+              <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
               <Input
                 placeholder="Search people..."
                 value={search}
@@ -122,7 +122,8 @@ export function MemberAssignDialog({
                 </div>
               ) : (
                 filteredPeople.map((person) => {
-                  const initials = `${person.firstName[0]}${person.lastName[0]}`.toUpperCase();
+                  const initials =
+                    `${person.firstName[0]}${person.lastName[0]}`.toUpperCase();
                   return (
                     <button
                       key={person.id}

@@ -132,7 +132,9 @@ async function createAccountEntities(
 
     case "sending_church": {
       if (!organizationName) {
-        throw new Error("Organization name is required for sending church accounts");
+        throw new Error(
+          "Organization name is required for sending church accounts"
+        );
       }
       // Create a new sending church (independent, no network)
       const [sendingChurch] = await db

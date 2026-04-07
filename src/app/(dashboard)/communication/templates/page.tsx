@@ -74,10 +74,7 @@ export default async function TemplatesPage() {
                         <div>
                           <p className="font-medium">{template.name}</p>
                           {template.sourceTemplateId && (
-                            <Badge
-                              variant="outline"
-                              className="mt-1 text-xs"
-                            >
+                            <Badge variant="outline" className="mt-1 text-xs">
                               Customized
                             </Badge>
                           )}

@@ -46,9 +46,7 @@ export function MaterialsChecklist({
   );
 
   const progressPercent =
-    summary.total > 0
-      ? Math.round((summary.checked / summary.total) * 100)
-      : 0;
+    summary.total > 0 ? Math.round((summary.checked / summary.total) * 100) : 0;
 
   const handleToggle = (itemId: string, currentlyChecked: boolean) => {
     startTransition(async () => {
@@ -62,10 +60,8 @@ export function MaterialsChecklist({
         <CardContent className="pt-6">
           <div className="mb-2 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Package className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm font-medium">
-                Preparation Progress
-              </span>
+              <Package className="text-muted-foreground h-4 w-4" />
+              <span className="text-sm font-medium">Preparation Progress</span>
             </div>
             <div className="flex items-center gap-2 text-sm">
               {summary.checked === summary.total && summary.total > 0 && (
@@ -107,9 +103,9 @@ export function MaterialsChecklist({
                     />
                     <label
                       htmlFor={item.id}
-                      className={`cursor-pointer text-sm flex-1 ${
+                      className={`flex-1 cursor-pointer text-sm ${
                         item.isChecked
-                          ? "line-through text-muted-foreground"
+                          ? "text-muted-foreground line-through"
                           : ""
                       }`}
                     >
@@ -126,9 +122,9 @@ export function MaterialsChecklist({
       {items.length === 0 && (
         <Card>
           <CardContent className="py-12 text-center">
-            <Package className="mx-auto h-12 w-12 text-muted-foreground/50" />
+            <Package className="text-muted-foreground/50 mx-auto h-12 w-12" />
             <h3 className="mt-4 font-semibold">No checklist items</h3>
-            <p className="mt-1 text-sm text-muted-foreground">
+            <p className="text-muted-foreground mt-1 text-sm">
               Checklist items are automatically created when a meeting is
               scheduled.
             </p>

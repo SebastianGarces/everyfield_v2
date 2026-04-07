@@ -4,7 +4,13 @@ import { useState } from "react";
 import { Plus, MapPin } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { Location } from "@/db/schema";
 
 interface LocationPickerProps {
@@ -39,7 +45,7 @@ export function LocationPicker({
               : "bg-muted text-muted-foreground hover:text-foreground"
           }`}
         >
-          <MapPin className="mr-1.5 h-3.5 w-3.5 inline-block" />
+          <MapPin className="mr-1.5 inline-block h-3.5 w-3.5" />
           Saved Location
         </button>
         <button
@@ -54,7 +60,7 @@ export function LocationPicker({
               : "bg-muted text-muted-foreground hover:text-foreground"
           }`}
         >
-          <Plus className="mr-1.5 h-3.5 w-3.5 inline-block" />
+          <Plus className="mr-1.5 inline-block h-3.5 w-3.5" />
           New Location
         </button>
       </div>
@@ -62,21 +68,24 @@ export function LocationPicker({
       {mode === "select" ? (
         <div className="space-y-2">
           <input type="hidden" name="locationId" value={locationId} />
-          <Select
-            value={locationId}
-            onValueChange={setLocationId}
-          >
+          <Select value={locationId} onValueChange={setLocationId}>
             <SelectTrigger className="w-full cursor-pointer">
               <SelectValue placeholder="Select a saved location" />
             </SelectTrigger>
             <SelectContent>
               {locations.map((loc) => (
-                <SelectItem key={loc.id} value={loc.id} className="cursor-pointer">
-                  <span className="truncate">{loc.name} — {loc.address}</span>
+                <SelectItem
+                  key={loc.id}
+                  value={loc.id}
+                  className="cursor-pointer"
+                >
+                  <span className="truncate">
+                    {loc.name} — {loc.address}
+                  </span>
                 </SelectItem>
               ))}
               {locations.length === 0 && (
-                <div className="px-2 py-4 text-center text-sm text-muted-foreground">
+                <div className="text-muted-foreground px-2 py-4 text-center text-sm">
                   No saved locations yet
                 </div>
               )}

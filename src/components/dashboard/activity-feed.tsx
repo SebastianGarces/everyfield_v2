@@ -23,11 +23,13 @@ const ACTIVITY_ICONS: Record<
   },
   status_changed: {
     icon: Sparkles,
-    color: "text-purple-600 bg-purple-100 dark:bg-purple-900/30 dark:text-purple-400",
+    color:
+      "text-purple-600 bg-purple-100 dark:bg-purple-900/30 dark:text-purple-400",
   },
   commitment_recorded: {
     icon: CheckCircle2,
-    color: "text-green-600 bg-green-100 dark:bg-green-900/30 dark:text-green-400",
+    color:
+      "text-green-600 bg-green-100 dark:bg-green-900/30 dark:text-green-400",
   },
   note_added: {
     icon: MessageSquare,
@@ -35,7 +37,8 @@ const ACTIVITY_ICONS: Record<
   },
   meeting_completed: {
     icon: CalendarCheck,
-    color: "text-emerald-600 bg-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-400",
+    color:
+      "text-emerald-600 bg-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-400",
   },
   task_completed: {
     icon: CheckCircle2,
@@ -73,11 +76,11 @@ interface ActivityFeedProps {
 export function ActivityFeed({ activities }: ActivityFeedProps) {
   if (activities.length === 0) {
     return (
-      <div className="rounded-xl border bg-card p-6 shadow-sm">
+      <div className="bg-card rounded-xl border p-6 shadow-sm">
         <h2 className="text-lg font-semibold">Recent Activity</h2>
         <div className="mt-6 flex flex-col items-center justify-center py-8 text-center">
-          <AlertCircle className="h-10 w-10 text-muted-foreground/40" />
-          <p className="mt-3 text-sm text-muted-foreground">
+          <AlertCircle className="text-muted-foreground/40 h-10 w-10" />
+          <p className="text-muted-foreground mt-3 text-sm">
             No activity yet. Start by adding people, scheduling meetings, or
             creating tasks.
           </p>
@@ -87,7 +90,7 @@ export function ActivityFeed({ activities }: ActivityFeedProps) {
   }
 
   return (
-    <div className="rounded-xl border bg-card p-6 shadow-sm">
+    <div className="bg-card rounded-xl border p-6 shadow-sm">
       <h2 className="text-lg font-semibold">Recent Activity</h2>
       <div className="mt-4 space-y-0">
         {activities.map((activity, index) => {
@@ -112,7 +115,7 @@ export function ActivityFeed({ activities }: ActivityFeedProps) {
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-sm leading-snug">{activity.description}</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">
+                <p className="text-muted-foreground mt-0.5 text-xs">
                   {formatTimeAgo(activity.timestamp)}
                 </p>
               </div>

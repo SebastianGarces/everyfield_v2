@@ -22,9 +22,7 @@ export const churches = pgTable("churches", {
   inactivityWarningDays: integer("inactivity_warning_days")
     .default(7)
     .notNull(),
-  inactivityAlertDays: integer("inactivity_alert_days")
-    .default(14)
-    .notNull(),
+  inactivityAlertDays: integer("inactivity_alert_days").default(14).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

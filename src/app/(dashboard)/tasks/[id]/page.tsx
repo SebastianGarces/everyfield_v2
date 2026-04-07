@@ -153,10 +153,7 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
   return (
     <>
       <HeaderBreadcrumbs
-        items={[
-          { label: "Tasks", href: "/tasks" },
-          { label: task.title },
-        ]}
+        items={[{ label: "Tasks", href: "/tasks" }, { label: task.title }]}
       />
       <div className="mx-auto max-w-3xl space-y-6 p-6">
         {/* Header with actions */}
@@ -276,9 +273,7 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
         {task.description && (
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">
-                Description
-              </CardTitle>
+              <CardTitle className="text-sm font-medium">Description</CardTitle>
             </CardHeader>
             <CardContent>
               <p className="text-sm whitespace-pre-wrap">{task.description}</p>

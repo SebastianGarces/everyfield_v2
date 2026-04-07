@@ -68,10 +68,7 @@ export function LocationPicker({
       {mode === "select" ? (
         <div className="space-y-2">
           <input type="hidden" name="locationId" value={locationId} />
-          <Select
-            value={locationId}
-            onValueChange={setLocationId}
-          >
+          <Select value={locationId} onValueChange={setLocationId}>
             <SelectTrigger className="w-full cursor-pointer">
               <SelectValue placeholder="Select a saved location" />
             </SelectTrigger>
@@ -82,7 +79,9 @@ export function LocationPicker({
                   value={loc.id}
                   className="cursor-pointer"
                 >
-                  <span className="truncate">{loc.name} — {loc.address}</span>
+                  <span className="truncate">
+                    {loc.name} — {loc.address}
+                  </span>
                 </SelectItem>
               ))}
               {locations.length === 0 && (

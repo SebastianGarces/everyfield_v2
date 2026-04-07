@@ -105,7 +105,10 @@ export const tasks = pgTable(
     index("tasks_parent_task_id_idx").on(table.parentTaskId),
     index("tasks_deleted_at_idx").on(table.deletedAt),
     index("tasks_related_idx").on(table.relatedType, table.relatedId),
-    index("tasks_completion_event_idx").on(table.completionEvent, table.relatedId),
+    index("tasks_completion_event_idx").on(
+      table.completionEvent,
+      table.relatedId
+    ),
   ]
 );
 

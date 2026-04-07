@@ -16,10 +16,10 @@ export function InvitationLeaderboard({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base flex items-center gap-2">
+        <CardTitle className="flex items-center gap-2 text-base">
           <Trophy className="h-4 w-4" />
           Invitation Leaderboard
-          <span className="text-xs text-muted-foreground font-normal">
+          <span className="text-muted-foreground text-xs font-normal">
             (Target: {target} per member)
           </span>
         </CardTitle>
@@ -34,14 +34,14 @@ export function InvitationLeaderboard({
                 className="flex items-center justify-between py-3"
               >
                 <div className="flex items-center gap-3">
-                  <span className="text-lg font-bold text-muted-foreground w-6 text-right">
+                  <span className="text-muted-foreground w-6 text-right text-lg font-bold">
                     {index + 1}
                   </span>
                   <div>
                     <p className="text-sm font-medium">
                       {entry.person.firstName} {entry.person.lastName}
                     </p>
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-muted-foreground text-xs">
                       {entry.confirmedCount} confirmed &bull;{" "}
                       {entry.attendedCount} attended
                     </p>

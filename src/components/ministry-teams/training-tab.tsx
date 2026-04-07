@@ -82,9 +82,7 @@ export function TrainingTab({ teamId, programs, matrix }: TrainingTabProps) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">
-          Training Matrix
-        </h2>
+        <h2 className="text-lg font-semibold">Training Matrix</h2>
         <AddProgramDialog
           open={addOpen}
           onOpenChange={setAddOpen}

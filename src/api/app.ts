@@ -28,12 +28,14 @@ function crud(path: string, table: PgTableWithColumns<any>) {
       path: "/",
       responses: {
         200: {
-          content: { "application/json": { schema: z.object({ data: z.array(select) }) } },
+          content: {
+            "application/json": { schema: z.object({ data: z.array(select) }) },
+          },
           description: `List ${path}`,
         },
       },
     }),
-    async (c) => c.json({ data: await db.select().from(table) }),
+    async (c) => c.json({ data: await db.select().from(table) })
   );
 
   r.openapi(
@@ -49,16 +51,21 @@ function crud(path: string, table: PgTableWithColumns<any>) {
       },
     }),
     async (c) => {
-      const [row] = await db.select().from(table).where(eq(table.id, c.req.valid("param").id));
+      const [row] = await db
+        .select()
+        .from(table)
+        .where(eq(table.id, c.req.valid("param").id));
       return row ? c.json(row) : c.json({ error: "Not found" }, 404);
-    },
+    }
   );
 
   r.openapi(
     createRoute({
       method: "post",
       path: "/",
-      request: { body: { content: { "application/json": { schema: insert } } } },
+      request: {
+        body: { content: { "application/json": { schema: insert } } },
+      },
       responses: {
         201: {
           content: { "application/json": { schema: select } },
@@ -67,9 +74,12 @@ function crud(path: string, table: PgTableWithColumns<any>) {
       },
     }),
     async (c) => {
-      const [row] = await db.insert(table).values(c.req.valid("json")).returning();
+      const [row] = await db
+        .insert(table)
+        .values(c.req.valid("json"))
+        .returning();
       return c.json(row, 201);
-    },
+    }
   );
 
   app.route(`/${path}`, r);

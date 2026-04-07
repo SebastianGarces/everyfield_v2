@@ -52,7 +52,7 @@ export function TaskQuickAdd() {
     <form
       ref={formRef}
       action={handleSubmit}
-      className="flex items-center gap-2 rounded-lg border bg-card p-3"
+      className="bg-card flex items-center gap-2 rounded-lg border p-3"
     >
       <Input
         ref={titleRef}
@@ -74,10 +74,18 @@ export function TaskQuickAdd() {
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="low" className="cursor-pointer">Low</SelectItem>
-          <SelectItem value="medium" className="cursor-pointer">Medium</SelectItem>
-          <SelectItem value="high" className="cursor-pointer">High</SelectItem>
-          <SelectItem value="urgent" className="cursor-pointer">Urgent</SelectItem>
+          <SelectItem value="low" className="cursor-pointer">
+            Low
+          </SelectItem>
+          <SelectItem value="medium" className="cursor-pointer">
+            Medium
+          </SelectItem>
+          <SelectItem value="high" className="cursor-pointer">
+            High
+          </SelectItem>
+          <SelectItem value="urgent" className="cursor-pointer">
+            Urgent
+          </SelectItem>
         </SelectContent>
       </Select>
       <Button

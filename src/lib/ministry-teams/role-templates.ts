@@ -229,8 +229,7 @@ export const TEAM_TEMPLATES: TeamTemplate[] = [
       {
         key: "preschool_lead",
         roleName: "Preschool Lead",
-        description:
-          "Leads preschool-age programming and classroom management",
+        description: "Leads preschool-age programming and classroom management",
         isLeadership: false,
         timeCommitment: "medium",
         sortOrder: 3,
