@@ -104,6 +104,47 @@ test("maybePreventImplicitDateTimeAssumptions keeps an explicit midnight time", 
   assert.equal(result.requiresTimeClarification, false);
 });
 
+test("maybePreventImplicitDateTimeAssumptions keeps an existing datetime when the latest message only updates notes", () => {
+  const existingDraft = {
+    ...initialVisionMeetingDraft,
+    datetime: "2026-04-09T00:00:00.000Z",
+  };
+
+  const result = maybePreventImplicitDateTimeAssumptions({
+    currentDraft: existingDraft,
+    previousDraft: existingDraft,
+    messages: [
+      {
+        id: "u1",
+        role: "user",
+        content: "Add a note that this is a potluck dinner planning meeting.",
+      },
+    ],
+    timezone: "America/Chicago",
+  });
+
+  assert.equal(result.draft.datetime, "2026-04-09T00:00:00.000Z");
+  assert.equal(result.pendingDateLabel, undefined);
+  assert.equal(result.requiresTimeClarification, false);
+});
+
+test("maybeApplyDeterministicSchedulingDateTime resolves noon in America/Chicago", () => {
+  const result = maybeApplyDeterministicSchedulingDateTime({
+    currentDraft: initialVisionMeetingDraft,
+    messages: [
+      {
+        id: "u1",
+        role: "user",
+        content: "Schedule a vision meeting tomorrow at noon.",
+      },
+    ],
+    now: new Date("2026-04-07T12:00:00.000Z"),
+    timezone: "America/Chicago",
+  });
+
+  assert.equal(result.datetime, "2026-04-08T17:00:00.000Z");
+});
+
 test("maybeApplyDeterministicLocationResolution matches a saved location by name from the user message", () => {
   const result = maybeApplyDeterministicLocationResolution({
     currentDraft: {
@@ -284,5 +325,25 @@ test("buildAssistantMessage asks for a time when the date is known but time is m
   assert.equal(
     message,
     "I have the date set for Wednesday, April 8, 2026 and the location set to North Ridgeville High School, 123 Center Ridge Rd, North Ridgeville, OH 44039. What time should I use?"
+  );
+});
+
+test("buildAssistantMessage asks for time and location when only the date is known", () => {
+  const message = buildAssistantMessage({
+    missingFields: ["datetime", "location"],
+    readyToCreate: false,
+    draft: initialVisionMeetingDraft,
+    pendingDateLabel: "Wednesday, April 8, 2026",
+    requiresSavedLocationClarification: false,
+    requiresTimeClarification: true,
+    suggestedSavedLocations: [],
+    interpretation: {
+      dateLabel: "Wednesday, April 8, 2026",
+    },
+  });
+
+  assert.equal(
+    message,
+    "I have the date set for Wednesday, April 8, 2026. What time and location should I use?"
   );
 });
