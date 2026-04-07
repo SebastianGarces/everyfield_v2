@@ -1,0 +1,7 @@
+# Run formatting + linting only on staged files (auto-fixes)
+pnpm exec lint-staged
+
+# Run full project checks that can't be limited to staged files
+pnpm run typecheck
+pnpm run format
+pnpm run lint

@@ -16,7 +16,15 @@
     "db:studio": "drizzle-kit studio",
     "db:seed": "pnpm exec tsx scripts/seed-dev-db.ts",
     "db:clean": "pnpm exec tsx scripts/seed-dev-db.ts --clean-only",
-    "db:reset": "pnpm exec tsx scripts/seed-dev-db.ts"
+    "db:reset": "pnpm exec tsx scripts/seed-dev-db.ts",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx}": [
+      "prettier --write",
+      "eslint --fix"
+    ],
+    "*.{json,md,css,scss,yml,yaml,mdx}": "prettier --write"
   },
   "dependencies": {
     "@atlaskit/pragmatic-drag-and-drop": "^1.7.7",
@@ -76,6 +84,8 @@
     "eslint": "^9.39.2",
     "eslint-config-next": "^16.1.4",
     "eslint-plugin-react-hooks": "^7.0.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
     "prettier": "^3.8.1",
     "prettier-plugin-tailwindcss": "^0.7.2",
     "tsx": "^4.21.0",
