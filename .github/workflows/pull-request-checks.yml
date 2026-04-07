@@ -38,3 +38,9 @@ jobs:
 
       - name: Build
         run: pnpm build
+        env:
+          # Required so Next.js can run `generateStaticParams` (which queries
+          # the wiki tables) during build-time page-data collection. Points at
+          # the dev Neon branch — safe because the build only reads, never
+          # writes.
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
