@@ -106,9 +106,26 @@ export async function createMeetingAction(
     meetingId = meeting.id;
   } catch (error) {
     console.error("createMeetingAction error:", error);
-    if (error instanceof Error && error.message === "Unauthorized") {
-      return { success: false, error: "You must be logged in" };
+    if (error instanceof Error) {
+      if (error.message === "Unauthorized") {
+        return { success: false, error: "You must be logged in" };
+      }
+
+      if (error.message === "Location not found") {
+        return {
+          success: false,
+          error: "The selected location could not be found for your church",
+        };
+      }
+
+      if (error.message === "Team not found") {
+        return {
+          success: false,
+          error: "The selected team could not be found for your church",
+        };
+      }
     }
+
     return {
       success: false,
       error: "An unexpected error occurred while creating the meeting",
@@ -161,6 +178,11 @@ export async function updateMeetingAction(
         return {
           success: false,
           error: "Meeting not found or has been deleted",
+        };
+      if (error.message === "Location not found")
+        return {
+          success: false,
+          error: "The selected location could not be found for your church",
         };
     }
     return {

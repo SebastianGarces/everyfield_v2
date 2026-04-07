@@ -27,35 +27,46 @@ export const checklistCategorySchema = z.enum(checklistCategories);
 // Meeting Schemas
 // ============================================================================
 
-export const meetingCreateSchema = z
-  .object({
-    type: meetingTypeSchema,
-    title: z.string().max(255).optional(),
-    datetime: z.coerce.date({ error: "Date and time is required" }),
-    locationId: z.string().uuid().optional(),
-    locationName: z.string().max(255).optional(),
-    locationAddress: z.string().max(500).optional(),
-    estimatedAttendance: z.coerce.number().int().min(0).optional(),
-    durationMinutes: z.coerce.number().int().min(1).max(1440).optional(),
-    notes: z.string().optional(),
-    agenda: z.any().optional(),
-    // Team meeting specific
-    teamId: z.string().uuid().optional(),
-    meetingSubtype: meetingSubtypeSchema.optional(),
-  })
-  .refine(
-    (data) => {
-      // Team meetings require a teamId
-      if (data.type === "team_meeting" && !data.teamId) {
-        return false;
-      }
-      return true;
-    },
-    {
-      message: "Team meetings require a team to be selected",
-      path: ["teamId"],
-    }
-  );
+const meetingCreateObjectSchema = z.object({
+  type: meetingTypeSchema,
+  title: z.string().max(255).optional(),
+  datetime: z.coerce.date({ error: "Date and time is required" }),
+  locationId: z.string().uuid().optional(),
+  locationName: z.string().max(255).optional(),
+  locationAddress: z.string().max(500).optional(),
+  estimatedAttendance: z.coerce.number().int().min(0).optional(),
+  durationMinutes: z.coerce.number().int().min(1).max(1440).optional(),
+  notes: z.string().optional(),
+  agenda: z.any().optional(),
+  // Team meeting specific
+  teamId: z.string().uuid().optional(),
+  meetingSubtype: meetingSubtypeSchema.optional(),
+});
+
+function validateMeetingCreateData(data: {
+  type: z.infer<typeof meetingTypeSchema>;
+  teamId?: string;
+}) {
+  if (data.type === "team_meeting" && !data.teamId) {
+    return false;
+  }
+
+  return true;
+}
+
+const meetingCreateRefinement = {
+  message: "Team meetings require a team to be selected",
+  path: ["teamId"],
+};
+
+export const meetingCreateSchema = meetingCreateObjectSchema.refine(
+  validateMeetingCreateData,
+  meetingCreateRefinement
+);
+
+export const meetingCreateApiSchema = meetingCreateObjectSchema
+  .strict()
+  .refine(validateMeetingCreateData, meetingCreateRefinement);
 
 export type MeetingCreateInput = z.infer<typeof meetingCreateSchema>;
 
