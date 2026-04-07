@@ -66,6 +66,40 @@ async function verifyMeetingOwnership(
   }
 }
 
+async function verifyLocationOwnership(
+  churchId: string,
+  locationId: string
+): Promise<{ name: string; address: string }> {
+  const [location] = await db
+    .select({ name: locations.name, address: locations.address })
+    .from(locations)
+    .where(and(eq(locations.id, locationId), eq(locations.churchId, churchId)))
+    .limit(1);
+
+  if (!location) {
+    throw new Error("Location not found");
+  }
+
+  return location;
+}
+
+async function verifyTeamOwnership(
+  churchId: string,
+  teamId: string
+): Promise<void> {
+  const [team] = await db
+    .select({ id: ministryTeams.id })
+    .from(ministryTeams)
+    .where(
+      and(eq(ministryTeams.id, teamId), eq(ministryTeams.churchId, churchId))
+    )
+    .limit(1);
+
+  if (!team) {
+    throw new Error("Team not found");
+  }
+}
+
 /**
  * Get the next vision meeting number for a church.
  * Returns `MAX(meeting_number) + 1`, starting at 1 for the first meeting.
@@ -290,18 +324,9 @@ export async function createMeeting(
 
   if (locationId) {
     // Existing saved location — snapshot its name/address onto the meeting
-    const [loc] = await db
-      .select({ name: locations.name, address: locations.address })
-      .from(locations)
-      .where(
-        and(eq(locations.id, locationId), eq(locations.churchId, churchId))
-      )
-      .limit(1);
-
-    if (loc) {
-      locationName = loc.name;
-      locationAddress = loc.address;
-    }
+    const location = await verifyLocationOwnership(churchId, locationId);
+    locationName = location.name;
+    locationAddress = location.address;
   } else if (locationName) {
     // Ad-hoc location — auto-save it so it appears in the dropdown for future meetings
     const newLocValues: NewLocation = {
@@ -316,6 +341,10 @@ export async function createMeeting(
       .returning();
 
     locationId = savedLocation.id;
+  }
+
+  if (data.teamId) {
+    await verifyTeamOwnership(churchId, data.teamId);
   }
 
   // Auto-assign meeting number for vision meetings
@@ -420,21 +449,9 @@ export async function updateMeeting(
     updateData.locationId = data.locationId ?? null;
 
     if (data.locationId) {
-      const [loc] = await db
-        .select({ name: locations.name, address: locations.address })
-        .from(locations)
-        .where(
-          and(
-            eq(locations.id, data.locationId),
-            eq(locations.churchId, churchId)
-          )
-        )
-        .limit(1);
-
-      if (loc) {
-        updateData.locationName = loc.name;
-        updateData.locationAddress = loc.address;
-      }
+      const location = await verifyLocationOwnership(churchId, data.locationId);
+      updateData.locationName = location.name;
+      updateData.locationAddress = location.address;
     } else {
       // Clearing the location
       updateData.locationName = null;
