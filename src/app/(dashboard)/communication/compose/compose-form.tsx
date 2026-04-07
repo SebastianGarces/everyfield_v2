@@ -309,11 +309,7 @@ export function ComposeForm({
           )}
 
           {/* Recipients */}
-          <RecipientPicker
-            selected={recipients}
-            onChange={setRecipients}
-            showMeetingGroups={!!selectedMeetingId}
-          />
+          <RecipientPicker selected={recipients} onChange={setRecipients} />
 
           {/* Subject */}
           <div className="space-y-2">

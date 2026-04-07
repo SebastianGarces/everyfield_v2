@@ -1,12 +1,9 @@
 "use client";
 
-import { CheckCircle2, Circle, Clock } from "lucide-react";
+import { Circle } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import {
-  TEAM_TEMPLATES,
-  type TeamTemplate,
-} from "@/lib/ministry-teams/role-templates";
+import { TEAM_TEMPLATES } from "@/lib/ministry-teams/role-templates";
 
 interface ResponsibilitiesTabProps {
   teamName: string;

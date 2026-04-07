@@ -13,7 +13,6 @@ interface MeetingListProps {
   upcomingMeetings: MeetingWithCounts[];
   pastMeetings: MeetingWithCounts[];
   initialView: "upcoming" | "past" | "all";
-  initialTypeFilter?: MeetingType;
 }
 
 const typeFilters: { value: MeetingType | "all"; label: string }[] = [
@@ -27,7 +26,6 @@ export function MeetingList({
   upcomingMeetings,
   pastMeetings,
   initialView,
-  initialTypeFilter,
 }: MeetingListProps) {
   const router = useRouter();
   const searchParams = useSearchParams();

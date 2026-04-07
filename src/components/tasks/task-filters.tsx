@@ -1,6 +1,5 @@
 "use client";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -9,16 +8,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  taskCategories,
-  taskPriorities,
-  taskStatuses,
-  type TaskCategory,
-  type TaskPriority,
-  type TaskStatus,
-} from "@/db/schema";
+import { taskCategories, taskPriorities, taskStatuses } from "@/db/schema";
 import { cn } from "@/lib/utils";
-import { Filter, X } from "lucide-react";
+import { X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback } from "react";
 

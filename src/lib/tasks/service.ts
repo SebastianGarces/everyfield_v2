@@ -18,10 +18,8 @@ import {
   ilike,
   inArray,
   isNull,
-  lt,
   lte,
   ne,
-  or,
   sql,
 } from "drizzle-orm";
 import type { ListTasksResult, TaskCounts, TaskWithAssignee } from "./types";

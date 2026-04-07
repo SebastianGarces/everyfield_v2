@@ -28,14 +28,9 @@ import type {
 interface AnalyticsChartsProps {
   trend: AttendanceTrendPoint[];
   stats: MeetingSummaryStats;
-  currentMeetingId?: string;
 }
 
-export function AnalyticsCharts({
-  trend,
-  stats,
-  currentMeetingId,
-}: AnalyticsChartsProps) {
+export function AnalyticsCharts({ trend, stats }: AnalyticsChartsProps) {
   const chartData = trend.map((point) => ({
     name: `#${point.meetingNumber}`,
     total: point.totalAttendance,

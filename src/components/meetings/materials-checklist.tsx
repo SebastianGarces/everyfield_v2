@@ -9,7 +9,6 @@ import { toggleChecklistItemAction } from "@/app/(dashboard)/meetings/actions";
 import type { MeetingChecklistItem, ChecklistCategory } from "@/db/schema";
 
 interface MaterialsChecklistProps {
-  meetingId: string;
   items: MeetingChecklistItem[];
   summary: { total: number; checked: number };
 }
@@ -31,7 +30,6 @@ const categoryOrder: ChecklistCategory[] = [
 ];
 
 export function MaterialsChecklist({
-  meetingId,
   items,
   summary,
 }: MaterialsChecklistProps) {

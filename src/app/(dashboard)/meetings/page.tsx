@@ -72,7 +72,6 @@ export default async function MeetingsPage({
             upcomingMeetings={upcomingResult.meetings}
             pastMeetings={pastResult.meetings}
             initialView={view}
-            initialTypeFilter={typeFilter}
           />
         </div>
       </div>

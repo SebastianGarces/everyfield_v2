@@ -12,7 +12,8 @@ import { communications } from "@/db/schema/communication";
 
 export const app = new OpenAPIHono().basePath("/api/v1");
 
-// Generic CRUD factory — derives OpenAPI schemas from drizzle tables
+// Generic CRUD factory — derives OpenAPI schemas from arbitrary drizzle tables.
+/* eslint-disable @typescript-eslint/no-explicit-any -- `crud()` intentionally stays generic across Drizzle tables, and drizzle-zod requires the cast for the omitted audit fields. */
 function crud(path: string, table: PgTableWithColumns<any>) {
   const r = new OpenAPIHono();
   const select = createSelectSchema(table);
@@ -95,6 +96,7 @@ function crud(path: string, table: PgTableWithColumns<any>) {
 
   app.route(`/${path}`, r);
 }
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 crud("churches", churches);
 crud("people", persons);

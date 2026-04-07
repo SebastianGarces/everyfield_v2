@@ -27,7 +27,6 @@ import type {
   MeetingSubtype,
 } from "@/db/schema";
 import type { MinistryTeam } from "@/db/schema";
-import type { ActionResult } from "@/lib/meetings/types";
 
 interface MeetingFormProps {
   meeting?: ChurchMeeting;

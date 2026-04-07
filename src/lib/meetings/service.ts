@@ -12,7 +12,6 @@ import {
   type MeetingChecklistItem,
   type MeetingEvaluation,
   type MeetingStatus,
-  type MeetingType,
   type NewChurchMeeting,
   type NewLocation,
 } from "@/db/schema";
@@ -673,8 +672,7 @@ export async function getAttendanceSummary(
  */
 export async function finalizeAttendance(
   churchId: string,
-  meetingId: string,
-  userId: string
+  meetingId: string
 ): Promise<void> {
   // Get the meeting to know the type
   const meeting = await getMeeting(churchId, meetingId);

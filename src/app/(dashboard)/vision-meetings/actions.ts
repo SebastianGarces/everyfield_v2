@@ -658,7 +658,7 @@ export async function finalizeAttendanceAction(
       };
     }
 
-    await finalizeAttendance(user.churchId, meetingId, user.id);
+    await finalizeAttendance(user.churchId, meetingId);
 
     revalidatePath("/vision-meetings");
     revalidatePath(`/vision-meetings/${meetingId}`);

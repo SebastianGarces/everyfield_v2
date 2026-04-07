@@ -9,7 +9,7 @@
 // - getTemplates() returns church forks in place of their system originals
 // ============================================================================
 
-import { and, eq, isNull, or, desc } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 import { db } from "@/db";
 import {
   messageTemplates,

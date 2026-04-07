@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { Mail, Pencil, Eye } from "lucide-react";
+import { Mail, Pencil } from "lucide-react";
 
 import { HeaderBreadcrumbs } from "@/components/header";
 import { Button } from "@/components/ui/button";

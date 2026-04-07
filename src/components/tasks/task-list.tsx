@@ -20,7 +20,6 @@ function groupTasksByDueDate(tasks: TaskWithAssignee[]): TaskGroup[] {
 
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowStr = tomorrow.toISOString().split("T")[0];
 
   const weekEnd = new Date(today);
   weekEnd.setDate(weekEnd.getDate() + 7);

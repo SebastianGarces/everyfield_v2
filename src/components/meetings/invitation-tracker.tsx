@@ -105,11 +105,6 @@ export function InvitationTracker({
   );
   const [searching, setSearching] = useState(false);
 
-  // Already-invited person IDs (to filter search results)
-  const invitedPersonIds = new Set(
-    invitationsList.filter((inv) => inv.inviteeId).map((inv) => inv.inviteeId!)
-  );
-
   const handleInviteeSearch = useCallback(
     async (value: string) => {
       setInviteeQuery(value);
@@ -120,6 +115,11 @@ export function InvitationTracker({
       setSearching(true);
       try {
         const people = await searchPeopleAction(value);
+        const invitedPersonIds = new Set(
+          invitationsList
+            .filter((inv) => inv.inviteeId)
+            .map((inv) => inv.inviteeId!)
+        );
         // Filter out already-invited people
         setInviteeResults(people.filter((p) => !invitedPersonIds.has(p.id)));
       } catch {
@@ -128,7 +128,7 @@ export function InvitationTracker({
         setSearching(false);
       }
     },
-    [invitedPersonIds]
+    [invitationsList]
   );
 
   const handleSelectInvitee = (person: PersonResult) => {

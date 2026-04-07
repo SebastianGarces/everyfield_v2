@@ -32,7 +32,6 @@ export function TeamHealthDashboard({
 }: TeamHealthDashboardProps) {
   const redAlerts = healthMetrics.filter((m) => m.alertLevel === "red");
   const yellowAlerts = healthMetrics.filter((m) => m.alertLevel === "yellow");
-  const healthyTeams = healthMetrics.filter((m) => m.alertLevel === "green");
 
   // Prepare radar chart data
   const radarData = healthMetrics.map((m) => ({

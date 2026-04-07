@@ -12,6 +12,7 @@ import type {
   MeetingChecklistItem,
   MeetingEvaluation,
 } from "@/db/schema";
+import type { ResponseStatus } from "@/db/schema/meetings";
 import { verifySession } from "@/lib/auth/session";
 import { createPerson } from "@/lib/people/service";
 import {
@@ -487,7 +488,7 @@ export async function finalizeAttendanceAction(
         error: "You must be associated with a church to finalize attendance",
       };
 
-    await finalizeAttendance(user.churchId, meetingId, user.id);
+    await finalizeAttendance(user.churchId, meetingId);
     revalidatePath("/meetings");
     revalidatePath(`/meetings/${meetingId}`);
     return { success: true, data: undefined };
@@ -795,10 +796,15 @@ export async function updateRsvpStatusAction(
 
     const { updateRsvpStatus } = await import("@/lib/meetings/guest-list");
     const { responseStatuses } = await import("@/db/schema/meetings");
-    if (!responseStatuses.includes(status as any)) {
+    if (!responseStatuses.includes(status as ResponseStatus)) {
       return { success: false, error: "Invalid status" };
     }
-    await updateRsvpStatus(user.churchId, meetingId, personId, status as any);
+    await updateRsvpStatus(
+      user.churchId,
+      meetingId,
+      personId,
+      status as ResponseStatus
+    );
     revalidatePath(`/meetings/${meetingId}`);
     return { success: true, data: null };
   } catch (error) {

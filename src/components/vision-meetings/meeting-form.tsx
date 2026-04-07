@@ -11,7 +11,6 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { Location } from "@/db/schema";
 import type { VisionMeeting } from "@/db/schema/vision-meetings";
-import type { ActionResult } from "@/lib/vision-meetings/types";
 import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useActionState, useEffect, useRef } from "react";

@@ -140,24 +140,6 @@ function getDueDateInfo(dueDate: string | null): {
   };
 }
 
-function getRelatedUrl(
-  relatedType: string | null,
-  relatedId: string | null
-): string | null {
-  if (!relatedType || !relatedId) return null;
-
-  switch (relatedType) {
-    case "person":
-      return `/people/${relatedId}`;
-    case "meeting":
-      return `/meetings/${relatedId}/evaluation`;
-    case "team":
-      return `/teams/${relatedId}`;
-    default:
-      return null;
-  }
-}
-
 // ============================================================================
 // Component
 // ============================================================================

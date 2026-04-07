@@ -20,8 +20,6 @@ interface Recipient {
 interface RecipientPickerProps {
   selected: Recipient[];
   onChange: (recipients: Recipient[]) => void;
-  /** Whether to show meeting-specific groups */
-  showMeetingGroups?: boolean;
 }
 
 const quickGroups = [
@@ -31,11 +29,7 @@ const quickGroups = [
   { id: "leaders", label: "Leaders" },
 ];
 
-export function RecipientPicker({
-  selected,
-  onChange,
-  showMeetingGroups,
-}: RecipientPickerProps) {
+export function RecipientPicker({ selected, onChange }: RecipientPickerProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Recipient[]>([]);
   const [searching, setSearching] = useState(false);
