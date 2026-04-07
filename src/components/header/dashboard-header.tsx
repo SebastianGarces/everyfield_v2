@@ -60,10 +60,7 @@ export function DashboardHeader() {
       <div className="flex-1" />
 
       {/* Portal target for page-specific actions */}
-      <div
-        ref={setActionsContainer}
-        className="flex items-center gap-2"
-      />
+      <div ref={setActionsContainer} className="flex items-center gap-2" />
     </header>
   );
 }

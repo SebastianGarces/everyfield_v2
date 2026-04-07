@@ -19,7 +19,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
-import { cn } from "@/lib/utils";
 import {
   createTrainingProgramAction,
   markTrainingCompleteAction,
@@ -82,9 +81,7 @@ export function TrainingTab({ teamId, programs, matrix }: TrainingTabProps) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">
-          Training Matrix
-        </h2>
+        <h2 className="text-lg font-semibold">Training Matrix</h2>
         <AddProgramDialog
           open={addOpen}
           onOpenChange={setAddOpen}

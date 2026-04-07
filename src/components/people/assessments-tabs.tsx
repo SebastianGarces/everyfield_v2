@@ -121,8 +121,7 @@ export function AssessmentsTabs({
             <FileSignature className="text-muted-foreground/50 h-12 w-12" />
             <h3 className="mt-4 font-semibold">No commitments yet</h3>
             <p className="text-muted-foreground mt-1 text-sm">
-              Record a commitment when this person signs their commitment
-              card.
+              Record a commitment when this person signs their commitment card.
             </p>
             <Button asChild className="mt-4">
               <Link href={`/people/${personId}/assessments/commitment`}>
@@ -157,8 +156,7 @@ export function AssessmentsTabs({
             <ClipboardList className="text-muted-foreground/50 h-12 w-12" />
             <h3 className="mt-4 font-semibold">No assessments yet</h3>
             <p className="text-muted-foreground mt-1 text-sm">
-              Start a 4 C&apos;s assessment to track this person&apos;s
-              growth.
+              Start a 4 C&apos;s assessment to track this person&apos;s growth.
             </p>
             <Button asChild className="mt-4">
               <Link href={`/people/${personId}/assessments/new`}>

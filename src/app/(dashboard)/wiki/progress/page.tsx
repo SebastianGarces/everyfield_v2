@@ -10,7 +10,10 @@ import { WikiBreadcrumb } from "@/components/wiki/wiki-breadcrumb";
 export const dynamic = "force-dynamic";
 
 // Sort order matches sidebar navigation
-const CATEGORY_NAMES: Record<string, { name: string; phase?: number; sortOrder: number }> = {
+const CATEGORY_NAMES: Record<
+  string,
+  { name: string; phase?: number; sortOrder: number }
+> = {
   // Getting Started first
   "getting-started": { name: "Getting Started", sortOrder: 0 },
   // The Journey - phases 0-6
@@ -59,9 +62,16 @@ export default async function WikiProgressPage() {
   // Build category rows for display
   const categoryRows = Object.entries(articlesByCategory)
     .map(([category, total]) => {
-      const stats = progressStats?.[category] ?? { completed: 0, inProgress: 0 };
-      const info = CATEGORY_NAMES[category] ?? { name: category, sortOrder: 99 };
-      const percentage = total > 0 ? Math.round((stats.completed / total) * 100) : 0;
+      const stats = progressStats?.[category] ?? {
+        completed: 0,
+        inProgress: 0,
+      };
+      const info = CATEGORY_NAMES[category] ?? {
+        name: category,
+        sortOrder: 99,
+      };
+      const percentage =
+        total > 0 ? Math.round((stats.completed / total) * 100) : 0;
 
       return {
         category,
@@ -96,7 +106,9 @@ export default async function WikiProgressPage() {
       {/* Overall Progress */}
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-lg font-medium">Overall Progress</CardTitle>
+          <CardTitle className="text-lg font-medium">
+            Overall Progress
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-2">
@@ -120,19 +132,19 @@ export default async function WikiProgressPage() {
               key={row.category}
               className="flex items-center gap-4 rounded-lg border p-4"
             >
-              <div className="flex-1 min-w-0">
+              <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   {row.phase !== undefined && (
-                    <span className="text-xs text-muted-foreground">
+                    <span className="text-muted-foreground text-xs">
                       Phase {row.phase}:
                     </span>
                   )}
-                  <span className="font-medium truncate">{row.name}</span>
+                  <span className="truncate font-medium">{row.name}</span>
                 </div>
               </div>
               <div className="flex items-center gap-4">
-                <Progress value={row.percentage} className="w-32 h-2" />
-                <div className="flex items-center gap-1 text-sm text-muted-foreground w-24 justify-end">
+                <Progress value={row.percentage} className="h-2 w-32" />
+                <div className="text-muted-foreground flex w-24 items-center justify-end gap-1 text-sm">
                   {row.percentage === 100 ? (
                     <span className="flex items-center gap-1 text-green-600 dark:text-green-500">
                       <Check className="h-4 w-4" />
@@ -157,14 +169,16 @@ export default async function WikiProgressPage() {
           <Card>
             <CardContent className="p-6">
               <div className="flex items-start justify-between gap-4">
-                <div className="space-y-1 flex-1 min-w-0">
-                  <h3 className="font-medium truncate">{lastInProgress.title}</h3>
+                <div className="min-w-0 flex-1 space-y-1">
+                  <h3 className="truncate font-medium">
+                    {lastInProgress.title}
+                  </h3>
                   {lastInProgress.description && (
-                    <p className="text-sm text-muted-foreground line-clamp-1">
+                    <p className="text-muted-foreground line-clamp-1 text-sm">
                       {lastInProgress.description}
                     </p>
                   )}
-                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                  <div className="text-muted-foreground flex items-center gap-3 text-xs">
                     <span className="capitalize">{lastInProgress.type}</span>
                     <span>{lastInProgress.readTime} min read</span>
                     <span>

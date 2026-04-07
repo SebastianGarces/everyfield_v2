@@ -9,19 +9,17 @@ import {
   ResponsiveContainer,
   Tooltip,
 } from "recharts";
-import {
-  AlertTriangle,
-  ArrowRight,
-  BarChart3,
-  TrendingUp,
-} from "lucide-react";
+import { AlertTriangle, ArrowRight, BarChart3, TrendingUp } from "lucide-react";
 import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
-import type { TeamHealthMetrics, StaffingSummary } from "@/lib/ministry-teams/service";
+import type {
+  TeamHealthMetrics,
+  StaffingSummary,
+} from "@/lib/ministry-teams/service";
 
 interface TeamHealthDashboardProps {
   healthMetrics: TeamHealthMetrics[];
@@ -34,7 +32,6 @@ export function TeamHealthDashboard({
 }: TeamHealthDashboardProps) {
   const redAlerts = healthMetrics.filter((m) => m.alertLevel === "red");
   const yellowAlerts = healthMetrics.filter((m) => m.alertLevel === "yellow");
-  const healthyTeams = healthMetrics.filter((m) => m.alertLevel === "green");
 
   // Prepare radar chart data
   const radarData = healthMetrics.map((m) => ({
@@ -191,9 +188,7 @@ export function TeamHealthDashboard({
                     )}
                   />
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">
-                      {m.teamName}
-                    </p>
+                    <p className="truncate text-sm font-medium">{m.teamName}</p>
                     <div className="text-muted-foreground mt-1 flex items-center gap-3 text-xs">
                       <span>Staffing: {m.staffingPercent}%</span>
                       <span>Training: {m.trainingPercent}%</span>
@@ -237,20 +232,12 @@ function SummaryCard({
             {title}
           </span>
           <span
-            className={cn(
-              "text-muted-foreground",
-              alert && "text-red-500"
-            )}
+            className={cn("text-muted-foreground", alert && "text-red-500")}
           >
             {icon}
           </span>
         </div>
-        <p
-          className={cn(
-            "mt-2 text-2xl font-bold",
-            alert && "text-red-500"
-          )}
-        >
+        <p className={cn("mt-2 text-2xl font-bold", alert && "text-red-500")}>
           {value}
         </p>
         <p className="text-muted-foreground mt-1 text-xs">{description}</p>
@@ -262,7 +249,8 @@ function SummaryCard({
 function AlertRow({ metrics }: { metrics: TeamHealthMetrics }) {
   const issues: string[] = [];
   if (metrics.staffingPercent < 40) issues.push("Critical: Staffing below 40%");
-  else if (metrics.staffingPercent < 60) issues.push("Warning: Staffing below 60%");
+  else if (metrics.staffingPercent < 60)
+    issues.push("Warning: Staffing below 60%");
   if (metrics.meetingAttendancePercent < 50)
     issues.push("Warning: Attendance below 50%");
 
@@ -287,10 +275,7 @@ function AlertRow({ metrics }: { metrics: TeamHealthMetrics }) {
         </div>
       </div>
       <div className="flex items-center gap-2">
-        <Progress
-          value={metrics.staffingPercent}
-          className="h-2 w-16"
-        />
+        <Progress value={metrics.staffingPercent} className="h-2 w-16" />
         <span className="text-muted-foreground text-xs">
           {metrics.staffingPercent}%
         </span>

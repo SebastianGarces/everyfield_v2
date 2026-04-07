@@ -40,7 +40,7 @@ export function TagPicker({
   onTagsChange,
 }: TagPickerProps) {
   const [open, setOpen] = useState(false);
-  const [isPending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
   const [searchValue, setSearchValue] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [newTagColor, setNewTagColor] = useState<string>("gray");

@@ -7,7 +7,10 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Mail } from "lucide-react";
 import { verifySession } from "@/lib/auth/session";
-import { getCommunications, resolveSubjects } from "@/lib/communication/service";
+import {
+  getCommunications,
+  resolveSubjects,
+} from "@/lib/communication/service";
 import { formatDistanceToNow } from "date-fns";
 
 export const dynamic = "force-dynamic";
@@ -37,7 +40,10 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
   });
 
   // Resolve merge field variables in subjects for display
-  const resolvedSubjectMap = await resolveSubjects(user.churchId, communications);
+  const resolvedSubjectMap = await resolveSubjects(
+    user.churchId,
+    communications
+  );
 
   const totalPages = Math.ceil(total / 20);
 
@@ -51,9 +57,7 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
       />
       <div className="flex h-full flex-col">
         <div className="bg-card p-6 pb-4 shadow-sm">
-          <h1 className="text-3xl font-bold tracking-tight">
-            Message History
-          </h1>
+          <h1 className="text-3xl font-bold tracking-tight">Message History</h1>
           <p className="text-foreground/50">
             All sent messages · {total} total
           </p>
@@ -101,7 +105,9 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
                             href={`/communication/${msg.id}`}
                             className="cursor-pointer font-medium hover:underline"
                           >
-                            {resolvedSubjectMap.get(msg.id) ?? msg.subject ?? "(No subject)"}
+                            {resolvedSubjectMap.get(msg.id) ??
+                              msg.subject ??
+                              "(No subject)"}
                           </Link>
                         </td>
                         <td className="px-4 py-3 text-center text-sm">

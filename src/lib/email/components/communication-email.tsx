@@ -33,9 +33,7 @@ interface CommunicationEmailProps {
  * Segment types produced by parsing the body text.
  * "text" segments render as Text components; "buttons" renders the RSVP CTA row.
  */
-type Segment =
-  | { type: "text"; lines: string[] }
-  | { type: "buttons" };
+type Segment = { type: "text"; lines: string[] } | { type: "buttons" };
 
 /**
  * Parse the email body into segments: consecutive text lines are grouped

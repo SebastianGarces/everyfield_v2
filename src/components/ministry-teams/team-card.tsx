@@ -46,11 +46,7 @@ export function TeamCard({ team }: TeamCardProps) {
       : 0;
 
   const alertLevel =
-    staffingPercent < 40
-      ? "red"
-      : staffingPercent < 60
-        ? "yellow"
-        : "green";
+    staffingPercent < 40 ? "red" : staffingPercent < 60 ? "yellow" : "green";
 
   return (
     <Link href={`/teams/${team.id}`}>
@@ -68,7 +64,7 @@ export function TeamCard({ team }: TeamCardProps) {
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center justify-between gap-2">
-              <h3 className="truncate text-sm font-semibold leading-none tracking-tight">
+              <h3 className="truncate text-sm leading-none font-semibold tracking-tight">
                 {team.name}
               </h3>
               <span

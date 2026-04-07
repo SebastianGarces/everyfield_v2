@@ -113,7 +113,9 @@ export async function POST(req: NextRequest) {
 
     if (newStatus) {
       // Only advance status forward (prevent regression from async events)
-      const currentIdx = statusOrder.indexOf(recipient.status as RecipientStatus);
+      const currentIdx = statusOrder.indexOf(
+        recipient.status as RecipientStatus
+      );
       const newIdx = statusOrder.indexOf(newStatus);
 
       // Special handling: bounced/failed always take effect

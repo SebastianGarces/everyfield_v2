@@ -10,7 +10,9 @@ interface NewMeetingPageProps {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }
 
-export default async function NewMeetingPage({ searchParams }: NewMeetingPageProps) {
+export default async function NewMeetingPage({
+  searchParams,
+}: NewMeetingPageProps) {
   const { user } = await verifySession();
 
   if (!user.churchId) {
@@ -44,8 +46,8 @@ export default async function NewMeetingPage({ searchParams }: NewMeetingPagePro
               Set a date, time, and location for your next meeting.
             </p>
           </div>
-          <MeetingForm 
-            locations={locations} 
+          <MeetingForm
+            locations={locations}
             teams={teams}
             defaultType={defaultType}
             defaultTeamId={defaultTeamId}

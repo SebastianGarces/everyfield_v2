@@ -83,11 +83,13 @@ export function ComposeForm({
     const patterns = typePatterns[meeting.type] ?? [];
 
     // Find a matching invitation template
-    return templates.find(
-      (t) =>
-        t.category === "meeting_invitation" &&
-        patterns.some((p) => t.name.includes(p))
-    ) ?? null;
+    return (
+      templates.find(
+        (t) =>
+          t.category === "meeting_invitation" &&
+          patterns.some((p) => t.name.includes(p))
+      ) ?? null
+    );
   }, [initialTemplate, initialMeetingId, meetings, templates]);
 
   const effectiveTemplate = initialTemplate ?? autoTemplate;
@@ -97,14 +99,19 @@ export function ComposeForm({
   const [selectedTemplateId, setSelectedTemplateId] = useState(
     effectiveTemplate?.id ?? ""
   );
-  const [selectedMeetingId, setSelectedMeetingId] = useState(initialMeetingId ?? "");
+  const [selectedMeetingId, setSelectedMeetingId] = useState(
+    initialMeetingId ?? ""
+  );
   const [recipients, setRecipients] = useState<Recipient[]>(initialRecipients);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Detect if the current content uses meeting merge fields
   const meetingFieldNames = useMemo(
-    () => new Set(MERGE_FIELDS.filter((f) => f.group === "meeting").map((f) => f.name)),
+    () =>
+      new Set(
+        MERGE_FIELDS.filter((f) => f.group === "meeting").map((f) => f.name)
+      ),
     []
   );
   const usedFields = useMemo(
@@ -176,8 +183,7 @@ export function ComposeForm({
         const textarea = bodyRef.current;
         const start = textarea.selectionStart ?? body.length;
         const end = textarea.selectionEnd ?? body.length;
-        const newValue =
-          body.substring(0, start) + token + body.substring(end);
+        const newValue = body.substring(0, start) + token + body.substring(end);
         setBody(newValue);
         requestAnimationFrame(() => {
           textarea.focus();
@@ -216,10 +222,7 @@ export function ComposeForm({
     formData.set("subject", subject);
     formData.set("body", body);
     formData.set("channel", "email");
-    formData.set(
-      "recipientIds",
-      JSON.stringify(recipients.map((r) => r.id))
-    );
+    formData.set("recipientIds", JSON.stringify(recipients.map((r) => r.id)));
     if (selectedTemplateId) formData.set("templateId", selectedTemplateId);
     if (selectedMeetingId) formData.set("meetingId", selectedMeetingId);
 
@@ -274,7 +277,8 @@ export function ComposeForm({
               {needsMeeting && (
                 <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
                   <AlertTriangle className="h-4 w-4 shrink-0" />
-                  This template uses meeting fields. Select a meeting to fill them in.
+                  This template uses meeting fields. Select a meeting to fill
+                  them in.
                 </div>
               )}
               <Select
@@ -305,11 +309,7 @@ export function ComposeForm({
           )}
 
           {/* Recipients */}
-          <RecipientPicker
-            selected={recipients}
-            onChange={setRecipients}
-            showMeetingGroups={!!selectedMeetingId}
-          />
+          <RecipientPicker selected={recipients} onChange={setRecipients} />
 
           {/* Subject */}
           <div className="space-y-2">
@@ -349,9 +349,7 @@ export function ComposeForm({
           />
 
           {/* Error */}
-          {error && (
-            <p className="text-sm text-red-600">{error}</p>
-          )}
+          {error && <p className="text-sm text-red-600">{error}</p>}
 
           {/* Send button */}
           <div className="flex items-center justify-end gap-3 pt-2">
@@ -385,7 +383,11 @@ export function ComposeForm({
 
       {/* Right panel: Live Preview */}
       <div className="hidden w-[480px] shrink-0 lg:block">
-        <EmailPreview subject={subject} body={body} mergeData={previewMergeData} />
+        <EmailPreview
+          subject={subject}
+          body={body}
+          mergeData={previewMergeData}
+        />
       </div>
     </div>
   );

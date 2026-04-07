@@ -9,7 +9,7 @@
 // - getTemplates() returns church forks in place of their system originals
 // ============================================================================
 
-import { and, eq, isNull, or, desc } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 import { db } from "@/db";
 import {
   messageTemplates,
@@ -36,7 +36,10 @@ export async function getTemplates(
   filters?: TemplateFilters
 ): Promise<MessageTemplate[]> {
   const conditions = [
-    or(eq(messageTemplates.isSystem, true), eq(messageTemplates.churchId, churchId)),
+    or(
+      eq(messageTemplates.isSystem, true),
+      eq(messageTemplates.churchId, churchId)
+    ),
   ];
 
   if (filters?.category) {

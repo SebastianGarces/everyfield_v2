@@ -8,12 +8,25 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { LocationPicker } from "./location-picker";
-import { createMeetingAction, updateMeetingAction } from "@/app/(dashboard)/meetings/actions";
-import type { ChurchMeeting, Location, MeetingType, MeetingSubtype } from "@/db/schema";
+import {
+  createMeetingAction,
+  updateMeetingAction,
+} from "@/app/(dashboard)/meetings/actions";
+import type {
+  ChurchMeeting,
+  Location,
+  MeetingType,
+  MeetingSubtype,
+} from "@/db/schema";
 import type { MinistryTeam } from "@/db/schema";
-import type { ActionResult } from "@/lib/meetings/types";
 
 interface MeetingFormProps {
   meeting?: ChurchMeeting;
@@ -57,9 +70,10 @@ export function MeetingForm({
 
   // Pass server actions directly to useActionState.
   // Create action redirects server-side; update action uses bind for meetingId.
-  const serverAction = isEdit && meeting
-    ? updateMeetingAction.bind(null, meeting.id)
-    : createMeetingAction;
+  const serverAction =
+    isEdit && meeting
+      ? updateMeetingAction.bind(null, meeting.id)
+      : createMeetingAction;
 
   const [state, formAction, isPending] = useActionState(serverAction, null);
 
@@ -99,7 +113,11 @@ export function MeetingForm({
             </SelectTrigger>
             <SelectContent>
               {meetingTypeOptions.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value} className="cursor-pointer">
+                <SelectItem
+                  key={opt.value}
+                  value={opt.value}
+                  className="cursor-pointer"
+                >
                   {opt.label}
                 </SelectItem>
               ))}
@@ -115,13 +133,20 @@ export function MeetingForm({
         <>
           <div className="space-y-2">
             <Label>Team *</Label>
-            <Select name="teamId" defaultValue={meeting?.teamId ?? defaultTeamId ?? ""}>
+            <Select
+              name="teamId"
+              defaultValue={meeting?.teamId ?? defaultTeamId ?? ""}
+            >
               <SelectTrigger className="cursor-pointer">
                 <SelectValue placeholder="Select a team" />
               </SelectTrigger>
               <SelectContent>
                 {teams.map((team) => (
-                  <SelectItem key={team.id} value={team.id} className="cursor-pointer">
+                  <SelectItem
+                    key={team.id}
+                    value={team.id}
+                    className="cursor-pointer"
+                  >
                     {team.name}
                   </SelectItem>
                 ))}
@@ -130,13 +155,20 @@ export function MeetingForm({
           </div>
           <div className="space-y-2">
             <Label>Meeting Subtype</Label>
-            <Select name="meetingSubtype" defaultValue={meeting?.meetingSubtype ?? "regular"}>
+            <Select
+              name="meetingSubtype"
+              defaultValue={meeting?.meetingSubtype ?? "regular"}
+            >
               <SelectTrigger className="cursor-pointer">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 {subtypeOptions.map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value} className="cursor-pointer">
+                  <SelectItem
+                    key={opt.value}
+                    value={opt.value}
+                    className="cursor-pointer"
+                  >
                     {opt.label}
                   </SelectItem>
                 ))}
@@ -171,7 +203,9 @@ export function MeetingForm({
           className="cursor-pointer"
         />
         {state && !state.success && state.fieldErrors?.datetime && (
-          <p className="text-destructive text-sm">{state.fieldErrors.datetime[0]}</p>
+          <p className="text-destructive text-sm">
+            {state.fieldErrors.datetime[0]}
+          </p>
         )}
       </div>
 

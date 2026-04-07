@@ -11,7 +11,6 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { Location } from "@/db/schema";
 import type { VisionMeeting } from "@/db/schema/vision-meetings";
-import type { ActionResult } from "@/lib/vision-meetings/types";
 import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useActionState, useEffect, useRef } from "react";
@@ -35,9 +34,10 @@ export function MeetingForm({
 
   // Pass server actions directly to useActionState.
   // Create action redirects server-side; update action uses bind for meetingId.
-  const serverAction = isEdit && meeting
-    ? updateMeetingAction.bind(null, meeting.id)
-    : createMeetingAction;
+  const serverAction =
+    isEdit && meeting
+      ? updateMeetingAction.bind(null, meeting.id)
+      : createMeetingAction;
 
   const [state, formAction, isPending] = useActionState(serverAction, null);
 

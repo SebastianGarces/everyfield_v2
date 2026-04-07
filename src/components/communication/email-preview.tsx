@@ -39,7 +39,7 @@ function renderRsvpButtons(html: string): string {
     // Replace the confirm placeholder line + decline placeholder line with a single button row
     // Use [^<>]* to avoid consuming < or > from surrounding <br> tags
     const combinedPattern = new RegExp(
-      `[^<>]*${escapeRegex(CONFIRM_PLACEHOLDER)}[^<>]*(?:<br>)+[^<>]*${escapeRegex(DECLINE_PLACEHOLDER)}[^<>]*`,
+      `[^<>]*${escapeRegex(CONFIRM_PLACEHOLDER)}[^<>]*(?:<br>)+[^<>]*${escapeRegex(DECLINE_PLACEHOLDER)}[^<>]*`
     );
 
     if (combinedPattern.test(html)) {
@@ -86,11 +86,7 @@ function escapeRegex(str: string): string {
  * Highlights unresolved {{...}} tokens in red.
  * Renders {{confirm_link}} / {{decline_link}} as styled RSVP buttons.
  */
-export function EmailPreview({
-  subject,
-  body,
-  mergeData,
-}: EmailPreviewProps) {
+export function EmailPreview({ subject, body, mergeData }: EmailPreviewProps) {
   const data = mergeData ?? getSampleData();
   const renderedSubject = subject ? renderTemplate(subject, data) : "";
   const renderedBody = renderTemplate(body || "", data);
@@ -113,7 +109,7 @@ export function EmailPreview({
     <div className="flex h-full flex-col overflow-hidden rounded-lg border">
       {/* Header */}
       <div className="border-b bg-gray-50 px-4 py-3">
-        <p className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
+        <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
           Email Preview
         </p>
       </div>
@@ -144,7 +140,7 @@ export function EmailPreview({
           >
             {body ? (
               <div
-                className="text-[#4b5563] leading-relaxed"
+                className="leading-relaxed text-[#4b5563]"
                 style={{ fontSize: "16px" }}
                 dangerouslySetInnerHTML={{ __html: displayBody }}
               />
@@ -157,9 +153,7 @@ export function EmailPreview({
 
           {/* Footer */}
           <div className="mt-4 text-center">
-            <p className="text-muted-foreground text-xs">
-              — via EveryField
-            </p>
+            <p className="text-muted-foreground text-xs">— via EveryField</p>
           </div>
         </div>
       </div>

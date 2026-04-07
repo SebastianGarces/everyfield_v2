@@ -84,7 +84,10 @@ export function NavUser({ user }: NavUserProps) {
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild>
               <form action={logout} className="w-full">
-                <button type="submit" className="flex w-full items-center gap-2">
+                <button
+                  type="submit"
+                  className="flex w-full items-center gap-2"
+                >
                   <LogOut className="size-4" />
                   Log out
                 </button>

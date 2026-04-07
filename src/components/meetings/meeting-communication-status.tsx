@@ -1,13 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import {
-  Mail,
-  CheckCheck,
-  Eye,
-  ExternalLink,
-  Send,
-} from "lucide-react";
+import { Mail, CheckCheck, Eye, ExternalLink, Send } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -83,7 +77,7 @@ export function MeetingCommunicationStatus({
           </div>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-muted-foreground text-sm">
             No communications sent for this meeting yet.
           </p>
         </CardContent>
@@ -120,13 +114,13 @@ export function MeetingCommunicationStatus({
             <Link
               key={comm.id}
               href={`/communication/${comm.id}`}
-              className="cursor-pointer flex items-center justify-between rounded-lg border p-3 transition-colors hover:bg-muted/50"
+              className="hover:bg-muted/50 flex cursor-pointer items-center justify-between rounded-lg border p-3 transition-colors"
             >
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">
                   {resolvedSubject}
                 </p>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-muted-foreground text-xs">
                   {comm.sentAt
                     ? format(new Date(comm.sentAt), "MMM d, yyyy 'at' h:mm a")
                     : "Draft"}
@@ -164,9 +158,7 @@ export function MeetingCommunicationStatus({
                       {comm.stats.opened}
                     </span>
                   </TooltipTrigger>
-                  <TooltipContent>
-                    {comm.stats.opened} opened
-                  </TooltipContent>
+                  <TooltipContent>{comm.stats.opened} opened</TooltipContent>
                 </Tooltip>
 
                 {issues > 0 && (
@@ -183,7 +175,7 @@ export function MeetingCommunicationStatus({
                     </TooltipContent>
                   </Tooltip>
                 )}
-                <ExternalLink className="h-3.5 w-3.5 text-muted-foreground" />
+                <ExternalLink className="text-muted-foreground h-3.5 w-3.5" />
               </div>
             </Link>
           );

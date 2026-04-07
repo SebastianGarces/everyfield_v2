@@ -75,7 +75,10 @@ export async function submitFeedbackAction(
     console.error("[submitFeedbackAction] error:", error);
 
     if (error instanceof Error && error.message === "Unauthorized") {
-      return { success: false, error: "You must be logged in to send feedback" };
+      return {
+        success: false,
+        error: "You must be logged in to send feedback",
+      };
     }
 
     return {

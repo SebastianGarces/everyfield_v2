@@ -2,13 +2,7 @@
 
 import { useState } from "react";
 import { format } from "date-fns";
-import {
-  CalendarDays,
-  Clock,
-  ExternalLink,
-  MapPin,
-  Plus,
-} from "lucide-react";
+import { CalendarDays, Clock, ExternalLink, MapPin, Plus } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -48,7 +42,8 @@ const SUBTYPE_LABELS: Record<string, string> = {
 const SUBTYPE_COLORS: Record<string, string> = {
   regular: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-400",
   training: "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-400",
-  planning: "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-400",
+  planning:
+    "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-400",
   special: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400",
   rehearsal: "bg-pink-100 text-pink-700 dark:bg-pink-950 dark:text-pink-400",
 };
@@ -63,12 +58,8 @@ export function MeetingsTab({ teamId, meetings }: MeetingsTabProps) {
   const [addLoading, setAddLoading] = useState(false);
 
   const now = new Date();
-  const upcomingMeetings = meetings.filter(
-    (m) => new Date(m.datetime) >= now
-  );
-  const pastMeetings = meetings.filter(
-    (m) => new Date(m.datetime) < now
-  );
+  const upcomingMeetings = meetings.filter((m) => new Date(m.datetime) >= now);
+  const pastMeetings = meetings.filter((m) => new Date(m.datetime) < now);
 
   async function handleCreate(formData: FormData) {
     setAddLoading(true);
@@ -211,7 +202,7 @@ export function MeetingsTab({ teamId, meetings }: MeetingsTabProps) {
         <>
           {upcomingMeetings.length > 0 && (
             <div className="space-y-3">
-              <h3 className="text-muted-foreground text-sm font-medium uppercase tracking-wide">
+              <h3 className="text-muted-foreground text-sm font-medium tracking-wide uppercase">
                 Upcoming ({upcomingMeetings.length})
               </h3>
               {upcomingMeetings.map((meeting) => (
@@ -222,7 +213,7 @@ export function MeetingsTab({ teamId, meetings }: MeetingsTabProps) {
 
           {pastMeetings.length > 0 && (
             <div className="space-y-3">
-              <h3 className="text-muted-foreground text-sm font-medium uppercase tracking-wide">
+              <h3 className="text-muted-foreground text-sm font-medium tracking-wide uppercase">
                 Past ({pastMeetings.length})
               </h3>
               {pastMeetings.map((meeting) => (
@@ -250,14 +241,19 @@ function TeamMeetingCard({
     "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300";
 
   return (
-    <Link href={`/meetings/${meeting.id}`} className="cursor-pointer block">
-      <Card className={cn("py-0 hover:border-primary/50 transition-colors", isPast && "opacity-60")}>
+    <Link href={`/meetings/${meeting.id}`} className="block cursor-pointer">
+      <Card
+        className={cn(
+          "hover:border-primary/50 py-0 transition-colors",
+          isPast && "opacity-60"
+        )}
+      >
         <CardContent className="flex items-center gap-4 p-4">
           <div className="bg-muted flex h-12 w-12 shrink-0 flex-col items-center justify-center rounded-lg text-center">
             <span className="text-xs font-medium uppercase">
               {format(meetingDate, "MMM")}
             </span>
-            <span className="text-lg font-bold leading-none">
+            <span className="text-lg leading-none font-bold">
               {format(meetingDate, "d")}
             </span>
           </div>
@@ -275,8 +271,7 @@ function TeamMeetingCard({
               <span className="flex items-center gap-1">
                 <Clock className="h-3 w-3" />
                 {format(meetingDate, "h:mm a")}
-                {meeting.durationMinutes &&
-                  ` (${meeting.durationMinutes} min)`}
+                {meeting.durationMinutes && ` (${meeting.durationMinutes} min)`}
               </span>
               {meeting.locationName && (
                 <span className="flex items-center gap-1">
@@ -287,7 +282,7 @@ function TeamMeetingCard({
             </div>
           </div>
 
-          <ExternalLink className="h-4 w-4 text-muted-foreground shrink-0" />
+          <ExternalLink className="text-muted-foreground h-4 w-4 shrink-0" />
         </CardContent>
       </Card>
     </Link>

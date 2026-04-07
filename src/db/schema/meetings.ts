@@ -125,9 +125,7 @@ export const churchMeetings = pgTable(
     churchId: uuid("church_id")
       .references(() => churches.id)
       .notNull(),
-    type: varchar("type", { length: 20 })
-      .$type<MeetingType>()
-      .notNull(),
+    type: varchar("type", { length: 20 }).$type<MeetingType>().notNull(),
     title: varchar("title", { length: 255 }),
     datetime: timestamp("datetime").notNull(),
     status: varchar("status", { length: 50 })
@@ -141,8 +139,9 @@ export const churchMeetings = pgTable(
     meetingNumber: integer("meeting_number"),
     // Team meeting specific
     teamId: uuid("team_id").references(() => ministryTeams.id),
-    meetingSubtype: varchar("meeting_subtype", { length: 20 })
-      .$type<MeetingSubtype>(),
+    meetingSubtype: varchar("meeting_subtype", {
+      length: 20,
+    }).$type<MeetingSubtype>(),
     // Common fields
     estimatedAttendance: integer("estimated_attendance"),
     actualAttendance: integer("actual_attendance"),
@@ -186,8 +185,9 @@ export const meetingAttendance = pgTable(
     personId: uuid("person_id")
       .references(() => persons.id, { onDelete: "cascade" })
       .notNull(),
-    attendanceType: varchar("attendance_type", { length: 50 })
-      .$type<AttendanceType>(),
+    attendanceType: varchar("attendance_type", {
+      length: 50,
+    }).$type<AttendanceType>(),
     status: varchar("status", { length: 10 })
       .$type<AttendanceStatus>()
       .notNull()

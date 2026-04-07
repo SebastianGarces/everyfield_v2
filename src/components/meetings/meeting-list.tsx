@@ -13,7 +13,6 @@ interface MeetingListProps {
   upcomingMeetings: MeetingWithCounts[];
   pastMeetings: MeetingWithCounts[];
   initialView: "upcoming" | "past" | "all";
-  initialTypeFilter?: MeetingType;
 }
 
 const typeFilters: { value: MeetingType | "all"; label: string }[] = [
@@ -27,11 +26,11 @@ export function MeetingList({
   upcomingMeetings,
   pastMeetings,
   initialView,
-  initialTypeFilter,
 }: MeetingListProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const view = (searchParams.get("view") as "upcoming" | "past" | "all") || initialView;
+  const view =
+    (searchParams.get("view") as "upcoming" | "past" | "all") || initialView;
   const activeType = (searchParams.get("type") as MeetingType | null) || "all";
 
   const showUpcoming = view === "upcoming" || view === "all";
@@ -41,7 +40,11 @@ export function MeetingList({
   function updateParams(updates: Record<string, string | null>) {
     const params = new URLSearchParams(searchParams.toString());
     for (const [key, value] of Object.entries(updates)) {
-      if (value === null || (key === "view" && value === "upcoming") || (key === "type" && value === "all")) {
+      if (
+        value === null ||
+        (key === "view" && value === "upcoming") ||
+        (key === "type" && value === "all")
+      ) {
         params.delete(key);
       } else {
         params.set(key, value);
@@ -54,7 +57,7 @@ export function MeetingList({
   return (
     <div className="space-y-6">
       {/* Type Filter */}
-      <div className="flex gap-1 rounded-lg bg-muted p-1 w-fit">
+      <div className="bg-muted flex w-fit gap-1 rounded-lg p-1">
         {typeFilters.map((f) => (
           <button
             key={f.value}
@@ -72,7 +75,7 @@ export function MeetingList({
       </div>
 
       {/* View Toggle */}
-      <div className="flex gap-1 rounded-lg bg-muted p-1 w-fit">
+      <div className="bg-muted flex w-fit gap-1 rounded-lg p-1">
         {(["upcoming", "past", "all"] as const).map((v) => (
           <button
             key={v}
@@ -104,11 +107,13 @@ export function MeetingList({
         <>
           {showUpcoming && (
             <div className="space-y-4">
-              <h2 className="text-lg font-semibold text-foreground/80">
+              <h2 className="text-foreground/80 text-lg font-semibold">
                 Upcoming ({upcomingMeetings.length})
               </h2>
               {upcomingMeetings.length === 0 ? (
-                <p className="text-muted-foreground text-sm py-4">No upcoming meetings scheduled.</p>
+                <p className="text-muted-foreground py-4 text-sm">
+                  No upcoming meetings scheduled.
+                </p>
               ) : (
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                   {upcomingMeetings.map((meeting) => (
@@ -120,11 +125,13 @@ export function MeetingList({
           )}
           {showPast && (
             <div className="space-y-4">
-              <h2 className="text-lg font-semibold text-foreground/80">
+              <h2 className="text-foreground/80 text-lg font-semibold">
                 Past ({pastMeetings.length})
               </h2>
               {pastMeetings.length === 0 ? (
-                <p className="text-muted-foreground text-sm py-4">No past meetings recorded.</p>
+                <p className="text-muted-foreground py-4 text-sm">
+                  No past meetings recorded.
+                </p>
               ) : (
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                   {pastMeetings.map((meeting) => (

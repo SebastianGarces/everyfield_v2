@@ -15,7 +15,9 @@ interface MeetingsPageProps {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }
 
-export default async function MeetingsPage({ searchParams }: MeetingsPageProps) {
+export default async function MeetingsPage({
+  searchParams,
+}: MeetingsPageProps) {
   const { user } = await verifySession();
 
   if (!user.churchId) {
@@ -23,12 +25,26 @@ export default async function MeetingsPage({ searchParams }: MeetingsPageProps) 
   }
 
   const params = await searchParams;
-  const view = (params.view === "past" ? "past" : params.view === "all" ? "all" : "upcoming") as "upcoming" | "past" | "all";
+  const view = (
+    params.view === "past" ? "past" : params.view === "all" ? "all" : "upcoming"
+  ) as "upcoming" | "past" | "all";
   const typeFilter = params.type as MeetingType | undefined;
 
   const [upcomingResult, pastResult] = await Promise.all([
-    view !== "past" ? listMeetings(user.churchId, { status: "upcoming", type: typeFilter, limit: 50 }) : Promise.resolve({ meetings: [], total: 0 }),
-    view !== "upcoming" ? listMeetings(user.churchId, { status: "past", type: typeFilter, limit: 50 }) : Promise.resolve({ meetings: [], total: 0 }),
+    view !== "past"
+      ? listMeetings(user.churchId, {
+          status: "upcoming",
+          type: typeFilter,
+          limit: 50,
+        })
+      : Promise.resolve({ meetings: [], total: 0 }),
+    view !== "upcoming"
+      ? listMeetings(user.churchId, {
+          status: "past",
+          type: typeFilter,
+          limit: 50,
+        })
+      : Promise.resolve({ meetings: [], total: 0 }),
   ]);
 
   return (
@@ -56,7 +72,6 @@ export default async function MeetingsPage({ searchParams }: MeetingsPageProps) 
             upcomingMeetings={upcomingResult.meetings}
             pastMeetings={pastResult.meetings}
             initialView={view}
-            initialTypeFilter={typeFilter}
           />
         </div>
       </div>

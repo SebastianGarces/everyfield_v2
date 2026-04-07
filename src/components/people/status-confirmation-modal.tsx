@@ -110,8 +110,7 @@ export function StatusConfirmationModal({
           {/* Reason - Required for all status changes */}
           <div className="space-y-2">
             <Label htmlFor="reason">
-              Reason for change{" "}
-              <span className="text-destructive">*</span>
+              Reason for change <span className="text-destructive">*</span>
             </Label>
             <Textarea
               id="reason"

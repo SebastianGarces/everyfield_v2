@@ -35,7 +35,12 @@ export function HeaderProvider({ children }: { children: ReactNode }) {
 
   return (
     <HeaderContext.Provider
-      value={{ breadcrumbs, setBreadcrumbs, actionsContainer, setActionsContainer }}
+      value={{
+        breadcrumbs,
+        setBreadcrumbs,
+        actionsContainer,
+        setActionsContainer,
+      }}
     >
       {children}
     </HeaderContext.Provider>

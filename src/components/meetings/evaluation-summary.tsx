@@ -25,9 +25,7 @@ function ScoreStars({ score }: { score: number }) {
         <Star
           key={s}
           className={`h-4 w-4 ${
-            score >= s
-              ? "fill-yellow-400 text-yellow-400"
-              : "text-gray-300"
+            score >= s ? "fill-yellow-400 text-yellow-400" : "text-gray-300"
           }`}
         />
       ))}
@@ -58,7 +56,7 @@ export function EvaluationSummary({
               <span className="text-sm font-medium">{factor.label}</span>
               <div className="flex items-center gap-2">
                 <ScoreStars score={evaluation[factor.key]} />
-                <span className="text-sm font-bold w-6 text-right">
+                <span className="w-6 text-right text-sm font-bold">
                   {evaluation[factor.key]}
                 </span>
               </div>

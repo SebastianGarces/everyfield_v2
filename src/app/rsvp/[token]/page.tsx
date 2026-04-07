@@ -3,9 +3,7 @@ import { format } from "date-fns";
 import { CalendarDays, MapPin, Check, X } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  getConfirmationDetails,
-} from "@/lib/communication/confirmation";
+import { getConfirmationDetails } from "@/lib/communication/confirmation";
 import { RsvpActions } from "./rsvp-actions";
 
 interface RsvpPageProps {
@@ -48,9 +46,7 @@ export default async function RsvpPage({
               {church.name}
             </p>
             <h1 className="mt-2 text-2xl font-bold">
-              {meeting.title ??
-                meetingTypeLabels[meeting.type] ??
-                meeting.type}
+              {meeting.title ?? meetingTypeLabels[meeting.type] ?? meeting.type}
             </h1>
           </div>
 

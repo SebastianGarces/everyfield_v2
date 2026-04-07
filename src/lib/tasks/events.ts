@@ -1,5 +1,11 @@
 import { db } from "@/db";
-import { persons, tasks, users, churchMeetings, type NewTask } from "@/db/schema";
+import {
+  persons,
+  tasks,
+  users,
+  churchMeetings,
+  type NewTask,
+} from "@/db/schema";
 import { and, eq, isNull, ne } from "drizzle-orm";
 import { eventBus } from "@/lib/events/event-bus";
 
@@ -173,12 +179,7 @@ export async function handleMeetingAttendanceFinalized(
           lastName: persons.lastName,
         })
         .from(persons)
-        .where(
-          and(
-            eq(persons.churchId, churchId),
-            isNull(persons.deletedAt)
-          )
-        );
+        .where(and(eq(persons.churchId, churchId), isNull(persons.deletedAt)));
 
       const attendeeMap = new Map(
         attendees.map((a) => [a.id, `${a.firstName} ${a.lastName}`])

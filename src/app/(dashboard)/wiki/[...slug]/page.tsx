@@ -128,7 +128,11 @@ export default async function WikiPage({ params }: Props) {
 }
 
 // Article view component
-async function ArticleView({ article }: { article: ArticleMeta & { content: string } }) {
+async function ArticleView({
+  article,
+}: {
+  article: ArticleMeta & { content: string };
+}) {
   const [content, bookmarked] = await Promise.all([
     compileArticle(article),
     isBookmarked(article.slug),
@@ -142,15 +146,22 @@ async function ArticleView({ article }: { article: ArticleMeta & { content: stri
 
         <header className="space-y-4 border-b pb-6">
           <div className="flex items-start justify-between gap-4">
-            <h1 className="text-3xl font-bold tracking-tight">{article.title}</h1>
-            <BookmarkButton slug={article.slug} initialBookmarked={bookmarked} />
+            <h1 className="text-3xl font-bold tracking-tight">
+              {article.title}
+            </h1>
+            <BookmarkButton
+              slug={article.slug}
+              initialBookmarked={bookmarked}
+            />
           </div>
 
           {article.description && (
-            <p className="text-lg text-muted-foreground">{article.description}</p>
+            <p className="text-muted-foreground text-lg">
+              {article.description}
+            </p>
           )}
 
-          <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
+          <div className="text-muted-foreground flex flex-wrap items-center gap-4 text-sm">
             <div className="flex items-center gap-1.5">
               <FileText className="h-4 w-4" />
               <span className="capitalize">{article.type}</span>
@@ -191,12 +202,12 @@ async function SectionIndexView({
   // Group articles by section if at top level and there are meaningful sub-sections
   const isTopLevel = slugPath.split("/").length === 1;
   const grouped = isTopLevel ? groupArticlesBySection(articles) : null;
-  
+
   // Only use grouping if there are actual sub-sections (not just "_root")
-  const hasRealSections = grouped && (
-    Object.keys(grouped).length > 1 || 
-    (Object.keys(grouped).length === 1 && !grouped["_root"])
-  );
+  const hasRealSections =
+    grouped &&
+    (Object.keys(grouped).length > 1 ||
+      (Object.keys(grouped).length === 1 && !grouped["_root"]));
   const groupedArticles = hasRealSections ? grouped : null;
 
   return (
@@ -216,7 +227,9 @@ async function SectionIndexView({
         <div className="space-y-8">
           {Object.entries(groupedArticles).map(([section, sectionArticles]) => (
             <div key={section} className="space-y-3">
-              <h2 className="text-xl font-semibold">{formatSectionTitle(section)}</h2>
+              <h2 className="text-xl font-semibold">
+                {formatSectionTitle(section)}
+              </h2>
               <ArticleList
                 articles={sectionArticles}
                 progressMap={progressMap}
@@ -244,7 +257,10 @@ function ArticleList({
   bookmarkedSlugs,
 }: {
   articles: ArticleMeta[];
-  progressMap: Map<string, { status: WikiProgressStatus; scrollPosition: number | null }>;
+  progressMap: Map<
+    string,
+    { status: WikiProgressStatus; scrollPosition: number | null }
+  >;
   bookmarkedSlugs: Set<string>;
 }) {
   const sortedArticles = [...articles].sort((a, b) => {
@@ -261,14 +277,14 @@ function ArticleList({
           <Link
             key={article.slug}
             href={`/wiki/${article.slug}`}
-            className="group flex items-center justify-between rounded-lg border p-4 transition-colors hover:bg-muted/50"
+            className="group hover:bg-muted/50 flex items-center justify-between rounded-lg border p-4 transition-colors"
           >
             <div className="space-y-1">
-              <h3 className="font-medium group-hover:text-primary">
+              <h3 className="group-hover:text-primary font-medium">
                 {article.title}
               </h3>
               {article.description && (
-                <p className="text-sm text-muted-foreground line-clamp-1">
+                <p className="text-muted-foreground line-clamp-1 text-sm">
                   {article.description}
                 </p>
               )}
@@ -280,13 +296,13 @@ function ArticleList({
               </div>
             </div>
             <div className="ml-4 flex shrink-0 items-center gap-3">
-              <span className="rounded-full bg-muted px-2 py-0.5 text-xs capitalize">
+              <span className="bg-muted rounded-full px-2 py-0.5 text-xs capitalize">
                 {article.type}
               </span>
-              <span className="text-xs text-muted-foreground">
+              <span className="text-muted-foreground text-xs">
                 {article.readTime} min
               </span>
-              <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground" />
+              <ChevronRight className="text-muted-foreground group-hover:text-foreground h-4 w-4" />
             </div>
           </Link>
         );

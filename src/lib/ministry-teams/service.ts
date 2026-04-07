@@ -102,9 +102,7 @@ export interface TrainingMatrixRow {
  * List all teams for a church with staffing stats.
  * Uses batch queries instead of N+1 loops.
  */
-export async function listTeams(
-  churchId: string
-): Promise<TeamWithStats[]> {
+export async function listTeams(churchId: string): Promise<TeamWithStats[]> {
   const teams = await db
     .select()
     .from(ministryTeams)
@@ -123,10 +121,7 @@ export async function listTeams(
     })
     .from(teamRoles)
     .where(
-      and(
-        eq(teamRoles.churchId, churchId),
-        inArray(teamRoles.teamId, teamIds)
-      )
+      and(eq(teamRoles.churchId, churchId), inArray(teamRoles.teamId, teamIds))
     )
     .groupBy(teamRoles.teamId);
 
@@ -148,10 +143,7 @@ export async function listTeams(
       })
       .from(persons)
       .where(
-        and(
-          eq(persons.churchId, churchId),
-          inArray(persons.id, leaderIds)
-        )
+        and(eq(persons.churchId, churchId), inArray(persons.id, leaderIds))
       );
     for (const l of leaders) {
       leaderMap.set(l.id, `${l.firstName} ${l.lastName}`);
@@ -164,7 +156,7 @@ export async function listTeams(
       ...team,
       filledRoles: counts.filled,
       totalRoles: counts.total,
-      leaderName: team.leaderId ? leaderMap.get(team.leaderId) ?? null : null,
+      leaderName: team.leaderId ? (leaderMap.get(team.leaderId) ?? null) : null,
     };
   });
 }
@@ -190,9 +182,7 @@ export async function getTeam(
   const roles = await db
     .select()
     .from(teamRoles)
-    .where(
-      and(eq(teamRoles.churchId, churchId), eq(teamRoles.teamId, teamId))
-    )
+    .where(and(eq(teamRoles.churchId, churchId), eq(teamRoles.teamId, teamId)))
     .orderBy(asc(teamRoles.sortOrder), asc(teamRoles.name));
 
   // Get active memberships for this team
@@ -211,7 +201,13 @@ export async function getTeam(
   const assignedPersonIds = memberships.map((m) => m.personId);
   const personMap = new Map<
     string,
-    { id: string; firstName: string; lastName: string; email: string | null; phone: string | null }
+    {
+      id: string;
+      firstName: string;
+      lastName: string;
+      email: string | null;
+      phone: string | null;
+    }
   >();
   if (assignedPersonIds.length > 0) {
     const assignedPersons = await db
@@ -238,7 +234,7 @@ export async function getTeam(
   const rolesWithMembers = roles.map((role) => {
     const membership = memberships.find((m) => m.roleId === role.id);
     const assignedPerson = membership
-      ? personMap.get(membership.personId) ?? null
+      ? (personMap.get(membership.personId) ?? null)
       : null;
     return { ...role, assignedPerson };
   });
@@ -255,9 +251,7 @@ export async function getTeam(
         lastName: persons.lastName,
       })
       .from(persons)
-      .where(
-        and(eq(persons.id, team.leaderId), eq(persons.churchId, churchId))
-      )
+      .where(and(eq(persons.id, team.leaderId), eq(persons.churchId, churchId)))
       .limit(1);
     if (leader) {
       leaderName = `${leader.firstName} ${leader.lastName}`;
@@ -429,9 +423,7 @@ export async function listRoles(
   return db
     .select()
     .from(teamRoles)
-    .where(
-      and(eq(teamRoles.churchId, churchId), eq(teamRoles.teamId, teamId))
-    )
+    .where(and(eq(teamRoles.churchId, churchId), eq(teamRoles.teamId, teamId)))
     .orderBy(asc(teamRoles.sortOrder), asc(teamRoles.name));
 }
 
@@ -747,10 +739,7 @@ export async function removeMember(
     .update(teamRoles)
     .set({ status: "open" as RoleStatus, updatedAt: new Date() })
     .where(
-      and(
-        eq(teamRoles.id, membership.roleId),
-        eq(teamRoles.churchId, churchId)
-      )
+      and(eq(teamRoles.id, membership.roleId), eq(teamRoles.churchId, churchId))
     );
 
   // Emit staffing changed
@@ -827,7 +816,9 @@ export async function getPersonTeamCount(
   personId: string
 ): Promise<number> {
   const [result] = await db
-    .select({ count: sql<number>`count(DISTINCT ${teamMemberships.teamId})::int` })
+    .select({
+      count: sql<number>`count(DISTINCT ${teamMemberships.teamId})::int`,
+    })
     .from(teamMemberships)
     .where(
       and(
@@ -1055,9 +1046,7 @@ async function getTeamStaffingCounts(
   const roles = await db
     .select()
     .from(teamRoles)
-    .where(
-      and(eq(teamRoles.churchId, churchId), eq(teamRoles.teamId, teamId))
-    );
+    .where(and(eq(teamRoles.churchId, churchId), eq(teamRoles.teamId, teamId)));
 
   const filled = roles.filter((r) => r.status === "filled").length;
   return { filled, total: roles.length };

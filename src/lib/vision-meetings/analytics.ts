@@ -1,5 +1,8 @@
 import { db } from "@/db";
-import { visionMeetingAttendance, visionMeetings } from "@/db/schema/vision-meetings";
+import {
+  visionMeetingAttendance,
+  visionMeetings,
+} from "@/db/schema/vision-meetings";
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { AttendanceTrendPoint, MeetingSummaryStats } from "./types";
 

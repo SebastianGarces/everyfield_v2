@@ -39,10 +39,7 @@ export default async function PersonCommunicationPage({
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Communication Log</h2>
           <Button size="sm" asChild>
-            <Link
-              href={`/communication/compose`}
-              className="cursor-pointer"
-            >
+            <Link href={`/communication/compose`} className="cursor-pointer">
               <Send className="mr-1 h-3 w-3" />
               Send Message
             </Link>
@@ -74,7 +71,10 @@ export default async function PersonCommunicationPage({
                       </p>
                       <p className="text-muted-foreground mt-1 text-sm">
                         {communication.sentAt
-                          ? format(communication.sentAt, "MMM d, yyyy 'at' h:mm a")
+                          ? format(
+                              communication.sentAt,
+                              "MMM d, yyyy 'at' h:mm a"
+                            )
                           : "—"}
                       </p>
                     </div>

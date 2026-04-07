@@ -55,10 +55,7 @@ export async function getAttendanceTrend(
         )})`
       )
     )
-    .groupBy(
-      meetingAttendance.meetingId,
-      meetingAttendance.attendanceType
-    );
+    .groupBy(meetingAttendance.meetingId, meetingAttendance.attendanceType);
 
   // Build breakdown map
   const breakdownMap = new Map<

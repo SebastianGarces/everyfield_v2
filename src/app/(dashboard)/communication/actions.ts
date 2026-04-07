@@ -5,7 +5,6 @@ import { revalidatePath } from "next/cache";
 import { verifySession } from "@/lib/auth/session";
 import {
   sendCommunication,
-  getCommunications,
   getRecipientsByGroup,
 } from "@/lib/communication/service";
 import {

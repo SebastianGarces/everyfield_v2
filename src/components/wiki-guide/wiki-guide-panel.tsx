@@ -4,13 +4,7 @@ import { Fragment, useEffect, useState, type JSX } from "react";
 import Link from "next/link";
 import { jsx, jsxs } from "react/jsx-runtime";
 import remarkGfm from "remark-gfm";
-import {
-  X,
-  ExternalLink,
-  Clock,
-  FileText,
-  AlertCircle,
-} from "lucide-react";
+import { X, ExternalLink, Clock, FileText, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Callout } from "@/components/wiki/callout";
@@ -27,22 +21,22 @@ const mdxComponents = {
 
   // Element overrides (same classes as wiki pages)
   h1: ({ children }: { children?: React.ReactNode }) => (
-    <h1 className="mb-4 mt-8 scroll-m-20 text-3xl font-bold tracking-tight first:mt-0">
+    <h1 className="mt-8 mb-4 scroll-m-20 text-3xl font-bold tracking-tight first:mt-0">
       {children}
     </h1>
   ),
   h2: ({ children }: { children?: React.ReactNode }) => (
-    <h2 className="mb-3 mt-8 scroll-m-20 border-b pb-2 text-2xl font-semibold tracking-tight first:mt-0">
+    <h2 className="mt-8 mb-3 scroll-m-20 border-b pb-2 text-2xl font-semibold tracking-tight first:mt-0">
       {children}
     </h2>
   ),
   h3: ({ children }: { children?: React.ReactNode }) => (
-    <h3 className="mb-2 mt-6 scroll-m-20 text-xl font-semibold tracking-tight">
+    <h3 className="mt-6 mb-2 scroll-m-20 text-xl font-semibold tracking-tight">
       {children}
     </h3>
   ),
   h4: ({ children }: { children?: React.ReactNode }) => (
-    <h4 className="mb-2 mt-4 scroll-m-20 text-lg font-semibold tracking-tight">
+    <h4 className="mt-4 mb-2 scroll-m-20 text-lg font-semibold tracking-tight">
       {children}
     </h4>
   ),
@@ -51,7 +45,7 @@ const mdxComponents = {
   ),
   ul: ({ children, ...props }: React.ComponentProps<"ul">) => (
     <ul
-      className="my-4 ml-6 list-disc [&_ul]:my-1 [&_ul]:ml-4 [&_ol]:my-1 [&_ol]:ml-4"
+      className="my-4 ml-6 list-disc [&_ol]:my-1 [&_ol]:ml-4 [&_ul]:my-1 [&_ul]:ml-4"
       {...props}
     >
       {children}
@@ -59,38 +53,36 @@ const mdxComponents = {
   ),
   ol: ({ children, ...props }: React.ComponentProps<"ol">) => (
     <ol
-      className="my-4 ml-6 list-decimal [&_ul]:my-1 [&_ul]:ml-4 [&_ol]:my-1 [&_ol]:ml-4"
+      className="my-4 ml-6 list-decimal [&_ol]:my-1 [&_ol]:ml-4 [&_ul]:my-1 [&_ul]:ml-4"
       {...props}
     >
       {children}
     </ol>
   ),
   li: ({ children, ...props }: React.ComponentProps<"li">) => (
-    <li className="mt-2 [&>ul]:mt-1 [&>ol]:mt-1" {...props}>
+    <li className="mt-2 [&>ol]:mt-1 [&>ul]:mt-1" {...props}>
       {children}
     </li>
   ),
   blockquote: ({ children }: { children?: React.ReactNode }) => (
-    <blockquote className="mt-4 border-l-4 border-muted-foreground/30 pl-4 italic text-muted-foreground">
+    <blockquote className="border-muted-foreground/30 text-muted-foreground mt-4 border-l-4 pl-4 italic">
       {children}
     </blockquote>
   ),
-  hr: () => <hr className="my-8 border-muted" />,
+  hr: () => <hr className="border-muted my-8" />,
   table: ({ children }: { children?: React.ReactNode }) => (
     <div className="my-6 w-full overflow-auto">
       <table className="w-full border-collapse text-sm">{children}</table>
     </div>
   ),
   thead: ({ children }: { children?: React.ReactNode }) => (
-    <thead className="border-b bg-muted/50">{children}</thead>
+    <thead className="bg-muted/50 border-b">{children}</thead>
   ),
   tbody: ({ children }: { children?: React.ReactNode }) => (
     <tbody>{children}</tbody>
   ),
   tr: ({ children }: { children?: React.ReactNode }) => (
-    <tr className="border-b transition-colors hover:bg-muted/50">
-      {children}
-    </tr>
+    <tr className="hover:bg-muted/50 border-b transition-colors">{children}</tr>
   ),
   th: ({ children }: { children?: React.ReactNode }) => (
     <th className="px-4 py-3 text-left font-semibold">{children}</th>
@@ -101,18 +93,18 @@ const mdxComponents = {
   a: ({ href, children }: { href?: string; children?: React.ReactNode }) => (
     <a
       href={href}
-      className="text-primary underline underline-offset-4 hover:text-primary/80"
+      className="text-primary hover:text-primary/80 underline underline-offset-4"
     >
       {children}
     </a>
   ),
   code: ({ children }: { children?: React.ReactNode }) => (
-    <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-sm">
+    <code className="bg-muted rounded px-1.5 py-0.5 font-mono text-sm">
       {children}
     </code>
   ),
   pre: ({ children }: { children?: React.ReactNode }) => (
-    <pre className="my-4 overflow-x-auto rounded-lg bg-muted p-4">
+    <pre className="bg-muted my-4 overflow-x-auto rounded-lg p-4">
       {children}
     </pre>
   ),
@@ -208,8 +200,8 @@ export function WikiGuidePanel() {
     <div
       className={cn(
         // Panel positioning — floating with margin on all sides
-        "fixed right-4 top-4 bottom-4 w-[520px] z-40",
-        "bg-card border rounded-xl shadow-2xl",
+        "fixed top-4 right-4 bottom-4 z-40 w-[520px]",
+        "bg-card rounded-xl border shadow-2xl",
         "flex flex-col",
         // Slide transition
         "transition-all duration-300 ease-in-out",
@@ -217,20 +209,20 @@ export function WikiGuidePanel() {
           ? "translate-x-0 opacity-100"
           : "translate-x-[calc(100%+1rem)] opacity-0",
         // Mobile: full width with smaller margins
-        "max-md:left-4 max-md:w-auto max-md:right-4"
+        "max-md:right-4 max-md:left-4 max-md:w-auto"
       )}
       role="complementary"
       aria-label="Wiki guide panel"
     >
       {/* ── Panel Header ─────────────────────────────────────────── */}
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b px-4 py-3 rounded-t-xl">
-        <div className="flex items-center gap-2 min-w-0">
-          <FileText className="size-4 shrink-0 text-muted-foreground" />
-          <h2 className="text-sm font-semibold truncate">
+      <div className="flex shrink-0 items-center justify-between gap-2 rounded-t-xl border-b px-4 py-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <FileText className="text-muted-foreground size-4 shrink-0" />
+          <h2 className="truncate text-sm font-semibold">
             {entry?.label ?? "Wiki Guide"}
           </h2>
         </div>
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex shrink-0 items-center gap-1">
           {activeSlug && (
             <Button
               variant="ghost"
@@ -238,10 +230,7 @@ export function WikiGuidePanel() {
               asChild
               className="cursor-pointer"
             >
-              <Link
-                href={`/wiki/${activeSlug}`}
-                title="Open in Wiki"
-              >
+              <Link href={`/wiki/${activeSlug}`} title="Open in Wiki">
                 <ExternalLink className="size-3.5" />
               </Link>
             </Button>
@@ -265,12 +254,12 @@ export function WikiGuidePanel() {
 
           {(error || compileError) && (
             <div className="flex flex-col items-center gap-3 py-12 text-center">
-              <AlertCircle className="size-8 text-muted-foreground" />
+              <AlertCircle className="text-muted-foreground size-8" />
               <div className="space-y-1">
-                <p className="text-sm font-medium text-muted-foreground">
+                <p className="text-muted-foreground text-sm font-medium">
                   {error || compileError}
                 </p>
-                <p className="text-xs text-muted-foreground/70">
+                <p className="text-muted-foreground/70 text-xs">
                   This article may not exist yet. Check the wiki guide
                   configuration.
                 </p>
@@ -286,16 +275,16 @@ export function WikiGuidePanel() {
                   {article.title}
                 </h3>
                 {article.description && (
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-muted-foreground text-sm">
                     {article.description}
                   </p>
                 )}
-                <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                <div className="text-muted-foreground flex items-center gap-3 text-xs">
                   <span className="inline-flex items-center gap-1">
                     <Clock className="size-3" />
                     {article.readTime} min read
                   </span>
-                  <span className="rounded-full bg-muted px-2 py-0.5 capitalize">
+                  <span className="bg-muted rounded-full px-2 py-0.5 capitalize">
                     {article.type}
                   </span>
                 </div>
@@ -310,7 +299,7 @@ export function WikiGuidePanel() {
               <div className="mt-8 border-t pt-4 pb-2">
                 <Link
                   href={`/wiki/${article.slug}`}
-                  className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline cursor-pointer"
+                  className="text-primary inline-flex cursor-pointer items-center gap-1.5 text-xs hover:underline"
                 >
                   <ExternalLink className="size-3" />
                   Read full article in Wiki
@@ -323,8 +312,8 @@ export function WikiGuidePanel() {
 
       {/* ── Related Articles Card (always visible at bottom) ─────── */}
       {hasMultipleArticles && (
-        <div className="shrink-0 border-t bg-muted/30 px-4 py-3 rounded-b-xl">
-          <p className="mb-2 text-xs font-medium text-muted-foreground">
+        <div className="bg-muted/30 shrink-0 rounded-b-xl border-t px-4 py-3">
+          <p className="text-muted-foreground mb-2 text-xs font-medium">
             Related Articles
           </p>
           <div className="space-y-1">
@@ -333,7 +322,7 @@ export function WikiGuidePanel() {
                 key={slug}
                 onClick={() => setActiveSlug(slug)}
                 className={cn(
-                  "cursor-pointer flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors",
+                  "flex w-full cursor-pointer items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors",
                   slug === activeSlug
                     ? "bg-primary/10 text-primary font-medium"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -353,7 +342,7 @@ export function WikiGuidePanel() {
 /** Loading skeleton for article content */
 function ArticleSkeleton() {
   return (
-    <div className="space-y-4 animate-pulse">
+    <div className="animate-pulse space-y-4">
       <div className="space-y-2">
         <Skeleton className="h-6 w-3/4" />
         <Skeleton className="h-4 w-full" />

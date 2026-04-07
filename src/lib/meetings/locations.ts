@@ -17,9 +17,7 @@ export async function listLocations(churchId: string): Promise<Location[]> {
   return db
     .select()
     .from(locations)
-    .where(
-      and(eq(locations.churchId, churchId), eq(locations.isActive, true))
-    )
+    .where(and(eq(locations.churchId, churchId), eq(locations.isActive, true)))
     .orderBy(asc(locations.name));
 }
 
@@ -34,9 +32,7 @@ export async function getLocation(
   const result = await db
     .select()
     .from(locations)
-    .where(
-      and(eq(locations.churchId, churchId), eq(locations.id, locationId))
-    )
+    .where(and(eq(locations.churchId, churchId), eq(locations.id, locationId)))
     .limit(1);
 
   return result[0] ?? null;
@@ -102,9 +98,7 @@ export async function updateLocation(
   const [updated] = await db
     .update(locations)
     .set(updateData)
-    .where(
-      and(eq(locations.churchId, churchId), eq(locations.id, locationId))
-    )
+    .where(and(eq(locations.churchId, churchId), eq(locations.id, locationId)))
     .returning();
 
   if (!updated) {
@@ -130,7 +124,5 @@ export async function deactivateLocation(
   await db
     .update(locations)
     .set({ isActive: false, updatedAt: new Date() })
-    .where(
-      and(eq(locations.churchId, churchId), eq(locations.id, locationId))
-    );
+    .where(and(eq(locations.churchId, churchId), eq(locations.id, locationId)));
 }

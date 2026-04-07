@@ -573,8 +573,7 @@ export async function getAttendanceSummary(
  */
 export async function finalizeAttendance(
   churchId: string,
-  meetingId: string,
-  userId: string
+  meetingId: string
 ): Promise<void> {
   const records = await db
     .select()
