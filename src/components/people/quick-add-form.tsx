@@ -55,7 +55,9 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
   const router = useRouter();
 
   // Track which submit action triggered
-  const actionRef = useRef<"save" | "saveAndAdd">("save");
+  const [submitAction, setSubmitAction] = useState<"save" | "saveAndAdd">(
+    "save"
+  );
 
   function resetForm() {
     formRef.current?.reset();
@@ -115,7 +117,7 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
 
       router.refresh();
 
-      if (actionRef.current === "saveAndAdd") {
+      if (submitAction === "saveAndAdd") {
         // Clear form but keep dialog open
         resetForm();
         // Focus the first input after a tick
@@ -274,11 +276,9 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
               type="submit"
               variant="outline"
               disabled={isPending}
-              onClick={() => {
-                actionRef.current = "saveAndAdd";
-              }}
+              onClick={() => setSubmitAction("saveAndAdd")}
             >
-              {isPending && actionRef.current === "saveAndAdd" && (
+              {isPending && submitAction === "saveAndAdd" && (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               )}
               Save & Add Another
@@ -286,11 +286,9 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
             <Button
               type="submit"
               disabled={isPending}
-              onClick={() => {
-                actionRef.current = "save";
-              }}
+              onClick={() => setSubmitAction("save")}
             >
-              {isPending && actionRef.current === "save" && (
+              {isPending && submitAction === "save" && (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               )}
               Save

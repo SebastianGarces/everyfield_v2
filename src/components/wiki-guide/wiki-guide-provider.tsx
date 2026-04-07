@@ -75,24 +75,21 @@ export function WikiGuideProvider({ children }: { children: React.ReactNode }) {
   );
   const isAvailable = entry !== null && entry.slugs.length > 0;
 
-  // Close panel and reset when navigating to a page with no guide entry
-  useEffect(() => {
-    if (!isAvailable) {
-      setIsOpen(false);
-      setArticle(null);
-      setActiveSlug(null);
-      setError(null);
-    }
-  }, [isAvailable]);
-
-  // Set default active slug when entry changes
-  useEffect(() => {
+  // React to entry changes by syncing dependent state during render
+  // (instead of in an effect) — this avoids cascading re-renders.
+  const [prevEntry, setPrevEntry] = useState(entry);
+  if (prevEntry !== entry) {
+    setPrevEntry(entry);
+    setArticle(null);
+    setError(null);
     if (entry && entry.slugs.length > 0) {
       setActiveSlug(entry.slugs[0]);
-      // Reset article when entry changes to force refetch
-      setArticle(null);
+    } else {
+      setActiveSlug(null);
+      setIsOpen(false);
+      setIsLoading(false);
     }
-  }, [entry]);
+  }
 
   // Fetch article content when panel is opened or active slug changes
   useEffect(() => {
@@ -102,6 +99,7 @@ export function WikiGuideProvider({ children }: { children: React.ReactNode }) {
     if (article?.slug === activeSlug) return;
 
     let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- standard fetch pattern: mark loading and clear stale error before kicking off the request
     setIsLoading(true);
     setError(null);
 

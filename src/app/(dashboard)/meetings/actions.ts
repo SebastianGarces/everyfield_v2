@@ -795,10 +795,16 @@ export async function updateRsvpStatusAction(
 
     const { updateRsvpStatus } = await import("@/lib/meetings/guest-list");
     const { responseStatuses } = await import("@/db/schema/meetings");
-    if (!responseStatuses.includes(status as any)) {
+    type ResponseStatus = (typeof responseStatuses)[number];
+    if (!responseStatuses.includes(status as ResponseStatus)) {
       return { success: false, error: "Invalid status" };
     }
-    await updateRsvpStatus(user.churchId, meetingId, personId, status as any);
+    await updateRsvpStatus(
+      user.churchId,
+      meetingId,
+      personId,
+      status as ResponseStatus
+    );
     revalidatePath(`/meetings/${meetingId}`);
     return { success: true, data: null };
   } catch (error) {

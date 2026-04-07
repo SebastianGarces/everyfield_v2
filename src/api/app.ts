@@ -1,7 +1,7 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { createSelectSchema, createInsertSchema } from "drizzle-zod";
-import { eq } from "drizzle-orm";
-import type { PgTableWithColumns } from "drizzle-orm/pg-core";
+import { eq, type Column } from "drizzle-orm";
+import type { PgTable } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import { churches } from "@/db/schema/church";
 import { persons } from "@/db/schema/people";
@@ -12,15 +12,25 @@ import { communications } from "@/db/schema/communication";
 
 export const app = new OpenAPIHono().basePath("/api/v1");
 
+// Tables passed to crud() must have id/createdAt/updatedAt — these are
+// auto-managed and stripped from the insert schema below.
+type CrudTable = PgTable & { id: Column };
+
 // Generic CRUD factory — derives OpenAPI schemas from drizzle tables
-function crud(path: string, table: PgTableWithColumns<any>) {
+function crud(path: string, table: CrudTable) {
   const r = new OpenAPIHono();
   const select = createSelectSchema(table);
-  const insert = createInsertSchema(table).omit({
+  const insert = (
+    createInsertSchema(table) as unknown as z.ZodObject<{
+      id: z.ZodTypeAny;
+      createdAt: z.ZodTypeAny;
+      updatedAt: z.ZodTypeAny;
+    }>
+  ).omit({
     id: true,
     createdAt: true,
     updatedAt: true,
-  } as any);
+  });
 
   r.openapi(
     createRoute({
