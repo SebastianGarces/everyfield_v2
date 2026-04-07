@@ -58,6 +58,12 @@ function crud(path: string, table: CrudTable) {
           content: { "application/json": { schema: select } },
           description: `Get ${path}`,
         },
+        404: {
+          content: {
+            "application/json": { schema: z.object({ error: z.string() }) },
+          },
+          description: "Not found",
+        },
       },
     }),
     async (c) => {
@@ -65,7 +71,7 @@ function crud(path: string, table: CrudTable) {
         .select()
         .from(table)
         .where(eq(table.id, c.req.valid("param").id));
-      return row ? c.json(row) : c.json({ error: "Not found" }, 404);
+      return row ? c.json(row, 200) : c.json({ error: "Not found" }, 404);
     }
   );
 
