@@ -73,21 +73,25 @@ The biggest opportunity with EveryField is reducing the operational burden on th
 A conversational AI interface (sidebar or full-screen) could become the primary way planters interact with the platform. Instead of navigating menus and filling forms, the planter simply says what they need:
 
 **Meeting management via tool calls:**
+
 - *"Schedule a vision meeting for next Thursday at 7pm at the Johnson's house"* → AI creates the meeting, sets the location, auto-generates a preparation checklist.
 - *"Invite everyone who attended the last vision meeting plus the 5 new prospects I added this week"* → AI queries the CRM, composes invitations, and sends them.
 - *"Send a reminder to everyone who hasn't RSVP'd to Thursday's meeting"* → AI filters unconfirmed attendees and sends reminder emails.
 
 **People management via tool calls:**
+
 - *"Add John and Sarah Miller — they came to the vision meeting last night, got their info from Mike Davis"* → AI creates both person records, links them as a household, sets source to vision_meeting, records Mike as the referrer, and marks them as attendees.
 - *"Move everyone who's attended 3+ vision meetings to Following Up status"* → AI queries attendance, identifies qualifying people, and batch-updates their pipeline status.
 - *"Who haven't I followed up with in the last 2 weeks?"* → AI queries activity history and surfaces stale contacts.
 
 **Communication via tool calls:**
+
 - *"Send a thank-you email to everyone who came last night"* → AI pulls the attendance list, drafts an email using the follow-up template, and sends it.
 - *"Draft a mass invitation for our next vision meeting and send it to all prospects and attendees"* → AI composes the email with meeting details, selects the right recipient segments, and queues it.
 - *"Text the core group that we're moving the meeting to Wednesday"* → AI sends an SMS blast to all core group members.
 
 **Task management via tool calls:**
+
 - *"What do I need to do before the meeting on Thursday?"* → AI shows the meeting's checklist plus any related tasks.
 - *"Create follow-up tasks for everyone who attended last night — due in 48 hours"* → AI batch-creates personalized follow-up tasks linked to each attendee.
 
@@ -104,12 +108,14 @@ The wiki content (phases, frameworks, best practices from the Launch Playbook) i
 
 The overarching goal is to make the planter's most common workflows require **zero navigation and zero form-filling**. The AI layer sits between the planter and the database, turning natural language intent into structured actions:
 
-| Traditional Flow | AI-Assisted Flow |
-|---|---|
-| Navigate to Meetings → Click New → Fill form → Save → Navigate to Communication → Select recipients → Write email → Send | *"Schedule a vision meeting next Thursday at 7pm and invite all prospects"* |
-| Navigate to People → Click Add → Fill form → Save → Navigate to Person → Add Note → Save | *"Add Jane Doe, met her at church today, she's interested in kids ministry"* |
-| Navigate to People → Filter by status → Select multiple → Bulk action → Change status → Confirm | *"Move everyone who signed a commitment card to Core Group"* |
-| Navigate to Tasks → Review each → Check off → Navigate to next | *"Mark all the prep tasks for last night's meeting as done"* |
+
+| Traditional Flow                                                                                                         | AI-Assisted Flow                                                             |
+| ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| Navigate to Meetings → Click New → Fill form → Save → Navigate to Communication → Select recipients → Write email → Send | *"Schedule a vision meeting next Thursday at 7pm and invite all prospects"*  |
+| Navigate to People → Click Add → Fill form → Save → Navigate to Person → Add Note → Save                                 | *"Add Jane Doe, met her at church today, she's interested in kids ministry"* |
+| Navigate to People → Filter by status → Select multiple → Bulk action → Change status → Confirm                          | *"Move everyone who signed a commitment card to Core Group"*                 |
+| Navigate to Tasks → Review each → Check off → Navigate to next                                                           | *"Mark all the prep tasks for last night's meeting as done"*                 |
+
 
 ### Network & Sending Church Intelligence
 
