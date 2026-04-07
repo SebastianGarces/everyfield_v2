@@ -41,7 +41,9 @@ export function getCardData(
   return { type: CARD_TYPE, personId: person.id, columnId, person };
 }
 
-export function isCardData(data: Record<string, unknown>): data is CardDragData {
+export function isCardData(
+  data: Record<string, unknown>
+): data is CardDragData {
   return data.type === CARD_TYPE;
 }
 
@@ -117,7 +119,11 @@ function getInactivityInfo(
   return null;
 }
 
-export function PipelineCard({ person, columnId, inactivityThresholds }: PipelineCardProps) {
+export function PipelineCard({
+  person,
+  columnId,
+  inactivityThresholds,
+}: PipelineCardProps) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [state, setState] = useState<CardState>(idle);
 
@@ -210,13 +216,13 @@ export function PipelineCard({ person, columnId, inactivityThresholds }: Pipelin
             className={cn(
               "bg-card text-card-foreground rounded-lg border px-3 py-2.5 shadow-xs transition-all duration-150",
               "cursor-grab active:cursor-grabbing",
-              "hover:shadow-sm hover:border-foreground/15",
-              isDragging && "ring-2 ring-primary/30"
+              "hover:border-foreground/15 hover:shadow-sm",
+              isDragging && "ring-primary/30 ring-2"
             )}
           >
             {/* Row 1: Name + status/inactivity icons */}
             <div className="flex items-center justify-between gap-2">
-              <span className="truncate text-sm font-medium leading-tight">
+              <span className="truncate text-sm leading-tight font-medium">
                 {person.firstName} {person.lastName}
               </span>
               <div className="flex shrink-0 items-center gap-1">
@@ -260,7 +266,7 @@ export function PipelineCard({ person, columnId, inactivityThresholds }: Pipelin
                 {person.source && (
                   <Badge
                     variant="outline"
-                    className="h-4 shrink-0 border-border bg-muted px-1.5 py-0 text-[10px] font-medium text-foreground/60"
+                    className="border-border bg-muted text-foreground/60 h-4 shrink-0 px-1.5 py-0 text-[10px] font-medium"
                   >
                     {person.source.replace(/_/g, " ")}
                   </Badge>
@@ -279,7 +285,7 @@ export function PipelineCard({ person, columnId, inactivityThresholds }: Pipelin
       {/* Native drag preview rendered in portal */}
       {state.type === "preview" &&
         createPortal(
-          <div className="max-w-[260px] -rotate-2 rounded-lg border border-border bg-card px-3 py-2.5 text-card-foreground shadow-xl ring-1 ring-border">
+          <div className="border-border bg-card text-card-foreground ring-border max-w-[260px] -rotate-2 rounded-lg border px-3 py-2.5 shadow-xl ring-1">
             <p className="truncate text-sm font-medium">
               {person.firstName} {person.lastName}
             </p>

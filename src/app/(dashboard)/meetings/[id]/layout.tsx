@@ -16,7 +16,10 @@ const meetingTypeLabels = {
   team_meeting: "Team Meeting",
 } as const;
 
-export default async function MeetingLayout({ children, params }: MeetingLayoutProps) {
+export default async function MeetingLayout({
+  children,
+  params,
+}: MeetingLayoutProps) {
   const { user } = await verifySession();
 
   if (!user.churchId) {
@@ -30,9 +33,10 @@ export default async function MeetingLayout({ children, params }: MeetingLayoutP
     notFound();
   }
 
-  const meetingLabel = meeting.type === "vision_meeting" && meeting.meetingNumber
-    ? `Vision Meeting #${meeting.meetingNumber}`
-    : meeting.title || meetingTypeLabels[meeting.type];
+  const meetingLabel =
+    meeting.type === "vision_meeting" && meeting.meetingNumber
+      ? `Vision Meeting #${meeting.meetingNumber}`
+      : meeting.title || meetingTypeLabels[meeting.type];
 
   return (
     <>
@@ -48,12 +52,14 @@ export default async function MeetingLayout({ children, params }: MeetingLayoutP
             <MeetingHeader meeting={meeting} />
           </div>
           <div className="px-6">
-            <MeetingTabs meetingId={meeting.id} meetingType={meeting.type} meetingStatus={meeting.status} />
+            <MeetingTabs
+              meetingId={meeting.id}
+              meetingType={meeting.type}
+              meetingStatus={meeting.status}
+            />
           </div>
         </div>
-        <div className="flex-1 overflow-auto p-6">
-          {children}
-        </div>
+        <div className="flex-1 overflow-auto p-6">{children}</div>
       </div>
     </>
   );

@@ -33,7 +33,7 @@ export function ProgressTracker({
   // Record view on mount
   useEffect(() => {
     recordView(slug);
-    
+
     // Reset refs for new article
     lastSavedPosition.current = 0;
     isCompleted.current = false;
@@ -45,10 +45,10 @@ export function ProgressTracker({
   useEffect(() => {
     // Find the scrollable container - look for overflow-y-auto ancestor
     const findScrollableContainer = (): HTMLElement | Window => {
-      let element = document.querySelector('article')?.parentElement;
+      let element = document.querySelector("article")?.parentElement;
       while (element) {
         const style = window.getComputedStyle(element);
-        if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
+        if (style.overflowY === "auto" || style.overflowY === "scroll") {
           return element;
         }
         element = element.parentElement;
@@ -83,7 +83,7 @@ export function ProgressTracker({
     const handleScroll = () => {
       hasScrolled.current = true;
       const position = calculateScrollProgress();
-      
+
       // Track maximum scroll position
       if (position > maxScrollPosition.current) {
         maxScrollPosition.current = position;
@@ -117,7 +117,7 @@ export function ProgressTracker({
 
     return () => {
       scrollContainer.removeEventListener("scroll", handleScroll);
-      
+
       if (debounceTimer.current) {
         clearTimeout(debounceTimer.current);
       }

@@ -5,7 +5,9 @@ import { searchArticles, type SearchResult } from "@/lib/wiki";
 /**
  * Server action to search wiki articles
  */
-export async function searchWikiArticles(query: string): Promise<SearchResult[]> {
+export async function searchWikiArticles(
+  query: string
+): Promise<SearchResult[]> {
   // Basic input validation
   if (!query || typeof query !== "string") {
     return [];

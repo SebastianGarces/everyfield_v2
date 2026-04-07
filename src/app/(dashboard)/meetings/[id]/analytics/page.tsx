@@ -26,12 +26,5 @@ export default async function AnalyticsPage({ params }: AnalyticsPageProps) {
   ]);
 
   if (!meeting) notFound();
-
-  return (
-    <AnalyticsCharts
-      trend={trend}
-      stats={stats}
-      currentMeetingId={meeting.id}
-    />
-  );
+  return <AnalyticsCharts trend={trend} stats={stats} />;
 }

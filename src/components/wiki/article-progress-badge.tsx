@@ -46,10 +46,7 @@ export function ArticleProgressBadge({
 
   // not_started
   return (
-    <Badge
-      variant="outline"
-      className={cn("text-muted-foreground", className)}
-    >
+    <Badge variant="outline" className={cn("text-muted-foreground", className)}>
       <Circle className="mr-1 h-3 w-3" />
       Not started
     </Badge>

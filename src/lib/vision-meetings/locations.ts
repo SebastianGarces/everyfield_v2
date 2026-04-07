@@ -1,5 +1,9 @@
 import { db } from "@/db";
-import { locations, type Location, type NewLocation } from "@/db/schema/vision-meetings";
+import {
+  locations,
+  type Location,
+  type NewLocation,
+} from "@/db/schema/vision-meetings";
 import type {
   LocationCreateInput,
   LocationUpdateInput,

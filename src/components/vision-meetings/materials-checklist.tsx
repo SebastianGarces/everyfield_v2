@@ -10,7 +10,6 @@ import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 
 interface MaterialsChecklistProps {
-  meetingId: string;
   items: MeetingChecklistItem[];
   summary: { total: number; checked: number };
 }
@@ -32,7 +31,6 @@ const categoryOrder: ChecklistCategory[] = [
 ];
 
 export function MaterialsChecklist({
-  meetingId,
   items,
   summary,
 }: MaterialsChecklistProps) {

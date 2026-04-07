@@ -28,14 +28,9 @@ import type {
 interface AnalyticsChartsProps {
   trend: AttendanceTrendPoint[];
   stats: MeetingSummaryStats;
-  currentMeetingId?: string;
 }
 
-export function AnalyticsCharts({
-  trend,
-  stats,
-  currentMeetingId,
-}: AnalyticsChartsProps) {
+export function AnalyticsCharts({ trend, stats }: AnalyticsChartsProps) {
   const chartData = trend.map((point) => ({
     name: `#${point.meetingNumber}`,
     total: point.totalAttendance,
@@ -51,8 +46,8 @@ export function AnalyticsCharts({
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center gap-2">
-              <CalendarCheck className="h-4 w-4 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">Total Meetings</p>
+              <CalendarCheck className="text-muted-foreground h-4 w-4" />
+              <p className="text-muted-foreground text-sm">Total Meetings</p>
             </div>
             <p className="mt-1 text-2xl font-bold">{stats.totalMeetings}</p>
           </CardContent>
@@ -60,8 +55,8 @@ export function AnalyticsCharts({
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center gap-2">
-              <Users className="h-4 w-4 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">Avg Attendance</p>
+              <Users className="text-muted-foreground h-4 w-4" />
+              <p className="text-muted-foreground text-sm">Avg Attendance</p>
             </div>
             <p className="mt-1 text-2xl font-bold">{stats.avgAttendance}</p>
           </CardContent>
@@ -69,8 +64,8 @@ export function AnalyticsCharts({
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center gap-2">
-              <BarChart3 className="h-4 w-4 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">Last Meeting</p>
+              <BarChart3 className="text-muted-foreground h-4 w-4" />
+              <p className="text-muted-foreground text-sm">Last Meeting</p>
             </div>
             <p className="mt-1 text-2xl font-bold">
               {stats.lastMeetingAttendance ?? "—"}
@@ -85,7 +80,7 @@ export function AnalyticsCharts({
               ) : (
                 <TrendingDown className="h-4 w-4 text-red-600" />
               )}
-              <p className="text-sm text-muted-foreground">Growth</p>
+              <p className="text-muted-foreground text-sm">Growth</p>
             </div>
             <p className="mt-1 text-2xl font-bold">
               {stats.growthPercent !== null
@@ -175,9 +170,9 @@ export function AnalyticsCharts({
       {chartData.length === 0 && (
         <Card>
           <CardContent className="py-12 text-center">
-            <BarChart3 className="mx-auto h-12 w-12 text-muted-foreground/50" />
+            <BarChart3 className="text-muted-foreground/50 mx-auto h-12 w-12" />
             <h3 className="mt-4 font-semibold">No analytics data yet</h3>
-            <p className="mt-1 text-sm text-muted-foreground">
+            <p className="text-muted-foreground mt-1 text-sm">
               Complete meetings and finalize attendance to see analytics.
             </p>
           </CardContent>

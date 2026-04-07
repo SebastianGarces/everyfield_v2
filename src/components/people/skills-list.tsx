@@ -106,7 +106,9 @@ export function SkillsList({ personId, skills }: SkillsListProps) {
     <>
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
-          <CardTitle className="text-base font-semibold">Skills & Gifts</CardTitle>
+          <CardTitle className="text-base font-semibold">
+            Skills & Gifts
+          </CardTitle>
           <Sparkles className="text-muted-foreground h-4 w-4" />
         </CardHeader>
         <CardContent>

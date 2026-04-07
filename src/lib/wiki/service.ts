@@ -70,7 +70,9 @@ export async function getArticlesBySection(
 /**
  * Get articles by phase
  */
-export async function getArticlesByPhase(phase: number): Promise<WikiArticle[]> {
+export async function getArticlesByPhase(
+  phase: number
+): Promise<WikiArticle[]> {
   return db
     .select()
     .from(wikiArticles)
@@ -142,10 +144,7 @@ export async function deleteArticle(id: string): Promise<void> {
  * Get all sections
  */
 export async function getAllSections(): Promise<WikiSection[]> {
-  return db
-    .select()
-    .from(wikiSections)
-    .orderBy(asc(wikiSections.sortOrder));
+  return db.select().from(wikiSections).orderBy(asc(wikiSections.sortOrder));
 }
 
 /**

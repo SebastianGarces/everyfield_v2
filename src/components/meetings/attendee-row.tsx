@@ -13,8 +13,7 @@ interface AttendeeRowProps {
 const typeBadgeColors: Record<AttendanceType, string> = {
   first_time:
     "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
-  returning:
-    "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
+  returning: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
   core_group:
     "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400",
 };
@@ -25,7 +24,11 @@ const typeLabels: Record<AttendanceType, string> = {
   core_group: "Core Group",
 };
 
-export function AttendeeRow({ attendee, onRemove, disabled }: AttendeeRowProps) {
+export function AttendeeRow({
+  attendee,
+  onRemove,
+  disabled,
+}: AttendeeRowProps) {
   // Default to first_time if null (though schema should enforce it, types might be loose)
   const type = attendee.attendanceType ?? "first_time";
 
@@ -37,16 +40,13 @@ export function AttendeeRow({ attendee, onRemove, disabled }: AttendeeRowProps) 
             {attendee.person.firstName} {attendee.person.lastName}
           </p>
           {attendee.invitedBy && (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-muted-foreground text-xs">
               Invited by {attendee.invitedBy.firstName}{" "}
               {attendee.invitedBy.lastName}
             </p>
           )}
         </div>
-        <Badge
-          className={typeBadgeColors[type]}
-          variant="secondary"
-        >
+        <Badge className={typeBadgeColors[type]} variant="secondary">
           {typeLabels[type]}
         </Badge>
       </div>
@@ -55,7 +55,7 @@ export function AttendeeRow({ attendee, onRemove, disabled }: AttendeeRowProps) 
         size="icon"
         onClick={onRemove}
         disabled={disabled}
-        className="h-8 w-8 cursor-pointer text-muted-foreground hover:text-destructive"
+        className="text-muted-foreground hover:text-destructive h-8 w-8 cursor-pointer"
       >
         <X className="h-4 w-4" />
       </Button>

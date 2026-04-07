@@ -8,10 +8,7 @@ import {
   type TaskStatus,
   type TaskCategory,
 } from "@/db/schema";
-import type {
-  TaskCreateInput,
-  TaskUpdateInput,
-} from "@/lib/validations/tasks";
+import type { TaskCreateInput, TaskUpdateInput } from "@/lib/validations/tasks";
 import {
   and,
   asc,
@@ -21,10 +18,8 @@ import {
   ilike,
   inArray,
   isNull,
-  lt,
   lte,
   ne,
-  or,
   sql,
 } from "drizzle-orm";
 import type { ListTasksResult, TaskCounts, TaskWithAssignee } from "./types";

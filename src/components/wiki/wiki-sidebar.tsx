@@ -79,7 +79,7 @@ export function WikiSidebar({
       <div className="space-y-2">
         {bookmarks.length > 0 ? (
           <div>
-            <div className="flex items-center gap-2 px-2 py-1 text-sm font-medium text-foreground">
+            <div className="text-foreground flex items-center gap-2 px-2 py-1 text-sm font-medium">
               <Bookmark className="h-4 w-4" />
               <span>My Bookmarks</span>
             </div>
@@ -89,7 +89,7 @@ export function WikiSidebar({
                   key={item.slug}
                   href={`/wiki/${item.slug}`}
                   className={cn(
-                    "block truncate rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-muted hover:text-foreground",
+                    "text-muted-foreground hover:bg-muted hover:text-foreground block truncate rounded-md px-2 py-1 text-sm",
                     pathname === `/wiki/${item.slug}` &&
                       "bg-muted text-foreground font-medium"
                   )}
@@ -102,18 +102,18 @@ export function WikiSidebar({
           </div>
         ) : (
           <div className="flex items-center justify-between gap-2 rounded-md px-2 py-1 text-sm">
-            <div className="flex items-center gap-2 font-medium text-foreground">
+            <div className="text-foreground flex items-center gap-2 font-medium">
               <Bookmark className="h-4 w-4" />
               <span>My Bookmarks</span>
             </div>
-            <span className="text-xs text-muted-foreground">(none yet)</span>
+            <span className="text-muted-foreground text-xs">(none yet)</span>
           </div>
         )}
 
         {/* Recently Viewed */}
         {recentlyViewed.length > 0 ? (
           <div>
-            <div className="flex items-center gap-2 px-2 py-1 text-sm font-medium text-foreground">
+            <div className="text-foreground flex items-center gap-2 px-2 py-1 text-sm font-medium">
               <Clock className="h-4 w-4" />
               <span>Recently Viewed</span>
             </div>
@@ -123,7 +123,7 @@ export function WikiSidebar({
                   key={item.slug}
                   href={`/wiki/${item.slug}`}
                   className={cn(
-                    "block truncate rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-muted hover:text-foreground",
+                    "text-muted-foreground hover:bg-muted hover:text-foreground block truncate rounded-md px-2 py-1 text-sm",
                     pathname === `/wiki/${item.slug}` &&
                       "bg-muted text-foreground font-medium"
                   )}
@@ -136,11 +136,11 @@ export function WikiSidebar({
           </div>
         ) : (
           <div className="flex items-center justify-between gap-2 rounded-md px-2 py-1 text-sm">
-            <div className="flex items-center gap-2 font-medium text-foreground">
+            <div className="text-foreground flex items-center gap-2 font-medium">
               <Clock className="h-4 w-4" />
               <span>Recently Viewed</span>
             </div>
-            <span className="text-xs text-muted-foreground">(none yet)</span>
+            <span className="text-muted-foreground text-xs">(none yet)</span>
           </div>
         )}
       </div>
@@ -220,7 +220,7 @@ function SidebarItem({
       <Collapsible defaultOpen={hasActiveChild || isActive}>
         <CollapsibleTrigger
           className={cn(
-            "group text-foreground/80 hover:text-foreground flex w-full items-center gap-1 rounded px-2 py-1 text-left text-xs font-medium uppercase tracking-wide",
+            "group text-foreground/80 hover:text-foreground flex w-full items-center gap-1 rounded px-2 py-1 text-left text-xs font-medium tracking-wide uppercase",
             (isActive || hasActiveChild) && "text-foreground"
           )}
         >
@@ -240,8 +240,8 @@ function SidebarItem({
     <Link
       href={item.href}
       className={cn(
-        "relative text-muted-foreground hover:bg-muted hover:text-foreground block rounded px-2 py-1 text-sm before:absolute before:left-0 before:top-0 before:h-full before:w-[4px] before:bg-transparent",
-        isActive && "bg-muted text-foreground font-medium before:bg-ef"
+        "text-muted-foreground hover:bg-muted hover:text-foreground relative block rounded px-2 py-1 text-sm before:absolute before:top-0 before:left-0 before:h-full before:w-[4px] before:bg-transparent",
+        isActive && "bg-muted text-foreground before:bg-ef font-medium"
       )}
     >
       {item.title}

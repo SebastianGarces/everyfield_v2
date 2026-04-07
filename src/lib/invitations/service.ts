@@ -373,10 +373,7 @@ function verifyInvitationAuthority(
     case "church_to_sending_church":
     case "church_to_network": {
       // The target is a church — user must be the planter for that church
-      if (
-        !user.churchId ||
-        user.churchId !== invitation.targetChurchId
-      ) {
+      if (!user.churchId || user.churchId !== invitation.targetChurchId) {
         throw new Error("You are not authorized to respond to this invitation");
       }
       break;

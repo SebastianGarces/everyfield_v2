@@ -6,7 +6,6 @@ import {
   Plus,
   Mail,
   Search,
-  X,
   Loader2,
   Trash2,
   CheckCircle2,
@@ -76,12 +75,26 @@ interface GuestListProps {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const rsvpBadge: Record<string, { label: string; className: string; icon: typeof CheckCircle2 }> = {
-  confirmed: { label: "Confirmed", className: "bg-green-100 text-green-800", icon: CheckCircle2 },
-  declined: { label: "Declined", className: "bg-red-100 text-red-800", icon: XCircle },
+const rsvpBadge: Record<
+  string,
+  { label: string; className: string; icon: typeof CheckCircle2 }
+> = {
+  confirmed: {
+    label: "Confirmed",
+    className: "bg-green-100 text-green-800",
+    icon: CheckCircle2,
+  },
+  declined: {
+    label: "Declined",
+    className: "bg-red-100 text-red-800",
+    icon: XCircle,
+  },
 };
 
-const emailStatusIcons: Record<string, { icon: typeof Mail; color: string; label: string }> = {
+const emailStatusIcons: Record<
+  string,
+  { icon: typeof Mail; color: string; label: string }
+> = {
   pending: { icon: Mail, color: "text-gray-400", label: "Pending" },
   sent: { icon: Mail, color: "text-blue-500", label: "Sent" },
   delivered: { icon: CheckCheck, color: "text-green-500", label: "Delivered" },
@@ -95,7 +108,11 @@ const emailStatusIcons: Record<string, { icon: typeof Mail; color: string; label
 // Component
 // ---------------------------------------------------------------------------
 
-export function GuestList({ meetingId, guests, emailTracking }: GuestListProps) {
+export function GuestList({
+  meetingId,
+  guests,
+  emailTracking,
+}: GuestListProps) {
   const [isPending, startTransition] = useTransition();
 
   // Person picker state
@@ -110,10 +127,13 @@ export function GuestList({ meetingId, guests, emailTracking }: GuestListProps) 
 
   const guestPersonIds = new Set(guests.map((g) => g.personId));
 
-  const confirmed = guests.filter((g) => g.responseStatus === "confirmed").length;
+  const confirmed = guests.filter(
+    (g) => g.responseStatus === "confirmed"
+  ).length;
   const declined = guests.filter((g) => g.responseStatus === "declined").length;
   const noResponse = guests.filter(
-    (g) => !g.responseStatus || !["confirmed", "declined"].includes(g.responseStatus)
+    (g) =>
+      !g.responseStatus || !["confirmed", "declined"].includes(g.responseStatus)
   ).length;
 
   // Build "Send Email" URL with all guest personIds
@@ -196,25 +216,25 @@ export function GuestList({ meetingId, guests, emailTracking }: GuestListProps) 
         <Card>
           <CardContent className="pt-4 text-center">
             <p className="text-xl font-bold">{guests.length}</p>
-            <p className="text-xs text-muted-foreground">Total Guests</p>
+            <p className="text-muted-foreground text-xs">Total Guests</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-4 text-center">
             <p className="text-xl font-bold text-green-600">{confirmed}</p>
-            <p className="text-xs text-muted-foreground">Confirmed</p>
+            <p className="text-muted-foreground text-xs">Confirmed</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-4 text-center">
             <p className="text-xl font-bold text-red-600">{declined}</p>
-            <p className="text-xs text-muted-foreground">Declined</p>
+            <p className="text-muted-foreground text-xs">Declined</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-4 text-center">
             <p className="text-xl font-bold text-gray-600">{noResponse}</p>
-            <p className="text-xs text-muted-foreground">No Response</p>
+            <p className="text-muted-foreground text-xs">No Response</p>
           </CardContent>
         </Card>
       </div>
@@ -237,7 +257,11 @@ export function GuestList({ meetingId, guests, emailTracking }: GuestListProps) 
               {/* Quick Add Person Dialog */}
               <Dialog open={quickAddOpen} onOpenChange={setQuickAddOpen}>
                 <DialogTrigger asChild>
-                  <Button variant="outline" size="sm" className="cursor-pointer">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="cursor-pointer"
+                  >
                     <UserPlus className="mr-2 h-4 w-4" />
                     Quick Add Person
                   </Button>
@@ -300,8 +324,14 @@ export function GuestList({ meetingId, guests, emailTracking }: GuestListProps) 
                       >
                         Cancel
                       </Button>
-                      <Button type="submit" disabled={isPending} className="cursor-pointer">
-                        {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      <Button
+                        type="submit"
+                        disabled={isPending}
+                        className="cursor-pointer"
+                      >
+                        {isPending && (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        )}
                         Add Person
                       </Button>
                     </DialogFooter>
@@ -325,12 +355,12 @@ export function GuestList({ meetingId, guests, emailTracking }: GuestListProps) 
         <CardContent className="space-y-4">
           {/* Person Search */}
           {showSearch && (
-            <div className="rounded-lg border bg-muted/30 p-4">
+            <div className="bg-muted/30 rounded-lg border p-4">
               <Label className="mb-2 block text-sm font-medium">
                 Search People
               </Label>
               <div className="relative">
-                <Search className="text-muted-foreground absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2" />
+                <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
                 <Input
                   value={searchQuery}
                   onChange={(e) => handleSearch(e.target.value)}
@@ -357,7 +387,7 @@ export function GuestList({ meetingId, guests, emailTracking }: GuestListProps) 
                             </span>
                           )}
                         </div>
-                        <Plus className="h-4 w-4 text-muted-foreground" />
+                        <Plus className="text-muted-foreground h-4 w-4" />
                       </button>
                     ))}
                   </div>
@@ -367,11 +397,14 @@ export function GuestList({ meetingId, guests, emailTracking }: GuestListProps) 
                     Searching...
                   </p>
                 )}
-                {searchQuery.length >= 2 && !searching && searchResults.length === 0 && (
-                  <p className="text-muted-foreground mt-1 text-xs">
-                    No results found. Try &quot;Quick Add Person&quot; to create a new one.
-                  </p>
-                )}
+                {searchQuery.length >= 2 &&
+                  !searching &&
+                  searchResults.length === 0 && (
+                    <p className="text-muted-foreground mt-1 text-xs">
+                      No results found. Try &quot;Quick Add Person&quot; to
+                      create a new one.
+                    </p>
+                  )}
               </div>
             </div>
           )}
@@ -379,13 +412,13 @@ export function GuestList({ meetingId, guests, emailTracking }: GuestListProps) 
           {/* Guest Table */}
           {guests.length === 0 ? (
             <p className="text-muted-foreground py-8 text-center text-sm">
-              No guests added yet. Add people from your database or use Quick Add
-              to create new people.
+              No guests added yet. Add people from your database or use Quick
+              Add to create new people.
             </p>
           ) : (
             <div className="divide-y">
               {/* Table header */}
-              <div className="grid grid-cols-12 gap-4 pb-2 text-xs font-medium text-muted-foreground uppercase">
+              <div className="text-muted-foreground grid grid-cols-12 gap-4 pb-2 text-xs font-medium uppercase">
                 <div className="col-span-4">Name</div>
                 <div className="col-span-3">Contact</div>
                 <div className="col-span-2">RSVP</div>
@@ -396,7 +429,8 @@ export function GuestList({ meetingId, guests, emailTracking }: GuestListProps) 
               {guests.map((guest) => {
                 const tracking = emailTracking?.[guest.personId];
                 const trackingConfig = tracking
-                  ? emailStatusIcons[tracking.status] ?? emailStatusIcons.pending
+                  ? (emailStatusIcons[tracking.status] ??
+                    emailStatusIcons.pending)
                   : null;
 
                 const rsvp = guest.responseStatus
@@ -419,7 +453,7 @@ export function GuestList({ meetingId, guests, emailTracking }: GuestListProps) 
                     </div>
 
                     {/* Contact */}
-                    <div className="col-span-3 text-sm text-muted-foreground truncate">
+                    <div className="text-muted-foreground col-span-3 truncate text-sm">
                       {guest.email || guest.phone || "—"}
                     </div>
 
@@ -440,7 +474,10 @@ export function GuestList({ meetingId, guests, emailTracking }: GuestListProps) 
                             {rsvp.label}
                           </Badge>
                         ) : (
-                          <Badge variant="outline" className="text-muted-foreground">
+                          <Badge
+                            variant="outline"
+                            className="text-muted-foreground"
+                          >
                             <Clock className="mr-1 h-3 w-3" />
                             Pending
                           </Badge>
@@ -459,7 +496,7 @@ export function GuestList({ meetingId, guests, emailTracking }: GuestListProps) 
                           {trackingConfig.label}
                         </span>
                       ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
+                        <span className="text-muted-foreground text-xs">—</span>
                       )}
                     </div>
 
@@ -467,7 +504,7 @@ export function GuestList({ meetingId, guests, emailTracking }: GuestListProps) 
                     <div className="col-span-1 flex justify-end">
                       <button
                         type="button"
-                        className="cursor-pointer rounded-md p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600"
+                        className="text-muted-foreground cursor-pointer rounded-md p-1 hover:bg-red-50 hover:text-red-600"
                         onClick={() => handleRemovePerson(guest.personId)}
                         disabled={isPending}
                         title="Remove from guest list"

@@ -66,8 +66,9 @@ function AttendeeNoteRow({
   return (
     <div
       className={cn(
-        "flex flex-col gap-2 rounded-lg border bg-background p-3",
-        saved && "border-green-200 bg-green-50/50 dark:border-green-800/50 dark:bg-green-900/10"
+        "bg-background flex flex-col gap-2 rounded-lg border p-3",
+        saved &&
+          "border-green-200 bg-green-50/50 dark:border-green-800/50 dark:bg-green-900/10"
       )}
     >
       <div className="flex items-center justify-between">
@@ -132,7 +133,9 @@ function AttendeeNoteRow({
       )}
 
       {saved && note && (
-        <p className="text-xs text-muted-foreground italic">&ldquo;{note}&rdquo;</p>
+        <p className="text-muted-foreground text-xs italic">
+          &ldquo;{note}&rdquo;
+        </p>
       )}
     </div>
   );
@@ -155,7 +158,7 @@ export function AttendeeNotes({
     <div className="space-y-4">
       <div>
         <h3 className="text-lg font-semibold">Attendee Notes</h3>
-        <p className="text-sm text-muted-foreground">
+        <p className="text-muted-foreground text-sm">
           Add individual notes for attendees. These will be saved to each
           person&apos;s activity timeline and linked to this meeting.
         </p>

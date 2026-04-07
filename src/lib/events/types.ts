@@ -32,7 +32,10 @@ export type {
 // Union Type
 // ============================================================================
 
-import type { PersonCreatedEvent, PersonStatusChangedEvent } from "@/lib/people/events";
+import type {
+  PersonCreatedEvent,
+  PersonStatusChangedEvent,
+} from "@/lib/people/events";
 import type {
   MeetingAttendanceRecordedEvent,
   MeetingAttendanceFinalizedEvent,

@@ -6,7 +6,12 @@ import { PersonProfileShell } from "./person-profile-shell";
 
 interface PersonProfileWrapperProps {
   personId: string;
-  activeTab: "overview" | "activity" | "assessments" | "teams" | "communication";
+  activeTab:
+    | "overview"
+    | "activity"
+    | "assessments"
+    | "teams"
+    | "communication";
   children: React.ReactNode;
 }
 

@@ -185,16 +185,22 @@ async function seedDatabase(): Promise<void> {
 
   // Summary
   console.log("✅ Database seeded successfully!\n");
-  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  console.log(
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  );
   console.log("📝 Dev Login Credentials");
-  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  console.log(
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  );
   console.log(`   Password for all users: ${DEV_PASSWORD}`);
   console.log();
   console.log("   Network Admin:  admin@everyfield.dev");
   console.log("   Planter:        planter1@everyfield.dev");
   console.log("   Coach:          coach1@everyfield.dev");
   console.log("   Team Member:    team1@everyfield.dev");
-  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+  console.log(
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+  );
 }
 
 // ============================================================================

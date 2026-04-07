@@ -25,12 +25,5 @@ export default async function LogisticsPage({ params }: LogisticsPageProps) {
   ]);
 
   if (!meeting) notFound();
-
-  return (
-    <MaterialsChecklist
-      meetingId={meeting.id}
-      items={checklist}
-      summary={checklistSummary}
-    />
-  );
+  return <MaterialsChecklist items={checklist} summary={checklistSummary} />;
 }

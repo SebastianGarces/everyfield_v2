@@ -1,6 +1,9 @@
 "use client";
 
-import { MERGE_FIELDS, type MergeFieldDefinition } from "@/lib/communication/merge";
+import {
+  MERGE_FIELDS,
+  type MergeFieldDefinition,
+} from "@/lib/communication/merge";
 import { Badge } from "@/components/ui/badge";
 
 interface MergeFieldInserterProps {
@@ -51,7 +54,7 @@ export function MergeFieldInserter({
             <Badge
               key={field.name}
               variant="outline"
-              className="cursor-pointer font-mono text-xs transition-colors hover:bg-primary hover:text-primary-foreground"
+              className="hover:bg-primary hover:text-primary-foreground cursor-pointer font-mono text-xs transition-colors"
               onClick={() => onInsert(`{{${field.name}}}`)}
               title={field.description}
             >

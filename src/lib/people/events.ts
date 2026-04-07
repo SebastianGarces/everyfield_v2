@@ -121,10 +121,7 @@ export async function handleVisionMeetingAttendance(
       );
     }
   } catch (error) {
-    console.error(
-      `[EVENT] Failed to auto-advance person ${personId}:`,
-      error
-    );
+    console.error(`[EVENT] Failed to auto-advance person ${personId}:`, error);
   }
 }
 
@@ -258,8 +255,11 @@ export async function handleFollowUpInitiated(
   churchId: string,
   _noteId?: string
 ): Promise<void> {
-  console.warn("[DEFERRED] handleFollowUpInitiated called — no subscriber registered yet", {
-    personId,
-    churchId,
-  });
+  console.warn(
+    "[DEFERRED] handleFollowUpInitiated called — no subscriber registered yet",
+    {
+      personId,
+      churchId,
+    }
+  );
 }

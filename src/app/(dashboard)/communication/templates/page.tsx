@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { Mail, Pencil, Eye } from "lucide-react";
+import { Mail, Pencil } from "lucide-react";
 
 import { HeaderBreadcrumbs } from "@/components/header";
 import { Button } from "@/components/ui/button";
@@ -74,10 +74,7 @@ export default async function TemplatesPage() {
                         <div>
                           <p className="font-medium">{template.name}</p>
                           {template.sourceTemplateId && (
-                            <Badge
-                              variant="outline"
-                              className="mt-1 text-xs"
-                            >
+                            <Badge variant="outline" className="mt-1 text-xs">
                               Customized
                             </Badge>
                           )}

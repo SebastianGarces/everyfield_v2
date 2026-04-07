@@ -20,8 +20,6 @@ interface Recipient {
 interface RecipientPickerProps {
   selected: Recipient[];
   onChange: (recipients: Recipient[]) => void;
-  /** Whether to show meeting-specific groups */
-  showMeetingGroups?: boolean;
 }
 
 const quickGroups = [
@@ -31,11 +29,7 @@ const quickGroups = [
   { id: "leaders", label: "Leaders" },
 ];
 
-export function RecipientPicker({
-  selected,
-  onChange,
-  showMeetingGroups,
-}: RecipientPickerProps) {
+export function RecipientPicker({ selected, onChange }: RecipientPickerProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Recipient[]>([]);
   const [searching, setSearching] = useState(false);
@@ -121,7 +115,7 @@ export function RecipientPicker({
 
       {/* Search input */}
       <div className="relative">
-        <Search className="text-muted-foreground absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2" />
+        <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
         <Input
           placeholder="Search people by name or email..."
           value={query}
@@ -163,11 +157,7 @@ export function RecipientPicker({
           </p>
           <div className="flex flex-wrap gap-1.5">
             {selected.slice(0, 20).map((person) => (
-              <Badge
-                key={person.id}
-                variant="secondary"
-                className="gap-1 py-1"
-              >
+              <Badge key={person.id} variant="secondary" className="gap-1 py-1">
                 {person.firstName} {person.lastName}
                 <button
                   className="cursor-pointer rounded-full p-0.5 hover:bg-gray-300"
@@ -178,9 +168,7 @@ export function RecipientPicker({
               </Badge>
             ))}
             {selected.length > 20 && (
-              <Badge variant="secondary">
-                +{selected.length - 20} more
-              </Badge>
+              <Badge variant="secondary">+{selected.length - 20} more</Badge>
             )}
           </div>
         </div>

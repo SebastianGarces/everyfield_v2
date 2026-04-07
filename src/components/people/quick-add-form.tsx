@@ -50,12 +50,13 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
   const [skipDuplicateCheck, setSkipDuplicateCheck] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
+  const [submitAction, setSubmitAction] = useState<"save" | "saveAndAdd">(
+    "save"
+  );
   const formRef = useRef<HTMLFormElement>(null);
   const firstInputRef = useRef<HTMLInputElement>(null);
+  const submitActionRef = useRef<"save" | "saveAndAdd">("save");
   const router = useRouter();
-
-  // Track which submit action triggered
-  const actionRef = useRef<"save" | "saveAndAdd">("save");
 
   function resetForm() {
     formRef.current?.reset();
@@ -63,6 +64,8 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
     setSkipDuplicateCheck(false);
     setError(null);
     setFieldErrors({});
+    setSubmitAction("save");
+    submitActionRef.current = "save";
   }
 
   function handleOpenChange(newOpen: boolean) {
@@ -75,6 +78,10 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
   async function handleSubmit(formData: FormData) {
     setError(null);
     setFieldErrors({});
+    const intent =
+      formData.get("intent") === "saveAndAdd"
+        ? "saveAndAdd"
+        : submitActionRef.current;
 
     const data = {
       firstName: formData.get("firstName") as string,
@@ -115,7 +122,7 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
 
       router.refresh();
 
-      if (actionRef.current === "saveAndAdd") {
+      if (intent === "saveAndAdd") {
         // Clear form but keep dialog open
         resetForm();
         // Focus the first input after a tick
@@ -135,6 +142,15 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
       const formData = new FormData(formRef.current);
       handleSubmit(formData);
     }
+  }
+
+  function handleSubmitCapture(event: React.FormEvent<HTMLFormElement>) {
+    const nativeEvent = event.nativeEvent as SubmitEvent;
+    const submitter = nativeEvent.submitter as HTMLButtonElement | null;
+    const intent = submitter?.value === "saveAndAdd" ? "saveAndAdd" : "save";
+
+    submitActionRef.current = intent;
+    setSubmitAction(intent);
   }
 
   return (
@@ -164,6 +180,7 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
 
         <form
           ref={formRef}
+          onSubmitCapture={handleSubmitCapture}
           action={(formData) => handleSubmit(formData)}
           className="space-y-4"
         >
@@ -273,24 +290,22 @@ export function QuickAddForm({ children }: QuickAddFormProps) {
             <Button
               type="submit"
               variant="outline"
+              name="intent"
+              value="saveAndAdd"
               disabled={isPending}
-              onClick={() => {
-                actionRef.current = "saveAndAdd";
-              }}
             >
-              {isPending && actionRef.current === "saveAndAdd" && (
+              {isPending && submitAction === "saveAndAdd" && (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               )}
               Save & Add Another
             </Button>
             <Button
               type="submit"
+              name="intent"
+              value="save"
               disabled={isPending}
-              onClick={() => {
-                actionRef.current = "save";
-              }}
             >
-              {isPending && actionRef.current === "save" && (
+              {isPending && submitAction === "save" && (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               )}
               Save

@@ -47,7 +47,11 @@ interface PipelineColumnProps {
   inactivityThresholds?: InactivityThresholds;
 }
 
-export function PipelineColumn({ column, people, inactivityThresholds }: PipelineColumnProps) {
+export function PipelineColumn({
+  column,
+  people,
+  inactivityThresholds,
+}: PipelineColumnProps) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [isDraggedOver, setIsDraggedOver] = useState(false);
 
@@ -79,8 +83,8 @@ export function PipelineColumn({ column, people, inactivityThresholds }: Pipelin
     <div
       ref={ref}
       className={cn(
-        "bg-muted/50 flex h-full max-w-[320px] min-w-[280px] flex-col rounded-lg border border-border/50 transition-colors duration-200",
-        isDraggedOver && "border-primary/25 bg-primary/4 ring-2 ring-primary/40"
+        "bg-muted/50 border-border/50 flex h-full max-w-[320px] min-w-[280px] flex-col rounded-lg border transition-colors duration-200",
+        isDraggedOver && "border-primary/25 bg-primary/4 ring-primary/40 ring-2"
       )}
     >
       {/* Sticky column header */}

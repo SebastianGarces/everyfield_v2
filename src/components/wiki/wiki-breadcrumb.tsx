@@ -41,10 +41,12 @@ export function WikiBreadcrumb({ items }: WikiBreadcrumbProps) {
                   <BreadcrumbLink asChild>
                     <Link
                       href={item.href}
-                      className="flex items-center gap-1.5 hover:text-foreground"
+                      className="hover:text-foreground flex items-center gap-1.5"
                     >
                       {index === 0 && <Home className="h-3.5 w-3.5" />}
-                      <span className="max-w-[150px] truncate">{item.label}</span>
+                      <span className="max-w-[150px] truncate">
+                        {item.label}
+                      </span>
                     </Link>
                   </BreadcrumbLink>
                 )}

@@ -23,11 +23,11 @@ export function PhaseTimeline({ currentPhase, className }: PhaseTimelineProps) {
         {/* Circles and lines row */}
         <div className="relative flex items-center justify-between">
           {/* Background line spanning full width - behind everything */}
-          <div className="absolute inset-x-4 top-1/2 z-0 h-0.5 -translate-y-1/2 bg-muted-foreground/20" />
-          
+          <div className="bg-muted-foreground/20 absolute inset-x-4 top-1/2 z-0 h-0.5 -translate-y-1/2" />
+
           {/* Progress line - also behind circles */}
           <div
-            className="absolute left-4 top-1/2 z-0 h-0.5 -translate-y-1/2 bg-primary/50 transition-all"
+            className="bg-primary/50 absolute top-1/2 left-4 z-0 h-0.5 -translate-y-1/2 transition-all"
             style={{
               width: `calc(${(currentPhase / (PHASES.length - 1)) * 100}% - 32px)`,
             }}
@@ -35,7 +35,10 @@ export function PhaseTimeline({ currentPhase, className }: PhaseTimelineProps) {
 
           {/* Phase circles - on top of lines */}
           {PHASES.map((phase) => (
-            <div key={phase.number} className="relative z-10 flex flex-col items-center">
+            <div
+              key={phase.number}
+              className="relative z-10 flex flex-col items-center"
+            >
               <div
                 className={cn(
                   "flex h-8 w-8 items-center justify-center rounded-full border-2 text-xs font-medium",
@@ -58,7 +61,7 @@ export function PhaseTimeline({ currentPhase, className }: PhaseTimelineProps) {
             <div key={phase.number} className="flex w-8 justify-center">
               <span
                 className={cn(
-                  "whitespace-nowrap text-[10px] font-medium",
+                  "text-[10px] font-medium whitespace-nowrap",
                   phase.number === currentPhase
                     ? "text-primary"
                     : "text-muted-foreground"
@@ -75,11 +78,11 @@ export function PhaseTimeline({ currentPhase, className }: PhaseTimelineProps) {
       <div className="sm:hidden">
         <div className="relative flex items-center justify-between px-1">
           {/* Background line */}
-          <div className="absolute inset-x-1 top-1/2 z-0 h-0.5 -translate-y-1/2 bg-muted-foreground/20" />
-          
+          <div className="bg-muted-foreground/20 absolute inset-x-1 top-1/2 z-0 h-0.5 -translate-y-1/2" />
+
           {/* Progress line */}
           <div
-            className="absolute left-1 top-1/2 z-0 h-0.5 -translate-y-1/2 bg-primary/50"
+            className="bg-primary/50 absolute top-1/2 left-1 z-0 h-0.5 -translate-y-1/2"
             style={{
               width: `calc(${(currentPhase / (PHASES.length - 1)) * 100}%)`,
             }}
@@ -100,7 +103,7 @@ export function PhaseTimeline({ currentPhase, className }: PhaseTimelineProps) {
             />
           ))}
         </div>
-        <p className="mt-3 text-center text-xs text-muted-foreground">
+        <p className="text-muted-foreground mt-3 text-center text-xs">
           Phase {currentPhase}: {PHASES[currentPhase]?.name}
         </p>
       </div>

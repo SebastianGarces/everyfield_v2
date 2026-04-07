@@ -21,9 +21,7 @@ export function MembersRolesTab({ team, people }: MembersRolesTabProps) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">
-          Roles ({team.roles.length})
-        </h2>
+        <h2 className="text-lg font-semibold">Roles ({team.roles.length})</h2>
         <div className="flex items-center gap-2">
           {team.type === "predefined" && (
             <RoleTemplateImport teamId={team.id} teamName={team.name} />

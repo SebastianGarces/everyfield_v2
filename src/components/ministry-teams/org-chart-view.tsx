@@ -40,8 +40,8 @@ interface OrgChartViewProps {
 
 export function OrgChartView({ teams }: OrgChartViewProps) {
   // Senior Pastor is the root node
-  const seniorPastor = teams.find(
-    (t) => t.name.toLowerCase().includes("senior pastor")
+  const seniorPastor = teams.find((t) =>
+    t.name.toLowerCase().includes("senior pastor")
   );
   const otherTeams = teams.filter(
     (t) => !t.name.toLowerCase().includes("senior pastor")
@@ -115,12 +115,7 @@ function OrgNode({
             <Icon className="h-5 w-5" />
           </div>
           <div>
-            <p
-              className={cn(
-                "text-sm font-semibold",
-                isRoot && "text-base"
-              )}
-            >
+            <p className={cn("text-sm font-semibold", isRoot && "text-base")}>
               {team.name}
             </p>
             {team.leaderName ? (

@@ -1,4 +1,9 @@
-import type { ArticleMeta, ArticleCategory, ArticleNavSection, NavGroup } from "./types";
+import type {
+  ArticleMeta,
+  ArticleCategory,
+  ArticleNavSection,
+  NavGroup,
+} from "./types";
 import { toArticleMeta } from "./types";
 import { getAllPublishedArticles } from "./service";
 
@@ -23,7 +28,9 @@ export async function getArticles(): Promise<ArticleMeta[]> {
  * e.g., "phase-1" returns all articles in phase 1
  * e.g., "phase-1/introduction" returns all articles in that section
  */
-export async function getArticlesByPrefix(prefix: string): Promise<ArticleMeta[]> {
+export async function getArticlesByPrefix(
+  prefix: string
+): Promise<ArticleMeta[]> {
   const articles = await getArticles();
   return articles.filter((article) => article.slug.startsWith(prefix + "/"));
 }

@@ -121,10 +121,7 @@ export function TaskForm({ task, users = [] }: TaskFormProps) {
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">
           <Label htmlFor="status">Status</Label>
-          <Select
-            name="status"
-            defaultValue={task?.status ?? "not_started"}
-          >
+          <Select name="status" defaultValue={task?.status ?? "not_started"}>
             <SelectTrigger className="cursor-pointer">
               <SelectValue />
             </SelectTrigger>
@@ -140,10 +137,7 @@ export function TaskForm({ task, users = [] }: TaskFormProps) {
 
         <div className="space-y-2">
           <Label htmlFor="priority">Priority</Label>
-          <Select
-            name="priority"
-            defaultValue={task?.priority ?? "medium"}
-          >
+          <Select name="priority" defaultValue={task?.priority ?? "medium"}>
             <SelectTrigger className="cursor-pointer">
               <SelectValue />
             </SelectTrigger>
@@ -173,10 +167,7 @@ export function TaskForm({ task, users = [] }: TaskFormProps) {
 
         <div className="space-y-2">
           <Label htmlFor="category">Category</Label>
-          <Select
-            name="category"
-            defaultValue={task?.category ?? ""}
-          >
+          <Select name="category" defaultValue={task?.category ?? ""}>
             <SelectTrigger className="cursor-pointer">
               <SelectValue placeholder="Select category..." />
             </SelectTrigger>
@@ -195,10 +186,7 @@ export function TaskForm({ task, users = [] }: TaskFormProps) {
       {users.length > 0 && (
         <div className="space-y-2">
           <Label htmlFor="assignedToId">Assigned To</Label>
-          <Select
-            name="assignedToId"
-            defaultValue={task?.assignedToId ?? ""}
-          >
+          <Select name="assignedToId" defaultValue={task?.assignedToId ?? ""}>
             <SelectTrigger className="cursor-pointer">
               <SelectValue placeholder="Select assignee..." />
             </SelectTrigger>

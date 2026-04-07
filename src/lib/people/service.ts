@@ -197,9 +197,7 @@ export async function listPeople(
  * Get the latest note for a person from person_activities.
  * Returns the note text and metadata, or null if no notes exist.
  */
-export async function getLatestPersonNote(
-  personId: string
-): Promise<{
+export async function getLatestPersonNote(personId: string): Promise<{
   note: string;
   meetingId?: string;
   meetingType?: string;
@@ -223,8 +221,7 @@ export async function getLatestPersonNote(
   if (!row) return null;
 
   const meta = row.metadata as Record<string, unknown> | null;
-  const noteText =
-    (meta?.note as string) ?? (meta?.content as string) ?? "";
+  const noteText = (meta?.note as string) ?? (meta?.content as string) ?? "";
 
   if (!noteText) return null;
 

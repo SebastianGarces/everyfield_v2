@@ -9,7 +9,10 @@ import {
   useState,
 } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
-import { resolveGuideEntry, type WikiGuideEntry } from "@/lib/wiki/guide-config";
+import {
+  resolveGuideEntry,
+  type WikiGuideEntry,
+} from "@/lib/wiki/guide-config";
 
 export type WikiGuideArticle = {
   slug: string;
@@ -50,11 +53,13 @@ const WikiGuideContext = createContext<WikiGuideContextValue | null>(null);
 export function WikiGuideProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [isOpen, setIsOpen] = useState(false);
-  const [activeSlug, setActiveSlug] = useState<string | null>(null);
+  const [openEntryKey, setOpenEntryKey] = useState<string | null>(null);
+  const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
   const [article, setArticle] = useState<WikiGuideArticle | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [errorState, setErrorState] = useState<{
+    slug: string;
+    message: string;
+  } | null>(null);
 
   // Convert search params to a plain object for matching
   const searchParamsObj = useMemo(() => {
@@ -71,44 +76,36 @@ export function WikiGuideProvider({ children }: { children: React.ReactNode }) {
     [pathname, searchParamsObj]
   );
   const isAvailable = entry !== null && entry.slugs.length > 0;
-
-  // Close panel and reset when navigating to a page with no guide entry
-  useEffect(() => {
-    if (!isAvailable) {
-      setIsOpen(false);
-      setArticle(null);
-      setActiveSlug(null);
-      setError(null);
-    }
-  }, [isAvailable]);
-
-  // Set default active slug when entry changes
-  useEffect(() => {
-    if (entry && entry.slugs.length > 0) {
-      setActiveSlug(entry.slugs[0]);
-      // Reset article when entry changes to force refetch
-      setArticle(null);
-    }
-  }, [entry]);
+  const entryKey = useMemo(
+    () =>
+      entry ? `${pathname}::${entry.label}::${entry.slugs.join("|")}` : null,
+    [entry, pathname]
+  );
+  const activeSlug =
+    entry && entry.slugs.length > 0
+      ? selectedSlug && entry.slugs.includes(selectedSlug)
+        ? selectedSlug
+        : entry.slugs[0]
+      : null;
+  const resolvedArticle = article?.slug === activeSlug ? article : null;
+  const error = errorState?.slug === activeSlug ? errorState.message : null;
+  const isOpen = !!entryKey && openEntryKey === entryKey;
+  const isLoading = isOpen && !!activeSlug && !resolvedArticle && !error;
 
   // Fetch article content when panel is opened or active slug changes
   useEffect(() => {
     if (!isOpen || !activeSlug) return;
 
     // Don't refetch if we already have this article
-    if (article?.slug === activeSlug) return;
+    if (resolvedArticle || error) return;
 
     let cancelled = false;
-    setIsLoading(true);
-    setError(null);
 
     fetch(`/api/wiki/article?slug=${encodeURIComponent(activeSlug)}`)
       .then((res) => {
         if (!res.ok) {
           throw new Error(
-            res.status === 404
-              ? "Article not found"
-              : "Failed to load article"
+            res.status === 404 ? "Article not found" : "Failed to load article"
           );
         }
         return res.json();
@@ -116,24 +113,51 @@ export function WikiGuideProvider({ children }: { children: React.ReactNode }) {
       .then((data: WikiGuideArticle) => {
         if (!cancelled) {
           setArticle(data);
-          setIsLoading(false);
+          setErrorState(null);
         }
       })
       .catch((err: Error) => {
         if (!cancelled) {
-          setError(err.message);
-          setIsLoading(false);
+          setErrorState({ slug: activeSlug, message: err.message });
         }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [isOpen, activeSlug, article?.slug]);
+  }, [isOpen, activeSlug, resolvedArticle, error]);
 
-  const toggle = useCallback(() => setIsOpen((prev) => !prev), []);
-  const close = useCallback(() => setIsOpen(false), []);
-  const open = useCallback(() => setIsOpen(true), []);
+  const toggle = useCallback(() => {
+    if (!entryKey) return;
+
+    if (openEntryKey === entryKey) {
+      setOpenEntryKey(null);
+      return;
+    }
+
+    if (errorState?.slug === activeSlug) {
+      setErrorState(null);
+    }
+    setOpenEntryKey(entryKey);
+  }, [entryKey, openEntryKey, errorState, activeSlug]);
+  const close = useCallback(() => setOpenEntryKey(null), []);
+  const open = useCallback(() => {
+    if (!entryKey) return;
+
+    if (errorState?.slug === activeSlug) {
+      setErrorState(null);
+    }
+    setOpenEntryKey(entryKey);
+  }, [entryKey, errorState, activeSlug]);
+  const setActiveSlug = useCallback(
+    (slug: string) => {
+      if (errorState?.slug === slug) {
+        setErrorState(null);
+      }
+      setSelectedSlug(slug);
+    },
+    [errorState]
+  );
 
   const value = useMemo<WikiGuideContextValue>(
     () => ({
@@ -145,11 +169,23 @@ export function WikiGuideProvider({ children }: { children: React.ReactNode }) {
       open,
       activeSlug,
       setActiveSlug,
-      article,
+      article: resolvedArticle,
       isLoading,
       error,
     }),
-    [isAvailable, entry, isOpen, toggle, close, open, activeSlug, article, isLoading, error]
+    [
+      isAvailable,
+      entry,
+      isOpen,
+      toggle,
+      close,
+      open,
+      activeSlug,
+      setActiveSlug,
+      resolvedArticle,
+      isLoading,
+      error,
+    ]
   );
 
   return (

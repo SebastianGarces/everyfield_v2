@@ -66,7 +66,7 @@ export function TeamTabs({ teamId }: TeamTabsProps) {
               key={tab.id}
               href={tab.href}
               className={cn(
-                "flex items-center gap-2 border-b-2 px-1 py-4 text-sm font-medium whitespace-nowrap transition-colors cursor-pointer",
+                "flex cursor-pointer items-center gap-2 border-b-2 px-1 py-4 text-sm font-medium whitespace-nowrap transition-colors",
                 isActive
                   ? "border-primary text-primary"
                   : "text-muted-foreground hover:text-foreground border-transparent hover:border-gray-300"
