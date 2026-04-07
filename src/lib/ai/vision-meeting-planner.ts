@@ -152,6 +152,11 @@ function getSavedLocationSuggestions(savedLocations: PlannerSavedLocation[]) {
   return savedLocations.slice(0, 3).map((location) => location.name);
 }
 
+function getLatestUserMessage(messages: PlannerMessage[]) {
+  return [...messages].reverse().find((message) => message.role === "user")
+    ?.content;
+}
+
 function formatDateOnlyLabel(datetime: string, timezone: string) {
   return new Date(datetime).toLocaleDateString("en-US", {
     weekday: "long",
@@ -169,6 +174,29 @@ function clearDraftDateTime(draft: VisionMeetingDraft): VisionMeetingDraft {
   };
 }
 
+function extractEstimatedAttendanceIntent(message: string) {
+  const match = message.match(
+    /\b(\d{1,4})\s*(?:people|ppl|persons|attendees|guests)\b/i
+  );
+
+  if (!match) {
+    return null;
+  }
+
+  return Number(match[1]);
+}
+
+function extractNotesIntent(message: string) {
+  const noteMatch = message.match(/\bnotes?:\s*(.+)$/i);
+
+  if (!noteMatch) {
+    return null;
+  }
+
+  const note = noteMatch[1]?.trim();
+  return note ? note : null;
+}
+
 function hasExplicitDateReference(message: string) {
   return (
     extractSchedulingDateIntent(message) !== null ||
@@ -177,6 +205,76 @@ function hasExplicitDateReference(message: string) {
     ) ||
     /\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b/.test(message) ||
     /\b\d{4}-\d{2}-\d{2}\b/.test(message)
+  );
+}
+
+function resolveDeterministicDateLabel(params: {
+  message: string;
+  now: Date;
+  timezone: string;
+}) {
+  const dateIntent = extractSchedulingDateIntent(params.message);
+
+  if (!dateIntent) {
+    return undefined;
+  }
+
+  const currentWeekday = new Intl.DateTimeFormat("en-US", {
+    timeZone: params.timezone,
+    weekday: "long",
+  }).format(params.now);
+  const currentWeekdayIndex = WEEKDAY_NAMES.findIndex(
+    (weekday) => weekday === currentWeekday
+  );
+
+  if (currentWeekdayIndex === -1) {
+    return undefined;
+  }
+
+  const normalizedMessage = params.message.toLowerCase();
+  const matchedWeekday = normalizedMessage.match(
+    /\b(?:next|on|this|make it)?\s*(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/
+  )?.[1];
+
+  let deltaDaysFromToday = dateIntent.deltaDaysFromToday;
+
+  if (matchedWeekday) {
+    const targetWeekdayIndex = WEEKDAY_NAMES.findIndex(
+      (weekday) => weekday.toLowerCase() === matchedWeekday
+    );
+
+    if (targetWeekdayIndex !== -1) {
+      deltaDaysFromToday = resolveWeekdayDeltaFromToday(
+        currentWeekdayIndex,
+        targetWeekdayIndex,
+        params.message
+      );
+    }
+  }
+
+  const todayLocalDate = getLocalDateParts(params.now, params.timezone);
+  const targetLocalDate = addDaysToLocalDate(
+    todayLocalDate,
+    deltaDaysFromToday
+  );
+
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    timeZone: params.timezone,
+  }).format(
+    new Date(
+      Date.UTC(
+        targetLocalDate.year,
+        targetLocalDate.month - 1,
+        targetLocalDate.day,
+        12,
+        0,
+        0
+      )
+    )
   );
 }
 
@@ -266,9 +364,7 @@ export function maybeApplyDeterministicLocationResolution(params: {
   messages: PlannerMessage[];
   savedLocations: PlannerSavedLocation[];
 }): DeterministicLocationResolution {
-  const latestUserMessage = [...params.messages]
-    .reverse()
-    .find((message) => message.role === "user")?.content;
+  const latestUserMessage = getLatestUserMessage(params.messages);
   const suggestedSavedLocations = getSavedLocationSuggestions(
     params.savedLocations
   );
@@ -639,9 +735,7 @@ export function maybeApplyDeterministicSchedulingDateTime(params: {
   now: Date;
   timezone: string;
 }) {
-  const latestUserMessage = [...params.messages]
-    .reverse()
-    .find((message) => message.role === "user")?.content;
+  const latestUserMessage = getLatestUserMessage(params.messages);
 
   if (!latestUserMessage) {
     return params.currentDraft;
@@ -708,13 +802,34 @@ export function maybePreventImplicitDateTimeAssumptions(params: {
   currentDraft: VisionMeetingDraft;
   previousDraft: VisionMeetingDraft;
   messages: PlannerMessage[];
+  now: Date;
   timezone: string;
 }): DeterministicDateTimeClarification {
-  const latestUserMessage = [...params.messages]
-    .reverse()
-    .find((message) => message.role === "user")?.content;
+  const latestUserMessage = getLatestUserMessage(params.messages);
 
-  if (!latestUserMessage || !params.currentDraft.datetime) {
+  if (!latestUserMessage) {
+    return {
+      draft: params.currentDraft,
+      requiresTimeClarification: false,
+    };
+  }
+
+  if (!params.currentDraft.datetime) {
+    if (
+      !extractSchedulingTimeIntent(latestUserMessage) &&
+      hasExplicitDateReference(latestUserMessage)
+    ) {
+      return {
+        draft: params.currentDraft,
+        pendingDateLabel: resolveDeterministicDateLabel({
+          message: latestUserMessage,
+          now: params.now,
+          timezone: params.timezone,
+        }),
+        requiresTimeClarification: true,
+      };
+    }
+
     return {
       draft: params.currentDraft,
       requiresTimeClarification: false,
@@ -744,11 +859,34 @@ export function maybePreventImplicitDateTimeAssumptions(params: {
 
   return {
     draft: clearDraftDateTime(params.currentDraft),
-    pendingDateLabel: formatDateOnlyLabel(
-      params.currentDraft.datetime,
-      params.timezone
-    ),
+    pendingDateLabel:
+      resolveDeterministicDateLabel({
+        message: latestUserMessage,
+        now: params.now,
+        timezone: params.timezone,
+      }) ?? formatDateOnlyLabel(params.currentDraft.datetime, params.timezone),
     requiresTimeClarification: true,
+  };
+}
+
+export function maybeApplyDeterministicMeetingMetadata(params: {
+  currentDraft: VisionMeetingDraft;
+  messages: PlannerMessage[];
+}) {
+  // This is a narrow fallback-only recovery path for explicit user tokens.
+  // We do not want freeform text parsing here to become the primary planner.
+  const latestUserMessage = getLatestUserMessage(params.messages);
+
+  if (!latestUserMessage) {
+    return params.currentDraft;
+  }
+
+  return {
+    ...params.currentDraft,
+    estimatedAttendance:
+      params.currentDraft.estimatedAttendance ??
+      extractEstimatedAttendanceIntent(latestUserMessage),
+    notes: params.currentDraft.notes ?? extractNotesIntent(latestUserMessage),
   };
 }
 
@@ -899,6 +1037,7 @@ export async function runVisionMeetingPlanner(input: {
         currentDraft: draftWithDateTime,
         previousDraft: input.draft,
         messages: input.messages,
+        now,
         timezone: PLANNER_TIMEZONE,
       });
       const locationResolution = maybeApplyDeterministicLocationResolution({
@@ -966,14 +1105,72 @@ export async function runVisionMeetingPlanner(input: {
       lastRecoverableError
     );
 
-    const state = computePlannerState(input.draft);
+    const fallbackDraftWithDateTime = maybeApplyDeterministicSchedulingDateTime(
+      {
+        currentDraft: input.draft,
+        messages: input.messages,
+        now,
+        timezone: PLANNER_TIMEZONE,
+      }
+    );
+    const fallbackDateTimeClarification =
+      maybePreventImplicitDateTimeAssumptions({
+        currentDraft: fallbackDraftWithDateTime,
+        previousDraft: input.draft,
+        messages: input.messages,
+        now,
+        timezone: PLANNER_TIMEZONE,
+      });
+    const fallbackLocationResolution =
+      maybeApplyDeterministicLocationResolution({
+        currentDraft: fallbackDateTimeClarification.draft,
+        messages: input.messages,
+        savedLocations: input.savedLocations,
+      });
+    const fallbackDraft = maybeApplyDeterministicMeetingMetadata({
+      currentDraft: fallbackLocationResolution.draft,
+      messages: input.messages,
+    });
+    const state = computePlannerState(fallbackDraft);
+    const interpretation = {
+      dateLabel: fallbackDateTimeClarification.pendingDateLabel,
+      datetimeLabel: fallbackDraft.datetime
+        ? new Date(fallbackDraft.datetime).toLocaleString("en-US", {
+            weekday: "long",
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+            timeZone: PLANNER_TIMEZONE,
+            timeZoneName: "short",
+          })
+        : undefined,
+      locationLabel:
+        [fallbackDraft.locationName, fallbackDraft.locationAddress]
+          .filter(Boolean)
+          .join(", ") || undefined,
+    };
     const devErrorDetail = ` (${lastRecoverableError instanceof ZodError ? (lastRecoverableError.issues[0]?.message ?? lastRecoverableError.message) : lastRecoverableError.message})`;
 
     return PlannerResponseSchema.parse({
-      assistantMessage: `I couldn't interpret that cleanly. Please restate the date, time, or location.${devErrorDetail}`,
-      draft: input.draft,
+      assistantMessage: `${buildAssistantMessage({
+        missingFields: state.missingFields,
+        readyToCreate: state.readyToCreate,
+        draft: fallbackDraft,
+        pendingDateLabel: fallbackDateTimeClarification.pendingDateLabel,
+        requiresSavedLocationClarification:
+          fallbackLocationResolution.requiresSavedLocationClarification,
+        requiresTimeClarification:
+          fallbackDateTimeClarification.requiresTimeClarification,
+        suggestedSavedLocations:
+          fallbackLocationResolution.suggestedSavedLocations,
+        interpretation,
+      })}${devErrorDetail}`,
+      draft: fallbackDraft,
       missingFields: state.missingFields,
       readyToCreate: state.readyToCreate,
+      interpretation,
     });
   }
 

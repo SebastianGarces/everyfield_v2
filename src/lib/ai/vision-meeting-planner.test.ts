@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildAssistantMessage,
   buildRelativeDateAnchors,
+  maybeApplyDeterministicMeetingMetadata,
   maybeApplyDeterministicLocationResolution,
   maybePreventImplicitDateTimeAssumptions,
   maybeApplyDeterministicSchedulingDateTime,
@@ -74,6 +75,7 @@ test("maybePreventImplicitDateTimeAssumptions clears a model-guessed midnight wh
         content: "Meeting tomorrow at the high school, 35 ppl",
       },
     ],
+    now: new Date("2026-04-07T12:00:00.000Z"),
     timezone: "America/Chicago",
   });
 
@@ -96,6 +98,7 @@ test("maybePreventImplicitDateTimeAssumptions keeps an explicit midnight time", 
         content: "Meeting tomorrow at midnight at the high school",
       },
     ],
+    now: new Date("2026-04-07T12:00:00.000Z"),
     timezone: "America/Chicago",
   });
 
@@ -120,6 +123,7 @@ test("maybePreventImplicitDateTimeAssumptions keeps an existing datetime when th
         content: "Add a note that this is a potluck dinner planning meeting.",
       },
     ],
+    now: new Date("2026-04-07T12:00:00.000Z"),
     timezone: "America/Chicago",
   });
 
@@ -251,6 +255,60 @@ test("maybeApplyDeterministicLocationResolution clears ambiguous default locatio
     "North Ridgeville High School",
     "Community Center",
   ]);
+});
+
+test("maybeApplyDeterministicMeetingMetadata recovers explicit attendance and notes tokens", () => {
+  const result = maybeApplyDeterministicMeetingMetadata({
+    currentDraft: initialVisionMeetingDraft,
+    messages: [
+      {
+        id: "u1",
+        role: "user",
+        content:
+          "Meeting tomorrow at the high school, 35 ppl, note: prospective core group meet and greet",
+      },
+    ],
+  });
+
+  assert.equal(result.estimatedAttendance, 35);
+  assert.equal(result.notes, "prospective core group meet and greet");
+});
+
+test("maybeApplyDeterministicMeetingMetadata does not overwrite existing metadata", () => {
+  const result = maybeApplyDeterministicMeetingMetadata({
+    currentDraft: {
+      ...initialVisionMeetingDraft,
+      estimatedAttendance: 50,
+      notes: "existing note",
+    },
+    messages: [
+      {
+        id: "u1",
+        role: "user",
+        content: "Actually make it 35 ppl, note: new note",
+      },
+    ],
+  });
+
+  assert.equal(result.estimatedAttendance, 50);
+  assert.equal(result.notes, "existing note");
+});
+
+test("maybeApplyDeterministicMeetingMetadata stays narrow when prose is not explicit", () => {
+  const result = maybeApplyDeterministicMeetingMetadata({
+    currentDraft: initialVisionMeetingDraft,
+    messages: [
+      {
+        id: "u1",
+        role: "user",
+        content:
+          "There should be around 35 there and it is for a potluck dinner.",
+      },
+    ],
+  });
+
+  assert.equal(result.estimatedAttendance, null);
+  assert.equal(result.notes, null);
 });
 
 test("buildAssistantMessage asks the user to choose between saved locations when default location is ambiguous", () => {
