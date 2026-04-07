@@ -2,6 +2,7 @@ import {
   PlannerModelResponseSchema,
   PlannerResponseSchema,
   type PlannerMessage,
+  type PlannerSavedLocation,
   type VisionMeetingDraft,
 } from "./vision-meeting-planner-schema";
 import { ZodError } from "zod";
@@ -25,6 +26,10 @@ Your job:
 - "next Monday" means the next occurrence of Monday after today in America/Chicago.
 - If date or time is ambiguous, ask a clarifying question instead of guessing.
 - If the time is missing AM/PM and could reasonably mean morning or evening, ask the user to clarify.
+- Prefer matching the user's location to the provided saved church locations. If a saved location matches, set locationId, locationName, and locationAddress from that saved location.
+- If the user says "my default location", "our usual place", or similar and there is exactly one saved location, use it.
+- If the user references a default/usual location but there are multiple saved locations, ask which saved location they mean.
+- Do not leave placeholder text like "my default location" or "our usual place" in locationName.
 - If a location name exists but no address exists and no locationId is set, ask for the address.
 - If datetime and location are already known, say the draft is ready for review and creation.
 - Do not ask for a location ID when the location name and address are already present.
@@ -95,16 +100,223 @@ const WEEKDAY_NAMES = [
   "Saturday",
 ] as const;
 
+const DEFAULT_LOCATION_REFERENCE_PATTERN =
+  /\b(default location|usual (?:location|place|spot)|usual venue|same place|same location|same spot|our usual (?:location|place|spot))\b/i;
+
+type DeterministicLocationResolution = {
+  draft: VisionMeetingDraft;
+  matchedSavedLocation: PlannerSavedLocation | null;
+  requiresSavedLocationClarification: boolean;
+  suggestedSavedLocations: string[];
+};
+
 type LocalDateParts = {
   year: number;
   month: number;
   day: number;
 };
 
+function normalizeLocationText(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function clearDraftLocation(draft: VisionMeetingDraft): VisionMeetingDraft {
+  return {
+    ...draft,
+    locationId: null,
+    locationName: null,
+    locationAddress: null,
+  };
+}
+
+function isDefaultLocationReference(value: string | null | undefined) {
+  if (!value) {
+    return false;
+  }
+
+  return DEFAULT_LOCATION_REFERENCE_PATTERN.test(value);
+}
+
+function getSavedLocationSuggestions(savedLocations: PlannerSavedLocation[]) {
+  return savedLocations.slice(0, 3).map((location) => location.name);
+}
+
+function rankSavedLocationMatch(
+  value: string,
+  location: PlannerSavedLocation
+): number {
+  const normalizedValue = normalizeLocationText(value);
+
+  if (!normalizedValue) {
+    return 0;
+  }
+
+  const normalizedName = normalizeLocationText(location.name);
+  const normalizedAddress = normalizeLocationText(location.address);
+
+  if (normalizedValue === normalizedName) {
+    return 100;
+  }
+
+  if (normalizedValue === normalizedAddress) {
+    return 95;
+  }
+
+  if (normalizedValue.includes(normalizedName)) {
+    return 90;
+  }
+
+  if (normalizedValue.includes(normalizedAddress)) {
+    return 85;
+  }
+
+  if (normalizedName.includes(normalizedValue) && normalizedValue.length >= 8) {
+    return 70;
+  }
+
+  return 0;
+}
+
+function findDeterministicSavedLocationMatch(params: {
+  savedLocations: PlannerSavedLocation[];
+  candidateTexts: Array<string | null | undefined>;
+}) {
+  const locationScores = new Map<string, number>();
+
+  for (const candidateText of params.candidateTexts) {
+    if (!candidateText) {
+      continue;
+    }
+
+    for (const location of params.savedLocations) {
+      const score = rankSavedLocationMatch(candidateText, location);
+
+      if (score === 0) {
+        continue;
+      }
+
+      const previousScore = locationScores.get(location.id) ?? 0;
+      locationScores.set(location.id, Math.max(previousScore, score));
+    }
+  }
+
+  const rankedLocations = params.savedLocations
+    .map((location) => ({
+      location,
+      score: locationScores.get(location.id) ?? 0,
+    }))
+    .filter((entry) => entry.score > 0)
+    .sort((left, right) => right.score - left.score);
+
+  if (rankedLocations.length === 0) {
+    return null;
+  }
+
+  if (
+    rankedLocations.length > 1 &&
+    rankedLocations[0]?.score === rankedLocations[1]?.score
+  ) {
+    return null;
+  }
+
+  return rankedLocations[0]?.location ?? null;
+}
+
+export function maybeApplyDeterministicLocationResolution(params: {
+  currentDraft: VisionMeetingDraft;
+  messages: PlannerMessage[];
+  savedLocations: PlannerSavedLocation[];
+}): DeterministicLocationResolution {
+  const latestUserMessage = [...params.messages]
+    .reverse()
+    .find((message) => message.role === "user")?.content;
+  const suggestedSavedLocations = getSavedLocationSuggestions(
+    params.savedLocations
+  );
+  const locationCandidateTexts = [
+    params.currentDraft.locationName,
+    params.currentDraft.locationAddress,
+    latestUserMessage,
+  ];
+  const referencesDefaultLocation = locationCandidateTexts.some((value) =>
+    isDefaultLocationReference(value)
+  );
+
+  if (referencesDefaultLocation) {
+    if (
+      params.currentDraft.locationId &&
+      params.currentDraft.locationName &&
+      params.currentDraft.locationAddress
+    ) {
+      return {
+        draft: params.currentDraft,
+        matchedSavedLocation: null,
+        requiresSavedLocationClarification: false,
+        suggestedSavedLocations,
+      };
+    }
+
+    if (params.savedLocations.length === 1) {
+      const [savedLocation] = params.savedLocations;
+
+      return {
+        draft: {
+          ...params.currentDraft,
+          locationId: savedLocation.id,
+          locationName: savedLocation.name,
+          locationAddress: savedLocation.address,
+        },
+        matchedSavedLocation: savedLocation,
+        requiresSavedLocationClarification: false,
+        suggestedSavedLocations,
+      };
+    }
+
+    return {
+      draft: clearDraftLocation(params.currentDraft),
+      matchedSavedLocation: null,
+      requiresSavedLocationClarification: params.savedLocations.length > 1,
+      suggestedSavedLocations,
+    };
+  }
+
+  const matchedSavedLocation = findDeterministicSavedLocationMatch({
+    savedLocations: params.savedLocations,
+    candidateTexts: locationCandidateTexts,
+  });
+
+  if (matchedSavedLocation) {
+    return {
+      draft: {
+        ...params.currentDraft,
+        locationId: matchedSavedLocation.id,
+        locationName: matchedSavedLocation.name,
+        locationAddress: matchedSavedLocation.address,
+      },
+      matchedSavedLocation,
+      requiresSavedLocationClarification: false,
+      suggestedSavedLocations,
+    };
+  }
+
+  return {
+    draft: params.currentDraft,
+    matchedSavedLocation: null,
+    requiresSavedLocationClarification: false,
+    suggestedSavedLocations,
+  };
+}
+
 function buildPlannerInput(params: {
   todayIso: string;
   todayLabel: string;
   relativeDateAnchors: string[];
+  savedLocations: PlannerSavedLocation[];
   timezone: string;
   draft: VisionMeetingDraft;
   messages: PlannerMessage[];
@@ -116,6 +328,15 @@ Today in ${params.timezone}: ${params.todayLabel}
 Timezone assumption: ${params.timezone}
 Relative date anchors in ${params.timezone}:
 ${params.relativeDateAnchors.map((anchor) => `- ${anchor}`).join("\n")}
+
+Saved church locations:
+${
+  params.savedLocations.length > 0
+    ? params.savedLocations
+        .map((location) => `- ${location.name} — ${location.address}`)
+        .join("\n")
+    : "- No saved locations available"
+}
 
 Current draft:
 ${JSON.stringify(params.draft, null, 2)}
@@ -443,6 +664,9 @@ export function maybeApplyDeterministicSchedulingDateTime(params: {
 export function buildAssistantMessage(params: {
   missingFields: Array<"datetime" | "location">;
   readyToCreate: boolean;
+  draft: VisionMeetingDraft;
+  requiresSavedLocationClarification: boolean;
+  suggestedSavedLocations: string[];
   interpretation: {
     datetimeLabel?: string;
     locationLabel?: string;
@@ -457,6 +681,20 @@ export function buildAssistantMessage(params: {
     }
 
     if (missingLocation) {
+      if (params.requiresSavedLocationClarification) {
+        return params.suggestedSavedLocations.length > 0
+          ? `I found multiple saved locations. Which one should I use: ${params.suggestedSavedLocations.join(", ")}?`
+          : "I couldn't tell which saved location you meant. Please name the saved location or provide the address.";
+      }
+
+      if (
+        params.draft.locationName &&
+        !params.draft.locationId &&
+        !params.draft.locationAddress
+      ) {
+        return `I have the location name set to ${params.draft.locationName}. What address should I use?`;
+      }
+
       return `I have the date and time set for ${params.interpretation.datetimeLabel ?? "this meeting"}. What location should I use?`;
     }
 
@@ -511,6 +749,7 @@ export async function runVisionMeetingPlanner(input: {
   churchId: string;
   messages: PlannerMessage[];
   draft: VisionMeetingDraft;
+  savedLocations: PlannerSavedLocation[];
 }) {
   const now = new Date();
   const relativeDateAnchors = buildRelativeDateAnchors(now, PLANNER_TIMEZONE);
@@ -531,6 +770,7 @@ export async function runVisionMeetingPlanner(input: {
             timeZone: PLANNER_TIMEZONE,
           }),
           relativeDateAnchors,
+          savedLocations: input.savedLocations,
           timezone: PLANNER_TIMEZONE,
           draft: input.draft,
           messages: input.messages,
@@ -543,12 +783,18 @@ export async function runVisionMeetingPlanner(input: {
       });
 
       const modelResponse = PlannerModelResponseSchema.parse(parsed);
-      const draft = maybeApplyDeterministicSchedulingDateTime({
+      const draftWithDateTime = maybeApplyDeterministicSchedulingDateTime({
         currentDraft: normalizeDraft(modelResponse.draft),
         messages: input.messages,
         now,
         timezone: PLANNER_TIMEZONE,
       });
+      const locationResolution = maybeApplyDeterministicLocationResolution({
+        currentDraft: draftWithDateTime,
+        messages: input.messages,
+        savedLocations: input.savedLocations,
+      });
+      const draft = locationResolution.draft;
       const state = computePlannerState(draft);
       const interpretation = {
         datetimeLabel: draft.datetime
@@ -573,6 +819,10 @@ export async function runVisionMeetingPlanner(input: {
         assistantMessage: buildAssistantMessage({
           missingFields: state.missingFields,
           readyToCreate: state.readyToCreate,
+          draft,
+          requiresSavedLocationClarification:
+            locationResolution.requiresSavedLocationClarification,
+          suggestedSavedLocations: locationResolution.suggestedSavedLocations,
           interpretation,
         }),
         draft,

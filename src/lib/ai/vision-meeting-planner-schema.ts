@@ -14,6 +14,12 @@ export const PlannerMessageSchema = z.object({
   content: z.string().min(1),
 });
 
+export const PlannerSavedLocationSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1),
+  address: z.string().min(1),
+});
+
 export const VisionMeetingDraftSchema = z.object({
   type: z.literal("vision_meeting"),
   datetime: plannerDateTimeSchema.nullable(),
@@ -48,6 +54,7 @@ export const PlannerResponseSchema = PlannerModelResponseSchema.extend({
 export type PlannerMessage = z.infer<typeof PlannerMessageSchema>;
 export type PlannerRequest = z.infer<typeof PlannerRequestSchema>;
 export type PlannerResponse = z.infer<typeof PlannerResponseSchema>;
+export type PlannerSavedLocation = z.infer<typeof PlannerSavedLocationSchema>;
 export type VisionMeetingDraft = z.infer<typeof VisionMeetingDraftSchema>;
 
 export const initialVisionMeetingDraft: VisionMeetingDraft = {

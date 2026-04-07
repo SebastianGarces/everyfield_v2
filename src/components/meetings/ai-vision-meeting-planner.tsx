@@ -39,7 +39,7 @@ function createAssistantMessage(content: string): PlannerMessage {
 function createInitialMessages(): PlannerMessage[] {
   return [
     createAssistantMessage(
-      "Tell me the date, time, and location for the vision meeting you want to schedule."
+      "Tell me the date, time, and location for the vision meeting you want to schedule. You can use a saved location name or give me a new address."
     ),
   ];
 }

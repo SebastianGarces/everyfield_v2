@@ -6,6 +6,7 @@ import {
   PlannerResponseSchema,
 } from "@/lib/ai/vision-meeting-planner-schema";
 import { runVisionMeetingPlanner } from "@/lib/ai/vision-meeting-planner";
+import { listLocations } from "@/lib/meetings/locations";
 
 export const aiPlannerRoute = new OpenAPIHono<AppBindings>();
 
@@ -87,11 +88,17 @@ aiPlannerRoute.openapi(
     }
 
     try {
+      const savedLocations = await listLocations(sessionContext.churchId);
       const result = await runVisionMeetingPlanner({
         user: sessionContext.user,
         churchId: sessionContext.churchId,
         messages: parsedBody.data.messages,
         draft: parsedBody.data.draft,
+        savedLocations: savedLocations.map((location) => ({
+          id: location.id,
+          name: location.name,
+          address: location.address,
+        })),
       });
 
       return c.json(result, 200);

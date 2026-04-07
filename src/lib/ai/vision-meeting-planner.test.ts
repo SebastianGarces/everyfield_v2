@@ -3,9 +3,30 @@ import assert from "node:assert/strict";
 import {
   buildAssistantMessage,
   buildRelativeDateAnchors,
+  maybeApplyDeterministicLocationResolution,
   maybeApplyDeterministicSchedulingDateTime,
 } from "./vision-meeting-planner";
-import { initialVisionMeetingDraft } from "./vision-meeting-planner-schema";
+import {
+  initialVisionMeetingDraft,
+  type PlannerSavedLocation,
+} from "./vision-meeting-planner-schema";
+
+const singleSavedLocation: PlannerSavedLocation[] = [
+  {
+    id: "11111111-1111-4111-8111-111111111111",
+    name: "North Ridgeville High School",
+    address: "123 Center Ridge Rd, North Ridgeville, OH 44039",
+  },
+];
+
+const multipleSavedLocations: PlannerSavedLocation[] = [
+  ...singleSavedLocation,
+  {
+    id: "22222222-2222-4222-8222-222222222222",
+    name: "Community Center",
+    address: "456 Main St, North Ridgeville, OH 44039",
+  },
+];
 
 test("buildRelativeDateAnchors includes next sunday", () => {
   const anchors = buildRelativeDateAnchors(
@@ -38,10 +59,145 @@ test("maybeApplyDeterministicSchedulingDateTime resolves next Monday at 7 PM in 
   assert.equal(result.datetime, "2026-04-14T00:00:00.000Z");
 });
 
-test("buildAssistantMessage asks for the missing location without implying creation", () => {
+test("maybeApplyDeterministicLocationResolution matches a saved location by name from the user message", () => {
+  const result = maybeApplyDeterministicLocationResolution({
+    currentDraft: {
+      ...initialVisionMeetingDraft,
+      locationName: "North Ridgeville High School",
+    },
+    messages: [
+      {
+        id: "u1",
+        role: "user",
+        content:
+          "Schedule it at North Ridgeville High School for about 50 people.",
+      },
+    ],
+    savedLocations: singleSavedLocation,
+  });
+
+  assert.deepEqual(result.draft, {
+    ...initialVisionMeetingDraft,
+    locationId: "11111111-1111-4111-8111-111111111111",
+    locationName: "North Ridgeville High School",
+    locationAddress: "123 Center Ridge Rd, North Ridgeville, OH 44039",
+  });
+  assert.equal(result.requiresSavedLocationClarification, false);
+});
+
+test("maybeApplyDeterministicLocationResolution maps a default location phrase to the only saved location", () => {
+  const result = maybeApplyDeterministicLocationResolution({
+    currentDraft: {
+      ...initialVisionMeetingDraft,
+      locationName: "my default location",
+    },
+    messages: [
+      {
+        id: "u1",
+        role: "user",
+        content:
+          "Schedule a meeting tomorrow 4pm, my default location, 50 ppl note: potluck dinner planning",
+      },
+    ],
+    savedLocations: singleSavedLocation,
+  });
+
+  assert.deepEqual(result.draft, {
+    ...initialVisionMeetingDraft,
+    locationId: "11111111-1111-4111-8111-111111111111",
+    locationName: "North Ridgeville High School",
+    locationAddress: "123 Center Ridge Rd, North Ridgeville, OH 44039",
+  });
+  assert.equal(
+    result.matchedSavedLocation?.name,
+    "North Ridgeville High School"
+  );
+});
+
+test("maybeApplyDeterministicLocationResolution preserves an already resolved location when the user says same place", () => {
+  const result = maybeApplyDeterministicLocationResolution({
+    currentDraft: {
+      ...initialVisionMeetingDraft,
+      locationId: "11111111-1111-4111-8111-111111111111",
+      locationName: "North Ridgeville High School",
+      locationAddress: "123 Center Ridge Rd, North Ridgeville, OH 44039",
+    },
+    messages: [
+      {
+        id: "u2",
+        role: "user",
+        content: "Same place, but make it 50 people instead.",
+      },
+    ],
+    savedLocations: multipleSavedLocations,
+  });
+
+  assert.equal(result.draft.locationId, "11111111-1111-4111-8111-111111111111");
+  assert.equal(result.draft.locationName, "North Ridgeville High School");
+  assert.equal(
+    result.draft.locationAddress,
+    "123 Center Ridge Rd, North Ridgeville, OH 44039"
+  );
+  assert.equal(result.requiresSavedLocationClarification, false);
+});
+
+test("maybeApplyDeterministicLocationResolution clears ambiguous default location placeholders when multiple saved locations exist", () => {
+  const result = maybeApplyDeterministicLocationResolution({
+    currentDraft: {
+      ...initialVisionMeetingDraft,
+      locationName: "my default location",
+    },
+    messages: [
+      {
+        id: "u1",
+        role: "user",
+        content: "Tomorrow at 4 PM at my default location",
+      },
+    ],
+    savedLocations: multipleSavedLocations,
+  });
+
+  assert.equal(result.draft.locationId, null);
+  assert.equal(result.draft.locationName, null);
+  assert.equal(result.draft.locationAddress, null);
+  assert.equal(result.requiresSavedLocationClarification, true);
+  assert.deepEqual(result.suggestedSavedLocations, [
+    "North Ridgeville High School",
+    "Community Center",
+  ]);
+});
+
+test("buildAssistantMessage asks the user to choose between saved locations when default location is ambiguous", () => {
   const message = buildAssistantMessage({
     missingFields: ["location"],
     readyToCreate: false,
+    draft: initialVisionMeetingDraft,
+    requiresSavedLocationClarification: true,
+    suggestedSavedLocations: [
+      "North Ridgeville High School",
+      "Community Center",
+    ],
+    interpretation: {
+      datetimeLabel: "Wednesday, April 8, 2026 at 4:00 PM CDT",
+    },
+  });
+
+  assert.equal(
+    message,
+    "I found multiple saved locations. Which one should I use: North Ridgeville High School, Community Center?"
+  );
+});
+
+test("buildAssistantMessage asks for an address when the location name is known but unresolved", () => {
+  const message = buildAssistantMessage({
+    missingFields: ["location"],
+    readyToCreate: false,
+    draft: {
+      ...initialVisionMeetingDraft,
+      locationName: "North Ridgeville High School",
+    },
+    requiresSavedLocationClarification: false,
+    suggestedSavedLocations: [],
     interpretation: {
       datetimeLabel: "Monday, April 13, 2026 at 7:00 PM CDT",
     },
@@ -49,6 +205,6 @@ test("buildAssistantMessage asks for the missing location without implying creat
 
   assert.equal(
     message,
-    "I have the date and time set for Monday, April 13, 2026 at 7:00 PM CDT. What location should I use?"
+    "I have the location name set to North Ridgeville High School. What address should I use?"
   );
 });
