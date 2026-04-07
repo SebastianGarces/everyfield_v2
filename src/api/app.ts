@@ -108,4 +108,9 @@ crud("communications", communications);
 app.doc("/doc", {
   openapi: "3.1.0",
   info: { title: "EveryField API", version: "0.1.0" },
+  servers: [
+    {
+      url: process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
+    },
+  ],
 });

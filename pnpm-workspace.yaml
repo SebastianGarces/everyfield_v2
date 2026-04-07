@@ -1,0 +1,2 @@
+overrides:
+  openapi-sidecar: link:../openapi-sidecar
