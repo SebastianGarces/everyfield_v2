@@ -32,7 +32,7 @@ export function AttendeeQuickAdd({
   return (
     <form
       onSubmit={handleSubmit}
-      className="space-y-4 rounded-lg border bg-muted/30 p-4"
+      className="bg-muted/30 space-y-4 rounded-lg border p-4"
     >
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">

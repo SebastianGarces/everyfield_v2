@@ -32,7 +32,9 @@ export async function isBookmarked(slug: string): Promise<boolean> {
  * Get bookmarked status for multiple articles (batch query)
  * Returns a Set of bookmarked slugs
  */
-export async function getBookmarkedSlugs(slugs: string[]): Promise<Set<string>> {
+export async function getBookmarkedSlugs(
+  slugs: string[]
+): Promise<Set<string>> {
   const session = await getCurrentSession();
   if (!session?.user || slugs.length === 0) return new Set();
 

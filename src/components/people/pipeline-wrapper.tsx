@@ -18,7 +18,10 @@ interface PipelineWrapperProps {
   inactivityThresholds?: InactivityThresholds;
 }
 
-export function PipelineWrapper({ data, inactivityThresholds }: PipelineWrapperProps) {
+export function PipelineWrapper({
+  data,
+  inactivityThresholds,
+}: PipelineWrapperProps) {
   const router = useRouter();
 
   const handleStatusChange = async (

@@ -32,10 +32,7 @@ import {
   createInvitation,
   updateInvitationStatus,
 } from "@/lib/meetings/invitations";
-import {
-  createLocation,
-  updateLocation,
-} from "@/lib/meetings/locations";
+import { createLocation, updateLocation } from "@/lib/meetings/locations";
 import {
   addAttendee,
   createEvaluation,
@@ -83,7 +80,10 @@ export async function createMeetingAction(
     const { user } = await verifySession();
 
     if (!user.churchId) {
-      return { success: false, error: "You must be associated with a church to create meetings" };
+      return {
+        success: false,
+        error: "You must be associated with a church to create meetings",
+      };
     }
 
     const rawData = formDataToObject(formData);
@@ -93,7 +93,10 @@ export async function createMeetingAction(
       return {
         success: false,
         error: "Validation failed",
-        fieldErrors: parsed.error.flatten().fieldErrors as Record<string, string[]>,
+        fieldErrors: parsed.error.flatten().fieldErrors as Record<
+          string,
+          string[]
+        >,
       };
     }
 
@@ -105,7 +108,10 @@ export async function createMeetingAction(
     if (error instanceof Error && error.message === "Unauthorized") {
       return { success: false, error: "You must be logged in" };
     }
-    return { success: false, error: "An unexpected error occurred while creating the meeting" };
+    return {
+      success: false,
+      error: "An unexpected error occurred while creating the meeting",
+    };
   }
 
   redirect(`/meetings/${meetingId}`);
@@ -120,7 +126,10 @@ export async function updateMeetingAction(
     const { user } = await verifySession();
 
     if (!user.churchId) {
-      return { success: false, error: "You must be associated with a church to update meetings" };
+      return {
+        success: false,
+        error: "You must be associated with a church to update meetings",
+      };
     }
 
     const rawData = formDataToObject(formData);
@@ -130,7 +139,10 @@ export async function updateMeetingAction(
       return {
         success: false,
         error: "Validation failed",
-        fieldErrors: parsed.error.flatten().fieldErrors as Record<string, string[]>,
+        fieldErrors: parsed.error.flatten().fieldErrors as Record<
+          string,
+          string[]
+        >,
       };
     }
 
@@ -142,10 +154,18 @@ export async function updateMeetingAction(
   } catch (error) {
     console.error("updateMeetingAction error:", error);
     if (error instanceof Error) {
-      if (error.message === "Unauthorized") return { success: false, error: "You must be logged in" };
-      if (error.message === "Meeting not found") return { success: false, error: "Meeting not found or has been deleted" };
+      if (error.message === "Unauthorized")
+        return { success: false, error: "You must be logged in" };
+      if (error.message === "Meeting not found")
+        return {
+          success: false,
+          error: "Meeting not found or has been deleted",
+        };
     }
-    return { success: false, error: "An unexpected error occurred while updating the meeting" };
+    return {
+      success: false,
+      error: "An unexpected error occurred while updating the meeting",
+    };
   }
 }
 
@@ -156,7 +176,10 @@ export async function deleteMeetingAction(
     const { user } = await verifySession();
 
     if (!user.churchId) {
-      return { success: false, error: "You must be associated with a church to delete meetings" };
+      return {
+        success: false,
+        error: "You must be associated with a church to delete meetings",
+      };
     }
 
     await deleteMeeting(user.churchId, meetingId);
@@ -166,10 +189,18 @@ export async function deleteMeetingAction(
   } catch (error) {
     console.error("deleteMeetingAction error:", error);
     if (error instanceof Error) {
-      if (error.message === "Unauthorized") return { success: false, error: "You must be logged in" };
-      if (error.message === "Meeting not found") return { success: false, error: "Meeting not found or has already been deleted" };
+      if (error.message === "Unauthorized")
+        return { success: false, error: "You must be logged in" };
+      if (error.message === "Meeting not found")
+        return {
+          success: false,
+          error: "Meeting not found or has already been deleted",
+        };
     }
-    return { success: false, error: "An unexpected error occurred while deleting the meeting" };
+    return {
+      success: false,
+      error: "An unexpected error occurred while deleting the meeting",
+    };
   }
 }
 
@@ -181,7 +212,10 @@ export async function updateMeetingStatusAction(
     const { user } = await verifySession();
 
     if (!user.churchId) {
-      return { success: false, error: "You must be associated with a church to update meetings" };
+      return {
+        success: false,
+        error: "You must be associated with a church to update meetings",
+      };
     }
 
     const statusResult = meetingStatusSchema.safeParse(newStatus);
@@ -189,7 +223,11 @@ export async function updateMeetingStatusAction(
       return { success: false, error: "Invalid meeting status value" };
     }
 
-    const meeting = await updateMeetingStatus(user.churchId, meetingId, statusResult.data);
+    const meeting = await updateMeetingStatus(
+      user.churchId,
+      meetingId,
+      statusResult.data
+    );
     revalidatePath("/meetings");
     revalidatePath(`/meetings/${meetingId}`);
 
@@ -197,10 +235,18 @@ export async function updateMeetingStatusAction(
   } catch (error) {
     console.error("updateMeetingStatusAction error:", error);
     if (error instanceof Error) {
-      if (error.message === "Unauthorized") return { success: false, error: "You must be logged in" };
-      if (error.message === "Meeting not found") return { success: false, error: "Meeting not found or has been deleted" };
+      if (error.message === "Unauthorized")
+        return { success: false, error: "You must be logged in" };
+      if (error.message === "Meeting not found")
+        return {
+          success: false,
+          error: "Meeting not found or has been deleted",
+        };
     }
-    return { success: false, error: "An unexpected error occurred while updating the meeting status" };
+    return {
+      success: false,
+      error: "An unexpected error occurred while updating the meeting status",
+    };
   }
 }
 
@@ -213,12 +259,23 @@ export async function createLocationAction(
 ): Promise<ActionResult<Location>> {
   try {
     const { user } = await verifySession();
-    if (!user.churchId) return { success: false, error: "You must be associated with a church to create locations" };
+    if (!user.churchId)
+      return {
+        success: false,
+        error: "You must be associated with a church to create locations",
+      };
 
     const rawData = formDataToObject(formData);
     const parsed = locationCreateSchema.safeParse(rawData);
     if (!parsed.success) {
-      return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors as Record<string, string[]> };
+      return {
+        success: false,
+        error: "Validation failed",
+        fieldErrors: parsed.error.flatten().fieldErrors as Record<
+          string,
+          string[]
+        >,
+      };
     }
 
     const location = await createLocation(user.churchId, parsed.data);
@@ -226,8 +283,12 @@ export async function createLocationAction(
     return { success: true, data: location };
   } catch (error) {
     console.error("createLocationAction error:", error);
-    if (error instanceof Error && error.message === "Unauthorized") return { success: false, error: "You must be logged in" };
-    return { success: false, error: "An unexpected error occurred while creating the location" };
+    if (error instanceof Error && error.message === "Unauthorized")
+      return { success: false, error: "You must be logged in" };
+    return {
+      success: false,
+      error: "An unexpected error occurred while creating the location",
+    };
   }
 }
 
@@ -237,24 +298,47 @@ export async function updateLocationAction(
 ): Promise<ActionResult<Location>> {
   try {
     const { user } = await verifySession();
-    if (!user.churchId) return { success: false, error: "You must be associated with a church to update locations" };
+    if (!user.churchId)
+      return {
+        success: false,
+        error: "You must be associated with a church to update locations",
+      };
 
     const rawData = formDataToObject(formData);
     const parsed = locationUpdateSchema.safeParse(rawData);
     if (!parsed.success) {
-      return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors as Record<string, string[]> };
+      return {
+        success: false,
+        error: "Validation failed",
+        fieldErrors: parsed.error.flatten().fieldErrors as Record<
+          string,
+          string[]
+        >,
+      };
     }
 
-    const location = await updateLocation(user.churchId, locationId, parsed.data);
+    const location = await updateLocation(
+      user.churchId,
+      locationId,
+      parsed.data
+    );
     revalidatePath("/meetings");
     return { success: true, data: location };
   } catch (error) {
     console.error("updateLocationAction error:", error);
     if (error instanceof Error) {
-      if (error.message === "Unauthorized") return { success: false, error: "You must be logged in" };
-      if (error.message === "Location not found") return { success: false, error: "Location not found or has been deleted" };
+      if (error.message === "Unauthorized")
+        return { success: false, error: "You must be logged in" };
+      if (error.message === "Location not found")
+        return {
+          success: false,
+          error: "Location not found or has been deleted",
+        };
     }
-    return { success: false, error: "An unexpected error occurred while updating the location" };
+    return {
+      success: false,
+      error: "An unexpected error occurred while updating the location",
+    };
   }
 }
 
@@ -268,12 +352,23 @@ export async function addAttendeeAction(
 ): Promise<ActionResult<MeetingAttendanceRecord>> {
   try {
     const { user } = await verifySession();
-    if (!user.churchId) return { success: false, error: "You must be associated with a church to record attendance" };
+    if (!user.churchId)
+      return {
+        success: false,
+        error: "You must be associated with a church to record attendance",
+      };
 
     const rawData = formDataToObject(formData);
     const parsed = attendanceCreateSchema.safeParse(rawData);
     if (!parsed.success) {
-      return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors as Record<string, string[]> };
+      return {
+        success: false,
+        error: "Validation failed",
+        fieldErrors: parsed.error.flatten().fieldErrors as Record<
+          string,
+          string[]
+        >,
+      };
     }
 
     const record = await addAttendee(user.churchId, meetingId, parsed.data);
@@ -282,8 +377,12 @@ export async function addAttendeeAction(
     return { success: true, data: record };
   } catch (error) {
     console.error("addAttendeeAction error:", error);
-    if (error instanceof Error && error.message === "Unauthorized") return { success: false, error: "You must be logged in" };
-    return { success: false, error: "An unexpected error occurred while adding the attendee" };
+    if (error instanceof Error && error.message === "Unauthorized")
+      return { success: false, error: "You must be logged in" };
+    return {
+      success: false,
+      error: "An unexpected error occurred while adding the attendee",
+    };
   }
 }
 
@@ -293,12 +392,23 @@ export async function quickAddAttendeeAction(
 ): Promise<ActionResult<MeetingAttendanceRecord>> {
   try {
     const { user } = await verifySession();
-    if (!user.churchId) return { success: false, error: "You must be associated with a church to record attendance" };
+    if (!user.churchId)
+      return {
+        success: false,
+        error: "You must be associated with a church to record attendance",
+      };
 
     const rawData = formDataToObject(formData);
     const parsed = attendeeQuickAddSchema.safeParse(rawData);
     if (!parsed.success) {
-      return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors as Record<string, string[]> };
+      return {
+        success: false,
+        error: "Validation failed",
+        fieldErrors: parsed.error.flatten().fieldErrors as Record<
+          string,
+          string[]
+        >,
+      };
     }
 
     const person = await createPerson(user.churchId, user.id, {
@@ -323,8 +433,12 @@ export async function quickAddAttendeeAction(
     return { success: true, data: record };
   } catch (error) {
     console.error("quickAddAttendeeAction error:", error);
-    if (error instanceof Error && error.message === "Unauthorized") return { success: false, error: "You must be logged in" };
-    return { success: false, error: "An unexpected error occurred while adding the attendee" };
+    if (error instanceof Error && error.message === "Unauthorized")
+      return { success: false, error: "You must be logged in" };
+    return {
+      success: false,
+      error: "An unexpected error occurred while adding the attendee",
+    };
   }
 }
 
@@ -334,7 +448,11 @@ export async function removeAttendeeAction(
 ): Promise<ActionResult<void>> {
   try {
     const { user } = await verifySession();
-    if (!user.churchId) return { success: false, error: "You must be associated with a church to manage attendance" };
+    if (!user.churchId)
+      return {
+        success: false,
+        error: "You must be associated with a church to manage attendance",
+      };
 
     await removeAttendee(user.churchId, meetingId, personId);
     revalidatePath("/meetings");
@@ -343,10 +461,18 @@ export async function removeAttendeeAction(
   } catch (error) {
     console.error("removeAttendeeAction error:", error);
     if (error instanceof Error) {
-      if (error.message === "Unauthorized") return { success: false, error: "You must be logged in" };
-      if (error.message === "Attendance record not found") return { success: false, error: "Attendance record not found or already removed" };
+      if (error.message === "Unauthorized")
+        return { success: false, error: "You must be logged in" };
+      if (error.message === "Attendance record not found")
+        return {
+          success: false,
+          error: "Attendance record not found or already removed",
+        };
     }
-    return { success: false, error: "An unexpected error occurred while removing the attendee" };
+    return {
+      success: false,
+      error: "An unexpected error occurred while removing the attendee",
+    };
   }
 }
 
@@ -355,7 +481,11 @@ export async function finalizeAttendanceAction(
 ): Promise<ActionResult<void>> {
   try {
     const { user } = await verifySession();
-    if (!user.churchId) return { success: false, error: "You must be associated with a church to finalize attendance" };
+    if (!user.churchId)
+      return {
+        success: false,
+        error: "You must be associated with a church to finalize attendance",
+      };
 
     await finalizeAttendance(user.churchId, meetingId, user.id);
     revalidatePath("/meetings");
@@ -363,8 +493,12 @@ export async function finalizeAttendanceAction(
     return { success: true, data: undefined };
   } catch (error) {
     console.error("finalizeAttendanceAction error:", error);
-    if (error instanceof Error && error.message === "Unauthorized") return { success: false, error: "You must be logged in" };
-    return { success: false, error: "An unexpected error occurred while finalizing attendance" };
+    if (error instanceof Error && error.message === "Unauthorized")
+      return { success: false, error: "You must be logged in" };
+    return {
+      success: false,
+      error: "An unexpected error occurred while finalizing attendance",
+    };
   }
 }
 
@@ -374,22 +508,35 @@ export async function recordAttendanceBatchAction(
 ): Promise<ActionResult<void>> {
   try {
     const { user } = await verifySession();
-    if (!user.churchId) return { success: false, error: "You must be associated with a church to record attendance" };
+    if (!user.churchId)
+      return {
+        success: false,
+        error: "You must be associated with a church to record attendance",
+      };
 
     const parsed = attendanceBatchSchema.safeParse({ records });
     if (!parsed.success) {
       return { success: false, error: "Validation failed" };
     }
 
-    await recordAttendanceBatch(user.churchId, meetingId, parsed.data.records, user.id);
+    await recordAttendanceBatch(
+      user.churchId,
+      meetingId,
+      parsed.data.records,
+      user.id
+    );
     revalidatePath("/meetings");
     revalidatePath(`/meetings/${meetingId}`);
     revalidatePath("/teams");
     return { success: true, data: undefined };
   } catch (error) {
     console.error("recordAttendanceBatchAction error:", error);
-    if (error instanceof Error && error.message === "Unauthorized") return { success: false, error: "You must be logged in" };
-    return { success: false, error: "An unexpected error occurred while recording attendance" };
+    if (error instanceof Error && error.message === "Unauthorized")
+      return { success: false, error: "You must be logged in" };
+    return {
+      success: false,
+      error: "An unexpected error occurred while recording attendance",
+    };
   }
 }
 
@@ -403,23 +550,42 @@ export async function createInvitationAction(
 ): Promise<ActionResult<Invitation>> {
   try {
     const { user } = await verifySession();
-    if (!user.churchId) return { success: false, error: "You must be associated with a church to create invitations" };
+    if (!user.churchId)
+      return {
+        success: false,
+        error: "You must be associated with a church to create invitations",
+      };
 
     const rawData = formDataToObject(formData);
     const parsed = invitationCreateSchema.safeParse(rawData);
     if (!parsed.success) {
-      return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors as Record<string, string[]> };
+      return {
+        success: false,
+        error: "Validation failed",
+        fieldErrors: parsed.error.flatten().fieldErrors as Record<
+          string,
+          string[]
+        >,
+      };
     }
 
-    const invitation = await createInvitation(user.churchId, meetingId, parsed.data);
+    const invitation = await createInvitation(
+      user.churchId,
+      meetingId,
+      parsed.data
+    );
     revalidatePath("/meetings");
     revalidatePath(`/meetings/${meetingId}`);
     revalidatePath(`/meetings/${meetingId}/invitations`);
     return { success: true, data: invitation };
   } catch (error) {
     console.error("createInvitationAction error:", error);
-    if (error instanceof Error && error.message === "Unauthorized") return { success: false, error: "You must be logged in" };
-    return { success: false, error: "An unexpected error occurred while creating the invitation" };
+    if (error instanceof Error && error.message === "Unauthorized")
+      return { success: false, error: "You must be logged in" };
+    return {
+      success: false,
+      error: "An unexpected error occurred while creating the invitation",
+    };
   }
 }
 
@@ -429,22 +595,40 @@ export async function updateInvitationStatusAction(
 ): Promise<ActionResult<Invitation>> {
   try {
     const { user } = await verifySession();
-    if (!user.churchId) return { success: false, error: "You must be associated with a church to update invitation status" };
+    if (!user.churchId)
+      return {
+        success: false,
+        error:
+          "You must be associated with a church to update invitation status",
+      };
 
     const rawData = formDataToObject(formData);
     const parsed = invitationStatusUpdateSchema.safeParse(rawData);
-    if (!parsed.success) return { success: false, error: "Invalid invitation status" };
+    if (!parsed.success)
+      return { success: false, error: "Invalid invitation status" };
 
-    const invitation = await updateInvitationStatus(user.churchId, invitationId, parsed.data.status);
+    const invitation = await updateInvitationStatus(
+      user.churchId,
+      invitationId,
+      parsed.data.status
+    );
     revalidatePath("/meetings");
     return { success: true, data: invitation };
   } catch (error) {
     console.error("updateInvitationStatusAction error:", error);
     if (error instanceof Error) {
-      if (error.message === "Unauthorized") return { success: false, error: "You must be logged in" };
-      if (error.message === "Invitation not found") return { success: false, error: "Invitation not found or has been deleted" };
+      if (error.message === "Unauthorized")
+        return { success: false, error: "You must be logged in" };
+      if (error.message === "Invitation not found")
+        return {
+          success: false,
+          error: "Invitation not found or has been deleted",
+        };
     }
-    return { success: false, error: "An unexpected error occurred while updating invitation status" };
+    return {
+      success: false,
+      error: "An unexpected error occurred while updating invitation status",
+    };
   }
 }
 
@@ -458,23 +642,43 @@ export async function createEvaluationAction(
 ): Promise<ActionResult<MeetingEvaluation>> {
   try {
     const { user } = await verifySession();
-    if (!user.churchId) return { success: false, error: "You must be associated with a church to evaluate meetings" };
+    if (!user.churchId)
+      return {
+        success: false,
+        error: "You must be associated with a church to evaluate meetings",
+      };
 
     const rawData = formDataToObject(formData);
     const parsed = evaluationCreateSchema.safeParse(rawData);
     if (!parsed.success) {
-      return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors as Record<string, string[]> };
+      return {
+        success: false,
+        error: "Validation failed",
+        fieldErrors: parsed.error.flatten().fieldErrors as Record<
+          string,
+          string[]
+        >,
+      };
     }
 
-    const evaluation = await createEvaluation(user.churchId, meetingId, user.id, parsed.data);
+    const evaluation = await createEvaluation(
+      user.churchId,
+      meetingId,
+      user.id,
+      parsed.data
+    );
     revalidatePath("/meetings");
     revalidatePath(`/meetings/${meetingId}`);
     revalidatePath(`/meetings/${meetingId}/evaluation`);
     return { success: true, data: evaluation };
   } catch (error) {
     console.error("createEvaluationAction error:", error);
-    if (error instanceof Error && error.message === "Unauthorized") return { success: false, error: "You must be logged in" };
-    return { success: false, error: "An unexpected error occurred while saving the evaluation" };
+    if (error instanceof Error && error.message === "Unauthorized")
+      return { success: false, error: "You must be logged in" };
+    return {
+      success: false,
+      error: "An unexpected error occurred while saving the evaluation",
+    };
   }
 }
 
@@ -490,12 +694,15 @@ export async function toggleChecklistItemAction(
     const { user } = await verifySession();
     if (!user.churchId) return { success: false, error: "Unauthorized" };
 
-    const item = await updateChecklistItem(user.churchId, itemId, { isChecked });
+    const item = await updateChecklistItem(user.churchId, itemId, {
+      isChecked,
+    });
     revalidatePath("/meetings");
     return { success: true, data: item };
   } catch (error) {
     console.error("toggleChecklistItemAction error:", error);
-    if (error instanceof Error && error.message === "Checklist item not found") return { success: false, error: "Checklist item not found" };
+    if (error instanceof Error && error.message === "Checklist item not found")
+      return { success: false, error: "Checklist item not found" };
     return { success: false, error: "Failed to update checklist item" };
   }
 }
@@ -511,7 +718,14 @@ export async function updateChecklistItemAction(
     const rawData = formDataToObject(formData);
     const parsed = checklistItemUpdateSchema.safeParse(rawData);
     if (!parsed.success) {
-      return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors as Record<string, string[]> };
+      return {
+        success: false,
+        error: "Validation failed",
+        fieldErrors: parsed.error.flatten().fieldErrors as Record<
+          string,
+          string[]
+        >,
+      };
     }
 
     const item = await updateChecklistItem(user.churchId, itemId, parsed.data);
@@ -519,7 +733,8 @@ export async function updateChecklistItemAction(
     return { success: true, data: item };
   } catch (error) {
     console.error("updateChecklistItemAction error:", error);
-    if (error instanceof Error && error.message === "Checklist item not found") return { success: false, error: "Checklist item not found" };
+    if (error instanceof Error && error.message === "Checklist item not found")
+      return { success: false, error: "Checklist item not found" };
     return { success: false, error: "Failed to update checklist item" };
   }
 }
@@ -537,7 +752,12 @@ export async function addToGuestListAction(
     if (!user.churchId) return { success: false, error: "No church" };
 
     const { addToGuestList } = await import("@/lib/meetings/guest-list");
-    const record = await addToGuestList(user.churchId, meetingId, personId, user.id);
+    const record = await addToGuestList(
+      user.churchId,
+      meetingId,
+      personId,
+      user.id
+    );
     revalidatePath(`/meetings/${meetingId}`);
     return { success: true, data: record };
   } catch (error) {
@@ -616,7 +836,12 @@ export async function quickAddPersonToGuestListAction(
 
     // Add to guest list
     const { addToGuestList } = await import("@/lib/meetings/guest-list");
-    const record = await addToGuestList(user.churchId, meetingId, person.id, user.id);
+    const record = await addToGuestList(
+      user.churchId,
+      meetingId,
+      person.id,
+      user.id
+    );
 
     revalidatePath(`/meetings/${meetingId}`);
     revalidatePath("/people");
@@ -673,7 +898,12 @@ export async function addWalkInAttendeeAction(
     if (!user.churchId) return { success: false, error: "No church" };
 
     const { addToGuestList } = await import("@/lib/meetings/guest-list");
-    const record = await addToGuestList(user.churchId, meetingId, personId, user.id);
+    const record = await addToGuestList(
+      user.churchId,
+      meetingId,
+      personId,
+      user.id
+    );
 
     // Mark as attended immediately
     await db
@@ -719,7 +949,12 @@ export async function quickAddWalkInAction(
     });
 
     const { addToGuestList } = await import("@/lib/meetings/guest-list");
-    const record = await addToGuestList(user.churchId, meetingId, person.id, user.id);
+    const record = await addToGuestList(
+      user.churchId,
+      meetingId,
+      person.id,
+      user.id
+    );
 
     // Mark as attended
     await db

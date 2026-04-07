@@ -1,4 +1,11 @@
-import { Heading, Text, Section, Row, Column, render } from "@react-email/components";
+import {
+  Heading,
+  Text,
+  Section,
+  Row,
+  Column,
+  render,
+} from "@react-email/components";
 import { BaseLayout } from "../components/base-layout";
 import type { TeamHealthMetrics } from "@/lib/ministry-teams/service";
 

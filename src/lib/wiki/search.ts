@@ -102,6 +102,8 @@ export async function searchArticlesWithSections(
 
   return results.map((result) => ({
     ...result,
-    sectionName: result.sectionId ? sectionMap.get(result.sectionId) ?? null : null,
+    sectionName: result.sectionId
+      ? (sectionMap.get(result.sectionId) ?? null)
+      : null,
   }));
 }

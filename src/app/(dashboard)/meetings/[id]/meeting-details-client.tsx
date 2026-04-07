@@ -44,7 +44,10 @@ interface MeetingDetailsProps {
   locations: Location[];
 }
 
-const statusTransitions: Record<MeetingStatus, { next: MeetingStatus; label: string } | null> = {
+const statusTransitions: Record<
+  MeetingStatus,
+  { next: MeetingStatus; label: string } | null
+> = {
   planning: { next: "ready", label: "Mark as Ready" },
   ready: { next: "in_progress", label: "Start Meeting" },
   in_progress: { next: "completed", label: "Mark Completed" },
@@ -84,8 +87,10 @@ export function MeetingDetails({ meeting, locations }: MeetingDetailsProps) {
 
   const status = meeting.status as MeetingStatus;
   const transition = statusTransitions[status];
-  const locationDisplay = meeting.locationName || meeting.location?.name || "Not set";
-  const addressDisplay = meeting.locationAddress || meeting.location?.address || "";
+  const locationDisplay =
+    meeting.locationName || meeting.location?.name || "Not set";
+  const addressDisplay =
+    meeting.locationAddress || meeting.location?.address || "";
 
   const handleDelete = async () => {
     setIsDeleting(true);
@@ -129,7 +134,7 @@ export function MeetingDetails({ meeting, locations }: MeetingDetailsProps) {
                 Edit
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>Edit {title}</DialogTitle>
               </DialogHeader>
@@ -143,7 +148,11 @@ export function MeetingDetails({ meeting, locations }: MeetingDetailsProps) {
           </Dialog>
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button variant="outline" size="sm" className="cursor-pointer text-destructive hover:text-destructive">
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-destructive hover:text-destructive cursor-pointer"
+              >
                 <Trash2 className="mr-2 h-4 w-4" />
                 Delete
               </Button>
@@ -152,16 +161,19 @@ export function MeetingDetails({ meeting, locations }: MeetingDetailsProps) {
               <AlertDialogHeader>
                 <AlertDialogTitle>Delete {title}?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  This will permanently delete this meeting and all associated attendance records,
-                  evaluations, and checklist items. This action cannot be undone.
+                  This will permanently delete this meeting and all associated
+                  attendance records, evaluations, and checklist items. This
+                  action cannot be undone.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
-                <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+                <AlertDialogCancel className="cursor-pointer">
+                  Cancel
+                </AlertDialogCancel>
                 <AlertDialogAction
                   onClick={handleDelete}
                   disabled={isDeleting}
-                  className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90 cursor-pointer"
                 >
                   {isDeleting ? "Deleting..." : "Delete Meeting"}
                 </AlertDialogAction>
@@ -179,11 +191,11 @@ export function MeetingDetails({ meeting, locations }: MeetingDetailsProps) {
           </CardHeader>
           <CardContent className="space-y-2">
             <div className="flex items-center gap-2 text-sm">
-              <CalendarDays className="h-4 w-4 text-muted-foreground" />
+              <CalendarDays className="text-muted-foreground h-4 w-4" />
               <span>{formatDate(meeting.datetime)}</span>
             </div>
             <div className="flex items-center gap-2 text-sm">
-              <Clock className="h-4 w-4 text-muted-foreground" />
+              <Clock className="text-muted-foreground h-4 w-4" />
               <span>{formatTime(meeting.datetime)}</span>
             </div>
           </CardContent>
@@ -195,11 +207,13 @@ export function MeetingDetails({ meeting, locations }: MeetingDetailsProps) {
           </CardHeader>
           <CardContent className="space-y-2">
             <div className="flex items-center gap-2 text-sm">
-              <MapPin className="h-4 w-4 text-muted-foreground" />
+              <MapPin className="text-muted-foreground h-4 w-4" />
               <span>{locationDisplay}</span>
             </div>
             {addressDisplay && (
-              <p className="text-sm text-muted-foreground pl-6">{addressDisplay}</p>
+              <p className="text-muted-foreground pl-6 text-sm">
+                {addressDisplay}
+              </p>
             )}
           </CardContent>
         </Card>
@@ -210,20 +224,33 @@ export function MeetingDetails({ meeting, locations }: MeetingDetailsProps) {
           </CardHeader>
           <CardContent className="space-y-2">
             <div className="flex items-center gap-2 text-sm">
-              <Users className="h-4 w-4 text-muted-foreground" />
+              <Users className="text-muted-foreground h-4 w-4" />
               {meeting.actualAttendance != null ? (
                 <span>
-                  <span className="font-medium">{meeting.actualAttendance}</span> actual
+                  <span className="font-medium">
+                    {meeting.actualAttendance}
+                  </span>{" "}
+                  actual
                   {meeting.estimatedAttendance && (
-                    <span className="text-muted-foreground"> / {meeting.estimatedAttendance} estimated</span>
+                    <span className="text-muted-foreground">
+                      {" "}
+                      / {meeting.estimatedAttendance} estimated
+                    </span>
                   )}
                 </span>
               ) : (
                 <span>
                   {meeting.estimatedAttendance ? (
-                    <><span className="font-medium">~{meeting.estimatedAttendance}</span> estimated</>
+                    <>
+                      <span className="font-medium">
+                        ~{meeting.estimatedAttendance}
+                      </span>{" "}
+                      estimated
+                    </>
                   ) : (
-                    <span className="text-muted-foreground">No estimate set</span>
+                    <span className="text-muted-foreground">
+                      No estimate set
+                    </span>
                   )}
                 </span>
               )}

@@ -8,10 +8,7 @@ import {
   type TaskStatus,
   type TaskCategory,
 } from "@/db/schema";
-import type {
-  TaskCreateInput,
-  TaskUpdateInput,
-} from "@/lib/validations/tasks";
+import type { TaskCreateInput, TaskUpdateInput } from "@/lib/validations/tasks";
 import {
   and,
   asc,

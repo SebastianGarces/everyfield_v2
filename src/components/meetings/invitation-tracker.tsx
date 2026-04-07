@@ -121,9 +121,7 @@ export function InvitationTracker({
       try {
         const people = await searchPeopleAction(value);
         // Filter out already-invited people
-        setInviteeResults(
-          people.filter((p) => !invitedPersonIds.has(p.id))
-        );
+        setInviteeResults(people.filter((p) => !invitedPersonIds.has(p.id)));
       } catch {
         setInviteeResults([]);
       } finally {
@@ -183,7 +181,7 @@ export function InvitationTracker({
         <Card>
           <CardContent className="pt-4 text-center">
             <p className="text-xl font-bold">{summary.total}</p>
-            <p className="text-xs text-muted-foreground">Invited</p>
+            <p className="text-muted-foreground text-xs">Invited</p>
           </CardContent>
         </Card>
         <Card>
@@ -191,21 +189,19 @@ export function InvitationTracker({
             <p className="text-xl font-bold text-green-600">
               {summary.confirmed}
             </p>
-            <p className="text-xs text-muted-foreground">Confirmed</p>
+            <p className="text-muted-foreground text-xs">Confirmed</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-4 text-center">
             <p className="text-xl font-bold text-blue-600">{summary.maybe}</p>
-            <p className="text-xs text-muted-foreground">Maybe</p>
+            <p className="text-muted-foreground text-xs">Maybe</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-4 text-center">
-            <p className="text-xl font-bold text-red-600">
-              {summary.declined}
-            </p>
-            <p className="text-xs text-muted-foreground">Declined</p>
+            <p className="text-xl font-bold text-red-600">{summary.declined}</p>
+            <p className="text-muted-foreground text-xs">Declined</p>
           </CardContent>
         </Card>
         <Card>
@@ -213,13 +209,13 @@ export function InvitationTracker({
             <p className="text-xl font-bold text-purple-600">
               {summary.attended}
             </p>
-            <p className="text-xs text-muted-foreground">Attended</p>
+            <p className="text-muted-foreground text-xs">Attended</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-4 text-center">
             <p className="text-xl font-bold text-gray-600">{summary.noShow}</p>
-            <p className="text-xs text-muted-foreground">No Show</p>
+            <p className="text-muted-foreground text-xs">No Show</p>
           </CardContent>
         </Card>
       </div>
@@ -235,10 +231,7 @@ export function InvitationTracker({
             <div className="flex items-center gap-2">
               {sendInvitationsUrl && (
                 <Button variant="default" size="sm" asChild>
-                  <Link
-                    href={sendInvitationsUrl}
-                    className="cursor-pointer"
-                  >
+                  <Link href={sendInvitationsUrl} className="cursor-pointer">
                     <Mail className="mr-2 h-4 w-4" />
                     Send Invitations ({sendableInvitees.length})
                   </Link>
@@ -260,7 +253,7 @@ export function InvitationTracker({
           {showAddForm && (
             <form
               onSubmit={handleAddInvitation}
-              className="space-y-3 rounded-lg border bg-muted/30 p-4"
+              className="bg-muted/30 space-y-3 rounded-lg border p-4"
             >
               <div className="grid grid-cols-2 gap-4">
                 {/* Inviter (core group member) */}
@@ -305,8 +298,7 @@ export function InvitationTracker({
                     <div className="flex items-center justify-between rounded-md border bg-white px-3 py-2">
                       <div>
                         <span className="text-sm font-medium">
-                          {selectedInvitee.firstName}{" "}
-                          {selectedInvitee.lastName}
+                          {selectedInvitee.firstName} {selectedInvitee.lastName}
                         </span>
                         {selectedInvitee.email && (
                           <span className="text-muted-foreground ml-2 text-xs">
@@ -324,7 +316,7 @@ export function InvitationTracker({
                     </div>
                   ) : (
                     <div className="relative">
-                      <Search className="text-muted-foreground absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2" />
+                      <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
                       <Input
                         value={inviteeQuery}
                         onChange={(e) => handleInviteeSearch(e.target.value)}
@@ -366,14 +358,10 @@ export function InvitationTracker({
               <Button
                 type="submit"
                 size="sm"
-                disabled={
-                  isPending || !selectedInviter || !selectedInvitee
-                }
+                disabled={isPending || !selectedInviter || !selectedInvitee}
                 className="cursor-pointer"
               >
-                {isPending && (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                )}
+                {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 <Send className="mr-2 h-4 w-4" />
                 Record Invitation
               </Button>
@@ -391,8 +379,8 @@ export function InvitationTracker({
                 const tracking =
                   inv.inviteeId && emailTracking?.[inv.inviteeId];
                 const trackingConfig = tracking
-                  ? emailStatusIcons[tracking.status] ??
-                    emailStatusIcons.pending
+                  ? (emailStatusIcons[tracking.status] ??
+                    emailStatusIcons.pending)
                   : null;
 
                 return (

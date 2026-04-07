@@ -35,9 +35,10 @@ export function MeetingForm({
 
   // Pass server actions directly to useActionState.
   // Create action redirects server-side; update action uses bind for meetingId.
-  const serverAction = isEdit && meeting
-    ? updateMeetingAction.bind(null, meeting.id)
-    : createMeetingAction;
+  const serverAction =
+    isEdit && meeting
+      ? updateMeetingAction.bind(null, meeting.id)
+      : createMeetingAction;
 
   const [state, formAction, isPending] = useActionState(serverAction, null);
 

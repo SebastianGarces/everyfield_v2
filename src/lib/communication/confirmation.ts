@@ -291,5 +291,5 @@ export async function getConfirmationStatus(
     )
     .limit(1);
 
-  return record?.status as ConfirmationStatus | null ?? null;
+  return (record?.status as ConfirmationStatus | null) ?? null;
 }

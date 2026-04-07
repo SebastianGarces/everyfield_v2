@@ -1,8 +1,5 @@
 import { z } from "zod";
-import {
-  teamStatuses,
-  timeCommitments,
-} from "@/db/schema/ministry-teams";
+import { teamStatuses, timeCommitments } from "@/db/schema/ministry-teams";
 
 // ============================================================================
 // Team Validations

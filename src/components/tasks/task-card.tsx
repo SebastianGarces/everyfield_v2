@@ -15,7 +15,10 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useTransition } from "react";
-import { completeTaskAction, reopenTaskAction } from "@/app/(dashboard)/tasks/actions";
+import {
+  completeTaskAction,
+  reopenTaskAction,
+} from "@/app/(dashboard)/tasks/actions";
 import { toast } from "sonner";
 
 // ============================================================================
@@ -26,10 +29,26 @@ const PRIORITY_CONFIG: Record<
   string,
   { label: string; color: string; icon: string }
 > = {
-  urgent: { label: "Urgent", color: "text-red-600 bg-red-50 border-red-200", icon: "!" },
-  high: { label: "High", color: "text-orange-600 bg-orange-50 border-orange-200", icon: "!" },
-  medium: { label: "Medium", color: "text-blue-600 bg-blue-50 border-blue-200", icon: "" },
-  low: { label: "Low", color: "text-slate-500 bg-slate-50 border-slate-200", icon: "" },
+  urgent: {
+    label: "Urgent",
+    color: "text-red-600 bg-red-50 border-red-200",
+    icon: "!",
+  },
+  high: {
+    label: "High",
+    color: "text-orange-600 bg-orange-50 border-orange-200",
+    icon: "!",
+  },
+  medium: {
+    label: "Medium",
+    color: "text-blue-600 bg-blue-50 border-blue-200",
+    icon: "",
+  },
+  low: {
+    label: "Low",
+    color: "text-slate-500 bg-slate-50 border-slate-200",
+    icon: "",
+  },
 };
 
 const CATEGORY_CONFIG: Record<string, { label: string }> = {
@@ -62,12 +81,20 @@ function getDueDateInfo(dueDate: string | null): {
   isDueToday: boolean;
   isDueSoon: boolean;
 } {
-  if (!dueDate) return { label: "No due date", isOverdue: false, isDueToday: false, isDueSoon: false };
+  if (!dueDate)
+    return {
+      label: "No due date",
+      isOverdue: false,
+      isDueToday: false,
+      isDueSoon: false,
+    };
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const due = new Date(dueDate + "T00:00:00");
-  const diffDays = Math.floor((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  const diffDays = Math.floor(
+    (due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+  );
 
   if (diffDays < 0) {
     const absDays = Math.abs(diffDays);
@@ -78,19 +105,45 @@ function getDueDateInfo(dueDate: string | null): {
       isDueSoon: false,
     };
   }
-  if (diffDays === 0) return { label: "Due today", isOverdue: false, isDueToday: true, isDueSoon: false };
-  if (diffDays === 1) return { label: "Due tomorrow", isOverdue: false, isDueToday: false, isDueSoon: true };
-  if (diffDays <= 7) return { label: `Due in ${diffDays} days`, isOverdue: false, isDueToday: false, isDueSoon: true };
+  if (diffDays === 0)
+    return {
+      label: "Due today",
+      isOverdue: false,
+      isDueToday: true,
+      isDueSoon: false,
+    };
+  if (diffDays === 1)
+    return {
+      label: "Due tomorrow",
+      isOverdue: false,
+      isDueToday: false,
+      isDueSoon: true,
+    };
+  if (diffDays <= 7)
+    return {
+      label: `Due in ${diffDays} days`,
+      isOverdue: false,
+      isDueToday: false,
+      isDueSoon: true,
+    };
 
   // Format the date
   const formatted = due.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
   });
-  return { label: `Due ${formatted}`, isOverdue: false, isDueToday: false, isDueSoon: false };
+  return {
+    label: `Due ${formatted}`,
+    isOverdue: false,
+    isDueToday: false,
+    isDueSoon: false,
+  };
 }
 
-function getRelatedUrl(relatedType: string | null, relatedId: string | null): string | null {
+function getRelatedUrl(
+  relatedType: string | null,
+  relatedId: string | null
+): string | null {
   if (!relatedType || !relatedId) return null;
 
   switch (relatedType) {
@@ -139,7 +192,7 @@ export function TaskCard({ task, personNote }: TaskCardProps) {
   return (
     <div
       className={cn(
-        "group flex items-start gap-3 rounded-lg border bg-card p-4 transition-all duration-200 hover:shadow-md",
+        "group bg-card flex items-start gap-3 rounded-lg border p-4 transition-all duration-200 hover:shadow-md",
         isComplete && "opacity-60",
         isPending && "opacity-50"
       )}
@@ -161,7 +214,7 @@ export function TaskCard({ task, personNote }: TaskCardProps) {
           <Link
             href={`/tasks/${task.id}`}
             className={cn(
-              "cursor-pointer text-sm font-medium leading-snug hover:underline",
+              "cursor-pointer text-sm leading-snug font-medium hover:underline",
               isComplete && "line-through"
             )}
           >
@@ -183,14 +236,18 @@ export function TaskCard({ task, personNote }: TaskCardProps) {
         </div>
 
         {/* Metadata row */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        <div className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
           {/* Due date */}
           {task.dueDate && (
             <span
               className={cn(
                 "flex items-center gap-1",
-                !isComplete && dueDateInfo.isOverdue && "font-medium text-red-600",
-                !isComplete && dueDateInfo.isDueToday && "font-medium text-orange-600",
+                !isComplete &&
+                  dueDateInfo.isOverdue &&
+                  "font-medium text-red-600",
+                !isComplete &&
+                  dueDateInfo.isDueToday &&
+                  "font-medium text-orange-600",
                 !isComplete && dueDateInfo.isDueSoon && "text-amber-600"
               )}
             >
@@ -235,8 +292,8 @@ export function TaskCard({ task, personNote }: TaskCardProps) {
 
         {/* Person note for follow-up tasks */}
         {personNote && task.relatedType === "person" && (
-          <div className="mt-1.5 rounded-md bg-muted/50 px-2.5 py-1.5">
-            <p className="text-xs italic text-muted-foreground line-clamp-2">
+          <div className="bg-muted/50 mt-1.5 rounded-md px-2.5 py-1.5">
+            <p className="text-muted-foreground line-clamp-2 text-xs italic">
               <MessageSquare className="mr-1 inline h-3 w-3 -translate-y-px" />
               {personNote}
             </p>

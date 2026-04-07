@@ -82,30 +82,24 @@ export function registerSubscriptions(bus: EventBusLike): void {
 
   // When a member is assigned to a team role, auto-advance from
   // core_group to launch_team.
-  bus.on<TeamMemberAssignedEvent>(
-    "team.member.assigned",
-    async (event) => {
-      await handleTeamMemberAssigned(
-        event.personId,
-        event.teamId,
-        event.roleId,
-        event.churchId
-      );
-    }
-  );
+  bus.on<TeamMemberAssignedEvent>("team.member.assigned", async (event) => {
+    await handleTeamMemberAssigned(
+      event.personId,
+      event.teamId,
+      event.roleId,
+      event.churchId
+    );
+  });
 
   // When a person is assigned as team leader or to a leadership role,
   // auto-advance from launch_team to leader.
-  bus.on<TeamLeaderAssignedEvent>(
-    "team.leader.assigned",
-    async (event) => {
-      await handleTeamLeaderAssigned(
-        event.personId,
-        event.teamId,
-        event.churchId
-      );
-    }
-  );
+  bus.on<TeamLeaderAssignedEvent>("team.leader.assigned", async (event) => {
+    await handleTeamLeaderAssigned(
+      event.personId,
+      event.teamId,
+      event.churchId
+    );
+  });
 
   // --------------------------------------------------------------------------
   // F3 (Meetings) -> F5 (Task Management)

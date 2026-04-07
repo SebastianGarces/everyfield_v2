@@ -17,10 +17,7 @@ function TeamWelcomeEmail({
   churchName,
 }: TeamWelcomeEmailProps) {
   return (
-    <BaseLayout
-      preview={`Welcome to the ${teamName}!`}
-      footerText={churchName}
-    >
+    <BaseLayout preview={`Welcome to the ${teamName}!`} footerText={churchName}>
       <Heading style={heading}>Welcome to the {teamName}!</Heading>
       <Text style={text}>Hi {personName},</Text>
       <Text style={text}>

@@ -11,9 +11,11 @@ interface MeetingCardProps {
 }
 
 const statusColors: Record<MeetingStatus, string> = {
-  planning: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
+  planning:
+    "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
   ready: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
-  in_progress: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
+  in_progress:
+    "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
   completed: "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400",
   cancelled: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
 };
@@ -27,9 +29,12 @@ const statusLabels: Record<MeetingStatus, string> = {
 };
 
 const typeColors: Record<MeetingType, string> = {
-  vision_meeting: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400",
-  orientation: "bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-400",
-  team_meeting: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
+  vision_meeting:
+    "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400",
+  orientation:
+    "bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-400",
+  team_meeting:
+    "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
 };
 
 const typeLabels: Record<MeetingType, string> = {
@@ -50,13 +55,18 @@ function getMeetingTitle(meeting: MeetingWithCounts): string {
 
 function formatMeetingDate(date: Date): string {
   return new Intl.DateTimeFormat("en-US", {
-    weekday: "short", month: "short", day: "numeric", year: "numeric",
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
   }).format(new Date(date));
 }
 
 function formatMeetingTime(date: Date): string {
   return new Intl.DateTimeFormat("en-US", {
-    hour: "numeric", minute: "2-digit", hour12: true,
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
   }).format(new Date(date));
 }
 
@@ -72,12 +82,13 @@ function getDaysUntil(date: Date): string {
 }
 
 export function MeetingCard({ meeting, isPast }: MeetingCardProps) {
-  const locationDisplay = meeting.locationName || meeting.location?.name || "No location set";
+  const locationDisplay =
+    meeting.locationName || meeting.location?.name || "No location set";
   const status = meeting.status as MeetingStatus;
 
   return (
-    <Link href={`/meetings/${meeting.id}`} className="cursor-pointer block">
-      <Card className="hover:border-primary/50 transition-colors h-full">
+    <Link href={`/meetings/${meeting.id}`} className="block cursor-pointer">
+      <Card className="hover:border-primary/50 h-full transition-colors">
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between">
             <div className="space-y-1">
@@ -86,13 +97,16 @@ export function MeetingCard({ meeting, isPast }: MeetingCardProps) {
                   {typeLabels[meeting.type]}
                 </Badge>
                 {meeting.teamName && meeting.type === "team_meeting" && (
-                  <span className="text-xs text-muted-foreground">{meeting.teamName}</span>
+                  <span className="text-muted-foreground text-xs">
+                    {meeting.teamName}
+                  </span>
                 )}
               </div>
-              <p className="text-sm text-muted-foreground">
-                {formatMeetingDate(meeting.datetime)} &bull; {formatMeetingTime(meeting.datetime)}
+              <p className="text-muted-foreground text-sm">
+                {formatMeetingDate(meeting.datetime)} &bull;{" "}
+                {formatMeetingTime(meeting.datetime)}
               </p>
-              <h3 className="font-semibold text-lg leading-tight">
+              <h3 className="text-lg leading-tight font-semibold">
                 {getMeetingTitle(meeting)}
               </h3>
             </div>
@@ -102,28 +116,31 @@ export function MeetingCard({ meeting, isPast }: MeetingCardProps) {
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <div className="text-muted-foreground flex items-center gap-2 text-sm">
             <MapPin className="h-4 w-4 shrink-0" />
             <span className="truncate">{locationDisplay}</span>
           </div>
           {isPast && meeting.actualAttendance != null ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <div className="text-muted-foreground flex items-center gap-2 text-sm">
               <Users className="h-4 w-4 shrink-0" />
               <span>
                 {meeting.actualAttendance} attended
                 {meeting.newAttendees > 0 && (
-                  <span className="text-green-600 dark:text-green-400"> ({meeting.newAttendees} new)</span>
+                  <span className="text-green-600 dark:text-green-400">
+                    {" "}
+                    ({meeting.newAttendees} new)
+                  </span>
                 )}
               </span>
             </div>
           ) : meeting.estimatedAttendance ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <div className="text-muted-foreground flex items-center gap-2 text-sm">
               <Users className="h-4 w-4 shrink-0" />
               <span>~{meeting.estimatedAttendance} estimated</span>
             </div>
           ) : null}
           {!isPast && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <div className="text-muted-foreground flex items-center gap-2 text-sm">
               <CalendarDays className="h-4 w-4 shrink-0" />
               <span>{getDaysUntil(meeting.datetime)}</span>
             </div>

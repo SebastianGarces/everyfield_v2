@@ -8,37 +8,52 @@ interface MeetingHeaderProps {
 }
 
 const statusColors: Record<MeetingStatus, string> = {
-  planning: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
+  planning:
+    "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
   ready: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
-  in_progress: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
+  in_progress:
+    "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
   completed: "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400",
   cancelled: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
 };
 
 const statusLabels: Record<MeetingStatus, string> = {
-  planning: "Planning", ready: "Ready", in_progress: "In Progress",
-  completed: "Completed", cancelled: "Cancelled",
+  planning: "Planning",
+  ready: "Ready",
+  in_progress: "In Progress",
+  completed: "Completed",
+  cancelled: "Cancelled",
 };
 
 const typeColors: Record<MeetingType, string> = {
-  vision_meeting: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400",
-  orientation: "bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-400",
-  team_meeting: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
+  vision_meeting:
+    "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400",
+  orientation:
+    "bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-400",
+  team_meeting:
+    "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
 };
 
 const typeLabels: Record<MeetingType, string> = {
-  vision_meeting: "Vision Meeting", orientation: "Orientation", team_meeting: "Team Meeting",
+  vision_meeting: "Vision Meeting",
+  orientation: "Orientation",
+  team_meeting: "Team Meeting",
 };
 
 function formatMeetingDate(date: Date): string {
   return new Intl.DateTimeFormat("en-US", {
-    weekday: "long", month: "long", day: "numeric", year: "numeric",
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
   }).format(new Date(date));
 }
 
 function formatMeetingTime(date: Date): string {
   return new Intl.DateTimeFormat("en-US", {
-    hour: "numeric", minute: "2-digit", hour12: true,
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
   }).format(new Date(date));
 }
 
@@ -66,26 +81,30 @@ function getMeetingTitle(meeting: MeetingWithCounts): string {
 
 export function MeetingHeader({ meeting }: MeetingHeaderProps) {
   const status = meeting.status as MeetingStatus;
-  const locationDisplay = meeting.locationName || meeting.location?.name || "No location set";
-  const addressDisplay = meeting.locationAddress || meeting.location?.address || "";
+  const locationDisplay =
+    meeting.locationName || meeting.location?.name || "No location set";
+  const addressDisplay =
+    meeting.locationAddress || meeting.location?.address || "";
   const isPast = new Date(meeting.datetime) < new Date();
 
   return (
     <div className="space-y-4 pb-4">
       <div className="flex items-start justify-between">
         <div className="space-y-1">
-          <div className="flex items-center gap-2 mb-1">
+          <div className="mb-1 flex items-center gap-2">
             <Badge className={typeColors[meeting.type]} variant="secondary">
               {typeLabels[meeting.type]}
             </Badge>
             {meeting.teamName && meeting.type === "team_meeting" && (
-              <span className="text-sm text-muted-foreground">{meeting.teamName}</span>
+              <span className="text-muted-foreground text-sm">
+                {meeting.teamName}
+              </span>
             )}
           </div>
           <h1 className="text-2xl font-bold tracking-tight">
             {getMeetingTitle(meeting)}
           </h1>
-          <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
+          <div className="text-muted-foreground flex flex-wrap items-center gap-4 text-sm">
             <span className="flex items-center gap-1.5">
               <CalendarDays className="h-4 w-4" />
               {formatMeetingDate(meeting.datetime)}
@@ -102,7 +121,7 @@ export function MeetingHeader({ meeting }: MeetingHeaderProps) {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-sm font-medium text-muted-foreground">
+          <span className="text-muted-foreground text-sm font-medium">
             {getTimeRelative(meeting.datetime)}
           </span>
           <Badge className={statusColors[status]} variant="secondary">
@@ -114,13 +133,15 @@ export function MeetingHeader({ meeting }: MeetingHeaderProps) {
       {isPast && meeting.actualAttendance != null && (
         <div className="flex gap-6 text-sm">
           <div className="flex items-center gap-1.5">
-            <Users className="h-4 w-4 text-muted-foreground" />
+            <Users className="text-muted-foreground h-4 w-4" />
             <span className="font-medium">{meeting.actualAttendance}</span>
             <span className="text-muted-foreground">attended</span>
           </div>
           {meeting.newAttendees > 0 && (
             <div>
-              <span className="font-medium text-green-600 dark:text-green-400">{meeting.newAttendees}</span>
+              <span className="font-medium text-green-600 dark:text-green-400">
+                {meeting.newAttendees}
+              </span>
               <span className="text-muted-foreground"> new</span>
             </div>
           )}

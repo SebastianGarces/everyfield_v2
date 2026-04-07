@@ -199,9 +199,7 @@ export async function filterChurchesByPrivacy(
     .from(churchPrivacySettings)
     .where(inArray(churchPrivacySettings.churchId, churchIds));
 
-  return allSettings
-    .filter((s) => s[column] === true)
-    .map((s) => s.churchId);
+  return allSettings.filter((s) => s[column] === true).map((s) => s.churchId);
 }
 
 // ============================================================================

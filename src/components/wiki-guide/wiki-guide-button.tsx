@@ -22,9 +22,9 @@ export function WikiGuideButton() {
       variant="default"
       size="lg"
       className={cn(
-        "cursor-pointer fixed z-50 shadow-lg transition-all duration-300 ease-in-out",
-        "bottom-6 right-6",
-        "rounded-full px-4 gap-2",
+        "fixed z-50 cursor-pointer shadow-lg transition-all duration-300 ease-in-out",
+        "right-6 bottom-6",
+        "gap-2 rounded-full px-4",
         // Shift left when panel is open to stay visible
         isOpen && "right-[calc(520px+2rem)] md:right-[calc(520px+2rem)]"
       )}
@@ -32,7 +32,7 @@ export function WikiGuideButton() {
       title={entry?.label ?? "Wiki Guide"}
     >
       <BookOpen className="size-5" />
-      <span className="hidden sm:inline text-sm font-medium">
+      <span className="hidden text-sm font-medium sm:inline">
         {isOpen ? "Close Guide" : "Guide"}
       </span>
     </Button>

@@ -102,10 +102,8 @@ async function getAttendanceCountsForMeetings(
     .select({
       meetingId: meetingAttendance.meetingId,
       total: sql<number>`count(*)::int`,
-      firstTime:
-        sql<number>`count(*) filter (where ${meetingAttendance.attendanceType} = 'first_time')::int`,
-      returning:
-        sql<number>`count(*) filter (where ${meetingAttendance.attendanceType} = 'returning')::int`,
+      firstTime: sql<number>`count(*) filter (where ${meetingAttendance.attendanceType} = 'first_time')::int`,
+      returning: sql<number>`count(*) filter (where ${meetingAttendance.attendanceType} = 'returning')::int`,
     })
     .from(meetingAttendance)
     .where(
@@ -331,7 +329,8 @@ export async function createMeeting(
     churchId,
     createdBy: userId,
     type: data.type,
-    title: data.title ?? (meetingNumber ? `Vision Meeting #${meetingNumber}` : null),
+    title:
+      data.title ?? (meetingNumber ? `Vision Meeting #${meetingNumber}` : null),
     datetime: data.datetime,
     locationId,
     locationName,
@@ -345,10 +344,7 @@ export async function createMeeting(
     agenda: data.agenda ?? null,
   };
 
-  const [meeting] = await db
-    .insert(churchMeetings)
-    .values(values)
-    .returning();
+  const [meeting] = await db.insert(churchMeetings).values(values).returning();
 
   // Auto-populate the materials checklist for vision meetings
   if (data.type === "vision_meeting") {
@@ -356,7 +352,11 @@ export async function createMeeting(
   }
 
   // If it's a training team meeting, emit training scheduled event
-  if (data.type === "team_meeting" && data.meetingSubtype === "training" && data.teamId) {
+  if (
+    data.type === "team_meeting" &&
+    data.meetingSubtype === "training" &&
+    data.teamId
+  ) {
     const members = await db
       .select({ personId: teamMemberships.personId })
       .from(teamMemberships)
@@ -632,7 +632,7 @@ export async function listAttendees(
       email: null,
       phone: null,
     },
-    invitedBy: r.invitedById ? personMap.get(r.invitedById) ?? null : null,
+    invitedBy: r.invitedById ? (personMap.get(r.invitedById) ?? null) : null,
   })) as AttendanceWithPerson[];
 }
 
@@ -646,12 +646,9 @@ export async function getAttendanceSummary(
   const rows = await db
     .select({
       total: sql<number>`count(*)::int`,
-      firstTime:
-        sql<number>`count(*) filter (where ${meetingAttendance.attendanceType} = 'first_time')::int`,
-      returning:
-        sql<number>`count(*) filter (where ${meetingAttendance.attendanceType} = 'returning')::int`,
-      coreGroup:
-        sql<number>`count(*) filter (where ${meetingAttendance.attendanceType} = 'core_group')::int`,
+      firstTime: sql<number>`count(*) filter (where ${meetingAttendance.attendanceType} = 'first_time')::int`,
+      returning: sql<number>`count(*) filter (where ${meetingAttendance.attendanceType} = 'returning')::int`,
+      coreGroup: sql<number>`count(*) filter (where ${meetingAttendance.attendanceType} = 'core_group')::int`,
     })
     .from(meetingAttendance)
     .where(
@@ -741,7 +738,10 @@ export async function finalizeAttendance(
 export async function recordAttendanceBatch(
   churchId: string,
   meetingId: string,
-  attendanceRecords: { personId: string; status: "attended" | "absent" | "excused" }[],
+  attendanceRecords: {
+    personId: string;
+    status: "attended" | "absent" | "excused";
+  }[],
   userId: string
 ): Promise<void> {
   // Verify meeting belongs to church
@@ -766,15 +766,13 @@ export async function recordAttendanceBatch(
         .set({ status: record.status, updatedAt: new Date() })
         .where(eq(meetingAttendance.id, existing[0].id));
     } else {
-      await db
-        .insert(meetingAttendance)
-        .values({
-          churchId,
-          meetingId,
-          personId: record.personId,
-          status: record.status,
-          createdBy: userId,
-        });
+      await db.insert(meetingAttendance).values({
+        churchId,
+        meetingId,
+        personId: record.personId,
+        status: record.status,
+        createdBy: userId,
+      });
     }
   }
 }
@@ -859,7 +857,9 @@ export async function getEvaluation(
 export async function getEvaluationTrend(
   churchId: string,
   limit = 10
-): Promise<{ meetingNumber: number | null; totalScore: number; datetime: Date }[]> {
+): Promise<
+  { meetingNumber: number | null; totalScore: number; datetime: Date }[]
+> {
   const rows = await db
     .select({
       meetingNumber: churchMeetings.meetingNumber,
@@ -876,13 +876,11 @@ export async function getEvaluationTrend(
     .limit(limit);
 
   // Return in chronological order (oldest first)
-  return rows
-    .reverse()
-    .map((r) => ({
-      meetingNumber: r.meetingNumber,
-      totalScore: parseFloat(r.totalScore),
-      datetime: r.datetime,
-    }));
+  return rows.reverse().map((r) => ({
+    meetingNumber: r.meetingNumber,
+    totalScore: parseFloat(r.totalScore),
+    datetime: r.datetime,
+  }));
 }
 
 // ============================================================================

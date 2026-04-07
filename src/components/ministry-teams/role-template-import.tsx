@@ -103,7 +103,7 @@ export function RoleTemplateImport({
               return (
                 <label
                   key={role.key}
-                  className="flex cursor-pointer items-center gap-3 rounded-md border p-2.5 transition-colors hover:bg-accent"
+                  className="hover:bg-accent flex cursor-pointer items-center gap-3 rounded-md border p-2.5 transition-colors"
                 >
                   <Checkbox
                     checked={checked}
@@ -111,7 +111,7 @@ export function RoleTemplateImport({
                   />
                   <span className="text-sm">{role.roleName}</span>
                   {role.isLeadership && (
-                    <span className="text-amber-600 text-xs">(Leadership)</span>
+                    <span className="text-xs text-amber-600">(Leadership)</span>
                   )}
                 </label>
               );

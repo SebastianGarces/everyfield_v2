@@ -32,9 +32,7 @@ export const wikiSections = pgTable(
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
-  (table) => [
-    uniqueIndex("wiki_sections_slug_idx").on(table.slug),
-  ]
+  (table) => [uniqueIndex("wiki_sections_slug_idx").on(table.slug)]
 );
 
 export type WikiSection = typeof wikiSections.$inferSelect;

@@ -175,7 +175,7 @@ export default async function MessageDetailPage({
             {meeting && (
               <Link
                 href={`/meetings/${meeting.id}`}
-                className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border bg-muted/50 px-2.5 py-1 text-xs font-medium text-foreground/70 hover:bg-muted hover:text-foreground transition-colors"
+                className="bg-muted/50 text-foreground/70 hover:bg-muted hover:text-foreground inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors"
               >
                 <Calendar className="h-3.5 w-3.5" />
                 {meeting.title ||
@@ -205,15 +205,11 @@ export default async function MessageDetailPage({
 
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">
-                  Delivered
-                </CardTitle>
+                <CardTitle className="text-sm font-medium">Delivered</CardTitle>
                 <CheckCheck className="text-muted-foreground h-4 w-4" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">
-                  {comm.stats.delivered}
-                </div>
+                <div className="text-2xl font-bold">{comm.stats.delivered}</div>
                 <p className="text-muted-foreground text-xs">
                   {deliveryRate}% delivery rate
                 </p>
@@ -287,10 +283,7 @@ export default async function MessageDetailPage({
                             {r.email}
                           </td>
                           <td className="px-4 py-3 text-center">
-                            <Badge
-                              variant="secondary"
-                              className={config.color}
-                            >
+                            <Badge variant="secondary" className={config.color}>
                               {config.label}
                             </Badge>
                           </td>
@@ -316,7 +309,7 @@ export default async function MessageDetailPage({
             </CardHeader>
             <CardContent>
               <div className="rounded-lg bg-gray-50 p-4">
-                <p className="whitespace-pre-wrap text-sm">{resolvedBody}</p>
+                <p className="text-sm whitespace-pre-wrap">{resolvedBody}</p>
               </div>
             </CardContent>
           </Card>

@@ -113,12 +113,8 @@
           "name": "users_church_id_churches_id_fk",
           "tableFrom": "users",
           "tableTo": "churches",
-          "columnsFrom": [
-            "church_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["church_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -128,9 +124,7 @@
         "users_email_unique": {
           "name": "users_email_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "email"
-          ]
+          "columns": ["email"]
         }
       },
       "policies": {},
@@ -235,12 +229,8 @@
           "name": "sessions_user_id_users_id_fk",
           "tableFrom": "sessions",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -430,12 +420,8 @@
           "name": "wiki_articles_church_id_churches_id_fk",
           "tableFrom": "wiki_articles",
           "tableTo": "churches",
-          "columnsFrom": [
-            "church_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["church_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -443,12 +429,8 @@
           "name": "wiki_articles_section_id_wiki_sections_id_fk",
           "tableFrom": "wiki_articles",
           "tableTo": "wiki_sections",
-          "columnsFrom": [
-            "section_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["section_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -533,12 +515,8 @@
           "name": "wiki_bookmarks_user_id_users_id_fk",
           "tableFrom": "wiki_bookmarks",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -678,12 +656,8 @@
           "name": "wiki_progress_user_id_users_id_fk",
           "tableFrom": "wiki_progress",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -785,12 +759,8 @@
           "name": "wiki_sections_parent_section_id_wiki_sections_id_fk",
           "tableFrom": "wiki_sections",
           "tableTo": "wiki_sections",
-          "columnsFrom": [
-            "parent_section_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["parent_section_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }

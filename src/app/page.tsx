@@ -9,7 +9,7 @@ export default function Home() {
         <p className="mb-6 text-lg text-gray-600">
           Church Planting Management Platform
         </p>
-        <div className="flex gap-3 justify-center">
+        <div className="flex justify-center gap-3">
           <Button asChild>
             <Link href="/login">Login</Link>
           </Button>
@@ -17,7 +17,9 @@ export default function Home() {
             <Link href="/register">Register</Link>
           </Button>
         </div>
-        <p className="mt-6 text-xs text-muted-foreground uppercase tracking-wide">Development preview</p>
+        <p className="text-muted-foreground mt-6 text-xs tracking-wide uppercase">
+          Development preview
+        </p>
       </div>
     </div>
   );

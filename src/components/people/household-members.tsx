@@ -40,7 +40,9 @@ export function HouseholdMembers({
     <>
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
-          <CardTitle className="text-base font-semibold">Family Members</CardTitle>
+          <CardTitle className="text-base font-semibold">
+            Family Members
+          </CardTitle>
           {household && (
             <Button
               variant="ghost"

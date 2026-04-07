@@ -16,7 +16,10 @@ export async function POST(
 
     if (response !== "confirmed" && response !== "declined") {
       return NextResponse.json(
-        { success: false, error: "Invalid response. Must be 'confirmed' or 'declined'." },
+        {
+          success: false,
+          error: "Invalid response. Must be 'confirmed' or 'declined'.",
+        },
         { status: 400 }
       );
     }

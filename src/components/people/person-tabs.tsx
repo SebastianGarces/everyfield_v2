@@ -13,7 +13,12 @@ import Link from "next/link";
 
 interface PersonTabsProps {
   personId: string;
-  activeTab: "overview" | "activity" | "assessments" | "teams" | "communication";
+  activeTab:
+    | "overview"
+    | "activity"
+    | "assessments"
+    | "teams"
+    | "communication";
 }
 
 export function PersonTabs({ personId, activeTab }: PersonTabsProps) {

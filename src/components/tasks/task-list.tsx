@@ -58,22 +58,46 @@ function groupTasksByDueDate(tasks: TaskWithAssignee[]): TaskGroup[] {
   const groups: TaskGroup[] = [];
 
   if (overdue.length > 0) {
-    groups.push({ label: `Overdue (${overdue.length})`, tasks: overdue, variant: "overdue" });
+    groups.push({
+      label: `Overdue (${overdue.length})`,
+      tasks: overdue,
+      variant: "overdue",
+    });
   }
   if (dueToday.length > 0) {
-    groups.push({ label: `Today (${dueToday.length})`, tasks: dueToday, variant: "today" });
+    groups.push({
+      label: `Today (${dueToday.length})`,
+      tasks: dueToday,
+      variant: "today",
+    });
   }
   if (upcoming.length > 0) {
-    groups.push({ label: `This Week (${upcoming.length})`, tasks: upcoming, variant: "upcoming" });
+    groups.push({
+      label: `This Week (${upcoming.length})`,
+      tasks: upcoming,
+      variant: "upcoming",
+    });
   }
   if (later.length > 0) {
-    groups.push({ label: `Later (${later.length})`, tasks: later, variant: "later" });
+    groups.push({
+      label: `Later (${later.length})`,
+      tasks: later,
+      variant: "later",
+    });
   }
   if (noDate.length > 0) {
-    groups.push({ label: `No Due Date (${noDate.length})`, tasks: noDate, variant: "no_date" });
+    groups.push({
+      label: `No Due Date (${noDate.length})`,
+      tasks: noDate,
+      variant: "no_date",
+    });
   }
   if (completed.length > 0) {
-    groups.push({ label: `Completed (${completed.length})`, tasks: completed, variant: "completed" });
+    groups.push({
+      label: `Completed (${completed.length})`,
+      tasks: completed,
+      variant: "completed",
+    });
   }
 
   return groups;
@@ -99,7 +123,12 @@ interface TaskListProps {
   personNotes?: Record<string, string>;
 }
 
-export function TaskList({ tasks, total, nextCursor, personNotes }: TaskListProps) {
+export function TaskList({
+  tasks,
+  total,
+  nextCursor,
+  personNotes,
+}: TaskListProps) {
   if (tasks.length === 0) {
     return (
       <div className="animate-in fade-in-50 flex min-h-[400px] flex-col items-center justify-center rounded-lg border border-dashed p-8 text-center">
@@ -132,7 +161,7 @@ export function TaskList({ tasks, total, nextCursor, personNotes }: TaskListProp
                 task={task}
                 personNote={
                   task.relatedType === "person" && task.relatedId
-                    ? personNotes?.[task.relatedId] ?? null
+                    ? (personNotes?.[task.relatedId] ?? null)
                     : null
                 }
               />

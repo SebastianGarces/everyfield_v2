@@ -113,12 +113,8 @@
           "name": "users_church_id_churches_id_fk",
           "tableFrom": "users",
           "tableTo": "churches",
-          "columnsFrom": [
-            "church_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["church_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -128,9 +124,7 @@
         "users_email_unique": {
           "name": "users_email_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "email"
-          ]
+          "columns": ["email"]
         }
       },
       "policies": {},
@@ -235,12 +229,8 @@
           "name": "sessions_user_id_users_id_fk",
           "tableFrom": "sessions",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -445,12 +435,8 @@
           "name": "wiki_articles_church_id_churches_id_fk",
           "tableFrom": "wiki_articles",
           "tableTo": "churches",
-          "columnsFrom": [
-            "church_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["church_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -458,12 +444,8 @@
           "name": "wiki_articles_section_id_wiki_sections_id_fk",
           "tableFrom": "wiki_articles",
           "tableTo": "wiki_sections",
-          "columnsFrom": [
-            "section_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["section_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -548,12 +530,8 @@
           "name": "wiki_bookmarks_user_id_users_id_fk",
           "tableFrom": "wiki_bookmarks",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -693,12 +671,8 @@
           "name": "wiki_progress_user_id_users_id_fk",
           "tableFrom": "wiki_progress",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -800,12 +774,8 @@
           "name": "wiki_sections_parent_section_id_wiki_sections_id_fk",
           "tableFrom": "wiki_sections",
           "tableTo": "wiki_sections",
-          "columnsFrom": [
-            "parent_section_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["parent_section_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -935,12 +905,8 @@
           "name": "assessments_church_id_churches_id_fk",
           "tableFrom": "assessments",
           "tableTo": "churches",
-          "columnsFrom": [
-            "church_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["church_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -948,12 +914,8 @@
           "name": "assessments_person_id_persons_id_fk",
           "tableFrom": "assessments",
           "tableTo": "persons",
-          "columnsFrom": [
-            "person_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["person_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -961,12 +923,8 @@
           "name": "assessments_assessed_by_users_id_fk",
           "tableFrom": "assessments",
           "tableTo": "users",
-          "columnsFrom": [
-            "assessed_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["assessed_by"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1060,12 +1018,8 @@
           "name": "commitments_church_id_churches_id_fk",
           "tableFrom": "commitments",
           "tableTo": "churches",
-          "columnsFrom": [
-            "church_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["church_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1073,12 +1027,8 @@
           "name": "commitments_person_id_persons_id_fk",
           "tableFrom": "commitments",
           "tableTo": "persons",
-          "columnsFrom": [
-            "person_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["person_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1086,12 +1036,8 @@
           "name": "commitments_witnessed_by_users_id_fk",
           "tableFrom": "commitments",
           "tableTo": "users",
-          "columnsFrom": [
-            "witnessed_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["witnessed_by"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1199,12 +1145,8 @@
           "name": "households_church_id_churches_id_fk",
           "tableFrom": "households",
           "tableTo": "churches",
-          "columnsFrom": [
-            "church_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["church_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1352,12 +1294,8 @@
           "name": "interviews_church_id_churches_id_fk",
           "tableFrom": "interviews",
           "tableTo": "churches",
-          "columnsFrom": [
-            "church_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["church_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1365,12 +1303,8 @@
           "name": "interviews_person_id_persons_id_fk",
           "tableFrom": "interviews",
           "tableTo": "persons",
-          "columnsFrom": [
-            "person_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["person_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1378,12 +1312,8 @@
           "name": "interviews_interviewed_by_users_id_fk",
           "tableFrom": "interviews",
           "tableTo": "users",
-          "columnsFrom": [
-            "interviewed_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["interviewed_by"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1480,12 +1410,8 @@
           "name": "person_activities_church_id_churches_id_fk",
           "tableFrom": "person_activities",
           "tableTo": "churches",
-          "columnsFrom": [
-            "church_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["church_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1493,12 +1419,8 @@
           "name": "person_activities_person_id_persons_id_fk",
           "tableFrom": "person_activities",
           "tableTo": "persons",
-          "columnsFrom": [
-            "person_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["person_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1506,12 +1428,8 @@
           "name": "person_activities_performed_by_users_id_fk",
           "tableFrom": "person_activities",
           "tableTo": "users",
-          "columnsFrom": [
-            "performed_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["performed_by"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1596,12 +1514,8 @@
           "name": "person_tags_church_id_churches_id_fk",
           "tableFrom": "person_tags",
           "tableTo": "churches",
-          "columnsFrom": [
-            "church_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["church_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1609,12 +1523,8 @@
           "name": "person_tags_person_id_persons_id_fk",
           "tableFrom": "person_tags",
           "tableTo": "persons",
-          "columnsFrom": [
-            "person_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["person_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1622,12 +1532,8 @@
           "name": "person_tags_tag_id_tags_id_fk",
           "tableFrom": "person_tags",
           "tableTo": "tags",
-          "columnsFrom": [
-            "tag_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["tag_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1637,10 +1543,7 @@
         "person_tags_person_tag_unique": {
           "name": "person_tags_person_tag_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "person_id",
-            "tag_id"
-          ]
+          "columns": ["person_id", "tag_id"]
         }
       },
       "policies": {},
@@ -1877,12 +1780,8 @@
           "name": "persons_church_id_churches_id_fk",
           "tableFrom": "persons",
           "tableTo": "churches",
-          "columnsFrom": [
-            "church_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["church_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1890,12 +1789,8 @@
           "name": "persons_household_id_households_id_fk",
           "tableFrom": "persons",
           "tableTo": "households",
-          "columnsFrom": [
-            "household_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["household_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1903,12 +1798,8 @@
           "name": "persons_created_by_users_id_fk",
           "tableFrom": "persons",
           "tableTo": "users",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["created_by"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1996,12 +1887,8 @@
           "name": "skills_inventory_church_id_churches_id_fk",
           "tableFrom": "skills_inventory",
           "tableTo": "churches",
-          "columnsFrom": [
-            "church_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["church_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -2009,12 +1896,8 @@
           "name": "skills_inventory_person_id_persons_id_fk",
           "tableFrom": "skills_inventory",
           "tableTo": "persons",
-          "columnsFrom": [
-            "person_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["person_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2084,12 +1967,8 @@
           "name": "tags_church_id_churches_id_fk",
           "tableFrom": "tags",
           "tableTo": "churches",
-          "columnsFrom": [
-            "church_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["church_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }

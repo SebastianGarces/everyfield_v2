@@ -66,7 +66,7 @@ export default async function DashboardPage({
           <h1 className="text-3xl font-bold tracking-tight">
             {church?.name ?? "Dashboard"}
           </h1>
-          <p className="mt-1 text-muted-foreground">{phaseLabel}</p>
+          <p className="text-muted-foreground mt-1">{phaseLabel}</p>
         </div>
 
         {/* Metric Cards */}

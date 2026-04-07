@@ -75,7 +75,7 @@ export function InitializeTeamsButton() {
               return (
                 <label
                   key={key}
-                  className="flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors hover:bg-accent"
+                  className="hover:bg-accent flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors"
                 >
                   <Checkbox
                     checked={checked}
@@ -83,7 +83,7 @@ export function InitializeTeamsButton() {
                     className="mt-0.5"
                   />
                   <div className="flex-1 space-y-0.5">
-                    <div className="text-sm font-medium leading-none">
+                    <div className="text-sm leading-none font-medium">
                       {template.teamName}
                     </div>
                     <div className="text-muted-foreground text-xs">

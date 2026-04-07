@@ -9,7 +9,10 @@ import {
   useState,
 } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
-import { resolveGuideEntry, type WikiGuideEntry } from "@/lib/wiki/guide-config";
+import {
+  resolveGuideEntry,
+  type WikiGuideEntry,
+} from "@/lib/wiki/guide-config";
 
 export type WikiGuideArticle = {
   slug: string;
@@ -106,9 +109,7 @@ export function WikiGuideProvider({ children }: { children: React.ReactNode }) {
       .then((res) => {
         if (!res.ok) {
           throw new Error(
-            res.status === 404
-              ? "Article not found"
-              : "Failed to load article"
+            res.status === 404 ? "Article not found" : "Failed to load article"
           );
         }
         return res.json();
@@ -149,7 +150,18 @@ export function WikiGuideProvider({ children }: { children: React.ReactNode }) {
       isLoading,
       error,
     }),
-    [isAvailable, entry, isOpen, toggle, close, open, activeSlug, article, isLoading, error]
+    [
+      isAvailable,
+      entry,
+      isOpen,
+      toggle,
+      close,
+      open,
+      activeSlug,
+      article,
+      isLoading,
+      error,
+    ]
   );
 
   return (

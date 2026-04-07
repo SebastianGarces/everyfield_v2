@@ -1,10 +1,5 @@
 import { db } from "@/db";
-import {
-  churchMeetings,
-  personActivities,
-  persons,
-  tasks,
-} from "@/db/schema";
+import { churchMeetings, personActivities, persons, tasks } from "@/db/schema";
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { getTaskCounts } from "@/lib/tasks/service";
 
@@ -63,9 +58,7 @@ export async function getDashboardMetrics(
       db
         .select({ count: sql<number>`count(*)::int` })
         .from(persons)
-        .where(
-          and(eq(persons.churchId, churchId), isNull(persons.deletedAt))
-        ),
+        .where(and(eq(persons.churchId, churchId), isNull(persons.deletedAt))),
 
       // Overdue Tasks (existing function)
       getTaskCounts(churchId, userId),
@@ -188,7 +181,7 @@ export async function getRecentActivity(
     const label =
       meeting.type === "vision_meeting"
         ? `Vision Meeting #${meeting.meetingNumber ?? "?"}`
-        : meeting.title ?? formatMeetingType(meeting.type);
+        : (meeting.title ?? formatMeetingType(meeting.type));
     const attendance = meeting.actualAttendance;
     const description = attendance
       ? `${label} completed with ${attendance} attendees`

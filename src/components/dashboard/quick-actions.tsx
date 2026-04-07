@@ -19,7 +19,8 @@ const ACTIONS = [
     label: "View Tasks",
     href: "/tasks",
     icon: ListChecks,
-    color: "text-amber-600 bg-amber-100 dark:bg-amber-900/30 dark:text-amber-400",
+    color:
+      "text-amber-600 bg-amber-100 dark:bg-amber-900/30 dark:text-amber-400",
   },
   {
     label: "View Pipeline",
@@ -32,14 +33,14 @@ const ACTIONS = [
 
 export function QuickActions() {
   return (
-    <div className="rounded-xl border bg-card p-6 shadow-sm">
+    <div className="bg-card rounded-xl border p-6 shadow-sm">
       <h2 className="text-lg font-semibold">Quick Actions</h2>
       <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
         {ACTIONS.map((action) => (
           <Link
             key={action.href}
             href={action.href}
-            className="flex cursor-pointer flex-col items-center gap-2 rounded-lg border bg-background p-4 text-center transition-all hover:border-foreground/15 hover:shadow-sm"
+            className="bg-background hover:border-foreground/15 flex cursor-pointer flex-col items-center gap-2 rounded-lg border p-4 text-center transition-all hover:shadow-sm"
           >
             <div
               className={`flex h-10 w-10 items-center justify-center rounded-full ${action.color}`}

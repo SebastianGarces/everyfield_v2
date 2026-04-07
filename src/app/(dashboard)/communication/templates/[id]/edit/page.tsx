@@ -10,7 +10,9 @@ interface EditTemplatePageProps {
   params: Promise<{ id: string }>;
 }
 
-export default async function EditTemplatePage({ params }: EditTemplatePageProps) {
+export default async function EditTemplatePage({
+  params,
+}: EditTemplatePageProps) {
   const { user } = await verifySession();
   if (!user.churchId) redirect("/dashboard");
 

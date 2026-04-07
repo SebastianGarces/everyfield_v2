@@ -26,10 +26,7 @@ export async function GET(request: NextRequest) {
 
     const article = await getArticle(slug);
     if (!article) {
-      return NextResponse.json(
-        { error: "Article not found" },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "Article not found" }, { status: 404 });
     }
 
     return NextResponse.json({
