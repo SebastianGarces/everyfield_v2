@@ -1,12 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { Resend } from "resend";
 import { db } from "@/db";
+import { resend } from "@/lib/email/client";
 import { communicationRecipients } from "@/db/schema/communication";
 import type { RecipientStatus } from "@/db/schema/communication";
-
-// Initialize Resend client for webhook verification
-const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Status progression order (we only advance forward, never backward)
 const statusOrder: RecipientStatus[] = [

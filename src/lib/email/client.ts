@@ -1,8 +1,24 @@
 import { Resend } from "resend";
 
-// Initialize Resend client
-// RESEND_API_KEY must be set in environment variables
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Lazy-initialized Resend client. Defers `new Resend(...)` until first
+// property access so that Next.js's build-time page-data collection (which
+// has no RESEND_API_KEY) does not crash on module evaluation.
+let cachedResend: Resend | undefined;
+
+function initResend(): Resend {
+  if (!cachedResend) {
+    cachedResend = new Resend(process.env.RESEND_API_KEY);
+  }
+  return cachedResend;
+}
+
+const resend = new Proxy({} as Resend, {
+  get(_target, prop) {
+    const real = initResend();
+    const value = Reflect.get(real, prop, real);
+    return typeof value === "function" ? value.bind(real) : value;
+  },
+});
 
 export { resend };
 

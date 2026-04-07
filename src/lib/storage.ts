@@ -10,16 +10,28 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 // Configuration
 // ============================================================================
 
-const BUCKET_NAME = process.env.AWS_BUCKET_NAME!;
+// Lazy-initialized S3 client. Defers `new S3Client({...})` and the
+// AWS_* env-var reads until first use, so Next.js's build-time page-data
+// collection (which has no AWS credentials) does not crash on module load.
+let cachedS3: S3Client | undefined;
 
-const s3Client = new S3Client({
-  region: process.env.AWS_REGION!,
-  endpoint: process.env.AWS_ENDPOINT_URL_S3!,
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-  },
-});
+function getS3Client(): S3Client {
+  if (!cachedS3) {
+    cachedS3 = new S3Client({
+      region: process.env.AWS_REGION!,
+      endpoint: process.env.AWS_ENDPOINT_URL_S3!,
+      credentials: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+      },
+    });
+  }
+  return cachedS3;
+}
+
+function getBucketName(): string {
+  return process.env.AWS_BUCKET_NAME!;
+}
 
 // ============================================================================
 // File Upload
@@ -38,13 +50,13 @@ export async function uploadFile(
   contentType: string
 ): Promise<string> {
   const command = new PutObjectCommand({
-    Bucket: BUCKET_NAME,
+    Bucket: getBucketName(),
     Key: key,
     Body: body,
     ContentType: contentType,
   });
 
-  await s3Client.send(command);
+  await getS3Client().send(command);
   return key;
 }
 
@@ -58,11 +70,11 @@ export async function uploadFile(
  */
 export async function deleteFile(key: string): Promise<void> {
   const command = new DeleteObjectCommand({
-    Bucket: BUCKET_NAME,
+    Bucket: getBucketName(),
     Key: key,
   });
 
-  await s3Client.send(command);
+  await getS3Client().send(command);
 }
 
 // ============================================================================
@@ -84,12 +96,12 @@ export async function getSignedDownloadUrl(
   expiresInSeconds: number = 3600
 ): Promise<string> {
   const command = new GetObjectCommand({
-    Bucket: BUCKET_NAME,
+    Bucket: getBucketName(),
     Key: key,
     ResponseContentDisposition: `attachment; filename="${encodeURIComponent(filename)}"`,
   });
 
-  const signedUrl = await getSignedUrl(s3Client, command, {
+  const signedUrl = await getSignedUrl(getS3Client(), command, {
     expiresIn: expiresInSeconds,
   });
 
