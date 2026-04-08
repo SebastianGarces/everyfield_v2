@@ -3,6 +3,7 @@ import { registerCrudResource } from "@/api/crud";
 import { sessionMiddleware } from "@/api/middleware/session";
 import { meetingsResource } from "@/api/resources/meetings";
 import { aiPlannerRoute } from "@/api/routes/ai-planner";
+import { assistantRoute } from "@/api/routes/assistant";
 import type { AppBindings } from "@/api/types";
 import { churches } from "@/db/schema/church";
 import { persons } from "@/db/schema/people";
@@ -14,6 +15,7 @@ export const app = new OpenAPIHono<AppBindings>().basePath("/api/v1");
 
 app.use("*", sessionMiddleware);
 app.route("/ai", aiPlannerRoute);
+app.route("/assistant", assistantRoute);
 
 registerCrudResource(app, "churches", churches);
 registerCrudResource(app, "people", persons);

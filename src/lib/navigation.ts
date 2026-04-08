@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   ListChecks,
   MessageSquare,
+  Sparkles,
   Network,
   PiggyBank,
   Settings,
@@ -34,6 +35,12 @@ export const mainNavItems: NavItem[] = [
     title: "Dashboard",
     href: "/dashboard",
     icon: LayoutDashboard,
+  },
+  {
+    title: "AI Assistant",
+    href: "/assistant",
+    icon: Sparkles,
+    requiresChurch: true,
   },
   {
     title: "Wiki",

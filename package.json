@@ -11,6 +11,7 @@
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
     "test:ai-planner": "node --import tsx --test src/lib/ai/vision-meeting-planner.test.ts",
+    "test:assistant": "DOTENV_CONFIG_PATH=.env.local node --import dotenv/config --import tsx --test src/lib/assistant/*.test.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
