@@ -11,6 +11,7 @@ import { MetricCard } from "@/components/dashboard/metric-card";
 import { ActivityFeed } from "@/components/dashboard/activity-feed";
 import { QuickActions } from "@/components/dashboard/quick-actions";
 import { AlertCircle, CalendarCheck, Users, UsersRound } from "lucide-react";
+import { AskWidget } from "@/components/sidecar/ask-widget";
 
 export const dynamic = "force-dynamic";
 
@@ -103,6 +104,9 @@ export default async function DashboardPage({
             description="Completed vision meetings"
           />
         </div>
+
+        {/* AI Sidecar */}
+        <AskWidget />
 
         {/* Activity Feed + Quick Actions */}
         <div className="grid gap-6 lg:grid-cols-3">
