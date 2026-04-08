@@ -43,6 +43,7 @@ export function AssistantShell({
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
+  const [isCreatingMeeting, setIsCreatingMeeting] = useState(false);
   const [isCreatingConversation, setIsCreatingConversation] = useState(false);
   const [isClearingHistory, setIsClearingHistory] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
@@ -177,6 +178,44 @@ export function AssistantShell({
     }
   }
 
+  async function handleCreateMeeting() {
+    if (isCreatingMeeting) {
+      return;
+    }
+
+    setError(null);
+    setIsCreatingMeeting(true);
+
+    try {
+      const response = await fetch(
+        `/api/v1/assistant/threads/${initialDetail.thread.id}/actions/create-meeting`,
+        {
+          method: "POST",
+        }
+      );
+
+      const data = (await response.json()) as
+        | AssistantThreadDetail
+        | { error?: string };
+
+      if (!response.ok || !("thread" in data)) {
+        setError(
+          "error" in data
+            ? (data.error ?? "Failed to create meeting")
+            : "Failed to create meeting"
+        );
+        return;
+      }
+
+      setMessages(data.messages);
+      setArtifacts(data.artifacts);
+    } catch {
+      setError("Failed to create meeting");
+    } finally {
+      setIsCreatingMeeting(false);
+    }
+  }
+
   return (
     <>
       <div className="flex min-h-[calc(100vh-10rem)] flex-col gap-4">
@@ -271,7 +310,11 @@ export function AssistantShell({
 
           {hasArtifacts ? (
             <aside className="min-h-[calc(100vh-15rem)]">
-              <AssistantWorkspacePane artifacts={artifacts} />
+              <AssistantWorkspacePane
+                artifacts={artifacts}
+                isCreatingMeeting={isCreatingMeeting}
+                onCreateMeeting={handleCreateMeeting}
+              />
             </aside>
           ) : null}
         </div>

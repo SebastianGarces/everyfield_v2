@@ -4,6 +4,7 @@ import type {
   AssistantMessageRole,
   AssistantThreadStatus,
 } from "@/db/schema/assistant";
+import type { MeetingDraftArtifactPayload } from "./meeting-draft";
 
 export type AssistantThreadSummary = {
   id: string;
@@ -47,4 +48,6 @@ export type AssistantMessageMetadata = {
   actions?: AssistantMessageAction[];
 } & Record<string, unknown>;
 
-export type AssistantArtifactPayload = Record<string, unknown>;
+export type AssistantArtifactPayload =
+  | MeetingDraftArtifactPayload
+  | Record<string, unknown>;

@@ -2,14 +2,16 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import type { AppBindings } from "@/api/types";
 import { getSessionContext } from "@/api/middleware/session";
 import {
-  appendAssistantMessage,
   clearAssistantHistory,
-  createPlaceholderAssistantReply,
   createAssistantThread,
   getAssistantThread,
   listAssistantHistory,
   listAssistantThreads,
 } from "@/lib/assistant/service";
+import {
+  createMeetingFromAssistantThread,
+  handleAssistantConversationTurn,
+} from "@/lib/assistant/meeting-orchestrator";
 
 const assistantThreadSchema = z.object({
   id: z.string().uuid(),
@@ -366,6 +368,14 @@ assistantRoute.openapi(
           },
         },
       },
+      409: {
+        description: "Thread state conflict",
+        content: {
+          "application/json": {
+            schema: errorSchema,
+          },
+        },
+      },
     },
   }),
   async (c) => {
@@ -392,29 +402,12 @@ assistantRoute.openapi(
     const { threadId } = c.req.valid("param");
 
     try {
-      await appendAssistantMessage({
+      const thread = await handleAssistantConversationTurn({
         churchId: sessionContext.churchId,
         userId: sessionContext.user.id,
         threadId,
-        role: "user",
         content: parsedBody.data.content,
       });
-
-      await createPlaceholderAssistantReply(
-        sessionContext.churchId,
-        sessionContext.user.id,
-        threadId
-      );
-
-      const thread = await getAssistantThread(
-        sessionContext.churchId,
-        sessionContext.user.id,
-        threadId
-      );
-
-      if (!thread) {
-        return c.json({ error: "Assistant thread not found" }, 404);
-      }
 
       return c.json(thread, 200);
     } catch (error) {
@@ -424,6 +417,98 @@ assistantRoute.openapi(
           error.message === "Assistant thread is archived")
       ) {
         return c.json({ error: error.message }, 404);
+      }
+
+      throw error;
+    }
+  }
+);
+
+assistantRoute.openapi(
+  createRoute({
+    method: "post",
+    path: "/threads/{threadId}/actions/create-meeting",
+    request: {
+      params: z.object({
+        threadId: z.string().uuid(),
+      }),
+    },
+    responses: {
+      200: {
+        description: "Meeting created and assistant thread updated",
+        content: {
+          "application/json": {
+            schema: assistantThreadDetailSchema,
+          },
+        },
+      },
+      401: {
+        description: "Unauthorized",
+        content: {
+          "application/json": {
+            schema: errorSchema,
+          },
+        },
+      },
+      404: {
+        description: "Thread not found",
+        content: {
+          "application/json": {
+            schema: errorSchema,
+          },
+        },
+      },
+      409: {
+        description: "Meeting draft conflict",
+        content: {
+          "application/json": {
+            schema: errorSchema,
+          },
+        },
+      },
+    },
+  }),
+  async (c) => {
+    const sessionContext = getSessionContext(c);
+
+    if (!sessionContext) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const { threadId } = c.req.valid("param");
+
+    try {
+      const thread = await createMeetingFromAssistantThread({
+        churchId: sessionContext.churchId,
+        userId: sessionContext.user.id,
+        threadId,
+      });
+
+      return c.json(thread, 200);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        (error.message === "Assistant thread not found" ||
+          error.message === "Assistant thread is archived")
+      ) {
+        return c.json({ error: error.message }, 404);
+      }
+
+      if (
+        error instanceof Error &&
+        (error.message === "No meeting draft found" ||
+          error.message === "Meeting has already been created" ||
+          error.message === "Meeting draft is not ready to create")
+      ) {
+        return c.json({ error: error.message }, 409);
+      }
+
+      if (
+        error instanceof Error &&
+        (error.message === "Location not found" ||
+          error.message === "Team not found")
+      ) {
+        return c.json({ error: error.message }, 409);
       }
 
       throw error;
