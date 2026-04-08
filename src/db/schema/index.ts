@@ -13,3 +13,4 @@ export * from "./meetings";
 export * from "./communication";
 export * from "./tasks";
 export * from "./feedback";
+export * from "./assistant";
