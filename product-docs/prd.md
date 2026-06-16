@@ -9,7 +9,7 @@
 
 This document serves as an index to the EveryField requirements documentation system. Requirements are organized following a **context-sharded** approach optimized for AI-assisted development.
 
-For documentation rules and structure, see [Requirements Documentation Rules](../.cursor/requirements-docs.md).
+For documentation rules and structure, see [Requirements Documentation Rules](../.claude/skills/requirements-docs/SKILL.md).
 
 ---
 

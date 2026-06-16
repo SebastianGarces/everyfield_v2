@@ -76,7 +76,7 @@ Memory is updated when changes affect:
 - **Contracts** - Schema, API, or config changes
 - **Invariants** - Security, tenancy, or auth rules
 
-See the WIP skill (`.cursor/skills/work-in-progress/SKILL.md`) for memory maintenance workflow during feature implementation.
+See the WIP skill (`.claude/skills/work-in-progress/SKILL.md`) for memory maintenance workflow during feature implementation.
 
 ## Size Budget
 
