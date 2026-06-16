@@ -37,34 +37,11 @@ import type {
   MeetingWithCounts,
 } from "./types";
 import { emitTrainingScheduled } from "@/lib/ministry-teams/events";
+import { deriveAttendanceType } from "./attendance-type";
 
 // ============================================================================
 // Internal Helpers
 // ============================================================================
-
-/**
- * Verify that a meeting belongs to the specified church.
- * Throws if the meeting doesn't exist or belongs to a different church.
- */
-async function verifyMeetingOwnership(
-  churchId: string,
-  meetingId: string
-): Promise<void> {
-  const [meeting] = await db
-    .select({ id: churchMeetings.id })
-    .from(churchMeetings)
-    .where(
-      and(
-        eq(churchMeetings.id, meetingId),
-        eq(churchMeetings.churchId, churchId)
-      )
-    )
-    .limit(1);
-
-  if (!meeting) {
-    throw new Error("Meeting not found");
-  }
-}
 
 /**
  * Get the next vision meeting number for a church.
@@ -538,8 +515,35 @@ export async function addAttendee(
   meetingId: string,
   data: AttendanceCreateInput
 ) {
-  // Verify meeting belongs to church
-  await verifyMeetingOwnership(churchId, meetingId);
+  // Verify meeting belongs to church and grab its datetime for type derivation
+  const [meeting] = await db
+    .select({ id: churchMeetings.id, datetime: churchMeetings.datetime })
+    .from(churchMeetings)
+    .where(
+      and(
+        eq(churchMeetings.id, meetingId),
+        eq(churchMeetings.churchId, churchId)
+      )
+    )
+    .limit(1);
+
+  if (!meeting) {
+    throw new Error("Meeting not found");
+  }
+
+  const status = data.status ?? "attended";
+
+  // When the row is created as attended, ensure attendance_type is populated
+  // (analytics read it). Honor an explicit type if one was provided.
+  let attendanceType = data.attendanceType ?? null;
+  if (status === "attended" && !attendanceType) {
+    attendanceType = await deriveAttendanceType(
+      data.personId,
+      meetingId,
+      meeting.datetime,
+      db
+    );
+  }
 
   const [record] = await db
     .insert(meetingAttendance)
@@ -547,8 +551,8 @@ export async function addAttendee(
       churchId,
       meetingId,
       personId: data.personId,
-      attendanceType: data.attendanceType ?? null,
-      status: data.status ?? "attended",
+      attendanceType,
+      status,
       invitedById: data.invitedById ?? null,
       responseStatus: data.responseStatus ?? null,
       notes: data.notes ?? null,
@@ -742,10 +746,34 @@ export async function recordAttendanceBatch(
   }[],
   userId: string
 ): Promise<void> {
-  // Verify meeting belongs to church
-  await verifyMeetingOwnership(churchId, meetingId);
+  // Verify meeting belongs to church and grab its datetime for type derivation
+  const [meeting] = await db
+    .select({ id: churchMeetings.id, datetime: churchMeetings.datetime })
+    .from(churchMeetings)
+    .where(
+      and(
+        eq(churchMeetings.id, meetingId),
+        eq(churchMeetings.churchId, churchId)
+      )
+    )
+    .limit(1);
+
+  if (!meeting) {
+    throw new Error("Meeting not found");
+  }
 
   for (const record of attendanceRecords) {
+    // Derive attendance_type only when marking attended; clear otherwise.
+    const attendanceType =
+      record.status === "attended"
+        ? await deriveAttendanceType(
+            record.personId,
+            meetingId,
+            meeting.datetime,
+            db
+          )
+        : null;
+
     const existing = await db
       .select()
       .from(meetingAttendance)
@@ -761,7 +789,7 @@ export async function recordAttendanceBatch(
     if (existing.length > 0) {
       await db
         .update(meetingAttendance)
-        .set({ status: record.status, updatedAt: new Date() })
+        .set({ status: record.status, attendanceType, updatedAt: new Date() })
         .where(eq(meetingAttendance.id, existing[0].id));
     } else {
       await db.insert(meetingAttendance).values({
@@ -769,6 +797,7 @@ export async function recordAttendanceBatch(
         meetingId,
         personId: record.personId,
         status: record.status,
+        attendanceType,
         createdBy: userId,
       });
     }

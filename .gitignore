@@ -56,3 +56,6 @@ scratchpad/
 working-feature
 # next-agents-md
 .next-docs/
+
+# Sentry Config File
+.env.sentry-build-plugin

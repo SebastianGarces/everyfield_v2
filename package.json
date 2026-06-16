@@ -49,6 +49,7 @@
     "@radix-ui/react-tabs": "^1.1.13",
     "@radix-ui/react-tooltip": "^1.2.8",
     "@react-email/components": "^1.0.7",
+    "@sentry/nextjs": "^10.57.0",
     "@tailwindcss/postcss": "^4.1.18",
     "canvas-confetti": "^1.9.4",
     "class-variance-authority": "^0.7.1",

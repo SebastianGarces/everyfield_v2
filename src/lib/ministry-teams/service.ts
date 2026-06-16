@@ -52,6 +52,7 @@ export interface TeamDetail extends MinistryTeam {
   leaderName: string | null;
   roles: (TeamRole & {
     assignedPerson: {
+      membershipId: string;
       id: string;
       firstName: string;
       lastName: string;
@@ -233,9 +234,13 @@ export async function getTeam(
   // Map roles with assigned persons
   const rolesWithMembers = roles.map((role) => {
     const membership = memberships.find((m) => m.roleId === role.id);
-    const assignedPerson = membership
+    const person = membership
       ? (personMap.get(membership.personId) ?? null)
       : null;
+    const assignedPerson =
+      membership && person
+        ? { membershipId: membership.id, ...person }
+        : null;
     return { ...role, assignedPerson };
   });
 
@@ -640,8 +645,12 @@ export async function assignMember(
 
   if (!role) throw new Error("Role not found in this team");
 
-  // Check for duplicate active assignment
-  const existing = await db
+  // Look for any existing membership row for this (team, person, role).
+  // A row may linger after removeMember sets status='inactive' (the partial
+  // unique index only constrains active rows). If an active row exists this is
+  // a true duplicate; if an inactive row exists we reactivate it instead of
+  // inserting a duplicate (F8 re-assignment fix).
+  const [existing] = await db
     .select()
     .from(teamMemberships)
     .where(
@@ -649,28 +658,50 @@ export async function assignMember(
         eq(teamMemberships.churchId, churchId),
         eq(teamMemberships.teamId, teamId),
         eq(teamMemberships.roleId, roleId),
-        eq(teamMemberships.personId, personId),
-        eq(teamMemberships.status, "active")
+        eq(teamMemberships.personId, personId)
       )
     )
+    .orderBy(desc(teamMemberships.createdAt))
     .limit(1);
 
-  if (existing.length > 0) {
+  if (existing && existing.status === "active") {
     throw new Error("Person is already assigned to this role");
   }
 
-  const [membership] = await db
-    .insert(teamMemberships)
-    .values({
-      churchId,
-      teamId,
-      personId,
-      roleId,
-      startDate: startDate ?? null,
-      status: "active" as MembershipStatus,
-      createdBy: userId,
-    } satisfies NewTeamMembership)
-    .returning();
+  let membership: TeamMembership;
+  if (existing) {
+    // Reactivate the inactive row: fresh startDate, cleared end fields.
+    const [reactivated] = await db
+      .update(teamMemberships)
+      .set({
+        status: "active" as MembershipStatus,
+        startDate: startDate ?? null,
+        endDate: null,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(teamMemberships.churchId, churchId),
+          eq(teamMemberships.id, existing.id)
+        )
+      )
+      .returning();
+    membership = reactivated;
+  } else {
+    const [inserted] = await db
+      .insert(teamMemberships)
+      .values({
+        churchId,
+        teamId,
+        personId,
+        roleId,
+        startDate: startDate ?? null,
+        status: "active" as MembershipStatus,
+        createdBy: userId,
+      } satisfies NewTeamMembership)
+      .returning();
+    membership = inserted;
+  }
 
   // Mark role as filled
   await db

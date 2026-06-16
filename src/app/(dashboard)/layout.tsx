@@ -6,6 +6,7 @@ import { DashboardHeader, HeaderProvider } from "@/components/header";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { WikiGuide } from "@/components/wiki-guide";
 import { getCurrentSession } from "@/lib/auth";
+import { isPlatformAdmin } from "@/lib/auth/admin";
 
 function getInitials(name: string | null, email: string): string {
   if (name) {
@@ -50,9 +51,15 @@ export default async function DashboardLayout({
   const isOversightUser =
     user.role === "sending_church_admin" || user.role === "network_admin";
 
+  const userIsPlatformAdmin = isPlatformAdmin(user);
+
   return (
     <SidebarProvider defaultOpen={defaultOpen}>
-      <AppSidebar user={sidebarUser} hasChurch={!!user.churchId} />
+      <AppSidebar
+        user={sidebarUser}
+        hasChurch={!!user.churchId}
+        isPlatformAdmin={userIsPlatformAdmin}
+      />
       <SidebarInset className="flex h-screen flex-col overflow-hidden">
         <HeaderProvider>
           <DashboardHeader />

@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
   date,
@@ -7,6 +8,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
@@ -169,11 +171,11 @@ export const teamMemberships = pgTable(
     index("team_memberships_team_id_idx").on(table.teamId),
     index("team_memberships_person_id_idx").on(table.personId),
     index("team_memberships_role_id_idx").on(table.roleId),
-    unique("team_memberships_active_unique").on(
-      table.teamId,
-      table.personId,
-      table.roleId
-    ),
+    // Partial unique: only ACTIVE memberships are constrained, so a person can
+    // be re-assigned to the same team/role after being set inactive (F8 fix).
+    uniqueIndex("team_memberships_active_unique")
+      .on(table.teamId, table.personId, table.roleId)
+      .where(sql`status = 'active'`),
   ]
 );
 

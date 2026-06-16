@@ -10,6 +10,7 @@ import type { TeamDetail } from "@/lib/ministry-teams/service";
 import type { Person } from "@/db/schema";
 import { RoleFormDialog } from "./role-form-dialog";
 import { MemberAssignDialog } from "./member-assign-dialog";
+import { MemberRemoveButton } from "./member-remove-button";
 import { RoleTemplateImport } from "./role-template-import";
 
 interface MembersRolesTabProps {
@@ -115,6 +116,11 @@ export function MembersRolesTab({ team, people }: MembersRolesTabProps) {
                     >
                       Filled
                     </Badge>
+                    <MemberRemoveButton
+                      membershipId={role.assignedPerson.membershipId}
+                      personName={`${role.assignedPerson.firstName} ${role.assignedPerson.lastName}`}
+                      roleName={role.name}
+                    />
                   </div>
                 ) : (
                   <div className="flex items-center gap-2">

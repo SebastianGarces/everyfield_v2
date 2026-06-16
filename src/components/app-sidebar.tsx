@@ -1,7 +1,8 @@
 "use client";
 
-import { Sprout } from "lucide-react";
+import { MessageSquare, Sprout } from "lucide-react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import * as React from "react";
 
 import { FeedbackButton } from "@/components/feedback/feedback-button";
@@ -11,10 +12,12 @@ import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
-  SidebarHeader,
+  SidebarGroup,
+  SidebarGroupLabel,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarHeader,
   SidebarRail,
 } from "@/components/ui/sidebar";
 import type { UserRole } from "@/db/schema/user";
@@ -32,6 +35,8 @@ type AppSidebarProps = React.ComponentProps<typeof Sidebar> & {
     role: UserRole;
   };
   hasChurch: boolean;
+  /** Server-decided: whether the current user is a platform admin. */
+  isPlatformAdmin?: boolean;
 };
 
 function getNavConfig(role: UserRole) {
@@ -60,8 +65,15 @@ function getNavConfig(role: UserRole) {
   }
 }
 
-export function AppSidebar({ user, hasChurch, ...props }: AppSidebarProps) {
+export function AppSidebar({
+  user,
+  hasChurch,
+  isPlatformAdmin = false,
+  ...props
+}: AppSidebarProps) {
   const navConfig = getNavConfig(user.role);
+  const pathname = usePathname();
+  const adminActive = pathname.startsWith("/admin");
 
   return (
     <Sidebar collapsible="icon" {...props}>
@@ -88,6 +100,27 @@ export function AppSidebar({ user, hasChurch, ...props }: AppSidebarProps) {
           label={navConfig.label}
           hasChurch={hasChurch}
         />
+        {/* Admin group is rendered only when the server marks the user as a
+            platform admin — invisible to everyone else. */}
+        {isPlatformAdmin && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Admin</SidebarGroupLabel>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  tooltip="Feedback"
+                  isActive={adminActive}
+                >
+                  <Link href="/admin/feedback" className="cursor-pointer">
+                    <MessageSquare />
+                    <span>Feedback</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroup>
+        )}
       </SidebarContent>
       <SidebarFooter>
         <FeedbackButton />

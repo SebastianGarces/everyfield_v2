@@ -14,10 +14,22 @@ import {
   hashPassword,
   setSessionCookie,
 } from "@/lib/auth";
+import {
+  checkRateLimit,
+  getRequestIp,
+  recordAttempt,
+} from "@/lib/auth/rate-limit";
 import { extractFieldErrors, registerSchema } from "@/lib/validations";
 import type { AccountType } from "@/lib/validations/auth";
 import { eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
+import {
+  BETA_GATE_ERROR,
+  BETA_GATE_INVALID_ERROR,
+  hasValidInvitationBypass,
+  isBetaCodeValid,
+  isBetaGateEnabled,
+} from "./beta-gate";
 
 export type RegisterState = {
   error?: string;
@@ -50,15 +62,46 @@ export async function register(
   }
 
   const { email, password, name, accountType, organizationName } = result.data;
+  const identifier = email.toLowerCase();
+  const ip = await getRequestIp();
+
+  // Rate-limit check BEFORE any account lookup/creation. Limited by IP.
+  // Generic message avoids leaking whether the account exists.
+  const { limited } = await checkRateLimit(identifier, ip, "register");
+  if (limited) {
+    return { error: "Too many attempts. Please try again later." };
+  }
+
+  // Private-beta gate (server-side enforced). Skipped entirely when the env
+  // var is unset/empty. Org-invitation signups (the invitation IS the invite)
+  // bypass the code. Validated regardless of client-side visibility.
+  if (isBetaGateEnabled()) {
+    const invitationId =
+      (formData.get("invitationId") as string | null) || null;
+    const bypassed = await hasValidInvitationBypass(invitationId);
+
+    if (!bypassed) {
+      const submittedCode = formData.get("inviteCode") as string | null;
+      if (!isBetaCodeValid(submittedCode)) {
+        // Distinguish a wrong code from a missing one so the user knows whether
+        // to fix what they typed or go ask for a code.
+        const hasSubmittedCode = (submittedCode ?? "").trim().length > 0;
+        return {
+          error: hasSubmittedCode ? BETA_GATE_INVALID_ERROR : BETA_GATE_ERROR,
+        };
+      }
+    }
+  }
 
   // Check if user already exists
   const existingUser = await db
     .select({ id: users.id })
     .from(users)
-    .where(eq(users.email, email.toLowerCase()))
+    .where(eq(users.email, identifier))
     .limit(1);
 
   if (existingUser.length > 0) {
+    await recordAttempt(identifier, ip, "register", false);
     return { error: "An account with this email already exists" };
   }
 
@@ -97,6 +140,9 @@ export async function register(
 
   // Set session cookie
   await setSessionCookie(token, session.expiresAt);
+
+  // Record the successful attempt (recorded before redirect, which throws).
+  await recordAttempt(identifier, ip, "register", true);
 
   redirect("/dashboard");
 }

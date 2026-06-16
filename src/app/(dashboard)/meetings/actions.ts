@@ -2,8 +2,9 @@
 
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { meetingAttendance } from "@/db/schema/meetings";
+import { churchMeetings, meetingAttendance } from "@/db/schema/meetings";
 import { personActivities } from "@/db/schema/people";
+import { deriveAttendanceType } from "@/lib/meetings/attendance-type";
 import type {
   ChurchMeeting,
   Invitation,
@@ -65,6 +66,32 @@ function formDataToObject(formData: FormData): Record<string, unknown> {
   });
 
   return obj;
+}
+
+/**
+ * Resolve the attendance_type for a person being marked attended at a meeting,
+ * scoped to the church. Returns null if the meeting can't be found for this
+ * church (caller should leave attendance_type untouched in that case).
+ */
+async function resolveAttendanceType(
+  churchId: string,
+  meetingId: string,
+  personId: string
+) {
+  const [meeting] = await db
+    .select({ datetime: churchMeetings.datetime })
+    .from(churchMeetings)
+    .where(
+      and(
+        eq(churchMeetings.id, meetingId),
+        eq(churchMeetings.churchId, churchId)
+      )
+    )
+    .limit(1);
+
+  if (!meeting) return null;
+
+  return deriveAttendanceType(personId, meetingId, meeting.datetime, db);
 }
 
 // ============================================================================
@@ -870,10 +897,16 @@ export async function toggleAttendanceStatusAction(
     const { user } = await verifySession();
     if (!user.churchId) return { success: false, error: "No church" };
 
+    // Only set attendance_type when marking attended; clear it when un-marking.
+    const attendanceType = attended
+      ? await resolveAttendanceType(user.churchId, meetingId, personId)
+      : null;
+
     await db
       .update(meetingAttendance)
       .set({
         status: attended ? "attended" : "absent",
+        attendanceType,
         updatedAt: new Date(),
       })
       .where(
@@ -912,9 +945,14 @@ export async function addWalkInAttendeeAction(
     );
 
     // Mark as attended immediately
+    const attendanceType = await resolveAttendanceType(
+      user.churchId,
+      meetingId,
+      personId
+    );
     await db
       .update(meetingAttendance)
-      .set({ status: "attended", updatedAt: new Date() })
+      .set({ status: "attended", attendanceType, updatedAt: new Date() })
       .where(eq(meetingAttendance.id, record.id));
 
     revalidatePath(`/meetings/${meetingId}`);
@@ -963,9 +1001,14 @@ export async function quickAddWalkInAction(
     );
 
     // Mark as attended
+    const attendanceType = await resolveAttendanceType(
+      user.churchId,
+      meetingId,
+      person.id
+    );
     await db
       .update(meetingAttendance)
-      .set({ status: "attended", updatedAt: new Date() })
+      .set({ status: "attended", attendanceType, updatedAt: new Date() })
       .where(eq(meetingAttendance.id, record.id));
 
     revalidatePath(`/meetings/${meetingId}`);

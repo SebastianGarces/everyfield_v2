@@ -127,6 +127,20 @@
       "when": 1771116573693,
       "tag": "0017_inactivity_thresholds",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1781130119804,
+      "tag": "0018_confused_lady_ursula",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1781130128807,
+      "tag": "0019_attendance_type_backfill",
+      "breakpoints": true
     }
   ]
 }

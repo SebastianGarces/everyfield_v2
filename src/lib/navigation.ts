@@ -1,15 +1,12 @@
 import type { LucideIcon } from "lucide-react";
 import {
   BookOpenText,
-  Building2,
   CalendarCheck,
   Church,
-  FileText,
   LayoutDashboard,
   ListChecks,
   MessageSquare,
   Network,
-  PiggyBank,
   Settings,
   Users,
   UsersRound,
@@ -58,18 +55,20 @@ export const mainNavItems: NavItem[] = [
     icon: ListChecks,
     requiresChurch: true,
   },
-  {
-    title: "Documents",
-    href: "/documents",
-    icon: FileText,
-    isDisabled: true,
-  },
-  {
-    title: "Financial",
-    href: "/financial",
-    icon: PiggyBank,
-    isDisabled: true,
-  },
+  // Sprint A: hidden until built - see gap-report-2026-06.md
+  // {
+  //   title: "Documents",
+  //   href: "/documents",
+  //   icon: FileText,
+  //   isDisabled: true,
+  // },
+  // Sprint A: hidden until built - see gap-report-2026-06.md
+  // {
+  //   title: "Financial",
+  //   href: "/financial",
+  //   icon: PiggyBank,
+  //   isDisabled: true,
+  // },
   {
     title: "Ministry Teams",
     href: "/teams",
@@ -82,12 +81,13 @@ export const mainNavItems: NavItem[] = [
     icon: MessageSquare,
     requiresChurch: true,
   },
-  {
-    title: "Facilities",
-    href: "/facilities",
-    icon: Building2,
-    isDisabled: true,
-  },
+  // Sprint A: hidden until built - see gap-report-2026-06.md
+  // {
+  //   title: "Facilities",
+  //   href: "/facilities",
+  //   icon: Building2,
+  //   isDisabled: true,
+  // },
 ];
 
 /**
