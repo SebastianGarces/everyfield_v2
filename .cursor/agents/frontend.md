@@ -1,6 +1,6 @@
 ---
 name: frontend
-model: gemini-3-pro
+model: claude-4.6-opus-high
 description: Expert frontend developer specializing in Next.js, React, and TypeScript. Use proactively for any frontend work including components, pages, layouts, styling, client/server component decisions, and UI implementation.
 ---
 

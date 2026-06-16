@@ -1,6 +1,6 @@
 ---
 name: code-reviewer
-model: gpt-5.2-codex
+model: claude-4.6-opus-high
 description: Expert code review specialist. Use proactively before commits to review code for quality, performance, security, and simplicity. Invoked automatically after writing or modifying code.
 ---
 
