@@ -53,11 +53,7 @@ export function FeedbackStatusSelect({
       </SelectTrigger>
       <SelectContent>
         {feedbackStatuses.map((value) => (
-          <SelectItem
-            key={value}
-            value={value}
-            className="cursor-pointer"
-          >
+          <SelectItem key={value} value={value} className="cursor-pointer">
             {STATUS_LABELS[value]}
           </SelectItem>
         ))}

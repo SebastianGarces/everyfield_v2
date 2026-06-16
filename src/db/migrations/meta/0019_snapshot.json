@@ -87,13 +87,9 @@
         "sending_churches_sending_network_id_sending_networks_id_fk": {
           "name": "sending_churches_sending_network_id_sending_networks_id_fk",
           "tableFrom": "sending_churches",
-          "columnsFrom": [
-            "sending_network_id"
-          ],
+          "columnsFrom": ["sending_network_id"],
           "tableTo": "sending_networks",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -174,26 +170,18 @@
         "churches_sending_church_id_sending_churches_id_fk": {
           "name": "churches_sending_church_id_sending_churches_id_fk",
           "tableFrom": "churches",
-          "columnsFrom": [
-            "sending_church_id"
-          ],
+          "columnsFrom": ["sending_church_id"],
           "tableTo": "sending_churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "churches_sending_network_id_sending_networks_id_fk": {
           "name": "churches_sending_network_id_sending_networks_id_fk",
           "tableFrom": "churches",
-          "columnsFrom": [
-            "sending_network_id"
-          ],
+          "columnsFrom": ["sending_network_id"],
           "tableTo": "sending_networks",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -322,39 +310,27 @@
         "assessments_church_id_churches_id_fk": {
           "name": "assessments_church_id_churches_id_fk",
           "tableFrom": "assessments",
-          "columnsFrom": [
-            "church_id"
-          ],
+          "columnsFrom": ["church_id"],
           "tableTo": "churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "assessments_person_id_persons_id_fk": {
           "name": "assessments_person_id_persons_id_fk",
           "tableFrom": "assessments",
-          "columnsFrom": [
-            "person_id"
-          ],
+          "columnsFrom": ["person_id"],
           "tableTo": "persons",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "assessments_assessed_by_users_id_fk": {
           "name": "assessments_assessed_by_users_id_fk",
           "tableFrom": "assessments",
-          "columnsFrom": [
-            "assessed_by"
-          ],
+          "columnsFrom": ["assessed_by"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -447,39 +423,27 @@
         "commitments_church_id_churches_id_fk": {
           "name": "commitments_church_id_churches_id_fk",
           "tableFrom": "commitments",
-          "columnsFrom": [
-            "church_id"
-          ],
+          "columnsFrom": ["church_id"],
           "tableTo": "churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "commitments_person_id_persons_id_fk": {
           "name": "commitments_person_id_persons_id_fk",
           "tableFrom": "commitments",
-          "columnsFrom": [
-            "person_id"
-          ],
+          "columnsFrom": ["person_id"],
           "tableTo": "persons",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "commitments_witnessed_by_users_id_fk": {
           "name": "commitments_witnessed_by_users_id_fk",
           "tableFrom": "commitments",
-          "columnsFrom": [
-            "witnessed_by"
-          ],
+          "columnsFrom": ["witnessed_by"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -586,13 +550,9 @@
         "households_church_id_churches_id_fk": {
           "name": "households_church_id_churches_id_fk",
           "tableFrom": "households",
-          "columnsFrom": [
-            "church_id"
-          ],
+          "columnsFrom": ["church_id"],
           "tableTo": "churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -739,39 +699,27 @@
         "interviews_church_id_churches_id_fk": {
           "name": "interviews_church_id_churches_id_fk",
           "tableFrom": "interviews",
-          "columnsFrom": [
-            "church_id"
-          ],
+          "columnsFrom": ["church_id"],
           "tableTo": "churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "interviews_person_id_persons_id_fk": {
           "name": "interviews_person_id_persons_id_fk",
           "tableFrom": "interviews",
-          "columnsFrom": [
-            "person_id"
-          ],
+          "columnsFrom": ["person_id"],
           "tableTo": "persons",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "interviews_interviewed_by_users_id_fk": {
           "name": "interviews_interviewed_by_users_id_fk",
           "tableFrom": "interviews",
-          "columnsFrom": [
-            "interviewed_by"
-          ],
+          "columnsFrom": ["interviewed_by"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -867,39 +815,27 @@
         "person_activities_church_id_churches_id_fk": {
           "name": "person_activities_church_id_churches_id_fk",
           "tableFrom": "person_activities",
-          "columnsFrom": [
-            "church_id"
-          ],
+          "columnsFrom": ["church_id"],
           "tableTo": "churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "person_activities_person_id_persons_id_fk": {
           "name": "person_activities_person_id_persons_id_fk",
           "tableFrom": "person_activities",
-          "columnsFrom": [
-            "person_id"
-          ],
+          "columnsFrom": ["person_id"],
           "tableTo": "persons",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "person_activities_performed_by_users_id_fk": {
           "name": "person_activities_performed_by_users_id_fk",
           "tableFrom": "person_activities",
-          "columnsFrom": [
-            "performed_by"
-          ],
+          "columnsFrom": ["performed_by"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -983,39 +919,27 @@
         "person_tags_church_id_churches_id_fk": {
           "name": "person_tags_church_id_churches_id_fk",
           "tableFrom": "person_tags",
-          "columnsFrom": [
-            "church_id"
-          ],
+          "columnsFrom": ["church_id"],
           "tableTo": "churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "person_tags_person_id_persons_id_fk": {
           "name": "person_tags_person_id_persons_id_fk",
           "tableFrom": "person_tags",
-          "columnsFrom": [
-            "person_id"
-          ],
+          "columnsFrom": ["person_id"],
           "tableTo": "persons",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "person_tags_tag_id_tags_id_fk": {
           "name": "person_tags_tag_id_tags_id_fk",
           "tableFrom": "person_tags",
-          "columnsFrom": [
-            "tag_id"
-          ],
+          "columnsFrom": ["tag_id"],
           "tableTo": "tags",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         }
@@ -1024,10 +948,7 @@
       "uniqueConstraints": {
         "person_tags_person_tag_unique": {
           "name": "person_tags_person_tag_unique",
-          "columns": [
-            "person_id",
-            "tag_id"
-          ],
+          "columns": ["person_id", "tag_id"],
           "nullsNotDistinct": false
         }
       },
@@ -1271,39 +1192,27 @@
         "persons_church_id_churches_id_fk": {
           "name": "persons_church_id_churches_id_fk",
           "tableFrom": "persons",
-          "columnsFrom": [
-            "church_id"
-          ],
+          "columnsFrom": ["church_id"],
           "tableTo": "churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "persons_household_id_households_id_fk": {
           "name": "persons_household_id_households_id_fk",
           "tableFrom": "persons",
-          "columnsFrom": [
-            "household_id"
-          ],
+          "columnsFrom": ["household_id"],
           "tableTo": "households",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "persons_created_by_users_id_fk": {
           "name": "persons_created_by_users_id_fk",
           "tableFrom": "persons",
-          "columnsFrom": [
-            "created_by"
-          ],
+          "columnsFrom": ["created_by"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -1390,26 +1299,18 @@
         "skills_inventory_church_id_churches_id_fk": {
           "name": "skills_inventory_church_id_churches_id_fk",
           "tableFrom": "skills_inventory",
-          "columnsFrom": [
-            "church_id"
-          ],
+          "columnsFrom": ["church_id"],
           "tableTo": "churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "skills_inventory_person_id_persons_id_fk": {
           "name": "skills_inventory_person_id_persons_id_fk",
           "tableFrom": "skills_inventory",
-          "columnsFrom": [
-            "person_id"
-          ],
+          "columnsFrom": ["person_id"],
           "tableTo": "persons",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         }
@@ -1478,13 +1379,9 @@
         "tags_church_id_churches_id_fk": {
           "name": "tags_church_id_churches_id_fk",
           "tableFrom": "tags",
-          "columnsFrom": [
-            "church_id"
-          ],
+          "columnsFrom": ["church_id"],
           "tableTo": "churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -1592,13 +1489,9 @@
         "sessions_user_id_users_id_fk": {
           "name": "sessions_user_id_users_id_fk",
           "tableFrom": "sessions",
-          "columnsFrom": [
-            "user_id"
-          ],
+          "columnsFrom": ["user_id"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         }
@@ -1682,39 +1575,27 @@
         "users_church_id_churches_id_fk": {
           "name": "users_church_id_churches_id_fk",
           "tableFrom": "users",
-          "columnsFrom": [
-            "church_id"
-          ],
+          "columnsFrom": ["church_id"],
           "tableTo": "churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "users_sending_church_id_sending_churches_id_fk": {
           "name": "users_sending_church_id_sending_churches_id_fk",
           "tableFrom": "users",
-          "columnsFrom": [
-            "sending_church_id"
-          ],
+          "columnsFrom": ["sending_church_id"],
           "tableTo": "sending_churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "users_sending_network_id_sending_networks_id_fk": {
           "name": "users_sending_network_id_sending_networks_id_fk",
           "tableFrom": "users",
-          "columnsFrom": [
-            "sending_network_id"
-          ],
+          "columnsFrom": ["sending_network_id"],
           "tableTo": "sending_networks",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -1723,9 +1604,7 @@
       "uniqueConstraints": {
         "users_email_unique": {
           "name": "users_email_unique",
-          "columns": [
-            "email"
-          ],
+          "columns": ["email"],
           "nullsNotDistinct": false
         }
       },
@@ -1926,26 +1805,18 @@
         "wiki_articles_church_id_churches_id_fk": {
           "name": "wiki_articles_church_id_churches_id_fk",
           "tableFrom": "wiki_articles",
-          "columnsFrom": [
-            "church_id"
-          ],
+          "columnsFrom": ["church_id"],
           "tableTo": "churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "wiki_articles_section_id_wiki_sections_id_fk": {
           "name": "wiki_articles_section_id_wiki_sections_id_fk",
           "tableFrom": "wiki_articles",
-          "columnsFrom": [
-            "section_id"
-          ],
+          "columnsFrom": ["section_id"],
           "tableTo": "wiki_sections",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -2029,13 +1900,9 @@
         "wiki_bookmarks_user_id_users_id_fk": {
           "name": "wiki_bookmarks_user_id_users_id_fk",
           "tableFrom": "wiki_bookmarks",
-          "columnsFrom": [
-            "user_id"
-          ],
+          "columnsFrom": ["user_id"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         }
@@ -2174,13 +2041,9 @@
         "wiki_progress_user_id_users_id_fk": {
           "name": "wiki_progress_user_id_users_id_fk",
           "tableFrom": "wiki_progress",
-          "columnsFrom": [
-            "user_id"
-          ],
+          "columnsFrom": ["user_id"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         }
@@ -2281,13 +2144,9 @@
         "wiki_sections_parent_section_id_wiki_sections_id_fk": {
           "name": "wiki_sections_parent_section_id_wiki_sections_id_fk",
           "tableFrom": "wiki_sections",
-          "columnsFrom": [
-            "parent_section_id"
-          ],
+          "columnsFrom": ["parent_section_id"],
           "tableTo": "wiki_sections",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -2372,26 +2231,18 @@
         "coach_assignments_coach_user_id_users_id_fk": {
           "name": "coach_assignments_coach_user_id_users_id_fk",
           "tableFrom": "coach_assignments",
-          "columnsFrom": [
-            "coach_user_id"
-          ],
+          "columnsFrom": ["coach_user_id"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "coach_assignments_church_id_churches_id_fk": {
           "name": "coach_assignments_church_id_churches_id_fk",
           "tableFrom": "coach_assignments",
-          "columnsFrom": [
-            "church_id"
-          ],
+          "columnsFrom": ["church_id"],
           "tableTo": "churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -2400,10 +2251,7 @@
       "uniqueConstraints": {
         "coach_assignments_coach_church_unique": {
           "name": "coach_assignments_coach_church_unique",
-          "columns": [
-            "coach_user_id",
-            "church_id"
-          ],
+          "columns": ["coach_user_id", "church_id"],
           "nullsNotDistinct": false
         }
       },
@@ -2557,78 +2405,54 @@
         "organization_invitations_inviter_user_id_users_id_fk": {
           "name": "organization_invitations_inviter_user_id_users_id_fk",
           "tableFrom": "organization_invitations",
-          "columnsFrom": [
-            "inviter_user_id"
-          ],
+          "columnsFrom": ["inviter_user_id"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "organization_invitations_target_church_id_churches_id_fk": {
           "name": "organization_invitations_target_church_id_churches_id_fk",
           "tableFrom": "organization_invitations",
-          "columnsFrom": [
-            "target_church_id"
-          ],
+          "columnsFrom": ["target_church_id"],
           "tableTo": "churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "organization_invitations_target_sending_church_id_sending_churches_id_fk": {
           "name": "organization_invitations_target_sending_church_id_sending_churches_id_fk",
           "tableFrom": "organization_invitations",
-          "columnsFrom": [
-            "target_sending_church_id"
-          ],
+          "columnsFrom": ["target_sending_church_id"],
           "tableTo": "sending_churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "organization_invitations_sending_church_id_sending_churches_id_fk": {
           "name": "organization_invitations_sending_church_id_sending_churches_id_fk",
           "tableFrom": "organization_invitations",
-          "columnsFrom": [
-            "sending_church_id"
-          ],
+          "columnsFrom": ["sending_church_id"],
           "tableTo": "sending_churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "organization_invitations_sending_network_id_sending_networks_id_fk": {
           "name": "organization_invitations_sending_network_id_sending_networks_id_fk",
           "tableFrom": "organization_invitations",
-          "columnsFrom": [
-            "sending_network_id"
-          ],
+          "columnsFrom": ["sending_network_id"],
           "tableTo": "sending_networks",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "organization_invitations_responded_by_users_id_fk": {
           "name": "organization_invitations_responded_by_users_id_fk",
           "tableFrom": "organization_invitations",
-          "columnsFrom": [
-            "responded_by"
-          ],
+          "columnsFrom": ["responded_by"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -2717,26 +2541,18 @@
         "church_privacy_settings_church_id_churches_id_fk": {
           "name": "church_privacy_settings_church_id_churches_id_fk",
           "tableFrom": "church_privacy_settings",
-          "columnsFrom": [
-            "church_id"
-          ],
+          "columnsFrom": ["church_id"],
           "tableTo": "churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "church_privacy_settings_updated_by_users_id_fk": {
           "name": "church_privacy_settings_updated_by_users_id_fk",
           "tableFrom": "church_privacy_settings",
-          "columnsFrom": [
-            "updated_by"
-          ],
+          "columnsFrom": ["updated_by"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -2745,9 +2561,7 @@
       "uniqueConstraints": {
         "church_privacy_settings_church_id_unique": {
           "name": "church_privacy_settings_church_id_unique",
-          "columns": [
-            "church_id"
-          ],
+          "columns": ["church_id"],
           "nullsNotDistinct": false
         }
       },
@@ -2887,39 +2701,27 @@
         "ministry_teams_church_id_churches_id_fk": {
           "name": "ministry_teams_church_id_churches_id_fk",
           "tableFrom": "ministry_teams",
-          "columnsFrom": [
-            "church_id"
-          ],
+          "columnsFrom": ["church_id"],
           "tableTo": "churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "ministry_teams_leader_id_persons_id_fk": {
           "name": "ministry_teams_leader_id_persons_id_fk",
           "tableFrom": "ministry_teams",
-          "columnsFrom": [
-            "leader_id"
-          ],
+          "columnsFrom": ["leader_id"],
           "tableTo": "persons",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "ministry_teams_created_by_users_id_fk": {
           "name": "ministry_teams_created_by_users_id_fk",
           "tableFrom": "ministry_teams",
-          "columnsFrom": [
-            "created_by"
-          ],
+          "columnsFrom": ["created_by"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -3105,65 +2907,45 @@
         "team_memberships_church_id_churches_id_fk": {
           "name": "team_memberships_church_id_churches_id_fk",
           "tableFrom": "team_memberships",
-          "columnsFrom": [
-            "church_id"
-          ],
+          "columnsFrom": ["church_id"],
           "tableTo": "churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "team_memberships_team_id_ministry_teams_id_fk": {
           "name": "team_memberships_team_id_ministry_teams_id_fk",
           "tableFrom": "team_memberships",
-          "columnsFrom": [
-            "team_id"
-          ],
+          "columnsFrom": ["team_id"],
           "tableTo": "ministry_teams",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "team_memberships_person_id_persons_id_fk": {
           "name": "team_memberships_person_id_persons_id_fk",
           "tableFrom": "team_memberships",
-          "columnsFrom": [
-            "person_id"
-          ],
+          "columnsFrom": ["person_id"],
           "tableTo": "persons",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "team_memberships_role_id_team_roles_id_fk": {
           "name": "team_memberships_role_id_team_roles_id_fk",
           "tableFrom": "team_memberships",
-          "columnsFrom": [
-            "role_id"
-          ],
+          "columnsFrom": ["role_id"],
           "tableTo": "team_roles",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "team_memberships_created_by_users_id_fk": {
           "name": "team_memberships_created_by_users_id_fk",
           "tableFrom": "team_memberships",
-          "columnsFrom": [
-            "created_by"
-          ],
+          "columnsFrom": ["created_by"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -3305,39 +3087,27 @@
         "team_roles_church_id_churches_id_fk": {
           "name": "team_roles_church_id_churches_id_fk",
           "tableFrom": "team_roles",
-          "columnsFrom": [
-            "church_id"
-          ],
+          "columnsFrom": ["church_id"],
           "tableTo": "churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "team_roles_team_id_ministry_teams_id_fk": {
           "name": "team_roles_team_id_ministry_teams_id_fk",
           "tableFrom": "team_roles",
-          "columnsFrom": [
-            "team_id"
-          ],
+          "columnsFrom": ["team_id"],
           "tableTo": "ministry_teams",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "team_roles_created_by_users_id_fk": {
           "name": "team_roles_created_by_users_id_fk",
           "tableFrom": "team_roles",
-          "columnsFrom": [
-            "created_by"
-          ],
+          "columnsFrom": ["created_by"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -3467,65 +3237,45 @@
         "training_completions_church_id_churches_id_fk": {
           "name": "training_completions_church_id_churches_id_fk",
           "tableFrom": "training_completions",
-          "columnsFrom": [
-            "church_id"
-          ],
+          "columnsFrom": ["church_id"],
           "tableTo": "churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "training_completions_person_id_persons_id_fk": {
           "name": "training_completions_person_id_persons_id_fk",
           "tableFrom": "training_completions",
-          "columnsFrom": [
-            "person_id"
-          ],
+          "columnsFrom": ["person_id"],
           "tableTo": "persons",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "training_completions_training_program_id_training_programs_id_fk": {
           "name": "training_completions_training_program_id_training_programs_id_fk",
           "tableFrom": "training_completions",
-          "columnsFrom": [
-            "training_program_id"
-          ],
+          "columnsFrom": ["training_program_id"],
           "tableTo": "training_programs",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "training_completions_verified_by_users_id_fk": {
           "name": "training_completions_verified_by_users_id_fk",
           "tableFrom": "training_completions",
-          "columnsFrom": [
-            "verified_by"
-          ],
+          "columnsFrom": ["verified_by"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "training_completions_created_by_users_id_fk": {
           "name": "training_completions_created_by_users_id_fk",
           "tableFrom": "training_completions",
-          "columnsFrom": [
-            "created_by"
-          ],
+          "columnsFrom": ["created_by"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -3534,10 +3284,7 @@
       "uniqueConstraints": {
         "training_completions_unique": {
           "name": "training_completions_unique",
-          "columns": [
-            "person_id",
-            "training_program_id"
-          ],
+          "columns": ["person_id", "training_program_id"],
           "nullsNotDistinct": false
         }
       },
@@ -3644,39 +3391,27 @@
         "training_programs_church_id_churches_id_fk": {
           "name": "training_programs_church_id_churches_id_fk",
           "tableFrom": "training_programs",
-          "columnsFrom": [
-            "church_id"
-          ],
+          "columnsFrom": ["church_id"],
           "tableTo": "churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "training_programs_team_id_ministry_teams_id_fk": {
           "name": "training_programs_team_id_ministry_teams_id_fk",
           "tableFrom": "training_programs",
-          "columnsFrom": [
-            "team_id"
-          ],
+          "columnsFrom": ["team_id"],
           "tableTo": "ministry_teams",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "set null"
         },
         "training_programs_created_by_users_id_fk": {
           "name": "training_programs_created_by_users_id_fk",
           "tableFrom": "training_programs",
-          "columnsFrom": [
-            "created_by"
-          ],
+          "columnsFrom": ["created_by"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -3882,52 +3617,36 @@
         "church_meetings_church_id_churches_id_fk": {
           "name": "church_meetings_church_id_churches_id_fk",
           "tableFrom": "church_meetings",
-          "columnsFrom": [
-            "church_id"
-          ],
+          "columnsFrom": ["church_id"],
           "tableTo": "churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "church_meetings_location_id_locations_id_fk": {
           "name": "church_meetings_location_id_locations_id_fk",
           "tableFrom": "church_meetings",
-          "columnsFrom": [
-            "location_id"
-          ],
+          "columnsFrom": ["location_id"],
           "tableTo": "locations",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "church_meetings_team_id_ministry_teams_id_fk": {
           "name": "church_meetings_team_id_ministry_teams_id_fk",
           "tableFrom": "church_meetings",
-          "columnsFrom": [
-            "team_id"
-          ],
+          "columnsFrom": ["team_id"],
           "tableTo": "ministry_teams",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "church_meetings_created_by_users_id_fk": {
           "name": "church_meetings_created_by_users_id_fk",
           "tableFrom": "church_meetings",
-          "columnsFrom": [
-            "created_by"
-          ],
+          "columnsFrom": ["created_by"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -3936,10 +3655,7 @@
       "uniqueConstraints": {
         "church_meetings_church_meeting_number": {
           "name": "church_meetings_church_meeting_number",
-          "columns": [
-            "church_id",
-            "meeting_number"
-          ],
+          "columns": ["church_id", "meeting_number"],
           "nullsNotDistinct": false
         }
       },
@@ -4031,52 +3747,36 @@
         "invitations_church_id_churches_id_fk": {
           "name": "invitations_church_id_churches_id_fk",
           "tableFrom": "invitations",
-          "columnsFrom": [
-            "church_id"
-          ],
+          "columnsFrom": ["church_id"],
           "tableTo": "churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "invitations_meeting_id_church_meetings_id_fk": {
           "name": "invitations_meeting_id_church_meetings_id_fk",
           "tableFrom": "invitations",
-          "columnsFrom": [
-            "meeting_id"
-          ],
+          "columnsFrom": ["meeting_id"],
           "tableTo": "church_meetings",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "invitations_inviter_id_persons_id_fk": {
           "name": "invitations_inviter_id_persons_id_fk",
           "tableFrom": "invitations",
-          "columnsFrom": [
-            "inviter_id"
-          ],
+          "columnsFrom": ["inviter_id"],
           "tableTo": "persons",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "invitations_invitee_id_persons_id_fk": {
           "name": "invitations_invitee_id_persons_id_fk",
           "tableFrom": "invitations",
-          "columnsFrom": [
-            "invitee_id"
-          ],
+          "columnsFrom": ["invitee_id"],
           "tableTo": "persons",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -4195,13 +3895,9 @@
         "locations_church_id_churches_id_fk": {
           "name": "locations_church_id_churches_id_fk",
           "tableFrom": "locations",
-          "columnsFrom": [
-            "church_id"
-          ],
+          "columnsFrom": ["church_id"],
           "tableTo": "churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -4329,65 +4025,45 @@
         "meeting_attendance_church_id_churches_id_fk": {
           "name": "meeting_attendance_church_id_churches_id_fk",
           "tableFrom": "meeting_attendance",
-          "columnsFrom": [
-            "church_id"
-          ],
+          "columnsFrom": ["church_id"],
           "tableTo": "churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "meeting_attendance_meeting_id_church_meetings_id_fk": {
           "name": "meeting_attendance_meeting_id_church_meetings_id_fk",
           "tableFrom": "meeting_attendance",
-          "columnsFrom": [
-            "meeting_id"
-          ],
+          "columnsFrom": ["meeting_id"],
           "tableTo": "church_meetings",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "meeting_attendance_person_id_persons_id_fk": {
           "name": "meeting_attendance_person_id_persons_id_fk",
           "tableFrom": "meeting_attendance",
-          "columnsFrom": [
-            "person_id"
-          ],
+          "columnsFrom": ["person_id"],
           "tableTo": "persons",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "meeting_attendance_invited_by_id_persons_id_fk": {
           "name": "meeting_attendance_invited_by_id_persons_id_fk",
           "tableFrom": "meeting_attendance",
-          "columnsFrom": [
-            "invited_by_id"
-          ],
+          "columnsFrom": ["invited_by_id"],
           "tableTo": "persons",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "meeting_attendance_created_by_users_id_fk": {
           "name": "meeting_attendance_created_by_users_id_fk",
           "tableFrom": "meeting_attendance",
-          "columnsFrom": [
-            "created_by"
-          ],
+          "columnsFrom": ["created_by"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -4396,10 +4072,7 @@
       "uniqueConstraints": {
         "meeting_attendance_meeting_person_unique": {
           "name": "meeting_attendance_meeting_person_unique",
-          "columns": [
-            "meeting_id",
-            "person_id"
-          ],
+          "columns": ["meeting_id", "person_id"],
           "nullsNotDistinct": false
         }
       },
@@ -4497,39 +4170,27 @@
         "meeting_checklist_items_church_id_churches_id_fk": {
           "name": "meeting_checklist_items_church_id_churches_id_fk",
           "tableFrom": "meeting_checklist_items",
-          "columnsFrom": [
-            "church_id"
-          ],
+          "columnsFrom": ["church_id"],
           "tableTo": "churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "meeting_checklist_items_meeting_id_church_meetings_id_fk": {
           "name": "meeting_checklist_items_meeting_id_church_meetings_id_fk",
           "tableFrom": "meeting_checklist_items",
-          "columnsFrom": [
-            "meeting_id"
-          ],
+          "columnsFrom": ["meeting_id"],
           "tableTo": "church_meetings",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "meeting_checklist_items_assigned_to_persons_id_fk": {
           "name": "meeting_checklist_items_assigned_to_persons_id_fk",
           "tableFrom": "meeting_checklist_items",
-          "columnsFrom": [
-            "assigned_to"
-          ],
+          "columnsFrom": ["assigned_to"],
           "tableTo": "persons",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -4649,39 +4310,27 @@
         "meeting_evaluations_church_id_churches_id_fk": {
           "name": "meeting_evaluations_church_id_churches_id_fk",
           "tableFrom": "meeting_evaluations",
-          "columnsFrom": [
-            "church_id"
-          ],
+          "columnsFrom": ["church_id"],
           "tableTo": "churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "meeting_evaluations_meeting_id_church_meetings_id_fk": {
           "name": "meeting_evaluations_meeting_id_church_meetings_id_fk",
           "tableFrom": "meeting_evaluations",
-          "columnsFrom": [
-            "meeting_id"
-          ],
+          "columnsFrom": ["meeting_id"],
           "tableTo": "church_meetings",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "meeting_evaluations_evaluated_by_users_id_fk": {
           "name": "meeting_evaluations_evaluated_by_users_id_fk",
           "tableFrom": "meeting_evaluations",
-          "columnsFrom": [
-            "evaluated_by"
-          ],
+          "columnsFrom": ["evaluated_by"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -4690,9 +4339,7 @@
       "uniqueConstraints": {
         "evaluations_meeting_unique": {
           "name": "evaluations_meeting_unique",
-          "columns": [
-            "meeting_id"
-          ],
+          "columns": ["meeting_id"],
           "nullsNotDistinct": false
         }
       },
@@ -4867,39 +4514,27 @@
         "communication_recipients_church_id_churches_id_fk": {
           "name": "communication_recipients_church_id_churches_id_fk",
           "tableFrom": "communication_recipients",
-          "columnsFrom": [
-            "church_id"
-          ],
+          "columnsFrom": ["church_id"],
           "tableTo": "churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "communication_recipients_communication_id_communications_id_fk": {
           "name": "communication_recipients_communication_id_communications_id_fk",
           "tableFrom": "communication_recipients",
-          "columnsFrom": [
-            "communication_id"
-          ],
+          "columnsFrom": ["communication_id"],
           "tableTo": "communications",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "communication_recipients_person_id_persons_id_fk": {
           "name": "communication_recipients_person_id_persons_id_fk",
           "tableFrom": "communication_recipients",
-          "columnsFrom": [
-            "person_id"
-          ],
+          "columnsFrom": ["person_id"],
           "tableTo": "persons",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         }
@@ -5076,52 +4711,36 @@
         "communications_church_id_churches_id_fk": {
           "name": "communications_church_id_churches_id_fk",
           "tableFrom": "communications",
-          "columnsFrom": [
-            "church_id"
-          ],
+          "columnsFrom": ["church_id"],
           "tableTo": "churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "communications_template_id_message_templates_id_fk": {
           "name": "communications_template_id_message_templates_id_fk",
           "tableFrom": "communications",
-          "columnsFrom": [
-            "template_id"
-          ],
+          "columnsFrom": ["template_id"],
           "tableTo": "message_templates",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "communications_meeting_id_church_meetings_id_fk": {
           "name": "communications_meeting_id_church_meetings_id_fk",
           "tableFrom": "communications",
-          "columnsFrom": [
-            "meeting_id"
-          ],
+          "columnsFrom": ["meeting_id"],
           "tableTo": "church_meetings",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "communications_created_by_id_users_id_fk": {
           "name": "communications_created_by_id_users_id_fk",
           "tableFrom": "communications",
-          "columnsFrom": [
-            "created_by_id"
-          ],
+          "columnsFrom": ["created_by_id"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -5245,39 +4864,27 @@
         "meeting_confirmation_tokens_church_id_churches_id_fk": {
           "name": "meeting_confirmation_tokens_church_id_churches_id_fk",
           "tableFrom": "meeting_confirmation_tokens",
-          "columnsFrom": [
-            "church_id"
-          ],
+          "columnsFrom": ["church_id"],
           "tableTo": "churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "meeting_confirmation_tokens_meeting_id_church_meetings_id_fk": {
           "name": "meeting_confirmation_tokens_meeting_id_church_meetings_id_fk",
           "tableFrom": "meeting_confirmation_tokens",
-          "columnsFrom": [
-            "meeting_id"
-          ],
+          "columnsFrom": ["meeting_id"],
           "tableTo": "church_meetings",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "meeting_confirmation_tokens_person_id_persons_id_fk": {
           "name": "meeting_confirmation_tokens_person_id_persons_id_fk",
           "tableFrom": "meeting_confirmation_tokens",
-          "columnsFrom": [
-            "person_id"
-          ],
+          "columnsFrom": ["person_id"],
           "tableTo": "persons",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         }
@@ -5286,9 +4893,7 @@
       "uniqueConstraints": {
         "meeting_confirmation_tokens_token_unique": {
           "name": "meeting_confirmation_tokens_token_unique",
-          "columns": [
-            "token"
-          ],
+          "columns": ["token"],
           "nullsNotDistinct": false
         }
       },
@@ -5441,13 +5046,9 @@
         "message_templates_church_id_churches_id_fk": {
           "name": "message_templates_church_id_churches_id_fk",
           "tableFrom": "message_templates",
-          "columnsFrom": [
-            "church_id"
-          ],
+          "columnsFrom": ["church_id"],
           "tableTo": "churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -5781,52 +5382,36 @@
         "tasks_church_id_churches_id_fk": {
           "name": "tasks_church_id_churches_id_fk",
           "tableFrom": "tasks",
-          "columnsFrom": [
-            "church_id"
-          ],
+          "columnsFrom": ["church_id"],
           "tableTo": "churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "tasks_assigned_to_id_users_id_fk": {
           "name": "tasks_assigned_to_id_users_id_fk",
           "tableFrom": "tasks",
-          "columnsFrom": [
-            "assigned_to_id"
-          ],
+          "columnsFrom": ["assigned_to_id"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "tasks_completed_by_id_users_id_fk": {
           "name": "tasks_completed_by_id_users_id_fk",
           "tableFrom": "tasks",
-          "columnsFrom": [
-            "completed_by_id"
-          ],
+          "columnsFrom": ["completed_by_id"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "tasks_created_by_id_users_id_fk": {
           "name": "tasks_created_by_id_users_id_fk",
           "tableFrom": "tasks",
-          "columnsFrom": [
-            "created_by_id"
-          ],
+          "columnsFrom": ["created_by_id"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -5967,26 +5552,18 @@
         "feedback_church_id_churches_id_fk": {
           "name": "feedback_church_id_churches_id_fk",
           "tableFrom": "feedback",
-          "columnsFrom": [
-            "church_id"
-          ],
+          "columnsFrom": ["church_id"],
           "tableTo": "churches",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "feedback_user_id_users_id_fk": {
           "name": "feedback_user_id_users_id_fk",
           "tableFrom": "feedback",
-          "columnsFrom": [
-            "user_id"
-          ],
+          "columnsFrom": ["user_id"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }

@@ -11,9 +11,7 @@ import { updateFeedbackStatus } from "@/lib/feedback/service";
 // Types
 // ============================================================================
 
-type ActionResult =
-  | { success: true }
-  | { success: false; error: string };
+type ActionResult = { success: true } | { success: false; error: string };
 
 // ============================================================================
 // Validation

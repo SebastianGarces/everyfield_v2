@@ -238,9 +238,7 @@ export async function getTeam(
       ? (personMap.get(membership.personId) ?? null)
       : null;
     const assignedPerson =
-      membership && person
-        ? { membershipId: membership.id, ...person }
-        : null;
+      membership && person ? { membershipId: membership.id, ...person } : null;
     return { ...role, assignedPerson };
   });
 

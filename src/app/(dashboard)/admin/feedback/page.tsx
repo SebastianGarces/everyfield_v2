@@ -70,7 +70,11 @@ export default async function AdminFeedbackPage({
   const page =
     typeof params.page === "string" ? Number.parseInt(params.page, 10) || 1 : 1;
 
-  const { items, page: currentPage, hasNextPage } = await listFeedback({
+  const {
+    items,
+    page: currentPage,
+    hasNextPage,
+  } = await listFeedback({
     status,
     category,
     page,
@@ -124,7 +128,7 @@ export default async function AdminFeedbackPage({
             ) : (
               items.map((item) => (
                 <TableRow key={item.id}>
-                  <TableCell className="text-muted-foreground whitespace-nowrap text-sm">
+                  <TableCell className="text-muted-foreground text-sm whitespace-nowrap">
                     {dateFormatter.format(item.createdAt)}
                   </TableCell>
                   <TableCell className="text-sm">
@@ -154,15 +158,12 @@ export default async function AdminFeedbackPage({
                   </TableCell>
                   <TableCell className="text-sm">
                     {/* Rendered as plain text — no HTML/markdown interpretation. */}
-                    <p className="max-w-md whitespace-pre-wrap break-words">
+                    <p className="max-w-md break-words whitespace-pre-wrap">
                       {item.description}
                     </p>
                   </TableCell>
                   <TableCell>
-                    <FeedbackStatusSelect
-                      id={item.id}
-                      status={item.status}
-                    />
+                    <FeedbackStatusSelect id={item.id} status={item.status} />
                   </TableCell>
                 </TableRow>
               ))

@@ -40,20 +40,13 @@ export function FeedbackStatusFilter({
   };
 
   return (
-    <Tabs
-      value={activeStatus ?? ALL_VALUE}
-      onValueChange={handleValueChange}
-    >
+    <Tabs value={activeStatus ?? ALL_VALUE} onValueChange={handleValueChange}>
       <TabsList>
         <TabsTrigger value={ALL_VALUE} className="cursor-pointer">
           All
         </TabsTrigger>
         {feedbackStatuses.map((status) => (
-          <TabsTrigger
-            key={status}
-            value={status}
-            className="cursor-pointer"
-          >
+          <TabsTrigger key={status} value={status} className="cursor-pointer">
             {STATUS_LABELS[status]}
           </TabsTrigger>
         ))}

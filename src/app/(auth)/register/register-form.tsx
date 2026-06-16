@@ -56,7 +56,11 @@ const ACCOUNT_TYPE_CONFIG: Record<
  * to render the invite-code input. Enforcement happens server-side in the
  * `register` action regardless of this flag.
  */
-export function RegisterForm({ betaGateEnabled }: { betaGateEnabled: boolean }) {
+export function RegisterForm({
+  betaGateEnabled,
+}: {
+  betaGateEnabled: boolean;
+}) {
   const [state, formAction, pending] = useActionState(register, initialState);
   const [accountType, setAccountType] = useState<AccountType>("planter");
 
