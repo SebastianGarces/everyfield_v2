@@ -20,14 +20,14 @@
 
 ## Should Have
 
-- [ ] DOC-011: XLSX generation (spreadsheet templates for budgets)
+- [x] DOC-011: XLSX generation (spreadsheet templates for budgets) — via `exceljs`, with live SUM formulas
 - [x] DOC-012: Template filtering by category, phase, format — search + category/phase/format filters
 - [x] DOC-013: Related wiki linking — per-template "Read the related wiki article" link
 - [ ] DOC-014: Contextual access from other features
 - [x] DOC-015: Multiple output formats selection — format picker shown when a template supports >1 format
 - [x] DOC-016: Document preview (in-app) — opens the rendered PDF inline
 - [x] DOC-017: Church profile auto-fill for merge fields
-- [ ] DOC-018: Budget templates (First Year Budget, Budget Worksheet)
+- [x] DOC-018: Budget templates (First Year Budget, Budget Worksheet)
 - [ ] DOC-019: Launch Sunday checklists (team-specific)
 
 ## Nice to Have

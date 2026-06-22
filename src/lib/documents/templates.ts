@@ -220,6 +220,40 @@ export const DOCUMENT_TEMPLATES: DocumentTemplate[] = [
       },
     ],
   },
+  {
+    id: "first-year-budget",
+    name: "First-Year Budget",
+    description:
+      "A 12-month budget spreadsheet with income/expense categories and live total formulas.",
+    category: "administrative",
+    formats: ["xlsx"],
+    pageCount: 1,
+    mergeFields: [
+      {
+        key: "church_name",
+        label: "Church Name",
+        required: true,
+        autoFill: "church_name",
+      },
+    ],
+  },
+  {
+    id: "budget-worksheet",
+    name: "Budget Worksheet",
+    description:
+      "A simple monthly-vs-annual budget planner spreadsheet with live total formulas.",
+    category: "administrative",
+    formats: ["xlsx"],
+    pageCount: 1,
+    mergeFields: [
+      {
+        key: "church_name",
+        label: "Church Name",
+        required: true,
+        autoFill: "church_name",
+      },
+    ],
+  },
 ];
 
 export function getTemplateById(id: string): DocumentTemplate | undefined {

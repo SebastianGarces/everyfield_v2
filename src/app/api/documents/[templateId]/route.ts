@@ -11,12 +11,13 @@ import {
 } from "@/lib/documents";
 import { hasDocxRenderer, renderDocumentDocx } from "@/lib/documents/docx";
 import { hasRenderer, renderDocumentPdf } from "@/lib/documents/pdf";
+import { hasXlsxRenderer, renderDocumentXlsx } from "@/lib/documents/xlsx";
 
-// react-pdf / docx need the Node.js runtime (not edge).
+// react-pdf / docx / exceljs need the Node.js runtime (not edge).
 export const runtime = "nodejs";
 
 /**
- * GET /api/documents/[templateId]?format=pdf|docx&church_name=...&pastor_name=...
+ * GET /api/documents/[templateId]?format=pdf|docx|xlsx&church_name=...&pastor_name=...
  *
  * Renders a code-defined document template and streams it as a download.
  * Format defaults to the template's first supported format. Merge values come
@@ -47,7 +48,11 @@ export async function GET(
   ) as DocumentFormat;
 
   const hasFor =
-    format === "docx" ? hasDocxRenderer(templateId) : hasRenderer(templateId);
+    format === "docx"
+      ? hasDocxRenderer(templateId)
+      : format === "xlsx"
+        ? hasXlsxRenderer(templateId)
+        : hasRenderer(templateId);
   if (!hasFor) {
     return NextResponse.json(
       { error: "Template cannot be generated in the requested format" },
@@ -86,7 +91,9 @@ export async function GET(
     file =
       format === "docx"
         ? await renderDocumentDocx(templateId, values)
-        : await renderDocumentPdf(templateId, values);
+        : format === "xlsx"
+          ? await renderDocumentXlsx(templateId, values)
+          : await renderDocumentPdf(templateId, values);
   } catch (error) {
     console.error(
       `[documents] failed to render ${templateId} (${format}):`,

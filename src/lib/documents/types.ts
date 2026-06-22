@@ -32,11 +32,12 @@ export const CATEGORY_ORDER: DocumentCategory[] = [
   "communication",
 ];
 
-export type DocumentFormat = "pdf" | "docx";
+export type DocumentFormat = "pdf" | "docx" | "xlsx";
 
 export const FORMAT_LABELS: Record<DocumentFormat, string> = {
   pdf: "PDF",
   docx: "Word (.docx)",
+  xlsx: "Excel (.xlsx)",
 };
 
 /** MIME type + file extension per output format. */
@@ -48,6 +49,10 @@ export const FORMAT_OUTPUT: Record<
   docx: {
     mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ext: "docx",
+  },
+  xlsx: {
+    mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ext: "xlsx",
   },
 };
 
