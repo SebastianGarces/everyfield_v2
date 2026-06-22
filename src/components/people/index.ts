@@ -15,6 +15,7 @@ export * from "./note-form";
 // Note: activity-timeline.tsx is a Server Component - import directly:
 // import { ActivityTimeline } from "@/components/people/activity-timeline";
 export * from "./duplicate-warning";
+export * from "./export-button";
 export * from "./import-wizard";
 export * from "./people-filters";
 export * from "./people-list";
