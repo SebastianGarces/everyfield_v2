@@ -12,7 +12,7 @@
 - [x] DOC-003: Document generation with merged church data
 - [x] DOC-004: Merge field support (church name, pastor name, dates)
 - [x] DOC-005: PDF generation
-- [ ] DOC-006: DOCX generation (editable Word documents) — deferred
+- [x] DOC-006: DOCX generation (editable Word documents) — via `docx`; Member Expectations, Launch Team Commitment, and Vision Meeting Agenda
 - [x] DOC-007: Template categorization (commitment, VM, etc.)
 - [ ] DOC-008: Generated document history — deferred (needs `documents` table + migration)
 - [x] DOC-009: Document download
@@ -24,7 +24,7 @@
 - [ ] DOC-012: Template filtering by category, phase, format — grouped by category; no filter controls yet
 - [x] DOC-013: Related wiki linking — per-template "Read the related wiki article" link
 - [ ] DOC-014: Contextual access from other features
-- [ ] DOC-015: Multiple output formats selection — PDF only for now
+- [x] DOC-015: Multiple output formats selection — format picker shown when a template supports >1 format
 - [x] DOC-016: Document preview (in-app) — opens the rendered PDF inline
 - [x] DOC-017: Church profile auto-fill for merge fields
 - [ ] DOC-018: Budget templates (First Year Budget, Budget Worksheet)

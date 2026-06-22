@@ -15,21 +15,28 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Separator } from "@/components/ui/separator";
-import type { DocumentMergeValues, DocumentTemplate } from "@/lib/documents";
+import {
+  FORMAT_LABELS,
+  type DocumentFormat,
+  type DocumentMergeValues,
+  type DocumentTemplate,
+} from "@/lib/documents";
 
 function buildUrl(
   templateId: string,
+  format: DocumentFormat,
   values: DocumentMergeValues,
   preview: boolean
 ): string {
   const params = new URLSearchParams();
+  params.set("format", format);
   for (const [key, value] of Object.entries(values)) {
     if (value) params.set(key, value);
   }
   if (preview) params.set("preview", "1");
-  const query = params.toString();
-  return `/api/documents/${templateId}${query ? `?${query}` : ""}`;
+  return `/api/documents/${templateId}?${params.toString()}`;
 }
 
 interface GenerateDialogProps {
@@ -53,6 +60,7 @@ export function GenerateDialog({
     }
     return initial;
   });
+  const [format, setFormat] = useState<DocumentFormat>(template.formats[0]);
 
   const missingRequired = template.mergeFields.some(
     (f) => f.required && !values[f.key]?.trim()
@@ -63,18 +71,24 @@ export function GenerateDialog({
   }
 
   function handleDownload() {
-    const url = buildUrl(template.id, values, false);
+    const url = buildUrl(template.id, format, values, false);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `${template.id}.pdf`;
+    anchor.download = `${template.id}.${format}`;
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
   }
 
   function handlePreview() {
-    window.open(buildUrl(template.id, values, true), "_blank", "noopener");
+    window.open(
+      buildUrl(template.id, "pdf", values, true),
+      "_blank",
+      "noopener"
+    );
   }
+
+  const canPreview = template.formats.includes("pdf");
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -118,6 +132,38 @@ export function GenerateDialog({
             </div>
           ))}
 
+          {template.formats.length > 1 && (
+            <>
+              <Separator />
+              <div className="space-y-2">
+                <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+                  Format
+                </p>
+                <RadioGroup
+                  value={format}
+                  onValueChange={(v) => setFormat(v as DocumentFormat)}
+                  className="flex gap-6"
+                >
+                  {template.formats.map((f) => (
+                    <div key={f} className="flex items-center gap-2">
+                      <RadioGroupItem
+                        value={f}
+                        id={`fmt-${template.id}-${f}`}
+                        className="cursor-pointer"
+                      />
+                      <Label
+                        htmlFor={`fmt-${template.id}-${f}`}
+                        className="cursor-pointer font-normal"
+                      >
+                        {FORMAT_LABELS[f]}
+                      </Label>
+                    </div>
+                  ))}
+                </RadioGroup>
+              </div>
+            </>
+          )}
+
           {template.relatedWikiSlug && (
             <>
               <Separator />
@@ -132,16 +178,18 @@ export function GenerateDialog({
         </div>
 
         <DialogFooter className="gap-2 sm:gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            className="cursor-pointer"
-            onClick={handlePreview}
-            disabled={missingRequired}
-          >
-            <Eye className="mr-2 h-4 w-4" />
-            Preview
-          </Button>
+          {canPreview && (
+            <Button
+              type="button"
+              variant="outline"
+              className="cursor-pointer"
+              onClick={handlePreview}
+              disabled={missingRequired}
+            >
+              <Eye className="mr-2 h-4 w-4" />
+              Preview
+            </Button>
+          )}
           <Button
             type="button"
             className="cursor-pointer"

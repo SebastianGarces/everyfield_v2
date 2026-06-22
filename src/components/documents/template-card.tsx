@@ -35,9 +35,15 @@ export function TemplateCard({ template, defaults }: TemplateCardProps) {
             {template.name}
           </CardTitle>
           <div className="flex flex-wrap items-center gap-1.5 pt-1">
-            <Badge variant="secondary" className="text-xs uppercase">
-              {template.format}
-            </Badge>
+            {template.formats.map((format) => (
+              <Badge
+                key={format}
+                variant="secondary"
+                className="text-xs uppercase"
+              >
+                {format}
+              </Badge>
+            ))}
             <Badge variant="outline" className="text-xs">
               {template.pageCount} page{template.pageCount === 1 ? "" : "s"}
             </Badge>

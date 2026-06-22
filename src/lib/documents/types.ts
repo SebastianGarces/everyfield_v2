@@ -32,7 +32,24 @@ export const CATEGORY_ORDER: DocumentCategory[] = [
   "communication",
 ];
 
-export type DocumentFormat = "pdf";
+export type DocumentFormat = "pdf" | "docx";
+
+export const FORMAT_LABELS: Record<DocumentFormat, string> = {
+  pdf: "PDF",
+  docx: "Word (.docx)",
+};
+
+/** MIME type + file extension per output format. */
+export const FORMAT_OUTPUT: Record<
+  DocumentFormat,
+  { mime: string; ext: string }
+> = {
+  pdf: { mime: "application/pdf", ext: "pdf" },
+  docx: {
+    mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ext: "docx",
+  },
+};
 
 /**
  * A merge field on a template. `autoFill` names a value the server can resolve
@@ -58,7 +75,8 @@ export interface DocumentTemplate {
   category: DocumentCategory;
   /** Relevant journey phase (0-6), if any. */
   phase?: number;
-  format: DocumentFormat;
+  /** Output formats this template can generate (first is the default). */
+  formats: DocumentFormat[];
   pageCount: number;
   mergeFields: DocumentMergeField[];
   /** Slug of a related wiki article, rendered as a "Read" link. */
