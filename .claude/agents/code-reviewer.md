@@ -108,7 +108,3 @@ Highlight well-written code to reinforce good patterns.
 - Functions over 50 lines
 - Files over 300 lines
 - More than 3 levels of nesting
-
-## Model Preference
-
-This agent is designed to work with GPT 5.2 Codex for fast, thorough code analysis.
