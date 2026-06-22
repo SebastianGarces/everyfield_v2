@@ -141,6 +141,13 @@
       "when": 1781130128807,
       "tag": "0019_attendance_type_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1781663649826,
+      "tag": "0020_naive_ultimates",
+      "breakpoints": true
     }
   ]
 }
