@@ -11,6 +11,7 @@ import type { ReactElement } from "react";
 
 import type { DocumentMergeValues } from "../types";
 import { CommitmentCardDocument } from "./commitment-card";
+import { LaunchSundayChecklistsDocument } from "./launch-sunday-checklists";
 import { ResponseCardDocument } from "./response-card";
 import { SignInSheetDocument } from "./sign-in-sheet";
 import { VisionMeetingAgendaDocument } from "./vision-meeting-agenda";
@@ -24,6 +25,7 @@ const PDF_COMPONENTS: Record<string, TemplateComponent> = {
   "response-card": ResponseCardDocument,
   "guest-sign-in-sheet": SignInSheetDocument,
   "vision-meeting-agenda": VisionMeetingAgendaDocument,
+  "launch-sunday-checklists": LaunchSundayChecklistsDocument,
 };
 
 export function hasRenderer(templateId: string): boolean {

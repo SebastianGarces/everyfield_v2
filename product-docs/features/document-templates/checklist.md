@@ -28,7 +28,7 @@
 - [x] DOC-016: Document preview (in-app) — opens the rendered PDF inline
 - [x] DOC-017: Church profile auto-fill for merge fields
 - [x] DOC-018: Budget templates (First Year Budget, Budget Worksheet)
-- [ ] DOC-019: Launch Sunday checklists (team-specific)
+- [x] DOC-019: Launch Sunday checklists (team-specific) — one-page-per-team packet (setup, hospitality, worship, kids, connections, prayer)
 
 ## Nice to Have
 

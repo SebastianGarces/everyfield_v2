@@ -254,6 +254,31 @@ export const DOCUMENT_TEMPLATES: DocumentTemplate[] = [
       },
     ],
   },
+  {
+    id: "launch-sunday-checklists",
+    name: "Launch Sunday Checklists",
+    description:
+      "A print-ready packet with a per-team launch-day checklist — setup, hospitality, worship, kids, connections, and prayer.",
+    category: "operational",
+    phase: 4,
+    formats: ["pdf"],
+    pageCount: 6,
+    mergeFields: [
+      {
+        key: "church_name",
+        label: "Church Name",
+        required: true,
+        autoFill: "church_name",
+      },
+      {
+        key: "launch_date",
+        label: "Launch Date",
+        required: false,
+        autoFill: "launch_date",
+        placeholder: "e.g. September 14, 2026",
+      },
+    ],
+  },
 ];
 
 export function getTemplateById(id: string): DocumentTemplate | undefined {
