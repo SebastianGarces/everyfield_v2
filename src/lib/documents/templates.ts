@@ -2,9 +2,9 @@
 // Document Templates — Catalog (F6)
 // ============================================================================
 //
-// Code-defined catalog (the "role-templates" pattern). Phase-1 ships the three
-// highest-value print-ready templates per gap-report P2-1. New templates are
-// added here + a matching react-pdf component in ./pdf.
+// Code-defined catalog (the "role-templates" pattern) per gap-report P2-1.
+// New templates are added here + a matching renderer: a react-pdf component in
+// ./pdf (for "pdf") and/or a docx builder in ./docx (for "docx").
 // ============================================================================
 
 import type { DocumentTemplate } from "./types";
@@ -168,6 +168,55 @@ export const DOCUMENT_TEMPLATES: DocumentTemplate[] = [
         required: false,
         autoFill: "pastor_name",
         placeholder: "Pastor John Smith",
+      },
+    ],
+  },
+  {
+    id: "follow-up-letter",
+    name: "Vision Meeting Follow-up Letter",
+    description:
+      "An editable letter to send guests after a vision meeting — thank them, keep the connection warm, and invite the next step.",
+    category: "vision_meeting",
+    phase: 1,
+    formats: ["docx"],
+    pageCount: 1,
+    relatedWikiSlug: "vision-meetings/running-a-vision-meeting",
+    mergeFields: [
+      {
+        key: "church_name",
+        label: "Church Name",
+        required: true,
+        autoFill: "church_name",
+      },
+      {
+        key: "pastor_name",
+        label: "Pastor Name",
+        required: false,
+        autoFill: "pastor_name",
+        placeholder: "Pastor John Smith",
+      },
+    ],
+  },
+  {
+    id: "board-meeting-agenda",
+    name: "Board / Elder Meeting Agenda",
+    description:
+      "An editable agenda for a board or elder meeting — prayer, minutes, financials, ministry updates, and action items.",
+    category: "administrative",
+    formats: ["docx"],
+    pageCount: 1,
+    mergeFields: [
+      {
+        key: "church_name",
+        label: "Church Name",
+        required: true,
+        autoFill: "church_name",
+      },
+      {
+        key: "meeting_date",
+        label: "Meeting Date",
+        required: false,
+        placeholder: "e.g. March 10, 2026",
       },
     ],
   },

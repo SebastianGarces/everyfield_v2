@@ -1,14 +1,9 @@
 import { redirect } from "next/navigation";
 
-import { TemplateCard } from "@/components/documents";
+import { DocumentsLibrary } from "@/components/documents";
 import { HeaderBreadcrumbs } from "@/components/header";
 import { getCurrentUserChurch, verifySession } from "@/lib/auth/session";
-import {
-  buildAutoFillDefaults,
-  CATEGORY_LABELS,
-  CATEGORY_ORDER,
-  DOCUMENT_TEMPLATES,
-} from "@/lib/documents";
+import { buildAutoFillDefaults, DOCUMENT_TEMPLATES } from "@/lib/documents";
 
 export const dynamic = "force-dynamic";
 
@@ -32,11 +27,11 @@ export default async function DocumentsPage() {
     launchDate: null,
   };
 
-  const categories = CATEGORY_ORDER.map((category) => ({
-    category,
-    label: CATEGORY_LABELS[category],
-    templates: DOCUMENT_TEMPLATES.filter((t) => t.category === category),
-  })).filter((group) => group.templates.length > 0);
+  // Resolve auto-fill defaults server-side; the client library filters/renders.
+  const items = DOCUMENT_TEMPLATES.map((template) => ({
+    template,
+    defaults: buildAutoFillDefaults(template, context),
+  }));
 
   return (
     <>
@@ -51,23 +46,8 @@ export default async function DocumentsPage() {
         </div>
 
         {/* Library */}
-        <div className="flex-1 space-y-10 overflow-auto p-6">
-          {categories.map((group) => (
-            <section key={group.category} className="space-y-4">
-              <h2 className="text-muted-foreground text-sm font-semibold tracking-wide uppercase">
-                {group.label}
-              </h2>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {group.templates.map((template) => (
-                  <TemplateCard
-                    key={template.id}
-                    template={template}
-                    defaults={buildAutoFillDefaults(template, context)}
-                  />
-                ))}
-              </div>
-            </section>
-          ))}
+        <div className="flex-1 overflow-auto p-6">
+          <DocumentsLibrary items={items} />
         </div>
       </div>
     </>

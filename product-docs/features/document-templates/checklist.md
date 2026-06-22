@@ -21,7 +21,7 @@
 ## Should Have
 
 - [ ] DOC-011: XLSX generation (spreadsheet templates for budgets)
-- [ ] DOC-012: Template filtering by category, phase, format — grouped by category; no filter controls yet
+- [x] DOC-012: Template filtering by category, phase, format — search + category/phase/format filters
 - [x] DOC-013: Related wiki linking — per-template "Read the related wiki article" link
 - [ ] DOC-014: Contextual access from other features
 - [x] DOC-015: Multiple output formats selection — format picker shown when a template supports >1 format

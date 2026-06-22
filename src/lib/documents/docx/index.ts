@@ -9,6 +9,8 @@
 import { type Document, Packer } from "docx";
 
 import type { DocumentMergeValues } from "../types";
+import { buildBoardMeetingAgenda } from "./board-meeting-agenda";
+import { buildFollowUpLetter } from "./follow-up-letter";
 import { buildLaunchTeamCommitment } from "./launch-team-commitment";
 import { buildMemberExpectations } from "./member-expectations";
 import { buildVisionMeetingAgenda } from "./vision-meeting-agenda";
@@ -19,6 +21,8 @@ const DOCX_BUILDERS: Record<string, DocxBuilder> = {
   "vision-meeting-agenda": buildVisionMeetingAgenda,
   "member-expectations": buildMemberExpectations,
   "launch-team-commitment": buildLaunchTeamCommitment,
+  "follow-up-letter": buildFollowUpLetter,
+  "board-meeting-agenda": buildBoardMeetingAgenda,
 };
 
 export function hasDocxRenderer(templateId: string): boolean {
