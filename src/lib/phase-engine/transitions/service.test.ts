@@ -220,6 +220,33 @@ test("maps a positive/info readiness insight to ready", () => {
   );
 });
 
+// Regression: the PRODUCTION path (getPhaseReadiness) feeds deriveReadiness the
+// PERSISTED insights, whose severities are the DB vocabulary the persist layer
+// produced (urgent→high, watch→medium, info→low, positive→info). Earlier the
+// mapping only knew the judge vocabulary, so every persisted insight fell
+// through to "ready" — a launch-imminent plant the judge flagged urgent showed
+// as "ready". These assert the real stored severities map correctly.
+test("maps PERSISTED severities (high/medium/low) to readiness states", () => {
+  assert.equal(
+    deriveReadiness("a-1", [insight({ severity: "high" })]).state,
+    "not_ready",
+    "high (persisted from judge 'urgent') must be not_ready"
+  );
+  assert.equal(
+    deriveReadiness("a-1", [insight({ severity: "critical" })]).state,
+    "not_ready"
+  );
+  assert.equal(
+    deriveReadiness("a-1", [insight({ severity: "medium" })]).state,
+    "approaching",
+    "medium (persisted from judge 'watch') must be approaching"
+  );
+  assert.equal(
+    deriveReadiness("a-1", [insight({ severity: "low" })]).state,
+    "ready"
+  );
+});
+
 test("picks the highest-priority (lowest rank) readiness insight", () => {
   const r = deriveReadiness("a-1", [
     insight({ severity: "info", rank: 5, title: "low priority" }),

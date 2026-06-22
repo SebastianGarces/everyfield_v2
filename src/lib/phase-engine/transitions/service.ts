@@ -213,16 +213,36 @@ export function deriveReadiness(
   };
 }
 
-/** Map an insight severity to a coarse readiness state. */
+/**
+ * Map an insight severity to a coarse readiness state.
+ *
+ * getPhaseReadiness reads PERSISTED insights (via getLatestAssessment), whose
+ * severities are the DB vocabulary (info|low|medium|high|critical) the persist
+ * layer produced from the judge vocabulary (positive→info, info→low,
+ * watch→medium, urgent→high). We map on the DB vocabulary so a judge-"urgent"
+ * issue (stored as "high") correctly yields "not_ready" rather than silently
+ * falling through to "ready". The raw judge vocabulary is also handled
+ * defensively in case a not-yet-persisted insight is passed in.
+ */
 function severityToReadiness(
   severity: string
 ): "ready" | "approaching" | "not_ready" {
   switch (severity) {
+    // Persisted DB vocabulary (the real runtime path).
+    case "critical":
+    case "high":
+      return "not_ready";
+    case "medium":
+      return "approaching";
+    case "low":
+    case "info":
+      return "ready";
+    // Defensive: raw judge vocabulary.
     case "urgent":
       return "not_ready";
     case "watch":
       return "approaching";
-    // positive / info → no concern raised
+    // positive → no concern raised
     default:
       return "ready";
   }
