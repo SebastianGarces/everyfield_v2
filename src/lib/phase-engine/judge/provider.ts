@@ -7,9 +7,12 @@
 // or imports a provider SDK directly — it asks here for `getJudgeModel()` and
 // records `JUDGE_MODEL_ID`. Mirrors the embedding seam in `rag/embed.ts`.
 //
-// Today: OpenAI `gpt-4o-mini` (current cost-effective model) via the Vercel AI
-// SDK v6. To swap providers, change the two lines below — nothing downstream
-// references the concrete model.
+// Today: OpenAI `gpt-4o` via the Vercel AI SDK v6 — strong enough to follow the
+// rubric and the planter+network dual-audience contract (PE-012), and in line
+// with the FRD's ~$0.03–0.05/assessment estimate. (`gpt-4o-mini` was too weak:
+// it intermittently returned only one audience and tripped the pipeline guard.)
+// To swap providers, change the two lines below — nothing downstream references
+// the concrete model.
 // ============================================================================
 
 import { createOpenAI } from "@ai-sdk/openai";
@@ -19,7 +22,7 @@ import type { LanguageModel } from "ai";
  * The judge model id of record. Recorded on every assessment and Langfuse trace
  * so an audit can tie an insight back to the exact model that produced it.
  */
-export const JUDGE_MODEL_ID = "gpt-4o-mini" as const;
+export const JUDGE_MODEL_ID = "gpt-4o" as const;
 
 /**
  * Resolve the judge model. Created lazily so importing this module (or the

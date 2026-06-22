@@ -156,10 +156,14 @@ test("insightSchema rejects an unknown category", () => {
   );
 });
 
-test("relatedArticleSlugs defaults to an empty array when omitted", () => {
+test("relatedArticleSlugs is required (OpenAI strict mode) but may be empty", () => {
+  // Omitting it fails: every property must be in `required` for strict
+  // structured output, so the model must always emit the key.
   const { relatedArticleSlugs, ...rest } = validInsight();
   void relatedArticleSlugs;
-  const parsed = insightSchema.parse(rest);
+  assert.throws(() => insightSchema.parse(rest));
+  // An explicit empty array is valid (no relevant passage).
+  const parsed = insightSchema.parse(validInsight({ relatedArticleSlugs: [] }));
   assert.deepEqual(parsed.relatedArticleSlugs, []);
 });
 

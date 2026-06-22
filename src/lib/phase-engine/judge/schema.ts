@@ -74,9 +74,12 @@ export const insightSchema = z.object({
   citedFacts: z.array(z.string().min(1)).min(1),
   /**
    * Wiki article slugs (from the supplied RAG passages) that back the advice.
-   * May be empty when no passage was relevant.
+   * Always present; the model returns an empty array when no passage was
+   * relevant. NOT `.optional()`/`.default()` — OpenAI strict structured output
+   * requires every property to be in `required`, so the key must always be
+   * emitted (an empty array is allowed).
    */
-  relatedArticleSlugs: z.array(z.string().min(1)).default([]),
+  relatedArticleSlugs: z.array(z.string().min(1)),
 });
 export type Insight = z.infer<typeof insightSchema>;
 
