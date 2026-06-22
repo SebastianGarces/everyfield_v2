@@ -37,6 +37,25 @@ export const DOCUMENT_TEMPLATES: DocumentTemplate[] = [
     ],
   },
   {
+    id: "response-card",
+    name: "Response Card",
+    description:
+      "A quarter-page card guests complete at a vision meeting to share contact info and how they'd like to be involved.",
+    category: "vision_meeting",
+    phase: 1,
+    format: "pdf",
+    pageCount: 1,
+    relatedWikiSlug: "vision-meetings/running-a-vision-meeting",
+    mergeFields: [
+      {
+        key: "church_name",
+        label: "Church Name",
+        required: true,
+        autoFill: "church_name",
+      },
+    ],
+  },
+  {
     id: "guest-sign-in-sheet",
     name: "Guest Sign-in Sheet",
     description:

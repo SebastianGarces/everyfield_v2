@@ -11,6 +11,7 @@ import type { ReactElement } from "react";
 
 import type { DocumentMergeValues } from "../types";
 import { CommitmentCardDocument } from "./commitment-card";
+import { ResponseCardDocument } from "./response-card";
 import { SignInSheetDocument } from "./sign-in-sheet";
 import { VisionMeetingAgendaDocument } from "./vision-meeting-agenda";
 
@@ -20,6 +21,7 @@ type TemplateComponent = (props: {
 
 const PDF_COMPONENTS: Record<string, TemplateComponent> = {
   "commitment-card": CommitmentCardDocument,
+  "response-card": ResponseCardDocument,
   "guest-sign-in-sheet": SignInSheetDocument,
   "vision-meeting-agenda": VisionMeetingAgendaDocument,
 };

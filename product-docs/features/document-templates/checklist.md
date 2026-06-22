@@ -1,27 +1,32 @@
 # Document Templates & Generation – Implementation Checklist
 
+> **Phase-1 MVP shipped** on branch `feat/document-templates` (commit `e5cd8fb`).
+> Scope decision: **generate-on-demand** (code-defined catalog + on-demand PDF,
+> no persistence yet) per gap-report P2-1. Built on `@react-pdf/renderer`.
+> Reuses the existing church/user profile for merge auto-fill.
+
 ## Must Have
 
-- [ ] DOC-001: Template library (browse available templates)
-- [ ] DOC-002: Template preview
-- [ ] DOC-003: Document generation with merged church data
-- [ ] DOC-004: Merge field support (church name, pastor name, dates)
-- [ ] DOC-005: PDF generation
-- [ ] DOC-006: DOCX generation (editable Word documents)
-- [ ] DOC-007: Template categorization (commitment, VM, etc.)
-- [ ] DOC-008: Generated document history
-- [ ] DOC-009: Document download
-- [ ] DOC-010: Core templates available (Commitment Card, Sign-in Sheet, Response Card)
+- [x] DOC-001: Template library (browse available templates) — `/documents`, category-grouped
+- [x] DOC-002: Template preview — inline PDF preview (`?preview=1`)
+- [x] DOC-003: Document generation with merged church data
+- [x] DOC-004: Merge field support (church name, pastor name, dates)
+- [x] DOC-005: PDF generation
+- [ ] DOC-006: DOCX generation (editable Word documents) — deferred
+- [x] DOC-007: Template categorization (commitment, VM, etc.)
+- [ ] DOC-008: Generated document history — deferred (needs `documents` table + migration)
+- [x] DOC-009: Document download
+- [x] DOC-010: Core templates available (Commitment Card, Sign-in Sheet, Response Card) — all three shipped, plus Vision Meeting Agenda
 
 ## Should Have
 
 - [ ] DOC-011: XLSX generation (spreadsheet templates for budgets)
-- [ ] DOC-012: Template filtering by category, phase, format
-- [ ] DOC-013: Related wiki linking
+- [ ] DOC-012: Template filtering by category, phase, format — grouped by category; no filter controls yet
+- [x] DOC-013: Related wiki linking — per-template "Read the related wiki article" link
 - [ ] DOC-014: Contextual access from other features
-- [ ] DOC-015: Multiple output formats selection
-- [ ] DOC-016: Document preview (in-app)
-- [ ] DOC-017: Church profile auto-fill for merge fields
+- [ ] DOC-015: Multiple output formats selection — PDF only for now
+- [x] DOC-016: Document preview (in-app) — opens the rendered PDF inline
+- [x] DOC-017: Church profile auto-fill for merge fields
 - [ ] DOC-018: Budget templates (First Year Budget, Budget Worksheet)
 - [ ] DOC-019: Launch Sunday checklists (team-specific)
 
