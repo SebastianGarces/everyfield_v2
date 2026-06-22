@@ -145,7 +145,9 @@ Qualification criteria for potential Core Group members:
 
 ## Phase Structure
 
-The platform guides planters through six distinct phases. Each phase has specific goals, activities, and tracked metrics defined in the relevant Feature Requirements Documents.
+The platform guides planters through seven phases (0–6). Each phase has specific goals, activities, and tracked metrics defined in the relevant Feature Requirements Documents.
+
+The phase is **advisory context**, not a gate. Rather than forcing planters through rigid step completion, the platform's Phase Engine reads each plant's real activity and offers prioritized guidance toward the phase's goals (and health signals to overseers); planters advance when they judge they are ready. See the Phase Engine (Plant Intelligence) feature.
 
 | Phase | Name | Purpose |
 |-------|------|---------|

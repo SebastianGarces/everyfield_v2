@@ -75,19 +75,22 @@ For detailed contracts, referencing rules, and cross-feature invariants, see **[
 
 ## Cross-Cutting Services
 
-### Phase Engine
+### Phase Engine (Plant Intelligence)
 
-Manages church progression through the 6-phase journey.
+The platform's primary differentiator. An **advisory intelligence engine**, not a gating state machine: it continuously reads each plant's real activity, judges it against the church-planting methodology (Launch Playbook + wiki) via an LLM-as-judge grounded in retrieved content (RAG), and surfaces prioritized **insights** to planters and **health signals** to sending networks/churches. The phase is *context for judgment*, not a gate — advancement is soft-gated and always planter-confirmed. Detailed behavior, entities, and the evaluation rubric live in the **[Phase Engine FRD](./features/phase-engine/frd.md)**.
+
+**Architectural principle — facts vs. judgment (mandatory):** all countable facts are computed deterministically from the database (the *Signal layer*); the LLM (the *Judgment layer*) interprets and prioritizes but never produces a number. Assessments are precomputed snapshots read instantly by the UI; the judge runs asynchronously, debounced to plants with material activity.
 
 **Responsibilities:**
-- Track `current_phase` per church
-- Validate phase transition criteria
-- Emit `phase.changed` and `phase.criteria.updated` events
-- Maintain phase history audit log
+- Track `current_phase` per church and record planter-initiated transitions (forward/back/skip, never blocked)
+- Compute the deterministic plant fact snapshot (Signal layer)
+- Produce LLM-as-judge assessments against a versioned rubric, grounded in methodology RAG
+- Emit `phase.changed` (on transition) and `plant.assessment.created` (on new snapshot)
+- Maintain an immutable transition + assessment audit history
 
-**Exit Criteria Summary:**
+**Readiness gates** (advisory — they inform a "ready to advance" insight, they do **not** block; full table and rubric in the FRD):
 
-| Transition | Key Gates |
+| Transition | Key Marks |
 |------------|-----------|
 | 0 → 1 | Foundational modules complete, values documented, coach assigned |
 | 1 → 2 | 30-40 committed adults, financial base, worship leader, geographic area |
