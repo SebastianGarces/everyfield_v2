@@ -22,7 +22,8 @@ export const meta = {
 // unit = { id, title, lane, files, summary, acceptanceCriteria }
 // ASSUMPTION: these units' dependencies are already merged on the current branch.
 // ---------------------------------------------------------------------------
-const units = Array.isArray(args) ? args : args?.units;
+const parsedArgs = typeof args === "string" ? JSON.parse(args) : args;
+const units = Array.isArray(parsedArgs) ? parsedArgs : parsedArgs?.units;
 if (!Array.isArray(units) || units.length === 0) {
   throw new Error(
     "Pass the wave's units array as args (from frd-plan output), e.g. args: [{id,title,lane,files,summary,acceptanceCriteria}, ...]"

@@ -148,6 +148,13 @@
       "when": 1781663649826,
       "tag": "0020_naive_ultimates",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1782164185289,
+      "tag": "0021_wealthy_ender_wiggin",
+      "breakpoints": true
     }
   ]
 }
