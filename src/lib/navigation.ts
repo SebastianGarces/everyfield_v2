@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import {
+  Activity,
   BookOpenText,
   CalendarCheck,
   Church,
@@ -8,6 +9,7 @@ import {
   MessageSquare,
   Network,
   Settings,
+  Sparkles,
   Users,
   UsersRound,
 } from "lucide-react";
@@ -31,6 +33,12 @@ export const mainNavItems: NavItem[] = [
     title: "Dashboard",
     href: "/dashboard",
     icon: LayoutDashboard,
+  },
+  {
+    title: "Plant Intelligence",
+    href: "/phase",
+    icon: Sparkles,
+    requiresChurch: true,
   },
   {
     title: "Wiki",
@@ -106,6 +114,11 @@ export const sendingChurchNavItems: NavItem[] = [
     icon: Church,
   },
   {
+    title: "Plant Health",
+    href: "/oversight/health",
+    icon: Activity,
+  },
+  {
     title: "Invitations",
     href: "/oversight/invitations",
     icon: Users,
@@ -136,6 +149,11 @@ export const networkAdminNavItems: NavItem[] = [
     title: "Church Plants",
     href: "/oversight/plants",
     icon: Network,
+  },
+  {
+    title: "Plant Health",
+    href: "/oversight/health",
+    icon: Activity,
   },
   {
     title: "Invitations",
