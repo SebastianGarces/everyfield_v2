@@ -7,6 +7,7 @@
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
 | `NEXT_PUBLIC_APP_URL` | No | Base URL (default: localhost:3000) |
 | `REVALIDATION_SECRET` | For prod | Wiki cache revalidation auth |
+| `CRON_SECRET` | For prod | Phase Engine cron auth (Bearer token on `/api/phase-engine/assess`) |
 
 **Source:** `.env.example`
 

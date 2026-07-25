@@ -70,7 +70,3 @@ When given a frontend task:
 - Write semantic HTML
 - Ensure keyboard accessibility
 - Use proper ARIA attributes when needed
-
-## Model Preference
-
-This agent is designed to work with Gemini 3 Pro for optimal frontend development assistance.

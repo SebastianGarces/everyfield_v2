@@ -51,6 +51,8 @@ Thumbs.db
 # AI Agents
 .codex
 scratchpad/
+# Playwright MCP browser artifacts (snapshots, console logs, screenshots)
+.playwright-mcp/
 
 # Working feature (ephemeral planning workspace)
 working-feature

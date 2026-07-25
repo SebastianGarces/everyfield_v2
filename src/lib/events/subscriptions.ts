@@ -25,6 +25,9 @@ import {
   autoCompleteTasksByEvent,
 } from "@/lib/tasks/events";
 
+// Handlers owned by PE (Phase Engine / Plant Intelligence)
+import { handleMaterialEvent } from "@/lib/phase-engine/dirty-handler";
+
 // Event types from producers
 import type {
   MeetingAttendanceRecordedEvent,
@@ -35,6 +38,8 @@ import type {
   TeamMemberAssignedEvent,
   TeamLeaderAssignedEvent,
 } from "@/lib/ministry-teams/events";
+import type { PersonCreatedEvent } from "@/lib/people/events";
+import type { TaskCompletedEvent } from "@/lib/tasks/events";
 
 /**
  * Minimal interface for the event bus, used to avoid importing from event-bus.ts
@@ -135,6 +140,24 @@ export function registerSubscriptions(bus: EventBusLike): void {
       );
     }
   );
+
+  // --------------------------------------------------------------------------
+  // Material events -> PE (Phase Engine / Plant Intelligence) — dirty marking
+  // --------------------------------------------------------------------------
+
+  // A "material" event meaningfully changes a plant's state, so its latest
+  // assessment may be out of date. Each of these stamps
+  // churches.last_material_event_at = now for the affected church, marking the
+  // plant "dirty" for re-assessment (PE-010). The handler is tenant-scoped and
+  // best-effort — it only ever touches the event's own churchId and never
+  // throws back into the originating flow.
+  bus.on<MeetingAttendanceFinalizedEvent>(
+    "meeting.attendance.finalized",
+    handleMaterialEvent
+  );
+  bus.on<TeamMemberAssignedEvent>("team.member.assigned", handleMaterialEvent);
+  bus.on<PersonCreatedEvent>("person.created", handleMaterialEvent);
+  bus.on<TaskCompletedEvent>("task.completed", handleMaterialEvent);
 
   // --------------------------------------------------------------------------
   // Future subscriptions (no handlers yet)

@@ -38,3 +38,15 @@ jobs:
 
       - name: Build
         run: pnpm build
+        env:
+          # `next build` collects page data, which evaluates route modules —
+          # and several of them construct the Neon client at import time. The
+          # client is only constructed here, never connected to, so a
+          # syntactically valid placeholder is enough and no real credentials
+          # belong in CI. Without this the build fails on the first such route
+          # ("No database connection string was provided to `neon()`"), which
+          # is why this workflow had never passed since it was added.
+          DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
+          # Same reason: `new Resend(...)` runs at module scope in the email
+          # client and the webhook route, and throws on a missing key.
+          RESEND_API_KEY: "re_ci_placeholder"

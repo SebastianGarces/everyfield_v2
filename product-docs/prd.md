@@ -97,6 +97,7 @@ Each feature has its own FRD defining *what that feature must do*. FRDs are inde
 
 | Code | Feature | FRD Location |
 |------|---------|--------------|
+| PE | [Phase Engine (Plant Intelligence)](./features/phase-engine/frd.md) | **Primary differentiator.** Advisory LLM-as-judge engine: reads each plant's activity, judges it against the methodology (RAG), surfaces prioritized insights to planters and health signals to overseers |
 | F1 | [Wiki / Knowledge Base](./features/wiki/frd.md) | Educational resource with structured guidance |
 | F2 | [People / CRM Management](./features/people-crm/frd.md) | Contact and relationship tracking |
 | F3 | [Meetings](./features/meetings/frd.md) | Plan, execute, and track all meeting types (Vision Meetings, Orientations, Team Meetings) |
@@ -107,6 +108,12 @@ Each feature has its own FRD defining *what that feature must do*. FRDs are inde
 | F8 | [Ministry Team Management](./features/ministry-team-management/frd.md) | Team organization and health |
 | F9 | [Communication Hub](./features/communication-hub/frd.md) | Messaging and communication |
 | F10 | [Facility Management](./features/facility-management/frd.md) | Venue search and management |
+
+### Planned (pre-FRD)
+
+| Feature | Doc | Status |
+|---------|-----|--------|
+| Church Plant Agent | [vision](./features/church-plant-agent/vision.md) | Vision capture. Conversational tool-calling agent that *executes* multi-step ops (the "chat-first ops" / action half of the AI direction; insight→action loop with the Phase Engine). FRD pending prioritization (post-beta). |
 
 ---
 
@@ -148,6 +155,10 @@ Reference the [Launch Playbook](./launch-playbook.md) for the underlying church 
 ---
 
 ## Changelog
+
+### v2.1 (June 16, 2026)
+- **Phase Engine direction change.** Reframed the Phase Engine from a deterministic exit-criteria *state machine* into the **Plant Intelligence Engine** — an advisory LLM-as-judge that reads plant activity, judges it against the methodology (Launch Playbook + wiki via RAG), and surfaces prioritized insights to planters and health signals to networks. Phase becomes advisory context; advancement is soft-gated and planter-confirmed. Added [Phase Engine FRD](./features/phase-engine/frd.md) + companion rubric (`features/phase-engine/rubric-v0.md`). Updated System Architecture (Phase Engine service) and Product Brief (Phase Structure).
+- **Follow-up alignment needed** (not yet done): dependent FRDs that describe phase "exit-criteria validation/gating" — F4 Progress Dashboard, F5 Task Management (phase-triggered templates), F1 Wiki (phase recommendations) — should be reconciled to the advisory model. The `phase.changed` contract they rely on is unchanged.
 
 ### v2.0 (January 25, 2026)
 - Refactored to context-sharded structure

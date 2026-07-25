@@ -52,6 +52,18 @@ body {
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Attention scale — how much operator attention a thing warrants.
+     The base carries the hue across an AREA (tile tint, border), where hue is
+     easy to judge; the `-ink` is the same hue darkened enough to read as text.
+     Colour is never asked to do its work in a few pixels of type: a label is
+     too small to carry a hue reliably, so the tile around it does that job and
+     the label only has to be readable. Used with opacity modifiers for tints
+     and borders (`bg-attention-high/12`). */
+  --color-attention-high: var(--attention-high);
+  --color-attention-high-ink: var(--attention-high-ink);
+  --color-attention-medium: var(--attention-medium);
+  --color-attention-medium-ink: var(--attention-medium-ink);
 }
 
 :root {
@@ -93,6 +105,15 @@ body {
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+
+  /* Attention scale. Red (28) vs amber (76) reads as an intensity ramp on its
+     own. The inks stop short of the darkest passing value on purpose: pushed
+     further they stop reading as red and amber at all and just look black,
+     which is what the first two attempts got wrong. Measured with APCA. */
+  --attention-high: oklch(0.55 0.21 28);
+  --attention-high-ink: oklch(0.47 0.195 28);
+  --attention-medium: oklch(0.7 0.155 76);
+  --attention-medium-ink: oklch(0.45 0.115 71);
 }
 
 .dark {
@@ -127,6 +148,15 @@ body {
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+
+  /* Lifted for the dark surface rather than mechanically inverted. The inks
+     invert their relationship to the base here — on a dark tile the readable
+     version of a hue is lighter, not darker. Re-measured against
+     oklch(0.205 0 0) with APCA. */
+  --attention-high: oklch(0.62 0.19 30);
+  --attention-high-ink: oklch(0.87 0.12 38);
+  --attention-medium: oklch(0.74 0.15 78);
+  --attention-medium-ink: oklch(0.86 0.11 82);
 }
 
 @layer base {
