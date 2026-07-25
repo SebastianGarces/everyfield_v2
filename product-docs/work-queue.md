@@ -41,12 +41,15 @@ which also requires a PR. It runs on **every** PR regardless of base — a PR ag
 used to run no check at all, which reads as "not yet run" rather than failing, and hid a PR for a
 month.
 
-**Caveat worth knowing:** the ruleset keeps a repository-admin bypass, so a red check does not
-physically block a merge. Remove it when the check should actually bind:
+**The check now genuinely binds.** The repository-admin bypass has been removed, so a red check
+stops a merge for everyone including you. Verified: `GET /rules/branches/main` returns both rules
+(it returned `[]` while the bypass was active, which is how the earlier misconfiguration was
+caught), and a direct push to `main` is rejected with "Changes must be made through a pull request."
 
-```bash
-gh api repos/:owner/:repo/rulesets/19738586 --method PUT -f 'bypass_actors=[]'
-```
+The escape hatch is no longer a flag — it is setting the ruleset to Disabled or Evaluate in
+**Settings → Rules**, which is deliberate and leaves a trace. Editing the ruleset via the API needs
+the **full** payload; `PUT` replaces the object, so sending a single field would drop the rules and
+conditions along with it.
 
 ### 2. Browser validation — decided: Vercel previews
 
@@ -314,7 +317,6 @@ route that works locally and a cron that fires in production are different claim
 
 | Item | Why |
 |---|---|
-| **Ruleset admin bypass** | Left on deliberately. Until removed, a red check does not block a merge — see §1 for the one-line command. |
 | **OpenAI data posture** | See Go-live §4. Self-serve retention control now; ZDR needs sales and is likely out of reach pre-revenue. The FRD requirement needs restating. |
 | **Database hosting decision** | See Go-live §3. Trigger is the first real test users. |
 | **Langfuse** | Needs a self-hosted instance + `LANGFUSE_*` env. Tracing currently no-ops, so judge behaviour is unobservable — worth doing *before* rubric feedback arrives, since traces are how you answer "why did it say that?". |
