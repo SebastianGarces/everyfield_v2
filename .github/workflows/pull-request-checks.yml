@@ -47,3 +47,6 @@ jobs:
           # ("No database connection string was provided to `neon()`"), which
           # is why this workflow had never passed since it was added.
           DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
+          # Same reason: `new Resend(...)` runs at module scope in the email
+          # client and the webhook route, and throws on a missing key.
+          RESEND_API_KEY: "re_ci_placeholder"
