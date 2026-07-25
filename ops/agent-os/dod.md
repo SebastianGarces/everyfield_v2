@@ -10,6 +10,37 @@ human reviewer can confirm each claim without re-running anything.
 
 ---
 
+## Anchored vs attested — read this before trusting any gate below
+
+Every gate is one of two kinds, and the difference decides how much you have to supervise:
+
+- **Anchored** — something that cannot argue back said so. A check run's conclusion. A test exit
+  code. An HTTP response from a deployment that actually contains this branch's code.
+- **Attested** — an agent says so, and its evidence is its own prose.
+
+An attested gate is not worthless, but it fails in a specific way: it stays green while the thing
+it describes quietly stops being true. This repo has three worked examples. A DoD reported PASS
+with a browser gate that had never opened a browser. CI was believed to be validating PRs while it
+had not passed once since April. G3 drove `localhost:3000`, which serves `main`, so it exercised
+code the branch had never written.
+
+> Topology does not buy truth. Anchors do.
+
+| Gate | Kind | What anchors it |
+|---|---|---|
+| G0 Spec mapped | attested | — judgment, inherently |
+| G1 Static | **anchored** | the `Format, Lint, Typecheck, Build` check on the PR |
+| G2 Tests | **anchored** | `pnpm test` runs in that same check |
+| G3 Functional | partly anchored | a real preview deployment containing this branch; assertions are still attested |
+| G4 Conventions | attested | — |
+| G5 Diff hygiene | **computed** | `git diff --name-only` compared against the declared file set |
+| G6 Independent sign-off | attested | fresh-context reviewer; judgment by design |
+
+**The rule that follows:** a passing DoD report is a claim, and the PR's required check is the
+verdict. `open-pr` waits for it, and the loop treats *green DoD + red check* as a failed attempt.
+
+---
+
 ## Gates
 
 ### G0 — Spec mapped
@@ -21,13 +52,24 @@ human reviewer can confirm each claim without re-running anything.
 ### G1 — Static checks
 - `pnpm typecheck` → clean (0 errors).
 - `pnpm lint` → clean (0 errors; warnings noted).
-- `pnpm build` → succeeds.
-- **Evidence:** the tail of each command + exit code.
+- `pnpm format:check` → clean.
+- `pnpm build` → succeeds. Run it the way CI does — **hermetic**, no reachable database:
+  ```bash
+  CI=1 DATABASE_URL="postgresql://ci:ci@localhost:5432/ci" \
+    RESEND_API_KEY="re_ci_placeholder" pnpm build
+  ```
+  A build that only succeeds against a live database will pass locally and fail in CI.
+- **Evidence:** the tail of each command + exit code — *and* the PR check, which is the anchor.
+  Running these locally is how you avoid a red check; it is not what proves the gate.
 
 ### G2 — Tests
 - `pnpm test` → green.
 - New/changed logic has tests (happy path + at least one failure/edge path).
 - No `.only`, no `.skip`, no commented-out tests.
+- **Anchored:** CI runs the suite too, so a number reported here that CI cannot reproduce fails the
+  PR. If a test only passes with your `.env.local`, it does not pass.
+- A pre-existing failure is not a free pass. Say which test, and prove it fails on `main` as well —
+  otherwise you are shipping on the assumption that someone else broke it.
 - **Evidence:** test summary (counts) + exit code.
 
 ### G3 — Functional validation (the proof — MCP-driven)
@@ -69,7 +111,14 @@ The unit must be demonstrated **working against the running app**, not just comp
 - Changes confined to the unit's declared files; any deviation is named and justified.
 - Conventional commit messages.
 - No debug logs, no commented dead code, no secrets/keys, no `.env` edits.
-- **Evidence:** `git diff --stat` + a one-line deviation note (or "none").
+- **Compute the file list, do not recall it.** Run it and compare against the declared set:
+  ```bash
+  git diff --name-only $(git merge-base origin/main HEAD)...HEAD
+  ```
+  Anything in that output and not in the unit's declared files is a deviation, whether or not it
+  felt significant while writing it. "I stayed in scope" is a memory; this command is a fact.
+- **Evidence:** the raw command output, plus `git diff --stat` and a one-line deviation note
+  (or "none").
 
 ### G6 — Independent sign-off
 - A **separate** `code-reviewer` agent (NOT the implementer) confirms G1–G5 **from the evidence,

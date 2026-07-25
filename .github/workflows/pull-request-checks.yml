@@ -15,6 +15,11 @@ on:
 
 jobs:
   validate:
+    # This name is a CONTRACT, not a description. The `main protection` ruleset
+    # requires the check by this exact string, so renaming it here without
+    # updating the ruleset in the same change silently un-protects `main`:
+    # PRs would wait forever on a check name that no longer reports.
+    # (It now also runs tests, which the name does not say.)
     name: Format, Lint, Typecheck, Build
     runs-on: ubuntu-latest
 
@@ -63,7 +68,18 @@ jobs:
         if: steps.scope.outputs.docs_only != 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # 24, matching local dev and Vercel's current default — not 20.
+          #
+          # This was 20, and adding the Test step is what exposed it: `pnpm
+          # test` passes a glob to `node --test`, which only learned to expand
+          # globs in Node 22. On 20 it fails with "Could not find
+          # 'src/**/*.test.ts'" — so the suite has never been runnable here,
+          # and nobody noticed because CI never tried to run it.
+          #
+          # The deeper fix is the alignment: CI on a different major than dev
+          # and production is a divergence that will keep producing failures
+          # that reproduce nowhere.
+          node-version: 24
           cache: "pnpm"
 
       - name: Install dependencies
@@ -81,6 +97,17 @@ jobs:
       - name: Typecheck
         if: steps.scope.outputs.docs_only != 'true'
         run: pnpm typecheck
+
+      # The suite is the anchor under DoD gate G2. Before this step, "155/155
+      # tests pass" was only ever an agent reporting a number it had produced
+      # itself — nothing independent had run it. Verified to pass with no
+      # .env.local and an unreachable database, so it needs no real credentials.
+      - name: Test
+        if: steps.scope.outputs.docs_only != 'true'
+        run: pnpm test
+        env:
+          DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
+          RESEND_API_KEY: "re_ci_placeholder"
 
       - name: Build
         if: steps.scope.outputs.docs_only != 'true'
