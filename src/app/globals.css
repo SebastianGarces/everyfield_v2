@@ -52,6 +52,14 @@ body {
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Attention scale — how much operator attention a thing warrants.
+     Deliberately NOT `destructive`: these mark focus, not failure. One warm
+     hue at two intensities, so the ramp reads as a scale rather than as two
+     unrelated colours, and stays legible without hue discrimination. Used with
+     opacity modifiers for tints and borders (`bg-attention-high/10`). */
+  --color-attention-high: var(--attention-high);
+  --color-attention-medium: var(--attention-medium);
 }
 
 :root {
@@ -93,6 +101,11 @@ body {
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+
+  /* Attention scale. Hue sits clear of both the lime brand (~130) and
+     `destructive` (~27) so neither meaning bleeds into the other. */
+  --attention-high: oklch(0.5 0.15 47);
+  --attention-medium: oklch(0.54 0.1 80);
 }
 
 .dark {
@@ -127,6 +140,11 @@ body {
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+
+  /* Lifted, de-saturated for the dark surface rather than mechanically
+     inverted; both pairs re-checked against `--card` at oklch(0.205 0 0). */
+  --attention-high: oklch(0.78 0.13 52);
+  --attention-medium: oklch(0.81 0.09 84);
 }
 
 @layer base {
