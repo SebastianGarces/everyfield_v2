@@ -101,6 +101,13 @@ export async function runAssessment(
       schema: judgeOutputSchema,
       system,
       prompt: user,
+      // NFR-PE-4: do not let OpenAI retain this call. The AI SDK's OpenAI
+      // provider resolves `openai(modelId)` to the **Responses API**, which
+      // stores prompts and completions in the org's logs by default — the SDK
+      // itself defaults `store` to `true`. Plant data is real church data, so
+      // it is opted out explicitly here rather than relying on a dashboard
+      // toggle, which does not travel with the code, the key, or a new project.
+      providerOptions: { openai: { store: false } },
     });
 
     // 5. Coverage guard (PE-012): both audiences must be represented. The schema
