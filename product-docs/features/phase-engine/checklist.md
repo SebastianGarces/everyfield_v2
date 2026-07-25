@@ -18,7 +18,7 @@
 - [ ] PE-013: Planter-sees-first guarantee
 - [ ] PE-014: Insight feedback capture (rubric-tuning signal)
 
-- [ ] NFR-PE-4a: Provider + data-handling terms recorded in the feature's config documentation
+- [x] NFR-PE-4a: Provider + data-handling terms recorded in the feature's config documentation — `data-posture.md`
 - [ ] NFR-PE-4b: Strongest self-serve retention/training controls enabled on the provider account
 - [ ] NFR-PE-4c: Data processing disclosed in plain language to planters, coaches, and network users
 
