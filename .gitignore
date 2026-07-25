@@ -61,3 +61,4 @@ working-feature
 
 # Sentry Config File
 .env.sentry-build-plugin
+.neon
