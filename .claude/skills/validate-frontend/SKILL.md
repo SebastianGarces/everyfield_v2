@@ -1,6 +1,6 @@
 ---
 name: validate-frontend
-description: Functionally validate a frontend/fullstack change against the running app using the Playwright MCP and chrome-devtools MCP. Use to prove a UI acceptance criterion actually works (not just compiles) — navigate localhost:3000, assert the outcome, require a clean console, screenshot, and run a lighthouse a11y audit. This is DoD gate G3 for frontend units.
+description: Functionally validate a frontend/fullstack change against the branch's Vercel preview deployment using the Playwright MCP and chrome-devtools MCP. Use to prove a UI acceptance criterion actually works (not just compiles) — assert the outcome, require a clean console, screenshot, and run a lighthouse a11y audit. This is DoD gate G3 for frontend units.
 ---
 
 # validate-frontend (DoD gate G3 — frontend/fullstack)
@@ -10,10 +10,27 @@ Proves a UI change **works against the running app**. Compiling is not done; thi
 
 ## Preconditions
 
-- The dev server must be running at `http://localhost:3000`. **Do not start it** (per `AGENTS.md`).
-  Check first: `curl -sS -o /dev/null -w "%{http_code}" http://localhost:3000` (or a known route).
-  If it's down → return `FAIL` with `failingGate: "G3"` and a note that the human must start the dev
-  server; do not try to launch one.
+- **Validate on the branch's Vercel preview deployment — never `localhost:3000`.** Localhost serves
+  the **main checkout**, so it does not contain this track's work: driving it produces a confident
+  pass for code that was never executed. This is not hypothetical — it is why the CSV-export track
+  had to ship with its browser gate unmet.
+
+  ```bash
+  ./scripts/preview-url.sh --wait --bypass <pr-number>   # use as the FIRST navigation
+  ```
+
+  Read `.claude/skills/browser-validation/SKILL.md` before the first run. Two traps live there:
+  the dev account switcher does **not** exist on previews (log in with a seeded account, and note
+  eval planters use a different password), and `planter1@everyfield.dev`'s church has **zero
+  people** — useless for validating anything list-shaped.
+
+- **Sequencing:** the preview is created by the push, so the PR opens with G3 at ⏳, gets validated,
+  then has its body edited to ✅. If `preview-url.sh` cannot find a successful deployment, return
+  `FAIL` with `failingGate: "G3"` — do not fall back to localhost, and do not start a server.
+
+- **Re-fetch the URL after every push.** Each push builds a new deployment; an old URL keeps serving
+  old code and will happily "prove" a fix that is not there.
+
 - MCPs used (load via ToolSearch if their schemas aren't present):
   - **Playwright MCP** — `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`,
     `browser_fill_form`, `browser_evaluate`, `browser_console_messages`, `browser_take_screenshot`,
@@ -23,14 +40,19 @@ Proves a UI change **works against the running app**. Compiling is not done; thi
 
 ## Procedure (per acceptance criterion)
 
-1. `browser_navigate` to the route under test (sign in first if the flow needs auth — use seeded dev
-   credentials; never hardcode secrets).
+0. `browser_navigate` to the `--bypass` URL **once** — Vercel sets a cookie on the redirect, so
+   every later navigation can use plain paths. Then sign in through the real login form with a
+   seeded account (see the browser-validation skill's account table).
+1. `browser_navigate` to the route under test.
 2. `browser_snapshot` to get the accessibility tree, then drive the interaction the AC describes
    (`browser_click` / `browser_type` / `browser_fill_form`).
 3. **Assert the outcome** the AC promises — prefer `browser_evaluate` to read concrete DOM/state
    (text content, attribute, count, URL) over eyeballing. One assertion per AC, minimum.
 4. `browser_take_screenshot` of the key state (name it `<issue>-<ac-slug>.png`).
 5. After exercising all ACs, pull `browser_console_messages`. **Any `error` → FAIL** (warnings noted).
+   One known exception on previews: a single `403` per page load from a `HEAD` request made by the
+   Vercel preview toolbar. It is infrastructure, not the app — confirm that is what you are looking
+   at, and do not let it mask a real error underneath.
 6. Run `lighthouse_audit` on the primary touched page. **Accessibility ≥ 90** to pass; record
    performance / best-practices / SEO but treat them as non-blocking unless the issue's ACs say otherwise.
 
@@ -52,5 +74,7 @@ Feed these back into the `definition-of-done` report:
 
 - **Assert, don't admire.** A screenshot alone is not a pass — there must be a programmatic assertion per AC.
 - **Console-clean.** Runtime errors in the console fail the gate even if the screenshot looks right.
-- **Real flow, real data.** Use the seeded dev DB and real navigation; don't stub the thing you're validating.
-- **Leave it clean.** `browser_close` the page when done so the next track starts fresh.
+- **Real flow, real data.** Use the seeded DB and real navigation; don't stub the thing you're validating.
+- **Never localhost.** It serves `main`. A pass obtained there is a pass for someone else's code.
+- **Leave it clean.** The preview writes to the shared development database — prefer reading, and
+  clean up what you create. `browser_close` the page when done so the next track starts fresh.

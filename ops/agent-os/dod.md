@@ -34,7 +34,14 @@ human reviewer can confirm each claim without re-running anything.
 The unit must be demonstrated **working against the running app**, not just compiling.
 
 **Frontend / fullstack units** → run the `validate-frontend` skill:
-- Drive the already-running dev server at `http://localhost:3000` with the **Playwright MCP**.
+- Drive the branch's **Vercel preview deployment**, not `localhost:3000`. Localhost serves the
+  **main checkout**, so it never contains the track's work — validating there proves nothing about
+  the change and is how a UI gate passes without anything being exercised.
+  Get the URL with `./scripts/preview-url.sh --wait --bypass <pr-number>`; the full procedure and
+  its two traps are in `.claude/skills/browser-validation/SKILL.md`.
+- **Consequence for the loop:** the preview is created by the push, so a frontend track opens its PR
+  with G3 at ⏳, validates against the preview, then edits the PR body to ✅. A PR may exist briefly
+  unvalidated; it may never *claim* a gate it did not run.
 - For each AC: navigate to the flow, perform the interaction, and assert the visible outcome
   (`browser_snapshot` / `browser_click` / `browser_evaluate`).
 - `browser_console_messages` must contain **no errors** (warnings noted).

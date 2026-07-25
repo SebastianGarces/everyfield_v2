@@ -72,8 +72,9 @@ file-disjoint/track logic.
 ## Definition of Done
 
 The contract lives in [`dod.md`](./dod.md). Summary: G0 spec-mapped · G1 static (typecheck/lint/build)
-· G2 tests · **G3 functional via MCP** (Playwright drives `localhost:3000`, asserts each AC, requires a
-clean console + screenshots + lighthouse a11y ≥ 90; backend asserts contracts + migration) · G4
+· G2 tests · **G3 functional via MCP** (Playwright drives the branch's **Vercel preview deploy**,
+asserts each AC, requires a clean console + screenshots + lighthouse a11y ≥ 90; backend asserts
+contracts + migration) · G4
 conventions/invariants · G5 diff hygiene · G6 independent adversarial sign-off. High-risk adds migration
 dry-run, rollback, schema diff, and a second verifier.
 
@@ -91,8 +92,10 @@ to create the labels.
   the whole wave up front. A task that can't finish is **deferred or split**, never half-shipped.
 - **No silent stops** — exhaustion always produces an `agent:blocked` issue with the reason.
 - **High-risk → PR, not merge** — the human PR review is the checkpoint for schema/auth/tenancy/payments.
-- **Dev server** — G3 needs `localhost:3000` up. Per `AGENTS.md` the loop never starts one; it checks
-  and asks you if it's down.
+- **Preview deploys, not localhost** — G3 validates against the branch's Vercel preview, because
+  `localhost:3000` serves the main checkout and never contains the track's work. The loop never
+  starts a server (per `AGENTS.md`); it resolves the preview URL with `scripts/preview-url.sh`.
+  Consequence: a frontend track opens its PR with G3 at ⏳ and edits it to ✅ once validated.
 
 ## Where this lives
 

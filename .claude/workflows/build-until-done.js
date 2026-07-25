@@ -5,9 +5,18 @@ export const meta = {
   whenToUse:
     "After spec-intake + token-preflight, to actually build a wave of tracks autonomously to PR. Pass args = the wave's units array (each: {id,title,lane,files,summary,acceptanceCriteria,issue,risk}), optionally {units, base, maxAttempts}.",
   phases: [
-    { title: "Build", detail: "implementer codes the track in an isolated worktree" },
-    { title: "Verify", detail: "independent code-reviewer runs the DoD gates incl. MCP G3" },
-    { title: "Ship", detail: "open-pr — gated on a PASS verdict, with the evidence bundle" },
+    {
+      title: "Build",
+      detail: "implementer codes the track in an isolated worktree",
+    },
+    {
+      title: "Verify",
+      detail: "independent code-reviewer runs the DoD gates incl. MCP G3",
+    },
+    {
+      title: "Ship",
+      detail: "open-pr — gated on a PASS verdict, with the evidence bundle",
+    },
   ],
 };
 
@@ -31,11 +40,20 @@ const IMPL_SCHEMA = {
   type: "object",
   required: ["committed", "filesChanged", "summary", "selfCheckPassed"],
   properties: {
-    committed: { type: "boolean", description: "code committed to the track branch" },
+    committed: {
+      type: "boolean",
+      description: "code committed to the track branch",
+    },
     filesChanged: { type: "array", items: { type: "string" } },
     summary: { type: "string" },
-    selfCheckPassed: { type: "boolean", description: "tsc + lint passed in the worktree" },
-    deviations: { type: "string", description: "any files touched outside the declared set, justified" },
+    selfCheckPassed: {
+      type: "boolean",
+      description: "tsc + lint passed in the worktree",
+    },
+    deviations: {
+      type: "string",
+      description: "any files touched outside the declared set, justified",
+    },
   },
 };
 const DOD_SCHEMA = {
@@ -94,7 +112,9 @@ const BLOCK_SCHEMA = {
 // so parallel worktrees can never collide. (Same DSU as frd-implement-wave.)
 // ---------------------------------------------------------------------------
 const normFile = (f) =>
-  String(f).replace(/\s*\((new|modified|edit|edited)\)\s*$/i, "").trim();
+  String(f)
+    .replace(/\s*\((new|modified|edit|edited)\)\s*$/i, "")
+    .trim();
 function makeDSU(ids) {
   const p = new Map(ids.map((i) => [i, i]));
   const find = (x) => {
@@ -108,7 +128,8 @@ function makeDSU(ids) {
     return r;
   };
   const union = (a, b) => {
-    const ra = find(a), rb = find(b);
+    const ra = find(a),
+      rb = find(b);
     if (ra !== rb) p.set(ra, rb);
   };
   return { find, union };
@@ -135,9 +156,12 @@ const tracks = [...groups.values()].map((us) => ({
   units: us,
   issues: [...new Set(us.map((u) => u.issue).filter((x) => x != null))],
   risk: us.some((u) => u.risk === "high") ? "high" : us[0].risk || "low",
-  lane: [...new Set(us.map((u) => u.lane))].length === 1 ? us[0].lane : "fullstack",
+  lane:
+    [...new Set(us.map((u) => u.lane))].length === 1 ? us[0].lane : "fullstack",
 }));
-log(`${units.length} unit(s) → ${tracks.length} track(s); max ${MAX_ATTEMPTS} attempt(s) each.`);
+log(
+  `${units.length} unit(s) → ${tracks.length} track(s); max ${MAX_ATTEMPTS} attempt(s) each.`
+);
 
 // ---------------------------------------------------------------------------
 // Per-track verify-until-done loop
@@ -145,7 +169,10 @@ log(`${units.length} unit(s) → ${tracks.length} track(s); max ${MAX_ATTEMPTS} 
 function unitBlocks(track) {
   return track.units
     .map(
-      (u, i) => `### Unit ${i + 1}: ${u.title} (${u.lane}) — issue #${u.issue ?? "?"}
+      (
+        u,
+        i
+      ) => `### Unit ${i + 1}: ${u.title} (${u.lane}) — issue #${u.issue ?? "?"}
 Summary: ${u.summary}
 Files: ${(u.files || []).join(", ")}
 Acceptance criteria:
@@ -180,7 +207,11 @@ async function buildTrack(track) {
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     if (budget.total && budget.remaining() < RESERVE)
-      return blockTrack(track, `token reserve hit before attempt ${attempt} (remaining ${Math.round(budget.remaining() / 1000)}k < reserve ${Math.round(RESERVE / 1000)}k)`, lastReport);
+      return blockTrack(
+        track,
+        `token reserve hit before attempt ${attempt} (remaining ${Math.round(budget.remaining() / 1000)}k < reserve ${Math.round(RESERVE / 1000)}k)`,
+        lastReport
+      );
 
     log(`🔨 ${track.id} — attempt ${attempt}/${MAX_ATTEMPTS}`);
     const fixBlock =
@@ -198,9 +229,19 @@ Implement the following so it satisfies every acceptance criterion:
 ${unitBlocks(track)}
 
 Write code AND tests. Run \`pnpm typecheck\` and \`pnpm lint\` in the worktree and fix what you can. Commit to ${branch} (conventional commits). Do NOT push and do NOT open a PR — the loop handles that after validation. Stay within the declared files unless strictly necessary (note deviations). Return strictly the schema.`,
-      { label: `impl:${track.id}#${attempt}`, phase: "Build", agentType: implAgent, schema: IMPL_SCHEMA }
+      {
+        label: `impl:${track.id}#${attempt}`,
+        phase: "Build",
+        agentType: implAgent,
+        schema: IMPL_SCHEMA,
+      }
     );
-    if (!impl) return blockTrack(track, `implementer died on attempt ${attempt}`, lastReport);
+    if (!impl)
+      return blockTrack(
+        track,
+        `implementer died on attempt ${attempt}`,
+        lastReport
+      );
 
     // Independent verifier (G6): a DIFFERENT agent runs the full DoD.
     const verify = await agent(
@@ -208,20 +249,28 @@ Write code AND tests. Run \`pnpm typecheck\` and \`pnpm lint\` in the worktree a
 Run every gate yourself — do not trust the implementer's claims:
 - G1 \`pnpm typecheck && pnpm lint && pnpm build\` in ${wt}
 - G2 \`pnpm test\`
-- G3 functional: use \`${track.lane === "backend" ? "validate-backend" : "validate-frontend"}\` (drive localhost:3000 via Playwright MCP / run the route) and PROVE each acceptance criterion with an assertion + screenshot/transcript; console must be error-free; lighthouse a11y ≥ 90 for UI.
+- G3 functional: use \`${track.lane === "backend" ? "validate-backend" : "validate-frontend"}\` and PROVE each acceptance criterion with an assertion + screenshot/transcript; console must be error-free; lighthouse a11y ≥ 90 for UI. Frontend validates against the branch's VERCEL PREVIEW (scripts/preview-url.sh --wait --bypass), never localhost:3000 — localhost serves main and would pass code this track never wrote. Backend prefers a tsx harness in the worktree.
 - G4 conventions, G5 diff hygiene.
 Acceptance criteria to prove:
 ${track.units.map((u) => (u.acceptanceCriteria || []).map((a) => `  - ${a}`).join("\n")).join("\n")}
 ${track.risk === "high" ? "This is HIGH-RISK: also run HR1–HR3 (migration dry-run + schema diff + rollback proof)." : ""}
 Default to FAIL when evidence is missing or unconvincing. Return strictly the DoD report schema.`,
-      { label: `verify:${track.id}#${attempt}`, phase: "Verify", agentType: "code-reviewer", schema: DOD_SCHEMA }
+      {
+        label: `verify:${track.id}#${attempt}`,
+        phase: "Verify",
+        agentType: "code-reviewer",
+        schema: DOD_SCHEMA,
+      }
     );
     lastReport = verify;
     if (!verify) continue;
 
-    const passed = verify.verdict === "PASS" || verify.verdict === "PASS_WITH_WARNINGS";
+    const passed =
+      verify.verdict === "PASS" || verify.verdict === "PASS_WITH_WARNINGS";
     if (!passed) {
-      log(`❌ ${track.id} attempt ${attempt}: ${verify.failingGate || "FAIL"} — retrying`);
+      log(
+        `❌ ${track.id} attempt ${attempt}: ${verify.failingGate || "FAIL"} — retrying`
+      );
       continue;
     }
 
@@ -229,11 +278,21 @@ Default to FAIL when evidence is missing or unconvincing. Return strictly the Do
     if (track.risk === "high") {
       const verify2 = await agent(
         `You are a SECOND independent code-reviewer for HIGH-RISK branch ${branch} (worktree ${wt}), issue(s) ${track.issues.map((n) => `#${n}`).join(", ")}. Re-run the DoD gates focusing on the migration dry-run, schema diff, rollback, and the auth/tenancy ACs. Do not assume the first reviewer was right. Return strictly the DoD report schema.`,
-        { label: `verify2:${track.id}#${attempt}`, phase: "Verify", agentType: "code-reviewer", schema: DOD_SCHEMA }
+        {
+          label: `verify2:${track.id}#${attempt}`,
+          phase: "Verify",
+          agentType: "code-reviewer",
+          schema: DOD_SCHEMA,
+        }
       );
-      if (!verify2 || (verify2.verdict !== "PASS" && verify2.verdict !== "PASS_WITH_WARNINGS")) {
+      if (
+        !verify2 ||
+        (verify2.verdict !== "PASS" && verify2.verdict !== "PASS_WITH_WARNINGS")
+      ) {
         lastReport = verify2 || lastReport;
-        log(`❌ ${track.id} attempt ${attempt}: second verifier rejected — retrying`);
+        log(
+          `❌ ${track.id} attempt ${attempt}: second verifier rejected — retrying`
+        );
         continue;
       }
     }
@@ -246,10 +305,20 @@ ${JSON.stringify(verify)}
 Push the branch and open a PR against main with --label agent:in-review${track.risk === "high" ? " and --label risk:high" : ""}. Build the PR body from the evidence bundle (the DoD table + AC checklist + screenshots/lighthouse/migration). Include "Closes ${track.issues.map((n) => `#${n}`).join(", Closes ")}". Then flip each issue label agent:in-progress → agent:in-review. Return strictly the schema.`,
       { label: `pr:${track.id}`, phase: "Ship", schema: PR_SCHEMA }
     );
-    return { track, status: pr?.opened ? "shipped" : "pr-failed", pr, report: verify, attempts: attempt };
+    return {
+      track,
+      status: pr?.opened ? "shipped" : "pr-failed",
+      pr,
+      report: verify,
+      attempts: attempt,
+    };
   }
 
-  return blockTrack(track, `did not reach DoD in ${MAX_ATTEMPTS} attempts`, lastReport);
+  return blockTrack(
+    track,
+    `did not reach DoD in ${MAX_ATTEMPTS} attempts`,
+    lastReport
+  );
 }
 
 phase("Build");
@@ -260,12 +329,24 @@ const results = await parallel(tracks.map((t) => () => buildTrack(t)));
 // ---------------------------------------------------------------------------
 const done = results.filter(Boolean);
 const shipped = done.filter((r) => r.status === "shipped");
-const blocked = done.filter((r) => r.status === "blocked" || r.status === "pr-failed");
+const blocked = done.filter(
+  (r) => r.status === "blocked" || r.status === "pr-failed"
+);
 log(`Done: ${shipped.length} shipped (PR opened), ${blocked.length} blocked.`);
 return {
   summary: `${shipped.length}/${tracks.length} tracks shipped to PR; ${blocked.length} blocked.`,
-  shipped: shipped.map((r) => ({ track: r.track.id, issues: r.track.issues, pr: r.pr?.url, attempts: r.attempts })),
-  blocked: blocked.map((r) => ({ track: r.track.id, issues: r.track.issues, reason: r.reason, failingGate: r.lastReport?.failingGate })),
+  shipped: shipped.map((r) => ({
+    track: r.track.id,
+    issues: r.track.issues,
+    pr: r.pr?.url,
+    attempts: r.attempts,
+  })),
+  blocked: blocked.map((r) => ({
+    track: r.track.id,
+    issues: r.track.issues,
+    reason: r.reason,
+    failingGate: r.lastReport?.failingGate,
+  })),
   nextStep:
     "Review the opened PRs (your queue). For blocked issues, read the issue comment for the failing gate + evidence and decide: tighten the spec, raise budget (+Nk), or take it manually.",
 };

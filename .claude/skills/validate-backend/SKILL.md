@@ -10,8 +10,11 @@ Proves a server change **behaves**, not just type-checks. Asserts against the co
 
 ## Preconditions
 
-- Dev server at `http://localhost:3000` for HTTP routes (check with `curl`, don't start it — see
-  `validate-frontend`). For pure functions/server actions, a `tsx` harness is fine.
+- **Prefer a `tsx` harness in the worktree.** It imports the track's own code, so it exercises what
+  you actually built. This is the default for pure functions, services and server actions.
+- **For HTTP routes, use the branch's Vercel preview** (`./scripts/preview-url.sh --wait --bypass
+  <pr-number>`), not `localhost:3000`. Localhost serves the **main checkout** — a route added on
+  this branch either 404s there or, worse, resolves to the old implementation and passes.
 - Read `memory/contracts/api.md` (route shapes) and `memory/contracts/db.md` (schema) before asserting.
 
 ## Procedure
