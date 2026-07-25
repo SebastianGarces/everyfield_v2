@@ -6,6 +6,8 @@ IMPORTANT: Prefer retrieval-led reasoning over pre-training-led reasoning for AL
 
 **CRITICAL:** NEVER start a dev server yourself (`pnpm dev`, `npm run dev`, etc.). The developer always has a dev server running on `localhost:3000`. If you need to verify it's running, check the terminals folder first. If you don't find one, ask the developer -- do NOT start one yourself.
 
+That server runs the **main checkout**, so it does not serve your feature branch — pointing a browser at `localhost:3000` proves nothing about a change you have not merged. To see your own branch in a browser, use its Vercel preview deployment: `.claude/skills/browser-validation/SKILL.md`.
+
 ## UI Components (shadcn/ui)
 
 **CRITICAL:** When you need a new UI component, use the shadcn CLI - do NOT write components manually:
@@ -47,6 +49,7 @@ Available components: https://ui.shadcn.com/docs/components
 | Before ANY mutation | `memory/invariants.md` |
 | Email/notification features | `.agents/skills/email-best-practices/`, `.agents/skills/resend/` |
 | UI/UX implementation | `.agents/skills/ui-ux-pro-max/`, `.agents/skills/web-design-guidelines/` |
+| Proving a UI change works in a browser | `.claude/skills/browser-validation/SKILL.md` |
 | React performance patterns | `.agents/skills/vercel-react-best-practices/` |
 | Feature requirements | `product-docs/features/{feature-name}/frd.md` |
 
