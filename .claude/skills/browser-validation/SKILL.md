@@ -62,15 +62,34 @@ thing that guard prevents.
 Log in through the real form instead. Preview deployments read the same development Neon branch as
 local dev, so the seeded accounts work:
 
-| Account | Email | Password |
-|---|---|---|
-| Planter | `planter1@everyfield.dev` | `password123` |
-| Network admin | `admin@everyfield.dev` | `password123` |
-| Coach | `coach1@everyfield.dev` | `password123` |
+| Account | Email | Password | Notes |
+|---|---|---|---|
+| Planter | `planter1@everyfield.dev` | `password123` | **Church has 0 people** — fine for empty states, useless for anything about a list |
+| Network admin | `admin@everyfield.dev` | `password123` | |
+| Coach | `coach1@everyfield.dev` | `password123` | |
+| Eval planter | `planter-dayspring@eval.phase-engine.everyfield.dev` | `eval-password-123` | ~100 people, meetings, assessments |
+| Eval planter | `planter-evergreen@eval.phase-engine.everyfield.dev` | `eval-password-123` | ~89 people, different church |
 
-Pick the role your acceptance criterion is written for. Tenancy-sensitive work should be checked
-from **two** accounts in different churches — that a church-scoped list is correct for one user is
-not evidence it is scoped at all.
+**Note the different password for eval accounts** — they are seeded by
+`scripts/seed-phase-engine-eval.ts`, not `seed-dev-db.ts`.
+
+Reach for an eval planter whenever the criterion involves data. Checking a list feature against a
+church with nothing in it produces a screenshot of an empty state and proves nothing.
+
+Tenancy-sensitive work must be checked from **two** accounts in different churches. That a
+church-scoped list looks right for one user is not evidence it is scoped at all — the two eval
+planters above are the easy pair, and their records are name-prefixed by church so overlap is
+obvious.
+
+### Switching accounts
+
+There is no sign-out route to navigate to, and the session cookie is `httpOnly`, so
+`document.cookie` cannot clear it. Clear at the context level and re-apply the bypass:
+
+```js
+await page.context().clearCookies();
+await page.goto('<preview>/login?x-vercel-protection-bypass=…&x-vercel-set-bypass-cookie=true');
+```
 
 ### 5. Drive it and capture evidence
 
@@ -82,6 +101,27 @@ Use the Playwright MCP tools. What counts as evidence:
 - **The filtered/empty/error states** an AC mentions, not only the happy path.
 - **A snapshot or screenshot reference** in the PR body for anything visual.
 - **Console output**, checked. A clean render with a red console is not a pass.
+
+**Known console noise on previews:** one `Failed to load resource: 403` per page load, from a `HEAD`
+request the Vercel preview toolbar makes to the page URL. It is infrastructure, not the app — verify
+it is that before reporting it, and do not let it hide a real error underneath.
+
+### Capturing a download
+
+For anything that produces a file, capture and parse it — the download is the evidence, not the
+click:
+
+```js
+const [download] = await Promise.all([
+  page.waitForEvent('download', { timeout: 30000 }),
+  page.getByRole('button', { name: 'Export', exact: true }).click(),
+]);
+await download.saveAs('<scratchpad>/export.csv');
+download.suggestedFilename();   // assert the filename convention too
+```
+
+Then check the contents against what the UI claimed: if the list header said "3 total", the file has
+3 data rows, and they are the right 3.
 
 ### 6. Write the result into the PR
 

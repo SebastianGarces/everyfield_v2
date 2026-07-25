@@ -83,14 +83,28 @@ if [ -z "$url" ]; then
 fi
 
 if [ "$with_bypass" = true ]; then
-  if [ -z "${VERCEL_AUTOMATION_BYPASS_SECRET:-}" ]; then
-    echo "VERCEL_AUTOMATION_BYPASS_SECRET is not set — see .env.example." >&2
+  secret="${VERCEL_AUTOMATION_BYPASS_SECRET:-}"
+
+  # Read it out of .env.local rather than expecting the caller to export it.
+  # `set -a; . .env.local` looks like the obvious way to load it and does not
+  # work: EMAIL_FROM's value contains `<`, which the shell reads as a redirect,
+  # so sourcing dies at that line and every variable after it is silently
+  # missing. An empty secret then produces a 200 from vercel.com/login that
+  # looks like a working page until you read the URL.
+  if [ -z "$secret" ] && [ -f "$(dirname "$0")/../.env.local" ]; then
+    secret="$(sed -n 's/^VERCEL_AUTOMATION_BYPASS_SECRET=//p' \
+      "$(dirname "$0")/../.env.local" | tail -1)"
+  fi
+
+  if [ -z "$secret" ]; then
+    echo "VERCEL_AUTOMATION_BYPASS_SECRET is not set and not in .env.local." >&2
+    echo "See .env.example, or .claude/skills/browser-validation/SKILL.md." >&2
     exit 1
   fi
   # x-vercel-set-bypass-cookie=true makes Vercel set a cookie on the redirect,
   # so every later navigation in the same browser session is already bypassed
   # and the secret does not have to ride along in each URL.
-  echo "${url}?x-vercel-protection-bypass=${VERCEL_AUTOMATION_BYPASS_SECRET}&x-vercel-set-bypass-cookie=true"
+  echo "${url}?x-vercel-protection-bypass=${secret}&x-vercel-set-bypass-cookie=true"
 else
   echo "$url"
 fi
