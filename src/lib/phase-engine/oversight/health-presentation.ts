@@ -214,7 +214,8 @@ export function launchLabel(
   // Only a launch still ahead can be imminent. A date in the past is history
   // for a launched plant, and emphasising it would put a warm highlight on
   // every post-launch church in the portfolio for no reason.
-  const imminent = daysUntilLaunch >= 0 && daysUntilLaunch <= readinessWindowDays;
+  const imminent =
+    daysUntilLaunch >= 0 && daysUntilLaunch <= readinessWindowDays;
 
   if (daysUntilLaunch < 0) {
     const days = Math.abs(daysUntilLaunch);
