@@ -15,6 +15,11 @@ import { createCommitment, getCommitment } from "@/lib/people/commitments";
 import { checkForDuplicates } from "@/lib/people/duplicates";
 import { emitPersonStatusChanged } from "@/lib/people/events";
 import {
+  buildExportFilename,
+  serializePeopleToCsv,
+  type ExportablePerson,
+} from "@/lib/people/export";
+import {
   executeBulkImport,
   generateCsvTemplate,
   parseCsvImport,
@@ -22,8 +27,10 @@ import {
 import {
   createPerson,
   deletePerson,
+  getPeopleForExport,
   getPerson,
   updatePerson,
+  type ExportPeopleOptions,
 } from "@/lib/people/service";
 import { changeStatus } from "@/lib/people/status";
 import { isBackwardProgression } from "@/lib/people/status.shared";
@@ -31,6 +38,7 @@ import {
   assignTag,
   createTag,
   deleteTag,
+  getTagsForPeople,
   listTags,
   removeTag,
   updateTag,
@@ -42,6 +50,7 @@ import type {
   ImportRow,
   ImportSummary,
   Person,
+  PersonSource,
   PersonStatus,
   StatusTransition,
   Tag,
@@ -1673,6 +1682,74 @@ export async function downloadCsvTemplateAction(): Promise<
   } catch (error) {
     console.error("downloadCsvTemplateAction error:", error);
     return { success: false, error: "Failed to generate template" };
+  }
+}
+
+/**
+ * Filters that can be passed to the export action. Mirror the people list
+ * query params so the export reflects the currently-filtered set.
+ */
+export interface ExportPeopleFilters {
+  status?: PersonStatus[];
+  source?: PersonSource[];
+  search?: string;
+  tagIds?: string[];
+}
+
+/**
+ * Export the current church's contacts to CSV (P-027).
+ *
+ * Scoped to the current user's church (tenancy invariant) and respects the
+ * same filters as the people list. Returns the CSV payload plus a suggested
+ * filename; the client triggers the download. Empty list → header-only CSV.
+ */
+export async function exportPeopleAction(
+  filters: ExportPeopleFilters = {}
+): Promise<
+  ActionResult<{ csv: string; filename: string; contentType: string }>
+> {
+  try {
+    const { user } = await verifySession();
+    if (!user.churchId) {
+      return {
+        success: false,
+        error: "You must be associated with a church to export people",
+      };
+    }
+
+    const options: ExportPeopleOptions = {
+      status: filters.status,
+      source: filters.source,
+      search: filters.search,
+      tagIds: filters.tagIds,
+    };
+
+    // Fetch the filtered set scoped to this church, then batch-load tags
+    // (single query, no N+1) and attach them for serialization.
+    const people = await getPeopleForExport(user.churchId, options);
+    const tagMap = await getTagsForPeople(
+      user.churchId,
+      people.map((p) => p.id)
+    );
+
+    const exportable: ExportablePerson[] = people.map((person) => ({
+      ...person,
+      tags: tagMap.get(person.id) ?? [],
+    }));
+
+    const csv = serializePeopleToCsv(exportable);
+
+    return {
+      success: true,
+      data: {
+        csv,
+        filename: buildExportFilename(),
+        contentType: "text/csv",
+      },
+    };
+  } catch (error) {
+    console.error("exportPeopleAction error:", error);
+    return { success: false, error: "Failed to export people" };
   }
 }
 
