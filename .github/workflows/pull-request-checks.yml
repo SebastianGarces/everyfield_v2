@@ -22,30 +22,68 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # Markdown-only PRs cannot fail anything below: `*.md` is in
+      # .prettierignore, tsc and eslint never look at it, and `next build`
+      # does not read product-docs. Running the pipeline for them costs ~1m45s
+      # to prove nothing.
+      #
+      # The job still runs and still reports its result — deliberately. The
+      # `main protection` ruleset requires this check *by name*, so a
+      # `paths-ignore:` trigger would leave a docs PR waiting forever on a
+      # check that never arrives. Skipping steps keeps the check reporting;
+      # skipping the workflow would silently block the merge.
+      #
+      # Anything that is not markdown — including .json, .yml, and this
+      # workflow itself — takes the full path.
+      - name: Detect docs-only change
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          files=$(gh api --paginate \
+            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            --jq '.[].filename')
+          echo "Changed files:"
+          printf '%s\n' "$files"
+          non_docs=$(printf '%s\n' "$files" | grep -vE '\.md$' || true)
+          if [ -n "$files" ] && [ -z "$non_docs" ]; then
+            echo "Markdown only — skipping install, format, lint, typecheck and build."
+            echo "docs_only=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Setup pnpm
+        if: steps.scope.outputs.docs_only != 'true'
         uses: pnpm/action-setup@v4
         with:
           version: 9
 
       - name: Setup Node.js
+        if: steps.scope.outputs.docs_only != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: "pnpm"
 
       - name: Install dependencies
+        if: steps.scope.outputs.docs_only != 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Check formatting
+        if: steps.scope.outputs.docs_only != 'true'
         run: pnpm format:check
 
       - name: Lint
+        if: steps.scope.outputs.docs_only != 'true'
         run: pnpm lint
 
       - name: Typecheck
+        if: steps.scope.outputs.docs_only != 'true'
         run: pnpm typecheck
 
       - name: Build
+        if: steps.scope.outputs.docs_only != 'true'
         run: pnpm build
         env:
           # This build is hermetic: no database, no real credentials. Keep it
