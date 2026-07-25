@@ -94,11 +94,24 @@ const DOD_SCHEMA = {
 };
 const PR_SCHEMA = {
   type: "object",
-  required: ["opened", "url"],
+  required: ["opened", "url", "checkConclusion"],
   properties: {
     opened: { type: "boolean" },
     url: { type: "string" },
     reason: { type: "string", description: "if not opened, why" },
+    // The anchor. Everything else in this loop is an agent's account of its own
+    // work; this is the one field a model cannot talk its way past. A track is
+    // not shipped until GitHub says the required check is green.
+    checkConclusion: {
+      type: "string",
+      enum: ["success", "failure", "timed_out", "none"],
+      description:
+        "conclusion of the required check on the PR, from `gh pr checks` — NOT the agent's opinion",
+    },
+    checkSummary: {
+      type: "string",
+      description: "if not success: which step failed and the error excerpt",
+    },
   },
 };
 const BLOCK_SCHEMA = {
@@ -297,17 +310,40 @@ Default to FAIL when evidence is missing or unconvincing. Return strictly the Do
       }
     }
 
-    // PASS → ship.
+    // PASS (per the verifier) → push, open the PR, and WAIT FOR THE REAL CHECK.
     log(`✅ ${track.id} passed DoD on attempt ${attempt} — opening PR`);
     const pr = await agent(
       `You are the release agent. Use the \`open-pr\` skill. Branch ${branch} (worktree ${wt}) PASSED the Definition of Done. The verifier's evidence report:
 ${JSON.stringify(verify)}
-Push the branch and open a PR against main with --label agent:in-review${track.risk === "high" ? " and --label risk:high" : ""}. Build the PR body from the evidence bundle (the DoD table + AC checklist + screenshots/lighthouse/migration). Include "Closes ${track.issues.map((n) => `#${n}`).join(", Closes ")}". Then flip each issue label agent:in-progress → agent:in-review. Return strictly the schema.`,
-      { label: `pr:${track.id}`, phase: "Ship", schema: PR_SCHEMA }
+Push the branch. If a PR for this branch already EXISTS (an earlier attempt opened one), do NOT open a second — the push updates it. Otherwise open a PR against main with --label agent:in-review${track.risk === "high" ? " and --label risk:high" : ""}. Build the PR body from the evidence bundle (the DoD table + AC checklist + screenshots/lighthouse/migration). Include "Closes ${track.issues.map((n) => `#${n}`).join(", Closes ")}". Then flip each issue label agent:in-progress → agent:in-review.
+
+THEN WAIT FOR CI AND REPORT WHAT IT SAID, NOT WHAT YOU BELIEVE:
+\`gh pr checks <number> --watch --fail-fast\`, then read the conclusion of the "Format, Lint, Typecheck, Build" check. Put it in checkConclusion verbatim (success | failure | timed_out | none). If it is not success, pull the failing step and its error with \`gh run view <run-id> --log-failed\` and put that in checkSummary. Do not summarise it as "probably unrelated" and do not claim success you did not observe. Return strictly the schema.`,
+      { label: `pr:${track.id}#${attempt}`, phase: "Ship", schema: PR_SCHEMA }
     );
+
+    // The anchor decides, not the verifier. A green DoD with a red check is a
+    // failed attempt — the PR stays open and the next attempt pushes a fix to
+    // it. This is the cycle that stops "done" from meaning "an agent said so".
+    if (pr?.opened && pr.checkConclusion !== "success") {
+      lastReport = {
+        ...verify,
+        verdict: "FAIL",
+        failingGate: "CI",
+        notes: `CI reported "${pr.checkConclusion}" on ${pr.url}. ${pr.checkSummary || "no summary returned"}`,
+      };
+      log(
+        `🔴 ${track.id} attempt ${attempt}: DoD passed but CI said "${pr.checkConclusion}" — retrying against the real failure`
+      );
+      continue;
+    }
+
     return {
       track,
-      status: pr?.opened ? "shipped" : "pr-failed",
+      status:
+        pr?.opened && pr.checkConclusion === "success"
+          ? "shipped"
+          : "pr-failed",
       pr,
       report: verify,
       attempts: attempt,

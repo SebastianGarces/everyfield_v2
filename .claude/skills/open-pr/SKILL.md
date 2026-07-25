@@ -14,6 +14,38 @@ what makes "a PR means it's actually done" true.
   evidence is missing) → **do not open a PR**. Return control to the loop to retry/block.
 - The branch must be pushed: `git push -u origin <branch>`.
 
+## The DoD is a claim. CI is the anchor.
+
+A passing DoD report is an agent's account of its own work. That is necessary and not sufficient:
+the loop's own history contains a PR whose DoD said PASS with a browser gate that never opened a
+browser. **So the job does not end when the PR is open. It ends when the required check is green.**
+
+After opening (or updating) the PR:
+
+```bash
+gh pr checks <number> --watch --fail-fast
+```
+
+Then report the conclusion of the **`Format, Lint, Typecheck, Build`** check *verbatim* —
+`success`, `failure`, `timed_out`, or `none`. If it is anything but `success`, fetch the real
+failure and return it:
+
+```bash
+gh run view <run-id> --log-failed
+```
+
+Three rules, all of which exist because the opposite has happened here:
+
+- **Report what CI said, not what you believe.** "The failure looks unrelated" is not a conclusion,
+  it is an opinion about a conclusion.
+- **`none` is not success.** A check that never reported is the failure mode that hid PR #34 for a
+  month — it reads as "not yet run" forever.
+- **Never open a second PR for a branch that already has one.** On a retry the push updates the
+  existing PR; a duplicate splits the evidence and the check history.
+
+The loop treats a green DoD with a red check as a **failed attempt** and feeds the CI error back in.
+That is the intended path — a red check is information, not an emergency.
+
 ## Procedure
 
 1. Verify `verdict ∈ {PASS, PASS_WITH_WARNINGS}`. Otherwise abort with a clear reason.
