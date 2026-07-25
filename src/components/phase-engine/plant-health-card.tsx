@@ -43,27 +43,22 @@ import { cn } from "@/lib/utils";
 
 const EMPHASIS_STYLES: Record<
   InsightEmphasis,
-  { container: string; chip: string; text: string }
+  { container: string; label: string; text: string }
 > = {
   high: {
-    container:
-      "border-attention-high/25 border-l-attention-high bg-attention-high/10",
-    chip: "bg-attention-high text-attention-high-contrast rounded-full px-1.5 py-px",
+    container: "border-attention-high/45 bg-attention-high/12",
+    label: "text-attention-high-ink",
     text: "High",
   },
   medium: {
-    container:
-      "border-attention-medium/30 border-l-attention-medium bg-attention-medium/15",
-    chip: "bg-attention-medium/30 text-attention-medium-ink rounded-full px-1.5 py-px",
+    container: "border-attention-medium/45 bg-attention-medium/18",
+    label: "text-attention-medium-ink",
     text: "Medium",
   },
   low: {
-    // No fill at all, completing the ramp solid → tinted → bare. It also buys
-    // back contrast: `muted-foreground` over the old `bg-muted/40` measured
-    // 4.43:1, under AA, because the project's muted grey already sits at 4.54
-    // against plain white with nothing under it.
-    container: "border-border border-l-border",
-    chip: "text-foreground/75",
+    // No tint: the absence of colour is the third step of the ramp.
+    container: "border-border",
+    label: "text-foreground/80",
     text: "Low",
   },
 };
@@ -156,19 +151,20 @@ function InsightItem({ insight }: { insight: PlantInsight }) {
   const emphasis = EMPHASIS_STYLES[emphasisForSeverity(insight.severity)];
 
   return (
-    <li className={cn("rounded-md border border-l-4 p-3", emphasis.container)}>
+    <li className={cn("rounded-md border p-3", emphasis.container)}>
       {/* The level rides on the title's line rather than above it: at ~20
           observations a page, a dedicated line per level is a screenful of
           labels the operator has to read past to reach the observations.
 
-          Levels separate by FILL before colour — solid, tinted, then bare
-          text. Two hues alone were not telling high from medium apart at this
-          size, and fill survives greyscale and colour-vision differences. */}
+          Plain coloured text, not a filled pill. Reversing 10px type out of a
+          saturated fill measured fine on contrast (APCA Lc -80) and was still
+          unreadable — at that size the letterforms are the constraint, not the
+          contrast. Dark-on-light at 11px fixes what more contrast could not. */}
       <p className="text-sm font-medium text-pretty">
         <span
           className={cn(
-            "me-1.5 align-[0.09em] text-[0.625rem] font-semibold tracking-wider uppercase",
-            emphasis.chip
+            "me-1.5 align-[0.02em] text-[0.6875rem] font-semibold tracking-wide uppercase",
+            emphasis.label
           )}
         >
           {emphasis.text}
