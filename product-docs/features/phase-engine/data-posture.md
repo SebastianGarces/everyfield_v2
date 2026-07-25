@@ -42,10 +42,34 @@ Retrieval context (methodology RAG) is EveryField's own wiki and playbook conten
 
 | | |
 |---|---|
-| Training on API data | **No.** Since 2023-03-01 API data is not used to train or improve models unless explicitly opted in. We have not opted in. |
+| Training on API data | **Not by default** — since 2023-03-01, unless explicitly opted in. **This account was opted in.** See "What the audit found" below. |
 | Abuse-monitoring retention | **Up to 30 days**, "unless longer retention is required by law, or is reasonably necessary to protect our services" |
-| Stored completions | **Off.** `store` is never set on the judge call (`judge/provider.ts`); the default is off. |
+| Call retention | The judge uses the **Responses API**, which OpenAI logs by default. Now opted out in code with `store: false`. See below. |
 | Zero Data Retention | **Not available to us.** See below. |
+
+### What the audit found (2026-07-25)
+
+Reading the dashboard rather than assuming the defaults turned up two things, both now corrected.
+Recorded here because "we assumed the defaults" is how this goes wrong again.
+
+**1. Inputs and outputs were being shared with OpenAI.** Under **Data controls → Sharing**, "Share
+inputs and outputs with OpenAI" was **Enabled for all projects** — the opt-in that trades traffic
+for complimentary daily tokens, and it explicitly includes "improving and training our models". Two
+sibling toggles (model feedback, evaluation and fine-tuning data) were on as well. This is the
+opposite of the default posture, and it applied to real church data.
+
+**2. Every judge call was being retained.** The AI SDK's `openai(modelId)` resolves to the
+**Responses API**, not Chat Completions, and the Responses API logs prompts and completions by
+default — the SDK defaults `store` to `true`. So each assessment's fact snapshot and output sat in
+the org's logs.
+
+Fixes: the three Sharing toggles set to **Disabled**, org-level **API call logging** disabled, and
+`store: false` set in code on the judge call so the opt-out travels with the feature rather than
+with one account's settings.
+
+**Assessments that ran before this date were shared and retained under the old settings.** Those
+were the eval corpus and Bryan and Brett's plants — worth saying out loud to them rather than
+quietly fixing.
 
 ### Why ZDR is not simply switched on
 
@@ -58,8 +82,10 @@ A pre-revenue account cannot obtain them at any price. That is why **NFR-PE-4** 
 documented and disclosed posture rather than zero retention, with ZDR as a Should Have for when the
 account is contractually eligible. Revisit at the enterprise, post-revenue stage.
 
-**The honest summary for a planter:** their plant's numbers pass through OpenAI, are not trained on,
-and may sit in abuse-monitoring storage for up to 30 days. No names or contact details are sent.
+**The honest summary for a planter:** their plant's numbers — counts and dates, no names or contact
+details — pass through OpenAI, are not used to train models, are not retained in our logs there, and
+may sit in OpenAI's abuse-monitoring storage for up to 30 days. That is true as of 2026-07-25; it
+was not true of assessments run before then (see the audit above).
 
 ## Review triggers
 
