@@ -1,12 +1,14 @@
 # Work Queue — parallel agent dispatch
 
-**Updated:** 2026-07-25 · **Base branch:** `main` — the Plant Intelligence Engine merged via
-[PR #37](https://github.com/SebastianGarces/everyfield_v2/pull/37) (squashed to `78f4ef9`). Fork
-everything from `main`.
+**Updated:** 2026-07-25 (second pass) · **Base branch:** `main` — now the repo's default branch and
+the only remote branch. Fork everything from `main`.
 
 This is the outstanding work, grouped into **file-disjoint tracks** so multiple agents can run
-concurrently without colliding. Read "Before dispatching" first — two things will waste a lot of
-agent time if skipped.
+concurrently without colliding.
+
+**Both dispatch gates are now clear.** CI passes and is required on `main`; browser validation runs
+against Vercel previews and has been proven end to end. All seven tracks are runnable — §1 and §2
+below are now context to preserve, not blockers to resolve.
 
 ---
 
@@ -34,8 +36,17 @@ CI=1 DATABASE_URL="postgresql://ci:ci@localhost:5432/ci" RESEND_API_KEY="re_ci_p
 Next 16's `isolatedDevBuild` writes `next dev` output to `.next/dev`, so this is safe to run while
 the dev server is up.
 
-**Still open:** make the workflow a required check now that it is reliably green — a repo setting,
-not a code change.
+**Enforcement:** the check is now required on `main` via the `main protection` ruleset (#19738586),
+which also requires a PR. It runs on **every** PR regardless of base — a PR against a stray base
+used to run no check at all, which reads as "not yet run" rather than failing, and hid a PR for a
+month.
+
+**Caveat worth knowing:** the ruleset keeps a repository-admin bypass, so a red check does not
+physically block a merge. Remove it when the check should actually bind:
+
+```bash
+gh api repos/:owner/:repo/rulesets/19738586 --method PUT -f 'bypass_actors=[]'
+```
 
 ### 2. Browser validation — decided: Vercel previews
 
@@ -65,6 +76,14 @@ Two things make this work, both worth understanding before changing anything nea
 **Consequence for the tracks:** B, D, E and F are unblocked. Validation now happens *after* the PR
 is opened — the preview is created by the push — so a UI PR opens with its browser gate at ⏳ and
 gets edited to ✅ once exercised.
+
+**Proven, not theoretical.** The bypass secret is generated and in `.env.local`, and the flow closed
+a real gate: the CSV export PR ([#41](https://github.com/SebastianGarces/everyfield_v2/pull/41)) had
+its Export button exercised on its own preview — 100 rows against a UI reading `100 total`, 3 rows
+under a status filter reading `3 total`, and zero overlap between two churches' exports. Two traps
+the skill records so nobody re-discovers them: `planter1@everyfield.dev`'s church has **zero
+people** (use an eval planter, different password), and previews log one `403` per page load from a
+Vercel toolbar `HEAD` request that is not the app.
 
 ### 3. Known hazard: worktree isolation is not reliable
 
@@ -295,8 +314,7 @@ route that works locally and a cron that fires in production are different claim
 
 | Item | Why |
 |---|---|
-| **Browser-validation strategy** | An architectural call, not a task. Gates all frontend tracks. |
-| **Review [PR #34](https://github.com/SebastianGarces/everyfield_v2/pull/34)** (people CSV export) | Open and unreviewed; [#13](https://github.com/SebastianGarces/everyfield_v2/issues/13) sits at `agent:in-review`. Reviewing it closes the first full delivery-loop cycle. |
+| **Ruleset admin bypass** | Left on deliberately. Until removed, a red check does not block a merge — see §1 for the one-line command. |
 | **OpenAI data posture** | See Go-live §4. Self-serve retention control now; ZDR needs sales and is likely out of reach pre-revenue. The FRD requirement needs restating. |
 | **Database hosting decision** | See Go-live §3. Trigger is the first real test users. |
 | **Langfuse** | Needs a self-hosted instance + `LANGFUSE_*` env. Tracing currently no-ops, so judge behaviour is unobservable — worth doing *before* rubric feedback arrives, since traces are how you answer "why did it say that?". |
@@ -305,7 +323,35 @@ route that works locally and a cron that fires in production are different claim
 
 ---
 
-## Done this session (do not re-dispatch)
+## Done 2026-07-25, second pass (do not re-dispatch)
+
+Seven PRs, all merged to `main`:
+
+| PR | |
+|---|---|
+| [#40](https://github.com/SebastianGarces/everyfield_v2/pull/40) | CI hermetic build — first green run since April. Closed [#38](https://github.com/SebastianGarces/everyfield_v2/issues/38) |
+| [#41](https://github.com/SebastianGarces/everyfield_v2/pull/41) | People CSV export, browser-validated. Closed [#13](https://github.com/SebastianGarces/everyfield_v2/issues/13); supersedes the mis-based PR #34 |
+| [#42](https://github.com/SebastianGarces/everyfield_v2/pull/42) | PR checks run on every PR, not only base `main` |
+| [#43](https://github.com/SebastianGarces/everyfield_v2/pull/43) | Preview browser validation: `scripts/preview-url.sh` + `browser-validation` skill |
+| [#44](https://github.com/SebastianGarces/everyfield_v2/pull/44) | Dropped unused `hono` / `@hono/zod-openapi` |
+| [#45](https://github.com/SebastianGarces/everyfield_v2/pull/45) | Removed husky — its full-project checks duplicated CI |
+| [#46](https://github.com/SebastianGarces/everyfield_v2/pull/46) | Formatting automated instead: PostToolUse hook for agent edits, format-on-save for hand edits |
+
+Repo-level, outside any diff:
+
+- **Default branch was `development`, now `main`.** This mattered more than it sounds: the ruleset
+  targeted `~DEFAULT_BRANCH`, so it was guarding `development` while `main` had no rules at all.
+  The ruleset is now pinned to `refs/heads/main`.
+- **Vercel Protection Bypass secret** generated and stored in `.env.local`.
+- **Other contributors' work removed** — from the three-day window when this was headed for a
+  different scope. PR #12 closed; branches `Wiki-modules`, `development`, `wire-up-sidecar`,
+  `sidecar` deleted (SHAs in #12's closing comment). Their *merged* work stays: it is ~835 lines of
+  ~60,900 in `src/` and is interleaved through meetings, tasks and communication.
+- **Branch cleanup** — remote is now `main` alone. Six merged/superseded branches and twelve local
+  leftovers deleted; three stale worktrees removed. `feat/agent-delivery-os` and
+  `feat/document-templates` kept, both still unmerged.
+
+## Done in the prior session (do not re-dispatch)
 
 - `CRON_SECRET` set and verified end-to-end: 401 without/with a wrong token, 200 with the correct
   one, 24 of 25 plants assessed, rollover confirmed.
@@ -324,8 +370,11 @@ route that works locally and a cron that fires in production are different claim
 
 ## Housekeeping
 
-- Stale worktrees: `everyfield_v2-loop-test`, `everyfield_v2-feat-csv`.
-- Untracked skill directories (`better-*`, `make-interfaces-feel-better`) + `skills-lock.json` —
-  decide whether they belong in the repo.
-- One uncommitted two-line prettier reflow in `src/lib/phase-engine/oversight/health-presentation.ts`,
-  left alone because another agent was active in that file.
+All previously listed items are cleared: the stale worktrees are gone, the `better-*` skills and
+`skills-lock.json` are tracked, and the `health-presentation.ts` reflow is committed. Working tree
+clean, no open PRs.
+
+One thing parked outside the repo: `/Users/sebastian/dev/build-until-done-uncommitted-20260725.patch`
+— 106 uncommitted lines to `.claude/workflows/build-until-done.js`, rescued from the deleted
+`feat-csv` worktree. That file lives only on `feat/agent-delivery-os`, so apply the patch there
+before doing further work on the delivery loop, or discard it deliberately.
