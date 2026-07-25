@@ -12,18 +12,30 @@ agent time if skipped.
 
 ## Before dispatching
 
-### 1. CI is red for everything (affects every agent PR)
+### 1. CI is green — keep the build hermetic
 
-[#38](https://github.com/SebastianGarces/everyfield_v2/issues/38) — `pull-request-checks.yml` has
-**never passed since it was added in April**. Two module-scope client constructions were fixed while
-merging #37 (placeholder `DATABASE_URL` and `RESEND_API_KEY` in the workflow env), but a third cause
-remains: `/wiki/[...slug]` queries the database during page-data collection, so the build needs a
-*reachable* database and no placeholder can satisfy it.
+[#38](https://github.com/SebastianGarces/everyfield_v2/issues/38) is **fixed**.
+`pull-request-checks.yml` had never passed since it was added in April. Three causes, all now
+resolved: two module-scope client constructions (placeholder `DATABASE_URL` and `RESEND_API_KEY` in
+the workflow env, fixed while merging #37), and `/wiki/[...slug]` querying the database during
+page-data collection. The third was a `generateStaticParams` on a route that already declares
+`dynamic = "force-dynamic"` — it prerendered nothing and only forced a build-time DB round-trip, so
+it was removed rather than made fail-soft. No prerendering was lost; the route was already `ƒ`.
 
-**Consequence for parallel dispatch:** every agent PR will show a failing check regardless of
-quality, and merges need `--admin`. More importantly the delivery loop's "verified before PR" signal
-is worthless while a broken PR and a healthy one look identical. Fix #38 before running agents in
-bulk. Recommended option is making `generateStaticParams` fail-soft — see the issue.
+**The invariant to preserve:** `pnpm build` must succeed with no reachable database and no real
+credentials. That means no `generateStaticParams`, `sitemap.ts`, or other build-time hook may
+depend on a live query, and module-scope client construction needs a placeholder-tolerant path.
+Verify a change locally the way CI sees it:
+
+```bash
+CI=1 DATABASE_URL="postgresql://ci:ci@localhost:5432/ci" RESEND_API_KEY="re_ci_placeholder" pnpm build
+```
+
+Next 16's `isolatedDevBuild` writes `next dev` output to `.next/dev`, so this is safe to run while
+the dev server is up.
+
+**Still open:** make the workflow a required check now that it is reliably green — a repo setting,
+not a code change.
 
 ### 2. Resolve the browser-validation gap (blocks all frontend tracks)
 
@@ -289,7 +301,8 @@ route that works locally and a cron that fires in production are different claim
   returns three separate messages ordered so "Not assessed yet" wins. Verified; no work needed.
 - **Merged to `main`** via PR #37 (squash, `78f4ef9`). 43 commits, 151 files.
 - Design-engineering skills committed (`better-*` + `make-interfaces-feel-better`).
-- Two of three CI build blockers fixed; the third is #38.
+- All three CI build blockers fixed — #38 closed, `pnpm build` now succeeds with an unreachable
+  database.
 - Neon CLI org-scoping resolved and the branch identifiers recorded above.
 
 ## Housekeeping

@@ -39,6 +39,10 @@ jobs:
       - name: Build
         run: pnpm build
         env:
+          # This build is hermetic: no database, no real credentials. Keep it
+          # that way — nothing evaluated at build time (generateStaticParams,
+          # sitemap, metadata) may depend on a live query. See issue #38.
+          #
           # `next build` collects page data, which evaluates route modules —
           # and several of them construct the Neon client at import time. The
           # client is only constructed here, never connected to, so a
