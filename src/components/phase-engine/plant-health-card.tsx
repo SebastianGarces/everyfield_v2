@@ -43,21 +43,27 @@ import { cn } from "@/lib/utils";
 
 const EMPHASIS_STYLES: Record<
   InsightEmphasis,
-  { container: string; label: string; text: string }
+  { container: string; chip: string; text: string }
 > = {
   high: {
-    container: "border-attention-high/30 bg-attention-high/[0.06]",
-    label: "text-attention-high",
+    container:
+      "border-attention-high/25 border-l-attention-high bg-attention-high/10",
+    chip: "bg-attention-high text-attention-high-contrast rounded-full px-1.5 py-px",
     text: "High",
   },
   medium: {
-    container: "border-attention-medium/30 bg-attention-medium/[0.07]",
-    label: "text-attention-medium",
+    container:
+      "border-attention-medium/30 border-l-attention-medium bg-attention-medium/15",
+    chip: "bg-attention-medium/30 text-attention-medium-ink rounded-full px-1.5 py-px",
     text: "Medium",
   },
   low: {
-    container: "border-border bg-muted/40",
-    label: "text-muted-foreground",
+    // No fill at all, completing the ramp solid → tinted → bare. It also buys
+    // back contrast: `muted-foreground` over the old `bg-muted/40` measured
+    // 4.43:1, under AA, because the project's muted grey already sits at 4.54
+    // against plain white with nothing under it.
+    container: "border-border border-l-border",
+    chip: "text-foreground/75",
     text: "Low",
   },
 };
@@ -103,7 +109,9 @@ function PlantMeta({
         <>
           <span aria-hidden="true">&middot;</span>
           <span
-            className={cn(launch.imminent && "text-attention-high font-medium")}
+            className={cn(
+              launch.imminent && "text-attention-high-ink font-semibold"
+            )}
           >
             {launch.text}
           </span>
@@ -148,15 +156,19 @@ function InsightItem({ insight }: { insight: PlantInsight }) {
   const emphasis = EMPHASIS_STYLES[emphasisForSeverity(insight.severity)];
 
   return (
-    <li className={cn("rounded-md border border-l-2 p-3", emphasis.container)}>
+    <li className={cn("rounded-md border border-l-4 p-3", emphasis.container)}>
       {/* The level rides on the title's line rather than above it: at ~20
           observations a page, a dedicated line per level is a screenful of
-          labels the operator has to read past to reach the observations. */}
+          labels the operator has to read past to reach the observations.
+
+          Levels separate by FILL before colour — solid, tinted, then bare
+          text. Two hues alone were not telling high from medium apart at this
+          size, and fill survives greyscale and colour-vision differences. */}
       <p className="text-sm font-medium text-pretty">
         <span
           className={cn(
             "me-1.5 align-[0.09em] text-[0.625rem] font-semibold tracking-wider uppercase",
-            emphasis.label
+            emphasis.chip
           )}
         >
           {emphasis.text}

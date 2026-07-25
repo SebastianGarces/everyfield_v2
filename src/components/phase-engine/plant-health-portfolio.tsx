@@ -72,8 +72,8 @@ export function PlantHealthPortfolio({
 
 /** The count colour restates what the label already says; never the only cue. */
 const COUNT_TONE: Record<string, string> = {
-  readiness: "text-attention-high",
-  watch: "text-attention-medium",
+  readiness: "text-attention-high-ink",
+  watch: "text-attention-medium-ink",
   "on-track": "text-foreground",
 };
 

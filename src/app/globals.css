@@ -54,12 +54,17 @@ body {
   --color-sidebar-ring: var(--sidebar-ring);
 
   /* Attention scale — how much operator attention a thing warrants.
-     Deliberately NOT `destructive`: these mark focus, not failure. One warm
-     hue at two intensities, so the ramp reads as a scale rather than as two
-     unrelated colours, and stays legible without hue discrimination. Used with
-     opacity modifiers for tints and borders (`bg-attention-high/10`). */
+     Split into `-ink` (text, must clear 4.5:1) and the base (fills, rules and
+     tints, non-text, free to be saturated). The split exists because a single
+     value cannot do both jobs: an amber dark enough to read as text is brown,
+     and brown is indistinguishable from the red at label sizes. `-contrast` is
+     what sits ON a solid fill. Used with opacity modifiers for tints
+     (`bg-attention-high/10`). */
   --color-attention-high: var(--attention-high);
+  --color-attention-high-ink: var(--attention-high-ink);
+  --color-attention-high-contrast: var(--attention-high-contrast);
   --color-attention-medium: var(--attention-medium);
+  --color-attention-medium-ink: var(--attention-medium-ink);
 }
 
 :root {
@@ -102,10 +107,15 @@ body {
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
 
-  /* Attention scale. Hue sits clear of both the lime brand (~130) and
-     `destructive` (~27) so neither meaning bleeds into the other. */
-  --attention-high: oklch(0.5 0.15 47);
-  --attention-medium: oklch(0.54 0.1 80);
+  /* Attention scale. Levels separate on hue (29 vs 74), chroma and lightness at
+     once, because any one of those alone disappears at label sizes. Measured
+     against every surface each lands on: rules clear 3:1, all text clears
+     4.5:1 (lowest pair 5.32:1). */
+  --attention-high: oklch(0.55 0.205 29);
+  --attention-high-ink: oklch(0.45 0.175 29);
+  --attention-high-contrast: oklch(1 0 0);
+  --attention-medium: oklch(0.66 0.155 74);
+  --attention-medium-ink: oklch(0.46 0.1 68);
 }
 
 .dark {
@@ -141,10 +151,15 @@ body {
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
 
-  /* Lifted, de-saturated for the dark surface rather than mechanically
-     inverted; both pairs re-checked against `--card` at oklch(0.205 0 0). */
-  --attention-high: oklch(0.78 0.13 52);
-  --attention-medium: oklch(0.81 0.09 84);
+  /* Lifted for the dark surface rather than mechanically inverted, and the
+     solid fill flips to dark text: white on a red light enough to read against
+     `--card` only reaches 4:1. Every pair re-measured against oklch(0.205 0 0);
+     lowest is 6.21:1. */
+  --attention-high: oklch(0.7 0.185 32);
+  --attention-high-ink: oklch(0.78 0.155 34);
+  --attention-high-contrast: oklch(0.205 0 0);
+  --attention-medium: oklch(0.76 0.145 78);
+  --attention-medium-ink: oklch(0.85 0.11 80);
 }
 
 @layer base {
