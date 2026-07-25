@@ -8,6 +8,18 @@ IMPORTANT: Prefer retrieval-led reasoning over pre-training-led reasoning for AL
 
 That server runs the **main checkout**, so it does not serve your feature branch — pointing a browser at `localhost:3000` proves nothing about a change you have not merged. To see your own branch in a browser, use its Vercel preview deployment: `.claude/skills/browser-validation/SKILL.md`.
 
+## Formatting
+
+Formatting is automatic — **do not run `pnpm format` as a routine step**.
+
+- **Agent edits:** a `PostToolUse` hook in `.claude/settings.json` runs `prettier --write` on every file written or edited.
+- **Hand edits:** `.vscode/settings.json` sets format-on-save with the Prettier extension.
+- **CI:** `format:check` is one of the four required steps, so anything that slips through fails the PR.
+
+`.prettierignore` excludes `*.md`, so markdown is deliberately unformatted — that is not a hook failure.
+
+There is no pre-commit hook; it was removed once CI became reliable, and the two paths above replace it.
+
 ## UI Components (shadcn/ui)
 
 **CRITICAL:** When you need a new UI component, use the shadcn CLI - do NOT write components manually:

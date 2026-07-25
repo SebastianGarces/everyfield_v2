@@ -37,7 +37,12 @@ coverage
 
 # IDE
 .idea
-.vscode
+# Ignore local VS Code state, but share the two files that configure the
+# project itself — format-on-save is part of how this repo stays formatted
+# now that there is no pre-commit hook doing it.
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
 *.swp
 *.swo
 
