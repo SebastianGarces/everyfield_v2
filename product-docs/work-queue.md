@@ -37,17 +37,34 @@ the dev server is up.
 **Still open:** make the workflow a required check now that it is reliably green — a repo setting,
 not a code change.
 
-### 2. Resolve the browser-validation gap (blocks all frontend tracks)
+### 2. Browser validation — decided: Vercel previews
 
-Browser-level validation needs the *feature branch* served, but `localhost:3000` serves the main
-checkout, so a new UI cannot be exercised live. Until this is decided, frontend agents can write
-code but cannot prove it works.
+**Decision: validate on the branch's Vercel preview deployment**, not a transient local server. The
+deciding fact is that the preview half already exists — every PR to `main` gets a preview deploy
+(visible as the passing `Vercel` check on any PR), so there was nothing to build there, only to
+reach. It also matches the deployment target, which a `pnpm start -p 3001` from a worktree does not.
 
-Two options: a transient `pnpm build && start -p <alt>` from the feature worktree, torn down after
-validation; or a Vercel preview deploy per branch, with Playwright run against the preview URL
-(higher fidelity, matches the deployment target).
+Procedure lives in `.claude/skills/browser-validation/SKILL.md`. In short:
 
-**Backend-only tracks (A, G) are unaffected and can start immediately.**
+```bash
+./scripts/preview-url.sh --wait --bypass <pr-number>   # first navigation
+```
+
+Two things make this work, both worth understanding before changing anything near them:
+
+- **Deployment protection stays on.** Previews are behind Vercel Authentication and point at the
+  development database, which holds real people's data — leaving them public is not an option. The
+  sanctioned way through is Protection Bypass for Automation: a project secret passed as
+  `x-vercel-protection-bypass`, with `x-vercel-set-bypass-cookie=true` so one navigation authorizes
+  the whole browser session. Set `VERCEL_AUTOMATION_BYPASS_SECRET` in `.env.local`.
+- **The dev account switcher is absent on previews and must stay absent.** It is gated on
+  `NODE_ENV === "development" && !process.env.VERCEL`, enforced in three places, and Vercel builds
+  are production builds. Agents log in through the real form with a seeded account
+  (`planter1@everyfield.dev` / `password123`) against the shared development database.
+
+**Consequence for the tracks:** B, D, E and F are unblocked. Validation now happens *after* the PR
+is opened — the preview is created by the push — so a UI PR opens with its browser gate at ⏳ and
+gets edited to ✅ once exercised.
 
 ### 3. Known hazard: worktree isolation is not reliable
 
