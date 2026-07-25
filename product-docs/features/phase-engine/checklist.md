@@ -18,7 +18,12 @@
 - [ ] PE-013: Planter-sees-first guarantee
 - [ ] PE-014: Insight feedback capture (rubric-tuning signal)
 
+- [ ] NFR-PE-4a: Provider + data-handling terms recorded in the feature's config documentation
+- [ ] NFR-PE-4b: Strongest self-serve retention/training controls enabled on the provider account
+- [ ] NFR-PE-4c: Data processing disclosed in plain language to planters, coaches, and network users
+
 ## Should Have
+- [ ] NFR-PE-4d: Zero data retention adopted once the account is contractually eligible (enterprise, post-revenue — not a go-live gate)
 - [ ] PE-015: "Ready to advance" readiness prompt
 - [ ] PE-016: "What changed since last assessment"
 - [ ] PE-017: Network health rollup for portfolio views

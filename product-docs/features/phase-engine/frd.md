@@ -165,7 +165,15 @@ The engine is two layers that must never blur:
 - **NFR-PE-1 (Trust):** The fact/judgment separation is mandatory. The judge prompt must constrain reasoning to supplied facts and forbid inventing figures.
 - **NFR-PE-2 (Cost):** Assessment runs are bounded — dirty-or-stale selection only, at most ~once/day per plant, with a max-staleness floor (e.g., weekly). No per-pageview LLM calls.
 - **NFR-PE-3 (Latency):** Planter/oversight reads served from cached snapshots return without model latency.
-- **NFR-PE-4 (Data privacy):** Plant data (including person-level facts) is sent to an LLM provider during assessment. Use a provider/configuration with **zero data retention**; document the provider and data-handling in config. No data crosses tenant boundaries.
+- **NFR-PE-4 (Data privacy) — Must Have:** Plant data, including person-level facts, is sent to an external LLM provider during assessment. The requirement is a **documented, disclosed, and maximally-restricted data posture** — not zero retention:
+  - The provider and its data-handling terms are recorded in this feature's configuration documentation.
+  - The strongest retention and training controls the account is eligible for are enabled.
+  - Any planter, coach, or network user whose plant data is processed is told, in plain language, that it is.
+  - Zero data retention is adopted when the account becomes contractually eligible for it — an enterprise, post-revenue milestone, tracked as **Should Have** and explicitly not a go-live gate.
+
+  No data crosses tenant boundaries.
+
+  > **Why this is not "use a zero-data-retention provider".** ZDR is not self-serve: it requires provider approval through a sales agreement and is aimed at enterprise accounts, so a pre-revenue account cannot obtain it at any price. As originally written, the requirement was permanently unsatisfiable — and an unmeetable requirement is worse than a weaker one that is actually enforced, because it is silently carried as "not done" forever instead of being met. What survives the restatement is the part that protects real people in real churches: know the posture, restrict it as far as the account allows, and tell users.
 - **NFR-PE-5 (Auditability & reproducibility):** Every assessment and transition records the rubric version, model id, and fact snapshot, so any output can be explained and reproduced.
 - **NFR-PE-6 (Tenant isolation):** All entities are `church_id`-scoped; assessments and signals never leak across tenants.
 
@@ -186,7 +194,7 @@ The engine is two layers that must never blur:
 | Area | Decision | Notes |
 |------|----------|-------|
 | Judge orchestration | **Vercel AI SDK `generateObject`** (structured output) + plain TypeScript pipeline | The judge is a structured pipeline (facts → retrieve → one validated LLM call → persist), not an agentic graph. **No LangGraph.** Provider stays behind `judge/provider.ts` for one-line swaps. |
-| LLM provider | **OpenAI GPT family** via the AI SDK | Confirm OpenAI **zero-data-retention** posture for plant data before go-live (NFR-PE-4). Judge inference ≈ **$0.03–0.05 / assessment** (~$30/mo at beta scale); the only cost that matters. |
+| LLM provider | **OpenAI GPT family** via the AI SDK | Data posture per NFR-PE-4: API data is not trained on by default, abuse-monitoring retention is up to 30 days, and the self-serve retention control is set at the project level. ZDR needs a sales agreement and waits for enterprise eligibility — it does **not** gate go-live. Judge inference ≈ **$0.03–0.05 / assessment** (~$30/mo at beta scale); the only cost that matters. |
 | Observability | **Self-hosted Langfuse** | Trace each judge run tagged with rubric version + model id; correlate traces with insight feedback to evaluate and tune the rubric. |
 | RAG store | **pgvector on Neon** (same DB) | Corpus ≈ **215k tokens** / low-thousands of chunks — Pinecone would be over-engineering. Hybrid retrieval with the existing wiki `tsvector` FTS. |
 | Embeddings | **`text-embedding-3-small`** (1536 dims; reducible to 1024) | **Section/heading chunking** (~300–800 tok, small overlap) with `phase` / `section` / `article_slug` metadata for **phase-filtered retrieval**. One-time corpus embed ≈ **$0.004**. |
