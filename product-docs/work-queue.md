@@ -301,10 +301,20 @@ Monitoring, Data Residency, Enterprise Key Management.
 disclose it to Bryan, Brett, and any test user whose plant data goes through the judge — real people
 in a real church are in that data. Pursue ZDR when there is a contract to hang it on.
 
-**Amend the FRD.** The non-functional requirement currently reads "use a provider/configuration with
-zero data retention". As written it cannot be satisfied, so it should be restated as: document the
-provider's data handling, enable the strongest self-serve controls, disclose to users, and escalate
-to ZDR when eligible.
+**FRD amended.** NFR-PE-4 no longer reads "use a provider/configuration with zero data retention" —
+unsatisfiable pre-revenue, and therefore carried forever as "not done" instead of being met. It now
+requires a documented, disclosed, maximally-restricted posture, with ZDR as a Should Have for when
+the account is contractually eligible, explicitly not a go-live gate. The remaining work is tracked
+as NFR-PE-4a–d in `product-docs/features/phase-engine/checklist.md`:
+
+| | |
+|---|---|
+| a | Record provider + data-handling terms in config documentation |
+| b | Enable the strongest self-serve retention/training controls |
+| c | Disclose processing in plain language to planters, coaches, network users |
+| d | Adopt ZDR when enterprise-eligible (Should Have) |
+
+Items a–c are doable today and are what actually protect the people in that data; d waits.
 
 ### 5. Verify the deployed cron fires
 
