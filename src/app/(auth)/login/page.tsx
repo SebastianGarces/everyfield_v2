@@ -2,6 +2,8 @@ import { Suspense } from "react";
 import { LoginForm } from "./login-form";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { DevAccountSwitcher } from "./dev-account-switcher";
+import { isDevLoginEnabled, listDevAccounts } from "./dev-accounts";
 
 function LoginFormSkeleton() {
   return (
@@ -25,10 +27,36 @@ function LoginFormSkeleton() {
   );
 }
 
-export default function LoginPage() {
+/**
+ * Local-development-only account switcher. Renders nothing (and queries
+ * nothing) unless the app is running on a dev machine — see dev-accounts.ts.
+ */
+async function DevAccountSwitcherSlot({ redirectTo }: { redirectTo: string }) {
+  if (!isDevLoginEnabled()) return null;
+
+  const accounts = await listDevAccounts();
+  return <DevAccountSwitcher accounts={accounts} redirectTo={redirectTo} />;
+}
+
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ redirect?: string }>;
+}) {
+  const { redirect } = await searchParams;
+  const redirectTo =
+    typeof redirect === "string" && redirect.startsWith("/")
+      ? redirect
+      : "/dashboard";
+
+  // The auth layout is a flex row; stack so the dev switcher sits BELOW the
+  // form rather than beside it.
   return (
-    <Suspense fallback={<LoginFormSkeleton />}>
-      <LoginForm />
-    </Suspense>
+    <div className="flex w-full max-w-md flex-col items-center">
+      <Suspense fallback={<LoginFormSkeleton />}>
+        <LoginForm />
+      </Suspense>
+      <DevAccountSwitcherSlot redirectTo={redirectTo} />
+    </div>
   );
 }
