@@ -135,6 +135,29 @@ export function privacyFeatureForCategory(
     : "people";
 }
 
+/**
+ * Whether oversight has any shared content to show for a plant.
+ *
+ * Two independent reasons this is true:
+ *   1. At least one insight survived gating. This covers the ungated categories
+ *      (`phase_progress`, `onboarding`) that are visible on their own merit and
+ *      reference no `share_*` toggle at all — without this clause a plant whose
+ *      only network insight is ungated would be reported as "shares nothing"
+ *      and the UI would suppress an insight that legitimately passed the gate.
+ *   2. The church shares at least one feature the network read consulted, even
+ *      if the judge produced no insight for it this cycle. The distinction
+ *      matters to the planter: "shared, nothing to report" is not "withheld".
+ *
+ * Pure so the branch is testable without a DATABASE_URL.
+ */
+export function computeHasSharedContent(
+  visibleInsights: readonly unknown[],
+  featureAllowed: Iterable<boolean>
+): boolean {
+  if (visibleInsights.length > 0) return true;
+  return Array.from(featureAllowed).some(Boolean);
+}
+
 // ----------------------------------------------------------------------------
 // Read result types.
 // ----------------------------------------------------------------------------
@@ -152,9 +175,10 @@ export interface PlantHealthSummary {
   /** When the latest snapshot was generated, or null if never assessed. */
   generatedAt: Date | null;
   /**
-   * True when the plant shares at least one feature relevant to the network
-   * read. When false, the planter has not opted any data into oversight; we
-   * still list the plant (phase is portfolio context) but show no insights.
+   * True when there is shared content to show: either an insight survived
+   * gating, or the plant shares at least one feature the read consulted. When
+   * false, the planter has opted nothing into oversight; we still list the
+   * plant (phase is portfolio context) but show no insights.
    */
   hasSharedContent: boolean;
 }
@@ -208,7 +232,10 @@ async function gateNetworkInsights(
     return featureAllowed.get(feature) === true;
   });
 
-  const hasSharedContent = Array.from(featureAllowed.values()).some(Boolean);
+  const hasSharedContent = computeHasSharedContent(
+    visible,
+    featureAllowed.values()
+  );
 
   return { insights: visible, hasSharedContent };
 }

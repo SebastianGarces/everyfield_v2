@@ -6,6 +6,7 @@ import type { PlantFactSnapshot } from "@/lib/phase-engine/signals";
 
 import {
   classifyPlantHealth,
+  computeHasSharedContent,
   privacyFeatureForCategory,
   READINESS_LAUNCH_WINDOW_DAYS,
 } from "./read";
@@ -128,4 +129,31 @@ test("cross-cutting categories are not privacy-gated", () => {
 
 test("unknown categories fail closed to the people toggle", () => {
   assert.equal(privacyFeatureForCategory("totally_unknown"), "people");
+});
+
+// --- shared-content branch (AC-PE-9) ---------------------------------------
+
+test("nothing visible and nothing shared reads as no shared content", () => {
+  assert.equal(computeHasSharedContent([], []), false);
+});
+
+test("a shared feature counts even when the judge produced no insight", () => {
+  // "Shared, nothing to report" must not render as "withheld".
+  assert.equal(computeHasSharedContent([], [true]), true);
+});
+
+test("every consulted feature withheld reads as no shared content", () => {
+  assert.equal(computeHasSharedContent([], [false, false]), false);
+});
+
+test("regression: an ungated insight is shared content on its own", () => {
+  // `phase_progress` / `onboarding` map to no privacy feature, so `featureAllowed`
+  // is empty for a plant whose only network insight is ungated. Before the fix
+  // this returned false and the card suppressed an insight that passed gating.
+  assert.equal(computeHasSharedContent([{ id: "i1" }], []), true);
+});
+
+test("regression: a visible insight wins over fully-withheld features", () => {
+  // Mixed case: the people-gated insight was dropped, the ungated one survived.
+  assert.equal(computeHasSharedContent([{ id: "i1" }], [false]), true);
 });

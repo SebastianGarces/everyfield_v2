@@ -25,6 +25,11 @@
  * Usage:
  *   pnpm exec tsx scripts/seed-phase-engine-eval.ts            # clean + reseed
  *   pnpm exec tsx scripts/seed-phase-engine-eval.ts --clean    # clean only
+ *   pnpm exec tsx scripts/seed-phase-engine-eval.ts --privacy-only
+ *                       # apply oversight sharing postures to an EXISTING
+ *                       # corpus without touching anything else. Use this when
+ *                       # assessments have already been generated: a default
+ *                       # run cleans first and would discard them.
  */
 
 import { neon } from "@neondatabase/serverless";
@@ -35,10 +40,15 @@ import { drizzle } from "drizzle-orm/neon-http";
 import {
   churches,
   churchMeetings,
+  churchPrivacySettings,
   commitments,
+  insightFeedback,
   meetingAttendance,
   ministryTeams,
   persons,
+  phaseTransitions,
+  plantAssessments,
+  plantInsights,
   plantSignals,
   sendingChurches,
   sendingNetworks,
@@ -62,6 +72,13 @@ import { hashPassword } from "../src/lib/auth/password";
 config({ path: ".env.local" });
 
 const cleanOnly = process.argv.includes("--clean");
+/**
+ * Apply ONLY the oversight sharing postures to churches that are already
+ * seeded, leaving every other row untouched. A default run cleans-then-reseeds,
+ * which would discard any generated `plant_assessments` (real LLM spend), so
+ * this flag exists to opt an existing corpus into oversight sharing in place.
+ */
+const privacyOnly = process.argv.includes("--privacy-only");
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
@@ -498,6 +515,26 @@ async function cleanEvalData(): Promise<void> {
     // Child tables first (respect FKs). meetingAttendance & teamMemberships
     // cascade from their parents, but deleting explicitly by churchId is safe
     // and keeps the cleanup self-contained.
+    // Phase-engine output rows. Their `church_id` FKs do NOT cascade, so a
+    // church delete fails once any assessment has been generated — these must
+    // go first. (Insight feedback cascades from insights, but is explicit here
+    // to keep the cleanup self-describing.)
+    await db
+      .delete(insightFeedback)
+      .where(inArray(insightFeedback.churchId, churchIds));
+    await db
+      .delete(plantInsights)
+      .where(inArray(plantInsights.churchId, churchIds));
+    await db
+      .delete(plantAssessments)
+      .where(inArray(plantAssessments.churchId, churchIds));
+    await db
+      .delete(phaseTransitions)
+      .where(inArray(phaseTransitions.churchId, churchIds));
+    await db
+      .delete(churchPrivacySettings)
+      .where(inArray(churchPrivacySettings.churchId, churchIds));
+
     await db
       .delete(meetingAttendance)
       .where(inArray(meetingAttendance.churchId, churchIds));
@@ -943,6 +980,128 @@ async function seedChurch(
   return churchId;
 }
 
+// ============================================================================
+// Oversight sharing postures (church_privacy_settings)
+//
+// The oversight read path (lib/phase-engine/oversight/read.ts) gates every
+// NETWORK-audience insight on the church's `share_*` toggle for the feature the
+// insight's rubric category derives from. A church with NO settings row shares
+// nothing — so without this, the whole Plant Health surface renders as
+// "has not shared detailed data" and no insight is ever exercised.
+//
+// The postures are deliberately a SPREAD, not all-on: the interesting property
+// to review is the gradient, including that withheld content genuinely stays
+// withheld. Assignments are chosen so each posture is observable:
+//   - full    : `wanderer` (a high-severity people insight → flips the plant to
+//               "Readiness focus") and `cornerstone` (medium → "Worth a look",
+//               the posture no plant currently exercises).
+//   - partial : `hollow` shares people but NOT ministry_teams, so its
+//               critical_mass observation shows while its training one stays
+//               hidden — the clearest proof the per-category gate works.
+//   - none    : `genesis` shares nothing yet its only network insight is
+//               `phase_progress` (an ungated category), so it must STILL render
+//               — the regression the read-layer fix addresses.
+// ============================================================================
+
+type SharingPosture = "full" | "partial" | "none";
+
+/** Column values per posture. `partial` = people-derived data only. */
+const POSTURE_TOGGLES: Record<
+  SharingPosture,
+  {
+    sharePeople: boolean;
+    shareMeetings: boolean;
+    shareTasks: boolean;
+    shareFinancials: boolean;
+    shareMinistryTeams: boolean;
+    shareFacilities: boolean;
+  }
+> = {
+  full: {
+    sharePeople: true,
+    shareMeetings: true,
+    shareTasks: true,
+    shareFinancials: true,
+    shareMinistryTeams: true,
+    shareFacilities: true,
+  },
+  partial: {
+    sharePeople: true,
+    shareMeetings: false,
+    shareTasks: false,
+    shareFinancials: false,
+    shareMinistryTeams: false,
+    shareFacilities: false,
+  },
+  none: {
+    sharePeople: false,
+    shareMeetings: false,
+    shareTasks: false,
+    shareFinancials: false,
+    shareMinistryTeams: false,
+    shareFacilities: false,
+  },
+};
+
+/** Posture per profile key. Every profile MUST appear (asserted at seed time). */
+const SHARING_POSTURE: Record<string, SharingPosture> = {
+  cornerstone: "full",
+  wanderer: "full",
+  lighthouse: "full",
+  ember: "full",
+
+  beacon: "partial",
+  drift: "partial",
+  hollow: "partial",
+  evergreen: "partial",
+
+  genesis: "none",
+  summit: "none",
+  freefall: "none",
+  dayspring: "none",
+};
+
+/**
+ * Upsert the sharing posture for each seeded church. Idempotent via the
+ * `church_privacy_settings_church_id_unique` constraint, so this is safe to
+ * re-run over an existing corpus (`--privacy-only`).
+ */
+async function seedPrivacySettings(
+  seeded: { profileKey: string; churchId: string }[]
+): Promise<void> {
+  console.log("🔒 Applying oversight sharing postures…");
+
+  const missing = seeded.filter((s) => !(s.profileKey in SHARING_POSTURE));
+  if (missing.length > 0) {
+    throw new Error(
+      `No sharing posture defined for: ${missing.map((m) => m.profileKey).join(", ")}`
+    );
+  }
+
+  const counts: Record<SharingPosture, number> = {
+    full: 0,
+    partial: 0,
+    none: 0,
+  };
+
+  for (const { profileKey, churchId } of seeded) {
+    const posture = SHARING_POSTURE[profileKey];
+    counts[posture] += 1;
+
+    await db
+      .insert(churchPrivacySettings)
+      .values({ churchId, ...POSTURE_TOGGLES[posture], updatedAt: daysAgo(3) })
+      .onConflictDoUpdate({
+        target: churchPrivacySettings.churchId,
+        set: { ...POSTURE_TOGGLES[posture], updatedAt: daysAgo(3) },
+      });
+  }
+
+  console.log(
+    `   ${counts.full} share all · ${counts.partial} share people only · ${counts.none} share nothing\n`
+  );
+}
+
 // ----------------------------------------------------------------------------
 // Shared eval ids (network + sending church), populated during seeding.
 // ----------------------------------------------------------------------------
@@ -1010,7 +1169,12 @@ async function seedAll(): Promise<SeededChurch[]> {
     console.log(`   [Phase ${profile.currentPhase}] ${profile.name}`);
   }
 
-  console.log("\n✅ Seed complete.\n");
+  console.log("");
+  await seedPrivacySettings(
+    seeded.map((s) => ({ profileKey: s.profile.key, churchId: s.churchId }))
+  );
+
+  console.log("✅ Seed complete.\n");
   return seeded;
 }
 
@@ -1083,8 +1247,44 @@ async function verify(seeded: SeededChurch[]): Promise<void> {
 // Main
 // ============================================================================
 
+/**
+ * Resolve already-seeded eval churches by matching profile names, so sharing
+ * postures can be applied without a destructive clean-and-reseed.
+ */
+async function applyPrivacyToExistingCorpus(): Promise<void> {
+  const names = PROFILES.map((p) => p.name);
+  const rows = await db
+    .select({ id: churches.id, name: churches.name })
+    .from(churches)
+    .where(inArray(churches.name, names));
+
+  const byName = new Map(rows.map((r) => [r.name, r.id]));
+  const resolved = PROFILES.flatMap((p) => {
+    const churchId = byName.get(p.name);
+    return churchId ? [{ profileKey: p.key, churchId }] : [];
+  });
+
+  if (resolved.length === 0) {
+    console.log("   No seeded eval churches found — run the seed first.\n");
+    return;
+  }
+  if (resolved.length < PROFILES.length) {
+    console.log(
+      `   ⚠️  Only ${resolved.length}/${PROFILES.length} eval churches present.`
+    );
+  }
+
+  await seedPrivacySettings(resolved);
+}
+
 async function main(): Promise<void> {
   try {
+    if (privacyOnly) {
+      await applyPrivacyToExistingCorpus();
+      console.log("✅ Sharing postures applied (no other data touched).");
+      process.exit(0);
+    }
+
     await cleanEvalData();
 
     if (cleanOnly) {
