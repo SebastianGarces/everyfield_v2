@@ -42,7 +42,7 @@ Retrieval context (methodology RAG) is EveryField's own wiki and playbook conten
 
 | | |
 |---|---|
-| Training on API data | **Not by default** — since 2023-03-01, unless explicitly opted in. **This account was opted in.** See "What the audit found" below. |
+| Training on API data | **Not by default** — since 2023-03-01, unless explicitly opted in. **This account is currently opted in**, by decision, until beta. See below. |
 | Abuse-monitoring retention | **Up to 30 days**, "unless longer retention is required by law, or is reasonably necessary to protect our services" |
 | Call retention | The judge uses the **Responses API**, which OpenAI logs by default. Now opted out in code with `store: false`. See below. |
 | Zero Data Retention | **Not available to us.** See below. |
@@ -63,13 +63,22 @@ opposite of the default posture, and it applied to real church data.
 default — the SDK defaults `store` to `true`. So each assessment's fact snapshot and output sat in
 the org's logs.
 
-Fixes: the three Sharing toggles set to **Disabled**, org-level **API call logging** disabled, and
-`store: false` set in code on the judge call so the opt-out travels with the feature rather than
-with one account's settings.
+**Fixed now:** `store: false` on the judge call, in code, so the retention opt-out travels with the
+feature rather than with one account's settings.
 
-**Assessments that ran before this date were shared and retained under the old settings.** Those
-were the eval corpus and Bryan and Brett's plants — worth saying out loud to them rather than
-quietly fixing.
+**Deliberately not fixed yet — sharing stays on until beta.** "Share inputs and outputs with OpenAI"
+remains **enabled**, a considered decision on 2026-07-25: the complimentary daily tokens are worth
+more than the exposure while the only data flowing through the judge is the eval corpus and
+friendly test plants. **This must be disabled before any beta release with real churches** — it is
+tracked as a Must Have gate on the checklist, not a nice-to-have.
+
+While it stays on, the true statement is: **plant data sent to the judge is shared with OpenAI,
+including for improving and training their models.** Any disclosure written before that toggle flips
+has to say so — see NFR-PE-4c. A disclosure that describes the post-beta posture while the pre-beta
+one is live would be worse than no disclosure at all.
+
+**Assessments that ran before 2026-07-25 were also retained** in the org's logs, on top of being
+shared. That covers the eval corpus and Bryan and Brett's plants.
 
 ### Why ZDR is not simply switched on
 
@@ -82,10 +91,13 @@ A pre-revenue account cannot obtain them at any price. That is why **NFR-PE-4** 
 documented and disclosed posture rather than zero retention, with ZDR as a Should Have for when the
 account is contractually eligible. Revisit at the enterprise, post-revenue stage.
 
-**The honest summary for a planter:** their plant's numbers — counts and dates, no names or contact
-details — pass through OpenAI, are not used to train models, are not retained in our logs there, and
-may sit in OpenAI's abuse-monitoring storage for up to 30 days. That is true as of 2026-07-25; it
-was not true of assessments run before then (see the audit above).
+**The honest summary for a planter, today:** their plant's numbers — counts and dates, no names or
+contact details — pass through OpenAI, are **currently shared with OpenAI including for training
+their models**, and may sit in abuse-monitoring storage for up to 30 days. They are no longer
+retained in our organization's call logs.
+
+**The summary at beta,** once sharing is disabled: the same, minus the training and sharing. Do not
+use this version until the toggle is actually off.
 
 ## Review triggers
 

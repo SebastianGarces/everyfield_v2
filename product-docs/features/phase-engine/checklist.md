@@ -19,8 +19,10 @@
 - [ ] PE-014: Insight feedback capture (rubric-tuning signal)
 
 - [x] NFR-PE-4a: Provider + data-handling terms recorded in the feature's config documentation — `data-posture.md`
-- [ ] NFR-PE-4b: Strongest self-serve retention/training controls enabled on the provider account
-- [ ] NFR-PE-4c: Data processing disclosed in plain language to planters, coaches, and network users
+- [ ] NFR-PE-4b: Strongest retention/training controls enabled on the provider account
+  - [x] Judge call opted out of OpenAI retention in code (`store: false`)
+  - [ ] **Beta gate:** disable "Share inputs and outputs with OpenAI" — deliberately left ON pre-beta for the complimentary tokens; must be OFF before any real church uses the product
+- [ ] NFR-PE-4c: Data processing disclosed in plain language to planters, coaches, and network users — must state the *current* posture, which includes sharing-for-training until the beta gate above is closed
 
 ## Should Have
 - [ ] NFR-PE-4d: Zero data retention adopted once the account is contractually eligible (enterprise, post-revenue — not a go-live gate)
