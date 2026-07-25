@@ -36,6 +36,15 @@ CI=1 DATABASE_URL="postgresql://ci:ci@localhost:5432/ci" RESEND_API_KEY="re_ci_p
 Next 16's `isolatedDevBuild` writes `next dev` output to `.next/dev`, so this is safe to run while
 the dev server is up.
 
+**Markdown-only PRs skip the pipeline.** If every changed file ends in `.md`, the job still runs and
+still reports, but install, format, lint, typecheck and build are skipped — markdown cannot fail
+any of them. Anything else, including `.json`, `.yml` and the workflow itself, takes the full path.
+
+Worth knowing before "optimising" this further: `paths-ignore:` on the trigger is the obvious
+implementation and it **breaks merges**. The ruleset requires this check *by name*, so a workflow
+that never runs leaves a docs PR waiting forever on a check that never arrives — blocked, with no
+red X to explain why. Skip steps, never the workflow.
+
 **Enforcement:** the check is now required on `main` via the `main protection` ruleset (#19738586),
 which also requires a PR. It runs on **every** PR regardless of base — a PR against a stray base
 used to run no check at all, which reads as "not yet run" rather than failing, and hid a PR for a
@@ -380,6 +389,9 @@ Later the same day, five more PRs — the ruleset and the data posture:
 | [#49](https://github.com/SebastianGarces/everyfield_v2/pull/49) | NFR-PE-4 restated as a satisfiable data posture |
 | [#50](https://github.com/SebastianGarces/everyfield_v2/pull/50) | `data-posture.md` — what leaves the building, where it goes, and the audit findings |
 | [#51](https://github.com/SebastianGarces/everyfield_v2/pull/51) | `store: false` on the judge call — Responses API calls were being retained |
+
+| [#52](https://github.com/SebastianGarces/everyfield_v2/pull/52) | Queue §4 corrected — it still asserted the two things the audit disproved |
+| [#53](https://github.com/SebastianGarces/everyfield_v2/pull/53) | Markdown-only PRs skip install/build (~1m45s → seconds) |
 
 Formatting is automatic now (PostToolUse hook for agent edits, format-on-save for hand edits) and
 there is no pre-commit hook, so `pnpm format` is not a step anyone runs.
