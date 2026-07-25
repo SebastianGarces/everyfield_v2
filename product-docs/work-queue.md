@@ -283,38 +283,47 @@ worth more than durability. Two consequences worth remembering while that holds:
 level once granted, and is aimed at enterprise accounts. It is unlikely to be available pre-revenue,
 so treating the requirement as "turn on ZDR" leaves it permanently unmet.
 
-What is true by default, and may well be sufficient for a small beta:
+**The defaults were not what we assumed.** An audit of the dashboard on 2026-07-25 contradicted two
+things this section previously asserted. Both are recorded in
+`product-docs/features/phase-engine/data-posture.md`; the short version:
 
-| | |
-|---|---|
-| Training on API data | **No** — API data is not used to train models unless you explicitly opt in |
-| Abuse-monitoring retention | **Up to 30 days** by default |
-| Stored completions | Off unless `store` is set |
+| | Assumed | Actual |
+|---|---|---|
+| Training on API data | Not opted in | **Opted in** — "Share inputs and outputs with OpenAI" was enabled for all projects, the complimentary-daily-tokens trade |
+| Call retention | Off, since `store` is never set | **On** — `openai(modelId)` resolves to the **Responses API**, which logs by default, and the SDK defaults `store` to `true` |
+| Abuse-monitoring retention | Up to 30 days | Unchanged, up to 30 days |
 
-Self-serve, do this now: **Settings → Organization → Data controls → Data Retention**, set at the
-project level.
+Retention is **fixed in code** (`store: false` on the judge call, PR #51) rather than by a dashboard
+toggle, so the opt-out survives a new key, a new project, or a fresh clone.
+
+Sharing is **deliberately still on** — the complimentary tokens are worth more than the exposure
+while only the eval corpus and friendly test plants flow through the judge. It is a **Must Have beta
+gate**: off before any real church uses the product. Until it flips, the true statement is that
+plant data is shared with OpenAI including for training their models, and any disclosure written
+before then has to say so.
 
 Requires contacting sales (`openai.com/contact-sales`): Zero Data Retention, Modified Abuse
 Monitoring, Data Residency, Enterprise Key Management.
 
-**Recommended path:** configure the self-serve retention control, write the actual posture down, and
-disclose it to Bryan, Brett, and any test user whose plant data goes through the judge — real people
-in a real church are in that data. Pursue ZDR when there is a contract to hang it on.
+**Sequencing that saves a rewrite:** close the beta gate first, then write the disclosure once, then
+tell Bryan and Brett. Writing it now means describing a posture that is about to change — and
+telling them something you then have to correct.
+
+Separately, assessments that ran before 2026-07-25 were both shared and retained under the old
+settings — the eval corpus plus Bryan and Brett's plants. Worth a sentence to them regardless.
 
 **FRD amended.** NFR-PE-4 no longer reads "use a provider/configuration with zero data retention" —
 unsatisfiable pre-revenue, and therefore carried forever as "not done" instead of being met. It now
 requires a documented, disclosed, maximally-restricted posture, with ZDR as a Should Have for when
-the account is contractually eligible, explicitly not a go-live gate. The remaining work is tracked
-as NFR-PE-4a–d in `product-docs/features/phase-engine/checklist.md`:
+the account is contractually eligible, explicitly not a go-live gate. Status, tracked as NFR-PE-4a–d
+in `product-docs/features/phase-engine/checklist.md`:
 
-| | |
-|---|---|
-| a | Record provider + data-handling terms in config documentation |
-| b | Enable the strongest self-serve retention/training controls |
-| c | Disclose processing in plain language to planters, coaches, network users |
-| d | Adopt ZDR when enterprise-eligible (Should Have) |
-
-Items a–c are doable today and are what actually protect the people in that data; d waits.
+| | | |
+|---|---|---|
+| a | Record provider + data-handling terms | ✅ `features/phase-engine/data-posture.md` |
+| b | Strongest retention/training controls | ◐ retention opted out in code; **sharing toggle is the beta gate** |
+| c | Disclose processing in plain language | ☐ open — do it after the gate closes, and state the posture that is live when written |
+| d | Adopt ZDR when enterprise-eligible | ☐ deferred by design |
 
 ### 5. Verify the deployed cron fires
 
@@ -327,7 +336,7 @@ route that works locally and a cron that fires in production are different claim
 
 | Item | Why |
 |---|---|
-| **OpenAI data posture** | See Go-live §4. Self-serve retention control now; ZDR needs sales and is likely out of reach pre-revenue. The FRD requirement needs restating. |
+| **OpenAI data posture** | See Go-live §4. Posture documented and retention fixed in code. What is left needs you: flip the sharing toggle before beta, then write the disclosure, then tell Bryan and Brett. |
 | **Database hosting decision** | See Go-live §3. Trigger is the first real test users. |
 | **Langfuse** | Needs a self-hosted instance + `LANGFUSE_*` env. Tracing currently no-ops, so judge behaviour is unobservable — worth doing *before* rubric feedback arrives, since traces are how you answer "why did it say that?". |
 | **Rubric feedback** | With Brett and Bryan. When it returns, edits go to `product-docs/features/phase-engine/rubric-v0.md` **and** `src/lib/phase-engine/rubric.ts` — the judge reads the second, not the first. Then ship as v1. |
@@ -362,6 +371,18 @@ Repo-level, outside any diff:
 - **Branch cleanup** — remote is now `main` alone. Six merged/superseded branches and twelve local
   leftovers deleted; three stale worktrees removed. `feat/agent-delivery-os` and
   `feat/document-templates` kept, both still unmerged.
+
+Later the same day, five more PRs — the ruleset and the data posture:
+
+| PR | |
+|---|---|
+| [#47](https://github.com/SebastianGarces/everyfield_v2/pull/47) · [#48](https://github.com/SebastianGarces/everyfield_v2/pull/48) | Work-queue refresh, then the admin bypass removed so the required check actually binds |
+| [#49](https://github.com/SebastianGarces/everyfield_v2/pull/49) | NFR-PE-4 restated as a satisfiable data posture |
+| [#50](https://github.com/SebastianGarces/everyfield_v2/pull/50) | `data-posture.md` — what leaves the building, where it goes, and the audit findings |
+| [#51](https://github.com/SebastianGarces/everyfield_v2/pull/51) | `store: false` on the judge call — Responses API calls were being retained |
+
+Formatting is automatic now (PostToolUse hook for agent edits, format-on-save for hand edits) and
+there is no pre-commit hook, so `pnpm format` is not a step anyone runs.
 
 ## Done in the prior session (do not re-dispatch)
 
