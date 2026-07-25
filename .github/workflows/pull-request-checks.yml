@@ -1,8 +1,17 @@
 name: PR Checks
 
 on:
+  # Every pull request, whatever its base — deliberately unfiltered.
+  #
+  # This was `branches: [main]`, which meant a PR opened against any other
+  # base ran no checks at all. That is worse than failing: the PR shows no
+  # check rather than a red one, so it reads as "not yet run" indefinitely.
+  # PR #34 sat that way for a month against a throwaway base branch.
+  #
+  # Agents fork from whatever HEAD they are handed, so a wrong base is a
+  # realistic mistake. Checking every PR means the mistake surfaces as a
+  # diff nobody expected instead of as silence.
   pull_request:
-    branches: [main]
 
 jobs:
   validate:
