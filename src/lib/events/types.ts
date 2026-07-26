@@ -28,6 +28,12 @@ export type {
   TrainingScheduledEvent,
 } from "@/lib/ministry-teams/events";
 
+// PE: Phase Engine (Plant Intelligence)
+export type {
+  PhaseChangedEvent,
+  PlantAssessmentCreatedEvent,
+} from "@/lib/phase-engine/events";
+
 // ============================================================================
 // Union Type
 // ============================================================================
@@ -47,6 +53,10 @@ import type {
   TeamStaffingChangedEvent,
   TrainingScheduledEvent,
 } from "@/lib/ministry-teams/events";
+import type {
+  PhaseChangedEvent,
+  PlantAssessmentCreatedEvent,
+} from "@/lib/phase-engine/events";
 
 /**
  * Union of all application events.
@@ -64,4 +74,7 @@ export type AppEvent =
   | TeamMemberAssignedEvent
   | TeamLeaderAssignedEvent
   | TeamStaffingChangedEvent
-  | TrainingScheduledEvent;
+  | TrainingScheduledEvent
+  // PE: Phase Engine (Plant Intelligence)
+  | PhaseChangedEvent
+  | PlantAssessmentCreatedEvent;

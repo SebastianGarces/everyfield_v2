@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 
 import { HeaderBreadcrumbs } from "@/components/header";
 import {
+  ExportButton,
   ImportWizard,
   PeopleFilters,
   PeopleList,
@@ -104,6 +105,7 @@ export default async function PeoplePage({ searchParams }: PeoplePageProps) {
             </div>
             <div className="flex items-center gap-2">
               <ImportWizard />
+              <ExportButton />
               <QuickAddForm />
               <Button asChild>
                 <Link href="/people/new">

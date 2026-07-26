@@ -1,7 +1,7 @@
 # EveryField - Feature Dependency Graph
 
-**Version:** 1.0  
-**Date:** February 6, 2026
+**Version:** 1.1  
+**Date:** July 25, 2026
 
 ---
 
@@ -28,7 +28,7 @@ These are blocking — the dependent feature cannot operate without the dependen
 
 | Dependent Feature | Depends On | Reason |
 |-------------------|-----------|--------|
-| F3 (Vision Meeting) | F2 (People) | Meetings track attendance via Person records |
+| F3 (Meetings) | F2 (People) | Meetings track attendance via Person records |
 | F8 (Ministry Teams) | F2 (People) | Teams assign Person records as members |
 | F9 (Communication Hub) | F2 (People) | Messaging targets Person records as recipients |
 | F4 (Progress Dashboard) | F2, F3, F5, F7, F8 | Aggregates metrics from most features; needs data sources |
@@ -41,15 +41,15 @@ These cross-feature integrations enhance functionality but are not required for 
 
 | Source | Target | Integration |
 |--------|--------|-------------|
-| F3 (Vision Meeting) | F5 (Tasks) | Auto-creates follow-up tasks for new attendees |
-| F3 (Vision Meeting) | F6 (Documents) | Accesses Vision Meeting material templates |
+| F3 (Meetings) | F5 (Tasks) | Auto-creates follow-up tasks for new attendees |
+| F3 (Meetings) | F6 (Documents) | Accesses Vision Meeting material templates |
 | F10 (Facilities) | F5 (Tasks) | Creates site visit follow-up tasks |
 | F8 (Ministry Teams) | F9 (Communication) | Sends team-scoped group communications |
 | F9 (Communication) | F8 (Ministry Teams) | Reads team rosters for group messaging |
 | F7 (Financial) | F2 (People) | Reads Person count for giving participation rate |
 | F7 (Financial) | F6 (Documents) | Imports budget templates |
 | F1 (Wiki) | F6 (Documents) | Wiki articles link to downloadable templates |
-| F2 (People) | F3 (Vision Meeting) | Status auto-progression on meeting attendance (event) |
+| F2 (People) | F3 (Meetings) | Status auto-progression on meeting attendance (event) |
 | F2 (People) | F8 (Ministry Teams) | Status auto-progression on team assignment (event) |
 
 ---
@@ -62,8 +62,8 @@ Prerequisite for all features.
 
 - Auth system (User, Session, Roles)
 - Multi-tenancy (Church, SendingChurch, SendingNetwork)
-- Phase Engine (Phase transitions, exit criteria)
-- Database foundation (RLS policies, `church_id` scoping)
+- Phase Engine (advisory: planter-confirmed transitions + LLM-as-judge readiness insights; see [Phase Engine FRD](./features/phase-engine/frd.md))
+- Database foundation (application-layer `church_id` scoping; DB-layer RLS is a future goal)
 
 ### Wave 1: Foundation Features
 
@@ -84,7 +84,7 @@ These features fundamentally need Person records to function. All 3 can be built
 
 | Feature | Hard Dependency | Notes |
 |---------|----------------|-------|
-| **F3: Vision Meeting** | F2 (Person) | Attendance tracking requires Person records |
+| **F3: Meetings** | F2 (Person) | Attendance tracking requires Person records |
 | **F8: Ministry Teams** | F2 (Person) | Team membership requires Person records |
 | **F9: Communication Hub** | F2 (Person) | Recipient selection requires Person records |
 
@@ -142,6 +142,14 @@ Prioritizing F2 completion maximizes parallelism for subsequent waves.
 | Feature | Status |
 |---------|--------|
 | Core Infrastructure (Auth, Multi-tenancy) | Implemented |
+| Phase Engine (Plant Intelligence) | Implemented |
 | F1: Wiki | Implemented |
-| F2: People/CRM | In Progress |
-| F3–F10 | Not Started |
+| F2: People/CRM | Implemented |
+| F3: Meetings | Implemented |
+| F4: Progress Dashboard | Implemented (basic aggregation + activity feed) |
+| F5: Task Management | Implemented |
+| F6: Document Templates | Not Started |
+| F7: Financial Tracking | Not Started |
+| F8: Ministry Teams | Implemented |
+| F9: Communication Hub | Implemented |
+| F10: Facility Management | Not Started |

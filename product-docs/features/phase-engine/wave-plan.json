@@ -1,0 +1,582 @@
+{
+  "frd": "product-docs/features/phase-engine/frd.md",
+  "scope": "MVP",
+  "prerequisites": [
+    {
+      "id": "PE-schema",
+      "title": "Phase Engine schema + churches columns + pgvector embeddings table (single migration)",
+      "reason": "DB schema and migration — must be human-approved and run first/alone, and only one db:generate is allowed. The five phase-engine tables (phase_transitions, plant_signals, plant_assessments, plant_insights, insight_feedback) plus the churches.launch_date / last_material_event_at columns are ALREADY authored in src/db/schema/phase-engine.ts + church.ts and captured in the uncommitted migration 0020 (NOT yet applied). This deferred unit must ALSO add the RAG store — a methodology_embeddings table (pgvector: chunk text, embedding vector(1536), phase, section, article_slug metadata + an ivfflat/hnsw index) and enable the pgvector extension — then regenerate so a SINGLE migration covers everything. After approval: review SQL, then pnpm db:migrate (never db:push). Touches src/db/schema/phase-engine.ts, src/db/schema/church.ts, src/db/schema/index.ts, the generated migration + snapshot + _journal.json, and is the sole owner of all schema/migration files for this feature.",
+      "note": "Agent-authorable, but needs human approval and must land on the base branch BEFORE running wave 1."
+    }
+  ],
+  "tracks": [
+    {
+      "id": "PE-signal-layer",
+      "lane": "backend",
+      "units": [
+        {
+          "id": "PE-signal-layer",
+          "title": "Signal layer: deterministic fact-snapshot builder",
+          "lane": "backend",
+          "files": [
+            "src/lib/phase-engine/signals/index.ts",
+            "src/lib/phase-engine/signals/build-fact-snapshot.ts",
+            "src/lib/phase-engine/signals/queries.ts",
+            "src/lib/phase-engine/signals/types.ts"
+          ],
+          "summary": "Pure read-side service that computes the deterministic plant fact snapshot from existing feature tables (persons/commitments, vision_meetings/attendance, ministry teams + training, tasks, churches.launch_date) plus manual plant_signals. Returns a typed, reproducible JSON structure: committed core-group count + growth delta, vision-meeting cadence & attendance trend, follow-up staleness, ministry-role coverage (which of 8 filled), per-person leadership-readiness signals, training progress, launch_date countdown. Every value is SQL-derived; the LLM never produces a fact. This is the contract both the judge and the transition audit consume.",
+          "acceptanceCriteria": [
+            "buildFactSnapshot(churchId) returns a typed object reproducible from the DB: identical data yields identical facts (AC-PE-2)",
+            "Snapshot includes committed core-group count + delta, vision-meeting cadence/attendance trend, follow-up staleness, count of the 8 ministry roles filled, per-person leadership-readiness signals, training completion, and launch_date countdown (PE-004)",
+            "Manual attestations from plant_signals are merged into the snapshot; no computed fact is read from plant_signals (PE-005)",
+            "All queries are church_id-scoped; no value is LLM-generated (NFR-PE-6, NFR-PE-1)",
+            "Cold-start case (sparse data) returns a well-formed snapshot with explicit emptiness markers rather than throwing (PE-018)"
+          ]
+        }
+      ],
+      "files": [
+        "src/lib/phase-engine/signals/index.ts",
+        "src/lib/phase-engine/signals/build-fact-snapshot.ts",
+        "src/lib/phase-engine/signals/queries.ts",
+        "src/lib/phase-engine/signals/types.ts"
+      ]
+    },
+    {
+      "id": "PE-rag-infra",
+      "lane": "backend",
+      "units": [
+        {
+          "id": "PE-rag-infra",
+          "title": "Methodology RAG: embeddings, chunking, hybrid retrieval",
+          "lane": "backend",
+          "files": [
+            "package.json",
+            "src/lib/phase-engine/rag/index.ts",
+            "src/lib/phase-engine/rag/embed.ts",
+            "src/lib/phase-engine/rag/chunk.ts",
+            "src/lib/phase-engine/rag/retrieve.ts",
+            "scripts/embed-methodology-corpus.ts"
+          ],
+          "summary": "Adds the AI SDK + OpenAI provider + pgvector client deps, and builds the methodology RAG layer over the playbook + 96-article wiki corpus. Section/heading chunking (~300-800 tok) with phase/section/article_slug metadata; text-embedding-3-small (1536 dims). One-time corpus-embed script populates the methodology_embeddings table (owned by PE-schema). retrieve() does phase-filtered hybrid retrieval combining pgvector cosine + the existing wiki tsvector FTS, returning passages with article_slug for the judge to cite/link. Rubric is NOT embedded.",
+          "acceptanceCriteria": [
+            "embed-methodology-corpus script chunks playbook + wiki articles by heading and writes rows to methodology_embeddings with phase/section/article_slug metadata (PE-008)",
+            "retrieve(query, {phase}) returns ranked passages via hybrid pgvector + tsvector retrieval, each carrying its source article_slug",
+            "Embedding model is text-embedding-3-small behind a swappable provider module; corpus embed runs idempotently (re-running upserts, not duplicates)",
+            "Retrieval respects phase filtering so phase-relevant passages rank first"
+          ]
+        }
+      ],
+      "files": [
+        "package.json",
+        "src/lib/phase-engine/rag/index.ts",
+        "src/lib/phase-engine/rag/embed.ts",
+        "src/lib/phase-engine/rag/chunk.ts",
+        "src/lib/phase-engine/rag/retrieve.ts",
+        "scripts/embed-methodology-corpus.ts"
+      ]
+    },
+    {
+      "id": "PE-judge",
+      "lane": "backend",
+      "units": [
+        {
+          "id": "PE-judge",
+          "title": "LLM-as-judge pipeline (generateObject) + provider seam + tracing",
+          "lane": "backend",
+          "files": [
+            "src/lib/phase-engine/judge/index.ts",
+            "src/lib/phase-engine/judge/provider.ts",
+            "src/lib/phase-engine/judge/prompt.ts",
+            "src/lib/phase-engine/judge/schema.ts",
+            "src/lib/phase-engine/judge/run-assessment.ts",
+            "src/lib/phase-engine/rubric.ts",
+            "src/lib/phase-engine/observability.ts"
+          ],
+          "summary": "The headline AI layer. A plain-TypeScript pipeline: load fact snapshot + current phase + active rubric (loaded whole from rubric.ts, versioned) + RAG passages, make ONE validated Vercel AI SDK generateObject call (Zod-constrained to the insight shape), and return a structured assessment. Provider isolated behind judge/provider.ts for one-line swaps; Langfuse tracing tagged with rubric version + model id. Prompt hard-constrains reasoning to supplied facts, forbids inventing numbers, and requires each insight to cite the facts that drove it and produce both planter- and network-audience insights.",
+          "acceptanceCriteria": [
+            "runAssessment(snapshot, phase) returns Zod-validated insights, each with audience, category, severity, title, body, citedFacts, relatedArticleSlugs (PE-007/009)",
+            "The judge reasons only over supplied facts; every insight cites facts from the snapshot and contains no count/date absent from it (AC-PE-5, NFR-PE-1)",
+            "The active rubric is loaded whole and its version string is returned alongside the result; changing the rubric version changes the recorded version (PE-006, AC-PE-4)",
+            "Provider is swappable via judge/provider.ts with no change to pipeline logic; each run is traced in Langfuse tagged with rubric version + model id (NFR-PE-5)",
+            "Output includes both planter and network audience insights (PE-012)"
+          ]
+        }
+      ],
+      "files": [
+        "src/lib/phase-engine/judge/index.ts",
+        "src/lib/phase-engine/judge/provider.ts",
+        "src/lib/phase-engine/judge/prompt.ts",
+        "src/lib/phase-engine/judge/schema.ts",
+        "src/lib/phase-engine/judge/run-assessment.ts",
+        "src/lib/phase-engine/rubric.ts",
+        "src/lib/phase-engine/observability.ts"
+      ]
+    },
+    {
+      "id": "PE-assessment-orchestrator",
+      "lane": "backend",
+      "units": [
+        {
+          "id": "PE-assessment-orchestrator",
+          "title": "Assessment orchestrator + snapshot persistence + plant.assessment.created",
+          "lane": "backend",
+          "files": [
+            "src/lib/phase-engine/assessment/index.ts",
+            "src/lib/phase-engine/assessment/generate-assessment.ts",
+            "src/lib/phase-engine/assessment/persist.ts",
+            "src/lib/phase-engine/assessment/dirty.ts",
+            "src/lib/phase-engine/assessment/queries.ts",
+            "src/lib/phase-engine/events.ts"
+          ],
+          "summary": "Ties the pipeline to persistence. generateAssessment(churchId): create a pending plant_assessment, build fact snapshot, run judge, write insights (with privacy-safe audience tagging + rank + what-changed delta vs prior snapshot), mark complete (or failed), and emit plant.assessment.created. Owns dirty/stale selection logic (a plant is selected when last_material_event_at > latest assessment generated_at OR past the max-staleness window) and the read queries for the latest complete snapshot. Defines the phase-engine event payloads (phase.changed, plant.assessment.created) consumed by the event-wiring unit.",
+          "acceptanceCriteria": [
+            "generateAssessment writes a plant_assessment (rubric version, model id, fact snapshot, status) + its plant_insights, then emits plant.assessment.created (PE-009)",
+            "selectPlantsForAssessment returns only dirty-or-stale plants; a quiet plant is excluded, a plant with a material event or past max-staleness is included (AC-PE-8)",
+            "getLatestAssessment(churchId) returns the latest complete snapshot for instant reads with no LLM call (PE-011)",
+            "Each assessment computes a what-changed delta vs the prior snapshot (PE-016)",
+            "Network-audience insights persisted exclude any individual-person finding; planter insights are always written (PE-012/013)",
+            "Failed judge runs persist status=failed and do not overwrite the last good snapshot"
+          ]
+        }
+      ],
+      "files": [
+        "src/lib/phase-engine/assessment/index.ts",
+        "src/lib/phase-engine/assessment/generate-assessment.ts",
+        "src/lib/phase-engine/assessment/persist.ts",
+        "src/lib/phase-engine/assessment/dirty.ts",
+        "src/lib/phase-engine/assessment/queries.ts",
+        "src/lib/phase-engine/events.ts"
+      ]
+    },
+    {
+      "id": "PE-transitions",
+      "lane": "backend",
+      "units": [
+        {
+          "id": "PE-transitions",
+          "title": "Phase transition service (soft-gated) + audit + phase.changed",
+          "lane": "backend",
+          "files": [
+            "src/lib/phase-engine/transitions/index.ts",
+            "src/lib/phase-engine/transitions/service.ts",
+            "src/app/(dashboard)/phase/actions.ts"
+          ],
+          "summary": "Server-action-backed phase control. transitionPhase(churchId, toPhase, reason): allow forward/backward/skip with a required reason, NEVER block; write an immutable phase_transitions row capturing the fact snapshot (from the Signal layer) + active rubric version; update churches.current_phase; emit phase.changed. Also exposes the readiness state (derived from the latest assessment's readiness insight) for the phase-control UI. Consumes the Signal layer for the audit snapshot and the rubric module for the version.",
+          "acceptanceCriteria": [
+            "Planter can advance/regress/correct phase with a reason; the action never blocks (PE-001)",
+            "Every transition writes an immutable phase_transitions row with from/to, initiating user, timestamp, reason, fact snapshot, and rubric version (PE-002, AC-PE-1)",
+            "phase.changed is emitted on every successful transition for downstream consumers (PE-003)",
+            "Action enforces church_id scope and planter role via existing access helpers",
+            "Readiness state for the current phase is exposed for the UI, derived from the latest assessment (PE-015)"
+          ]
+        }
+      ],
+      "files": [
+        "src/lib/phase-engine/transitions/index.ts",
+        "src/lib/phase-engine/transitions/service.ts",
+        "src/app/(dashboard)/phase/actions.ts"
+      ]
+    },
+    {
+      "id": "PE-signals-feedback-actions",
+      "lane": "backend",
+      "units": [
+        {
+          "id": "PE-signals-feedback-actions",
+          "title": "Manual self-attestation + insight feedback server actions",
+          "lane": "backend",
+          "files": [
+            "src/lib/phase-engine/signals/attestation-service.ts",
+            "src/lib/phase-engine/feedback/service.ts",
+            "src/app/(dashboard)/phase/signals-actions.ts",
+            "src/app/(dashboard)/phase/feedback-actions.ts"
+          ],
+          "summary": "Two small write surfaces. (1) Self-attestation: upsert plant_signals (signal_key -> value) with attested_by/at, marks the plant dirty so the attestation feeds the next assessment. (2) Insight feedback: upsert insight_feedback (useful/not_useful + optional comment), denormalizing assessment id, church id, and rubric version so it is queryable as the rubric-tuning signal from day one. Both are church_id-scoped server actions.",
+          "acceptanceCriteria": [
+            "Toggling a manual signal upserts plant_signals and marks the plant dirty so it is reflected in the next assessment's reasoning (AC-PE-3)",
+            "Insight feedback is persisted and queryable, associated with the insight, assessment, and rubric version (PE-014, AC-PE-10)",
+            "Both actions enforce church_id scope; feedback unique per (insight, user) via upsert",
+            "Attestation records who and when"
+          ]
+        }
+      ],
+      "files": [
+        "src/lib/phase-engine/signals/attestation-service.ts",
+        "src/lib/phase-engine/feedback/service.ts",
+        "src/app/(dashboard)/phase/signals-actions.ts",
+        "src/app/(dashboard)/phase/feedback-actions.ts"
+      ]
+    },
+    {
+      "id": "PE-event-wiring",
+      "lane": "backend",
+      "units": [
+        {
+          "id": "PE-event-wiring",
+          "title": "Event wiring: phase-engine events + dirty-marking subscriptions",
+          "lane": "backend",
+          "files": [
+            "src/lib/events/types.ts",
+            "src/lib/events/subscriptions.ts",
+            "src/lib/phase-engine/dirty-handler.ts"
+          ],
+          "summary": "SINGLE owner of the cross-cutting event registry edits for this feature. Registers the phase-engine event types (phase.changed, plant.assessment.created) into the AppEvent union, and wires subscriptions so material events (meeting.attendance.finalized, team.member.assigned, person.created, task.completed) mark the plant dirty by setting churches.last_material_event_at. The dirty-marking handler lives in phase-engine; this unit only mounts it in the shared subscriptions file. Confines all shared event-bus edits to one unit to keep merges clean.",
+          "acceptanceCriteria": [
+            "phase.changed and plant.assessment.created are added to the AppEvent union in events/types.ts (PE-003)",
+            "Material events (meeting.attendance.finalized, team.member.assigned, person.created, task.completed) are subscribed to set churches.last_material_event_at, marking the plant dirty (PE-010)",
+            "No feature module imports another feature's service directly; all wiring stays in events/subscriptions.ts",
+            "Existing subscriptions remain intact and untouched in behavior"
+          ]
+        }
+      ],
+      "files": [
+        "src/lib/events/types.ts",
+        "src/lib/events/subscriptions.ts",
+        "src/lib/phase-engine/dirty-handler.ts"
+      ]
+    },
+    {
+      "id": "PE-cron",
+      "lane": "backend",
+      "units": [
+        {
+          "id": "PE-cron",
+          "title": "Vercel Cron route: dirty-or-stale assessment runner",
+          "lane": "backend",
+          "files": ["vercel.json", "src/app/api/phase-engine/assess/route.ts"],
+          "summary": "Secret-guarded route (Bearer/CRON_SECRET) invoked ~daily by Vercel Cron. Selects dirty-or-stale plants via the orchestrator's selection query and runs generateAssessment for each, bounded so quiet plants are skipped and each plant runs at most ~once/day with a max-staleness floor (NFR-PE-2). Adds the cron schedule to vercel.json (new file). No per-pageview LLM calls anywhere.",
+          "acceptanceCriteria": [
+            "Route rejects requests without the cron secret",
+            "Run selects only dirty-or-stale plants and invokes generateAssessment for each (AC-PE-8)",
+            "vercel.json declares a ~daily cron pointing at the route",
+            "A plant with no material events since its last assessment is not re-assessed; one past max-staleness is (PE-010)"
+          ]
+        }
+      ],
+      "files": ["vercel.json", "src/app/api/phase-engine/assess/route.ts"]
+    },
+    {
+      "id": "PE-phase-constants",
+      "lane": "fullstack",
+      "units": [
+        {
+          "id": "PE-phase-constants",
+          "title": "Canonicalize phase names to the product brief",
+          "lane": "fullstack",
+          "files": ["src/lib/constants.ts"],
+          "summary": "Resolves FRD open question #6: align PHASES labels in constants.ts to the product brief / rubric naming (e.g., Phase 1 'Core Group Development', Phase 2 'Launch Team Formation', Phase 3 'Training & Preparation', Phase 4 'Pre-Launch', Phase 5 'Launch Sunday', Phase 6 'Post-Launch'). Pure label change, keys (0-6) unchanged so no consumer breaks. Isolated to its own unit because constants.ts is a cross-cutting chokepoint touched by many surfaces.",
+          "acceptanceCriteria": [
+            "PHASES labels match the rubric/product-brief phase names; numeric keys 0-6 are unchanged",
+            "PhaseNumber type and all existing imports continue to compile",
+            "No behavioral change beyond display labels"
+          ]
+        }
+      ],
+      "files": ["src/lib/constants.ts"]
+    },
+    {
+      "id": "PE-focus-panel",
+      "lane": "frontend",
+      "units": [
+        {
+          "id": "PE-focus-panel",
+          "title": "Planter Focus panel + phase control UI",
+          "lane": "frontend",
+          "files": [
+            "src/app/(dashboard)/phase/page.tsx",
+            "src/components/phase-engine/focus-panel.tsx",
+            "src/components/phase-engine/insight-card.tsx",
+            "src/components/phase-engine/insight-feedback.tsx",
+            "src/components/phase-engine/phase-control.tsx",
+            "src/components/phase-engine/signal-toggles.tsx"
+          ],
+          "summary": "Planter-facing surfaces. Reads the latest cached assessment (no LLM on load) and renders the Focus panel: prioritized planter-audience insights with severity, plain-language body, cited-fact context, and wiki links; 'as of <date>' + what-changed. Phase control shows current phase + readiness state with an Advance/Change-phase action (reason field, soft confirm). Self-attestation toggles and per-insight thumbs up/down + comment wire to the existing server actions. All clickable elements use cursor-pointer; shadcn components added via the CLI.",
+          "acceptanceCriteria": [
+            "Focus panel renders prioritized planter insights from the latest snapshot with severity, body, cited facts, and wiki links; performs zero LLM calls on load (AC-PE-7, PE-011)",
+            "Phase control shows current phase + readiness and lets the planter advance/regress/correct with a reason via the transition action (PE-001/015)",
+            "Self-attestation toggles call the attestation action; insight feedback (thumbs + comment) calls the feedback action (PE-005/014)",
+            "Each assessment shows 'as of <date>' and what changed since last (PE-016)",
+            "All interactive elements include cursor-pointer; new shadcn components installed via pnpm dlx shadcn@latest add"
+          ]
+        }
+      ],
+      "files": [
+        "src/app/(dashboard)/phase/page.tsx",
+        "src/components/phase-engine/focus-panel.tsx",
+        "src/components/phase-engine/insight-card.tsx",
+        "src/components/phase-engine/insight-feedback.tsx",
+        "src/components/phase-engine/phase-control.tsx",
+        "src/components/phase-engine/signal-toggles.tsx"
+      ]
+    },
+    {
+      "id": "PE-oversight-health",
+      "lane": "frontend",
+      "units": [
+        {
+          "id": "PE-oversight-health",
+          "title": "Oversight plant-health surface (privacy-gated)",
+          "lane": "frontend",
+          "files": [
+            "src/app/(dashboard)/oversight/health/page.tsx",
+            "src/components/phase-engine/plant-health-card.tsx",
+            "src/lib/phase-engine/oversight/read.ts"
+          ],
+          "summary": "Network/sending-church oversight view. Reads the latest assessment's network-audience insights and a per-plant health classification (on-track / watch / readiness), gated by getAccessibleChurchIds + canAccessFeatureData and the plant's share_* settings. Never exposes individual-person insights and never shows anything the planter has not seen. Conservative 'observation, not verdict' framing. Read path enforces privacy at the query layer; UI renders portfolio cards.",
+          "acceptanceCriteria": [
+            "Oversight health view renders only network-audience insights from the latest snapshot; zero LLM calls on load (AC-PE-7, PE-011)",
+            "Output contains no individual-person insight and respects share_* settings; toggling a share setting off removes the corresponding network content (AC-PE-9, PE-012)",
+            "Per-plant health classification (on-track/watch/readiness) is shown for portfolio views (PE-017)",
+            "Access is gated via getAccessibleChurchIds + canAccessFeatureData; planter-sees-first is preserved (PE-013)",
+            "All interactive elements include cursor-pointer"
+          ]
+        }
+      ],
+      "files": [
+        "src/app/(dashboard)/oversight/health/page.tsx",
+        "src/components/phase-engine/plant-health-card.tsx",
+        "src/lib/phase-engine/oversight/read.ts"
+      ]
+    }
+  ],
+  "waves": [
+    {
+      "wave": 1,
+      "tracks": [
+        "PE-signal-layer",
+        "PE-rag-infra",
+        "PE-signals-feedback-actions",
+        "PE-phase-constants"
+      ],
+      "units": [
+        {
+          "id": "PE-signal-layer",
+          "title": "Signal layer: deterministic fact-snapshot builder",
+          "lane": "backend",
+          "files": [
+            "src/lib/phase-engine/signals/index.ts",
+            "src/lib/phase-engine/signals/build-fact-snapshot.ts",
+            "src/lib/phase-engine/signals/queries.ts",
+            "src/lib/phase-engine/signals/types.ts"
+          ],
+          "summary": "Pure read-side service that computes the deterministic plant fact snapshot from existing feature tables (persons/commitments, vision_meetings/attendance, ministry teams + training, tasks, churches.launch_date) plus manual plant_signals. Returns a typed, reproducible JSON structure: committed core-group count + growth delta, vision-meeting cadence & attendance trend, follow-up staleness, ministry-role coverage (which of 8 filled), per-person leadership-readiness signals, training progress, launch_date countdown. Every value is SQL-derived; the LLM never produces a fact. This is the contract both the judge and the transition audit consume.",
+          "acceptanceCriteria": [
+            "buildFactSnapshot(churchId) returns a typed object reproducible from the DB: identical data yields identical facts (AC-PE-2)",
+            "Snapshot includes committed core-group count + delta, vision-meeting cadence/attendance trend, follow-up staleness, count of the 8 ministry roles filled, per-person leadership-readiness signals, training completion, and launch_date countdown (PE-004)",
+            "Manual attestations from plant_signals are merged into the snapshot; no computed fact is read from plant_signals (PE-005)",
+            "All queries are church_id-scoped; no value is LLM-generated (NFR-PE-6, NFR-PE-1)",
+            "Cold-start case (sparse data) returns a well-formed snapshot with explicit emptiness markers rather than throwing (PE-018)"
+          ]
+        },
+        {
+          "id": "PE-rag-infra",
+          "title": "Methodology RAG: embeddings, chunking, hybrid retrieval",
+          "lane": "backend",
+          "files": [
+            "package.json",
+            "src/lib/phase-engine/rag/index.ts",
+            "src/lib/phase-engine/rag/embed.ts",
+            "src/lib/phase-engine/rag/chunk.ts",
+            "src/lib/phase-engine/rag/retrieve.ts",
+            "scripts/embed-methodology-corpus.ts"
+          ],
+          "summary": "Adds the AI SDK + OpenAI provider + pgvector client deps, and builds the methodology RAG layer over the playbook + 96-article wiki corpus. Section/heading chunking (~300-800 tok) with phase/section/article_slug metadata; text-embedding-3-small (1536 dims). One-time corpus-embed script populates the methodology_embeddings table (owned by PE-schema). retrieve() does phase-filtered hybrid retrieval combining pgvector cosine + the existing wiki tsvector FTS, returning passages with article_slug for the judge to cite/link. Rubric is NOT embedded.",
+          "acceptanceCriteria": [
+            "embed-methodology-corpus script chunks playbook + wiki articles by heading and writes rows to methodology_embeddings with phase/section/article_slug metadata (PE-008)",
+            "retrieve(query, {phase}) returns ranked passages via hybrid pgvector + tsvector retrieval, each carrying its source article_slug",
+            "Embedding model is text-embedding-3-small behind a swappable provider module; corpus embed runs idempotently (re-running upserts, not duplicates)",
+            "Retrieval respects phase filtering so phase-relevant passages rank first"
+          ]
+        },
+        {
+          "id": "PE-signals-feedback-actions",
+          "title": "Manual self-attestation + insight feedback server actions",
+          "lane": "backend",
+          "files": [
+            "src/lib/phase-engine/signals/attestation-service.ts",
+            "src/lib/phase-engine/feedback/service.ts",
+            "src/app/(dashboard)/phase/signals-actions.ts",
+            "src/app/(dashboard)/phase/feedback-actions.ts"
+          ],
+          "summary": "Two small write surfaces. (1) Self-attestation: upsert plant_signals (signal_key -> value) with attested_by/at, marks the plant dirty so the attestation feeds the next assessment. (2) Insight feedback: upsert insight_feedback (useful/not_useful + optional comment), denormalizing assessment id, church id, and rubric version so it is queryable as the rubric-tuning signal from day one. Both are church_id-scoped server actions.",
+          "acceptanceCriteria": [
+            "Toggling a manual signal upserts plant_signals and marks the plant dirty so it is reflected in the next assessment's reasoning (AC-PE-3)",
+            "Insight feedback is persisted and queryable, associated with the insight, assessment, and rubric version (PE-014, AC-PE-10)",
+            "Both actions enforce church_id scope; feedback unique per (insight, user) via upsert",
+            "Attestation records who and when"
+          ]
+        },
+        {
+          "id": "PE-phase-constants",
+          "title": "Canonicalize phase names to the product brief",
+          "lane": "fullstack",
+          "files": ["src/lib/constants.ts"],
+          "summary": "Resolves FRD open question #6: align PHASES labels in constants.ts to the product brief / rubric naming (e.g., Phase 1 'Core Group Development', Phase 2 'Launch Team Formation', Phase 3 'Training & Preparation', Phase 4 'Pre-Launch', Phase 5 'Launch Sunday', Phase 6 'Post-Launch'). Pure label change, keys (0-6) unchanged so no consumer breaks. Isolated to its own unit because constants.ts is a cross-cutting chokepoint touched by many surfaces.",
+          "acceptanceCriteria": [
+            "PHASES labels match the rubric/product-brief phase names; numeric keys 0-6 are unchanged",
+            "PhaseNumber type and all existing imports continue to compile",
+            "No behavioral change beyond display labels"
+          ]
+        }
+      ]
+    },
+    {
+      "wave": 2,
+      "tracks": ["PE-judge"],
+      "units": [
+        {
+          "id": "PE-judge",
+          "title": "LLM-as-judge pipeline (generateObject) + provider seam + tracing",
+          "lane": "backend",
+          "files": [
+            "src/lib/phase-engine/judge/index.ts",
+            "src/lib/phase-engine/judge/provider.ts",
+            "src/lib/phase-engine/judge/prompt.ts",
+            "src/lib/phase-engine/judge/schema.ts",
+            "src/lib/phase-engine/judge/run-assessment.ts",
+            "src/lib/phase-engine/rubric.ts",
+            "src/lib/phase-engine/observability.ts"
+          ],
+          "summary": "The headline AI layer. A plain-TypeScript pipeline: load fact snapshot + current phase + active rubric (loaded whole from rubric.ts, versioned) + RAG passages, make ONE validated Vercel AI SDK generateObject call (Zod-constrained to the insight shape), and return a structured assessment. Provider isolated behind judge/provider.ts for one-line swaps; Langfuse tracing tagged with rubric version + model id. Prompt hard-constrains reasoning to supplied facts, forbids inventing numbers, and requires each insight to cite the facts that drove it and produce both planter- and network-audience insights.",
+          "acceptanceCriteria": [
+            "runAssessment(snapshot, phase) returns Zod-validated insights, each with audience, category, severity, title, body, citedFacts, relatedArticleSlugs (PE-007/009)",
+            "The judge reasons only over supplied facts; every insight cites facts from the snapshot and contains no count/date absent from it (AC-PE-5, NFR-PE-1)",
+            "The active rubric is loaded whole and its version string is returned alongside the result; changing the rubric version changes the recorded version (PE-006, AC-PE-4)",
+            "Provider is swappable via judge/provider.ts with no change to pipeline logic; each run is traced in Langfuse tagged with rubric version + model id (NFR-PE-5)",
+            "Output includes both planter and network audience insights (PE-012)"
+          ]
+        }
+      ]
+    },
+    {
+      "wave": 3,
+      "tracks": ["PE-assessment-orchestrator"],
+      "units": [
+        {
+          "id": "PE-assessment-orchestrator",
+          "title": "Assessment orchestrator + snapshot persistence + plant.assessment.created",
+          "lane": "backend",
+          "files": [
+            "src/lib/phase-engine/assessment/index.ts",
+            "src/lib/phase-engine/assessment/generate-assessment.ts",
+            "src/lib/phase-engine/assessment/persist.ts",
+            "src/lib/phase-engine/assessment/dirty.ts",
+            "src/lib/phase-engine/assessment/queries.ts",
+            "src/lib/phase-engine/events.ts"
+          ],
+          "summary": "Ties the pipeline to persistence. generateAssessment(churchId): create a pending plant_assessment, build fact snapshot, run judge, write insights (with privacy-safe audience tagging + rank + what-changed delta vs prior snapshot), mark complete (or failed), and emit plant.assessment.created. Owns dirty/stale selection logic (a plant is selected when last_material_event_at > latest assessment generated_at OR past the max-staleness window) and the read queries for the latest complete snapshot. Defines the phase-engine event payloads (phase.changed, plant.assessment.created) consumed by the event-wiring unit.",
+          "acceptanceCriteria": [
+            "generateAssessment writes a plant_assessment (rubric version, model id, fact snapshot, status) + its plant_insights, then emits plant.assessment.created (PE-009)",
+            "selectPlantsForAssessment returns only dirty-or-stale plants; a quiet plant is excluded, a plant with a material event or past max-staleness is included (AC-PE-8)",
+            "getLatestAssessment(churchId) returns the latest complete snapshot for instant reads with no LLM call (PE-011)",
+            "Each assessment computes a what-changed delta vs the prior snapshot (PE-016)",
+            "Network-audience insights persisted exclude any individual-person finding; planter insights are always written (PE-012/013)",
+            "Failed judge runs persist status=failed and do not overwrite the last good snapshot"
+          ]
+        }
+      ]
+    },
+    {
+      "wave": 4,
+      "tracks": ["PE-transitions", "PE-event-wiring", "PE-oversight-health"],
+      "units": [
+        {
+          "id": "PE-transitions",
+          "title": "Phase transition service (soft-gated) + audit + phase.changed",
+          "lane": "backend",
+          "files": [
+            "src/lib/phase-engine/transitions/index.ts",
+            "src/lib/phase-engine/transitions/service.ts",
+            "src/app/(dashboard)/phase/actions.ts"
+          ],
+          "summary": "Server-action-backed phase control. transitionPhase(churchId, toPhase, reason): allow forward/backward/skip with a required reason, NEVER block; write an immutable phase_transitions row capturing the fact snapshot (from the Signal layer) + active rubric version; update churches.current_phase; emit phase.changed. Also exposes the readiness state (derived from the latest assessment's readiness insight) for the phase-control UI. Consumes the Signal layer for the audit snapshot and the rubric module for the version.",
+          "acceptanceCriteria": [
+            "Planter can advance/regress/correct phase with a reason; the action never blocks (PE-001)",
+            "Every transition writes an immutable phase_transitions row with from/to, initiating user, timestamp, reason, fact snapshot, and rubric version (PE-002, AC-PE-1)",
+            "phase.changed is emitted on every successful transition for downstream consumers (PE-003)",
+            "Action enforces church_id scope and planter role via existing access helpers",
+            "Readiness state for the current phase is exposed for the UI, derived from the latest assessment (PE-015)"
+          ]
+        },
+        {
+          "id": "PE-event-wiring",
+          "title": "Event wiring: phase-engine events + dirty-marking subscriptions",
+          "lane": "backend",
+          "files": [
+            "src/lib/events/types.ts",
+            "src/lib/events/subscriptions.ts",
+            "src/lib/phase-engine/dirty-handler.ts"
+          ],
+          "summary": "SINGLE owner of the cross-cutting event registry edits for this feature. Registers the phase-engine event types (phase.changed, plant.assessment.created) into the AppEvent union, and wires subscriptions so material events (meeting.attendance.finalized, team.member.assigned, person.created, task.completed) mark the plant dirty by setting churches.last_material_event_at. The dirty-marking handler lives in phase-engine; this unit only mounts it in the shared subscriptions file. Confines all shared event-bus edits to one unit to keep merges clean.",
+          "acceptanceCriteria": [
+            "phase.changed and plant.assessment.created are added to the AppEvent union in events/types.ts (PE-003)",
+            "Material events (meeting.attendance.finalized, team.member.assigned, person.created, task.completed) are subscribed to set churches.last_material_event_at, marking the plant dirty (PE-010)",
+            "No feature module imports another feature's service directly; all wiring stays in events/subscriptions.ts",
+            "Existing subscriptions remain intact and untouched in behavior"
+          ]
+        },
+        {
+          "id": "PE-oversight-health",
+          "title": "Oversight plant-health surface (privacy-gated)",
+          "lane": "frontend",
+          "files": [
+            "src/app/(dashboard)/oversight/health/page.tsx",
+            "src/components/phase-engine/plant-health-card.tsx",
+            "src/lib/phase-engine/oversight/read.ts"
+          ],
+          "summary": "Network/sending-church oversight view. Reads the latest assessment's network-audience insights and a per-plant health classification (on-track / watch / readiness), gated by getAccessibleChurchIds + canAccessFeatureData and the plant's share_* settings. Never exposes individual-person insights and never shows anything the planter has not seen. Conservative 'observation, not verdict' framing. Read path enforces privacy at the query layer; UI renders portfolio cards.",
+          "acceptanceCriteria": [
+            "Oversight health view renders only network-audience insights from the latest snapshot; zero LLM calls on load (AC-PE-7, PE-011)",
+            "Output contains no individual-person insight and respects share_* settings; toggling a share setting off removes the corresponding network content (AC-PE-9, PE-012)",
+            "Per-plant health classification (on-track/watch/readiness) is shown for portfolio views (PE-017)",
+            "Access is gated via getAccessibleChurchIds + canAccessFeatureData; planter-sees-first is preserved (PE-013)",
+            "All interactive elements include cursor-pointer"
+          ]
+        }
+      ]
+    },
+    {
+      "wave": 5,
+      "tracks": ["PE-cron", "PE-focus-panel"],
+      "units": [
+        {
+          "id": "PE-cron",
+          "title": "Vercel Cron route: dirty-or-stale assessment runner",
+          "lane": "backend",
+          "files": ["vercel.json", "src/app/api/phase-engine/assess/route.ts"],
+          "summary": "Secret-guarded route (Bearer/CRON_SECRET) invoked ~daily by Vercel Cron. Selects dirty-or-stale plants via the orchestrator's selection query and runs generateAssessment for each, bounded so quiet plants are skipped and each plant runs at most ~once/day with a max-staleness floor (NFR-PE-2). Adds the cron schedule to vercel.json (new file). No per-pageview LLM calls anywhere.",
+          "acceptanceCriteria": [
+            "Route rejects requests without the cron secret",
+            "Run selects only dirty-or-stale plants and invokes generateAssessment for each (AC-PE-8)",
+            "vercel.json declares a ~daily cron pointing at the route",
+            "A plant with no material events since its last assessment is not re-assessed; one past max-staleness is (PE-010)"
+          ]
+        },
+        {
+          "id": "PE-focus-panel",
+          "title": "Planter Focus panel + phase control UI",
+          "lane": "frontend",
+          "files": [
+            "src/app/(dashboard)/phase/page.tsx",
+            "src/components/phase-engine/focus-panel.tsx",
+            "src/components/phase-engine/insight-card.tsx",
+            "src/components/phase-engine/insight-feedback.tsx",
+            "src/components/phase-engine/phase-control.tsx",
+            "src/components/phase-engine/signal-toggles.tsx"
+          ],
+          "summary": "Planter-facing surfaces. Reads the latest cached assessment (no LLM on load) and renders the Focus panel: prioritized planter-audience insights with severity, plain-language body, cited-fact context, and wiki links; 'as of <date>' + what-changed. Phase control shows current phase + readiness state with an Advance/Change-phase action (reason field, soft confirm). Self-attestation toggles and per-insight thumbs up/down + comment wire to the existing server actions. All clickable elements use cursor-pointer; shadcn components added via the CLI.",
+          "acceptanceCriteria": [
+            "Focus panel renders prioritized planter insights from the latest snapshot with severity, body, cited facts, and wiki links; performs zero LLM calls on load (AC-PE-7, PE-011)",
+            "Phase control shows current phase + readiness and lets the planter advance/regress/correct with a reason via the transition action (PE-001/015)",
+            "Self-attestation toggles call the attestation action; insight feedback (thumbs + comment) calls the feedback action (PE-005/014)",
+            "Each assessment shows 'as of <date>' and what changed since last (PE-016)",
+            "All interactive elements include cursor-pointer; new shadcn components installed via pnpm dlx shadcn@latest add"
+          ]
+        }
+      ]
+    }
+  ],
+  "sharedFileClusters": [],
+  "howToRun": "Land the prerequisites (approved) on a base branch. Then for each wave in order: run frd-implement-wave with args = that wave's `units` array; review and merge its branches into the base; proceed to the next wave.",
+  "decompositionNotes": "Schema status: phase-engine.ts + churches columns + migration 0020 are already authored (uncommitted, NOT yet applied per project memory). The deferred PE-schema unit folds in the still-missing RAG store (methodology_embeddings + pgvector extension) so the whole feature lands in ONE db:generate / one migration, then db:migrate. Do not let any other unit run db:generate.\n\nChokepoints confined to single owners: (1) PE-event-wiring solely edits src/lib/events/types.ts + subscriptions.ts (the shared event registry); (2) PE-phase-constants solely edits src/lib/constants.ts; (3) PE-schema solely owns all src/db/schema + migration files. Every other unit works in greenfield src/lib/phase-engine/* or src/components/phase-engine/* paths to keep tracks file-disjoint.\n\nDependency-wave shape (after PE-schema merges): Wave 1 = PE-signal-layer, PE-rag-infra, PE-signals-feedback-actions, PE-phase-constants (all parallel, file-disjoint). Wave 2 = PE-judge. Wave 3 = PE-assessment-orchestrator. Wave 4 = PE-transitions, PE-event-wiring. Wave 5 = PE-cron, PE-focus-panel, PE-oversight-health.\n\nPre-build deps to install in PE-rag-infra (none present today): ai / @ai-sdk/openai, an OpenAI key, and a pgvector helper. Langfuse client lands in PE-judge. NFR-PE-4 (zero-data-retention OpenAI posture) is an external/config gate to confirm before go-live, not an agent unit.\n\nScope guard: the Church Plant Agent (features/church-plant-agent/vision.md) is explicitly OUT of scope — no agentic/tool-calling loop here; the judge is a single structured generateObject call. The phase.changed contract is preserved unchanged for existing F5/F1 consumers; this feature only ADDS the intelligence layer alongside it. Nice-to-have PE-019/020/021 are not decomposed (out of MVP).\n\nOpen questions surfaced by the FRD that gate content (not code) quality: rubric governance/finalization with Brett & Bryan (NFR external dep), exact materiality event list (resolved pragmatically in PE-event-wiring), and insight volume/capping (handled as a rank+cap in PE-judge/orchestrator). These do not block the build but will tune rubric-v0 post-first-cohort."
+}

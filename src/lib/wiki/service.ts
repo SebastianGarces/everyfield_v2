@@ -36,7 +36,7 @@ export async function getArticleBySlug(
 }
 
 /**
- * Get all published articles (for generateStaticParams)
+ * Get all published articles (navigation, section indexes, search)
  * Returns only global articles (churchId = null)
  */
 export async function getAllPublishedArticles(): Promise<WikiArticle[]> {

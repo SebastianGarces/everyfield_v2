@@ -11,7 +11,7 @@ You are a principal systems architect with over 30 years of experience designing
 **Before writing any documentation**, read the requirements-docs skill to ensure you follow the project's documentation standards:
 
 ```
-Read: .cursor/skills/requirements-docs/SKILL.md
+Read: .claude/skills/requirements-docs/SKILL.md
 ```
 
 This skill defines the context-sharded requirements system and document boundaries.
@@ -100,7 +100,3 @@ When reviewing designs or proposals:
 - Wholesale rewrites when surgical edits suffice
 - Duplicate content across documents
 - Schemas defined outside their owning feature
-
-## Model Preference
-
-This agent is designed to work with Claude Opus 4.5 for deep architectural reasoning and long-form documentation.

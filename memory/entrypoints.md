@@ -1,5 +1,7 @@
 # Entrypoints
 
+> Path shorthand: `(dash)/` = `(dash)/`
+
 ## Authentication
 
 | Flow | Entrypoint | Trigger |
@@ -19,9 +21,9 @@
 
 | Flow | Entrypoint | Trigger |
 |------|-----------|---------|
-| Article view | `src/app/(dashboard)/wiki/[...slug]/page.tsx` | Route `/wiki/*` |
+| Article view | `(dash)/wiki/[...slug]/page.tsx` | Route `/wiki/*` |
 | Article retrieval | `src/lib/wiki/get-article.ts:getArticle()` | Page render |
-| Search | `src/app/(dashboard)/wiki/actions.ts:searchWikiArticles()` | Search input |
+| Search | `(dash)/wiki/actions.ts:searchWikiArticles()` | Search input |
 | Progress update | `src/lib/wiki/progress.ts:updateProgress()` | Article scroll/view |
 | Bookmark toggle | `src/lib/wiki/bookmarks.ts:toggleBookmark()` | User action |
 | Cache revalidation | `src/app/api/wiki/revalidate/route.ts` | POST with secret |
@@ -36,10 +38,10 @@
 
 | Flow | Entrypoint | Trigger |
 |------|-----------|---------|
-| Layout auth guard | `src/app/(dashboard)/layout.tsx` | Any `/dashboard/*` route |
-| Dashboard page | `src/app/(dashboard)/dashboard/page.tsx` | Route `/dashboard` |
+| Layout auth guard | `(dash)/layout.tsx` | Any `/dashboard/*` route |
+| Dashboard page | `(dash)/dashboard/page.tsx` | Route `/dashboard` |
 
-**Primary modules:** `src/app/(dashboard)/`, `src/components/`
+**Primary modules:** `(dash)/`, `src/components/`
 
 **Key deps:** `getCurrentSession()`, sidebar state cookie
 
@@ -49,16 +51,16 @@
 
 | Flow | Entrypoint | Trigger |
 |------|-----------|---------|
-| People list | `src/app/(dashboard)/people/page.tsx` | Route `/people` |
-| Person detail | `src/app/(dashboard)/people/[id]/page.tsx` | Route `/people/[id]` |
-| Activity tab | `src/app/(dashboard)/people/[id]/activity/page.tsx` | Route `/people/[id]/activity` |
-| Create person | `src/app/(dashboard)/people/actions.ts:createPersonAction()` | Form submit |
-| Update person | `src/app/(dashboard)/people/actions.ts:updatePersonAction()` | Form submit |
-| Delete person | `src/app/(dashboard)/people/actions.ts:deletePersonAction()` | User action |
-| Change status | `src/app/(dashboard)/people/actions.ts:changeStatusAction()` | Drag-drop / Modal |
-| Change status w/reason | `src/app/(dashboard)/people/actions.ts:changeStatusWithReasonAction()` | Modal submit |
-| Add note | `src/app/(dashboard)/people/actions.ts:addNoteAction()` | Form submit |
-| Tag management | `src/app/(dashboard)/people/actions.ts:*TagAction()` | User action |
+| People list | `(dash)/people/page.tsx` | Route `/people` |
+| Person detail | `(dash)/people/[id]/page.tsx` | Route `/people/[id]` |
+| Activity tab | `(dash)/people/[id]/activity/page.tsx` | Route `/people/[id]/activity` |
+| Create person | `(dash)/people/actions.ts:createPersonAction()` | Form submit |
+| Update person | `(dash)/people/actions.ts:updatePersonAction()` | Form submit |
+| Delete person | `(dash)/people/actions.ts:deletePersonAction()` | User action |
+| Change status | `(dash)/people/actions.ts:changeStatusAction()` | Drag-drop / Modal |
+| Change status w/reason | `(dash)/people/actions.ts:changeStatusWithReasonAction()` | Modal submit |
+| Add note | `(dash)/people/actions.ts:addNoteAction()` | Form submit |
+| Tag management | `(dash)/people/actions.ts:*TagAction()` | User action |
 
 **Primary modules:** `src/lib/people/`, `src/components/people/`, `src/db/schema/people.ts`
 
@@ -97,46 +99,132 @@
 
 ---
 
-## Vision Meetings
+## Meetings
 
 | Flow | Entrypoint | Trigger |
 |------|-----------|---------|
-| Meeting list | `src/app/(dashboard)/vision-meetings/page.tsx` | Route `/vision-meetings` |
-| Schedule meeting | `src/app/(dashboard)/vision-meetings/new/page.tsx` | Route `/vision-meetings/new` |
-| Meeting detail | `src/app/(dashboard)/vision-meetings/[id]/page.tsx` | Route `/vision-meetings/[id]` |
-| Attendance capture | `src/app/(dashboard)/vision-meetings/[id]/attendance/page.tsx` | Route `/vision-meetings/[id]/attendance` |
-| Analytics | `src/app/(dashboard)/vision-meetings/[id]/analytics/page.tsx` | Route `/vision-meetings/[id]/analytics` |
-| Evaluation | `src/app/(dashboard)/vision-meetings/[id]/evaluation/page.tsx` | Route `/vision-meetings/[id]/evaluation` |
-| Logistics | `src/app/(dashboard)/vision-meetings/[id]/logistics/page.tsx` | Route `/vision-meetings/[id]/logistics` |
-| Invitations | `src/app/(dashboard)/vision-meetings/[id]/invitations/page.tsx` | Route `/vision-meetings/[id]/invitations` |
-| Create meeting | `src/app/(dashboard)/vision-meetings/actions.ts:createMeetingAction()` | Form submit |
-| Update meeting | `src/app/(dashboard)/vision-meetings/actions.ts:updateMeetingAction()` | Form submit |
-| Delete meeting | `src/app/(dashboard)/vision-meetings/actions.ts:deleteMeetingAction()` | User action |
-| Update status | `src/app/(dashboard)/vision-meetings/actions.ts:updateMeetingStatusAction()` | Status button |
-| Add attendee | `src/app/(dashboard)/vision-meetings/actions.ts:addAttendeeAction()` | User action |
-| Quick add attendee | `src/app/(dashboard)/vision-meetings/actions.ts:quickAddAttendeeAction()` | Form submit |
-| Remove attendee | `src/app/(dashboard)/vision-meetings/actions.ts:removeAttendeeAction()` | User action |
-| Finalize attendance | `src/app/(dashboard)/vision-meetings/actions.ts:finalizeAttendanceAction()` | Button click |
-| Create location | `src/app/(dashboard)/vision-meetings/actions.ts:createLocationAction()` | Form submit |
-| Create invitation | `src/app/(dashboard)/vision-meetings/actions.ts:createInvitationAction()` | Form submit |
-| Update invitation status | `src/app/(dashboard)/vision-meetings/actions.ts:updateInvitationStatusAction()` | Dropdown change |
-| Create evaluation | `src/app/(dashboard)/vision-meetings/actions.ts:createEvaluationAction()` | Form submit |
-| Toggle checklist | `src/app/(dashboard)/vision-meetings/actions.ts:toggleChecklistItemAction()` | Checkbox click |
+| Meeting list / schedule | `(dash)/meetings/page.tsx`, `new/page.tsx` | Routes `/meetings`, `/meetings/new` |
+| Meeting detail + tabs | `(dash)/meetings/[id]/page.tsx` + `{attendance,analytics,evaluation,logistics,invitations}/page.tsx` | Route `/meetings/[id]/*` |
+| Meeting CRUD | `(dash)/meetings/actions.ts:createMeetingAction()` / `updateMeetingAction()` / `deleteMeetingAction()` / `updateMeetingStatusAction()` | Form submit / status button |
+| Locations | `(dash)/meetings/actions.ts:createLocationAction()` / `updateLocationAction()` | Form submit |
+| Attendees | `(dash)/meetings/actions.ts:addAttendeeAction()` / `quickAddAttendeeAction()` / `removeAttendeeAction()` | User action |
+| Attendance | `(dash)/meetings/actions.ts:recordAttendanceBatchAction()` / `toggleAttendanceStatusAction()` / `finalizeAttendanceAction()` | Attendance UI |
+| Walk-ins | `(dash)/meetings/actions.ts:addWalkInAttendeeAction()` / `quickAddWalkInAction()` / `addAttendeeNoteAction()` | Attendance UI |
+| Guest list / RSVP | `(dash)/meetings/actions.ts:*GuestListAction()` / `updateRsvpStatusAction()` | User action |
+| Invitations | `(dash)/meetings/actions.ts:createInvitationAction()` / `updateInvitationStatusAction()` | Form submit / dropdown |
+| Evaluation | `(dash)/meetings/actions.ts:createEvaluationAction()` | Form submit |
+| Checklist | `(dash)/meetings/actions.ts:toggleChecklistItemAction()` / `updateChecklistItemAction()` | Checkbox / form |
 
-**Primary modules:** `src/lib/vision-meetings/`, `src/components/vision-meetings/`, `src/db/schema/vision-meetings.ts`
+**Primary modules:** `src/lib/meetings/`, `src/components/meetings/`, `src/db/schema/meetings.ts`
 
-**Key deps:** `locations`, `vision_meetings`, `vision_meeting_attendance`, `invitations`, `meeting_evaluations`, `meeting_checklist_items` tables
+**Key deps:** `locations`, `church_meetings`, `meeting_attendance`, `invitations`, `meeting_evaluations`, `meeting_checklist_items` tables
 
-**Events:** `meeting.attendance.recorded` → F2 handler (prospect → attendee), `meeting.attendance.finalized` → F5 (deferred), `meeting.completed` → F4 (deferred)
+**Events:** `meeting.attendance.recorded` → prospect → attendee auto-advance (vision meetings only), `meeting.attendance.finalized` → follow-up/evaluation task creation + Phase Engine dirty-marking, `meeting.evaluation.completed` → auto-completes evaluation task. Handlers registered in `src/lib/events/subscriptions.ts`.
+
+---
+
+## Communication
+
+| Flow | Entrypoint | Trigger |
+|------|-----------|---------|
+| Pages | `(dash)/communication/{page,compose/page,history/page,[id]/page,templates/page}.tsx` | Routes `/communication/*` |
+| Send message | `(dash)/communication/actions.ts:sendMessageAction()` | Form submit |
+| Template CRUD | `(dash)/communication/actions.ts:*TemplateAction()` | User action |
+| Recipient resolution | `(dash)/communication/actions.ts:resolveGroupAction()` / `searchPeopleAction()` | Compose UI |
+
+**Primary modules:** `src/lib/communication/`, `src/lib/email/`, `src/components/communication/`, `src/db/schema/communication.ts`
+
+**Key deps:** `message_templates`, `communications`, `communication_recipients`, `meeting_confirmation_tokens` tables; Resend delivery webhook (`/api/webhooks/resend`)
+
+---
+
+## Tasks
+
+| Flow | Entrypoint | Trigger |
+|------|-----------|---------|
+| Pages | `(dash)/tasks/{page,new/page,[id]/page}.tsx` | Routes `/tasks`, `/tasks/new`, `/tasks/[id]` |
+| Task CRUD | `(dash)/tasks/actions.ts:createTaskAction()` / `quickAddTaskAction()` / `updateTaskAction()` / `deleteTaskAction()` | Form submit |
+| Status changes | `(dash)/tasks/actions.ts:completeTaskAction()` / `reopenTaskAction()` / `updateTaskStatusAction()` | User action |
+
+**Primary modules:** `src/lib/tasks/`, `src/components/tasks/`, `src/db/schema/tasks.ts`
+
+**Key deps:** `tasks` table
+
+**Events:** `meeting.attendance.finalized` → auto-creates follow-up (48h) + evaluation (24h) tasks; `meeting.evaluation.completed` → auto-completes matching task; `task.completed` → Phase Engine dirty-marking
+
+---
+
+## Ministry Teams
+
+| Flow | Entrypoint | Trigger |
+|------|-----------|---------|
+| Pages | `(dash)/teams/{page,[teamId]/page,org-chart/page,health/page}.tsx` (+ `[teamId]/{meetings,responsibilities,training}/`) | Routes `/teams/*` |
+| Team CRUD | `(dash)/teams/actions.ts:createTeamAction()` / `updateTeamAction()` / `initializeTeamsAction()` | Form submit |
+| Roles | `(dash)/teams/actions.ts:*RoleAction()` / `importRoleTemplatesAction()` | User action |
+| Membership | `(dash)/teams/actions.ts:assignMemberAction()` / `removeMemberAction()` / `assignTeamLeaderAction()` | User action |
+| Training | `(dash)/teams/actions.ts:*TrainingProgramAction()` / `markTrainingCompleteAction()` | User action |
+
+**Primary modules:** `src/lib/ministry-teams/`, `src/components/ministry-teams/`, `src/db/schema/ministry-teams.ts`
+
+**Key deps:** `ministry_teams`, `team_roles`, `team_memberships`, `training_programs`, `training_completions` tables
+
+**Events:** `team.member.assigned` → core_group → launch_team auto-advance, `team.leader.assigned` → launch_team → leader auto-advance (handlers in `src/lib/people/events.ts`)
+
+---
+
+## Phase Engine (Plant Intelligence)
+
+| Flow | Entrypoint | Trigger |
+|------|-----------|---------|
+| Phase page | `(dash)/phase/page.tsx` | Route `/phase` |
+| Phase transition | `(dash)/phase/actions.ts:transitionPhaseAction()` / `getPhaseReadinessAction()` | User action |
+| Manual signals | `(dash)/phase/signals-actions.ts:setManualSignalAction()` | User action |
+| Insight feedback | `(dash)/phase/feedback-actions.ts:submitInsightFeedbackAction()` | User action |
+| Assessment run | `src/app/api/phase-engine/assess/route.ts` | Vercel cron (daily, `CRON_SECRET`) |
+
+**Primary modules:** `src/lib/phase-engine/` (assessment, judge, rag, signals, transitions, feedback, oversight), `src/components/phase-engine/`, `src/db/schema/phase-engine.ts`
+
+**Key deps:** `phase_transitions`, `plant_signals`, `plant_assessments`, `plant_insights`, `insight_feedback`, `methodology_embeddings` tables; `churches.last_material_event_at` dirty flag (`src/lib/phase-engine/dirty-handler.ts`)
+
+---
+
+## Feedback
+
+| Flow | Entrypoint | Trigger |
+|------|-----------|---------|
+| Submit feedback | `(dash)/feedback/actions.ts:submitFeedbackAction()` | Feedback widget |
+| Admin review | `(dash)/admin/feedback/page.tsx` | Route `/admin/feedback` (platform admin) |
+| Update status | `(dash)/admin/feedback/actions.ts:updateFeedbackStatusAction()` | Admin action |
+
+**Primary modules:** `src/lib/feedback/`, `src/components/feedback/`, `src/db/schema/feedback.ts`
+
+**Key deps:** `feedback` table; `ADMIN_EMAILS` allowlist (`src/lib/auth/admin.ts:isPlatformAdmin()`)
+
+---
+
+## Oversight
+
+| Flow | Entrypoint | Trigger |
+|------|-----------|---------|
+| Oversight dashboard | `(dash)/oversight/page.tsx` | Route `/oversight` (oversight roles) |
+| Plant health | `(dash)/oversight/health/page.tsx` | Route `/oversight/health` |
+
+**Primary modules:** `src/lib/phase-engine/oversight/`, `src/lib/dashboard/`
+
+**Key deps:** `getAccessibleChurchIds()`, church privacy settings
 
 ---
 
 ## API Routes
 
-| Route | File | Method |
-|-------|------|--------|
-| `/api/health` | `src/app/api/health/route.ts` | GET |
-| `/api/wiki/revalidate` | `src/app/api/wiki/revalidate/route.ts` | POST, DELETE |
+| Route | File | Method | Auth / Trigger |
+|-------|------|--------|----------------|
+| `/api/health` | `src/app/api/health/route.ts` | GET | Public health check |
+| `/api/wiki/article` | `src/app/api/wiki/article/route.ts` | GET | Session-authed article JSON |
+| `/api/wiki/revalidate` | `src/app/api/wiki/revalidate/route.ts` | POST, DELETE | `REVALIDATION_SECRET` |
+| `/api/phase-engine/assess` | `src/app/api/phase-engine/assess/route.ts` | GET | Vercel cron (daily), `CRON_SECRET` bearer |
+| `/api/rsvp/[token]` | `src/app/api/rsvp/[token]/route.ts` | POST | Public, token-based RSVP |
+| `/api/webhooks/resend` | `src/app/api/webhooks/resend/route.ts` | POST | Resend webhook signature |
 
 ---
 

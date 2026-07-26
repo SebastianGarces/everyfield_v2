@@ -1,11 +1,25 @@
 name: PR Checks
 
 on:
+  # Every pull request, whatever its base — deliberately unfiltered.
+  #
+  # This was `branches: [main]`, which meant a PR opened against any other
+  # base ran no checks at all. That is worse than failing: the PR shows no
+  # check rather than a red one, so it reads as "not yet run" indefinitely.
+  # PR #34 sat that way for a month against a throwaway base branch.
+  #
+  # Agents fork from whatever HEAD they are handed, so a wrong base is a
+  # realistic mistake. Checking every PR means the mistake surfaces as a
+  # diff nobody expected instead of as silence.
   pull_request:
-    branches: [main]
 
 jobs:
   validate:
+    # This name is a CONTRACT, not a description. The `main protection` ruleset
+    # requires the check by this exact string, so renaming it here without
+    # updating the ruleset in the same change silently un-protects `main`:
+    # PRs would wait forever on a check name that no longer reports.
+    # (It now also runs tests, which the name does not say.)
     name: Format, Lint, Typecheck, Build
     runs-on: ubuntu-latest
 
@@ -13,28 +27,104 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # Markdown-only PRs cannot fail anything below: `*.md` is in
+      # .prettierignore, tsc and eslint never look at it, and `next build`
+      # does not read product-docs. Running the pipeline for them costs ~1m45s
+      # to prove nothing.
+      #
+      # The job still runs and still reports its result — deliberately. The
+      # `main protection` ruleset requires this check *by name*, so a
+      # `paths-ignore:` trigger would leave a docs PR waiting forever on a
+      # check that never arrives. Skipping steps keeps the check reporting;
+      # skipping the workflow would silently block the merge.
+      #
+      # Anything that is not markdown — including .json, .yml, and this
+      # workflow itself — takes the full path.
+      - name: Detect docs-only change
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          files=$(gh api --paginate \
+            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            --jq '.[].filename')
+          echo "Changed files:"
+          printf '%s\n' "$files"
+          non_docs=$(printf '%s\n' "$files" | grep -vE '\.md$' || true)
+          if [ -n "$files" ] && [ -z "$non_docs" ]; then
+            echo "Markdown only — skipping install, format, lint, typecheck and build."
+            echo "docs_only=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Setup pnpm
+        if: steps.scope.outputs.docs_only != 'true'
         uses: pnpm/action-setup@v4
         with:
           version: 9
 
       - name: Setup Node.js
+        if: steps.scope.outputs.docs_only != 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # 24, matching local dev and Vercel's current default — not 20.
+          #
+          # This was 20, and adding the Test step is what exposed it: `pnpm
+          # test` passes a glob to `node --test`, which only learned to expand
+          # globs in Node 22. On 20 it fails with "Could not find
+          # 'src/**/*.test.ts'" — so the suite has never been runnable here,
+          # and nobody noticed because CI never tried to run it.
+          #
+          # The deeper fix is the alignment: CI on a different major than dev
+          # and production is a divergence that will keep producing failures
+          # that reproduce nowhere.
+          node-version: 24
           cache: "pnpm"
 
       - name: Install dependencies
+        if: steps.scope.outputs.docs_only != 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Check formatting
+        if: steps.scope.outputs.docs_only != 'true'
         run: pnpm format:check
 
       - name: Lint
+        if: steps.scope.outputs.docs_only != 'true'
         run: pnpm lint
 
       - name: Typecheck
+        if: steps.scope.outputs.docs_only != 'true'
         run: pnpm typecheck
 
+      # The suite is the anchor under DoD gate G2. Before this step, "155/155
+      # tests pass" was only ever an agent reporting a number it had produced
+      # itself — nothing independent had run it. Verified to pass with no
+      # .env.local and an unreachable database, so it needs no real credentials.
+      - name: Test
+        if: steps.scope.outputs.docs_only != 'true'
+        run: pnpm test
+        env:
+          DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
+          RESEND_API_KEY: "re_ci_placeholder"
+
       - name: Build
+        if: steps.scope.outputs.docs_only != 'true'
         run: pnpm build
+        env:
+          # This build is hermetic: no database, no real credentials. Keep it
+          # that way — nothing evaluated at build time (generateStaticParams,
+          # sitemap, metadata) may depend on a live query. See issue #38.
+          #
+          # `next build` collects page data, which evaluates route modules —
+          # and several of them construct the Neon client at import time. The
+          # client is only constructed here, never connected to, so a
+          # syntactically valid placeholder is enough and no real credentials
+          # belong in CI. Without this the build fails on the first such route
+          # ("No database connection string was provided to `neon()`"), which
+          # is why this workflow had never passed since it was added.
+          DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
+          # Same reason: `new Resend(...)` runs at module scope in the email
+          # client and the webhook route, and throws on a missing key.
+          RESEND_API_KEY: "re_ci_placeholder"

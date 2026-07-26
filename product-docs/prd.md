@@ -1,7 +1,7 @@
 # EveryField - Product Requirements Document Index
 
-**Version:** 2.0  
-**Date:** January 25, 2026
+**Version:** 2.2  
+**Date:** July 25, 2026
 
 ---
 
@@ -21,29 +21,29 @@ product-docs/
 ├── system-architecture.md        # Data model, integrations, cross-cutting services
 ├── core-data-contracts.md        # Shared entity contracts, referencing rules
 ├── launch-playbook.md            # Domain reference (source material)
+├── app-summary.md                # What the built app does today
+├── dependency-graph.md / .mmd    # Feature dependency analysis + diagram
 ├── prd.md                        # This index
-└── features/
-    ├── wiki/
-    │   └── frd.md                # F1: Wiki / Knowledge Base
-    ├── people-crm/
-    │   └── frd.md                # F2: People / CRM Management
-    ├── meetings/
-    │   └── frd.md                # F3: Meetings
-    ├── progress-dashboard/
-    │   └── frd.md                # F4: Progress Dashboard
-    ├── task-project-management/
-    │   └── frd.md                # F5: Task & Project Management
-    ├── document-templates/
-    │   └── frd.md                # F6: Document Templates & Generation
-    ├── financial-tracking/
-    │   └── frd.md                # F7: Financial Tracking
-    ├── ministry-team-management/
-    │   └── frd.md                # F8: Ministry Team Management
-    ├── communication-hub/
-    │   └── frd.md                # F9: Communication Hub
-    └── facility-management/
-        └── frd.md                # F10: Facility Management
+└── features/                     # Each feature dir: frd.md + checklist.md (implementation status)
+    ├── phase-engine/             # PE: Phase Engine (Plant Intelligence)
+    │   ├── frd.md
+    │   ├── rubric-v0.md          # Companion evaluation rubric
+    │   └── data-posture.md       # LLM data-sharing posture
+    ├── wiki/                     # F1: Wiki / Knowledge Base
+    ├── people-crm/               # F2: People / CRM Management
+    ├── meetings/                 # F3: Meetings
+    ├── progress-dashboard/       # F4: Progress Dashboard
+    ├── task-project-management/  # F5: Task & Project Management
+    ├── document-templates/       # F6: Document Templates & Generation
+    ├── financial-tracking/       # F7: Financial Tracking
+    ├── ministry-team-management/ # F8: Ministry Team Management
+    ├── communication-hub/        # F9: Communication Hub
+    ├── facility-management/      # F10: Facility Management
+    └── church-plant-agent/
+        └── vision.md             # Planned (pre-FRD): conversational tool-calling agent
 ```
+
+Working documents (gap reports, `sprints/`, `work-queue.md`, brainlifts, `wiki/` content sources) also live in `product-docs/` but are not requirements documents and are not indexed here.
 
 ---
 
@@ -97,6 +97,7 @@ Each feature has its own FRD defining *what that feature must do*. FRDs are inde
 
 | Code | Feature | FRD Location |
 |------|---------|--------------|
+| PE | [Phase Engine (Plant Intelligence)](./features/phase-engine/frd.md) | **Primary differentiator.** Advisory LLM-as-judge engine: reads each plant's activity, judges it against the methodology (RAG), surfaces prioritized insights to planters and health signals to overseers |
 | F1 | [Wiki / Knowledge Base](./features/wiki/frd.md) | Educational resource with structured guidance |
 | F2 | [People / CRM Management](./features/people-crm/frd.md) | Contact and relationship tracking |
 | F3 | [Meetings](./features/meetings/frd.md) | Plan, execute, and track all meeting types (Vision Meetings, Orientations, Team Meetings) |
@@ -107,6 +108,12 @@ Each feature has its own FRD defining *what that feature must do*. FRDs are inde
 | F8 | [Ministry Team Management](./features/ministry-team-management/frd.md) | Team organization and health |
 | F9 | [Communication Hub](./features/communication-hub/frd.md) | Messaging and communication |
 | F10 | [Facility Management](./features/facility-management/frd.md) | Venue search and management |
+
+### Planned (pre-FRD)
+
+| Feature | Doc | Status |
+|---------|-----|--------|
+| Church Plant Agent | [vision](./features/church-plant-agent/vision.md) | Vision capture. Conversational tool-calling agent that *executes* multi-step ops (the "chat-first ops" / action half of the AI direction; insight→action loop with the Phase Engine). FRD pending prioritization (post-beta). |
 
 ---
 
@@ -148,6 +155,15 @@ Reference the [Launch Playbook](./launch-playbook.md) for the underlying church 
 ---
 
 ## Changelog
+
+### v2.2 (July 25, 2026)
+- Refreshed the Document Structure tree to match the repo: added `app-summary.md`, `dependency-graph.md`/`.mmd`, `features/phase-engine/` (frd + rubric + data posture), `features/church-plant-agent/` (vision), and per-feature `checklist.md` files.
+- Removed legacy `features/vision-meeting-management/` (superseded by `features/meetings/`).
+- Header version/date brought in line with the changelog (v2.1 was never reflected in the header).
+
+### v2.1 (June 16, 2026)
+- **Phase Engine direction change.** Reframed the Phase Engine from a deterministic exit-criteria *state machine* into the **Plant Intelligence Engine** — an advisory LLM-as-judge that reads plant activity, judges it against the methodology (Launch Playbook + wiki via RAG), and surfaces prioritized insights to planters and health signals to networks. Phase becomes advisory context; advancement is soft-gated and planter-confirmed. Added [Phase Engine FRD](./features/phase-engine/frd.md) + companion rubric (`features/phase-engine/rubric-v0.md`). Updated System Architecture (Phase Engine service) and Product Brief (Phase Structure).
+- **Follow-up alignment needed** (not yet done): dependent FRDs that describe phase "exit-criteria validation/gating" — F4 Progress Dashboard, F5 Task Management (phase-triggered templates), F1 Wiki (phase recommendations) — should be reconciled to the advisory model. The `phase.changed` contract they rely on is unchanged.
 
 ### v2.0 (January 25, 2026)
 - Refactored to context-sharded structure

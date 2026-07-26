@@ -2,6 +2,16 @@
 
 This is a living document tracking all wiki articles derived from the [Launch Playbook](../launch-playbook.md) and aligned with the [Wiki FRD](../features/wiki/frd.md). Use this to manage context and resume work on incomplete articles.
 
+> **Status (2026-07-25):** The article source MDX was migrated into the database
+> (`wiki_articles` / `wiki_sections`, via `scripts/migrate-wiki-to-db.ts`); the repo-root `wiki/`
+> source tree no longer exists, so the **File Path columns below are historical identifiers, not
+> files on disk**. Articles are served from the DB via `src/lib/wiki/get-article.ts`. The
+> Frontmatter Reference, Component Tracker, and completion checklists remain the authoring
+> contract (used by `.claude/skills/wiki-articles`). Where new articles — e.g. the unbuilt
+> templates T.1–T.9 — get authored (directly in the DB, or a recreated `wiki/` tree re-run through
+> the migration script) is an open decision; update this note and the wiki-articles skill once
+> decided.
+
 **Status Key:**
 - ✅ Done
 - 🚧 In Progress

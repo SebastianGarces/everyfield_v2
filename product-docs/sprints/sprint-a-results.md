@@ -6,6 +6,13 @@
 
 Nothing is committed. Commit/PR is a human decision; the §6 manual QA checklist in the sprint plan is still yours to run.
 
+> **Status update (2026-07-25):** Merged to `main` as `ab89201` (+ `293d038` prettier follow-up); the
+> `sprint-a` branch is deleted — "nothing is committed" above is historical. Of the follow-ups:
+> `hono` / `@hono/zod-openapi` removed (PR #44), but `drizzle-zod` is still in `package.json` with
+> zero usage; the orphaned legacy `vision_meetings` DB tables still await a cleanup migration. The
+> phase-exit-criteria item is superseded — the rubric was rewritten and sent to Brett & Bryan, and
+> the Phase Engine shipped (PR #37).
+
 ---
 
 ## Integration gate
@@ -76,5 +83,5 @@ Schema: partial unique index (migration 0018) — only **active** rows constrain
 
 - [ ] Restart the dev server (stale `.next/dev` was cleared).
 - [ ] Run the §6 manual QA checklist in `sprint-a.md`.
-- [ ] Commit / open PR from `sprint-a`.
-- [ ] Send draft phase exit criteria to Brett & Bryan — unblocks Sprint B's Phase Engine.
+- [x] Commit / open PR from `sprint-a`. *(Done — merged to `main` as `ab89201`.)*
+- [x] Send draft phase exit criteria to Brett & Bryan — unblocks Sprint B's Phase Engine. *(Superseded — rubric rewritten and sent; Phase Engine shipped, PR #37.)*

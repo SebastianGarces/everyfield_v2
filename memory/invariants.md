@@ -68,7 +68,7 @@ Stable truths that must not be violated.
 - `getCurrentSession()` uses `React.cache()` for per-request dedup
 - Multiple calls in same request hit cache, not DB
 
-**Source:** `src/lib/auth/session.ts:254`
+**Source:** `src/lib/auth/session.ts` (`getCurrentSession`)
 
 ## Client/Server Data Synchronization
 

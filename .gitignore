@@ -37,7 +37,12 @@ coverage
 
 # IDE
 .idea
-.vscode
+# Ignore local VS Code state, but share the two files that configure the
+# project itself — format-on-save is part of how this repo stays formatted
+# now that there is no pre-commit hook doing it.
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
 *.swp
 *.swo
 
@@ -51,6 +56,8 @@ Thumbs.db
 # AI Agents
 .codex
 scratchpad/
+# Playwright MCP browser artifacts (snapshots, console logs, screenshots)
+.playwright-mcp/
 
 # Working feature (ephemeral planning workspace)
 working-feature
@@ -59,3 +66,4 @@ working-feature
 
 # Sentry Config File
 .env.sentry-build-plugin
+.neon

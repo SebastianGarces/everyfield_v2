@@ -5,7 +5,6 @@ import {
   getArticle,
   compileArticle,
   getBreadcrumbs,
-  getArticles,
   getArticlesByPrefix,
   getArticlesProgress,
   isBookmarked,
@@ -22,38 +21,22 @@ import type { WikiProgressStatus } from "@/db/schema";
 // Force dynamic rendering for progress data
 export const dynamic = "force-dynamic";
 
+// No `generateStaticParams` here, deliberately — this is not a regression.
+//
+// `force-dynamic` above already opts every wiki path out of static
+// generation (per-user reading progress and bookmarks are rendered at
+// request time), so a `generateStaticParams` implementation would prerender
+// nothing. What it *did* do was query `wiki_articles` during `next build`
+// page-data collection, which made the build require a reachable database
+// and broke CI, where none exists. See issue #38.
+//
+// If prerendering is ever wanted back, `force-dynamic` has to go first —
+// move the progress/bookmark reads into a client or Suspense boundary — and
+// any params query must tolerate an unreachable database at build time.
+
 type Props = {
   params: Promise<{ slug: string[] }>;
 };
-
-export async function generateStaticParams() {
-  const articles = await getArticles();
-
-  // Generate params for articles
-  const articleParams = articles.map((article) => ({
-    slug: article.slug.split("/"),
-  }));
-
-  // Generate params for section indexes (phase-X and phase-X/section)
-  const sectionParams = new Set<string>();
-  for (const article of articles) {
-    const parts = article.slug.split("/");
-    // Add phase-level: e.g., "phase-1"
-    if (parts.length >= 1) {
-      sectionParams.add(parts[0]);
-    }
-    // Add section-level: e.g., "phase-1/introduction"
-    if (parts.length >= 2) {
-      sectionParams.add(`${parts[0]}/${parts[1]}`);
-    }
-  }
-
-  const indexParams = Array.from(sectionParams).map((path) => ({
-    slug: path.split("/"),
-  }));
-
-  return [...articleParams, ...indexParams];
-}
 
 export async function generateMetadata({ params }: Props) {
   const { slug } = await params;

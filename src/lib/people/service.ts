@@ -189,6 +189,79 @@ export async function listPeople(
   };
 }
 
+/**
+ * Filters for the people export. Mirrors the list filters (status, source,
+ * search, tags) but without pagination — every matching person is returned.
+ */
+export interface ExportPeopleOptions {
+  status?: PersonStatus[];
+  source?: PersonSource[];
+  search?: string;
+  tagIds?: string[];
+  includeDeleted?: boolean;
+}
+
+/**
+ * Fetch ALL people for a church matching the given filters, for CSV export.
+ *
+ * Scoped to churchId (tenancy invariant) and excludes soft-deleted by default.
+ * No pagination: this is intended for export, where the full filtered set is
+ * needed. Reuses the same filter semantics as {@link listPeople}.
+ */
+export async function getPeopleForExport(
+  churchId: string,
+  options: ExportPeopleOptions = {}
+): Promise<Person[]> {
+  const { status, source, search, tagIds, includeDeleted = false } = options;
+
+  const conditions = [eq(persons.churchId, churchId)];
+
+  if (!includeDeleted) {
+    conditions.push(isNull(persons.deletedAt));
+  }
+
+  if (status && status.length > 0) {
+    conditions.push(inArray(persons.status, status));
+  }
+
+  if (source && source.length > 0) {
+    conditions.push(inArray(persons.source, source));
+  }
+
+  if (search) {
+    const searchLike = `%${search}%`;
+    const searchCondition = or(
+      ilike(persons.firstName, searchLike),
+      ilike(persons.lastName, searchLike),
+      ilike(persons.email, searchLike),
+      ilike(persons.phone, searchLike)
+    );
+    if (searchCondition) {
+      conditions.push(searchCondition);
+    }
+  }
+
+  if (tagIds && tagIds.length > 0) {
+    const tagSubquery = sql`(
+      SELECT COUNT(DISTINCT pt.tag_id)::int
+      FROM person_tags pt
+      WHERE pt.person_id = ${persons.id}
+        AND pt.church_id = ${churchId}
+        AND pt.tag_id IN (${sql.join(
+          tagIds.map((id) => sql`${id}::uuid`),
+          sql`, `
+        )})
+    ) = ${tagIds.length}`;
+    conditions.push(tagSubquery);
+  }
+
+  return db
+    .select()
+    .from(persons)
+    .where(and(...conditions))
+    .orderBy(desc(persons.createdAt), desc(persons.id));
+}
+
 // ============================================================================
 // Note Queries
 // ============================================================================
