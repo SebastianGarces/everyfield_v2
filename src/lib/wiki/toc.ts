@@ -99,6 +99,59 @@ export function slugifyHeading(text: string): string {
   return slug || "section";
 }
 
+/** A rendered heading's id and the distance from its top to the viewport top. */
+export type MeasuredHeading = {
+  id: string;
+  /** `getBoundingClientRect().top`, in CSS px. */
+  top: number;
+};
+
+/**
+ * Fallback for the "you are reading this" line, in px from the top of the
+ * viewport, used when the live geometry cannot be measured.
+ *
+ * A heading reached by clicking its TOC entry does not land at the top of the
+ * viewport: the browser scrolls it to the top of its scroll container plus its
+ * own `scroll-margin-top`. In the wiki layout that is the ~64px sticky topbar
+ * plus the 80px of `scroll-m-20` the MDX headings carry — 144px. The line has
+ * to sit *below* that landing position or the heading just jumped to is never
+ * counted as reached.
+ */
+export const TOC_ACTIVE_LINE_FALLBACK_PX = 160;
+
+/**
+ * Which heading the reader is under: the last one to have reached the active
+ * line, else the first.
+ *
+ * The comparison is inclusive (`top <= activeLinePx`) because a heading
+ * arrived at by clicking its own TOC entry sits *exactly* on its landing
+ * position, and that click must highlight the heading it targeted rather than
+ * the one above it.
+ *
+ * `atScrollEnd` covers the last section of an article: once the container can
+ * scroll no further, its heading may never climb to the line, and the honest
+ * answer for a reader at the bottom of the page is the final heading.
+ */
+export function activeHeadingId(
+  headings: readonly MeasuredHeading[],
+  {
+    activeLinePx,
+    atScrollEnd = false,
+  }: { activeLinePx: number; atScrollEnd?: boolean }
+): string | null {
+  if (headings.length === 0) return null;
+  if (atScrollEnd) return headings[headings.length - 1].id;
+
+  let current = headings[0].id;
+
+  for (const heading of headings) {
+    if (heading.top > activeLinePx) break;
+    current = heading.id;
+  }
+
+  return current;
+}
+
 /**
  * Strip the inline markdown a heading may carry, so the TOC label matches the
  * text content the browser renders for that heading.

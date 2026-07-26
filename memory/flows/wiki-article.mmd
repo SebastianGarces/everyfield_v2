@@ -8,10 +8,13 @@ flowchart TD
         R5["toArticle - types.ts"]
         R6["compileArticle - next-mdx-remote"]
         R7[Render ArticleView]
-        
+        R11["extractHeadings(article.content) - lib/wiki/toc.ts"]
+        R12["TableOfContents - 2+ H2/H3 only, ids via slugifyHeading"]
+
         R1 --> R2 --> R3 --> R4
         R4 -->|not found| R8[Try section index]
         R4 -->|found| R5 --> R6 --> R7
+        R5 --> R11 --> R7 --> R12
         R8 -->|no articles| R9[notFound]
         R8 -->|has articles| R10[Render SectionIndexView]
     end

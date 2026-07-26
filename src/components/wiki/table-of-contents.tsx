@@ -3,15 +3,22 @@
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { List } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { TOC_MIN_HEADINGS, type TocHeading } from "@/lib/wiki/toc";
+import {
+  activeHeadingId,
+  TOC_ACTIVE_LINE_FALLBACK_PX,
+  TOC_MIN_HEADINGS,
+  type MeasuredHeading,
+  type TocHeading,
+} from "@/lib/wiki/toc";
 
 /**
- * Distance from the top of the viewport at which a heading counts as "the
- * section you are reading". Matches the `scroll-m-20` (5rem) offset the MDX
- * headings carry, with room to spare so the heading you just jumped to reads
- * as active rather than the one above it.
+ * Slack added below a heading's landing position before it counts as reached,
+ * to absorb the fractional pixels scrolling leaves behind.
  */
-const ACTIVE_OFFSET_PX = 120;
+const LANDING_TOLERANCE_PX = 8;
+
+/** Treat a scroll container this close to its end as scrolled to the end. */
+const SCROLL_END_EPSILON_PX = 2;
 
 type TableOfContentsProps = {
   headings: TocHeading[];
@@ -137,7 +144,7 @@ function useActiveHeadingId(headings: TocHeading[]): string | null {
     };
   }, []);
 
-  const getSnapshot = useCallback(() => activeHeadingId(ids), [ids]);
+  const getSnapshot = useCallback(() => readActiveHeadingId(ids), [ids]);
 
   // On the server there is no geometry to read: the reader starts at the top,
   // so the first heading is the honest answer.
@@ -146,18 +153,74 @@ function useActiveHeadingId(headings: TocHeading[]): string | null {
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
 
-/** The last heading whose top has passed the active line, else the first. */
-function activeHeadingId(ids: string[]): string | null {
-  if (ids.length === 0) return null;
-
-  let current = ids[0];
+/**
+ * Read the rendered headings' geometry and hand it to `activeHeadingId`.
+ *
+ * The active line is measured rather than hardcoded, because it is a property
+ * of the layout: a heading the browser scrolls to lands at the top of its
+ * scroll container plus its own `scroll-margin-top`. Measuring means a taller
+ * topbar or a different `scroll-m-*` on the headings cannot silently
+ * de-synchronise the highlight from where clicks actually land.
+ */
+function readActiveHeadingId(ids: string[]): string | null {
+  const headings: MeasuredHeading[] = [];
+  let activeLinePx = TOC_ACTIVE_LINE_FALLBACK_PX;
+  let atScrollEnd = false;
+  let measuredLayout = false;
 
   for (const id of ids) {
     const element = document.getElementById(id);
     if (!element) continue;
-    if (element.getBoundingClientRect().top > ACTIVE_OFFSET_PX) break;
-    current = id;
+
+    // The layout is the same for every heading, so read it off the first one
+    // that is actually in the document.
+    if (!measuredLayout) {
+      measuredLayout = true;
+      const container = scrollContainerOf(element);
+      activeLinePx = landingPositionOf(element, container);
+      atScrollEnd = isScrolledToEnd(container);
+    }
+
+    headings.push({ id, top: element.getBoundingClientRect().top });
   }
 
-  return current;
+  return activeHeadingId(headings, { activeLinePx, atScrollEnd });
+}
+
+/** Where the browser puts this heading when it scrolls to its fragment. */
+function landingPositionOf(
+  heading: HTMLElement,
+  container: HTMLElement | null
+): number {
+  const scrollMarginTop =
+    Number.parseFloat(window.getComputedStyle(heading).scrollMarginTop) || 0;
+  const containerTop = container
+    ? container.getBoundingClientRect().top
+    : /* The window scrolls: the container's top edge is the viewport's. */ 0;
+
+  return containerTop + scrollMarginTop + LANDING_TOLERANCE_PX;
+}
+
+/**
+ * The element that actually scrolls this heading — the wiki layout scrolls a
+ * column, not the window, so the viewport top is not where content begins.
+ */
+function scrollContainerOf(element: HTMLElement): HTMLElement | null {
+  for (let node = element.parentElement; node; node = node.parentElement) {
+    const { overflowY } = window.getComputedStyle(node);
+    if (overflowY === "auto" || overflowY === "scroll") return node;
+  }
+
+  return null;
+}
+
+/** Can the reader scroll no further? Then the last section is the one in view. */
+function isScrolledToEnd(container: HTMLElement | null): boolean {
+  const { scrollTop, clientHeight, scrollHeight } =
+    container ?? document.documentElement;
+
+  // A container with nothing to scroll is not "at the end" of a read-through.
+  if (scrollHeight <= clientHeight) return false;
+
+  return scrollTop + clientHeight >= scrollHeight - SCROLL_END_EPSILON_PX;
 }
