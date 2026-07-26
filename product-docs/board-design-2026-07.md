@@ -432,6 +432,11 @@ is ever rebuilt.
 The alternative fix — widening the PAT with `read:user` — was rejected. Adding scope to make a
 convenience wrapper work is exactly the scope creep the token note warns about.
 
+**Verified after the fix**, this time against the run log rather than the end state: toggling #73 to
+`agent:in-progress` produced a **successful** run and moved the card to In Progress; toggling it back
+produced another and returned it to Todo. Board tally unchanged at 37 Todo / 18 Backlog, and #73 is
+back on `agent:queued`.
+
 **The PAT is a classic token, `project` scope only, with no expiration.** That is a deliberate call,
 not an oversight — do not "harden" it to a 90-day expiry without reading this first:
 
