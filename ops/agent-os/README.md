@@ -76,7 +76,9 @@ The contract lives in [`dod.md`](./dod.md). Summary: G0 spec-mapped · G1 static
 asserts each AC, requires a clean console + screenshots + lighthouse a11y ≥ 90; backend asserts
 contracts + migration) · G4
 conventions/invariants · G5 diff hygiene · G6 independent adversarial sign-off. High-risk adds migration
-dry-run, rollback, schema diff, and a second verifier.
+dry-run, rollback, schema diff, and **diverse-lens sign-off** — three reviewers, one lens each
+(correctness / security / reproducibility), every one of which must clear. Each lens holds a veto over
+its own axis; the votes are deliberately not pooled.
 
 ## The board
 
@@ -87,6 +89,11 @@ to create the labels.
 
 ## Safety / circuit breakers
 
+- **Only a human starts the factory.** `delivery-orchestrator` is user-invoked
+  (`disable-model-invocation: true`), so the model cannot decide a message looked like a build list
+  and start opening PRs. Everything the loop *calls* stays model-invocable by design — flagging one
+  of those breaks the loop silently. The rule and the full classification live in
+  [`invocation.md`](./invocation.md); read it before adding a skill.
 - **Max attempts** per track (default 3) — the loop will not iterate forever.
 - **Token reserve** — the loop refuses to *start* an attempt it can't finish; `token-preflight` gates
   the whole wave up front. A task that can't finish is **deferred or split**, never half-shipped.
@@ -99,5 +106,7 @@ to create the labels.
 
 ## Where this lives
 
-Branch `feat/agent-delivery-os` in the worktree `everyfield_v2-agent-os`. Merge to `main` once you're
-happy with it, and every session/agent inherits the skills.
+Merged to `main` (#55, #56) — every session and every agent inherits these skills. The loop is
+`.claude/workflows/build-until-done.js`; the skills are `.claude/skills/`; the gate contract is
+[`dod.md`](./dod.md), the board is [`labels.md`](./labels.md), and who may start what is
+[`invocation.md`](./invocation.md).

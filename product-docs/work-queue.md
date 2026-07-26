@@ -1,7 +1,9 @@
 # Work Queue — parallel agent dispatch
 
-**Updated:** 2026-07-25 (second pass) · **Base branch:** `main` — now the repo's default branch and
-the only remote branch. Fork everything from `main`.
+**Updated:** 2026-07-25 (third pass) · **Base branch:** `main` — the repo's default branch. Fork
+everything from `main`. Merged PRs #47–#58 left ~10 leftover remote branches (`docs/*`, `ci/*`,
+`feat/*`, `fix/*`) — all merged, safe to prune; only local `feat/document-templates` holds unmerged
+work.
 
 This is the outstanding work, grouped into **file-disjoint tracks** so multiple agents can run
 concurrently without colliding.
@@ -349,7 +351,7 @@ route that works locally and a cron that fires in production are different claim
 | **Database hosting decision** | See Go-live §3. Trigger is the first real test users. |
 | **Langfuse** | Needs a self-hosted instance + `LANGFUSE_*` env. Tracing currently no-ops, so judge behaviour is unobservable — worth doing *before* rubric feedback arrives, since traces are how you answer "why did it say that?". |
 | **Rubric feedback** | With Brett and Bryan. When it returns, edits go to `product-docs/features/phase-engine/rubric-v0.md` **and** `src/lib/phase-engine/rubric.ts` — the judge reads the second, not the first. Then ship as v1. |
-| **Merge `feat/document-templates` and `feat/agent-delivery-os`** | Both unmerged; the delivery loop itself only exists on the latter. |
+| **Merge `feat/document-templates`** | Still unmerged (local branch only). `feat/agent-delivery-os` is merged — the delivery loop now lives on `main` (#55, #56). |
 
 ---
 
@@ -393,6 +395,16 @@ Later the same day, five more PRs — the ruleset and the data posture:
 | [#52](https://github.com/SebastianGarces/everyfield_v2/pull/52) | Queue §4 corrected — it still asserted the two things the audit disproved |
 | [#53](https://github.com/SebastianGarces/everyfield_v2/pull/53) | Markdown-only PRs skip install/build (~1m45s → seconds) |
 
+Third pass, same day — the Agent Delivery OS:
+
+| PR | |
+|---|---|
+| [#54](https://github.com/SebastianGarces/everyfield_v2/pull/54) | Work-queue: recorded the markdown-only CI skip |
+| [#55](https://github.com/SebastianGarces/everyfield_v2/pull/55) | Agent Delivery OS merged — `.claude/workflows/build-until-done.js` and the delivery skills now live on `main` |
+| [#56](https://github.com/SebastianGarces/everyfield_v2/pull/56) | Anchored the gates that decide "done" |
+| [#57](https://github.com/SebastianGarces/everyfield_v2/pull/57) | Grilling, conflict resolution, and an invocation policy |
+| [#58](https://github.com/SebastianGarces/everyfield_v2/pull/58) | Fan-in guard, model tiering, and diverse-lens HR4 in `build-until-done.js` |
+
 Formatting is automatic now (PostToolUse hook for agent edits, format-on-save for hand edits) and
 there is no pre-commit hook, so `pnpm format` is not a step anyone runs.
 
@@ -408,7 +420,8 @@ there is no pre-commit hook, so `pnpm format` is not a step anyone runs.
 - Oversight empty states already distinguish never-assessed from withheld — `plant-health-card.tsx`
   returns three separate messages ordered so "Not assessed yet" wins. Verified; no work needed.
 - **Merged to `main`** via PR #37 (squash, `78f4ef9`). 43 commits, 151 files.
-- Design-engineering skills committed (`better-*` + `make-interfaces-feel-better`).
+- Design-engineering skills committed (`better-*`; `make-interfaces-feel-better` has since been
+  folded into `better-ui` and its skill directory removed).
 - All three CI build blockers fixed — #38 closed, `pnpm build` now succeeds with an unreachable
   database.
 - Neon CLI org-scoping resolved and the branch identifiers recorded above.
@@ -419,7 +432,8 @@ All previously listed items are cleared: the stale worktrees are gone, the `bett
 `skills-lock.json` are tracked, and the `health-presentation.ts` reflow is committed. Working tree
 clean, no open PRs.
 
-One thing parked outside the repo: `/Users/sebastian/dev/build-until-done-uncommitted-20260725.patch`
-— 106 uncommitted lines to `.claude/workflows/build-until-done.js`, rescued from the deleted
-`feat-csv` worktree. That file lives only on `feat/agent-delivery-os`, so apply the patch there
-before doing further work on the delivery loop, or discard it deliberately.
+The parked patch (`build-until-done-uncommitted-20260725.patch`, 106 lines rescued from the deleted
+`feat-csv` worktree) is resolved: the patch file no longer exists on disk and
+`.claude/workflows/build-until-done.js` now lives on `main` (merged via #55). Not verified whether
+the rescued lines were folded into the merged version — if the loop misbehaves, that patch content
+is the first thing to suspect went missing.

@@ -3,7 +3,7 @@
 > **Direction change (June 2026):** This feature was previously conceived as a deterministic *phase state machine* — track `current_phase`, validate hard exit criteria, gate transitions. It is being **reframed** as a **Plant Intelligence Engine**: an advisory system that continuously reads the plant's real activity, judges it against the church-planting methodology (the Launch Playbook + wiki) using an LLM-as-judge, and surfaces prioritized **insights and guidance** to planters and to sending networks/churches. The phase becomes *context for judgment*, not a gate. See `system-architecture.md` → Phase Engine, and the PRD changelog. This is the platform's primary differentiator ("the data backbone" thesis).
 
 **Feature ID prefix:** PE
-**Status:** Draft
+**Status:** Implemented (merged to main; per-requirement status tracked in `checklist.md`)
 **References:** `product-brief.md` (Phase Structure, Success Metrics), `system-architecture.md` (Phase Engine cross-cutting service, Core Canonical Models → Phase), `rubric-v0.md` (companion artifact: the evaluation rubric).
 
 ---
@@ -210,4 +210,4 @@ The engine is two layers that must never blur:
 3. **Insight volume:** how many insights per assessment before "judge fatigue" sets in — and how to rank/cap.
 4. **Network conservatism:** auto-generated network health signals are in for beta (decided); revisit thresholds after first-cohort feedback.
 5. **Prayer/Generosity signals (CSF-5/6):** weak system representation today; how much to lean on manual attestation vs. building data capture.
-6. **Phase name canonicalization:** `src/lib/constants.ts` phase names differ from the product brief (e.g., Phase 1 "Foundation" vs "Core Group Development"); align to the brief.
+6. **Phase name canonicalization:** resolved — `src/lib/constants.ts` now matches the product brief (all seven phases, e.g., Phase 1 "Core Group Development").

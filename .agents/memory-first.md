@@ -64,7 +64,9 @@ When opening code is necessary:
 | `memory/contracts/api.md` | API routes and actions |
 | `memory/contracts/db.md` | Database schema |
 | `memory/contracts/config.md` | Environment and config |
+| `memory/contracts/data-patterns.md` | Client/server data sync patterns |
 | `memory/flows/auth.mmd` | Authentication flow |
+| `memory/flows/person-status.mmd` | Person status progression flow |
 | `memory/flows/wiki-article.mmd` | Wiki article retrieval |
 | `memory/flows/request-lifecycle.mmd` | Dashboard request lifecycle |
 

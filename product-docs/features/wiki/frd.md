@@ -1,8 +1,8 @@
 # F1: Wiki / Knowledge Base
 ## Feature Requirements Document (FRD)
 
-**Version:** 1.1  
-**Date:** January 25, 2026  
+**Version:** 1.2  
+**Date:** July 25, 2026  
 **Feature Code:** F1
 
 ---
@@ -651,11 +651,15 @@ Full-text search across all wiki content.
 - Contextual snippets showing match
 - Keyboard navigation (arrow keys, enter)
 
+*Implementation note: search shipped as a global Cmd/Ctrl+K command palette (top 10 results, no filters or sort) rather than this dedicated results page. Whether the palette is the canonical search UX or this screen is still required is an open decision.*
+
 ---
 
 ### 6. Templates & Downloads
 
 Downloadable resources organized by category.
+
+*Status: not built — pending product decision on templates (see WikiTemplate data model).*
 
 **Layout:**
 
@@ -713,6 +717,8 @@ Downloadable resources organized by category.
 ### 7. Training Library (Video Content)
 
 Video resources organized by topic.
+
+*Status: not built — pending product decision on the video library (see WikiVideo data model).*
 
 **Layout:**
 
@@ -837,6 +843,8 @@ Click article → Opens in sidebar (doesn't leave current screen)
 "Open in full view" option to navigate to wiki
 ```
 
+*Implementation note: shipped as the WikiGuide floating panel mounted across dashboard routes, driven by a route-pattern → article-slug mapping, rather than per-feature sidebar embeds.*
+
 ---
 
 ### Workflow 4: Bookmarking and Progress Tracking
@@ -922,6 +930,8 @@ System logs download for analytics
 
 **Query pattern:** `WHERE church_id IS NULL OR church_id = :current_church_id`
 
+*Implementation note: the shipped `wiki_articles` schema diverges from this model — it uses a `section_id` FK instead of a `section` string, `related_article_slugs` (String[]) instead of `related_article_ids`, has no `parent_article_id` or `related_template_ids`, and adds `overview` and `guide` to the content_type enum. Whether to rewrite this model to match the shipped schema or converge the schema toward it is an open decision.*
+
 ---
 
 ### WikiSection
@@ -947,16 +957,18 @@ System logs download for analytics
 |-------|------|----------|-------------|
 | id | UUID | Yes | Primary key |
 | user_id | UUID (FK) | Yes | Reference to User |
-| article_id | UUID (FK) | Yes | Reference to WikiArticle |
+| article_slug | String | Yes | Article slug (progress keys on slug, not an article FK) |
 | status | Enum | Yes | `not_started` / `in_progress` / `completed` |
 | scroll_position | Float | No | Last scroll position (0-1) |
-| time_spent_seconds | Integer | No | Total time spent reading |
+| last_viewed_at | Timestamp | Yes | Last time the article was viewed (powers Recently Viewed) |
 | completed_at | Timestamp | No | When marked complete |
 | created_at | Timestamp | Yes | Creation timestamp |
 | updated_at | Timestamp | Yes | Last update timestamp |
 
 **Constraints:**
-- Unique constraint on (user_id, article_id)
+- Unique constraint on (user_id, article_slug)
+
+*Note: `time_spent_seconds` from the original spec was not implemented.*
 
 ---
 
@@ -966,12 +978,13 @@ System logs download for analytics
 |-------|------|----------|-------------|
 | id | UUID | Yes | Primary key |
 | user_id | UUID (FK) | Yes | Reference to User |
-| article_id | UUID (FK) | Yes | Reference to WikiArticle |
-| notes | Text | No | User's notes about the bookmark |
+| article_slug | String | Yes | Article slug (bookmarks key on slug, not an article FK) |
 | created_at | Timestamp | Yes | Creation timestamp |
 
 **Constraints:**
-- Unique constraint on (user_id, article_id)
+- Unique constraint on (user_id, article_slug)
+
+*Note: the `notes` field from the original spec was not implemented.*
 
 ---
 
@@ -991,6 +1004,8 @@ System logs download for analytics
 | created_at | Timestamp | Yes | Creation timestamp |
 | updated_at | Timestamp | Yes | Last update timestamp |
 
+*Status: not built — whether template downloads remain on the roadmap is an open decision.*
+
 ---
 
 ### WikiVideo
@@ -1009,6 +1024,8 @@ System logs download for analytics
 | created_at | Timestamp | Yes | Creation timestamp |
 | updated_at | Timestamp | Yes | Last update timestamp |
 
+*Status: not built — whether the video library remains on the roadmap is an open decision.*
+
 ---
 
 ### WikiSearch
@@ -1023,6 +1040,8 @@ System logs download for analytics
 | created_at | Timestamp | Yes | Timestamp of search |
 
 *Note: Used for analytics and search improvement.*
+
+*Status: not built — whether search analytics remain on the roadmap is an open decision.*
 
 ---
 
@@ -1157,6 +1176,8 @@ The wiki should appear contextually throughout the platform:
 
 ## Oversight Access Patterns
 
+*Status: not built — no oversight surface currently reads wiki progress. Whether coach/sending-church/network visibility into wiki progress remains a requirement is an open decision.*
+
 ### Coach Access
 Coaches can view wiki progress and bookmarks for their assigned churches. This includes per-article completion status, overall phase completion percentages, and bookmark lists. Access is read-only.
 
@@ -1175,7 +1196,7 @@ Network admins can see aggregate wiki completion rates across all plants in thei
 
 ## Open Questions
 
-1. **Content authoring:** Will wiki content be authored directly in the codebase (MDX files) or through an admin CMS interface?
+1. **Content authoring:** ~~Will wiki content be authored directly in the codebase (MDX files) or through an admin CMS interface?~~ **Resolved:** Content is authored as MDX and seeded into the `wiki_articles` table via `scripts/migrate-wiki-to-db.ts`; no CMS. The former in-repo `wiki/` content directory was removed after migration.
 
 2. **Multi-language support:** Is localization needed for Spanish or other languages?
 

@@ -62,13 +62,13 @@ People / CRM Management tracks all individuals from initial contact through comm
 | P-023 | Household grouping | Link family members together |
 | P-024 | Photo support | Profile photos for contacts (avatars in lists, larger on profile) |
 | P-025 | Potential duplicates view | Dedicated section showing potential duplicate records for user review |
+| P-027 | Bulk export | Export contacts to CSV (honors current search/filters) |
 
 ### Nice to Have (Future)
 
 | ID | Requirement | Description |
 |----|-------------|-------------|
 | P-026 | External ChMS sync | Bidirectional sync with Planning Center, Breeze, etc. |
-| P-027 | Bulk export | Export contacts to CSV |
 | P-028 | Custom fields | Church-defined additional fields |
 | P-029 | Communication preferences | Track preferred contact method |
 | P-030 | Birthday/anniversary tracking | Date tracking for personal outreach |
@@ -92,7 +92,7 @@ The primary landing page for managing contacts.
 │                                                                              │
 │  ─────────────────────────────────────────────────────────────────────────   │
 │                                                                              │
-│  View: [List] [Pipeline] [Table]                                   245 total │
+│  View: [List] [Pipeline]                                           245 total │
 │                                                                              │
 │  ┌────────────────────────────────────────────────────────────────────────┐  │
 │  │ ○ John Smith                                    Core Group Member      │  │
@@ -114,8 +114,8 @@ The primary landing page for managing contacts.
 **Features:**
 - Quick search by name, email, phone
 - Multi-filter capability (status, tags, source, team assignment)
-- Toggle between List, Pipeline, and Table views
-- Bulk actions (tag, export, message)
+- Toggle between List and Pipeline views
+- Export to CSV honoring current search/filters (P-027)
 - Quick status indicator showing position in journey
 
 ---
@@ -151,7 +151,7 @@ Visual kanban showing members at each stage. The pipeline displays the five prim
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Kanban Columns (6):**
+**Kanban Columns (5):**
 
 | Column | Description |
 |--------|-------------|
@@ -159,8 +159,7 @@ Visual kanban showing members at each stage. The pipeline displays the five prim
 | Attendee | Has attended at least one Vision Meeting |
 | Following Up | Active follow-up in progress |
 | Interviewed | Interview completed (any result) |
-| Committed | Signed commitment card |
-| Core Group | Active Core Group member |
+| Core Group | Active Core Group member (includes `launch_team` and `leader`) |
 
 **Status Badges (shown on Core Group cards):**
 - 🚀 **Launch Team** - Assigned to ministry team (Phase 2+)
@@ -423,7 +422,7 @@ Record when a person signs a commitment card.
 ```
 
 **Behavior:**
-- Recording a commitment automatically advances person status to "Committed"
+- Recording a commitment automatically advances person status to "Core Group" (commitment = Core Group entry)
 - Witness field populated with church team members (optional)
 - Document upload stores scanned commitment card
 
@@ -591,7 +590,7 @@ Enter signed date
     ↓
 `commitment.recorded` event emitted
     ↓
-Person auto-advances to `committed` status
+Person auto-advances to `core_group` status
     ↓
 Activity logged in timeline
 ```
@@ -643,7 +642,6 @@ Canonical status values for pipeline progression:
 | `attendee` | Has attended at least one Vision Meeting | Attendee |
 | `following_up` | Active follow-up in progress | Following Up |
 | `interviewed` | Interview completed (any result) | Interviewed |
-| `committed` | Signed commitment card | Committed |
 | `core_group` | Active Core Group member | Core Group |
 | `launch_team` | Core Group member assigned to ministry team | Core Group (with badge) |
 | `leader` | Has leadership role on ministry team | Core Group (with badge) |
@@ -707,7 +705,7 @@ Groups family members together.
 **Behavior:**
 - When a household address is updated, optionally propagate to all household members
 - Person can belong to at most one household
-- Deleting a household unlinks members but doesn't delete them
+- A household with members cannot be deleted — remove all members first
 
 ---
 
@@ -802,7 +800,7 @@ Signed commitment records.
 | commitment_type | Enum | Yes | `core_group` / `launch_team` |
 | signed_date | Date | Yes | Date commitment signed |
 | witnessed_by | UUID (FK) | No | Reference to User |
-| document_id | UUID (FK) | No | Reference to scanned/uploaded document |
+| document_url | String (500) | No | URL to scanned/uploaded document |
 | notes | Text | No | Notes |
 | created_at | Timestamp | Yes | Creation timestamp |
 
@@ -834,7 +832,7 @@ This feature integrates with cross-cutting services defined in [System Architect
 | Event/Data | Contract | Source | Action |
 |------------|----------|--------|--------|
 | **User identity** | Read `user.id` for audit trails | Auth Service | Populate `created_by`, `assessed_by`, etc. |
-| **`vision_meeting.attendance.recorded`** | `{ person_id, meeting_id, church_id }` | F3 (Vision Meeting) | Auto-advance `prospect` → `attendee` |
+| **`meeting.attendance.recorded`** | `{ person_id, meeting_id, meeting_type, church_id }` — F2 acts only when `meeting_type` = `vision_meeting` | F3 (Meetings) | Auto-advance `prospect` → `attendee` |
 | **`team.member.assigned`** | `{ person_id, team_id, role, church_id }` | F8 (Ministry Teams) | Auto-advance `core_group` → `launch_team` |
 | **`team.leader.assigned`** | `{ person_id, team_id, role, church_id }` | F8 (Ministry Teams) | Auto-advance to `leader` |
 
@@ -858,7 +856,7 @@ Status changes are **event-driven** and happen automatically when triggering act
 stateDiagram-v2
     [*] --> prospect: Person created
     
-    prospect --> attendee: vision_meeting.attendance.recorded
+    prospect --> attendee: meeting.attendance.recorded (vision meeting)
     
     attendee --> following_up: follow_up.initiated
     
@@ -879,7 +877,7 @@ stateDiagram-v2
 | Transition | Trigger Event | Trigger Action | Auto/Manual |
 |------------|---------------|----------------|-------------|
 | → `prospect` | `person.created` | Person added to system | Auto |
-| `prospect` → `attendee` | `vision_meeting.attendance.recorded` | Person marked as attended in F3 | **Auto** |
+| `prospect` → `attendee` | `meeting.attendance.recorded` (`meeting_type` = `vision_meeting`) | Person marked as attended in F3 | **Auto** |
 | `attendee` → `following_up` | `follow_up.initiated` | Note/task created with follow-up tag | Auto |
 | `following_up` → `interviewed` | `interview.completed` | Interview form saved (any result) | **Auto** |
 | `interviewed` → `core_group` | `commitment.recorded` | Commitment card recorded (= Core Group entry) | **Auto** |
@@ -942,6 +940,8 @@ Example: Commitment recorded for a Prospect
 ---
 
 ## Oversight Access Patterns
+
+> **Status:** Not yet implemented. The oversight section currently shows plant-level aggregates only (no people list, pipeline, or people counts). The `share_people` privacy toggle exists in schema and access mapping, but no oversight view consumes people data yet.
 
 ### Coach Access
 Coaches have read-only access to the full people list, pipeline view, assessments, interviews, and commitment records for their assigned churches. Coaches see the same data as planters but cannot create, edit, or delete records.

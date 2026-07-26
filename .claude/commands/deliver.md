@@ -2,7 +2,12 @@
 description: Hand the Agent Delivery OS a list of work to build autonomously to PRs (intake → preflight → plan → build-until-done).
 ---
 
-Invoke the `delivery-orchestrator` skill to deliver the following work autonomously to reviewable PRs.
+Read `.claude/skills/delivery-orchestrator/SKILL.md` and follow it as your procedure, to deliver the
+following work autonomously to reviewable PRs.
+
+> Read the file — do not invoke it with the Skill tool. `delivery-orchestrator` is user-invoked
+> (`disable-model-invocation: true`) so the model can never start the factory on its own; this
+> command is the human's trigger. See `ops/agent-os/invocation.md`.
 
 Work to deliver:
 $ARGUMENTS

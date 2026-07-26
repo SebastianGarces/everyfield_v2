@@ -503,7 +503,7 @@ System actions:
 [Finalize Attendance]
     |
 F3 emits `meeting.attendance.finalized` event:
-+-- Payload: { meeting_id, new_attendee_ids[], church_id, meetingType }
++-- Payload: { meetingId, meetingType, churchId, attendeeIds[], totalAttendance }
     |
 F5 subscribes and creates follow-up tasks:
 +-- One task per new attendee: "Follow up with [Name]"
@@ -586,8 +586,8 @@ Communication Hub (F9):
 Emails delivered, delivery status tracked in F9
     |
 Guest list updated:
-+-- invited_at timestamp set
-+-- RSVP responses update rsvp_status as they come in
++-- Delivery status tracked per guest via F9
++-- RSVP responses update response_status as they come in (via public /rsvp/[token] confirmation links)
     |
 [Resend to Pending] action available for follow-up
 ```
@@ -629,41 +629,47 @@ Guest list updated:
 
 ### MeetingAttendance
 
+Doubles as the guest list: people are added to this table before the meeting (RSVP tracked via `response_status`), and attendance is marked after (via `status`).
+
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | id | UUID | Yes | Primary key |
 | church_id | UUID (FK) | Yes | Reference to Church |
 | meeting_id | UUID (FK) | Yes | Reference to ChurchMeeting |
 | person_id | UUID (FK) | Yes | Reference to Person |
-| attendance_type | Enum | Yes | `first_time` / `returning` / `core_group` |
-| response_status | Enum | No | `interested` / `ready_commit` / `questions` / `not_interested` (vision meetings only) |
+| attendance_type | Enum | No | `first_time` / `returning` / `core_group` — system-derived when a row is marked attended |
+| status | Enum | Yes | `attended` / `absent` / `excused` (default: `attended`) |
+| invited_by_id | UUID (FK) | No | Reference to Person who invited this attendee |
+| response_status | Enum | No | `confirmed` / `declined` / `interested` / `ready_commit` / `questions` / `not_interested`; `null` = pending (no response yet) |
 | notes | Text | No | Notes from response card |
+| created_by | UUID (FK) | No | Reference to User |
 | created_at | Timestamp | Yes | Creation timestamp |
 | updated_at | Timestamp | Yes | Last update timestamp |
 
 **Constraints:**
 - Unique constraint on (meeting_id, person_id)
+
+**Attendance type derivation:** `attendance_type` is derived automatically whenever a row transitions to `status = attended`: person status in {core_group, launch_team, leader} -> `core_group`; else any prior attended meeting -> `returning`; else `first_time`.
 
 ---
 
-### MeetingInvitee
+### MeetingConfirmationToken
 
-Guest list for meeting invitations.
+Public token-based RSVP for guest list members (table `meeting_confirmation_tokens`, owned by the Communication Hub schema). Recipients confirm or decline via the public `/rsvp/[token]` page; responses update both the token record and the guest list row's `response_status`.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | id | UUID | Yes | Primary key |
+| token | String | Yes | URL-safe unique token |
 | church_id | UUID (FK) | Yes | Reference to Church |
 | meeting_id | UUID (FK) | Yes | Reference to ChurchMeeting |
 | person_id | UUID (FK) | Yes | Reference to Person |
-| rsvp_status | Enum | Yes | `pending` / `confirmed` / `declined` / `no_response` |
-| invited_at | Timestamp | No | When invitation email was sent |
+| status | Enum | Yes | `pending` / `confirmed` / `declined` (default: `pending`) |
 | responded_at | Timestamp | No | When person responded |
+| expires_at | Timestamp | Yes | Token expiry (7 days after issue) |
 | created_at | Timestamp | Yes | Creation timestamp |
-| updated_at | Timestamp | Yes | Last update timestamp |
 
-**Constraints:**
-- Unique constraint on (meeting_id, person_id)
+> **Note:** There is no dedicated `MeetingInvitee` table — the guest list and RSVP state live on `MeetingAttendance` plus the confirmation tokens above. See Open Questions for whether a dedicated invitee table is still planned.
 
 ---
 
@@ -680,7 +686,7 @@ Saved venue information for reuse across all meeting types.
 | contact_name | String | No | Venue contact person |
 | contact_phone | String | No | Contact phone |
 | contact_email | String | No | Contact email |
-| cost | Decimal | No | Cost per use |
+| cost | String | No | Cost per use (stored as string) |
 | capacity | Integer | No | Maximum capacity |
 | notes | Text | No | Notes about venue |
 | is_active | Boolean | Yes | Default: true |
@@ -706,7 +712,7 @@ Self-assessment of vision meeting effectiveness.
 | message_score | Integer | Yes | 1-5 rating |
 | close_score | Integer | Yes | 1-5 rating |
 | next_steps_score | Integer | Yes | 1-5 rating |
-| total_score | Decimal | Yes | Average of all scores |
+| total_score | String | Yes | Average of all scores (stored as string) |
 | notes | Text | No | Improvement notes |
 | evaluated_by | UUID (FK) | Yes | Reference to User |
 | created_at | Timestamp | Yes | Creation timestamp |
@@ -776,9 +782,10 @@ This feature integrates with cross-cutting services and shared canonical models 
 
 | Event/Data | Contract | Consumers May |
 |------------|----------|---------------|
-| **`meeting.attendance.recorded`** | Emits `{ meeting_id, person_id, attendance_type, church_id, meetingType }` per attendee | F2 subscribes to auto-advance person status (Prospect to Attendee) for vision meetings |
-| **`meeting.attendance.finalized`** | Emits `{ meeting_id, new_attendee_ids[], church_id, meetingType }` when attendance is finalized | F5 subscribes to create follow-up tasks (due date = meeting date + 48 hours) for vision meetings |
-| **`meeting.completed`** | Emits `{ meeting_id, attendance_count, new_attendee_count, church_id, meetingType }` | Update dashboard metrics |
+| **`meeting.attendance.recorded`** | Emits `{ meetingId, meetingType, personId, churchId, attendanceType }` per attended person | F2 subscribes to auto-advance person status (Prospect to Attendee) for vision meetings |
+| **`meeting.attendance.finalized`** | Emits `{ meetingId, meetingType, churchId, attendeeIds[], totalAttendance }` when attendance is finalized (`attendeeIds` covers all attended people) | F5 subscribes to create 48-hour follow-up tasks and a 24-hour evaluation task for vision meetings |
+| **`meeting.evaluation.completed`** | Emits `{ meetingId, churchId, evaluatedById }` when an evaluation is submitted | F5 subscribes to auto-complete the meeting's evaluation task |
+| **`meeting.completed`** | Emits `{ meetingId, meetingType, churchId, attendanceCount, newAttendeeCount }` | Update dashboard metrics |
 | **Meeting invitation requests** | Expose meeting details (title, datetime, location, type) and guest list (person IDs) to Communication Hub for email delivery | F9 sends invitation emails using meeting templates |
 | **Meeting metrics** | Exposes attendance counts and trends by `church_id`, filterable by meeting type | Dashboard aggregation |
 
@@ -788,8 +795,8 @@ This feature integrates with cross-cutting services and shared canonical models 
 
 - **Tenant isolation:** All feature entities and emitted events must carry `church_id` and enforce church-scoped access.
 - **Performance:** Meeting list and detail pages should load in under 2 seconds for typical church datasets.
-- **Reliability:** Attendance finalization and follow-up task generation must be atomic to avoid partial post-meeting state.
-- **Auditability:** Meeting creation, attendance finalization, status changes, and evaluation saves must be audit logged with `user_id` and timestamp.
+- **Reliability:** Attendance finalization and follow-up task generation must be atomic to avoid partial post-meeting state. *(Known gap: the current implementation runs sequential queries and event emissions without a database transaction.)*
+- **Auditability:** Meeting creation, attendance finalization, status changes, and evaluation saves must be audit logged with `user_id` and timestamp. *(Known gap: no audit logging is implemented yet.)*
 - **Security:** Only authorized users for the active church can create, update, or view meeting data.
 
 ---
@@ -849,3 +856,5 @@ Network admins can see aggregate meeting metrics across all plants in their netw
 5. **Response card digitization:** Should response cards be captured digitally during meeting or paper then entered?
 
 6. **Orientation completion tracking:** Should completing an orientation trigger any pipeline advancement or is it purely informational?
+
+7. **Dedicated invitee table:** The guest list currently lives on `MeetingAttendance` (with confirmation tokens for public RSVP). Is a dedicated `MeetingInvitee` table with explicit `pending`/`no_response` statuses still planned, or is the current design canon?

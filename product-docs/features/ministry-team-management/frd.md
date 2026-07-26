@@ -1,8 +1,8 @@
 # F8: Ministry Team Management
 ## Feature Requirements Document (FRD)
 
-**Version:** 1.4  
-**Date:** February 9, 2026  
+**Version:** 1.5  
+**Date:** July 25, 2026  
 **Parent Document:** [Product Brief](../../product-brief.md)  
 **Architecture:** [System Architecture](../../system-architecture.md)  
 **Shared Contracts:** [Core Data Contracts](../../core-data-contracts.md)  
@@ -257,6 +257,8 @@ Aggregate view of all teams' health metrics.
 - Training < 50% in Phase 3+ → Warning
 - Meeting attendance < 50% → Yellow alert
 
+> **Implementation status:** The shipped alert logic (`getTeamHealth`) derives the alert level from staffing % and meeting attendance only. The training/phase warning threshold is not yet part of the calculation.
+
 ---
 
 ### 7. Role Templates Library
@@ -504,6 +506,8 @@ Update dashboard health indicators
     Send specific alerts to team leaders
 ```
 
+> **Implementation status:** Not yet implemented. Health metrics are computed on demand when the Team Health Dashboard renders; there is no scheduled weekly process and no alert notifications are sent. Whether the scheduled check + notifications remain in scope is an open decision.
+
 ---
 
 ## Acceptance Criteria
@@ -535,6 +539,7 @@ Update dashboard health indicators
 | reports_to_team_id | UUID (FK) | No | Reference to parent MinistryTeam |
 | phase_introduced | Enum | Yes | Phase 0-6 |
 | status | Enum | Yes | `forming` / `active` / `paused` |
+| sort_order | Integer | Yes | Display order (predefined teams follow template order; custom teams sort after) |
 | created_by | UUID (FK) | Yes | Reference to User |
 | created_at | Timestamp | Yes | Creation timestamp |
 | updated_at | Timestamp | Yes | Last update timestamp |
@@ -554,12 +559,14 @@ Update dashboard health indicators
 | is_leadership_role | Boolean | No | Default: false |
 | time_commitment | Enum | No | `low` / `medium` / `high` |
 | required_training_ids | UUID[] | No | Array of TrainingProgram IDs |
-| desired_skills | String[] | No | Array of skill/gift tags |
+| desired_skills | Text | No | Skill/gift tags (single text field) |
 | sort_order | Integer | No | Display order |
 | status | Enum | Yes | `open` / `filled` |
 | created_by | UUID (FK) | Yes | Reference to User |
 | created_at | Timestamp | Yes | Creation timestamp |
 | updated_at | Timestamp | Yes | Last update timestamp |
+
+> **Implementation status:** The shipped `team_roles` table has no `required_training_ids` column; training requirements are currently modeled at the team level (`TrainingProgram.team_id` + `is_required`). Whether role-level required training remains canon or the team-level model supersedes it is an open decision (see MT-011).
 
 ---
 
@@ -737,6 +744,8 @@ Per [Core Data Contracts](../../core-data-contracts.md):
 - A user who is team leader for multiple teams has write access to each of those teams.
 - Planters always have full access regardless of team leader assignment.
 - Write operations validate the user's role and team leader status before proceeding.
+
+> **Implementation status:** Not yet enforced. Shipped server actions validate the session and `church_id` tenancy only; there is no role or team-leader scoping check. Whether the planter-only access model is acceptable for MVP is an open decision.
 
 ---
 

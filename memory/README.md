@@ -17,9 +17,11 @@ memory/
 ├── contracts/
 │   ├── api.md         # API routes summary
 │   ├── db.md          # Database schema summary
-│   └── config.md      # Environment and configuration
+│   ├── config.md      # Environment and configuration
+│   └── data-patterns.md   # Client/server data sync patterns
 └── flows/
     ├── auth.mmd       # Authentication flow
+    ├── person-status.mmd  # Person status progression
     ├── wiki-article.mmd   # Wiki article retrieval
     └── request-lifecycle.mmd  # Dashboard request lifecycle
 ```

@@ -17,7 +17,7 @@ A platform purpose-built for the church planting journey. Helps church planters 
 
 ## Prerequisites
 
-- [Node.js](https://nodejs.org/) >= 20
+- [Node.js](https://nodejs.org/) >= 24 (CI runs Node 24)
 - [pnpm](https://pnpm.io/) >= 8
 - A PostgreSQL database (we use [Neon](https://neon.tech/) — free tier works fine for dev)
 
@@ -56,6 +56,11 @@ Edit `.env.local` and fill in your values:
 | `RESEND_API_KEY` | API key from [Resend](https://resend.com/) |
 | `RESEND_WEBHOOK_SECRET` | Webhook signing secret from Resend |
 | `EMAIL_FROM` | Sender address (e.g. `EveryField <notifications@yourdomain.com>`) |
+| `CRON_SECRET` | Auth token for the Phase Engine Vercel cron (`/api/phase-engine/assess`). Required in prod; set locally for manual runs |
+| `VERCEL_AUTOMATION_BYPASS_SECRET` | Deployment Protection bypass for preview browser validation (local only) |
+| `SENTRY_DSN`, `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN` | Sentry error tracking (optional — Sentry no-ops when unset) |
+
+See `.env.example` for the canonical list with per-variable notes.
 
 ### 4. Run database migrations
 
@@ -88,12 +93,14 @@ Open [http://localhost:3000](http://localhost:3000).
 | `pnpm format` | Format code with Prettier |
 | `pnpm format:check` | Check formatting |
 | `pnpm typecheck` | Run TypeScript type checking |
+| `pnpm test` | Run the test suite (Node test runner via tsx) |
 | `pnpm db:generate` | Generate Drizzle migrations from schema changes |
 | `pnpm db:migrate` | Apply pending migrations |
-| `pnpm db:push` | Push schema directly (skip migration files) |
+| `pnpm db:push` | Push schema directly (skip migration files) — avoid; project policy is `db:migrate` (see `AGENTS.md`) |
 | `pnpm db:studio` | Open Drizzle Studio (database GUI) |
 | `pnpm db:seed` | Seed the database with dev data |
 | `pnpm db:clean` | Clean the database (remove seeded data) |
+| `pnpm db:reset` | Reset the database (clean + reseed dev data) |
 
 ## Project Structure
 

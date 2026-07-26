@@ -32,7 +32,7 @@ The Communication Hub also serves as a **delivery service** for other features. 
 | ID | Requirement | Description |
 |----|-------------|-------------|
 | COM-001 | Message composition | Create and send messages to recipients |
-| COM-002 | Email delivery | Send emails via integrated service (SendGrid, etc.) |
+| COM-002 | Email delivery | Send emails via integrated service (Resend) |
 | COM-003 | Recipient selection | Select individuals or groups as recipients |
 | COM-004 | Message templates | Pre-built templates for common communications |
 | COM-005 | Merge fields | Personalize messages with recipient data |
@@ -413,7 +413,7 @@ Template content loaded into editor
     ↓
 Message queued for delivery
     ↓
-Integration service delivers (SendGrid, Twilio, etc.)
+Integration service delivers (Resend for email; SMS not yet integrated)
     ↓
 Delivery status tracked and updated
 ```
@@ -528,6 +528,8 @@ Communication logged to each recipient's history
 Calling feature notified of send completion (e.g., update invited_at timestamp)
 ```
 
+**RSVP extension (meeting invitations):** For meeting-triggered sends, a per-recipient confirmation token (MeetingConfirmationToken) is generated at send time. The `{{confirm_link}}` and `{{decline_link}}` merge fields render recipient-specific RSVP links pointing at the public `/rsvp/[token]` page, which records the response (`confirmed` / `declined`) against the token.
+
 **Key principle:** The calling feature owns the "who" and "why" (guest list, meeting context). The Communication Hub owns the "how" (templates, rendering, delivery, tracking). This keeps email delivery centralized while allowing any feature to trigger sends.
 
 ---
@@ -545,6 +547,7 @@ Calling feature notified of send completion (e.g., update invited_at timestamp)
 | body_html | Text | No | HTML version (email) |
 | channel | Enum | Yes | `email` / `sms` / `both` |
 | template_id | UUID (FK) | No | Reference to MessageTemplate |
+| meeting_id | UUID (FK) | No | Reference to ChurchMeeting (set for meeting-triggered sends) |
 | status | Enum | Yes | `draft` / `scheduled` / `sending` / `sent` / `failed` |
 | scheduled_at | Timestamp | No | Scheduled send time |
 | sent_at | Timestamp | No | Actual send time |
@@ -561,6 +564,7 @@ Calling feature notified of send completion (e.g., update invited_at timestamp)
 |-------|------|----------|-------------|
 | id | UUID | Yes | Primary key |
 | communication_id | UUID (FK) | Yes | Reference to Communication |
+| church_id | UUID (FK) | Yes | Reference to Church (tenant isolation) |
 | person_id | UUID (FK) | Yes | Reference to Person |
 | email | String | No | Email address used |
 | phone | String | No | Phone number used |
@@ -589,8 +593,29 @@ Calling feature notified of send completion (e.g., update invited_at timestamp)
 | body_html | Text | No | HTML body template |
 | merge_fields | JSON | No | Available merge fields |
 | is_system | Boolean | Yes | System-provided vs custom |
+| source_template_id | UUID | No | For church forks of system templates, the original system template |
 | created_at | Timestamp | Yes | Creation timestamp |
 | updated_at | Timestamp | Yes | Last update timestamp |
+
+**Copy-on-write semantics:** System templates (`is_system=true`, `church_id=null`) are immutable. When a church edits a system template, it is forked into a church-owned copy with `source_template_id` pointing at the original; template listings return the church's fork in place of its system original.
+
+---
+
+### MeetingConfirmationToken
+
+Per-recipient RSVP tokens for meeting-triggered invitations.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| id | UUID | Yes | Primary key |
+| token | String | Yes | Unique token embedded in confirm/decline links |
+| church_id | UUID (FK) | Yes | Reference to Church |
+| meeting_id | UUID (FK) | Yes | Reference to ChurchMeeting |
+| person_id | UUID (FK) | Yes | Reference to Person |
+| status | Enum | Yes | `pending` / `confirmed` / `declined` |
+| responded_at | Timestamp | No | Response timestamp |
+| expires_at | Timestamp | Yes | Token expiry |
+| created_at | Timestamp | Yes | Creation timestamp |
 
 ---
 
@@ -642,6 +667,8 @@ General notes attached to any entity.
 | `{{pastor_name}}` | Senior Pastor name | Church profile |
 | `{{launch_date}}` | Launch Sunday date | Church.launch_date |
 
+> **Note:** `{{pastor_name}}` and `{{launch_date}}` are registered in the merge engine but currently render empty — the backing church profile fields are not yet sourced.
+
 ### Meeting Fields (available when triggered from Meetings feature)
 
 | Field | Description | Source |
@@ -650,6 +677,8 @@ General notes attached to any entity.
 | `{{meeting_type}}` | Meeting type label (Vision Meeting, Orientation, Team Meeting) | ChurchMeeting.type |
 | `{{meeting_date}}` | Meeting date and time | ChurchMeeting.datetime |
 | `{{meeting_location}}` | Meeting location name and address | ChurchMeeting.location_name |
+| `{{confirm_link}}` | Recipient-specific RSVP confirm link (`/rsvp/[token]`) | MeetingConfirmationToken |
+| `{{decline_link}}` | Recipient-specific RSVP decline link (`/rsvp/[token]`) | MeetingConfirmationToken |
 
 ---
 
@@ -675,8 +704,8 @@ General notes attached to any entity.
 
 | Function | Purpose | Integration |
 |----------|---------|-------------|
-| **Email** | Bulk/transactional delivery | API (SendGrid, Amazon SES) |
-| **SMS** | Text messaging | API (Twilio, MessageBird) |
+| **Email** | Bulk/transactional delivery | API (Resend — single + batch send, webhook delivery tracking) |
+| **SMS** | Text messaging | Not yet integrated (Twilio planned, pending COM-011 decision) |
 
 ---
 

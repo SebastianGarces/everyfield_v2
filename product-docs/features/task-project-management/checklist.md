@@ -65,6 +65,7 @@
 
 ## Event Integration
 
-- [x] `meeting.attendance.finalized` -> Auto-create follow-up tasks for new vision meeting attendees (48h due date)
+- [x] `meeting.attendance.finalized` -> Auto-create follow-up tasks for all finalized vision meeting attendees, first-time or returning (48h due date)
 - [x] `meeting.attendance.finalized` -> Auto-create meeting evaluation task for planter (24h due date, links to evaluation page)
-- [x] `task.completed` -> Emit event on task completion (for future dashboard integration)
+- [x] `meeting.evaluation.completed` -> Auto-complete the matching evaluation task via `completion_event` + `related_id` match
+- [x] `task.completed` -> Emit event on task completion (consumed by the Phase Engine dirty-marking handler in `src/lib/events/subscriptions.ts`; the dashboard reads overdue counts via direct query)

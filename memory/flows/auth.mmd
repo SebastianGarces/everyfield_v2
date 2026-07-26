@@ -3,20 +3,26 @@ flowchart TD
         L1[User submits form]
         L2["login - login/actions.ts"]
         L3["Zod validation - validations/auth.ts"]
+        LR["checkRateLimit - rate-limit.ts"]
         L4["Find user by email"]
         L5["verifyPassword - password.ts"]
+        LF["recordAttempt failure - rate-limit.ts"]
+        LS["recordAttempt success - rate-limit.ts"]
         L6["generateSessionToken - session.ts"]
         L7["createSession - session.ts"]
         L8["setSessionCookie - cookies.ts"]
-        L9[Redirect to /dashboard]
-        
+        L9[Redirect to redirect param if local path, else /dashboard]
+
         L1 --> L2 --> L3
-        L3 -->|valid| L4
+        L3 -->|valid| LR
         L3 -->|invalid| LE1[Return fieldErrors]
-        L4 -->|not found| LE2[Return error]
+        LR -->|limited| LE3["Return generic 'Too many attempts'"]
+        LR -->|ok| L4
+        L4 -->|not found| LF
         L4 -->|found| L5
-        L5 -->|invalid| LE2
-        L5 -->|valid| L6 --> L7 --> L8 --> L9
+        L5 -->|invalid| LF
+        LF --> LE2[Return error]
+        L5 -->|valid| LS --> L6 --> L7 --> L8 --> L9
     end
 
     subgraph validate [Session Validation]
