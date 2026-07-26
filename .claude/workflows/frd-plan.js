@@ -4,6 +4,11 @@ export const meta = {
     "Plan an FRD into a parallel build: decompose, group into file-disjoint tracks, and schedule dependency waves. Pulls human-gated work (schema, high-risk) out as prerequisites. No code is written.",
   whenToUse:
     "Before implementing an FRD. Produces the wave plan you execute one wave at a time with frd-implement-wave. Pass the FRD path (or {frd, scope}) as args.",
+  // NOTE (2026-07-26): the wave plan is no longer committed as wave-plan.json — the
+  // board holds dependency state now (ops/agent-os/labels.md). The returned plan is
+  // still correct and still consumed by frd-implement-wave; what changes next is that
+  // this workflow publishes its units as issues with native `blocked_by` edges, and
+  // waves collapse into a frontier query. See product-docs/board-design-2026-07.md §7.
   phases: [
     {
       title: "Decompose",

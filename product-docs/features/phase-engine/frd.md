@@ -1,4 +1,6 @@
 # Feature Requirements Document: Phase Engine (Plant Intelligence)
+> **Tracked on the board:** [Phase Engine #105](https://github.com/SebastianGarces/everyfield_v2/issues/105) — open requirements are its sub-issues. Implementation status is not tracked in this file.
+
 
 > **Direction change (June 2026):** This feature was previously conceived as a deterministic *phase state machine* — track `current_phase`, validate hard exit criteria, gate transitions. It is being **reframed** as a **Plant Intelligence Engine**: an advisory system that continuously reads the plant's real activity, judges it against the church-planting methodology (the Launch Playbook + wiki) using an LLM-as-judge, and surfaces prioritized **insights and guidance** to planters and to sending networks/churches. The phase becomes *context for judgment*, not a gate. See `system-architecture.md` → Phase Engine, and the PRD changelog. This is the platform's primary differentiator ("the data backbone" thesis).
 

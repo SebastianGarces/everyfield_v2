@@ -34,17 +34,26 @@ label plus a title convention, nothing more. If the repo ever moves to an organi
 is a one-pass relabel — `feature` label → `Epic` issue type — so choosing labels now costs nothing
 later.
 
-**The local `gh` is too old.** `gh 2.58.0` (Oct 2024) predates the June 2026 release that added
-`--parent`, `--blocked-by`, `--blocking` and `--type` flags. Everything below still works today via
-`gh api`, but `brew upgrade gh` makes the skills far shorter to write. Treat it as step zero.
+**~~The local `gh` is too old.~~ Fixed 2026-07-26 — upgraded 2.58.0 → 2.96.0.** The June 2026 release
+added native flags, so the migration used them directly:
 
-The dependency API is worth writing down because it is easy to get wrong — it takes the blocker's
-numeric **database id**, not its `#number` and not its `node_id`:
+```bash
+gh issue create --title "…" -l agent:queued --parent 69 --blocked-by 87 --body-file …
+gh issue edit 63 --parent 95 --add-blocked-by 29
+```
+
+The REST fallback is still worth writing down for anything running on an older `gh`, because it is
+easy to get wrong — it takes the blocker's numeric **database id**, not its `#number` and not its
+`node_id`:
 
 ```bash
 BLOCKER_ID=$(gh api repos/$R/issues/62 --jq .id)
 gh api --method POST repos/$R/issues/63/dependencies/blocked_by -F issue_id=$BLOCKER_ID
 ```
+
+One `gh` quirk that cost a rerun during the migration: **zsh does not word-split unquoted
+parameters**, so a shell helper passing `"$FLAGS"` hands `gh` one argument and it dies on
+`unknown flag: --label agent:queued`. Pass flags explicitly, or use `${=VAR}`.
 
 ---
 
@@ -212,6 +221,9 @@ decided most of them out:
 feature parents and 3 decision issues. Call it **60–70 issues**, every one of which needs a real
 title and a parent link, and roughly a third of which need `Blocked by` edges.
 
+> **Executed 2026-07-26.** All four passes below are done — see §10 for what actually landed. The
+> estimate held: **45 new issues**, against the 45–55 predicted.
+
 That is too much for one blind script and too little to justify tooling. **Gradual, in four passes:**
 
 1. **Setup + pilot (30 min).** `gh auth refresh -s project`, `brew upgrade gh`, three new labels,
@@ -316,3 +328,57 @@ it was accepted deliberately.
 
 The mirror can also lag or fail. That is tolerable *only* because of the §4 rule: the board informs a
 human, and no agent ever reads it. A broken mirror is a stale picture, never a wrong build.
+
+Implemented as `.github/workflows/board-sync.yml`. It exits with a notice rather than failing when
+`PROJECT_TOKEN` is absent — a missing board must never turn a PR red.
+
+---
+
+## 10. What landed (2026-07-26)
+
+**47 issues, #69–#115.** Eight feature parents holding 49 children, three tombstones, three decision
+issues, four dependency edges.
+
+| Parent | Children | Notes |
+|---|---:|---|
+| #69 F6 Documents | 3 | the pilot; #67 adopted as a child |
+| #72 F1 Wiki | 9 | four existing issues adopted, W-019 stays cut |
+| #77 F9 Communication | 8 | includes the two `deferred` post-beta items |
+| #84 F8 Ministry Teams | 2 | MT-010 lives under F2 with the files it touches |
+| #86 F5 Tasks | 8 | one internal edge: T-020 blocked by T-011+T-012 |
+| #95 F3 Meetings | 9 | build-log checklist deleted, not migrated |
+| #102 F2 People | 3 | same |
+| #105 Phase Engine | 7 | includes PE-022..027, the folded F4 |
+
+**Tombstones:** #113 F10 (closed, cut), #114 F7 (open, deferred), #115 F4 (closed, folded).
+
+**Decisions:** #85 MT-011 training model, #96 follow-up task generation, #112 wiki data model. None
+closes by a PR.
+
+**Edges:** #88→#87, #94→#29, #101→#29, #107→#106. The two pointing at #29 are the useful ones — task
+notifications and meeting reminders were both quietly waiting on notification infrastructure, and the
+old checklists recorded that only as prose in a parenthetical.
+
+**Deleted:** 11 `checklist.md`, `work-queue.md`, `phase-engine/wave-plan.json` — 1,573 lines.
+
+### Judgement calls worth knowing about
+
+- **Some requirements were merged into one issue** where they are a single vertical slice: `W-018 +
+  W-020` (print and PDF are one stylesheet), `T-011 + T-012` (a template nobody can import is dead
+  weight), `VM-010k + VM-016c`, `PE-022 + PE-025`, `PE-026 + PE-027`. Each says so in its title and
+  explains the merge in its body.
+- **Two loose meetings items folded into #63** rather than becoming issues: `VM-S02i` and `VM-011k`
+  are both the dead invited-by subtree #63 already removes.
+- **DOC-008 was filed `needs-spec`, not `agent:queued`.** It is the one F6 requirement needing a
+  `documents` table, which presses on audit decision #15. The issue names the tension and lays out
+  three options rather than resolving it quietly — the handoff's instruction was to reopen that
+  deliberately, not drift into it.
+- **#23 (oversight planter-invitation UI) has no parent.** No FRD covers oversight. G0 now allows
+  that explicitly for platform work rather than forcing a wrong parent.
+
+### Not done, deliberately
+
+**waves → DAG.** `frd-plan.js` still returns a static wave array and `frd-implement-wave.js` still
+consumes one. The board now carries the dependency state that change needs, and both files carry a
+note pointing here — but rewriting the planner in the same change as the migration would have made
+one reviewable thing into two half-verified ones. It is the next task, not this one.

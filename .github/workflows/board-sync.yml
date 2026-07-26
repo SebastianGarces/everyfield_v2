@@ -1,0 +1,100 @@
+# Mirrors the canonical `agent:*` / `needs-spec` labels onto the Project board's Status field.
+#
+# ONE WAY ONLY. Labels are the source of truth (ops/agent-os/labels.md): build-until-done writes
+# them, standup reads them, and agents never read the board. This workflow renders that state for a
+# human. Dragging a card in the UI changes nothing durable — the next label event overwrites it.
+#
+# Done needs no mirroring: two Project workflows are enabled by default and already set Status to
+# Done when an issue closes or its PR merges.
+#
+# SETUP REQUIRED (see product-docs/board-design-2026-07.md §9):
+#   1. Create the user-owned Project "EveryField Delivery".
+#   2. Give its Status single-select these options, spelled exactly as in STATUS_BY_LABEL below.
+#   3. Create a PAT with the `project` scope and store it as the repo secret PROJECT_TOKEN.
+#      GITHUB_TOKEN CANNOT write a user-owned Project v2 — this is the most likely reason the
+#      mirror appears to silently do nothing.
+#   4. Set PROJECT_NUMBER below.
+#
+# Until PROJECT_TOKEN exists the job exits cleanly with a notice rather than failing: a missing
+# board must never turn a PR red.
+
+name: Board sync
+
+on:
+  issues:
+    types: [opened, reopened, labeled, unlabeled]
+
+permissions:
+  issues: read
+
+concurrency:
+  # Serialize per issue so two fast label edits cannot land out of order.
+  group: board-sync-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+env:
+  PROJECT_OWNER: SebastianGarces
+  PROJECT_NUMBER: "1"
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mirror label state onto the board
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::notice::PROJECT_TOKEN is not set — board sync skipped. See board-design-2026-07.md §9."
+            exit 0
+          fi
+
+          labels=$(gh issue view "$ISSUE" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name')
+
+          # Exactly one of these should ever be present. If more than one is, the board would
+          # otherwise silently show whichever we checked last — warn instead of guessing.
+          active=$(echo "$labels" | grep -c '^agent:' || true)
+          if [ "$active" -gt 1 ]; then
+            echo "::warning::Issue #$ISSUE carries $active agent:* labels; ops/agent-os/labels.md requires exactly one. Board not updated."
+            exit 0
+          fi
+
+          status=""
+          case "$labels" in
+            *"agent:queued"*)      status="Todo" ;;
+            *"agent:in-progress"*) status="In progress" ;;
+            *"agent:in-review"*)   status="Pending PR review" ;;
+            *"agent:blocked"*)     status="Blocked" ;;
+            *"needs-spec"*)        status="Backlog" ;;
+          esac
+
+          if [ -z "$status" ]; then
+            echo "No mapped label on #$ISSUE — leaving board untouched."
+            exit 0
+          fi
+
+          project=$(gh project view "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --format json)
+          project_id=$(echo "$project" | jq -r '.id')
+
+          fields=$(gh project field-list "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --format json)
+          field_id=$(echo "$fields" | jq -r '.fields[] | select(.name == "Status") | .id')
+          option_id=$(echo "$fields" | jq -r --arg s "$status" \
+            '.fields[] | select(.name == "Status") | .options[] | select(.name == $s) | .id')
+
+          if [ -z "$option_id" ] || [ "$option_id" = "null" ]; then
+            echo "::warning::Status option '$status' does not exist on the project. Add it, spelled exactly."
+            exit 0
+          fi
+
+          issue_url="https://github.com/$GITHUB_REPOSITORY/issues/$ISSUE"
+          # Idempotent: re-adding an item already on the board returns the existing item.
+          item_id=$(gh project item-add "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" \
+            --url "$issue_url" --format json | jq -r '.id')
+
+          gh project item-edit --id "$item_id" --project-id "$project_id" \
+            --field-id "$field_id" --single-select-option-id "$option_id"
+
+          echo "#$ISSUE → $status"

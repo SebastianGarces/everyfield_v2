@@ -47,7 +47,14 @@ verdict. `open-pr` waits for it, and the loop treats *green DoD + red check* as 
 - Every acceptance criterion (AC) on the source GitHub Issue has a declared **verification method**
   (which gate proves it, and how).
 - No AC is left unverifiable ("looks good" is not a method).
-- **Evidence:** AC → method table.
+- The issue **has a parent**, and that parent is a `feature` issue linking an FRD. An orphan unit is
+  work nobody can trace back to a requirement — check with
+  `gh api repos/{owner}/{repo}/issues/<n> --jq .parent`.
+  The one standing exception is platform work that no FRD covers (oversight, CI, the factory itself);
+  say so explicitly in the evidence rather than inventing a parent.
+- The issue is **not blocked** — `issue_dependencies_summary.blocked_by == 0`. Building past an open
+  blocker is how a merge conflict becomes a design conflict.
+- **Evidence:** AC → method table, plus the parent issue and blocker count.
 
 ### G1 — Static checks
 - `pnpm typecheck` → clean (0 errors).

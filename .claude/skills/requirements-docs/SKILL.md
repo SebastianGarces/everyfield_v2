@@ -10,7 +10,7 @@ description: Rules for writing and editing EveryField requirements documentation
 - Use this skill when creating or editing files in `product-docs/`
 - Use when writing or revising Feature Requirements Documents (FRDs)
 - Use when updating Product Brief, System Architecture, or PRD
-- Use when updating feature implementation checklists
+- Use when a requirement's status changes — the answer is an issue on the board, never a checklist file (§6)
 - Use when asked to refactor, correct, or audit documentation
 
 ## Purpose
@@ -169,52 +169,36 @@ Defines one valid execution strategy for an FRD.
 
 ---
 
-### 6. Feature Implementation Checklists
+### 6. Implementation status — **on the board, not in a file**
 
-**Location**
+**There is no `checklist.md`.** All eleven were deleted on 2026-07-26; implementation status now lives on GitHub. Design and reasoning: `product-docs/board-design-2026-07.md`.
+
+**Where status lives**
 
 ```
-product-docs/features/<feature-name>/checklist.md
+Feature issue (label: feature)   ← links to the FRD, renders the progress bar
+  └─ requirement sub-issue       ← one per OPEN requirement, titled with its FRD ID
+       └─ unit sub-issue         ← only where a requirement needs slicing
 ```
 
-**Purpose:**
-Tracks implementation progress for a feature. This is the **working document** that gets updated as features are built, keeping the FRD stable as the source of truth.
-
-**Required Structure**
-
-```markdown
-# <Feature Name> – Implementation Checklist
-
-## Must Have
-- [ ] Requirement ID: Description
-- [x] Requirement ID: Description (completed)
-
-## Should Have
-- [ ] Requirement ID: Description
-
-## Nice to Have
-- [ ] Requirement ID: Description
-```
+Find a feature's board entry with `gh issue list --label feature`.
 
 **Rules**
 
-* One checklist per feature, alongside its FRD
-* Items should reference requirement IDs from the FRD (e.g., `W-001`, `W-011`)
-* Update the checklist as work progresses—not the FRD
-* Mark items with `[x]` when complete
-* Add notes or sub-tasks as needed for implementation details
+* **Never recreate a checklist file.** It went stale twice in one day, which is why it is gone. If you catch yourself writing `- [ ] W-0xx` into a markdown file, the answer is an issue.
+* **The FRD requirement tables stay.** They carry no status — Must/Should/Nice is a statement of what the feature *is*, not of what is built. They were never the duplicate.
+* **Only open requirements get issues.** Shipped ones are recorded by their closed issue and by git history; do not create an issue in order to close it.
+* **Nice-to-Have requirements stay in the FRD** and get no issue. They are spec, not backlog.
+* Requirement issues are titled with the FRD ID (`W-010 — Template linking`) so the doc and the board share one vocabulary.
+* Two requirements may share one issue when they are a single vertical slice (`W-018 + W-020`). Say so in the title and explain the merge in the body.
 
-**Allowed Content**
+**When a requirement's status changes**
 
-* Checkbox items mirroring FRD requirements
-* Implementation notes and sub-tasks
-* Links to PRs or commits
-* Dates or version tags for completion
+Nothing to edit. A PR carrying `Closes #<n>` closes the issue, which moves the parent's progress bar. That is the whole point.
 
-**Forbidden Content**
+**When a requirement is added to an FRD**
 
-* New requirements not in the FRD (add to FRD first)
-* Detailed specs or behavior definitions (belongs in FRD)
+Add the row to the FRD. Create an issue for it only if it is Must or Should *and* actually intended — otherwise the row is enough.
 
 ---
 

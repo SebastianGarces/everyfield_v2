@@ -22,10 +22,22 @@ file-disjoint** where possible (smaller tracks → cleaner parallel waves, cheap
    boundaries, or payments. (Still autonomous-to-PR, but gets the extra DoD gates + second verifier.)
 4. **Guess file ownership.** List the files/dirs the work will likely create or edit, from `memory/` +
    a quick look. This is what the planner uses to keep tracks file-disjoint — accuracy keeps merges clean.
-5. **Create the issue** and label it `agent:queued` (+ `risk:high` if applicable):
+5. **Find its parent.** Every requirement issue hangs off a `feature` issue — the FRD's home on the
+   board. `gh issue list --label feature` lists them. If the item belongs to a feature with no parent
+   yet, create the parent first (thin body: FRD link, three lines of scope, settled scope decisions —
+   an index, not a store).
+6. **Declare blocking edges.** If this item genuinely cannot start until another lands, say so as a
+   native dependency, not a sentence. Publish blockers **first** so the edge can reference a real
+   number. A dependency is *semantic* — file overlap is a scheduling constraint and belongs in
+   `## Likely files`, not here.
+7. **Create the issue** and label it `agent:queued` (+ `risk:high` if applicable):
    ```bash
-   gh issue create --title "<concise>" --body-file <path> --label agent:queued
+   gh issue create --title "<concise>" --body-file <path> \
+     --label agent:queued --parent <feature-issue> [--blocked-by <n>[,<n>]]
    ```
+   Use `needs-spec` instead of `agent:queued` when an open question inside the spec still changes what
+   gets built — a blocked build is cheaper to prevent than to unwind. Title requirement issues with
+   their FRD ID (`W-010 — Template linking`) so the doc and the board share one vocabulary.
 
 ## Issue template
 
@@ -59,6 +71,10 @@ low | medium | high   <!-- high → label risk:high -->
 ## Rules
 
 - **Observable ACs or it's not ready.** "Looks good" / "works well" are not ACs.
+- **Every issue has a parent** (`ops/agent-os/dod.md` G0). The exception is platform work no FRD
+  covers — state that rather than inventing a parent.
+- **Never write a checklist file.** Status lives on the board; the eleven `checklist.md` files were
+  deleted on 2026-07-26 precisely because they went stale (`product-docs/board-design-2026-07.md`).
 - **Small & disjoint beats big & tangled.** Split a list item that spans many files into separate issues.
 - **One concern per issue.** It maps 1:1 to a track and a PR.
 - **Don't design the implementation** — describe the outcome and constraints; let the implementer choose how.
