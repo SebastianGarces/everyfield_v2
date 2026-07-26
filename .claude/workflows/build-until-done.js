@@ -115,6 +115,25 @@ const PR_SCHEMA = {
     },
   },
 };
+const CLAIM_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["claimed", "inProgressNow"],
+  properties: {
+    claimed: {
+      type: "array",
+      items: { type: "integer" },
+      description: "The issue numbers this step actually edited.",
+    },
+    inProgressNow: {
+      type: "array",
+      items: { type: "integer" },
+      description:
+        "Every issue currently carrying agent:in-progress, for blast-radius verification.",
+    },
+  },
+};
+
 const BLOCK_SCHEMA = {
   type: "object",
   required: ["labelled"],
@@ -219,6 +238,10 @@ log(
   `${units.length} unit(s) → ${tracks.length} track(s); max ${MAX_ATTEMPTS} attempt(s) each.`
 );
 
+// Every issue this pass is permitted to touch. Any `agent:in-progress` outside
+// this set means a labelling step overreached — see board-design-2026-07.md §11.
+const PASS_ISSUES = [...new Set(tracks.flatMap((t) => t.issues))];
+
 // ---------------------------------------------------------------------------
 // Per-track verify-until-done loop
 // ---------------------------------------------------------------------------
@@ -263,18 +286,50 @@ async function buildTrack(track) {
   const implAgent = track.lane === "backend" ? "backend" : "frontend";
   let lastReport = null;
 
-  // mark issues in-progress (best-effort, inside an agent since the script has no shell)
-  await agent(
-    `For each issue in [${track.issues.join(", ")}], run: \`gh issue edit <n> --remove-label agent:queued --add-label agent:in-progress\`. Return strictly {"labelled": true}.`,
-    {
-      label: `start:${track.id}`,
-      phase: "Build",
-      // Two shell commands and a fixed return value. No judgment involved.
-      model: "haiku",
-      effort: "low",
-      schema: BLOCK_SCHEMA,
-    }
-  );
+  // Claim this track's issues — and ONLY this track's issues.
+  //
+  // On 2026-07-26 this step swept the entire `agent:queued` label, claiming 35
+  // issues for a 2-unit pass and jamming dispatch's "nothing in flight" gate
+  // (board-design-2026-07.md §11). The prompt was already scoped to
+  // `track.issues`; a cheap model still enumerated the label and "helpfully"
+  // claimed the frontier. The old comment here read "No judgment involved",
+  // which is precisely the assumption that failed — so the blast radius is now
+  // asserted rather than assumed.
+  if (track.issues.length) {
+    const claim = await agent(
+      `Label EXACTLY these issues and no others: ${track.issues.join(", ")}
+
+For each number n in that list, run:
+\`gh issue edit n --remove-label agent:queued --add-label agent:in-progress\`
+
+HARD CONSTRAINTS — violating any of these corrupts the board:
+- Do NOT run \`gh issue list\`, \`gh search\`, or anything else that enumerates issues by label in order to decide what to edit. The list above is the complete and only input.
+- Do NOT edit any issue outside that list, even if it looks queued, unblocked, ready, or related.
+- The number of issues you edit must be exactly ${track.issues.length}.
+
+Then, purely to report state, run ONCE:
+\`gh issue list --state open --label agent:in-progress --limit 200 --json number --jq '[.[].number]'\`
+
+Return {"claimed": [the numbers you edited], "inProgressNow": [every number that last command printed]}.`,
+      {
+        label: `start:${track.id}`,
+        phase: "Build",
+        model: "haiku",
+        effort: "low",
+        schema: CLAIM_SCHEMA,
+      }
+    );
+
+    const strays = (claim?.inProgressNow || []).filter(
+      (n) => !PASS_ISSUES.includes(n)
+    );
+    if (strays.length)
+      throw new Error(
+        `claim step overreached: ${strays.length} issue(s) carry agent:in-progress that this pass does not own (${strays.join(", ")}). ` +
+          `This pass owns ${PASS_ISSUES.join(", ") || "(none)"}. Aborting ${track.id} rather than building against a corrupted board. ` +
+          `Revert the strays to agent:queued, then re-run. (If a human is genuinely mid-flight on an unrelated issue, that is what dispatch's gate 2 exists to catch before this point.)`
+      );
+  }
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     if (budget.total && budget.remaining() < RESERVE)
@@ -432,6 +487,8 @@ Default to FAIL when evidence is missing or unconvincing. Set lens to "${lens.ke
       `You are the release agent. Use the \`open-pr\` skill. Branch ${branch} (worktree ${wt}) PASSED the Definition of Done. The verifier's evidence report:
 ${JSON.stringify(verify)}
 Push the branch. If a PR for this branch already EXISTS (an earlier attempt opened one), do NOT open a second — the push updates it. Otherwise open a PR against main with --label agent:in-review${track.risk === "high" ? " and --label risk:high" : ""}. Build the PR body from the evidence bundle (the DoD table + AC checklist + screenshots/lighthouse/migration). Include "Closes ${track.issues.map((n) => `#${n}`).join(", Closes ")}". Then flip each issue label agent:in-progress → agent:in-review.
+
+The body MUST include the skill's **## 👀 Manual QA** section: the preview URL and exact path(s), a numbered happy-path walkthrough, and — the part that matters — **what the automation could NOT check**. Do NOT restate the acceptance criteria there; G3 already proved those, and a reviewer re-reading them learns nothing. Name the judgement calls instead (does it look right, read right, feel fast) and any edge case no AC asserted. Human attention is the scarcest resource in this system: spend it on what a gate cannot decide. If this track genuinely has nothing to eyeball, say so in one line.
 
 THEN WAIT FOR CI AND REPORT WHAT IT SAID, NOT WHAT YOU BELIEVE:
 \`gh pr checks <number> --watch --fail-fast\`, then read the conclusion of the "Format, Lint, Typecheck, Build" check. Put it in checkConclusion verbatim (success | failure | timed_out | none). If it is not success, pull the failing step and its error with \`gh run view <run-id> --log-failed\` and put that in checkSummary. Do not summarise it as "probably unrelated" and do not claim success you did not observe. Return strictly the schema.`,
