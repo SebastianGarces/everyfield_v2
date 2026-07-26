@@ -62,6 +62,9 @@ Available components: https://ui.shadcn.com/docs/components
 | Email/notification features | `.agents/skills/email-best-practices/`, `.agents/skills/resend/` |
 | UI/UX implementation | `.agents/skills/ui-ux-pro-max/`, `.agents/skills/web-design-guidelines/` |
 | Proving a UI change works in a browser | `.claude/skills/browser-validation/SKILL.md` |
+| A fuzzy ask, before writing a spec | `.claude/skills/grilling/SKILL.md` |
+| A merge/rebase conflict (esp. wave branches) | `.claude/skills/resolving-merge-conflicts/SKILL.md` |
+| Adding a skill — who may invoke it | `ops/agent-os/invocation.md` |
 | React performance patterns | `.agents/skills/vercel-react-best-practices/` |
 | Feature requirements | `product-docs/features/{feature-name}/frd.md` |
 

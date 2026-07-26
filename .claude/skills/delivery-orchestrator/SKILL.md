@@ -1,7 +1,13 @@
 ---
 name: delivery-orchestrator
-description: The PM-facing entry point of the Agent Delivery OS. Use when the user hands you a list of things to build (with or without specs) and wants them delivered autonomously to PRs with minimal human-in-the-loop. Runs intake → token preflight → plan into file-disjoint waves → build-until-done per track → report. The human only reviews the resulting PRs.
+description: The PM-facing entry point of the Agent Delivery OS — intake → token preflight → file-disjoint waves → build-until-done per track → report. The human only reviews the resulting PRs.
+disable-model-invocation: true
 ---
+
+<!-- User-invoked on purpose: this skill creates issues, spawns implementers and opens PRs, so a
+     human starts it — never the model deciding a message looked like a build list. See
+     ops/agent-os/invocation.md. Reached via /deliver or /delivery-orchestrator. -->
+
 
 # delivery-orchestrator
 
