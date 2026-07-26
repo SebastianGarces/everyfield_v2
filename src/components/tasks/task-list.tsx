@@ -4,8 +4,8 @@ import { ListChecks } from "lucide-react";
 import {
   BulkActionsBar,
   TaskGroupSelectAll,
-  TaskSelectCheckbox,
   TaskSelectionProvider,
+  TaskSelectionRow,
 } from "./bulk-actions";
 import { TaskCard } from "./task-card";
 
@@ -157,7 +157,9 @@ export function TaskList({
       <div className="space-y-6">
         {groups.map((group) => (
           <div key={group.label} className="space-y-2">
-            <div className="flex items-center gap-2">
+            {/* gap-1 lines the group checkbox up with the per-row ones below,
+                which sit in a gutter of the same width. */}
+            <div className="flex items-center gap-1">
               <TaskGroupSelectAll
                 taskIds={group.tasks.map((task) => task.id)}
                 label={group.label}
@@ -170,21 +172,20 @@ export function TaskList({
             </div>
             <div className="space-y-2">
               {group.tasks.map((task) => (
-                <div key={task.id} className="flex items-start gap-2">
-                  <div className="pt-5">
-                    <TaskSelectCheckbox taskId={task.id} title={task.title} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <TaskCard
-                      task={task}
-                      personNote={
-                        task.relatedType === "person" && task.relatedId
-                          ? (personNotes?.[task.relatedId] ?? null)
-                          : null
-                      }
-                    />
-                  </div>
-                </div>
+                <TaskSelectionRow
+                  key={task.id}
+                  taskId={task.id}
+                  title={task.title}
+                >
+                  <TaskCard
+                    task={task}
+                    personNote={
+                      task.relatedType === "person" && task.relatedId
+                        ? (personNotes?.[task.relatedId] ?? null)
+                        : null
+                    }
+                  />
+                </TaskSelectionRow>
               ))}
             </div>
           </div>

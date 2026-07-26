@@ -130,26 +130,94 @@ export function TaskSelectionProvider({
 // Selection controls
 // ============================================================================
 
-/** Per-row selection checkbox, rendered beside each task card. */
-export function TaskSelectCheckbox({
+/**
+ * A selection checkbox inside a padded label.
+ *
+ * The label matters twice over. It lifts the hit area from the checkbox's own
+ * 16px to a comfortable target, and — because `button` is a labelable element —
+ * clicking anywhere in that padding activates the checkbox, with no risk of a
+ * double toggle (a label does nothing for events targeted at its own labelable
+ * descendant).
+ */
+function SelectionCheckbox({
+  id,
+  checked,
+  onToggle,
+  label,
+  className,
+  testId,
+  taskId,
+}: {
+  id: string;
+  checked: boolean | "indeterminate";
+  onToggle: () => void;
+  label: string;
+  className?: string;
+  testId: string;
+  taskId?: string;
+}) {
+  return (
+    <label
+      htmlFor={id}
+      className="flex cursor-pointer items-center justify-center p-2"
+    >
+      <Checkbox
+        id={id}
+        checked={checked}
+        onCheckedChange={onToggle}
+        className={cn("cursor-pointer", className)}
+        aria-label={label}
+        data-testid={testId}
+        data-task-id={taskId}
+      />
+    </label>
+  );
+}
+
+/**
+ * One selectable row: a selection gutter, then the task card itself.
+ *
+ * The row — not just the little box — carries the selected state. Each card
+ * already renders its own checkbox to COMPLETE a task, so a bare second
+ * checkbox a couple of dozen pixels away would be two identical squares on one
+ * line where one ticks a box and the other finishes a piece of work. Painting
+ * the whole row on select makes the two unmistakable at a glance: selection
+ * lights up the row, completion strikes through the title.
+ */
+export function TaskSelectionRow({
   taskId,
   title,
+  children,
 }: {
   taskId: string;
   title: string;
+  children: React.ReactNode;
 }) {
   const { isSelected, setSelected } = useTaskSelection();
   const checked = isSelected(taskId);
 
   return (
-    <Checkbox
-      checked={checked}
-      onCheckedChange={(state) => setSelected(taskId, state === true)}
-      className="cursor-pointer"
-      aria-label={`Select task: ${title}`}
-      data-testid="task-select"
+    <div
+      className={cn(
+        "flex items-start gap-1 rounded-lg transition-colors",
+        checked && "bg-primary/5 ring-primary/50 ring-2"
+      )}
+      data-testid="task-row"
       data-task-id={taskId}
-    />
+      data-selected={checked ? "true" : "false"}
+    >
+      <div className="pt-4">
+        <SelectionCheckbox
+          id={`task-select-${taskId}`}
+          checked={checked}
+          onToggle={() => setSelected(taskId, !checked)}
+          label={`Select task: ${title}`}
+          testId="task-select"
+          taskId={taskId}
+        />
+      </div>
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
   );
 }
 
@@ -172,12 +240,13 @@ export function TaskGroupSelectAll({
       : false;
 
   return (
-    <Checkbox
+    <SelectionCheckbox
+      id={`task-group-select-${label.replace(/\W+/g, "-").toLowerCase()}`}
       checked={checked}
-      onCheckedChange={() => setManySelected(taskIds, !allSelected)}
-      className="data-[state=indeterminate]:bg-primary/40 data-[state=indeterminate]:text-primary-foreground data-[state=indeterminate]:border-primary cursor-pointer"
-      aria-label={`Select all tasks in ${label}`}
-      data-testid="task-group-select-all"
+      onToggle={() => setManySelected(taskIds, !allSelected)}
+      label={`Select all tasks in ${label}`}
+      className="data-[state=indeterminate]:bg-primary/40 data-[state=indeterminate]:text-primary-foreground data-[state=indeterminate]:border-primary"
+      testId="task-group-select-all"
     />
   );
 }
