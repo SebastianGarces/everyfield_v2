@@ -7,13 +7,13 @@
 # Done needs no mirroring: two Project workflows are enabled by default and already set Status to
 # Done when an issue closes or its PR merges.
 #
-# SETUP REQUIRED (see product-docs/board-design-2026-07.md §9):
-#   1. Create the user-owned Project "EveryField Delivery".
-#   2. Give its Status single-select these options, spelled exactly as in STATUS_BY_LABEL below.
-#   3. Create a PAT with the `project` scope and store it as the repo secret PROJECT_TOKEN.
-#      GITHUB_TOKEN CANNOT write a user-owned Project v2 — this is the most likely reason the
-#      mirror appears to silently do nothing.
-#   4. Set PROJECT_NUMBER below.
+# SETUP (see product-docs/board-design-2026-07.md §9):
+#   [x] Project "EveryField Delivery" created — user-owned, number 1
+#   [x] Status single-select carries the six options in the case statement below, spelled exactly
+#   [x] All open work items backfilled onto the board
+#   [ ] A PAT with the `project` scope stored as the repo secret PROJECT_TOKEN.
+#       GITHUB_TOKEN CANNOT write a user-owned Project v2 — this is the most likely reason the
+#       mirror appears to silently do nothing. Until it exists, this job no-ops.
 #
 # Until PROJECT_TOKEN exists the job exits cleanly with a notice rather than failing: a missing
 # board must never turn a PR red.
@@ -65,12 +65,16 @@ jobs:
           status=""
           case "$labels" in
             *"agent:queued"*)      status="Todo" ;;
-            *"agent:in-progress"*) status="In progress" ;;
+            *"agent:in-progress"*) status="In Progress" ;;
             *"agent:in-review"*)   status="Pending PR review" ;;
             *"agent:blocked"*)     status="Blocked" ;;
             *"needs-spec"*)        status="Backlog" ;;
           esac
 
+          # No mapped label means the issue is not a work item: `feature` parents are indexes,
+          # `decision` issues close by a ruling, `deferred` ones are off the roadmap. They stay off
+          # the board on purpose — a kanban of things nobody can pick up is noise. Feature grouping
+          # is still available via the built-in "Parent issue" field on the children.
           if [ -z "$status" ]; then
             echo "No mapped label on #$ISSUE — leaving board untouched."
             exit 0
