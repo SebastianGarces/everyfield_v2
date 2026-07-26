@@ -1,11 +1,12 @@
 // ============================================================================
-// /phase — the planter's Plant Intelligence surface (PE-001/005/007/011/014/015/016).
+// /phase — the planter's Plant Intelligence surface (PE-001/005/007/011/014/015/016/023).
 //
 // Server component. Reads the LATEST CACHED assessment with ZERO LLM calls on
 // load (getLatestAssessment, PE-011), renders the planter-audience Focus panel
 // (insights ordered by rank, with severity, body, cited facts, wiki links, and
-// the as-of date + what-changed delta from PE-016), the soft-gated phase control
-// + advisory readiness (PE-001/015), and the self-attestation toggles (PE-005).
+// the as-of date + what-changed delta from PE-016), the CSF scorecard projected
+// from that same snapshot (PE-023), the soft-gated phase control + advisory
+// readiness (PE-001/015), and the self-attestation toggles (PE-005).
 //
 // Auth: this is the planter-facing surface — only planters with a church see it.
 // Oversight users are sent to their aggregate plant-health surface instead.
@@ -14,6 +15,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { redirect } from "next/navigation";
 
+import { CsfScorecard } from "@/components/phase-engine/csf-scorecard";
 import { FocusPanel } from "@/components/phase-engine/focus-panel";
 import {
   readBooleanSignals,
@@ -26,7 +28,10 @@ import { db } from "@/db";
 import { churches, insightFeedback } from "@/db/schema";
 import type { InsightFeedbackRating } from "@/db/schema";
 import { getCurrentSession } from "@/lib/auth";
-import { getLatestAssessment } from "@/lib/phase-engine/assessment";
+import {
+  buildCsfScorecard,
+  getLatestAssessment,
+} from "@/lib/phase-engine/assessment";
 import { listManualSignals } from "@/lib/phase-engine/signals/attestation-service";
 import { getPhaseReadiness } from "@/lib/phase-engine/transitions";
 
@@ -103,6 +108,13 @@ export default async function PhasePage() {
   const delta = latest ? readDelta(latest.assessment.factSnapshot) : null;
   const booleanSignals = readBooleanSignals(manualSignals);
 
+  // The CSF scorecard (PE-023) is a pure projection of the SAME snapshot the
+  // Focus panel renders — built here rather than re-read, so the two halves of
+  // the page can never disagree and the page still costs one assessment read.
+  // Null when the plant has never completed an assessment; the component turns
+  // that into a cold-start state rather than eight empty rows.
+  const scorecard = buildCsfScorecard(latest, "planter");
+
   return (
     <div className="container mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
       <header>
@@ -116,7 +128,10 @@ export default async function PhasePage() {
       </header>
 
       <div className="grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2">
+        {/* Scorecard first, focus list second: the breakdown says WHERE the
+            plant stands, the focus list says what to do about it. */}
+        <div className="space-y-6 lg:col-span-2">
+          <CsfScorecard scorecard={scorecard} />
           <FocusPanel
             assessment={latest?.assessment ?? null}
             insights={planterInsights}
