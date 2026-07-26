@@ -54,6 +54,7 @@
 | People list | `(dash)/people/page.tsx` | Route `/people` |
 | Person detail | `(dash)/people/[id]/page.tsx` | Route `/people/[id]` |
 | Activity tab | `(dash)/people/[id]/activity/page.tsx` | Route `/people/[id]/activity` |
+| Teams & Training tab | `(dash)/people/[id]/teams/page.tsx` → `ministry-teams/service.ts:getPersonTeams()` + `getPersonTraining()` | Route `/people/[id]/teams` |
 | Create person | `(dash)/people/actions.ts:createPersonAction()` | Form submit |
 | Update person | `(dash)/people/actions.ts:updatePersonAction()` | Form submit |
 | Delete person | `(dash)/people/actions.ts:deletePersonAction()` | User action |
