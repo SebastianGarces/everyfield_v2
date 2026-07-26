@@ -28,8 +28,15 @@
 // 2. COLOUR IS NEVER THE ONLY CUE. Every standing carries an icon, a text
 //    label, and a tint — matching the attention scale already established on
 //    the oversight cards (components/phase-engine/plant-health-card.tsx) and
-//    reusing its tokens, which were contrast-checked there. The card survives
-//    greyscale, colour-vision differences and forced-colors.
+//    reusing its tokens. The card survives greyscale, colour-vision differences
+//    and forced-colors.
+//
+//    What plant-health-card verified is *ink-on-tint* (the `-ink` pairs) and
+//    full-foreground body text over a tint — NOT muted grey on a tint, which
+//    that file explicitly rejects at plant-health-card.tsx:174-177 because it
+//    measures below AA. So secondary text on a tinted tile here cannot borrow
+//    `text-muted-foreground`; it gets a per-standing `meta` ink instead, and
+//    every tint was re-measured in both themes (see STANDING_STYLES).
 //
 // 3. THE 8 TILES NEVER MOVE. They render in rubric order (CSF-1 → CSF-8), not
 //    urgency order. A scorecard is a fixed reference frame the planter learns
@@ -75,7 +82,39 @@ interface StandingStyle {
   container: string;
   /** Ink for the icon + label pair. */
   ink: string;
+  /**
+   * Ink for the tile's secondary text (the "CSF n" eyebrow, the cited-facts
+   * line, the overflow count).
+   *
+   * This is per-standing rather than a single shared class because a tint
+   * changes what secondary text may be. `text-muted-foreground` is only legal
+   * on the two untinted standings; over a tint it drops below AA:
+   *
+   *   muted grey on…              light   dark
+   *   bg-attention-high/12         3.89    6.15   ✗ light
+   *   bg-attention-medium/18       4.00    5.04   ✗ light
+   *   bg-emerald-500/10            4.30    5.99   ✗ light
+   *   no tint (card)               4.73    6.91   ✓
+   *
+   * All of this text is under 18.66px, so the large-text exemption does not
+   * apply — it needs 4.5:1. The tinted standings therefore use a faded
+   * foreground, which clears it with room in both themes while staying a
+   * visible step below the tile's body copy:
+   *
+   *   text-foreground/70 on…       light   dark
+   *   bg-attention-high/12         6.96    8.12   ✓
+   *   bg-attention-medium/18       7.06    6.98   ✓
+   *   bg-emerald-500/10            7.31    7.96   ✓
+   *
+   * Fading the foreground rather than dropping the tint is deliberate: the
+   * tint is the standing's third redundant cue (constraint 2) and carries real
+   * information, so it stays.
+   */
+  meta: string;
 }
+
+/** Secondary-text ink for tinted tiles. See `StandingStyle.meta`. */
+const META_ON_TINT = "text-foreground/70";
 
 const STANDING_STYLES: Record<CsfStanding, StandingStyle> = {
   attention: {
@@ -83,12 +122,14 @@ const STANDING_STYLES: Record<CsfStanding, StandingStyle> = {
     Icon: TriangleAlert,
     container: "border-attention-high/45 bg-attention-high/12",
     ink: "text-attention-high-ink",
+    meta: META_ON_TINT,
   },
   watch: {
     label: "Worth a look",
     Icon: Eye,
     container: "border-attention-medium/45 bg-attention-medium/18",
     ink: "text-attention-medium-ink",
+    meta: META_ON_TINT,
   },
   noted: {
     // No tint: the absence of colour is a real step on the ramp, not a gap.
@@ -96,12 +137,14 @@ const STANDING_STYLES: Record<CsfStanding, StandingStyle> = {
     Icon: Info,
     container: "border-border",
     ink: "text-foreground/80",
+    meta: "text-muted-foreground",
   },
   strength: {
     label: "Going well",
     Icon: CircleCheck,
     container: "border-emerald-600/40 bg-emerald-500/10",
     ink: "text-emerald-700 dark:text-emerald-400",
+    meta: META_ON_TINT,
   },
   not_raised: {
     // Dashed border, no tint: visibly a placeholder rather than a verdict.
@@ -109,6 +152,7 @@ const STANDING_STYLES: Record<CsfStanding, StandingStyle> = {
     Icon: Minus,
     container: "border-border border-dashed",
     ink: "text-muted-foreground",
+    meta: "text-muted-foreground",
   },
 };
 
@@ -138,7 +182,12 @@ function FactorTile({ factor }: { factor: CsfFactorStanding }) {
     <li className={cn("rounded-lg border p-3.5", style.container)}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-muted-foreground text-[0.6875rem] font-medium tracking-wide tabular-nums">
+          <p
+            className={cn(
+              "text-[0.6875rem] font-medium tracking-wide tabular-nums",
+              style.meta
+            )}
+          >
             CSF {factor.number}
           </p>
           <h3 className="mt-0.5 text-sm leading-snug font-semibold text-pretty">
@@ -165,13 +214,13 @@ function FactorTile({ factor }: { factor: CsfFactorStanding }) {
             {lead.title}
           </p>
           {shownFacts.length > 0 && (
-            <p className="text-muted-foreground mt-1.5 text-xs tabular-nums">
+            <p className={cn("mt-1.5 text-xs tabular-nums", style.meta)}>
               Based on {shownFacts.join(", ")}
               {hiddenFactCount > 0 && ` +${hiddenFactCount} more`}
             </p>
           )}
           {rest.length > 0 && (
-            <p className="text-muted-foreground mt-1 text-xs">
+            <p className={cn("mt-1 text-xs", style.meta)}>
               {rest.length === 1
                 ? "1 more observation"
                 : `${rest.length} more observations`}{" "}
@@ -238,7 +287,10 @@ export function CsfScorecard({ scorecard }: CsfScorecardProps) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Critical success factors</CardTitle>
+          {/* h2 for the same reason as the populated card below. */}
+          <CardTitle>
+            <h2>Critical success factors</h2>
+          </CardTitle>
           <CardDescription>
             Your plant hasn&apos;t been assessed yet. Once the first assessment
             runs, the eight critical success factors appear here with how each
@@ -263,7 +315,13 @@ export function CsfScorecard({ scorecard }: CsfScorecardProps) {
       <CardHeader>
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
-            <CardTitle>Critical success factors</CardTitle>
+            {/* An h2, so the page reads h1 → h2 → h3 (the tiles). CardTitle is
+                a plain div; Tailwind's preflight resets heading size, weight
+                and margin, so nesting the real heading inside it changes the
+                outline without changing a pixel. */}
+            <CardTitle>
+              <h2>Critical success factors</h2>
+            </CardTitle>
             <CardDescription>
               How the latest assessment reads each of the eight.{" "}
               {summaryLine(scorecard)}
