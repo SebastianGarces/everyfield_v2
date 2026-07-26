@@ -745,7 +745,17 @@ Per [Core Data Contracts](../../core-data-contracts.md):
 - Planters always have full access regardless of team leader assignment.
 - Write operations validate the user's role and team leader status before proceeding.
 
-> **Implementation status:** Not yet enforced. Shipped server actions validate the session and `church_id` tenancy only; there is no role or team-leader scoping check. Whether the planter-only access model is acceptable for MVP is an open decision.
+> **⛔ Implementation status: NOT ENFORCED — this is a live authorization hole.** Shipped server
+> actions validate the session and `church_id` tenancy only; there is no role or team-leader scoping
+> check. **Any authenticated user in a church can mutate any team in that church.**
+>
+> **Decided 2026-07-26 (#12a): the table above is canon — team-leader scoping.** This was never a
+> product decision to make; the only question was which model to enforce, and it is the one already
+> written here. Tracked as a `risk:high` issue. The `is_leadership_role` flag already in the schema
+> is the hook to build on.
+>
+> Until it lands, treat every write path in this feature as unauthorized-by-default when reasoning
+> about tenancy.
 
 ---
 

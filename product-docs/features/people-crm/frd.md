@@ -52,8 +52,8 @@ People / CRM Management tracks all individuals from initial contact through comm
 | P-018 | Duplicate detection | Identify and merge duplicate records |
 | P-019 | Quick add | Simplified form for rapid contact entry |
 | P-020 | Conversion metrics | Display conversion rates between pipeline stages |
-| P-021 | Team assignment visibility | Show ministry team assignments on person profile |
-| P-022 | Training status display | Show training completion on person profile |
+| P-021 | Team assignment visibility | Show ministry team assignments on person profile. **UN-DEFERRED 2026-07-26** (decision #13) — the "blocked by F8" rationale is stale; F8 shipped, and `getPersonTeams` + `getPersonTeamsAction` already exist. Frontend-only work: replace the placeholder Teams tab. |
+| P-022 | Training status display | Show training completion on person profile. **UN-DEFERRED 2026-07-26** (decision #13) — same unit as P-021. |
 
 ### Should Have (continued)
 

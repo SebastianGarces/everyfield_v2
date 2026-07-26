@@ -78,7 +78,7 @@ Memory is updated when changes affect:
 - **Contracts** - Schema, API, or config changes
 - **Invariants** - Security, tenancy, or auth rules
 
-See the WIP skill (`.claude/skills/work-in-progress/SKILL.md`) for memory maintenance workflow during feature implementation.
+See the `memory-maintenance` skill (`.claude/skills/memory-maintenance/SKILL.md`) for the workflow: what to check when planning, what to update during implementation, and the before-commit check. It is part of DoD gate G4.
 
 ## Size Budget
 

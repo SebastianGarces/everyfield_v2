@@ -7,6 +7,17 @@
 
 ---
 
+> ## ✖ CUT — decided 2026-07-26
+>
+> **F10 is off the roadmap.** Not deferred — cut. Zero code exists and nav has been commented out
+> since Sprint A. This document is retained as a record of what was once scoped, not as a plan.
+>
+> Its 26 requirements must **not** be reported as gaps. Do not build against this FRD without an
+> explicit decision to reinstate the feature. Decision #3 in
+> [`docs-audit-2026-07.md`](../../docs-audit-2026-07.md).
+
+---
+
 ## References
 
 - [Product Brief](../../product-brief.md) - Core concepts and domain language

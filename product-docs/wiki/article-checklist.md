@@ -7,10 +7,13 @@ This is a living document tracking all wiki articles derived from the [Launch Pl
 > source tree no longer exists, so the **File Path columns below are historical identifiers, not
 > files on disk**. Articles are served from the DB via `src/lib/wiki/get-article.ts`. The
 > Frontmatter Reference, Component Tracker, and completion checklists remain the authoring
-> contract (used by `.claude/skills/wiki-articles`). Where new articles — e.g. the unbuilt
-> templates T.1–T.9 — get authored (directly in the DB, or a recreated `wiki/` tree re-run through
-> the migration script) is an open decision; update this note and the wiki-articles skill once
-> decided.
+> contract. The `wiki-articles` skill was **archived** on 2026-07-26 (decision #18) to
+> `ops/archive/skills/wiki-articles/` — its MDX mechanics were dead, though its style guidance is
+> still the standard.
+>
+> **How new articles get authored is still undecided** — directly in the DB, a seed/upsert script, or
+> an in-product editor. This blocks the templates/downloads content kept in decision #6, and the
+> logistics articles that go with it. Revive the skill against whichever path is chosen.
 
 **Status Key:**
 - ✅ Done
