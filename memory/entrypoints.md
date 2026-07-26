@@ -121,6 +121,8 @@
 
 **Events:** `meeting.attendance.recorded` → prospect → attendee auto-advance (vision meetings only), `meeting.attendance.finalized` → follow-up/evaluation task creation + Phase Engine dirty-marking, `meeting.evaluation.completed` → auto-completes evaluation task. Handlers registered in `src/lib/events/subscriptions.ts`.
 
+**Finalize contract:** `finalizeAttendance()` returns `{ outcome: finalized | already_finalized | reconciled, total, attendeeIds }` and throws `FinalizeAttendanceError` if follow-up generation failed (meeting left un-finalized, safe to retry). Atomicity rules: `memory/invariants.md` → Transactions / Atomicity.
+
 ---
 
 ## Communication

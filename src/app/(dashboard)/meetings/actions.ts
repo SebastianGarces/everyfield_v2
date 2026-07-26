@@ -41,6 +41,7 @@ import {
   createMeeting,
   deleteMeeting,
   finalizeAttendance,
+  FinalizeAttendanceError,
   recordAttendanceBatch,
   removeAttendee,
   updateChecklistItem,
@@ -504,6 +505,15 @@ export async function removeAttendeeAction(
   }
 }
 
+/**
+ * Finalize attendance for a meeting.
+ *
+ * `finalizeAttendance` is idempotent and never leaves a meeting half-finalized
+ * (see the block comment above it in `src/lib/meetings/service.ts`), so this
+ * action is safe to retry: a repeat click reconciles the count at most, and a
+ * downstream failure leaves the meeting un-finalized with a message that says
+ * so rather than a generic error.
+ */
 export async function finalizeAttendanceAction(
   meetingId: string
 ): Promise<ActionResult<void>> {
@@ -523,6 +533,12 @@ export async function finalizeAttendanceAction(
     console.error("finalizeAttendanceAction error:", error);
     if (error instanceof Error && error.message === "Unauthorized")
       return { success: false, error: "You must be logged in" };
+    if (error instanceof FinalizeAttendanceError)
+      return {
+        success: false,
+        error:
+          "We couldn't create the follow-up tasks, so this meeting was not finalized. Please try again.",
+      };
     return {
       success: false,
       error: "An unexpected error occurred while finalizing attendance",

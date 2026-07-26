@@ -2,6 +2,15 @@
 
 Stable truths that must not be violated.
 
+## Transactions / Atomicity
+
+- `drizzle-orm/neon-http` has **no interactive transactions** — `db.transaction()` throws at runtime. Never use it.
+- Writes all known up front: `atomicWrite([...])` (`src/db/index.ts`) — a Neon batched transaction, all-or-nothing.
+- Writes interleaved with reads/events/another feature: nothing can span them. Write the durable "already happened" marker **last** and make every earlier step idempotent, so a failure is retryable rather than half-applied.
+- Reference: `finalizeAttendance()` emits downstream first, then compare-and-sets `church_meetings.actual_attendance` (written only there; non-null = already finalized = its idempotency key), so a meeting is never finalized without its follow-up tasks. `meeting.attendance.finalized` is the one event emitted **strictly** — handler failures reach the emitter instead of being swallowed.
+
+**Source:** `src/db/index.ts`, `src/lib/meetings/service.ts`, `src/lib/events/event-bus.ts`
+
 ## Multi-Tenancy
 
 - All feature data includes `church_id` for tenant isolation

@@ -136,6 +136,17 @@ export async function autoCompleteTasksByEvent(
  *    - Priority: high
  *    - Due: 1 day from now (24 hours -- prompt reflection)
  *    - Related: meeting (deep-links to /meetings/[id]/evaluation)
+ *
+ * IDEMPOTENT (MEET-011). Both task kinds are written by a single INSERT, and
+ * the evaluation task is unique per meeting, so its existence is a reliable
+ * "this handler already ran for this meeting" marker. A replay — a retried
+ * finalize, or two finalizes racing — therefore creates nothing the second
+ * time instead of a duplicate set of follow-ups.
+ *
+ * THROWS on failure. `finalizeAttendance` only marks the meeting finalized
+ * after this resolves, so swallowing an error here would strand a finalized
+ * meeting with no follow-up tasks. Letting it propagate leaves the meeting
+ * un-finalized and the whole operation safely retryable.
  */
 export async function handleMeetingAttendanceFinalized(
   meetingId: string,
@@ -148,115 +159,139 @@ export async function handleMeetingAttendanceFinalized(
     return;
   }
 
-  try {
-    // Look up the planter (church creator) to assign tasks to them
-    const planter = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(and(eq(users.churchId, churchId), eq(users.role, "planter")))
-      .limit(1);
+  // Idempotency guard — see the note above.
+  const alreadyGenerated = await db
+    .select({ id: tasks.id })
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.churchId, churchId),
+        eq(tasks.relatedType, "meeting"),
+        eq(tasks.relatedId, meetingId),
+        eq(tasks.completionEvent, "meeting.evaluation.completed"),
+        isNull(tasks.deletedAt)
+      )
+    )
+    .limit(1);
 
-    const planterId = planter[0]?.id;
-    if (!planterId) {
-      console.warn(
-        `[EVENT] handleMeetingAttendanceFinalized: no planter found for church ${churchId}`
+  if (alreadyGenerated.length > 0) {
+    if (process.env.NODE_ENV === "development") {
+      console.log(
+        `[EVENT] Follow-up tasks already exist for meeting ${meetingId} — skipping (idempotent replay)`
       );
-      return;
     }
+    return;
+  }
 
-    const now = new Date();
-    const tasksToCreate: NewTask[] = [];
+  // Look up the planter (church creator) to assign tasks to them
+  const planter = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(and(eq(users.churchId, churchId), eq(users.role, "planter")))
+    .limit(1);
 
-    // -----------------------------------------------------------------------
-    // 1. Per-attendee follow-up tasks (48-hour due date)
-    // -----------------------------------------------------------------------
-    if (attendeeIds.length > 0) {
-      // Look up person names for task titles
-      const attendees = await db
-        .select({
-          id: persons.id,
-          firstName: persons.firstName,
-          lastName: persons.lastName,
-        })
-        .from(persons)
-        .where(and(eq(persons.churchId, churchId), isNull(persons.deletedAt)));
-
-      const attendeeMap = new Map(
-        attendees.map((a) => [a.id, `${a.firstName} ${a.lastName}`])
-      );
-
-      const followUpDueDate = new Date(now);
-      followUpDueDate.setDate(followUpDueDate.getDate() + 2);
-      const followUpDueDateStr = followUpDueDate.toISOString().split("T")[0];
-
-      for (const personId of attendeeIds) {
-        const personName = attendeeMap.get(personId) ?? "Unknown";
-        tasksToCreate.push({
-          churchId,
-          title: `Follow up with ${personName}`,
-          status: "not_started",
-          priority: "high",
-          category: "follow_up",
-          dueDate: followUpDueDateStr,
-          assignedToId: planterId,
-          relatedType: "person",
-          relatedId: personId,
-          createdById: planterId,
-        });
-      }
-    }
-
-    // -----------------------------------------------------------------------
-    // 2. Meeting evaluation task (24-hour due date)
-    // -----------------------------------------------------------------------
-    // Look up the meeting title/date for the task title
-    const meeting = await db
-      .select({
-        id: churchMeetings.id,
-        title: churchMeetings.title,
-      })
-      .from(churchMeetings)
-      .where(eq(churchMeetings.id, meetingId))
-      .limit(1);
-
-    const meetingInfo = meeting[0];
-    const meetingLabel = meetingInfo?.title ?? `Vision Meeting`;
-
-    const evalDueDate = new Date(now);
-    evalDueDate.setDate(evalDueDate.getDate() + 1);
-    const evalDueDateStr = evalDueDate.toISOString().split("T")[0];
-
-    tasksToCreate.push({
-      churchId,
-      title: `Complete evaluation for ${meetingLabel}`,
-      status: "not_started",
-      priority: "high",
-      category: "vision_meeting",
-      dueDate: evalDueDateStr,
-      assignedToId: planterId,
-      relatedType: "meeting",
-      relatedId: meetingId,
-      createdById: planterId,
-      completionEvent: "meeting.evaluation.completed",
-    });
-
-    // -----------------------------------------------------------------------
-    // Bulk insert all tasks
-    // -----------------------------------------------------------------------
-    if (tasksToCreate.length > 0) {
-      await db.insert(tasks).values(tasksToCreate);
-
-      if (process.env.NODE_ENV === "development") {
-        console.log(
-          `[EVENT] Created ${tasksToCreate.length} follow-up task(s) for meeting ${meetingId} ` +
-            `(${attendeeIds.length} attendee follow-ups + 1 evaluation)`
-        );
-      }
-    }
-  } catch (error) {
-    console.error(
-      `[EVENT] Failed to create follow-up tasks for meeting ${meetingId}:`,
-      error
+  const planterId = planter[0]?.id;
+  if (!planterId) {
+    // Deliberately NOT an error: with no planter there is nobody to assign the
+    // tasks to, and that is a stable data condition rather than a transient
+    // failure. Throwing would block the planter's meeting from ever being
+    // finalized instead of eventually succeeding.
+    console.warn(
+      `[EVENT] handleMeetingAttendanceFinalized: no planter found for church ${churchId}`
     );
+    return;
+  }
+
+  const now = new Date();
+  const tasksToCreate: NewTask[] = [];
+
+  // -----------------------------------------------------------------------
+  // 1. Per-attendee follow-up tasks (48-hour due date)
+  // -----------------------------------------------------------------------
+  if (attendeeIds.length > 0) {
+    // Look up person names for task titles
+    const attendees = await db
+      .select({
+        id: persons.id,
+        firstName: persons.firstName,
+        lastName: persons.lastName,
+      })
+      .from(persons)
+      .where(and(eq(persons.churchId, churchId), isNull(persons.deletedAt)));
+
+    const attendeeMap = new Map(
+      attendees.map((a) => [a.id, `${a.firstName} ${a.lastName}`])
+    );
+
+    const followUpDueDate = new Date(now);
+    followUpDueDate.setDate(followUpDueDate.getDate() + 2);
+    const followUpDueDateStr = followUpDueDate.toISOString().split("T")[0];
+
+    for (const personId of attendeeIds) {
+      const personName = attendeeMap.get(personId) ?? "Unknown";
+      tasksToCreate.push({
+        churchId,
+        title: `Follow up with ${personName}`,
+        status: "not_started",
+        priority: "high",
+        category: "follow_up",
+        dueDate: followUpDueDateStr,
+        assignedToId: planterId,
+        relatedType: "person",
+        relatedId: personId,
+        createdById: planterId,
+      });
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // 2. Meeting evaluation task (24-hour due date)
+  // -----------------------------------------------------------------------
+  // Look up the meeting title/date for the task title
+  const meeting = await db
+    .select({
+      id: churchMeetings.id,
+      title: churchMeetings.title,
+    })
+    .from(churchMeetings)
+    .where(eq(churchMeetings.id, meetingId))
+    .limit(1);
+
+  const meetingInfo = meeting[0];
+  const meetingLabel = meetingInfo?.title ?? `Vision Meeting`;
+
+  const evalDueDate = new Date(now);
+  evalDueDate.setDate(evalDueDate.getDate() + 1);
+  const evalDueDateStr = evalDueDate.toISOString().split("T")[0];
+
+  tasksToCreate.push({
+    churchId,
+    title: `Complete evaluation for ${meetingLabel}`,
+    status: "not_started",
+    priority: "high",
+    category: "vision_meeting",
+    dueDate: evalDueDateStr,
+    assignedToId: planterId,
+    relatedType: "meeting",
+    relatedId: meetingId,
+    createdById: planterId,
+    completionEvent: "meeting.evaluation.completed",
+  });
+
+  // -----------------------------------------------------------------------
+  // Bulk insert all tasks
+  // -----------------------------------------------------------------------
+  // One statement, so the follow-ups and the evaluation task land together or
+  // not at all. That is what makes the guard at the top of this function a
+  // sound idempotency marker.
+  if (tasksToCreate.length > 0) {
+    await db.insert(tasks).values(tasksToCreate);
+
+    if (process.env.NODE_ENV === "development") {
+      console.log(
+        `[EVENT] Created ${tasksToCreate.length} follow-up task(s) for meeting ${meetingId} ` +
+          `(${attendeeIds.length} attendee follow-ups + 1 evaluation)`
+      );
+    }
   }
 }

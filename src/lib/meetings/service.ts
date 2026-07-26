@@ -8,10 +8,12 @@ import {
   ministryTeams,
   persons,
   teamMemberships,
+  type AttendanceType,
   type ChurchMeeting,
   type MeetingChecklistItem,
   type MeetingEvaluation,
   type MeetingStatus,
+  type MeetingType,
   type NewChurchMeeting,
   type NewLocation,
 } from "@/db/schema";
@@ -22,7 +24,7 @@ import type {
   MeetingCreateInput,
   MeetingUpdateInput,
 } from "@/lib/validations/meetings";
-import { and, asc, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import {
   emitAttendanceRecorded,
   emitAttendanceFinalized,
@@ -670,65 +672,245 @@ export async function getAttendanceSummary(
   };
 }
 
+// ============================================================================
+// Attendance finalization (MEET-011)
+// ============================================================================
+//
+// Finalizing a meeting is not one write. It is: count who attended, advance
+// person statuses, generate follow-up + evaluation tasks, mark the plant dirty,
+// and record the count on the meeting. Those writes live in three different
+// features behind the event bus, so no single SQL transaction can cover them —
+// and the neon-http driver has no interactive transactions to offer anyway
+// (see the note in `src/db/index.ts`).
+//
+// The guarantee is built out of ordering + idempotency instead:
+//
+//   1. `church_meetings.actual_attendance` is written ONLY here. A non-null
+//      value therefore means "this meeting has already been finalized", which
+//      makes it both the durable marker and the idempotency key.
+//   2. Everything downstream runs FIRST, and the marker is written LAST. If any
+//      downstream step throws, the meeting is left exactly as it was —
+//      un-finalized — and the operation is safely retryable. A meeting can
+//      never be marked finalized without its tasks.
+//   3. Every downstream step is idempotent (person auto-advance only moves
+//      prospects; follow-up task generation skips a meeting that already has
+//      its evaluation task), so a retry converges rather than duplicating.
+//   4. The marker write is a compare-and-set on `actual_attendance IS NULL`, so
+//      two concurrent finalizes cannot both claim to have rolled forward.
+//
+// The orchestration is expressed against an injectable `FinalizeAttendanceDeps`
+// seam so the failure ordering can be unit-tested without a database.
+// ============================================================================
+
+/** Thrown when downstream generation failed and the meeting was left alone. */
+export class FinalizeAttendanceError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "FinalizeAttendanceError";
+  }
+}
+
+export type FinalizeAttendanceOutcome =
+  /** Downstream ran and this call wrote the finalized marker. */
+  | "finalized"
+  /** Already finalized; nothing re-emitted, nothing changed. */
+  | "already_finalized"
+  /** Already finalized, but attendance was edited since — count refreshed only. */
+  | "reconciled";
+
+export interface FinalizeAttendanceResult {
+  outcome: FinalizeAttendanceOutcome;
+  total: number;
+  attendeeIds: string[];
+}
+
+/** One attendance row, reduced to what finalization actually needs. */
+interface AttendedRecord {
+  personId: string;
+  attendanceType: AttendanceType | null;
+}
+
+/** The DB + event seams `runFinalizeAttendance` orchestrates. */
+export interface FinalizeAttendanceDeps {
+  loadMeeting(): Promise<{
+    type: MeetingType;
+    actualAttendance: number | null;
+  } | null>;
+  loadAttendedRecords(): Promise<AttendedRecord[]>;
+  emitRecorded(
+    meetingType: MeetingType,
+    personId: string,
+    attendanceType?: AttendanceType
+  ): Promise<void>;
+  emitFinalized(
+    meetingType: MeetingType,
+    attendeeIds: string[],
+    total: number
+  ): Promise<void>;
+  /** Compare-and-set the marker. Resolves true only if THIS call set it. */
+  commitFinalized(total: number): Promise<boolean>;
+  /** Refresh the count on an already-finalized meeting. Emits nothing. */
+  reconcileCount(total: number): Promise<void>;
+}
+
 /**
- * Finalize attendance for a meeting.
- * Updates the meeting's actual attendance count and emits events.
+ * Pure orchestration of the finalize flow (see the block comment above).
+ * Exported for unit testing; production callers use `finalizeAttendance`.
  */
-export async function finalizeAttendance(
-  churchId: string,
-  meetingId: string
-): Promise<void> {
-  // Get the meeting to know the type
-  const meeting = await getMeeting(churchId, meetingId);
+export async function runFinalizeAttendance(
+  deps: FinalizeAttendanceDeps
+): Promise<FinalizeAttendanceResult> {
+  const meeting = await deps.loadMeeting();
   if (!meeting) {
     throw new Error("Meeting not found");
   }
 
-  const allRecords = await db
-    .select()
-    .from(meetingAttendance)
-    .where(
-      and(
-        eq(meetingAttendance.churchId, churchId),
-        eq(meetingAttendance.meetingId, meetingId)
-      )
-    );
+  const attended = await deps.loadAttendedRecords();
+  const total = attended.length;
+  const attendeeIds = attended.map((r) => r.personId);
 
-  // Only count people marked as "attended" (toggled via checkbox)
-  const attendedRecords = allRecords.filter((r) => r.status === "attended");
-  const total = attendedRecords.length;
-  const attendeeIds = attendedRecords.map((r) => r.personId);
+  // --- Idempotency guard --------------------------------------------------
+  // Re-running finalize must not re-emit: that would duplicate follow-up tasks
+  // and re-run every other subscriber. If attendance was edited after the fact
+  // we still reconcile the visible count, which is a plain UPDATE with no
+  // downstream effects.
+  if (meeting.actualAttendance !== null) {
+    if (meeting.actualAttendance !== total) {
+      await deps.reconcileCount(total);
+      return { outcome: "reconciled", total, attendeeIds };
+    }
+    return { outcome: "already_finalized", total, attendeeIds };
+  }
 
-  // Update meeting's actual attendance count
-  await db
-    .update(churchMeetings)
-    .set({ actualAttendance: total, updatedAt: new Date() })
-    .where(
-      and(
-        eq(churchMeetings.churchId, churchId),
-        eq(churchMeetings.id, meetingId)
-      )
-    );
+  // --- Downstream generation (must succeed before we commit the marker) ----
+  try {
+    // Per-attendee events. F2 auto-advances prospect -> attendee for vision
+    // meetings; the handler ignores anyone who is not still a prospect, so
+    // replaying these is a no-op.
+    for (const record of attended) {
+      await deps.emitRecorded(
+        meeting.type,
+        record.personId,
+        record.attendanceType ?? undefined
+      );
+    }
 
-  // Emit per-attendee events only for those who attended
-  // (F2 subscribes to auto-advance prospect -> attendee for vision meetings)
-  for (const record of attendedRecords) {
-    await emitAttendanceRecorded(
-      meetingId,
-      meeting.type,
-      record.personId,
-      churchId,
-      record.attendanceType ?? undefined
+    // F5 creates the follow-up + evaluation tasks. Emitted strictly, so a
+    // failure lands here instead of being swallowed by the bus.
+    await deps.emitFinalized(meeting.type, attendeeIds, total);
+  } catch (error) {
+    throw new FinalizeAttendanceError(
+      "Follow-up generation failed; the meeting was left un-finalized and can be retried",
+      { cause: error }
     );
   }
 
-  // Emit finalized event (F5 subscribes to create follow-up tasks)
-  await emitAttendanceFinalized(
-    meetingId,
-    meeting.type,
-    churchId,
+  // --- Commit the marker last ---------------------------------------------
+  const committed = await deps.commitFinalized(total);
+  return {
+    outcome: committed ? "finalized" : "already_finalized",
+    total,
     attendeeIds,
-    total
+  };
+}
+
+/** Wire the production DB + event-bus seams for one meeting. */
+function createFinalizeAttendanceDeps(
+  churchId: string,
+  meetingId: string
+): FinalizeAttendanceDeps {
+  const scopeMeeting = and(
+    eq(churchMeetings.churchId, churchId),
+    eq(churchMeetings.id, meetingId)
+  );
+
+  return {
+    async loadMeeting() {
+      const [meeting] = await db
+        .select({
+          type: churchMeetings.type,
+          actualAttendance: churchMeetings.actualAttendance,
+        })
+        .from(churchMeetings)
+        .where(scopeMeeting)
+        .limit(1);
+
+      return meeting ?? null;
+    },
+
+    async loadAttendedRecords() {
+      // Only people marked "attended" (toggled via checkbox) count. Filtered in
+      // SQL rather than in JS so we never pull absent/excused rows over the wire.
+      return db
+        .select({
+          personId: meetingAttendance.personId,
+          attendanceType: meetingAttendance.attendanceType,
+        })
+        .from(meetingAttendance)
+        .where(
+          and(
+            eq(meetingAttendance.churchId, churchId),
+            eq(meetingAttendance.meetingId, meetingId),
+            eq(meetingAttendance.status, "attended")
+          )
+        );
+    },
+
+    emitRecorded(meetingType, personId, attendanceType) {
+      return emitAttendanceRecorded(
+        meetingId,
+        meetingType,
+        personId,
+        churchId,
+        attendanceType
+      );
+    },
+
+    emitFinalized(meetingType, attendeeIds, total) {
+      return emitAttendanceFinalized(
+        meetingId,
+        meetingType,
+        churchId,
+        attendeeIds,
+        total
+      );
+    },
+
+    async commitFinalized(total) {
+      // Compare-and-set: only the call that flips actual_attendance away from
+      // NULL "wins" the finalization.
+      const committed = await db
+        .update(churchMeetings)
+        .set({ actualAttendance: total, updatedAt: new Date() })
+        .where(and(scopeMeeting, isNull(churchMeetings.actualAttendance)))
+        .returning({ id: churchMeetings.id });
+
+      return committed.length > 0;
+    },
+
+    async reconcileCount(total) {
+      await db
+        .update(churchMeetings)
+        .set({ actualAttendance: total, updatedAt: new Date() })
+        .where(scopeMeeting);
+    },
+  };
+}
+
+/**
+ * Finalize attendance for a meeting: generate the downstream follow-ups, then
+ * record the attendance count on the meeting.
+ *
+ * Idempotent — calling it again on a finalized meeting reconciles the count at
+ * most, and never re-emits. Throws `FinalizeAttendanceError` if follow-up
+ * generation fails, in which case the meeting is left un-finalized.
+ */
+export async function finalizeAttendance(
+  churchId: string,
+  meetingId: string
+): Promise<FinalizeAttendanceResult> {
+  return runFinalizeAttendance(
+    createFinalizeAttendanceDeps(churchId, meetingId)
   );
 }
 
