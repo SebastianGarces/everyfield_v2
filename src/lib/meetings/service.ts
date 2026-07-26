@@ -697,6 +697,17 @@ export async function getAttendanceSummary(
 //      its evaluation task), so a retry converges rather than duplicating.
 //   4. The marker write is a compare-and-set on `actual_attendance IS NULL`, so
 //      two concurrent finalizes cannot both claim to have rolled forward.
+//   5. Ordering + idempotency make a REPLAY safe; they do not make concurrency
+//      safe on their own, because two finalizes can interleave between a
+//      downstream SELECT and its INSERT. Duplicate follow-up sets are excluded
+//      by the database instead: `tasks_meeting_evaluation_unique_idx` aborts
+//      the loser's whole INSERT (see `src/lib/tasks/events.ts`).
+//
+// Known and accepted: `meeting.attendance.recorded` is emitted non-strictly, so
+// a failed prospect -> attendee auto-advance is logged by the bus and swallowed
+// while the meeting still finalizes. That is deliberate — a status nudge must
+// not be able to block a planter from finalizing — and the next status change
+// heals it. Only follow-up generation is load-bearing enough to be strict.
 //
 // The orchestration is expressed against an injectable `FinalizeAttendanceDeps`
 // seam so the failure ordering can be unit-tested without a database.

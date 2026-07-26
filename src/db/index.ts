@@ -23,10 +23,10 @@ export type Database = typeof db;
 // must be built up front — no statement may depend on a previous one's result,
 // and nothing else (a read, an event, an external call) may interleave.
 //
-// So there are exactly two sanctioned shapes:
+// So there are exactly three sanctioned shapes:
 //
-//   1. Every write is known up front and touches only our own tables:
-//      use `atomicWrite([...])`.
+//   1. Every write is known up front and touches only our own tables: pass them
+//      all to `db.batch([...])`. Do NOT reach for `db.transaction`.
 //
 //   2. The writes must interleave with reads, events, or another feature's
 //      writes, so they cannot share one SQL transaction at all: order the work
@@ -35,25 +35,13 @@ export type Database = typeof db;
 //      leaves the operation un-marked and safely replayable instead of
 //      half-applied. `finalizeAttendance` in `src/lib/meetings/service.ts` is
 //      the reference implementation of that pattern.
+//
+//   3. Concurrency, not just retries, has to be excluded. Ordering and
+//      idempotency only make a *replay* safe; two requests interleaving can
+//      still both pass a SELECT-then-INSERT guard, because nothing in
+//      application code holds a lock between the two round trips. Push the
+//      guard into the database — a (partial) unique index — and let the write
+//      fail. `tasks_meeting_evaluation_unique_idx` is the reference example:
+//      the uniquely-indexed row shares one INSERT statement with the rows it
+//      speaks for, so the loser of a race writes nothing at all.
 // ============================================================================
-
-/** A non-empty tuple of Drizzle statements, as accepted by `db.batch`. */
-export type AtomicWriteBatch = Parameters<Database["batch"]>[0];
-
-/**
- * Run several statements inside a single Neon transaction — all of them commit
- * or none do.
- *
- * Use this instead of `db.transaction()`, which the neon-http driver does not
- * support (see the note above). Every statement must be known before the call;
- * if a later write depends on an earlier one's result, a batch cannot express
- * it and you need the ordering + idempotency pattern instead.
- *
- * `client` is injectable so callers can be unit-tested without a database.
- */
-export function atomicWrite(
-  statements: AtomicWriteBatch,
-  client: Pick<Database, "batch"> = db
-) {
-  return client.batch(statements);
-}

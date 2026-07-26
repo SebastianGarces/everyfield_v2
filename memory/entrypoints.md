@@ -1,6 +1,6 @@
 # Entrypoints
 
-> Path shorthand: `(dash)/` = `(dash)/`
+> Path shorthand: `(dash)/` = `src/app/(dashboard)/`
 
 ## Authentication
 

@@ -164,7 +164,14 @@ test("a failing follow-up step leaves the meeting in its pre-finalized state", a
   );
 });
 
-test("a failing per-attendee event aborts before anything is committed", async () => {
+// NOTE: this is a defensive property of the orchestration, NOT a production
+// guarantee. `emitAttendanceRecorded` emits NON-strictly, so the event bus
+// swallows handler rejections and the real `emitRecorded` never rejects: in
+// production a failed prospect → attendee auto-advance is logged and the
+// meeting finalizes anyway (deliberate — a status nudge must not block
+// finalization; the next status change heals it). The test pins what happens
+// IF a rejection ever reaches this loop, e.g. if that emit is made strict.
+test("a rejecting per-attendee emit would abort before the marker is written", async () => {
   const h = makeHarness({ attended: ATTENDED, failRecordedFor: "person-2" });
 
   await assert.rejects(

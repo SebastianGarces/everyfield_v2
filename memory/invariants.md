@@ -5,11 +5,13 @@ Stable truths that must not be violated.
 ## Transactions / Atomicity
 
 - `drizzle-orm/neon-http` has **no interactive transactions** — `db.transaction()` throws at runtime. Never use it.
-- Writes all known up front: `atomicWrite([...])` (`src/db/index.ts`) — a Neon batched transaction, all-or-nothing.
+- Writes all known up front: pass them all to `db.batch([...])` — a Neon batched transaction, all-or-nothing.
 - Writes interleaved with reads/events/another feature: nothing can span them. Write the durable "already happened" marker **last** and make every earlier step idempotent, so a failure is retryable rather than half-applied.
-- Reference: `finalizeAttendance()` emits downstream first, then compare-and-sets `church_meetings.actual_attendance` (written only there; non-null = already finalized = its idempotency key), so a meeting is never finalized without its follow-up tasks. `meeting.attendance.finalized` is the one event emitted **strictly** — handler failures reach the emitter instead of being swallowed.
+- **A SELECT-then-INSERT guard is not a concurrency guard.** Ordering + idempotency only make a *replay* safe; two concurrent requests both pass the SELECT. Where duplicates must be impossible, enforce it with a (partial) unique index and let the write fail — and keep the uniquely-indexed row in the SAME `INSERT` as the rows it speaks for, so the loser writes nothing at all.
+- Reference: `finalizeAttendance()` emits downstream first, then compare-and-sets `church_meetings.actual_attendance` (written only there; non-null = already finalized = its idempotency key), so a meeting is never finalized without its follow-up tasks. `meeting.attendance.finalized` is the one event emitted **strictly** — handler failures reach the emitter instead of being swallowed. Duplicate follow-up sets are blocked by `tasks_meeting_evaluation_unique_idx` (one live evaluation task per meeting).
+- Residual, accepted: `meeting.attendance.recorded` is emitted non-strictly, so a failed prospect → attendee auto-advance is logged and swallowed while the meeting still finalizes. Deliberate — a status nudge must not block finalization — and self-healing on the next status change.
 
-**Source:** `src/db/index.ts`, `src/lib/meetings/service.ts`, `src/lib/events/event-bus.ts`
+**Source:** `src/db/index.ts`, `src/db/schema/tasks.ts`, `src/lib/meetings/service.ts`, `src/lib/tasks/events.ts`, `src/lib/events/event-bus.ts`
 
 ## Multi-Tenancy
 
