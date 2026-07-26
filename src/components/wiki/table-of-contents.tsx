@@ -53,7 +53,11 @@ export function TableOfContents({ headings }: TableOfContentsProps) {
           On this page
         </summary>
         <nav aria-label="Table of contents" className="mt-3">
-          <TocLinks headings={headings} activeId={activeId} />
+          <TocLinks
+            headings={headings}
+            activeId={activeId}
+            entryTestId="wiki-toc-mobile-entry"
+          />
         </nav>
       </details>
 
@@ -66,18 +70,31 @@ export function TableOfContents({ headings }: TableOfContentsProps) {
         <p className="text-muted-foreground mb-3 text-xs font-semibold tracking-wide uppercase">
           On this page
         </p>
-        <TocLinks headings={headings} activeId={activeId} />
+        <TocLinks
+          headings={headings}
+          activeId={activeId}
+          entryTestId="wiki-toc-entry"
+        />
       </nav>
     </>
   );
 }
 
+/**
+ * The two trees carry *different* entry testids on purpose. Both are in the DOM
+ * at every viewport — only their visibility differs — so a shared testid makes
+ * an unscoped `[data-testid="wiki-toc-entry"]` count every heading twice and
+ * match two elements per `data-active`. One testid per tree keeps a selector
+ * honest without the caller having to remember to scope it.
+ */
 function TocLinks({
   headings,
   activeId,
+  entryTestId,
 }: {
   headings: TocHeading[];
   activeId: string | null;
+  entryTestId: string;
 }) {
   return (
     <ul className="space-y-1 text-sm">
@@ -87,7 +104,7 @@ function TocLinks({
           <li key={`${heading.id}-${index}`}>
             <a
               href={`#${heading.id}`}
-              data-testid="wiki-toc-entry"
+              data-testid={entryTestId}
               data-active={isActive ? "true" : "false"}
               aria-current={isActive ? "location" : undefined}
               className={cn(
