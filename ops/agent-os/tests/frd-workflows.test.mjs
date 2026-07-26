@@ -334,3 +334,118 @@ test("the run settles the board rather than leaving issues in-progress", async (
     "this workflow runs no DoD and opens no PR, so it cannot claim review-readiness"
   );
 });
+
+// ---------------------------------------------------------------------------
+// build-until-done: the claim step's blast radius
+//
+// On 2026-07-26 this step swept the entire `agent:queued` label, claiming 35
+// issues for a 2-unit pass (board-design-2026-07.md §11). The prompt was already
+// correctly scoped; there was simply no check that it had been obeyed. These
+// tests cover the check, not the prompt — an agent's wording cannot be tested
+// here, but "does the guard fire, and does it abort before building" can.
+// ---------------------------------------------------------------------------
+
+/** Run build-until-done with stubbed globals. `reply(prompt, opts)` answers each agent. */
+async function runBuild(units, reply, over = {}) {
+  const source = load("build-until-done.js");
+  const calls = [];
+  const globals = {
+    args: { units, maxAttempts: 1, base: "main", ...over },
+    log: (m) => calls.push({ kind: "log", value: m }),
+    phase: (p) => calls.push({ kind: "phase", value: p }),
+    budget: { total: null, spent: () => 0, remaining: () => Infinity },
+    agent: async (prompt, opts = {}) => {
+      calls.push({ kind: "agent", label: opts.label, phase: opts.phase, prompt });
+      return reply(prompt, opts);
+    },
+    // Mirrors the runtime contract: a thunk that throws resolves to null.
+    parallel: async (thunks) =>
+      Promise.all(
+        thunks.map((t) =>
+          Promise.resolve()
+            .then(t)
+            .catch(() => null)
+        )
+      ),
+  };
+  const fn = new Function(
+    ...Object.keys(globals),
+    `return (async () => { ${source} })()`
+  );
+  return { result: await fn(...Object.values(globals)), calls };
+}
+
+const buildUnit = (id, issue) => ({
+  id,
+  title: id.toUpperCase(),
+  lane: "backend",
+  risk: "low",
+  issue,
+  files: [`src/${id}.ts`],
+  summary: `summary for ${id}`,
+  acceptanceCriteria: [`${id} works`],
+});
+
+/** Answers the claim step with `inProgressNow`, and fails any later gate fast. */
+const replyWith = (inProgressNow, claimed) => (_prompt, opts) => {
+  if (opts.label?.startsWith("start:"))
+    return { claimed, inProgressNow };
+  if (opts.label?.startsWith("impl:"))
+    return { summary: "did the thing", filesTouched: [], notes: "" };
+  if (opts.label?.startsWith("verify:"))
+    return { verdict: "FAIL", gates: [], blockingReason: "stubbed fail" };
+  if (opts.label?.startsWith("block:")) return { labelled: true };
+  return {};
+};
+
+test("the claim step names an exact issue list and forbids enumerating the label", async () => {
+  const { calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    replyWith([101], [101])
+  );
+  const claim = calls.find((c) => c.kind === "agent" && c.label === "start:alpha");
+  assert.ok(claim, "a claim step must run");
+  assert.match(claim.prompt, /EXACTLY these issues and no others: 101/);
+  assert.match(
+    claim.prompt,
+    /Do NOT run `gh issue list`/,
+    "the sweep happened because the agent enumerated the label to decide what to edit"
+  );
+  assert.match(
+    claim.prompt,
+    /must be exactly 1/,
+    "stating the expected count gives the agent a self-check"
+  );
+});
+
+test("a claim confined to the pass's own issues proceeds to implement", async () => {
+  const { calls } = await runBuild(
+    [buildUnit("alpha", 101), buildUnit("beta", 202)],
+    replyWith([101, 202], [101])
+  );
+  assert.ok(
+    calls.some((c) => c.kind === "agent" && c.label?.startsWith("impl:")),
+    "the guard must not false-positive on issues the pass legitimately owns"
+  );
+});
+
+test("a claim that swept issues the pass does not own aborts before building", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    // The real failure: the claim step returns the whole board, not just #101.
+    replyWith([101, 15, 16, 18, 62, 98], [101])
+  );
+  assert.ok(
+    !calls.some((c) => c.kind === "agent" && c.label?.startsWith("impl:")),
+    "building against a corrupted board is the thing the guard exists to prevent"
+  );
+  assert.equal(
+    result.shipped.length,
+    0,
+    "an aborted track must not be reported as shipped"
+  );
+  assert.ok(
+    JSON.stringify(result).includes("alpha"),
+    "the aborted track must be surfaced, not silently dropped"
+  );
+});
