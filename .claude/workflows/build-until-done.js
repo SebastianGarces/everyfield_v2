@@ -165,7 +165,7 @@ const HIGH_RISK_LENSES = [
 
 // ---------------------------------------------------------------------------
 // Defensive regroup: merge any units that share a file into ONE track/branch
-// so parallel worktrees can never collide. (Same DSU as frd-implement-wave.)
+// so parallel worktrees can never collide. (Same DSU as frd-implement.)
 // ---------------------------------------------------------------------------
 const normFile = (f) =>
   String(f)

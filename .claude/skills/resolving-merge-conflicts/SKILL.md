@@ -8,7 +8,7 @@ description: Work through an in-progress git merge or rebase conflict hunk by hu
 Adapted from [mattpocock/skills](https://github.com/mattpocock/skills) (`resolving-merge-conflicts`).
 
 Conflicts are common here because tracks are built in parallel in isolated worktrees and merged
-afterwards (`frd-implement-wave`, `build-until-done`). Tracks are planned to be file-disjoint, so a
+afterwards (`frd-implement`, `build-until-done`). Tracks are planned to be file-disjoint, so a
 conflict is itself a signal: **the file ownership guessed at intake was wrong.** Note it — it is
 worth more than the resolution.
 
