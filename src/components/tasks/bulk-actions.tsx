@@ -29,6 +29,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { BulkTaskFailure, BulkTaskResult } from "@/lib/tasks/service";
+import { MAX_BULK_TASKS } from "@/lib/tasks/types";
 import { cn } from "@/lib/utils";
 import { CalendarClock, CheckCheck, X } from "lucide-react";
 import {
@@ -265,6 +266,12 @@ export function BulkActionsBar() {
 
   if (count === 0) return null;
 
+  // Show the cap before the click, not after. A group select-all can easily run
+  // past MAX_BULK_TASKS, and letting the request go would spend a server round
+  // trip only to be rejected wholesale — so the actions go disabled and the bar
+  // says why while the selection is too large.
+  const overLimit = count > MAX_BULK_TASKS;
+
   function handleComplete() {
     const ids = selectedIds;
     startTransition(async () => {
@@ -304,6 +311,7 @@ export function BulkActionsBar() {
       className="bg-card sticky bottom-0 z-10 -mx-1 flex flex-wrap items-center gap-3 rounded-lg border px-4 py-3 shadow-lg"
       data-testid="bulk-actions-bar"
       data-selected-count={count}
+      data-over-limit={overLimit ? "true" : "false"}
     >
       <span
         className="text-sm font-medium"
@@ -314,6 +322,17 @@ export function BulkActionsBar() {
         {pluralizeTasks(count)} selected
       </span>
 
+      {overLimit && (
+        <span
+          className="text-destructive text-sm"
+          role="status"
+          aria-live="polite"
+          data-testid="bulk-over-limit"
+        >
+          Too many — {MAX_BULK_TASKS} at a time is the maximum
+        </span>
+      )}
+
       <div className="ml-auto flex flex-wrap items-center gap-2">
         {/* Bulk complete */}
         <AlertDialog>
@@ -321,7 +340,7 @@ export function BulkActionsBar() {
             <Button
               size="sm"
               className="cursor-pointer"
-              disabled={isPending}
+              disabled={isPending || overLimit}
               data-testid="bulk-complete-trigger"
             >
               <CheckCheck className="mr-1.5 h-4 w-4" />
@@ -361,7 +380,7 @@ export function BulkActionsBar() {
               size="sm"
               variant="outline"
               className="cursor-pointer"
-              disabled={isPending}
+              disabled={isPending || overLimit}
               data-testid="bulk-reschedule-trigger"
             >
               <CalendarClock className="mr-1.5 h-4 w-4" />

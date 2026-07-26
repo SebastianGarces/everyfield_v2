@@ -23,6 +23,7 @@ import {
   sql,
 } from "drizzle-orm";
 import type { ListTasksResult, TaskCounts, TaskWithAssignee } from "./types";
+import { MAX_BULK_TASKS } from "./types";
 import { emitTaskCompleted } from "./events";
 
 // ============================================================================
@@ -534,8 +535,12 @@ export async function deleteTask(
 // behaviour is unit-testable without a database.
 // ============================================================================
 
-/** Upper bound on a single bulk operation. Keeps one statement one statement. */
-export const MAX_BULK_TASKS = 100;
+/**
+ * Upper bound on a single bulk operation. Defined in `./types` so the selection
+ * UI can import the value too; re-exported here because this is where callers
+ * of the bulk operations already look.
+ */
+export { MAX_BULK_TASKS };
 
 /** One requested task that did not make it through the operation, and why. */
 export interface BulkTaskFailure {
@@ -586,7 +591,7 @@ export interface BulkTaskPlan {
 export function planBulkTaskOperation(
   requestedIds: string[],
   found: BulkTaskCandidate[],
-  options: { rejectCompleted?: boolean } = {}
+  options: { rejectCompleted?: boolean; completedReason?: string } = {}
 ): BulkTaskPlan {
   const requested = [...new Set(requestedIds)];
   const byId = new Map(found.map((row) => [row.id, row]));
@@ -606,7 +611,7 @@ export function planBulkTaskOperation(
       failures.push({
         taskId: id,
         title: row.title,
-        reason: "Task is already complete",
+        reason: options.completedReason ?? "Task is already complete",
       });
       continue;
     }
@@ -728,7 +733,11 @@ export const defaultBulkTaskDeps: BulkTaskDeps = {
         and(
           eq(tasks.churchId, churchId),
           inArray(tasks.id, taskIds),
-          isNull(tasks.deletedAt)
+          isNull(tasks.deletedAt),
+          // Mirrors the planner's rejectCompleted guard. Belt and braces: if a
+          // task is completed between the load and this write, it is reported
+          // as a failure rather than quietly given a new due date.
+          ne(tasks.status, "complete")
         )
       )
       .returning({ id: tasks.id });
@@ -830,6 +839,13 @@ export async function bulkCompleteTasks(
  *
  * Rescheduling is not a material event (no status change), so it emits no
  * events. Tasks that could not be rescheduled are returned in `failed`.
+ *
+ * Completed tasks are refused, not re-dated. A due date on a finished task
+ * means nothing, and the task list renders a "Completed" group with its own
+ * select-all — so without this guard one click there would silently hand a
+ * batch of done tasks a fresh deadline and drag them back into the Overdue or
+ * Today group. Refusing them surfaces as a named partial failure, which is the
+ * honest outcome rather than a silent one.
  */
 export async function bulkRescheduleTasks(
   churchId: string,
@@ -842,7 +858,10 @@ export async function bulkRescheduleTasks(
   assertBulkSize(requested);
 
   const found = await deps.loadCandidates(churchId, requested);
-  const plan = planBulkTaskOperation(requested, found);
+  const plan = planBulkTaskOperation(requested, found, {
+    rejectCompleted: true,
+    completedReason: "Task is complete — reopen it before rescheduling",
+  });
 
   let writtenIds: string[] = [];
   let missedReason = "Task could not be rescheduled";

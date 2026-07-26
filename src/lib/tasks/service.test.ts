@@ -312,7 +312,10 @@ test("bulkRescheduleTasks reports rows the write did not touch", async () => {
   );
 });
 
-test("bulkRescheduleTasks reschedules a completed task without objecting", async () => {
+// A due date on a finished task means nothing, and the list renders a
+// "Completed" group with its own select-all — so re-dating completed tasks is
+// one click away and must be refused rather than done silently.
+test("bulkRescheduleTasks refuses a completed task instead of re-dating it", async () => {
   const { deps, rescheduled } = makeDeps({
     rows: [candidate("a", { status: "complete" })],
   });
@@ -324,6 +327,32 @@ test("bulkRescheduleTasks reschedules a completed task without objecting", async
     deps
   );
 
+  assert.deepEqual(result.succeeded, []);
+  assert.deepEqual(
+    result.failed.map((failure) => [failure.taskId, failure.reason]),
+    [["a", "Task is complete — reopen it before rescheduling"]]
+  );
+  // The write is never even attempted for a wholly-completed selection.
+  assert.equal(rescheduled.length, 0);
+});
+
+test("bulkRescheduleTasks reschedules the open tasks and names the completed ones", async () => {
+  const { deps, rescheduled } = makeDeps({
+    rows: [candidate("a"), candidate("b", { status: "complete" })],
+  });
+
+  const result = await bulkRescheduleTasks(
+    CHURCH_ID,
+    ["a", "b"],
+    "2026-08-01",
+    deps
+  );
+
   assert.deepEqual(result.succeeded, ["a"]);
-  assert.equal(rescheduled.length, 1);
+  assert.deepEqual(
+    result.failed.map((failure) => [failure.title, failure.reason]),
+    [["Task b", "Task is complete — reopen it before rescheduling"]]
+  );
+  // Only the open task is handed to the write.
+  assert.deepEqual(rescheduled, [{ ids: ["a"], dueDate: "2026-08-01" }]);
 });

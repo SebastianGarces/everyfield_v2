@@ -3,7 +3,6 @@
 import type { Task } from "@/db/schema";
 import { verifySession } from "@/lib/auth/session";
 import {
-  MAX_BULK_TASKS,
   bulkCompleteTasks,
   bulkRescheduleTasks,
   completeTask,
@@ -15,12 +14,13 @@ import {
 } from "@/lib/tasks/service";
 import type { ActionResult } from "@/lib/tasks/types";
 import {
+  bulkRescheduleSchema,
+  bulkTaskIdsSchema,
   taskCreateSchema,
   taskQuickAddSchema,
   taskUpdateSchema,
 } from "@/lib/validations/tasks";
 import { revalidatePath } from "next/cache";
-import { z } from "zod";
 
 // ============================================================================
 // Helpers
@@ -369,22 +369,6 @@ export async function updateTaskStatusAction(
 // ============================================================================
 // Bulk Actions (T-019)
 // ============================================================================
-
-const bulkTaskIdsSchema = z
-  .array(z.string().uuid())
-  .min(1, "Select at least one task")
-  .max(MAX_BULK_TASKS, `You can only update ${MAX_BULK_TASKS} tasks at once`);
-
-const bulkRescheduleSchema = z.object({
-  taskIds: bulkTaskIdsSchema,
-  // Date-only ISO string, matching `tasks.due_date`.
-  dueDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, "Choose a valid date")
-    .refine((value) => !Number.isNaN(Date.parse(`${value}T00:00:00Z`)), {
-      message: "Choose a valid date",
-    }),
-});
 
 /**
  * Complete every selected task.

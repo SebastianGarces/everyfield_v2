@@ -4,6 +4,7 @@ import {
   taskRelatedTypes,
   taskStatuses,
 } from "@/db/schema";
+import { MAX_BULK_TASKS } from "@/lib/tasks/types";
 import { z } from "zod";
 
 // ============================================================================
@@ -102,3 +103,41 @@ export const taskQuickAddSchema = z.object({
 });
 
 export type TaskQuickAddInput = z.infer<typeof taskQuickAddSchema>;
+
+// ============================================================================
+// Bulk Operation Schemas (T-019)
+// ============================================================================
+
+/**
+ * True only for a date string naming a day that actually exists.
+ *
+ * `Date.parse` is not sufficient on its own: it does not reject impossible
+ * calendar days, it *rolls them over*. `Date.parse("2026-02-31T00:00:00Z")`
+ * returns a number (Mar 3), so a regex-plus-parse check happily accepts
+ * 2026-02-31 and the user's reschedule silently lands on the wrong day — or
+ * surfaces later as a generic write failure. Round-tripping the parsed date
+ * back to Y-M-D and comparing is what actually catches it.
+ */
+export function isCalendarDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+
+  const parsed = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return false;
+
+  return parsed.toISOString().slice(0, 10) === value;
+}
+
+export const bulkTaskIdsSchema = z
+  .array(z.string().uuid())
+  .min(1, "Select at least one task")
+  .max(MAX_BULK_TASKS, `You can only update ${MAX_BULK_TASKS} tasks at once`);
+
+export const bulkRescheduleSchema = z.object({
+  taskIds: bulkTaskIdsSchema,
+  // Date-only ISO string, matching `tasks.due_date`.
+  dueDate: z.string().refine(isCalendarDate, {
+    message: "Choose a valid date",
+  }),
+});
+
+export type BulkRescheduleInput = z.infer<typeof bulkRescheduleSchema>;
