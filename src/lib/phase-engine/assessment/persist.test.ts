@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { Insight } from "@/lib/phase-engine/judge";
+import type { RetrievedPassage } from "@/lib/phase-engine/rag";
 import type { PlantFactSnapshot } from "@/lib/phase-engine/signals";
 
 import {
@@ -10,6 +11,7 @@ import {
   filterInsightsForPersistence,
   isIndividualPersonFinding,
   mapSeverity,
+  reconcileArticleSlugs,
 } from "./persist";
 
 // ----------------------------------------------------------------------------
@@ -25,6 +27,22 @@ function makeInsight(overrides: Partial<Insight> = {}): Insight {
     body: "Observation plus a recommended next step.",
     citedFacts: ["coreGroup.committedCount=10"],
     relatedArticleSlugs: [],
+    ...overrides,
+  };
+}
+
+function makePassage(
+  articleSlug: string | null,
+  overrides: Partial<RetrievedPassage> = {}
+): RetrievedPassage {
+  return {
+    docKey: articleSlug ?? "playbook:section",
+    articleSlug,
+    source: articleSlug ? "wiki" : "playbook",
+    section: "A heading",
+    phase: 1,
+    content: "Methodology passage text.",
+    score: 0.5,
     ...overrides,
   };
 }
@@ -182,6 +200,93 @@ test("buildInsightRows applies privacy filtering before ranking", () => {
   const rows = buildInsightRows("a", "c", insights);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].audience, "planter");
+});
+
+// ----------------------------------------------------------------------------
+// "How to improve" wiki links (PE-024) — a persisted link must point at
+// methodology the engine ACTUALLY retrieved, not a slug the model invented.
+// ----------------------------------------------------------------------------
+
+test("reconcileArticleSlugs keeps only slugs carried by a retrieved passage", () => {
+  const passages = [
+    makePassage("core-group/what-is-a-vision-meeting"),
+    makePassage("core-group/building-momentum"),
+  ];
+
+  assert.deepEqual(
+    reconcileArticleSlugs(
+      ["core-group/what-is-a-vision-meeting", "invented/never-retrieved"],
+      passages
+    ),
+    ["core-group/what-is-a-vision-meeting"]
+  );
+});
+
+test("reconcileArticleSlugs drops every slug when retrieval returned nothing", () => {
+  assert.deepEqual(reconcileArticleSlugs(["core-group/anything"], []), []);
+});
+
+test("reconcileArticleSlugs ignores passages with no article slug (playbook chunks)", () => {
+  const passages = [makePassage(null, { docKey: "playbook:core-group" })];
+  assert.deepEqual(
+    reconcileArticleSlugs(["playbook:core-group"], passages),
+    []
+  );
+});
+
+test("reconcileArticleSlugs normalizes casing/slashes and persists the corpus spelling", () => {
+  const passages = [makePassage("core-group/vision-meetings")];
+
+  assert.deepEqual(
+    reconcileArticleSlugs(["/Core-Group/Vision-Meetings/"], passages),
+    ["core-group/vision-meetings"]
+  );
+});
+
+test("reconcileArticleSlugs dedupes repeated citations and preserves judge order", () => {
+  const passages = [makePassage("b-article"), makePassage("a-article")];
+
+  assert.deepEqual(
+    reconcileArticleSlugs(["a-article", "b-article", "a-article"], passages),
+    ["a-article", "b-article"]
+  );
+});
+
+test("reconcileArticleSlugs handles an empty/absent citation list", () => {
+  assert.deepEqual(reconcileArticleSlugs([], [makePassage("a")]), []);
+  assert.deepEqual(reconcileArticleSlugs(null, [makePassage("a")]), []);
+  assert.deepEqual(reconcileArticleSlugs(undefined, [makePassage("a")]), []);
+});
+
+test("buildInsightRows persists the slug the retrieved chunk's metadata carried", () => {
+  const retrieved = makePassage("core-group/what-is-a-vision-meeting");
+  const insights: Insight[] = [
+    makeInsight({
+      severity: "urgent",
+      title: "Vision meeting cadence has slipped",
+      relatedArticleSlugs: [
+        "core-group/what-is-a-vision-meeting",
+        "hallucinated/article",
+      ],
+    }),
+  ];
+
+  const rows = buildInsightRows("assessment-1", "church-1", insights, [
+    retrieved,
+  ]);
+
+  // The stored link is exactly the retrieved chunk's articleSlug metadata.
+  assert.deepEqual(rows[0].relatedArticleSlugs, [retrieved.articleSlug]);
+});
+
+test("buildInsightRows stores no links when the run had no retrieval provenance", () => {
+  const insights: Insight[] = [
+    makeInsight({ relatedArticleSlugs: ["core-group/anything"] }),
+  ];
+
+  // No passages argument at all (e.g. retrieval failed and degraded to []).
+  const rows = buildInsightRows("assessment-1", "church-1", insights);
+  assert.deepEqual(rows[0].relatedArticleSlugs, []);
 });
 
 // ----------------------------------------------------------------------------

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  buildArticleLinks,
   deltaFieldLabel,
   readBooleanSignals,
   readDelta,
@@ -117,4 +118,77 @@ test("slugToLabel produces a readable label from a slug", () => {
   assert.equal(slugToLabel("core-group"), "Core group");
   assert.equal(slugToLabel("phases/launch_team"), "Launch team");
   assert.equal(slugToLabel("vision"), "Vision");
+});
+
+// ----------------------------------------------------------------------------
+// "How to improve" wiki links (PE-024) — a stored slug must resolve to a real
+// published article or render nothing at all (never a 404).
+// ----------------------------------------------------------------------------
+
+const PUBLISHED = [
+  { slug: "core-group/what-is-a-vision-meeting", title: "The vision meeting" },
+  { slug: "core-group/building-momentum", title: "Building momentum" },
+];
+
+test("buildArticleLinks links a slug that resolves to a published article", () => {
+  const links = buildArticleLinks(
+    ["core-group/what-is-a-vision-meeting"],
+    PUBLISHED
+  );
+
+  assert.deepEqual(links, [
+    {
+      slug: "core-group/what-is-a-vision-meeting",
+      href: "/wiki/core-group/what-is-a-vision-meeting",
+      label: "The vision meeting",
+    },
+  ]);
+});
+
+test("buildArticleLinks renders no link for a stale slug rather than a 404", () => {
+  // Deliberately stale: persisted when the article existed, since renamed.
+  const links = buildArticleLinks(
+    ["core-group/renamed-away", "core-group/building-momentum"],
+    PUBLISHED
+  );
+
+  assert.deepEqual(
+    links.map((l) => l.slug),
+    ["core-group/building-momentum"]
+  );
+});
+
+test("buildArticleLinks yields nothing when every stored slug is stale", () => {
+  assert.deepEqual(buildArticleLinks(["gone", "also-gone"], PUBLISHED), []);
+});
+
+test("buildArticleLinks yields nothing for an insight with no stored slugs", () => {
+  assert.deepEqual(buildArticleLinks([], PUBLISHED), []);
+  assert.deepEqual(buildArticleLinks(null, PUBLISHED), []);
+  assert.deepEqual(buildArticleLinks(undefined, PUBLISHED), []);
+});
+
+test("buildArticleLinks dedupes repeated slugs and keeps stored order", () => {
+  const links = buildArticleLinks(
+    [
+      "core-group/building-momentum",
+      "core-group/what-is-a-vision-meeting",
+      "core-group/building-momentum",
+    ],
+    PUBLISHED
+  );
+
+  assert.deepEqual(
+    links.map((l) => l.slug),
+    ["core-group/building-momentum", "core-group/what-is-a-vision-meeting"]
+  );
+});
+
+test("buildArticleLinks falls back to a humanized slug when the title is blank", () => {
+  const links = buildArticleLinks(
+    ["core-group/building-momentum"],
+    [{ slug: "core-group/building-momentum", title: "   " }]
+  );
+
+  assert.equal(links[0].label, "Building momentum");
 });
