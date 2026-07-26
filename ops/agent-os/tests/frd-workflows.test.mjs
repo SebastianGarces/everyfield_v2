@@ -455,3 +455,133 @@ test("a claim that swept issues the pass does not own aborts before building", a
     "the aborted track must be surfaced, not silently dropped"
   );
 });
+
+// ---------------------------------------------------------------------------
+// build-until-done: the auto-merge gate
+//
+// The DoD proves the code does what the spec SAID. It cannot prove the spec was
+// right. So the gate is not severity — it is whether a warning raises a question
+// about WHAT was built. A spec-question holds the track for a human; a
+// code-quality warning is filed as a follow-up issue and the track merges.
+// These tests pin that distinction, plus the two unconditional refusals.
+// ---------------------------------------------------------------------------
+
+const warn = (kind, summary) => ({
+  kind,
+  summary,
+  detail: `${summary} detail`,
+});
+
+/** Drives a track all the way to the ship step with a given verifier report. */
+const replyShip = (verifyReport) => (_prompt, opts) => {
+  const l = opts.label || "";
+  if (l.startsWith("start:")) return { claimed: [101], inProgressNow: [101] };
+  if (l.startsWith("impl:"))
+    return {
+      committed: true,
+      filesChanged: [],
+      summary: "ok",
+      selfCheckPassed: true,
+    };
+  if (l.startsWith("verify:")) return verifyReport;
+  if (l.startsWith("lens:"))
+    return { verdict: "PASS", lens: "x", findings: [], summary: "ok" };
+  if (l.startsWith("pr:"))
+    return { opened: true, url: "https://gh/pr/1", checkConclusion: "success" };
+  if (l.startsWith("merge:"))
+    return { merged: true, state: "merged", followUpIssues: [901] };
+  if (l.startsWith("hold:")) return { merged: false, state: "refused" };
+  return {};
+};
+
+const passing = (warnings) => ({
+  verdict: warnings?.length ? "PASS_WITH_WARNINGS" : "PASS",
+  gates: [],
+  acceptanceCriteria: [],
+  summary: "ok",
+  warnings: warnings || [],
+});
+
+test("a clean pass auto-merges when autoMerge is on", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    replyShip(passing([])),
+    { autoMerge: true }
+  );
+  assert.ok(
+    calls.some((c) => c.label === "merge:alpha"),
+    "a clean pass is exactly what auto-merge exists for"
+  );
+  assert.equal(result.shipped[0].merge, "merged");
+});
+
+test("code-quality warnings do NOT hold the merge — they become follow-up issues", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    replyShip(passing([warn("code-quality", "date formatted in UTC")])),
+    { autoMerge: true }
+  );
+  const merge = calls.find((c) => c.label === "merge:alpha");
+  assert.ok(
+    merge,
+    "a known small defect is not a reason to stall a good branch"
+  );
+  assert.match(
+    merge.prompt,
+    /BEFORE the merge/,
+    "the follow-up issue must exist before the merge, so merging cannot lose it"
+  );
+  assert.deepEqual(result.shipped[0].followUpIssues, [901]);
+});
+
+test("a single spec-question holds the track for a human", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    replyShip(
+      passing([
+        warn("code-quality", "duplicated constant"),
+        warn("spec-question", "is a church-wide packet the intended read?"),
+      ])
+    ),
+    { autoMerge: true }
+  );
+  assert.ok(
+    !calls.some((c) => c.label === "merge:alpha"),
+    "shipping a product decision the human never made is the failure this prevents"
+  );
+  assert.ok(calls.some((c) => c.label === "hold:alpha"));
+  assert.equal(
+    result.shipped[0].merge,
+    "held-for-review",
+    "the report must name WHY it did not merge, not just that it did not"
+  );
+  assert.deepEqual(result.shipped[0].heldBy, [
+    "is a church-wide packet the intended read?",
+  ]);
+});
+
+test("risk:high never auto-merges, even on a spotless pass", async () => {
+  const { calls } = await runBuild(
+    [{ ...buildUnit("alpha", 101), risk: "high" }],
+    replyShip(passing([])),
+    { autoMerge: true }
+  );
+  assert.ok(
+    !calls.some((c) => c.label === "merge:alpha"),
+    "schema/auth/tenancy is where a bad merge is unrecoverable"
+  );
+  const hold = calls.find((c) => c.label === "hold:alpha");
+  assert.match(hold.prompt, /risk:high/);
+});
+
+test("auto-merge is off by default, so a direct call cannot merge to main", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    replyShip(passing([]))
+  );
+  assert.ok(
+    !calls.some((c) => c.label === "merge:alpha" || c.label === "hold:alpha"),
+    "opting in must be explicit — /deliver must not merge by surprise"
+  );
+  assert.equal(result.shipped[0].merge, "not-attempted");
+});

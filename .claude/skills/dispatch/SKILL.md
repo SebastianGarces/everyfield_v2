@@ -40,6 +40,12 @@ gh pr list --state open --json number,labels --jq '[.[] | select(.labels[].name 
 This is the most important gate. The others prevent waste; this one prevents the failure mode that
 makes the whole system worse than doing nothing.
 
+**Under auto-merge this counts only the PRs that were *held*** — a clean pass merges itself and never
+enters the queue. That is the point: the queue now fills exclusively with work that raised a question
+about *what should have been built*, which is the only thing a human was ever needed for. If this gate
+starts tripping regularly, the signal is that specs are going into the loop underdetermined, not that
+the cap is too low. Fix the intake, not the number.
+
 ### 2. Nothing is already in flight
 
 ```bash
@@ -93,8 +99,15 @@ review queue, not tokens, so measure PRs-merged-per-day before raising it again.
 Call the `build-until-done` workflow with the selected tracks:
 
 ```
-Workflow({ name: "build-until-done", args: { units: [...], base: "main", maxAttempts: 3 } })
+Workflow({ name: "build-until-done", args: { units: [...], base: "main", maxAttempts: 3, autoMerge: true } })
 ```
+
+**`autoMerge: true` is what dispatch adds.** It is off by default so a direct `/deliver` call cannot
+merge to `main` by surprise; a dispatch pass opts in. Under it the loop merges a track only when all
+three hold: the DoD passed **and** the required check is green, the track is not `risk:high`, and no
+warning was classified `spec-question`. Code-quality warnings are filed as follow-up issues and land
+back on the frontier — they do not stall a good branch. See §11's sibling note in
+`product-docs/board-design-2026-07.md` and `DOD_SCHEMA.warnings`.
 
 Each unit is `{id, title, lane, files, summary, acceptanceCriteria, issue, risk}` — `files` comes
 from the issue's **Likely files** section, which is what keeps parallel tracks from colliding.
@@ -118,7 +131,11 @@ scope because the frontier looked thin.
 
 ## Hard rules
 
-- **Never merge a PR.** The human review is the checkpoint, and the `main` ruleset enforces it anyway.
+- **Merge only through the loop's gate, never by hand.** Auto-merge is a property of a track that
+  passed every gate with no spec-question raised; it is not a judgement this skill gets to make about
+  a PR it is looking at. If a PR is held, it is held — reaching past the gate to merge it is the same
+  class of error as clearing another run's claim.
+- **Never merge a `risk:high` PR, auto or otherwise.** Schema, auth and tenancy keep a human.
 - **Never clear an `agent:in-progress` claim** that this pass did not set.
 - **Never dispatch `risk:high` unattended** without an explicit opt-in.
 - **One pass, then stop.** Do not loop waiting for PRs to be merged so more work unblocks — that is
