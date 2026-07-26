@@ -15,7 +15,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 
-const ROOT = process.cwd();
+// Resolved from this file, not the cwd — the test must not depend on where it is run from.
+const ROOT = path.resolve(import.meta.dirname, "../../..");
 const load = (name) =>
   fs
     .readFileSync(path.join(ROOT, ".claude/workflows", name), "utf8")
