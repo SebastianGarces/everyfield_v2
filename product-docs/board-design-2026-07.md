@@ -491,3 +491,61 @@ fully rolling behaviour arrives with the scheduled dispatcher, which can close i
 (grouping, ordering, cycle rejection, frontier handling), run by stubbing the workflow globals so they
 cost no agent calls. `pnpm test`'s glob was widened to `ops/**/*.test.mjs` to run them; that glob was
 also what stranded the earlier HR4 harness.
+
+---
+
+## 11. The claim step swept the whole board (2026-07-26)
+
+The second component to look correct and fail on every run — after `board-sync` (§9). Same lesson, so it
+is recorded the same way: against the run log, not against intent.
+
+**What happened.** A `dispatch` pass of **2 units** claimed **35 issues**. A second pass of 1 unit claimed
+the remaining 5. Net effect: the entire `agent:queued` label was flipped to `agent:in-progress` — 29 issues
+that had no branch, no worktree and no agent.
+
+**The evidence.** Two sweeps, each starting seconds after a workflow launched, in descending issue order:
+
+| Sweep | Started | Launched at | Units in that pass | Issues claimed |
+|-------|---------|-------------|--------------------|----------------|
+| 1 | 19:40:21 UTC | 19:40:06 (+15s) | 2 | 30 |
+| 2 | 19:46:58 UTC | 19:46:12 (+46s) | 1 | 5 |
+
+30-then-5 is the tell: `gh issue list` pages at 30 by default, so the first sweep took a full page and the
+second took what was left after the first had been relabelled. `git branch -a` showed exactly 8 feature
+branches — one per genuinely dispatched track — and none for the other 29.
+
+**Why it happened.** `build-until-done.js`'s claim step delegated labelling to an agent whose prompt was
+**already correctly scoped** to `track.issues`. It ran on `haiku` at `effort: low` under a comment reading:
+
+> `// Two shell commands and a fixed return value. No judgment involved.`
+
+That assumption is the bug. The step involved no judgment *as specified*, so it got the cheapest model and
+no verification — and the cheapest model resolved "claim the issues for this track" into "claim the queued
+work", which is a locally reasonable reading of a board whose whole vocabulary is about claiming queued
+work. A correct instruction with no check on its blast radius is not a control.
+
+**Why it mattered more than it looked.** Nothing was built wrongly and no code was harmed. The damage was
+to the board's meaning: `dispatch`'s gate 2 ("nothing is already in flight") saw 35 claims and would have
+refused **every future pass**, and `standup` would have reported 29 items as underway. An autonomous
+factory whose durable state lies about itself is worse than one that has stopped, because it looks like it
+is working.
+
+It also went undetected through two full passes. It was found only because a routine `agent:queued` count
+came back as 11 when it should have been ~37 — i.e. by a number looking wrong in passing, not by any gate.
+
+**The fix.** The blast radius is now asserted rather than assumed:
+
+- `PASS_ISSUES` is computed once — the complete set of issues a pass may touch.
+- The claim prompt forbids `gh issue list` / `gh search` for *deciding what to edit*, states the exact
+  expected count, and returns both what it edited and the current global `agent:in-progress` set.
+- Any issue carrying `agent:in-progress` outside `PASS_ISSUES` **throws**, aborting the track. `parallel()`
+  surfaces it through the existing `lost` path, so it is reported rather than swallowed.
+
+**The generalisable rule.** *Assign a cheap model to a step whose instruction is unambiguous, but never to
+one whose blast radius is unbounded.* Cost tiering is fine; unverified mutation of shared state is not. Any
+step that writes durable state on the board should report what it touched and have that compared against
+what it was permitted to touch.
+
+**Not fixed here.** The revert was done by hand (29 label flips, live tracks protected by branch existence).
+There is no tooling to reconcile the board against `git branch -a`, which is the check that made the
+diagnosis obvious and would make the next one instant.

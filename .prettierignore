@@ -4,3 +4,9 @@ build
 dist
 pnpm-lock.yaml
 *.md
+
+# Track worktrees are separate checkouts living inside the repo. They are excluded
+# from git via .git/info/exclude, but prettier walks them anyway — so a local
+# `format:check` fails on another track's in-progress scratch files while a build
+# loop is running. CI never sees them (they are not in any commit).
+.claude/worktrees/
