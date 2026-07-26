@@ -17,6 +17,9 @@
 
 import type { MeetingType } from "@/db/schema/meetings";
 
+// Type-only: erased at compile time, so react-pdf never reaches the bundle of
+// a feature page that imports this module.
+import type { LaunchChecklistSection } from "./pdf/launch-sunday-checklists";
 import { getTemplateById } from "./templates";
 import type { DocumentFormat } from "./types";
 
@@ -72,25 +75,43 @@ function toContextualTemplates(
 // Meetings
 // ----------------------------------------------------------------------------
 
+/** A section of contextual templates: the heading and what goes under it. */
+export interface ContextualTemplateSection {
+  title: string;
+  templates: ContextualTemplate[];
+}
+
 /**
- * Templates offered on a meeting detail page, keyed by meeting type. Types
+ * Templates offered on a meeting detail page, keyed by meeting type — each
+ * entry carries its own section heading, so adding a type here brings its
+ * title with it rather than needing a matching branch in the page. Types
  * absent from this map (orientation, team meetings) have no matching template
  * and render nothing.
  */
-const MEETING_TEMPLATE_IDS: Partial<Record<MeetingType, readonly string[]>> = {
-  vision_meeting: [
-    "vision-meeting-agenda",
-    "guest-sign-in-sheet",
-    "response-card",
-  ],
+const MEETING_TEMPLATES: Partial<
+  Record<MeetingType, { title: string; ids: readonly string[] }>
+> = {
+  vision_meeting: {
+    title: "Vision Meeting Documents",
+    ids: ["vision-meeting-agenda", "guest-sign-in-sheet", "response-card"],
+  },
 };
 
-/** Templates a planter needs while running this meeting. */
+/**
+ * The documents a planter needs while running this meeting, with the heading
+ * to file them under. `null` when this meeting type has no matching template —
+ * the page then renders nothing at all.
+ */
 export function getMeetingContextualTemplates(
   meetingType: string
-): ContextualTemplate[] {
-  const ids = MEETING_TEMPLATE_IDS[meetingType as MeetingType] ?? [];
-  return toContextualTemplates(ids);
+): ContextualTemplateSection | null {
+  const entry = MEETING_TEMPLATES[meetingType as MeetingType];
+  if (!entry) return null;
+
+  const templates = toContextualTemplates(entry.ids);
+  if (templates.length === 0) return null;
+
+  return { title: entry.title, templates };
 }
 
 // ----------------------------------------------------------------------------
@@ -103,10 +124,12 @@ const LAUNCH_CHECKLISTS_ID = "launch-sunday-checklists";
  * The per-team sections inside the Launch Sunday checklist packet, with the
  * team-name keywords that point at each one. Order matters: first match wins.
  *
- * Keep in sync with `src/lib/documents/pdf/launch-sunday-checklists.tsx`.
+ * `section` is typed as `LaunchChecklistSection`, so it can only ever name a
+ * section the PDF actually prints — renaming one there fails typecheck here.
+ * `contextual.test.ts` also asserts membership at runtime.
  */
 const LAUNCH_CHECKLIST_SECTIONS: readonly {
-  section: string;
+  section: LaunchChecklistSection;
   keywords: readonly string[];
 }[] = [
   {
@@ -136,7 +159,9 @@ const LAUNCH_CHECKLIST_SECTIONS: readonly {
  * The launch-day checklist section this team owns, if the packet has one for
  * them. Used only to label the link — every team still gets the packet.
  */
-export function getLaunchChecklistSection(teamName: string): string | null {
+export function getLaunchChecklistSection(
+  teamName: string
+): LaunchChecklistSection | null {
   const name = teamName.toLowerCase();
 
   for (const { section, keywords } of LAUNCH_CHECKLIST_SECTIONS) {

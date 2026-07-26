@@ -7,7 +7,13 @@ import {
   getMeetingContextualTemplates,
   getTeamContextualTemplates,
 } from "./contextual";
+import { LAUNCH_CHECKLIST_SECTION_NAMES } from "./pdf/launch-sunday-checklists";
 import { getTemplateById } from "./templates";
+
+/** The meeting section's templates, or `[]` when the type offers none. */
+function meetingTemplates(meetingType: string) {
+  return getMeetingContextualTemplates(meetingType)?.templates ?? [];
+}
 
 // ----------------------------------------------------------------------------
 // Links (DOC-014) — every contextual link opens the template's generate dialog
@@ -37,16 +43,21 @@ test("contextualTemplateHref encodes the template id", () => {
 // ----------------------------------------------------------------------------
 
 test("a vision meeting offers its agenda, sign-in sheet, and response card", () => {
-  const templates = getMeetingContextualTemplates("vision_meeting");
-
   assert.deepEqual(
-    templates.map((t) => t.id),
+    meetingTemplates("vision_meeting").map((t) => t.id),
     ["vision-meeting-agenda", "guest-sign-in-sheet", "response-card"]
   );
 });
 
+test("the meeting section carries its own heading", () => {
+  assert.equal(
+    getMeetingContextualTemplates("vision_meeting")?.title,
+    "Vision Meeting Documents"
+  );
+});
+
 test("vision meeting links carry the template's catalog metadata", () => {
-  const templates = getMeetingContextualTemplates("vision_meeting");
+  const templates = meetingTemplates("vision_meeting");
 
   for (const contextual of templates) {
     const template = getTemplateById(contextual.id);
@@ -59,13 +70,14 @@ test("vision meeting links carry the template's catalog metadata", () => {
 });
 
 test("meeting types with no matching template offer nothing", () => {
-  assert.deepEqual(getMeetingContextualTemplates("orientation"), []);
-  assert.deepEqual(getMeetingContextualTemplates("team_meeting"), []);
+  // `null`, not an empty section — the page renders no heading at all.
+  assert.equal(getMeetingContextualTemplates("orientation"), null);
+  assert.equal(getMeetingContextualTemplates("team_meeting"), null);
 });
 
 test("an unrecognized meeting type offers nothing rather than throwing", () => {
-  assert.deepEqual(getMeetingContextualTemplates("not_a_meeting_type"), []);
-  assert.deepEqual(getMeetingContextualTemplates(""), []);
+  assert.equal(getMeetingContextualTemplates("not_a_meeting_type"), null);
+  assert.equal(getMeetingContextualTemplates(""), null);
 });
 
 // ----------------------------------------------------------------------------
@@ -122,11 +134,73 @@ test("getLaunchChecklistSection matches regardless of case or custom naming", ()
 });
 
 // ----------------------------------------------------------------------------
+// The UI must never promise a checklist the packet does not print
+// ----------------------------------------------------------------------------
+
+test("every section the UI can name is a section the PDF actually prints", () => {
+  // Names are also constrained at compile time (LaunchChecklistSection), but a
+  // rename in the PDF must fail loudly here too rather than leave the team page
+  // advertising a checklist that no longer exists.
+  const teamNames = [
+    "Facilities",
+    "Setup Crew",
+    "Hospitality",
+    "Greeters",
+    "Ushers",
+    "Welcome Team",
+    "Worship",
+    "Production",
+    "Music",
+    "Technology",
+    "Audio",
+    "Children's Ministry",
+    "Kids",
+    "Nursery",
+    "Assimilation",
+    "Connections",
+    "Follow-up",
+    "Prayer",
+  ];
+
+  for (const teamName of teamNames) {
+    const section = getLaunchChecklistSection(teamName);
+    assert.ok(section, `${teamName} should map to a section`);
+    assert.ok(
+      LAUNCH_CHECKLIST_SECTION_NAMES.includes(section),
+      `"${section}" (from "${teamName}") is not printed by the packet — ` +
+        `the PDF prints: ${LAUNCH_CHECKLIST_SECTION_NAMES.join(", ")}`
+    );
+  }
+});
+
+test("every section the packet prints is reachable from some team name", () => {
+  // Guards the other direction: a section added to the PDF without a keyword
+  // here is a checklist no team page will ever point at.
+  const reachable = new Set(
+    [
+      "Facilities",
+      "Hospitality",
+      "Worship",
+      "Children's Ministry",
+      "Assimilation",
+      "Prayer",
+    ].map((name) => getLaunchChecklistSection(name))
+  );
+
+  for (const section of LAUNCH_CHECKLIST_SECTION_NAMES) {
+    assert.ok(
+      reachable.has(section),
+      `no team name maps to the "${section}" checklist`
+    );
+  }
+});
+
+// ----------------------------------------------------------------------------
 // No dead links, anywhere
 // ----------------------------------------------------------------------------
 
 const ALL_CONTEXTUAL = [
-  ...getMeetingContextualTemplates("vision_meeting"),
+  ...meetingTemplates("vision_meeting"),
   ...getTeamContextualTemplates({ name: "Facilities" }),
 ];
 

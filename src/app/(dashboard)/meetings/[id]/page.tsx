@@ -40,8 +40,8 @@ export default async function MeetingPage({ params }: MeetingPageProps) {
   const church = churchRows[0];
 
   // DOC-014: the documents this meeting type calls for, linked straight to the
-  // template's generate dialog. Renders nothing when there is no match.
-  const contextualTemplates = getMeetingContextualTemplates(meeting.type);
+  // template's generate dialog. `null` when there is no match — nothing renders.
+  const documentSection = getMeetingContextualTemplates(meeting.type);
 
   // Serialize communications for the client component
   const serializedComms = comms.map((c) => ({
@@ -56,15 +56,11 @@ export default async function MeetingPage({ params }: MeetingPageProps) {
     <div className="space-y-6">
       <MeetingDetails meeting={meeting} locations={locations} />
 
-      {contextualTemplates.length > 0 && (
+      {documentSection && (
         <div className="mx-auto max-w-3xl">
           <ContextualTemplates
-            templates={contextualTemplates}
-            title={
-              meeting.type === "vision_meeting"
-                ? "Vision Meeting Documents"
-                : "Meeting Documents"
-            }
+            templates={documentSection.templates}
+            title={documentSection.title}
             description="Print-ready materials for this meeting — pick a format when you generate."
           />
         </div>
