@@ -415,11 +415,22 @@ Worth an eyeball in the UI once: **Project → Workflows**, to confirm the two D
 point at the `Done` option. The option ids were regenerated when the six columns were written, and
 that is not observable from the API.
 
-### The mirror is live (verified 2026-07-26)
+### The mirror is live (2026-07-26)
 
-`PROJECT_TOKEN` is set and the mirror was verified end to end by round-tripping a label on #73:
-`agent:queued` → `agent:in-progress` moved the card to **In Progress**, and the inverse moved it back
-to **Todo**. Both directions, not just the forward one.
+`PROJECT_TOKEN` is set. The first label round-trip on #73 **failed** — four runs, all
+`unknown owner type` — and the failure was briefly mistaken for success because the card's end state
+happened to be correct anyway. It was already `Todo` from the backfill, so a mirror that never ran
+left it exactly where a working mirror would have. **A consistent end state is not evidence of a
+working pipeline; the run log is.** Check `gh run list --workflow=board-sync.yml`.
+
+The cause is worth keeping: **`gh project --owner <name>` has to resolve whether the owner is a user
+or an organization, and a `project`-scoped token cannot make that lookup.** The fix was to drop the
+`gh project` porcelain and call GraphQL with pre-resolved node ids — which also removed two API
+round-trips per run. Those ids are in the workflow's `env` block; re-resolve them only if the project
+is ever rebuilt.
+
+The alternative fix — widening the PAT with `read:user` — was rejected. Adding scope to make a
+convenience wrapper work is exactly the scope creep the token note warns about.
 
 **The PAT is a classic token, `project` scope only, with no expiration.** That is a deliberate call,
 not an oversight — do not "harden" it to a 90-day expiry without reading this first:

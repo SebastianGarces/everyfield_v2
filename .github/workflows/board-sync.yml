@@ -40,8 +40,12 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  PROJECT_OWNER: SebastianGarces
-  PROJECT_NUMBER: "1"
+  # Pre-resolved GraphQL node ids. Deliberate: `gh project --owner` needs to look up whether the
+  # owner is a user or an org, which a project-scoped token cannot do. Re-resolve only if the
+  # project is rebuilt — `gh project view 1 --owner SebastianGarces --format json` for the project
+  # id, `gh project field-list 1 --owner SebastianGarces --format json` for the field and options.
+  PROJECT_ID: PVT_kwHOAzeefc4BeeCi
+  STATUS_FIELD_ID: PVTSSF_lAHOAzeefc4BeeCizhY4Ay4
 
 jobs:
   sync:
@@ -78,13 +82,18 @@ jobs:
             exit 0
           fi
 
-          status=""
+          # Option ids, not names. `gh project` resolves --owner by asking whether the owner is a
+          # user or an org, and a project-scoped token cannot make that lookup — it fails with
+          # "unknown owner type". So this talks to GraphQL directly with pre-resolved ids, which
+          # also removes two API round-trips per run. Re-resolve these only if the project is
+          # rebuilt: gh project field-list 1 --owner SebastianGarces --format json
+          status=""; option_id=""
           case "$labels" in
-            *"agent:queued"*)      status="Todo" ;;
-            *"agent:in-progress"*) status="In Progress" ;;
-            *"agent:in-review"*)   status="Pending PR review" ;;
-            *"agent:blocked"*)     status="Blocked" ;;
-            *"needs-spec"*)        status="Backlog" ;;
+            *"agent:queued"*)      status="Todo";              option_id="8e532e11" ;;
+            *"agent:in-progress"*) status="In Progress";       option_id="2b12f8f4" ;;
+            *"agent:in-review"*)   status="Pending PR review"; option_id="a2d0c924" ;;
+            *"agent:blocked"*)     status="Blocked";           option_id="726047a5" ;;
+            *"needs-spec"*)        status="Backlog";           option_id="a6027ea1" ;;
           esac
 
           # No mapped label means the issue is not a work item: `feature` parents are indexes,
@@ -96,25 +105,23 @@ jobs:
             exit 0
           fi
 
-          project=$(gh project view "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --format json)
-          project_id=$(echo "$project" | jq -r '.id')
+          # The issue's GraphQL node id — a repo read, so it uses the repo token.
+          content_id=$(GH_TOKEN="$REPO_TOKEN" gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE" --jq '.node_id')
 
-          fields=$(gh project field-list "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --format json)
-          field_id=$(echo "$fields" | jq -r '.fields[] | select(.name == "Status") | .id')
-          option_id=$(echo "$fields" | jq -r --arg s "$status" \
-            '.fields[] | select(.name == "Status") | .options[] | select(.name == $s) | .id')
+          # Idempotent: adding an item already on the board returns the existing item.
+          item_id=$(gh api graphql -f query='
+            mutation($project:ID!, $content:ID!) {
+              addProjectV2ItemById(input:{projectId:$project, contentId:$content}) { item { id } }
+            }' -F project="$PROJECT_ID" -F content="$content_id" \
+            --jq '.data.addProjectV2ItemById.item.id')
 
-          if [ -z "$option_id" ] || [ "$option_id" = "null" ]; then
-            echo "::warning::Status option '$status' does not exist on the project. Add it, spelled exactly."
-            exit 0
-          fi
-
-          issue_url="https://github.com/$GITHUB_REPOSITORY/issues/$ISSUE"
-          # Idempotent: re-adding an item already on the board returns the existing item.
-          item_id=$(gh project item-add "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" \
-            --url "$issue_url" --format json | jq -r '.id')
-
-          gh project item-edit --id "$item_id" --project-id "$project_id" \
-            --field-id "$field_id" --single-select-option-id "$option_id"
+          gh api graphql -f query='
+            mutation($project:ID!, $item:ID!, $field:ID!, $option:String!) {
+              updateProjectV2ItemFieldValue(input:{
+                projectId:$project, itemId:$item, fieldId:$field
+                value:{singleSelectOptionId:$option}
+              }) { projectV2Item { id } }
+            }' -F project="$PROJECT_ID" -F item="$item_id" -F field="$STATUS_FIELD_ID" \
+               -F option="$option_id" --jq '.data.updateProjectV2ItemFieldValue.projectV2Item.id' > /dev/null
 
           echo "#$ISSUE → $status"
