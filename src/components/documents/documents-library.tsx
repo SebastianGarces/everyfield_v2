@@ -94,7 +94,10 @@ export function DocumentsLibrary({ items }: { items: DocumentLibraryItem[] }) {
         </div>
         <div className="flex gap-2">
           <Select value={category} onValueChange={setCategory}>
-            <SelectTrigger className="w-[160px] cursor-pointer">
+            <SelectTrigger
+              aria-label="Filter templates by category"
+              className="w-[160px] cursor-pointer"
+            >
               <SelectValue placeholder="Category" />
             </SelectTrigger>
             <SelectContent>
@@ -111,7 +114,10 @@ export function DocumentsLibrary({ items }: { items: DocumentLibraryItem[] }) {
 
           {phases.length > 0 && (
             <Select value={phase} onValueChange={setPhase}>
-              <SelectTrigger className="w-[130px] cursor-pointer">
+              <SelectTrigger
+                aria-label="Filter templates by phase"
+                className="w-[130px] cursor-pointer"
+              >
                 <SelectValue placeholder="Phase" />
               </SelectTrigger>
               <SelectContent>
@@ -132,7 +138,10 @@ export function DocumentsLibrary({ items }: { items: DocumentLibraryItem[] }) {
           )}
 
           <Select value={format} onValueChange={setFormat}>
-            <SelectTrigger className="w-[120px] cursor-pointer">
+            <SelectTrigger
+              aria-label="Filter templates by file format"
+              className="w-[120px] cursor-pointer"
+            >
               <SelectValue placeholder="Format" />
             </SelectTrigger>
             <SelectContent>
