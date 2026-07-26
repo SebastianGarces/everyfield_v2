@@ -137,8 +137,27 @@ checkpoint), but they must additionally satisfy:
 - **HR1 Migration dry-run** — migration applied to a scratch DB and the resulting schema diff captured.
 - **HR2 Rollback verified** — down-migration (or documented rollback) proven to restore prior state.
 - **HR3 Schema diff in PR body** — the exact DDL delta is shown to the reviewer.
-- **HR4 Two independent verifiers** — two separate `code-reviewer` passes must both reach PASS;
-  any FAIL blocks.
+- **HR4 Diverse-lens sign-off** — after G6, three *independent* reviewers each examine the branch
+  through **one** lens, and **every one must clear**. Any FAIL blocks; a lens whose agent dies also
+  blocks, because missing evidence is a FAIL everywhere else in this document.
+
+  | Lens | The question it owns |
+  |---|---|
+  | `correctness` | Does it do what the ACs asked, including the edge cases nobody wrote an AC for? Is the DDL itself right, and does existing data survive it? |
+  | `security` | Auth on every new entrypoint, multi-tenant boundaries, injection, secrets or internal data leaking to a client bundle or log. Holds `memory/invariants.md` as hard requirements. |
+  | `reproducibility` | Re-runs the migration dry-run, the rollback, and `pnpm test`, and re-derives the schema diff — then checks the first verifier's claims against what it actually observed. |
+
+  This replaced *two identical `code-reviewer` passes*. Two identical reviewers largely reproduce
+  each other's blind spots — the second agrees with the first for the same reasons the first was
+  wrong. Three different questions don't correlate that way.
+
+  **The votes are not pooled, and that is the point.** Majority voting is the correct aggregation
+  for *redundant* verifiers, where identical skeptics generate correlated noise and outvoting
+  filters it. These verifiers are *diverse*: a `security` FAIL is not noise the other two can
+  outvote, because neither of them looked at security. Each lens holds a veto over its own axis.
+
+  Findings from lenses that **do** clear are carried into the PR body, so the human reviewer can see
+  what each axis actually examined rather than just that it passed.
 - The PR is labelled `risk:high` so it sorts to the top of the review queue.
 
 ---

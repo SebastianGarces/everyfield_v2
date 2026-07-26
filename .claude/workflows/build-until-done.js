@@ -11,7 +11,8 @@ export const meta = {
     },
     {
       title: "Verify",
-      detail: "independent code-reviewer runs the DoD gates incl. MCP G3",
+      detail:
+        "independent code-reviewer runs the DoD gates incl. MCP G3; high-risk adds three diverse lenses (correctness / security / reproducibility), every one of which must clear",
     },
     {
       title: "Ship",
@@ -119,6 +120,48 @@ const BLOCK_SCHEMA = {
   required: ["labelled"],
   properties: { labelled: { type: "boolean" }, note: { type: "string" } },
 };
+const LENS_SCHEMA = {
+  type: "object",
+  required: ["verdict", "lens", "findings", "summary"],
+  properties: {
+    verdict: { type: "string", enum: ["PASS", "FAIL"] },
+    lens: { type: "string" },
+    findings: { type: "array", items: { type: "string" } },
+    failingGate: { type: "string" },
+    fixInstructions: { type: "string" },
+    summary: { type: "string" },
+  },
+};
+
+// ---------------------------------------------------------------------------
+// HR4 — diverse-lens sign-off for high-risk tracks.
+//
+// This replaced a SECOND IDENTICAL code-reviewer pass. Two identical reviewers
+// mostly reproduce each other's blind spots: the second agrees with the first
+// for the same reasons the first was wrong. Three different QUESTIONS do not
+// correlate that way — each lens is the only one looking down its own axis.
+//
+// Which is exactly why these votes are NOT majority-pooled. Majority voting is
+// the right aggregation for REDUNDANT verifiers (identical skeptics produce
+// correlated noise, so outvoting filters it). With DIVERSE verifiers a security
+// FAIL is not noise the other two can outvote — they never looked at security.
+// So: any lens FAIL blocks, and a lens that DIED counts as a NO, because
+// dod.md's own rule is to default to FAIL when evidence is missing.
+// ---------------------------------------------------------------------------
+const HIGH_RISK_LENSES = [
+  {
+    key: "correctness",
+    brief: `Read the diff against the acceptance criteria and the data model. Does it actually do what was asked, including the edge cases nobody wrote an AC for — empty states, the second call, concurrent writes, null/missing rows? For migrations: is the DDL itself right (nullability, defaults, indexes, cascade behaviour), and does existing data survive it?`,
+  },
+  {
+    key: "security",
+    brief: `Attack the diff. Auth and permission checks on every new entrypoint; multi-tenant boundaries (can org A read or write org B's rows through anything this adds?); injection and unsafe interpolation; secrets or internal data reaching a client bundle or a log; over-broad SELECTs that widen what a response exposes. Read memory/invariants.md and treat every rule in it as a hard requirement, not a guideline. You are the ONLY reviewer looking down this axis — if you pass this, nobody else will catch it.`,
+  },
+  {
+    key: "reproducibility",
+    brief: `Do NOT reason about the code — RE-RUN the evidence. Execute the migration dry-run, the rollback, and \`pnpm test\` yourself in the worktree, and re-derive the schema diff. Then compare what you observed against what the first verifier's report claims. Any claim you cannot reproduce is a FAIL, and say which claim and what you got instead.`,
+  },
+];
 
 // ---------------------------------------------------------------------------
 // Defensive regroup: merge any units that share a file into ONE track/branch
@@ -201,7 +244,15 @@ async function blockTrack(track, reason, lastReport) {
 Reason: ${reason}.
 Failing gate / findings: ${lastReport ? JSON.stringify({ failingGate: lastReport.failingGate, fixInstructions: lastReport.fixInstructions, summary: lastReport.summary }) : "no verifier report"}.
 For EACH issue: \`gh issue edit <n> --remove-label agent:in-progress --add-label agent:blocked\` and post a comment (\`gh issue comment <n>\`) with the failing gate + the concrete evidence + what a human needs to do. Do NOT open a PR. Return strictly the schema.`,
-    { label: `block:${track.id}`, phase: "Verify", schema: BLOCK_SCHEMA }
+    {
+      label: `block:${track.id}`,
+      phase: "Verify",
+      // Mechanical: label edits plus a comment transcribed from the report it
+      // was handed. It reformats findings, it does not produce them.
+      model: "sonnet",
+      effort: "low",
+      schema: BLOCK_SCHEMA,
+    }
   );
   return { track, status: "blocked", reason, lastReport };
 }
@@ -215,7 +266,14 @@ async function buildTrack(track) {
   // mark issues in-progress (best-effort, inside an agent since the script has no shell)
   await agent(
     `For each issue in [${track.issues.join(", ")}], run: \`gh issue edit <n> --remove-label agent:queued --add-label agent:in-progress\`. Return strictly {"labelled": true}.`,
-    { label: `start:${track.id}`, phase: "Build", schema: BLOCK_SCHEMA }
+    {
+      label: `start:${track.id}`,
+      phase: "Build",
+      // Two shell commands and a fixed return value. No judgment involved.
+      model: "haiku",
+      effort: "low",
+      schema: BLOCK_SCHEMA,
+    }
   );
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -287,27 +345,85 @@ Default to FAIL when evidence is missing or unconvincing. Return strictly the Do
       continue;
     }
 
-    // High-risk → second independent verifier must also pass (HR4).
+    // High-risk → diverse-lens sign-off (HR4). Every lens must clear.
     if (track.risk === "high") {
-      const verify2 = await agent(
-        `You are a SECOND independent code-reviewer for HIGH-RISK branch ${branch} (worktree ${wt}), issue(s) ${track.issues.map((n) => `#${n}`).join(", ")}. Re-run the DoD gates focusing on the migration dry-run, schema diff, rollback, and the auth/tenancy ACs. Do not assume the first reviewer was right. Return strictly the DoD report schema.`,
-        {
-          label: `verify2:${track.id}#${attempt}`,
-          phase: "Verify",
-          agentType: "code-reviewer",
-          schema: DOD_SCHEMA,
-        }
+      const votes = await parallel(
+        HIGH_RISK_LENSES.map(
+          (lens) => () =>
+            agent(
+              `You are an independent adversarial reviewer of HIGH-RISK branch ${branch} (worktree ${wt}), issue(s) ${track.issues.map((n) => `#${n}`).join(", ")}. ${CONVENTIONS}
+
+You review through ONE lens only: **${lens.key}**. Stay in it — other reviewers cover the other axes, and anything you wave through on your axis ships unexamined.
+
+${lens.brief}
+
+The first verifier reported PASS. Do not assume it was right; its report is below so you can check it, not so you can agree with it.
+${JSON.stringify({ gates: verify.gates, acceptanceCriteria: verify.acceptanceCriteria, summary: verify.summary })}
+
+Acceptance criteria in scope:
+${track.units.map((u) => (u.acceptanceCriteria || []).map((a) => `  - ${a}`).join("\n")).join("\n")}
+
+Default to FAIL when evidence is missing or unconvincing. Set lens to "${lens.key}". Return strictly the schema.`,
+              {
+                label: `lens:${lens.key}:${track.id}#${attempt}`,
+                // Explicit — nested inside parallel(), so don't race the global phase().
+                phase: "Verify",
+                agentType: "code-reviewer",
+                schema: LENS_SCHEMA,
+              }
+            ).then((v) => ({ lens: lens.key, report: v }))
+        )
       );
-      if (
-        !verify2 ||
-        (verify2.verdict !== "PASS" && verify2.verdict !== "PASS_WITH_WARNINGS")
-      ) {
-        lastReport = verify2 || lastReport;
+
+      // A dead lens is missing evidence, not a pass. Fail closed.
+      const tally = HIGH_RISK_LENSES.map((lens, i) => {
+        const r = votes[i];
+        return {
+          lens: lens.key,
+          report: r?.report ?? null,
+          cleared: r?.report?.verdict === "PASS",
+          died: !r?.report,
+        };
+      });
+      const dissent = tally.filter((t) => !t.cleared);
+      log(
+        `🔎 ${track.id} HR4 lenses: ${tally.map((t) => `${t.lens}=${t.died ? "DIED" : t.report.verdict}`).join(" ")}`
+      );
+
+      if (dissent.length) {
+        const first = dissent.find((d) => !d.died) || dissent[0];
+        lastReport = {
+          ...verify,
+          verdict: "FAIL",
+          failingGate: `HR4/${first.lens}`,
+          fixInstructions: dissent
+            .map((d) =>
+              d.died
+                ? `[${d.lens}] lens agent died — no evidence on this axis; it must be re-reviewed.`
+                : `[${d.lens}] ${d.report.fixInstructions || d.report.summary}\n${(d.report.findings || []).map((f) => `  - ${f}`).join("\n")}`
+            )
+            .join("\n\n"),
+          summary: `HR4 rejected by ${dissent.map((d) => d.lens).join(", ")}.`,
+          lenses: tally.map(({ lens, cleared, died, report }) => ({
+            lens,
+            cleared,
+            died,
+            findings: report?.findings || [],
+          })),
+        };
         log(
-          `❌ ${track.id} attempt ${attempt}: second verifier rejected — retrying`
+          `❌ ${track.id} attempt ${attempt}: HR4 rejected by ${dissent.map((d) => d.lens).join(", ")} — retrying`
         );
         continue;
       }
+
+      // Cleared by every lens — carry their findings into the PR body so the
+      // human reviewer sees what each axis actually looked at.
+      verify.lensFindings = tally.map(({ lens, report }) => ({
+        lens,
+        summary: report.summary,
+        findings: report.findings || [],
+      }));
     }
 
     // PASS (per the verifier) → push, open the PR, and WAIT FOR THE REAL CHECK.
@@ -319,6 +435,10 @@ Push the branch. If a PR for this branch already EXISTS (an earlier attempt open
 
 THEN WAIT FOR CI AND REPORT WHAT IT SAID, NOT WHAT YOU BELIEVE:
 \`gh pr checks <number> --watch --fail-fast\`, then read the conclusion of the "Format, Lint, Typecheck, Build" check. Put it in checkConclusion verbatim (success | failure | timed_out | none). If it is not success, pull the failing step and its error with \`gh run view <run-id> --log-failed\` and put that in checkSummary. Do not summarise it as "probably unrelated" and do not claim success you did not observe. Return strictly the schema.`,
+      // Deliberately NOT tiered down. This node looks mechanical, but it is the
+      // one that transcribes the CI conclusion, and the whole anchoring story
+      // rests on it reporting what GitHub said instead of summarising it into
+      // "probably unrelated". Cheapening it is a false economy.
       { label: `pr:${track.id}#${attempt}`, phase: "Ship", schema: PR_SCHEMA }
     );
 
@@ -361,6 +481,25 @@ phase("Build");
 const results = await parallel(tracks.map((t) => () => buildTrack(t)));
 
 // ---------------------------------------------------------------------------
+// Fan-in guard
+//
+// parallel() resolves a thunk that threw to null, so a track whose buildTrack
+// died — an agent erroring out after retries, the token budget throwing mid-run
+// — comes back as a hole. `.filter(Boolean)` then removes it from the report
+// entirely, and the run ends looking tidy while a unit nobody mentioned simply
+// never happened: no PR, no agent:blocked label, no alert. The count that went
+// in must equal the count that comes out; anything else gets named, loudly.
+// ---------------------------------------------------------------------------
+const lost = tracks.filter((_, i) => !results[i]);
+if (lost.length) {
+  log(
+    `🚨 FAN-IN GAP: launched ${tracks.length} track(s), ${results.length - lost.length} returned. ` +
+      `${lost.length} vanished without a verdict: ${lost.map((t) => `${t.id} (issues ${t.issues.map((n) => `#${n}`).join(", ") || "none"})`).join("; ")}. ` +
+      `These are NOT blocked and NOT shipped — their issues still read agent:in-progress and no one was told. Re-run them or take them manually.`
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Report
 // ---------------------------------------------------------------------------
 const done = results.filter(Boolean);
@@ -368,9 +507,17 @@ const shipped = done.filter((r) => r.status === "shipped");
 const blocked = done.filter(
   (r) => r.status === "blocked" || r.status === "pr-failed"
 );
-log(`Done: ${shipped.length} shipped (PR opened), ${blocked.length} blocked.`);
+log(
+  `Done: ${shipped.length} shipped (PR opened), ${blocked.length} blocked${lost.length ? `, ${lost.length} LOST` : ""}.`
+);
 return {
-  summary: `${shipped.length}/${tracks.length} tracks shipped to PR; ${blocked.length} blocked.`,
+  summary: `${shipped.length}/${tracks.length} tracks shipped to PR; ${blocked.length} blocked${lost.length ? `; ⚠️ ${lost.length} lost without a verdict` : ""}.`,
+  lost: lost.map((t) => ({
+    track: t.id,
+    issues: t.issues,
+    reason:
+      "track returned no result (agent died or the budget threw) — still labelled agent:in-progress",
+  })),
   shipped: shipped.map((r) => ({
     track: r.track.id,
     issues: r.track.issues,
@@ -384,5 +531,8 @@ return {
     failingGate: r.lastReport?.failingGate,
   })),
   nextStep:
-    "Review the opened PRs (your queue). For blocked issues, read the issue comment for the failing gate + evidence and decide: tighten the spec, raise budget (+Nk), or take it manually.",
+    "Review the opened PRs (your queue). For blocked issues, read the issue comment for the failing gate + evidence and decide: tighten the spec, raise budget (+Nk), or take it manually." +
+    (lost.length
+      ? " ⚠️ FIRST: the lost tracks got no verdict and no issue comment — nothing told you about them except this field. Re-queue them (their issues are stuck on agent:in-progress)."
+      : ""),
 };
