@@ -4,6 +4,7 @@ import {
   BookOpenText,
   CalendarCheck,
   Church,
+  FileText,
   LayoutDashboard,
   ListChecks,
   MessageSquare,
@@ -63,13 +64,12 @@ export const mainNavItems: NavItem[] = [
     icon: ListChecks,
     requiresChurch: true,
   },
-  // Sprint A: hidden until built - see gap-report-2026-06.md
-  // {
-  //   title: "Documents",
-  //   href: "/documents",
-  //   icon: FileText,
-  //   isDisabled: true,
-  // },
+  {
+    title: "Documents",
+    href: "/documents",
+    icon: FileText,
+    requiresChurch: true,
+  },
   // Sprint A: hidden until built - see gap-report-2026-06.md
   // {
   //   title: "Financial",
