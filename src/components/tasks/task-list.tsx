@@ -1,6 +1,12 @@
 import { Button } from "@/components/ui/button";
 import type { TaskWithAssignee } from "@/lib/tasks/types";
 import { ListChecks } from "lucide-react";
+import {
+  BulkActionsBar,
+  TaskGroupSelectAll,
+  TaskSelectCheckbox,
+  TaskSelectionProvider,
+} from "./bulk-actions";
 import { TaskCard } from "./task-card";
 
 // ============================================================================
@@ -145,41 +151,59 @@ export function TaskList({
   const groups = groupTasksByDueDate(tasks);
 
   return (
-    <div className="space-y-6">
-      {groups.map((group) => (
-        <div key={group.label} className="space-y-2">
-          <h3
-            className={`text-sm font-semibold ${GROUP_STYLES[group.variant] ?? ""}`}
-          >
-            {group.label}
-          </h3>
-          <div className="space-y-2">
-            {group.tasks.map((task) => (
-              <TaskCard
-                key={task.id}
-                task={task}
-                personNote={
-                  task.relatedType === "person" && task.relatedId
-                    ? (personNotes?.[task.relatedId] ?? null)
-                    : null
-                }
+    // Selection is client state; the list itself stays a server component so
+    // the due-date grouping is computed once, on the server.
+    <TaskSelectionProvider>
+      <div className="space-y-6">
+        {groups.map((group) => (
+          <div key={group.label} className="space-y-2">
+            <div className="flex items-center gap-2">
+              <TaskGroupSelectAll
+                taskIds={group.tasks.map((task) => task.id)}
+                label={group.label}
               />
-            ))}
+              <h3
+                className={`text-sm font-semibold ${GROUP_STYLES[group.variant] ?? ""}`}
+              >
+                {group.label}
+              </h3>
+            </div>
+            <div className="space-y-2">
+              {group.tasks.map((task) => (
+                <div key={task.id} className="flex items-start gap-2">
+                  <div className="pt-5">
+                    <TaskSelectCheckbox taskId={task.id} title={task.title} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <TaskCard
+                      task={task}
+                      personNote={
+                        task.relatedType === "person" && task.relatedId
+                          ? (personNotes?.[task.relatedId] ?? null)
+                          : null
+                      }
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-      ))}
+        ))}
 
-      {nextCursor && (
-        <div className="flex justify-center pt-4">
-          <Button variant="outline" disabled>
-            Load more (Pagination coming soon)
-          </Button>
-        </div>
-      )}
+        {nextCursor && (
+          <div className="flex justify-center pt-4">
+            <Button variant="outline" disabled>
+              Load more (Pagination coming soon)
+            </Button>
+          </div>
+        )}
 
-      <div className="text-muted-foreground text-center text-xs">
-        Showing {tasks.length} of {total} tasks
+        <div className="text-muted-foreground text-center text-xs">
+          Showing {tasks.length} of {total} tasks
+        </div>
+
+        <BulkActionsBar />
       </div>
-    </div>
+    </TaskSelectionProvider>
   );
 }

@@ -510,3 +510,355 @@ export async function deleteTask(
       )
     );
 }
+
+// ============================================================================
+// Bulk Operations (T-019)
+// ============================================================================
+//
+// Two rules shape this section:
+//
+// 1. NOTHING IS SILENTLY DROPPED. Every requested task id comes back in the
+//    result either as a success or as a failure carrying a human reason. The
+//    write itself is a single statement (one round trip, not N), and the ids
+//    it returns are reconciled against the ids we asked for — anything the
+//    statement did not touch is reported, not assumed.
+//
+// 2. DOWNSTREAM CONSUMERS ARE NOT STAMPEDED. A bulk complete emits one
+//    `task.completed` per task (auto-completion + Phase Engine dirty-marking
+//    subscribe to it, and skipping any would lose a material event). They are
+//    emitted SEQUENTIALLY — awaited one at a time — so a 100-task bulk write
+//    never fans 100 concurrent handler chains at the DB. Dirty-marking is
+//    idempotent per church, so repeated stamps are cheap and safe.
+//
+// The pure planner/reconciler below is exported so the partial-failure
+// behaviour is unit-testable without a database.
+// ============================================================================
+
+/** Upper bound on a single bulk operation. Keeps one statement one statement. */
+export const MAX_BULK_TASKS = 100;
+
+/** One requested task that did not make it through the operation, and why. */
+export interface BulkTaskFailure {
+  taskId: string;
+  title: string | null;
+  reason: string;
+}
+
+/** Outcome of a bulk operation over a set of requested task ids. */
+export interface BulkTaskResult {
+  /** How many distinct task ids the caller asked for. */
+  requested: number;
+  /** Ids that were actually written. */
+  succeeded: string[];
+  /** Ids that were not written, each with a reason. */
+  failed: BulkTaskFailure[];
+  /** How many `task.completed` events were emitted (bulk complete only). */
+  eventsEmitted: number;
+}
+
+/** The minimal row shape bulk operations need to plan and emit events. */
+export interface BulkTaskCandidate {
+  id: string;
+  churchId: string;
+  title: string;
+  status: TaskStatus;
+  category: TaskCategory | null;
+  relatedType: string | null;
+  relatedId: string | null;
+}
+
+/** What a bulk operation intends to do, before it touches anything. */
+export interface BulkTaskPlan {
+  /** Distinct requested ids, in request order. */
+  requested: string[];
+  /** Rows that exist, are in scope, and are eligible for the operation. */
+  actionable: BulkTaskCandidate[];
+  /** Requested ids rejected before the write (missing, ineligible). */
+  failures: BulkTaskFailure[];
+}
+
+/**
+ * Pure: decide which of the requested ids can be operated on.
+ *
+ * A requested id that was not loaded is a failure ("Task not found") — that
+ * covers ids from another church, soft-deleted rows, and stale client state.
+ */
+export function planBulkTaskOperation(
+  requestedIds: string[],
+  found: BulkTaskCandidate[],
+  options: { rejectCompleted?: boolean } = {}
+): BulkTaskPlan {
+  const requested = [...new Set(requestedIds)];
+  const byId = new Map(found.map((row) => [row.id, row]));
+
+  const actionable: BulkTaskCandidate[] = [];
+  const failures: BulkTaskFailure[] = [];
+
+  for (const id of requested) {
+    const row = byId.get(id);
+
+    if (!row) {
+      failures.push({ taskId: id, title: null, reason: "Task not found" });
+      continue;
+    }
+
+    if (options.rejectCompleted && row.status === "complete") {
+      failures.push({
+        taskId: id,
+        title: row.title,
+        reason: "Task is already complete",
+      });
+      continue;
+    }
+
+    actionable.push(row);
+  }
+
+  return { requested, actionable, failures };
+}
+
+/**
+ * Pure: fold the ids a write actually returned back into the plan.
+ *
+ * Anything the plan considered actionable but the write did not return is
+ * reported as a failure — a bulk operation never quietly loses a row.
+ */
+export function reconcileBulkTaskOperation(
+  plan: BulkTaskPlan,
+  writtenIds: string[],
+  missedReason = "Task could not be updated"
+): { result: BulkTaskResult; written: BulkTaskCandidate[] } {
+  const writtenSet = new Set(writtenIds);
+
+  const written = plan.actionable.filter((row) => writtenSet.has(row.id));
+  const missed = plan.actionable
+    .filter((row) => !writtenSet.has(row.id))
+    .map((row) => ({
+      taskId: row.id,
+      title: row.title,
+      reason: missedReason,
+    }));
+
+  return {
+    result: {
+      requested: plan.requested.length,
+      succeeded: written.map((row) => row.id),
+      failed: [...plan.failures, ...missed],
+      eventsEmitted: 0,
+    },
+    written,
+  };
+}
+
+/**
+ * The database/event surface a bulk operation needs. Injectable so the
+ * partial-failure and event-fan-out behaviour can be unit-tested without a DB.
+ */
+export interface BulkTaskDeps {
+  loadCandidates(
+    churchId: string,
+    taskIds: string[]
+  ): Promise<BulkTaskCandidate[]>;
+  completeMany(
+    churchId: string,
+    taskIds: string[],
+    userId: string
+  ): Promise<string[]>;
+  rescheduleMany(
+    churchId: string,
+    taskIds: string[],
+    dueDate: string
+  ): Promise<string[]>;
+  emitCompleted(task: BulkTaskCandidate, userId: string): Promise<void>;
+}
+
+export const defaultBulkTaskDeps: BulkTaskDeps = {
+  async loadCandidates(churchId, taskIds) {
+    if (taskIds.length === 0) return [];
+
+    return db
+      .select({
+        id: tasks.id,
+        churchId: tasks.churchId,
+        title: tasks.title,
+        status: tasks.status,
+        category: tasks.category,
+        relatedType: tasks.relatedType,
+        relatedId: tasks.relatedId,
+      })
+      .from(tasks)
+      .where(
+        and(
+          eq(tasks.churchId, churchId),
+          inArray(tasks.id, taskIds),
+          isNull(tasks.deletedAt)
+        )
+      );
+  },
+
+  async completeMany(churchId, taskIds, userId) {
+    const now = new Date();
+
+    const updated = await db
+      .update(tasks)
+      .set({
+        status: "complete",
+        completedAt: now,
+        completedById: userId,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(tasks.churchId, churchId),
+          inArray(tasks.id, taskIds),
+          isNull(tasks.deletedAt),
+          ne(tasks.status, "complete")
+        )
+      )
+      .returning({ id: tasks.id });
+
+    return updated.map((row) => row.id);
+  },
+
+  async rescheduleMany(churchId, taskIds, dueDate) {
+    const updated = await db
+      .update(tasks)
+      .set({ dueDate, updatedAt: new Date() })
+      .where(
+        and(
+          eq(tasks.churchId, churchId),
+          inArray(tasks.id, taskIds),
+          isNull(tasks.deletedAt)
+        )
+      )
+      .returning({ id: tasks.id });
+
+    return updated.map((row) => row.id);
+  },
+
+  async emitCompleted(task, userId) {
+    await emitTaskCompleted(
+      task.id,
+      task.churchId,
+      task.category,
+      task.relatedType,
+      task.relatedId,
+      userId
+    );
+  },
+};
+
+function emptyBulkResult(): BulkTaskResult {
+  return { requested: 0, succeeded: [], failed: [], eventsEmitted: 0 };
+}
+
+function assertBulkSize(requested: string[]): void {
+  if (requested.length > MAX_BULK_TASKS) {
+    throw new Error(`Cannot update more than ${MAX_BULK_TASKS} tasks at once`);
+  }
+}
+
+function describeWriteError(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
+/**
+ * Complete many tasks in one operation.
+ *
+ * Emits one `task.completed` event per task that was actually completed —
+ * sequentially, so downstream subscribers (auto-completion, Phase Engine
+ * dirty-marking) see every task without being hit concurrently. Tasks that
+ * could not be completed are returned in `failed`, never dropped.
+ */
+export async function bulkCompleteTasks(
+  churchId: string,
+  taskIds: string[],
+  userId: string,
+  deps: BulkTaskDeps = defaultBulkTaskDeps
+): Promise<BulkTaskResult> {
+  const requested = [...new Set(taskIds)];
+  if (requested.length === 0) return emptyBulkResult();
+  assertBulkSize(requested);
+
+  const found = await deps.loadCandidates(churchId, requested);
+  const plan = planBulkTaskOperation(requested, found, {
+    rejectCompleted: true,
+  });
+
+  let writtenIds: string[] = [];
+  let missedReason = "Task could not be completed";
+
+  if (plan.actionable.length > 0) {
+    try {
+      writtenIds = await deps.completeMany(
+        churchId,
+        plan.actionable.map((row) => row.id),
+        userId
+      );
+    } catch (error) {
+      console.error("bulkCompleteTasks write failed:", error);
+      missedReason = describeWriteError(error, missedReason);
+    }
+  }
+
+  const { result, written } = reconcileBulkTaskOperation(
+    plan,
+    writtenIds,
+    missedReason
+  );
+
+  // One event per completed task, emitted one at a time (see header note).
+  for (const task of written) {
+    try {
+      await deps.emitCompleted(task, userId);
+      result.eventsEmitted += 1;
+    } catch (error) {
+      // The write already landed — a failed emit degrades downstream
+      // freshness, it does not un-complete the task.
+      console.error(
+        `bulkCompleteTasks failed to emit task.completed for ${task.id}:`,
+        error
+      );
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Set the same due date on many tasks in one operation.
+ *
+ * Rescheduling is not a material event (no status change), so it emits no
+ * events. Tasks that could not be rescheduled are returned in `failed`.
+ */
+export async function bulkRescheduleTasks(
+  churchId: string,
+  taskIds: string[],
+  dueDate: string,
+  deps: BulkTaskDeps = defaultBulkTaskDeps
+): Promise<BulkTaskResult> {
+  const requested = [...new Set(taskIds)];
+  if (requested.length === 0) return emptyBulkResult();
+  assertBulkSize(requested);
+
+  const found = await deps.loadCandidates(churchId, requested);
+  const plan = planBulkTaskOperation(requested, found);
+
+  let writtenIds: string[] = [];
+  let missedReason = "Task could not be rescheduled";
+
+  if (plan.actionable.length > 0) {
+    try {
+      writtenIds = await deps.rescheduleMany(
+        churchId,
+        plan.actionable.map((row) => row.id),
+        dueDate
+      );
+    } catch (error) {
+      console.error("bulkRescheduleTasks write failed:", error);
+      missedReason = describeWriteError(error, missedReason);
+    }
+  }
+
+  return reconcileBulkTaskOperation(plan, writtenIds, missedReason).result;
+}
