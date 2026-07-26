@@ -294,10 +294,17 @@ Our pipeline already exists as the `agent:*` state machine, so the field is a st
 |---|---|---|
 | **Backlog** | `needs-spec` label | `spec-intake` triage / by hand |
 | **Todo** | `agent:queued` label | `spec-intake` on issue creation |
-| **In progress** | `agent:in-progress` label | `build-until-done` on claim |
+| **In Progress** | `agent:in-progress` label | `build-until-done` on claim |
 | **Pending PR review** | `agent:in-review` label | `build-until-done` on DoD PASS + PR open |
 | **Blocked** | `agent:blocked` label | `build-until-done` on exhaustion |
 | **Done** | issue **closed** | GitHub, via `Closes #` on merge |
+
+Casing matters — GitHub's default option is `In Progress`, and the mirror matches an option by name.
+
+**Not every issue belongs on the board.** An issue with no mapped label is not a work item: `feature`
+parents are indexes, `decision` issues close by a ruling rather than a PR, and `deferred` ones are off
+the roadmap. All three stay off deliberately — a kanban full of cards nobody can pick up is noise.
+Feature grouping is still available through the built-in **Parent issue** field on the children.
 
 `Done` needs no mirroring: the two workflows enabled by default on every new project already set
 Status → Done when an issue closes or a PR merges. The Action only has to map the five active labels.
@@ -375,6 +382,22 @@ old checklists recorded that only as prose in a parenthetical.
   deliberately, not drift into it.
 - **#23 (oversight planter-invitation UI) has no parent.** No FRD covers oversight. G0 now allows
   that explicitly for platform work rather than forcing a wrong parent.
+
+### The Project (created 2026-07-26)
+
+**[EveryField Delivery](https://github.com/users/SebastianGarces/projects/1)** — user-owned, number 1,
+which is what `board-sync.yml` already expected.
+
+Its default `Status` field was **updated in place** rather than replaced, so the field id survived and
+the two workflows GitHub enables by default (issue closed → Done, PR merged → Done) stay bound to it.
+Replacing the field would have silently unbound them.
+
+**55 work items backfilled**, using the same label rule the workflow uses so the two cannot disagree:
+37 Todo, 18 Backlog. The `feature`, `decision` and `deferred` issues were correctly skipped.
+
+Worth an eyeball in the UI once: **Project → Workflows**, to confirm the two Done automations still
+point at the `Done` option. The option ids were regenerated when the six columns were written, and
+that is not observable from the API.
 
 ### Not done, deliberately
 
