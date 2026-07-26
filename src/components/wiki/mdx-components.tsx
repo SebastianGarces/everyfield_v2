@@ -1,5 +1,34 @@
+import { isValidElement, type ReactNode } from "react";
 import type { MDXComponents } from "mdx/types";
+import { slugifyHeading } from "@/lib/wiki/toc";
 import { Callout } from "./callout";
+
+/**
+ * Flatten a heading's children to plain text so its anchor id can be derived
+ * the same way `extractHeadings()` derives it from the MDX source — a heading
+ * like `## **Pray** first` renders as two nodes but must still slugify to
+ * `pray-first`.
+ */
+function headingText(node: ReactNode): string {
+  if (node === null || node === undefined || typeof node === "boolean") {
+    return "";
+  }
+  if (typeof node === "string" || typeof node === "number") {
+    return String(node);
+  }
+  if (Array.isArray(node)) {
+    return node.map(headingText).join("");
+  }
+  if (isValidElement<{ children?: ReactNode }>(node)) {
+    return headingText(node.props.children);
+  }
+  return "";
+}
+
+/** Anchor id for a rendered heading — the target of a TOC entry (W-014). */
+function headingId(children: ReactNode): string {
+  return slugifyHeading(headingText(children));
+}
 
 export const mdxComponents: MDXComponents = {
   // Custom components
@@ -12,17 +41,26 @@ export const mdxComponents: MDXComponents = {
     </h1>
   ),
   h2: ({ children }) => (
-    <h2 className="mt-8 mb-3 scroll-m-20 border-b pb-2 text-2xl font-semibold tracking-tight first:mt-0">
+    <h2
+      id={headingId(children)}
+      className="mt-8 mb-3 scroll-m-20 border-b pb-2 text-2xl font-semibold tracking-tight first:mt-0"
+    >
       {children}
     </h2>
   ),
   h3: ({ children }) => (
-    <h3 className="mt-6 mb-2 scroll-m-20 text-xl font-semibold tracking-tight">
+    <h3
+      id={headingId(children)}
+      className="mt-6 mb-2 scroll-m-20 text-xl font-semibold tracking-tight"
+    >
       {children}
     </h3>
   ),
   h4: ({ children }) => (
-    <h4 className="mt-4 mb-2 scroll-m-20 text-lg font-semibold tracking-tight">
+    <h4
+      id={headingId(children)}
+      className="mt-4 mb-2 scroll-m-20 text-lg font-semibold tracking-tight"
+    >
       {children}
     </h4>
   ),
