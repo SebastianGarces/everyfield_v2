@@ -428,16 +428,29 @@ export function buildCsfScorecard(
 }
 
 /**
- * The CSF scorecard for a church, read from its latest COMPLETE assessment
- * (PE-023). Zero LLM calls — one snapshot read plus a pure projection.
+ * The PLANTER's CSF scorecard for a church, read from its latest COMPLETE
+ * assessment (PE-023). Zero LLM calls — one snapshot read plus a pure
+ * projection.
+ *
+ * Deliberately has no `audience` parameter. This is the only function in this
+ * section that touches the DB, and `getLatestAssessment` returns every insight
+ * on the assessment — including network-audience rows that have NOT passed the
+ * `share_*` privacy gate. An `audience: "network"` option here would therefore
+ * be a one-argument bypass of that gate, sitting right where a future oversight
+ * UI would reach for it.
+ *
+ * A network scorecard is built the only safe way instead: gate first with the
+ * oversight read path (`oversight/read.ts:gateNetworkInsights`, reached via
+ * `getOversightPlantHealth`), then hand the surviving rows to
+ * {@link buildCsfScorecard} with `audience: "network"`. That projection is
+ * pure — it can only ever show what the caller already decided is shareable.
  *
  * Callers that already hold the snapshot (the /phase page reads it for the
  * Focus panel) should call {@link buildCsfScorecard} directly rather than
  * paying for a second identical read.
  */
 export async function getCsfScorecard(
-  churchId: string,
-  audience: InsightAudience = "planter"
+  churchId: string
 ): Promise<CsfScorecard | null> {
-  return buildCsfScorecard(await getLatestAssessment(churchId), audience);
+  return buildCsfScorecard(await getLatestAssessment(churchId), "planter");
 }
