@@ -7,6 +7,17 @@
 
 ---
 
+> ## ⏸ DEFERRED — decided 2026-07-26
+>
+> F7 is deferred, not cut. Zero code exists; nav is commented out in `src/lib/navigation.ts`.
+> Financial **readiness** is currently satisfied attestation-only through the phase engine, and that
+> is the shipped answer until this feature is picked up.
+>
+> Audits and gap reports should treat every requirement below as **intentionally unbuilt** rather
+> than as a gap. Decision #2 in [`docs-audit-2026-07.md`](../../docs-audit-2026-07.md).
+
+---
+
 ## References
 
 - [Product Brief](../../product-brief.md) - Core concepts and domain language

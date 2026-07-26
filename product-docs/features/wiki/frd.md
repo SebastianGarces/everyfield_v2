@@ -135,7 +135,7 @@ Inspired by software documentation best practices (Divio framework), the wiki or
 | W-016 | Article feedback | Thumbs up/down helpfulness rating |
 | W-017 | Contextual surfacing | Show relevant wiki content within other features |
 | W-018 | Download as PDF | Export individual articles as PDF |
-| W-019 | Video content embedding | Support embedded video content (YouTube, Vimeo) |
+| ~~W-019~~ | ~~Video content embedding~~ | **CUT 2026-07-26** (decision #6) — own-content production is far enough out that this isn't worth carrying. Drop the `WikiVideo` table with it. |
 | W-020 | Print-friendly styling | Articles render well for printing |
 
 ### Nice to Have (Future)

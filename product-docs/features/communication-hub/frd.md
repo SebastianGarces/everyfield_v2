@@ -39,17 +39,17 @@ The Communication Hub also serves as a **delivery service** for other features. 
 | COM-006 | Message history | View all sent messages |
 | COM-007 | Person communication log | View all messages sent to a specific person |
 | COM-008 | Basic delivery tracking | Track sent/delivered status |
-| COM-009 | Quick select groups | Select Core Group, Teams, etc. as recipients |
+| COM-009 | Quick select groups | Select Core Group, pipeline status groups, **and ministry-team rosters** as recipients. Team rosters confirmed in scope 2026-07-26 (decision #17). Note: no quick-select implementation exists yet — this is a build, not an extension. |
 | COM-010 | Template categorization | Organize templates by purpose |
 
 ### Should Have
 
 | ID | Requirement | Description |
 |----|-------------|-------------|
-| COM-011 | SMS delivery | Send text messages via integrated service (Twilio) |
+| COM-011 | SMS delivery | Send text messages via integrated service (Twilio). **POST-BETA** (decision #7) — kept, not cut; a second provider plus number compliance is out of beta scope. |
 | COM-012 | Open tracking | Track email opens |
 | COM-013 | Click tracking | Track link clicks in emails |
-| COM-014 | Scheduled sending | Schedule messages for future delivery |
+| COM-014 | Scheduled sending | Schedule messages for future delivery. **POST-BETA** (decision #7) — kept; a send queue on top of Resend, useful for batching, but not beta scope. |
 | COM-015 | Message preview | Preview message with sample merge data |
 | COM-016 | Custom templates | Create church-specific message templates |
 | COM-017 | Rich text editor | Format messages with bold, italic, links |

@@ -102,6 +102,29 @@ The engine is two layers that must never blur:
 - **PE-020 (Reactive criteria nudges):** Emit a `phase.criteria.updated`-style signal when a readiness threshold is newly crossed, to drive proactive notifications (depends on the notification layer).
 - **PE-021 (Outcome linkage):** Associate historical assessments with eventual launch outcomes, building the dataset for cross-plant benchmarking and rubric evaluation.
 
+### Presentation — absorbed from F4 Progress Dashboard (2026-07-26)
+
+F4 was retired and folded in here (decision #4 in [`docs-audit-2026-07.md`](../../docs-audit-2026-07.md)).
+The judgement layer is the engine's strong half; **presentation is its weak half**, and these are the
+progress-dashboard ideas judged worth keeping. They render *what the engine already knows* — none of
+them introduces a second, competing source of truth about a plant's progress.
+
+The facts-vs-judgment principle binds all of them: a deterministic fact renders as a fact, an
+LLM-produced judgement is always labelled as such.
+
+| ID | Requirement | Was | Notes |
+|----|-------------|-----|-------|
+| **PE-022** | **Exit-criteria progress.** Show progress against the current phase's exit criteria, not just the overall verdict. | D-002 | The rubric already encodes the criteria; this surfaces them individually. |
+| **PE-023** | **Critical Success Factor scorecard.** Visual scorecard across the 8 CSFs. | D-005 | The highest-value import — it turns one composite verdict into a diagnosable breakdown. |
+| **PE-024** | **"How to improve" wiki links.** Each weak criterion links to the wiki content that addresses it. | D-016 | Depends on the wiki integration contract. Turns an assessment into a next action. |
+| **PE-025** | **Phase detail drill-down.** Expand any criterion to the facts that drove it. | D-017 | Directly serves the anchoring principle — the planter can always trace a judgement to its facts. |
+| **PE-026** | **Trend and velocity display.** Core-group growth rate, meeting attendance trend, 48-hour follow-up completion rate, ministry-team readiness. | D-010–D-013 | All four are deterministic facts already computable from shipped tables. |
+| **PE-027** | **Milestone timeline and alert badges.** Visual timeline of key milestones; badges for items needing attention. | D-014, D-015 | Badges must reflect engine-derived urgency, not a separate threshold system. |
+
+**Not carried across:** D-018 (coach dashboard) is substantially delivered by `/oversight`;
+D-001/003/004/006/007/009 already ship; D-019–D-024 (customization, network comparison, export,
+weekly email, push, historical trends) stay out of scope.
+
 ---
 
 ## 5. Acceptance Criteria

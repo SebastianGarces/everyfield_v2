@@ -5,6 +5,15 @@
 **Date:** January 25, 2026  
 **Feature Code:** F6
 
+> **Data model settled 2026-07-26 (decision #15): a code-defined, generate-on-demand catalog.**
+> Templates live in code as `DOCUMENT_TEMPLATES` with `getTemplateById`, rendered to DOCX/PDF on
+> request. **There are no template tables and none are planned** — disregard any DB-backed template
+> entity described below. This also means F6 carries no migration and is not `risk:high`.
+>
+> Phase 1 (16/25 requirements) is built on `feat/document-templates` and merges into `main` cleanly.
+> Per decision #1 it ships through a PR so CI and the Definition of Done run on it, rather than being
+> merged directly. The checklist is re-trued once that lands.
+
 ---
 
 ## References

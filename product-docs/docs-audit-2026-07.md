@@ -52,37 +52,110 @@ Cross-cutting findings worth naming:
 - **Stale deferral rationale**: people-crm P-021/P-022 ("blocked by F8") — F8 shipped; the placeholder page and the deferral reason are both outdated.
 - **Contract without consumer**: `getPersonTeams` backend exists for the person-profile Teams tab that still renders a hardcoded placeholder.
 
-## 3. Docs held pending your decision (not touched)
+## 3. Docs held pending decision — now resolved
 
-- `.claude/skills/wiki-articles/SKILL.md` — its whole workflow writes MDX to a repo-root `wiki/` dir that was deleted when articles migrated to the DB (`scripts/migrate-wiki-to-db.ts`, commit `6f9445a`). Style guidance is still good; the mechanics are dead.
-- `.claude/skills/work-in-progress/SKILL.md` — describes the pre-Agent-Delivery-OS interactive flow; conflicts with the factory pipeline (its Risk Gate halts high-risk work; the delivery OS ships high-risk autonomously). Still referenced by `.agents/memory-first.md` for memory maintenance.
-- `product-docs/features/document-templates/checklist.md` — truthful for `main` (all unchecked) but blind to the 16/25 items done on unmerged `feat/document-templates`.
+- `.claude/skills/wiki-articles/SKILL.md` — workflow writes MDX to a repo-root `wiki/` dir deleted when articles migrated to the DB (`scripts/migrate-wiki-to-db.ts`, commit `6f9445a`). **Resolved (#18): archive it.** There is no DB-era authoring path at all — only the one-time migration script — so the skill cannot be reworked until authoring is designed.
+- `.claude/skills/work-in-progress/SKILL.md` — pre-factory interactive flow; its Risk Gate halts high-risk work while the delivery OS ships high-risk to PR. **Resolved (#19): extract the memory-maintenance section, retire the rest**, and re-point `.agents/memory-first.md`.
+- `product-docs/features/document-templates/checklist.md` — blind to the 16/25 items done on `feat/document-templates`. **Resolved (#1): PR the branch through CI + the DoD**, after which the checklist is re-trued against merged code.
 
-## 4. Decision queue
+## 4. Decision ledger — RESOLVED 2026-07-26
 
-See the summary presented with this audit (also reproduced here for the record):
+All 19 queue items were worked through with the planter. **These are settled — do not re-litigate
+them in a future audit.** Three were converted into action items (§5) because they needed evidence
+before they could be ruled on.
 
-**Direction / roadmap**
-1. F6 document-templates: merge the stale local branch `feat/document-templates`, rebuild, or abandon (main has moved 17 PRs since).
-2. F7 financial: still on roadmap, or formally "attestation-only via phase engine"?
-3. F10 facility: confirm deferred; annotate FRD as deferred so audits stop re-litigating.
-4. Progress Dashboard FRD vs Plant Intelligence: is `/phase` the canonical successor to D-002 (exit criteria), D-005 (CSF scorecard), D-016 (wiki links), D-017 (drill-down)? Rewrite FRD or keep deterministic dashboard as future complement?
-5. Coach surfaces: D-018 coach dashboard, wiki-progress oversight visibility (W integration contracts), people oversight views, communication-log coach access — in or out (per feature)?
-6. Wiki roadmap trims: video library (W-019), templates/downloads + WikiTemplate/WikiVideo/WikiSearch tables, search-results page vs Cmd+K palette as canon.
-7. SMS (COM-011) and scheduled sending (COM-014): keep or cut from FRD.
-8. Polymorphic Note entity (communication-hub FRD): still planned, or per-entity notes columns are canon?
-9. T-020 phase-triggered task templates: superseded by Plant Intelligence insights?
+### Direction / roadmap
 
-**Code-vs-FRD canon (code did something different on purpose)**
-10. Meetings: derived attendance_type vs user-marked (AC 3); follow-up tasks for all attendees at finalize+48h vs new-only at meeting-date+48h (VM-007); RSVP via meeting_attendance+tokens vs dedicated invitee table (VM-028); roster auto-population for team meetings (VM-006); automated reminders vs manual template sends (VM-018).
-11. Meetings invited-by tracking: VM-017 was dropped from the FRD but table/actions/components remain — dead code to remove, or requirement to re-add?
-12. Ministry teams: team-level vs role-level training model (MT-011); planter-only auth vs team-leader/member scoping server-side (security-relevant); weekly automated health check vs on-demand dashboard.
-13. People CRM: un-defer P-021/P-022 (Teams tab) now that F8 exists?
-14. Wiki data model: rewrite FRD to shipped schema or treat schema as converging?
-15. Document templates data model (if F6 proceeds): DB-backed tables + API vs code-defined generate-on-demand catalog.
-16. Phase engine: where does the NFR-PE-4 plain-language data-processing disclosure ship (must describe current posture incl. sharing-until-beta); is `/phase` the permanent Focus-panel home or does it also surface on the dashboard when F4 lands?
-17. COM-009: add ministry-team rosters to recipient quick-select, or status-groups are canon scope?
+| # | Decision | Consequence |
+|---|----------|-------------|
+| 1 | **F6 — PR the branch through CI + the DoD.** Not a raw merge. | `feat/document-templates` merges clean (6 commits, 30 files, all-new paths, 0 conflict hunks). It predates every gate, so it goes through them rather than around them. |
+| 2 | **F7 financial — deferred.** | Dated deferred banner on the FRD. Readiness stays attestation-only via the phase engine, as shipped. |
+| 3 | **F10 facility — cut entirely.** | Off the roadmap, not deferred. FRD marked cut; its 26 requirements stop appearing as gaps. |
+| 4 | **F4 — fold surviving requirements into the phase-engine FRD.** Retire F4 as a separate feature doc. | Not a deletion: the progress-dashboard *presentation* ideas (D-002 exit criteria, D-005 CSF scorecard, D-016 wiki links, D-017 drill-down) are judged useful and move across as display requirements on the phase engine, whose current presentation is the weaker half. |
+| 6 | **Wiki — cut the video library (W-019). Keep templates/downloads. Keep the search-results page.** | Video is far-future own-content territory. Templates/downloads is wanted and pairs with F6: the catalog ships the documents, wiki articles explain which to use when. The Cmd+K palette does find-and-jump; a results page supports browsing a growing logistics section. |
+| 7 | **SMS (COM-011) + scheduled send (COM-014) — keep, post-beta.** | Deferred banner, not a cut. |
+| 9 | **T-020 phase-triggered task templates — keep.** | Rationale: *insights advise, tasks commit.* An insight is a suggestion; a task is tracked work. The two are complementary, not competing. |
+| 13 | **People CRM P-021/P-022 — un-defer and build.** | The "blocked by F8" rationale is stale; F8 shipped and `getPersonTeams` + `getPersonTeamsAction` already exist. Frontend-only unit. |
 
-**Doc-mechanics**
-18. `wiki-articles` skill: rework for DB-era authoring (how are articles authored now?), or archive.
-19. `work-in-progress` skill: retire/absorb into the delivery OS, or keep for interactive (non-factory) work with its memory-maintenance section extracted?
+### Canon
+
+| # | Decision | Consequence |
+|---|----------|-------------|
+| 5 | **Add a `wiki` privacy toggle. Communication stays private.** | The shipped role model already answers most of this — see the note below. Needs a new `church_privacy_settings` column → migration → `risk:high`. |
+| 8 | **Polymorphic Note stays the target.** | Per-entity `notes` columns (5 meeting tables, people, the four 4C fields) are interim, not canon. FRD keeps the unified Note entity. |
+| 11 | **Delete the dead invitation subtree.** | Verified dead transitively: `invitation-tracker.tsx` has zero importers, and `invitation-leaderboard` + `createInvitationAction` are imported only by it. Remove the components and actions. **The `invitations` table is left in place** — dropping it is a migration for no user-visible benefit; fold it into a future high-risk unit if one comes along. |
+| 12a | **Team-leader scoping.** | Planter + the team's designated leader may mutate; other members read-only. Builds on the `isLeadershipRole` flag already in the schema. See the security note below. |
+| 15 | **F6 code-defined catalog is canon.** | Answered by the branch itself: `DOCUMENT_TEMPLATES` + `getTemplateById`, **zero schema changes**. DB-backed template tables are off the table. Also means F6 is not `risk:high`. |
+| 16 | **NFR-PE-4 disclosure ships with the beta toggle flip.** | Keeps NFR-PE-4b (flip OpenAI sharing off) and 4c (write the disclosure) together, since the text changes when the posture does. `/phase` is the permanent home — settled by #4 folding F4 into the phase engine. |
+| 17 | **Add ministry-team rosters to the recipient quick-select (COM-009).** | F8 shipped with rosters, so "message this team" is a natural ask. Note: no quick-select implementation exists yet at all — this is build, not extend. |
+
+### Doc mechanics
+
+| # | Decision |
+|---|----------|
+| 18 | **Archive the `wiki-articles` skill** until an authoring path exists. |
+| 19 | **Extract memory maintenance from `work-in-progress`, retire the rest**, and re-point `.agents/memory-first.md`. |
+
+### Two notes worth keeping
+
+**"Coach" is a ubiquitous-language failure, not a missing feature.** The FRDs use "coach" loosely to
+mean *whoever oversees a plant*. The shipped model is more precise, and already complete:
+
+| Role | Sees |
+|------|------|
+| `planter` / `team_member` | own church |
+| `coach` | plants via `coach_assignments` |
+| `sending_church_admin` | plants where `sending_church_id` matches |
+| `network_admin` | plants where `sending_network_id` matches |
+
+`church_privacy_settings` then gates *what* they see, per feature: `sharePeople`, `shareMeetings`,
+`shareTasks`, `shareFinancials`, `shareMinistryTeams`, `shareFacilities`. Wiki and communication have
+no column, which is why #5 was a real decision rather than a doc fix. `/oversight` already ships plant
+health, insight urgency and multi-plant comparison, so D-018's "coach dashboard" is substantially
+delivered under a different name. **FRD wording should use the real role names.** This is the clearest
+argument yet for a root `CONTEXT.md` glossary.
+
+**#12a was never a decision.** Ministry-team server actions check only session + `churchId`, so any
+authenticated user in a church can mutate any team. That is a live multi-tenant authorization hole,
+filed as `risk:high` independently of what the FRD says.
+
+## 5. Pending — evidence gathered, decision outstanding
+
+Three items could not be ruled on without seeing the divergence. Evidence below; decision still open.
+
+### #10 Meetings — five divergences
+
+| # | FRD says | Code does | Evidence |
+|---|----------|-----------|----------|
+| 1 | `attendance_type` user-marked (AC 3) | **Derived**, with documented precedence: `core_group`/`launch_team`/`leader` status → `core_group`; else any *prior* attended meeting → `returning`; else `first_time`. Must be called by every path transitioning to `status='attended'`. | `src/lib/meetings/attendance-type.ts:1-45` |
+| 2 | Follow-up tasks for **new** attendees, due **meeting date + 48h** | Follow-up for **every** attendee, due **finalization + 2 days**, priority high, assigned to the planter; `vision_meeting` type only; plus a separate evaluation task due +1 day. Code comment justifies it: *"the planter can dismiss duplicates if a person has an existing follow-up from a prior meeting."* | `src/lib/tasks/events.ts:115-200` |
+| 3 | RSVP via a dedicated invitee table (VM-028) | `meeting_confirmation_tokens` (in the **communication** schema) + public `/rsvp/[token]` route + `/api/rsvp/[token]`. No invitee table. | `src/db/schema/communication.ts:196-220`, `src/app/rsvp/[token]/` |
+| 4 | Roster auto-population for team meetings (VM-006) | `church_meetings.team_id` exists and is joined/filtered on, but no auto-population of attendance from the team roster. | `src/lib/meetings/service.ts:127,186,220` |
+| 5 | Automated reminders (VM-018) | **No reminder automation at all** — no cron, no scheduler. `meeting-reminder.tsx` exists but is imported nowhere. Manual template sends are the shipped path. | no `src/app/api/**/cron`; zero importers of `meeting-reminder.tsx` |
+
+**The one to actually think about is #2** — it changes how much task noise a planter gets after every
+vision meeting. The other four are doc-fixes.
+
+### #12b MT-011 — training model
+
+- **FRD:** "Track required training completion **per role**" (`ministry-team-management/frd.md:67`)
+- **Shipped:** training is **team-level** — `training_programs.team_id` + `is_required`; completion
+  tracked per person via `training_completions.person_id`. `team_roles` has no `required_training_ids`
+  column. (`src/db/schema/ministry-teams.ts:188-243`)
+
+Role-level would need a new column or join table → migration → `risk:high`.
+
+### #14 Wiki data model — four divergences
+
+FRD `WikiArticle` (`wiki/frd.md:902+`) vs shipped `wiki_articles` (`src/db/schema/wiki.ts:68-92`):
+
+| FRD | Shipped |
+|-----|---------|
+| `section` (String) | `section_id` (uuid FK → `wiki_sections`) |
+| `related_article_ids` (UUID[]) | `related_article_slugs` (text[]) |
+| `parent_article_id`, `related_template_ids` | **absent** |
+| content_type: `tutorial`/`how_to`/`explanation`/`reference` | same **plus `overview`, `guide`** |
+
+Shipped is arguably better on three of four (an FK beats a string; slugs match how `wiki_progress` and
+`wiki_bookmarks` already key). `related_template_ids` is the one worth keeping as a target, since #6
+kept templates/downloads.

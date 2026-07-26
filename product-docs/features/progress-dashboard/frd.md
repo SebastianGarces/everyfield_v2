@@ -7,6 +7,36 @@
 
 ---
 
+> ## ⤳ RETIRED — folded into the Phase Engine, 2026-07-26
+>
+> **This FRD is no longer the source of truth for progress display.** Its intent migrated to the
+> `/phase` Plant Intelligence surface, which judges progress against real signals rather than
+> rendering static counters.
+>
+> This was a **merge, not a deletion**. The Plant Intelligence engine is the stronger half on
+> *judgement* and the weaker half on *presentation*, so the display ideas below were carried across
+> into [`../phase-engine/frd.md`](../phase-engine/frd.md) as presentation requirements:
+>
+> | Carried across | Was |
+> |---|---|
+> | Exit-criteria progress | D-002 |
+> | 8 Critical Success Factors scorecard | D-005 |
+> | "How to improve" wiki links | D-016 |
+> | Phase detail drill-down | D-017 |
+> | Growth velocity, meeting trends, follow-up rate, team readiness, milestone timeline, alert badges | D-010–D-015 |
+>
+> Already delivered elsewhere, and **not** to be reported as gaps:
+>
+> - **D-018 coach dashboard** → `/oversight` ships plant health, insight urgency and multi-plant
+>   comparison. Note the FRD's "coach" means *whoever oversees a plant*; the shipped roles are
+>   `coach`, `sending_church_admin` and `network_admin`, which are three different things.
+> - **D-001, D-003, D-004, D-006, D-007, D-009** → shipped on the dashboard and `/phase`.
+>
+> Read this document as history. New work goes in the phase-engine FRD. Decision #4 in
+> [`docs-audit-2026-07.md`](../../docs-audit-2026-07.md).
+
+---
+
 ## References
 
 - [Product Brief](../../product-brief.md) - Core concepts and domain language
