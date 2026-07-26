@@ -1,0 +1,115 @@
+---
+name: dispatch
+description: One autonomous pass over the board's frontier — take the unblocked, unclaimed work and build it to reviewed PRs. Use when a schedule fires, or when the user asks to "dispatch", "run a pass", or "pick up whatever is ready". Refuses to run when the review queue is full, a loop is already in flight, or the budget cannot finish a track.
+---
+
+# dispatch
+
+One pass of the factory, with no human in the loop for the duration of the pass.
+
+Everything it needs already exists: the board holds durable order (`ops/agent-os/labels.md`), the
+frontier query says what is takeable, and `build-until-done` implements → validates against the DoD →
+opens a PR with the evidence bundle. `dispatch` is the thin, careful thing that decides **whether to
+run at all**, and how much.
+
+> **The human is the bottleneck, and that is by design.** A PR only exists because the DoD passed,
+> but merging is still a human judgement. A dispatcher that outruns the review queue does not ship
+> faster — it builds a backlog of unreviewed branches that rot against a moving `main`. Most of this
+> skill is about not doing that.
+
+## Preconditions — check in order, stop at the first failure
+
+Report which gate stopped it and stop. **Stopping is a normal outcome**, not an error; a scheduled
+job that no-ops quietly is working correctly.
+
+### 1. The review queue has room
+
+```bash
+gh pr list --state open --json number,labels --jq '[.[] | select(.labels[].name == "agent:in-review")] | length'
+```
+
+**Cap: 3.** At or over, stop with "review queue full (N open) — nothing dispatched."
+
+This is the most important gate. The others prevent waste; this one prevents the failure mode that
+makes the whole system worse than doing nothing.
+
+### 2. Nothing is already in flight
+
+```bash
+gh issue list --state open --label agent:in-progress --json number,title
+```
+
+Any result means a previous pass is still running, a human is working, or a run died mid-flight and
+left a claim behind. All three mean **do not start**. If the issues look stale (check the last
+comment and `updatedAt`), say so and let a human clear them — never clear a claim automatically, as
+that is exactly how two loops end up on one branch.
+
+### 3. The working tree is clean and `main` is current
+
+```bash
+git status --porcelain && git fetch -q origin && git status -sb | head -1
+```
+
+Dirty tree or behind `main` → stop. Tracks branch from `main`, and building on a stale base produces
+conflicts a human then has to untangle.
+
+### 4. The frontier is not empty
+
+The frontier is every issue that is open, `agent:queued`, has **zero open blockers**, and has **no
+assignee**. The canonical query is in `ops/agent-os/labels.md` — use it rather than re-deriving one.
+
+**Exclude `risk:high` unless the caller explicitly opted in** (`dispatch high-risk`). Not because the
+DoD cannot handle it — HR1–HR4 exist precisely so high-risk work can go autonomously to PR — but
+because *unattended and recurring* is a different axis from *autonomous*. Schema, auth and tenancy
+changes should start when someone is around to notice. Say how many were skipped for this reason.
+
+Empty frontier → stop with what the board is waiting on (the blocked list, and what blocks it).
+
+### 5. The budget can finish what it starts
+
+Run `token-preflight` over the candidate tracks.
+
+- **RUN** → proceed with all of them
+- **SPLIT** → take only what fits, highest-value first, and say what was left
+- **DEFER** → stop
+
+**Cap: 2 tracks per pass**, even when the budget allows more. A pass that opens five PRs at 03:00
+guarantees gate 1 blocks the next four passes. Steady beats bursty.
+
+## The pass
+
+Call the `build-until-done` workflow with the selected tracks:
+
+```
+Workflow({ name: "build-until-done", args: { units: [...], base: "main", maxAttempts: 3 } })
+```
+
+Each unit is `{id, title, lane, files, summary, acceptanceCriteria, issue, risk}` — `files` comes
+from the issue's **Likely files** section, which is what keeps parallel tracks from colliding.
+
+The loop owns everything after that: claiming (`agent:in-progress`), the DoD gates, retries, opening
+the PR with its evidence bundle and flipping to `agent:in-review`, or labelling `agent:blocked` with
+the failing gate on exhaustion. **Do not re-implement any of it here, and do not second-guess its
+verdict.** A PR it did not open is a PR that did not earn one.
+
+## After the pass
+
+Report, in this order:
+
+1. **PRs opened** — number, title, `risk:high` first. This is the human's queue.
+2. **Blocked** — issue, the gate that failed, and the one thing needed to unblock it.
+3. **Left on the frontier** — what was ready but not taken, and why (cap, budget).
+4. **Still blocked by dependencies** — with what each waits on.
+
+Then stop. **Never merge**, never close an issue, never clear another run's claim, and never widen
+scope because the frontier looked thin.
+
+## Hard rules
+
+- **Never merge a PR.** The human review is the checkpoint, and the `main` ruleset enforces it anyway.
+- **Never clear an `agent:in-progress` claim** that this pass did not set.
+- **Never dispatch `risk:high` unattended** without an explicit opt-in.
+- **One pass, then stop.** Do not loop waiting for PRs to be merged so more work unblocks — that is
+  the schedule's job, and a pass that waits is a pass holding a claim open.
+- **A quiet no-op is a success.** Do not manufacture work to justify the run: no inventing issues, no
+  relabelling `needs-spec` to `agent:queued` to fill a pass.
