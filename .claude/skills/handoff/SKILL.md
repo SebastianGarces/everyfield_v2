@@ -1,7 +1,12 @@
 ---
 name: handoff
-description: Create or resume a session handoff. Use when the user says "/handoff", "create a handoff", "hand off", "wrap up the session", "I'm going to clear context", or (resume) "resume", "where were we", "/handoff resume". Captures current session state to project memory so the next session picks up instantly.
+description: Create or resume a session handoff — captures current session state to project memory so the next session picks up instantly. `/handoff` to create, `/handoff resume` to re-orient.
+disable-model-invocation: true
 ---
+
+<!-- User-invoked on purpose: creating a handoff overwrites session_handoff.md and the MEMORY.md
+     pointer, so the human picks the moment. See ops/agent-os/invocation.md. -->
+
 
 # Handoff Skill
 
