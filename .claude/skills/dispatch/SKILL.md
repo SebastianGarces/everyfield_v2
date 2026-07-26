@@ -7,6 +7,13 @@ description: One autonomous pass over the board's frontier — take the unblocke
 
 One pass of the factory, with no human in the loop for the duration of the pass.
 
+> **Status: no schedule exists yet — run it by hand with `/dispatch`.**
+> The skill is built to be cron-invoked and `ops/agent-os/invocation.md` classifies it that way, but
+> the cron is deliberately not created until a pass has been *observed* producing a real PR. This
+> system has already shipped one component that looked correct and was failing every run
+> (`board-sync`, see `product-docs/board-design-2026-07.md` §9), and an unattended job that opens PRs
+> is a worse thing to be wrong about. Create the schedule after the first watched pass, not before.
+
 Everything it needs already exists: the board holds durable order (`ops/agent-os/labels.md`), the
 frontier query says what is takeable, and `build-until-done` implements → validates against the DoD →
 opens a PR with the evidence bundle. `dispatch` is the thin, careful thing that decides **whether to

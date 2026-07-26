@@ -19,7 +19,7 @@ passes with evidence attached.** Your only manual step is reviewing PRs.
 | (implicit, on run) | Decompose into file-disjoint tracks; publish the DAG to the board | `frd-plan` (or inline) |
 | (implicit, per track) | Implement → validate against DoD → fix → … → **open PR** | `build-until-done` |
 | "What's pending?" | Board by status + your PR review queue + running loops | `/standup` → `standup` |
-| (nothing — a schedule fires) | One guarded pass over the frontier → reviewed PRs | cron → `dispatch` |
+| "Dispatch" / a schedule fires | One guarded pass over the frontier → reviewed PRs | `/dispatch` → `dispatch` |
 
 You never merge by hand-built guesswork: a PR exists **only** because the DoD gate passed, and its
 body carries the evidence (test output, screenshots, lighthouse, console, migration diff).
