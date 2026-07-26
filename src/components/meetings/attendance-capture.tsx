@@ -285,7 +285,9 @@ export function AttendanceCapture({
                       />
                     </div>
                     {quickAddError && (
-                      <p className="text-sm text-red-600">{quickAddError}</p>
+                      <p className="text-destructive text-sm">
+                        {quickAddError}
+                      </p>
                     )}
                     <DialogFooter>
                       <Button
@@ -479,7 +481,7 @@ export function AttendanceCapture({
       {guests.length > 0 && (
         <div className="space-y-3">
           {finalizeError && (
-            <p role="alert" className="text-sm text-red-600">
+            <p role="alert" className="text-destructive text-sm">
               {finalizeError}
             </p>
           )}
