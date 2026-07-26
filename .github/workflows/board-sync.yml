@@ -11,9 +11,13 @@
 #   [x] Project "EveryField Delivery" created — user-owned, number 1
 #   [x] Status single-select carries the six options in the case statement below, spelled exactly
 #   [x] All open work items backfilled onto the board
-#   [ ] A PAT with the `project` scope ONLY, stored as the repo secret PROJECT_TOKEN.
-#       GITHUB_TOKEN CANNOT write a user-owned Project v2 — this is the most likely reason the
-#       mirror appears to silently do nothing. Until it exists, this job no-ops.
+#   [x] PROJECT_TOKEN set — a classic PAT, `project` scope ONLY, no expiration. Verified 2026-07-26
+#       by round-tripping a label on #73. GITHUB_TOKEN CANNOT write a user-owned Project v2, which
+#       is why a PAT exists at all; without the secret this job no-ops.
+#
+# Setup is COMPLETE. If the board stops updating, the token is the first thing to check
+# (github.com/settings/tokens) — but check the Actions tab first, because a broken token fails
+# loudly there rather than going quiet.
 #
 # Absent secret -> exit 0 with a notice, because "not set up yet" is not a failure.
 # Present but broken (expired, wrong scope) -> the job FAILS, loudly and visibly in Actions.
