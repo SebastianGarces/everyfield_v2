@@ -355,7 +355,12 @@ async function runBuild(units, reply, over = {}) {
     phase: (p) => calls.push({ kind: "phase", value: p }),
     budget: { total: null, spent: () => 0, remaining: () => Infinity },
     agent: async (prompt, opts = {}) => {
-      calls.push({ kind: "agent", label: opts.label, phase: opts.phase, prompt });
+      calls.push({
+        kind: "agent",
+        label: opts.label,
+        phase: opts.phase,
+        prompt,
+      });
       return reply(prompt, opts);
     },
     // Mirrors the runtime contract: a thunk that throws resolves to null.
@@ -388,8 +393,7 @@ const buildUnit = (id, issue) => ({
 
 /** Answers the claim step with `inProgressNow`, and fails any later gate fast. */
 const replyWith = (inProgressNow, claimed) => (_prompt, opts) => {
-  if (opts.label?.startsWith("start:"))
-    return { claimed, inProgressNow };
+  if (opts.label?.startsWith("start:")) return { claimed, inProgressNow };
   if (opts.label?.startsWith("impl:"))
     return { summary: "did the thing", filesTouched: [], notes: "" };
   if (opts.label?.startsWith("verify:"))
@@ -403,7 +407,9 @@ test("the claim step names an exact issue list and forbids enumerating the label
     [buildUnit("alpha", 101)],
     replyWith([101], [101])
   );
-  const claim = calls.find((c) => c.kind === "agent" && c.label === "start:alpha");
+  const claim = calls.find(
+    (c) => c.kind === "agent" && c.label === "start:alpha"
+  );
   assert.ok(claim, "a claim step must run");
   assert.match(claim.prompt, /EXACTLY these issues and no others: 101/);
   assert.match(
