@@ -87,7 +87,7 @@ before they could be ruled on.
 | 12a | **Team-leader scoping.** | Planter + the team's designated leader may mutate; other members read-only. Builds on the `isLeadershipRole` flag already in the schema. See the security note below. |
 | 15 | **F6 code-defined catalog is canon.** | Answered by the branch itself: `DOCUMENT_TEMPLATES` + `getTemplateById`, **zero schema changes**. DB-backed template tables are off the table. Also means F6 is not `risk:high`. |
 | 16 | **NFR-PE-4 disclosure ships with the beta toggle flip.** | Keeps NFR-PE-4b (flip OpenAI sharing off) and 4c (write the disclosure) together, since the text changes when the posture does. `/phase` is the permanent home — settled by #4 folding F4 into the phase engine. |
-| 17 | **Add ministry-team rosters to the recipient quick-select (COM-009).** | F8 shipped with rosters, so "message this team" is a natural ask. Note: no quick-select implementation exists yet at all — this is build, not extend. |
+| 17 | **Add ministry-team rosters to the recipient quick-select (COM-009).** | F8 shipped with rosters, so "message this team" is a natural ask. The picker already exists with status groups (`src/components/communication/recipient-picker.tsx:25`); the work is resolving `team:<id>` in `getRecipientsByGroup`. Tracked in issue #18. |
 
 ### Doc mechanics
 
@@ -95,6 +95,20 @@ before they could be ruled on.
 |---|----------|
 | 18 | **Archive the `wiki-articles` skill** until an authoring path exists. |
 | 19 | **Extract memory maintenance from `work-in-progress`, retire the rest**, and re-point `.agents/memory-first.md`. |
+
+### Where these land on the board
+
+Most of the buildable outcomes were **already queued** before this audit — the decisions settle the
+spec they build to, they don't create new work. Check the board before filing.
+
+| Decision | Issue |
+|----------|-------|
+| #12a team-leader scoping | **#22** (`risk:high`) — derives leadership from `MinistryTeam.leader_id`; note there is no `team_leader` user role |
+| #13 Teams tab | **#14** — replaces the placeholder at `people/[id]/teams/page.tsx:28-56` |
+| #17 team rosters in quick-select | **#18** — resolves `team:<id>` in `getRecipientsByGroup` |
+| #5 wiki privacy toggle | **#62** (`risk:high`) — new, no prior issue |
+| #11 dead invitation subtree | **#63** — new, no prior issue |
+| #10 divergence 4 (VM-006 roster auto-population) | **#19** — already queued as a build, so that divergence is a known gap rather than an open canon question |
 
 ### Two notes worth keeping
 

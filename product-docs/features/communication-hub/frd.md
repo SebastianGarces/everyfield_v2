@@ -39,7 +39,7 @@ The Communication Hub also serves as a **delivery service** for other features. 
 | COM-006 | Message history | View all sent messages |
 | COM-007 | Person communication log | View all messages sent to a specific person |
 | COM-008 | Basic delivery tracking | Track sent/delivered status |
-| COM-009 | Quick select groups | Select Core Group, pipeline status groups, **and ministry-team rosters** as recipients. Team rosters confirmed in scope 2026-07-26 (decision #17). Note: no quick-select implementation exists yet — this is a build, not an extension. |
+| COM-009 | Quick select groups | Select Core Group, pipeline status groups, **and ministry-team rosters** as recipients. Team rosters confirmed in scope 2026-07-26 (decision #17). Status groups already ship in `src/components/communication/recipient-picker.tsx`; the remaining work is resolving `team:<id>` in `getRecipientsByGroup` — tracked in issue #18. |
 | COM-010 | Template categorization | Organize templates by purpose |
 
 ### Should Have
