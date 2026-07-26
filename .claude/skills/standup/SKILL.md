@@ -17,6 +17,23 @@ Issues) + the live PR review queue + in-flight loops, and renders one compact vi
    gh issue list --label agent:blocked     --state open --json number,title,labels,updatedAt
    gh issue list --label agent:in-review    --state open --json number,title
    ```
+1b. **The frontier** — of the queued issues, which are actually *takeable* right now. A queued issue
+   with an open blocker is not runnable, and reporting it as available is the main way a standup
+   misleads:
+   ```bash
+   R={owner}/{repo}
+   gh issue list --state open --label agent:queued --json number --jq '.[].number' | while read n; do
+     b=$(gh api repos/$R/issues/$n --jq '.issue_dependencies_summary.blocked_by')
+     [ "$b" = "0" ] && echo "frontier $n" || echo "blocked-by-dep $n ($b open)"
+   done
+   ```
+1c. **Feature progress** — the roll-up that replaced the checklist files:
+   ```bash
+   gh issue list --label feature --state open --json number,title
+   gh api repos/$R/issues/<parent> --jq '.sub_issues_summary'   # {completed, total, percent_completed}
+   ```
+   Also surface open `decision` issues. They gate builds, they never close by a PR, and they are the
+   easiest thing on the board to forget — a decision nobody rules on silently stalls its dependents.
 2. **Your review queue** — open PRs the factory has produced:
    ```bash
    gh pr list --state open --json number,title,headRefName,labels,isDraft,createdAt
@@ -43,8 +60,16 @@ Issues) + the live PR review queue + in-flight loops, and renders one compact vi
   • #12  in-progress  build-until-done attempt 2/3 (G3 frontend)
   • #15  in-progress  …
 
-⚪ QUEUED (3)
+⚪ FRONTIER (3 takeable)
   • #19, #20, #21   (~240k budget to clear all 3)
+  ⤷ also queued but blocked: #94 (waits on #29), #101 (waits on #29)
+
+🟣 DECISIONS OPEN (2) — no PR closes these
+  • #85  MT-011: training per role or per team?
+  • #96  VM: which attendees get an auto follow-up task?
+
+📊 FEATURES
+  • F6 Documents  1/3     F1 Wiki  0/9     F3 Meetings  0/9
 
 ✅ Shipped since yesterday: #08, #09 (PRs merged)
 ```
@@ -53,5 +78,9 @@ Issues) + the live PR review queue + in-flight loops, and renders one compact vi
 
 - **Read-only.** Never start, retry, or merge from standup — just report. (The user starts work with `/deliver`.)
 - **Lead with what needs the human:** review queue + blocked, before in-flight/queued.
+- **Queued ≠ takeable.** Always separate the frontier from queued-but-dependency-blocked. Reporting a
+  blocked issue as available sends the loop at work it cannot finish.
+- **Never read status from the Project board.** The `agent:*` labels are canonical; the board's
+  `Status` field is mirrored from them and can lag or fail. See `ops/agent-os/labels.md`.
 - **Blocked = actionable:** always include the failing gate + the one thing needed to unblock.
 - Keep it scannable — counts and IDs, not paragraphs.

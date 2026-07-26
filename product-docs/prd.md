@@ -24,7 +24,8 @@ product-docs/
 ├── app-summary.md                # What the built app does today
 ├── dependency-graph.md / .mmd    # Feature dependency analysis + diagram
 ├── prd.md                        # This index
-└── features/                     # Each feature dir: frd.md + checklist.md (implementation status)
+├── board-design-2026-07.md       # How requirements are tracked on GitHub
+└── features/                     # Each feature dir: frd.md (status lives on the board, not in a file)
     ├── phase-engine/             # PE: Phase Engine (Plant Intelligence)
     │   ├── frd.md
     │   ├── rubric-v0.md          # Companion evaluation rubric

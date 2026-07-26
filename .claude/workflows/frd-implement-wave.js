@@ -4,6 +4,12 @@ export const meta = {
     "Execute ONE wave of a planned FRD build: fan out file-disjoint units into isolated git worktrees, each implemented and code-reviewed. You merge the resulting branches before running the next wave.",
   whenToUse:
     "After frd-plan, once the prerequisites (schema) and any prior waves are merged onto the current branch. Pass args = the wave's `units` array (file-disjoint; their dependencies already merged on the base branch).",
+  // NOTE (2026-07-26): waves are still passed in as a static array. The board now carries
+  // durable dependency state, so the planned replacement is a frontier query — every open
+  // issue whose `issue_dependencies_summary.blocked_by` is 0 and which nobody has claimed.
+  // That removes the barrier between waves: a unit starts the moment its own blockers close,
+  // instead of waiting for the slowest unit in its wave. Deliberately NOT done in the same
+  // change as the migration. See product-docs/board-design-2026-07.md §7.
   phases: [
     {
       title: "Implement",

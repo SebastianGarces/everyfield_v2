@@ -1,4 +1,6 @@
 # F8: Ministry Team Management
+> **Tracked on the board:** [F8 #84](https://github.com/SebastianGarces/everyfield_v2/issues/84) — open requirements are its sub-issues. Implementation status is not tracked in this file.
+
 ## Feature Requirements Document (FRD)
 
 **Version:** 1.5  

@@ -18,6 +18,8 @@
 
 ---
 
+> **Tracked on the board:** [F10 (cut) #113](https://github.com/SebastianGarces/everyfield_v2/issues/113) — open requirements are its sub-issues. Implementation status is not tracked in this file.
+
 ## References
 
 - [Product Brief](../../product-brief.md) - Core concepts and domain language

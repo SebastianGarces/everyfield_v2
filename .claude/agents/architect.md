@@ -54,10 +54,10 @@ This skill defines the context-sharded requirements system and document boundari
 - Must conform to Architecture + FRD
 - Must not introduce new requirements
 
-### Implementation Checklists
-- Tracks progress at `product-docs/features/<feature-name>/checklist.md`
-- Working document that gets updated as features are built
-- FRD remains stable as source of truth
+### Implementation status
+- Lives on the GitHub board, not in a file — a `feature` parent issue per FRD, with one sub-issue per open requirement
+- `gh issue list --label feature` finds them; `product-docs/board-design-2026-07.md` explains the model
+- FRD remains stable as source of truth; the checklist files were deleted on 2026-07-26
 
 ## Workflow
 
