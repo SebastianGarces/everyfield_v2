@@ -76,7 +76,9 @@ The contract lives in [`dod.md`](./dod.md). Summary: G0 spec-mapped · G1 static
 asserts each AC, requires a clean console + screenshots + lighthouse a11y ≥ 90; backend asserts
 contracts + migration) · G4
 conventions/invariants · G5 diff hygiene · G6 independent adversarial sign-off. High-risk adds migration
-dry-run, rollback, schema diff, and a second verifier.
+dry-run, rollback, schema diff, and **diverse-lens sign-off** — three reviewers, one lens each
+(correctness / security / reproducibility), every one of which must clear. Each lens holds a veto over
+its own axis; the votes are deliberately not pooled.
 
 ## The board
 
