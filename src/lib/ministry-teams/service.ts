@@ -95,6 +95,20 @@ export interface TrainingMatrixRow {
   completions: Record<string, boolean>;
 }
 
+/**
+ * One training program as it applies to a single person: the program itself,
+ * the team it belongs to (null = church-wide), and whether this person has a
+ * `training_completions` row for it.
+ */
+export interface PersonTrainingItem {
+  programId: string;
+  programName: string;
+  teamId: string | null;
+  teamName: string | null;
+  isRequired: boolean;
+  completedAt: Date | null;
+}
+
 // ============================================================================
 // Team Queries
 // ============================================================================
@@ -951,6 +965,97 @@ export async function markTrainingComplete(
     .returning();
 
   return completion;
+}
+
+/**
+ * Get every training program that applies to one person, with completion state.
+ *
+ * A program applies when it is church-wide (`team_id IS NULL`), when it belongs
+ * to a team the person is actively assigned to, or when the person already has
+ * a completion row for it (so training earned on a team they later left still
+ * shows as completed rather than silently disappearing).
+ */
+export async function getPersonTraining(
+  churchId: string,
+  personId: string
+): Promise<PersonTrainingItem[]> {
+  const [programs, completions, memberships] = await Promise.all([
+    db
+      .select()
+      .from(trainingPrograms)
+      .where(eq(trainingPrograms.churchId, churchId))
+      .orderBy(asc(trainingPrograms.name)),
+    db
+      .select({
+        trainingProgramId: trainingCompletions.trainingProgramId,
+        completedAt: trainingCompletions.completedAt,
+      })
+      .from(trainingCompletions)
+      .where(
+        and(
+          eq(trainingCompletions.churchId, churchId),
+          eq(trainingCompletions.personId, personId)
+        )
+      ),
+    db
+      .selectDistinct({ teamId: teamMemberships.teamId })
+      .from(teamMemberships)
+      .where(
+        and(
+          eq(teamMemberships.churchId, churchId),
+          eq(teamMemberships.personId, personId),
+          eq(teamMemberships.status, "active")
+        )
+      ),
+  ]);
+
+  if (programs.length === 0) return [];
+
+  const completedAtByProgram = new Map(
+    completions.map((c) => [c.trainingProgramId, c.completedAt])
+  );
+  const activeTeamIds = new Set(memberships.map((m) => m.teamId));
+
+  const applicable = programs.filter(
+    (p) =>
+      p.teamId === null ||
+      activeTeamIds.has(p.teamId) ||
+      completedAtByProgram.has(p.id)
+  );
+
+  if (applicable.length === 0) return [];
+
+  // Batch-load names for the teams referenced by the applicable programs.
+  const teamIds = [
+    ...new Set(
+      applicable
+        .map((p) => p.teamId)
+        .filter((teamId): teamId is string => teamId !== null)
+    ),
+  ];
+
+  const teamRows = teamIds.length
+    ? await db
+        .select({ id: ministryTeams.id, name: ministryTeams.name })
+        .from(ministryTeams)
+        .where(
+          and(
+            eq(ministryTeams.churchId, churchId),
+            inArray(ministryTeams.id, teamIds)
+          )
+        )
+    : [];
+
+  const teamNameMap = new Map(teamRows.map((t) => [t.id, t.name]));
+
+  return applicable.map((program) => ({
+    programId: program.id,
+    programName: program.name,
+    teamId: program.teamId,
+    teamName: program.teamId ? (teamNameMap.get(program.teamId) ?? null) : null,
+    isRequired: program.isRequired,
+    completedAt: completedAtByProgram.get(program.id) ?? null,
+  }));
 }
 
 /**
