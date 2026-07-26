@@ -92,8 +92,15 @@ export async function generateAssessment(
     // 4. Run the judge over the snapshot (PE-007/009).
     const result = await deps.runAssessment(snapshot, snapshot.currentPhase);
 
-    // 5. Privacy-filter + rank, then persist insights (PE-012/013).
-    const rows = buildInsightRows(pending.id, churchId, result.insights);
+    // 5. Privacy-filter + rank, then persist insights (PE-012/013). The
+    //    retrieved passages travel with the result so each insight's wiki links
+    //    can be reconciled against what RAG actually returned (PE-024).
+    const rows = buildInsightRows(
+      pending.id,
+      churchId,
+      result.insights,
+      result.retrievedPassages
+    );
     await persistInsights(rows);
 
     // Annotate the stored snapshot with the what-changed delta (PE-016) and
