@@ -35,7 +35,7 @@ job that no-ops quietly is working correctly.
 gh pr list --state open --json number,labels --jq '[.[] | select(.labels[].name == "agent:in-review")] | length'
 ```
 
-**Cap: 3.** At or over, stop with "review queue full (N open) — nothing dispatched."
+**Cap: 6.** At or over, stop with "review queue full (N open) — nothing dispatched."
 
 This is the most important gate. The others prevent waste; this one prevents the failure mode that
 makes the whole system worse than doing nothing.
@@ -80,8 +80,13 @@ Run `token-preflight` over the candidate tracks.
 - **SPLIT** → take only what fits, highest-value first, and say what was left
 - **DEFER** → stop
 
-**Cap: 2 tracks per pass**, even when the budget allows more. A pass that opens five PRs at 03:00
+**Cap: 3 tracks per pass**, even when the budget allows more. A pass that opens five PRs at 03:00
 guarantees gate 1 blocks the next four passes. Steady beats bursty.
+
+This cap and gate 1's are one setting in two places: a pass may not be able to fill the review queue
+on its own, or every pass ends by blocking the next one. Keep gate 1 at roughly **twice** this
+number. Raised 2 → 3 on 2026-07-26 to use more of a session; the binding constraint is the human
+review queue, not tokens, so measure PRs-merged-per-day before raising it again.
 
 ## The pass
 
