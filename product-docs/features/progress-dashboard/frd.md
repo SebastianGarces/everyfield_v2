@@ -387,7 +387,7 @@ Overview of all assigned planters.
 
 ## Integration Contracts
 
-This feature is **read-only** and aggregates metrics via events and queries. It integrates with cross-cutting services defined in [System Architecture](../../system-architecture.md).
+This feature is **read-only** and aggregates metrics via queries. The current implementation queries feature tables directly rather than subscribing to events. It integrates with cross-cutting services defined in [System Architecture](../../system-architecture.md).
 
 ### Inbound (This Feature Consumes)
 
@@ -398,7 +398,7 @@ This feature is **read-only** and aggregates metrics via events and queries. It 
 | **Task completion** | Query task completion rates by `church_id` and `category` | Task Service |
 | **Giving metrics** | Query aggregate giving and giving units by `church_id` | Financial Service |
 | **Team staffing** | Query filled roles vs total roles by `team_id` and `church_id` | Ministry Teams Service |
-| **Phase status** | Subscribe to `phase.changed` and `phase.criteria.updated` events | Phase Engine (per [Core Data Contracts](../../core-data-contracts.md)) |
+| **Phase status** | Query `Church.current_phase`; phase state is managed by the Phase Engine (Plant Intelligence) assessment pipeline | Phase Engine (per [Core Data Contracts](../../core-data-contracts.md)) |
 
 ### Outbound (This Feature Provides)
 
@@ -473,3 +473,7 @@ Network admins see a network-wide dashboard with plants by phase, aggregate heal
 4. **Historical:** How far back should trend data be available?
 
 5. **Alerts:** Should dashboard alerts trigger push notifications or just show on-screen?
+
+6. **Plant Intelligence reconciliation:** Phase readiness is currently surfaced by the LLM-judge Plant Intelligence Engine on `/phase` (advisory readiness, ranked insight cards with wiki links) rather than deterministic exit-criteria checklists and a CSF scorecard on the dashboard. Are D-002, D-005, D-016, and D-017 superseded by that surface, or do they remain as deterministic complements?
+
+7. **Coach dashboard vs oversight surfaces:** Admin-facing oversight dashboards exist (`/oversight`, `/oversight/health`) for sending church and network admins. Does the coach role get its own multi-planter dashboard (D-018), or is it folded into those surfaces?

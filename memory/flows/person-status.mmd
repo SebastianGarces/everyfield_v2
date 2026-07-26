@@ -4,43 +4,41 @@
 
 stateDiagram-v2
     direction TB
-    
+
     [*] --> prospect: person.created
-    
-    prospect --> attendee: vision_meeting.attendance.recorded (F3)
+
+    prospect --> attendee: meeting.attendance.recorded (F3, vision meetings)
     note right of prospect: Initial contact\nSource tracked
-    
+
     attendee --> following_up: follow_up.initiated
     note right of attendee: Attended Vision Meeting
-    
+
     following_up --> interviewed: interview.completed
     note right of following_up: Active follow-up
-    
-    interviewed --> committed: commitment.recorded
+
+    interviewed --> core_group: commitment.recorded
     note right of interviewed: 5-criteria interview\nResult stored
-    
-    committed --> core_group: orientation.completed
-    note right of committed: Signed commitment card
-    
+
     core_group --> launch_team: team.member.assigned (F8)
-    note right of core_group: Core Group member\n4 C's eligible
-    
+    note right of core_group: Signed commitment card\n4 C's eligible
+
     launch_team --> leader: team.leader.assigned (F8)
     note right of launch_team: Launch Team badge
-    
+
     note right of leader: Leader badge
 
 %% Manual Override Path (dashed lines represent manual changes)
 %% Any status can be manually changed to any other status
 %% This is shown as manual_override in the status service
 
-%% Event Triggers:
-%% - prospect -> attendee: F3 Vision Meetings (DEFERRED)
-%% - core_group -> launch_team: F8 Ministry Teams (DEFERRED)
-%% - launch_team -> leader: F8 Ministry Teams (DEFERRED)
+%% Event Triggers (auto-advance handlers in src/lib/people/events.ts,
+%% registered via src/lib/events/subscriptions.ts):
+%% - prospect -> attendee: handleVisionMeetingAttendance (vision meetings only, prospects only)
+%% - core_group -> launch_team: handleTeamMemberAssigned
+%% - launch_team -> leader: handleTeamLeaderAssigned
 %% - All others: Manual actions in People CRM
 
-%% Soft Validation Warnings:
+%% Soft Validation Warnings (src/lib/people/status.ts getStatusWarnings):
 %% - Interview without Vision Meeting attendance: Warning shown
 %% - Commitment without interview: Warning shown
 %% - 4 C's assessment for non-core_group: Info shown
@@ -51,4 +49,4 @@ stateDiagram-v2
 %% When an action triggers a status that skips intermediate stages,
 %% the system auto-advances through all intermediate statuses.
 %% Example: commitment.recorded for a prospect advances through:
-%% prospect -> attendee -> following_up -> interviewed -> committed
+%% prospect -> attendee -> following_up -> interviewed -> core_group

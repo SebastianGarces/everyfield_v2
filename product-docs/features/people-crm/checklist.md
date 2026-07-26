@@ -131,7 +131,8 @@
 - [x] P-010a: Create `src/components/people/note-form.tsx`
 - [x] P-010b: Create addNoteAction server action
 - [x] P-010c: Display notes in activity timeline
-- [x] P-010d: Support note editing/deletion
+- [x] P-010d: Support note deletion
+- [ ] P-010e: Support note editing (not implemented — deletion only)
 
 ---
 
@@ -167,15 +168,15 @@
 - [x] P-012e: Create status change modal with confirmation
 - [x] P-012f: Log manual status changes with reason
 
-### Automatic Progression (PARTIAL - F3/F8 dependent)
-- [x] P-012g: Create event handler stubs for external events
-- [ ] P-012h: DEFERRED: `vision_meeting.attendance.recorded` handler (depends on F3)
-- [ ] P-012i: DEFERRED: `team.member.assigned` handler (depends on F8)
-- [ ] P-012j: DEFERRED: `team.leader.assigned` handler (depends on F8)
+### Automatic Progression
+- [x] P-012g: Create event handlers for external events (`src/lib/people/events.ts`)
+- [x] P-012h: `meeting.attendance.recorded` handler (vision meetings, from F3)
+- [x] P-012i: `team.member.assigned` handler (from F8)
+- [x] P-012j: `team.leader.assigned` handler (from F8)
 
 ### Status Events Emission
-- [x] P-012k: Emit `person.created` event (stubbed)
-- [x] P-012l: Emit `person.status.changed` event (stubbed)
+- [x] P-012k: Emit `person.created` event (via event bus)
+- [x] P-012l: Emit `person.status.changed` event (via event bus)
 
 ---
 
@@ -203,7 +204,7 @@
 ### Commitment Recording
 - [x] P-015a: Create `src/components/people/commitment-form.tsx`
 - [x] P-015b: Create recordCommitmentAction
-- [x] P-015c: Auto-advance to `committed` status on save
+- [x] P-015c: Auto-advance to `core_group` status on save (commitment = Core Group entry)
 - [x] P-015d: Display commitment history
 
 ### Document Upload (Optional)
@@ -259,30 +260,30 @@
 
 ### Photo Support (P-024)
 - [ ] P-024a: Add photo upload to person form
-- [ ] P-024b: Display avatar in list views (48-64px)
-- [ ] P-024c: Display larger photo on profile (128-256px)
+- [x] P-024b: Display avatar in list views (rendered when `photoUrl` present)
+- [x] P-024c: Display larger photo on profile (rendered when `photoUrl` present)
 
 ### Team Assignment Visibility (P-021)
-- [ ] P-021: DEFERRED - Display live team assignments (depends on F8)
+- [ ] P-021: DEFERRED - Display live team assignments (F8 now exists; wiring pending decision)
 - [x] P-021a: Create placeholder Teams & Training tab
 - [x] P-021b: Stub team display component
 
 ### Training Status Display (P-022)
-- [ ] P-022: DEFERRED - Display live training completion (depends on F8)
+- [ ] P-022: DEFERRED - Display live training completion (F8 now exists; wiring pending decision)
 
 ---
 
 ## Phase 14: Integration Event Handlers
 
 ### Event Emission
-- [ ] Create event emitter utility
+- [x] Create event emitter utility (`src/lib/events/event-bus.ts`)
 - [x] Emit `person.created` on person creation
 - [x] Emit `person.status.changed` on status changes
 
-### Inbound Event Handlers (DEFERRED)
-- [ ] DEFERRED: Handle `vision_meeting.attendance.recorded` from F3
-- [ ] DEFERRED: Handle `team.member.assigned` from F8
-- [ ] DEFERRED: Handle `team.leader.assigned` from F8
+### Inbound Event Handlers
+- [x] Handle `meeting.attendance.recorded` from F3 (vision meetings: prospect → attendee)
+- [x] Handle `team.member.assigned` from F8 (core_group → launch_team)
+- [x] Handle `team.leader.assigned` from F8 (launch_team → leader)
 
 ---
 
@@ -292,26 +293,21 @@
 
 - [ ] P-016d: Filter by skills in list view (future)
 - [ ] P-024a: Add photo upload to person form
-- [ ] P-024b: Display avatar in list views (48-64px)
-- [ ] P-024c: Display larger photo on profile (128-256px)
-- [ ] Create event emitter utility
+- [ ] P-010e: Support note editing
 
-### Deferred TODOs (Blocked by Dependencies or Intentional Deferral)
+### Deferred TODOs (Intentional Deferral or Pending Decision)
 
-- [ ] P-012h: `vision_meeting.attendance.recorded` handler (depends on F3)
-- [ ] P-012i: `team.member.assigned` handler (depends on F8)
-- [ ] P-012j: `team.leader.assigned` handler (depends on F8)
 - [ ] P-018d: Potential duplicates view for batch review (deferred)
 - [ ] P-020c: Display conversion metrics in pipeline footer (deferred pending design revisit)
-- [ ] P-021: Display live team assignments (depends on F8)
-- [ ] P-022: Display live training completion (depends on F8)
+- [ ] P-021: Display live team assignments (F8 now exists; wiring pending decision)
+- [ ] P-022: Display live training completion (F8 now exists; wiring pending decision)
 
 ---
 
 ## Nice to Have (Future)
 
 - [ ] P-026: External ChMS sync (Planning Center, Breeze)
-- [ ] P-027: Bulk export (CSV)
+- [x] P-027: Bulk export (CSV) — implemented (`src/lib/people/export.ts`, `src/components/people/export-button.tsx`)
 - [ ] P-028: Custom fields (church-defined)
 - [ ] P-029: Communication preferences
 - [ ] P-030: Birthday/anniversary tracking

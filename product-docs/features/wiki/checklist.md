@@ -3,7 +3,7 @@
 ## Must Have
 
 - [x] W-001: Phase-based content organization
-  - Articles organized in `/wiki` by phase directories
+  - Articles stored in the `wiki_articles` table (authored as MDX, seeded via `scripts/migrate-wiki-to-db.ts`; the `/wiki` content directory was removed after migration)
   - Navigation groups articles by phase (0-6)
 - [x] W-002: Article viewing with rich formatting
   - MDX compilation via `next-mdx-remote`
@@ -29,7 +29,7 @@
   - `WikiBreadcrumb` component implemented
   - `getBreadcrumbs()` helper in lib
 - [ ] W-009: Related articles cross-linking
-  - `related_article_ids` defined in FRD but not implemented
+  - `wiki_articles.related_article_slugs` column exists, but no wiki UI renders related articles yet
 - [ ] W-010: Template linking (F6 integration)
   - `related_template_ids` defined in FRD but not implemented
 
@@ -38,19 +38,22 @@
 - [x] W-011: Bookmarking
   - `BookmarkButton` component toggles bookmark state
   - `BookmarkIndicator` shows bookmark status in lists
-  - `wiki_bookmark` table stores user bookmarks
+  - `wiki_bookmarks` table stores user bookmarks
 - [x] W-012: Reading progress (save scroll position)
   - `wiki_progress.scroll_position` tracks reading position
   - "Continue Reading" card on progress page shows last position
 - [x] W-013: Time estimates (read time per article)
-  - `readTime` parsed from frontmatter
+  - `readTime` from the `wiki_articles.read_time_minutes` column (defaults to 5 when unset)
   - Displayed in article header and list views
 - [ ] W-014: Table of contents (right-side TOC)
 - [x] W-015: Recently viewed
   - "Recently Viewed" section in sidebar shows last 5 articles
   - Updates dynamically as user visits articles
 - [ ] W-016: Article feedback (thumbs up/down)
-- [ ] W-017: Contextual surfacing in other features
+- [x] W-017: Contextual surfacing in other features
+  - `WikiGuide` floating panel mounted in the dashboard layout for non-oversight users
+  - Route-pattern → article-slug mapping in `src/lib/wiki/guide-config.ts`
+  - Panel fetches article content via `GET /api/wiki/article`
 - [ ] W-018: Download as PDF
 - [ ] W-019: Video content embedding
   - MDX supports embeds but no dedicated `WikiVideo` integration

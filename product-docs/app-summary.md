@@ -33,11 +33,13 @@ Sending Network (e.g., Send Network, ARC — oversees 10-1000+ plants)
 
 All relationships are optional and mutable. A planter can sign up independently and later accept an invitation to join a sending church or network. Each tier has its own navigation and dashboard:
 
-- **Planters** see the full toolset: Dashboard, Wiki, People & CRM, Meetings, Tasks, Communication, Ministry Teams, and more.
+- **Planters** see the full toolset: Dashboard, Wiki, People & CRM, Meetings, Tasks, Communication, Ministry Teams, Phase (Plant Intelligence), and more.
 - **Sending Church Admins** see a portfolio view of their church plants, invitations, and settings.
-- **Network Admins** see a network-wide overview of sending churches and church plants with aggregate metrics.
+- **Network Admins** see a network-wide overview of sending churches and church plants with aggregate metrics, plus a plant health view powered by the Phase Engine.
 
 ### Core Features (Built)
+
+**Phase Engine (Plant Intelligence)** — The platform's primary differentiator. An advisory intelligence engine that reads each plant's real activity (a deterministic Signal layer computes fact snapshots from the database), judges it against the Launch Playbook methodology via an LLM-as-judge grounded in retrieved methodology content (RAG over embedded methodology chunks), and surfaces prioritized insights to the planter on a dedicated Phase page — with useful / not-useful feedback on each insight. Phase transitions are soft-gated and planter-confirmed (forward, back, or skip — never blocked), recorded in an immutable audit trail with the fact snapshot and rubric version. Oversight users get a plant health view with assessment-derived health signals. Runs on OpenAI gpt-4o via the Vercel AI SDK.
 
 **People & CRM** — A Kanban-style pipeline that tracks every person from initial contact through committed team member. Statuses flow through: Prospect → Attendee → Following Up → Interviewed → Core Group → Launch Team → Leader. The CRM includes household grouping, tagging, skills inventory, 4 C's assessments (Committed, Compelled, Contagious, Courageous), 5-criteria interviews (Maturity, Gifted, Chemistry, Right Reasons, Season of Life), commitment tracking, activity timelines, notes, and CSV import with duplicate detection.
 
@@ -45,9 +47,9 @@ All relationships are optional and mutable. A planter can sign up independently 
 
 **Tasks** — Task management with statuses (not started, in progress, blocked, complete), priorities (low through urgent), due dates, assignment, categories (vision meeting, follow-up, training, facilities, promotion, administrative, ministry team, launch prep, recurring, general), parent/sub-task relationships, recurring task support, and event-driven auto-completion.
 
-**Wiki / Knowledge Base** — A curated, structured knowledge base that guides planters through six phases of the church planting journey: Phase 0 (Discovery), Phase 1 (Core Group Development), Phase 2 (Launch Team Formation), Phase 3 (Training & Preparation), Phase 4 (Pre-Launch), Phase 5 (Launch Sunday), Phase 6 (Post-Launch). Articles cover frameworks like the 4 C's, 8 Critical Success Factors, the Ministry Funnel, the 4 Pillars, Meeting Objectives (Inspire, Instill, Inform), and the 5 Interview Criteria. Includes full-text search, reading progress tracking, bookmarks, and support for network/church-specific content.
+**Wiki / Knowledge Base** — A curated, structured knowledge base that guides planters through the seven phases (0–6) of the church planting journey: Phase 0 (Discovery), Phase 1 (Core Group Development), Phase 2 (Launch Team Formation), Phase 3 (Training & Preparation), Phase 4 (Pre-Launch), Phase 5 (Launch Sunday), Phase 6 (Post-Launch). Articles cover frameworks like the 4 C's, 8 Critical Success Factors, the Ministry Funnel, the 4 Pillars, Meeting Objectives (Inspire, Instill, Inform), and the 5 Interview Criteria. Includes full-text search, reading progress tracking, bookmarks, and support for network/church-specific content.
 
-**Communication Hub** — Email and SMS messaging with reusable templates (meeting invitations, reminders, follow-ups, core group communications, team updates, announcements, launch communications). Per-recipient delivery tracking (sent, delivered, opened, clicked, bounced). Meeting-linked communications with RSVP confirmation tokens. Powered by Resend for email delivery.
+**Communication Hub** — Email messaging with reusable templates (meeting invitations, reminders, follow-ups, core group communications, team updates, announcements, launch communications). Per-recipient delivery tracking (sent, delivered, opened, clicked, bounced). Meeting-linked communications with RSVP confirmation tokens. Powered by Resend for email delivery. SMS is planned (the schema supports sms/both channels, but no SMS send path or provider is wired up yet).
 
 **Dashboard** — Aggregated metrics (core group size, total people, overdue tasks, vision meetings held) and a cross-feature activity feed showing recent contact additions, status changes, commitments, completed meetings, and completed tasks.
 
@@ -64,11 +66,13 @@ All relationships are optional and mutable. A planter can sign up independently 
 
 ---
 
-## How AI Could Transform the Experience
+## AI: What Has Shipped, and What Comes Next
 
 The biggest opportunity with EveryField is reducing the operational burden on the planter. Church planters are typically not administrators — they're pastors, visionaries, and relationship builders. Every minute spent clicking through forms, writing follow-up emails, or hunting for the right wiki article is a minute not spent casting vision or meeting with people.
 
-### Chat-First Interface
+The AI direction has two halves. The **judgment half has shipped** as the Phase Engine (see Core Features above): a RAG-grounded LLM-as-judge (OpenAI gpt-4o via the Vercel AI SDK, over embedded methodology content) that assesses each plant against the Launch Playbook and surfaces insights to planters and health signals to oversight. The **action half is planned**: a conversational tool-calling agent that executes multi-step operations from natural language (vision captured in [features/church-plant-agent/vision.md](./features/church-plant-agent/vision.md)). The sections below describe that planned agent.
+
+### Chat-First Interface (Planned)
 
 A conversational AI interface (sidebar or full-screen) could become the primary way planters interact with the platform. Instead of navigating menus and filling forms, the planter simply says what they need:
 
@@ -95,9 +99,9 @@ A conversational AI interface (sidebar or full-screen) could become the primary 
 - *"What do I need to do before the meeting on Thursday?"* → AI shows the meeting's checklist plus any related tasks.
 - *"Create follow-up tasks for everyone who attended last night — due in 48 hours"* → AI batch-creates personalized follow-up tasks linked to each attendee.
 
-### RAG-Powered Wiki & Coaching
+### RAG-Powered Wiki & Coaching (Partially Shipped)
 
-The wiki content (phases, frameworks, best practices from the Launch Playbook) is a perfect candidate for Retrieval-Augmented Generation:
+The Phase Engine already does the retrieval-grounded judgment half of this: methodology content is embedded and retrieved to ground phase-aware assessments and insights. What remains is the conversational layer on top:
 
 - **Contextual coaching:** When a planter asks *"How do I handle someone who wants to join the core group but fails the chemistry interview?"*, the AI retrieves relevant wiki content about the 5 Interview Criteria and the process for handling a "not qualified" result, then synthesizes a practical, personalized answer.
 - **Phase-aware guidance:** The AI knows what phase the planter is in (stored in the church record) and proactively surfaces relevant articles, frameworks, and checklists. *"You're in Phase 1 with 30 core group members. Here are the 3 things the Launch Playbook says to focus on right now."*
@@ -117,9 +121,9 @@ The overarching goal is to make the planter's most common workflows require **ze
 | Navigate to Tasks → Review each → Check off → Navigate to next                                                           | *"Mark all the prep tasks for last night's meeting as done"*                 |
 
 
-### Network & Sending Church Intelligence
+### Network & Sending Church Intelligence (First Version Shipped)
 
-For oversight users (sending networks and sending churches), AI can provide:
+The oversight health view already surfaces Phase Engine assessment-derived health signals per plant. Beyond that, AI can provide:
 
 - **Portfolio health summaries:** *"Which of my planters are at risk?"* → AI analyzes activity recency, core group growth velocity, meeting frequency, and task completion rates across all plants.
 - **Comparative analytics:** *"How is Pastor Mike doing compared to other planters at the same phase?"* → AI benchmarks against network-wide averages.
@@ -127,12 +131,12 @@ For oversight users (sending networks and sending churches), AI can provide:
 
 ### Implementation Approach
 
-The AI features would be implemented as a **tool-calling architecture** where:
+The planned agent would be implemented as a **tool-calling architecture** where:
 
 1. The chat interface accepts natural language input from the planter.
-2. An LLM (Claude) interprets the intent and selects from a set of defined tools (create_meeting, add_person, send_email, query_people, update_status, create_task, search_wiki, etc.).
+2. An LLM interprets the intent and selects from a set of defined tools (create_meeting, add_person, send_email, query_people, update_status, create_task, search_wiki, etc.).
 3. Each tool maps to existing service functions in the codebase — the same business logic that powers the traditional UI.
-4. RAG for the wiki uses vector embeddings of wiki articles stored alongside the existing full-text search index, enabling semantic retrieval of relevant content.
+4. RAG reuses the Phase Engine's existing embedding pipeline (methodology embeddings already power the judge), extended to wiki articles for semantic retrieval alongside the existing full-text search index.
 5. The AI maintains conversation context so planters can have multi-turn interactions: *"Add her to Thursday's meeting too"* (referring to the person just created).
 
 This approach means the AI layer is additive — the traditional UI continues to work for users who prefer it or need fine-grained control, while the chat interface dramatically accelerates the most common workflows.

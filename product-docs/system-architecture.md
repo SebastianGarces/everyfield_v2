@@ -1,7 +1,7 @@
 # EveryField - System Architecture
 
-**Version:** 1.3  
-**Date:** February 7, 2026
+**Version:** 1.4  
+**Date:** July 25, 2026
 
 ---
 
@@ -23,7 +23,7 @@ EveryField follows a feature-based modular architecture where each feature (F1-F
 │  │                    Feature Layer                                │   │
 │  │  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐│   │
 │  │  │ F1  │ │ F2  │ │ F3  │ │ F4  │ │ F5  │ │ F6  │ │ F7  │ │ F8  ││   │
-│  │  │Wiki │ │CRM  │ │VM   │ │Dash │ │Task │ │Docs │ │Fin  │ │Team ││   │
+│  │  │Wiki │ │CRM  │ │Meet │ │Dash │ │Task │ │Docs │ │Fin  │ │Team ││   │
 │  │  └─────┘ └─────┘ └─────┘ └─────┘ └─────┘ └─────┘ └─────┘ └─────┘│   │
 │  │  ┌─────┐ ┌─────┐                                                │   │
 │  │  │ F9  │ │ F10 │                                                │   │
@@ -60,15 +60,15 @@ For detailed contracts, referencing rules, and cross-feature invariants, see **[
 | Feature | Owned Entities | References |
 |---------|---------------|------------|
 | **Core** | SendingNetwork, SendingChurch, Church, User, Phase, CoachAssignment, OrganizationInvitation, ChurchPrivacySettings | — |
-| **F1: Wiki** | WikiArticle, WikiSection, WikiProgress, WikiBookmark, WikiTemplate, WikiVideo | User, Phase |
-| **F2: People/CRM** | Person, Assessment, Interview, Commitment | Church, User |
-| **F3: Vision Meeting** | VisionMeeting, VisionMeetingAttendance, Invitation, Location, MeetingEvaluation, MeetingChecklistItem | Person |
+| **F1: Wiki** | WikiArticle, WikiSection, WikiProgress, WikiBookmark | User, Phase |
+| **F2: People/CRM** | Person, Household, Assessment, Interview, Commitment, PersonActivity *(notes are a Person field)* | Church, User |
+| **F3: Meetings** | ChurchMeeting, MeetingAttendance, Invitation, Location, MeetingEvaluation, MeetingChecklistItem *(covers vision meetings, orientations, and team meetings)* | Person |
 | **F4: Dashboard** | *(aggregates only)* | All |
-| **F5: Task Management** | Task, Checklist, Milestone | Person, User |
+| **F5: Task Management** | Task | Person, User |
 | **F6: Documents** | Document, Template | Church, Person |
 | **F7: Financial** | Budget, BudgetLineItem | Church |
-| **F8: Ministry Teams** | MinistryTeam, TeamRole, TeamMembership, TeamMeeting, TeamMeetingAttendance, TrainingProgram, TrainingCompletion | Person |
-| **F9: Communication** | Communication, Note | Person, User |
+| **F8: Ministry Teams** | MinistryTeam, TeamRole, TeamMembership, TrainingProgram, TrainingCompletion *(team meetings reuse F3's ChurchMeeting with type `team_meeting`)* | Person |
+| **F9: Communication** | MessageTemplate, Communication, CommunicationRecipient, MeetingConfirmationToken | Person, User |
 | **F10: Facility** | Facility, SiteVisit | Task, Document |
 
 ---
@@ -211,7 +211,7 @@ Document uploads, template storage, export generation (PDF, XLSX). All files sco
 
 ### Security
 
-- Row-level security on all church data
+- Row-level isolation on all church data (application layer; DB-layer RLS is a future goal)
 - Encryption at rest; HTTPS in transit
 - Regular security audits
 
@@ -242,7 +242,7 @@ Document uploads, template storage, export generation (PDF, XLSX). All files sco
 | **Validation** | Zod | Runtime type validation, schema-first, TypeScript integration |
 | **Authentication** | Custom (session-based) | No third-party dependency; follows Lucia/Copenhagen patterns |
 | **Authorization** | RBAC | Role-based access control per user type |
-| **Multi-tenancy** | Row-Level Security | PostgreSQL RLS policies on `church_id` |
+| **Multi-tenancy** | Application-layer `church_id` scoping | Enforced in query helpers; PostgreSQL RLS is a future goal |
 | **Package Manager** | pnpm | Fast, disk-efficient, strict dependency management |
 
 ### Tech Stack Constraints

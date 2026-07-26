@@ -57,7 +57,7 @@ tidier. In this repo the primary sources, in order of authority:
 ### 4. Finish and verify
 
 Complete the operation (`git merge --continue` / `git rebase --continue`), then run the checks a
-merge can break. These are the same four CI requires, plus tests:
+merge can break. These are the same five checks CI's required job runs:
 
 ```bash
 pnpm format:check && pnpm lint && pnpm typecheck && pnpm build && pnpm test

@@ -20,9 +20,11 @@ Work the gates in order; **stop early on the first hard failure** that the imple
 (don't waste tokens validating downstream of a broken build). Capture evidence for every gate you run.
 
 1. **G0 Spec mapped** — read the source Issue; build the AC → method table. If any AC is unverifiable, that's a FAIL (the spec is the problem — kick back to `spec-intake`).
-2. **G1 Static** — run in the track's worktree:
+2. **G1 Static** — run in the track's worktree. The build must be **hermetic** (the way CI runs it — no reachable database; see `dod.md` G1):
    ```bash
-   pnpm typecheck && pnpm lint && pnpm build
+   pnpm typecheck && pnpm lint && pnpm format:check && \
+     CI=1 DATABASE_URL="postgresql://ci:ci@localhost:5432/ci" \
+     RESEND_API_KEY="re_ci_placeholder" pnpm build
    ```
 3. **G2 Tests** — `pnpm test`. Grep the diff for `.only(` / `.skip(`.
 4. **G3 Functional** — delegate to `validate-frontend` (frontend/fullstack) or `validate-backend` (backend/API). This is the load-bearing gate: it proves the thing actually works.

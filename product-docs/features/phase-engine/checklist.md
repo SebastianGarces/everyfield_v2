@@ -3,20 +3,20 @@
 > Tracks implementation against `frd.md`. Update this file as work progresses; keep the FRD stable.
 
 ## Must Have
-- [ ] PE-001: Phase tracking + planter-initiated transitions (forward/back/skip, reason, never blocked)
-- [ ] PE-002: Immutable transition audit trail (fact snapshot + rubric version)
-- [ ] PE-003: `phase.changed` event emitted on transition
-- [ ] PE-004: Signal layer / deterministic fact snapshot (no LLM-produced facts)
-- [ ] PE-005: Manual signals / self-attestation
-- [ ] PE-006: Versioned rubric artifact (v0 = `rubric-v0.md`)
-- [ ] PE-007: LLM-as-judge assessment (facts-only reasoning, cites facts)
-- [ ] PE-008: Methodology RAG over playbook + wiki
-- [ ] PE-009: Assessment snapshot persistence (insights with audience/severity/citations)
-- [ ] PE-010: Event-driven, debounced execution (dirty-or-stale selection)
-- [ ] PE-011: Instant reads from cached snapshot (no per-pageview LLM call)
-- [ ] PE-012: Two audiences (planter / network), network privacy-gated, no individual insights to network
-- [ ] PE-013: Planter-sees-first guarantee
-- [ ] PE-014: Insight feedback capture (rubric-tuning signal)
+- [x] PE-001: Phase tracking + planter-initiated transitions (forward/back/skip, reason, never blocked) — `src/lib/phase-engine/transitions/service.ts`
+- [x] PE-002: Immutable transition audit trail (fact snapshot + rubric version) — `phase_transitions` in `src/db/schema/phase-engine.ts`
+- [x] PE-003: `phase.changed` event emitted on transition — `src/lib/phase-engine/events.ts`
+- [x] PE-004: Signal layer / deterministic fact snapshot (no LLM-produced facts) — `src/lib/phase-engine/signals/build-fact-snapshot.ts`
+- [x] PE-005: Manual signals / self-attestation — `src/lib/phase-engine/signals/attestation-service.ts` + `plant_signals` table
+- [x] PE-006: Versioned rubric artifact (v0 = `rubric-v0.md`) — `src/lib/phase-engine/rubric.ts` (version recorded per assessment)
+- [x] PE-007: LLM-as-judge assessment (facts-only reasoning, cites facts) — `src/lib/phase-engine/judge/run-assessment.ts` (`citedFacts` required in schema)
+- [x] PE-008: Methodology RAG over playbook + wiki — `src/lib/phase-engine/rag/retrieve.ts` (hybrid pgvector + FTS, RRF)
+- [x] PE-009: Assessment snapshot persistence (insights with audience/severity/citations) — `plant_assessments` + `plant_insights` tables
+- [x] PE-010: Event-driven, debounced execution (dirty-or-stale selection) — `src/lib/phase-engine/dirty-handler.ts` + Vercel Cron → `src/app/api/phase-engine/assess/route.ts`
+- [x] PE-011: Instant reads from cached snapshot (no per-pageview LLM call) — `src/lib/phase-engine/assessment/queries.ts` (`getLatestAssessment`)
+- [x] PE-012: Two audiences (planter / network), network privacy-gated, no individual insights to network — `run-assessment.ts` audience guard + `src/lib/phase-engine/assessment/persist.ts` + `src/lib/phase-engine/oversight/read.ts` (`share_*` gating)
+- [x] PE-013: Planter-sees-first guarantee — `src/lib/phase-engine/oversight/read.ts` (COMPLETE-snapshots-only reads)
+- [x] PE-014: Insight feedback capture (rubric-tuning signal) — `insight_feedback` table + `src/lib/phase-engine/feedback/service.ts`
 
 - [x] NFR-PE-4a: Provider + data-handling terms recorded in the feature's config documentation — `data-posture.md`
 - [ ] NFR-PE-4b: Strongest retention/training controls enabled on the provider account
@@ -26,10 +26,10 @@
 
 ## Should Have
 - [ ] NFR-PE-4d: Zero data retention adopted once the account is contractually eligible (enterprise, post-revenue — not a go-live gate)
-- [ ] PE-015: "Ready to advance" readiness prompt
-- [ ] PE-016: "What changed since last assessment"
-- [ ] PE-017: Network health rollup for portfolio views
-- [ ] PE-018: Cold-start handling for new plants
+- [x] PE-015: "Ready to advance" readiness prompt — `deriveReadiness` in `src/lib/phase-engine/transitions/service.ts` + `src/components/phase-engine/phase-control.tsx`
+- [x] PE-016: "What changed since last assessment" — `computeSnapshotDelta` in `src/lib/phase-engine/assessment/persist.ts`
+- [x] PE-017: Network health rollup for portfolio views — `src/lib/phase-engine/oversight/health-presentation.ts` + `src/components/phase-engine/plant-health-portfolio.tsx`
+- [x] PE-018: Cold-start handling for new plants — `isColdStart` signal + `onboarding` insight category (`src/lib/phase-engine/judge/schema.ts`)
 
 ## Nice to Have
 - [ ] PE-019: Rubric as data / per-network configurable

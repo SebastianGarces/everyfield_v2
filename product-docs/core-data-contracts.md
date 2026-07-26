@@ -1,7 +1,7 @@
 # EveryField - Core Data Contracts
 
-**Version:** 1.2  
-**Date:** February 7, 2026
+**Version:** 1.3  
+**Date:** July 25, 2026
 
 ---
 
@@ -26,7 +26,7 @@ Church planting networks that oversee multiple sending churches and/or church pl
 
 ### SendingChurch
 
-Churches that send planters. A separate entity from Church (church plants) because sending churches do not go through the 6-phase journey. May belong to a network or operate independently.
+Churches that send planters. A separate entity from Church (church plants) because sending churches do not go through the phase journey (phases 0-6). May belong to a network or operate independently.
 
 | Field | Type | Contract |
 |-------|------|----------|
@@ -78,10 +78,19 @@ The church plant being launched. The primary tenant entity.
 
 ### Phase
 
+Phase is **not a standalone table**. It is `churches.current_phase` (integer 0-6) plus the Phase Engine's immutable transition audit trail. Advancement is advisory and planter-confirmed — the Phase Engine judges readiness against a versioned rubric but never gates (transitions may go forward, back, or skip).
+
+**PhaseTransition** (append-only audit record, owned by the Phase Engine):
+
 | Field | Type | Contract |
 |-------|------|----------|
-| `id` | Enum (0-6) | Phase identifier |
-| `exit_criteria` | JSON | Conditions for progression (Phase Engine evaluates) |
+| `church_id` | UUID (FK) | Scoping key |
+| `from_phase` | Integer (0-6) | |
+| `to_phase` | Integer (0-6) | Forward, back, or skip — never blocked |
+| `initiated_by_id` | UUID (FK) | The planter who confirmed the transition |
+| `reason` | String | Planter-provided context |
+| `fact_snapshot` | JSON | Deterministic plant facts at transition time (Signal layer) |
+| `rubric_version` | String | Rubric version used for the readiness judgment |
 
 ### CoachAssignment
 
@@ -158,7 +167,7 @@ Features **reference shared entities by ID only**—never duplicate profile fiel
 > **All feature data MUST include `church_id` and enforce row-level isolation.**
 
 - Every feature table includes `church_id` foreign key
-- Row-level security enforced at database layer
+- Row-level isolation enforced at the application layer (`church_id` filtering on all queries); DB-layer RLS is a future goal
 - Coach/Network Admin roles may have cross-church read access for assigned churches only
 - No cross-tenant data leakage in queries, exports, or search results
 
@@ -171,7 +180,7 @@ Features **reference shared entities by ID only**—never duplicate profile fiel
 | `created_at`, `updated_at` | All mutable entities |
 | `created_by` (user_id) | User-initiated mutations |
 | Immutable audit trail | Financial data (F7) |
-| Criteria snapshot on transition | Phase changes |
+| Fact snapshot + rubric version on transition | Phase changes |
 
 ### Event Naming Conventions
 
@@ -180,7 +189,7 @@ Events follow `entity.action` pattern:
 | Event | Emitter | Subscribers |
 |-------|---------|-------------|
 | `phase.changed` | Phase Engine | All phase-aware features |
-| `phase.criteria.updated` | Phase Engine | Dashboard (F4) |
+| `plant.assessment.created` | Phase Engine | Dashboard (F4), Oversight views |
 | `person.created` | F2 (People/CRM) | Features needing person sync |
 | `person.status.changed` | F2 (People/CRM) | Dashboard, Communication |
 
@@ -195,7 +204,7 @@ Events follow `entity.action` pattern:
 
 | Owner | Entities | Dependents May |
 |-------|----------|----------------|
-| **Core** | SendingNetwork, SendingChurch, Church, User, Phase, CoachAssignment, OrganizationInvitation, ChurchPrivacySettings | Read all fields |
+| **Core** | SendingNetwork, SendingChurch, Church (incl. `current_phase`), User, CoachAssignment, OrganizationInvitation, ChurchPrivacySettings | Read all fields |
 | **F2 (People/CRM)** | Person, Household | Read; write attendance/assignment via own tables |
 
 Features own their domain tables and reference shared entities by ID. See [System Architecture](./system-architecture.md) for full ownership map.

@@ -11,6 +11,7 @@
 | [contracts/config.md](contracts/config.md) | Environment and config |
 | [contracts/data-patterns.md](contracts/data-patterns.md) | Client/server data sync patterns |
 | [flows/auth.mmd](flows/auth.mmd) | Authentication flow |
+| [flows/person-status.mmd](flows/person-status.mmd) | Person status progression flow |
 | [flows/wiki-article.mmd](flows/wiki-article.mmd) | Wiki article retrieval |
 | [flows/request-lifecycle.mmd](flows/request-lifecycle.mmd) | Dashboard request lifecycle |
 
