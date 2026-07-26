@@ -11,12 +11,15 @@
 #   [x] Project "EveryField Delivery" created — user-owned, number 1
 #   [x] Status single-select carries the six options in the case statement below, spelled exactly
 #   [x] All open work items backfilled onto the board
-#   [ ] A PAT with the `project` scope stored as the repo secret PROJECT_TOKEN.
+#   [ ] A PAT with the `project` scope ONLY, stored as the repo secret PROJECT_TOKEN.
 #       GITHUB_TOKEN CANNOT write a user-owned Project v2 — this is the most likely reason the
 #       mirror appears to silently do nothing. Until it exists, this job no-ops.
 #
-# Until PROJECT_TOKEN exists the job exits cleanly with a notice rather than failing: a missing
-# board must never turn a PR red.
+# Absent secret -> exit 0 with a notice, because "not set up yet" is not a failure.
+# Present but broken (expired, wrong scope) -> the job FAILS, loudly and visibly in Actions.
+# Those are different situations and are deliberately not collapsed into one.
+#
+# This workflow triggers on `issues` events only, so it never reports as a PR check either way.
 
 name: Board sync
 
@@ -42,17 +45,26 @@ jobs:
     steps:
       - name: Mirror label state onto the board
         env:
-          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+          # Two tokens on purpose, so the PAT only ever needs `project` scope:
+          #   REPO_TOKEN    — reads labels. GITHUB_TOKEN already has repo scope; a PAT would not.
+          #   PROJECT_TOKEN — writes the board. Repo-scoped tokens cannot reach a user-owned project.
+          REPO_TOKEN: ${{ github.token }}
+          PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
           ISSUE: ${{ github.event.issue.number }}
         run: |
           set -euo pipefail
 
-          if [ -z "${GH_TOKEN:-}" ]; then
+          if [ -z "${PROJECT_TOKEN:-}" ]; then
             echo "::notice::PROJECT_TOKEN is not set — board sync skipped. See board-design-2026-07.md §9."
             exit 0
           fi
 
-          labels=$(gh issue view "$ISSUE" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name')
+          # Read live rather than from github.event.issue.labels: the payload is a snapshot, and
+          # two quick label edits would replay an older one over a newer.
+          labels=$(GH_TOKEN="$REPO_TOKEN" gh issue view "$ISSUE" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name')
+
+          # Everything below writes the board, so it uses the PAT.
+          export GH_TOKEN="$PROJECT_TOKEN"
 
           # Exactly one of these should ever be present. If more than one is, the board would
           # otherwise silently show whichever we checked last — warn instead of guessing.
