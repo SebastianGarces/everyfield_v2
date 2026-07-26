@@ -20,6 +20,8 @@
 
 import { z } from "zod";
 
+import type { RetrievedPassage } from "@/lib/phase-engine/rag";
+
 /** Who the insight is phrased for (rubric-v0: planter coaching vs. network health). */
 export const insightAudienceSchema = z.enum(["planter", "network"]);
 export type InsightAudience = z.infer<typeof insightAudienceSchema>;
@@ -114,6 +116,13 @@ export interface AssessmentResult extends JudgeOutput {
   phase: number;
   /** ISO timestamp the assessment completed. */
   assessedAt: string;
+  /**
+   * The methodology passages the judge was actually grounded with (PE-024).
+   * Carried out of the pipeline so persistence can reconcile the model's
+   * `relatedArticleSlugs` against real retrieved metadata rather than trusting
+   * the model not to invent a slug. Empty when retrieval returned nothing.
+   */
+  retrievedPassages: RetrievedPassage[];
 }
 
 /**

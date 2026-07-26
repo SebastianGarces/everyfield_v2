@@ -16,6 +16,7 @@ import type {
   Insight,
   InsightSeverity as JudgeSeverity,
 } from "@/lib/phase-engine/judge";
+import type { RetrievedPassage } from "@/lib/phase-engine/rag";
 import type { PlantFactSnapshot } from "@/lib/phase-engine/signals";
 
 // ----------------------------------------------------------------------------
@@ -86,6 +87,75 @@ export function filterInsightsForPersistence(insights: Insight[]): Insight[] {
 }
 
 // ----------------------------------------------------------------------------
+// "How to improve" wiki links (PE-024).
+//
+// The judge is *asked* to cite only slugs that appear in the METHODOLOGY block
+// (judge/prompt.ts), but a prompt instruction is not a guarantee: a model can
+// echo a plausible-looking slug that was never retrieved. Since the RAG layer
+// already returns each passage's `articleSlug` metadata
+// (rag/retrieve.ts → RetrievedPassage), the link target is KNOWN at assessment
+// time and does not have to be trusted or guessed.
+//
+// So persistence reconciles: a slug survives only when a retrieved passage
+// carried it, and it is stored in the retrieved passage's canonical spelling.
+// Anything else is dropped — an insight linking to methodology the engine never
+// read is worse than an insight with no link.
+// ----------------------------------------------------------------------------
+
+/** Comparison key for a slug: trimmed, unwrapped of slashes, case-folded. */
+function slugKey(slug: string): string {
+  return slug
+    .trim()
+    .replace(/^\/+|\/+$/g, "")
+    .toLowerCase();
+}
+
+/**
+ * Index the retrieved passages by comparison key → canonical slug, so a judge
+ * slug can be matched loosely but persisted exactly as the corpus spells it.
+ */
+function canonicalSlugIndex(passages: RetrievedPassage[]): Map<string, string> {
+  const index = new Map<string, string>();
+  for (const passage of passages) {
+    const slug = passage.articleSlug;
+    if (!slug) continue;
+    const key = slugKey(slug);
+    if (key && !index.has(key)) index.set(key, slug);
+  }
+  return index;
+}
+
+/**
+ * Keep only the article slugs the RAG layer actually retrieved for this run
+ * (PE-024). Order follows the judge's citation order; duplicates collapse.
+ *
+ * @param slugs    the model's `relatedArticleSlugs` (may be null/empty)
+ * @param passages the passages that grounded the run (their `articleSlug`
+ *                 metadata is the source of truth for what may be linked)
+ * @returns the retained slugs in the corpus's own spelling
+ */
+export function reconcileArticleSlugs(
+  slugs: string[] | null | undefined,
+  passages: RetrievedPassage[]
+): string[] {
+  if (!slugs || slugs.length === 0) return [];
+
+  const canonical = canonicalSlugIndex(passages);
+  const kept: string[] = [];
+  const seen = new Set<string>();
+
+  for (const slug of slugs) {
+    const key = slugKey(slug);
+    const match = canonical.get(key);
+    if (!match || seen.has(key)) continue;
+    seen.add(key);
+    kept.push(match);
+  }
+
+  return kept;
+}
+
+// ----------------------------------------------------------------------------
 // Ranking + row mapping.
 // ----------------------------------------------------------------------------
 
@@ -100,11 +170,18 @@ const SEVERITY_WEIGHT: Record<JudgeSeverity, number> = {
 /**
  * Build the persistable insight rows for an assessment: privacy-filter, order by
  * urgency (stable), then assign a 0-based `rank` (lower = higher priority).
+ *
+ * @param retrievedPassages the passages that grounded the run; each insight's
+ *        `relatedArticleSlugs` is reconciled against their `articleSlug`
+ *        metadata so a persisted link always points at methodology the engine
+ *        actually retrieved (PE-024). Defaults to none — with no retrieval
+ *        provenance there is nothing to link, so no link is stored.
  */
 export function buildInsightRows(
   assessmentId: string,
   churchId: string,
-  insights: Insight[]
+  insights: Insight[],
+  retrievedPassages: RetrievedPassage[] = []
 ): NewPlantInsight[] {
   const kept = filterInsightsForPersistence(insights);
 
@@ -127,7 +204,10 @@ export function buildInsightRows(
     title: insight.title,
     body: insight.body,
     citedFacts: insight.citedFacts,
-    relatedArticleSlugs: insight.relatedArticleSlugs,
+    relatedArticleSlugs: reconcileArticleSlugs(
+      insight.relatedArticleSlugs,
+      retrievedPassages
+    ),
     rank,
   }));
 }
