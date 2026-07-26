@@ -1,6 +1,6 @@
 ---
 name: token-preflight
-description: Before starting a build, estimate whether there is enough token/context budget to FINISH it, and recommend run-now / split-into-waves / defer. Use at the start of delivery-orchestrator and inside build-until-done's wave loop. Prevents starting a task we can't complete and stranding it half-done.
+description: Before starting a build, estimate whether there is enough token/context budget to FINISH it, and recommend run-now / split-into-batches / defer. Use at the start of delivery-orchestrator and before each frontier pass in build-until-done. Prevents starting a task we can't complete and stranding it half-done.
 ---
 
 # token-preflight

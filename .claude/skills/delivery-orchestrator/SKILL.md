@@ -1,6 +1,6 @@
 ---
 name: delivery-orchestrator
-description: The PM-facing entry point of the Agent Delivery OS — intake → token preflight → file-disjoint waves → build-until-done per track → report. The human only reviews the resulting PRs.
+description: The PM-facing entry point of the Agent Delivery OS — intake → token preflight → build the board's frontier → build-until-done per track → report. The human only reviews the resulting PRs.
 disable-model-invocation: true
 ---
 
@@ -31,18 +31,28 @@ the user the numbers. Never start work you can't finish — split or defer inste
 `+Nk` budget directive, the workflow's `budget` global enforces it; otherwise run best-effort and lean
 on per-track `MAX_ATTEMPTS` + `reserve`.
 
-### 3. Plan into waves
-- **FRD-scale** feature → run the `frd-plan` workflow (file-disjoint tracks + dependency waves, schema
-  pulled out as a prerequisite).
+### 3. Plan onto the board
+- **FRD-scale** feature → run the `frd-plan` workflow. It decomposes into file-disjoint tracks and
+  **publishes them as issues with native `blocked_by` edges**, schema pulled out as a blocking
+  prerequisite. There is no wave array to carry forward — the board holds the order.
 - **Ad-hoc list** → group the issues yourself by shared files (issues that touch the same file must run
-  in the same track/branch; independent issues run in parallel). Dependencies define wave order.
+  in the same track/branch; independent issues run in parallel). Where one issue genuinely needs
+  another's code first, write that as an edge: `gh issue edit <n> --add-blocked-by <m>`.
 
-### 4. Build each wave  (`build-until-done` workflow)
-Run `build-until-done` with the wave's `units` array (each `{id,title,lane,files,summary,
+Keep the two apart, because they behave differently: **shared file** is a scheduling constraint (same
+branch, built in order), **blocked_by** is a semantic one (different branch, later run). Conflating
+them is what made the old wave model coarser than it needed to be.
+
+### 4. Build the frontier  (`build-until-done` workflow)
+The **frontier** is every queued issue with zero *open* blockers and no assignee — see
+`ops/agent-os/labels.md` for the query. That is what you build; anything still blocked waits.
+
+Run `build-until-done` with the frontier's `units` array (each `{id,title,lane,files,summary,
 acceptanceCriteria,issue,risk}`). The loop implements → validates against the DoD with an **independent
 verifier + MCP** → retries on failure → opens a PR with the evidence bundle on PASS, or labels the issue
-`agent:blocked` on exhaustion. Merge/approve happens at PR review (the human checkpoint) — then run the
-next wave (re-preflight first; budget is shared).
+`agent:blocked` on exhaustion. Merge/approve happens at PR review (the human checkpoint) — merging closes
+the issue, which clears its edges and moves whatever it was blocking onto the frontier. Then re-query and
+run again (re-preflight first; budget is shared).
 
 ### 5. Report
 Summarize: PRs opened (the review queue), anything blocked (with the failing gate), and what's still

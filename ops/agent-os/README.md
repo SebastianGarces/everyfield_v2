@@ -16,7 +16,7 @@ passes with evidence attached.** Your only manual step is reviewing PRs.
 |----------|--------------|------------------|
 | "Build these: …" (a list + specs) | Each item → a rigorous GitHub Issue (`agent:queued`) | `/deliver` → `delivery-orchestrator` → `spec-intake` |
 | (implicit, before any build) | "Do we have enough tokens to finish?" → run / split / defer | `token-preflight` |
-| (implicit, on run) | Decompose into file-disjoint tracks + dependency waves | `frd-plan` (or inline) |
+| (implicit, on run) | Decompose into file-disjoint tracks; publish the DAG to the board | `frd-plan` (or inline) |
 | (implicit, per track) | Implement → validate against DoD → fix → … → **open PR** | `build-until-done` |
 | "What's pending?" | Board by status + your PR review queue + running loops | `/standup` → `standup` |
 
@@ -37,7 +37,9 @@ You (PM): list + specs
 [token-preflight] ── estimate cost vs remaining budget → run-now / split / defer
         │
         ▼
-[frd-plan]* ── file-disjoint tracks + dependency waves         (high-risk → its own wave)
+[frd-plan]* ── file-disjoint tracks, published as issues       (high-risk → a blocking prerequisite)
+        │      with native blocked_by edges. The board holds the order,
+        │      so what runs next is a query, not a plan you carry around.
         │
         ▼  per track, in an ISOLATED git worktree:
 ┌──────────────────  build-until-done.js  (THE LOOP)  ──────────────────┐
@@ -96,7 +98,10 @@ to create the labels.
   [`invocation.md`](./invocation.md); read it before adding a skill.
 - **Max attempts** per track (default 3) — the loop will not iterate forever.
 - **Token reserve** — the loop refuses to *start* an attempt it can't finish; `token-preflight` gates
-  the whole wave up front. A task that can't finish is **deferred or split**, never half-shipped.
+  the whole batch up front. A task that can't finish is **deferred or split**, never half-shipped.
+- **"Wave" now means one frontier pass**, not a pre-computed layer. The word survives in a few skills as
+  shorthand for "the batch running together"; the authority on what may run is always the board —
+  `blocked_by == 0` and unassigned. There is no wave array to keep in sync, which is the point.
 - **No silent stops** — exhaustion always produces an `agent:blocked` issue with the reason.
 - **High-risk → PR, not merge** — the human PR review is the checkpoint for schema/auth/tenancy/payments.
 - **Preview deploys, not localhost** — G3 validates against the branch's Vercel preview, because

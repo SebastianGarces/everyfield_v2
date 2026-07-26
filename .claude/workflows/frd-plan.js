@@ -1,19 +1,19 @@
 export const meta = {
   name: "frd-plan",
   description:
-    "Plan an FRD into a parallel build: decompose, group into file-disjoint tracks, and schedule dependency waves. Pulls human-gated work (schema, high-risk) out as prerequisites. No code is written.",
+    "Plan an FRD into a parallel build: decompose, group into file-disjoint tracks, and publish them to the board as issues with native blocking edges. Human-gated work (schema, high-risk) is published as blockers. No code is written.",
   whenToUse:
-    "Before implementing an FRD. Produces the wave plan you execute one wave at a time with frd-implement-wave. Pass the FRD path (or {frd, scope}) as args.",
-  // NOTE (2026-07-26): the wave plan is no longer committed as wave-plan.json — the
-  // board holds dependency state now (ops/agent-os/labels.md). The returned plan is
-  // still correct and still consumed by frd-implement-wave; what changes next is that
-  // this workflow publishes its units as issues with native `blocked_by` edges, and
-  // waves collapse into a frontier query. See product-docs/board-design-2026-07.md §7.
+    "Before implementing an FRD. Publishes the dependency DAG onto the board; execute it with frd-implement, which reads the frontier. Pass the FRD path (or {frd, scope, publish:false}) as args.",
   phases: [
     {
       title: "Decompose",
       detail:
         "Architect splits the FRD into work units with declared file ownership and dependencies",
+    },
+    {
+      title: "Publish",
+      detail:
+        "Tracks become issues on the board, blockers first, with native blocked_by edges",
     },
   ],
 };
@@ -23,6 +23,9 @@ export const meta = {
 // ---------------------------------------------------------------------------
 const frdPath = typeof args === "string" ? args : args?.frd;
 const scope = (typeof args === "object" && args?.scope) || "MVP";
+// publish:false plans without writing to the board — useful for a dry run.
+const publish =
+  typeof args === "object" && args?.publish === false ? false : true;
 if (!frdPath)
   throw new Error(
     'Pass the FRD path as args, e.g. "product-docs/features/phase-engine/frd.md"'
@@ -71,7 +74,7 @@ const DECOMPOSE_SCHEMA = {
     deferred: {
       type: "array",
       description:
-        "HUMAN-GATED units: DB schema/migrations, auth, tenancy, payments. Agent-authorable, but they need approval and run first/alone — kept OUT of the parallel waves.",
+        "HUMAN-GATED units: DB schema/migrations, auth, tenancy, payments. Agent-authorable, but they need approval and run first/alone — everything depending on them is published blocked_by them.",
       items: {
         type: "object",
         required: ["id", "title", "reason"],
@@ -81,6 +84,41 @@ const DECOMPOSE_SCHEMA = {
           reason: { type: "string" },
         },
       },
+    },
+    notes: { type: "string" },
+  },
+};
+
+const PUBLISH_SCHEMA = {
+  type: "object",
+  required: ["parentIssue", "published", "edges", "notes"],
+  properties: {
+    parentIssue: {
+      type: "number",
+      description:
+        "the `feature` issue these were filed under, 0 if none existed",
+    },
+    published: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["trackId", "issue", "created"],
+        properties: {
+          trackId: { type: "string" },
+          issue: { type: "number" },
+          created: {
+            type: "boolean",
+            description:
+              "false if an existing issue with this title was reused",
+          },
+        },
+      },
+    },
+    edges: {
+      type: "array",
+      description:
+        "the blocked_by edges actually written, as 'blocked<-blocker'",
+      items: { type: "string" },
     },
     notes: { type: "string" },
   },
@@ -126,15 +164,20 @@ const plan = await agent(
 Read the FRD at "${frdPath}" and product-docs/system-architecture.md (and any companion files the FRD references, e.g. a rubric). Decompose the ${scope} scope into work units.
 Rules:
 - "files": list EVERY file/dir the unit creates or edits. The planner serializes any units that share a file, so accuracy keeps merges clean. Confine cross-cutting chokepoints (shared barrels, event-bus registries, constants) to a SINGLE owner unit.
-- "dependsOn": logical ordering only (it does NOT force same-branch grouping).
-- risk "high" = DB schema/migrations, auth/permissions, multi-tenant boundaries, payments → put in "deferred" (human-gated: agent can author, but it needs approval and runs first/alone). Consolidate ALL schema into one deferred unit (only one db:generate is allowed).
+- "dependsOn": logical ordering only — one unit needing another's code to exist. It does NOT mean "touches the same file"; file overlap is handled separately and must not be expressed here.
+- risk "high" = DB schema/migrations, auth/permissions, multi-tenant boundaries, payments → put in "deferred" (human-gated: agent can author, but it needs approval and lands first). Consolidate ALL schema into one deferred unit (only one db:generate is allowed). Anything needing that schema should list it in dependsOn — it becomes a real blocking edge on the board.
 Return strictly the schema.`,
   { phase: "Decompose", agentType: "architect", schema: DECOMPOSE_SCHEMA }
 );
 if (!plan) throw new Error("Decomposition failed");
 
 // ---------------------------------------------------------------------------
-// Deterministic grouping: tracks (shared-file ONLY) + dependency waves
+// Deterministic grouping: tracks (shared-file ONLY) + a dependency DAG
+//
+// Two different constraints, deliberately kept apart (ops/agent-os/labels.md):
+//   shared file  -> a SCHEDULING constraint. Same track, same branch, built in order.
+//   dependsOn    -> a SEMANTIC blocking edge. Separate track, published as blocked_by.
+// Collapsing them is what made the old wave model coarser than it needed to be.
 // ---------------------------------------------------------------------------
 const gated = [...plan.deferred];
 const gatedIds = new Set(gated.map((d) => d.id));
@@ -146,7 +189,6 @@ for (const u of plan.units) {
   } else implementable.push(u);
 }
 
-// Group into tracks by SHARED FILE ONLY (deps do NOT merge tracks — they schedule waves).
 const ids = implementable.map((u) => u.id);
 const dsu = makeDSU(ids);
 const fileOwners = new Map();
@@ -190,66 +232,145 @@ const tracks = [...trackMembers.entries()].map(([root, units]) => ({
       : "fullstack",
 }));
 
-// Track-level dependency graph (ignore gated deps — those are prerequisites, "wave 0/human").
+// Track-level dependency graph. Unlike the old model, a dependency on a gated
+// unit is NOT dropped — it becomes an edge onto that prerequisite's issue, so
+// "the schema must land first" is durable state rather than a sentence in a plan.
 const byId = new Map(implementable.map((u) => [u.id, u]));
 const trackDeps = new Map(tracks.map((t) => [t.root, new Set()]));
+const gatedDeps = new Map(tracks.map((t) => [t.root, new Set()]));
 for (const u of implementable) {
   for (const d of u.dependsOn || []) {
-    if (gatedIds.has(d) || !byId.has(d)) continue;
-    const from = trackOf.get(u.id),
-      to = trackOf.get(d);
+    const from = trackOf.get(u.id);
+    if (gatedIds.has(d)) {
+      gatedDeps.get(from).add(d);
+      continue;
+    }
+    if (!byId.has(d)) continue;
+    const to = trackOf.get(d);
     if (from !== to) trackDeps.get(from).add(to);
   }
 }
-// Topological wave = longest dependency chain length.
+
+// Depth is now used ONLY to order the writes — publish a blocker before the
+// thing it blocks, so `--blocked-by` can reference a real issue number. It is
+// no longer an execution barrier; the frontier decides what runs.
 const depthMemo = new Map();
+const visiting = new Set();
 function depth(root) {
   if (depthMemo.has(root)) return depthMemo.get(root);
-  depthMemo.set(root, 0);
+  if (visiting.has(root)) {
+    // A cycle would deadlock the frontier permanently — every member stays
+    // blocked forever. Surface it here rather than on the board.
+    throw new Error(
+      `Dependency cycle detected at track "${root}". A cycle can never reach the frontier — fix dependsOn in the decomposition.`
+    );
+  }
+  visiting.add(root);
   let d = 0;
   for (const dep of trackDeps.get(root)) d = Math.max(d, 1 + depth(dep));
+  visiting.delete(root);
   depthMemo.set(root, d);
   return d;
 }
-const waveOf = new Map(tracks.map((t) => [t.root, depth(t.root)]));
-const maxWave = Math.max(0, ...[...waveOf.values()]);
-const waves = [];
-for (let w = 0; w <= maxWave; w++)
-  waves.push(tracks.filter((t) => waveOf.get(t.root) === w).map((t) => t.id));
+const publishOrder = [...tracks].sort(
+  (a, b) => depth(a.root) - depth(b.root) || a.id.localeCompare(b.id)
+);
 
+const rootCount = tracks.filter(
+  (t) => trackDeps.get(t.root).size === 0 && gatedDeps.get(t.root).size === 0
+).length;
 log(
-  `${implementable.length} units → ${tracks.length} file-disjoint tracks across ${waves.length} wave(s); ${gated.length} human-gated prerequisite(s)`
+  `${implementable.length} units → ${tracks.length} file-disjoint tracks; ${rootCount} start unblocked; ${gated.length} human-gated prerequisite(s)`
 );
 if (sharedFiles.length)
   log(
     `Shared-file tracks: ${sharedFiles.map((s) => s.file.split("/").pop()).join(", ")}`
   );
 
+const dag = publishOrder.map((t) => ({
+  trackId: t.id,
+  lane: t.lane,
+  units: t.units,
+  files: t.files,
+  blockedBy: [...trackDeps.get(t.root)].map(
+    (r) => tracks.find((x) => x.root === r).id
+  ),
+  blockedByPrerequisite: [...gatedDeps.get(t.root)],
+}));
+
 // ---------------------------------------------------------------------------
-// Return the plan (no code written). Run each wave with frd-implement-wave.
+// Publish to the board
 // ---------------------------------------------------------------------------
+if (!publish) {
+  log("publish:false — returning the DAG without touching the board");
+  return {
+    frd: frdPath,
+    scope,
+    published: false,
+    prerequisites: gated,
+    dag,
+    sharedFileClusters: sharedFiles,
+    decompositionNotes: plan.notes,
+    howToRun:
+      "Dry run only. Re-run without publish:false to write the DAG onto the board.",
+  };
+}
+
+phase("Publish");
+const published = await agent(
+  `You are publishing a planned build onto the GitHub board. Read ops/agent-os/labels.md and .claude/skills/spec-intake/SKILL.md FIRST — they define the issue shape, the label vocabulary and the parent rule. Use the \`gh\` CLI (>= 2.96, so --parent and --blocked-by are available).
+
+FRD: ${frdPath}
+
+**1. Find the parent.** \`gh issue list --label feature\` and pick the feature issue for this FRD. If none exists, create it first: a thin body linking the FRD plus the settled scope decisions — an index, not a store. Report its number as parentIssue.
+
+**2. Publish the prerequisites**, each as its own issue with \`--label needs-spec --label risk:high --parent <parent>\`. These are human-gated: they are agent-authorable but need approval before they run, which is why they are NOT \`agent:queued\`.
+${gated.map((g) => `  - [${g.id}] ${g.title}\n    reason: ${g.reason}`).join("\n") || "  (none)"}
+
+**3. Publish the tracks IN THE ORDER GIVEN BELOW.** The order is topological, so every blocker already exists by the time something references it. For each: \`gh issue create --label agent:queued --parent <parent> [--blocked-by <numbers>]\`, using the issue numbers you got from earlier steps for the edges.
+
+Each body must follow the spec-intake template: Goal, Context (link the FRD), Acceptance criteria (each with how it is verified), Validation plan, Risk, **Likely files** (list them exactly — that is what keeps parallel tracks from colliding), Out of scope.
+
+${publishOrder
+  .map((t, i) => {
+    const deps = [...trackDeps.get(t.root)].map(
+      (r) => tracks.find((x) => x.root === r).id
+    );
+    const pre = [...gatedDeps.get(t.root)];
+    const blockers = [...deps, ...pre];
+    return `${i + 1}. trackId "${t.id}" (${t.lane})
+   blocked by: ${blockers.length ? blockers.join(", ") : "nothing — starts on the frontier"}
+   files: ${t.files.join(", ")}
+   units:
+${t.units.map((u) => `     - ${u.title}: ${u.summary}\n       ACs: ${(u.acceptanceCriteria || []).join(" | ")}`).join("\n")}`;
+  })
+  .join("\n\n")}
+
+**Idempotency:** before creating anything, \`gh issue list --state all --search "<title> in:title"\`. If an issue with that exact title already exists, REUSE it (report created:false) and only add missing edges with \`gh issue edit <n> --add-blocked-by <m>\`. Re-running a plan must not duplicate the board.
+
+**Do not** open PRs, write code, or close anything. Report exactly what you created and every edge you wrote.
+Return strictly the schema.`,
+  { phase: "Publish", agentType: "backend", schema: PUBLISH_SCHEMA }
+);
+
+if (!published) throw new Error("Publishing to the board failed");
+log(
+  `Published ${published.published.length} track issue(s) under #${published.parentIssue}; ${published.edges.length} blocking edge(s)`
+);
+
+const issueOf = new Map(published.published.map((p) => [p.trackId, p.issue]));
+
 return {
   frd: frdPath,
   scope,
-  prerequisites: gated.map((g) => ({
-    ...g,
-    note: "Agent-authorable, but needs human approval and must land on the base branch BEFORE running wave 1.",
-  })),
-  tracks: tracks.map((t) => ({
-    id: t.id,
-    lane: t.lane,
-    units: t.units,
-    files: t.files,
-  })),
-  waves: waves.map((trackIds, i) => ({
-    wave: i + 1,
-    tracks: trackIds,
-    units: tracks
-      .filter((t) => trackIds.includes(t.id))
-      .flatMap((t) => t.units),
-  })),
+  published: true,
+  parentIssue: published.parentIssue,
+  prerequisites: gated,
+  dag: dag.map((t) => ({ ...t, issue: issueOf.get(t.trackId) ?? null })),
+  edges: published.edges,
   sharedFileClusters: sharedFiles,
-  howToRun:
-    "Land the prerequisites (approved) on a base branch. Then for each wave in order: run frd-implement-wave with args = that wave's `units` array; review and merge its branches into the base; proceed to the next wave.",
   decompositionNotes: plan.notes,
+  publishNotes: published.notes,
+  howToRun:
+    "Approve and land the prerequisites on the base branch, then close their issues so the edges clear. Run frd-implement to build everything currently on the frontier; merge its branches, close those issues, and run it again. There is no wave array to carry between runs — the board holds the order.",
 };

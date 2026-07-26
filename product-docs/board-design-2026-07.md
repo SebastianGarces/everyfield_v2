@@ -136,7 +136,7 @@ what `spec-intake` already produces; the only change is that it now gets a paren
 
 Semantic blocking — "the schema migration must land before the signal layer" — becomes a native
 `blocked_by` edge. `frd-plan` stops emitting a static `wave-plan.json` and instead publishes issues
-blockers-first with edges attached; `frd-implement-wave` stops reading a wave array and instead runs
+blockers-first with edges attached; `frd-implement` stops reading a wave array and instead runs
 a **frontier query**:
 
 ```bash
@@ -248,7 +248,7 @@ Each pass is independently mergeable and leaves the repo consistent. Nothing for
 |---|---|
 | `spec-intake` | add `## Parent` linkage + a `--parent` step; emit `Blocked by` edges via the dependencies API |
 | `frd-plan` | stop emitting `wave-plan.json`; publish issues blockers-first with native edges |
-| `frd-implement-wave` | waves → **frontier query** (`blocked_by == 0` and unassigned) |
+| `frd-implement` | renamed from `frd-implement-wave`; waves → **frontier query** (`blocked_by == 0` and unassigned) |
 | `standup` | read `sub_issues_summary` for per-feature progress; report the frontier |
 | `build-until-done` | **unchanged** — still label-driven. This is the point of not duplicating status. |
 | `definition-of-done` | G0 "spec mapped" now means: the issue has a parent and its parent links an FRD |
@@ -454,9 +454,40 @@ because something else needed access and it was already there. Defence: the toke
 `everyfield board-sync`, and anything else that needs GitHub access gets its own token rather than
 widening this one.
 
-### Not done, deliberately
+### waves → DAG (landed 2026-07-26, after the migration)
 
-**waves → DAG.** `frd-plan.js` still returns a static wave array and `frd-implement-wave.js` still
-consumes one. The board now carries the dependency state that change needs, and both files carry a
-note pointing here — but rewriting the planner in the same change as the migration would have made
-one reviewable thing into two half-verified ones. It is the next task, not this one.
+Deliberately held back from the migration so neither change reviewed as half-verified. Now done.
+
+**`frd-plan`** no longer returns a wave array. It decomposes, groups by shared file as before, then
+**publishes the tracks as issues with native `blocked_by` edges**. The topological sort survives, but
+its job changed: it now orders the *writes*, so a blocker always exists before something references
+it. `publish:false` gives a dry run.
+
+Two behaviours are genuinely new rather than moved:
+
+- **A dependency on a gated prerequisite is kept as an edge.** The old model dropped those
+  (`wave 0/human`) and conveyed "the schema lands first" as a sentence in a plan. It is now durable
+  state, which is the whole premise of the board.
+- **A dependency cycle throws at plan time.** Every member of a cycle has an open blocker forever, so
+  none can ever reach the frontier. Publishing one would be a silent, permanent deadlock.
+
+**`frd-implement`** (renamed from `frd-implement-wave` — "wave" was the concept being removed) takes
+no units array. It queries the frontier, claims what it takes (`--add-assignee @me` first, so two runs
+cannot grab the same issue), reads each issue body for the files and ACs, then runs the existing
+implement → review pipeline. A **Settle** phase writes outcomes back, because leaving issues on
+`agent:in-progress` after a run is exactly the stale state this board exists to prevent.
+
+It deliberately does **not** promote to `agent:in-review` on success. That label means "DoD passed, PR
+opened", and this workflow runs neither the DoD gates nor `open-pr`. Claiming a readiness it has not
+earned would be the same class of error as trusting a board card over a run log.
+
+**What this does and does not buy.** Within one run the human merge is still the gate — a dependent
+track needs its blocker's *code* on the base branch, and that only happens when you merge. What
+changed is that each pass takes the **maximal** unblocked set computed from durable state rather than
+a pre-baked layer, and the ordering survives across sessions with nothing to carry between them. The
+fully rolling behaviour arrives with the scheduled dispatcher, which can close its own PRs.
+
+**Tests:** `ops/agent-os/tests/frd-workflows.test.mjs` — 13 tests over the deterministic half
+(grouping, ordering, cycle rejection, frontier handling), run by stubbing the workflow globals so they
+cost no agent calls. `pnpm test`'s glob was widened to `ops/**/*.test.mjs` to run them; that glob was
+also what stranded the earlier HR4 harness.
