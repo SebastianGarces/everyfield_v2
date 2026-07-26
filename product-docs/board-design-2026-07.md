@@ -386,7 +386,23 @@ old checklists recorded that only as prose in a parenthetical.
 ### The Project (created 2026-07-26)
 
 **[EveryField Delivery](https://github.com/users/SebastianGarces/projects/1)** — user-owned, number 1,
-which is what `board-sync.yml` already expected.
+which is what `board-sync.yml` already expected. Private, and **linked** to the repo so it appears on
+its Projects tab.
+
+**A Project does not live in a repository.** Projects v2 are owned by a user or an organization only;
+the repo-scoped boards were Projects (classic), which GitHub shut down. Linking is as close as it
+gets — the URL stays user-scoped.
+
+Two things follow, and the second is the reason the split is safe:
+
+- **This is why the mirror needs `PROJECT_TOKEN`.** `GITHUB_TOKEN` is scoped to the *repository*, and
+  a user-owned project sits outside it. No workflow permission block can bridge that.
+- **Everything durable is repo-owned; only the view is not.** Issues, labels, parent/sub-issue links,
+  dependency edges and milestones all belong to the repo and travel with it. The Project and its
+  `Status` field belong to the account. If the repo ever moves to an organization, the hierarchy and
+  the blocking edges move with it and the board is simply rebuilt — a scripted ten minutes. Had
+  status lived in the Project field instead of the labels, that move would have lost state rather
+  than a rendering.
 
 Its default `Status` field was **updated in place** rather than replaced, so the field id survived and
 the two workflows GitHub enables by default (issue closed → Done, PR merged → Done) stay bound to it.
