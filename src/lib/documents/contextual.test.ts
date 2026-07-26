@@ -125,18 +125,28 @@ test("getLaunchChecklistSection matches regardless of case or custom naming", ()
 // No dead links, anywhere
 // ----------------------------------------------------------------------------
 
-test("every contextual template resolves to a real catalog template", () => {
-  const all = [
-    ...getMeetingContextualTemplates("vision_meeting"),
-    ...getTeamContextualTemplates({ name: "Facilities" }),
-  ];
+const ALL_CONTEXTUAL = [
+  ...getMeetingContextualTemplates("vision_meeting"),
+  ...getTeamContextualTemplates({ name: "Facilities" }),
+];
 
-  assert.ok(all.length > 0);
-  for (const contextual of all) {
+test("every contextual template resolves to a real catalog template", () => {
+  assert.ok(ALL_CONTEXTUAL.length > 0);
+  for (const contextual of ALL_CONTEXTUAL) {
     assert.ok(
       getTemplateById(contextual.id),
       `${contextual.id} must resolve via getTemplateById`
     );
     assert.ok(contextual.formats.length > 0);
+  }
+});
+
+test("no contextual link is a blind download — every one opens the library", () => {
+  for (const contextual of ALL_CONTEXTUAL) {
+    assert.ok(
+      contextual.href.startsWith("/documents?template="),
+      `${contextual.id} must open the library, got ${contextual.href}`
+    );
+    assert.ok(!contextual.href.includes("format="));
   }
 });
