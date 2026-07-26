@@ -21,6 +21,7 @@ import {
   type DocumentTemplate,
 } from "@/lib/documents";
 
+import { GenerateDialog } from "./generate-dialog";
 import { TemplateCard } from "./template-card";
 
 export interface DocumentLibraryItem {
@@ -30,11 +31,24 @@ export interface DocumentLibraryItem {
 
 const ALL = "all";
 
-export function DocumentsLibrary({ items }: { items: DocumentLibraryItem[] }) {
+export function DocumentsLibrary({
+  items,
+  initialTemplateId,
+}: {
+  items: DocumentLibraryItem[];
+  /** Template to open on arrival — a contextual link from another feature. */
+  initialTemplateId?: string;
+}) {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState<string>(ALL);
   const [phase, setPhase] = useState<string>(ALL);
   const [format, setFormat] = useState<string>(ALL);
+  const [deepLinkedId, setDeepLinkedId] = useState<string | null>(
+    initialTemplateId ?? null
+  );
+
+  const deepLinked =
+    items.find(({ template }) => template.id === deepLinkedId) ?? null;
 
   // Distinct filter options derived from the catalog.
   const { categories, phases, formats } = useMemo(() => {
@@ -81,6 +95,18 @@ export function DocumentsLibrary({ items }: { items: DocumentLibraryItem[] }) {
 
   return (
     <div className="space-y-6">
+      {/* Contextual arrival (DOC-014): open the requested template straight away */}
+      {deepLinked && (
+        <GenerateDialog
+          template={deepLinked.template}
+          defaults={deepLinked.defaults}
+          open
+          onOpenChange={(next) => {
+            if (!next) setDeepLinkedId(null);
+          }}
+        />
+      )}
+
       {/* Filter bar */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="relative flex-1">
