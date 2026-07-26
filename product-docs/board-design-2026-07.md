@@ -415,6 +415,29 @@ Worth an eyeball in the UI once: **Project → Workflows**, to confirm the two D
 point at the `Done` option. The option ids were regenerated when the six columns were written, and
 that is not observable from the API.
 
+### The mirror is live (verified 2026-07-26)
+
+`PROJECT_TOKEN` is set and the mirror was verified end to end by round-tripping a label on #73:
+`agent:queued` → `agent:in-progress` moved the card to **In Progress**, and the inverse moved it back
+to **Todo**. Both directions, not just the forward one.
+
+**The PAT is a classic token, `project` scope only, with no expiration.** That is a deliberate call,
+not an oversight — do not "harden" it to a 90-day expiry without reading this first:
+
+- The scope grants read/write on project boards and **nothing else** — no code, no pushes, no
+  secrets, no ability to touch the issues themselves. A leak vandalises a view we designed to be
+  rebuildable from labels.
+- The realistic leak vectors are closed. Secrets are masked in logs, the workflow calls no
+  third-party Actions, and forks never receive secrets — this triggers on `issues` events, which a
+  fork cannot fire anyway.
+- Expiry's cost is recurring and certain: a rotation every 90 days, with a real chance of the board
+  sitting broken between the warning email and someone acting on it.
+
+The risk that *is* worth guarding is **scope creep** — a long-lived token quietly acquiring `repo`
+because something else needed access and it was already there. Defence: the token's note is
+`everyfield board-sync`, and anything else that needs GitHub access gets its own token rather than
+widening this one.
+
 ### Not done, deliberately
 
 **waves → DAG.** `frd-plan.js` still returns a static wave array and `frd-implement-wave.js` still
