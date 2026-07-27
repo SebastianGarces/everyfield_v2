@@ -9,6 +9,28 @@ import {
   checklistCategories,
 } from "@/db/schema";
 import { z } from "zod";
+import { parseDateTimeLocalValue } from "@/lib/datetime";
+
+// ============================================================================
+// Wall-clock datetime
+// ============================================================================
+
+/**
+ * A meeting's date and time, as submitted by `<input type="datetime-local">`.
+ *
+ * `z.coerce.date()` would hand the naive string to `new Date()`, which reads it
+ * as *the server's* local time — so the instant a meeting is stored at would
+ * depend on the `TZ` of whatever machine served the form post, and the detail
+ * page would then render a time nobody typed. Parsing it explicitly in the
+ * app's zone keeps "7:00 PM in, 7:00 PM out" true everywhere.
+ */
+export const meetingDatetimeSchema = z.preprocess(
+  (value) =>
+    typeof value === "string"
+      ? (parseDateTimeLocalValue(value) ?? value)
+      : value,
+  z.date({ error: "Date and time is required" })
+);
 
 // ============================================================================
 // Base Schemas
@@ -31,7 +53,7 @@ export const meetingCreateSchema = z
   .object({
     type: meetingTypeSchema,
     title: z.string().max(255).optional(),
-    datetime: z.coerce.date({ error: "Date and time is required" }),
+    datetime: meetingDatetimeSchema,
     locationId: z.string().uuid().optional(),
     locationName: z.string().max(255).optional(),
     locationAddress: z.string().max(500).optional(),
@@ -61,7 +83,7 @@ export type MeetingCreateInput = z.infer<typeof meetingCreateSchema>;
 
 export const meetingUpdateSchema = z.object({
   title: z.string().max(255).optional(),
-  datetime: z.coerce.date().optional(),
+  datetime: meetingDatetimeSchema.optional(),
   locationId: z.string().uuid().optional().nullable(),
   locationName: z.string().max(255).optional(),
   locationAddress: z.string().max(500).optional(),

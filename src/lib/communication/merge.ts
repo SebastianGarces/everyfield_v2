@@ -7,6 +7,8 @@
 // and by the UI to render live previews with sample data.
 // ============================================================================
 
+import { formatDateTime } from "@/lib/datetime";
+
 export interface MergeFieldDefinition {
   /** The field token (without braces), e.g. "first_name" */
   name: string;
@@ -217,14 +219,11 @@ export function buildMeetingMergeData(meeting: {
   return {
     meeting_title: meeting.title ?? typeLabels[meeting.type] ?? meeting.type,
     meeting_type: typeLabels[meeting.type] ?? meeting.type,
-    meeting_date: meeting.datetime.toLocaleDateString("en-US", {
-      weekday: "long",
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    }),
+    // Zone-pinned: this runs both on the server (sending mail) and inside the
+    // client preview on /meetings/[id]. A locale-default format would put a
+    // different time in the SSR markup than in the hydrated preview — and a
+    // different time in the email than on the page. See src/lib/datetime.ts.
+    meeting_date: formatDateTime(meeting.datetime),
     meeting_location: [meeting.locationName, meeting.locationAddress]
       .filter(Boolean)
       .join(", "),

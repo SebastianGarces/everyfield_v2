@@ -81,6 +81,14 @@ Stable truths that must not be violated.
 
 **Source:** `src/lib/auth/session.ts` (`getCurrentSession`)
 
+## Date & Time Rendering
+
+- **Never format a `Date` without a pinned `timeZone`.** `Intl`/`toLocale*`/date-fns follow the *runtime's* zone — UTC on the server, the visitor's in the browser — so SSR markup and hydrated markup differ (React #418) and a server-only sibling disagrees forever. Format through `src/lib/datetime.ts`, pinned to `APP_TIME_ZONE` (UTC).
+- **A meeting's `datetime` is a wall clock, not a zoned instant.** `datetime-local` submits a naive string; `parseDateTimeLocalValue()` reads it as `APP_TIME_ZONE` so the stored instant does not follow the server's `TZ`, `toDateTimeLocalValue()` inverts it. Use `meetingDatetimeSchema`, never `z.coerce.date()`.
+- No per-user/per-church timezone column exists. Adding one means changing `APP_TIME_ZONE` and back-filling, not re-introducing runtime-local formatting.
+
+**Source:** `src/lib/datetime.ts`, `src/lib/validations/meetings.ts`
+
 ## Client/Server Data Synchronization
 
 - **NEVER store server data in useState** - This is an anti-pattern that leads to stale data

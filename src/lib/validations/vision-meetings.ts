@@ -6,6 +6,7 @@ import {
   responseStatuses,
 } from "@/db/schema";
 import { z } from "zod";
+import { meetingDatetimeSchema } from "@/lib/validations/meetings";
 
 // ============================================================================
 // Base Schemas
@@ -22,7 +23,7 @@ export const checklistCategorySchema = z.enum(checklistCategories);
 // ============================================================================
 
 export const meetingCreateSchema = z.object({
-  datetime: z.coerce.date({ error: "Date and time is required" }),
+  datetime: meetingDatetimeSchema,
   locationId: z.string().uuid().optional(),
   locationName: z.string().max(255).optional(),
   locationAddress: z.string().max(500).optional(),
