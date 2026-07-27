@@ -67,12 +67,13 @@ Stable truths that must not be violated.
 ## Wiki Articles
 
 - Slug-based routing (not ID-based)
+- **Never interpolate a slug into a wiki path** (`` `/wiki/${slug}` ``). Slugs are authored content: a space, `#`, `?` or `%` truncates or breaks the href. Build every wiki path — href, `router.push`, OpenGraph `url`, `revalidatePath` — with `wikiHref()` from `src/lib/wiki/href.ts`. It encodes **per segment**, so `/` stays a separator for the `[...slug]` catch-all and safe slugs are byte-identical.
 - Progress and bookmarks link by `article_slug`, not `article_id`
 - MDX content compiled at request time via `next-mdx-remote/rsc`
 - Full-text search: weighted tsvector (title A > excerpt B > content C)
 - Cache revalidation requires `REVALIDATION_SECRET`
 
-**Source:** `src/db/schema/wiki.ts`, `src/lib/wiki/search.ts`
+**Source:** `src/db/schema/wiki.ts`, `src/lib/wiki/href.ts`, `src/lib/wiki/search.ts`
 
 ## Request Deduplication
 

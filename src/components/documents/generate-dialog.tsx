@@ -23,6 +23,7 @@ import {
   type DocumentMergeValues,
   type DocumentTemplate,
 } from "@/lib/documents";
+import { wikiHref } from "@/lib/wiki/href";
 
 function buildUrl(
   templateId: string,
@@ -168,7 +169,7 @@ export function GenerateDialog({
             <>
               <Separator />
               <Link
-                href={`/wiki/${template.relatedWikiSlug}`}
+                href={wikiHref(template.relatedWikiSlug)}
                 className="text-primary text-sm hover:underline"
               >
                 Read the related wiki article →

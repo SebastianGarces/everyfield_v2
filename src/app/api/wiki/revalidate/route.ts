@@ -1,6 +1,8 @@
 import { revalidatePath } from "next/cache";
 import { NextRequest, NextResponse } from "next/server";
 
+import { wikiHref } from "@/lib/wiki/href";
+
 /**
  * On-demand revalidation endpoint for wiki articles
  *
@@ -32,7 +34,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Revalidate the specific article path
-    revalidatePath(`/wiki/${slug}`);
+    revalidatePath(wikiHref(slug));
 
     // Also revalidate the wiki index page (navigation might have changed)
     revalidatePath("/wiki");

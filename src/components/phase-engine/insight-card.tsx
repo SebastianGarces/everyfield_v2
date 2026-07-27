@@ -47,6 +47,8 @@ export async function InsightCard({ insight, feedback }: InsightCardProps) {
   // Resolve the stored slugs against the live published wiki: only articles
   // that still exist become links (PE-024). No stored slug, or none that still
   // resolves, means no "how to improve" section at all — never a dangling link.
+  // `link.href` below is already URL-safe (buildArticleLinks → wikiHref, which
+  // percent-encodes each slug segment); never re-interpolate `link.slug` here.
   const storedSlugs = insight.relatedArticleSlugs ?? [];
   const articleLinks =
     storedSlugs.length > 0
