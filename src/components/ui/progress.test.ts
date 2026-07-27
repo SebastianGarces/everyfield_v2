@@ -119,19 +119,25 @@ test("max is forwarded and the fill is measured against it", () => {
   assert.equal(indicator.attrs["style"], "transform:translateX(-75%)");
 });
 
-test("an out-of-range value leaves root and indicator agreeing", () => {
-  // Radix coerces an out-of-range value to indeterminate (and warns). The
-  // indicator must not paint a fill the root never announced.
-  const originalError = console.error;
-  console.error = () => {};
-  try {
-    const { root, indicator } = renderProgress({ value: 150 });
-    assert.equal(root.attrs["data-state"], "indeterminate");
-    assert.equal(root.attrs["aria-valuenow"], undefined);
-    assert.equal(indicator.attrs["style"], "transform:translateX(-100%)");
-  } finally {
-    console.error = originalError;
-  }
+test("an out-of-range value clamps: 150 renders full and announces 100", () => {
+  // Ruling on #149 (PR #174): clamp rather than fall back to indeterminate —
+  // an empty, unannounced bar at 105% would read as the opposite of the truth.
+  // No console.error suppression needed: Radix only ever sees the clamped,
+  // valid value.
+  const over = renderProgress({ value: 150 });
+  assert.equal(over.root.attrs["data-state"], "complete");
+  assert.equal(over.root.attrs["aria-valuenow"], "100");
+  assert.equal(over.indicator.attrs["style"], "transform:translateX(-0%)");
+
+  const negative = renderProgress({ value: -5 });
+  assert.equal(negative.root.attrs["data-state"], "loading");
+  assert.equal(negative.root.attrs["aria-valuenow"], "0");
+  assert.equal(negative.indicator.attrs["style"], "transform:translateX(-100%)");
+
+  // A non-numeric value is still genuinely indeterminate, not clamped to 0.
+  const nan = renderProgress({ value: NaN });
+  assert.equal(nan.root.attrs["data-state"], "indeterminate");
+  assert.equal(nan.root.attrs["aria-valuenow"], undefined);
 });
 
 test("className and arbitrary props still reach the root", () => {

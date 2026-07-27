@@ -10,26 +10,24 @@ const DEFAULT_MAX = 100;
 
 /**
  * Radix decides `data-state`, `aria-valuenow` and `aria-valuetext` from the
- * `value`/`max` it receives. These two predicates mirror
- * `isValidMaxNumber`/`isValidValueNumber` inside `@radix-ui/react-progress` so
- * the indicator's fill can never disagree with the state the root reports: if
- * Radix treats the bar as indeterminate, the indicator renders empty rather
- * than claiming a percentage no assistive technology was told about.
+ * `value`/`max` it receives, and treats an out-of-range value as invalid:
+ * indeterminate, plus a console.error. Ruling on #149 (PR #174): out-of-range
+ * values clamp instead — 105% renders a full bar announcing 100, a negative
+ * value renders empty announcing 0 — because an empty, unannounced bar reads
+ * as the opposite of the truth. Only a non-numeric value is indeterminate.
+ * The clamped value is what gets forwarded, so the indicator's fill can never
+ * disagree with the state the root reports.
  */
 function isValidMax(max: number | undefined): max is number {
   return typeof max === "number" && !Number.isNaN(max) && max > 0;
 }
 
-function isValidValue(
+function toClampedValue(
   value: number | null | undefined,
   max: number
-): value is number {
-  return (
-    typeof value === "number" &&
-    !Number.isNaN(value) &&
-    value >= 0 &&
-    value <= max
-  );
+): number | null {
+  if (typeof value !== "number" || Number.isNaN(value)) return null;
+  return Math.min(Math.max(value, 0), max);
 }
 
 function Progress({
@@ -40,9 +38,9 @@ function Progress({
 }: React.ComponentProps<typeof ProgressPrimitive.Root>) {
   const resolvedMax = isValidMax(max) ? max : DEFAULT_MAX;
   // `null` means indeterminate — no fill, and no aria-valuenow from Radix.
-  const percentage = isValidValue(value, resolvedMax)
-    ? (value / resolvedMax) * 100
-    : null;
+  const clampedValue = toClampedValue(value, resolvedMax);
+  const percentage =
+    clampedValue === null ? null : (clampedValue / resolvedMax) * 100;
 
   return (
     <ProgressPrimitive.Root
@@ -50,8 +48,9 @@ function Progress({
       // Forwarding these is what gives the root `aria-valuenow` and a real
       // `data-state` (loading/complete) instead of a permanent
       // `indeterminate`. They are destructured above, so the spread below
-      // cannot supply them.
-      value={value}
+      // cannot supply them. The clamped value goes to Radix — the raw one
+      // would trip its range check and force indeterminate.
+      value={clampedValue}
       max={max}
       className={cn(
         "bg-primary/20 relative h-2 w-full overflow-hidden rounded-full",
