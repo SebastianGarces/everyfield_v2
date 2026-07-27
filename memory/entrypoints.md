@@ -141,6 +141,28 @@
 
 ---
 
+## Notifications
+
+| Flow | Entrypoint | Trigger |
+|------|-----------|---------|
+| In-app feed | `(dash)/notifications/page.tsx` | Route `/notifications` (`?filter=unread` for the unread tab) |
+| Unread badge | `(dash)/layout.tsx` → `queries.ts:getUnreadCount()` → `components/notifications/notification-bell.tsx` | Every dashboard route |
+| Mark one read | `(dash)/notifications/actions.ts:markNotificationReadAction()` | Row click / "Mark read" |
+| Mark all read | `(dash)/notifications/actions.ts:markAllNotificationsReadAction()` | Toolbar action |
+| Enqueue (no UI) | `src/lib/notifications/enqueue.ts:enqueue()` / `cancelByEntity()` | Feature callers |
+
+**Primary modules:** `src/lib/notifications/` (queries, mark-read, entity-links, enqueue, preferences, categories), `src/components/notifications/`, `src/db/schema/notifications.ts`
+
+**Key deps:** `notifications`, `notification_preferences`, `notification_deliveries` tables
+
+**Read state:** `notifications.read_at` only — never a delivery row. Both mark-read writes are built from `scopedWhere` + `feedVisibility` (`queries.ts`), so a write is never looser than the read that surfaced the row and cannot mark a cancelled or not-yet-due row read. Actions call `refresh()` (not `revalidatePath`) because the badge lives in the layout, not on the page.
+
+**Feed links:** `entity-links.ts:notificationEntityHref()` — an exhaustive `Record` over `notificationEntityTypes`; `null` where this app has no screen (`training`, `document`, `facility`, `financial_entry`), so a row renders as plain text rather than a dead link.
+
+**Empty states:** `hasAnyNotifications()` separates cold start ("no notifications yet") from "all caught up"; it shares the feed's visibility rules so `hasAny === false` implies the feed is empty.
+
+---
+
 ## Tasks
 
 | Flow | Entrypoint | Trigger |

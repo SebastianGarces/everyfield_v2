@@ -3,10 +3,12 @@ import { redirect } from "next/navigation";
 
 import { AppSidebar } from "@/components/app-sidebar";
 import { DashboardHeader, HeaderProvider } from "@/components/header";
+import { NotificationBell } from "@/components/notifications/notification-bell";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { WikiGuide } from "@/components/wiki-guide";
 import { getCurrentSession } from "@/lib/auth";
 import { isPlatformAdmin } from "@/lib/auth/admin";
+import { getUnreadCount } from "@/lib/notifications/queries";
 
 function getInitials(name: string | null, email: string): string {
   if (name) {
@@ -41,6 +43,18 @@ export default async function DashboardLayout({
   const cookieStore = await cookies();
   const defaultOpen = cookieStore.get("sidebar_state")?.value === "true";
 
+  // The shell's unread count (N-008). Read here, in the one place that already
+  // holds the session, so the bell itself stays a presentational component and
+  // there is exactly one query behind the badge. A user with no church has no
+  // notifications — every row is church-scoped — so there is nothing to count
+  // and no bell to show.
+  const unreadCount = user.churchId
+    ? await getUnreadCount({
+        churchId: user.churchId,
+        recipientUserId: user.id,
+      })
+    : 0;
+
   const sidebarUser = {
     name: user.name || user.email.split("@")[0],
     email: user.email,
@@ -62,7 +76,9 @@ export default async function DashboardLayout({
       />
       <SidebarInset className="flex h-screen flex-col overflow-hidden">
         <HeaderProvider>
-          <DashboardHeader />
+          <DashboardHeader>
+            {user.churchId && <NotificationBell unreadCount={unreadCount} />}
+          </DashboardHeader>
           <main className="flex-1 overflow-auto">{children}</main>
           {!isOversightUser && <WikiGuide />}
         </HeaderProvider>

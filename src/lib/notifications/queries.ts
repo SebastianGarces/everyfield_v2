@@ -119,8 +119,14 @@ export function dispatcherWhere(
  * Applied to EVERY user-facing read — the feed, the unread count and the
  * single-row fetch by id — so the badge can never disagree with the list it
  * counts, and the by-id path can never hand back what the list is hiding.
+ *
+ * Exported because the MARK-READ writes (`./mark-read`) need the identical
+ * predicate, not a second copy of it: "mark all read" that ignored these rules
+ * would stamp `read_at` on a reminder scheduled for next week, so it would
+ * arrive already-read and never be seen. A user can only mark read what the
+ * feed was allowed to show them.
  */
-function feedVisibility(now: Date): (SQL | undefined)[] {
+export function feedVisibility(now: Date): (SQL | undefined)[] {
   return [
     ne(notifications.status, "cancelled"),
     lte(notifications.scheduledFor, now),
@@ -281,6 +287,29 @@ export function unreadCountQuery(scope: NotificationScope, now?: Date) {
 }
 
 /**
+ * Does this recipient have ANY visible notification at all (N-008, Screen 1)?
+ *
+ * This is the cold-start question, and it is genuinely different from "is the
+ * feed page empty right now". A church whose first week has produced nothing
+ * has to read as intentional ("nothing yet"), while a user who has read
+ * everything has to read as finished ("all caught up") — the same empty box
+ * cannot say both, and an empty box that says neither reads as broken.
+ *
+ * It carries the SAME visibility rules as the feed on purpose: `hasAny` false
+ * must imply the feed is empty, or the UI could claim a cold start while
+ * listing rows (or, worse, claim "all caught up" on a church that has never
+ * been notified of anything). `limit(1)` because the answer is a boolean — the
+ * count is the badge's job, not this one's.
+ */
+export function hasAnyNotificationsQuery(scope: NotificationScope, now?: Date) {
+  return db
+    .select({ id: notifications.id })
+    .from(notifications)
+    .where(scopedWhere(scope, ...feedVisibility(now ?? new Date())))
+    .limit(1);
+}
+
+/**
  * Due, unclaimed rows across every recipient in a church — the dispatcher's
  * read, and the only church-wide one in this file.
  */
@@ -338,6 +367,18 @@ export async function getUnreadCount(
 ): Promise<number> {
   const [row] = await unreadCountQuery(scope, now);
   return row?.value ?? 0;
+}
+
+/**
+ * True when this recipient has at least one visible notification — the flag the
+ * feed's empty state needs to tell "nothing yet" from "all caught up".
+ */
+export async function hasAnyNotifications(
+  scope: NotificationScope,
+  now?: Date
+): Promise<boolean> {
+  const rows = await hasAnyNotificationsQuery(scope, now);
+  return rows.length > 0;
 }
 
 /**

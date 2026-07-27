@@ -5,6 +5,7 @@ import {
   DEFAULT_FEED_LIMIT,
   dispatchQueueQuery,
   feedCursorFrom,
+  hasAnyNotificationsQuery,
   notificationByIdQuery,
   notificationFeedQuery,
   unreadCountQuery,
@@ -256,6 +257,7 @@ test("every user-facing read emits exactly one church_id AND one recipient predi
     notificationByIdQuery(SCOPE, NOTIFICATION),
     notificationFeedQuery(SCOPE),
     unreadCountQuery(SCOPE),
+    hasAnyNotificationsQuery(SCOPE),
   ];
 
   for (const builder of builders) {
@@ -288,4 +290,46 @@ test("the dispatcher read is church-wide, and that is why it has its own name", 
   assert.match(sql, /"notifications"\."status" = \$\d/);
   assert.ok(params.includes("pending"));
   assert.ok(boundInstant(params, now));
+});
+
+// ----------------------------------------------------------------------------
+// Cold start — "nothing yet" is a different sentence from "all caught up"
+// ----------------------------------------------------------------------------
+
+test("the cold-start probe is scoped and bounded like every other read", () => {
+  const now = new Date("2026-07-27T12:00:00.000Z");
+  const { sql, params } = hasAnyNotificationsQuery(SCOPE, now).toSQL();
+
+  assert.match(sql, CHURCH_PREDICATE);
+  assert.match(sql, RECIPIENT_PREDICATE);
+  // A boolean question does not need a count, and must not scan the table for
+  // one: the feed page asks it on every render.
+  assert.match(sql, /limit \$\d/i);
+  assert.ok(params.includes(1));
+  assert.ok(params.includes(CHURCH_A));
+  assert.ok(params.includes(USER));
+});
+
+test("the cold-start probe agrees with the feed about what is visible", () => {
+  // `hasAny === false` has to IMPLY "the feed is empty", or the UI could claim
+  // a brand-new church while listing rows — or, worse, say "all caught up" to a
+  // church that has never been notified of anything. The two answers come from
+  // the same visibility rules, so they cannot drift apart.
+  const now = new Date("2026-07-27T12:00:00.000Z");
+  const { sql, params } = hasAnyNotificationsQuery(SCOPE, now).toSQL();
+
+  assert.match(sql, /"notifications"\."status" <> \$\d/);
+  assert.match(sql, /"notifications"\."scheduled_for" <= \$\d/);
+  assert.ok(params.includes("cancelled"));
+  assert.ok(boundInstant(params, now));
+});
+
+test("the cold-start probe carries no notification content", () => {
+  // It answers "is there anything?", so it has no business selecting a title or
+  // a body — the answer is a row's existence, not its contents.
+  const { sql } = hasAnyNotificationsQuery(SCOPE).toSQL();
+  const projection = sql.slice(0, sql.indexOf(" from "));
+
+  assert.ok(!projection.includes("title"), projection);
+  assert.ok(!projection.includes("body"), projection);
 });
