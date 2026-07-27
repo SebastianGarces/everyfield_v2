@@ -12,7 +12,7 @@ import { Progress } from "@/components/ui/progress";
 import type { PersonTrainingItem } from "@/lib/ministry-teams/service";
 
 import {
-  formatMembershipStart,
+  formatCalendarDate,
   sortTrainingItems,
   summarizeTraining,
 } from "./person-teams-presentation";
@@ -80,11 +80,7 @@ export function PersonTrainingProgress({ items }: PersonTrainingProgressProps) {
 
             <ul className="divide-border divide-y">
               {sorted.map((item) => {
-                const completedOn = item.completedAt
-                  ? formatMembershipStart(
-                      item.completedAt.toISOString().slice(0, 10)
-                    )
-                  : null;
+                const completedOn = formatCalendarDate(item.completedAt);
 
                 return (
                   <li
