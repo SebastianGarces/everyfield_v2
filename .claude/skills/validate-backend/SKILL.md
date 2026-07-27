@@ -10,6 +10,10 @@ Proves a server change **behaves**, not just type-checks. Asserts against the co
 
 ## Preconditions
 
+- **Give the worktree its env first:** `scripts/worktree-env.sh <worktree-dir>` (idempotent; the
+  script's header says what it does and why). A worktree created for a track has no `.env.local`, so
+  `pnpm test`, a `tsx` harness and `pnpm db:migrate` all fail on a missing `DATABASE_URL` — a harness
+  failure that looks exactly like a broken track. Never hand-roll an env file instead.
 - **Prefer a `tsx` harness in the worktree.** It imports the track's own code, so it exercises what
   you actually built. This is the default for pure functions, services and server actions.
 - **For HTTP routes, use the branch's Vercel preview** (`./scripts/preview-url.sh --wait --bypass

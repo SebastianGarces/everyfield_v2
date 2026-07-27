@@ -105,6 +105,22 @@ stored per `(user, category, channel)` and an unknown category falls back to its
 > action triggered the reminder. A notification permission must not be able to fail a meeting. The refusal
 > stays total for the barred recipient: no row is written, ever.
 
+> **Ruled 2026-07-27 (standup rulings; supersedes decision 1 above): oversight receives a digest and
+> milestones, not categories.** Granular per-event category notifications are for the plant's own team;
+> an oversight recipient is never enqueued one, shared or not. What oversight receives instead:
+>
+> - **A daily activity digest**, sent only when there was activity — a quiet plant generates no contact.
+> - **Milestone events**, delivered per event: planter accepted invitation, phase/stage advanced, and
+>   launch date set or changed.
+>
+> The plant-side control collapses accordingly: **one toggle** ("Share activity with your sending
+> church/network"), default **off**, gating both the digest and the milestone events. Its UI copy must
+> say what is being shared — a summary digest, not a detailed list of everything that occurred. Decision
+> 2 above (skip-and-report) is unchanged and applies to the new gate identically. Oversight users also
+> get the in-app feed in alpha (N-027) — parity means a notification delivered to them always has an
+> in-app row they can see. Until the new model ships, nothing changes in practice: the existing toggles
+> default off and no plant has opted in. Board: #224 (model + toggle), #225 (feed).
+
 ---
 
 ## User-Visible Behavior
@@ -146,6 +162,9 @@ that no longer exists is worse than no notification, because it teaches the user
 | **N-015** | A failed delivery is retried with backoff up to a bounded attempt count, then recorded as failed with its error. A permanent failure (invalid address, hard bounce) is not retried. |
 | **N-016** | Delivery outcome per channel is recorded — queued, sent, failed, cancelled, suppressed-by-preference — so "did it send?" is answerable without reading provider logs. |
 | **N-017** | The dispatcher completes within the platform function timeout at expected beta volume, and a run that cannot finish leaves the remainder pending rather than dropping it. |
+| **N-025** | Oversight recipients receive only a daily activity digest (sent only when there was activity) and milestone events — planter accepted invitation, phase/stage advanced, launch date set or changed. They are never enqueued granular per-event category notifications. |
+| **N-026** | A single plant-side toggle ("Share activity with your sending church/network"), default **off**, gates everything oversight receives. Its copy states that a summary digest is shared, not a detailed activity list. |
+| **N-027** | Oversight roles have the in-app feed — bell, unread count, `/notifications`, mark-read. A notification delivered to an oversight user always has an in-app row they can see. |
 
 ### Should Have
 
@@ -198,10 +217,12 @@ Each criterion below is observable. Requirement issues on the board carry the sa
 11. **Bounded retry** — a transient failure is retried and eventually succeeds; a hard bounce is recorded
     failed without retry. *Verify:* attempt-count assertions on both paths.
 12. **Every control carries `cursor-pointer`** — project hard rule. *Verify:* DOM assertion.
-13. **Oversight eligibility is the church's to grant** — an oversight recipient is skipped for a category
-    their plant has not shared, and the identical call is recorded once that plant turns the toggle on.
-    Toggles are independent: sharing `phase` does not share the `digest`. *Verify:* real-DB assertions on
-    both sides of each toggle, plus a row-count assertion that nothing was written while it was off.
+13. **Oversight sharing is the church's to grant, via one toggle** — with the toggle off, an oversight
+    recipient is enqueued nothing; with it on, the digest and the three milestone events are enqueued and
+    granular category notifications never are. *(Amended 2026-07-27: the per-category toggle model this
+    criterion previously described is superseded — see the Access Prerequisites ruling.)* *Verify:*
+    real-DB assertions on both sides of the toggle, plus a row-count assertion that no granular category
+    row is ever written for an oversight recipient.
 14. **A barred recipient costs only that recipient** — a fan-out with a non-permitted recipient in the middle
     records rows for every permitted recipient, including those after the barred one, writes none for the
     barred one, and reports the skip with its reason. *Verify:* real-DB assertion on the written recipients
@@ -215,6 +236,9 @@ Each criterion below is observable. Requirement issues on the board carry the sa
     contributes no feed rows and nothing to the shell count; re-enabling it restores both with unread state
     intact, and its delivery records are unchanged throughout. *Verify:* real-DB assertions either side of the
     toggle, plus a byte-comparison that no delivery row was touched by the read path.
+17. **Oversight in-app parity** — an oversight user whose plant has the sharing toggle on sees their
+    delivered notifications in the feed and can mark them read; `/notifications` renders for them rather
+    than redirecting. *Verify:* Playwright assertions per oversight role.
 
 ---
 

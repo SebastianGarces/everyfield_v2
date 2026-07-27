@@ -207,6 +207,24 @@
 
 ---
 
+## Notifications (F11)
+
+| Flow | Entrypoint | Trigger |
+|------|-----------|---------|
+| Enqueue | `src/lib/notifications/enqueue.ts:enqueue()` / `cancelByEntity()` | Any feature announcing something |
+| Preferences | `src/lib/notifications/preferences.ts:setPreference()` / `getPreferenceMatrix()` | Settings screen (needs a `PreferenceOwner`) |
+| Feed / unread count | `src/lib/notifications/queries.ts:listNotifications()` / `getUnreadCount()` | App shell + feed page |
+| **Scheduled dispatch** | `src/app/api/notifications/dispatch/route.ts` → `src/lib/notifications/dispatch.ts:runDispatch()` | GitHub Actions schedule, every 15 min (`.github/workflows/notifications-dispatch.yml`, `CRON_SECRET`) — NOT a Vercel cron; Hobby caps those at daily |
+| Still-live predicate | `dispatch.ts:registerStillLivePredicate(type, fn)` | Owning feature, at module load |
+
+**Primary modules:** `src/lib/notifications/` (categories, enqueue, preferences, queries, dispatch), `src/db/schema/notifications.ts`
+
+**Key deps:** `notifications`, `notification_preferences`, `notification_deliveries` tables; `src/lib/email/client.ts` (dispatch ONLY — enqueue's import graph provably cannot reach it)
+
+**Dispatch contract:** claims rows `pending → claimed` in ONE `UPDATE ... WHERE id IN (SELECT ... FOR UPDATE SKIP LOCKED)`, then claims each channel through the unique `(notification_id, channel)` index — at-most-once is a DB property, not a dispatcher intention. Groups by (church, recipient, category) so N notifications become ONE email and N feed rows. Backoff lives on the DELIVERY row's `updated_at`, never on `scheduled_for` (which is also the feed's visibility gate). Batch bounded by `MAX_DISPATCH_BATCH`; the remainder stays pending and claimed-but-unprocessed rows are released.
+
+---
+
 ## Phase Engine (Plant Intelligence)
 
 | Flow | Entrypoint | Trigger |
@@ -258,6 +276,7 @@
 | `/api/wiki/article` | `src/app/api/wiki/article/route.ts` | GET | Session-authed article JSON |
 | `/api/wiki/revalidate` | `src/app/api/wiki/revalidate/route.ts` | POST, DELETE | `REVALIDATION_SECRET` |
 | `/api/phase-engine/assess` | `src/app/api/phase-engine/assess/route.ts` | GET | Vercel cron (daily), `CRON_SECRET` bearer |
+| `/api/notifications/dispatch` | `src/app/api/notifications/dispatch/route.ts` | GET | GitHub Actions schedule (every 15 min), `CRON_SECRET` bearer |
 | `/api/rsvp/[token]` | `src/app/api/rsvp/[token]/route.ts` | POST | Public, token-based RSVP |
 | `/api/webhooks/resend` | `src/app/api/webhooks/resend/route.ts` | POST | Resend webhook signature |
 
