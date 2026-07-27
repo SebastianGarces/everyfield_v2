@@ -29,7 +29,7 @@ export default async function TeamsPage() {
               <h1 className="text-3xl font-bold tracking-tight">
                 Ministry Teams
               </h1>
-              <p className="text-foreground/50">
+              <p className="text-muted-foreground">
                 Organize, staff, and track your ministry teams
               </p>
             </div>

@@ -94,7 +94,7 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold tracking-tight">Tasks</h1>
-              <p className="text-foreground/50">
+              <p className="text-muted-foreground">
                 Manage your tasks and follow-ups
               </p>
             </div>

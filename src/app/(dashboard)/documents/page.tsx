@@ -59,7 +59,7 @@ export default async function DocumentsPage({
         {/* Header */}
         <div className="bg-card space-y-1 p-6 pb-4 shadow-sm">
           <h1 className="text-3xl font-bold tracking-tight">Documents</h1>
-          <p className="text-foreground/50">
+          <p className="text-muted-foreground">
             Generate print-ready documents with your church details filled in.
           </p>
         </div>

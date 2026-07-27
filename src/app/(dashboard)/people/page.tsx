@@ -99,7 +99,7 @@ export default async function PeoplePage({ searchParams }: PeoplePageProps) {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold tracking-tight">People</h1>
-              <p className="text-foreground/50">
+              <p className="text-muted-foreground">
                 Manage your contacts and pipeline
               </p>
             </div>
@@ -128,7 +128,7 @@ export default async function PeoplePage({ searchParams }: PeoplePageProps) {
 
             <div className="flex items-center gap-2">
               <ViewToggle currentView={view} />
-              <div className="text-foreground/50 text-sm font-medium">
+              <div className="text-muted-foreground text-sm font-medium">
                 {total} total
               </div>
             </div>
