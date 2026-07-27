@@ -75,23 +75,85 @@ test("a GET with no secret configured is refused with 401", async () => {
 });
 
 // ----------------------------------------------------------------------------
-// The schedule has to exist, or the dispatcher never runs at all
+// The schedule has to exist, or the dispatcher never runs at all — and it has to
+// live somewhere the plan will actually accept
 // ----------------------------------------------------------------------------
 
-test("vercel.json schedules the dispatcher", () => {
+function readVercelCrons(): { path: string; schedule: string }[] {
   const config = JSON.parse(
     readFileSync(path.join(process.cwd(), "vercel.json"), "utf8")
   ) as { crons?: { path: string; schedule: string }[] };
+  return config.crons ?? [];
+}
 
-  const entry = config.crons?.find(
-    (cron) => cron.path === "/api/notifications/dispatch"
+// The workflow is read as text rather than parsed: `yaml` is only a transitive
+// dependency here, and the two facts under test are a literal schedule line and
+// a literal URL. Both break loudly if the file is restructured.
+function readDispatchWorkflow(): string {
+  return readFileSync(
+    path.join(process.cwd(), ".github/workflows/notifications-dispatch.yml"),
+    "utf8"
   );
-  assert.ok(entry, "no cron entry for /api/notifications/dispatch");
-  assert.match(entry.schedule, /^\S+ \S+ \S+ \S+ \S+$/);
+}
 
-  // The existing Plant Intelligence job must survive alongside it.
+test("a GitHub Actions schedule ticks the dispatcher", () => {
+  const workflow = readDispatchWorkflow();
+
+  assert.match(
+    workflow,
+    /- cron: "\*\/15 \* \* \* \*"/,
+    "no 15-minute cron trigger in the dispatch workflow"
+  );
+  assert.match(
+    workflow,
+    /\/api\/notifications\/dispatch/,
+    "the workflow does not call the dispatch route"
+  );
+  // Without the bearer the route fails closed and every tick 401s.
+  assert.match(
+    workflow,
+    /Authorization: Bearer \$CRON_SECRET/,
+    "the workflow does not send the CRON_SECRET bearer"
+  );
+});
+
+test("vercel.json does NOT schedule the dispatcher", () => {
+  // Not a style preference — a deployment gate. The project is on the Hobby
+  // plan, which rejects sub-daily crons outright rather than throttling them,
+  // taking the whole deployment down with it. That is what moved this schedule
+  // to Actions; putting it back here breaks production deploys, not just this
+  // job.
+  assert.equal(
+    readVercelCrons().find(
+      (cron) => cron.path === "/api/notifications/dispatch"
+    ),
+    undefined,
+    "the dispatcher is back in vercel.json — Hobby will reject the deployment"
+  );
+});
+
+test("every vercel.json cron is daily or less frequent (Hobby limit)", () => {
+  // Same gate, generalised: on Hobby, minute and hour must each be a single
+  // literal value, so the job fires at most once a day. Any `*`, `*/n`, list or
+  // range in those two fields means more than one invocation per day.
+  for (const cron of readVercelCrons()) {
+    const [minute, hour] = cron.schedule.split(/\s+/);
+    assert.match(
+      minute,
+      /^\d+$/,
+      `${cron.path}: minute field "${minute}" fires more than once an hour`
+    );
+    assert.match(
+      hour,
+      /^\d+$/,
+      `${cron.path}: hour field "${hour}" fires more than once a day`
+    );
+  }
+});
+
+test("the phase-engine cron survives in vercel.json", () => {
   assert.ok(
-    config.crons?.some((cron) => cron.path === "/api/phase-engine/assess"),
+    readVercelCrons().some((cron) => cron.path === "/api/phase-engine/assess"),
     "the phase-engine cron was dropped"
   );
 });

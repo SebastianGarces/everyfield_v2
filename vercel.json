@@ -4,10 +4,6 @@
     {
       "path": "/api/phase-engine/assess",
       "schedule": "0 7 * * *"
-    },
-    {
-      "path": "/api/notifications/dispatch",
-      "schedule": "*/15 * * * *"
     }
   ]
 }

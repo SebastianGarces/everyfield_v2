@@ -185,7 +185,7 @@
 | Enqueue | `src/lib/notifications/enqueue.ts:enqueue()` / `cancelByEntity()` | Any feature announcing something |
 | Preferences | `src/lib/notifications/preferences.ts:setPreference()` / `getPreferenceMatrix()` | Settings screen (needs a `PreferenceOwner`) |
 | Feed / unread count | `src/lib/notifications/queries.ts:listNotifications()` / `getUnreadCount()` | App shell + feed page |
-| **Scheduled dispatch** | `src/app/api/notifications/dispatch/route.ts` → `src/lib/notifications/dispatch.ts:runDispatch()` | Vercel cron (every 15 min, `CRON_SECRET`) |
+| **Scheduled dispatch** | `src/app/api/notifications/dispatch/route.ts` → `src/lib/notifications/dispatch.ts:runDispatch()` | GitHub Actions schedule, every 15 min (`.github/workflows/notifications-dispatch.yml`, `CRON_SECRET`) — NOT a Vercel cron; Hobby caps those at daily |
 | Still-live predicate | `dispatch.ts:registerStillLivePredicate(type, fn)` | Owning feature, at module load |
 
 **Primary modules:** `src/lib/notifications/` (categories, enqueue, preferences, queries, dispatch), `src/db/schema/notifications.ts`
@@ -247,7 +247,7 @@
 | `/api/wiki/article` | `src/app/api/wiki/article/route.ts` | GET | Session-authed article JSON |
 | `/api/wiki/revalidate` | `src/app/api/wiki/revalidate/route.ts` | POST, DELETE | `REVALIDATION_SECRET` |
 | `/api/phase-engine/assess` | `src/app/api/phase-engine/assess/route.ts` | GET | Vercel cron (daily), `CRON_SECRET` bearer |
-| `/api/notifications/dispatch` | `src/app/api/notifications/dispatch/route.ts` | GET | Vercel cron (every 15 min), `CRON_SECRET` bearer |
+| `/api/notifications/dispatch` | `src/app/api/notifications/dispatch/route.ts` | GET | GitHub Actions schedule (every 15 min), `CRON_SECRET` bearer |
 | `/api/rsvp/[token]` | `src/app/api/rsvp/[token]/route.ts` | POST | Public, token-based RSVP |
 | `/api/webhooks/resend` | `src/app/api/webhooks/resend/route.ts` | POST | Resend webhook signature |
 

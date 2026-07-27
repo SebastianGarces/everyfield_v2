@@ -1,23 +1,26 @@
 // ============================================================================
-// Vercel Cron: notification dispatcher (N-003, N-004, N-017).
+// Scheduled notification dispatcher (N-003, N-004, N-017).
 //
 // The recurring job that drains due notifications to email and to the in-app
 // feed. All of the interesting behaviour — the row claim, the per-channel
 // claim, batching, the still-live re-check, bounded retry — lives in
-// `src/lib/notifications/dispatch.ts`; this file is the schedule and the guard.
+// `src/lib/notifications/dispatch.ts`; this file is the guard, not the logic.
 //
-// Security: `Authorization: Bearer <CRON_SECRET>`, the header Vercel Cron sends
-// when `CRON_SECRET` is set in the project's environment. It FAILS CLOSED — an
-// unset secret rejects everything rather than opening the endpoint, because
-// this route sends email to real users and an open one is a spam cannon
-// pointed at the cohort. Same contract as `/api/phase-engine/assess`.
+// Security: `Authorization: Bearer <CRON_SECRET>`. It FAILS CLOSED — an unset
+// secret rejects everything rather than opening the endpoint, because this
+// route sends email to real users and an open one is a spam cannon pointed at
+// the cohort. Same contract as `/api/phase-engine/assess`.
 //
-// Schedule: every 15 minutes (vercel.json). More frequent than the daily
-// Plant Intelligence run because a meeting reminder that is a day late is not a
-// reminder. Growth is absorbed by MORE TICKS, not longer runs — the batch bound
-// stays put and the remainder rolls over (N-017). NOTE: sub-daily cron
-// schedules require a paid Vercel plan; on Hobby this entry must be relaxed to
-// a daily schedule, which degrades punctuality but not correctness.
+// Schedule: every 15 minutes, from `.github/workflows/notifications-dispatch.yml`
+// — NOT from vercel.json, which carries only the daily phase-engine cron. The
+// Hobby plan caps Vercel crons at one invocation per day and rejects the
+// deployment outright rather than throttling, and a daily tick would make a
+// meeting reminder arrive a day late. GitHub's scheduler has no such cap, at
+// the cost of being best-effort about the exact minute. This runs far more
+// often than the daily Plant Intelligence job for that same reason: these are
+// time-sensitive. Growth is absorbed by MORE TICKS, not longer runs — the batch
+// bound stays put and the remainder rolls over (N-017), which is also what
+// makes a late or dropped tick a delay rather than a loss.
 //
 // Overlap: a tick that starts while the previous one is still running is safe
 // by construction — `claimDue` is a single atomic statement, so the second run
@@ -63,7 +66,7 @@ export interface DispatchResponseBody extends DispatchRunSummary {
 /**
  * GET /api/notifications/dispatch
  *
- * Vercel Cron entrypoint. The summary is returned for observability — how many
+ * The scheduled entrypoint. The summary is returned for observability — how many
  * rows were claimed, how many are still pending, and how long the run took are
  * exactly the numbers that say whether the tick interval is keeping up.
  */
