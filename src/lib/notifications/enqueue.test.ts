@@ -224,22 +224,61 @@ test("enqueue records a pending notification and calls no provider", async (t) =
   assert.equal(result.notification?.id, store.rows[0].id);
 });
 
-test("no module under src/lib/notifications imports an email provider", () => {
-  // Belt to the spy's braces, and the stronger statement: enqueue cannot send
-  // because nothing in this directory can reach a provider at all. A future
-  // edit that adds the import fails here before it can fail in production.
+/** Modules under `src/lib/notifications` reachable from `entry` by import. */
+function localImportClosure(entry: string): string[] {
   const dir = path.join(process.cwd(), "src/lib/notifications");
-  const offenders: string[] = [];
+  const seen = new Set<string>();
+  const queue = [entry];
 
-  for (const file of readdirSync(dir)) {
-    if (!file.endsWith(".ts") || file.endsWith(".test.ts")) continue;
+  while (queue.length > 0) {
+    const file = queue.shift() as string;
+    if (seen.has(file)) continue;
+    seen.add(file);
+
     const source = readFileSync(path.join(dir, file), "utf8");
-    if (/from\s+["'](resend|@\/lib\/email)/.test(source)) {
-      offenders.push(file);
+    for (const match of source.matchAll(/from\s+["']\.\/([\w.-]+)["']/g)) {
+      queue.push(`${match[1]}.ts`);
     }
   }
 
+  return [...seen].sort();
+}
+
+const IMPORTS_A_PROVIDER = /from\s+["'](resend|@\/lib\/email)/;
+
+test("nothing enqueue can reach imports an email provider (N-002)", () => {
+  // Belt to the spy's braces, and the stronger statement: enqueue cannot send
+  // because nothing in its import graph can reach a provider at all. A future
+  // edit that adds the import fails here before it can fail in production.
+  const dir = path.join(process.cwd(), "src/lib/notifications");
+  const reachable = localImportClosure("enqueue.ts");
+
+  const offenders = reachable.filter((file) =>
+    IMPORTS_A_PROVIDER.test(readFileSync(path.join(dir, file), "utf8"))
+  );
+
   assert.deepEqual(offenders, []);
+  // Sanity: the walker actually walked something.
+  assert.ok(reachable.includes("categories.ts"));
+});
+
+test("dispatch.ts is the ONLY module allowed to reach a provider", () => {
+  // Delivery is the dispatcher's job and nobody else's (N-002/N-003). Listing
+  // the exception by name means a THIRD module reaching for the provider fails
+  // this test instead of quietly becoming a second send path.
+  const dir = path.join(process.cwd(), "src/lib/notifications");
+  const senders: string[] = [];
+
+  for (const file of readdirSync(dir)) {
+    if (!file.endsWith(".ts") || file.endsWith(".test.ts")) continue;
+    if (IMPORTS_A_PROVIDER.test(readFileSync(path.join(dir, file), "utf8"))) {
+      senders.push(file);
+    }
+  }
+
+  assert.deepEqual(senders.sort(), ["dispatch.ts"]);
+  // And it is not reachable FROM enqueue — the two halves stay separate.
+  assert.ok(!localImportClosure("enqueue.ts").includes("dispatch.ts"));
 });
 
 test("scheduledFor defaults to now and is preserved when supplied", async () => {
