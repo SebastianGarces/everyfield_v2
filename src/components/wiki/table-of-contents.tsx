@@ -25,17 +25,13 @@ type TableOfContentsProps = {
 };
 
 /**
- * Table of contents for a wiki article (W-014).
+ * Right-side table of contents for a wiki article (W-014).
  *
- * Renders nothing below `TOC_MIN_HEADINGS` headings. Below the layout's `lg`
- * breakpoint it is always a closed disclosure above the article. At `lg` and
- * up, which tree shows is decided by the `data-toc-proto` attribute the wiki
- * layout stamps on <html> (see `toc-prototype-switcher.tsx` — TEMPORARY
- * evaluation scaffolding for the W-014 layout ruling):
- *
- *   a — sticky right rail beside the prose, inside a widened card
- *   b — nested under the active item in the left sidebar (`sidebar-toc.tsx`)
- *   c — the same closed disclosure as mobile, kept on desktop
+ * Renders nothing below `TOC_MIN_HEADINGS` headings. Above the layout's `lg`
+ * breakpoint it is a sticky right rail beside the prose (the wiki layout's
+ * card widens via `:has()` so the prose keeps its 704px measure); below it,
+ * it collapses into a closed disclosure above the article so it never
+ * overlaps the text.
  *
  * Scroll position is *not* persisted here — reading progress is W-012's job
  * (`ProgressTracker`), and this component deliberately only reads scroll state.
@@ -49,10 +45,10 @@ export function TableOfContents({ headings }: TableOfContentsProps) {
 
   return (
     <>
-      {/* Below `lg` always; at `lg`+ only in prototype C. */}
+      {/* Below `lg`: collapsed, above the prose, out of the way. */}
       <details
         data-testid="wiki-toc-mobile"
-        className="bg-muted/40 order-first rounded-lg border px-4 py-3 lg:hidden [[data-toc-proto=c]_&]:lg:block"
+        className="bg-muted/40 order-first rounded-lg border px-4 py-3 lg:hidden"
       >
         <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-medium">
           <List className="h-4 w-4 shrink-0" aria-hidden="true" />
@@ -67,11 +63,11 @@ export function TableOfContents({ headings }: TableOfContentsProps) {
         </nav>
       </details>
 
-      {/* `lg` and up, prototype A only: sticky right rail. */}
+      {/* `lg` and up: sticky right rail. */}
       <nav
         data-testid="wiki-toc"
         aria-label="Table of contents"
-        className="sticky top-6 hidden w-48 shrink-0 self-start xl:w-56 [[data-toc-proto=a]_&]:lg:block"
+        className="sticky top-6 hidden w-48 shrink-0 self-start lg:block xl:w-56"
       >
         <p className="text-muted-foreground mb-3 text-xs font-semibold tracking-wide uppercase">
           On this page
@@ -87,15 +83,13 @@ export function TableOfContents({ headings }: TableOfContentsProps) {
 }
 
 /**
- * Every tree carries a *different* entry testid on purpose. All are in the DOM
+ * The two trees carry *different* entry testids on purpose. Both are in the DOM
  * at every viewport — only their visibility differs — so a shared testid makes
- * an unscoped `[data-testid="wiki-toc-entry"]` count every heading multiple
- * times and match several elements per `data-active`. One testid per tree
- * keeps a selector honest without the caller having to remember to scope it.
- *
- * Exported for `sidebar-toc.tsx` (prototype B) so all trees render one way.
+ * an unscoped `[data-testid="wiki-toc-entry"]` count every heading twice and
+ * match two elements per `data-active`. One testid per tree keeps a selector
+ * honest without the caller having to remember to scope it.
  */
-export function TocLinks({
+function TocLinks({
   headings,
   activeId,
   entryTestId,
@@ -145,7 +139,7 @@ export function TocLinks({
  * window, and scroll events do not bubble. `getBoundingClientRect()` is then
  * correct whichever element actually moved.
  */
-export function useActiveHeadingId(headings: TocHeading[]): string | null {
+function useActiveHeadingId(headings: TocHeading[]): string | null {
   const ids = useMemo(() => headings.map((heading) => heading.id), [headings]);
 
   const subscribe = useCallback((onStoreChange: () => void) => {
