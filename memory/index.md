@@ -15,26 +15,11 @@
 | [flows/wiki-article.mmd](flows/wiki-article.mmd) | Wiki article retrieval |
 | [flows/request-lifecycle.mmd](flows/request-lifecycle.mmd) | Dashboard request lifecycle |
 
-## When Memory Suffices
-
-Use memory alone when:
-- Understanding high-level architecture
-- Identifying which files to modify
-- Checking invariants before making changes
-- Understanding data flow between components
-- Reviewing API contracts
-
-## When to Open Code
-
-Open source files when:
-- Memory references a file but lacks needed detail
-- Implementing changes to specific functions
-- Debugging unexpected behavior
-- Memory explicitly says "see source for implementation"
-
 ## Reading Order
 
-1. **entrypoints.md** - Always start here
-2. **Relevant flow diagram** - Visual understanding
-3. **Relevant contract** - Interface details
-4. **invariants.md** - Before any mutation
+1. **entrypoints.md** — always start here
+2. **Relevant flow diagram** — visual understanding
+3. **Relevant contract** — interface details
+4. **invariants.md** — before any mutation
+
+Memory alone is enough for architecture, picking which files to change, checking invariants, and reading contracts. Open source only when memory lacks the specific detail, when editing a specific function, or when debugging. Full rules: `.agents/memory-first.md`.

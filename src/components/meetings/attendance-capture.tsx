@@ -110,6 +110,9 @@ export function AttendanceCapture({
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [quickAddError, setQuickAddError] = useState<string | null>(null);
 
+  // Finalize error state
+  const [finalizeError, setFinalizeError] = useState<string | null>(null);
+
   const guestPersonIds = new Set(guests.map((g) => g.personId));
   const attendedCount = guests.filter(
     (g) => g.attendanceStatus === "attended"
@@ -169,9 +172,16 @@ export function AttendanceCapture({
   };
 
   // ------- Finalize -------
+  // The action reports a failed finalize instead of throwing (the meeting is
+  // left un-finalized and the click is safe to repeat), so the result has to be
+  // read — otherwise the spinner just stops and the user is told nothing.
   const handleFinalize = () => {
+    setFinalizeError(null);
     startTransition(async () => {
-      await finalizeAttendanceAction(meetingId);
+      const result = await finalizeAttendanceAction(meetingId);
+      if (!result.success) {
+        setFinalizeError(result.error ?? "Something went wrong");
+      }
     });
   };
 
@@ -275,7 +285,9 @@ export function AttendanceCapture({
                       />
                     </div>
                     {quickAddError && (
-                      <p className="text-sm text-red-600">{quickAddError}</p>
+                      <p className="text-destructive text-sm">
+                        {quickAddError}
+                      </p>
                     )}
                     <DialogFooter>
                       <Button
@@ -467,23 +479,30 @@ export function AttendanceCapture({
 
       {/* Finalize Button */}
       {guests.length > 0 && (
-        <div className="flex items-center justify-between">
-          <p className="text-muted-foreground text-sm">
-            {attendedCount} of {guests.length} marked as attended
-          </p>
-          <Button
-            onClick={handleFinalize}
-            disabled={isPending || attendedCount === 0}
-            size="lg"
-            className="cursor-pointer"
-          >
-            {isPending ? (
-              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-            ) : (
-              <CheckCircle className="mr-2 h-5 w-5" />
-            )}
-            Finalize Attendance ({attendedCount})
-          </Button>
+        <div className="space-y-3">
+          {finalizeError && (
+            <p role="alert" className="text-destructive text-sm">
+              {finalizeError}
+            </p>
+          )}
+          <div className="flex items-center justify-between">
+            <p className="text-muted-foreground text-sm">
+              {attendedCount} of {guests.length} marked as attended
+            </p>
+            <Button
+              onClick={handleFinalize}
+              disabled={isPending || attendedCount === 0}
+              size="lg"
+              className="cursor-pointer"
+            >
+              {isPending ? (
+                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+              ) : (
+                <CheckCircle className="mr-2 h-5 w-5" />
+              )}
+              Finalize Attendance ({attendedCount})
+            </Button>
+          </div>
         </div>
       )}
     </div>
