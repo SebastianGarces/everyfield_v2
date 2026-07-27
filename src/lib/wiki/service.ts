@@ -9,10 +9,38 @@ import {
   type NewWikiSection,
 } from "@/db/schema";
 import { revalidatePath } from "next/cache";
+import { cache } from "react";
 
 // ============================================================================
 // Article Queries
 // ============================================================================
+
+/** The minimum an article needs to be linked to: where it lives and its name. */
+export interface WikiArticleRef {
+  slug: string;
+  title: string;
+}
+
+/**
+ * Slug → title index of every published global article.
+ *
+ * Deliberately projects only `slug` + `title` (no `content`), so callers that
+ * merely need to know whether a slug resolves — e.g. Plant Intelligence
+ * insights linking to the methodology that backs them, PE-024 — can check
+ * without pulling the corpus body. Deduped per request with `React.cache`, so
+ * rendering many insight cards costs one query, not one per card.
+ */
+export const getPublishedArticleRefs = cache(
+  async (): Promise<WikiArticleRef[]> => {
+    return db
+      .select({ slug: wikiArticles.slug, title: wikiArticles.title })
+      .from(wikiArticles)
+      .where(
+        and(isNull(wikiArticles.churchId), eq(wikiArticles.status, "published"))
+      )
+      .orderBy(asc(wikiArticles.sortOrder));
+  }
+);
 
 /**
  * Get a single article by slug

@@ -334,3 +334,254 @@ test("the run settles the board rather than leaving issues in-progress", async (
     "this workflow runs no DoD and opens no PR, so it cannot claim review-readiness"
   );
 });
+
+// ---------------------------------------------------------------------------
+// build-until-done: the claim step's blast radius
+//
+// On 2026-07-26 this step swept the entire `agent:queued` label, claiming 35
+// issues for a 2-unit pass (board-design-2026-07.md §11). The prompt was already
+// correctly scoped; there was simply no check that it had been obeyed. These
+// tests cover the check, not the prompt — an agent's wording cannot be tested
+// here, but "does the guard fire, and does it abort before building" can.
+// ---------------------------------------------------------------------------
+
+/** Run build-until-done with stubbed globals. `reply(prompt, opts)` answers each agent. */
+async function runBuild(units, reply, over = {}) {
+  const source = load("build-until-done.js");
+  const calls = [];
+  const globals = {
+    args: { units, maxAttempts: 1, base: "main", ...over },
+    log: (m) => calls.push({ kind: "log", value: m }),
+    phase: (p) => calls.push({ kind: "phase", value: p }),
+    budget: { total: null, spent: () => 0, remaining: () => Infinity },
+    agent: async (prompt, opts = {}) => {
+      calls.push({
+        kind: "agent",
+        label: opts.label,
+        phase: opts.phase,
+        prompt,
+      });
+      return reply(prompt, opts);
+    },
+    // Mirrors the runtime contract: a thunk that throws resolves to null.
+    parallel: async (thunks) =>
+      Promise.all(
+        thunks.map((t) =>
+          Promise.resolve()
+            .then(t)
+            .catch(() => null)
+        )
+      ),
+  };
+  const fn = new Function(
+    ...Object.keys(globals),
+    `return (async () => { ${source} })()`
+  );
+  return { result: await fn(...Object.values(globals)), calls };
+}
+
+const buildUnit = (id, issue) => ({
+  id,
+  title: id.toUpperCase(),
+  lane: "backend",
+  risk: "low",
+  issue,
+  files: [`src/${id}.ts`],
+  summary: `summary for ${id}`,
+  acceptanceCriteria: [`${id} works`],
+});
+
+/** Answers the claim step with `inProgressNow`, and fails any later gate fast. */
+const replyWith = (inProgressNow, claimed) => (_prompt, opts) => {
+  if (opts.label?.startsWith("start:")) return { claimed, inProgressNow };
+  if (opts.label?.startsWith("impl:"))
+    return { summary: "did the thing", filesTouched: [], notes: "" };
+  if (opts.label?.startsWith("verify:"))
+    return { verdict: "FAIL", gates: [], blockingReason: "stubbed fail" };
+  if (opts.label?.startsWith("block:")) return { labelled: true };
+  return {};
+};
+
+test("the claim step names an exact issue list and forbids enumerating the label", async () => {
+  const { calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    replyWith([101], [101])
+  );
+  const claim = calls.find(
+    (c) => c.kind === "agent" && c.label === "start:alpha"
+  );
+  assert.ok(claim, "a claim step must run");
+  assert.match(claim.prompt, /EXACTLY these issues and no others: 101/);
+  assert.match(
+    claim.prompt,
+    /Do NOT run `gh issue list`/,
+    "the sweep happened because the agent enumerated the label to decide what to edit"
+  );
+  assert.match(
+    claim.prompt,
+    /must be exactly 1/,
+    "stating the expected count gives the agent a self-check"
+  );
+});
+
+test("a claim confined to the pass's own issues proceeds to implement", async () => {
+  const { calls } = await runBuild(
+    [buildUnit("alpha", 101), buildUnit("beta", 202)],
+    replyWith([101, 202], [101])
+  );
+  assert.ok(
+    calls.some((c) => c.kind === "agent" && c.label?.startsWith("impl:")),
+    "the guard must not false-positive on issues the pass legitimately owns"
+  );
+});
+
+test("a claim that swept issues the pass does not own aborts before building", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    // The real failure: the claim step returns the whole board, not just #101.
+    replyWith([101, 15, 16, 18, 62, 98], [101])
+  );
+  assert.ok(
+    !calls.some((c) => c.kind === "agent" && c.label?.startsWith("impl:")),
+    "building against a corrupted board is the thing the guard exists to prevent"
+  );
+  assert.equal(
+    result.shipped.length,
+    0,
+    "an aborted track must not be reported as shipped"
+  );
+  assert.ok(
+    JSON.stringify(result).includes("alpha"),
+    "the aborted track must be surfaced, not silently dropped"
+  );
+});
+
+// ---------------------------------------------------------------------------
+// build-until-done: the auto-merge gate
+//
+// The DoD proves the code does what the spec SAID. It cannot prove the spec was
+// right. So the gate is not severity — it is whether a warning raises a question
+// about WHAT was built. A spec-question holds the track for a human; a
+// code-quality warning is filed as a follow-up issue and the track merges.
+// These tests pin that distinction, plus the two unconditional refusals.
+// ---------------------------------------------------------------------------
+
+const warn = (kind, summary) => ({
+  kind,
+  summary,
+  detail: `${summary} detail`,
+});
+
+/** Drives a track all the way to the ship step with a given verifier report. */
+const replyShip = (verifyReport) => (_prompt, opts) => {
+  const l = opts.label || "";
+  if (l.startsWith("start:")) return { claimed: [101], inProgressNow: [101] };
+  if (l.startsWith("impl:"))
+    return {
+      committed: true,
+      filesChanged: [],
+      summary: "ok",
+      selfCheckPassed: true,
+    };
+  if (l.startsWith("verify:")) return verifyReport;
+  if (l.startsWith("lens:"))
+    return { verdict: "PASS", lens: "x", findings: [], summary: "ok" };
+  if (l.startsWith("pr:"))
+    return { opened: true, url: "https://gh/pr/1", checkConclusion: "success" };
+  if (l.startsWith("merge:"))
+    return { merged: true, state: "merged", followUpIssues: [901] };
+  if (l.startsWith("hold:")) return { merged: false, state: "refused" };
+  return {};
+};
+
+const passing = (warnings) => ({
+  verdict: warnings?.length ? "PASS_WITH_WARNINGS" : "PASS",
+  gates: [],
+  acceptanceCriteria: [],
+  summary: "ok",
+  warnings: warnings || [],
+});
+
+test("a clean pass auto-merges when autoMerge is on", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    replyShip(passing([])),
+    { autoMerge: true }
+  );
+  assert.ok(
+    calls.some((c) => c.label === "merge:alpha"),
+    "a clean pass is exactly what auto-merge exists for"
+  );
+  assert.equal(result.shipped[0].merge, "merged");
+});
+
+test("code-quality warnings do NOT hold the merge — they become follow-up issues", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    replyShip(passing([warn("code-quality", "date formatted in UTC")])),
+    { autoMerge: true }
+  );
+  const merge = calls.find((c) => c.label === "merge:alpha");
+  assert.ok(
+    merge,
+    "a known small defect is not a reason to stall a good branch"
+  );
+  assert.match(
+    merge.prompt,
+    /BEFORE the merge/,
+    "the follow-up issue must exist before the merge, so merging cannot lose it"
+  );
+  assert.deepEqual(result.shipped[0].followUpIssues, [901]);
+});
+
+test("a single spec-question holds the track for a human", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    replyShip(
+      passing([
+        warn("code-quality", "duplicated constant"),
+        warn("spec-question", "is a church-wide packet the intended read?"),
+      ])
+    ),
+    { autoMerge: true }
+  );
+  assert.ok(
+    !calls.some((c) => c.label === "merge:alpha"),
+    "shipping a product decision the human never made is the failure this prevents"
+  );
+  assert.ok(calls.some((c) => c.label === "hold:alpha"));
+  assert.equal(
+    result.shipped[0].merge,
+    "held-for-review",
+    "the report must name WHY it did not merge, not just that it did not"
+  );
+  assert.deepEqual(result.shipped[0].heldBy, [
+    "is a church-wide packet the intended read?",
+  ]);
+});
+
+test("risk:high never auto-merges, even on a spotless pass", async () => {
+  const { calls } = await runBuild(
+    [{ ...buildUnit("alpha", 101), risk: "high" }],
+    replyShip(passing([])),
+    { autoMerge: true }
+  );
+  assert.ok(
+    !calls.some((c) => c.label === "merge:alpha"),
+    "schema/auth/tenancy is where a bad merge is unrecoverable"
+  );
+  const hold = calls.find((c) => c.label === "hold:alpha");
+  assert.match(hold.prompt, /risk:high/);
+});
+
+test("auto-merge is off by default, so a direct call cannot merge to main", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    replyShip(passing([]))
+  );
+  assert.ok(
+    !calls.some((c) => c.label === "merge:alpha" || c.label === "hold:alpha"),
+    "opting in must be explicit — /deliver must not merge by surprise"
+  );
+  assert.equal(result.shipped[0].merge, "not-attempted");
+});

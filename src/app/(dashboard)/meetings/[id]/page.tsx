@@ -5,7 +5,9 @@ import { listLocations } from "@/lib/meetings/locations";
 import { getMeetingCommunications } from "@/lib/communication/service";
 import { notFound } from "next/navigation";
 import { MeetingDetails } from "./meeting-details-client";
+import { ContextualTemplates } from "@/components/documents/contextual-templates";
 import { MeetingCommunicationStatus } from "@/components/meetings/meeting-communication-status";
+import { getMeetingContextualTemplates } from "@/lib/documents/contextual";
 import { db } from "@/db";
 import { churches } from "@/db/schema/church";
 import { eq } from "drizzle-orm";
@@ -37,6 +39,10 @@ export default async function MeetingPage({ params }: MeetingPageProps) {
 
   const church = churchRows[0];
 
+  // DOC-014: the documents this meeting type calls for, linked straight to the
+  // template's generate dialog. `null` when there is no match — nothing renders.
+  const documentSection = getMeetingContextualTemplates(meeting.type);
+
   // Serialize communications for the client component
   const serializedComms = comms.map((c) => ({
     id: c.id,
@@ -49,6 +55,16 @@ export default async function MeetingPage({ params }: MeetingPageProps) {
   return (
     <div className="space-y-6">
       <MeetingDetails meeting={meeting} locations={locations} />
+
+      {documentSection && (
+        <div className="mx-auto max-w-3xl">
+          <ContextualTemplates
+            templates={documentSection.templates}
+            title={documentSection.title}
+            description="Print-ready materials for this meeting — pick a format when you generate."
+          />
+        </div>
+      )}
 
       {church && (
         <div className="mx-auto max-w-3xl">
