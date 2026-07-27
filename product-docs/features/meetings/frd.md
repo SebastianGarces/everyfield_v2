@@ -5,13 +5,14 @@
 **Date:** February 9, 2026  
 **Feature Code:** F3
 
-> **⚠ Five requirements diverge from shipped code — decision pending.** `attendance_type` derivation
-> (AC 3), follow-up task generation (VM-007), the RSVP mechanism (VM-028), roster auto-population
-> (VM-006) and reminders (VM-018) all behave differently from what is written below. The divergences
-> are set out with `file:line` evidence in §5 of
-> [`docs-audit-2026-07.md`](../../docs-audit-2026-07.md). **Trust the code over this document in those
-> five areas until the decision lands.** VM-017 invite tracking is separately confirmed dead code and
-> queued for removal (decision #11).
+> **⚠ Divergences from shipped code.** The evidence lives in §5 of
+> [`docs-audit-2026-07.md`](../../docs-audit-2026-07.md). Current state:
+> **VM-007 follow-up generation — ruled 2026-07-27 (decision #96): this document is canon** (first-time
+> attendees only, due meeting date + 48h); code diverges until build #179 lands. For the other four —
+> `attendance_type` derivation (AC 3), the RSVP mechanism (VM-028), roster auto-population (VM-006,
+> build #19) and reminders (VM-018, build #101) — **trust the code over this document**; they are
+> doc-fixes not yet applied. VM-017 invite tracking is separately confirmed dead code and queued for
+> removal (decision #11).
 
 ---
 
