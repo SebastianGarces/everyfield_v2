@@ -91,7 +91,7 @@ Every Vision Meeting should aim to achieve these 8 meeting-level quality factors
 | VM-004 | New vs returning tracking | Distinguish first-time from returning attendees |
 | VM-005 | Attendee-to-person linking | Create Person records for new attendees (F2 integration) |
 | VM-006 | Guest list management | Add people from CRM to a meeting's guest list; auto-populate from team roster for team meetings |
-| VM-007 | Follow-up task generation | Emit event that triggers follow-up task creation for new vision meeting attendees (F5 integration) |
+| VM-007 | Follow-up task generation | Emit event that triggers follow-up task creation for **first-time** vision meeting attendees only (`attendance_type = first_time`); returning and core-group attendees get none. Due date anchors to meeting date + 48 hours. Ruled 2026-07-27, decision #96 (F5 integration) |
 | VM-008 | Meeting detail view | Full view of meeting details, attendance, and outcomes |
 | VM-009 | Location management | Save and reuse venue information across meeting types |
 | VM-010 | Basic analytics | Track attendance counts and trends, filterable by meeting type |
@@ -134,7 +134,7 @@ Every Vision Meeting should aim to achieve these 8 meeting-level quality factors
 4. For first-time attendees, user can create or link a Person record from the attendance workflow.
 5. User can add people from the CRM to a meeting's guest list and track RSVP status per invitee.
 6. For team meetings, guest list auto-populates from the ministry team roster.
-7. Finalizing attendance for new vision meeting attendees creates follow-up tasks with due date at meeting date + 48 hours.
+7. Finalizing attendance creates follow-up tasks for first-time vision meeting attendees only (`attendance_type = first_time`), with due date at meeting date + 48 hours.
 8. Meeting detail view shows core meeting data, attendance totals, and follow-up completion status.
 9. Venue records can be saved and reused across multiple meetings within the same `church_id`.
 10. Analytics view provides at minimum attendance count trend and new-vs-returning split over time, filterable by meeting type.
@@ -516,7 +516,8 @@ F3 emits `meeting.attendance.finalized` event:
 +-- Payload: { meetingId, meetingType, churchId, attendeeIds[], totalAttendance }
     |
 F5 subscribes and creates follow-up tasks:
-+-- One task per new attendee: "Follow up with [Name]"
++-- One task per FIRST-TIME attendee only: "Follow up with [Name]"
++-- (returning and core-group attendees get no follow-up task — decision #96)
 +-- Assigned to: Senior Pastor (default) or customize
 +-- Due date: Meeting date + 48 hours
 +-- Priority: High
@@ -793,7 +794,7 @@ This feature integrates with cross-cutting services and shared canonical models 
 | Event/Data | Contract | Consumers May |
 |------------|----------|---------------|
 | **`meeting.attendance.recorded`** | Emits `{ meetingId, meetingType, personId, churchId, attendanceType }` per attended person | F2 subscribes to auto-advance person status (Prospect to Attendee) for vision meetings |
-| **`meeting.attendance.finalized`** | Emits `{ meetingId, meetingType, churchId, attendeeIds[], totalAttendance }` when attendance is finalized (`attendeeIds` covers all attended people) | F5 subscribes to create 48-hour follow-up tasks and a 24-hour evaluation task for vision meetings |
+| **`meeting.attendance.finalized`** | Emits `{ meetingId, meetingType, churchId, attendeeIds[], totalAttendance }` when attendance is finalized (`attendeeIds` covers all attended people) | F5 subscribes to create 48-hour follow-up tasks (first-time attendees only — F5 filters by `attendance_type`, decision #96) and a 24-hour evaluation task for vision meetings |
 | **`meeting.evaluation.completed`** | Emits `{ meetingId, churchId, evaluatedById }` when an evaluation is submitted | F5 subscribes to auto-complete the meeting's evaluation task |
 | **`meeting.completed`** | Emits `{ meetingId, meetingType, churchId, attendanceCount, newAttendeeCount }` | Update dashboard metrics |
 | **Meeting invitation requests** | Expose meeting details (title, datetime, location, type) and guest list (person IDs) to Communication Hub for email delivery | F9 sends invitation emails using meeting templates |

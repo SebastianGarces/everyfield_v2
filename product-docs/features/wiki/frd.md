@@ -913,14 +913,13 @@ System logs download for analytics
 | title | String | Yes | Article title |
 | content | Rich Text | Yes | Article body (Markdown/MDX) |
 | excerpt | Text | No | Short description for previews |
-| content_type | Enum | Yes | `tutorial` / `how_to` / `explanation` / `reference` |
+| content_type | Enum | Yes | `tutorial` / `how_to` / `explanation` / `reference` / `overview` / `guide` |
 | phase | Enum | No | Phase 0-6, or null for cross-phase content |
-| section | String | Yes | Primary section (e.g., "vision_meetings") |
-| parent_article_id | UUID (FK) | No | Reference to parent article for hierarchy |
+| section_id | UUID (FK) | No | Reference to WikiSection |
 | read_time_minutes | Integer | No | Estimated read time |
 | sort_order | Integer | No | Display order within section |
-| related_article_ids | UUID[] | No | Array of related article IDs |
-| related_template_ids | UUID[] | No | Array of related WikiTemplate IDs |
+| related_article_slugs | String[] | No | Slugs of related articles (slugs are how WikiProgress and WikiBookmark key articles too) |
+| related_template_ids | UUID[] | No | Array of related WikiTemplate IDs. **Planned, not yet shipped** — added by W-010 template linking |
 | status | Enum | Yes | `draft` / `published` / `archived` |
 | published_at | Timestamp | No | Publication date |
 | created_at | Timestamp | Yes | Creation timestamp |
@@ -932,7 +931,7 @@ System logs download for analytics
 
 **Query pattern:** `WHERE church_id IS NULL OR church_id = :current_church_id`
 
-*Implementation note: the shipped `wiki_articles` schema diverges from this model — it uses a `section_id` FK instead of a `section` string, `related_article_slugs` (String[]) instead of `related_article_ids`, has no `parent_article_id` or `related_template_ids`, and adds `overview` and `guide` to the content_type enum. Whether to rewrite this model to match the shipped schema or converge the schema toward it is an open decision.*
+*Ruled 2026-07-27 (issue #112): the shipped `wiki_articles` schema is canon and this model matches it. There is no article hierarchy beyond sections (`parent_article_id` was dropped). `related_template_ids` is the one field the schema does not have yet; it lands with W-010 template linking. Rulings recorded in `docs-audit-2026-07.md` §4.*
 
 ---
 
@@ -1204,7 +1203,7 @@ Network admins can see aggregate wiki completion rates across all plants in thei
 
 3. **Coach overlay:** Should coaches be able to add notes/annotations to articles visible only to their planters?
 
-4. **Network customization:** ~~Can networks customize certain articles or add network-specific content?~~ **Resolved:** WikiArticle supports `church_id` scoping (null = global, value = church-specific). Network-level scoping deferred to future enhancement if needed.
+4. **Network customization:** Can networks customize certain articles or add network-specific content? **Reopened 2026-07-27 (with #112):** the end goal is that sending networks and sending churches can modify the wiki their planters see. `church_id` scoping (null = global, value = church-specific) is the only hook shipped; network/sending-church scoping and an authoring path need a discovery session — tracked as issue #178 (`needs-spec`).
 
 5. **Print/Export:** Should users be able to export entire sections as PDF for offline reference?
 
