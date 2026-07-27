@@ -162,6 +162,13 @@
       "when": 1785100968811,
       "tag": "0022_tense_hydra",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1785170871208,
+      "tag": "0023_notifications",
+      "breakpoints": true
     }
   ]
 }

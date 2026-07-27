@@ -2,7 +2,7 @@
 
 ORM: Drizzle | DB: PostgreSQL (Neon serverless) | **Connection:** `src/db/index.ts`
 
-34 tables across `src/db/schema/*.ts` (file names cited per table below). Notation — unless stated: `id` uuid PK auto; `church_id` → churches required (tenant scope); `created_at`/`updated_at` timestamps default now; `created_by`/`created_by_id` → users required. `→t` = uuid FK to table t; `(c)` = cascade delete; `=x` = default; untyped columns are varchar/text (lengths in source).
+37 tables across `src/db/schema/*.ts` (file names cited per table below). Notation — unless stated: `id` uuid PK auto; `church_id` → churches required (tenant scope); `created_at`/`updated_at` timestamps default now; `created_by`/`created_by_id` → users required. `→t` = uuid FK to table t; `(c)` = cascade delete; `=x` = default; untyped columns are varchar/text (lengths in source).
 
 ## Hierarchy
 
@@ -118,6 +118,16 @@ Facts are computed at assessment time — only manual attestations persist (plan
 **plant_insights** — one finding within an assessment: assessment_id FK(c); audience: planter/network (privacy-gated); category; severity: info/low/medium/high/critical =info; title; body; cited_facts jsonb; related_article_slugs text[]; rank int =0. No updated_at.
 
 **insight_feedback** — per-insight rating (rubric-tuning signal): insight_id + assessment_id FK(c); user_id →users req; rubric_version req (denormalized); rating: useful/not_useful; comment. Unique (insight_id, user_id) — upserted.
+
+## Notifications (`notifications.ts`)
+
+F11 foundation. Categories/channels/statuses are code-defined tuples in the schema file, re-exported with their coded defaults by `src/lib/notifications/categories.ts`. Enqueue contract: `src/lib/notifications/enqueue.ts` (`enqueue`, `cancelByEntity` — never calls a provider); reads: `queries.ts` (every builder takes a `NotificationScope` whose `churchId` is required); preference resolution: `preferences.ts`.
+
+**notifications** — the queue row AND the in-app feed row, one record: recipient_user_id →users(c) req; category: tasks/meetings/communication/teams/phase/digest; type req (caller discriminator, e.g. `task.overdue`); title + body req (rendered by the caller — F11 never templates); entity_type + entity_id null (cancel-by-entity target + feed link); dedupe_key null; scheduled_for =now; status: pending/claimed/delivered/cancelled/failed =pending; read_at null (independent of delivery). **Partial unique index** `notifications_dedupe_key_unique_idx` on (church_id, dedupe_key) WHERE dedupe_key IS NOT NULL — the arbiter for `ON CONFLICT DO NOTHING`, which is what makes enqueue idempotent under concurrency (see invariants → Transactions / Atomicity). Also indexed for the feed (church_id, recipient_user_id, created_at), unread (partial, read_at IS NULL), dispatch (status, scheduled_for), entity (church_id, entity_type, entity_id).
+
+**notification_preferences** — per (user, category, channel); **NOT church-scoped** (a coach across two churches has one set), the one notification table with no church_id: user_id →users(c) req; category; channel: email/in_app; enabled bool =true; digest_cadence: daily/weekly null (only meaningful on `digest`). Unique (user_id, category, channel) — upserted. **An ABSENT row means the category's coded default, not "off"** — rows are never seeded, so a new category needs no backfill.
+
+**notification_deliveries** — one row per channel attempt: notification_id FK(c); channel; status: queued/sent/failed/suppressed_by_preference/cancelled =queued; attempt_count int =0; error null; provider_message_id null (webhook correlation); sent_at null. Unique (notification_id, channel) — this is what makes at-most-once delivery a DB guarantee rather than a dispatcher intention.
 
 ## Methodology RAG (`methodology-embeddings.ts`)
 
