@@ -31,10 +31,17 @@ export default async function WikiLayout({
       {/* Main content. When the page inside renders a right-rail TOC, the card
           widens just enough that the prose keeps the same 704px measure it has
           on a TOC-less page (card 48rem − 4rem padding) instead of being
-          squeezed to 448px beside the rail: 62rem − padding − w-48 rail − gap
-          at lg, 64rem − padding − w-56 rail − gap at xl, both = 44rem. */}
-      <div className="flex-1 overflow-y-auto p-6">
-        <div className="bg-card mx-auto max-w-3xl rounded-xl px-8 py-10 shadow-sm lg:has-[[data-testid=wiki-toc]]:max-w-[62rem] xl:has-[[data-testid=wiki-toc]]:max-w-5xl">
+          squeezed beside the rail: 62rem − padding − w-48 rail − gap, or with
+          the wider rail 64rem − padding − w-56 rail − gap, both = 44rem.
+
+          The thresholds are CONTAINER queries on this column, not viewport
+          breakpoints: the rail only exists once the column genuinely fits the
+          widened card (65rem = 62rem card + p-6), so the prose is never
+          compressed below its measure by a rail the viewport cannot afford —
+          below that the TOC stays a disclosure above the article, whatever
+          the surrounding sidebars are doing. */}
+      <div className="@container/wiki-content flex-1 overflow-y-auto p-6">
+        <div className="bg-card mx-auto max-w-3xl rounded-xl px-8 py-10 shadow-sm @min-[65rem]/wiki-content:has-[[data-testid=wiki-toc]]:max-w-[62rem] @min-[67rem]/wiki-content:has-[[data-testid=wiki-toc]]:max-w-5xl">
           {children}
         </div>
       </div>

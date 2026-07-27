@@ -133,7 +133,7 @@ async function ArticleView({
 
   return (
     <ProgressTracker slug={article.slug}>
-      <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-8">
+      <div className="flex flex-col gap-6 @min-[65rem]/wiki-content:flex-row @min-[65rem]/wiki-content:items-start @min-[65rem]/wiki-content:gap-8">
         <article className="min-w-0 flex-1 space-y-6">
           <WikiBreadcrumb items={breadcrumbs} />
 

@@ -27,11 +27,11 @@ type TableOfContentsProps = {
 /**
  * Right-side table of contents for a wiki article (W-014).
  *
- * Renders nothing below `TOC_MIN_HEADINGS` headings. Above the layout's `lg`
- * breakpoint it is a sticky right rail beside the prose (the wiki layout's
- * card widens via `:has()` so the prose keeps its 704px measure); below it,
- * it collapses into a closed disclosure above the article so it never
- * overlaps the text.
+ * Renders nothing below `TOC_MIN_HEADINGS` headings. Once the wiki layout's
+ * content column can afford it — a container query, mirroring the card
+ * widening in `wiki/layout.tsx`, so the prose keeps its 704px measure — it
+ * is a sticky right rail beside the prose; in narrower columns it collapses
+ * into a closed disclosure above the article so it never squeezes the text.
  *
  * Scroll position is *not* persisted here — reading progress is W-012's job
  * (`ProgressTracker`), and this component deliberately only reads scroll state.
@@ -45,10 +45,10 @@ export function TableOfContents({ headings }: TableOfContentsProps) {
 
   return (
     <>
-      {/* Below `lg`: collapsed, above the prose, out of the way. */}
+      {/* Narrow column: collapsed, above the prose, out of the way. */}
       <details
         data-testid="wiki-toc-mobile"
-        className="bg-muted/40 order-first rounded-lg border px-4 py-3 lg:hidden"
+        className="bg-muted/40 order-first rounded-lg border px-4 py-3 @min-[65rem]/wiki-content:hidden"
       >
         <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-medium">
           <List className="h-4 w-4 shrink-0" aria-hidden="true" />
@@ -63,11 +63,11 @@ export function TableOfContents({ headings }: TableOfContentsProps) {
         </nav>
       </details>
 
-      {/* `lg` and up: sticky right rail. */}
+      {/* Wide column: sticky right rail. */}
       <nav
         data-testid="wiki-toc"
         aria-label="Table of contents"
-        className="sticky top-6 hidden w-48 shrink-0 self-start lg:block xl:w-56"
+        className="sticky top-6 hidden w-48 shrink-0 self-start @min-[65rem]/wiki-content:block @min-[67rem]/wiki-content:w-56"
       >
         <p className="text-muted-foreground mb-3 text-xs font-semibold tracking-wide uppercase">
           On this page
