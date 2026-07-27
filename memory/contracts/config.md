@@ -7,7 +7,7 @@
 | `DATABASE_URL` | Yes | PostgreSQL connection string (Neon) |
 | `NEXT_PUBLIC_APP_URL` | No | Base URL (default: localhost:3000) |
 | `REVALIDATION_SECRET` | For prod | Wiki cache revalidation auth. ⚠️ Still required by `src/app/api/wiki/revalidate/route.ts` but MISSING from `.env.example` |
-| `CRON_SECRET` | For prod | Phase Engine cron auth (Bearer token on `/api/phase-engine/assess`) |
+| `CRON_SECRET` | For prod | Cron auth (Bearer token) for BOTH scheduled routes: `/api/phase-engine/assess` and `/api/notifications/dispatch`. Both fail closed when unset. Lives in TWO places that must hold the same value: the Vercel production env (read by the routes, sent by the daily Vercel cron) and this repo's Actions secrets (sent by `.github/workflows/notifications-dispatch.yml`, which drives the 15-min dispatch tick because Hobby caps Vercel crons at daily) |
 | `OPENAI_API_KEY` | Phase Engine | LLM judge + embeddings (`src/lib/phase-engine/judge/provider.ts`, `rag/embed.ts`). Not in `.env.example` |
 | `LANGFUSE_SECRET_KEY` / `_PUBLIC_KEY` / `_BASE_URL` | No | LLM tracing (`src/lib/phase-engine/observability.ts`). Not in `.env.example` |
 | `RESEND_API_KEY` | For email | Resend client (`src/lib/email/client.ts`, webhook route) |

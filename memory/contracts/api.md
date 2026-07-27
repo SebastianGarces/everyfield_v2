@@ -9,6 +9,7 @@
 | `POST /api/wiki/revalidate` | `REVALIDATION_SECRET` in body | `{ slug, secret }` → `{ revalidated: true, slug, timestamp }` |
 | `DELETE /api/wiki/revalidate` | secret in body | `{ secret }` → `{ revalidated: true, scope: "all", timestamp }` |
 | `POST /api/phase-engine/assess` | `Authorization: Bearer <CRON_SECRET>` | Vercel Cron judge runner: dirty-or-stale plants, sequential, `MAX_BATCH=25`/run (rest roll over); returns `{selected,attempted,assessed,failed,skipped,outcomes[]}`; assessments run ONLY here or via manual trigger |
+| `GET /api/notifications/dispatch` | `Authorization: Bearer <CRON_SECRET>` | F11 dispatcher (every 15 min). Claims due `pending` rows atomically (`MAX_DISPATCH_BATCH=100`), groups per (church, recipient, category) into ONE email + N feed rows, re-checks the still-live predicate, records a delivery per channel. At-most-once via the unique `(notification_id, channel)` index. Returns the run summary `{claimed,remainingPending,groups,emailsSent,delivered,cancelled,failed,retryScheduled,deferred,suppressed,released,durationMs}`. Fails closed with no `CRON_SECRET` |
 | `POST /api/rsvp/[token]` | None — token in path | Public RSVP: `{ response: "confirmed"\|"declined" }` → `{ success: true }`; 400 invalid; backed by `meeting_confirmation_tokens` |
 | `POST /api/webhooks/resend` | Svix signature via `RESEND_WEBHOOK_SECRET` | Resend events advance `communication_recipients.status` (forward-only) |
 

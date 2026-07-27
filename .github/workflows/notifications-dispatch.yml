@@ -1,0 +1,105 @@
+# Ticks the notification dispatcher (#131, N-003/N-004/N-017).
+#
+# WHY THIS IS NOT A VERCEL CRON. Every other scheduled job in this repo lives in vercel.json, and
+# this one did too until it could not deploy: the project is on the Hobby plan, which accepts at
+# most ONE cron invocation per day per job. A `*/15 * * * *` entry is not throttled there — it is
+# rejected, and the whole deployment fails with it. The two ways out were a daily Vercel cron (a
+# meeting reminder that is a day late is not a reminder — the schedule IS the feature here) or an
+# external trigger. Ruled 2026-07-27: trigger it from Actions, which has no sub-daily restriction.
+# vercel.json keeps the daily phase-engine cron, which fits Hobby fine.
+#
+# This is therefore a SCHEDULE and nothing else. It holds no logic: it makes one authenticated GET
+# and reports whether the run succeeded. Everything real — the atomic claim, batching, the
+# still-live re-check, bounded retry — is in src/lib/notifications/dispatch.ts, unchanged by how
+# the tick arrives. Moving back to a Vercel cron on a paid plan is deleting this file and restoring
+# four lines to vercel.json.
+#
+# PUNCTUALITY. GitHub's scheduler is best-effort: it queues runs on shared infrastructure, commonly
+# runs them a few minutes late, and drops them outright under heavy load. So "*/15" is an upper
+# bound on frequency, not a guarantee. That is survivable by design — the dispatcher claims
+# whatever is due whenever it runs, and anything past the batch bound rolls over to the next tick
+# (N-017). A missed tick delays notifications; it never loses them.
+#
+# Scheduled workflows run from the DEFAULT BRANCH only. Editing this file on a branch changes
+# nothing until it merges to main, and it cannot be tested by pushing — use the Run workflow button
+# (workflow_dispatch) once it is on main.
+
+name: Notifications dispatch
+
+on:
+  schedule:
+    # Every 15 minutes. More frequent than the daily Plant Intelligence run because these are
+    # time-sensitive: meeting reminders, task due dates.
+    - cron: "*/15 * * * *"
+  # Manual tick, for verifying the wiring and for draining the queue after an outage.
+  workflow_dispatch:
+
+# No repository contents are read and nothing is written back — this workflow only makes an
+# outbound HTTP call. Least privilege for a job holding a production credential.
+permissions: {}
+
+concurrency:
+  group: notifications-dispatch
+  # A tick that is still running when the next one fires means the previous one is stuck, not busy:
+  # the route's own run budget sits under its 60s function timeout, and ticks are 15 minutes apart.
+  # Let the newer tick win rather than accumulating a queue of runs that all do the same work.
+  # Abandoning the older curl is safe — `claimDue` is a single atomic statement, so an overlapping
+  # server-side run gets a disjoint set of rows or none at all (see the dispatch module header).
+  cancel-in-progress: true
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    # Generous against a cold start, but bounded: a tick that has not returned in five minutes is
+    # not going to.
+    timeout-minutes: 5
+    steps:
+      - name: Tick the dispatcher
+        env:
+          # The stable production alias, not a per-deployment URL: those change on every deploy.
+          # everyfield.app resolves to the same deployment; the .vercel.app alias is used because
+          # it survives anything that happens to the custom domain's DNS.
+          DISPATCH_URL: https://everyfield-v2.vercel.app/api/notifications/dispatch
+          # Same secret the route checks, and the same one Vercel Cron would have sent. It must be
+          # set to the IDENTICAL value in both places: this repo's Actions secrets and the Vercel
+          # project's production environment.
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+
+          # Deliberately a hard failure, not a skip. An unset secret here means notifications are
+          # silently never sent — the exact failure nobody notices until a planter misses a
+          # meeting. Board sync can no-op when its token is absent because a stale board is
+          # visible; this cannot.
+          if [ -z "${CRON_SECRET:-}" ]; then
+            echo "::error::CRON_SECRET is not set in this repository's Actions secrets. The dispatcher cannot authenticate, so NO notifications are being sent. Set it to the same value as the Vercel project's production CRON_SECRET."
+            exit 1
+          fi
+
+          # Status and body are captured separately so the body prints on success AND on failure.
+          # It is the run summary — claimed, remainingPending, delivered, failed — which is what
+          # makes a bad tick diagnosable from the Actions log alone. It carries no secrets and no
+          # recipient data, only counts.
+          #
+          # The `if !` form rather than `|| echo 000`: curl ALREADY prints 000 for %{http_code}
+          # when it never got a response, so the fallback would concatenate to "000000" and miss
+          # its own case below. Assigning on failure keeps the value a single status code. It also
+          # stops `set -e` from exiting before the diagnosis prints.
+          if ! status=$(curl -sS -o response.json -w '%{http_code}' --max-time 240 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$DISPATCH_URL"); then
+            status="000"
+          fi
+
+          echo "HTTP $status from $DISPATCH_URL"
+          echo "Response:"
+          cat response.json 2>/dev/null || echo "(no response body)"
+          echo
+
+          case "$status" in
+            2??) echo "Dispatch run completed." ;;
+            000) echo "::error::No HTTP response — the request failed or timed out. Notifications for this tick roll over to the next one."; exit 1 ;;
+            401) echo "::error::401 Unauthorized. This repo's CRON_SECRET does not match the one in the Vercel production environment (the route fails closed when its own copy is unset)."; exit 1 ;;
+            404) echo "::error::404 Not Found. The dispatch route is not present in the current production deployment — check that the branch adding it has merged and deployed."; exit 1 ;;
+            *)   echo "::error::Dispatch failed with HTTP $status. Claimed rows are released or retried by the next tick; nothing is dropped and nothing sends twice."; exit 1 ;;
+          esac
