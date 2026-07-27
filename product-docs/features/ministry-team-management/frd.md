@@ -66,7 +66,7 @@ Ministry Team Management enables church planters to organize, staff, and track t
 
 | ID | Requirement | Description |
 |----|-------------|-------------|
-| MT-011 | Training tracking | Track required training completion per role |
+| MT-011 | Training tracking | Track required training completion per team — every member of a team shares the team's required programs (ruled 2026-07-27, decision #85) |
 | MT-012 | Training completion matrix | Grid view of team members vs training programs |
 | MT-013 | Team meeting scheduling | Schedule and track team meetings via the Meetings feature (F3) with `type = team_meeting`. Accessible from the team detail Meetings tab. |
 | MT-014 | Meeting attendance | Record attendance at team meetings via the Meetings feature (F3). |
@@ -568,7 +568,7 @@ Update dashboard health indicators
 | created_at | Timestamp | Yes | Creation timestamp |
 | updated_at | Timestamp | Yes | Last update timestamp |
 
-> **Implementation status:** The shipped `team_roles` table has no `required_training_ids` column; training requirements are currently modeled at the team level (`TrainingProgram.team_id` + `is_required`). Whether role-level required training remains canon or the team-level model supersedes it is an open decision (see MT-011).
+> **Ruled 2026-07-27 (decision #85):** team-level training is canon. Requirements are modeled as `TrainingProgram.team_id` + `is_required`, completion per person via `training_completions`; `team_roles` carries no training key. Per-role granularity was judged premature for church-plant-sized teams — revisit only if real usage demands it (that would be a `risk:high` join-table migration plus rewrites of the MT-012/MT-016/MT-017 surfaces). Ruling recorded in `docs-audit-2026-07.md` §4.
 
 ---
 

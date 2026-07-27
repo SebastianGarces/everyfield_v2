@@ -133,9 +133,17 @@ argument yet for a root `CONTEXT.md` glossary.
 authenticated user in a church can mutate any team. That is a live multi-tenant authorization hole,
 filed as `risk:high` independently of what the FRD says.
 
+### Resolved 2026-07-27 — the three §5 holdouts
+
+| # | Decision | Consequence |
+|---|----------|-------------|
+| 10.2 | **Follow-up tasks for first-time attendees only** (issue #96). Returning attendees are already in the pipeline; committed core group needs no 48-hour touch. | Matches the methodology's first-48-hours emphasis and the FRD's original wording. Changes shipped behaviour (today: every attendee, due finalization + 2 days) → build issue filed; the follow-up completion signal in the fact snapshot becomes *first-time follow-up rate* and its interpretation note must say so. The planter evaluation task is unchanged. |
+| 12b | **Team-level training is canon** (issue #85). MT-011 reworded from per-role to per-team; no migration. | Already shipped and working across MT-012/MT-016/MT-017. A church plant's teams are small — per-role granularity is premature. Revisit only if real usage demands it (that would be the `risk:high` join-table migration). |
+| 14 | **Shipped `wiki_articles` model is canon** (issue #112). FK section, slug relations, and the `overview`/`guide` content types all stand; `parent_article_id` is dropped from the FRD. **`related_template_ids` stays a build target** for W-010 (#73). | FRD data model rewritten to match the schema. Longer-term: sending networks and sending churches should be able to modify the wiki their planters see — that is a discovery session, filed as a `needs-spec` issue, not a schema tweak now. |
+
 ## 5. Pending — evidence gathered, decision outstanding
 
-Three items could not be ruled on without seeing the divergence. Evidence below; decision still open.
+**All three items below were ruled on 2026-07-27** — rulings in §4 above. Evidence kept for the record.
 
 ### #10 Meetings — five divergences
 
