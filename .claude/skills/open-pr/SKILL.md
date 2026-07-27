@@ -61,11 +61,40 @@ That is the intended path — a red check is information, not an emergency.
      --label "agent:in-review" \
      $([ "$HIGH_RISK" = true ] && echo --label risk:high)
    ```
-5. Move the issue into the review queue:
+5. Move the issue into the review queue — **and read the label back** (see below):
    ```bash
-   gh issue edit <issue> --remove-label agent:in-progress --add-label agent:in-review
+   gh issue edit <issue> --add-label agent:in-review --remove-label agent:in-progress
+   gh issue view <issue> --json labels --jq '[.labels[].name]'   # must print agent:in-review
    ```
 6. Return the PR URL.
+
+## The label is half the outcome, and it is the half that fails silently
+
+A PR body is a narrative; the **label is the record**. `ops/agent-os/labels.md` makes the labels
+canonical and the Project board derived, so every downstream consumer — `dispatch`'s in-flight gate,
+`standup`, a human scanning the queue — reads the label, not the prose.
+
+On 2026-07-26 the narrative landed and the label did not, on 2 of 8 tracks. `#110` shipped with a
+full seven-gate evidence bundle and `#74` was blocked after three failed attempts; **both issues
+stayed on `agent:in-progress`**, and no step reported an error. From the outside those two states and
+"still running" are indistinguishable, and they demand opposite actions — a reviewer took a blocked
+PR for a finished one and nearly merged it.
+
+So the same rule that governs the CI conclusion governs the label:
+
+- **Never report a label you did not observe.** `gh issue edit` exiting 0 is not proof; the proof is
+  what `gh issue view --json labels` prints afterwards.
+- **Retry a label write that did not stick.** The write is idempotent — re-running costs nothing,
+  and skipping the retry is what left two tracks lying.
+- **A label that cannot be confirmed is an ERROR, not a footnote.** Report the track as errored
+  rather than as success. A green PR whose issue reads `agent:in-progress` is worse than a failed
+  one, because it will be believed.
+- **`agent:in-progress` must be gone**, not merely joined by `agent:in-review`. The status labels are
+  mutually exclusive; two at once is a bug, not a state.
+
+`build-until-done` re-reads and asserts these labels after this skill runs, and errors the track if
+the board disagrees. Do not treat that as a reason to be casual here — it is the backstop, not the
+mechanism.
 
 ## PR body template
 
@@ -123,6 +152,8 @@ That is the intended path — a red check is information, not an emergency.
 ## Rules
 
 - **Closes #<issue>** in the body so merging closes the board item — no manual bookkeeping.
+- **The PR carries `agent:in-review` too**, not just the issue — `--label agent:in-review` on
+  `gh pr create`, verified with `gh pr view <number> --json labels`.
 - **Never open a PR without the evidence table.** The table is the contract with the reviewer.
 - **Never open a PR without the Manual QA section**, and never let it restate the acceptance criteria.
   G3 already proved the ACs; repeating them wastes the one scarce resource in this system, which is

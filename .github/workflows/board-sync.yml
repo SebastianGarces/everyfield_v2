@@ -101,6 +101,10 @@ jobs:
             *"agent:in-progress"*) status="In Progress";       option_id="2b12f8f4" ;;
             *"agent:in-review"*)   status="Pending PR review"; option_id="a2d0c924" ;;
             *"agent:blocked"*)     status="Blocked";           option_id="726047a5" ;;
+            # Shares the Blocked column with agent:blocked — both mean "a human is needed", and the
+            # project has no separate option. The board is derived and coarser; the LABEL is what
+            # says whether to fix the code or just retry the delivery (ops/agent-os/labels.md).
+            *"agent:delivery-failed"*) status="Blocked";       option_id="726047a5" ;;
             *"needs-spec"*)        status="Backlog";           option_id="a6027ea1" ;;
           esac
 
