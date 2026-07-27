@@ -549,7 +549,7 @@ Return {"claimed": [the numbers you edited], "inProgressNow": [every number that
     log(`🔨 ${track.id} — attempt ${attempt}/${MAX_ATTEMPTS}`);
     const fixBlock =
       attempt === 1
-        ? `Create the worktree and branch:\n\`git worktree add -b ${branch} ${wt} <HEAD of ${BASE}>\` (skip add if ${wt} already exists; just \`cd\` into it).`
+        ? `Create the worktree and branch:\n\`git worktree add -b ${branch} ${wt} <HEAD of ${BASE}>\` (skip add if ${wt} already exists; just \`cd\` into it).\nThen give it a test env — \`scripts/worktree-env.sh ${wt}\` (idempotent; read its header for what it does and why). A fresh worktree has no \`.env.local\`, so \`pnpm test\` fails every DB suite until you run it. Do not improvise your own env file.`
         : `The branch ${branch} and worktree ${wt} already exist with your prior work. The verifier REJECTED the last attempt. Fix ONLY what's needed:\nFailing gate: ${lastReport?.failingGate}\nFix instructions: ${lastReport?.fixInstructions}`;
 
     const impl = await agent(
@@ -581,7 +581,7 @@ Write code AND tests. Run \`pnpm typecheck\` and \`pnpm lint\` in the worktree a
       `You are the code-reviewer and the INDEPENDENT verifier. Use the \`definition-of-done\` skill and \`ops/agent-os/dod.md\`. Validate branch ${branch} in worktree ${wt} for issue(s) ${track.issues.map((n) => `#${n}`).join(", ")}.
 Run every gate yourself — do not trust the implementer's claims:
 - G1 \`pnpm typecheck && pnpm lint && pnpm build\` in ${wt}
-- G2 \`pnpm test\`
+- G2 \`pnpm test\` — if the worktree has no \`.env.local\`, run \`scripts/worktree-env.sh ${wt}\` first and re-run. A missing env is not a test failure, and reporting it as one blames the track for the harness.
 - G3 functional: use \`${track.lane === "backend" ? "validate-backend" : "validate-frontend"}\` and PROVE each acceptance criterion with an assertion + screenshot/transcript; console must be error-free; lighthouse a11y ≥ 90 for UI. Frontend validates against the branch's VERCEL PREVIEW (scripts/preview-url.sh --wait --bypass), never localhost:3000 — localhost serves main and would pass code this track never wrote. Backend prefers a tsx harness in the worktree.
 - G4 conventions, G5 diff hygiene.
 Acceptance criteria to prove:
