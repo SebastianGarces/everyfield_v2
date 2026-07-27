@@ -61,6 +61,7 @@ One flow, four steps. Step 1 creates the church; steps 2–4 update it.
 
 - Target launch date: a date, or an explicit "no date yet."
 - Journey stage: a picker of the seven phases described in plain language (from the Product Brief's phase table — "Discovery: discerning the calling…" through "Post-Launch"), not raw phase numbers. Includes "not sure — start me at the beginning" (→ phase 0).
+- The floating wiki Guide is wired for this step via the existing contextual guide config, surfacing phase-discernment articles so a planter unsure of their stage can read before picking.
 - Selecting a stage sets the church's current phase **as an initial declaration**: recorded in phase history as a declaration, distinguishable from a real transition, with no intermediate transitions synthesized.
 
 ### Step 4 — Bring your people
@@ -72,6 +73,7 @@ One flow, four steps. Step 1 creates the church; steps 2–4 update it.
 ### Finish
 
 - Lands on the dashboard with `?churchCreated=true` (existing confetti preserved).
+- **When the declared stage is phase 2 or later**, the finish screen offers one card: set up the standard ministry teams and roles from the existing templates — one click, one confirmation, using the template-initialization machinery that already ships. No roster assignment or role editing here; staffing and customization stay on the teams surface. Phase 0–1 declarations never see the offer.
 - The plant is marked dirty for the phase engine so the first assessment happens promptly rather than waiting up to 24h for the daily cron.
 
 ---
@@ -90,6 +92,7 @@ One flow, four steps. Step 1 creates the church; steps 2–4 update it.
 | OB-006 | Step 4 surfaces the existing CSV import wizard and quick-add without duplicating them. |
 | OB-007 | Every step after step 1 is skippable; the flow is resumable at the first incomplete step. |
 | OB-008 | Everything captured is editable later in church settings (settings surface is a separate feature; this FRD only requires that no onboarding answer is permanent). |
+| OB-014 | The contextual wiki Guide is configured for the onboarding steps — at minimum the journey-stage step, whose entry surfaces phase-discernment articles (config-only: entries in the existing route-pattern → slugs guide config). |
 
 ### Should Have
 
@@ -98,6 +101,7 @@ One flow, four steps. Step 1 creates the church; steps 2–4 update it.
 | OB-009 | Completing onboarding marks the plant for prompt first assessment (dirty flag), so `/phase` is not cold for a day. |
 | OB-010 | Existing churches created before this feature that have no planter assigned get a one-time pastor-confirmation prompt (the #157 open question, answered: yes, one-time and dismissible). |
 | OB-011 | An incomplete-onboarding indicator on the dashboard (dismissible) listing skipped steps, linking back into the flow. |
+| OB-015 | Stage-gated team-template offer on the finish screen: declared phase ≥ 2 offers one-click initialization of the standard ministry teams and their role templates; accepting runs the existing template initialization, declining does nothing, phase 0–1 never sees it. |
 
 ### Nice to Have (Future — no board issues; spec only)
 
@@ -117,6 +121,8 @@ One flow, four steps. Step 1 creates the church; steps 2–4 update it.
 5. Abandoning after step 2 and returning resumes at step 3, with steps 1–2 answers intact.
 6. The launch-countdown surface shows the declared date immediately after onboarding; documents generated afterward merge the real launch date instead of a blank.
 7. All flow controls are keyboard-accessible and every clickable element has `cursor-pointer`.
+8. On the journey-stage step, opening the Guide shows the configured phase-discernment articles in the floating panel.
+9. A planter declaring phase 3 who accepts the team-template offer lands on a dashboard where the teams surface shows the template teams and roles; a planter declaring phase 0 is never shown the offer.
 
 ---
 
@@ -136,6 +142,8 @@ Schema changes ⇒ requirement issues carrying them are `risk:high` per board co
 
 - **Phase engine**: initial declaration sets the phase the judge scores against; completion marks the plant dirty for prompt first assessment. Declaration must not distort transition-history-based analytics.
 - **People/CRM**: step 4 links to the existing import wizard and quick-add; no duplication.
+- **Wiki Guide**: OB-014 adds entries to the existing contextual guide config (route pattern → article slugs); no new mechanism. Which discernment articles the entries point at is a content choice at build time.
+- **Ministry Teams**: OB-015 invokes the existing team/role template initialization; onboarding owns only the offer, not the templates.
 - **Documents & countdown surfaces**: consume `launch_date` (already read; currently always null).
 - **Oversight**: declared phase appears wherever current phase already appears; no new oversight surface.
 - **Church settings** (separate feature): the permanent edit surface for everything captured here.
