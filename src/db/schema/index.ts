@@ -13,6 +13,7 @@ export * from "./meetings";
 export * from "./communication";
 export * from "./tasks";
 export * from "./feedback";
+export * from "./notifications";
 export * from "./auth-attempts";
 export * from "./phase-engine";
 export * from "./methodology-embeddings";
