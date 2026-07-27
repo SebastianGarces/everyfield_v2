@@ -27,6 +27,8 @@
 //    deliberately withheld are opaque identifiers (a personId is a UUID: it is
 //    unreadable to a planter and it names an individual — see
 //    assessment/persist.ts, which drops network insights that cite one).
+//    HOW MANY rows agreed is evidence too: an insight backed by three
+//    candidates says "3 leadership candidates", never "one".
 //
 // 2. AN UNKNOWN SHAPE DEGRADES, IT NEVER THROWS AND NEVER LEAKS SYNTAX. The
 //    snapshot grows, and a model can cite a key that no longer exists or was
@@ -75,6 +77,11 @@ export function parseCitedFact(fact: string): ParsedCitedFact {
   };
 }
 
+/** Unify the two index spellings without discarding which row was cited. */
+function dotIndices(path: string): string {
+  return path.replace(/\[(\d+)\]/g, ".$1");
+}
+
 /**
  * Collapse array indices so `leadership.candidates[0].personId` and
  * `leadership.candidates.3.personId` reach the same template. Both spellings
@@ -82,12 +89,24 @@ export function parseCitedFact(fact: string): ParsedCitedFact {
  * echoes bracketed ones).
  */
 function normalizePath(path: string): string {
-  return path
-    .replace(/\[(\d+)\]/g, ".$1")
+  return dotIndices(path)
     .split(".")
     .map((segment) => (/^\d+$/.test(segment) ? "#" : segment))
     .filter((segment) => segment.length > 0)
     .join(".");
+}
+
+/**
+ * How one citation is identified when de-duplicating a column. The row index
+ * is KEPT — unlike `normalizePath`, which collapses it to reach a template —
+ * because the two questions are different: `candidates.0` and `candidates.1`
+ * share a template but are two candidates, while the same citation written
+ * twice is one candidate. Counting (see `formatCitedFacts`) depends on telling
+ * those apart.
+ */
+function citationIdentity(fact: string): string {
+  const { path, value } = parseCitedFact(fact);
+  return `${dotIndices(path)}=${value ?? ""}`;
 }
 
 // ----------------------------------------------------------------------------
@@ -144,8 +163,15 @@ function toWords(identifier: string): string {
 // Known facts.
 //
 // One entry per path in the deterministic snapshot (signals/types.ts). Indices
-// are collapsed to `#`, so a per-candidate or per-role citation is phrased as
-// "one …" rather than pretending the reader knows which row index 3 was.
+// are collapsed to `#`, so a per-candidate or per-role citation is phrased by
+// its subject ("one leadership candidate") rather than pretending the reader
+// knows which row index 3 was.
+//
+// A fact that names an anonymous ROW returns a `RowPhrase` instead of a plain
+// string. The phrase is then a function of how many rows cited the same thing,
+// so an insight backed by three candidates reads "3 leadership candidates" and
+// not "one leadership candidate" — the count is evidence, and dropping it
+// understates the insight (ruling on #154).
 // ----------------------------------------------------------------------------
 
 /** Always 8 (CSF-7): the roles a plant must cover before launch. */
@@ -169,14 +195,59 @@ function manualSignalClause(key: string): string {
 }
 
 /**
+ * A phrase about an anonymous row, deferred until we know how many rows cited
+ * it. `render(1)` is the singular a lone citation reads as.
+ */
+interface RowPhrase {
+  render: (rows: number) => string;
+}
+
+/** What a fact renders as: fixed prose, or prose that counts its rows. */
+type Phrase = string | RowPhrase;
+
+/** How a row's subject is named at a given count. */
+type RowSubject = (rows: number) => string;
+
+const CANDIDATES: RowSubject = (n) =>
+  n === 1 ? "one leadership candidate" : `${n} leadership candidates`;
+
+const MINISTRY_ROLES: RowSubject = (n) =>
+  n === 1 ? "one ministry role" : `${n} ministry roles`;
+
+const SELF_REPORTS: RowSubject = (n) =>
+  n === 1 ? "a self-report" : `${n} self-reports`;
+
+/** The subject of an attestation's own value, which is a thing, not a report. */
+const ATTESTED_THINGS: RowSubject = (n) =>
+  n === 1 ? "something" : `${n} things`;
+
+/**
+ * Build a row phrase from its subject and one template. The template receives
+ * the subject already named for the count plus the count itself, so a plural
+ * that needs more than an `s` ("3 leadership candidates EACH 90 days in") stays
+ * a single template rather than two copies that can drift apart.
+ */
+function perRow(
+  subject: RowSubject,
+  template: (subject: string, rows: number) => string
+): RowPhrase {
+  return { render: (rows) => template(subject(rows), rows) };
+}
+
+/** Render a phrase for a known number of rows. Plain prose ignores the count. */
+function renderPhrase(phrase: Phrase, rows: number): string {
+  return typeof phrase === "string" ? phrase : phrase.render(rows);
+}
+
+/**
  * A phrase builder for one known fact path. Returns `null` when the value is
  * not the shape this fact expects (a count that is not a number, say), which
  * hands the citation to the generic fallback instead of printing nonsense.
  */
-type FactPhrase = (value: string | null) => string | null;
+type FactPhrase = (value: string | null) => Phrase | null;
 
 /** Build a phrase from a numeric value, or defer to the fallback. */
-function numeric(phrase: (n: number) => string): FactPhrase {
+function numeric(phrase: (n: number) => Phrase): FactPhrase {
   return (value) => {
     const n = toNumber(value);
     return n === null ? null : phrase(n);
@@ -184,7 +255,7 @@ function numeric(phrase: (n: number) => string): FactPhrase {
 }
 
 /** Build a phrase from a boolean value, or defer to the fallback. */
-function boolean(whenTrue: string, whenFalse: string): FactPhrase {
+function boolean(whenTrue: Phrase, whenFalse: Phrase): FactPhrase {
   return (value) => {
     const flag = toBoolean(value);
     if (flag === null) return null;
@@ -193,7 +264,7 @@ function boolean(whenTrue: string, whenFalse: string): FactPhrase {
 }
 
 /** Build a phrase from a date value, or defer to the fallback. */
-function date(phrase: (readable: string) => string): FactPhrase {
+function date(phrase: (readable: string) => Phrase): FactPhrase {
   return (value) => {
     if (!value || !ISO_DATE_PATTERN.test(value)) return null;
     return phrase(toReadableDate(value));
@@ -301,12 +372,24 @@ const FACT_PHRASES: Record<string, FactPhrase> = {
   "ministryRoles.roles.#.label": (value) =>
     value ? `the ${value.toLowerCase()} ministry role` : null,
   "ministryRoles.roles.#.teamPresent": boolean(
-    "a team in place for one ministry role",
-    "no team yet for one ministry role"
+    perRow(
+      MINISTRY_ROLES,
+      (role, n) => `${n === 1 ? "a team" : "teams"} in place for ${role}`
+    ),
+    perRow(
+      MINISTRY_ROLES,
+      (role, n) => `${n === 1 ? "no team" : "no teams"} yet for ${role}`
+    )
   ),
   "ministryRoles.roles.#.filled": boolean(
-    "a leader in place for one ministry role",
-    "no leader yet for one ministry role"
+    perRow(
+      MINISTRY_ROLES,
+      (role, n) => `${n === 1 ? "a leader" : "leaders"} in place for ${role}`
+    ),
+    perRow(
+      MINISTRY_ROLES,
+      (role, n) => `${n === 1 ? "no leader" : "no leaders"} yet for ${role}`
+    )
   ),
   "ministryRoles.isEmpty": boolean(
     "no ministry teams set up yet",
@@ -315,32 +398,56 @@ const FACT_PHRASES: Record<string, FactPhrase> = {
 
   // -- leadership (CSF-5) ----------------------------------------------------
   // Per-candidate facts stay anonymous: the snapshot's only person handle is a
-  // UUID, which reads as noise and names an individual.
-  "leadership.candidates.#.personId": () => "one leadership candidate",
+  // UUID, which reads as noise and names an individual. Anonymous does not mean
+  // uncounted — how MANY candidates back the insight is evidence the planter
+  // needs, so these count rather than collapse.
+  "leadership.candidates.#.personId": () => perRow(CANDIDATES, (who) => who),
   "leadership.candidates.#.status": (value) =>
-    value ? `one leadership candidate at the ${toWords(value)} stage` : null,
-  "leadership.candidates.#.tenureDays": numeric((n) =>
-    n === 1
-      ? "one leadership candidate 1 day in"
-      : `one leadership candidate ${n} days in`
+    value
+      ? perRow(CANDIDATES, (who) => `${who} at the ${toWords(value)} stage`)
+      : null,
+  "leadership.candidates.#.tenureDays": numeric((days) =>
+    perRow(
+      CANDIDATES,
+      (who, n) =>
+        `${who}${n === 1 ? "" : " each"} ${count(days, "day", "days")} in`
+    )
   ),
-  "leadership.candidates.#.meetingsAttended": numeric((n) =>
-    n === 1
-      ? "one leadership candidate at 1 vision meeting"
-      : `one leadership candidate at ${n} vision meetings`
+  "leadership.candidates.#.meetingsAttended": numeric((meetings) =>
+    perRow(
+      CANDIDATES,
+      (who, n) =>
+        `${who}${n === 1 ? "" : " each"} at ${count(meetings, "vision meeting", "vision meetings")}`
+    )
   ),
-  "leadership.candidates.#.activeMemberships": numeric((n) =>
-    n === 1
-      ? "one leadership candidate on 1 ministry team"
-      : `one leadership candidate on ${n} ministry teams`
+  "leadership.candidates.#.activeMemberships": numeric((teams) =>
+    perRow(
+      CANDIDATES,
+      (who, n) =>
+        `${who}${n === 1 ? "" : " each"} on ${count(teams, "ministry team", "ministry teams")}`
+    )
   ),
   "leadership.candidates.#.hasCommitment": boolean(
-    "one leadership candidate with a signed commitment",
-    "one leadership candidate without a signed commitment"
+    perRow(
+      CANDIDATES,
+      (who, n) =>
+        `${who} with ${n === 1 ? "a signed commitment" : "signed commitments"}`
+    ),
+    perRow(
+      CANDIDATES,
+      (who, n) =>
+        `${who} without ${n === 1 ? "a signed commitment" : "signed commitments"}`
+    )
   ),
   "leadership.candidates.#.leadsTeam": boolean(
-    "one leadership candidate already leading a team",
-    "one leadership candidate not yet leading a team"
+    perRow(
+      CANDIDATES,
+      (who, n) => `${who} already leading ${n === 1 ? "a team" : "teams"}`
+    ),
+    perRow(
+      CANDIDATES,
+      (who, n) => `${who} not yet leading ${n === 1 ? "a team" : "teams"}`
+    )
   ),
   "leadership.isEmpty": boolean(
     "no leadership candidates yet",
@@ -388,15 +495,23 @@ const FACT_PHRASES: Record<string, FactPhrase> = {
 
   // -- manual self-attestations ---------------------------------------------
   "manual.attestations.#.signalKey": (value) =>
-    value ? `a self-report about ${toWords(value)}` : null,
+    value
+      ? perRow(SELF_REPORTS, (report) => `${report} about ${toWords(value)}`)
+      : null,
   "manual.attestations.#.value": (value) => {
     const flag = toBoolean(value);
-    if (flag === null) return value ? `a self-report of ${value}` : null;
-    return flag
-      ? "something you confirmed"
-      : "something you have not confirmed";
+    if (flag === null) {
+      return value
+        ? perRow(SELF_REPORTS, (report) => `${report} of ${toWords(value)}`)
+        : null;
+    }
+    return perRow(ATTESTED_THINGS, (thing) =>
+      flag ? `${thing} you confirmed` : `${thing} you have not confirmed`
+    );
   },
-  "manual.attestations.#.attestedAt": date((d) => `a self-report from ${d}`),
+  "manual.attestations.#.attestedAt": date((d) =>
+    perRow(SELF_REPORTS, (report) => `${report} from ${d}`)
+  ),
   "manual.isEmpty": boolean(
     "nothing self-reported yet",
     "self-reports on record"
@@ -471,15 +586,9 @@ function fallbackLabel(normalized: string): string {
 // Public API.
 // ----------------------------------------------------------------------------
 
-/**
- * Turn one stored citation into a phrase a planter reads.
- *
- * Never throws and never returns ledger syntax: an unrecognised path degrades
- * to a de-camelised label plus a humanised value. Returns `""` only for an
- * empty input, which `formatCitedFacts` drops.
- */
-export function formatCitedFact(fact: string): string {
-  if (typeof fact !== "string" || fact.trim() === "") return "";
+/** Resolve one citation to its phrase, or `null` when there is nothing to say. */
+function buildPhrase(fact: unknown): Phrase | null {
+  if (typeof fact !== "string" || fact.trim() === "") return null;
 
   const { path, value } = parseCitedFact(fact);
   const normalized = normalizePath(path);
@@ -494,27 +603,71 @@ export function formatCitedFact(fact: string): string {
 }
 
 /**
+ * Turn one stored citation into a phrase a planter reads.
+ *
+ * Never throws and never returns ledger syntax: an unrecognised path degrades
+ * to a de-camelised label plus a humanised value. Returns `""` only for an
+ * empty input, which `formatCitedFacts` drops. A row fact renders as its
+ * singular here — one citation is one row; counting is `formatCitedFacts`'
+ * job, because only the whole column knows how many rows agreed.
+ */
+export function formatCitedFact(fact: string): string {
+  const phrase = buildPhrase(fact);
+  return phrase === null ? "" : renderPhrase(phrase, 1);
+}
+
+/**
  * Humanise a whole `cited_facts` column.
  *
  * Takes `unknown` because the column is `jsonb`: both render surfaces would
  * otherwise repeat the same cast, and a malformed row must degrade to "no
- * citations" rather than crash the page. Duplicates are collapsed — several
- * per-row citations can legitimately humanise to the same phrase, and "one
- * leadership candidate, one leadership candidate" reads as a bug.
+ * citations" rather than crash the page.
+ *
+ * Several per-row citations legitimately humanise to the same phrase, and
+ * "one leadership candidate, one leadership candidate" reads as a bug. They
+ * are therefore grouped — but a group of anonymous rows becomes a COUNT, not a
+ * single row: three candidates cited render "3 leadership candidates". The
+ * earlier collapse said "one", which understated the very evidence the
+ * citation exists to carry (ruling on #154).
+ *
+ * Two de-duplications are at work and they are not the same:
+ *
+ *   - the SAME citation written twice is one row (`citationIdentity` keeps the
+ *     index, so `candidates.0` twice counts once);
+ *   - DIFFERENT rows that read alike are one phrase carrying a count
+ *     (`candidates.0.tenureDays=90` and `candidates.1.tenureDays=90` are two).
+ *
+ * Phrases with a fixed subject — including ones that name their row, like a
+ * ministry role's own label — carry no count and simply group.
  */
 export function formatCitedFacts(citedFacts: unknown): string[] {
   if (!Array.isArray(citedFacts)) return [];
 
-  const phrases: string[] = [];
+  const groups = new Map<string, { phrase: Phrase; rows: number }>();
   const seen = new Set<string>();
 
   for (const fact of citedFacts) {
-    if (typeof fact !== "string") continue;
-    const phrase = formatCitedFact(fact);
-    if (!phrase || seen.has(phrase)) continue;
-    seen.add(phrase);
-    phrases.push(phrase);
+    if (typeof fact !== "string" || fact.trim() === "") continue;
+
+    const identity = citationIdentity(fact);
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+
+    const phrase = buildPhrase(fact);
+    if (phrase === null) continue;
+
+    // Group on the singular: it is the phrase's identity, independent of how
+    // many rows end up in the group.
+    const key = renderPhrase(phrase, 1);
+    const group = groups.get(key);
+    if (group) {
+      group.rows += 1;
+      continue;
+    }
+    groups.set(key, { phrase, rows: 1 });
   }
 
-  return phrases;
+  return [...groups.values()].map(({ phrase, rows }) =>
+    renderPhrase(phrase, rows)
+  );
 }

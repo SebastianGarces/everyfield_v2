@@ -294,13 +294,108 @@ test("formatCitedFacts humanises a whole column in order", () => {
   );
 });
 
-test("formatCitedFacts collapses phrases that humanise identically", () => {
+// ----------------------------------------------------------------------------
+// Duplicate anonymous citations aggregate to a count (ruling on #154).
+// ----------------------------------------------------------------------------
+
+test("formatCitedFacts counts rows that humanise identically", () => {
   assert.deepEqual(
     formatCitedFacts([
       "leadership.candidates[0].personId=6f1d2c3b-4a5e-4f60-8b71-9c2d3e4f5a6b",
       "leadership.candidates[1].personId=7a2e3d4c-5b6f-4071-9c82-ad3e4f5b6c7d",
     ]),
+    ["2 leadership candidates"]
+  );
+});
+
+test("three rows read as a count, not a repeat and not one", () => {
+  assert.deepEqual(
+    formatCitedFacts([
+      "leadership.candidates.0.personId=6f1d2c3b-4a5e-4f60-8b71-9c2d3e4f5a6b",
+      "leadership.candidates.1.personId=7a2e3d4c-5b6f-4071-9c82-ad3e4f5b6c7d",
+      "leadership.candidates.2.personId=8b3f4e5d-6c70-4182-ad93-be4f5a6c7d8e",
+    ]),
+    ["3 leadership candidates"]
+  );
+});
+
+test("a lone anonymous citation keeps the singular copy", () => {
+  assert.deepEqual(
+    formatCitedFacts(["leadership.candidates.0.tenureDays=90"]),
+    ["one leadership candidate 90 days in"]
+  );
+});
+
+test("a counted phrase pluralises the whole clause, not just the subject", () => {
+  assert.deepEqual(
+    formatCitedFacts([
+      "leadership.candidates.0.tenureDays=90",
+      "leadership.candidates.1.tenureDays=90",
+      "leadership.candidates.2.tenureDays=90",
+    ]),
+    ["3 leadership candidates each 90 days in"]
+  );
+  assert.deepEqual(
+    formatCitedFacts([
+      "leadership.candidates.0.leadsTeam=true",
+      "leadership.candidates.1.leadsTeam=true",
+    ]),
+    ["2 leadership candidates already leading teams"]
+  );
+  assert.deepEqual(
+    formatCitedFacts([
+      "ministryRoles.roles.0.filled=false",
+      "ministryRoles.roles.1.filled=false",
+      "ministryRoles.roles.2.filled=false",
+    ]),
+    ["no leaders yet for 3 ministry roles"]
+  );
+});
+
+test("a count keeps the underlying number visible and leaks no syntax", () => {
+  const [rendered] = formatCitedFacts([
+    "leadership.candidates.0.meetingsAttended=4",
+    "leadership.candidates.1.meetingsAttended=4",
+  ]);
+
+  assert.equal(rendered, "2 leadership candidates each at 4 vision meetings");
+  assert.doesNotMatch(rendered, LEDGER_SYNTAX);
+  assert.doesNotMatch(rendered, CAMEL_CASE);
+  assert.ok(!rendered.includes("="));
+});
+
+test("the same row cited twice is one row, not two", () => {
+  assert.deepEqual(
+    formatCitedFacts([
+      "leadership.candidates[0].personId=6f1d2c3b-4a5e-4f60-8b71-9c2d3e4f5a6b",
+      "leadership.candidates.0.personId=6f1d2c3b-4a5e-4f60-8b71-9c2d3e4f5a6b",
+    ]),
     ["one leadership candidate"]
+  );
+});
+
+test("rows that differ still read as separate phrases", () => {
+  assert.deepEqual(
+    formatCitedFacts([
+      "leadership.candidates.0.tenureDays=90",
+      "leadership.candidates.1.tenureDays=12",
+    ]),
+    [
+      "one leadership candidate 90 days in",
+      "one leadership candidate 12 days in",
+    ]
+  );
+});
+
+test("a phrase that names its row groups without counting", () => {
+  // `roles.#.key` and `roles.#.label` name the SAME role two ways; counting
+  // them would claim two roles where there is one.
+  assert.deepEqual(
+    formatCitedFacts([
+      "ministryRoles.roles.2.key=small_groups",
+      "ministryRoles.roles.2.label=Small groups",
+    ]),
+    ["the small groups ministry role"]
   );
 });
 
