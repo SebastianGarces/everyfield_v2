@@ -491,3 +491,131 @@ fully rolling behaviour arrives with the scheduled dispatcher, which can close i
 (grouping, ordering, cycle rejection, frontier handling), run by stubbing the workflow globals so they
 cost no agent calls. `pnpm test`'s glob was widened to `ops/**/*.test.mjs` to run them; that glob was
 also what stranded the earlier HR4 harness.
+
+---
+
+## 11. The claim step swept the whole board (2026-07-26)
+
+The second component to look correct and fail on every run — after `board-sync` (§9). Same lesson, so it
+is recorded the same way: against the run log, not against intent.
+
+**What happened.** A `dispatch` pass of **2 units** claimed **35 issues**. A second pass of 1 unit claimed
+the remaining 5. Net effect: the entire `agent:queued` label was flipped to `agent:in-progress` — 29 issues
+that had no branch, no worktree and no agent.
+
+**The evidence.** Two sweeps, each starting seconds after a workflow launched, in descending issue order:
+
+| Sweep | Started | Launched at | Units in that pass | Issues claimed |
+|-------|---------|-------------|--------------------|----------------|
+| 1 | 19:40:21 UTC | 19:40:06 (+15s) | 2 | 30 |
+| 2 | 19:46:58 UTC | 19:46:12 (+46s) | 1 | 5 |
+
+30-then-5 is the tell: `gh issue list` pages at 30 by default, so the first sweep took a full page and the
+second took what was left after the first had been relabelled. `git branch -a` showed exactly 8 feature
+branches — one per genuinely dispatched track — and none for the other 29.
+
+**Why it happened.** `build-until-done.js`'s claim step delegated labelling to an agent whose prompt was
+**already correctly scoped** to `track.issues`. It ran on `haiku` at `effort: low` under a comment reading:
+
+> `// Two shell commands and a fixed return value. No judgment involved.`
+
+That assumption is the bug. The step involved no judgment *as specified*, so it got the cheapest model and
+no verification — and the cheapest model resolved "claim the issues for this track" into "claim the queued
+work", which is a locally reasonable reading of a board whose whole vocabulary is about claiming queued
+work. A correct instruction with no check on its blast radius is not a control.
+
+**Why it mattered more than it looked.** Nothing was built wrongly and no code was harmed. The damage was
+to the board's meaning: `dispatch`'s gate 2 ("nothing is already in flight") saw 35 claims and would have
+refused **every future pass**, and `standup` would have reported 29 items as underway. An autonomous
+factory whose durable state lies about itself is worse than one that has stopped, because it looks like it
+is working.
+
+It also went undetected through two full passes. It was found only because a routine `agent:queued` count
+came back as 11 when it should have been ~37 — i.e. by a number looking wrong in passing, not by any gate.
+
+**The fix.** The blast radius is now asserted rather than assumed:
+
+- `PASS_ISSUES` is computed once — the complete set of issues a pass may touch.
+- The claim prompt forbids `gh issue list` / `gh search` for *deciding what to edit*, states the exact
+  expected count, and returns both what it edited and the current global `agent:in-progress` set.
+- Any issue carrying `agent:in-progress` outside `PASS_ISSUES` **throws**, aborting the track. `parallel()`
+  surfaces it through the existing `lost` path, so it is reported rather than swallowed.
+
+**The generalisable rule.** *Assign a cheap model to a step whose instruction is unambiguous, but never to
+one whose blast radius is unbounded.* Cost tiering is fine; unverified mutation of shared state is not. Any
+step that writes durable state on the board should report what it touched and have that compared against
+what it was permitted to touch.
+
+**Not fixed here.** The revert was done by hand (29 label flips, live tracks protected by branch existence).
+There is no tooling to reconcile the board against `git branch -a`, which is the check that made the
+diagnosis obvious and would make the next one instant.
+
+---
+
+## 12. Auto-merge — the queue holds decisions, not diffs (2026-07-26)
+
+Eight tracks reached PR in one afternoon. The developer's report: *"this workflow velocity is much
+greater than I can review… I get overwhelmed from the sheer volume and context switching."* That is the
+bottleneck §9's dispatcher was designed around rather than solved, and the honest reading is that a
+factory whose output must pass one person's attention is capped by that person, not by its gates.
+
+### What the batch actually showed
+
+Both directions, clearly:
+
+**The gates outperformed a human review.** G3 blocked #74 over duplicate DOM `id`s affecting 15 of 96
+wiki articles — a bug the test suite had **blessed**, because `toc.test.ts:106` asserted the
+non-deduping behaviour as an accepted trade-off. 185/185 tests passed. No amount of diff-reading would
+have caught it; only exercising the real page did.
+
+**And three PRs raised things no gate could settle:**
+
+| PR | The warning | Kind |
+|----|-------------|------|
+| #137 | "is offering a generic church-wide packet the intended read of DOC-014?" | needs the requirement's owner |
+| #127 | a bogus `?channel=` blanks the dropdowns — *passed*, because the AC only said "ignored, not crashing" | the AC did not say |
+| #136 | a doc comment claims the guard covers concurrent finalizes; it does not | decidable from the code |
+
+The first two need a human. The third does not — it is a defect, and defects are what this system is
+already good at turning into tracked work.
+
+### The rule
+
+> **The DoD proves the code does what the spec said. It cannot prove the spec was right.**
+
+So the gate is not severity, and it is not risk. It is whether answering a warning could change *what
+was built*:
+
+- **spec-question** → the track is **held**. Product intent, an AC that did not say, a requirement that
+  reads two ways.
+- **code-quality** → filed as a follow-up issue, and the track **merges**. The issue lands on the
+  frontier and re-enters the same loop.
+
+A track auto-merges only when the DoD passed, the required check is green, it is not `risk:high`, and
+no warning is a spec-question. `risk:high` is excluded unconditionally: schema, auth and tenancy are
+where a bad merge is unrecoverable.
+
+The asymmetry is deliberate and is stated to the verifier: a code-quality item wrongly held wastes a
+little attention; a spec-question wrongly merged ships a product decision the human never made. **When
+torn, hold.**
+
+### What this changes about the review queue
+
+It stops being a queue of diffs and becomes a queue of **decisions**. Gate 1's cap now counts only held
+PRs, which means a rising queue is a signal about *intake quality* — specs going in underdetermined —
+not about the cap being too low. Fix the intake, not the number.
+
+### The precondition nobody would have noticed
+
+`strict_required_status_checks_policy` was **false**. With eight tracks merging in parallel, two PRs
+each green against an *older* `main` could both merge and break it, with nothing watching. Turned on
+2026-07-26: a branch must be up to date and re-pass CI before merging, so "green" means green against
+what it actually lands on. This costs a CI re-run per merge and is not optional — parallel auto-merge
+without it is a race with a broken `main` as the prize.
+
+### Not solved here
+
+- **Nothing watches `main` after a merge.** If a merge breaks it anyway, no revert path exists.
+- **Follow-up issues inherit the ACs of nothing.** They are filed from a warning, so they are only as
+  good as the warning's detail field.
+- Auto-merge is off by default and `dispatch` opts in, so a direct `/deliver` cannot merge by surprise.

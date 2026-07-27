@@ -11,7 +11,15 @@ import { Document, Page, Text, View } from "@react-pdf/renderer";
 import type { DocumentMergeValues } from "../types";
 import { styles } from "./styles";
 
-const TEAMS: { team: string; items: string[] }[] = [
+/**
+ * The packet's sections, in print order. This is the single source of truth
+ * for the section names — `src/lib/documents/contextual.ts` types its
+ * team→section mapping against `LaunchChecklistSection` (a type-only import,
+ * so none of react-pdf reaches a feature page's bundle), and a rename here
+ * fails `pnpm typecheck` there instead of silently promising the UI a
+ * checklist that no longer exists.
+ */
+export const TEAMS = [
   {
     team: "Setup & Teardown",
     items: [
@@ -71,7 +79,14 @@ const TEAMS: { team: string; items: string[] }[] = [
       "Prayer requests collected and assigned",
     ],
   },
-];
+] as const satisfies readonly { team: string; items: readonly string[] }[];
+
+/** A section name the packet actually contains. */
+export type LaunchChecklistSection = (typeof TEAMS)[number]["team"];
+
+/** The section names, in print order. */
+export const LAUNCH_CHECKLIST_SECTION_NAMES: readonly LaunchChecklistSection[] =
+  TEAMS.map(({ team }) => team);
 
 export function LaunchSundayChecklistsDocument({
   values,

@@ -93,6 +93,23 @@ That is the intended path — a red check is information, not an emergency.
 - Console: no errors
 - Migration (if any): applied; rollback verified; schema diff below
 
+## 👀 Manual QA
+
+**Preview:** <vercel preview URL> → <exact path(s) to open>
+
+**Walk the happy path** (~N min)
+1. <concrete click-by-click step>
+2. <…>
+   - Expect: <what should happen>
+
+**What the automation could NOT check** — this is where your eyes actually add something:
+- <judgement call: does the layout read right, is the copy sensible, does it feel fast>
+- <edge case asserted by no AC>
+- <anything the DoD proved *compiles and responds* but not that it is *good*>
+
+**Known limitations / deliberate cuts**
+- <scope explicitly excluded, so it does not read as a bug>
+
 <details><summary>Schema diff (high-risk only)</summary>
 
 ```sql
@@ -107,6 +124,12 @@ That is the intended path — a red check is information, not an emergency.
 
 - **Closes #<issue>** in the body so merging closes the board item — no manual bookkeeping.
 - **Never open a PR without the evidence table.** The table is the contract with the reviewer.
+- **Never open a PR without the Manual QA section**, and never let it restate the acceptance criteria.
+  G3 already proved the ACs; repeating them wastes the one scarce resource in this system, which is
+  human attention. The section earns its place only by naming what the automation *cannot* judge —
+  whether it looks right, reads right, feels right, and whether an unasserted edge case bites. If a
+  track genuinely has nothing a human should eyeball (a pure refactor, a docs change), say that in one
+  line rather than padding the list.
 - Conventional-commit-style title with the issue number.
 - One PR per track/issue. Don't bundle unrelated work.
 - End the PR body with the Claude Code attribution line (per repo convention).

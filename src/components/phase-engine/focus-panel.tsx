@@ -8,8 +8,9 @@
 // snapshot (PE-016). Each insight is an InsightCard with its severity, body,
 // cited facts, wiki links, and feedback control.
 //
-// This component performs NO data access — it is handed the assessment, its
-// insights, and the current user's prior feedback by the page.
+// This component performs NO data access itself — it is handed the assessment,
+// its insights, and the current user's prior feedback by the page. (Its
+// InsightCard child does read the published-wiki slug index; see PE-024 there.)
 // ============================================================================
 
 import { ArrowDown, ArrowUp, Minus } from "lucide-react";
