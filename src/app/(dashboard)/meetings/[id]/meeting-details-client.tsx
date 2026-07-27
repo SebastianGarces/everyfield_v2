@@ -36,6 +36,11 @@ import {
   updateMeetingStatusAction,
 } from "@/app/(dashboard)/meetings/actions";
 import { MeetingForm } from "@/components/meetings/meeting-form";
+// This component is SSR'd and then hydrated, so it must format the meeting time
+// through the shared zone-pinned helpers — a locale-default format renders one
+// string on the server and another in the browser (React #418) and drifts away
+// from the server-only header above it. See src/lib/datetime.ts.
+import { formatDate, formatTime } from "@/lib/datetime";
 import type { MeetingWithCounts } from "@/lib/meetings/types";
 import type { Location, MeetingStatus } from "@/db/schema";
 
@@ -54,23 +59,6 @@ const statusTransitions: Record<
   completed: null,
   cancelled: null,
 };
-
-function formatDate(date: Date): string {
-  return new Intl.DateTimeFormat("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  }).format(new Date(date));
-}
-
-function formatTime(date: Date): string {
-  return new Intl.DateTimeFormat("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  }).format(new Date(date));
-}
 
 function getMeetingTitle(meeting: MeetingWithCounts): string {
   if (meeting.type === "vision_meeting" && meeting.meetingNumber) {

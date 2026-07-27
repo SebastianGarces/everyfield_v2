@@ -10,12 +10,15 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@/components/ui/tooltip";
-import { format } from "date-fns";
 import {
   renderTemplate,
   buildChurchMergeData,
   buildMeetingMergeData,
 } from "@/lib/communication/merge";
+// date-fns `format` renders in the runtime's zone, which differs between the
+// SSR pass and the browser — one more React #418 on this page. See
+// src/lib/datetime.ts.
+import { formatDateTime } from "@/lib/datetime";
 
 interface CommunicationSummary {
   id: string;
@@ -122,7 +125,7 @@ export function MeetingCommunicationStatus({
                 </p>
                 <p className="text-muted-foreground text-xs">
                   {comm.sentAt
-                    ? format(new Date(comm.sentAt), "MMM d, yyyy 'at' h:mm a")
+                    ? formatDateTime(new Date(comm.sentAt), "short")
                     : "Draft"}
                 </p>
               </div>
