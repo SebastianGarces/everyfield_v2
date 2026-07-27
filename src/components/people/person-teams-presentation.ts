@@ -102,14 +102,40 @@ const MONTHS = [
 ];
 
 /**
- * Format a `date` column (`YYYY-MM-DD`) without going through `Date`, which
- * would parse the value as UTC and shift the day for anyone west of Greenwich.
+ * The one date formatter for the Teams & Training tab — membership start dates
+ * and training completions both go through it.
+ *
+ * Two input shapes, one output:
+ *
+ * - A `date` column arrives as `YYYY-MM-DD` and is read straight off the
+ *   string. Handing it to `Date` would parse it as UTC midnight and shift the
+ *   day backwards for anyone west of Greenwich.
+ * - A `timestamp` column arrives as a `Date` and is read through the local-time
+ *   getters. Going via `toISOString()` would pin the day to UTC, so a
+ *   completion recorded at 23:30 local would display as the following day.
+ *
+ * "Local" is the timezone of whatever runtime renders the card. Both callers
+ * are server components today, so that is the server's zone (UTC on Vercel),
+ * not the viewer's. Showing a viewer's — or a church's — own calendar day
+ * needs a timezone decision this helper cannot make on its own.
+ *
  * Returns null for a missing or unparseable value so the caller can omit it.
  */
-export function formatMembershipStart(startDate: string | null): string | null {
-  if (!startDate) return null;
+export function formatCalendarDate(
+  value: Date | string | null | undefined
+): string | null {
+  if (!value) return null;
 
-  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(startDate);
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null;
+
+    const monthName = MONTHS[value.getMonth()];
+    if (!monthName) return null;
+
+    return `${monthName} ${value.getDate()}, ${value.getFullYear()}`;
+  }
+
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
   if (!match) return null;
 
   const [, year, month, day] = match;

@@ -12,7 +12,7 @@ import {
 import type { PersonTeamAssignment } from "@/lib/ministry-teams/service";
 
 import {
-  formatMembershipStart,
+  formatCalendarDate,
   sortTeamAssignments,
 } from "./person-teams-presentation";
 
@@ -61,7 +61,7 @@ export function PersonTeamAssignments({
         ) : (
           <ul className="divide-border divide-y">
             {sorted.map((assignment) => {
-              const startedOn = formatMembershipStart(assignment.startDate);
+              const startedOn = formatCalendarDate(assignment.startDate);
 
               return (
                 <li

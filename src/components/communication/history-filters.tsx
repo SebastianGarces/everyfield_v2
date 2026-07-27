@@ -2,7 +2,7 @@
 
 import { Search, X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useRef, useTransition } from "react";
+import { useCallback, useMemo, useRef, useTransition } from "react";
 import { useDebouncedCallback } from "use-debounce";
 
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,8 @@ import {
   communicationChannels,
   communicationStatuses,
 } from "@/db/schema/communication";
+
+import { deriveHistoryFilterState } from "./history-filters-presentation";
 
 const CHANNEL_LABELS: Record<string, string> = {
   email: "Email",
@@ -81,10 +83,15 @@ export function HistoryFilters() {
     pushParams(new URLSearchParams());
   }, [handleSearch, pushParams]);
 
-  const currentChannel = searchParams.get("channel") ?? "";
-  const currentStatus = searchParams.get("status") ?? "";
-  const currentSearch = searchParams.get("search") ?? "";
-  const hasFilters = Boolean(currentChannel || currentStatus || currentSearch);
+  // Narrow the URL through the SAME schema the page's server component uses,
+  // so a value the server refused to honour never shows up as a selected
+  // filter or as something to clear.
+  const {
+    channel: currentChannel,
+    status: currentStatus,
+    search: currentSearch,
+    hasFilters,
+  } = useMemo(() => deriveHistoryFilterState(searchParams), [searchParams]);
 
   return (
     <div
@@ -110,7 +117,7 @@ export function HistoryFilters() {
       </div>
 
       <Select
-        value={currentChannel || "all"}
+        value={currentChannel}
         onValueChange={(value) => updateParam("channel", value)}
       >
         <SelectTrigger
@@ -137,7 +144,7 @@ export function HistoryFilters() {
       </Select>
 
       <Select
-        value={currentStatus || "all"}
+        value={currentStatus}
         onValueChange={(value) => updateParam("status", value)}
       >
         <SelectTrigger
