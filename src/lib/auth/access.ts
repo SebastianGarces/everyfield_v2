@@ -122,7 +122,9 @@ export type PrivacyFeatureKey =
   | "tasks"
   | "financials"
   | "ministry_teams"
-  | "facilities";
+  | "facilities"
+  | "phase"
+  | "digest";
 
 /** Maps feature keys to their corresponding column in church_privacy_settings */
 const PRIVACY_COLUMN_MAP: Record<
@@ -135,6 +137,8 @@ const PRIVACY_COLUMN_MAP: Record<
   financials: "shareFinancials",
   ministry_teams: "shareMinistryTeams",
   facilities: "shareFacilities",
+  phase: "sharePhase",
+  digest: "shareDigest",
 };
 
 /**
