@@ -38,6 +38,11 @@ file-disjoint** where possible (smaller tracks → cleaner parallel waves, cheap
    Use `needs-spec` instead of `agent:queued` when an open question inside the spec still changes what
    gets built — a blocked build is cheaper to prevent than to unwind. Title requirement issues with
    their FRD ID (`W-010 — Template linking`) so the doc and the board share one vocabulary.
+8. **If the open question is a direction question** — 2+ plausible directions where trying them beats
+   reading about them — don't stop at the `needs-spec` label: invoke the `prototype` skill
+   (`.claude/skills/prototype/SKILL.md`). The issue then carries live candidates (UI variants behind
+   the switcher on a preview, or a runnable CLI for behavior) and a DECISION comment the human can
+   rule on directly — `go with A`, `combine A's <x> with B's <y>`, or `riff on B`.
 
 ## Issue template
 

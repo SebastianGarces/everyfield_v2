@@ -608,12 +608,14 @@ THEN WAIT FOR CI AND REPORT WHAT IT SAID, NOT WHAT YOU BELIEVE:
 Reason(s) it is held:
 ${holds.map((h) => `- ${h}`).join("\n")}
 
-${specQuestions.length ? `The decisions the human must make:\n${specQuestions.map((w) => `- **${w.summary}** — ${w.detail || "(no detail given)"}`).join("\n")}\n\nPresent each as a decision with its options, not as a defect report. The reviewer's job here is to RULE, not to hunt.` : ""}
+${specQuestions.length ? `The decisions the human must make:\n${specQuestions.map((w) => `- **${w.summary}** — ${w.detail || "(no detail given)"}`).join("\n")}\n\nPresent each as a decision with its options, not as a defect report. The reviewer's job here is to RULE, not to hunt.\n\nIf a decision is a DIRECTION question — two or more plausible directions where trying them beats reading about them — invoke the prototype skill (.claude/skills/prototype/SKILL.md) BEFORE commenting: build 3-4 candidates into this PR's branch (UI question → variants behind the prototype switcher, then ./scripts/preview-url.sh --wait --bypass for the link; behavior question → a throwaway CLI under prototypes/), verify each one works, and write the DECISION comment in the skill's format so the reviewer can operate the options instead of imagining them.` : ""}
 Return strictly {"merged": false, "state": "refused", "detail": "<one line>"}.`,
           {
             label: `hold:${track.id}`,
             phase: "Ship",
-            effort: "low",
+            // Not "low": a direction-shaped spec-question means this agent
+            // builds live prototypes before it comments, not just a comment.
+            effort: "medium",
             schema: MERGE_SCHEMA,
           }
         );

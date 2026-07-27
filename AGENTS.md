@@ -64,6 +64,7 @@ Available components: https://ui.shadcn.com/docs/components
 | UI polish, accessibility, typography, color, copy | `.agents/skills/better-interface/` (coordinates the `better-*` suite) |
 | Proving a UI change works in a browser | `.claude/skills/browser-validation/SKILL.md` |
 | A fuzzy ask, before writing a spec | `.claude/skills/grilling/SKILL.md` |
+| A direction question needing a ruling (spec-question hold / needs-spec) | `.claude/skills/prototype/SKILL.md` |
 | A merge/rebase conflict (esp. wave branches) | `.claude/skills/resolving-merge-conflicts/SKILL.md` |
 | Adding a skill — who may invoke it | `ops/agent-os/invocation.md` |
 | The delivery workflow end-to-end (diagram) | `ops/agent-os/workflow.md` |
