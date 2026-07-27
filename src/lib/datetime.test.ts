@@ -8,6 +8,7 @@ import {
   formatDate,
   formatDateTime,
   formatRelativeDay,
+  formatRelativeTimestamp,
   formatTime,
   parseDateTimeLocalValue,
   relativeDayOffset,
@@ -252,4 +253,39 @@ test("relative labels count whole calendar days in both directions", () => {
   for (const [iso, expected] of cases) {
     assert.equal(formatRelativeDay(new Date(iso), now), expected, iso);
   }
+});
+
+// ----------------------------------------------------------------------------
+// The feed's elapsed-time label (N-008). Finer-grained than the calendar-day
+// label, and pinned the same way: `now` is a parameter, so the string a client
+// renders after hydration is the string the server sent.
+// ----------------------------------------------------------------------------
+
+test("elapsed labels step from minutes to hours to days, then to a date", () => {
+  const now = new Date("2026-07-30T12:00:00Z");
+  const cases: [string, string][] = [
+    ["2026-07-30T11:59:30Z", "Just now"],
+    ["2026-07-30T11:48:00Z", "12m ago"],
+    ["2026-07-30T07:00:00Z", "5h ago"],
+    ["2026-07-27T12:00:00Z", "3d ago"],
+    // Past a week the elapsed count stops helping and the date takes over.
+    ["2026-07-20T12:00:00Z", "Mon, Jul 20, 2026"],
+  ];
+
+  for (const [iso, expected] of cases) {
+    assert.equal(formatRelativeTimestamp(new Date(iso), now), expected, iso);
+  }
+});
+
+test("a not-yet-elapsed instant reads as future, never as 0m ago", () => {
+  const now = new Date("2026-07-30T12:00:00Z");
+
+  assert.equal(
+    formatRelativeTimestamp(new Date("2026-07-30T12:05:00Z"), now),
+    "In 5m"
+  );
+  assert.equal(
+    formatRelativeTimestamp(new Date("2026-07-31T14:00:00Z"), now),
+    "In 1d"
+  );
 });

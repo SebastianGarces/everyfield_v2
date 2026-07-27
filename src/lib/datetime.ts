@@ -165,3 +165,44 @@ export function formatRelativeDay(date: Date, now: Date = new Date()): string {
   if (days === -1) return "Yesterday";
   return days > 0 ? `In ${days} days` : `${Math.abs(days)} days ago`;
 }
+
+const MS_PER_MINUTE = 60_000;
+
+/**
+ * A short, elapsed-time label for a feed: `"Just now"`, `"12m ago"`, `"5h ago"`,
+ * `"3d ago"`, then an absolute short date once it stops being useful.
+ *
+ * Finer-grained than `formatRelativeDay`, which answers a scheduling question
+ * ("is this meeting today?") in whole calendar days. A notification arriving
+ * eleven minutes ago and one arriving eleven hours ago are both "Today", and
+ * the difference is exactly what the reader of a feed wants.
+ *
+ * `now` is a parameter, not a call to the clock, and that is load-bearing:
+ * memory/invariants.md → Date & Time Rendering. A client component that
+ * recomputed this at hydration would render a different string than the server
+ * did and trip React #418, so the caller passes ONE instant for the whole
+ * render — and the fallback goes through `formatDate`, which is pinned to
+ * `APP_TIME_ZONE`, rather than through a runtime-local formatter.
+ *
+ * Future instants are labelled too (`"In 5m"`), so a caller that hands this a
+ * scheduled-ahead row gets something honest rather than "0m ago".
+ */
+export function formatRelativeTimestamp(
+  date: Date,
+  now: Date = new Date()
+): string {
+  const elapsedMs = now.getTime() - date.getTime();
+  const isFuture = elapsedMs < 0;
+  const minutes = Math.floor(Math.abs(elapsedMs) / MS_PER_MINUTE);
+
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return isFuture ? `In ${minutes}m` : `${minutes}m ago`;
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return isFuture ? `In ${hours}h` : `${hours}h ago`;
+
+  const days = Math.floor(hours / 24);
+  if (days < 7) return isFuture ? `In ${days}d` : `${days}d ago`;
+
+  return formatDate(date, "short");
+}

@@ -3,11 +3,13 @@ import {
   count,
   desc,
   eq,
+  inArray,
   isNull,
   lt,
   lte,
   ne,
   or,
+  sql,
   type SQL,
 } from "drizzle-orm";
 import { db } from "@/db";
@@ -109,22 +111,54 @@ export function dispatcherWhere(
 
 /**
  * The queue row and the feed row are one record (see the schema header), so the
- * feed has to say which queue states are user-visible. Two are not:
+ * feed has to say which queue states are user-visible. Three things are not:
  *
  * - `cancelled` — N-011 says a cancelled notification is never delivered. The
  *   in-app feed IS a delivery channel, so a cancelled row must leave it.
  * - not yet due — a reminder enqueued three days ahead would otherwise appear,
  *   and increment the unread badge, three days early.
+ * - a category the recipient has switched OFF for the `in_app` channel (N-005,
+ *   ruled 2026-07-27). `categories` is the resolved allow-list from
+ *   `resolveInAppCategories` (./preferences); omitting it means "no preference
+ *   filter", which is what the dispatcher-adjacent and by-id callers want.
  *
  * Applied to EVERY user-facing read — the feed, the unread count and the
- * single-row fetch by id — so the badge can never disagree with the list it
- * counts, and the by-id path can never hand back what the list is hiding.
+ * cold-start probe — so the badge can never disagree with the list it counts,
+ * and "nothing yet" can never be claimed while rows are on screen.
+ *
+ * Exported because the MARK-READ writes (`./mark-read`) need the identical
+ * predicate, not a second copy of it: "mark all read" that ignored these rules
+ * would stamp `read_at` on a reminder scheduled for next week, so it would
+ * arrive already-read and never be seen — and it would burn the unread state of
+ * a category the user has hidden, which they would get back already-read the
+ * day they turn it on again. A user can only mark read what the feed was
+ * allowed to show them.
  */
-function feedVisibility(now: Date): (SQL | undefined)[] {
+export function feedVisibility(
+  now: Date,
+  categories?: readonly NotificationCategory[]
+): (SQL | undefined)[] {
   return [
     ne(notifications.status, "cancelled"),
     lte(notifications.scheduledFor, now),
+    categoryAllowList(categories),
   ];
+}
+
+/**
+ * `category IN (...)`, or a predicate that matches nothing.
+ *
+ * The empty allow-list is the case worth spelling out: a user who has turned
+ * every category off has asked to see nothing, and `inArray(col, [])` is not a
+ * safe way to say so — it is the shape where an ORM is most likely to fold the
+ * clause away and return everything. `false` fails closed, and it is asserted.
+ */
+function categoryAllowList(
+  categories?: readonly NotificationCategory[]
+): SQL | undefined {
+  if (categories === undefined) return undefined;
+  if (categories.length === 0) return sql`false`;
+  return inArray(notifications.category, [...categories]);
 }
 
 // ----------------------------------------------------------------------------
@@ -165,6 +199,23 @@ export interface FeedNotification {
 // ----------------------------------------------------------------------------
 
 /**
+ * What every user-facing read needs to know beyond WHO is asking.
+ *
+ * `now` is injectable so "not yet due" is assertable without waiting; the
+ * allow-list is threaded rather than resolved in here so the preference query
+ * happens ONCE per request (see `./feed`) instead of once per read path.
+ */
+export interface VisibilityOptions {
+  /** Injectable clock. Defaults to now. */
+  now?: Date;
+  /**
+   * Categories the recipient still wants in-app (N-005). Omitted means no
+   * preference filter; `[]` means nothing is visible.
+   */
+  categories?: readonly NotificationCategory[];
+}
+
+/**
  * One row, by id — and it carries the FEED's visibility rules, not a weaker set.
  *
  * A single-row read is a delivery channel too: it returns the same projection
@@ -172,13 +223,12 @@ export interface FeedNotification {
  * cancelled notification — one N-011 says is never delivered — and a reminder
  * scheduled three days out would both be readable by anyone who has, or
  * guesses, the id, undoing on this path exactly what the feed and the badge
- * enforce on theirs. `now` is injectable for the same reason it is on the feed:
- * so "not yet due" is assertable.
+ * enforce on theirs.
  */
 export function notificationByIdQuery(
   scope: NotificationScope,
   id: string,
-  now?: Date
+  options: VisibilityOptions = {}
 ) {
   return db
     .select(feedColumns)
@@ -187,13 +237,16 @@ export function notificationByIdQuery(
       scopedWhere(
         scope,
         eq(notifications.id, id),
-        ...feedVisibility(now ?? new Date())
+        ...feedVisibility(options.now ?? new Date(), options.categories)
       )
     )
     .limit(1);
 }
 
 export const DEFAULT_FEED_LIMIT = 30;
+
+/** Hard ceiling on one page, whatever a caller asks for. */
+export const MAX_FEED_LIMIT = 100;
 
 /**
  * Keyset cursor. It is a PAIR because `created_at` is not unique: it defaults
@@ -213,15 +266,13 @@ export function feedCursorFrom(row: FeedNotification): FeedCursor {
   return { createdAt: row.createdAt, id: row.id };
 }
 
-export interface FeedOptions {
+export interface FeedOptions extends VisibilityOptions {
   /** Hard cap; the feed is never unbounded. */
   limit?: number;
   /** Keyset pagination — rows strictly older than this `(createdAt, id)`. */
   before?: FeedCursor;
   category?: NotificationCategory;
   unreadOnly?: boolean;
-  /** Injectable clock, so "not yet due" is assertable. Defaults to now. */
-  now?: Date;
 }
 
 /** `(created_at, id) < (cursor.createdAt, cursor.id)`, spelled out. */
@@ -240,7 +291,10 @@ export function notificationFeedQuery(
   scope: NotificationScope,
   options: FeedOptions = {}
 ) {
-  const limit = Math.min(Math.max(options.limit ?? DEFAULT_FEED_LIMIT, 1), 100);
+  const limit = Math.min(
+    Math.max(options.limit ?? DEFAULT_FEED_LIMIT, 1),
+    MAX_FEED_LIMIT
+  );
 
   return (
     db
@@ -249,7 +303,7 @@ export function notificationFeedQuery(
       .where(
         scopedWhere(
           scope,
-          ...feedVisibility(options.now ?? new Date()),
+          ...feedVisibility(options.now ?? new Date(), options.categories),
           options.before ? olderThan(options.before) : undefined,
           options.category
             ? eq(notifications.category, options.category)
@@ -267,7 +321,10 @@ export function notificationFeedQuery(
  * Unread count for the app shell — the same visibility rules as the feed, so
  * the badge counts exactly the rows the feed lists.
  */
-export function unreadCountQuery(scope: NotificationScope, now?: Date) {
+export function unreadCountQuery(
+  scope: NotificationScope,
+  options: VisibilityOptions = {}
+) {
   return db
     .select({ value: count() })
     .from(notifications)
@@ -275,9 +332,41 @@ export function unreadCountQuery(scope: NotificationScope, now?: Date) {
       scopedWhere(
         scope,
         isNull(notifications.readAt),
-        ...feedVisibility(now ?? new Date())
+        ...feedVisibility(options.now ?? new Date(), options.categories)
       )
     );
+}
+
+/**
+ * Does this recipient have ANY visible notification at all (N-008, Screen 1)?
+ *
+ * This is the cold-start question, and it is genuinely different from "is the
+ * feed page empty right now". A church whose first week has produced nothing
+ * has to read as intentional ("nothing yet"), while a user whose UNREAD filter
+ * has run dry has to read as finished ("all caught up") — the same empty box
+ * cannot say both, and an empty box that says neither reads as broken.
+ *
+ * It carries the SAME visibility rules as the feed on purpose, preference
+ * allow-list included: `hasAny` false must imply the feed is empty, or the UI
+ * could claim a cold start while listing rows (or, worse, greet a church that
+ * has never been notified of anything as though it had read everything).
+ * `limit(1)` because the answer is a boolean — the count is the badge's job,
+ * not this one's.
+ */
+export function hasAnyNotificationsQuery(
+  scope: NotificationScope,
+  options: VisibilityOptions = {}
+) {
+  return db
+    .select({ id: notifications.id })
+    .from(notifications)
+    .where(
+      scopedWhere(
+        scope,
+        ...feedVisibility(options.now ?? new Date(), options.categories)
+      )
+    )
+    .limit(1);
 }
 
 /**
@@ -319,9 +408,9 @@ export function dispatchQueueQuery(
 export async function getNotificationById(
   scope: NotificationScope,
   id: string,
-  now?: Date
+  options: VisibilityOptions = {}
 ): Promise<FeedNotification | null> {
-  const [row] = await notificationByIdQuery(scope, id, now);
+  const [row] = await notificationByIdQuery(scope, id, options);
   return row ?? null;
 }
 
@@ -332,12 +421,85 @@ export async function listNotifications(
   return notificationFeedQuery(scope, options);
 }
 
+/**
+ * One page of the feed, plus the cursor that fetches the next one.
+ *
+ * `nextCursor` is null exactly when there is nothing older left, and that has
+ * to be knowable BEFORE the user clicks: a "Load more" that returns nothing is
+ * indistinguishable, to the person clicking it, from one that is broken. So the
+ * page is read with one extra row — the peek — which is dropped from the result
+ * and never leaves the server.
+ */
+export interface FeedPage {
+  rows: FeedNotification[];
+  nextCursor: FeedCursor | null;
+}
+
+/**
+ * Split a peeked read (`limit + 1` rows) into the page and its cursor.
+ *
+ * Pure and exported so the paging arithmetic — off-by-one at the boundary, the
+ * cursor taken from the LAST row of the page and not from the peek — is
+ * testable without a database.
+ */
+export function feedPageFrom(
+  rows: FeedNotification[],
+  limit: number
+): FeedPage {
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+  const last = page[page.length - 1];
+
+  return {
+    rows: page,
+    nextCursor: hasMore && last ? feedCursorFrom(last) : null,
+  };
+}
+
+/**
+ * Rows per page, clamped BELOW the hard ceiling so the peek row still fits
+ * under it.
+ *
+ * Without the `- 1`, a caller asking for the maximum page would have its peek
+ * clamped away by `notificationFeedQuery`, and the feed would report "that is
+ * everything" with rows still unread behind it.
+ */
+export function feedPageLimit(limit?: number): number {
+  return Math.min(Math.max(limit ?? DEFAULT_FEED_LIMIT, 1), MAX_FEED_LIMIT - 1);
+}
+
+/**
+ * The feed's paging entrypoint: one page, newest-first, with the keyset cursor
+ * for the page after it (N-008).
+ */
+export async function listNotificationPage(
+  scope: NotificationScope,
+  options: FeedOptions = {}
+): Promise<FeedPage> {
+  const limit = feedPageLimit(options.limit);
+  const rows = await listNotifications(scope, { ...options, limit: limit + 1 });
+
+  return feedPageFrom(rows, limit);
+}
+
 export async function getUnreadCount(
   scope: NotificationScope,
-  now?: Date
+  options: VisibilityOptions = {}
 ): Promise<number> {
-  const [row] = await unreadCountQuery(scope, now);
+  const [row] = await unreadCountQuery(scope, options);
   return row?.value ?? 0;
+}
+
+/**
+ * True when this recipient has at least one visible notification — the flag the
+ * feed's empty state needs to tell "nothing yet" from "all caught up".
+ */
+export async function hasAnyNotifications(
+  scope: NotificationScope,
+  options: VisibilityOptions = {}
+): Promise<boolean> {
+  const rows = await hasAnyNotificationsQuery(scope, options);
+  return rows.length > 0;
 }
 
 /**
