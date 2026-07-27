@@ -16,7 +16,8 @@ export const meta = {
     },
     {
       title: "Ship",
-      detail: "open-pr — gated on a PASS verdict, with the evidence bundle",
+      detail:
+        "open-pr — gated on a PASS verdict, with the evidence bundle — then write the outcome label and READ IT BACK; an unconfirmed label errors the track instead of shipping it",
     },
   ],
 };
@@ -31,6 +32,10 @@ if (!Array.isArray(units) || units.length === 0)
     "Pass the wave's units array as args, e.g. [{id,title,lane,files,summary,acceptanceCriteria,issue,risk}, ...]"
   );
 const MAX_ATTEMPTS = parsed?.maxAttempts || 3;
+// How many times a label write is re-attempted before the track is errored.
+// A label write is idempotent, so retrying is free; NOT retrying is what left
+// two tracks lying on 2026-07-26.
+const LABEL_ATTEMPTS = parsed?.labelAttempts || 3;
 // Opt-in per run. Off by default so a direct `/deliver` call cannot merge to
 // main by surprise; `dispatch` turns it on explicitly.
 const AUTO_MERGE = parsed?.autoMerge === true;
@@ -183,8 +188,56 @@ const CLAIM_SCHEMA = {
 
 const BLOCK_SCHEMA = {
   type: "object",
-  required: ["labelled"],
-  properties: { labelled: { type: "boolean" }, note: { type: "string" } },
+  required: ["commented"],
+  properties: { commented: { type: "boolean" }, note: { type: "string" } },
+};
+
+// ---------------------------------------------------------------------------
+// The label is the outcome — so it is read back, not assumed.
+//
+// On 2026-07-26 the loop wrote its narrative (PR body / issue comment) and its
+// LABEL as two steps, and on 2 of 8 tracks the second one silently did not
+// happen: #110 shipped a full evidence bundle and #74 was blocked, and both
+// issues stayed on `agent:in-progress`. Neither step reported an error.
+//
+// `ops/agent-os/labels.md` declares the labels canonical and the Project board
+// derived, so a missed label is not cosmetic — it is the system of record
+// telling a lie that a human cannot distinguish from the truth (in-progress
+// with an open PR reads identically as passed, failed and still-running). A
+// reviewer acting on it promoted a blocked PR into the review queue.
+//
+// The fix is the #139 claim-guard shape: the writing agent reports what
+// `gh issue view` PRINTED after the write, the loop asserts that observation,
+// retries, and on final failure the track is ERRORED rather than reported as
+// success. An agent's "I labelled it" is not evidence; the read-back is.
+// ---------------------------------------------------------------------------
+const LABEL_STATE_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["observed"],
+  properties: {
+    observed: {
+      type: "array",
+      description:
+        "One row per issue, holding the labels `gh issue view` printed AFTER the write. Transcribe what you saw; do not report what you intended.",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["issue", "labels"],
+        properties: {
+          issue: { type: "integer" },
+          labels: { type: "array", items: { type: "string" } },
+        },
+      },
+    },
+    prLabels: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "Labels `gh pr view` printed after the write, when a PR was in scope.",
+    },
+    note: { type: "string" },
+  },
 };
 const LENS_SCHEMA = {
   type: "object",
@@ -307,24 +360,130 @@ ${(u.acceptanceCriteria || []).map((a) => `  - ${a}`).join("\n")}`
     .join("\n\n");
 }
 
+/**
+ * Which of `issues` do NOT demonstrably read `target`.
+ *
+ * A missing row counts as a violation: an issue nobody reported on is an issue
+ * nobody looked at. `agent:in-progress` surviving alongside the target counts
+ * too — the status labels are mutually exclusive (labels.md), and the observed
+ * failure mode was exactly a stale `agent:in-progress` left in place.
+ */
+function labelViolations(issues, observed, target) {
+  return (issues || []).filter((n) => {
+    const row = (observed || []).find((o) => Number(o?.issue) === Number(n));
+    if (!row) return true;
+    const labels = row.labels || [];
+    return !labels.includes(target) || labels.includes("agent:in-progress");
+  });
+}
+
+/**
+ * Write `target` onto the track's issues (and, for the review queue, its PR),
+ * then READ THE LABELS BACK and assert them. Retries, and reports failure
+ * instead of a cheerful boolean.
+ *
+ * Returns { settled, observed, prLabels, attempts, missing }.
+ */
+async function settleLabels(track, target, { phase = "Ship", pr = null } = {}) {
+  if (!track.issues.length)
+    return { settled: true, observed: [], attempts: 0, missing: [] };
+
+  const list = track.issues.join(", ");
+  const wantsPrLabel = Boolean(pr?.url) && target === "agent:in-review";
+  let observed = [];
+  let prLabels = [];
+
+  for (let attempt = 1; attempt <= LABEL_ATTEMPTS; attempt++) {
+    const reply = await agent(
+      `Put the board in its true state. The issues are ${list} and the target status label is \`${target}\`.
+${attempt > 1 ? `\nATTEMPT ${attempt}: a previous attempt did NOT land. The issues that still do not read \`${target}\` are ${labelViolations(track.issues, observed, target).join(", ") || "(none reported — the last attempt returned nothing)"}. Re-run the edit for those and read them back again.\n` : ""}
+1. For EACH issue n in ${list}:
+   \`gh issue edit n --add-label ${target} --remove-label agent:in-progress\`
+   The status labels are mutually exclusive, so also remove any OTHER \`agent:*\`
+   label the issue still carries. If a \`--remove-label\` fails because the label
+   was already gone, that is fine — re-run it as an \`--add-label\` only.
+${wantsPrLabel ? `2. Ensure the PR ${pr.url} carries \`${target}\` too: \`gh pr edit ${pr.url} --add-label ${target}\`.\n` : ""}
+${wantsPrLabel ? "3" : "2"}. Now READ IT BACK. Do not skip this and do not answer from what you
+   intended. For each issue n run:
+   \`gh issue view n --json labels --jq '[.labels[].name]'\`
+${wantsPrLabel ? `   and \`gh pr view ${pr.url} --json labels --jq '[.labels[].name]'\`\n` : ""}
+   Report EXACTLY what those commands printed, even if it is not what you expected —
+   the loop compares your report against the target and will retry. A wrong answer
+   here is worse than a failed edit, because it makes a broken board look settled.
+
+Return {"observed":[{"issue":n,"labels":[...]} for every issue in ${list}]${wantsPrLabel ? ', "prLabels":[...]' : ""}}.`,
+      {
+        label: `label:${target.replace("agent:", "")}:${track.id}#${attempt}`,
+        phase,
+        // Cheap is safe here ONLY because the answer is verified below. The
+        // 2026-07-26 failure was a cheap agent silently no-opping; the guard,
+        // not the model tier, is what makes that survivable.
+        model: "sonnet",
+        effort: "low",
+        schema: LABEL_STATE_SCHEMA,
+      }
+    );
+
+    observed = reply?.observed || [];
+    prLabels = reply?.prLabels || [];
+    const missing = labelViolations(track.issues, observed, target);
+    const prMissing = wantsPrLabel && !prLabels.includes(target);
+
+    if (!missing.length && !prMissing)
+      return {
+        settled: true,
+        observed,
+        prLabels,
+        attempts: attempt,
+        missing: [],
+      };
+
+    log(
+      `🏷️  ${track.id} label write did not stick on attempt ${attempt}/${LABEL_ATTEMPTS} — ` +
+        `${missing.length ? `issue(s) ${missing.join(", ")} do not read ${target}` : ""}` +
+        `${missing.length && prMissing ? "; " : ""}${prMissing ? `the PR does not carry ${target}` : ""}`
+    );
+  }
+
+  return {
+    settled: false,
+    observed,
+    prLabels,
+    attempts: LABEL_ATTEMPTS,
+    missing: labelViolations(track.issues, observed, target),
+  };
+}
+
 async function blockTrack(track, reason, lastReport) {
   log(`⛔ ${track.id} blocked: ${reason}`);
   await agent(
     `A build loop for issue(s) ${track.issues.map((n) => `#${n}`).join(", ")} could not reach the Definition of Done.
 Reason: ${reason}.
 Failing gate / findings: ${lastReport ? JSON.stringify({ failingGate: lastReport.failingGate, fixInstructions: lastReport.fixInstructions, summary: lastReport.summary }) : "no verifier report"}.
-For EACH issue: \`gh issue edit <n> --remove-label agent:in-progress --add-label agent:blocked\` and post a comment (\`gh issue comment <n>\`) with the failing gate + the concrete evidence + what a human needs to do. Do NOT open a PR. Return strictly the schema.`,
+For EACH issue, post a comment (\`gh issue comment <n>\`) with the failing gate + the concrete evidence + what a human needs to do. Do NOT open a PR. Do NOT edit labels — the loop writes and verifies the \`agent:blocked\` label itself in the next step. Return strictly the schema.`,
     {
       label: `block:${track.id}`,
       phase: "Verify",
-      // Mechanical: label edits plus a comment transcribed from the report it
-      // was handed. It reformats findings, it does not produce them.
+      // Mechanical: a comment transcribed from the report it was handed. It
+      // reformats findings, it does not produce them.
       model: "sonnet",
       effort: "low",
       schema: BLOCK_SCHEMA,
     }
   );
-  return { track, status: "blocked", reason, lastReport };
+
+  // The narrative is only half the outcome. Without this the issue keeps
+  // reading `agent:in-progress` and a human reads the failure as a success.
+  const labelState = await settleLabels(track, "agent:blocked", {
+    phase: "Verify",
+  });
+  if (!labelState.settled)
+    log(
+      `🚨 ${track.id} is blocked but its label did NOT settle after ${labelState.attempts} attempt(s): ` +
+        `issue(s) ${labelState.missing.join(", ")} still do not read agent:blocked. ` +
+        `Fix them by hand — the board is currently lying about this track.`
+    );
+  return { track, status: "blocked", reason, lastReport, labelState };
 }
 
 async function buildTrack(track) {
@@ -544,7 +703,7 @@ Default to FAIL when evidence is missing or unconvincing. Set lens to "${lens.ke
     const pr = await agent(
       `You are the release agent. Use the \`open-pr\` skill. Branch ${branch} (worktree ${wt}) PASSED the Definition of Done. The verifier's evidence report:
 ${JSON.stringify(verify)}
-Push the branch. If a PR for this branch already EXISTS (an earlier attempt opened one), do NOT open a second — the push updates it. Otherwise open a PR against main with --label agent:in-review${track.risk === "high" ? " and --label risk:high" : ""}. Build the PR body from the evidence bundle (the DoD table + AC checklist + screenshots/lighthouse/migration). Include "Closes ${track.issues.map((n) => `#${n}`).join(", Closes ")}". Then flip each issue label agent:in-progress → agent:in-review.
+Push the branch. If a PR for this branch already EXISTS (an earlier attempt opened one), do NOT open a second — the push updates it. Otherwise open a PR against main with --label agent:in-review${track.risk === "high" ? " and --label risk:high" : ""}. Build the PR body from the evidence bundle (the DoD table + AC checklist + screenshots/lighthouse/migration). Include "Closes ${track.issues.map((n) => `#${n}`).join(", Closes ")}". Then flip each issue label agent:in-progress → agent:in-review — and do not report the flip you did not verify: the loop re-reads every one of those labels after you and will error this track if the board does not agree with you.
 
 The body MUST include the skill's **## 👀 Manual QA** section: the preview URL and exact path(s), a numbered happy-path walkthrough, and — the part that matters — **what the automation could NOT check**. Do NOT restate the acceptance criteria there; G3 already proved those, and a reviewer re-reading them learns nothing. Name the judgement calls instead (does it look right, read right, feel fast) and any edge case no AC asserted. Human attention is the scarcest resource in this system: spend it on what a gate cannot decide. If this track genuinely has nothing to eyeball, say so in one line.
 
@@ -576,6 +735,84 @@ THEN WAIT FOR CI AND REPORT WHAT IT SAID, NOT WHAT YOU BELIEVE:
     const shipped = pr?.opened && pr.checkConclusion === "success";
 
     // -----------------------------------------------------------------------
+    // The DoD passed and the PR step still produced no PR.
+    //
+    // This is NOT `agent:blocked`. Blocked means the work did not reach the
+    // Definition of Done, and it sends a human to read a failing gate and fix
+    // code. Here the gates all passed and the commit is sitting on its branch —
+    // only the push/PR call failed (auth, a network blip, a rejected push, a
+    // dead `gh`). The human action is to retry the delivery, and telling them
+    // to go debug a build that already passed wastes the scarcest resource in
+    // this system. So the outcome gets its own label (`labels.md`) and its own
+    // bucket in the report.
+    // -----------------------------------------------------------------------
+    if (!shipped) {
+      const why = pr?.reason || "no reason given";
+      log(`📦 ${track.id} passed the DoD but delivery failed: ${why}`);
+      await agent(
+        `A build loop for issue(s) ${track.issues.map((n) => `#${n}`).join(", ")} PASSED the Definition of Done, but the delivery step failed to open a PR.
+Delivery failure: ${why}.
+The evidence bundle the DoD produced: ${JSON.stringify({ verdict: verify.verdict, summary: verify.summary, gates: verify.gates })}.
+Branch \`${branch}\` (worktree ${wt}) holds the committed work.
+For EACH issue, post a comment (\`gh issue comment <n>\`) that makes these three things unmissable:
+  1. The DoD PASSED — quote the evidence above. Nothing is known to be wrong with the code.
+  2. The DELIVERY step failed, and exactly why: ${why}.
+  3. What the human should do: retry the delivery (push \`${branch}\` and open the PR). Do NOT re-review or re-build the code; it already passed its gates.
+Do NOT open a PR yourself and do NOT edit labels — the loop writes and verifies the \`agent:delivery-failed\` label itself in the next step. Return strictly the schema.`,
+        {
+          label: `delivery-failed:${track.id}`,
+          phase: "Ship",
+          // Mechanical: it transcribes a verdict and a failure string it was
+          // handed. It produces no judgement of its own.
+          model: "sonnet",
+          effort: "low",
+          schema: BLOCK_SCHEMA,
+        }
+      );
+
+      const labelState = await settleLabels(track, "agent:delivery-failed");
+      if (!labelState.settled)
+        log(
+          `🚨 ${track.id} failed to open a PR AND its agent:delivery-failed label did not settle — issue(s) ${labelState.missing.join(", ")} need a manual fix.`
+        );
+      return {
+        track,
+        status: "pr-failed",
+        reason: `the PR step did not open a PR (${why})`,
+        pr,
+        report: verify,
+        attempts: attempt,
+        labelState,
+      };
+    }
+
+    // -----------------------------------------------------------------------
+    // Settle the label BEFORE anything downstream trusts "shipped".
+    //
+    // This is the step that was missing. It runs before auto-merge on purpose:
+    // merging on the strength of a board state nobody verified is how a blocked
+    // PR got promoted into the review queue in the first place.
+    // -----------------------------------------------------------------------
+    const labelState = await settleLabels(track, "agent:in-review", { pr });
+    if (!labelState.settled) {
+      log(
+        `🚨 ${track.id} opened ${pr.url} with a green check, but the board does NOT say so after ${labelState.attempts} attempt(s): ` +
+          `issue(s) ${labelState.missing.join(", ") || "(none reported)"} do not read agent:in-review. ` +
+          `Reporting this track as ERRORED rather than shipped — a PR whose issue still reads agent:in-progress is indistinguishable from a failure.`
+      );
+      return {
+        track,
+        status: "errored",
+        reason: `PR ${pr.url} is open and green, but agent:in-review could not be confirmed on issue(s) ${labelState.missing.join(", ") || "(unreported)"} after ${labelState.attempts} attempt(s)`,
+        pr,
+        report: verify,
+        warnings: verify.warnings || [],
+        attempts: attempt,
+        labelState,
+      };
+    }
+
+    // -----------------------------------------------------------------------
     // Auto-merge — the review queue, not the budget, is what caps this factory.
     //
     // Three things must all hold, and each is a different kind of guarantee:
@@ -589,7 +826,7 @@ THEN WAIT FOR CI AND REPORT WHAT IT SAID, NOT WHAT YOU BELIEVE:
     // become tracked work instead of a reason to stall a good branch.
     // -----------------------------------------------------------------------
     let merge = null;
-    if (shipped && AUTO_MERGE) {
+    if (AUTO_MERGE) {
       const warnings = verify.warnings || [];
       const specQuestions = warnings.filter((w) => w.kind === "spec-question");
       const codeQuality = warnings.filter((w) => w.kind === "code-quality");
@@ -603,7 +840,7 @@ THEN WAIT FOR CI AND REPORT WHAT IT SAID, NOT WHAT YOU BELIEVE:
       if (holds.length) {
         log(`⏸️  ${track.id} held for review — ${holds.join("; ")}`);
         await agent(
-          `PR ${pr.url} passed the DoD but is deliberately NOT auto-merged. Comment on it with \`gh pr comment\` explaining exactly why, then ensure it carries the label \`agent:in-review\`.
+          `PR ${pr.url} passed the DoD but is deliberately NOT auto-merged. Comment on it with \`gh pr comment\` explaining exactly why. Do NOT touch labels — the loop has already written and verified \`agent:in-review\` on this PR and its issue(s).
 
 Reason(s) it is held:
 ${holds.map((h) => `- ${h}`).join("\n")}
@@ -647,12 +884,13 @@ Return strictly the schema, with followUpIssues listing every issue number you c
 
     return {
       track,
-      status: shipped ? "shipped" : "pr-failed",
+      status: "shipped",
       pr,
       merge,
       warnings: verify.warnings || [],
       report: verify,
       attempts: attempt,
+      labelState,
     };
   }
 
@@ -689,15 +927,46 @@ if (lost.length) {
 // Report
 // ---------------------------------------------------------------------------
 const done = results.filter(Boolean);
+
+// ---------------------------------------------------------------------------
+// Label guard, at the fan-in.
+//
+// `shipped` is a claim about the BOARD, not only about the PR — labels.md makes
+// the label canonical, so a track whose issue still reads `agent:in-progress`
+// has not shipped in any sense a consumer can act on. buildTrack already
+// refuses to return "shipped" without a verified read-back; this re-asserts it
+// over the aggregate so no future edit can reintroduce the lie one layer up.
+// ---------------------------------------------------------------------------
+for (const r of done) {
+  if (r.status !== "shipped") continue;
+  const missing = r.labelState?.settled
+    ? labelViolations(r.track.issues, r.labelState.observed, "agent:in-review")
+    : r.track.issues;
+  if (!missing.length) continue;
+  log(
+    `🚨 ${r.track.id} reported shipped while issue(s) ${missing.join(", ")} do not read agent:in-review — demoting to errored.`
+  );
+  r.status = "errored";
+  r.reason =
+    r.reason ||
+    `shipped was claimed but issue(s) ${missing.join(", ")} were never confirmed on agent:in-review`;
+}
+
 const shipped = done.filter((r) => r.status === "shipped");
-const blocked = done.filter(
-  (r) => r.status === "blocked" || r.status === "pr-failed"
-);
+const blocked = done.filter((r) => r.status === "blocked");
+// Separate from `blocked` because the human action is different: these passed
+// every gate and only the push/PR call failed, so they want a retried delivery,
+// not a code review. Folding them into `blocked` sent a reader to look for a
+// failing gate that does not exist (`failingGate` came out undefined).
+const deliveryFailed = done.filter((r) => r.status === "pr-failed");
+// Neither shipped nor cleanly blocked: the work exists but the board cannot be
+// trusted about it. Loud and separate, because it needs a hand, not a re-run.
+const errored = done.filter((r) => r.status === "errored");
 log(
-  `Done: ${shipped.length} shipped (PR opened), ${blocked.length} blocked${lost.length ? `, ${lost.length} LOST` : ""}.`
+  `Done: ${shipped.length} shipped (PR opened), ${blocked.length} blocked${deliveryFailed.length ? `, ${deliveryFailed.length} delivery-failed (DoD passed, no PR)` : ""}${errored.length ? `, ${errored.length} ERRORED (label unsettled)` : ""}${lost.length ? `, ${lost.length} LOST` : ""}.`
 );
 return {
-  summary: `${shipped.length}/${tracks.length} tracks shipped to PR; ${blocked.length} blocked${lost.length ? `; ⚠️ ${lost.length} lost without a verdict` : ""}.`,
+  summary: `${shipped.length}/${tracks.length} tracks shipped to PR; ${blocked.length} blocked${deliveryFailed.length ? `; 📦 ${deliveryFailed.length} passed the DoD but failed to deliver` : ""}${errored.length ? `; 🚨 ${errored.length} errored with an unsettled label` : ""}${lost.length ? `; ⚠️ ${lost.length} lost without a verdict` : ""}.`,
   lost: lost.map((t) => ({
     track: t.id,
     issues: t.issues,
@@ -710,6 +979,8 @@ return {
     pr: r.pr?.url,
     attempts: r.attempts,
     merge: r.merge?.state || (AUTO_MERGE ? "held-for-review" : "not-attempted"),
+    // Not decoration: "shipped" is only true of the board if this is true.
+    labelsConfirmed: r.labelState?.settled === true,
     followUpIssues: r.merge?.followUpIssues || [],
     heldBy: (r.warnings || [])
       .filter((w) => w.kind === "spec-question")
@@ -720,12 +991,39 @@ return {
     issues: r.track.issues,
     reason: r.reason,
     failingGate: r.lastReport?.failingGate,
+    labelSettled: r.labelState?.settled !== false,
+  })),
+  deliveryFailed: deliveryFailed.map((r) => ({
+    track: r.track.id,
+    issues: r.track.issues,
+    // The work is committed here and nowhere else — a retry needs it by name.
+    branch: `feature/${r.track.id}`,
+    reason: r.reason,
+    // Not a gate name: every gate passed. Naming the step that failed is what
+    // stops this being read as a code failure.
+    failingGate: "delivery",
+    dodVerdict: r.report?.verdict,
+    labelSettled: r.labelState?.settled !== false,
+  })),
+  errored: errored.map((r) => ({
+    track: r.track.id,
+    issues: r.track.issues,
+    pr: r.pr?.url,
+    reason: r.reason,
+    unlabelledIssues: r.labelState?.missing || r.track.issues,
+    observedLabels: r.labelState?.observed || [],
   })),
   nextStep:
+    (errored.length
+      ? `🚨 FIRST: ${errored.length} track(s) errored because their label could not be confirmed. Their PRs may be open and green while their issues still read agent:in-progress — set the labels by hand before reading anything else on the board, because until then the board is lying about them. `
+      : "") +
     (AUTO_MERGE
       ? "Your queue is ONLY the held PRs — each is held because a warning raises a question about what should have been built, so it needs a ruling rather than a code review. Auto-merged PRs need no action; their code-quality warnings were filed as issues and are back on the frontier."
       : "Review the opened PRs (your queue).") +
     " For blocked issues, read the issue comment for the failing gate + evidence and decide: tighten the spec, raise budget (+Nk), or take it manually." +
+    (deliveryFailed.length
+      ? ` 📦 ${deliveryFailed.length} track(s) read agent:delivery-failed: they PASSED the DoD and only the push/PR step failed, so do NOT review or rebuild the code — push the named branch and open the PR. The issue comment has the delivery error.`
+      : "") +
     (lost.length
       ? " ⚠️ FIRST: the lost tracks got no verdict and no issue comment — nothing told you about them except this field. Re-queue them (their issues are stuck on agent:in-progress)."
       : ""),
