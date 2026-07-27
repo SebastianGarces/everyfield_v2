@@ -1,12 +1,18 @@
 ---
 name: token-preflight
-description: Before starting a build, estimate whether there is enough token/context budget to FINISH it, and recommend run-now / split-into-batches / defer. Use at the start of delivery-orchestrator and before each frontier pass in build-until-done. Prevents starting a task we can't complete and stranding it half-done.
+description: Estimate whether an explicit `+Nk` token budget can FINISH a wave, and recommend run-now / split-into-batches / defer. Use ONLY in delivery-orchestrator (/deliver) when the user gave a `+Nk` budget directive. Do NOT use in dispatch — its gate 5 does this arithmetic inline — and do not launch it when no budget directive exists (the answer is RUN best-effort by definition).
 ---
 
 # token-preflight
 
 A task you can't finish is worse than a task you didn't start — it strands a branch and burns budget.
-This skill makes "do we have enough to finish?" an explicit gate before any build, exactly once per wave.
+This skill makes "do we have enough to finish?" an explicit gate before a budgeted build, exactly once
+per wave.
+
+> **Scope (narrowed 2026-07-27):** only `/deliver` with an explicit `+Nk` directive launches this
+> skill. `dispatch` sizes its candidate tracks inline in gate 5 using the same table below — launching
+> a skill for arithmetic right before the wave fan-out made /usage attribute the entire build loop's
+> subagents to "token-preflight".
 
 ## Inputs
 

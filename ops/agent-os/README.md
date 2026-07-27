@@ -15,7 +15,7 @@ passes with evidence attached.** Your only manual step is reviewing PRs.
 | You say… | What happens | Skill / workflow |
 |----------|--------------|------------------|
 | "Build these: …" (a list + specs) | Each item → a rigorous GitHub Issue (`agent:queued`) | `/deliver` → `delivery-orchestrator` → `spec-intake` |
-| (implicit, before any build) | "Do we have enough tokens to finish?" → run / split / defer | `token-preflight` |
+| (implicit, when a `+Nk` budget directive was given) | "Do we have enough tokens to finish?" → run / split / defer | `token-preflight` (dispatch sizes inline instead) |
 | (implicit, on run) | Decompose into file-disjoint tracks; publish the DAG to the board | `frd-plan` (or inline) |
 | (implicit, per track) | Implement → validate against DoD → fix → … → **open PR** | `build-until-done` |
 | "What's pending?" | Board by status + your PR review queue + running loops | `/standup` → `standup` |
@@ -104,8 +104,9 @@ to create the labels.
   of those breaks the loop silently. The rule and the full classification live in
   [`invocation.md`](./invocation.md); read it before adding a skill.
 - **Max attempts** per track (default 3) — the loop will not iterate forever.
-- **Token reserve** — the loop refuses to *start* an attempt it can't finish; `token-preflight` gates
-  the whole batch up front. A task that can't finish is **deferred or split**, never half-shipped.
+- **Token reserve** — the loop refuses to *start* an attempt it can't finish; budget sizing gates
+  the whole batch up front (`token-preflight` under a `+Nk` directive, inline arithmetic in
+  dispatch's gate 5). A task that can't finish is **deferred or split**, never half-shipped.
 - **"Wave" now means one frontier pass**, not a pre-computed layer. The word survives in a few skills as
   shorthand for "the batch running together"; the authority on what may run is always the board —
   `blocked_by == 0` and unassigned. There is no wave array to keep in sync, which is the point.

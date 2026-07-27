@@ -418,8 +418,9 @@ Return {"observed":[{"issue":n,"labels":[...]} for every issue in ${list}]${want
         phase,
         // Cheap is safe here ONLY because the answer is verified below. The
         // 2026-07-26 failure was a cheap agent silently no-opping; the guard,
-        // not the model tier, is what makes that survivable.
-        model: "sonnet",
+        // not the model tier, is what makes that survivable — which is why
+        // haiku is fine here while blockTrack (unverified prose) stays sonnet.
+        model: "haiku",
         effort: "low",
         schema: LABEL_STATE_SCHEMA,
       }
