@@ -141,6 +141,13 @@ filed as `risk:high` independently of what the FRD says.
 | 12b | **Team-level training is canon** (issue #85). MT-011 reworded from per-role to per-team; no migration. | Already shipped and working across MT-012/MT-016/MT-017. A church plant's teams are small — per-role granularity is premature. Revisit only if real usage demands it (that would be the `risk:high` join-table migration). |
 | 14 | **Shipped `wiki_articles` model is canon** (issue #112). FK section, slug relations, and the `overview`/`guide` content types all stand; `parent_article_id` is dropped from the FRD. **`related_template_ids` stays a build target** for W-010 (#73). | FRD data model rewritten to match the schema. Longer-term: sending networks and sending churches should be able to modify the wiki their planters see — that is a discovery session, filed as a `needs-spec` issue, not a schema tweak now. |
 
+### Resolved 2026-07-27 — the alpha release decisions (#192, #193)
+
+| # | Decision | Consequence |
+|---|----------|-------------|
+| 192 | **No payments in alpha.** The alpha cohort is **free while the early-access (alpha/beta) period lasts**; terms at general launch TBD. **The sending org pays, per plant** — entitlements attach to the org, seats flow to plants. Price point deferred to beta (comps logged in the issue). | ToS states free access "during the early access period" (#189 unblocked). Landing page (#188) makes no price claim. Billing/entitlements FRD is post-alpha work — filed as `needs-spec` **#213** on the Beta milestone. The Feb 3 model shape (Free = Wiki + Phase 0; Paid = create a church) stands. |
+| 193 | **Alpha cohort: Brett & Bryan pick, ~10–15 planters, no hard cap** — the invite gate is control enough. **The end-to-end demo story is THE alpha exit condition, as written** in the plan of record. **Success criteria:** 3+ planters active weekly after 4 weeks; 1+ network admin checking `/oversight` unprompted; qualitative "would you tell another planter" yes. **Alpha and Beta stay separate milestones** — Beta is the parking lot for deferred scope. | The milestone has a concrete exit condition, not a vibe. The proposed out-of-alpha list in `alpha-release-2026-07.md` §4 stands as ruled. Feedback flows through the #190 bridge; Sebastian talks to the humans. |
+
 ## 5. Pending — evidence gathered, decision outstanding
 
 **All three items below were ruled on 2026-07-27** — rulings in §4 above. Evidence kept for the record.
