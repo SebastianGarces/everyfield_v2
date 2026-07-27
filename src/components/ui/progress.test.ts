@@ -132,7 +132,10 @@ test("an out-of-range value clamps: 150 renders full and announces 100", () => {
   const negative = renderProgress({ value: -5 });
   assert.equal(negative.root.attrs["data-state"], "loading");
   assert.equal(negative.root.attrs["aria-valuenow"], "0");
-  assert.equal(negative.indicator.attrs["style"], "transform:translateX(-100%)");
+  assert.equal(
+    negative.indicator.attrs["style"],
+    "transform:translateX(-100%)"
+  );
 
   // A non-numeric value is still genuinely indeterminate, not clamped to 0.
   const nan = renderProgress({ value: NaN });
