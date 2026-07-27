@@ -53,7 +53,7 @@ export default async function TemplatesPage() {
               <h1 className="text-3xl font-bold tracking-tight">
                 Message Templates
               </h1>
-              <p className="text-foreground/50">
+              <p className="text-muted-foreground">
                 Pre-built templates for common communications
               </p>
             </div>

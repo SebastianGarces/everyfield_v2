@@ -36,7 +36,7 @@ export default async function TeamHealthPage() {
             <h1 className="text-3xl font-bold tracking-tight">
               Team Health Dashboard
             </h1>
-            <p className="text-foreground/50">
+            <p className="text-muted-foreground">
               Monitor staffing, training, and engagement across all ministry
               teams
             </p>

@@ -60,7 +60,7 @@ export default async function CommunicationPage() {
               <h1 className="text-3xl font-bold tracking-tight">
                 Communication Hub
               </h1>
-              <p className="text-foreground/50">
+              <p className="text-muted-foreground">
                 Send messages and track communication with your people
               </p>
             </div>

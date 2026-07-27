@@ -192,3 +192,58 @@ test("buildArticleLinks falls back to a humanized slug when the title is blank",
 
   assert.equal(links[0].label, "Building momentum");
 });
+
+// ----------------------------------------------------------------------------
+// Href encoding (#152).
+//
+// A slug is authored content, not a sanitized identifier. Today's published
+// corpus happens to hold only URL-safe slugs, so raw interpolation *looked*
+// fine — but that is a property of the data, not of the code, and stale slugs
+// with spaces already sit in this DB. The href must be well-formed for any slug
+// that resolves, and unchanged for every slug that is already safe.
+// ----------------------------------------------------------------------------
+
+test("buildArticleLinks encodes a space, # and ? in the article href", () => {
+  const published = [
+    { slug: "core group/first steps", title: "First steps" },
+    { slug: "notes/draft #2", title: "Draft two" },
+    { slug: "faq/what now?", title: "What now" },
+  ];
+
+  const links = buildArticleLinks(
+    published.map((a) => a.slug),
+    published
+  );
+
+  assert.deepEqual(
+    links.map((l) => l.href),
+    [
+      "/wiki/core%20group/first%20steps",
+      "/wiki/notes/draft%20%232",
+      "/wiki/faq/what%20now%3F",
+    ]
+  );
+
+  // The encoded path still resolves: `/wiki/[...slug]` decodes each segment and
+  // rejoins them, so the page looks up exactly the slug that was stored.
+  for (const link of links) {
+    const resolved = link.href
+      .slice("/wiki/".length)
+      .split("/")
+      .map(decodeURIComponent)
+      .join("/");
+    assert.equal(resolved, link.slug);
+  }
+});
+
+test("buildArticleLinks keeps `slug` raw while `href` is encoded", () => {
+  // `slug` is the React key and the identity used against the published set —
+  // encoding it would break dedupe and stale-slug resolution.
+  const links = buildArticleLinks(
+    ["notes/draft #2"],
+    [{ slug: "notes/draft #2", title: "Draft two" }]
+  );
+
+  assert.equal(links[0].slug, "notes/draft #2");
+  assert.equal(links[0].href, "/wiki/notes/draft%20%232");
+});

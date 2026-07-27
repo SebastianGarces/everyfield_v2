@@ -6,6 +6,7 @@ import type {
 } from "./types";
 import { toArticleMeta } from "./types";
 import { getAllPublishedArticles } from "./service";
+import { wikiHref } from "./href";
 
 /**
  * Get all wiki articles with metadata
@@ -90,7 +91,7 @@ export async function getWikiNavigation(): Promise<NavGroup[]> {
           items.push({
             title: article.title,
             slug: article.slug,
-            href: `/wiki/${article.slug}`,
+            href: wikiHref(article.slug),
           });
         }
       }
@@ -136,7 +137,7 @@ export async function getWikiNavigation(): Promise<NavGroup[]> {
             items.push({
               title: article.title,
               slug: article.slug,
-              href: `/wiki/${article.slug}`,
+              href: wikiHref(article.slug),
             });
           }
         } else {
@@ -144,11 +145,11 @@ export async function getWikiNavigation(): Promise<NavGroup[]> {
           items.push({
             title: sectionData.title,
             slug: sectionSlug,
-            href: `/wiki/${phaseSlugPrefix}/${sectionSlug}`,
+            href: wikiHref(`${phaseSlugPrefix}/${sectionSlug}`),
             children: sortedArticles.map((article) => ({
               title: article.title,
               slug: article.slug,
-              href: `/wiki/${article.slug}`,
+              href: wikiHref(article.slug),
             })),
           });
         }
@@ -184,7 +185,7 @@ export async function getWikiNavigation(): Promise<NavGroup[]> {
           items.push({
             title: article.title,
             slug: article.slug,
-            href: `/wiki/${article.slug}`,
+            href: wikiHref(article.slug),
           });
         }
       }
@@ -223,7 +224,7 @@ export async function getWikiNavigation(): Promise<NavGroup[]> {
           items: sortedArticles.map((article) => ({
             title: article.title,
             slug: article.slug,
-            href: `/wiki/${article.slug}`,
+            href: wikiHref(article.slug),
           })),
         });
       }
@@ -256,7 +257,7 @@ export async function getWikiNavigation(): Promise<NavGroup[]> {
           items: sortedArticles.map((article) => ({
             title: article.title,
             slug: article.slug,
-            href: `/wiki/${article.slug}`,
+            href: wikiHref(article.slug),
           })),
         });
       }

@@ -166,7 +166,7 @@ export default async function MessageDetailPage({
             {resolvedSubject}
           </h1>
           <div className="mt-1 flex items-center gap-4">
-            <p className="text-foreground/50">
+            <p className="text-muted-foreground">
               Sent{" "}
               {comm.sentAt
                 ? format(comm.sentAt, "MMMM d, yyyy 'at' h:mm a")
