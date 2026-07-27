@@ -8,6 +8,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import type { ArticleNavSection, NavGroup } from "@/lib/wiki/types";
+import { wikiHref } from "@/lib/wiki/href";
 import { Bookmark, ChevronRight, Clock } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -87,10 +88,10 @@ export function WikiSidebar({
               {bookmarks.map((item) => (
                 <Link
                   key={item.slug}
-                  href={`/wiki/${item.slug}`}
+                  href={wikiHref(item.slug)}
                   className={cn(
                     "text-muted-foreground hover:bg-muted hover:text-foreground block truncate rounded-md px-2 py-1 text-sm",
-                    pathname === `/wiki/${item.slug}` &&
+                    pathname === wikiHref(item.slug) &&
                       "bg-muted text-foreground font-medium"
                   )}
                   title={item.title}
@@ -121,10 +122,10 @@ export function WikiSidebar({
               {recentlyViewed.map((item) => (
                 <Link
                   key={item.slug}
-                  href={`/wiki/${item.slug}`}
+                  href={wikiHref(item.slug)}
                   className={cn(
                     "text-muted-foreground hover:bg-muted hover:text-foreground block truncate rounded-md px-2 py-1 text-sm",
-                    pathname === `/wiki/${item.slug}` &&
+                    pathname === wikiHref(item.slug) &&
                       "bg-muted text-foreground font-medium"
                   )}
                   title={item.title}

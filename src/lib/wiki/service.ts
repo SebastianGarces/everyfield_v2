@@ -10,6 +10,7 @@ import {
 } from "@/db/schema";
 import { revalidatePath } from "next/cache";
 import { cache } from "react";
+import { wikiHref } from "./href";
 
 // ============================================================================
 // Article Queries
@@ -259,7 +260,7 @@ export async function deleteSection(id: string): Promise<void> {
  * Revalidate a specific article page
  */
 export function revalidateArticle(slug: string): void {
-  revalidatePath(`/wiki/${slug}`);
+  revalidatePath(wikiHref(slug));
 }
 
 /**
