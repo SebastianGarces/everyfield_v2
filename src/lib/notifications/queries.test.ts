@@ -1,0 +1,291 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+import {
+  DEFAULT_FEED_LIMIT,
+  dispatchQueueQuery,
+  feedCursorFrom,
+  notificationByIdQuery,
+  notificationFeedQuery,
+  unreadCountQuery,
+} from "./queries";
+
+// ----------------------------------------------------------------------------
+// The two boundaries on every read path (N-008, N-010).
+//
+// These are query-level assertions: each builder is rendered with `.toSQL()`
+// and inspected, so what is asserted is the SQL that would reach Postgres, not
+// a stand-in for it. A read path that stopped filtering on church_id OR on
+// recipient_user_id would fail here even though it still type-checked and still
+// returned rows.
+//
+// No query is EXECUTED — `.toSQL()` renders, it does not connect. The suite
+// does, however, need a DATABASE_URL present: importing `./queries` pulls in
+// `@/db`, which constructs the Neon client at module load, and that throws
+// without one. `pnpm test` supplies a placeholder (CI too), so this is a
+// module-graph fact rather than a live dependency — but it is a real one, and
+// claiming otherwise would mislead the next person who tries to run this file
+// in isolation.
+// ----------------------------------------------------------------------------
+
+const CHURCH_A = "church-a";
+const CHURCH_B = "church-b";
+const USER = "user-1";
+const OTHER_USER = "user-2";
+const NOTIFICATION = "notification-1";
+
+const SCOPE = { churchId: CHURCH_A, recipientUserId: USER };
+
+const CHURCH_PREDICATE = /"notifications"\."church_id" = \$\d/;
+const RECIPIENT_PREDICATE = /"notifications"\."recipient_user_id" = \$\d/;
+
+/**
+ * Timestamps are bound as driver-formatted strings, not `Date`s, so compare by
+ * instant rather than by identity — this stays true whichever string form the
+ * driver picks.
+ */
+function boundInstant(params: unknown[], instant: Date): boolean {
+  return params.some(
+    (param) =>
+      typeof param === "string" &&
+      new Date(param).getTime() === instant.getTime()
+  );
+}
+
+// ----------------------------------------------------------------------------
+// Fetch by id — the id is not a capability, in EITHER direction
+// ----------------------------------------------------------------------------
+
+test("fetch-by-id filters on church_id and recipient_user_id, not the id alone", () => {
+  const { sql, params } = notificationByIdQuery(SCOPE, NOTIFICATION).toSQL();
+
+  assert.match(sql, CHURCH_PREDICATE);
+  assert.match(sql, RECIPIENT_PREDICATE);
+  assert.match(sql, /"notifications"\."id" = \$\d/);
+  assert.ok(params.includes(CHURCH_A));
+  assert.ok(params.includes(USER));
+  assert.ok(params.includes(NOTIFICATION));
+});
+
+test("a cross-church fetch by id binds the asking church, not the row's", () => {
+  const { params } = notificationByIdQuery(
+    { churchId: CHURCH_B, recipientUserId: USER },
+    NOTIFICATION
+  ).toSQL();
+
+  assert.ok(params.includes(CHURCH_B));
+  assert.ok(!params.includes(CHURCH_A));
+});
+
+test("a same-church, other-user fetch by id cannot match that user's row", () => {
+  // The intra-church case the church-only scoping used to miss entirely: a
+  // team_member asking for the planter's notification. The recipient predicate
+  // binds the ASKER, so the row belonging to OTHER_USER is not "hidden from the
+  // UI" — it is absent from the result set.
+  const { sql, params } = notificationByIdQuery(SCOPE, NOTIFICATION).toSQL();
+
+  assert.match(sql, RECIPIENT_PREDICATE);
+  assert.ok(params.includes(USER));
+  assert.ok(!params.includes(OTHER_USER));
+});
+
+test("a scope without a recipient does not type-check", () => {
+  // @ts-expect-error recipientUserId is required — a user-facing read cannot
+  // omit it, so the fail-open path does not exist to be tested at runtime.
+  const build = () => notificationByIdQuery({ churchId: CHURCH_A }, "id");
+
+  // The type error IS the assertion (pnpm typecheck fails without it); this
+  // keeps the builder referenced so lint does not strip it.
+  assert.equal(typeof build, "function");
+});
+
+// ----------------------------------------------------------------------------
+// The feed
+// ----------------------------------------------------------------------------
+
+test("the feed filters on church_id and recipient, newest first and bounded", () => {
+  const { sql, params } = notificationFeedQuery(SCOPE).toSQL();
+
+  assert.match(sql, CHURCH_PREDICATE);
+  assert.match(sql, RECIPIENT_PREDICATE);
+  assert.match(sql, /order by .*"created_at" desc/i);
+  assert.match(sql, /limit/i);
+  assert.ok(params.includes(CHURCH_A));
+  assert.ok(params.includes(USER));
+  assert.ok(params.includes(DEFAULT_FEED_LIMIT));
+});
+
+test("the feed carries no queue internals off the server", () => {
+  // The feed row lands in an RSC payload. `dedupe_key` is caller-composed and
+  // embeds entity ids by convention, so it — and the rest of the queue's
+  // bookkeeping — is projected out rather than trusted to a later unit to strip.
+  const { sql } = notificationFeedQuery(SCOPE).toSQL();
+  const projection = sql.slice(0, sql.indexOf(" from "));
+
+  assert.ok(!projection.includes("dedupe_key"), projection);
+  assert.ok(!projection.includes("updated_at"), projection);
+  assert.ok(projection.includes("title"), projection);
+  assert.ok(projection.includes("body"), projection);
+});
+
+test("the feed limit is clamped — a caller cannot ask for everything", () => {
+  const huge = notificationFeedQuery(SCOPE, { limit: 10_000 }).toSQL();
+  assert.ok(huge.params.includes(100));
+
+  const zero = notificationFeedQuery(SCOPE, { limit: 0 }).toSQL();
+  assert.ok(zero.params.includes(1));
+});
+
+test("feed options narrow further without ever dropping either boundary", () => {
+  const before = feedCursorFrom({
+    id: NOTIFICATION,
+    category: "tasks",
+    type: "task.overdue",
+    title: "t",
+    body: "b",
+    entityType: null,
+    entityId: null,
+    readAt: null,
+    createdAt: new Date("2026-07-01T00:00:00.000Z"),
+  });
+
+  const { sql, params } = notificationFeedQuery(SCOPE, {
+    before,
+    category: "tasks",
+    unreadOnly: true,
+  }).toSQL();
+
+  assert.match(sql, CHURCH_PREDICATE);
+  assert.match(sql, RECIPIENT_PREDICATE);
+  assert.match(sql, /"notifications"\."created_at" < \$\d/);
+  assert.match(sql, /"notifications"\."category" = \$\d/);
+  assert.match(sql, /"notifications"\."read_at" is null/);
+  assert.ok(params.includes(CHURCH_A));
+  assert.ok(params.includes("tasks"));
+});
+
+// ----------------------------------------------------------------------------
+// Feed visibility — the queue row and the feed row are one record
+// ----------------------------------------------------------------------------
+
+test("the feed excludes cancelled rows and rows that are not due yet", () => {
+  const now = new Date("2026-07-27T12:00:00.000Z");
+  const { sql, params } = notificationFeedQuery(SCOPE, { now }).toSQL();
+
+  // N-011: a cancelled notification is never delivered, and the in-app feed is
+  // a delivery channel.
+  assert.match(sql, /"notifications"\."status" <> \$\d/);
+  assert.ok(params.includes("cancelled"));
+
+  // A reminder scheduled three days out must not appear (or be counted) today.
+  assert.match(sql, /"notifications"\."scheduled_for" <= \$\d/);
+  assert.ok(boundInstant(params, now));
+});
+
+test("fetch-by-id applies exactly the feed's visibility rules too", () => {
+  // The by-id path returns the SAME projection the list does — title, body,
+  // entity link — so it is a delivery channel in its own right. Without these
+  // predicates, a cancelled notification (one N-011 says is never delivered)
+  // and a reminder scheduled three days out are both readable by anyone
+  // holding the id, undoing on this path what the feed enforces on its own.
+  const now = new Date("2026-07-27T12:00:00.000Z");
+  const { sql, params } = notificationByIdQuery(
+    SCOPE,
+    NOTIFICATION,
+    now
+  ).toSQL();
+
+  assert.match(sql, /"notifications"\."status" <> \$\d/);
+  assert.ok(params.includes("cancelled"));
+
+  assert.match(sql, /"notifications"\."scheduled_for" <= \$\d/);
+  assert.ok(boundInstant(params, now));
+});
+
+test("the unread count applies exactly the feed's visibility rules", () => {
+  // The badge and the list it counts cannot be allowed to disagree.
+  const now = new Date("2026-07-27T12:00:00.000Z");
+  const { sql, params } = unreadCountQuery(SCOPE, now).toSQL();
+
+  assert.match(sql, /count\(\*\)/i);
+  assert.match(sql, CHURCH_PREDICATE);
+  assert.match(sql, RECIPIENT_PREDICATE);
+  assert.match(sql, /"notifications"\."read_at" is null/);
+  assert.match(sql, /"notifications"\."status" <> \$\d/);
+  assert.match(sql, /"notifications"\."scheduled_for" <= \$\d/);
+  assert.ok(params.includes(CHURCH_A));
+  assert.ok(params.includes(USER));
+  assert.ok(params.includes("cancelled"));
+  assert.ok(boundInstant(params, now));
+});
+
+// ----------------------------------------------------------------------------
+// Keyset pagination
+// ----------------------------------------------------------------------------
+
+test("the feed orders by (created_at, id) so a tie cannot skip rows", () => {
+  // `created_at` defaults to now(), which in Postgres is the TRANSACTION
+  // timestamp, and invariants mandate db.batch([...]) for writes known up
+  // front — so a fan-out enqueue produces byte-identical timestamps. Without a
+  // tiebreaker, siblings straddling a page boundary are never returned.
+  const { sql } = notificationFeedQuery(SCOPE).toSQL();
+
+  assert.match(
+    sql,
+    /order by "notifications"\."created_at" desc, "notifications"\."id" desc/
+  );
+});
+
+test("the cursor is the pair, so the tie is resolved on the next page too", () => {
+  const before = { createdAt: new Date("2026-07-01T00:00:00.000Z"), id: "n-9" };
+  const { sql, params } = notificationFeedQuery(SCOPE, { before }).toSQL();
+
+  assert.match(sql, /"notifications"\."created_at" < \$\d/);
+  assert.match(sql, /"notifications"\."created_at" = \$\d/);
+  assert.match(sql, /"notifications"\."id" < \$\d/);
+  assert.ok(boundInstant(params, before.createdAt));
+  assert.ok(params.includes("n-9"));
+});
+
+// ----------------------------------------------------------------------------
+// The exception, and the fact that it is one
+// ----------------------------------------------------------------------------
+
+test("every user-facing read emits exactly one church_id AND one recipient predicate", () => {
+  const builders = [
+    notificationByIdQuery(SCOPE, NOTIFICATION),
+    notificationFeedQuery(SCOPE),
+    unreadCountQuery(SCOPE),
+  ];
+
+  for (const builder of builders) {
+    const { sql } = builder.toSQL();
+    assert.equal(
+      (sql.match(/"notifications"\."church_id" = \$\d/g) ?? []).length,
+      1,
+      sql
+    );
+    assert.equal(
+      (sql.match(/"notifications"\."recipient_user_id" = \$\d/g) ?? []).length,
+      1,
+      sql
+    );
+  }
+});
+
+test("the dispatcher read is church-wide, and that is why it has its own name", () => {
+  // The one legitimate reader across recipients. It takes a DispatcherScope, so
+  // it cannot be reached by leaving a field off a NotificationScope — a
+  // church-wide read is something a caller asks for by name.
+  const now = new Date("2026-07-27T12:00:00.000Z");
+  const { sql, params } = dispatchQueueQuery(
+    { churchId: CHURCH_A },
+    { now }
+  ).toSQL();
+
+  assert.match(sql, CHURCH_PREDICATE);
+  assert.doesNotMatch(sql, RECIPIENT_PREDICATE);
+  assert.match(sql, /"notifications"\."status" = \$\d/);
+  assert.ok(params.includes("pending"));
+  assert.ok(boundInstant(params, now));
+});

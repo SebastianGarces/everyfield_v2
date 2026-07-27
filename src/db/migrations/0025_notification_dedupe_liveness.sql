@@ -1,0 +1,80 @@
+-- F11 / N-CORE — the dedupe index learns about liveness (issue #130).
+--
+-- 0023 shipped `notifications_dedupe_key_unique_idx` as
+--
+--   UNIQUE (church_id, recipient_user_id, dedupe_key) WHERE dedupe_key IS NOT NULL
+--
+-- with no status term, and that is a correctness bug rather than a refinement.
+-- N-011 defines reschedule as cancel + re-enqueue, and reopen has the same
+-- shape (task completed -> cancelled, task reopened -> re-enqueue under the
+-- same `task.overdue:<id>` key). Under the old predicate the CANCELLED row goes
+-- on occupying its key forever: the re-enqueue is absorbed by ON CONFLICT DO
+-- NOTHING, the caller is handed `created: false` with a cancelled row, and the
+-- notification is silently lost — no pending row for the dispatcher to claim,
+-- and nothing in the in-app feed either (feed reads exclude `cancelled`).
+--
+-- This migration replaces the predicate so only LIVE rows reserve a key.
+-- `delivered` and `failed` rows still reserve theirs: those announcements
+-- happened, and not re-announcing them is what dedupe is for.
+--
+-- NOT purely additive — an index is REPLACED, so unlike 0023/0024 there is a
+-- window (measured in milliseconds on an empty-to-small table) with no unique
+-- index behind `dedupe_key`. Two facts make that acceptable here: the
+-- notification tables were created empty by 0023 and nothing has shipped that
+-- writes to them (F11's callers are the blocked follow-on units #131/#133), and
+-- `DROP INDEX` + `CREATE UNIQUE INDEX` run inside drizzle-kit's single
+-- transaction, so no concurrent writer sees the gap. Deliberately NOT
+-- CONCURRENTLY: that cannot run in a transaction, and it buys nothing on a
+-- table with no traffic.
+--
+-- No table is rewritten, no column changes, no data is backfilled, and nothing
+-- outside "notifications" is touched.
+--
+-- *** The predicate here is mirrored BYTE-FOR-BYTE in application code. ***
+--
+-- `dbEnqueueDeps.insertIfAbsent` (src/lib/notifications/enqueue.ts) supplies
+-- the same expression as its ON CONFLICT index_predicate. Postgres infers a
+-- PARTIAL arbiter index only from a matching predicate, so if this predicate
+-- and that one ever drift, every keyed enqueue fails at runtime with
+-- "there is no unique or exclusion constraint matching the ON CONFLICT
+-- specification". They change together or not at all.
+--
+-- ROLLBACK — run both statements, then the ledger delete, in ONE psql session:
+--
+--   DROP INDEX IF EXISTS "notifications_dedupe_key_unique_idx";
+--   CREATE UNIQUE INDEX "notifications_dedupe_key_unique_idx" ON "notifications" USING btree ("church_id","recipient_user_id","dedupe_key") WHERE "notifications"."dedupe_key" is not null;
+--   DELETE FROM drizzle.__drizzle_migrations WHERE hash = '<0025 hash>';
+--
+-- The CREATE restores 0023's predicate exactly, so on a database with no
+-- rescheduled notifications the schema returns to its pre-0025 state byte for
+-- byte (verified: apply -> rollback -> re-apply leaves an identical catalog
+-- dump, with the rollback changing exactly two things — this index's predicate
+-- and the ledger row).
+--
+-- On a database that HAS rescheduled anything, the CREATE fails with SQLSTATE
+-- 23505 (also verified). That is informative rather than a rollback defect: it
+-- means two rows share a (church, recipient, key) triple with one of them
+-- cancelled, which is precisely the state 0025 exists to allow. Rolling back
+-- there requires deciding what happens to those rows first — delete the
+-- cancelled ones, or null their `dedupe_key` — before the old index can be
+-- rebuilt.
+--
+--   *** DO NOT EDIT src/db/migrations/meta/_journal.json. ***
+--
+-- Same reasoning as 0023 and 0024: the journal is the repository's list of
+-- migrations, the `drizzle.__drizzle_migrations` ledger is the database's
+-- record of what ran, and only the ledger row is deleted. Removing the journal
+-- entry instead makes drizzle-kit forget the migration while the ledger still
+-- claims it applied, which is unrecoverable by restoring the entry.
+--
+-- `<0025 hash>` is the sha256 of THIS FILE, byte for byte, from the deployed
+-- commit:
+--
+--   shasum -a 256 src/db/migrations/0025_notification_dedupe_liveness.sql
+--
+-- or identify the row by its `_journal.json` "when":
+--
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1785174998468;
+
+DROP INDEX "notifications_dedupe_key_unique_idx";--> statement-breakpoint
+CREATE UNIQUE INDEX "notifications_dedupe_key_unique_idx" ON "notifications" USING btree ("church_id","recipient_user_id","dedupe_key") WHERE "notifications"."dedupe_key" is not null and "notifications"."status" <> 'cancelled';
