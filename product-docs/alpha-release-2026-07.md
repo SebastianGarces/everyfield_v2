@@ -18,8 +18,9 @@ Alpha is an **invite-gated cohort release** into The SEND Network, sourced throu
 relationships. The user we must impress is the **oversight side** — sending churches and the network —
 which means the alpha bar is not "the planter tools work" (they largely do) but "a sending-church
 admin can invite a planter, the planter can onboard a real mid-journey plant, and the admin sees
-portfolio value on `/oversight`." Initial users get free access; pricing and the free-period terms
-are open decisions (#192). Payments are recommended **out** of alpha scope.
+portfolio value on `/oversight`." Ruled 2026-07-27 (#192): **no payments in alpha** — the cohort is
+free while the early-access period lasts, the paying customer post-alpha is the **sending org, per
+plant**, and the price point is a beta-time decision (billing FRD: #213 on the Beta milestone).
 
 ## 2. What the audit found (2026-07-27)
 
@@ -56,8 +57,9 @@ audit agents. Filed as **#183** (`risk:high`), first item to fix.
 
 ## 3. Milestone contents and why
 
-Milestone: **Alpha Release** (milestone #2). An older empty **Beta** milestone (#1) also exists;
-proposed naming — Alpha = SEND cohort, Beta = wider release — awaits the #193 ruling.
+Milestone: **Alpha Release** (milestone #2). Ruled in #193: **Alpha and Beta stay separate** —
+Alpha = the SEND cohort release, Beta (#1) = the wider invite-gated release and the parking lot for
+deferred scope (the billing FRD #213 lands there).
 
 ### New issues filed 2026-07-27
 
@@ -82,7 +84,7 @@ proposed naming — Alpha = SEND cohort, Beta = wider release — awaits the #19
 #106/#107 (OpenAI sharing off + plain-language disclosure — ruled to ship together),
 #157 (planter/pastor assignment — direction already given, folds into #184's spec).
 
-### The demo path (proposed alpha exit condition, ruled in #193)
+### The demo path (THE alpha exit condition — ruled in #193, 2026-07-27)
 
 > Sending-church admin signs up → invites a planter → planter accepts, onboards a mid-journey plant
 > (declares phase, launch date), imports core team CSV → runs a vision meeting with attendance and
@@ -90,28 +92,34 @@ proposed naming — Alpha = SEND cohort, Beta = wider release — awaits the #19
 > with data the planter chose to share via privacy toggles.
 
 Every link in that chain maps to a milestone issue. When the chain runs clean end-to-end, alpha is
-feature-ready; what remains is provisioning (#191) and the two decisions.
+feature-ready; what remains is provisioning (#191).
+
+**Cohort (ruled in #193):** Brett & Bryan pick, ~10–15 planters, no hard cap — the invite gate is
+control enough. **Success criteria:** 3+ planters active weekly after 4 weeks; 1+ network admin
+checking `/oversight` unprompted; a qualitative "would you tell another planter" yes. Feedback flows
+through the #190 bridge; Sebastian talks to the humans.
 
 ## 4. Business analysis summary
 
-- **Payments:** not needed for alpha (recommendation, pending #192). The invite gate already
-  controls access; the free-period *terms* must be decided so signup and the ToS can state them.
-- **Pricing:** shape was ruled 2026-02-03 (Free = Wiki + Phase 0; Paid = create a church) but no
-  amount, and no entitlement mechanism exists. The sharper question is **who pays** — planter vs
-  sending org per plant vs network license. Network-pays matches how SEND funds planters and the
-  Feb 7 "networks are the GTM channel" ruling. Comps and framing in #192.
+- **Payments:** ruled out of alpha (#192, 2026-07-27). The invite gate controls access; the cohort
+  is free while the early-access period lasts, with terms at general launch TBD — that is the
+  language signup and the ToS (#189) state.
+- **Pricing:** shape was ruled 2026-02-03 (Free = Wiki + Phase 0; Paid = create a church); the
+  buyer was ruled 2026-07-27 (#192): **the sending org pays, per plant** — entitlements attach to
+  the org, seats flow to plants. The amount is a beta-time decision; comps live in #192, the
+  billing/entitlements FRD is #213 (Beta milestone).
 - **Legal exposure worth respecting:** planters enter personal data about *third parties*
   (congregants — contacts, addresses, pastoral notes), and phase-engine data goes to OpenAI with
   sharing deliberately ON until the beta flip (#106). The privacy policy (#189) and disclosure
   (#107) are alpha-blocking for trust reasons, not box-ticking.
-- **Explicitly out of alpha (proposed in #193):** payments/billing, F7 financial tracking (already
+- **Explicitly out of alpha (ruled in #193):** payments/billing, F7 financial tracking (already
   deferred), SMS + scheduled send, free Phase-0 public toolkit (#27), plant micro-sites (#26),
   migration wizard beyond CSV (#32), network wiki customization (#178).
 
 ## 5. How to resume this work
 
-1. Rule #192 and #193 (surface at `/standup`).
-2. Fix #183 (in progress as of this document's merge).
+1. ~~Rule #192 and #193~~ — ruled 2026-07-27; ledger in `docs-audit-2026-07.md` §4.
+2. ~~Fix #183~~ — merged as #197, dev-DB residue repaired.
 3. Spec the `needs-spec` issues — suggested order: #184 (onboarding), #186 (oversight), #187
    (settings), #185 (team accounts — needs the duties ruling first, likely via the prototype flow),
    #188 (landing).

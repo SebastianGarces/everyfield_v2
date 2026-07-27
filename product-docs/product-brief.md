@@ -256,6 +256,9 @@ The following are explicitly out of scope for EveryField:
 | SendingChurch as separate entity | SendingChurch is a separate table from Church (church plants). Sending churches don't go through the 6-phase journey and have fundamentally different needs. | Feb 7, 2026 |
 | Oversight metrics scope | Network/sending church admins see aggregate metrics only. No individual person records or drill-down. Consent-gated drill-down deferred to future iteration. | Feb 7, 2026 |
 | Full hierarchy ships together | The full Network -> Sending Church -> Church Plant model ships together. Networks and sending churches are the GTM channel for acquiring planters. | Feb 7, 2026 |
+| Paying customer | The sending org pays, per plant. Entitlements attach to the sending church/network; seats flow to their plants. Price point decided before beta, not before alpha. | Jul 27, 2026 |
+| Alpha access terms | No payments in alpha. The alpha cohort is free while the early-access (alpha/beta) period lasts; terms at general launch TBD. | Jul 27, 2026 |
+| Alpha cohort | Selected by the SEND champions (Brett & Bryan), ~10-15 planters, no hard cap — the invite gate is the control. Alpha and Beta remain separate milestones. | Jul 27, 2026 |
 
 ---
 
