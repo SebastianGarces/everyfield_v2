@@ -30,7 +30,7 @@ Stable truths that must not be violated.
 - Sending Church Admin: accesses churches where `churches.sending_church_id = user.sending_church_id`
 - Network Admin: accesses churches where `churches.sending_network_id = user.sending_network_id`
 - Oversight users (sending_church_admin, network_admin) see **aggregate metrics only** — no individual person records
-- Per-feature privacy toggles in `church_privacy_settings` control what oversight users can see (default: all false / opt-in)
+- Per-feature privacy toggles in `church_privacy_settings` control what oversight users can see (default: all false / opt-in). This governs what is **pushed** as well as what is pulled: a notification body is item-level feature copy, so `enqueue` gates an oversight recipient on the same toggle (`share_phase`/`share_digest` exist for exactly this). A recipient who fails the gate is skipped and reported, never thrown over — see `memory/contracts/db.md` → Notifications
 - Use `getAccessibleChurchIds(user)` to resolve which churches a user can access
 - Use `canAccessFeatureData(user, churchId, feature)` before returning data to oversight users
 

@@ -26,6 +26,10 @@ import {
 } from "@/components/phase-engine/focus-presentation";
 import { Badge } from "@/components/ui/badge";
 import type { InsightFeedbackRating, PlantInsight } from "@/db/schema";
+// The one humanising formatter, shared with the CSF scorecard
+// (components/phase-engine/csf-scorecard.tsx): a planter reads the evidence in
+// English, never in the judge's fact-ledger syntax.
+import { formatCitedFacts } from "@/lib/phase-engine/fact-format";
 import { getPublishedArticleRefs } from "@/lib/wiki/service";
 
 /** The current user's prior feedback for an insight, if any. */
@@ -42,7 +46,7 @@ interface InsightCardProps {
 
 export async function InsightCard({ insight, feedback }: InsightCardProps) {
   const severity = severityMeta(insight.severity);
-  const citedFacts = (insight.citedFacts as string[] | null) ?? [];
+  const citedFacts = formatCitedFacts(insight.citedFacts);
 
   // Resolve the stored slugs against the live published wiki: only articles
   // that still exist become links (PE-024). No stored slug, or none that still
@@ -79,9 +83,14 @@ export async function InsightCard({ insight, feedback }: InsightCardProps) {
           <ul className="mt-1.5 flex flex-wrap gap-1.5">
             {citedFacts.map((fact, index) => (
               <li key={`${fact}-${index}`}>
+                {/* Humanised citations are phrases, not `key=value` tokens, so
+                    the chip has to wrap and stay inside the card rather than
+                    ride Badge's default `whitespace-nowrap` off a narrow
+                    screen. Left-aligned because a wrapped second line centred
+                    under the first reads as a caption, not a sentence. */}
                 <Badge
                   variant="outline"
-                  className="text-muted-foreground font-normal"
+                  className="text-muted-foreground max-w-full text-left font-normal whitespace-normal"
                 >
                   {fact}
                 </Badge>

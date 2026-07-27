@@ -81,6 +81,30 @@ stored per `(user, category, channel)` and an unknown category falls back to its
 - Notifications are church-scoped. A user never receives a notification about a church they cannot read, and
   oversight-role notifications respect the same privacy gating as the oversight read paths.
 
+> **Ruled 2026-07-27 (PR #199, Open Question #3): oversight eligibility is opt-in per church, and enqueue
+> skips rather than throws.** Two decisions, both settled against the F11 foundation:
+>
+> **1. Every category is available to oversight roles, gated by the church's privacy settings, default off.**
+> An oversight recipient may be told about a category only when that plant has turned on the matching toggle
+> in its privacy settings. `phase` and `digest` gained toggles of their own for this; the other four reuse
+> the toggle their content already belongs to (`tasks`, `meetings`, `ministry_teams`, and `people` for
+> `communication`, whose content is about people). All default to **off**, so no existing church changes
+> behaviour and no oversight user starts receiving anything until their plant opts in. This answers the
+> "twenty plants, twenty digests" concern the open question raised: an admin over twenty plants receives
+> only what each plant individually granted, never the union.
+>
+> `digest` gets a **separate** toggle rather than being inferred from the others — a digest is its own
+> recurring contact, and a church that shares its task list has not thereby asked for a weekly email about
+> itself to leave the building. That toggle governs eligibility only: whatever assembles a digest's contents
+> (N-013) must still gate each line against that line's own feature toggle.
+>
+> **2. A recipient who may not be told is skipped and reported, not thrown over.** Enqueue records nothing
+> for that recipient and returns a per-recipient result saying it was skipped and why. The natural caller is
+> a fan-out ("remind all six attendees"), and a throw there aborts the loop mid-way — rows written for the
+> recipients before the barred one, none for those after, and the exception surfacing in whatever feature
+> action triggered the reminder. A notification permission must not be able to fail a meeting. The refusal
+> stays total for the barred recipient: no row is written, ever.
+
 ---
 
 ## User-Visible Behavior
@@ -174,6 +198,14 @@ Each criterion below is observable. Requirement issues on the board carry the sa
 11. **Bounded retry** — a transient failure is retried and eventually succeeds; a hard bounce is recorded
     failed without retry. *Verify:* attempt-count assertions on both paths.
 12. **Every control carries `cursor-pointer`** — project hard rule. *Verify:* DOM assertion.
+13. **Oversight eligibility is the church's to grant** — an oversight recipient is skipped for a category
+    their plant has not shared, and the identical call is recorded once that plant turns the toggle on.
+    Toggles are independent: sharing `phase` does not share the `digest`. *Verify:* real-DB assertions on
+    both sides of each toggle, plus a row-count assertion that nothing was written while it was off.
+14. **A barred recipient costs only that recipient** — a fan-out with a non-permitted recipient in the middle
+    records rows for every permitted recipient, including those after the barred one, writes none for the
+    barred one, and reports the skip with its reason. *Verify:* real-DB assertion on the written recipients
+    plus an assertion on the collected per-recipient outcomes.
 
 ---
 
@@ -218,7 +250,14 @@ A logged-out-safe page reached from an email footer.
 2. It renders the human-readable title and body itself — F11 does not template feature content.
 3. It calls the enqueue contract with the recipient, category, type, rendered content, an entity reference,
    a scheduled time, and a dedupe key.
-4. F11 records a pending notification per enabled channel and returns. No provider call happens here.
+4. F11 checks the recipient may be told: they can read the church, and — for an oversight recipient — that
+   church has opted in to sharing this category's data. A recipient who fails either is **skipped**, and the
+   call says so; nothing is recorded for them.
+5. Otherwise F11 records a pending notification per enabled channel and returns. No provider call happens
+   here.
+6. A caller fanning out to several recipients loops this contract and collects the results. One barred
+   recipient costs only that recipient their notification; the rest are recorded normally, and the skips are
+   visible in what the loop collected.
 
 ### Workflow 2: Scheduled dispatch
 
@@ -312,7 +351,7 @@ dispatch works.
 
 | From | Contract |
 |------|----------|
-| Any feature | `enqueue(churchId, recipientUserId, category, type, title, body, { entityType, entityId, scheduledFor, dedupeKey })` → records pending notification(s). Idempotent on `dedupeKey`. |
+| Any feature | `enqueue(churchId, recipientUserId, category, type, title, body, { entityType, entityId, scheduledFor, dedupeKey })` → records pending notification(s). Idempotent on `dedupeKey`. Returns a per-recipient outcome: **recorded** (with the row) or **skipped** (with the reason — no church access, or the church has not opted in to this category for an oversight recipient). A refused recipient is never an exception, so a fan-out completes for everyone else. |
 | Any feature | `cancelByEntity(churchId, entityType, entityId, { category? })` → moves matching pending rows to cancelled. Safe to call when nothing is pending. |
 | Any feature | An optional **still-live predicate** registered per `type`, which dispatch calls before delivering, satisfying N-014 without F11 knowing any feature's domain rules. |
 | Communication Hub (F9) | The transactional email provider integration. F11 sends *through* it and adds no second provider. Provider delivery webhooks update `NotificationDelivery`. |
@@ -372,8 +411,14 @@ dispatch works.
    **N-018 is Should Have and gated on this ruling** — it is called out rather than quietly assumed.
 2. **Digest cadence default.** Weekly is assumed. Whether the default is weekly-on-Monday, weekly-on-Sunday
    (before a Sunday-heavy week) or user-chosen at first send is unruled. Affects N-013's default only.
-3. **Do oversight roles get church-activity notifications by default?** A network admin across twenty plants
-   could receive twenty digests. The safe default is opt-in for oversight roles and opt-out for church roles,
-   but this interacts with N-019 and with privacy gating, and is not ruled.
+3. ~~**Do oversight roles get church-activity notifications by default?**~~ **RULED 2026-07-27 (PR #199).**
+   No — but they are *eligible*, which the code previously was not. Oversight roles can receive every
+   category, gated per plant by that plant's privacy settings, and **every toggle defaults to off**. So the
+   answer to "by default" is "nothing", and the twenty-plants concern is bounded by construction: an admin
+   over twenty plants receives only what each plant individually granted. `phase` and `digest` gained
+   privacy toggles of their own to make this expressible. Opt-out remains the default for church roles.
+   Interaction with N-019 is unchanged — role-aware *defaults* are still unbuilt, and now sit behind the
+   privacy gate rather than beside it. See the ruling note under **Access Prerequisites** for the full
+   decision, including why enqueue skips a barred recipient rather than throwing.
 4. **In-app retention.** How long a read notification stays in the feed before pruning. Unbounded growth is
    a real cost at cohort scale; no ruling needed for v1 correctness.
