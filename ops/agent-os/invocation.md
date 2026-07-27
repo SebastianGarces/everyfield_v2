@@ -94,6 +94,7 @@ exist. It calls `token-preflight` and the `build-until-done` workflow directly.
 | `validate-frontend` / `validate-backend` | `definition-of-done` | read-only assertions |
 | `open-pr` | the release subagent | **its own precondition** — it refuses to open a PR on a FAIL verdict. That refusal is the guard, not the invocation flag. |
 | `standup` | anyone | read-only |
+| `prototype` | the hold agent in `build-until-done.js`, `spec-intake` | throwaway by contract — prototype code lives only on branches, never merges; stripping it is part of applying the ruling |
 | `grilling`, `browser-validation`, `resolving-merge-conflicts` | anyone | no side effects beyond the work at hand |
 
 > **Hazard.** Adding `disable-model-invocation: true` to any row in the second table breaks

@@ -16,7 +16,7 @@ flowchart TD
   subgraph intake ["1 · Intake — a sentence becomes buildable work"]
     A["PM list item / idea"] --> B["spec-intake:<br/>testable ACs · validation plan · risk · likely files"]
     B -->|"build-ready"| C["Issue: agent:queued"]
-    B -->|"open question"| D["Issue: needs-spec — waits for a ruling"]
+    B -->|"open question"| D["Issue: needs-spec — waits for a ruling<br/>(direction questions get live prototypes)"]
     D -->|"ruling"| C
   end
 
@@ -41,7 +41,7 @@ flowchart TD
   subgraph gate ["4 · The auto-merge gate"]
     N -->|"green"| O{"risk:high?<br/>any spec-question warning?"}
     O -->|"clean pass"| Q["merge agent:<br/>1. file code-quality warnings as issues FIRST<br/>2. squash-merge with --auto<br/>3. ⚓ report GitHub's answer, not its own"]
-    O -->|"HOLD"| P["hold agent posts a DECISION —<br/>options to rule on, not a defect report"]
+    O -->|"HOLD"| P["hold agent posts a DECISION —<br/>options to rule on, not a defect report;<br/>direction questions arrive as live prototypes"]
     Q --> R["issue closes → board shows Done"]
   end
 
@@ -70,6 +70,15 @@ rule on. A **code-quality** warning is a known, tracked defect — it becomes a 
 The human's attention is the scarcest resource in the system: the queue contains only
 decisions, never "please re-check what the gates already proved".
 
+When a spec-question (or a `needs-spec` intake question) is a **direction** question — two or
+more plausible answers where trying them beats reading about them — the decision arrives as
+**live prototypes**, not prose (`.claude/skills/prototype/`): UI directions as 3–4 variants
+behind the floating switcher on the branch's preview deployment, behavior directions as a
+throwaway interactive CLI under `prototypes/` that replays the same scenarios through each
+candidate. The reviewer operates the options and replies `go with A`, `combine A's <x> with
+B's <y>`, or `riff on B`. Prototype code never merges — stripping it is part of applying the
+ruling.
+
 ## Where each piece lives
 
 | Piece | File |
@@ -79,4 +88,5 @@ decisions, never "please re-check what the gates already proved".
 | The build loop + auto-merge gate | `.claude/workflows/build-until-done.js` |
 | Board mirror (labels → columns, closed → Done) | `.github/workflows/board-sync.yml` |
 | Intake, dispatch, PR, validation skills | `.claude/skills/{spec-intake,dispatch,open-pr,browser-validation,definition-of-done}/` |
+| Prototyping a direction decision | `.claude/skills/prototype/` (+ `src/components/prototype-switcher.tsx`) |
 | Design + decision history | `product-docs/board-design-2026-07.md` |
