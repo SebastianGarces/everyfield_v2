@@ -1,24 +1,31 @@
 "use client";
 
-import { CheckCheck, Inbox } from "lucide-react";
+import { CheckCheck, Inbox, Loader2 } from "lucide-react";
 import Link from "next/link";
-import { useOptimistic, useTransition } from "react";
+import { useState, useOptimistic, useTransition } from "react";
 import { toast } from "sonner";
 
 import {
+  loadMoreNotificationsAction,
   markAllNotificationsReadAction,
   markNotificationReadAction,
 } from "@/app/(dashboard)/notifications/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import type {
+  NotificationFeedRow,
+  SerializedFeedCursor,
+} from "@/lib/notifications/feed-view";
 import { cn } from "@/lib/utils";
 
 // ============================================================================
 // The in-app feed (N-008, N-009, Screen 1).
 //
-// Presentation only. Everything that needed a database, a session or a clock
-// was resolved by the page (`src/app/(dashboard)/notifications/page.tsx`) and
-// arrives as props:
+// Presentation and paging. Everything that needed a database, a session or a
+// clock was resolved on the server — by the page for the first screenful
+// (`src/app/(dashboard)/notifications/page.tsx`) and by the load-more action
+// for every page after it — and arrives as a finished view model
+// (`@/lib/notifications/feed-view`):
 //
 //   - `href` is already resolved, and is NULL where this app has no screen for
 //     the entity — so this component renders a link or plain text, and never
@@ -28,45 +35,42 @@ import { cn } from "@/lib/utils";
 //     different string than the server sent (memory/invariants.md → Date & Time
 //     Rendering).
 //   - `categoryLabel` is already looked up, which keeps `@/db/schema` — and the
-//     whole Drizzle table graph — out of the client bundle.
+//     whole Drizzle table graph — out of the client bundle. The two imports
+//     from `feed-view` are types, so they are erased and bring none of it.
 //
 // Read state is optimistic (memory/contracts/data-patterns.md): the row un-bolds
 // the instant it is clicked, the server action reconciles, and its `refresh()`
-// is what moves the count in the app shell's bell. Nothing here writes server
-// data into `useState`.
+// is what moves the count in the app shell's bell.
+//
+// The ONE piece of client state here is the paging cursor and the pages it has
+// fetched — which data-patterns.md names explicitly as legitimate. It is not a
+// mirror of a prop: `rows` remains server truth for the first page and is never
+// copied into state, and appended pages are strictly OLDER rows the server has
+// not been asked to re-render. Appends are deduplicated by id, because a
+// notification arriving between the first render and a load-more shifts the
+// page boundary by one.
 // ============================================================================
 
-/** One row as the feed renders it — a view model, not a database row. */
-export interface NotificationFeedRow {
-  id: string;
-  /** Plain-language category name, e.g. "Meetings". */
-  categoryLabel: string;
-  title: string;
-  body: string;
-  /** Where the row points, or null when the subject has no screen. */
-  href: string | null;
-  /** `"12m ago"`, computed server-side against one instant. */
-  timeLabel: string;
-  /** Absolute form, for the tooltip and for `<time dateTime>`. */
-  timeTitle: string;
-  timeIso: string;
-  isRead: boolean;
-}
-
 export interface NotificationFeedProps {
+  /** The first page, from the server. Never copied into state. */
   rows: NotificationFeedRow[];
+  /** Cursor for the page after `rows`, or null when there is none. */
+  nextCursor: SerializedFeedCursor | null;
   /** Server-truth unread count for this recipient (all rows, not just this page). */
   unreadCount: number;
   /**
    * Does this recipient have ANY visible notification at all?
    *
    * This is what separates the two empty states. Without it, a church in its
-   * first week and a user who has read everything get the same blank panel —
-   * and a blank panel with no explanation reads as a bug, not as "nothing has
-   * happened yet".
+   * first week and a user whose unread filter has run dry get the same blank
+   * panel — and a blank panel with no explanation reads as a bug, not as
+   * "nothing has happened yet".
    */
   hasAny: boolean;
-  /** Whether the unread-only filter is active — it decides which empty state. */
+  /**
+   * Whether the unread-only filter is active. The next page has to be drawn
+   * from the same filtered list as the first, so it travels with the cursor.
+   */
   unreadOnly: boolean;
 }
 
@@ -103,24 +107,85 @@ function applyFeedAction(state: FeedState, action: FeedAction): FeedState {
   };
 }
 
+/**
+ * Append older pages without ever showing a row twice.
+ *
+ * The duplicate is real, not defensive: a notification enqueued between the
+ * first render and the click shifts every page boundary down by one, so the row
+ * that was last on page 1 is first on page 2. React would render two children
+ * with the same key; the user would read the same notification twice.
+ */
+function appendRows(
+  existing: NotificationFeedRow[],
+  incoming: NotificationFeedRow[]
+): NotificationFeedRow[] {
+  const seen = new Set(existing.map((row) => row.id));
+  return [...existing, ...incoming.filter((row) => !seen.has(row.id))];
+}
+
 export function NotificationFeed({
   rows,
+  nextCursor,
   unreadCount,
   hasAny,
   unreadOnly,
 }: NotificationFeedProps) {
   const [isPending, startTransition] = useTransition();
+  const [isLoadingMore, startLoadingMore] = useTransition();
+
+  // Pagination state (data-patterns.md: cursors are legitimate client state).
+  // `rows` is page one and stays a prop; these are the pages after it.
+  const [olderRows, setOlderRows] = useState<NotificationFeedRow[]>([]);
+  const [cursor, setCursor] = useState<SerializedFeedCursor | null>(nextCursor);
 
   const [state, applyOptimistic] = useOptimistic(
-    { rows, unreadCount },
+    { rows: appendRows(rows, olderRows), unreadCount },
     applyFeedAction
   );
 
+  const loadMore = () => {
+    if (!cursor) return;
+
+    startLoadingMore(async () => {
+      const result = await loadMoreNotificationsAction({ cursor, unreadOnly });
+
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
+
+      setOlderRows((previous) => appendRows(previous, result.rows));
+      setCursor(result.nextCursor);
+    });
+  };
+
+  // An optimistic update lasts only as long as its transition: when the action
+  // settles, the row falls back to whatever the underlying data now says. For
+  // page one that is the server's answer, arriving via the action's `refresh()`.
+  // The appended pages are not part of that re-render, so a row marked read on
+  // page two would visibly UN-read itself the moment the transition ended. The
+  // confirmed result is written back to them here — after the action succeeded,
+  // never before, which is what keeps this a reconciliation rather than a second
+  // source of truth.
   const markRead = (id: string) => {
     startTransition(async () => {
       applyOptimistic({ type: "read", id });
       const result = await markNotificationReadAction(id);
-      if (!result.success) toast.error(result.error);
+
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
+
+      setOlderRows((previous) =>
+        unreadOnly
+          ? // On the unread tab a read row is no longer a member of the list —
+            // which is exactly what the server's refresh does to page one.
+            previous.filter((row) => row.id !== id)
+          : previous.map((row) =>
+              row.id === id ? { ...row, isRead: true } : row
+            )
+      );
     });
   };
 
@@ -128,7 +193,23 @@ export function NotificationFeed({
     startTransition(async () => {
       applyOptimistic({ type: "read-all" });
       const result = await markAllNotificationsReadAction();
-      if (!result.success) toast.error(result.error);
+
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
+
+      if (unreadOnly) {
+        // Nothing unread is left, so the unread list — every page of it — is
+        // empty, and there is no page after an empty list.
+        setOlderRows([]);
+        setCursor(null);
+        return;
+      }
+
+      setOlderRows((previous) =>
+        previous.map((row) => ({ ...row, isRead: true }))
+      );
     });
   };
 
@@ -155,18 +236,51 @@ export function NotificationFeed({
       </div>
 
       {state.rows.length === 0 ? (
-        <EmptyState hasAny={hasAny} unreadOnly={unreadOnly} />
+        <EmptyState hasAny={hasAny} />
       ) : (
-        <ul className="space-y-2" data-testid="notification-list">
-          {state.rows.map((row) => (
-            <NotificationRow
-              key={row.id}
-              row={row}
-              onMarkRead={() => markRead(row.id)}
-              disabled={isPending}
-            />
-          ))}
-        </ul>
+        <>
+          <ul className="space-y-2" data-testid="notification-list">
+            {state.rows.map((row) => (
+              <NotificationRow
+                key={row.id}
+                row={row}
+                onMarkRead={() => markRead(row.id)}
+                disabled={isPending}
+              />
+            ))}
+          </ul>
+
+          {cursor && (
+            <div className="flex justify-center pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="cursor-pointer"
+                onClick={loadMore}
+                disabled={isLoadingMore}
+                aria-busy={isLoadingMore}
+                data-testid="notification-load-more"
+              >
+                {isLoadingMore && (
+                  <Loader2 className="animate-spin" aria-hidden="true" />
+                )}
+                {isLoadingMore ? "Loading" : "Load more"}
+              </Button>
+            </div>
+          )}
+
+          {/* The end of the list, announced once rather than left ambiguous:
+              without it, a feed that has stopped paging looks identical to one
+              whose button failed to appear. */}
+          {!cursor && state.rows.length > 0 && olderRows.length > 0 && (
+            <p
+              className="text-muted-foreground pt-2 text-center text-sm"
+              data-testid="notification-feed-end"
+            >
+              That is everything.
+            </p>
+          )}
+        </>
       )}
     </div>
   );
@@ -273,15 +387,24 @@ function NotificationRow({
 
 // ----------------------------------------------------------------------------
 // The two empty states — deliberately different things to say
+//
+// There are exactly two, and which one shows is decided by `hasAny` alone.
+//
+// The version before this took `unreadOnly` as well and had a third message for
+// "the All tab is empty but you have notifications" — a state that cannot
+// happen. `hasAnyNotifications` is built from the same predicates as the feed
+// (tenancy, feed visibility, preference allow-list), so on the All tab an empty
+// list and `hasAny === true` are contradictory: the probe finds a row exactly
+// when the first page would list one. Paging does not create the state either —
+// page one is only empty when the whole filtered list is. So the branch was
+// unreachable copy, and unreachable copy is worse than none: it never ships, it
+// never gets read, and it quietly claims the empty states were considered.
+//
+// The remaining "all caught up" is reachable ONLY under the unread filter,
+// where `hasAny` counts read rows the list does not, and its copy says so.
 // ----------------------------------------------------------------------------
 
-function EmptyState({
-  hasAny,
-  unreadOnly,
-}: {
-  hasAny: boolean;
-  unreadOnly: boolean;
-}) {
+function EmptyState({ hasAny }: { hasAny: boolean }) {
   // Cold start: this recipient has never had a visible notification. Almost
   // always a brand-new plant, where an unexplained blank panel is the difference
   // between "the app is quiet" and "the app is broken".
@@ -307,7 +430,8 @@ function EmptyState({
     );
   }
 
-  // Everything visible has been read. A finished state, not an empty one.
+  // Everything visible has been read — the unread tab, run dry. A finished
+  // state, not an empty one.
   return (
     <div
       data-testid="notifications-all-caught-up"
@@ -316,9 +440,8 @@ function EmptyState({
       <CheckCheck className="text-muted-foreground size-8" aria-hidden="true" />
       <h2 className="text-base font-semibold">All caught up</h2>
       <p className="text-muted-foreground max-w-md text-sm text-pretty">
-        {unreadOnly
-          ? "Nothing is unread. Switch to All to look back through what you have already read."
-          : "You have read everything here. New notifications will appear at the top."}
+        Nothing is unread. Switch to All to look back through what you have
+        already read.
       </p>
     </div>
   );

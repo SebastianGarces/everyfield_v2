@@ -8,7 +8,10 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { WikiGuide } from "@/components/wiki-guide";
 import { getCurrentSession } from "@/lib/auth";
 import { isPlatformAdmin } from "@/lib/auth/admin";
-import { getUnreadCount } from "@/lib/notifications/queries";
+import {
+  loadUnreadBadgeCount,
+  notificationViewer,
+} from "@/lib/notifications/feed";
 
 function getInitials(name: string | null, email: string): string {
   if (name) {
@@ -45,15 +48,15 @@ export default async function DashboardLayout({
 
   // The shell's unread count (N-008). Read here, in the one place that already
   // holds the session, so the bell itself stays a presentational component and
-  // there is exactly one query behind the badge. A user with no church has no
-  // notifications — every row is church-scoped — so there is nothing to count
-  // and no bell to show.
-  const unreadCount = user.churchId
-    ? await getUnreadCount({
-        churchId: user.churchId,
-        recipientUserId: user.id,
-      })
-    : 0;
+  // there is exactly one read behind the badge. A user with no church has no
+  // notifications — every row is church-scoped — so there is no viewer, nothing
+  // to count and no bell to show.
+  //
+  // It goes through the same loader the feed does, so the badge counts exactly
+  // the categories the feed lists: a category switched off for `in_app` is
+  // absent from both, never counted here and missing there.
+  const viewer = notificationViewer({ user });
+  const unreadCount = viewer ? await loadUnreadBadgeCount(viewer) : 0;
 
   const sidebarUser = {
     name: user.name || user.email.split("@")[0],
@@ -77,7 +80,7 @@ export default async function DashboardLayout({
       <SidebarInset className="flex h-screen flex-col overflow-hidden">
         <HeaderProvider>
           <DashboardHeader>
-            {user.churchId && <NotificationBell unreadCount={unreadCount} />}
+            {viewer && <NotificationBell unreadCount={unreadCount} />}
           </DashboardHeader>
           <main className="flex-1 overflow-auto">{children}</main>
           {!isOversightUser && <WikiGuide />}

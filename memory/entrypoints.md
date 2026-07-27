@@ -145,13 +145,14 @@
 
 | Flow | Entrypoint | Trigger |
 |------|-----------|---------|
-| In-app feed | `(dash)/notifications/page.tsx` | Route `/notifications` (`?filter=unread` for the unread tab) |
-| Unread badge | `(dash)/layout.tsx` → `queries.ts:getUnreadCount()` → `components/notifications/notification-bell.tsx` | Every dashboard route |
+| In-app feed | `(dash)/notifications/page.tsx` → `feed.ts:loadNotificationFeedScreen()` | Route `/notifications` (`?filter=unread` for the unread tab) |
+| Load more | `(dash)/notifications/actions.ts:loadMoreNotificationsAction()` → `feed.ts:loadOlderNotifications()` | "Load more" in the feed |
+| Unread badge | `(dash)/layout.tsx` → `feed.ts:loadUnreadBadgeCount()` → `components/notifications/notification-bell.tsx` | Every dashboard route |
 | Mark one read | `(dash)/notifications/actions.ts:markNotificationReadAction()` | Row click / "Mark read" |
 | Mark all read | `(dash)/notifications/actions.ts:markAllNotificationsReadAction()` | Toolbar action |
 | Enqueue (no UI) | `src/lib/notifications/enqueue.ts:enqueue()` / `cancelByEntity()` | Feature callers |
 
-**Primary modules:** `src/lib/notifications/` (queries, mark-read, entity-links, enqueue, preferences, categories), `src/components/notifications/`, `src/db/schema/notifications.ts`
+**Primary modules:** `src/lib/notifications/` (feed, feed-view, queries, mark-read, entity-links, enqueue, preferences, categories), `src/components/notifications/`, `src/db/schema/notifications.ts`
 
 **Key deps:** `notifications`, `notification_preferences`, `notification_deliveries` tables
 
@@ -159,7 +160,13 @@
 
 **Feed links:** `entity-links.ts:notificationEntityHref()` — an exhaustive `Record` over `notificationEntityTypes`; `null` where this app has no screen (`training`, `document`, `facility`, `financial_entry`), so a row renders as plain text rather than a dead link.
 
-**Empty states:** `hasAnyNotifications()` separates cold start ("no notifications yet") from "all caught up"; it shares the feed's visibility rules so `hasAny === false` implies the feed is empty.
+**One composition module:** every user-facing read AND both mark-read writes go through `feed.ts` (`notificationViewer(session)` → `{scope, owner}`). `queries.ts`/`mark-read.ts` take the preference allow-list as an OPTION (the dispatcher must not consult a UI preference), and `feed.ts` is what guarantees the page, the badge, the cold-start probe and the writes all get the same one, resolved once per request.
+
+**Paging (N-008):** keyset, `(created_at, id)` — `listNotificationPage()` reads `limit + 1` and returns `{rows, nextCursor}`, so "is there another page" is known before the click. Page 1 is a prop; later pages are client state appended by id (a cursor is legitimate client state per data-patterns.md). The tab remounts the feed, so All and Unread never share a cursor.
+
+**Preferences at read time (N-005, ruled 2026-07-27):** a category disabled for `in_app` leaves the feed, the badge and the probe — `resolveInAppCategories()` (`preferences.ts`) is the allow-list, absence = coded default (so `digest` is out by default). Mark-all is bounded by the same list, so a hidden category keeps its unread state. Delivery rows are never touched by any of it.
+
+**Empty states:** `hasAnyNotifications()` separates cold start ("no notifications yet") from "all caught up"; it shares the feed's visibility rules (allow-list included) so `hasAny === false` implies the feed is empty. Two states only — "all caught up" is reachable only under `?filter=unread`, since on the All tab an empty list and `hasAny` true are contradictory.
 
 ---
 

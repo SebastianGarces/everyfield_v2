@@ -5,12 +5,17 @@ import { test } from "node:test";
 
 import type { NotificationPreference } from "@/db/schema";
 
-import { DEFAULT_DIGEST_CADENCE, defaultChannelEnabled } from "./categories";
+import {
+  DEFAULT_DIGEST_CADENCE,
+  defaultChannelEnabled,
+  notificationCategories,
+} from "./categories";
 import {
   buildPreferenceMap,
   isChannelEnabled,
   preferenceKey,
   preferenceOwnerFromSession,
+  resolveInAppCategories,
   resolvePreference,
   resolvePreferenceMatrix,
   setPreferenceQuery,
@@ -413,4 +418,64 @@ test("the enum sets are CHECK constraints in the database, not just a TS brand",
   ]) {
     assert.ok(sql.includes(constraint), constraint);
   }
+});
+
+// ----------------------------------------------------------------------------
+// The in-app allow-list the feed and the badge are filtered by (N-005 at read
+// time, ruled 2026-07-27)
+// ----------------------------------------------------------------------------
+
+test("with no stored rows the allow-list is the coded defaults, not everything", () => {
+  const allowed = resolveInAppCategories([]);
+
+  // Five on by default; `digest`/`in_app` is the one coded default that is off,
+  // because an in-app digest row would duplicate the feed it summarises. A
+  // "filter" that returned all six would be indistinguishable from no filter.
+  assert.deepEqual(allowed, [
+    "tasks",
+    "meetings",
+    "communication",
+    "teams",
+    "phase",
+  ]);
+  assert.ok(!allowed.includes("digest"));
+});
+
+test("a category switched off in-app leaves the allow-list", () => {
+  const allowed = resolveInAppCategories([
+    makeRow({ category: "meetings", channel: "in_app", enabled: false }),
+  ]);
+
+  assert.ok(!allowed.includes("meetings"));
+  assert.ok(allowed.includes("tasks"));
+});
+
+test("the allow-list is per channel — turning off email keeps the feed row", () => {
+  // The requirement in N-005's own words: a user can disable `tasks` email
+  // while keeping `tasks` in-app.
+  const allowed = resolveInAppCategories([
+    makeRow({ category: "tasks", channel: "email", enabled: false }),
+  ]);
+
+  assert.ok(allowed.includes("tasks"));
+});
+
+test("an explicit opt-IN overrides a default that is off", () => {
+  const allowed = resolveInAppCategories([
+    makeRow({ category: "digest", channel: "in_app", enabled: true }),
+  ]);
+
+  assert.ok(allowed.includes("digest"));
+});
+
+test("a viewer who turned every category off gets an empty allow-list", () => {
+  // Empty is a real answer and callers must treat it as "show nothing" — the
+  // SQL side of that is asserted in queries.test.ts.
+  const allowed = resolveInAppCategories(
+    notificationCategories.map((category) =>
+      makeRow({ category, channel: "in_app", enabled: false })
+    )
+  );
+
+  assert.deepEqual(allowed, []);
 });

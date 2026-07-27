@@ -3,20 +3,13 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { HeaderBreadcrumbs } from "@/components/header";
-import {
-  NotificationFeed,
-  type NotificationFeedRow,
-} from "@/components/notifications/notification-feed";
+import { NotificationFeed } from "@/components/notifications/notification-feed";
 import { verifySession } from "@/lib/auth/session";
-import { formatDateTime, formatRelativeTimestamp } from "@/lib/datetime";
-import { NOTIFICATION_CATEGORIES } from "@/lib/notifications/categories";
-import { notificationEntityHref } from "@/lib/notifications/entity-links";
 import {
-  getUnreadCount,
-  hasAnyNotifications,
-  listNotifications,
-  type FeedNotification,
-} from "@/lib/notifications/queries";
+  loadNotificationFeedScreen,
+  notificationViewer,
+} from "@/lib/notifications/feed";
+import { serializeFeedCursor, toFeedRow } from "@/lib/notifications/feed-view";
 import { cn } from "@/lib/utils";
 
 // ============================================================================
@@ -24,9 +17,14 @@ import { cn } from "@/lib/utils";
 //
 // The server resolves everything the list needs and hands the client component
 // a finished view model: the scope (from the session, never from the URL), the
-// link target, the formatted timestamps and the category label. That keeps the
-// three things that must not drift in one place — tenancy, "is there a screen
-// for this entity", and "which instant are these relative times relative to".
+// preference allow-list, the link target, the formatted timestamps and the
+// category label. That keeps the things that must not drift in one place —
+// tenancy, what this viewer has asked to see, "is there a screen for this
+// entity", and "which instant are these relative times relative to".
+//
+// The list is PAGED, not truncated: this is the first page plus the cursor for
+// the one after it, and the feed component appends the rest through the
+// load-more action.
 // ============================================================================
 
 export const dynamic = "force-dynamic";
@@ -35,56 +33,40 @@ export const metadata: Metadata = {
   title: "Notifications",
 };
 
-/** One page of the feed. Paging beyond it is N-020, not this unit. */
-const FEED_PAGE_SIZE = 50;
+/**
+ * Rows per page. The feed loads more on demand from the keyset cursor rather
+ * than stopping here (`loadOlderNotifications` in `@/lib/notifications/feed`).
+ */
+const FEED_PAGE_SIZE = 30;
 
 interface NotificationsPageProps {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }
 
-/**
- * Map a projected feed row onto what the list renders.
- *
- * `now` is threaded in rather than read here so every row on the page — and the
- * server's `hasAny`/count queries — agree on one instant.
- */
-function toFeedRow(row: FeedNotification, now: Date): NotificationFeedRow {
-  return {
-    id: row.id,
-    categoryLabel: NOTIFICATION_CATEGORIES[row.category]?.label ?? "Update",
-    title: row.title,
-    body: row.body,
-    href: notificationEntityHref(row.entityType, row.entityId),
-    timeLabel: formatRelativeTimestamp(row.createdAt, now),
-    timeTitle: formatDateTime(row.createdAt, "short"),
-    timeIso: row.createdAt.toISOString(),
-    isRead: row.readAt !== null,
-  };
-}
-
 export default async function NotificationsPage({
   searchParams,
 }: NotificationsPageProps) {
-  const { user } = await verifySession();
+  const session = await verifySession();
+  const viewer = notificationViewer(session);
 
   // Every notification is church-scoped, so a user with no church has no feed
   // to show — send them somewhere that means something instead of rendering an
   // empty page that looks broken.
-  if (!user.churchId) {
+  if (!viewer) {
     redirect("/dashboard");
   }
 
   const params = await searchParams;
   const unreadOnly = params.filter === "unread";
 
-  const scope = { churchId: user.churchId, recipientUserId: user.id };
   const now = new Date();
 
-  const [rows, unreadCount, hasAny] = await Promise.all([
-    listNotifications(scope, { unreadOnly, now, limit: FEED_PAGE_SIZE }),
-    getUnreadCount(scope, now),
-    hasAnyNotifications(scope, now),
-  ]);
+  const { rows, nextCursor, unreadCount, hasAny } =
+    await loadNotificationFeedScreen(viewer, {
+      unreadOnly,
+      now,
+      limit: FEED_PAGE_SIZE,
+    });
 
   return (
     <>
@@ -119,7 +101,12 @@ export default async function NotificationsPage({
         )}
 
         <NotificationFeed
+          // Remount when the tab changes: the appended pages and the cursor
+          // below belong to ONE filtered list, and carrying them across a
+          // switch would splice unread-only rows into the All tab.
+          key={unreadOnly ? "unread" : "all"}
           rows={rows.map((row) => toFeedRow(row, now))}
+          nextCursor={serializeFeedCursor(nextCursor)}
           unreadCount={unreadCount}
           hasAny={hasAny}
           unreadOnly={unreadOnly}

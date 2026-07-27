@@ -5,20 +5,33 @@ import { z } from "zod";
 
 import { verifySession } from "@/lib/auth/session";
 import {
-  markAllNotificationsRead,
-  markNotificationRead,
-} from "@/lib/notifications/mark-read";
+  loadOlderNotifications,
+  markAllVisibleNotificationsRead,
+  markVisibleNotificationRead,
+  notificationViewer,
+  type NotificationViewer,
+} from "@/lib/notifications/feed";
+import {
+  serializeFeedCursor,
+  toFeedRow,
+  type NotificationFeedRow,
+  type SerializedFeedCursor,
+} from "@/lib/notifications/feed-view";
 
 // ============================================================================
-// Mark-read actions (N-009).
+// The feed's actions (N-008 paging, N-009 mark-read).
 //
-// Both actions derive the SCOPE from the session — never from the caller. The
-// only thing a client is trusted with is a notification id, and an id is not a
-// capability: it is intersected with the session's church and the session's
-// user inside the UPDATE's WHERE clause (`src/lib/notifications/mark-read.ts`),
-// so a forged id belonging to another church, or to a colleague in the same
-// church, updates zero rows and returns `markedCount: 0` — the same answer as
-// an id that was already read. There is no oracle here.
+// All three derive the VIEWER from the session — never from the caller. The
+// only things a client is trusted with are a notification id and a page cursor,
+// and neither is a capability: both are intersected with the session's church
+// and the session's user inside the statement's WHERE clause
+// (`src/lib/notifications/queries.ts`, `mark-read.ts`), so a forged id or a
+// cursor pointing into another church's rows returns nothing and marks nothing
+// — the same answer as an id that was already read. There is no oracle here.
+//
+// Going through `@/lib/notifications/feed` rather than the query modules
+// directly is what keeps the reads and the writes filtered by the same in-app
+// preference allow-list the page was rendered with (N-005).
 //
 // `refresh()` rather than `revalidatePath("/notifications")` because the unread
 // badge does not live on this page: it lives in the dashboard LAYOUT's header,
@@ -34,29 +47,55 @@ export type MarkReadActionResult =
   | { success: true; markedCount: number }
   | { success: false; error: string };
 
+/** What the load-more action tells the caller. */
+export type LoadMoreActionResult =
+  | {
+      success: true;
+      rows: NotificationFeedRow[];
+      /** Null when that was the last page. */
+      nextCursor: SerializedFeedCursor | null;
+    }
+  | { success: false; error: string };
+
 const notificationIdSchema = z.string().uuid();
 
 /**
- * Resolve the session into a read scope, or say why there isn't one.
+ * The cursor as it comes back from the client.
+ *
+ * Parsed rather than trusted, but note what the parse is FOR: it keeps a
+ * malformed timestamp from reaching Postgres as a cast error. It is not what
+ * makes the page safe — the scope is, and the scope is rebuilt from the session
+ * below whatever this cursor claims.
+ */
+const feedCursorSchema = z.object({
+  createdAt: z.string().datetime(),
+  id: z.string().uuid(),
+});
+
+const loadMoreSchema = z.object({
+  cursor: feedCursorSchema,
+  unreadOnly: z.boolean(),
+});
+
+export type LoadMoreInput = z.infer<typeof loadMoreSchema>;
+
+/**
+ * Resolve the session into a feed viewer, or say why there isn't one.
  *
  * A user with no church has no notifications — every row is church-scoped — so
  * this is a real (if rare) state rather than an assertion: an oversight user
  * mid-association, or an account whose church was removed.
  */
-async function currentScope(): Promise<
-  | { ok: true; scope: { churchId: string; recipientUserId: string } }
-  | { ok: false; error: string }
+async function currentViewer(): Promise<
+  { ok: true; viewer: NotificationViewer } | { ok: false; error: string }
 > {
-  const { user } = await verifySession();
+  const viewer = notificationViewer(await verifySession());
 
-  if (!user.churchId) {
+  if (!viewer) {
     return { ok: false, error: "You are not associated with a church" };
   }
 
-  return {
-    ok: true,
-    scope: { churchId: user.churchId, recipientUserId: user.id },
-  };
+  return { ok: true, viewer };
 }
 
 /**
@@ -73,13 +112,13 @@ export async function markNotificationReadAction(
     return { success: false, error: "Invalid notification" };
   }
 
-  const resolved = await currentScope();
+  const resolved = await currentViewer();
   if (!resolved.ok) {
     return { success: false, error: resolved.error };
   }
 
-  const { markedCount } = await markNotificationRead(
-    resolved.scope,
+  const { markedCount } = await markVisibleNotificationRead(
+    resolved.viewer,
     parsed.data
   );
 
@@ -90,14 +129,53 @@ export async function markNotificationReadAction(
 
 /** Mark every visible unread notification read (N-009). */
 export async function markAllNotificationsReadAction(): Promise<MarkReadActionResult> {
-  const resolved = await currentScope();
+  const resolved = await currentViewer();
   if (!resolved.ok) {
     return { success: false, error: resolved.error };
   }
 
-  const { markedCount } = await markAllNotificationsRead(resolved.scope);
+  const { markedCount } = await markAllVisibleNotificationsRead(
+    resolved.viewer
+  );
 
   refresh();
 
   return { success: true, markedCount };
+}
+
+/**
+ * The next page of the feed, older than the cursor the client holds (N-008).
+ *
+ * Deliberately does NOT call `refresh()`: this action adds rows to a list the
+ * user is reading and changes nothing on the server, so re-rendering the tree
+ * would throw away the pages they had already loaded to tell them nothing new.
+ */
+export async function loadMoreNotificationsAction(
+  input: LoadMoreInput
+): Promise<LoadMoreActionResult> {
+  const parsed = loadMoreSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: "Could not load more notifications" };
+  }
+
+  const resolved = await currentViewer();
+  if (!resolved.ok) {
+    return { success: false, error: resolved.error };
+  }
+
+  const now = new Date();
+
+  const page = await loadOlderNotifications(resolved.viewer, {
+    before: {
+      createdAt: new Date(parsed.data.cursor.createdAt),
+      id: parsed.data.cursor.id,
+    },
+    unreadOnly: parsed.data.unreadOnly,
+  });
+
+  return {
+    success: true,
+    rows: page.rows.map((row) => toFeedRow(row, now)),
+    nextCursor: serializeFeedCursor(page.nextCursor),
+  };
 }

@@ -227,6 +227,33 @@ export function resolvePreferenceMatrix(
   );
 }
 
+/**
+ * The categories this user still wants IN THE APP — the allow-list the feed and
+ * the unread badge are filtered by (N-005 at read time, ruled 2026-07-27).
+ *
+ * A preference is honoured when the notification is READ, not only when it is
+ * dispatched. Dispatch already skips a suppressed channel, but a preference
+ * turned off after the row was written would otherwise leave that row sitting
+ * in the feed and counted by the badge forever.
+ *
+ * It resolves through `isChannelEnabled`, so absence is the coded default here
+ * exactly as it is everywhere else — including `digest`/`in_app`, whose default
+ * is off because an in-app digest row would duplicate the feed it summarises.
+ * Nothing about the defaults is restated in this function; that is the point.
+ *
+ * The result can legitimately be EMPTY (a user who turned every category off),
+ * and callers must treat that as "nothing is visible" rather than as "no
+ * filter" — see `feedVisibility` in ./queries.
+ */
+export function resolveInAppCategories(
+  rows: readonly NotificationPreference[]
+): NotificationCategory[] {
+  const map = buildPreferenceMap(rows);
+  return notificationCategories.filter((category) =>
+    isChannelEnabled(map, category, "in_app")
+  );
+}
+
 // ----------------------------------------------------------------------------
 // Persistence
 // ----------------------------------------------------------------------------
@@ -252,6 +279,13 @@ export async function getPreferenceMatrix(
   owner: PreferenceOwner
 ): Promise<ResolvedPreference[]> {
   return resolvePreferenceMatrix(await loadUserPreferences(owner));
+}
+
+/** The owner's in-app allow-list, straight from storage. */
+export async function getInAppCategories(
+  owner: PreferenceOwner
+): Promise<NotificationCategory[]> {
+  return resolveInAppCategories(await loadUserPreferences(owner));
 }
 
 /**

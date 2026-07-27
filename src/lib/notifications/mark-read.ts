@@ -1,7 +1,12 @@
 import { eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { notifications } from "@/db/schema";
-import { feedVisibility, scopedWhere, type NotificationScope } from "./queries";
+import {
+  feedVisibility,
+  scopedWhere,
+  type NotificationScope,
+  type VisibilityOptions,
+} from "./queries";
 
 // ============================================================================
 // Read state (N-009) — mark one read, mark all read.
@@ -31,6 +36,13 @@ import { feedVisibility, scopedWhere, type NotificationScope } from "./queries";
 //      "mark all read" would silently stamp future reminders as already-seen,
 //      and they would arrive dead: in the feed, below the fold, never bolded,
 //      never counted.
+//
+//      The in-app preference allow-list (N-005) rides the same predicate for
+//      the same reason. A category the user has hidden is not on screen, so
+//      "mark all read" is not a statement about it — and burning its unread
+//      state would hand the user a pile of already-read rows the day they turn
+//      it back on. The caller passes the allow-list it filtered the feed with,
+//      so the write can never be looser than what was shown.
 //
 // Both statements are idempotent: they filter on `read_at IS NULL`, so a double
 // click, a replayed action or a retry updates nothing the second time and
@@ -67,8 +79,10 @@ function readStatePatch(now: Date) {
 export function markNotificationReadQuery(
   scope: NotificationScope,
   id: string,
-  now: Date = new Date()
+  options: VisibilityOptions = {}
 ) {
+  const now = options.now ?? new Date();
+
   return db
     .update(notifications)
     .set(readStatePatch(now))
@@ -77,7 +91,7 @@ export function markNotificationReadQuery(
         scope,
         eq(notifications.id, id),
         isNull(notifications.readAt),
-        ...feedVisibility(now)
+        ...feedVisibility(now, options.categories)
       )
     )
     .returning({ id: notifications.id });
@@ -92,13 +106,19 @@ export function markNotificationReadQuery(
  */
 export function markAllNotificationsReadQuery(
   scope: NotificationScope,
-  now: Date = new Date()
+  options: VisibilityOptions = {}
 ) {
+  const now = options.now ?? new Date();
+
   return db
     .update(notifications)
     .set(readStatePatch(now))
     .where(
-      scopedWhere(scope, isNull(notifications.readAt), ...feedVisibility(now))
+      scopedWhere(
+        scope,
+        isNull(notifications.readAt),
+        ...feedVisibility(now, options.categories)
+      )
     )
     .returning({ id: notifications.id });
 }
@@ -115,17 +135,17 @@ export function markAllNotificationsReadQuery(
 export async function markNotificationRead(
   scope: NotificationScope,
   id: string,
-  now: Date = new Date()
+  options: VisibilityOptions = {}
 ): Promise<MarkReadResult> {
-  const rows = await markNotificationReadQuery(scope, id, now);
+  const rows = await markNotificationReadQuery(scope, id, options);
   return { markedIds: rows.map((row) => row.id), markedCount: rows.length };
 }
 
 /** Mark every visible unread notification read for this recipient (N-009). */
 export async function markAllNotificationsRead(
   scope: NotificationScope,
-  now: Date = new Date()
+  options: VisibilityOptions = {}
 ): Promise<MarkReadResult> {
-  const rows = await markAllNotificationsReadQuery(scope, now);
+  const rows = await markAllNotificationsReadQuery(scope, options);
   return { markedIds: rows.map((row) => row.id), markedCount: rows.length };
 }

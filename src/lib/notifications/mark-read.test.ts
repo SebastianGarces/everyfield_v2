@@ -37,7 +37,9 @@ const RECIPIENT_PREDICATE = /"recipient_user_id" = \$\d/;
 // ----------------------------------------------------------------------------
 
 test("marking read writes read_at on the notification and nothing else", () => {
-  const { sql } = markNotificationReadQuery(SCOPE, NOTIFICATION, NOW).toSQL();
+  const { sql } = markNotificationReadQuery(SCOPE, NOTIFICATION, {
+    now: NOW,
+  }).toSQL();
 
   assert.match(sql, /^update "notifications" set/i);
   assert.match(sql, /"read_at" = \$\d/);
@@ -56,8 +58,10 @@ test("marking read never touches the delivery log", () => {
   // says "a human looked at the feed row". An email that was sent does not make
   // the feed row read, and reading the feed row does not retract, re-send or
   // re-status the email that was already delivered.
-  const single = markNotificationReadQuery(SCOPE, NOTIFICATION, NOW).toSQL();
-  const all = markAllNotificationsReadQuery(SCOPE, NOW).toSQL();
+  const single = markNotificationReadQuery(SCOPE, NOTIFICATION, {
+    now: NOW,
+  }).toSQL();
+  const all = markAllNotificationsReadQuery(SCOPE, { now: NOW }).toSQL();
 
   for (const { sql } of [single, all]) {
     assert.doesNotMatch(sql, /notification_deliveries/);
@@ -75,11 +79,9 @@ test("marking read never touches the delivery log", () => {
 // ----------------------------------------------------------------------------
 
 test("mark-one is scoped by church AND recipient, not by id alone", () => {
-  const { sql, params } = markNotificationReadQuery(
-    SCOPE,
-    NOTIFICATION,
-    NOW
-  ).toSQL();
+  const { sql, params } = markNotificationReadQuery(SCOPE, NOTIFICATION, {
+    now: NOW,
+  }).toSQL();
 
   assert.match(sql, CHURCH_PREDICATE);
   assert.match(sql, RECIPIENT_PREDICATE);
@@ -96,7 +98,7 @@ test("a cross-church mark-read binds the asking church, so it updates nothing", 
   const { params } = markNotificationReadQuery(
     { churchId: CHURCH_B, recipientUserId: USER },
     NOTIFICATION,
-    NOW
+    { now: NOW }
   ).toSQL();
 
   assert.ok(params.includes(CHURCH_B));
@@ -104,11 +106,9 @@ test("a cross-church mark-read binds the asking church, so it updates nothing", 
 });
 
 test("a same-church, other-user mark-read cannot reach that user's row", () => {
-  const { sql, params } = markNotificationReadQuery(
-    SCOPE,
-    NOTIFICATION,
-    NOW
-  ).toSQL();
+  const { sql, params } = markNotificationReadQuery(SCOPE, NOTIFICATION, {
+    now: NOW,
+  }).toSQL();
 
   assert.match(sql, RECIPIENT_PREDICATE);
   assert.ok(params.includes(USER));
@@ -116,7 +116,9 @@ test("a same-church, other-user mark-read cannot reach that user's row", () => {
 });
 
 test("mark-all is scoped by church AND recipient, and names no id", () => {
-  const { sql, params } = markAllNotificationsReadQuery(SCOPE, NOW).toSQL();
+  const { sql, params } = markAllNotificationsReadQuery(SCOPE, {
+    now: NOW,
+  }).toSQL();
 
   assert.match(sql, CHURCH_PREDICATE);
   assert.match(sql, RECIPIENT_PREDICATE);
@@ -134,8 +136,8 @@ test("both writes only touch rows that are still unread", () => {
   // click changed"), what stops a double click double-counting, and what
   // preserves the FIRST read instant instead of sliding it forward on a retry.
   for (const { sql } of [
-    markNotificationReadQuery(SCOPE, NOTIFICATION, NOW).toSQL(),
-    markAllNotificationsReadQuery(SCOPE, NOW).toSQL(),
+    markNotificationReadQuery(SCOPE, NOTIFICATION, { now: NOW }).toSQL(),
+    markAllNotificationsReadQuery(SCOPE, { now: NOW }).toSQL(),
   ]) {
     assert.match(sql, /"read_at" is null/i);
   }
@@ -147,25 +149,23 @@ test("you cannot mark read what the feed was not allowed to show you", () => {
   // un-bolded and uncounted — delivered to a feed that had already dismissed
   // it. A cancelled row is likewise not something a user has "read".
   for (const { sql } of [
-    markNotificationReadQuery(SCOPE, NOTIFICATION, NOW).toSQL(),
-    markAllNotificationsReadQuery(SCOPE, NOW).toSQL(),
+    markNotificationReadQuery(SCOPE, NOTIFICATION, { now: NOW }).toSQL(),
+    markAllNotificationsReadQuery(SCOPE, { now: NOW }).toSQL(),
   ]) {
     assert.match(sql, /"status" <> \$\d/);
     assert.match(sql, /"scheduled_for" <= \$\d/);
   }
 
-  const { params } = markAllNotificationsReadQuery(SCOPE, NOW).toSQL();
+  const { params } = markAllNotificationsReadQuery(SCOPE, { now: NOW }).toSQL();
   assert.ok(params.includes("cancelled"));
 });
 
 test("the same instant is used for the cutoff and for the stamp", () => {
   // One `now` per call: a row is marked read as of the moment it was eligible,
   // not as of two different clock reads.
-  const { params } = markNotificationReadQuery(
-    SCOPE,
-    NOTIFICATION,
-    NOW
-  ).toSQL();
+  const { params } = markNotificationReadQuery(SCOPE, NOTIFICATION, {
+    now: NOW,
+  }).toSQL();
 
   const instants = params.filter(
     (param) =>
@@ -188,4 +188,69 @@ test("a mark-read scope without a recipient does not type-check", () => {
   const build = () => markAllNotificationsReadQuery({ churchId: CHURCH_A });
 
   assert.equal(typeof build, "function");
+});
+// ----------------------------------------------------------------------------
+// The preference allow-list rides the same predicate (N-005)
+// ----------------------------------------------------------------------------
+
+test("mark-all leaves a hidden category's unread state alone", () => {
+  // A category the user has switched off for `in_app` is not on their screen,
+  // so "mark all read" is not a statement about it. Stamping it anyway would
+  // hand them a pile of already-read rows the day they switch it back on —
+  // the unread state destroyed by a click that never claimed to touch it.
+  const { sql, params } = markAllNotificationsReadQuery(SCOPE, {
+    now: NOW,
+    categories: ["tasks", "meetings"],
+  }).toSQL();
+
+  assert.match(sql, /"category" in \(\$\d, \$\d\)/);
+  assert.ok(params.includes("tasks"));
+  assert.ok(params.includes("meetings"));
+
+  // And never in place of the boundaries.
+  assert.match(sql, CHURCH_PREDICATE);
+  assert.match(sql, RECIPIENT_PREDICATE);
+  assert.match(sql, /"read_at" is null/i);
+});
+
+test("a viewer who has hidden everything marks nothing read", () => {
+  const { sql } = markAllNotificationsReadQuery(SCOPE, {
+    now: NOW,
+    categories: [],
+  }).toSQL();
+
+  assert.match(sql, /\bfalse\b/);
+});
+
+test("mark-one carries the allow-list too, and is unfiltered without one", () => {
+  const filtered = markNotificationReadQuery(SCOPE, NOTIFICATION, {
+    now: NOW,
+    categories: ["tasks"],
+  }).toSQL();
+  assert.match(filtered.sql, /"category" in \(\$\d\)/);
+
+  const plain = markNotificationReadQuery(SCOPE, NOTIFICATION, {
+    now: NOW,
+  }).toSQL();
+  assert.doesNotMatch(plain.sql, /"category" in /);
+});
+
+test("neither write mentions the delivery log", () => {
+  // Read state lives on the notification. A preference filter narrows WHICH
+  // rows a click can touch; it does not turn a read path into a writer of
+  // `notification_deliveries`, which records what a channel attempted and is
+  // not the feed's to edit.
+  for (const { sql } of [
+    markNotificationReadQuery(SCOPE, NOTIFICATION, {
+      now: NOW,
+      categories: ["tasks"],
+    }).toSQL(),
+    markAllNotificationsReadQuery(SCOPE, {
+      now: NOW,
+      categories: ["tasks"],
+    }).toSQL(),
+  ]) {
+    assert.ok(!sql.includes("notification_deliveries"), sql);
+    assert.match(sql, /update "notifications"/i);
+  }
 });

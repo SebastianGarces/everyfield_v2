@@ -133,10 +133,10 @@ that no longer exists is worse than no notification, because it teaches the user
 | **N-002** | Enqueue is **never** a synchronous send. A caller returns as soon as the notification is recorded; delivery is the dispatcher's job. |
 | **N-003** | A recurring dispatcher drains notifications whose scheduled time has passed, delivering to each channel the recipient has enabled for that category. |
 | **N-004** | Delivery is **at-most-once per channel**. A dispatcher that runs twice, overlaps itself, or crashes mid-run does not double-send. |
-| **N-005** | Per-category, per-channel preferences: a user can disable `tasks` email while keeping `tasks` in-app, and vice versa. Absent an explicit row, the category's code-defined default applies. |
+| **N-005** | Per-category, per-channel preferences: a user can disable `tasks` email while keeping `tasks` in-app, and vice versa. Absent an explicit row, the category's code-defined default applies. A preference is honoured on **read** as well as on send: see the Screen 1 ruling below. |
 | **N-006** | A preferences screen lets a user see and change every category/channel combination. |
 | **N-007** | Every email carries a working unsubscribe link that disables that category's email channel for that user without requiring a login. |
-| **N-008** | An in-app feed lists a user's notifications newest-first with unread state; the app shell shows an unread count. |
+| **N-008** | An in-app feed lists a user's notifications newest-first with unread state; the app shell shows an unread count. The list is **paged**, not capped — see the Screen 1 ruling below. |
 | **N-009** | A user can mark one notification read, and mark all read. |
 | **N-010** | Notifications are church-scoped: a query for a user's notifications can never return another church's rows. |
 | **N-011** | A pending notification can be **cancelled by entity reference**, so a caller that deletes or reschedules the underlying thing does not send a stale notification. |
@@ -206,6 +206,15 @@ Each criterion below is observable. Requirement issues on the board carry the sa
     records rows for every permitted recipient, including those after the barred one, writes none for the
     barred one, and reports the skip with its reason. *Verify:* real-DB assertion on the written recipients
     plus an assertion on the collected per-recipient outcomes.
+15. **The feed pages rather than stopping** — with more visible notifications than fit one page, the feed
+    shows a page and a "Load more" control; using it appends the next older page, repeating no row and
+    skipping none across the boundary, including where several rows share a timestamp. When the last page is
+    reached the control is gone. *Verify:* Playwright assertion on the row count and on row identity across
+    two pages, plus query-level assertions that the cursor keeps both scoping predicates.
+16. **The in-app preference governs the feed and the count** — a category disabled for the in-app channel
+    contributes no feed rows and nothing to the shell count; re-enabling it restores both with unread state
+    intact, and its delivery records are unchanged throughout. *Verify:* real-DB assertions either side of the
+    toggle, plus a byte-comparison that no delivery row was touched by the read path.
 
 ---
 
@@ -219,8 +228,32 @@ Reachable from the app shell's unread indicator.
 - Each row: category, title, body, relative timestamp, and a link to the referenced entity where one exists.
 - Row click marks read and navigates to the entity.
 - "Mark all read" action.
+- **Paged, with a "Load more" control that appends older notifications.** The list never silently stops.
+- **Only categories the user has left on for the in-app channel appear**, and the shell count matches the list.
 - Empty state distinguishes *no notifications yet* from *all caught up*.
 - Cold-start (a brand-new church with no activity) reads as intentional, not broken.
+
+> **Ruled 2026-07-27 (PR #218, W1 and N-005): the feed pages, and the in-app preference governs what it
+> shows.** Two decisions about the read side of the in-app channel:
+>
+> **1. The feed is paged, not capped.** It shows a page of notifications and a "Load more" control that
+> appends the next page of older ones. There is no page count and no page number: the list grows downwards
+> from newest, which is how a feed is read. A user who has been away for a month can reach the whole of it.
+> Truncating at a fixed number instead — which is what an unpaged feed does — leaves the shell count
+> describing rows the list refuses to show, and no click can ever clear them.
+>
+> **2. A category switched off for the in-app channel leaves the feed and the count.** N-005 is a live
+> choice, not a filter that only applies to future sends: a user who turns `meetings` off is talking about
+> the meeting rows already in their feed, not only about the ones not yet enqueued. So the preference is
+> applied when the feed is read — its rows, the shell's unread count, and the empty-state probe all honour
+> the same allow-list, and "mark all read" is bounded by it too, so a hidden category keeps its unread state
+> for the day the user turns it back on. Absent a preference row, the category's coded default applies
+> exactly as N-005 already says (which is why `digest` is absent from the feed by default: an in-app digest
+> row would duplicate the feed it summarises).
+>
+> Delivery records are untouched by any of this. A preference governs what a user is **shown**; the delivery
+> log is the historical record of what a channel **attempted**, and hiding a row does not retro-edit the fact
+> that an email went out (N-016).
 
 ### 2. Notification Preferences
 
