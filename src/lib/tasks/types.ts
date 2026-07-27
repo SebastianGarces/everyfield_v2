@@ -40,3 +40,14 @@ export interface ListTasksResult {
   total: number;
   nextCursor: string | null;
 }
+
+/**
+ * Upper bound on a single bulk operation (T-019). Keeps one bulk write to one
+ * SQL statement.
+ *
+ * It lives here, rather than in `service.ts`, because the selection UI needs it
+ * to disable the bulk actions *before* the click — and this module is
+ * type-only at runtime, so a client component can import the value without
+ * pulling the database-backed service into the browser bundle.
+ */
+export const MAX_BULK_TASKS = 100;

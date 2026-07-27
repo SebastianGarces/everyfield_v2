@@ -146,12 +146,15 @@
 | Pages | `(dash)/tasks/{page,new/page,[id]/page}.tsx` | Routes `/tasks`, `/tasks/new`, `/tasks/[id]` |
 | Task CRUD | `(dash)/tasks/actions.ts:createTaskAction()` / `quickAddTaskAction()` / `updateTaskAction()` / `deleteTaskAction()` | Form submit |
 | Status changes | `(dash)/tasks/actions.ts:completeTaskAction()` / `reopenTaskAction()` / `updateTaskStatusAction()` | User action |
+| Bulk complete / reschedule | `(dash)/tasks/actions.ts:bulkCompleteTasksAction()` / `bulkRescheduleTasksAction()` | Bulk actions bar (multi-select) |
 
 **Primary modules:** `src/lib/tasks/`, `src/components/tasks/`, `src/db/schema/tasks.ts`
 
 **Key deps:** `tasks` table
 
 **Events:** `meeting.attendance.finalized` → auto-creates follow-up (48h) + evaluation (24h) tasks; `meeting.evaluation.completed` → auto-completes matching task; `task.completed` → Phase Engine dirty-marking
+
+**Bulk ops (T-019):** one SQL statement per bulk write; every requested id comes back as a success or a reasoned failure (never dropped). Bulk complete emits one `task.completed` per completed task, awaited **sequentially** so subscribers are not stampeded. Reschedule emits nothing. **Both refuse already-complete tasks** — reschedule too, so the list's Completed group select-all cannot silently re-date finished work. Cap is `MAX_BULK_TASKS` (100) in `src/lib/tasks/types.ts`, enforced in the action schema and shown in the UI before the click.
 
 ---
 

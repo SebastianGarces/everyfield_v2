@@ -3,14 +3,19 @@
 import type { Task } from "@/db/schema";
 import { verifySession } from "@/lib/auth/session";
 import {
+  bulkCompleteTasks,
+  bulkRescheduleTasks,
   completeTask,
   createTask,
   deleteTask,
   reopenTask,
   updateTask,
+  type BulkTaskResult,
 } from "@/lib/tasks/service";
 import type { ActionResult } from "@/lib/tasks/types";
 import {
+  bulkRescheduleSchema,
+  bulkTaskIdsSchema,
   taskCreateSchema,
   taskQuickAddSchema,
   taskUpdateSchema,
@@ -357,6 +362,104 @@ export async function updateTaskStatusAction(
     return {
       success: false,
       error: "Failed to update task status. Please try again.",
+    };
+  }
+}
+
+// ============================================================================
+// Bulk Actions (T-019)
+// ============================================================================
+
+/**
+ * Complete every selected task.
+ *
+ * Returns the full outcome — which ids succeeded and which failed and why — so
+ * the UI can report partial failure instead of pretending everything worked.
+ */
+export async function bulkCompleteTasksAction(
+  taskIds: string[]
+): Promise<ActionResult<BulkTaskResult>> {
+  try {
+    const { user } = await verifySession();
+
+    if (!user.churchId) {
+      return { success: false, error: "No church association" };
+    }
+
+    const parsed = bulkTaskIdsSchema.safeParse(taskIds);
+    if (!parsed.success) {
+      return {
+        success: false,
+        error: parsed.error.issues[0]?.message ?? "Invalid task selection",
+      };
+    }
+
+    const result = await bulkCompleteTasks(user.churchId, parsed.data, user.id);
+
+    revalidatePath("/tasks");
+
+    return { success: true, data: result };
+  } catch (error) {
+    console.error("bulkCompleteTasksAction error:", error);
+
+    if (error instanceof Error && error.message === "Unauthorized") {
+      return {
+        success: false,
+        error: "You must be logged in to complete tasks",
+      };
+    }
+
+    return {
+      success: false,
+      error: "Failed to complete the selected tasks. Please try again.",
+    };
+  }
+}
+
+/**
+ * Set the same due date on every selected task.
+ */
+export async function bulkRescheduleTasksAction(
+  taskIds: string[],
+  dueDate: string
+): Promise<ActionResult<BulkTaskResult>> {
+  try {
+    const { user } = await verifySession();
+
+    if (!user.churchId) {
+      return { success: false, error: "No church association" };
+    }
+
+    const parsed = bulkRescheduleSchema.safeParse({ taskIds, dueDate });
+    if (!parsed.success) {
+      return {
+        success: false,
+        error: parsed.error.issues[0]?.message ?? "Invalid reschedule request",
+      };
+    }
+
+    const result = await bulkRescheduleTasks(
+      user.churchId,
+      parsed.data.taskIds,
+      parsed.data.dueDate
+    );
+
+    revalidatePath("/tasks");
+
+    return { success: true, data: result };
+  } catch (error) {
+    console.error("bulkRescheduleTasksAction error:", error);
+
+    if (error instanceof Error && error.message === "Unauthorized") {
+      return {
+        success: false,
+        error: "You must be logged in to reschedule tasks",
+      };
+    }
+
+    return {
+      success: false,
+      error: "Failed to reschedule the selected tasks. Please try again.",
     };
   }
 }
