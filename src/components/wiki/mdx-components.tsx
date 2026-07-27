@@ -1,28 +1,46 @@
 import type { MDXComponents } from "mdx/types";
 import { Callout } from "./callout";
 
+// Heading anchor ids are stamped by `rehype-slug` at compile time
+// (src/lib/wiki/get-article.ts) and arrive here as an `id` prop — the spreads
+// below forward it. rehype-slug dedupes repeated heading text (`purpose`,
+// `purpose-1`, …), which deriving ids from `children` at render time could
+// not: each renderer call sees only its own heading (W-014, #74).
+
 export const mdxComponents: MDXComponents = {
   // Custom components
   Callout,
 
   // Override default elements for styling
-  h1: ({ children }) => (
-    <h1 className="mt-8 mb-4 scroll-m-20 text-3xl font-bold tracking-tight first:mt-0">
+  h1: ({ children, ...props }) => (
+    <h1
+      {...props}
+      className="mt-8 mb-4 scroll-m-20 text-3xl font-bold tracking-tight first:mt-0"
+    >
       {children}
     </h1>
   ),
-  h2: ({ children }) => (
-    <h2 className="mt-8 mb-3 scroll-m-20 border-b pb-2 text-2xl font-semibold tracking-tight first:mt-0">
+  h2: ({ children, ...props }) => (
+    <h2
+      {...props}
+      className="mt-8 mb-3 scroll-m-20 border-b pb-2 text-2xl font-semibold tracking-tight first:mt-0"
+    >
       {children}
     </h2>
   ),
-  h3: ({ children }) => (
-    <h3 className="mt-6 mb-2 scroll-m-20 text-xl font-semibold tracking-tight">
+  h3: ({ children, ...props }) => (
+    <h3
+      {...props}
+      className="mt-6 mb-2 scroll-m-20 text-xl font-semibold tracking-tight"
+    >
       {children}
     </h3>
   ),
-  h4: ({ children }) => (
-    <h4 className="mt-4 mb-2 scroll-m-20 text-lg font-semibold tracking-tight">
+  h4: ({ children, ...props }) => (
+    <h4
+      {...props}
+      className="mt-4 mb-2 scroll-m-20 text-lg font-semibold tracking-tight"
+    >
       {children}
     </h4>
   ),

@@ -11,8 +11,10 @@ import {
   getBookmarkedSlugs,
   wikiHref,
 } from "@/lib/wiki";
+import { extractHeadings } from "@/lib/wiki/toc";
 import { WikiBreadcrumb } from "@/components/wiki/wiki-breadcrumb";
 import { ProgressTracker } from "@/components/wiki/progress-tracker";
+import { TableOfContents } from "@/components/wiki/table-of-contents";
 import { ArticleProgressBadge } from "@/components/wiki/article-progress-badge";
 import { BookmarkButton } from "@/components/wiki/bookmark-button";
 import { BookmarkIndicator } from "@/components/wiki/bookmark-indicator";
@@ -123,44 +125,54 @@ async function ArticleView({
   ]);
   const breadcrumbs = getBreadcrumbs(article.slug, article.title);
 
+  // Headings come off the MDX source, not the compiled output — `compileMDX`
+  // hands back a rendered tree with no heading manifest. `extractHeadings` and
+  // the MDX `h2`/`h3` renderers share `slugifyHeading`, so these ids match the
+  // ids stamped on the rendered headings.
+  const headings = extractHeadings(article.content);
+
   return (
     <ProgressTracker slug={article.slug}>
-      <article className="space-y-6">
-        <WikiBreadcrumb items={breadcrumbs} />
+      <div className="flex flex-col gap-6 @min-[65rem]/wiki-content:flex-row @min-[65rem]/wiki-content:items-start @min-[65rem]/wiki-content:gap-8">
+        <article className="min-w-0 flex-1 space-y-6">
+          <WikiBreadcrumb items={breadcrumbs} />
 
-        <header className="space-y-4 border-b pb-6">
-          <div className="flex items-start justify-between gap-4">
-            <h1 className="text-3xl font-bold tracking-tight">
-              {article.title}
-            </h1>
-            <BookmarkButton
-              slug={article.slug}
-              initialBookmarked={bookmarked}
-            />
-          </div>
-
-          {article.description && (
-            <p className="text-muted-foreground text-lg">
-              {article.description}
-            </p>
-          )}
-
-          <div className="text-muted-foreground flex flex-wrap items-center gap-4 text-sm">
-            <div className="flex items-center gap-1.5">
-              <FileText className="h-4 w-4" />
-              <span className="capitalize">{article.type}</span>
+          <header className="space-y-4 border-b pb-6">
+            <div className="flex items-start justify-between gap-4">
+              <h1 className="text-3xl font-bold tracking-tight">
+                {article.title}
+              </h1>
+              <BookmarkButton
+                slug={article.slug}
+                initialBookmarked={bookmarked}
+              />
             </div>
-            <div className="flex items-center gap-1.5">
-              <Clock className="h-4 w-4" />
-              <span>{article.readTime} min read</span>
-            </div>
-          </div>
-        </header>
 
-        <div className="prose prose-neutral dark:prose-invert max-w-none">
-          {content}
-        </div>
-      </article>
+            {article.description && (
+              <p className="text-muted-foreground text-lg">
+                {article.description}
+              </p>
+            )}
+
+            <div className="text-muted-foreground flex flex-wrap items-center gap-4 text-sm">
+              <div className="flex items-center gap-1.5">
+                <FileText className="h-4 w-4" />
+                <span className="capitalize">{article.type}</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Clock className="h-4 w-4" />
+                <span>{article.readTime} min read</span>
+              </div>
+            </div>
+          </header>
+
+          <div className="prose prose-neutral dark:prose-invert max-w-none">
+            {content}
+          </div>
+        </article>
+
+        <TableOfContents headings={headings} />
+      </div>
     </ProgressTracker>
   );
 }

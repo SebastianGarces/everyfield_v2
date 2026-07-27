@@ -1,5 +1,6 @@
 import { compileMDX } from "next-mdx-remote/rsc";
 import remarkGfm from "remark-gfm";
+import rehypeSlug from "rehype-slug";
 import type { Article } from "./types";
 import { toArticle } from "./types";
 import { getArticleBySlug } from "./service";
@@ -33,6 +34,10 @@ export async function compileArticle(article: Article) {
       parseFrontmatter: false,
       mdxOptions: {
         remarkPlugins: [remarkGfm],
+        // Stamps deduped heading ids (purpose, purpose-1, …) at compile time.
+        // `extractHeadings` (src/lib/wiki/toc.ts) mirrors the same
+        // github-slugger sequence so TOC anchors always match.
+        rehypePlugins: [rehypeSlug],
       },
     },
   });
