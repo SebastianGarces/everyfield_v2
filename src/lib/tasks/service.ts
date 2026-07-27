@@ -767,10 +767,6 @@ function assertBulkSize(requested: string[]): void {
   }
 }
 
-function describeWriteError(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
-}
-
 /**
  * Complete many tasks in one operation.
  *
@@ -795,7 +791,9 @@ export async function bulkCompleteTasks(
   });
 
   let writtenIds: string[] = [];
-  let missedReason = "Task could not be completed";
+  // The raw error is logged server-side only — provider/constraint text must
+  // never reach the user-facing failure reason.
+  const missedReason = "Task could not be completed";
 
   if (plan.actionable.length > 0) {
     try {
@@ -806,7 +804,6 @@ export async function bulkCompleteTasks(
       );
     } catch (error) {
       console.error("bulkCompleteTasks write failed:", error);
-      missedReason = describeWriteError(error, missedReason);
     }
   }
 
@@ -864,7 +861,7 @@ export async function bulkRescheduleTasks(
   });
 
   let writtenIds: string[] = [];
-  let missedReason = "Task could not be rescheduled";
+  const missedReason = "Task could not be rescheduled";
 
   if (plan.actionable.length > 0) {
     try {
@@ -875,7 +872,6 @@ export async function bulkRescheduleTasks(
       );
     } catch (error) {
       console.error("bulkRescheduleTasks write failed:", error);
-      missedReason = describeWriteError(error, missedReason);
     }
   }
 

@@ -190,9 +190,11 @@ test("bulkCompleteTasks surfaces a whole-write failure against every actionable 
   const result = await bulkCompleteTasks(CHURCH_ID, ["a", "b"], USER_ID, deps);
 
   assert.deepEqual(result.succeeded, []);
+  // The raw error ("connection lost") stays server-side; the user-facing
+  // reason is always the generic fallback.
   assert.deepEqual(
     result.failed.map((failure) => failure.reason),
-    ["connection lost", "connection lost"]
+    ["Task could not be completed", "Task could not be completed"]
   );
   assert.deepEqual(emitted, []);
   assert.equal(result.eventsEmitted, 0);

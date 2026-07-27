@@ -147,6 +147,8 @@ function SelectionCheckbox({
   className,
   testId,
   taskId,
+  disabled,
+  title,
 }: {
   id: string;
   checked: boolean | "indeterminate";
@@ -155,17 +157,24 @@ function SelectionCheckbox({
   className?: string;
   testId: string;
   taskId?: string;
+  disabled?: boolean;
+  title?: string;
 }) {
   return (
     <label
       htmlFor={id}
-      className="flex cursor-pointer items-center justify-center p-2"
+      title={title}
+      className={cn(
+        "flex items-center justify-center p-2",
+        disabled ? "cursor-not-allowed" : "cursor-pointer"
+      )}
     >
       <Checkbox
         id={id}
         checked={checked}
         onCheckedChange={onToggle}
-        className={cn("cursor-pointer", className)}
+        disabled={disabled}
+        className={cn(!disabled && "cursor-pointer", className)}
         aria-label={label}
         data-testid={testId}
         data-task-id={taskId}
@@ -225,9 +234,11 @@ export function TaskSelectionRow({
 export function TaskGroupSelectAll({
   taskIds,
   label,
+  disabled,
 }: {
   taskIds: string[];
   label: string;
+  disabled?: boolean;
 }) {
   const { isSelected, setManySelected } = useTaskSelection();
 
@@ -244,7 +255,17 @@ export function TaskGroupSelectAll({
       id={`task-group-select-${label.replace(/\W+/g, "-").toLowerCase()}`}
       checked={checked}
       onToggle={() => setManySelected(taskIds, !allSelected)}
-      label={`Select all tasks in ${label}`}
+      label={
+        disabled
+          ? `Bulk actions aren't available for ${label}`
+          : `Select all tasks in ${label}`
+      }
+      disabled={disabled}
+      title={
+        disabled
+          ? "Completed tasks can't be bulk-completed or rescheduled"
+          : undefined
+      }
       className="data-[state=indeterminate]:bg-primary/40 data-[state=indeterminate]:text-primary-foreground data-[state=indeterminate]:border-primary"
       testId="task-group-select-all"
     />
@@ -422,9 +443,9 @@ export function BulkActionsBar() {
                 Complete {pluralizeTasks(count)}?
               </AlertDialogTitle>
               <AlertDialogDescription>
-                This marks {pluralizeTasks(count)} complete and records each one
-                against your plant&rsquo;s progress. You can reopen a task
-                afterwards if you need to.
+                {/* One template literal, not JSX text around an expression — the
+                    production build dropped the space after the count there. */}
+                {`This marks ${pluralizeTasks(count)} complete and records each one against your plant’s progress. You can reopen a task afterwards if you need to.`}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>

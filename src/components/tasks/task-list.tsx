@@ -163,6 +163,7 @@ export function TaskList({
               <TaskGroupSelectAll
                 taskIds={group.tasks.map((task) => task.id)}
                 label={group.label}
+                disabled={group.variant === "completed"}
               />
               <h3
                 className={`text-sm font-semibold ${GROUP_STYLES[group.variant] ?? ""}`}
