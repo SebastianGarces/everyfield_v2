@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import type {
   PersonTeamAssignment,
@@ -7,7 +10,7 @@ import type {
 } from "@/lib/ministry-teams/service";
 
 import {
-  formatMembershipStart,
+  formatCalendarDate,
   sortTeamAssignments,
   sortTrainingItems,
   summarizeTraining,
@@ -179,17 +182,89 @@ test("sortTeamAssignments orders by team, then role", () => {
 });
 
 // ----------------------------------------------------------------------------
-// formatMembershipStart — a `date` column, not a timestamp.
+// formatCalendarDate — one formatter for both a `date` column (membership
+// start) and a `timestamp` (training completion).
 // ----------------------------------------------------------------------------
 
-test("formatMembershipStart renders the stored calendar day, timezone-free", () => {
-  assert.equal(formatMembershipStart("2026-03-01"), "Mar 1, 2026");
-  assert.equal(formatMembershipStart("2026-12-25"), "Dec 25, 2026");
+/**
+ * Run `fn` with the process pinned to a timezone, so "does this shift the
+ * calendar day" means the same thing on a laptop in Texas and in CI's UTC
+ * container. Node re-reads `process.env.TZ` on the next `Date` call.
+ */
+function inTimezone<T>(timeZone: string, fn: () => T): T {
+  const previous = process.env.TZ;
+  process.env.TZ = timeZone;
+  try {
+    return fn();
+  } finally {
+    if (previous === undefined) delete process.env.TZ;
+    else process.env.TZ = previous;
+  }
+}
+
+test("formatCalendarDate renders the stored calendar day, timezone-free", () => {
+  assert.equal(formatCalendarDate("2026-03-01"), "Mar 1, 2026");
+  assert.equal(formatCalendarDate("2026-12-25"), "Dec 25, 2026");
 });
 
-test("formatMembershipStart returns null for missing or unparseable values", () => {
-  assert.equal(formatMembershipStart(null), null);
-  assert.equal(formatMembershipStart(""), null);
-  assert.equal(formatMembershipStart("not-a-date"), null);
-  assert.equal(formatMembershipStart("2026-13-01"), null);
+test("formatCalendarDate reads a date column the same way in any timezone", () => {
+  // UTC+14 and UTC-11 — the widest pair a `Date` round-trip could split.
+  for (const zone of ["Pacific/Kiritimati", "Pacific/Niue"]) {
+    inTimezone(zone, () => {
+      assert.equal(formatCalendarDate("2026-03-01"), "Mar 1, 2026");
+    });
+  }
+});
+
+test("formatCalendarDate returns null for missing or unparseable values", () => {
+  assert.equal(formatCalendarDate(null), null);
+  assert.equal(formatCalendarDate(undefined), null);
+  assert.equal(formatCalendarDate(""), null);
+  assert.equal(formatCalendarDate("not-a-date"), null);
+  assert.equal(formatCalendarDate("2026-13-01"), null);
+  assert.equal(formatCalendarDate(new Date("not-a-date")), null);
+});
+
+test("formatCalendarDate renders a completion's local day west of Greenwich", () => {
+  inTimezone("America/Chicago", () => {
+    // 23:30 on Mar 1 in Chicago is already Mar 2 in UTC. The old
+    // `completedAt.toISOString().slice(0, 10)` rendered "Mar 2, 2026".
+    const completedAt = new Date("2026-03-02T05:30:00Z");
+
+    assert.equal(completedAt.toISOString().slice(0, 10), "2026-03-02");
+    assert.equal(completedAt.getHours(), 23);
+    assert.equal(formatCalendarDate(completedAt), "Mar 1, 2026");
+  });
+});
+
+test("formatCalendarDate renders a completion's local day east of Greenwich", () => {
+  inTimezone("Asia/Tokyo", () => {
+    // The mirror image: 00:30 on Mar 2 in Tokyo is still Mar 1 in UTC, so
+    // pinning to UTC showed the day *early*.
+    const completedAt = new Date("2026-03-01T15:30:00Z");
+
+    assert.equal(completedAt.toISOString().slice(0, 10), "2026-03-01");
+    assert.equal(formatCalendarDate(completedAt), "Mar 2, 2026");
+  });
+});
+
+// ----------------------------------------------------------------------------
+// Guard: the UTC-pinning idiom must not come back anywhere in this folder.
+// ----------------------------------------------------------------------------
+
+test("no people component pins a calendar day to UTC via toISOString().slice", () => {
+  const dir = path.dirname(fileURLToPath(import.meta.url));
+  const offenders = readdirSync(dir)
+    .filter((name) => /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name))
+    .filter((name) =>
+      /toISOString\(\)\s*\.\s*slice/.test(
+        readFileSync(path.join(dir, name), "utf8")
+      )
+    );
+
+  assert.deepEqual(
+    offenders,
+    [],
+    `Use formatCalendarDate instead of toISOString().slice: ${offenders.join(", ")}`
+  );
 });
