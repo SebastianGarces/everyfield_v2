@@ -84,7 +84,7 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
       <div className="flex h-full flex-col">
         <div className="bg-card p-6 pb-4 shadow-sm">
           <h1 className="text-3xl font-bold tracking-tight">Message History</h1>
-          <p className="text-foreground/50" data-testid="history-count">
+          <p className="text-muted-foreground" data-testid="history-count">
             {hasFilters
               ? `${total} matching ${total === 1 ? "message" : "messages"}`
               : `All sent messages · ${total} total`}

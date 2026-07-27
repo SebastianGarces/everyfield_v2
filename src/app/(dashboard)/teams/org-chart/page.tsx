@@ -30,7 +30,7 @@ export default async function OrgChartPage() {
             <h1 className="text-3xl font-bold tracking-tight">
               Organization Chart
             </h1>
-            <p className="text-foreground/50">
+            <p className="text-muted-foreground">
               View the hierarchical structure of your ministry teams
             </p>
           </div>
