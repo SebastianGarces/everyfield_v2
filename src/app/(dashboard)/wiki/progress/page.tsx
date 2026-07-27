@@ -1,6 +1,11 @@
 import Link from "next/link";
 import { ArrowRight, Check } from "lucide-react";
-import { getArticles, getProgressStats, getLastInProgress } from "@/lib/wiki";
+import {
+  getArticles,
+  getProgressStats,
+  getLastInProgress,
+  wikiHref,
+} from "@/lib/wiki";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -188,7 +193,7 @@ export default async function WikiProgressPage() {
                   </div>
                 </div>
                 <Button asChild>
-                  <Link href={`/wiki/${lastInProgress.slug}`}>
+                  <Link href={wikiHref(lastInProgress.slug)}>
                     Continue
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </Link>
