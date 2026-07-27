@@ -12,6 +12,7 @@ import { wikiHref } from "@/lib/wiki/href";
 import { Bookmark, ChevronRight, Clock } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { SidebarArticleToc } from "./sidebar-toc";
 import { WikiSearchTrigger } from "./wiki-search";
 
 interface RecentlyViewedItem {
@@ -237,15 +238,30 @@ function SidebarItem({
     );
   }
 
+  if (!isActive) {
+    return (
+      <Link
+        href={item.href}
+        className="text-muted-foreground hover:bg-muted hover:text-foreground relative block rounded px-2 py-1 text-sm before:absolute before:top-0 before:left-0 before:h-full before:w-[4px] before:bg-transparent"
+      >
+        {item.title}
+      </Link>
+    );
+  }
+
+  // The active styling sits on this wrapper rather than the link so that in
+  // prototype B the accent bar and background wrap the article title AND its
+  // table of contents as one block. In prototypes A/C the TOC inside renders
+  // nothing and this is visually identical to the active link it replaced.
   return (
-    <Link
-      href={item.href}
-      className={cn(
-        "text-muted-foreground hover:bg-muted hover:text-foreground relative block rounded px-2 py-1 text-sm before:absolute before:top-0 before:left-0 before:h-full before:w-[4px] before:bg-transparent",
-        isActive && "bg-muted text-foreground before:bg-ef font-medium"
-      )}
-    >
-      {item.title}
-    </Link>
+    <div className="bg-muted before:bg-ef relative rounded before:absolute before:top-0 before:left-0 before:h-full before:w-[4px]">
+      <Link
+        href={item.href}
+        className="text-foreground block px-2 py-1 text-sm font-medium"
+      >
+        {item.title}
+      </Link>
+      <SidebarArticleToc href={item.href} />
+    </div>
   );
 }
