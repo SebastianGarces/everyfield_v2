@@ -95,6 +95,35 @@ export type NotificationDeliveryStatus =
 export const digestCadences = ["daily", "weekly"] as const;
 export type DigestCadence = (typeof digestCadences)[number];
 
+/**
+ * What a notification can be ABOUT — the cancel-by-entity discriminator and the
+ * feed's link target.
+ *
+ * Code-defined rather than free text on purpose. `cancelByEntity` is a denial
+ * primitive that spans every recipient in a church, so `entity_type` is half of
+ * the key that decides what gets suppressed; a free-text field lets a typo
+ * silently cancel nothing and lets request-forwarded input aim the primitive at
+ * anything. Adding a type is a one-line code change here — deliberately NOT a
+ * database CHECK, so a follow-on unit (#131, #133) can name a new subject
+ * without a migration.
+ *
+ * Values are the singular of the owning table, so a reviewer can map a
+ * notification back to what it speaks for.
+ */
+export const notificationEntityTypes = [
+  "task",
+  "meeting",
+  "person",
+  "message",
+  "ministry_team",
+  "training",
+  "phase_assessment",
+  "document",
+  "facility",
+  "financial_entry",
+] as const;
+export type NotificationEntityType = (typeof notificationEntityTypes)[number];
+
 // ============================================================================
 // Enum guards at the database boundary
 // ============================================================================
@@ -110,6 +139,15 @@ export type DigestCadence = (typeof digestCadences)[number];
 // They list values, not a pgEnum, deliberately: adding a category stays a code
 // change plus a small migration, never a type rewrite with a table rewrite.
 
+/**
+ * Render a value tuple as a SQL literal list for a CHECK constraint.
+ *
+ * `sql.raw` with unescaped single quotes — safe ONLY because every argument is
+ * a code-defined `as const` tuple in this file, compiled into the bundle. If a
+ * caller ever sources these values from config, a database table, a plugin or
+ * anything else that is not a literal in source, this becomes an injection
+ * point and must switch to escaping (or to `sql.join` of parameters).
+ */
 function inList(values: readonly string[]): SQL {
   return sql.raw(values.map((value) => `'${value}'`).join(", "));
 }
@@ -142,7 +180,9 @@ export const notifications = pgTable(
     title: varchar("title", { length: 255 }).notNull(),
     body: text("body").notNull(),
     /** What it is about — powers cancel-by-entity and the feed's link target. */
-    entityType: varchar("entity_type", { length: 32 }),
+    entityType: varchar("entity_type", {
+      length: 32,
+    }).$type<NotificationEntityType>(),
     entityId: uuid("entity_id"),
     /**
      * Caller-supplied idempotency key. Unique per (church, RECIPIENT) — see the
@@ -179,9 +219,30 @@ export const notifications = pgTable(
     // same key race into the same INSERT, and the loser is absorbed by ON
     // CONFLICT DO NOTHING rather than by a SELECT that both requests would have
     // passed (see memory/invariants.md → Atomicity).
+    //
+    // `status <> 'cancelled'` is the LIVENESS term, and it is load-bearing
+    // (migration 0025). N-011 defines reschedule as cancel + re-enqueue, and
+    // reopen (task completed → cancelled, task reopened → re-enqueue) has the
+    // same shape. Without the term, a cancelled row keeps occupying its key
+    // forever: the re-enqueue is absorbed by ON CONFLICT, the caller gets
+    // `created: false` with a CANCELLED row back, and the notification is
+    // silently lost — no pending row for the dispatcher, and nothing in the
+    // feed. A cancelled row is a record of something that will never be
+    // delivered, so it must not reserve the key for the thing that replaces it.
+    // Delivered and failed rows DO keep reserving it: those announcements
+    // happened, and re-announcing them is exactly what dedupe exists to stop.
+    //
+    // The predicate is mirrored BYTE-FOR-BYTE by the ON CONFLICT clause in
+    // `dbEnqueueDeps.insertIfAbsent` (src/lib/notifications/enqueue.ts).
+    // Postgres infers a partial arbiter index only from a matching predicate,
+    // so the two must change together or every keyed enqueue fails at runtime
+    // with "no unique or exclusion constraint matching the ON CONFLICT
+    // specification".
     uniqueIndex("notifications_dedupe_key_unique_idx")
       .on(table.churchId, table.recipientUserId, table.dedupeKey)
-      .where(sql`${table.dedupeKey} is not null`),
+      .where(
+        sql`${table.dedupeKey} is not null and ${table.status} <> 'cancelled'`
+      ),
     // Feed read path: newest-first for one recipient within one church.
     index("notifications_feed_idx").on(
       table.churchId,

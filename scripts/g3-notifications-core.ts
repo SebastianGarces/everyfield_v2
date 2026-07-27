@@ -21,10 +21,13 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   churches,
+  churchPrivacySettings,
   notificationPreferences,
   notifications,
+  sendingNetworks,
   users,
 } from "@/db/schema";
+import { canAccessChurch } from "@/lib/auth/access";
 import {
   cancelByEntity,
   enqueue,
@@ -37,6 +40,7 @@ import {
 } from "@/lib/notifications/queries";
 import {
   loadUserPreferences,
+  preferenceOwnerFromSession,
   resolvePreference,
   setPreference,
 } from "@/lib/notifications/preferences";
@@ -51,9 +55,16 @@ async function main() {
   // --------------------------------------------------------------------------
   // Seed: one church, two users in it; one church B with its own user.
   // --------------------------------------------------------------------------
+  // Church A sits under a network, so a network_admin genuinely passes
+  // `canAccessChurch` for it — which is the whole point of assertion 7c.
+  const [network] = await db
+    .insert(sendingNetworks)
+    .values({ name: "Scratch Network" })
+    .returning();
+
   const [churchA] = await db
     .insert(churches)
-    .values({ name: "Scratch Church A" })
+    .values({ name: "Scratch Church A", sendingNetworkId: network.id })
     .returning();
   const [churchB] = await db
     .insert(churches)
@@ -87,6 +98,11 @@ async function main() {
       churchId: churchB.id,
     })
     .returning();
+
+  // Preference ownership is a branded type — minted only from a verified
+  // session, never from a bare id. This is the production call shape.
+  const ownerA = preferenceOwnerFromSession({ user: userA });
+  const ownerB = preferenceOwnerFromSession({ user: userB });
 
   const scopeA = { churchId: churchA.id, recipientUserId: userA.id };
   const scopeB = { churchId: churchA.id, recipientUserId: userB.id };
@@ -293,15 +309,166 @@ async function main() {
   ok("cancelByEntity on nothing: no throw, no rows changed");
 
   // --------------------------------------------------------------------------
+  // 7b. N-011 reschedule — cancel RELEASES the key, against real Postgres.
+  //
+  // This is the assertion the whole of migration 0025 exists for, and it can
+  // only be made here: a faked store cannot tell whether Postgres actually
+  // infers the PARTIAL arbiter index from the predicate the ON CONFLICT clause
+  // supplies. If those two ever drift, this call fails with "there is no unique
+  // or exclusion constraint matching the ON CONFLICT specification" — so every
+  // keyed enqueue below is also a live check on that inference.
+  // --------------------------------------------------------------------------
+  const rescheduleEntity = "66666666-6666-4666-8666-666666666666";
+  const rescheduleKey = `meeting.reminder:${rescheduleEntity}:3d`;
+  const rescheduleInput = {
+    churchId: churchA.id,
+    recipientUserId: userA.id,
+    category: "meetings" as const,
+    type: "meeting.reminder",
+    title: "Vision meeting in 3 days",
+    body: "Thursday, 7pm.",
+    entityType: "meeting" as const,
+    entityId: rescheduleEntity,
+    dedupeKey: rescheduleKey,
+  };
+
+  const beforeMove = await enqueue(rescheduleInput);
+  assert.equal(beforeMove.created, true);
+
+  const moved = await cancelByEntity({
+    churchId: churchA.id,
+    entityType: "meeting",
+    entityId: rescheduleEntity,
+  });
+  assert.equal(moved.cancelledCount, 1);
+
+  const afterMove = await enqueue(rescheduleInput);
+  assert.equal(
+    afterMove.created,
+    true,
+    "the re-enqueue after a cancel was silently swallowed"
+  );
+  assert.equal(afterMove.notification?.status, "pending");
+  assert.notEqual(afterMove.notification?.id, beforeMove.notification?.id);
+
+  const rescheduleRows = await db
+    .select({ id: notifications.id, status: notifications.status })
+    .from(notifications)
+    .where(
+      and(
+        eq(notifications.churchId, churchA.id),
+        eq(notifications.dedupeKey, rescheduleKey)
+      )
+    );
+  assert.equal(rescheduleRows.length, 2);
+  assert.deepEqual(rescheduleRows.map((row) => row.status).sort(), [
+    "cancelled",
+    "pending",
+  ]);
+  ok("cancel + re-enqueue under one key => a NEW pending row (N-011)");
+
+  // ...and the live row is still unique: a THIRD enqueue collapses into the
+  // pending one rather than adding a third row.
+  const third = await enqueue(rescheduleInput);
+  assert.equal(third.created, false);
+  assert.equal(third.notification?.id, afterMove.notification?.id);
+  assert.equal(
+    third.notification?.status,
+    "pending",
+    "the read-back handed back a cancelled row"
+  );
+  const stillTwoLive = await db
+    .select({ id: notifications.id })
+    .from(notifications)
+    .where(
+      and(
+        eq(notifications.churchId, churchA.id),
+        eq(notifications.dedupeKey, rescheduleKey)
+      )
+    );
+  assert.equal(stillTwoLive.length, 2);
+  ok("the LIVE row is still unique, and never resolves to the cancelled one");
+
+  // --------------------------------------------------------------------------
+  // 7c. SECURITY — an oversight recipient is refused when the church has not
+  // opted in (memory/invariants.md → Hierarchical Access Control).
+  // --------------------------------------------------------------------------
+  const [oversight] = await db
+    .insert(users)
+    .values({
+      email: `oversight-${Date.now()}@example.test`,
+      passwordHash: "x",
+      role: "network_admin",
+      sendingNetworkId: network.id,
+    })
+    .returning();
+
+  // `canAccessChurch` alone says yes — the plant is in their network.
+  assert.equal(await canAccessChurch(oversight, churchA.id), true);
+
+  const oversightRowsBefore = await db
+    .select({ id: notifications.id })
+    .from(notifications);
+  await assert.rejects(
+    () =>
+      enqueue({
+        churchId: churchA.id,
+        recipientUserId: oversight.id,
+        category: "communication",
+        type: "message.failed",
+        title: "Delivery failed",
+        body: "No contact in 30 days: Jane Doe, 555-1234.",
+      }),
+    /may not be notified about "communication"/
+  );
+  const oversightRowsAfter = await db
+    .select({ id: notifications.id })
+    .from(notifications);
+  assert.equal(oversightRowsAfter.length, oversightRowsBefore.length);
+  ok("an oversight recipient is refused while the privacy toggle is closed");
+
+  // Opt in, and the SAME call is accepted — the gate is the toggle, not the
+  // role.
+  await db.insert(churchPrivacySettings).values({
+    churchId: churchA.id,
+    sharePeople: true,
+  });
+  const permitted = await enqueue({
+    churchId: churchA.id,
+    recipientUserId: oversight.id,
+    category: "communication",
+    type: "message.failed",
+    title: "Delivery failed",
+    body: "A message you sent could not be delivered.",
+  });
+  assert.equal(permitted.created, true);
+  ok("...and accepted once the church opts in to sharing that feature");
+
+  // `phase` has no toggle at all, so it stays refused either way.
+  await assert.rejects(
+    () =>
+      enqueue({
+        churchId: churchA.id,
+        recipientUserId: oversight.id,
+        category: "phase",
+        type: "phase.transition",
+        title: "Phase changed",
+        body: "Now in Core Group.",
+      }),
+    /may not be notified about "phase"/
+  );
+  ok("a category with no privacy toggle refuses an oversight recipient");
+
+  // --------------------------------------------------------------------------
   // 8. Preferences — unique (user, category, channel), upsert not duplicate.
   // --------------------------------------------------------------------------
-  await setPreference(userA.id, {
+  await setPreference(ownerA, {
     category: "digest",
     channel: "email",
     enabled: true,
     digestCadence: "daily",
   });
-  await setPreference(userA.id, {
+  await setPreference(ownerA, {
     category: "digest",
     channel: "email",
     enabled: false,
@@ -317,7 +484,7 @@ async function main() {
   assert.equal(prefRows[0].enabled, false);
   assert.equal(prefRows[0].digestCadence, "daily");
   assert.equal(
-    resolvePreference(await loadUserPreferences(userA.id), "digest", "email")
+    resolvePreference(await loadUserPreferences(ownerA), "digest", "email")
       .digestCadence,
     "daily"
   );
@@ -325,7 +492,7 @@ async function main() {
 
   // Absent row => coded default.
   const absent = resolvePreference(
-    await loadUserPreferences(userB.id),
+    await loadUserPreferences(ownerB),
     "tasks",
     "email"
   );
@@ -335,7 +502,7 @@ async function main() {
 
   // Validation now actually runs at the boundary.
   await assert.rejects(() =>
-    setPreference(userA.id, {
+    setPreference(ownerA, {
       // @ts-expect-error runtime guard is the point
       category: "billing",
       channel: "email",

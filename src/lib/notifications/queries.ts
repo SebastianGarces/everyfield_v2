@@ -15,6 +15,7 @@ import {
   notifications,
   type Notification,
   type NotificationCategory,
+  type NotificationEntityType,
 } from "@/db/schema";
 
 // ============================================================================
@@ -115,8 +116,9 @@ export function dispatcherWhere(
  * - not yet due — a reminder enqueued three days ahead would otherwise appear,
  *   and increment the unread badge, three days early.
  *
- * Applied to the feed AND the unread count, so the badge can never disagree
- * with the list it counts.
+ * Applied to EVERY user-facing read — the feed, the unread count and the
+ * single-row fetch by id — so the badge can never disagree with the list it
+ * counts, and the by-id path can never hand back what the list is hiding.
  */
 function feedVisibility(now: Date): (SQL | undefined)[] {
   return [
@@ -152,7 +154,7 @@ export interface FeedNotification {
   type: string;
   title: string;
   body: string;
-  entityType: string | null;
+  entityType: NotificationEntityType | null;
   entityId: string | null;
   readAt: Date | null;
   createdAt: Date;
@@ -162,11 +164,32 @@ export interface FeedNotification {
 // Query builders — exported so their SQL can be asserted without a database.
 // ----------------------------------------------------------------------------
 
-export function notificationByIdQuery(scope: NotificationScope, id: string) {
+/**
+ * One row, by id — and it carries the FEED's visibility rules, not a weaker set.
+ *
+ * A single-row read is a delivery channel too: it returns the same projection
+ * (title, body, entity link) the list does. Without `feedVisibility` here, a
+ * cancelled notification — one N-011 says is never delivered — and a reminder
+ * scheduled three days out would both be readable by anyone who has, or
+ * guesses, the id, undoing on this path exactly what the feed and the badge
+ * enforce on theirs. `now` is injectable for the same reason it is on the feed:
+ * so "not yet due" is assertable.
+ */
+export function notificationByIdQuery(
+  scope: NotificationScope,
+  id: string,
+  now?: Date
+) {
   return db
     .select(feedColumns)
     .from(notifications)
-    .where(scopedWhere(scope, eq(notifications.id, id)))
+    .where(
+      scopedWhere(
+        scope,
+        eq(notifications.id, id),
+        ...feedVisibility(now ?? new Date())
+      )
+    )
     .limit(1);
 }
 
@@ -290,13 +313,15 @@ export function dispatchQueueQuery(
  *
  * Returns null for a row that exists but belongs to another church, and equally
  * for one that belongs to another user in the SAME church. The id is not a
- * capability in either direction.
+ * capability in either direction — nor is it a way around the feed's visibility
+ * rules: a cancelled or not-yet-due row is null here too.
  */
 export async function getNotificationById(
   scope: NotificationScope,
-  id: string
+  id: string,
+  now?: Date
 ): Promise<FeedNotification | null> {
-  const [row] = await notificationByIdQuery(scope, id);
+  const [row] = await notificationByIdQuery(scope, id, now);
   return row ?? null;
 }
 

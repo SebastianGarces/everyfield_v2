@@ -2,10 +2,13 @@ import {
   digestCadences,
   notificationCategories,
   notificationChannels,
+  notificationEntityTypes,
   type DigestCadence,
   type NotificationCategory,
   type NotificationChannel,
+  type NotificationEntityType,
 } from "@/db/schema";
+import type { PrivacyFeatureKey } from "@/lib/auth/access";
 
 // ============================================================================
 // The fixed, code-defined category set (N-005).
@@ -24,9 +27,11 @@ export {
   digestCadences,
   notificationCategories,
   notificationChannels,
+  notificationEntityTypes,
   type DigestCadence,
   type NotificationCategory,
   type NotificationChannel,
+  type NotificationEntityType,
 };
 
 // ----------------------------------------------------------------------------
@@ -57,6 +62,10 @@ export interface NotificationCategoryDefinition {
  * should instead be opt-in is an explicitly unruled Open Question. When either
  * is ruled, only the `defaults` values below change — the resolver, the schema
  * and every caller stay put, because nothing is seeded into the database.
+ *
+ * That open question is about DEFAULTS, not about permission. Whether an
+ * oversight user may be a recipient at all is settled and enforced — see
+ * `oversightPrivacyFeature` below and `recipientMayBeNotified` in `enqueue.ts`.
  */
 export const NOTIFICATION_CATEGORIES: Record<
   NotificationCategory,
@@ -100,6 +109,60 @@ export const NOTIFICATION_CATEGORIES: Record<
  * dispatcher concern, not a data-model one.
  */
 export const DEFAULT_DIGEST_CADENCE: DigestCadence = "weekly";
+
+// ----------------------------------------------------------------------------
+// What an oversight recipient's church must be sharing for this category
+// ----------------------------------------------------------------------------
+
+/**
+ * The privacy toggle that governs whether an OVERSIGHT user
+ * (`sending_church_admin`, `network_admin`) may be told about this category.
+ *
+ * memory/invariants.md → Hierarchical Access Control: oversight users see
+ * aggregate metrics only, and `canAccessFeatureData(user, churchId, feature)`
+ * gates every feature read against `church_privacy_settings` (default: all
+ * false / opt-in). A notification `body` is arbitrary feature copy — "No
+ * contact in 30 days: Jane Doe", a giving figure, a message that failed — so
+ * enqueue is a feature read wearing a different hat, and it inherits the same
+ * gate. `canAccessChurch` alone is not that gate: it returns true for a network
+ * admin on every plant in the network, regardless of any toggle.
+ *
+ * `null` means NO toggle covers this category, and the effect is to REFUSE an
+ * oversight recipient outright:
+ *
+ * - `phase` — plant-intelligence assessments and transitions. Arguably the
+ *   aggregate view oversight exists for, but `church_privacy_settings` has no
+ *   column for it, and inventing an implicit "yes" here would be the one place
+ *   in the codebase where oversight access is granted without a toggle.
+ * - `digest` — a roll-up OF the other categories, so no single toggle can
+ *   answer for it. A digest addressed to an oversight user has to be assembled
+ *   from per-category permission by whatever builds it (N-013), not waved
+ *   through at enqueue.
+ *
+ * Both are fail-closed pending a ruling; opening either is a one-line change
+ * here plus, for `phase`, a privacy-settings column. Church-level roles
+ * (planter, coach, team_member) are unaffected either way —
+ * `canAccessFeatureData` returns true for them without consulting a toggle.
+ */
+export const OVERSIGHT_PRIVACY_FEATURE: Record<
+  NotificationCategory,
+  PrivacyFeatureKey | null
+> = {
+  tasks: "tasks",
+  meetings: "meetings",
+  // Message content is about PEOPLE — recipients, contact details, failures.
+  communication: "people",
+  teams: "ministry_teams",
+  phase: null,
+  digest: null,
+};
+
+/** The privacy toggle governing this category, or null if none covers it. */
+export function oversightPrivacyFeature(
+  category: NotificationCategory
+): PrivacyFeatureKey | null {
+  return OVERSIGHT_PRIVACY_FEATURE[category] ?? null;
+}
 
 // ----------------------------------------------------------------------------
 // Guards + lookups

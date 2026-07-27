@@ -10,6 +10,7 @@ import {
   type NotificationCategory,
   type NotificationChannel,
   type NotificationPreference,
+  type User,
 } from "@/db/schema";
 
 import {
@@ -29,6 +30,33 @@ import {
 // Resolution is pure (`resolvePreference`, `buildPreferenceMap`) so the
 // dispatcher can load a user's rows once and answer many questions from them
 // without a query per channel.
+//
+// ----------------------------------------------------------------------------
+// Whose preferences? — `PreferenceOwner`, and why it is not a `string`
+// ----------------------------------------------------------------------------
+//
+// A preference row is a CONSENT record, and every entrypoint here — read and
+// write alike — is addressed by user id. A bare `userId: string` parameter puts
+// no distance at all between "the logged-in user" and "a uuid that arrived in a
+// query string": anyone holding or guessing another user's id could read their
+// consent records and flip them in either direction (silently re-enabling a
+// deliberate opt-out is as damaging as disabling one). A uuid parse is a FORMAT
+// check and nothing more; it cannot tell those two apart.
+//
+// So ownership is a TYPE here, exactly as `NotificationScope` is in queries.ts:
+// `PreferenceOwner` is branded and cannot be constructed by a caller. The only
+// way to mint one is `preferenceOwnerFromSession(session)`, which takes an
+// already-verified session and throws when there is none — so the failure mode
+// is a compile error at the call site, not a missing runtime check.
+//
+// NO UNAUTHENTICATED CALLER IS SUPPORTED YET. The logged-out email-footer
+// unsubscribe (N-007) needs a signed token — an HMAC over (user_id, category,
+// channel, expiry), verified server-side — and that token does not exist in
+// this unit. When it lands it gets its OWN minting function
+// (`preferenceOwnerFromUnsubscribeToken`) beside this one, and it is the
+// verification inside that function, not a comment, that earns the brand. Until
+// then, an unsubscribe link that passes a raw user id is not something this
+// module will accept, and that is deliberate.
 // ============================================================================
 
 // ----------------------------------------------------------------------------
@@ -45,12 +73,61 @@ export const setPreferenceSchema = z.object({
 
 export type SetPreferenceInput = z.infer<typeof setPreferenceSchema>;
 
+// ----------------------------------------------------------------------------
+// Ownership
+// ----------------------------------------------------------------------------
+
+declare const preferenceOwnerBrand: unique symbol;
+
 /**
- * The owner of the preference. Parsed like everything else: a settings action
- * forwarding a form body is the expected caller, and a bare `string` parameter
- * is not a check.
+ * A user id that has been PROVEN to be the caller's own.
+ *
+ * Structurally a string, but nominally distinct: no assignment, cast-free
+ * construction or `z.string().uuid()` parse produces one. `string` is not
+ * assignable to it, so a route that reaches for `searchParams.get("user")` does
+ * not compile — which is the entire point, and the same technique
+ * `NotificationScope` uses in queries.ts.
+ */
+export type PreferenceOwner = string & {
+  readonly [preferenceOwnerBrand]: true;
+};
+
+/** Thrown when a preference read or write is attempted with no session. */
+export class UnauthenticatedPreferenceAccessError extends Error {
+  constructor() {
+    super(
+      "notification preferences: no authenticated session — a preference is a consent record and is only ever addressed to the session's own user"
+    );
+    this.name = "UnauthenticatedPreferenceAccessError";
+  }
+}
+
+/**
+ * Format check on a minted owner. Kept because it is cheap and catches a
+ * malformed id before it reaches Postgres — but note what it is NOT: it says
+ * nothing about ownership. `PreferenceOwner` does that, and only the minting
+ * functions below can produce one.
  */
 export const preferenceUserIdSchema = z.string().uuid();
+
+/**
+ * The one supported way to obtain a `PreferenceOwner`: from a session that
+ * `src/lib/auth/session.ts` has already validated.
+ *
+ * Takes the resolved session rather than reading the cookie itself, so this
+ * module stays free of `next/headers` and remains directly testable — and so
+ * the caller cannot skip validation without it being visible at the call site.
+ *
+ * @throws UnauthenticatedPreferenceAccessError when there is no session.
+ */
+export function preferenceOwnerFromSession(
+  session: { user: Pick<User, "id"> } | null | undefined
+): PreferenceOwner {
+  if (!session?.user?.id) {
+    throw new UnauthenticatedPreferenceAccessError();
+  }
+  return preferenceUserIdSchema.parse(session.user.id) as PreferenceOwner;
+}
 
 // ----------------------------------------------------------------------------
 // Pure resolution
@@ -155,24 +232,26 @@ export function resolvePreferenceMatrix(
 // ----------------------------------------------------------------------------
 
 /**
- * Load a user's explicit preference rows. Preferences are per user, not per
+ * Load the OWNER's explicit preference rows. Preferences are per user, not per
  * church — a coach across two churches keeps one set of choices — so this read
- * takes no `churchId`, unlike every notification read path.
+ * takes no `churchId`, unlike every notification read path. `PreferenceOwner`
+ * is what replaces that missing tenancy argument: the boundary here is the
+ * user, and it is a type rather than a convention.
  */
 export async function loadUserPreferences(
-  userId: string
+  owner: PreferenceOwner
 ): Promise<NotificationPreference[]> {
   return db
     .select()
     .from(notificationPreferences)
-    .where(eq(notificationPreferences.userId, userId));
+    .where(eq(notificationPreferences.userId, owner));
 }
 
-/** The resolved matrix for a user, straight from storage. */
+/** The resolved matrix for the owner, straight from storage. */
 export async function getPreferenceMatrix(
-  userId: string
+  owner: PreferenceOwner
 ): Promise<ResolvedPreference[]> {
-  return resolvePreferenceMatrix(await loadUserPreferences(userId));
+  return resolvePreferenceMatrix(await loadUserPreferences(owner));
 }
 
 /**
@@ -187,22 +266,26 @@ export async function getPreferenceMatrix(
  * `digestCadence` is only stored on the `digest` category; passing it elsewhere
  * is ignored rather than rejected, so a settings form can send the whole row.
  *
- * Two things this function is careful about:
+ * Three things this function is careful about:
  *
- * 1. It PARSES. `setPreferenceSchema` is the boundary, and it is applied here
+ * 1. It writes for a `PreferenceOwner`, never a bare id. See the module header:
+ *    a preference is a consent record, so whose it is has to be a type.
+ * 2. It PARSES. `setPreferenceSchema` is the boundary, and it is applied here
  *    rather than trusted to a caller — the columns are plain `varchar` with a
  *    compile-time brand, and a preference stored under a category the code does
  *    not define is never found by resolution, so an opt-out written that way is
  *    silently ignored forever.
- * 2. It does not clobber a cadence the caller did not send. A checkbox-only
- *    toggle, or the logged-out email-footer unsubscribe (N-007), submits
- *    `enabled` and nothing else; writing `digest_cadence = NULL` there would
- *    quietly reset a user's stored `daily` back to the `weekly` default.
- *    `digest_cadence` is therefore left out of the update entirely unless a
- *    cadence was actually supplied.
+ * 3. It does not clobber a cadence the caller did not send. A checkbox-only
+ *    toggle submits `enabled` and nothing else; writing `digest_cadence = NULL`
+ *    there would quietly reset a user's stored `daily` back to the `weekly`
+ *    default. `digest_cadence` is therefore left out of the update entirely
+ *    unless a cadence was actually supplied.
  */
-export function setPreferenceQuery(userId: string, input: SetPreferenceInput) {
-  const ownerId = preferenceUserIdSchema.parse(userId);
+export function setPreferenceQuery(
+  owner: PreferenceOwner,
+  input: SetPreferenceInput
+) {
+  const ownerId = preferenceUserIdSchema.parse(owner);
   const parsed = setPreferenceSchema.parse(input);
 
   const suppliedCadence =
@@ -245,9 +328,9 @@ export function setPreferenceQuery(userId: string, input: SetPreferenceInput) {
 
 /** Write one preference. See `setPreferenceQuery` for what it does and why. */
 export async function setPreference(
-  userId: string,
+  owner: PreferenceOwner,
   input: SetPreferenceInput
 ): Promise<NotificationPreference> {
-  const [row] = await setPreferenceQuery(userId, input);
+  const [row] = await setPreferenceQuery(owner, input);
   return row;
 }

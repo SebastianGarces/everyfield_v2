@@ -14,11 +14,18 @@ import {
 // The two boundaries on every read path (N-008, N-010).
 //
 // These are query-level assertions: each builder is rendered with `.toSQL()`
-// and inspected. No connection is opened — `pnpm test` supplies a placeholder
-// DATABASE_URL — so what is asserted is the SQL that would reach Postgres, not
+// and inspected, so what is asserted is the SQL that would reach Postgres, not
 // a stand-in for it. A read path that stopped filtering on church_id OR on
 // recipient_user_id would fail here even though it still type-checked and still
 // returned rows.
+//
+// No query is EXECUTED — `.toSQL()` renders, it does not connect. The suite
+// does, however, need a DATABASE_URL present: importing `./queries` pulls in
+// `@/db`, which constructs the Neon client at module load, and that throws
+// without one. `pnpm test` supplies a placeholder (CI too), so this is a
+// module-graph fact rather than a live dependency — but it is a real one, and
+// claiming otherwise would mislead the next person who tries to run this file
+// in isolation.
 // ----------------------------------------------------------------------------
 
 const CHURCH_A = "church-a";
@@ -171,6 +178,26 @@ test("the feed excludes cancelled rows and rows that are not due yet", () => {
   assert.ok(params.includes("cancelled"));
 
   // A reminder scheduled three days out must not appear (or be counted) today.
+  assert.match(sql, /"notifications"\."scheduled_for" <= \$\d/);
+  assert.ok(boundInstant(params, now));
+});
+
+test("fetch-by-id applies exactly the feed's visibility rules too", () => {
+  // The by-id path returns the SAME projection the list does — title, body,
+  // entity link — so it is a delivery channel in its own right. Without these
+  // predicates, a cancelled notification (one N-011 says is never delivered)
+  // and a reminder scheduled three days out are both readable by anyone
+  // holding the id, undoing on this path what the feed enforces on its own.
+  const now = new Date("2026-07-27T12:00:00.000Z");
+  const { sql, params } = notificationByIdQuery(
+    SCOPE,
+    NOTIFICATION,
+    now
+  ).toSQL();
+
+  assert.match(sql, /"notifications"\."status" <> \$\d/);
+  assert.ok(params.includes("cancelled"));
+
   assert.match(sql, /"notifications"\."scheduled_for" <= \$\d/);
   assert.ok(boundInstant(params, now));
 });

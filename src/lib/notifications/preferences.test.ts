@@ -10,10 +10,13 @@ import {
   buildPreferenceMap,
   isChannelEnabled,
   preferenceKey,
+  preferenceOwnerFromSession,
   resolvePreference,
   resolvePreferenceMatrix,
   setPreferenceQuery,
   setPreferenceSchema,
+  UnauthenticatedPreferenceAccessError,
+  type PreferenceOwner,
 } from "./preferences";
 
 // ----------------------------------------------------------------------------
@@ -232,7 +235,15 @@ test("setPreferenceSchema rejects an unknown category or channel", () => {
 // The write boundary — setPreference parses, and does not clobber
 // ----------------------------------------------------------------------------
 
-const OWNER = "55555555-5555-4555-8555-555555555555";
+const OWNER_ID = "55555555-5555-4555-8555-555555555555";
+
+/**
+ * Minted the ONLY supported way — from a verified session. There is no cast
+ * here on purpose: if `preferenceOwnerFromSession` stopped being the sole
+ * entrance, this line would still compile but the tests below would no longer
+ * be exercising the real call shape.
+ */
+const OWNER = preferenceOwnerFromSession({ user: { id: OWNER_ID } });
 
 /** The `do update set ...` clause alone — `returning` names every column. */
 function updateClause(sql: string): string {
@@ -264,9 +275,53 @@ test("setPreference parses its input rather than trusting the caller", () => {
   );
 });
 
-test("setPreference rejects a userId that is not a uuid", () => {
+// ----------------------------------------------------------------------------
+// Ownership — a preference is a consent record, so whose it is is a TYPE
+// ----------------------------------------------------------------------------
+
+test("a bare user id does not compile as a PreferenceOwner", () => {
+  // The security property, checked by the COMPILER rather than at runtime: a
+  // route reaching for `searchParams.get("user")` cannot call these functions
+  // at all. The `@ts-expect-error` below is the assertion — `pnpm typecheck`
+  // fails if this call ever starts type-checking — and it cannot rot into a
+  // comment, because an unused directive is itself an error.
+  const builder = setPreferenceQuery(
+    // @ts-expect-error a plain string is not proof of ownership
+    OWNER_ID,
+    { category: "tasks", channel: "email", enabled: false }
+  );
+
+  // At runtime the id happens to be well-formed and the statement builds fine.
+  // That is exactly why a runtime check could never have caught this, and why
+  // ownership had to become a type.
+  assert.ok(builder.toSQL().sql.includes("notification_preferences"));
+});
+
+test("minting an owner requires a session, and throws without one", () => {
+  // The unauthenticated caller the module header says is not supported yet:
+  // the N-007 email-footer unsubscribe needs a signed token, and until that
+  // lands there is no second way to mint an owner.
+  assert.throws(
+    () => preferenceOwnerFromSession(null),
+    UnauthenticatedPreferenceAccessError
+  );
+  assert.throws(
+    () => preferenceOwnerFromSession(undefined),
+    UnauthenticatedPreferenceAccessError
+  );
+  assert.equal(
+    preferenceOwnerFromSession({ user: { id: OWNER_ID } }),
+    OWNER_ID
+  );
+});
+
+test("a minted owner still has to be a uuid", () => {
+  // Belt to the type's braces: the brand proves ownership, the parse catches a
+  // malformed id before it reaches Postgres. They answer different questions.
+  assert.throws(() => preferenceOwnerFromSession({ user: { id: "user-1" } }));
+
   assert.throws(() =>
-    setPreferenceQuery("user-1", {
+    setPreferenceQuery("user-1" as PreferenceOwner, {
       category: "tasks",
       channel: "email",
       enabled: false,
