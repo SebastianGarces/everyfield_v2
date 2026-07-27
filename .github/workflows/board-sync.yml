@@ -1,11 +1,17 @@
-# Mirrors the canonical `agent:*` / `needs-spec` labels onto the Project board's Status field.
+# Mirrors the canonical issue state — `agent:*` / `needs-spec` labels, and closure — onto the
+# Project board's Status field.
 #
 # ONE WAY ONLY. Labels are the source of truth (ops/agent-os/labels.md): build-until-done writes
 # them, standup reads them, and agents never read the board. This workflow renders that state for a
 # human. Dragging a card in the UI changes nothing durable — the next label event overwrites it.
 #
-# Done needs no mirroring: two Project workflows are enabled by default and already set Status to
-# Done when an issue closes or its PR merges.
+# Done IS mirrored here, from the issue's closed state. The original design assumed GitHub's two
+# built-in Project workflows ("item closed" / "PR merged" → Done) would cover it; in practice they
+# never fired on this project — 15 closed issues sat in "Pending PR review" until 2026-07-27 —
+# most likely because recreating the Status field's options detached them. Rather than depend on
+# UI-configured automation nobody can audit from the repo, closure is mirrored by the same
+# mechanism as every other status: canonical repo state in, board out. Closure overrides labels,
+# so a stray label event on a closed issue re-derives Done instead of dragging the card back.
 #
 # SETUP (see product-docs/board-design-2026-07.md §9):
 #   [x] Project "EveryField Delivery" created — user-owned, number 1
@@ -29,7 +35,7 @@ name: Board sync
 
 on:
   issues:
-    types: [opened, reopened, labeled, unlabeled]
+    types: [opened, reopened, labeled, unlabeled, closed]
 
 permissions:
   issues: read
@@ -67,9 +73,11 @@ jobs:
             exit 0
           fi
 
-          # Read live rather than from github.event.issue.labels: the payload is a snapshot, and
-          # two quick label edits would replay an older one over a newer.
-          labels=$(GH_TOKEN="$REPO_TOKEN" gh issue view "$ISSUE" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name')
+          # Read live rather than from github.event.issue payload: it is a snapshot, and two quick
+          # edits would replay an older state over a newer.
+          state_and_labels=$(GH_TOKEN="$REPO_TOKEN" gh issue view "$ISSUE" --repo "$GITHUB_REPOSITORY" --json state,labels --jq '[.state, (.labels[].name)] | join("\n")')
+          state=$(echo "$state_and_labels" | head -1)
+          labels=$(echo "$state_and_labels" | tail -n +2)
 
           # Everything below writes the board, so it uses the PAT.
           export GH_TOKEN="$PROJECT_TOKEN"
@@ -99,10 +107,19 @@ jobs:
           # No mapped label means the issue is not a work item: `feature` parents are indexes,
           # `decision` issues close by a ruling, `deferred` ones are off the roadmap. They stay off
           # the board on purpose — a kanban of things nobody can pick up is noise. Feature grouping
-          # is still available via the built-in "Parent issue" field on the children.
+          # is still available via the built-in "Parent issue" field on the children. This applies
+          # closed or open, which is why it is checked BEFORE the closed override below.
           if [ -z "$status" ]; then
             echo "No mapped label on #$ISSUE — leaving board untouched."
             exit 0
+          fi
+
+          # Closed overrides every label: a closed work item is Done no matter what stale agent:*
+          # label it still carries (labels are deliberately not stripped on close — see
+          # ops/agent-os/labels.md), and a label event arriving after closure re-derives Done here
+          # rather than dragging the card back into an active column.
+          if [ "$state" = "CLOSED" ]; then
+            status="Done"; option_id="3044f5d2"
           fi
 
           # The issue's GraphQL node id — a repo read, so it uses the repo token.
