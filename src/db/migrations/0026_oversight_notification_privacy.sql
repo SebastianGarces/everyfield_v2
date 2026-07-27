@@ -1,0 +1,71 @@
+-- F11 / N-CORE — oversight roles become ELIGIBLE for `phase` and `digest`,
+-- gated by the church's own privacy toggles (issue #130).
+--
+-- Ruling on FRD Open Question #3. Before this migration,
+-- `OVERSIGHT_PRIVACY_FEATURE` mapped `phase` and `digest` to `null`, which
+-- `recipientMayBeNotified` read as a categorical refusal: no oversight user
+-- could ever be told about a plant's assessment or receive a digest, whatever
+-- the plant wanted. That was fail-closed pending a decision, and the decision
+-- went the other way — eligibility is the CHURCH's to grant, not the code's to
+-- withhold. So the two categories get what the other four already had: a
+-- column in `church_privacy_settings`.
+--
+-- DEFAULT FALSE is the substance of the ruling, not a detail. Every existing
+-- church keeps exactly today's behaviour — no oversight user starts receiving
+-- anything because this migration ran — and a plant opts in deliberately, the
+-- same way it already opts in to sharing people, meetings, tasks, financials,
+-- ministry teams or facilities.
+--
+-- `share_digest` is a SEPARATE toggle rather than an inference from the other
+-- six. A digest is its own recurring contact: a church that shares its task
+-- list has not thereby asked for a weekly email about itself to leave the
+-- building. And it governs ELIGIBILITY only — whatever assembles a digest's
+-- contents (N-013) still has to gate each line against that line's own feature
+-- toggle, because `share_digest` says "you may receive a digest", not "you may
+-- see everything in one".
+--
+-- PURELY ADDITIVE. Two nullable-free columns with defaults, on a table with one
+-- row per church (it is written at registration —
+-- src/app/(auth)/register/actions.ts). No table is rewritten in a blocking
+-- sense: Postgres 11+ stores a non-volatile column default in the catalog, so
+-- ADD COLUMN ... DEFAULT false NOT NULL is a metadata-only operation and does
+-- not scan the table. No index changes, no constraint changes, no data is
+-- backfilled, and nothing outside "church_privacy_settings" is touched.
+--
+-- ROLLBACK — run both statements, then the ledger delete, in ONE psql session:
+--
+--   ALTER TABLE "church_privacy_settings" DROP COLUMN IF EXISTS "share_digest";
+--   ALTER TABLE "church_privacy_settings" DROP COLUMN IF EXISTS "share_phase";
+--   DELETE FROM drizzle.__drizzle_migrations WHERE hash = '<0026 hash>';
+--
+-- Unconditionally clean, unlike 0025's: dropping a column cannot fail on data,
+-- there is no unique index to rebuild, and no other object depends on either
+-- column. What a rollback DISCARDS is any opt-in a church had recorded — the
+-- toggles return to their pre-0026 state, which is "off", which is also their
+-- default. Re-applying restores the columns at false, so a church that had
+-- opted in must opt in again. That is the correct direction to lose data in:
+-- rollback fails closed.
+--
+-- Rolling back this migration WITHOUT reverting the application code leaves
+-- `canAccessFeatureData(user, churchId, "phase" | "digest")` selecting a column
+-- that no longer exists. Revert the code first, or together.
+--
+--   *** DO NOT EDIT src/db/migrations/meta/_journal.json. ***
+--
+-- Same reasoning as 0023-0025: the journal is the repository's list of
+-- migrations, the `drizzle.__drizzle_migrations` ledger is the database's
+-- record of what ran, and only the ledger row is deleted. Removing the journal
+-- entry instead makes drizzle-kit forget the migration while the ledger still
+-- claims it applied, which is unrecoverable by restoring the entry.
+--
+-- `<0026 hash>` is the sha256 of THIS FILE, byte for byte, from the deployed
+-- commit:
+--
+--   shasum -a 256 src/db/migrations/0026_oversight_notification_privacy.sql
+--
+-- or identify the row by its `_journal.json` "when":
+--
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1785180246148;
+
+ALTER TABLE "church_privacy_settings" ADD COLUMN "share_phase" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "church_privacy_settings" ADD COLUMN "share_digest" boolean DEFAULT false NOT NULL;

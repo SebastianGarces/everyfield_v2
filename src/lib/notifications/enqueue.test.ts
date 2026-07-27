@@ -51,15 +51,16 @@ const MEMBERSHIPS: Record<string, string[]> = {
   [OVERSIGHT]: [CHURCH_A],
 };
 
-/**
- * The church's opt-in privacy toggles, faked. Absent church = absent settings
- * row = every feature closed, which is the production default.
- */
-const SHARED_FEATURES: Record<string, string[]> = {};
-
 class FakeNotificationStore implements EnqueueDeps, CancelByEntityDeps {
   readonly rows: Notification[] = [];
   private sequence = 0;
+
+  /**
+   * The church's opt-in privacy toggles, faked, per store. An absent church is
+   * an absent `church_privacy_settings` row, which is every feature closed —
+   * the production default, and the one every existing church is on.
+   */
+  constructor(readonly sharedFeatures: Record<string, string[]> = {}) {}
 
   /**
    * Mirrors `dbEnqueueDeps.recipientMayBeNotified`: church access first, then —
@@ -79,7 +80,7 @@ class FakeNotificationStore implements EnqueueDeps, CancelByEntityDeps {
       const feature = oversightPrivacyFeature(category);
       if (
         feature === null ||
-        !(SHARED_FEATURES[churchId] ?? []).includes(feature)
+        !(this.sharedFeatures[churchId] ?? []).includes(feature)
       ) {
         return { allowed: false, reason: "oversight_privacy" };
       }
@@ -516,18 +517,25 @@ test("a conflict with no dedupe key is a bug, not a silent no-op", async () => {
 // The (church, recipient) relationship is checked, not assumed
 // ----------------------------------------------------------------------------
 
-test("a recipient outside the church is refused, and nothing is written", async () => {
+test("a recipient outside the church is skipped, and nothing is written", async () => {
   // The tenancy fact a comment used to stand in for. A caller that derived
   // recipientUserId from request input would otherwise file a notification for
   // a stranger into a tenant they do not belong to — where, being church-scoped,
   // it becomes readable inside that church.
+  //
+  // The refusal is TOTAL (no row, ever) but it is reported, not thrown — see
+  // "a fan-out with one barred recipient" below.
   const store = new FakeNotificationStore();
 
-  await assert.rejects(
-    () => runEnqueue(store, baseInput({ recipientUserId: OUTSIDER })),
-    /does not belong to church/
+  const result = await runEnqueue(
+    store,
+    baseInput({ recipientUserId: OUTSIDER })
   );
 
+  assert.equal(result.status, "skipped");
+  assert.equal(result.reason, "outside_church");
+  assert.equal(result.notification, null);
+  assert.equal(result.created, false);
   assert.equal(store.rows.length, 0);
 });
 
@@ -535,15 +543,18 @@ test("the check is per church, not per user — the same user can be in-scope el
   const store = new FakeNotificationStore();
 
   // OTHER_USER belongs to church A only.
-  await runEnqueue(store, baseInput({ recipientUserId: OTHER_USER }));
-  await assert.rejects(
-    () =>
-      runEnqueue(
-        store,
-        baseInput({ churchId: CHURCH_B, recipientUserId: OTHER_USER })
-      ),
-    /does not belong to church/
+  const inScope = await runEnqueue(
+    store,
+    baseInput({ recipientUserId: OTHER_USER })
   );
+  const outOfScope = await runEnqueue(
+    store,
+    baseInput({ churchId: CHURCH_B, recipientUserId: OTHER_USER })
+  );
+
+  assert.equal(inScope.status, "recorded");
+  assert.equal(outOfScope.status, "skipped");
+  assert.equal(outOfScope.reason, "outside_church");
 
   assert.equal(store.rows.length, 1);
   assert.equal(store.rows[0].churchId, CHURCH_A);
@@ -565,7 +576,8 @@ test("membership is checked BEFORE the insert is attempted", async () => {
     },
   };
 
-  await assert.rejects(() => runEnqueue(deps, baseInput()));
+  const result = await runEnqueue(deps, baseInput());
+  assert.equal(result.status, "skipped");
   assert.equal(insertAttempts, 0);
 });
 
@@ -573,7 +585,7 @@ test("membership is checked BEFORE the insert is attempted", async () => {
 // Oversight recipients are subject to the church's privacy toggles
 // ----------------------------------------------------------------------------
 
-test("an oversight recipient is refused when the church has not opted in", async () => {
+test("an oversight recipient is skipped when the church has not opted in", async () => {
   // memory/invariants.md → Hierarchical Access Control: oversight users see
   // aggregate metrics only, gated by `church_privacy_settings`, which defaults
   // to all-false (an absent settings row is a closed one). `canAccessChurch`
@@ -582,21 +594,42 @@ test("an oversight recipient is refused when the church has not opted in", async
   // Jane Doe" — straight past a toggle the church deliberately left closed.
   const store = new FakeNotificationStore();
 
-  await assert.rejects(
-    () =>
-      runEnqueue(
-        store,
-        baseInput({
-          category: "communication",
-          type: "message.failed",
-          entityType: "message",
-          recipientUserId: OVERSIGHT,
-        })
-      ),
-    /may not be notified about "communication"/
+  const result = await runEnqueue(
+    store,
+    baseInput({
+      category: "communication",
+      type: "message.failed",
+      entityType: "message",
+      recipientUserId: OVERSIGHT,
+    })
   );
 
+  assert.equal(result.status, "skipped");
+  assert.equal(result.reason, "oversight_privacy");
+  assert.equal(result.notification, null);
   assert.equal(store.rows.length, 0);
+});
+
+test("...and recorded once that church opts in — the gate is the toggle, not the role", async () => {
+  // The same call, the same recipient, the same category. Only the church's
+  // choice differs, which is the whole point of routing this through
+  // `church_privacy_settings` rather than through the role.
+  const store = new FakeNotificationStore({ [CHURCH_A]: ["people"] });
+
+  const result = await runEnqueue(
+    store,
+    baseInput({
+      category: "communication",
+      type: "message.failed",
+      entityType: "message",
+      recipientUserId: OVERSIGHT,
+    })
+  );
+
+  assert.equal(result.status, "recorded");
+  assert.equal(result.created, true);
+  assert.equal(store.rows.length, 1);
+  assert.equal(store.rows[0].recipientUserId, OVERSIGHT);
 });
 
 test("the refusal is NOT a tenancy error — the oversight user can access the church", async () => {
@@ -619,30 +652,85 @@ test("the refusal is NOT a tenancy error — the oversight user can access the c
   assert.deepEqual(outsider, { allowed: false, reason: "outside_church" });
 });
 
-test("phase and digest have no toggle, so an oversight recipient is refused outright", async () => {
-  // `church_privacy_settings` has no column for either: `phase` has no toggle
-  // at all, and `digest` is a roll-up OF the other categories that no single
-  // toggle can answer for. Fail closed pending a ruling.
-  assert.equal(oversightPrivacyFeature("phase"), null);
-  assert.equal(oversightPrivacyFeature("digest"), null);
+test("phase and digest are gated by their OWN toggles, not refused outright", async () => {
+  // FRD Open Question #3, ruled: oversight roles ARE eligible for `phase` and
+  // `digest`. Both used to map to null — a categorical refusal no church could
+  // lift — and now each has a column of its own in `church_privacy_settings`
+  // (migration 0026).
+  assert.equal(oversightPrivacyFeature("phase"), "phase");
+  assert.equal(oversightPrivacyFeature("digest"), "digest");
 
-  const store = new FakeNotificationStore();
+  // Default OFF: an existing church, having opted in to nothing, sees exactly
+  // the behaviour it saw before the ruling.
+  const closed = new FakeNotificationStore();
   for (const category of ["phase", "digest"] as const) {
-    await assert.rejects(
-      () =>
-        runEnqueue(
-          store,
-          baseInput({
-            category,
-            type: `${category}.update`,
-            entityType: undefined,
-            entityId: undefined,
-            recipientUserId: OVERSIGHT,
-          })
-        ),
-      /may not be notified about/
+    const result = await runEnqueue(
+      closed,
+      baseInput({
+        category,
+        type: `${category}.update`,
+        entityType: undefined,
+        entityId: undefined,
+        recipientUserId: OVERSIGHT,
+      })
+    );
+    assert.equal(result.status, "skipped", `${category} while opted out`);
+    assert.equal(result.reason, "oversight_privacy");
+  }
+  assert.equal(closed.rows.length, 0);
+
+  // Opted in, and each opens INDEPENDENTLY: sharing `phase` does not hand over
+  // the digest, and vice versa.
+  const phaseOnly = new FakeNotificationStore({ [CHURCH_A]: ["phase"] });
+  const asOversight = (category: "phase" | "digest") =>
+    baseInput({
+      category,
+      type: `${category}.update`,
+      entityType: undefined,
+      entityId: undefined,
+      recipientUserId: OVERSIGHT,
+    });
+
+  assert.equal(
+    (await runEnqueue(phaseOnly, asOversight("phase"))).status,
+    "recorded"
+  );
+  assert.equal(
+    (await runEnqueue(phaseOnly, asOversight("digest"))).status,
+    "skipped"
+  );
+  assert.equal(phaseOnly.rows.length, 1);
+
+  const bothOpen = new FakeNotificationStore({
+    [CHURCH_A]: ["phase", "digest"],
+  });
+  for (const category of ["phase", "digest"] as const) {
+    assert.equal(
+      (await runEnqueue(bothOpen, asOversight(category))).status,
+      "recorded"
     );
   }
+  assert.equal(bothOpen.rows.length, 2);
+});
+
+test("a toggle for ANOTHER church does not open this one", async () => {
+  // The toggle is per plant. A network admin over twenty plants gets whatever
+  // each plant individually granted, not the union.
+  const store = new FakeNotificationStore({ [CHURCH_B]: ["phase"] });
+
+  const result = await runEnqueue(
+    store,
+    baseInput({
+      category: "phase",
+      type: "phase.transition",
+      entityType: undefined,
+      entityId: undefined,
+      recipientUserId: OVERSIGHT,
+    })
+  );
+
+  assert.equal(result.status, "skipped");
+  assert.equal(result.reason, "oversight_privacy");
   assert.equal(store.rows.length, 0);
 });
 
@@ -666,6 +754,108 @@ test("a church-level recipient is never subject to a privacy toggle", async () =
   }
 
   assert.equal(store.rows.length, 3);
+});
+
+// ----------------------------------------------------------------------------
+// A barred recipient costs ONLY that recipient — the fan-out completes
+// ----------------------------------------------------------------------------
+
+test("a fan-out with one barred recipient still notifies everyone else", async () => {
+  // The defect the skip-not-throw ruling exists to fix. The natural caller is
+  // "remind all six attendees": one key per event, looped over recipients. When
+  // a refusal THREW, a single barred recipient aborted the loop wherever they
+  // happened to sit in it — rows written for those before them, none for those
+  // after, and the exception surfacing in whatever meeting action triggered the
+  // reminder. A notification permission could fail a meeting.
+  //
+  // The barred recipient is placed in the MIDDLE deliberately: with a throw,
+  // the recipient after them is what silently went missing.
+  const store = new FakeNotificationStore();
+  const key = "meeting.reminder:" + TASK + ":3d";
+  const recipients = [USER, OVERSIGHT, OTHER_USER];
+
+  const results = [];
+  for (const recipientUserId of recipients) {
+    results.push(
+      await runEnqueue(
+        store,
+        baseInput({
+          category: "meetings",
+          type: "meeting.reminder",
+          entityType: "meeting",
+          recipientUserId,
+          dedupeKey: key,
+        })
+      )
+    );
+  }
+
+  // Nothing threw: every recipient got an answer.
+  assert.equal(results.length, 3);
+  assert.deepEqual(
+    results.map((result) => result.status),
+    ["recorded", "skipped", "recorded"]
+  );
+
+  // The skip is inspectable, and says which refusal applied.
+  const skips = results.filter((result) => result.status === "skipped");
+  assert.equal(skips.length, 1);
+  assert.equal(skips[0].reason, "oversight_privacy");
+  assert.equal(skips[0].notification, null);
+
+  // No row for the barred recipient...
+  assert.ok(!store.rows.some((row) => row.recipientUserId === OVERSIGHT));
+  // ...and a row for each permitted one, INCLUDING the one after the skip.
+  assert.deepEqual(
+    store.rows.map((row) => row.recipientUserId),
+    [USER, OTHER_USER]
+  );
+  assert.equal(store.rows.length, 2);
+  assert.ok(store.rows.every((row) => row.status === "pending"));
+});
+
+test("a fan-out where NOBODY is permitted writes nothing and still returns", async () => {
+  // The degenerate case: all skips, no throw, and a caller that counts its
+  // skips can tell the difference between "sent to nobody" and "crashed".
+  const store = new FakeNotificationStore();
+
+  const results = [];
+  for (const recipientUserId of [OUTSIDER, OVERSIGHT]) {
+    results.push(await runEnqueue(store, baseInput({ recipientUserId })));
+  }
+
+  assert.deepEqual(
+    results.map((result) => result.reason),
+    ["outside_church", "oversight_privacy"]
+  );
+  assert.equal(store.rows.length, 0);
+});
+
+test("a skip is not a dedupe hit — the key stays free for a permitted recipient", async () => {
+  // A skipped recipient must not reserve the event's key. If it did, the next
+  // recipient in the loop could collapse into a row that was never written.
+  const store = new FakeNotificationStore();
+  const key = "meeting.reminder:" + TASK + ":3d";
+
+  const barred = await runEnqueue(
+    store,
+    baseInput({
+      category: "meetings",
+      recipientUserId: OVERSIGHT,
+      dedupeKey: key,
+    })
+  );
+  assert.equal(barred.status, "skipped");
+
+  const permitted = await runEnqueue(
+    store,
+    baseInput({ category: "meetings", dedupeKey: key })
+  );
+
+  assert.equal(permitted.status, "recorded");
+  assert.equal(permitted.created, true);
+  assert.equal(permitted.notification?.dedupeKey, key);
+  assert.equal(store.rows.length, 1);
 });
 
 test("every category maps to a toggle or to an explicit null — none is missing", () => {

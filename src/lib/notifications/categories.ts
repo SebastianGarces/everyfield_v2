@@ -58,14 +58,17 @@ export interface NotificationCategoryDefinition {
  * items the feed already lists one by one, so an in-app digest row would
  * duplicate the feed it summarises. The digest earns its keep in an inbox.
  *
- * Role-aware defaults are N-019 (Should Have) and whether oversight roles
- * should instead be opt-in is an explicitly unruled Open Question. When either
- * is ruled, only the `defaults` values below change — the resolver, the schema
- * and every caller stay put, because nothing is seeded into the database.
+ * Role-aware defaults are N-019 (Should Have) and still unbuilt. The values
+ * below are the CHURCH-level defaults; when N-019 lands, only they change —
+ * the resolver, the schema and every caller stay put, because nothing is
+ * seeded into the database.
  *
- * That open question is about DEFAULTS, not about permission. Whether an
- * oversight user may be a recipient at all is settled and enforced — see
+ * An oversight user reaches these defaults only after passing the privacy
+ * gate, which is a separate and stricter question — see
  * `oversightPrivacyFeature` below and `recipientMayBeNotified` in `enqueue.ts`.
+ * FRD Open Question #3 is ruled: oversight eligibility is opt-in per church
+ * and defaults to off, so an oversight user's effective default is "nothing"
+ * until their plant turns a toggle on, whatever this table says.
  */
 export const NOTIFICATION_CATEGORIES: Record<
   NotificationCategory,
@@ -127,22 +130,29 @@ export const DEFAULT_DIGEST_CADENCE: DigestCadence = "weekly";
  * gate. `canAccessChurch` alone is not that gate: it returns true for a network
  * admin on every plant in the network, regardless of any toggle.
  *
- * `null` means NO toggle covers this category, and the effect is to REFUSE an
- * oversight recipient outright:
+ * EVERY category maps to a toggle. `phase` and `digest` used to map to `null`
+ * — a categorical refusal — and FRD Open Question #3 has since been ruled the
+ * other way: oversight roles ARE eligible for both, gated by the church's
+ * privacy settings and DEFAULT OFF (`share_phase`, `share_digest`, added by
+ * migration 0026, both `default false`). Eligibility is the church's to grant,
+ * not the code's to withhold, and because the columns default to false an
+ * existing church sees no change in behaviour until it opts in.
  *
- * - `phase` — plant-intelligence assessments and transitions. Arguably the
- *   aggregate view oversight exists for, but `church_privacy_settings` has no
- *   column for it, and inventing an implicit "yes" here would be the one place
- *   in the codebase where oversight access is granted without a toggle.
- * - `digest` — a roll-up OF the other categories, so no single toggle can
- *   answer for it. A digest addressed to an oversight user has to be assembled
- *   from per-category permission by whatever builds it (N-013), not waved
- *   through at enqueue.
+ * Two notes on `digest` specifically. It gets its OWN toggle rather than being
+ * inferred from the other five: a digest is its own recurring contact, and a
+ * church that shares its task list has not thereby asked for a weekly email
+ * about itself to leave the building. And that toggle governs ELIGIBILITY
+ * only — whatever assembles the digest's contents (N-013) still has to gate
+ * each line against that line's own feature toggle, because `share_digest`
+ * says "you may receive a digest", not "you may see everything in one".
  *
- * Both are fail-closed pending a ruling; opening either is a one-line change
- * here plus, for `phase`, a privacy-settings column. Church-level roles
- * (planter, coach, team_member) are unaffected either way —
- * `canAccessFeatureData` returns true for them without consulting a toggle.
+ * The `| null` arm is kept in the type: a category added later with no ruling
+ * yet should be able to say so explicitly and fail closed, rather than being
+ * pointed at whichever existing toggle looked closest.
+ *
+ * Church-level roles (planter, coach, team_member) are unaffected by any of
+ * this — `canAccessFeatureData` returns true for them without consulting a
+ * toggle at all.
  */
 export const OVERSIGHT_PRIVACY_FEATURE: Record<
   NotificationCategory,
@@ -153,8 +163,8 @@ export const OVERSIGHT_PRIVACY_FEATURE: Record<
   // Message content is about PEOPLE — recipients, contact details, failures.
   communication: "people",
   teams: "ministry_teams",
-  phase: null,
-  digest: null,
+  phase: "phase",
+  digest: "digest",
 };
 
 /** The privacy toggle governing this category, or null if none covers it. */

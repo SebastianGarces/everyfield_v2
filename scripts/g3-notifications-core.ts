@@ -189,21 +189,27 @@ async function main() {
   ok("same dedupeKey + same recipient => still ONE row (ON CONFLICT works)");
 
   // --------------------------------------------------------------------------
-  // 3. enqueue refuses a recipient outside the church.
+  // 3. enqueue SKIPS a recipient outside the church — no throw, and no row.
   // --------------------------------------------------------------------------
-  await assert.rejects(
-    () =>
-      enqueue({
-        churchId: churchA.id,
-        recipientUserId: userC.id,
-        category: "tasks",
-        type: "task.overdue",
-        title: "t",
-        body: "b",
-      }),
-    /does not belong to church/
-  );
-  ok("enqueue refuses a recipient who cannot access the church");
+  const outsideBefore = await db
+    .select({ id: notifications.id })
+    .from(notifications);
+  const outside = await enqueue({
+    churchId: churchA.id,
+    recipientUserId: userC.id,
+    category: "tasks",
+    type: "task.overdue",
+    title: "t",
+    body: "b",
+  });
+  assert.equal(outside.status, "skipped");
+  assert.equal(outside.reason, "outside_church");
+  assert.equal(outside.notification, null);
+  const outsideAfter = await db
+    .select({ id: notifications.id })
+    .from(notifications);
+  assert.equal(outsideAfter.length, outsideBefore.length);
+  ok("enqueue skips a recipient who cannot access the church, writing no row");
 
   // --------------------------------------------------------------------------
   // 4. SECURITY — user A's read paths return ZERO of user B's rows.
@@ -409,23 +415,21 @@ async function main() {
   const oversightRowsBefore = await db
     .select({ id: notifications.id })
     .from(notifications);
-  await assert.rejects(
-    () =>
-      enqueue({
-        churchId: churchA.id,
-        recipientUserId: oversight.id,
-        category: "communication",
-        type: "message.failed",
-        title: "Delivery failed",
-        body: "No contact in 30 days: Jane Doe, 555-1234.",
-      }),
-    /may not be notified about "communication"/
-  );
+  const barred = await enqueue({
+    churchId: churchA.id,
+    recipientUserId: oversight.id,
+    category: "communication",
+    type: "message.failed",
+    title: "Delivery failed",
+    body: "No contact in 30 days: Jane Doe, 555-1234.",
+  });
+  assert.equal(barred.status, "skipped");
+  assert.equal(barred.reason, "oversight_privacy");
   const oversightRowsAfter = await db
     .select({ id: notifications.id })
     .from(notifications);
   assert.equal(oversightRowsAfter.length, oversightRowsBefore.length);
-  ok("an oversight recipient is refused while the privacy toggle is closed");
+  ok("an oversight recipient is skipped while the privacy toggle is closed");
 
   // Opt in, and the SAME call is accepted — the gate is the toggle, not the
   // role.
@@ -441,23 +445,138 @@ async function main() {
     title: "Delivery failed",
     body: "A message you sent could not be delivered.",
   });
+  assert.equal(permitted.status, "recorded");
   assert.equal(permitted.created, true);
   ok("...and accepted once the church opts in to sharing that feature");
 
-  // `phase` has no toggle at all, so it stays refused either way.
-  await assert.rejects(
-    () =>
-      enqueue({
-        churchId: churchA.id,
-        recipientUserId: oversight.id,
+  // --------------------------------------------------------------------------
+  // 7d. RULING (FRD Open Question #3) — `phase` and `digest` are eligible, and
+  // gated by their OWN toggles, which migration 0026 added at DEFAULT FALSE.
+  //
+  // The church opted in to `share_people` above and to nothing else, so this
+  // is the state every existing church is in: the new columns exist and are
+  // false, and behaviour is unchanged from before the ruling.
+  // --------------------------------------------------------------------------
+  for (const category of ["phase", "digest"] as const) {
+    const closed = await enqueue({
+      churchId: churchA.id,
+      recipientUserId: oversight.id,
+      category,
+      type: `${category}.update`,
+      title: "Phase changed",
+      body: "Now in Core Group.",
+    });
+    assert.equal(closed.status, "skipped", `${category} while opted out`);
+    assert.equal(closed.reason, "oversight_privacy");
+  }
+  ok(
+    "phase and digest skip an oversight recipient while their toggles are off"
+  );
+
+  // Turn on `share_phase` ALONE: phase opens, digest stays shut. The two are
+  // independent columns, so sharing assessments is not sharing the roll-up.
+  await db
+    .update(churchPrivacySettings)
+    .set({ sharePhase: true })
+    .where(eq(churchPrivacySettings.churchId, churchA.id));
+
+  const phaseOpen = await enqueue({
+    churchId: churchA.id,
+    recipientUserId: oversight.id,
+    category: "phase",
+    type: "phase.transition",
+    title: "Phase changed",
+    body: "Now in Core Group.",
+  });
+  assert.equal(phaseOpen.status, "recorded");
+  assert.equal(phaseOpen.created, true);
+
+  const digestStillShut = await enqueue({
+    churchId: churchA.id,
+    recipientUserId: oversight.id,
+    category: "digest",
+    type: "digest.weekly",
+    title: "Your week",
+    body: "Three things need attention.",
+  });
+  assert.equal(digestStillShut.status, "skipped");
+  assert.equal(digestStillShut.reason, "oversight_privacy");
+  ok("share_phase opens `phase` for oversight and leaves `digest` shut");
+
+  await db
+    .update(churchPrivacySettings)
+    .set({ shareDigest: true })
+    .where(eq(churchPrivacySettings.churchId, churchA.id));
+
+  const digestOpen = await enqueue({
+    churchId: churchA.id,
+    recipientUserId: oversight.id,
+    category: "digest",
+    type: "digest.weekly",
+    title: "Your week",
+    body: "Three things need attention.",
+  });
+  assert.equal(digestOpen.status, "recorded");
+  assert.equal(digestOpen.created, true);
+  ok("share_digest opens `digest` for oversight");
+
+  // --------------------------------------------------------------------------
+  // 7e. RULING (skip, do not throw) — a fan-out with a barred recipient in the
+  // MIDDLE completes for everyone else, against real Postgres.
+  // --------------------------------------------------------------------------
+  const [shutChurch] = await db
+    .insert(churches)
+    .values({ name: "Scratch Church C", sendingNetworkId: network.id })
+    .returning();
+  const [shutUser] = await db
+    .insert(users)
+    .values({
+      email: `shut-${Date.now()}@example.test`,
+      passwordHash: "x",
+      role: "planter",
+      churchId: shutChurch.id,
+    })
+    .returning();
+  // No privacy-settings row at all for this church: every toggle closed, which
+  // is what an oversight recipient there runs into.
+  const fanoutEntity = "77777777-7777-4777-8777-777777777777";
+  const fanoutRecipients = [shutUser.id, oversight.id, shutUser.id];
+  const fanoutResults = [];
+  for (const [index, recipientUserId] of fanoutRecipients.entries()) {
+    fanoutResults.push(
+      await enqueue({
+        churchId: shutChurch.id,
+        recipientUserId,
         category: "phase",
         type: "phase.transition",
         title: "Phase changed",
         body: "Now in Core Group.",
-      }),
-    /may not be notified about "phase"/
+        entityType: "phase_assessment",
+        entityId: fanoutEntity,
+        // Distinct keys so the repeated recipient is not deduped away — this
+        // assertion is about the SKIP not aborting the loop, not about dedupe.
+        dedupeKey: `phase.transition:${fanoutEntity}:${index}`,
+      })
+    );
+  }
+
+  assert.deepEqual(
+    fanoutResults.map((result) => result.status),
+    ["recorded", "skipped", "recorded"],
+    "the barred recipient aborted the fan-out"
   );
-  ok("a category with no privacy toggle refuses an oversight recipient");
+  assert.equal(fanoutResults[1].reason, "oversight_privacy");
+
+  const fanoutWritten = await db
+    .select({ recipientUserId: notifications.recipientUserId })
+    .from(notifications)
+    .where(eq(notifications.churchId, shutChurch.id));
+  assert.equal(fanoutWritten.length, 2);
+  assert.ok(
+    fanoutWritten.every((row) => row.recipientUserId === shutUser.id),
+    "a row was written for the barred recipient"
+  );
+  ok("a fan-out with a barred recipient mid-loop notifies everyone else");
 
   // --------------------------------------------------------------------------
   // 8. Preferences — unique (user, category, channel), upsert not duplicate.
