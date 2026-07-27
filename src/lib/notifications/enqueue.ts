@@ -4,9 +4,11 @@ import { db } from "@/db";
 import {
   notificationCategories,
   notifications,
+  users,
   type NewNotification,
   type Notification,
 } from "@/db/schema";
+import { canAccessChurch } from "@/lib/auth/access";
 
 // ============================================================================
 // The enqueue contract (N-001, N-002, N-011).
@@ -22,10 +24,16 @@ import {
 //      import graph reaches an email provider; delivery is the dispatcher's
 //      job, and it is a separate unit. A caller returns as soon as the row is
 //      recorded.
-//   2. `dedupeKey` is idempotent (N-001). Idempotency is enforced by the
-//      partial unique index on (church_id, dedupe_key) via ON CONFLICT DO
-//      NOTHING — not by a SELECT-then-INSERT guard, which two concurrent
-//      enqueues would both pass (memory/invariants.md → Atomicity).
+//   2. `dedupeKey` is idempotent (N-001) PER RECIPIENT. Idempotency is enforced
+//      by the partial unique index on (church_id, recipient_user_id,
+//      dedupe_key) via ON CONFLICT DO NOTHING — not by a SELECT-then-INSERT
+//      guard, which two concurrent enqueues would both pass
+//      (memory/invariants.md → Atomicity). The recipient belongs in that key
+//      because the natural caller for a fan-out ("remind all six attendees")
+//      composes ONE key per event and loops the recipients; without it,
+//      attendee #1 would silently swallow #2..N.
+//   3. The recipient must belong to the church the row is filed under. That is
+//      checked, not assumed — see `recipientBelongsToChurch` below.
 //
 // The orchestration is separated from its database access (`EnqueueDeps`,
 // `CancelByEntityDeps`) so the ordering rules above are testable without a live
@@ -38,7 +46,7 @@ import {
 
 export const enqueueNotificationSchema = z
   .object({
-    /** Tenancy. The caller has already verified the recipient may read it. */
+    /** Tenancy. Verified against the recipient's own access, not trusted. */
     churchId: z.string().uuid(),
     /** A user, never a bare address — a `person` with no login is not a recipient. */
     recipientUserId: z.string().uuid(),
@@ -95,15 +103,37 @@ export interface EnqueueResult {
 
 export interface EnqueueDeps {
   /**
-   * `INSERT ... ON CONFLICT (church_id, dedupe_key) DO NOTHING RETURNING *`.
-   * Resolves to null — never throws — when the key already exists.
+   * Does this user have access to this church at all? A scoped existence check
+   * against the same source `src/lib/auth/access.ts` uses, so a caller that
+   * derived `recipientUserId` from request input cannot file a notification for
+   * a stranger into a tenant they do not belong to.
+   */
+  recipientBelongsToChurch(
+    churchId: string,
+    recipientUserId: string
+  ): Promise<boolean>;
+  /**
+   * `INSERT ... ON CONFLICT (church_id, recipient_user_id, dedupe_key)
+   * DO NOTHING RETURNING *`. Resolves to null — never throws — when the key
+   * already exists for that recipient.
    */
   insertIfAbsent(row: NewNotification): Promise<Notification | null>;
-  /** Church-scoped read-back of the row that won a dedupe race. */
+  /** Church- AND recipient-scoped read-back of the row that won a dedupe race. */
   findByDedupeKey(
     churchId: string,
+    recipientUserId: string,
     dedupeKey: string
   ): Promise<Notification | null>;
+}
+
+/** Thrown when a notification is addressed to a user outside its church. */
+export class RecipientOutsideChurchError extends Error {
+  constructor(churchId: string, recipientUserId: string) {
+    super(
+      `enqueue: recipient ${recipientUserId} does not belong to church ${churchId}`
+    );
+    this.name = "RecipientOutsideChurchError";
+  }
 }
 
 export interface CancelByEntityResult {
@@ -126,14 +156,31 @@ export interface CancelByEntityDeps {
 /**
  * Record a pending notification. Makes no provider call, by construction.
  *
- * Idempotent on `dedupeKey`: a second call with the same key returns the first
- * call's notification with `created: false` and writes nothing.
+ * Idempotent on `dedupeKey` PER RECIPIENT: a second call with the same key for
+ * the same user returns the first call's notification with `created: false` and
+ * writes nothing, while the same key for a different user records its own row.
+ *
+ * Throws `RecipientOutsideChurchError` if the recipient has no access to the
+ * church — the (church, recipient) relationship is checked here rather than
+ * left to a comment about what callers have supposedly already done.
  */
 export async function runEnqueue(
   deps: EnqueueDeps,
   input: EnqueueNotificationInput
 ): Promise<EnqueueResult> {
   const parsed = enqueueNotificationSchema.parse(input);
+
+  if (
+    !(await deps.recipientBelongsToChurch(
+      parsed.churchId,
+      parsed.recipientUserId
+    ))
+  ) {
+    throw new RecipientOutsideChurchError(
+      parsed.churchId,
+      parsed.recipientUserId
+    );
+  }
 
   const row: NewNotification = {
     churchId: parsed.churchId,
@@ -166,6 +213,7 @@ export async function runEnqueue(
 
   const existing = await deps.findByDedupeKey(
     parsed.churchId,
+    parsed.recipientUserId,
     parsed.dedupeKey
   );
   return { notification: existing, created: false };
@@ -201,6 +249,22 @@ export async function runCancelByEntity(
 // ----------------------------------------------------------------------------
 
 export const dbEnqueueDeps: EnqueueDeps = {
+  async recipientBelongsToChurch(churchId, recipientUserId) {
+    const [recipient] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, recipientUserId))
+      .limit(1);
+
+    if (!recipient) return false;
+
+    // Deliberately the SAME resolution the rest of the app authorises reads
+    // with, so "may be notified about this church" and "may see this church"
+    // cannot drift apart: a coach reached via coach_assignments qualifies, a
+    // planter in another plant does not.
+    return canAccessChurch(recipient, churchId);
+  },
+
   async insertIfAbsent(row) {
     const [inserted] = await db
       .insert(notifications)
@@ -210,7 +274,11 @@ export const dbEnqueueDeps: EnqueueDeps = {
       // when the same predicate is supplied, so `where` here renders as the
       // ON CONFLICT index_predicate, not as a row filter.
       .onConflictDoNothing({
-        target: [notifications.churchId, notifications.dedupeKey],
+        target: [
+          notifications.churchId,
+          notifications.recipientUserId,
+          notifications.dedupeKey,
+        ],
         where: sql`${notifications.dedupeKey} is not null`,
       })
       .returning();
@@ -218,13 +286,14 @@ export const dbEnqueueDeps: EnqueueDeps = {
     return inserted ?? null;
   },
 
-  async findByDedupeKey(churchId, dedupeKey) {
+  async findByDedupeKey(churchId, recipientUserId, dedupeKey) {
     const [existing] = await db
       .select()
       .from(notifications)
       .where(
         and(
           eq(notifications.churchId, churchId),
+          eq(notifications.recipientUserId, recipientUserId),
           eq(notifications.dedupeKey, dedupeKey)
         )
       )

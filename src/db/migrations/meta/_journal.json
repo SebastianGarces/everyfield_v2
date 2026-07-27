@@ -166,8 +166,15 @@
     {
       "idx": 23,
       "version": "7",
-      "when": 1785170871208,
+      "when": 1785172648418,
       "tag": "0023_notifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1785172723135,
+      "tag": "0024_notification_enum_checks",
       "breakpoints": true
     }
   ]

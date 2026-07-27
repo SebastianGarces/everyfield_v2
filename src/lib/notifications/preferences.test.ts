@@ -12,6 +12,7 @@ import {
   preferenceKey,
   resolvePreference,
   resolvePreferenceMatrix,
+  setPreferenceQuery,
   setPreferenceSchema,
 } from "./preferences";
 
@@ -228,6 +229,94 @@ test("setPreferenceSchema rejects an unknown category or channel", () => {
 });
 
 // ----------------------------------------------------------------------------
+// The write boundary — setPreference parses, and does not clobber
+// ----------------------------------------------------------------------------
+
+const OWNER = "55555555-5555-4555-8555-555555555555";
+
+/** The `do update set ...` clause alone — `returning` names every column. */
+function updateClause(sql: string): string {
+  return sql.slice(sql.indexOf("do update set"), sql.indexOf(" returning "));
+}
+
+test("setPreference parses its input rather than trusting the caller", () => {
+  // The columns are plain varchar with a compile-time brand only, so a settings
+  // action forwarding a form body would otherwise reach Postgres unopposed. A
+  // preference stored under a category the code cannot name is never found by
+  // `${category}:${channel}` resolution — the user sees a setting saved that
+  // nothing will ever consult.
+  assert.throws(() =>
+    setPreferenceQuery(OWNER, {
+      // @ts-expect-error the runtime guard is the point of this test
+      category: "billing",
+      channel: "email",
+      enabled: false,
+    })
+  );
+
+  assert.throws(() =>
+    setPreferenceQuery(OWNER, {
+      category: "tasks",
+      // @ts-expect-error ditto for an unknown channel
+      channel: "sms",
+      enabled: false,
+    })
+  );
+});
+
+test("setPreference rejects a userId that is not a uuid", () => {
+  assert.throws(() =>
+    setPreferenceQuery("user-1", {
+      category: "tasks",
+      channel: "email",
+      enabled: false,
+    })
+  );
+});
+
+test("a toggle that sends no cadence leaves the stored cadence alone", () => {
+  // The N-007 shape: the logged-out email-footer unsubscribe, and any
+  // checkbox-only toggle, submits `enabled` and nothing else. Writing
+  // digest_cadence = NULL there would silently reset a user's explicit `daily`
+  // to the `weekly` default, with no error and no way to notice.
+  const { sql } = setPreferenceQuery(OWNER, {
+    category: "digest",
+    channel: "email",
+    enabled: false,
+  }).toSQL();
+
+  const update = updateClause(sql);
+  assert.ok(!update.includes("digest_cadence"), update);
+  assert.ok(update.includes("enabled"), update);
+});
+
+test("a toggle that DOES send a cadence writes it", () => {
+  const { sql, params } = setPreferenceQuery(OWNER, {
+    category: "digest",
+    channel: "email",
+    enabled: true,
+    digestCadence: "daily",
+  }).toSQL();
+
+  const update = updateClause(sql);
+  assert.ok(update.includes("digest_cadence"), update);
+  assert.ok(params.includes("daily"));
+});
+
+test("cadence is never written on a non-digest category", () => {
+  const { sql, params } = setPreferenceQuery(OWNER, {
+    category: "tasks",
+    channel: "email",
+    enabled: true,
+    digestCadence: "daily",
+  }).toSQL();
+
+  const update = updateClause(sql);
+  assert.ok(!update.includes("digest_cadence"), update);
+  assert.ok(!params.includes("daily"));
+});
+
+// ----------------------------------------------------------------------------
 // Uniqueness — the constraint the upsert depends on
 // ----------------------------------------------------------------------------
 
@@ -245,4 +334,28 @@ test("the migration creates the (user_id, category, channel) unique index", () =
     sql,
     /CREATE UNIQUE INDEX "notification_preferences_user_category_channel_idx" ON "notification_preferences" USING btree \("user_id","category","channel"\)/
   );
+});
+
+test("the enum sets are CHECK constraints in the database, not just a TS brand", () => {
+  // `.$type<>()` vanishes at runtime. Without these, a value that never passed
+  // a parse — from a script, a psql session, or a boundary someone forgets to
+  // validate — sits in the table forever and is never found by the code-defined
+  // lookups that are supposed to consult it.
+  const sql = readFileSync(
+    path.join(
+      process.cwd(),
+      "src/db/migrations/0024_notification_enum_checks.sql"
+    ),
+    "utf8"
+  );
+
+  for (const constraint of [
+    "notification_preferences_category_check",
+    "notification_preferences_channel_check",
+    "notification_preferences_digest_cadence_check",
+    "notifications_category_check",
+    "notifications_status_check",
+  ]) {
+    assert.ok(sql.includes(constraint), constraint);
+  }
 });

@@ -1,6 +1,7 @@
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import {
   boolean,
+  check,
   index,
   integer,
   pgTable,
@@ -95,6 +96,25 @@ export const digestCadences = ["daily", "weekly"] as const;
 export type DigestCadence = (typeof digestCadences)[number];
 
 // ============================================================================
+// Enum guards at the database boundary
+// ============================================================================
+//
+// `.$type<>()` is a TypeScript brand and nothing more — it disappears at
+// runtime, so a value that never passed a Zod parse (a server action forwarding
+// a form body, a script, a psql session) reaches a plain `varchar` unopposed.
+// A mangled `category` is not a loud failure either: it is simply never found
+// by the code-defined preference lookup, so the user sees a setting saved that
+// resolution will never consult. These CHECK constraints make the enum a
+// property of the data instead of a property of the caller.
+//
+// They list values, not a pgEnum, deliberately: adding a category stays a code
+// change plus a small migration, never a type rewrite with a table rewrite.
+
+function inList(values: readonly string[]): SQL {
+  return sql.raw(values.map((value) => `'${value}'`).join(", "));
+}
+
+// ============================================================================
 // Tables
 // ============================================================================
 
@@ -124,7 +144,11 @@ export const notifications = pgTable(
     /** What it is about — powers cancel-by-entity and the feed's link target. */
     entityType: varchar("entity_type", { length: 32 }),
     entityId: uuid("entity_id"),
-    /** Caller-supplied idempotency key (unique per church, see index below). */
+    /**
+     * Caller-supplied idempotency key. Unique per (church, RECIPIENT) — see the
+     * index below. The recipient is part of the key because a fan-out enqueue
+     * ("remind all six attendees") composes one key per event, not per person.
+     */
     dedupeKey: varchar("dedupe_key", { length: 255 }),
     /** When it becomes eligible for dispatch. Defaults to now. */
     scheduledFor: timestamp("scheduled_for").defaultNow().notNull(),
@@ -138,14 +162,25 @@ export const notifications = pgTable(
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [
-    // Idempotency (N-001). Partial, because most notifications carry no key and
-    // NULLs would not collide anyway — the predicate keeps the index small and
-    // states the intent. This is the concurrency guard: two simultaneous
-    // enqueues with the same key race into the same INSERT, and the loser is
-    // absorbed by ON CONFLICT DO NOTHING rather than by a SELECT that both
-    // requests would have passed (see memory/invariants.md → Atomicity).
+    // Idempotency (N-001), scoped to (church, RECIPIENT, key).
+    //
+    // The recipient is in the key on purpose. A notification is addressed to one
+    // user, but the EVENT it announces is usually shared: the natural caller for
+    // a meeting reminder (F3) or a team alert (F8) loops the attendees and
+    // enqueues one row each under a per-event key
+    // (`meeting.reminder:<id>:3d`). Leaving the recipient out of this index
+    // would let attendee #1 win the insert and silently swallow #2..N — the
+    // caller would get `created: false` and someone else's row back, with no
+    // way to detect the drop.
+    //
+    // Partial, because most notifications carry no key and NULLs would not
+    // collide anyway — the predicate keeps the index small and states the
+    // intent. This is the concurrency guard: two simultaneous enqueues with the
+    // same key race into the same INSERT, and the loser is absorbed by ON
+    // CONFLICT DO NOTHING rather than by a SELECT that both requests would have
+    // passed (see memory/invariants.md → Atomicity).
     uniqueIndex("notifications_dedupe_key_unique_idx")
-      .on(table.churchId, table.dedupeKey)
+      .on(table.churchId, table.recipientUserId, table.dedupeKey)
       .where(sql`${table.dedupeKey} is not null`),
     // Feed read path: newest-first for one recipient within one church.
     index("notifications_feed_idx").on(
@@ -164,6 +199,14 @@ export const notifications = pgTable(
       table.churchId,
       table.entityType,
       table.entityId
+    ),
+    check(
+      "notifications_category_check",
+      sql`${table.category} in (${inList(notificationCategories)})`
+    ),
+    check(
+      "notifications_status_check",
+      sql`${table.status} in (${inList(notificationStatuses)})`
     ),
   ]
 );
@@ -206,6 +249,22 @@ export const notificationPreferences = pgTable(
       table.channel
     ),
     index("notification_preferences_user_id_idx").on(table.userId),
+    // A preference is a consent record. One stored under a category or channel
+    // the code does not define is never found by resolution, so the opt-out it
+    // represents is silently ignored — the failure mode a CHECK turns into a
+    // write error at the boundary.
+    check(
+      "notification_preferences_category_check",
+      sql`${table.category} in (${inList(notificationCategories)})`
+    ),
+    check(
+      "notification_preferences_channel_check",
+      sql`${table.channel} in (${inList(notificationChannels)})`
+    ),
+    check(
+      "notification_preferences_digest_cadence_check",
+      sql`${table.digestCadence} is null or ${table.digestCadence} in (${inList(digestCadences)})`
+    ),
   ]
 );
 
@@ -247,6 +306,14 @@ export const notificationDeliveries = pgTable(
     index("notification_deliveries_status_idx").on(table.status),
     index("notification_deliveries_provider_message_id_idx").on(
       table.providerMessageId
+    ),
+    check(
+      "notification_deliveries_channel_check",
+      sql`${table.channel} in (${inList(notificationChannels)})`
+    ),
+    check(
+      "notification_deliveries_status_check",
+      sql`${table.status} in (${inList(notificationDeliveryStatuses)})`
     ),
   ]
 );

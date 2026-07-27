@@ -4,17 +4,48 @@
 -- existing table is touched, and no data is backfilled or rewritten. That is
 -- what makes the rollback exact rather than approximate.
 --
--- ROLLBACK (verified as part of this migration's high-risk gate) — run in this
--- order, then delete the 0023 entry from src/db/migrations/meta/_journal.json:
+-- ROLLBACK (verified as part of this migration's high-risk gate) — run all four
+-- statements, in this order, in ONE psql session against the affected database:
 --
 --   DROP TABLE IF EXISTS "notification_deliveries";
 --   DROP TABLE IF EXISTS "notification_preferences";
 --   DROP TABLE IF EXISTS "notifications";
+--   DELETE FROM drizzle.__drizzle_migrations WHERE hash = '<0023 hash>';
 --
 -- Deliveries first: it is the only table with an FK into "notifications", so
 -- dropping in this order needs no CASCADE and cannot take anything else with
 -- it. Indexes and FK constraints go with their tables. Prior state is byte-
 -- identical because nothing outside these three tables was ever written.
+--
+-- The fourth statement is the one that is easy to get wrong, so it is spelled
+-- out. `drizzle.__drizzle_migrations` is the applied-migration ledger IN THE
+-- DATABASE; `drizzle-kit migrate` re-applies a migration only when the ledger
+-- does not already hold it. Dropping the tables without deleting that row
+-- leaves a database with no notification tables and a migrator that reports
+-- "nothing to do" — broken in both directions.
+--
+--   *** DO NOT EDIT src/db/migrations/meta/_journal.json. ***
+--
+-- The journal is the repository's list of migrations, not the database's
+-- record of what ran. Deleting the 0023 entry makes drizzle-kit forget the
+-- migration exists (so it is never re-applied) while the ledger row still says
+-- it did — and restoring the entry later does NOT re-apply it either, because
+-- the ledger is still holding its row. The journal stays exactly as committed;
+-- only the ledger row is deleted.
+--
+-- `<0023 hash>` is the sha256 of THIS FILE, byte for byte — it is what
+-- drizzle-orm's migrator stored when it applied 0023. Get it with:
+--
+--   shasum -a 256 src/db/migrations/0023_notifications.sql
+--
+-- from the commit that is deployed (a different commit is a different file and
+-- therefore a different hash). If the file is not to hand, the ledger row can
+-- equally be identified by its `created_at`, which is this migration's
+-- `_journal.json` "when" value:
+--
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1785172648418;
+--
+-- Re-applying afterwards is `pnpm db:migrate` (never `db:push`).
 
 CREATE TABLE "notification_deliveries" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
@@ -67,7 +98,7 @@ CREATE INDEX "notification_deliveries_status_idx" ON "notification_deliveries" U
 CREATE INDEX "notification_deliveries_provider_message_id_idx" ON "notification_deliveries" USING btree ("provider_message_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "notification_preferences_user_category_channel_idx" ON "notification_preferences" USING btree ("user_id","category","channel");--> statement-breakpoint
 CREATE INDEX "notification_preferences_user_id_idx" ON "notification_preferences" USING btree ("user_id");--> statement-breakpoint
-CREATE UNIQUE INDEX "notifications_dedupe_key_unique_idx" ON "notifications" USING btree ("church_id","dedupe_key") WHERE "notifications"."dedupe_key" is not null;--> statement-breakpoint
+CREATE UNIQUE INDEX "notifications_dedupe_key_unique_idx" ON "notifications" USING btree ("church_id","recipient_user_id","dedupe_key") WHERE "notifications"."dedupe_key" is not null;--> statement-breakpoint
 CREATE INDEX "notifications_feed_idx" ON "notifications" USING btree ("church_id","recipient_user_id","created_at");--> statement-breakpoint
 CREATE INDEX "notifications_unread_idx" ON "notifications" USING btree ("church_id","recipient_user_id") WHERE "notifications"."read_at" is null;--> statement-breakpoint
 CREATE INDEX "notifications_dispatch_idx" ON "notifications" USING btree ("status","scheduled_for");--> statement-breakpoint

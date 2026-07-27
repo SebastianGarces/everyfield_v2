@@ -45,6 +45,13 @@ export const setPreferenceSchema = z.object({
 
 export type SetPreferenceInput = z.infer<typeof setPreferenceSchema>;
 
+/**
+ * The owner of the preference. Parsed like everything else: a settings action
+ * forwarding a form body is the expected caller, and a bare `string` parameter
+ * is not a check.
+ */
+export const preferenceUserIdSchema = z.string().uuid();
+
 // ----------------------------------------------------------------------------
 // Pure resolution
 // ----------------------------------------------------------------------------
@@ -169,29 +176,61 @@ export async function getPreferenceMatrix(
 }
 
 /**
- * Write one preference, upserting on the (user_id, category, channel) unique
+ * The write for one preference, as a builder — exported so the statement it
+ * produces can be asserted with `.toSQL()` without a live Postgres.
+ *
+ * It upserts on the (user_id, category, channel) unique
  * index — so writing the same pair twice UPDATES rather than duplicating. The
  * database, not a read-then-write in application code, is what guarantees that
  * (see memory/invariants.md → Atomicity).
  *
  * `digestCadence` is only stored on the `digest` category; passing it elsewhere
  * is ignored rather than rejected, so a settings form can send the whole row.
+ *
+ * Two things this function is careful about:
+ *
+ * 1. It PARSES. `setPreferenceSchema` is the boundary, and it is applied here
+ *    rather than trusted to a caller — the columns are plain `varchar` with a
+ *    compile-time brand, and a preference stored under a category the code does
+ *    not define is never found by resolution, so an opt-out written that way is
+ *    silently ignored forever.
+ * 2. It does not clobber a cadence the caller did not send. A checkbox-only
+ *    toggle, or the logged-out email-footer unsubscribe (N-007), submits
+ *    `enabled` and nothing else; writing `digest_cadence = NULL` there would
+ *    quietly reset a user's stored `daily` back to the `weekly` default.
+ *    `digest_cadence` is therefore left out of the update entirely unless a
+ *    cadence was actually supplied.
  */
-export async function setPreference(
-  userId: string,
-  input: SetPreferenceInput
-): Promise<NotificationPreference> {
-  const digestCadence =
-    input.category === "digest" ? (input.digestCadence ?? null) : null;
+export function setPreferenceQuery(userId: string, input: SetPreferenceInput) {
+  const ownerId = preferenceUserIdSchema.parse(userId);
+  const parsed = setPreferenceSchema.parse(input);
 
-  const [row] = await db
+  const suppliedCadence =
+    parsed.category === "digest" ? (parsed.digestCadence ?? null) : null;
+
+  const set: {
+    enabled: boolean;
+    updatedAt: Date;
+    digestCadence?: DigestCadence;
+  } = {
+    enabled: parsed.enabled,
+    updatedAt: new Date(),
+  };
+
+  // Present only when the caller actually chose one — an absent key leaves the
+  // stored value alone, which is the whole point.
+  if (suppliedCadence !== null) {
+    set.digestCadence = suppliedCadence;
+  }
+
+  return db
     .insert(notificationPreferences)
     .values({
-      userId,
-      category: input.category,
-      channel: input.channel,
-      enabled: input.enabled,
-      digestCadence,
+      userId: ownerId,
+      category: parsed.category,
+      channel: parsed.channel,
+      enabled: parsed.enabled,
+      digestCadence: suppliedCadence,
     })
     .onConflictDoUpdate({
       target: [
@@ -199,13 +238,16 @@ export async function setPreference(
         notificationPreferences.category,
         notificationPreferences.channel,
       ],
-      set: {
-        enabled: input.enabled,
-        digestCadence,
-        updatedAt: new Date(),
-      },
+      set,
     })
     .returning();
+}
 
+/** Write one preference. See `setPreferenceQuery` for what it does and why. */
+export async function setPreference(
+  userId: string,
+  input: SetPreferenceInput
+): Promise<NotificationPreference> {
+  const [row] = await setPreferenceQuery(userId, input);
   return row;
 }

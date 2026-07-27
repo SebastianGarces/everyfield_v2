@@ -19,32 +19,55 @@ import {
 // ----------------------------------------------------------------------------
 // The enqueue contract (N-001, N-002, N-011).
 //
-// The store below is a faithful stand-in for the three SQL statements the
-// production deps issue — including the partial unique index on
-// (church_id, dedupe_key), which is what makes a second enqueue a no-op rather
-// than a second row. Driving `runEnqueue` through it exercises the real
-// orchestration: what is faked is Postgres, not the logic under test.
+// The store below is a faithful stand-in for the SQL the production deps issue
+// — including the partial unique index on
+// (church_id, recipient_user_id, dedupe_key), which is what makes a second
+// enqueue TO THE SAME RECIPIENT a no-op rather than a second row, while the
+// same key for a different recipient still records its own. Driving
+// `runEnqueue` through it exercises the real orchestration: what is faked is
+// Postgres, not the logic under test. The index itself is asserted against the
+// generated migration below, so the fake cannot drift away from it.
 // ----------------------------------------------------------------------------
 
 const CHURCH_A = "11111111-1111-4111-8111-111111111111";
 const CHURCH_B = "22222222-2222-4222-8222-222222222222";
 const USER = "33333333-3333-4333-8333-333333333333";
 const TASK = "44444444-4444-4444-8444-444444444444";
+const OTHER_USER = "66666666-6666-4666-8666-666666666666";
+const OUTSIDER = "77777777-7777-4777-8777-777777777777";
+
+/** Who may be notified about what — the membership source, faked. */
+const MEMBERSHIPS: Record<string, string[]> = {
+  [USER]: [CHURCH_A, CHURCH_B],
+  [OTHER_USER]: [CHURCH_A],
+  [OUTSIDER]: [],
+};
 
 class FakeNotificationStore implements EnqueueDeps, CancelByEntityDeps {
   readonly rows: Notification[] = [];
   private sequence = 0;
 
+  async recipientBelongsToChurch(
+    churchId: string,
+    recipientUserId: string
+  ): Promise<boolean> {
+    return (MEMBERSHIPS[recipientUserId] ?? []).includes(churchId);
+  }
+
   /** Mirrors `INSERT ... ON CONFLICT DO NOTHING RETURNING *`. */
   async insertIfAbsent(row: NewNotification): Promise<Notification | null> {
     const dedupeKey = row.dedupeKey ?? null;
 
-    // The partial unique index: NULL keys never collide.
+    // The partial unique index on (church_id, recipient_user_id, dedupe_key):
+    // NULL keys never collide, and the same key for a different recipient is a
+    // different row.
     if (
       dedupeKey !== null &&
       this.rows.some(
         (existing) =>
-          existing.churchId === row.churchId && existing.dedupeKey === dedupeKey
+          existing.churchId === row.churchId &&
+          existing.recipientUserId === row.recipientUserId &&
+          existing.dedupeKey === dedupeKey
       )
     ) {
       return null;
@@ -76,11 +99,15 @@ class FakeNotificationStore implements EnqueueDeps, CancelByEntityDeps {
 
   async findByDedupeKey(
     churchId: string,
+    recipientUserId: string,
     dedupeKey: string
   ): Promise<Notification | null> {
     return (
       this.rows.find(
-        (row) => row.churchId === churchId && row.dedupeKey === dedupeKey
+        (row) =>
+          row.churchId === churchId &&
+          row.recipientUserId === recipientUserId &&
+          row.dedupeKey === dedupeKey
       ) ?? null
     );
   }
@@ -207,6 +234,78 @@ test("a second enqueue with the same dedupeKey creates no second row", async () 
   assert.equal(second.notification?.id, first.notification?.id);
 });
 
+test("the same dedupeKey for two recipients in one church records two rows", async () => {
+  // The fan-out shape, and the reason the recipient is in the unique index.
+  // A meeting reminder is ONE event with one natural key, sent to every
+  // attendee: the caller loops the recipients and reuses the key. If dedupe
+  // were (church, key) only, attendee #1 would win the insert and #2 would come
+  // back `created: false` holding attendee #1's row — the notification silently
+  // never sent, and no way for the caller to notice.
+  const store = new FakeNotificationStore();
+  const key = "meeting.reminder:" + TASK + ":3d";
+
+  const first = await runEnqueue(
+    store,
+    baseInput({
+      category: "meetings",
+      type: "meeting.reminder",
+      dedupeKey: key,
+    })
+  );
+  const second = await runEnqueue(
+    store,
+    baseInput({
+      category: "meetings",
+      type: "meeting.reminder",
+      recipientUserId: OTHER_USER,
+      dedupeKey: key,
+    })
+  );
+
+  assert.equal(store.rows.length, 2);
+  assert.equal(first.created, true);
+  assert.equal(second.created, true);
+  assert.notEqual(second.notification?.id, first.notification?.id);
+  assert.deepEqual(
+    store.rows.map((row) => row.recipientUserId),
+    [USER, OTHER_USER]
+  );
+});
+
+test("the same dedupeKey for the SAME recipient still collapses", async () => {
+  // The other half of the pair: per-recipient idempotency is still idempotency.
+  const store = new FakeNotificationStore();
+  const key = "meeting.reminder:" + TASK + ":3d";
+  const input = baseInput({
+    category: "meetings",
+    type: "meeting.reminder",
+    recipientUserId: OTHER_USER,
+    dedupeKey: key,
+  });
+
+  await runEnqueue(store, input);
+  const second = await runEnqueue(store, input);
+
+  assert.equal(store.rows.length, 1);
+  assert.equal(second.created, false);
+});
+
+test("the migration creates the (church, recipient, key) partial unique index", () => {
+  // The fake store above mirrors this index; if the migration ever stopped
+  // matching it, the fake would keep passing while production quietly changed
+  // behaviour. The index is the real arbiter for ON CONFLICT DO NOTHING, so it
+  // is asserted rather than assumed.
+  const sql = readFileSync(
+    path.join(process.cwd(), "src/db/migrations/0023_notifications.sql"),
+    "utf8"
+  );
+
+  assert.match(
+    sql,
+    /CREATE UNIQUE INDEX "notifications_dedupe_key_unique_idx" ON "notifications" USING btree \("church_id","recipient_user_id","dedupe_key"\) WHERE "notifications"\."dedupe_key" is not null/
+  );
+});
+
 test("dedupe keys are scoped per church", async () => {
   const store = new FakeNotificationStore();
   const key = "task.overdue:shared";
@@ -234,6 +333,9 @@ test("a conflict with no dedupe key is a bug, not a silent no-op", async () => {
   // The only conflict arbiter is the dedupe-key index. Deps reporting a
   // conflict for a keyless insert means the write vanished; that must surface.
   const brokenDeps: EnqueueDeps = {
+    async recipientBelongsToChurch() {
+      return true;
+    },
     async insertIfAbsent() {
       return null;
     },
@@ -246,6 +348,63 @@ test("a conflict with no dedupe key is a bug, not a silent no-op", async () => {
     () => runEnqueue(brokenDeps, baseInput()),
     /no dedupeKey/
   );
+});
+
+// ----------------------------------------------------------------------------
+// The (church, recipient) relationship is checked, not assumed
+// ----------------------------------------------------------------------------
+
+test("a recipient outside the church is refused, and nothing is written", async () => {
+  // The tenancy fact a comment used to stand in for. A caller that derived
+  // recipientUserId from request input would otherwise file a notification for
+  // a stranger into a tenant they do not belong to — where, being church-scoped,
+  // it becomes readable inside that church.
+  const store = new FakeNotificationStore();
+
+  await assert.rejects(
+    () => runEnqueue(store, baseInput({ recipientUserId: OUTSIDER })),
+    /does not belong to church/
+  );
+
+  assert.equal(store.rows.length, 0);
+});
+
+test("the check is per church, not per user — the same user can be in-scope elsewhere", async () => {
+  const store = new FakeNotificationStore();
+
+  // OTHER_USER belongs to church A only.
+  await runEnqueue(store, baseInput({ recipientUserId: OTHER_USER }));
+  await assert.rejects(
+    () =>
+      runEnqueue(
+        store,
+        baseInput({ churchId: CHURCH_B, recipientUserId: OTHER_USER })
+      ),
+    /does not belong to church/
+  );
+
+  assert.equal(store.rows.length, 1);
+  assert.equal(store.rows[0].churchId, CHURCH_A);
+});
+
+test("membership is checked BEFORE the insert is attempted", async () => {
+  // Not a post-hoc audit: the refused enqueue must never reach the table.
+  let insertAttempts = 0;
+  const deps: EnqueueDeps = {
+    async recipientBelongsToChurch() {
+      return false;
+    },
+    async insertIfAbsent() {
+      insertAttempts += 1;
+      return null;
+    },
+    async findByDedupeKey() {
+      return null;
+    },
+  };
+
+  await assert.rejects(() => runEnqueue(deps, baseInput()));
+  assert.equal(insertAttempts, 0);
 });
 
 // ----------------------------------------------------------------------------

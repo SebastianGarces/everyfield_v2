@@ -1,6 +1,6 @@
 {
-  "id": "97fb7ff4-7201-4f0f-b632-a7da3666ae11",
-  "prevId": "d1398a85-c407-440b-ae40-28e293bdd1ee",
+  "id": "e0cb25d9-5636-465b-b162-be5e469baabf",
+  "prevId": "97fb7ff4-7201-4f0f-b632-a7da3666ae11",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -5745,7 +5745,16 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "notification_deliveries_channel_check": {
+          "name": "notification_deliveries_channel_check",
+          "value": "\"notification_deliveries\".\"channel\" in ('email', 'in_app')"
+        },
+        "notification_deliveries_status_check": {
+          "name": "notification_deliveries_status_check",
+          "value": "\"notification_deliveries\".\"status\" in ('queued', 'sent', 'failed', 'suppressed_by_preference', 'cancelled')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.notification_preferences": {
@@ -5863,7 +5872,20 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "notification_preferences_category_check": {
+          "name": "notification_preferences_category_check",
+          "value": "\"notification_preferences\".\"category\" in ('tasks', 'meetings', 'communication', 'teams', 'phase', 'digest')"
+        },
+        "notification_preferences_channel_check": {
+          "name": "notification_preferences_channel_check",
+          "value": "\"notification_preferences\".\"channel\" in ('email', 'in_app')"
+        },
+        "notification_preferences_digest_cadence_check": {
+          "name": "notification_preferences_digest_cadence_check",
+          "value": "\"notification_preferences\".\"digest_cadence\" is null or \"notification_preferences\".\"digest_cadence\" in ('daily', 'weekly')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.notifications": {
@@ -6116,7 +6138,16 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "notifications_category_check": {
+          "name": "notifications_category_check",
+          "value": "\"notifications\".\"category\" in ('tasks', 'meetings', 'communication', 'teams', 'phase', 'digest')"
+        },
+        "notifications_status_check": {
+          "name": "notifications_status_check",
+          "value": "\"notifications\".\"status\" in ('pending', 'claimed', 'delivered', 'cancelled', 'failed')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.auth_attempts": {

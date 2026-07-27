@@ -133,15 +133,24 @@ export function isDigestCadence(value: unknown): value is DigestCadence {
 /**
  * The coded default for one (category, channel) pair.
  *
- * An unknown category — a row written by a newer deploy and read by an older
- * one — falls back to enabled rather than throwing, so a category the running
- * code has never heard of degrades to "delivered" instead of "dropped".
+ * An unrecognised category or channel — a row written by a newer deploy and
+ * read by an older one, or one that reached the table without passing a parse —
+ * resolves to DISABLED rather than throwing.
+ *
+ * That direction is deliberate. This function answers "should I send this?",
+ * and the answer is a consent decision: defaulting an unknown input to "yes"
+ * means the system's reflex when it does not understand something is to email
+ * the user anyway. A category the running code has never heard of has no copy,
+ * no preference row a user could ever have seen, and no label on the settings
+ * screen — sending it is worse than dropping it, and the next deploy delivers
+ * it correctly. Every category the code DOES define keeps its own default, so
+ * this branch is unreachable in normal operation.
  */
 export function defaultChannelEnabled(
   category: NotificationCategory,
   channel: NotificationChannel
 ): boolean {
-  return NOTIFICATION_CATEGORIES[category]?.defaults[channel] ?? true;
+  return NOTIFICATION_CATEGORIES[category]?.defaults[channel] ?? false;
 }
 
 /** Every (category, channel) pair, in a stable order for the settings matrix. */

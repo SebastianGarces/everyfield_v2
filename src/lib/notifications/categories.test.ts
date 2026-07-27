@@ -12,6 +12,7 @@ import {
   notificationChannels,
   notificationPreferenceMatrixKeys,
   type NotificationCategory,
+  type NotificationChannel,
 } from "./categories";
 
 // ----------------------------------------------------------------------------
@@ -67,12 +68,20 @@ test("defaults are opt-out everywhere except the digest's in-app row", () => {
   }
 });
 
-test("an unknown category degrades to enabled rather than dropping", () => {
-  // A row written by a newer deploy and read by an older one must still be
-  // delivered — silently dropping it is the worse failure.
+test("an unrecognised category fails CLOSED — the default answer to 'send?' is no", () => {
+  // This is a consent decision, so it defaults the safe way: a category the
+  // running code cannot name has no copy, no settings row a user could ever
+  // have seen, and no way for them to have opted out of it. Sending it anyway
+  // is worse than waiting for the deploy that understands it.
   const unknown = "something_new" as NotificationCategory;
-  assert.equal(defaultChannelEnabled(unknown, "email"), true);
-  assert.equal(defaultChannelEnabled(unknown, "in_app"), true);
+  assert.equal(defaultChannelEnabled(unknown, "email"), false);
+  assert.equal(defaultChannelEnabled(unknown, "in_app"), false);
+
+  // Same for a channel that is not in the coded set.
+  assert.equal(
+    defaultChannelEnabled("tasks", "sms" as NotificationChannel),
+    false
+  );
 });
 
 test("guards accept members and reject everything else", () => {
