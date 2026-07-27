@@ -18,6 +18,7 @@ export const meta = {
       title: "Ship",
       detail:
         "open-pr — gated on a PASS verdict, with the evidence bundle — then write the outcome label and READ IT BACK; an unconfirmed label errors the track instead of shipping it",
+      model: "opus",
     },
   ],
 };
@@ -709,11 +710,17 @@ The body MUST include the skill's **## 👀 Manual QA** section: the preview URL
 
 THEN WAIT FOR CI AND REPORT WHAT IT SAID, NOT WHAT YOU BELIEVE:
 \`gh pr checks <number> --watch --fail-fast\`, then read the conclusion of the "Format, Lint, Typecheck, Build" check. Put it in checkConclusion verbatim (success | failure | timed_out | none). If it is not success, pull the failing step and its error with \`gh run view <run-id> --log-failed\` and put that in checkSummary. Do not summarise it as "probably unrelated" and do not claim success you did not observe. Return strictly the schema.`,
-      // Deliberately NOT tiered down. This node looks mechanical, but it is the
-      // one that transcribes the CI conclusion, and the whole anchoring story
-      // rests on it reporting what GitHub said instead of summarising it into
-      // "probably unrelated". Cheapening it is a false economy.
-      { label: `pr:${track.id}#${attempt}`, phase: "Ship", schema: PR_SCHEMA }
+      // Pinned to opus, the executor tier. This node transcribes the CI
+      // conclusion, and the anchoring story rests on it reporting what GitHub
+      // said instead of summarising it into "probably unrelated" — so it must
+      // not drop to the quick-command tier. It also must not inherit the
+      // session model: shipping is executor work, not frontier work.
+      {
+        label: `pr:${track.id}#${attempt}`,
+        phase: "Ship",
+        model: "opus",
+        schema: PR_SCHEMA,
+      }
     );
 
     // The anchor decides, not the verifier. A green DoD with a red check is a
@@ -850,8 +857,11 @@ Return strictly {"merged": false, "state": "refused", "detail": "<one line>"}.`,
           {
             label: `hold:${track.id}`,
             phase: "Ship",
-            // Not "low": a direction-shaped spec-question means this agent
-            // builds live prototypes before it comments, not just a comment.
+            // Opus, not the session model: building prototypes and writing a
+            // DECISION comment is executor work. Not "low" effort either — a
+            // direction-shaped spec-question means this agent builds live
+            // prototypes before it comments, not just a comment.
+            model: "opus",
             effort: "medium",
             schema: MERGE_SCHEMA,
           }
@@ -872,10 +882,11 @@ Return strictly {"merged": false, "state": "refused", "detail": "<one line>"}.`,
 
 Return strictly the schema, with followUpIssues listing every issue number you created.`,
           {
-            // Not tiered down: this one mutates main and transcribes GitHub's
-            // answer. Same reasoning as the PR node above.
+            // Opus: this one mutates main and transcribes GitHub's answer, so
+            // it stays at the executor tier — same reasoning as the PR node.
             label: `merge:${track.id}`,
             phase: "Ship",
+            model: "opus",
             schema: MERGE_SCHEMA,
           }
         );
