@@ -498,12 +498,14 @@ const warn = (kind, summary) => ({
 /**
  * Drives a track all the way to the ship step with a given verifier report.
  * `labelImpl` overrides how the label step answers — the whole point of the
- * label tests is that the loop must not believe it.
+ * label tests is that the loop must not believe it. `prImpl` overrides the
+ * delivery step, for the case where the DoD passes and the push does not.
  */
-const replyShip = (verifyReport, labelImpl) => (prompt, opts) => {
+const replyShip = (verifyReport, labelImpl, prImpl) => (prompt, opts) => {
   const l = opts.label || "";
   if (l.startsWith("label:"))
     return (labelImpl || labelledOk)(prompt, opts, verifyReport);
+  if (prImpl && l.startsWith("pr:")) return prImpl(prompt, opts);
   if (l.startsWith("start:")) return { claimed: [101], inProgressNow: [101] };
   if (l.startsWith("impl:"))
     return {
@@ -809,4 +811,132 @@ test("an unconfirmed label stops the auto-merge before it happens", async () => 
     "merging on a board state nobody verified is how a blocked PR got promoted"
   );
   assert.equal(result.errored.length, 1);
+});
+
+// ---------------------------------------------------------------------------
+// build-until-done: a DoD that passed and a delivery that did not
+//
+// Ruling (2026-07-27, PR #182): this outcome gets its OWN label rather than
+// `agent:blocked`, because the human action differs. Blocked means the code did
+// not reach the Definition of Done — go read a failing gate. Delivery-failed
+// means every gate passed and the commit is on its branch; only the push/PR
+// call failed. The fix is to retry the delivery, and sending a human to review
+// a build that already passed spends the one resource this system cannot make
+// more of. These tests pin the label, the explanation, and the report fold.
+// ---------------------------------------------------------------------------
+
+const PUSH_REJECTED = "push rejected: remote denied write access";
+
+/** A delivery step that fails the way the ruling is about: no PR, a reason. */
+const deliveryFails = () => ({
+  opened: false,
+  url: "",
+  checkConclusion: "none",
+  reason: PUSH_REJECTED,
+});
+
+test("a DoD pass whose delivery fails lands on agent:delivery-failed, not agent:blocked", async () => {
+  const { calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    replyShip(passing([]), undefined, deliveryFails)
+  );
+  const settle = labelCalls(calls, "delivery-failed");
+  assert.equal(settle.length, 1, "the outcome label must be written once");
+  assert.match(
+    settle[0].prompt,
+    /target status label is `agent:delivery-failed`/
+  );
+  assert.equal(
+    labelCalls(calls, "blocked").length,
+    0,
+    "agent:blocked would send a human to debug a build that passed every gate"
+  );
+  assert.equal(
+    labelCalls(calls, "in-review").length,
+    0,
+    "there is no PR, so nothing belongs in the review queue"
+  );
+});
+
+test("the delivery-failed comment says the DoD passed and names the delivery error", async () => {
+  const { calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    replyShip(passing([]), undefined, deliveryFails)
+  );
+  const comment = calls.find(
+    (c) => c.kind === "agent" && c.label === "delivery-failed:alpha"
+  );
+  assert.ok(comment, "a track that fails to deliver must say so on its issue");
+  assert.match(comment.prompt, /gh issue comment/);
+  assert.match(
+    comment.prompt,
+    /PASSED the Definition of Done/,
+    "the reader must not go hunting for a failing gate that does not exist"
+  );
+  assert.ok(
+    comment.prompt.includes(PUSH_REJECTED),
+    "the delivery error is the whole diagnosis — it cannot be summarised away"
+  );
+  assert.match(
+    comment.prompt,
+    /retry the delivery/,
+    "the human action that distinguishes this label from agent:blocked"
+  );
+  assert.match(
+    comment.prompt,
+    /do NOT edit labels/,
+    "the loop owns the label so it can verify it, as with every other outcome"
+  );
+});
+
+test("a delivery failure is reported in its own bucket, not folded into blocked", async () => {
+  const { result } = await runBuild(
+    [buildUnit("alpha", 101)],
+    replyShip(passing([]), undefined, deliveryFails)
+  );
+  assert.equal(result.shipped.length, 0);
+  assert.equal(
+    result.blocked.length,
+    0,
+    "pr-failed rows used to land here with failingGate: undefined"
+  );
+  assert.equal(result.deliveryFailed.length, 1);
+  const row = result.deliveryFailed[0];
+  assert.equal(row.track, "alpha");
+  assert.deepEqual(row.issues, [101]);
+  assert.equal(row.failingGate, "delivery", "the step that failed, named");
+  assert.equal(
+    row.dodVerdict,
+    "PASS",
+    "the gates that passed, carried through"
+  );
+  assert.equal(row.branch, "feature/alpha", "a retry needs the branch by name");
+  assert.equal(row.labelSettled, true);
+  assert.match(
+    result.nextStep,
+    /do NOT review or rebuild the code/,
+    "the report must spend the reader's attention on the retry, not the diff"
+  );
+});
+
+test("a delivery-failed label that will not settle is still surfaced", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    replyShip(
+      passing([]),
+      labelsReadingBack(["agent:in-progress"]),
+      deliveryFails
+    )
+  );
+  assert.equal(
+    labelCalls(calls, "delivery-failed").length,
+    3,
+    "the read-back guard applies to this label like any other"
+  );
+  assert.equal(result.deliveryFailed.length, 1);
+  assert.equal(
+    result.deliveryFailed[0].labelSettled,
+    false,
+    "an unsettled label means the board is lying, whatever the outcome was"
+  );
 });

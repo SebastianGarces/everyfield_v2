@@ -734,19 +734,51 @@ THEN WAIT FOR CI AND REPORT WHAT IT SAID, NOT WHAT YOU BELIEVE:
 
     const shipped = pr?.opened && pr.checkConclusion === "success";
 
-    // The PR step did not produce a PR at all. That is a failed track, so the
-    // board must say so — otherwise the issue sits on `agent:in-progress`
-    // forever and reads as "still running" to every consumer.
+    // -----------------------------------------------------------------------
+    // The DoD passed and the PR step still produced no PR.
+    //
+    // This is NOT `agent:blocked`. Blocked means the work did not reach the
+    // Definition of Done, and it sends a human to read a failing gate and fix
+    // code. Here the gates all passed and the commit is sitting on its branch —
+    // only the push/PR call failed (auth, a network blip, a rejected push, a
+    // dead `gh`). The human action is to retry the delivery, and telling them
+    // to go debug a build that already passed wastes the scarcest resource in
+    // this system. So the outcome gets its own label (`labels.md`) and its own
+    // bucket in the report.
+    // -----------------------------------------------------------------------
     if (!shipped) {
-      const labelState = await settleLabels(track, "agent:blocked");
+      const why = pr?.reason || "no reason given";
+      log(`📦 ${track.id} passed the DoD but delivery failed: ${why}`);
+      await agent(
+        `A build loop for issue(s) ${track.issues.map((n) => `#${n}`).join(", ")} PASSED the Definition of Done, but the delivery step failed to open a PR.
+Delivery failure: ${why}.
+The evidence bundle the DoD produced: ${JSON.stringify({ verdict: verify.verdict, summary: verify.summary, gates: verify.gates })}.
+Branch \`${branch}\` (worktree ${wt}) holds the committed work.
+For EACH issue, post a comment (\`gh issue comment <n>\`) that makes these three things unmissable:
+  1. The DoD PASSED — quote the evidence above. Nothing is known to be wrong with the code.
+  2. The DELIVERY step failed, and exactly why: ${why}.
+  3. What the human should do: retry the delivery (push \`${branch}\` and open the PR). Do NOT re-review or re-build the code; it already passed its gates.
+Do NOT open a PR yourself and do NOT edit labels — the loop writes and verifies the \`agent:delivery-failed\` label itself in the next step. Return strictly the schema.`,
+        {
+          label: `delivery-failed:${track.id}`,
+          phase: "Ship",
+          // Mechanical: it transcribes a verdict and a failure string it was
+          // handed. It produces no judgement of its own.
+          model: "sonnet",
+          effort: "low",
+          schema: BLOCK_SCHEMA,
+        }
+      );
+
+      const labelState = await settleLabels(track, "agent:delivery-failed");
       if (!labelState.settled)
         log(
-          `🚨 ${track.id} failed to open a PR AND its agent:blocked label did not settle — issue(s) ${labelState.missing.join(", ")} need a manual fix.`
+          `🚨 ${track.id} failed to open a PR AND its agent:delivery-failed label did not settle — issue(s) ${labelState.missing.join(", ")} need a manual fix.`
         );
       return {
         track,
         status: "pr-failed",
-        reason: `the PR step did not open a PR (${pr?.reason || "no reason given"})`,
+        reason: `the PR step did not open a PR (${why})`,
         pr,
         report: verify,
         attempts: attempt,
@@ -921,17 +953,20 @@ for (const r of done) {
 }
 
 const shipped = done.filter((r) => r.status === "shipped");
-const blocked = done.filter(
-  (r) => r.status === "blocked" || r.status === "pr-failed"
-);
+const blocked = done.filter((r) => r.status === "blocked");
+// Separate from `blocked` because the human action is different: these passed
+// every gate and only the push/PR call failed, so they want a retried delivery,
+// not a code review. Folding them into `blocked` sent a reader to look for a
+// failing gate that does not exist (`failingGate` came out undefined).
+const deliveryFailed = done.filter((r) => r.status === "pr-failed");
 // Neither shipped nor cleanly blocked: the work exists but the board cannot be
 // trusted about it. Loud and separate, because it needs a hand, not a re-run.
 const errored = done.filter((r) => r.status === "errored");
 log(
-  `Done: ${shipped.length} shipped (PR opened), ${blocked.length} blocked${errored.length ? `, ${errored.length} ERRORED (label unsettled)` : ""}${lost.length ? `, ${lost.length} LOST` : ""}.`
+  `Done: ${shipped.length} shipped (PR opened), ${blocked.length} blocked${deliveryFailed.length ? `, ${deliveryFailed.length} delivery-failed (DoD passed, no PR)` : ""}${errored.length ? `, ${errored.length} ERRORED (label unsettled)` : ""}${lost.length ? `, ${lost.length} LOST` : ""}.`
 );
 return {
-  summary: `${shipped.length}/${tracks.length} tracks shipped to PR; ${blocked.length} blocked${errored.length ? `; 🚨 ${errored.length} errored with an unsettled label` : ""}${lost.length ? `; ⚠️ ${lost.length} lost without a verdict` : ""}.`,
+  summary: `${shipped.length}/${tracks.length} tracks shipped to PR; ${blocked.length} blocked${deliveryFailed.length ? `; 📦 ${deliveryFailed.length} passed the DoD but failed to deliver` : ""}${errored.length ? `; 🚨 ${errored.length} errored with an unsettled label` : ""}${lost.length ? `; ⚠️ ${lost.length} lost without a verdict` : ""}.`,
   lost: lost.map((t) => ({
     track: t.id,
     issues: t.issues,
@@ -958,6 +993,18 @@ return {
     failingGate: r.lastReport?.failingGate,
     labelSettled: r.labelState?.settled !== false,
   })),
+  deliveryFailed: deliveryFailed.map((r) => ({
+    track: r.track.id,
+    issues: r.track.issues,
+    // The work is committed here and nowhere else — a retry needs it by name.
+    branch: `feature/${r.track.id}`,
+    reason: r.reason,
+    // Not a gate name: every gate passed. Naming the step that failed is what
+    // stops this being read as a code failure.
+    failingGate: "delivery",
+    dodVerdict: r.report?.verdict,
+    labelSettled: r.labelState?.settled !== false,
+  })),
   errored: errored.map((r) => ({
     track: r.track.id,
     issues: r.track.issues,
@@ -974,6 +1021,9 @@ return {
       ? "Your queue is ONLY the held PRs — each is held because a warning raises a question about what should have been built, so it needs a ruling rather than a code review. Auto-merged PRs need no action; their code-quality warnings were filed as issues and are back on the frontier."
       : "Review the opened PRs (your queue).") +
     " For blocked issues, read the issue comment for the failing gate + evidence and decide: tighten the spec, raise budget (+Nk), or take it manually." +
+    (deliveryFailed.length
+      ? ` 📦 ${deliveryFailed.length} track(s) read agent:delivery-failed: they PASSED the DoD and only the push/PR step failed, so do NOT review or rebuild the code — push the named branch and open the PR. The issue comment has the delivery error.`
+      : "") +
     (lost.length
       ? " ⚠️ FIRST: the lost tracks got no verdict and no issue comment — nothing told you about them except this field. Re-queue them (their issues are stuck on agent:in-progress)."
       : ""),

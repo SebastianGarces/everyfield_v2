@@ -24,14 +24,22 @@ criteria, a declared validation plan, a risk classification, and a `## Likely fi
 
 ## Status labels (mutually exclusive — exactly one per active issue)
 
-| Label              | Meaning                                                              |
-|--------------------|----------------------------------------------------------------------|
-| `agent:queued`     | Spec accepted, not yet started. Waiting for a build slot / budget.   |
-| `agent:in-progress`| A `build-until-done` loop is actively iterating on it.               |
-| `agent:in-review`  | DoD passed, PR opened — **in the human review queue**.               |
-| `agent:blocked`    | Loop exhausted attempts/budget; needs a human. See the issue comment. |
+| Label                   | Meaning                                                              |
+|-------------------------|----------------------------------------------------------------------|
+| `agent:queued`          | Spec accepted, not yet started. Waiting for a build slot / budget.   |
+| `agent:in-progress`     | A `build-until-done` loop is actively iterating on it.               |
+| `agent:in-review`       | DoD passed, PR opened — **in the human review queue**.               |
+| `agent:blocked`         | Loop exhausted attempts/budget; needs a human. See the issue comment. |
+| `agent:delivery-failed` | DoD passed, but pushing/opening the PR failed. The code is fine — retry the delivery. See the issue comment. |
 
 (When the PR merges, the issue closes via `Closes #` — no separate "done" label needed.)
+
+`agent:blocked` and `agent:delivery-failed` both mean "a human is needed", and they are kept apart
+because the human does a **different thing**. `agent:blocked` says the work did not reach the
+Definition of Done — read the failing gate, then tighten the spec, raise the budget, or take it
+manually. `agent:delivery-failed` says the work *did* reach it and the commit exists on its branch;
+only the push/PR step failed. Nothing is wrong with the code, so re-reviewing it is wasted attention:
+retry the delivery. Collapsing the two sends a human to debug a build that already passed.
 
 Two labels ever carrying `agent:in-progress` at once on the same issue is a bug, not a state. The
 board-sync workflow logs a warning rather than guessing which one wins.
@@ -111,6 +119,7 @@ gh label create "agent:queued"      --color FBCA04 --description "Spec accepted,
 gh label create "agent:in-progress" --color 0E8A16 --description "build-until-done loop running"  --force
 gh label create "agent:in-review"   --color 1D76DB --description "DoD passed, PR in review queue" --force
 gh label create "agent:blocked"     --color B60205 --description "Loop exhausted, needs a human"  --force
+gh label create "agent:delivery-failed" --color E99695 --description "DoD passed but the PR/delivery step failed — retry delivery; the code is fine" --force
 gh label create "risk:high"         --color D93F0B --description "Schema/auth/tenancy/payments"   --force
 gh label create "needs-spec"        --color 5319E7 --description "Not build-ready — no FRD, or an open question inside one" --force
 gh label create "feature"           --color 0052CC --description "Feature parent issue — the FRD's home on the board" --force

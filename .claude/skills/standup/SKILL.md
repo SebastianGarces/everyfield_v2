@@ -18,7 +18,11 @@ work.
    gh issue list --label agent:queued      --state open --json number,title,labels
    gh issue list --label agent:blocked     --state open --json number,title,labels,updatedAt
    gh issue list --label agent:in-review    --state open --json number,title
+   gh issue list --label agent:delivery-failed --state open --json number,title,labels,updatedAt
    ```
+   Report `agent:delivery-failed` **separately from** `agent:blocked`, and say what it means: those
+   passed the DoD and only the push/PR step failed, so the action is to retry the delivery, not to
+   review the code. Folding them together is how a finished build gets re-litigated.
 1b. **The frontier** — of the queued issues, which are actually *takeable* right now. A queued issue
    with an open blocker is not runnable, and reporting it as available is the main way a standup
    misleads:
