@@ -80,11 +80,25 @@ Empty frontier → stop with what the board is waiting on (the blocked list, and
 
 ### 5. The budget can finish what it starts
 
-Run `token-preflight` over the candidate tracks.
+Size the candidate tracks **inline — do not launch the `token-preflight` skill here**. It is a
+lookup table plus a sum, and launching it as the last skill before the wave fan-out made the whole
+build loop's subagent usage read as "token-preflight" in /usage. The skill remains for
+`/deliver` runs that carry an explicit `+Nk` directive; dispatch does the arithmetic itself:
 
-- **RUN** → proceed with all of them
-- **SPLIT** → take only what fits, highest-value first, and say what was left
-- **DEFER** → stop
+| Track size | Est. output tokens (incl. ~1 retry) |
+|------------|--------------------------------------|
+| small (1–2 files, low risk)     | ~120k |
+| medium (3–6 files)              | ~250k |
+| large / high-risk (2 verifiers) | ~450k |
+
+`waveEstimate = Σ trackEstimate`; `reserve` = the largest single track's estimate.
+
+- **No `+Nk` budget directive** (the normal dispatch case) → **RUN** best-effort. The real guards
+  are the workflow's per-track reserve and `MAX_ATTEMPTS`, plus the track cap below.
+- **Directive given** and `remaining ≥ waveEstimate + reserve` → **RUN** all of them.
+- **Directive given** and only some fit (`remaining ≥ largestTrackEstimate + reserve`) → **SPLIT**:
+  take only what fits, highest-value first, and say what was left.
+- Otherwise → **DEFER**: stop, and say what a single track needs.
 
 **Cap: 3 tracks per pass**, even when the budget allows more. A pass that opens five PRs at 03:00
 guarantees gate 1 blocks the next four passes. Steady beats bursty.

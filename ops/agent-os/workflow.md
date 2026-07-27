@@ -22,7 +22,7 @@ flowchart TD
 
   subgraph pass ["2 · A dispatch pass"]
     F["dispatch — one pass over the frontier:<br/>unblocked, unclaimed, file-disjoint tracks"]
-    F --> G{"token-preflight:<br/>enough budget to FINISH?"}
+    F --> G{"budget sizing (inline, gate 5):<br/>enough to FINISH?"}
     G -->|"no"| G2["defer / split — never strand work half-done"]
   end
   C --> F

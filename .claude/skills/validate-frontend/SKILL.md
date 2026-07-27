@@ -10,6 +10,11 @@ Proves a UI change **works against the running app**. Compiling is not done; thi
 
 ## Preconditions
 
+- **Give the worktree its env first:** `scripts/worktree-env.sh <worktree-dir>` (idempotent; the
+  script's header says what it does and why). A worktree created for a track has no `.env.local`, so
+  anything you run there — `pnpm test` above all — fails on a missing `DATABASE_URL`, which reads as
+  a broken track when it is a broken harness. Never hand-roll an env file instead.
+
 - **Validate on the branch's Vercel preview deployment — never `localhost:3000`.** Localhost serves
   the **main checkout**, so it does not contain this track's work: driving it produces a confident
   pass for code that was never executed. This is not hypothetical — it is why the CSV-export track

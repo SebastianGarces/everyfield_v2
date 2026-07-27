@@ -25,11 +25,12 @@ For each list item, create a rigorous GitHub Issue with **observable acceptance 
 G3 validation plan, a risk class, and a file-ownership guess. Label `agent:queued` (+ `risk:high`).
 Ask the user a question ONLY if an ambiguity changes *what gets built*; otherwise default + note it.
 
-### 2. Token preflight  (`token-preflight`)
-Before building, estimate the wave's cost vs remaining budget. Decide **RUN / SPLIT / DEFER** and tell
-the user the numbers. Never start work you can't finish — split or defer instead. If the user gave a
-`+Nk` budget directive, the workflow's `budget` global enforces it; otherwise run best-effort and lean
-on per-track `MAX_ATTEMPTS` + `reserve`.
+### 2. Token preflight  (`token-preflight` — only under a `+Nk` directive)
+If the user gave a `+Nk` budget directive, run `token-preflight`: estimate the wave's cost vs the
+budget, decide **RUN / SPLIT / DEFER**, and tell the user the numbers — never start work you can't
+finish. The workflow's `budget` global enforces the ceiling. **No directive → skip the skill
+entirely** (its answer is RUN best-effort by definition) and lean on per-track `MAX_ATTEMPTS` +
+`reserve`.
 
 ### 3. Plan onto the board
 - **FRD-scale** feature → run the `frd-plan` workflow. It decomposes into file-disjoint tracks and

@@ -36,8 +36,7 @@ The factory is a graph, and only its roots are typed by a human:
     └─ delivery-orchestrator   ← USER-INVOKED
 cron (schedule)                ← human creates this ONCE
     └─ dispatch                ← SCHEDULE-INVOKED (model-invocable; guards live inside)
-         ├─ token-preflight
-         └─ build-until-done.js
+         └─ build-until-done.js   (budget sizing is inline in dispatch's gate 5)
          ├─ spec-intake              ┐
          ├─ token-preflight          │
          ├─ standup                  │  all model-invocable
@@ -82,14 +81,14 @@ the guarding has to move *inside* the skill:
 - a **per-pass track cap**, so one 03:00 run cannot fill the review queue and starve the next four
 
 Note what `dispatch` may **not** call: `delivery-orchestrator` is user-invoked, so that edge does not
-exist. It calls `token-preflight` and the `build-until-done` workflow directly.
+exist. It sizes the budget inline (gate 5) and calls the `build-until-done` workflow directly.
 
 **Model-invocable — deliberately, do not "fix" this:**
 
 | Skill | Called by | Guarded instead by |
 |---|---|---|
 | `spec-intake` | `delivery-orchestrator` | it only writes issues, never code |
-| `token-preflight` | `delivery-orchestrator`, the wave loop | read-only estimate |
+| `token-preflight` | `delivery-orchestrator` (only with a `+Nk` directive) | read-only estimate |
 | `definition-of-done` | the verifier subagent | it reports a verdict; it can't ship |
 | `validate-frontend` / `validate-backend` | `definition-of-done` | read-only assertions |
 | `open-pr` | the release subagent | **its own precondition** — it refuses to open a PR on a FAIL verdict. That refusal is the guard, not the invocation flag. |
