@@ -165,14 +165,25 @@ function tsxFiles(dir: string): string[] {
   });
 }
 
-test("no meaningful text is painted with text-foreground/50 anywhere", () => {
-  const offenders = tsxFiles(SRC).filter((file) =>
-    readFileSync(file, "utf8").includes("text-foreground/50")
-  );
+test("no meaningful text is painted with text-foreground/50 — decorative uses must carry an a11y-decorative marker", () => {
+  // Ruling on #151 (PR #173, option b): the guard is scoped to the AC's
+  // wording. WCAG imposes no contrast floor on decorative elements (icons
+  // tinted via currentColor, ornaments), so a line may keep the class by
+  // declaring itself decorative with an inline `a11y-decorative` comment on
+  // that same line — legal, greppable, and auditable. Any unmarked use is
+  // treated as meaningful text and fails.
+  const offenders = tsxFiles(SRC).flatMap((file) => {
+    const lines = readFileSync(file, "utf8").split("\n");
+    return lines.flatMap((line, i) =>
+      line.includes("text-foreground/50") && !line.includes("a11y-decorative")
+        ? [`${path.relative(process.cwd(), file)}:${i + 1}`]
+        : []
+    );
+  });
 
   assert.deepEqual(
-    offenders.map((file) => path.relative(process.cwd(), file)),
+    offenders,
     [],
-    "text-foreground/50 is 3.69:1 on white — use text-muted-foreground for text that carries meaning"
+    "text-foreground/50 is 3.69:1 on white — use text-muted-foreground for text that carries meaning, or mark the line {/* a11y-decorative */} if it is genuinely decorative"
   );
 });
