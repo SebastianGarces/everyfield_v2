@@ -133,3 +133,57 @@ export function slugToLabel(slug: string): string {
   const words = last.replace(/[-_]+/g, " ").trim();
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
+
+// ----------------------------------------------------------------------------
+// "How to improve" wiki links (PE-024).
+//
+// Persistence only stores slugs the RAG layer actually retrieved
+// (assessment/persist.ts → reconcileArticleSlugs), but a stored slug can still
+// go stale: the article can be renamed, archived, or unpublished long after the
+// assessment ran. A link to a dead slug is a 404 in the middle of a coaching
+// moment, so resolution happens at RENDER time against the live published set —
+// a slug that no longer resolves yields no link at all.
+// ----------------------------------------------------------------------------
+
+/** A resolved, safe-to-render link to a wiki article. */
+export interface InsightArticleLink {
+  slug: string;
+  href: string;
+  /** The article's real title (falls back to a humanized slug if untitled). */
+  label: string;
+}
+
+/**
+ * Resolve an insight's stored article slugs against the published wiki.
+ *
+ * @param slugs     the insight's `relatedArticleSlugs` (may be null/empty)
+ * @param published slug → title refs for currently published articles
+ * @returns one link per slug that still resolves, in stored order, deduped.
+ *          Unresolvable (stale) slugs are dropped rather than linked.
+ */
+export function buildArticleLinks(
+  slugs: string[] | null | undefined,
+  published: { slug: string; title: string }[]
+): InsightArticleLink[] {
+  if (!slugs || slugs.length === 0) return [];
+
+  const titleBySlug = new Map(published.map((a) => [a.slug, a.title]));
+
+  const links: InsightArticleLink[] = [];
+  const seen = new Set<string>();
+
+  for (const slug of slugs) {
+    if (seen.has(slug)) continue;
+    const title = titleBySlug.get(slug);
+    // Stale slug: the article is gone/unpublished — render nothing, not a 404.
+    if (title === undefined) continue;
+    seen.add(slug);
+    links.push({
+      slug,
+      href: `/wiki/${slug}`,
+      label: title.trim() || slugToLabel(slug),
+    });
+  }
+
+  return links;
+}

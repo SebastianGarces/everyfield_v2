@@ -21,6 +21,26 @@ export {
   type SelectedPlant,
 } from "./queries";
 
+// The 8-factor CSF scorecard (PE-023) — a pure projection of the persisted
+// snapshot plus its DB-backed convenience read.
+export {
+  buildCsfScorecard,
+  getCsfScorecard,
+  csfStandingUrgency,
+  isCsfCategory,
+  standingForSeverity,
+  CSF_CATEGORIES,
+  CSF_DEFINITIONS,
+  CSF_DEFINITION_BY_CATEGORY,
+  CSF_STANDINGS,
+  type CsfCategory,
+  type CsfDefinition,
+  type CsfFactorStanding,
+  type CsfScorecard,
+  type CsfStanding,
+  type RaisedCsfStanding,
+} from "./queries";
+
 export {
   MAX_STALENESS_MS,
   isDirtyOrStale,

@@ -1,12 +1,11 @@
 import { PersonProfileWrapper } from "@/components/people/person-profile-wrapper";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { PersonTeamAssignments } from "@/components/people/person-team-assignments";
+import { PersonTrainingProgress } from "@/components/people/person-training-progress";
 import { verifySession } from "@/lib/auth/session";
+import {
+  getPersonTeams,
+  getPersonTraining,
+} from "@/lib/ministry-teams/service";
 import { redirect } from "next/navigation";
 
 interface TeamsPageProps {
@@ -22,38 +21,18 @@ export default async function TeamsPage({ params }: TeamsPageProps) {
 
   const { id } = await params;
 
+  // Both reads are scoped to the session's church and neither depends on the
+  // other, so fetch them together rather than in a waterfall.
+  const [assignments, training] = await Promise.all([
+    getPersonTeams(user.churchId, id),
+    getPersonTraining(user.churchId, id),
+  ]);
+
   return (
     <PersonProfileWrapper personId={id} activeTab="teams">
       <div className="grid gap-6 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Team Assignments</CardTitle>
-            <CardDescription>
-              Depends on Ministry Team Management (F8)
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-muted-foreground">
-              Team assignments and roles will be displayed here once the
-              Ministry Team Management feature is implemented.
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Training Progress</CardTitle>
-            <CardDescription>
-              Depends on Ministry Team Management (F8)
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-muted-foreground">
-              Training completion status and certifications will be tracked
-              here.
-            </p>
-          </CardContent>
-        </Card>
+        <PersonTeamAssignments assignments={assignments} />
+        <PersonTrainingProgress items={training} />
       </div>
     </PersonProfileWrapper>
   );
