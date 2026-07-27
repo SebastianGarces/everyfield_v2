@@ -62,6 +62,10 @@ import type {
   CsfScorecard as CsfScorecardData,
   CsfStanding,
 } from "@/lib/phase-engine/assessment";
+// The one humanising formatter, shared with the Focus insight cards
+// (components/phase-engine/insight-card.tsx): a planter reads the evidence in
+// English, never in the judge's fact-ledger syntax.
+import { formatCitedFacts } from "@/lib/phase-engine/fact-format";
 import { cn } from "@/lib/utils";
 
 // ----------------------------------------------------------------------------
@@ -172,9 +176,7 @@ const MAX_TILE_FACTS = 2;
 function FactorTile({ factor }: { factor: CsfFactorStanding }) {
   const style = STANDING_STYLES[factor.standing];
   const [lead, ...rest] = factor.insights;
-  const citedFacts = ((lead?.citedFacts as string[] | null) ?? []).filter(
-    Boolean
-  );
+  const citedFacts = formatCitedFacts(lead?.citedFacts);
   const shownFacts = citedFacts.slice(0, MAX_TILE_FACTS);
   const hiddenFactCount = citedFacts.length - shownFacts.length;
 
