@@ -3,7 +3,8 @@
 import { db } from "@/db";
 import { churches, churchPrivacySettings, users } from "@/db/schema";
 import { verifySession } from "@/lib/auth/session";
-import { eq, isNull } from "drizzle-orm";
+import { linkUserToChurchFilter } from "@/lib/churches/link-user";
+import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
@@ -49,13 +50,12 @@ export async function createChurch(
   }
 
   // Create church, link user, and create privacy settings.
-  // The isNull(users.churchId) guard prevents double-submit race conditions.
   const [church] = await db.insert(churches).values({ name }).returning();
 
   const [updated] = await db
     .update(users)
     .set({ churchId: church.id })
-    .where(isNull(users.churchId))
+    .where(linkUserToChurchFilter(user.id))
     .returning();
 
   if (!updated) {
