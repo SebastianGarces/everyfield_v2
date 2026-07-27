@@ -134,6 +134,9 @@ export async function runAssessment(
       snapshotVersion: snapshot.snapshotVersion,
       phase,
       assessedAt: new Date().toISOString(),
+      // The passages that actually grounded this run (PE-024). Persistence
+      // reconciles the model's cited slugs against this metadata.
+      retrievedPassages: passages,
     };
   } catch (error) {
     trace.fail(error);

@@ -31,6 +31,9 @@ if (!Array.isArray(units) || units.length === 0)
     "Pass the wave's units array as args, e.g. [{id,title,lane,files,summary,acceptanceCriteria,issue,risk}, ...]"
   );
 const MAX_ATTEMPTS = parsed?.maxAttempts || 3;
+// Opt-in per run. Off by default so a direct `/deliver` call cannot merge to
+// main by surprise; `dispatch` turns it on explicitly.
+const AUTO_MERGE = parsed?.autoMerge === true;
 const BASE = parsed?.base || "the repository's current branch (HEAD)";
 // Stop starting a NEW attempt if we can't safely finish one. Tunable per run.
 const RESERVE = parsed?.reserve || 150_000;
@@ -88,9 +91,53 @@ const DOD_SCHEMA = {
       },
     },
     screenshots: { type: "array", items: { type: "string" } },
+    // Warnings decide whether a passing track may merge without a human.
+    //
+    // The DoD proves the code does what the SPEC said. It cannot prove the spec
+    // was right. Every warning in the 2026-07-26 batch that genuinely needed the
+    // human was of the second kind — "is a church-wide packet the intended read
+    // of DOC-014?" — while the code-quality ones (a UTC date format, a contrast
+    // ratio, a duplicated constant) were real but decidable without them. So the
+    // classification below, not the severity, is what gates auto-merge.
+    warnings: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["kind", "summary"],
+        properties: {
+          kind: {
+            type: "string",
+            enum: ["code-quality", "spec-question"],
+            description:
+              "spec-question = answering it could change WHAT was built (product intent, an AC that did not say, a requirement read two ways). code-quality = a defect or improvement in HOW it was built, decidable from the codebase alone. When genuinely torn, choose spec-question.",
+          },
+          summary: { type: "string" },
+          detail: {
+            type: "string",
+            description:
+              "for code-quality: enough to file as a standalone issue. for spec-question: the decision the human must make, and the options.",
+          },
+          files: { type: "array", items: { type: "string" } },
+        },
+      },
+    },
     failingGate: { type: "string" },
     fixInstructions: { type: "string" },
     summary: { type: "string" },
+  },
+};
+const MERGE_SCHEMA = {
+  type: "object",
+  required: ["merged", "state"],
+  properties: {
+    merged: { type: "boolean" },
+    state: {
+      type: "string",
+      enum: ["merged", "queued-for-auto-merge", "refused", "failed"],
+      description: "what GitHub actually reported — not what was attempted",
+    },
+    followUpIssues: { type: "array", items: { type: "integer" } },
+    detail: { type: "string" },
   },
 };
 const PR_SCHEMA = {
@@ -115,6 +162,25 @@ const PR_SCHEMA = {
     },
   },
 };
+const CLAIM_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["claimed", "inProgressNow"],
+  properties: {
+    claimed: {
+      type: "array",
+      items: { type: "integer" },
+      description: "The issue numbers this step actually edited.",
+    },
+    inProgressNow: {
+      type: "array",
+      items: { type: "integer" },
+      description:
+        "Every issue currently carrying agent:in-progress, for blast-radius verification.",
+    },
+  },
+};
+
 const BLOCK_SCHEMA = {
   type: "object",
   required: ["labelled"],
@@ -219,6 +285,10 @@ log(
   `${units.length} unit(s) → ${tracks.length} track(s); max ${MAX_ATTEMPTS} attempt(s) each.`
 );
 
+// Every issue this pass is permitted to touch. Any `agent:in-progress` outside
+// this set means a labelling step overreached — see board-design-2026-07.md §11.
+const PASS_ISSUES = [...new Set(tracks.flatMap((t) => t.issues))];
+
 // ---------------------------------------------------------------------------
 // Per-track verify-until-done loop
 // ---------------------------------------------------------------------------
@@ -263,18 +333,50 @@ async function buildTrack(track) {
   const implAgent = track.lane === "backend" ? "backend" : "frontend";
   let lastReport = null;
 
-  // mark issues in-progress (best-effort, inside an agent since the script has no shell)
-  await agent(
-    `For each issue in [${track.issues.join(", ")}], run: \`gh issue edit <n> --remove-label agent:queued --add-label agent:in-progress\`. Return strictly {"labelled": true}.`,
-    {
-      label: `start:${track.id}`,
-      phase: "Build",
-      // Two shell commands and a fixed return value. No judgment involved.
-      model: "haiku",
-      effort: "low",
-      schema: BLOCK_SCHEMA,
-    }
-  );
+  // Claim this track's issues — and ONLY this track's issues.
+  //
+  // On 2026-07-26 this step swept the entire `agent:queued` label, claiming 35
+  // issues for a 2-unit pass and jamming dispatch's "nothing in flight" gate
+  // (board-design-2026-07.md §11). The prompt was already scoped to
+  // `track.issues`; a cheap model still enumerated the label and "helpfully"
+  // claimed the frontier. The old comment here read "No judgment involved",
+  // which is precisely the assumption that failed — so the blast radius is now
+  // asserted rather than assumed.
+  if (track.issues.length) {
+    const claim = await agent(
+      `Label EXACTLY these issues and no others: ${track.issues.join(", ")}
+
+For each number n in that list, run:
+\`gh issue edit n --remove-label agent:queued --add-label agent:in-progress\`
+
+HARD CONSTRAINTS — violating any of these corrupts the board:
+- Do NOT run \`gh issue list\`, \`gh search\`, or anything else that enumerates issues by label in order to decide what to edit. The list above is the complete and only input.
+- Do NOT edit any issue outside that list, even if it looks queued, unblocked, ready, or related.
+- The number of issues you edit must be exactly ${track.issues.length}.
+
+Then, purely to report state, run ONCE:
+\`gh issue list --state open --label agent:in-progress --limit 200 --json number --jq '[.[].number]'\`
+
+Return {"claimed": [the numbers you edited], "inProgressNow": [every number that last command printed]}.`,
+      {
+        label: `start:${track.id}`,
+        phase: "Build",
+        model: "haiku",
+        effort: "low",
+        schema: CLAIM_SCHEMA,
+      }
+    );
+
+    const strays = (claim?.inProgressNow || []).filter(
+      (n) => !PASS_ISSUES.includes(n)
+    );
+    if (strays.length)
+      throw new Error(
+        `claim step overreached: ${strays.length} issue(s) carry agent:in-progress that this pass does not own (${strays.join(", ")}). ` +
+          `This pass owns ${PASS_ISSUES.join(", ") || "(none)"}. Aborting ${track.id} rather than building against a corrupted board. ` +
+          `Revert the strays to agent:queued, then re-run. (If a human is genuinely mid-flight on an unrelated issue, that is what dispatch's gate 2 exists to catch before this point.)`
+      );
+  }
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     if (budget.total && budget.remaining() < RESERVE)
@@ -325,7 +427,18 @@ Run every gate yourself — do not trust the implementer's claims:
 Acceptance criteria to prove:
 ${track.units.map((u) => (u.acceptanceCriteria || []).map((a) => `  - ${a}`).join("\n")).join("\n")}
 ${track.risk === "high" ? "This is HIGH-RISK: also run HR1–HR3 (migration dry-run + schema diff + rollback proof)." : ""}
-Default to FAIL when evidence is missing or unconvincing. Return strictly the DoD report schema.`,
+Default to FAIL when evidence is missing or unconvincing.
+
+FINALLY — classify every warning you raise, because this decides whether the track merges without a human:
+
+- **spec-question** — answering it could change WHAT was built. A requirement that reads two ways, an AC that did not say, a product judgement, a behaviour that satisfies the letter of the AC while arguably missing its intent. Anything you would want the requirement's owner to rule on.
+- **code-quality** — a defect or improvement in HOW it was built, decidable from the codebase alone: a wrong date format, a contrast ratio, a duplicated constant, dead code, an overclaiming comment.
+
+A **spec-question warning holds the track for a human**; code-quality warnings are filed as follow-up issues and the track merges. So the cost is asymmetric: a code-quality item wrongly marked spec-question wastes a little of the human's attention, while a spec-question wrongly marked code-quality ships a product decision they never made. **When genuinely torn, choose spec-question.**
+
+Do not invent warnings to seem thorough, and do not suppress one to get a clean merge. An empty list is a real answer.
+
+Return strictly the DoD report schema.`,
       {
         label: `verify:${track.id}#${attempt}`,
         phase: "Verify",
@@ -433,6 +546,8 @@ Default to FAIL when evidence is missing or unconvincing. Set lens to "${lens.ke
 ${JSON.stringify(verify)}
 Push the branch. If a PR for this branch already EXISTS (an earlier attempt opened one), do NOT open a second — the push updates it. Otherwise open a PR against main with --label agent:in-review${track.risk === "high" ? " and --label risk:high" : ""}. Build the PR body from the evidence bundle (the DoD table + AC checklist + screenshots/lighthouse/migration). Include "Closes ${track.issues.map((n) => `#${n}`).join(", Closes ")}". Then flip each issue label agent:in-progress → agent:in-review.
 
+The body MUST include the skill's **## 👀 Manual QA** section: the preview URL and exact path(s), a numbered happy-path walkthrough, and — the part that matters — **what the automation could NOT check**. Do NOT restate the acceptance criteria there; G3 already proved those, and a reviewer re-reading them learns nothing. Name the judgement calls instead (does it look right, read right, feel fast) and any edge case no AC asserted. Human attention is the scarcest resource in this system: spend it on what a gate cannot decide. If this track genuinely has nothing to eyeball, say so in one line.
+
 THEN WAIT FOR CI AND REPORT WHAT IT SAID, NOT WHAT YOU BELIEVE:
 \`gh pr checks <number> --watch --fail-fast\`, then read the conclusion of the "Format, Lint, Typecheck, Build" check. Put it in checkConclusion verbatim (success | failure | timed_out | none). If it is not success, pull the failing step and its error with \`gh run view <run-id> --log-failed\` and put that in checkSummary. Do not summarise it as "probably unrelated" and do not claim success you did not observe. Return strictly the schema.`,
       // Deliberately NOT tiered down. This node looks mechanical, but it is the
@@ -458,13 +573,82 @@ THEN WAIT FOR CI AND REPORT WHAT IT SAID, NOT WHAT YOU BELIEVE:
       continue;
     }
 
+    const shipped = pr?.opened && pr.checkConclusion === "success";
+
+    // -----------------------------------------------------------------------
+    // Auto-merge — the review queue, not the budget, is what caps this factory.
+    //
+    // Three things must all hold, and each is a different kind of guarantee:
+    //   1. the DoD passed AND the real CI check is green (proven above),
+    //   2. the track is not risk:high — schema/auth/tenancy is where a bad
+    //      merge is unrecoverable, so those keep a human regardless,
+    //   3. no warning is a spec-question — see DOD_SCHEMA.warnings.
+    //
+    // Code-quality warnings do NOT hold the merge. They are filed as issues and
+    // re-enter this same loop, which is the whole point: small known defects
+    // become tracked work instead of a reason to stall a good branch.
+    // -----------------------------------------------------------------------
+    let merge = null;
+    if (shipped && AUTO_MERGE) {
+      const warnings = verify.warnings || [];
+      const specQuestions = warnings.filter((w) => w.kind === "spec-question");
+      const codeQuality = warnings.filter((w) => w.kind === "code-quality");
+      const holds = [];
+      if (track.risk === "high") holds.push("risk:high — never auto-merges");
+      if (specQuestions.length)
+        holds.push(
+          `${specQuestions.length} spec-question warning(s): ${specQuestions.map((w) => w.summary).join(" | ")}`
+        );
+
+      if (holds.length) {
+        log(`⏸️  ${track.id} held for review — ${holds.join("; ")}`);
+        await agent(
+          `PR ${pr.url} passed the DoD but is deliberately NOT auto-merged. Comment on it with \`gh pr comment\` explaining exactly why, then ensure it carries the label \`agent:in-review\`.
+
+Reason(s) it is held:
+${holds.map((h) => `- ${h}`).join("\n")}
+
+${specQuestions.length ? `The decisions the human must make:\n${specQuestions.map((w) => `- **${w.summary}** — ${w.detail || "(no detail given)"}`).join("\n")}\n\nPresent each as a decision with its options, not as a defect report. The reviewer's job here is to RULE, not to hunt.` : ""}
+Return strictly {"merged": false, "state": "refused", "detail": "<one line>"}.`,
+          {
+            label: `hold:${track.id}`,
+            phase: "Ship",
+            effort: "low",
+            schema: MERGE_SCHEMA,
+          }
+        );
+      } else {
+        log(`🟢 ${track.id} clean pass — auto-merging`);
+        merge = await agent(
+          `Auto-merge PR ${pr.url} (issue(s) ${track.issues.map((n) => `#${n}`).join(", ")}). It passed the full DoD and the required check is green, with no spec-question warnings.
+
+1. ${
+            codeQuality.length
+              ? `FIRST file each of these as its own follow-up issue with \`gh issue create --label agent:queued\`, parented to the same feature parent as the track's issue (\`gh issue view <n> --json parent\`). Title it as the defect, body = the detail plus a link to ${pr.url}. They must exist BEFORE the merge, so a merge cannot lose them:\n${codeQuality.map((w) => `   - **${w.summary}** — ${w.detail || ""} ${(w.files || []).join(", ")}`).join("\n")}`
+              : `No follow-up issues to file.`
+          }
+2. Then merge: \`gh pr merge <number> --squash --delete-branch --auto\`.
+   \`--auto\` is deliberate: the main ruleset requires branches to be up to date, so if this PR is behind main GitHub will re-run the checks and merge only when they pass green against what it actually lands on. If the merge is refused because the branch is behind and auto-merge is unavailable, run \`gh pr update-branch\` first and then retry with \`--auto\`.
+3. Report what GitHub ACTUALLY did — \`merged\` if it merged now, \`queued-for-auto-merge\` if it is waiting on checks, \`failed\` if it refused. Do NOT report success you did not observe; re-read with \`gh pr view <number> --json state,mergedAt\` before answering.
+
+Return strictly the schema, with followUpIssues listing every issue number you created.`,
+          {
+            // Not tiered down: this one mutates main and transcribes GitHub's
+            // answer. Same reasoning as the PR node above.
+            label: `merge:${track.id}`,
+            phase: "Ship",
+            schema: MERGE_SCHEMA,
+          }
+        );
+      }
+    }
+
     return {
       track,
-      status:
-        pr?.opened && pr.checkConclusion === "success"
-          ? "shipped"
-          : "pr-failed",
+      status: shipped ? "shipped" : "pr-failed",
       pr,
+      merge,
+      warnings: verify.warnings || [],
       report: verify,
       attempts: attempt,
     };
@@ -523,6 +707,11 @@ return {
     issues: r.track.issues,
     pr: r.pr?.url,
     attempts: r.attempts,
+    merge: r.merge?.state || (AUTO_MERGE ? "held-for-review" : "not-attempted"),
+    followUpIssues: r.merge?.followUpIssues || [],
+    heldBy: (r.warnings || [])
+      .filter((w) => w.kind === "spec-question")
+      .map((w) => w.summary),
   })),
   blocked: blocked.map((r) => ({
     track: r.track.id,
@@ -531,7 +720,10 @@ return {
     failingGate: r.lastReport?.failingGate,
   })),
   nextStep:
-    "Review the opened PRs (your queue). For blocked issues, read the issue comment for the failing gate + evidence and decide: tighten the spec, raise budget (+Nk), or take it manually." +
+    (AUTO_MERGE
+      ? "Your queue is ONLY the held PRs — each is held because a warning raises a question about what should have been built, so it needs a ruling rather than a code review. Auto-merged PRs need no action; their code-quality warnings were filed as issues and are back on the frontier."
+      : "Review the opened PRs (your queue).") +
+    " For blocked issues, read the issue comment for the failing gate + evidence and decide: tighten the spec, raise budget (+Nk), or take it manually." +
     (lost.length
       ? " ⚠️ FIRST: the lost tracks got no verdict and no issue comment — nothing told you about them except this field. Re-queue them (their issues are stuck on agent:in-progress)."
       : ""),

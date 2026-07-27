@@ -13,7 +13,9 @@ import {
   communications,
   communicationRecipients,
   type Communication,
+  type CommunicationChannel,
   type CommunicationRecipient,
+  type CommunicationStatus,
   type RecipientStatus,
 } from "@/db/schema/communication";
 import { persons, type PersonStatus } from "@/db/schema/people";
@@ -33,6 +35,7 @@ import {
   buildMeetingMergeData,
 } from "./merge";
 import { createConfirmationToken } from "./confirmation";
+import { buildCommunicationsWhere } from "./filters";
 import type { ComposeMessageInput } from "@/lib/validations/communication";
 
 // ---------------------------------------------------------------------------
@@ -319,29 +322,39 @@ export async function sendCommunication(
 // Read
 // ---------------------------------------------------------------------------
 
+export interface GetCommunicationsOptions {
+  page?: number;
+  limit?: number;
+  /** Exact channel match. */
+  channel?: CommunicationChannel;
+  /** Exact send-status match. */
+  status?: CommunicationStatus;
+  /** Case-insensitive substring match against subject or body. */
+  search?: string;
+}
+
 /**
- * List communications for a church with pagination.
+ * List communications for a church with pagination and optional filters.
+ * `total` reflects the same filters, so pagination stays consistent.
  */
 export async function getCommunications(
   churchId: string,
-  options: { page?: number; limit?: number } = {}
+  options: GetCommunicationsOptions = {}
 ): Promise<{ communications: Communication[]; total: number }> {
   const page = options.page ?? 1;
   const limit = options.limit ?? 20;
   const offset = (page - 1) * limit;
+  const where = buildCommunicationsWhere(churchId, options);
 
   const [comms, [{ total }]] = await Promise.all([
     db
       .select()
       .from(communications)
-      .where(eq(communications.churchId, churchId))
+      .where(where)
       .orderBy(desc(communications.createdAt))
       .limit(limit)
       .offset(offset),
-    db
-      .select({ total: count() })
-      .from(communications)
-      .where(eq(communications.churchId, churchId)),
+    db.select({ total: count() }).from(communications).where(where),
   ]);
 
   return { communications: comms, total };
