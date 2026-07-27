@@ -3,7 +3,6 @@ import { test } from "node:test";
 import {
   activeHeadingId,
   extractHeadings,
-  slugifyHeading,
   TOC_ACTIVE_LINE_FALLBACK_PX,
   TOC_MIN_HEADINGS,
 } from "./toc";
@@ -12,9 +11,10 @@ import {
 // TOC extraction contract (W-014).
 //
 // The rendered TOC is only as good as this pass: the anchor ids it produces
-// have to match the ids `mdx-components.tsx` stamps on the rendered headings,
-// and the entries have to be the headings a reader actually sees — not the
-// `## …` line inside a shell sample. Both are pinned here.
+// have to match the ids `rehype-slug` stamps on the rendered headings — same
+// github-slugger, same sequence, same dedupe counters — and the entries have
+// to be the headings a reader actually sees, not the `## …` line inside a
+// shell sample. Both are pinned here.
 // ----------------------------------------------------------------------------
 
 test("collects H2 and H3 headings in document order", () => {
@@ -90,25 +90,58 @@ test("strips inline markdown so the label matches the rendered text", () => {
   );
 });
 
-test("slugs are lowercase, punctuation-free, and hyphen-joined", () => {
-  assert.equal(slugifyHeading("Count the Cost"), "count-the-cost");
-  assert.equal(slugifyHeading("Step 1: Pray!"), "step-1-pray");
-  assert.equal(slugifyHeading("  Spaced   out  "), "spaced-out");
-  assert.equal(slugifyHeading("Café résumé"), "cafe-resume");
-  assert.equal(slugifyHeading("Already-hyphenated"), "already-hyphenated");
+test("slugs are lowercase, punctuation-stripped, and hyphen-joined", () => {
+  const ids = extractHeadings(
+    ["## Count the Cost", "## Step 1: Pray!", "## Already-hyphenated"].join(
+      "\n\n"
+    )
+  ).map((h) => h.id);
+
+  assert.deepEqual(ids, [
+    "count-the-cost",
+    "step-1-pray",
+    "already-hyphenated",
+  ]);
 });
 
-test("a slug is never empty, so an anchor is never href='#'", () => {
-  assert.equal(slugifyHeading("???"), "section");
-  assert.equal(slugifyHeading(""), "section");
+test("a heading with no sluggable text is omitted, never rendered href='#'", () => {
+  const headings = extractHeadings("## ???\n\n## Real heading");
+  assert.deepEqual(
+    headings.map((h) => h.id),
+    ["real-heading"]
+  );
 });
 
-test("headings that slugify identically share an anchor", () => {
-  // Accepted: the second entry links to the first occurrence. A dead link
-  // would be worse than a link that lands one section early.
-  const headings = extractHeadings("## Overview\n\n## Overview");
-  assert.equal(headings.length, 2);
-  assert.equal(headings[0].id, headings[1].id);
+test("repeated heading text gets deduped ids, matching rehype-slug", () => {
+  // This inverts the original pinned trade-off (identical headings shared an
+  // anchor), which made 15 of 96 published articles emit duplicate DOM ids —
+  // invalid HTML, and TOC clicks that land on the wrong section (#74/G3).
+  const two = extractHeadings("## Overview\n\n## Overview");
+  assert.deepEqual(
+    two.map((h) => h.id),
+    ["overview", "overview-1"]
+  );
+
+  const three = extractHeadings(
+    "## Purpose\n\nBody.\n\n## Purpose\n\nBody.\n\n## Purpose"
+  );
+  assert.deepEqual(
+    three.map((h) => h.id),
+    ["purpose", "purpose-1", "purpose-2"]
+  );
+});
+
+test("H1/H4+ advance the dedupe counters even though only H2/H3 are listed", () => {
+  // rehype-slug slugs every heading level. If the extractor skipped H1/H4–H6
+  // entirely, a repeated title would put the TOC one counter behind the DOM.
+  const md = ["# Purpose", "## Purpose", "#### Purpose", "## Purpose"].join(
+    "\n\n"
+  );
+
+  assert.deepEqual(
+    extractHeadings(md).map((h) => h.id),
+    ["purpose-1", "purpose-3"]
+  );
 });
 
 test("an article with a single heading is below the render threshold", () => {

@@ -3,14 +3,20 @@
  *
  * Articles are MDX compiled at request time by `next-mdx-remote`, and the
  * compiler gives us no heading manifest. So the headings are read straight off
- * the MDX source with a small ATX-heading scanner, and the anchor ids are
- * derived from the heading text with `slugifyHeading()`.
+ * the MDX source with a small ATX-heading scanner.
  *
- * The same `slugifyHeading()` is used by the MDX `h2`/`h3` renderers
- * (`src/components/wiki/mdx-components.tsx`) so a TOC entry's `#id` always
- * matches the id stamped on the rendered heading. Change the slug rules in one
- * place and both sides move together — that is the point of it living here.
+ * The anchor ids on the rendered headings are stamped by `rehype-slug` at
+ * compile time (`src/lib/wiki/get-article.ts`), which dedupes repeats with
+ * `github-slugger` (`purpose`, `purpose-1`, `purpose-2`). `extractHeadings`
+ * therefore runs its own `GithubSlugger` over the same heading sequence so a
+ * TOC entry's `#id` always matches — including the counter suffixes, which is
+ * why EVERY heading level is slugged here even though only H2/H3 become TOC
+ * entries: rehype-slug's counters see H1/H4–H6 too, and skipping them here
+ * would let the two sides drift apart on articles that repeat heading text
+ * across levels.
  */
+
+import GithubSlugger from "github-slugger";
 
 /** Heading levels that appear in the table of contents. */
 export type TocLevel = 2 | 3;
@@ -30,17 +36,21 @@ export type TocHeading = {
 export const TOC_MIN_HEADINGS = 2;
 
 // Up to three leading spaces is still an ATX heading; four makes it a code
-// block. Trailing `#`s are the optional closing sequence.
-const HEADING_RE = /^ {0,3}(#{2,3})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/;
+// block. Trailing `#`s are the optional closing sequence. All six levels are
+// matched — see the module docblock for why H1/H4–H6 must still be slugged.
+const HEADING_RE = /^ {0,3}(#{1,6})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/;
 const FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;
 
 /**
- * Extract the H2/H3 headings of an MDX document, in document order.
+ * Extract the H2/H3 headings of an MDX document, in document order, with ids
+ * matching what `rehype-slug` stamps on the rendered headings.
  *
  * Fenced code blocks are skipped so a `## comment` inside a shell sample never
- * becomes a TOC entry.
+ * becomes a TOC entry. A heading whose text slugs to nothing (all punctuation)
+ * gets no usable anchor and is omitted rather than rendered as `href="#"`.
  */
 export function extractHeadings(source: string): TocHeading[] {
+  const slugger = new GithubSlugger();
   const headings: TocHeading[] = [];
   let fence: string | null = null;
 
@@ -67,36 +77,18 @@ export function extractHeadings(source: string): TocHeading[] {
     const text = stripInlineMarkdown(match[2]);
     if (!text) continue;
 
-    headings.push({
-      id: slugifyHeading(text),
-      text,
-      level: match[1].length as TocLevel,
-    });
+    // Slug EVERY heading level so this slugger's dedupe counters stay in step
+    // with rehype-slug's, which sees every level.
+    const id = slugger.slug(text);
+
+    const level = match[1].length;
+    if (level !== 2 && level !== 3) continue;
+    if (!id) continue;
+
+    headings.push({ id, text, level });
   }
 
   return headings;
-}
-
-/**
- * Turn heading text into a URL fragment.
- *
- * Deliberately lossy and deliberately simple: lowercase, accents folded,
- * anything that is not a letter/number/space/hyphen dropped, spaces collapsed
- * to single hyphens. Two headings with the same text produce the same id — the
- * anchor then lands on the first of them, which is a better failure than a
- * dead link.
- */
-export function slugifyHeading(text: string): string {
-  const slug = text
-    .normalize("NFKD")
-    // Strip combining marks left behind by NFKD (é -> e).
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, "")
-    .trim()
-    .replace(/[\s-]+/g, "-");
-
-  return slug || "section";
 }
 
 /** A rendered heading's id and the distance from its top to the viewport top. */
