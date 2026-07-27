@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { Kbd } from "@/components/ui/kbd";
 import type { SearchResult } from "@/lib/wiki";
+import { wikiHref } from "@/lib/wiki/href";
 import {
   ArrowDown,
   ArrowUp,
@@ -83,7 +84,7 @@ export function WikiSearch({ open, onOpenChange }: WikiSearchProps) {
       // Hide immediately via CSS, then close and navigate
       setIsNavigating(true);
       onOpenChange(false);
-      router.push(`/wiki/${slug}`);
+      router.push(wikiHref(slug));
     },
     [onOpenChange, router]
   );

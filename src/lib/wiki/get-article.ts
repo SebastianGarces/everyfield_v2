@@ -3,6 +3,7 @@ import remarkGfm from "remark-gfm";
 import type { Article } from "./types";
 import { toArticle } from "./types";
 import { getArticleBySlug } from "./service";
+import { encodeWikiSlug, wikiHref } from "./href";
 import { mdxComponents } from "@/components/wiki/mdx-components";
 
 /**
@@ -55,7 +56,7 @@ export function getBreadcrumbs(
 
   for (let i = 0; i < segments.length - 1; i++) {
     const segment = segments[i];
-    currentPath += `/${segment}`;
+    currentPath += `/${encodeWikiSlug(segment)}`;
     breadcrumbs.push({
       label: formatSegment(segment),
       href: currentPath,
@@ -65,7 +66,7 @@ export function getBreadcrumbs(
   // Add current article
   breadcrumbs.push({
     label: title,
-    href: `/wiki/${slug}`,
+    href: wikiHref(slug),
   });
 
   return breadcrumbs;

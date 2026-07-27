@@ -92,6 +92,12 @@ export async function emitAttendanceRecorded(
 /**
  * Emit an event when attendance is finalized for a meeting.
  * F5 (Task Management) subscribes to create follow-up tasks for all attendees.
+ *
+ * Emitted STRICTLY: `finalizeAttendance` only marks a meeting finalized once
+ * this resolves, so a handler failure has to be visible to the caller.
+ * Swallowing it would let a meeting be marked finalized with no follow-up tasks
+ * and no way to notice. Handlers are still all executed (see `emit`); the
+ * strict flag only decides whether the emitter is told about failures.
  */
 export async function emitAttendanceFinalized(
   meetingId: string,
@@ -100,15 +106,18 @@ export async function emitAttendanceFinalized(
   attendeeIds: string[],
   totalAttendance: number
 ): Promise<void> {
-  await eventBus.emit<MeetingAttendanceFinalizedEvent>({
-    type: "meeting.attendance.finalized",
-    meetingId,
-    meetingType,
-    churchId,
-    attendeeIds,
-    totalAttendance,
-    timestamp: new Date(),
-  });
+  await eventBus.emit<MeetingAttendanceFinalizedEvent>(
+    {
+      type: "meeting.attendance.finalized",
+      meetingId,
+      meetingType,
+      churchId,
+      attendeeIds,
+      totalAttendance,
+      timestamp: new Date(),
+    },
+    { strict: true }
+  );
 }
 
 /**

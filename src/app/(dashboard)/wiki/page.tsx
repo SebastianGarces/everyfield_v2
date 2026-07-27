@@ -12,6 +12,7 @@ import {
   getArticles,
   getArticlesProgress,
   getBookmarkedSlugs,
+  wikiHref,
 } from "@/lib/wiki";
 import { BarChart3, BookOpen, Compass, Rocket } from "lucide-react";
 import Link from "next/link";
@@ -138,7 +139,7 @@ export default async function WikiPage() {
               return (
                 <Link
                   key={article.slug}
-                  href={`/wiki/${article.slug}`}
+                  href={wikiHref(article.slug)}
                   className="group hover:bg-muted/50 block rounded-lg border p-4 transition-colors"
                 >
                   <div className="flex items-start justify-between">

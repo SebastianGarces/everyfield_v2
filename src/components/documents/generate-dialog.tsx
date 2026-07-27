@@ -23,6 +23,7 @@ import {
   type DocumentMergeValues,
   type DocumentTemplate,
 } from "@/lib/documents";
+import { wikiHref } from "@/lib/wiki/href";
 
 function buildUrl(
   templateId: string,
@@ -92,7 +93,7 @@ export function GenerateDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg" data-testid="generate-dialog">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileText className="text-muted-foreground h-5 w-5" />
@@ -132,43 +133,43 @@ export function GenerateDialog({
             </div>
           ))}
 
-          {template.formats.length > 1 && (
-            <>
-              <Separator />
-              <div className="space-y-2">
-                <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-                  Format
-                </p>
-                <RadioGroup
-                  value={format}
-                  onValueChange={(v) => setFormat(v as DocumentFormat)}
-                  className="flex gap-6"
-                >
-                  {template.formats.map((f) => (
-                    <div key={f} className="flex items-center gap-2">
-                      <RadioGroupItem
-                        value={f}
-                        id={`fmt-${template.id}-${f}`}
-                        className="cursor-pointer"
-                      />
-                      <Label
-                        htmlFor={`fmt-${template.id}-${f}`}
-                        className="cursor-pointer font-normal"
-                      >
-                        {FORMAT_LABELS[f]}
-                      </Label>
-                    </div>
-                  ))}
-                </RadioGroup>
-              </div>
-            </>
-          )}
+          {/* Always shown, even for single-format templates: arriving here from
+              a contextual link (DOC-014) must land on a format choice, never a
+              blind download. */}
+          <Separator />
+          <div className="space-y-2" data-testid="format-picker">
+            <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+              Format
+            </p>
+            <RadioGroup
+              value={format}
+              onValueChange={(v) => setFormat(v as DocumentFormat)}
+              className="flex gap-6"
+              aria-label="Output format"
+            >
+              {template.formats.map((f) => (
+                <div key={f} className="flex items-center gap-2">
+                  <RadioGroupItem
+                    value={f}
+                    id={`fmt-${template.id}-${f}`}
+                    className="cursor-pointer"
+                  />
+                  <Label
+                    htmlFor={`fmt-${template.id}-${f}`}
+                    className="cursor-pointer font-normal"
+                  >
+                    {FORMAT_LABELS[f]}
+                  </Label>
+                </div>
+              ))}
+            </RadioGroup>
+          </div>
 
           {template.relatedWikiSlug && (
             <>
               <Separator />
               <Link
-                href={`/wiki/${template.relatedWikiSlug}`}
+                href={wikiHref(template.relatedWikiSlug)}
                 className="text-primary text-sm hover:underline"
               >
                 Read the related wiki article →

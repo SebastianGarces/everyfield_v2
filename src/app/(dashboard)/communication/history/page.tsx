@@ -2,15 +2,17 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 
 import { HeaderBreadcrumbs } from "@/components/header";
+import { HistoryFilters } from "@/components/communication/history-filters";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Mail } from "lucide-react";
+import { Mail, SearchX } from "lucide-react";
 import { verifySession } from "@/lib/auth/session";
 import {
   getCommunications,
   resolveSubjects,
 } from "@/lib/communication/service";
+import { parseCommunicationFilters } from "@/lib/validations/communication";
 import { formatDistanceToNow } from "date-fns";
 
 export const dynamic = "force-dynamic";
@@ -27,17 +29,26 @@ const statusColors: Record<string, string> = {
   scheduled: "bg-yellow-100 text-yellow-700",
 };
 
+const channelLabels: Record<string, string> = {
+  email: "Email",
+  sms: "SMS",
+  both: "Email + SMS",
+};
+
 export default async function HistoryPage({ searchParams }: HistoryPageProps) {
   const { user } = await verifySession();
   if (!user.churchId) redirect("/dashboard");
 
   const params = await searchParams;
-  const page = typeof params.page === "string" ? parseInt(params.page, 10) : 1;
+  // Unparseable values are dropped, not thrown: a hand-edited or stale URL must
+  // degrade to a wider result set, never to an error page.
+  const filters = parseCommunicationFilters(params);
+  const { page, limit } = filters;
 
-  const { communications, total } = await getCommunications(user.churchId, {
-    page,
-    limit: 20,
-  });
+  const { communications, total } = await getCommunications(
+    user.churchId,
+    filters
+  );
 
   // Resolve merge field variables in subjects for display
   const resolvedSubjectMap = await resolveSubjects(
@@ -45,7 +56,22 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
     communications
   );
 
-  const totalPages = Math.ceil(total / 20);
+  const totalPages = Math.ceil(total / limit);
+  const hasFilters = Boolean(
+    filters.channel || filters.status || filters.search
+  );
+
+  function pageHref(target: number) {
+    const query = new URLSearchParams();
+    if (filters.channel) query.set("channel", filters.channel);
+    if (filters.status) query.set("status", filters.status);
+    if (filters.search) query.set("search", filters.search);
+    if (target > 1) query.set("page", String(target));
+    const queryString = query.toString();
+    return queryString
+      ? `/communication/history?${queryString}`
+      : "/communication/history";
+  }
 
   return (
     <>
@@ -58,26 +84,65 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
       <div className="flex h-full flex-col">
         <div className="bg-card p-6 pb-4 shadow-sm">
           <h1 className="text-3xl font-bold tracking-tight">Message History</h1>
-          <p className="text-foreground/50">
-            All sent messages · {total} total
+          <p className="text-muted-foreground" data-testid="history-count">
+            {hasFilters
+              ? `${total} matching ${total === 1 ? "message" : "messages"}`
+              : `All sent messages · ${total} total`}
           </p>
         </div>
 
         <div className="flex-1 overflow-auto p-6">
+          <div className="mb-4">
+            <HistoryFilters />
+          </div>
+
           {communications.length === 0 ? (
             <Card>
-              <CardContent className="flex flex-col items-center justify-center py-12">
-                <Mail className="text-muted-foreground mb-4 h-12 w-12" />
-                <p className="text-muted-foreground text-lg">
-                  No messages sent yet
-                </p>
+              <CardContent
+                className="flex flex-col items-center justify-center py-12"
+                data-testid="history-empty-state"
+              >
+                {hasFilters ? (
+                  <>
+                    <SearchX
+                      className="text-muted-foreground mb-4 h-12 w-12"
+                      aria-hidden="true"
+                    />
+                    <p className="text-muted-foreground text-lg">
+                      No messages match these filters
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      asChild
+                      className="mt-4"
+                    >
+                      <Link
+                        href="/communication/history"
+                        className="cursor-pointer"
+                      >
+                        Clear filters
+                      </Link>
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Mail
+                      className="text-muted-foreground mb-4 h-12 w-12"
+                      aria-hidden="true"
+                    />
+                    <p className="text-muted-foreground text-lg">
+                      No messages sent yet
+                    </p>
+                  </>
+                )}
               </CardContent>
             </Card>
           ) : (
             <>
               {/* Messages table */}
-              <div className="rounded-lg border">
-                <table className="w-full">
+              <div className="overflow-x-auto rounded-lg border">
+                <table className="w-full" data-testid="history-table">
                   <thead>
                     <tr className="border-b bg-gray-50 text-left text-sm font-medium text-gray-500">
                       <th className="px-4 py-3">Date</th>
@@ -92,6 +157,9 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
                       <tr
                         key={msg.id}
                         className="border-b last:border-0 hover:bg-gray-50"
+                        data-testid="history-row"
+                        data-channel={msg.channel}
+                        data-status={msg.status}
                       >
                         <td className="px-4 py-3 text-sm">
                           {msg.sentAt
@@ -115,7 +183,7 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
                         </td>
                         <td className="px-4 py-3 text-center">
                           <Badge variant="secondary" className="text-xs">
-                            {msg.channel === "email" ? "Email" : msg.channel}
+                            {channelLabels[msg.channel] ?? msg.channel}
                           </Badge>
                         </td>
                         <td className="px-4 py-3 text-center">
@@ -142,7 +210,7 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
                     {page > 1 && (
                       <Button variant="outline" size="sm" asChild>
                         <Link
-                          href={`/communication/history?page=${page - 1}`}
+                          href={pageHref(page - 1)}
                           className="cursor-pointer"
                         >
                           Previous
@@ -152,7 +220,7 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
                     {page < totalPages && (
                       <Button variant="outline" size="sm" asChild>
                         <Link
-                          href={`/communication/history?page=${page + 1}`}
+                          href={pageHref(page + 1)}
                           className="cursor-pointer"
                         >
                           Next

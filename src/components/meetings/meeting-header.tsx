@@ -1,5 +1,8 @@
 import { Badge } from "@/components/ui/badge";
 import { CalendarDays, MapPin, Users, Clock } from "lucide-react";
+// Shares one zone-pinned formatter with the detail card below it, so the two
+// cannot disagree about when the meeting is. See src/lib/datetime.ts.
+import { formatDate, formatRelativeDay, formatTime } from "@/lib/datetime";
 import type { MeetingWithCounts } from "@/lib/meetings/types";
 import type { MeetingStatus, MeetingType } from "@/db/schema";
 
@@ -40,35 +43,6 @@ const typeLabels: Record<MeetingType, string> = {
   team_meeting: "Team Meeting",
 };
 
-function formatMeetingDate(date: Date): string {
-  return new Intl.DateTimeFormat("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  }).format(new Date(date));
-}
-
-function formatMeetingTime(date: Date): string {
-  return new Intl.DateTimeFormat("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  }).format(new Date(date));
-}
-
-function getTimeRelative(date: Date): string {
-  const now = new Date();
-  const meetingDate = new Date(date);
-  const diffMs = meetingDate.getTime() - now.getTime();
-  const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-  if (diffDays === 0) return "Today";
-  if (diffDays === 1) return "Tomorrow";
-  if (diffDays > 1) return `In ${diffDays} days`;
-  if (diffDays === -1) return "Yesterday";
-  return `${Math.abs(diffDays)} days ago`;
-}
-
 function getMeetingTitle(meeting: MeetingWithCounts): string {
   if (meeting.type === "vision_meeting" && meeting.meetingNumber) {
     return `Vision Meeting #${meeting.meetingNumber}`;
@@ -107,11 +81,11 @@ export function MeetingHeader({ meeting }: MeetingHeaderProps) {
           <div className="text-muted-foreground flex flex-wrap items-center gap-4 text-sm">
             <span className="flex items-center gap-1.5">
               <CalendarDays className="h-4 w-4" />
-              {formatMeetingDate(meeting.datetime)}
+              {formatDate(meeting.datetime)}
             </span>
             <span className="flex items-center gap-1.5">
               <Clock className="h-4 w-4" />
-              {formatMeetingTime(meeting.datetime)}
+              {formatTime(meeting.datetime)}
             </span>
             <span className="flex items-center gap-1.5">
               <MapPin className="h-4 w-4" />
@@ -122,7 +96,7 @@ export function MeetingHeader({ meeting }: MeetingHeaderProps) {
         </div>
         <div className="flex items-center gap-3">
           <span className="text-muted-foreground text-sm font-medium">
-            {getTimeRelative(meeting.datetime)}
+            {formatRelativeDay(meeting.datetime)}
           </span>
           <Badge className={statusColors[status]} variant="secondary">
             {statusLabels[status]}

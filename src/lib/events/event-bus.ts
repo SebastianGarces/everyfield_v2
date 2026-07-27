@@ -33,8 +33,20 @@ class EventBus {
    * On the first emit, lazily registers all cross-feature subscriptions via
    * a dynamic import to avoid circular dependency issues at module load time.
    * Uses Promise.allSettled so individual handler failures don't break others.
+   *
+   * `options.strict` additionally re-throws once every handler has settled.
+   * Default (non-strict) emission is fire-and-forget: failures are logged and
+   * the emitter carries on. That is the right default for advisory side effects
+   * (dirty-marking, metrics), but it is wrong when the emitter's own durability
+   * depends on the handlers having succeeded — an emitter that cannot see the
+   * failure cannot decline to roll forward. Those call sites opt into strict
+   * emission and treat a rejection as "the operation did not happen".
+   * Handlers still ALL run; strict only changes what the emitter learns.
    */
-  async emit<T extends { type: string }>(event: T): Promise<void> {
+  async emit<T extends { type: string }>(
+    event: T,
+    options: { strict?: boolean } = {}
+  ): Promise<void> {
     // Lazily register subscriptions on first emit.
     // We pass `this` to avoid subscriptions.ts needing to import eventBus,
     // which would create a circular dependency that breaks in Next.js bundling.
@@ -62,13 +74,22 @@ class EventBus {
     );
 
     // Log any handler failures
+    const failures: unknown[] = [];
     for (const result of results) {
       if (result.status === "rejected") {
+        failures.push(result.reason);
         console.error(
           `[EVENT] Handler failed for ${event.type}:`,
           result.reason
         );
       }
+    }
+
+    if (options.strict && failures.length > 0) {
+      throw new AggregateError(
+        failures,
+        `${failures.length} handler(s) failed for "${event.type}"`
+      );
     }
   }
 

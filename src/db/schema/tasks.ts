@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
   date,
@@ -7,6 +8,7 @@ import {
   text,
   time,
   timestamp,
+  uniqueIndex,
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
@@ -109,6 +111,19 @@ export const tasks = pgTable(
       table.completionEvent,
       table.relatedId
     ),
+    // MEET-011: at most ONE live evaluation task per meeting. This is the
+    // idempotency key for follow-up generation
+    // (`handleMeetingAttendanceFinalized`), and it has to be enforced by the
+    // database: a SELECT-then-INSERT guard in application code cannot stop two
+    // concurrent finalizes from both passing the check. Because the evaluation
+    // task is inserted in the SAME statement as the per-attendee follow-ups,
+    // the unique violation aborts that whole INSERT — so the loser of a race
+    // writes nothing at all, not a set of orphan follow-ups.
+    uniqueIndex("tasks_meeting_evaluation_unique_idx")
+      .on(table.churchId, table.relatedId)
+      .where(
+        sql`${table.completionEvent} = 'meeting.evaluation.completed' and ${table.deletedAt} is null`
+      ),
   ]
 );
 

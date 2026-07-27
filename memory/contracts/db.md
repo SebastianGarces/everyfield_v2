@@ -81,7 +81,7 @@ Unified meetings model (replaced the old vision-meetings schema).
 
 ## Tasks (`tasks.ts`)
 
-**tasks**: title req; description; status: not_started/in_progress/blocked/complete =not_started; priority: low/medium/high/urgent =medium; due_date date + due_time time null; assigned_to_id →users null; category: vision_meeting/follow_up/training/facilities/promotion/administrative/ministry_team/launch_prep/recurring/general; related_type: person/meeting/team/facility + related_id uuid; parent_task_id uuid; is_recurring bool =false + recurrence_rule jsonb; completion_event (auto-complete hook); completed_at + completed_by_id null; created_by_id; deleted_at soft delete.
+**tasks**: title req; description; status: not_started/in_progress/blocked/complete =not_started; priority: low/medium/high/urgent =medium; due_date date + due_time time null; assigned_to_id →users null; category: vision_meeting/follow_up/training/facilities/promotion/administrative/ministry_team/launch_prep/recurring/general; related_type: person/meeting/team/facility + related_id uuid; parent_task_id uuid; is_recurring bool =false + recurrence_rule jsonb; completion_event (auto-complete hook); completed_at + completed_by_id null; created_by_id; deleted_at soft delete. **Partial unique index** `tasks_meeting_evaluation_unique_idx` on (church_id, related_id) WHERE completion_event='meeting.evaluation.completed' AND deleted_at IS NULL — one live evaluation task per meeting; this is what makes follow-up generation idempotent under concurrency (see invariants → Transactions / Atomicity).
 
 ## Communication (`communication.ts`)
 

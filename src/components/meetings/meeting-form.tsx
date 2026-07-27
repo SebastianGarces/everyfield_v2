@@ -16,6 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { LocationPicker } from "./location-picker";
+import { toDateTimeLocalValue } from "@/lib/datetime";
 import {
   createMeetingAction,
   updateMeetingAction,
@@ -87,8 +88,10 @@ export function MeetingForm({
     }
   }, [state, isEdit, onSuccess]);
 
+  // The wall clock the meeting was scheduled at — the inverse of the parse the
+  // action does, so reopening this form shows the time the detail page shows.
   const defaultDatetime = meeting?.datetime
-    ? new Date(meeting.datetime).toISOString().slice(0, 16)
+    ? toDateTimeLocalValue(new Date(meeting.datetime))
     : "";
 
   return (

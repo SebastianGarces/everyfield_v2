@@ -2,6 +2,17 @@
 
 Stable truths that must not be violated.
 
+## Transactions / Atomicity
+
+- `drizzle-orm/neon-http` has **no interactive transactions** — `db.transaction()` throws at runtime. Never use it.
+- Writes all known up front: pass them all to `db.batch([...])` — a Neon batched transaction, all-or-nothing.
+- Writes interleaved with reads/events/another feature: nothing can span them. Write the durable "already happened" marker **last** and make every earlier step idempotent, so a failure is retryable rather than half-applied.
+- **A SELECT-then-INSERT guard is not a concurrency guard.** Ordering + idempotency only make a *replay* safe; two concurrent requests both pass the SELECT. Where duplicates must be impossible, enforce it with a (partial) unique index and let the write fail — and keep the uniquely-indexed row in the SAME `INSERT` as the rows it speaks for, so the loser writes nothing at all.
+- Reference: `finalizeAttendance()` emits downstream first, then compare-and-sets `church_meetings.actual_attendance` (written only there; non-null = already finalized = its idempotency key), so a meeting is never finalized without its follow-up tasks. `meeting.attendance.finalized` is the one event emitted **strictly** — handler failures reach the emitter instead of being swallowed. Duplicate follow-up sets are blocked by `tasks_meeting_evaluation_unique_idx` (one live evaluation task per meeting).
+- Residual, accepted: `meeting.attendance.recorded` is emitted non-strictly, so a failed prospect → attendee auto-advance is logged and swallowed while the meeting still finalizes. Deliberate — a status nudge must not block finalization — and self-healing on the next status change.
+
+**Source:** `src/db/index.ts`, `src/db/schema/tasks.ts`, `src/lib/meetings/service.ts`, `src/lib/tasks/events.ts`, `src/lib/events/event-bus.ts`
+
 ## Multi-Tenancy
 
 - All feature data includes `church_id` for tenant isolation
@@ -56,12 +67,13 @@ Stable truths that must not be violated.
 ## Wiki Articles
 
 - Slug-based routing (not ID-based)
+- **Never interpolate a slug into a wiki path** (`` `/wiki/${slug}` ``). Slugs are authored content: a space, `#`, `?` or `%` truncates or breaks the href. Build every wiki path — href, `router.push`, OpenGraph `url`, `revalidatePath` — with `wikiHref()` from `src/lib/wiki/href.ts`. It encodes **per segment**, so `/` stays a separator for the `[...slug]` catch-all and safe slugs are byte-identical.
 - Progress and bookmarks link by `article_slug`, not `article_id`
 - MDX content compiled at request time via `next-mdx-remote/rsc`
 - Full-text search: weighted tsvector (title A > excerpt B > content C)
 - Cache revalidation requires `REVALIDATION_SECRET`
 
-**Source:** `src/db/schema/wiki.ts`, `src/lib/wiki/search.ts`
+**Source:** `src/db/schema/wiki.ts`, `src/lib/wiki/href.ts`, `src/lib/wiki/search.ts`
 
 ## Request Deduplication
 
@@ -69,6 +81,14 @@ Stable truths that must not be violated.
 - Multiple calls in same request hit cache, not DB
 
 **Source:** `src/lib/auth/session.ts` (`getCurrentSession`)
+
+## Date & Time Rendering
+
+- **Never format a `Date` without a pinned `timeZone`.** `Intl`/`toLocale*`/date-fns follow the *runtime's* zone — UTC on the server, the visitor's in the browser — so SSR markup and hydrated markup differ (React #418) and a server-only sibling disagrees forever. Format through `src/lib/datetime.ts`, pinned to `APP_TIME_ZONE` (UTC).
+- **A meeting's `datetime` is a wall clock, not a zoned instant.** `datetime-local` submits a naive string; `parseDateTimeLocalValue()` reads it as `APP_TIME_ZONE` so the stored instant does not follow the server's `TZ`, `toDateTimeLocalValue()` inverts it. Use `meetingDatetimeSchema`, never `z.coerce.date()`.
+- No per-user/per-church timezone column exists. Adding one means changing `APP_TIME_ZONE` and back-filling, not re-introducing runtime-local formatting.
+
+**Source:** `src/lib/datetime.ts`, `src/lib/validations/meetings.ts`
 
 ## Client/Server Data Synchronization
 

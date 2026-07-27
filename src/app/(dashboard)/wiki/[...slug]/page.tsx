@@ -9,6 +9,7 @@ import {
   getArticlesProgress,
   isBookmarked,
   getBookmarkedSlugs,
+  wikiHref,
 } from "@/lib/wiki";
 import { extractHeadings } from "@/lib/wiki/toc";
 import { WikiBreadcrumb } from "@/components/wiki/wiki-breadcrumb";
@@ -57,7 +58,7 @@ export async function generateMetadata({ params }: Props) {
         title,
         description,
         type: "article",
-        url: `/wiki/${slugPath}`,
+        url: wikiHref(slugPath),
         images: ["/og-image.png"],
       },
       twitter: {
@@ -79,7 +80,7 @@ export async function generateMetadata({ params }: Props) {
     openGraph: {
       title,
       description,
-      url: `/wiki/${slugPath}`,
+      url: wikiHref(slugPath),
       images: ["/og-image.png"],
     },
     twitter: {
@@ -271,7 +272,7 @@ function ArticleList({
         return (
           <Link
             key={article.slug}
-            href={`/wiki/${article.slug}`}
+            href={wikiHref(article.slug)}
             className="group hover:bg-muted/50 flex items-center justify-between rounded-lg border p-4 transition-colors"
           >
             <div className="space-y-1">

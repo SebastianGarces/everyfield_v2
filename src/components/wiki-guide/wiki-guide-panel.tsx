@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Callout } from "@/components/wiki/callout";
 import { useWikiGuide } from "./wiki-guide-provider";
 import { cn } from "@/lib/utils";
+import { wikiHref } from "@/lib/wiki/href";
 
 /**
  * MDX component overrides — identical to src/components/wiki/mdx-components.tsx.
@@ -230,7 +231,7 @@ export function WikiGuidePanel() {
               asChild
               className="cursor-pointer"
             >
-              <Link href={`/wiki/${activeSlug}`} title="Open in Wiki">
+              <Link href={wikiHref(activeSlug)} title="Open in Wiki">
                 <ExternalLink className="size-3.5" />
               </Link>
             </Button>
@@ -298,7 +299,7 @@ export function WikiGuidePanel() {
               {/* Footer link */}
               <div className="mt-8 border-t pt-4 pb-2">
                 <Link
-                  href={`/wiki/${article.slug}`}
+                  href={wikiHref(article.slug)}
                   className="text-primary inline-flex cursor-pointer items-center gap-1.5 text-xs hover:underline"
                 >
                   <ExternalLink className="size-3" />

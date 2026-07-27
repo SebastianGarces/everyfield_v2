@@ -7,8 +7,13 @@
 // The per-insight feedback control (thumbs + comment) is the only interactive
 // piece and is delegated to the InsightFeedback client component (PE-014).
 //
-// This component performs NO data access — it is handed a fully-formed insight
-// by the Focus panel, which read the latest cached snapshot with zero LLM calls.
+// The insight itself is handed in fully-formed by the Focus panel, which read
+// the latest cached snapshot with ZERO LLM calls (PE-011). The one read this
+// component does make is the published-wiki slug index (PE-024): a stored slug
+// can go stale between assessment and render, and a "how to improve" link that
+// 404s is worse than no link, so the link is resolved against live wiki state.
+// That read is `React.cache`-deduped, so a panel of insight cards costs one
+// query, not one per card — and it is a plain DB read, never an LLM call.
 // ============================================================================
 
 import Link from "next/link";
@@ -16,11 +21,12 @@ import { BookOpen } from "lucide-react";
 
 import { InsightFeedback } from "@/components/phase-engine/insight-feedback";
 import {
+  buildArticleLinks,
   severityMeta,
-  slugToLabel,
 } from "@/components/phase-engine/focus-presentation";
 import { Badge } from "@/components/ui/badge";
 import type { InsightFeedbackRating, PlantInsight } from "@/db/schema";
+import { getPublishedArticleRefs } from "@/lib/wiki/service";
 
 /** The current user's prior feedback for an insight, if any. */
 export interface InsightFeedbackState {
@@ -34,10 +40,23 @@ interface InsightCardProps {
   feedback?: InsightFeedbackState;
 }
 
-export function InsightCard({ insight, feedback }: InsightCardProps) {
+export async function InsightCard({ insight, feedback }: InsightCardProps) {
   const severity = severityMeta(insight.severity);
   const citedFacts = (insight.citedFacts as string[] | null) ?? [];
-  const articleSlugs = insight.relatedArticleSlugs ?? [];
+
+  // Resolve the stored slugs against the live published wiki: only articles
+  // that still exist become links (PE-024). No stored slug, or none that still
+  // resolves, means no "how to improve" section at all — never a dangling link.
+  // `link.href` below is already URL-safe (buildArticleLinks → wikiHref, which
+  // percent-encodes each slug segment); never re-interpolate `link.slug` here.
+  const storedSlugs = insight.relatedArticleSlugs ?? [];
+  const articleLinks =
+    storedSlugs.length > 0
+      ? buildArticleLinks(storedSlugs, await getPublishedArticleRefs())
+      : [];
+
+  // Ties the link list to its "How to improve" label for screen readers.
+  const improveHeadingId = `insight-improve-${insight.id}`;
 
   return (
     <article className="rounded-lg border p-4">
@@ -72,18 +91,30 @@ export function InsightCard({ insight, feedback }: InsightCardProps) {
         </div>
       )}
 
-      {articleSlugs.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-3">
-          {articleSlugs.map((slug) => (
-            <Link
-              key={slug}
-              href={`/wiki/${slug}`}
-              className="text-primary inline-flex cursor-pointer items-center gap-1.5 text-xs font-medium hover:underline"
-            >
-              <BookOpen className="h-3.5 w-3.5" />
-              {slugToLabel(slug)}
-            </Link>
-          ))}
+      {articleLinks.length > 0 && (
+        <div className="mt-3">
+          <p
+            id={improveHeadingId}
+            className="text-muted-foreground text-xs font-medium tracking-wide uppercase"
+          >
+            How to improve
+          </p>
+          <ul
+            aria-labelledby={improveHeadingId}
+            className="mt-1.5 flex flex-wrap gap-3"
+          >
+            {articleLinks.map((link) => (
+              <li key={link.slug}>
+                <Link
+                  href={link.href}
+                  className="text-primary inline-flex cursor-pointer items-center gap-1.5 text-xs font-medium hover:underline"
+                >
+                  <BookOpen className="h-3.5 w-3.5" aria-hidden />
+                  {link.label}
+                </Link>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

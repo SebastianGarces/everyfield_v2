@@ -2,6 +2,9 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CalendarDays, MapPin, Users } from "lucide-react";
+// Same zone-pinned formatter the meeting detail page uses, so a card and the
+// page it links to never show different times. See src/lib/datetime.ts.
+import { formatDate, formatRelativeDay, formatTime } from "@/lib/datetime";
 import type { MeetingWithCounts } from "@/lib/meetings/types";
 import type { MeetingStatus, MeetingType } from "@/db/schema";
 
@@ -53,34 +56,6 @@ function getMeetingTitle(meeting: MeetingWithCounts): string {
   return meeting.title || typeLabels[meeting.type] + " Meeting";
 }
 
-function formatMeetingDate(date: Date): string {
-  return new Intl.DateTimeFormat("en-US", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }).format(new Date(date));
-}
-
-function formatMeetingTime(date: Date): string {
-  return new Intl.DateTimeFormat("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  }).format(new Date(date));
-}
-
-function getDaysUntil(date: Date): string {
-  const now = new Date();
-  const meetingDate = new Date(date);
-  const diffMs = meetingDate.getTime() - now.getTime();
-  const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-  if (diffDays === 0) return "Today";
-  if (diffDays === 1) return "Tomorrow";
-  if (diffDays < 0) return `${Math.abs(diffDays)} days ago`;
-  return `In ${diffDays} days`;
-}
-
 export function MeetingCard({ meeting, isPast }: MeetingCardProps) {
   const locationDisplay =
     meeting.locationName || meeting.location?.name || "No location set";
@@ -103,8 +78,8 @@ export function MeetingCard({ meeting, isPast }: MeetingCardProps) {
                 )}
               </div>
               <p className="text-muted-foreground text-sm">
-                {formatMeetingDate(meeting.datetime)} &bull;{" "}
-                {formatMeetingTime(meeting.datetime)}
+                {formatDate(meeting.datetime, "short")} &bull;{" "}
+                {formatTime(meeting.datetime)}
               </p>
               <h3 className="text-lg leading-tight font-semibold">
                 {getMeetingTitle(meeting)}
@@ -142,7 +117,7 @@ export function MeetingCard({ meeting, isPast }: MeetingCardProps) {
           {!isPast && (
             <div className="text-muted-foreground flex items-center gap-2 text-sm">
               <CalendarDays className="h-4 w-4 shrink-0" />
-              <span>{getDaysUntil(meeting.datetime)}</span>
+              <span>{formatRelativeDay(meeting.datetime)}</span>
             </div>
           )}
         </CardContent>

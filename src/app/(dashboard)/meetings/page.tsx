@@ -55,7 +55,7 @@ export default async function MeetingsPage({
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold tracking-tight">Meetings</h1>
-              <p className="text-foreground/50">
+              <p className="text-muted-foreground">
                 Schedule, track, and analyze all your meetings
               </p>
             </div>
