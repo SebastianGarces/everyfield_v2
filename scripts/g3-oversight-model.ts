@@ -126,8 +126,16 @@ async function main() {
   });
 
   // --------------------------------------------------------------------------
-  // 1. MIGRATION — the single toggle exists, defaults to false for everyone,
-  //    and the two per-category columns it replaced are gone.
+  // 1. MIGRATION — the single toggle exists and defaults to false for everyone,
+  //    and the two per-category columns it replaces are no longer READ.
+  //
+  //    0028 is expand-only: it adds without dropping. The columns it supersedes
+  //    are still in the database on purpose, because this Neon branch is shared
+  //    by local dev, every preview and production, and pre-0028 builds still
+  //    name `share_phase`/`share_digest` in their SELECT list. So the assertion
+  //    that matters is NOT "the columns are gone" — it is "the shipped schema
+  //    has stopped reading them, and old code can still read them". A contract
+  //    migration drops them after #224 merges.
   // --------------------------------------------------------------------------
   const columns = await db.execute<{ column_name: string }>(sql`
     select column_name from information_schema.columns
@@ -140,12 +148,29 @@ async function main() {
     columnNames.includes("share_activity_with_oversight"),
     "0028 did not add share_activity_with_oversight"
   );
-  assert.ok(!columnNames.includes("share_phase"), "share_phase survived 0028");
+  ok("0028 added the single oversight sharing column");
+
+  // The new code no longer reads the superseded columns: they are absent from
+  // the Drizzle table, so nothing Drizzle compiles can name them.
+  const shippedColumns = Object.keys(churchPrivacySettings);
   assert.ok(
-    !columnNames.includes("share_digest"),
-    "share_digest survived 0028"
+    !shippedColumns.includes("sharePhase") &&
+      !shippedColumns.includes("shareDigest"),
+    "the shipped schema still declares a superseded per-category toggle"
   );
-  ok("0028 replaced the per-category oversight toggles with one column");
+  ok("the shipped schema no longer reads share_phase / share_digest");
+
+  // ...and old code still can. This is the whole point of expand/contract: a
+  // pre-0028 instance's exact projection must keep resolving while #224 sits in
+  // review. If this fails, deploying 0028 takes production's oversight surfaces
+  // down with it.
+  await db.execute(sql`
+    select "id", "church_id", "share_people", "share_meetings", "share_tasks",
+           "share_financials", "share_ministry_teams", "share_facilities",
+           "share_phase", "share_digest", "updated_at", "updated_by"
+    from "church_privacy_settings" limit 1
+  `);
+  ok("a PRE-0028 build's column projection still resolves (no deploy window)");
 
   // Read back through the shipped reader — every church starts at OFF, which is
   // the substance of the ruling, not a detail of the DDL.

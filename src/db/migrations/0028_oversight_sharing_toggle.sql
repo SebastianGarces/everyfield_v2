@@ -2,29 +2,41 @@
 -- three milestones, and ONE plant-side toggle (issue #224, FRD ruling
 -- 2026-07-27, landed in PR #226).
 --
+-- THIS MIGRATION IS PURELY ADDITIVE. That is a deliberate design, not an
+-- accident of what the change needed — see "EXPAND/CONTRACT" below, which is
+-- the most important thing on this page.
+--
 -- Two changes, and they are the same change seen from two sides.
 --
--- 1. `church_privacy_settings`: `share_phase` + `share_digest` OUT,
---    `share_activity_with_oversight` IN.
+-- 1. `church_privacy_settings` GAINS `share_activity_with_oversight`.
 --
---    Migration 0026 added those two columns so an oversight recipient could be
---    made eligible for the `phase` and `digest` notification CATEGORIES, each
---    gated by its own toggle, alongside the four older `share_*` columns doing
---    the same job for tasks/meetings/teams/people. The ruling removed the
---    category model for oversight entirely: an oversight recipient is never
---    enqueued a granular per-event notification, shared or not. With no
---    per-category eligibility left there is nothing for per-category toggles to
---    say, and a planter facing six switches to answer one question ("do I share
---    with my sending church?") was being asked to model our schema.
+--    Migration 0026 added `share_phase` + `share_digest` so an oversight
+--    recipient could be made eligible for the `phase` and `digest` notification
+--    CATEGORIES, each gated by its own toggle, alongside the four older
+--    `share_*` columns doing the same job for tasks/meetings/teams/people. The
+--    ruling removed the category model for oversight entirely: an oversight
+--    recipient is never enqueued a granular per-event notification, shared or
+--    not. With no per-category eligibility left there is nothing for
+--    per-category toggles to say, and a planter facing six switches to answer
+--    one question ("do I share with my sending church?") was being asked to
+--    model our schema.
+--
+--    `share_phase` and `share_digest` are therefore DEAD as of this migration —
+--    but they are NOT dropped here. They stay in the table, unread by the new
+--    code, and a follow-up contract migration removes them. Again: see
+--    EXPAND/CONTRACT.
 --
 --    DEFAULT FALSE FOR EVERYONE is the ruling, not a convenience. Nobody is
 --    migrated forward — a church that had switched `share_phase` on does NOT
 --    arrive here sharing. Sharing your plant's activity outward is a consent
 --    decision about a different thing (a daily summary and three milestones,
 --    where the old toggle meant "assessment notifications"), and inheriting
---    consent across a change of meaning is inventing it. Since 0026 shipped
---    with both columns at false and no UI ever surfaced them, the practical
---    effect is nil; the principle is what is being written down.
+--    consent across a change of meaning is inventing it. `ADD COLUMN ... DEFAULT
+--    false NOT NULL` backfills every existing row to false, so the collapse IS
+--    the default — there is no separate UPDATE to run, and a row-touching
+--    no-op is not written here just to look like a data migration. (Verified on
+--    dev before writing this: all 27 rows had `share_phase = false` and
+--    `share_digest = false`, so no opt-in exists to lose in any case.)
 --
 --    The six `share_*` columns left standing are untouched and unrelated: they
 --    gate what oversight may PULL on the oversight dashboard
@@ -44,70 +56,79 @@
 --    scale. It is a brief ACCESS EXCLUSIVE lock on `notifications` and
 --    `notification_preferences`, not a rewrite.
 --
--- ORDER MATTERS. The old CHECKs come off first: with them in place a row could
--- not carry `milestones`, and drizzle emits the drop/re-add pair around the
--- column work for exactly that reason. Do not reorder.
+--    Widening is safe under old code by construction: every category an
+--    unmigrated instance can write was already in the narrower list.
 --
--- ROLLBACK — every statement, then the ledger delete, in ONE psql session:
---
---   ALTER TABLE "notifications" DROP CONSTRAINT IF EXISTS "notifications_category_check";
---   ALTER TABLE "notification_preferences" DROP CONSTRAINT IF EXISTS "notification_preferences_category_check";
---   DELETE FROM notifications WHERE category = 'milestones';
---   ALTER TABLE "church_privacy_settings" ADD COLUMN "share_phase" boolean DEFAULT false NOT NULL;
---   ALTER TABLE "church_privacy_settings" ADD COLUMN "share_digest" boolean DEFAULT false NOT NULL;
---   ALTER TABLE "church_privacy_settings" DROP COLUMN IF EXISTS "share_activity_with_oversight";
---   ALTER TABLE "notification_preferences" ADD CONSTRAINT "notification_preferences_category_check" CHECK ("notification_preferences"."category" in ('tasks', 'meetings', 'communication', 'teams', 'phase', 'digest'));
---   ALTER TABLE "notifications" ADD CONSTRAINT "notifications_category_check" CHECK ("notifications"."category" in ('tasks', 'meetings', 'communication', 'teams', 'phase', 'digest'));
---   DELETE FROM drizzle.__drizzle_migrations WHERE hash = '<0028 hash>';
---
--- Two things a rollback DESTROYS, both deliberately called out:
---   * Every `milestones` notification. The narrowed CHECK cannot be re-added
---     while they exist, so they must go — hence the DELETE above, which must
---     run BEFORE the re-add. They are announcements, not records of anything
---     that only lives here; the invitation, the transition and the launch date
---     are all still in their own tables.
---   * Every sharing opt-in. `share_activity_with_oversight` goes, and the
---     restored `share_phase`/`share_digest` come back at false. A plant that
---     had opted in must opt in again. That is the correct direction to lose
---     data in: rollback fails closed.
---
--- Rolling back this migration WITHOUT reverting the application code leaves
--- `canAccessFeatureData(user, churchId, "oversight_activity")` selecting a
--- column that no longer exists, and every oversight enqueue erroring. Revert
--- the code first, or together.
---
--- DEPLOY ORDER — THE FORWARD HAZARD, WHICH HAPPENS ON EVERY DEPLOY
---
--- The rollback note above is the rare case. The ordinary one is this: between
--- the moment these statements land and the moment the new code is serving,
--- OLD instances are still up, and they break.
+-- EXPAND/CONTRACT — WHY NOTHING IS DROPPED HERE
 --
 -- `getChurchPrivacySettings` (`src/lib/auth/access.ts`) is a bare
 -- `db.select()`. Drizzle does NOT emit `SELECT *` for that — it expands the
--- schema it was compiled against into an explicit column list, so an instance
--- running the pre-0028 build asks Postgres for `share_phase` and
--- `share_digest`, which this migration has just dropped. Every call throws:
+-- schema it was compiled against into an explicit column list. So an instance
+-- running the PRE-0028 build asks Postgres for `share_phase` and
+-- `share_digest` by name. Had this migration dropped them, every such call
+-- would throw:
 --
 --   * `canAccessFeatureData(...)` for ANY of the six pull features, not just
 --     the oversight-activity one this migration is about — the projection is
 --     what fails, before the requested column is ever looked at;
 --   * therefore `/oversight/health`, via
 --     `src/lib/phase-engine/oversight/read.ts` → `gateNetworkInsights`, is the
---     surface that visibly breaks, for oversight users only;
+--     surface that visibly breaks, for oversight users;
 --   * and `enqueue`'s oversight gate, which fails closed — no row is written,
 --     which is the correct direction, but it is a swallowed error rather than
 --     a decision.
 --
--- Church-level roles are unaffected: `canAccessFeatureData` returns true for
--- them before it reads anything.
+-- The tempting answer is "migrate close to promotion and accept a brief
+-- window". Three facts kill it here:
 --
--- Migrate as close to promotion as possible and accept a brief window (alpha
--- scale, oversight users only, self-healing the moment the new build serves).
--- If a future deploy must have NO window, this DDL has to be split in two
--- releases the expand/contract way: ship code that no longer selects the
--- dropped columns FIRST, then drop them in a later migration. That is a
--- meaningful cost, and it is the reason to prefer adding a column over
--- dropping one when a choice exists.
+--   * this database is shared. One Neon branch backs local dev, EVERY preview
+--     deployment, and PRODUCTION. Applying the DDL breaks all of them at once,
+--     not just the deploy being promoted;
+--   * #224 is `risk:high`, so its PR is held for human review and never
+--     auto-merges. The window between "DDL applied" and "new code everywhere"
+--     is unbounded — hours or days, not minutes;
+--   * the drop is not needed to deliver the feature. Nothing in the new code
+--     reads the dead columns, because they are already absent from the Drizzle
+--     TS schema.
+--
+-- So: EXPAND now (add the column, widen the CHECKs — old code unaffected),
+-- CONTRACT later (drop the two dead columns in a follow-up migration, once
+-- #224 has merged and no running instance selects them). A follow-up issue
+-- tracks that cleanup; it must not be folded back into this file.
+--
+-- The generated SQL for this migration DID contain the two `DROP COLUMN`
+-- statements — drizzle-kit emits them because the TS schema no longer declares
+-- those columns. They were removed BY HAND, which is exactly what versioned SQL
+-- migrations are for. The snapshot in `meta/0028_snapshot.json` still matches
+-- the TS schema (columns absent), so `drizzle-kit generate` stays clean and
+-- does not re-propose the drops; the database simply carries two columns the
+-- schema has stopped caring about until the contract migration lands.
+--
+-- ROLLBACK — every statement, then the ledger delete, in ONE psql session:
+--
+--   ALTER TABLE "notifications" DROP CONSTRAINT IF EXISTS "notifications_category_check";
+--   ALTER TABLE "notification_preferences" DROP CONSTRAINT IF EXISTS "notification_preferences_category_check";
+--   DELETE FROM notifications WHERE category = 'milestones';
+--   ALTER TABLE "church_privacy_settings" DROP COLUMN IF EXISTS "share_activity_with_oversight";
+--   ALTER TABLE "notification_preferences" ADD CONSTRAINT "notification_preferences_category_check" CHECK ("notification_preferences"."category" in ('tasks', 'meetings', 'communication', 'teams', 'phase', 'digest'));
+--   ALTER TABLE "notifications" ADD CONSTRAINT "notifications_category_check" CHECK ("notifications"."category" in ('tasks', 'meetings', 'communication', 'teams', 'phase', 'digest'));
+--   DELETE FROM drizzle.__drizzle_migrations WHERE hash = '<0028 hash>';
+--
+-- Because nothing was dropped going forward, rollback restores nothing — there
+-- is no `share_phase`/`share_digest` re-add step, and old code keeps working
+-- throughout in both directions. Two things a rollback still DESTROYS:
+--   * Every `milestones` notification. The narrowed CHECK cannot be re-added
+--     while they exist, so they must go — hence the DELETE above, which must
+--     run BEFORE the re-add. They are announcements, not records of anything
+--     that only lives here; the invitation, the transition and the launch date
+--     are all still in their own tables.
+--   * Every sharing opt-in, with `share_activity_with_oversight`. A plant that
+--     had opted in must opt in again. That is the correct direction to lose
+--     data in: rollback fails closed.
+--
+-- Rolling back WITHOUT reverting the application code leaves
+-- `canAccessFeatureData(user, churchId, "oversight_activity")` selecting a
+-- column that no longer exists. Revert the code first, or together.
 --
 --   *** DO NOT EDIT src/db/migrations/meta/_journal.json. ***
 --
@@ -129,7 +150,5 @@
 ALTER TABLE "notification_preferences" DROP CONSTRAINT "notification_preferences_category_check";--> statement-breakpoint
 ALTER TABLE "notifications" DROP CONSTRAINT "notifications_category_check";--> statement-breakpoint
 ALTER TABLE "church_privacy_settings" ADD COLUMN "share_activity_with_oversight" boolean DEFAULT false NOT NULL;--> statement-breakpoint
-ALTER TABLE "church_privacy_settings" DROP COLUMN "share_phase";--> statement-breakpoint
-ALTER TABLE "church_privacy_settings" DROP COLUMN "share_digest";--> statement-breakpoint
 ALTER TABLE "notification_preferences" ADD CONSTRAINT "notification_preferences_category_check" CHECK ("notification_preferences"."category" in ('tasks', 'meetings', 'communication', 'teams', 'phase', 'milestones', 'digest'));--> statement-breakpoint
 ALTER TABLE "notifications" ADD CONSTRAINT "notifications_category_check" CHECK ("notifications"."category" in ('tasks', 'meetings', 'communication', 'teams', 'phase', 'milestones', 'digest'));

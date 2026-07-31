@@ -22,8 +22,8 @@ export const churchPrivacySettings = pgTable(
      * oversight recipient (`sending_church_admin`, `network_admin`) is told
      * about this plant.
      *
-     * It replaced `share_phase` and `share_digest` (migration 0026, dropped by
-     * 0028). Those were per-category notification toggles, and the ruling
+     * It replaced `share_phase` and `share_digest` (added by migration 0026).
+     * Those were per-category notification toggles, and the ruling
      * removed the category model for oversight altogether: oversight receives a
      * daily activity SUMMARY plus three milestones, never granular per-event
      * notifications, so there is nothing left for a per-category toggle to say.
@@ -39,6 +39,16 @@ export const churchPrivacySettings = pgTable(
      * The six `share_*` toggles above are a DIFFERENT question and are
      * untouched: they gate what an oversight user may PULL on the oversight
      * dashboard. This one gates what is PUSHED to them.
+     *
+     * NOTE — `share_phase` and `share_digest` are absent from this schema but
+     * STILL PRESENT IN THE DATABASE. 0028 is deliberately expand-only: it adds
+     * the column below without dropping the two it supersedes, because this
+     * Neon branch is shared by local dev, every preview AND production, and
+     * dropping a column that pre-0028 builds still name in their SELECT list
+     * would break `canAccessFeatureData` everywhere for as long as #224 sat in
+     * review. A follow-up contract migration drops them after #224 merges.
+     * Leaving them out of this file is what makes the new code stop reading
+     * them; see the 0028 header for the full reasoning.
      */
     shareActivityWithOversight: boolean("share_activity_with_oversight")
       .default(false)
