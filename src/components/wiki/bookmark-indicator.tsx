@@ -14,7 +14,7 @@ export function BookmarkIndicator() {
     <Tooltip>
       <TooltipTrigger asChild>
         <span className="inline-flex">
-          <Bookmark className="text-ef size-4 fill-current" />
+          <Bookmark className="text-ef-field size-4 fill-current" />
         </span>
       </TooltipTrigger>
       <TooltipContent>Bookmarked</TooltipContent>

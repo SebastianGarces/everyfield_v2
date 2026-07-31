@@ -2,6 +2,20 @@
 
 > Path shorthand: `(dash)/` = `src/app/(dashboard)/`
 
+## Marketing (public)
+
+| Flow | Entrypoint | Trigger |
+|------|-----------|---------|
+| Landing page | `src/app/(marketing)/page.tsx` | Route `/` (authed users → `/dashboard` via `src/proxy.ts`) |
+| Invite request | `src/app/(marketing)/actions.ts:requestInviteAction()` | Landing CTA form → email to `ADMIN_EMAILS` |
+| SEO shell | `src/app/{robots,sitemap,manifest}.ts` + `src/app/icon.svg` | `/robots.txt`, `/sitemap.xml`, `/manifest.webmanifest` |
+
+**Primary modules:** `src/app/(marketing)/` (layout, page, `marketing.css` scoped under `.marketing`, `_components/`), `public/marketing/` (optimized WebP art)
+
+**Design authority:** `DESIGN.md` at repo root (sharp system, ruled 2026-07-30); footer links `/terms` + `/privacy` are delivered by #189.
+
+---
+
 ## Authentication
 
 | Flow | Entrypoint | Trigger |
@@ -152,10 +166,13 @@
 |------|-----------|---------|
 | In-app feed | `(dash)/notifications/page.tsx` → `feed.ts:loadNotificationFeedScreen()` | Route `/notifications` (`?filter=unread` for the unread tab) |
 | Load more | `(dash)/notifications/actions.ts:loadMoreNotificationsAction()` → `feed.ts:loadOlderNotifications()` | "Load more" in the feed |
-| Unread badge | `(dash)/layout.tsx` → `feed.ts:loadUnreadBadgeCount()` → `components/notifications/notification-bell.tsx` | Every dashboard route |
+| Unread badge | `(dash)/layout.tsx` → `(dash)/notification-badge.ts:loadUnreadBadgeCountSafely()` → `feed.ts:loadUnreadBadgeCount()` → `components/notifications/notification-bell.tsx` | Every dashboard route |
 | Mark one read | `(dash)/notifications/actions.ts:markNotificationReadAction()` | Row click / "Mark read" |
 | Mark all read | `(dash)/notifications/actions.ts:markAllNotificationsReadAction()` | Toolbar action |
 | Enqueue (no UI) | `src/lib/notifications/enqueue.ts:enqueue()` / `cancelByEntity()` | Feature callers |
+| Preferences screen | `(dash)/settings/page.tsx` → `preferences.ts:buildPreferenceMatrixView()` | Route `/settings` (linked from the user menu) |
+| Save a toggle | `(dash)/settings/actions.ts:setNotificationPreferenceAction()` | Switch in the matrix |
+| Save a digest cadence | `(dash)/settings/actions.ts:setDigestCadenceAction()` | Cadence select in the `digest` row |
 
 **Primary modules:** `src/lib/notifications/` (feed, feed-view, queries, mark-read, entity-links, enqueue, preferences, categories), `src/components/notifications/`, `src/db/schema/notifications.ts`
 
@@ -170,6 +187,11 @@
 **Paging (N-008):** keyset, `(created_at, id)` — `listNotificationPage()` reads `limit + 1` and returns `{rows, nextCursor}`, so "is there another page" is known before the click. Page 1 is a prop; later pages are client state appended by id (a cursor is legitimate client state per data-patterns.md). The tab remounts the feed, so All and Unread never share a cursor.
 
 **Preferences at read time (N-005, ruled 2026-07-27):** a category disabled for `in_app` leaves the feed, the badge and the probe — `resolveInAppCategories()` (`preferences.ts`) is the allow-list, absence = coded default (so `digest` is out by default). Mark-all is bounded by the same list, so a hidden category keeps its unread state. Delivery rows are never touched by any of it.
+
+**Preferences screen (N-006, Screen 2):** `/settings` renders the matrix from the CODE registry — rows from `notificationCategories`, columns from `notificationChannels` — so a seventh category needs only its entry + copy in `categories.ts`. The server builds the whole view model (`buildPreferenceMatrixView`) and the client component imports types only; state is `useOptimistic` + `refresh()` (the bell is in the layout, and an `in_app` change moves it). **Both writes are no-op-guarded** (`preferenceWriteIsNoop` / `digestCadenceWriteIsNoop`): a save that restates the effective value writes NOTHING, so absence — and with it the coded default, and N-019's future re-default — survives a visit to the screen. Ownership is the `PreferenceOwner` brand and nothing else: no action, page or query on this screen names a user.
+
+**Digest cadence (N-013 only):** one CATEGORY-level value, stored on the `(digest, email)` row (`DIGEST_CADENCE_CHANNEL`) and read by `resolveDigestCadence()`, which falls back to the other digest row then to `DEFAULT_DIGEST_CADENCE`. `setDigestCadenceQuery` updates `digest_cadence` alone — cadence never switches the digest back on. The screen's copy is scoped to the user's own open-items digest; the oversight activity digest (N-025) is fixed daily and is governed by the plant-side sharing toggle (N-026), which is NOT on this screen.
+**Badge failure isolation (#227):** the badge is the one notifications read on EVERY dashboard route, so the layout never awaits it directly. `loadUnreadBadgeCountSafely()` degrades a throwing (or nonsense) count to 0 — `unstable_rethrow` first, so `redirect`/`notFound`/dynamic bailouts still escape — and the `await` sits inside a `<Suspense>`-wrapped `NotificationBellSlot`, so a notifications outage or stall costs the count, not the shell.
 
 **Empty states:** `hasAnyNotifications()` separates cold start ("no notifications yet") from "all caught up"; it shares the feed's visibility rules (allow-list included) so `hasAny === false` implies the feed is empty. Two states only — "all caught up" is reachable only under `?filter=unread`, since on the All tab an empty list and `hasAny` true are contradictory.
 
@@ -217,7 +239,7 @@
 | Flow | Entrypoint | Trigger |
 |------|-----------|---------|
 | Enqueue | `src/lib/notifications/enqueue.ts:enqueue()` / `cancelByEntity()` | Any feature announcing something |
-| Preferences | `src/lib/notifications/preferences.ts:setPreference()` / `getPreferenceMatrix()` | Settings screen (needs a `PreferenceOwner`) |
+| Preferences | `src/lib/notifications/preferences.ts:setPreference()` / `setDigestCadence()` / `buildPreferenceMatrixView()` | `(dash)/settings/` — see the Notifications section above (needs a `PreferenceOwner`) |
 | Feed / unread count | `src/lib/notifications/queries.ts:listNotifications()` / `getUnreadCount()` | App shell + feed page |
 | **Scheduled dispatch** | `src/app/api/notifications/dispatch/route.ts` → `src/lib/notifications/dispatch.ts:runDispatch()` | GitHub Actions schedule, every 15 min (`.github/workflows/notifications-dispatch.yml`, `CRON_SECRET`) — NOT a Vercel cron; Hobby caps those at daily |
 | Still-live predicate | `dispatch.ts:registerStillLivePredicate(type, fn)` | Owning feature, at module load |

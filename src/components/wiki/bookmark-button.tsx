@@ -49,7 +49,7 @@ export function BookmarkButton({
           <Bookmark
             className={cn(
               "size-7 transition-colors",
-              optimisticBookmarked && "text-ef fill-current"
+              optimisticBookmarked && "text-ef-field fill-current"
             )}
           />
         </Button>
