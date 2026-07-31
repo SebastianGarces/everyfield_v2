@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { Shot, type ShotSource } from "./shot";
+import { Shot, ShotOverlay, type ShotSource } from "./shot";
 import { usePrefetchShots } from "./use-prefetch-shots";
 
 type Overlay = ShotSource & { alt: string; style: React.CSSProperties };
@@ -154,18 +154,15 @@ export function FeatureSwitcher() {
               .join(" ")}
             style={{ backgroundImage: `url("${feature.art}")` }}
           >
-            <Shot desktop={feature.desktop} alt={feature.alt} />
-            {feature.overlay ? (
-              <img
-                className="shot-img shot-overlay"
-                src={feature.overlay.src}
-                alt={feature.overlay.alt}
-                width={feature.overlay.width}
-                height={feature.overlay.height}
-                loading="lazy"
-                style={feature.overlay.style}
-              />
-            ) : null}
+            {/* mobile source: this pane is hidden under 900px, but Chromium
+                still fetches lazy images in hidden subtrees — resolve them to
+                the (already downloaded) mobile crop instead of the desktop one */}
+            <Shot
+              desktop={feature.desktop}
+              mobile={feature.mobile}
+              alt={feature.alt}
+            />
+            {feature.overlay ? <ShotOverlay overlay={feature.overlay} /> : null}
           </div>
         ))}
       </div>

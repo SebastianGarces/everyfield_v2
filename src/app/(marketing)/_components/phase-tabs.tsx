@@ -3,7 +3,7 @@
 import { useState } from "react";
 
 import { Chip } from "./chip";
-import { Shot, type ShotSource } from "./shot";
+import { Shot, ShotOverlay, type ShotSource } from "./shot";
 import { usePrefetchShots } from "./use-prefetch-shots";
 
 type Overlay = ShotSource & { alt: string; style: React.CSSProperties };
@@ -238,15 +238,7 @@ function PhaseVisual({
         alt={phase.alt}
       />
       {!isMobile && phase.overlay ? (
-        <img
-          className="shot-img shot-overlay"
-          src={phase.overlay.src}
-          alt={phase.overlay.alt}
-          width={phase.overlay.width}
-          height={phase.overlay.height}
-          loading="lazy"
-          style={phase.overlay.style}
-        />
+        <ShotOverlay overlay={phase.overlay} />
       ) : null}
       {phase.chip ? (
         <Chip
