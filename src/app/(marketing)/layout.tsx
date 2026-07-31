@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { DM_Mono, DM_Sans, Newsreader, Outfit } from "next/font/google";
 
-import { Lockup } from "./_components/logo";
+import { Lockup } from "@/components/logo";
 import { MarketingNav } from "./_components/nav";
 import "./marketing.css";
 
@@ -37,7 +37,7 @@ export default function MarketingLayout({
       <MarketingNav />
       <main>{children}</main>
       <footer className="lp-footer">
-        <Lockup />
+        <Lockup className="logo" />
         <span>Built on a proven launch methodology.</span>
         <span>
           <Link href="/terms">Terms</Link> ·{" "}

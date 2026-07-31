@@ -187,7 +187,7 @@ html:has(.marketing) {
 }
 .marketing .lp-nav .logo {
   height: 20px;
-  aspect-ratio: 1243 / 212;
+  aspect-ratio: 1218 / 234;
   color: var(--ink);
 }
 .marketing .lp-nav .links {
@@ -1076,7 +1076,7 @@ html:has(.marketing) {
 }
 .marketing .lp-footer .logo {
   height: 18px;
-  aspect-ratio: 1243 / 212;
+  aspect-ratio: 1218 / 234;
   color: var(--cream);
 }
 .marketing .lp-footer a {

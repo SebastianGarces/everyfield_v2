@@ -491,10 +491,11 @@ Ruled 2026-07-27: **grounded shepherd**. The pitch:
 
 ## Assets
 
-- **Wordmark & mark:** SVG lockup (1243:212) is primary; the standalone mark
-  (293:212) serves avatars, favicons, small spaces. Renders via
-  `currentColor`: ink on cream/green, cream on ink. Functional sizes only —
-  decorative crops and mark-as-pattern are parked.
+- **Wordmark & mark:** SVG lockup (1218:234, 2026-07-31 revision) is primary;
+  the standalone mark (278:208) serves avatars, favicons, small spaces. Both
+  live in `src/components/logo.tsx` and render via `currentColor`: ink on
+  cream/green, cream on ink. Functional sizes only — decorative crops and
+  mark-as-pattern are parked.
 - **Art:** commissioned painterly landscapes in `docs/` — `c1-field.png`
   (dawn; hero backdrop), `c2-field.png` (the path; section panel + phase-tab
   backdrop), per-feature backdrops `people.png`, `meetings.png`,
