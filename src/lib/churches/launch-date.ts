@@ -2,7 +2,8 @@ import { and, eq, ne, or, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db";
-import { churches } from "@/db/schema";
+import { churches, type User } from "@/db/schema";
+import { requireChurchAccess, requireRole } from "@/lib/auth/access";
 import { announceLaunchDateChanged } from "@/lib/notifications/oversight";
 
 // ============================================================================
@@ -46,14 +47,30 @@ export type SetLaunchDateResult =
  *
  * Announcing to oversight is best-effort and happens AFTER the durable write:
  * a notification must never be the reason a planter's date failed to save, and
- * an announcement for a date that was not stored would be a lie. Callers are
- * authorised by their own action layer — this module writes, it does not
- * authorise.
+ * an announcement for a date that was not stored would be a lie.
+ *
+ * AUTHORISES ITSELF. An earlier draft took a bare `churchId` and deferred
+ * authorisation to "the caller's own action layer" — a layer that does not
+ * exist, since nothing calls this yet. The first surface to wire it (onboarding
+ * step 3, #202-#210) passing a request-supplied id would have had a
+ * cross-tenant write AND a cross-tenant announcement to that tenant's oversight
+ * partners, from a function whose doc said someone else had checked.
+ *
+ * Planter, and the planter of THIS church: `requireRole` refuses a coach or an
+ * oversight admin (a launch date is the planter's to set, and an oversight
+ * admin setting it would be the milestone announcing itself), and
+ * `requireChurchAccess` refuses a planter pointed at somebody else's plant.
+ * Both throw, so a caller cannot proceed by ignoring a return value — unlike
+ * the `error` status, which is reserved for a malformed date the user typed.
  */
 export async function setChurchLaunchDate(
+  user: User,
   churchId: string,
   launchDate: string
 ): Promise<SetLaunchDateResult> {
+  requireRole(user, "planter");
+  await requireChurchAccess(user, churchId);
+
   const parsed = launchDateSchema.safeParse(launchDate);
   if (!parsed.success) {
     return { status: "error", error: parsed.error.issues[0].message };

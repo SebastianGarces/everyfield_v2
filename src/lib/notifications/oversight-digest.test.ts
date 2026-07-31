@@ -7,6 +7,7 @@ import {
   composeDigestBody,
   dayKeyInAppZone,
   digestDayKey,
+  previousCompleteDayWindow,
   runOversightDigest,
   totalActivity,
   type ActivityWindow,
@@ -63,7 +64,14 @@ class FakeDigestDeps implements OversightDigestDeps {
       : this.options.plant;
   }
 
-  async summarizeActivity(): Promise<OversightActivitySummary> {
+  // The real parameters, even though the default body ignores them: a test that
+  // needs to prove WHICH window was queried (the previous-complete-day default)
+  // replaces this method, and it can only see the window if the signature has
+  // one.
+  async summarizeActivity(
+    _churchId: string,
+    _window: ActivityWindow
+  ): Promise<OversightActivitySummary> {
     this.summarizeCalls += 1;
     return this.options.summary;
   }
@@ -307,6 +315,95 @@ test("the window is a whole day in APP_TIME_ZONE, half-open", () => {
   assert.equal(DAY.from.toISOString(), "2026-07-30T00:00:00.000Z");
   assert.equal(DAY.to.toISOString(), "2026-07-31T00:00:00.000Z");
   assert.equal(digestDayKey(DAY), "2026-07-30");
+});
+
+test("the daily window is the last day that is OVER, never a partial today", () => {
+  // The hazard this replaced: `activityWindowForDay(now)` gave a scheduled run
+  // the day it was running IN. The digest's dedupe key is (church, day) and the
+  // partial unique index makes the first row for that day final, so a 07:00 run
+  // would have frozen "00:00–07:00" as the whole of that day forever — and a
+  // run early enough to find nothing yet would have returned `no_activity`,
+  // making a day WITH activity produce NO digest.
+  const window = previousCompleteDayWindow(
+    new Date("2026-07-31T07:00:00.000Z")
+  );
+
+  assert.equal(window.from.toISOString(), "2026-07-30T00:00:00.000Z");
+  assert.equal(window.to.toISOString(), "2026-07-31T00:00:00.000Z");
+  assert.equal(digestDayKey(window), "2026-07-30");
+});
+
+test("a run at 01:00 and a run at 23:00 digest the same day, identically", async () => {
+  // The property a scheduler depends on: the HOUR the job fires cannot change
+  // the answer. Same window in, same day key, same counts, same dedupe key —
+  // so a retry is a genuine no-op rather than a second, different opinion that
+  // the unique index then freezes.
+  const early = new Date("2026-07-31T01:00:00.000Z");
+  const late = new Date("2026-07-31T23:00:00.000Z");
+
+  assert.deepEqual(
+    previousCompleteDayWindow(early),
+    previousCompleteDayWindow(late)
+  );
+
+  // A summarizer whose answer DEPENDS on the window, so "same counts" is a
+  // claim about the query being asked and not just about a constant fake.
+  const seen: ActivityWindow[] = [];
+  const runAt = async (at: Date) => {
+    const deps = new FakeDigestDeps({ summary: QUIET, recipients: [ADMIN_A] });
+    deps.summarizeActivity = async (
+      _churchId: string,
+      window: ActivityWindow
+    ) => {
+      seen.push(window);
+      return {
+        ...QUIET,
+        meetingsHeld: window.from.getUTCDate(),
+        tasksCompleted:
+          (window.to.getTime() - window.from.getTime()) / 3_600_000,
+      };
+    };
+
+    const outcome = await runOversightDigest(deps, {
+      churchId: CHURCH,
+      window: previousCompleteDayWindow(at),
+    });
+    return { outcome, deps };
+  };
+
+  const first = await runAt(early);
+  const second = await runAt(late);
+
+  assert.deepEqual(seen[0], seen[1]);
+  assert.equal(first.deps.enqueued[0].body, second.deps.enqueued[0].body);
+  assert.equal(
+    first.deps.enqueued[0].dedupeKey,
+    second.deps.enqueued[0].dedupeKey
+  );
+  assert.equal(
+    first.deps.enqueued[0].dedupeKey,
+    `oversight.activity.digest:${CHURCH}:2026-07-30`
+  );
+  // 24 hours, whichever hour the job ran at.
+  assert.equal(first.deps.enqueued[0].body, "30 meetings, 24 tasks finished.");
+});
+
+test("the title names the day the counts belong to, not 'today'", async () => {
+  // The digest is composed after its day is over, may be retried tomorrow, and
+  // may be backfilled for a day last week. "Today's summary" is wrong in all
+  // three, and the reader has no other way to tell which day the counts are.
+  const deps = new FakeDigestDeps({ summary: BUSY, recipients: [ADMIN_A] });
+
+  await runOversightDigest(deps, {
+    churchId: CHURCH,
+    window: previousCompleteDayWindow(new Date("2026-07-31T06:00:00.000Z")),
+  });
+
+  assert.equal(
+    deps.enqueued[0].title,
+    "Grace Chapel — summary for Thu, Jul 30, 2026"
+  );
+  assert.doesNotMatch(deps.enqueued[0].title, /today/i);
 });
 
 test("the day key never follows the runtime's zone", () => {

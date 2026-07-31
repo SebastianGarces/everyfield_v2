@@ -49,7 +49,7 @@ export default async function SharingSettingsPage() {
         <div className="space-y-1">
           <h1 className="text-2xl font-semibold tracking-tight">Sharing</h1>
           <p className="text-muted-foreground text-sm">
-            What your sending church or network sees about this plant.
+            What your sending church or network hears about this plant.
           </p>
         </div>
 

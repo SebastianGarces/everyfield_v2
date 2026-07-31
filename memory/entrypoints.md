@@ -175,8 +175,8 @@
 | Save a digest cadence | `(dash)/settings/actions.ts:setDigestCadenceAction()` | Cadence select in the `digest` row |
 | Sharing screen (plant → oversight) | `(dash)/settings/sharing/page.tsx` → `oversight-sharing.ts:isSharingActivityWithOversight()` | Route `/settings/sharing` (planter only; linked from `/settings`) |
 | Save the sharing toggle | `(dash)/settings/sharing/actions.ts:setOversightSharingAction()` | The one switch on that screen |
-| Oversight milestone (no UI) | `oversight.ts:announceInvitationAccepted()` / `announcePhaseAdvanced()` / `announceLaunchDateChanged()` | `invitations/service.ts:acceptInvitation()`, the `phase.changed` subscription, `churches/launch-date.ts:setChurchLaunchDate()` |
-| Oversight daily digest (no UI) | `oversight-digest.ts:runDailyOversightDigest()` | Per plant, per day — no scheduler wired yet (#135 owns the job) |
+| Oversight milestone (no UI) | `oversight.ts:announceInvitationAccepted()` / `announcePhaseAdvanced()` / `announceLaunchDateChanged()` | `invitations/service.ts:acceptInvitation()`, the `phase.changed` subscription, `churches/launch-date.ts:setChurchLaunchDate(user, churchId, date)` — which authorises itself (`requireRole("planter")` + `requireChurchAccess`), so a surface wiring it cannot forget |
+| Oversight daily digest (no UI) | `oversight-digest.ts:runDailyOversightDigest()` | Per plant, one COMPLETE day — always the day BEFORE the moment passed in, never a partial today (the dedupe key `(church, day)` would freeze a partial count forever). No scheduler wired yet; the follow-up owns the cron entry + route |
 
 **Primary modules:** `src/lib/notifications/` (feed, feed-view, queries, mark-read, entity-links, enqueue, preferences, categories), `src/components/notifications/`, `src/db/schema/notifications.ts`
 

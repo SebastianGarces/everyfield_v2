@@ -79,7 +79,14 @@ export default async function SettingsPage() {
             what leaves the plant, and the planter's alone — and folding it into
             a personal notification matrix would make a consent choice read as
             one more switch about email volume (N-026). Shown only to a planter
-            with a plant, which is exactly who the target screen serves. */}
+            with a plant, which is exactly who the target screen serves.
+
+            "No updates", not "nothing": this toggle gates what is PUSHED to
+            oversight (the digest, the three milestones). The oversight
+            dashboard already lists the plant with its name, current stage and
+            launch date, ungated — see the header of OVERSIGHT_SHARING_TOGGLE.
+            A teaser that promises more than the setting delivers is the one
+            way this feature can fail its own purpose. */}
         {isPlanterWithPlant && (
           <section aria-labelledby="sharing-link" className="space-y-1">
             <h2
@@ -89,7 +96,7 @@ export default async function SettingsPage() {
               Sharing
             </h2>
             <p className="text-muted-foreground text-sm text-pretty">
-              Your sending church and network see nothing about this plant
+              Your sending church and network get no updates about this plant
               unless you turn sharing on.{" "}
               <Link
                 href="/settings/sharing"

@@ -10,6 +10,7 @@ import {
 } from "./categories";
 import type { EnqueueNotificationInput, EnqueueResult } from "./enqueue";
 import {
+  announceInvitationAccepted,
   composeMilestone,
   fanOutToOversight,
   oversightMilestoneKinds,
@@ -163,6 +164,77 @@ test("the toggle copy promises a SUMMARY and denies a detailed activity list", (
     prose.includes("turn it off"),
     "the copy never says it is reversible"
   );
+});
+
+test("the invitation milestone does not describe the toggle as off", () => {
+  // This row is written only when `enqueue`'s third gate passed — i.e. when
+  // `share_activity_with_oversight` was ALREADY true. The old body told the
+  // reader their summary "will start arriving once they turn sharing on",
+  // which was therefore false in every state in which it could be delivered.
+  //
+  // The structural consequence stands and is documented at the emitter: in the
+  // ordinary order (accept, then decide about sharing) this milestone is
+  // skipped and never retried. Fixing THAT means either exempting one
+  // milestone from the consent gate or retrying it on opt-in, both of which are
+  // rulings. Telling the truth in the body is not.
+  const fake = new FakeOversightEnqueue([{ id: ADMIN_A }]);
+
+  return announceInvitationAccepted(
+    {
+      churchId: CHURCH,
+      plantName: "Grace Chapel",
+      invitationId: "inv-1",
+    },
+    fake
+  ).then(() => {
+    const body = fake.written[0].body;
+    assert.doesNotMatch(body, /turn sharing on/i);
+    assert.doesNotMatch(body, /once they/i);
+    assert.match(body, /accepted your invitation/i);
+  });
+});
+
+test("the copy admits what this toggle does NOT cover", () => {
+  // The security finding this bullet answers: `getOversightPlantHealth`
+  // (`src/lib/phase-engine/oversight/read.ts`) returns every accessible plant's
+  // name, current phase and days-until-launch to an oversight admin with no
+  // privacy gate at all. That is the oversight dashboard working as designed —
+  // but it means a consent screen claiming "they see nothing unless you turn
+  // this on" was false about precisely the two facts the milestones mention.
+  //
+  // A consent control that overstates its own reach is worse than none: the
+  // planter decides on the strength of a guarantee the system does not offer.
+  // If a ruling ever brings that listing under this toggle, delete the bullet
+  // AND this test — not one of them.
+  const prose = OVERSIGHT_SHARING_TOGGLE.detail.join(" ").toLowerCase();
+
+  assert.ok(
+    prose.includes("does not cover"),
+    "the copy never admits a limit to what the toggle governs"
+  );
+  assert.ok(
+    prose.includes("already listed on their dashboard"),
+    "the copy never names the ungated portfolio listing"
+  );
+  for (const fact of ["current stage", "launch date"]) {
+    assert.ok(prose.includes(fact), `the copy never names "${fact}"`);
+  }
+});
+
+test("no copy anywhere promises totality", () => {
+  // "see nothing" / "sees nothing" is the specific false claim that shipped.
+  // It is asserted here rather than only on the screen because the screen's
+  // teaser and this module's detail have to agree, and this is the file the
+  // gate lives beside.
+  const prose = [
+    OVERSIGHT_SHARING_TOGGLE.label,
+    OVERSIGHT_SHARING_TOGGLE.summary,
+    ...OVERSIGHT_SHARING_TOGGLE.detail,
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  assert.doesNotMatch(prose, /sees? nothing/);
 });
 
 test("the toggle's label names the audience in the planter's words", () => {

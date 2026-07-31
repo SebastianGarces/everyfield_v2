@@ -195,6 +195,28 @@ export const OVERSIGHT_SHARING_FEATURE: PrivacyFeatureKey =
  * counts, not names; a summary once a day, not a live feed of everything that
  * happened. "Share activity" on its own reads like "let them watch me work",
  * which is both frightening and wrong.
+ *
+ * ----------------------------------------------------------------------------
+ * The copy may only claim what this toggle actually governs
+ * ----------------------------------------------------------------------------
+ *
+ * This toggle gates what is PUSHED: the digest and the three milestones, via
+ * `enqueue`. It does not gate what oversight may PULL. `getOversightPlantHealth`
+ * (`src/lib/phase-engine/oversight/read.ts`) already returns each accessible
+ * plant's name, `currentPhase`, `daysUntilLaunch` and health classification to
+ * any `sending_church_admin` / `network_admin` with no privacy gate at all —
+ * that portfolio view is the oversight dashboard's whole reason to exist, and
+ * the six `share_*` columns gate the FEATURE data inside it, not the listing.
+ *
+ * So an earlier draft of this screen ("they see nothing about this plant unless
+ * you turn sharing on") was false the moment it shipped, and false about
+ * precisely the two facts — current stage, launch date — the milestones below
+ * mention. The fourth bullet exists to say that out loud. A consent control
+ * whose promise overstates its own reach is worse than no promise: the planter
+ * makes a decision about a guarantee the system does not offer.
+ *
+ * If a future ruling brings the portfolio's phase/launch exposure under this
+ * toggle, that bullet comes out — and not before.
  */
 export const OVERSIGHT_SHARING_TOGGLE = {
   label: "Share activity with your sending church or network",
@@ -206,9 +228,10 @@ export const OVERSIGHT_SHARING_TOGGLE = {
    * however it likes without re-writing them.
    */
   detail: [
-    "Once a day, on days something happened, they see counts: meetings held, people added, tasks finished, stages reached.",
+    "Once a day, on days something happened, they get counts: meetings held, people added, tasks finished, stages reached.",
     "They also hear about three milestones — you accept an invitation, you move to a new stage, you set or change a launch date.",
     "They never see names, notes, messages, giving, or a list of what you did. This is a summary, not an activity feed.",
+    "One thing this setting does not cover: your plant is already listed on their dashboard with its name, current stage and launch date. This is about the updates they receive, not that listing.",
     "Turn it off whenever you like. Sharing stops at the next update — nothing already sent is recalled.",
   ],
 } as const;

@@ -1,7 +1,7 @@
-import { eq } from "drizzle-orm";
+import { eq, gt, type SQL } from "drizzle-orm";
 
 import { db } from "@/db";
-import { churches } from "@/db/schema";
+import { churches, phaseTransitions } from "@/db/schema";
 import type { PhaseChangedEvent } from "@/lib/phase-engine/events";
 
 import { announcePhaseAdvanced } from "./oversight";
@@ -28,6 +28,25 @@ import { announcePhaseAdvanced } from "./oversight";
  */
 export function isPhaseAdvance(fromPhase: number, toPhase: number): boolean {
   return toPhase > fromPhase;
+}
+
+/**
+ * The SAME rule, for a query that counts rows instead of judging one event.
+ *
+ * It lives here, touching `isPhaseAdvance`, because the two paths that ask
+ * "was this an advance?" — the milestone emitter below and the digest's
+ * `stagesReached` count in `./oversight-digest.ts` — got different answers once
+ * already. The digest counted every `phase_transitions` row, so a planter
+ * correcting stage 3 back to 2 read as "1 new stage" in tomorrow's summary: the
+ * event this file deliberately withholds, leaking through the other door and
+ * mislabelled as its opposite.
+ *
+ * Two expressions of one rule is the most that can be shared — drizzle cannot
+ * run a TypeScript predicate inside Postgres — so they are kept adjacent, and
+ * `oversight-events.test.ts` asserts they agree on the same table of pairs.
+ */
+export function phaseAdvanceCondition(): SQL {
+  return gt(phaseTransitions.toPhase, phaseTransitions.fromPhase);
 }
 
 /**

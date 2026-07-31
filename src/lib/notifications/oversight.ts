@@ -235,56 +235,92 @@ export async function announceMilestone(
   }
 }
 
-/** Source: `acceptInvitation()` — the plant joined a sending church/network. */
-export function announceInvitationAccepted(input: {
-  churchId: string;
-  plantName: string;
-  invitationId: string;
-}): Promise<OversightFanOutReport> {
-  return announceMilestone({
-    churchId: input.churchId,
-    plantName: input.plantName,
-    kind: "invitation_accepted",
-    occurrence: input.invitationId,
-    detail:
-      "They accepted your invitation, so their summary will start arriving once they turn sharing on.",
-  });
+/**
+ * Source: `acceptInvitation()` — the plant joined a sending church/network.
+ *
+ * `deps` is injectable on all three emitters for the same reason: the BODY each
+ * one composes is a promise made to a third party, and a promise is worth a
+ * test. This one's was wrong for a release.
+ */
+export function announceInvitationAccepted(
+  input: {
+    churchId: string;
+    plantName: string;
+    invitationId: string;
+  },
+  deps: OversightFanOutDeps = dbOversightFanOutDeps
+): Promise<OversightFanOutReport> {
+  return announceMilestone(
+    {
+      churchId: input.churchId,
+      plantName: input.plantName,
+      kind: "invitation_accepted",
+      occurrence: input.invitationId,
+      // Present tense, because of WHEN this can be read. The row exists only if
+      // the plant's sharing toggle was already on when `enqueue` looked, so
+      // telling the reader their summary "will start arriving once they turn
+      // sharing on" was false in every case it could be delivered — it described
+      // a toggle that is, by construction, on.
+      //
+      // The consequence worth naming: in the ordinary sequence (accept the
+      // invitation, then decide about sharing) the toggle is off at acceptance
+      // time, so this milestone is skipped and never retried. That is the gate
+      // working as ruled — no row without consent — not a bug to route around
+      // here. Prompting the sharing conversation is the planter-side onboarding's
+      // job, not an announcement sent to the other party.
+      detail:
+        "They accepted your invitation. You'll get a summary on the days something happens, plus the occasional milestone.",
+    },
+    deps
+  );
 }
 
 /** Source: the `phase.changed` event, wired in `src/lib/events/subscriptions.ts`. */
-export function announcePhaseAdvanced(input: {
-  churchId: string;
-  plantName: string;
-  toPhase: number;
-}): Promise<OversightFanOutReport> {
-  return announceMilestone({
-    churchId: input.churchId,
-    plantName: input.plantName,
-    kind: "phase_advanced",
-    // The phase REACHED, not the transition id: advancing to stage 3 twice
-    // (after a correction back to 2) is one milestone, and a replayed event is
-    // none.
-    occurrence: `phase-${input.toPhase}`,
-    detail: `They moved up to stage ${input.toPhase}.`,
-  });
+export function announcePhaseAdvanced(
+  input: {
+    churchId: string;
+    plantName: string;
+    toPhase: number;
+  },
+  deps: OversightFanOutDeps = dbOversightFanOutDeps
+): Promise<OversightFanOutReport> {
+  return announceMilestone(
+    {
+      churchId: input.churchId,
+      plantName: input.plantName,
+      kind: "phase_advanced",
+      // The phase REACHED, not the transition id: advancing to stage 3 twice
+      // (after a correction back to 2) is one milestone, and a replayed event is
+      // none.
+      occurrence: `phase-${input.toPhase}`,
+      detail: `They moved up to stage ${input.toPhase}.`,
+    },
+    deps
+  );
 }
 
 /** Source: `setChurchLaunchDate()` in `src/lib/churches/launch-date.ts`. */
-export function announceLaunchDateChanged(input: {
-  churchId: string;
-  plantName: string;
-  /** `YYYY-MM-DD`, as stored. */
-  launchDate: string;
-}): Promise<OversightFanOutReport> {
-  return announceMilestone({
-    churchId: input.churchId,
-    plantName: input.plantName,
-    kind: "launch_date_changed",
-    // Keyed by the DATE, so re-saving the same date says nothing and moving it
-    // says something.
-    occurrence: input.launchDate,
-    detail: `They are aiming to launch on ${input.launchDate}.`,
-  });
+export function announceLaunchDateChanged(
+  input: {
+    churchId: string;
+    plantName: string;
+    /** `YYYY-MM-DD`, as stored. */
+    launchDate: string;
+  },
+  deps: OversightFanOutDeps = dbOversightFanOutDeps
+): Promise<OversightFanOutReport> {
+  return announceMilestone(
+    {
+      churchId: input.churchId,
+      plantName: input.plantName,
+      kind: "launch_date_changed",
+      // Keyed by the DATE, so re-saving the same date says nothing and moving it
+      // says something.
+      occurrence: input.launchDate,
+      detail: `They are aiming to launch on ${input.launchDate}.`,
+    },
+    deps
+  );
 }
 
 // ----------------------------------------------------------------------------

@@ -8,13 +8,14 @@ import {
   phaseTransitions,
   tasks,
 } from "@/db/schema";
-import { APP_TIME_ZONE } from "@/lib/datetime";
+import { APP_TIME_ZONE, formatDate } from "@/lib/datetime";
 
 import {
   enqueue,
   type EnqueueNotificationInput,
   type EnqueueResult,
 } from "./enqueue";
+import { phaseAdvanceCondition } from "./oversight-events";
 import {
   fanOutToOversight,
   listOversightRecipientsForChurch,
@@ -38,6 +39,16 @@ import {
 // not a "nothing to report" digest. `summarizeActivity` returns a total, and a
 // total of zero returns `{ enqueued: 0, reason: "no_activity" }` having called
 // `enqueue` zero times — which is what the acceptance criterion counts.
+//
+// ----------------------------------------------------------------------------
+// A COMPLETE day, never a partial one
+// ----------------------------------------------------------------------------
+//
+// The digest's dedupe key is `(church, day)` and the partial unique index makes
+// the first row written for that day final. So the window must be a day whose
+// counts can no longer change: `runDailyOversightDigest` always digests the day
+// BEFORE the moment it is handed, and there is deliberately no way to ask it
+// for a day in progress. See `previousCompleteDayWindow`.
 //
 // ----------------------------------------------------------------------------
 // Counts, not contents
@@ -147,6 +158,30 @@ export function activityWindowForDay(at: Date): ActivityWindow {
   return { from, to: new Date(from.getTime() + MS_PER_DAY) };
 }
 
+/**
+ * The last day that is OVER, relative to `at`. The only window a scheduled
+ * daily run may use.
+ *
+ * A daily job that digests the day it is running in reports a fraction of it
+ * and then cannot correct itself, because the digest's dedupe key is
+ * `(church, day)` and the partial unique index makes the first row for that day
+ * final (memory/invariants.md → Atomicity). A 07:00 run would freeze
+ * "00:00–07:00" as the whole of that day forever, and a run that found nothing
+ * yet would return `no_activity` — so a day WITH activity would produce NO
+ * digest, which inverts the acceptance criterion this feature is built around.
+ *
+ * A complete day has no such hazard: every count is final before the query
+ * runs, so the hour the job fires cannot change the answer, and a retry an hour
+ * later (or a re-run days later) produces the same numbers.
+ */
+export function previousCompleteDayWindow(at: Date): ActivityWindow {
+  const today = activityWindowForDay(at);
+  return {
+    from: new Date(today.from.getTime() - MS_PER_DAY),
+    to: today.from,
+  };
+}
+
 // ----------------------------------------------------------------------------
 // The run
 // ----------------------------------------------------------------------------
@@ -209,7 +244,12 @@ export async function runOversightDigest(
       recipientUserId,
       category: "digest",
       type: "oversight.activity.digest",
-      title: `${plant.name} — today's summary`,
+      // The DAY, named. Not "today's summary": the digest speaks for a day that
+      // is over by the time it is composed (`previousCompleteDayWindow`), it may
+      // be retried tomorrow, and a backfill may run it for a day last week. A
+      // title that says "today" is wrong in every one of those cases, and the
+      // reader has no other way to tell which day the counts belong to.
+      title: `${plant.name} — summary for ${formatDate(input.window.from, "short")}`,
       body,
       dedupeKey: `oversight.activity.digest:${input.churchId}:${dayKey}`,
     })
@@ -241,12 +281,29 @@ export async function summarizeChurchActivity(
       .select({ n: count() })
       .from(persons)
       .where(and(eq(persons.churchId, churchId), inWindow(persons.createdAt))),
+    // "Meetings HELD" — the toggle's copy promises that exact word, so the
+    // query has to mean it. `church_meetings.status` starts at `planning` and
+    // can reach `cancelled`, so filtering on the datetime alone reported a
+    // meeting cancelled at 09:00 for a 19:00 slot to the sending church as a
+    // meeting that happened. Overstating a plant's activity to a third party
+    // under a consent control is the exact failure this feature exists to
+    // prevent, so the count is narrowed to `completed`.
+    //
+    // `completed` rather than `actual_attendance IS NOT NULL` (finalizeAttendance's
+    // idempotency marker, memory/invariants.md → Atomicity): attendance is a
+    // separate, optional step, so keying on it would report 0 meetings for a
+    // plant that meets weekly and never counts heads. `completed` is the
+    // planter's own statement that the meeting happened — the right authority
+    // for a fact told to their oversight partner. Both rules can only UNDER-
+    // report, which is the safe direction here; a meeting still sitting at
+    // `in_progress` when the day closes is simply not counted.
     db
       .select({ n: count() })
       .from(churchMeetings)
       .where(
         and(
           eq(churchMeetings.churchId, churchId),
+          eq(churchMeetings.status, "completed"),
           inWindow(churchMeetings.datetime)
         )
       ),
@@ -260,12 +317,19 @@ export async function summarizeChurchActivity(
           inWindow(tasks.completedAt)
         )
       ),
+    // ADVANCES only, via the same predicate the milestone emitter judges a
+    // single event with (`phaseAdvanceCondition`, beside `isPhaseAdvance` in
+    // `./oversight-events.ts`). Counting every transition made a planter's
+    // correction from stage 3 back to 2 read as "1 new stage" — the milestone
+    // path withholding a regression on purpose while the digest path announced
+    // it as its opposite. One rule, one place, two expressions of it.
     db
       .select({ n: count() })
       .from(phaseTransitions)
       .where(
         and(
           eq(phaseTransitions.churchId, churchId),
+          phaseAdvanceCondition(),
           inWindow(phaseTransitions.createdAt)
         )
       ),
@@ -293,13 +357,29 @@ export const dbOversightDigestDeps: OversightDigestDeps = {
   enqueue,
 };
 
-/** `runDailyOversightDigest(churchId, at)` — the wired-up production entrypoint. */
+/**
+ * The wired-up production entrypoint: digest one plant's LAST COMPLETE DAY.
+ *
+ * `at` is "when the job is running", not "which day to report" — the window is
+ * always the day before the one `at` falls in. So the hour a scheduler fires
+ * cannot change the answer: 01:00 and 23:00 on the same date digest the same
+ * day and produce the same counts, and a retry is a genuine no-op rather than a
+ * second, different opinion frozen by the dedupe key.
+ *
+ * To digest some other day (a backfill, a test), call `runOversightDigest` with
+ * an explicit window. There is deliberately no way to ask this function for a
+ * day still in progress.
+ *
+ * NOT YET SCHEDULED. Nothing in `vercel.json` calls this — see the PR body for
+ * issue #224; the cron entry and its route are a follow-up. Whatever wires it
+ * must pass the moment it runs and nothing else.
+ */
 export function runDailyOversightDigest(
   churchId: string,
   at: Date = new Date()
 ): Promise<OversightDigestOutcome> {
   return runOversightDigest(dbOversightDigestDeps, {
     churchId,
-    window: activityWindowForDay(at),
+    window: previousCompleteDayWindow(at),
   });
 }

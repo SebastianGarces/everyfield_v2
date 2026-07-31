@@ -25,10 +25,13 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   churches,
+  churchMeetings,
   churchPrivacySettings,
   notifications,
   organizationInvitations,
+  phaseTransitions,
   sendingNetworks,
+  tasks,
   users,
 } from "@/db/schema";
 import { canAccessChurch } from "@/lib/auth/access";
@@ -36,7 +39,13 @@ import { setChurchLaunchDate } from "@/lib/churches/launch-date";
 import { acceptInvitation, createInvitation } from "@/lib/invitations/service";
 import { notificationCategories } from "@/lib/notifications/categories";
 import { enqueue } from "@/lib/notifications/enqueue";
-import { runDailyOversightDigest } from "@/lib/notifications/oversight-digest";
+import {
+  activityWindowForDay,
+  dayKeyInAppZone,
+  dbOversightDigestDeps,
+  runDailyOversightDigest,
+  runOversightDigest,
+} from "@/lib/notifications/oversight-digest";
 import { handlePhaseChangedForOversight } from "@/lib/notifications/oversight-events";
 import {
   isSharingActivityWithOversight,
@@ -59,6 +68,7 @@ async function rowsFor(churchId: string) {
       category: notifications.category,
       type: notifications.type,
       recipientUserId: notifications.recipientUserId,
+      title: notifications.title,
       body: notifications.body,
     })
     .from(notifications)
@@ -314,7 +324,7 @@ async function main() {
     updatedBy: planter.id,
   });
   assert.equal(
-    (await setChurchLaunchDate(plant.id, "2026-09-13")).status,
+    (await setChurchLaunchDate(planter, plant.id, "2026-09-13")).status,
     "changed"
   );
   assert.equal((await rowsFor(plant.id)).length, 0);
@@ -326,7 +336,7 @@ async function main() {
     updatedBy: planter.id,
   });
   assert.equal(
-    (await setChurchLaunchDate(plant.id, "2026-10-04")).status,
+    (await setChurchLaunchDate(planter, plant.id, "2026-10-04")).status,
     "changed"
   );
   const afterLaunch = await rowsFor(plant.id);
@@ -339,21 +349,63 @@ async function main() {
   ok("launch date changed, sharing ON → one milestone per oversight admin");
 
   // Re-saving the same date is not a milestone, and writes nothing.
-  const resave = await setChurchLaunchDate(plant.id, "2026-10-04");
+  const resave = await setChurchLaunchDate(planter, plant.id, "2026-10-04");
   assert.equal(resave.status, "unchanged");
   assert.equal((await rowsFor(plant.id)).length, 2);
   ok("re-saving the same launch date announces nothing");
+
+  // The write authorises itself. An oversight admin has church ACCESS to this
+  // plant (asserted in §2) and would sail past a bare `requireChurchAccess`;
+  // the role check is what stops the milestone from being able to announce
+  // itself. A planter aimed at somebody else's plant fails the access check.
+  await assert.rejects(
+    () => setChurchLaunchDate(adminA, plant.id, "2026-11-01"),
+    /Forbidden/,
+    "an oversight admin set a plant's launch date"
+  );
+  const [foreignChurch] = await db
+    .insert(churches)
+    .values({ name: "Scratch Foreign Plant" })
+    .returning();
+  await assert.rejects(
+    () => setChurchLaunchDate(planter, foreignChurch.id, "2026-11-01"),
+    /Forbidden/,
+    "a planter set another church's launch date"
+  );
+  const [unmoved] = await db
+    .select({ launchDate: churches.launchDate })
+    .from(churches)
+    .where(eq(churches.id, plant.id));
+  assert.equal(unmoved.launchDate, "2026-10-04", "a refused write still wrote");
+  ok("setChurchLaunchDate refuses a non-planter and a foreign church");
 
   await db.delete(notifications).where(eq(notifications.churchId, plant.id));
 
   // --------------------------------------------------------------------------
   // 6. THE DIGEST — one per recipient on a day with activity, none on a quiet
-  //    day. The count assertion is on ROWS WRITTEN, both days.
+  //    day, and the counts computed from REAL rows of every kind.
+  //
+  //    An earlier version of this harness seeded one `persons` row and nothing
+  //    else, so three of the four count queries never ran against real data —
+  //    which is exactly why a digest that counted cancelled meetings and phase
+  //    regressions shipped as a PASS. Every source now gets a row that must be
+  //    counted AND a row that must not, and the assertion is on the rendered
+  //    body string, where a miscount is visible.
   // --------------------------------------------------------------------------
   const quietDay = new Date("2026-06-01T12:00:00.000Z");
   const busyDay = new Date("2026-06-02T12:00:00.000Z");
 
-  const quiet = await runDailyOversightDigest(plant.id, quietDay);
+  // Explicit windows: `runDailyOversightDigest` deliberately has no way to ask
+  // for a specific day (it always digests the last COMPLETE one), so a harness
+  // that wants to talk about June 2nd says so. The default is exercised on its
+  // own terms in §6b.
+  const digestFor = (day: Date) =>
+    runOversightDigest(dbOversightDigestDeps, {
+      churchId: plant.id,
+      window: activityWindowForDay(day),
+    });
+
+  const quiet = await digestFor(quietDay);
   assert.equal(quiet.status, "skipped");
   assert.equal(quiet.status === "skipped" && quiet.reason, "no_activity");
   assert.equal(
@@ -363,16 +415,99 @@ async function main() {
   );
   ok("a day with NO activity produces no digest row at all");
 
-  // One person added, dated into the busy day.
-  await db.insert(persons).values({
-    churchId: plant.id,
-    createdBy: planter.id,
-    firstName: "Sam",
-    lastName: "Rivera",
-    createdAt: new Date("2026-06-02T09:00:00.000Z"),
-  });
+  // ---- One row per source, each paired with a near-miss that must NOT count.
+  const at = (hhmm: string) => new Date(`2026-06-02T${hhmm}:00.000Z`);
 
-  const busy = await runDailyOversightDigest(plant.id, busyDay);
+  // Two people added. (Counts: 2.)
+  await db.insert(persons).values([
+    {
+      churchId: plant.id,
+      createdBy: planter.id,
+      firstName: "Sam",
+      lastName: "Rivera",
+      createdAt: at("09:00"),
+    },
+    {
+      churchId: plant.id,
+      createdBy: planter.id,
+      firstName: "Noor",
+      lastName: "Haddad",
+      createdAt: at("09:30"),
+    },
+  ]);
+
+  // Three meetings on the day; exactly ONE was held. The cancelled one is the
+  // finding this section exists for: it was reported to the sending church as a
+  // meeting that happened, under a toggle whose copy promises "meetings held".
+  await db.insert(churchMeetings).values([
+    {
+      churchId: plant.id,
+      createdBy: planter.id,
+      type: "vision_meeting" as const,
+      title: "Held",
+      datetime: at("19:00"),
+      status: "completed" as const,
+    },
+    {
+      churchId: plant.id,
+      createdBy: planter.id,
+      type: "vision_meeting" as const,
+      title: "Called off",
+      datetime: at("19:00"),
+      status: "cancelled" as const,
+    },
+    {
+      churchId: plant.id,
+      createdBy: planter.id,
+      type: "team_meeting" as const,
+      title: "Still just scheduled",
+      datetime: at("23:00"),
+      status: "planning" as const,
+    },
+  ]);
+
+  // Two tasks; one finished. (`completed_at` is the count's own filter.)
+  await db.insert(tasks).values([
+    {
+      churchId: plant.id,
+      createdById: planter.id,
+      title: "Book the venue",
+      status: "complete" as const,
+      completedAt: at("10:00"),
+    },
+    {
+      churchId: plant.id,
+      createdById: planter.id,
+      title: "Still open",
+      status: "in_progress" as const,
+    },
+  ]);
+
+  // Two transitions; one advance, one CORRECTION. `oversight-events.ts` refuses
+  // to announce the correction as a milestone, and the digest must not
+  // re-disclose it as "a new stage" — the whole point of the shared predicate.
+  await db.insert(phaseTransitions).values([
+    {
+      churchId: plant.id,
+      fromPhase: 1,
+      toPhase: 2,
+      initiatedById: planter.id,
+      reason: "advance",
+      rubricVersion: "v0",
+      createdAt: at("11:00"),
+    },
+    {
+      churchId: plant.id,
+      fromPhase: 3,
+      toPhase: 2,
+      initiatedById: planter.id,
+      reason: "correcting an earlier mistake",
+      rubricVersion: "v0",
+      createdAt: at("12:00"),
+    },
+  ]);
+
+  const busy = await digestFor(busyDay);
   assert.equal(busy.status, "enqueued");
   const digestRows = await rowsFor(plant.id);
   assert.equal(digestRows.length, 2, "one digest per oversight recipient");
@@ -380,18 +515,99 @@ async function main() {
   assert.ok(
     digestRows.every((row) => row.type === "oversight.activity.digest")
   );
-  // Counts, never contents: the seeded person's name must not be in the body.
+
+  // THE assertion. Seven rows of activity in the window, four of which must not
+  // be counted: a cancelled meeting, a meeting not yet held, an unfinished
+  // task, a phase regression. Any of them leaking changes this string.
+  const EXPECTED_BODY =
+    "1 meeting, 2 new people, 1 task finished, 1 new stage.";
+  for (const row of digestRows) {
+    assert.equal(row.body, EXPECTED_BODY, "the digest miscounted");
+  }
+  ok(`the digest body is exactly "${EXPECTED_BODY}"`);
+
+  // The title names the day, so a reader can tell what the counts are about
+  // whenever the row is read.
   assert.ok(
-    digestRows.every((row) => !row.body.includes("Sam")),
-    "the digest carried a person's name"
+    digestRows.every(
+      (row) => row.title === "Scratch Plant — summary for Tue, Jun 2, 2026"
+    ),
+    "the digest title does not name its day"
   );
+  assert.ok(
+    digestRows.every((row) => !/today/i.test(row.title)),
+    "the digest still claims to be about today"
+  );
+  ok("the digest title names the day it speaks for");
+
+  // Counts, never contents: no seeded name or title may appear in a body.
+  for (const needle of ["Sam", "Noor", "Held", "Book the venue"]) {
+    assert.ok(
+      digestRows.every((row) => !row.body.includes(needle)),
+      `the digest carried "${needle}"`
+    );
+  }
   ok("a day WITH activity produces exactly one digest per oversight recipient");
 
   // Running it again the same day is idempotent — the dedupe key is (church,
   // day), arbitrated by the partial unique index, not by memory.
-  await runDailyOversightDigest(plant.id, busyDay);
+  await digestFor(busyDay);
   assert.equal((await rowsFor(plant.id)).length, 2);
   ok("a second run on the same day writes nothing further");
+
+  // --------------------------------------------------------------------------
+  // 6b. THE PRODUCTION DEFAULT — `runDailyOversightDigest(churchId)` with no
+  //     `at`, which is how a scheduler will call it.
+  //
+  //     Previously every digest assertion passed an explicit historical day, so
+  //     the shipped default window was never exercised at all. It defaulted to
+  //     the day it was RUNNING IN: a partial day, frozen permanently by the
+  //     dedupe key, and empty enough near midnight that a day with activity
+  //     produced no digest.
+  // --------------------------------------------------------------------------
+  await db.delete(notifications).where(eq(notifications.churchId, plant.id));
+  await db.delete(persons).where(eq(persons.churchId, plant.id));
+
+  const now = new Date();
+  const yesterday = new Date(now.getTime() - 86_400_000);
+
+  // One person yesterday, one today. Only yesterday's may be counted.
+  await db.insert(persons).values([
+    {
+      churchId: plant.id,
+      createdBy: planter.id,
+      firstName: "Yesterday",
+      lastName: "Person",
+      createdAt: yesterday,
+    },
+    {
+      churchId: plant.id,
+      createdBy: planter.id,
+      firstName: "Today",
+      lastName: "Person",
+      createdAt: now,
+    },
+  ]);
+
+  const defaulted = await runDailyOversightDigest(plant.id);
+  assert.equal(defaulted.status, "enqueued");
+  assert.equal(
+    defaulted.dayKey,
+    dayKeyInAppZone(yesterday),
+    "the default window is not yesterday"
+  );
+
+  const defaultRows = await rowsFor(plant.id);
+  assert.equal(defaultRows.length, 2);
+  assert.ok(
+    defaultRows.every((row) => row.body === "1 new person."),
+    `the default run counted the wrong day: ${defaultRows[0]?.body}`
+  );
+  ok(
+    "the production default digests YESTERDAY, complete — not a partial today"
+  );
+
+  await db.delete(persons).where(eq(persons.churchId, plant.id));
 
   // --------------------------------------------------------------------------
   // 7. THE TOGGLE TAKES EFFECT AT THE NEXT ENQUEUE.
@@ -412,7 +628,7 @@ async function main() {
     createdAt: new Date("2026-06-03T09:00:00.000Z"),
   });
 
-  await runDailyOversightDigest(plant.id, laterDay);
+  await digestFor(laterDay);
   assert.equal((await rowsFor(plant.id)).length, 0);
 
   // Flip it — no deploy, no cache to clear, no job to restart.
@@ -423,7 +639,7 @@ async function main() {
   });
   assert.equal(await isSharingActivityWithOversight(plant.id), true);
 
-  await runDailyOversightDigest(plant.id, laterDay);
+  await digestFor(laterDay);
   assert.equal((await rowsFor(plant.id)).length, 2);
 
   // ...and back off again, for the day after.
@@ -440,7 +656,7 @@ async function main() {
     lastName: "Nwosu",
     createdAt: new Date("2026-06-04T09:00:00.000Z"),
   });
-  await runDailyOversightDigest(plant.id, lastDay);
+  await digestFor(lastDay);
   assert.equal((await rowsFor(plant.id)).length, 2, "the flip-off was ignored");
   ok("a toggle flip is honoured by the very next enqueue, both directions");
 
@@ -490,11 +706,18 @@ async function main() {
   // Cleanup of the rows this run created, so a re-run on the same scratch DB
   // starts from the same place.
   // --------------------------------------------------------------------------
-  const seededChurches = [plant.id, orphan.id, otherPlant.id];
+  const seededChurches = [plant.id, orphan.id, otherPlant.id, foreignChurch.id];
   await db
     .delete(notifications)
     .where(inArray(notifications.churchId, seededChurches));
   await db.delete(persons).where(inArray(persons.churchId, seededChurches));
+  await db.delete(tasks).where(inArray(tasks.churchId, seededChurches));
+  await db
+    .delete(churchMeetings)
+    .where(inArray(churchMeetings.churchId, seededChurches));
+  await db
+    .delete(phaseTransitions)
+    .where(inArray(phaseTransitions.churchId, seededChurches));
   await db
     .delete(organizationInvitations)
     .where(

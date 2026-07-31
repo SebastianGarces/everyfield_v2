@@ -76,6 +76,39 @@
 -- column that no longer exists, and every oversight enqueue erroring. Revert
 -- the code first, or together.
 --
+-- DEPLOY ORDER — THE FORWARD HAZARD, WHICH HAPPENS ON EVERY DEPLOY
+--
+-- The rollback note above is the rare case. The ordinary one is this: between
+-- the moment these statements land and the moment the new code is serving,
+-- OLD instances are still up, and they break.
+--
+-- `getChurchPrivacySettings` (`src/lib/auth/access.ts`) is a bare
+-- `db.select()`. Drizzle does NOT emit `SELECT *` for that — it expands the
+-- schema it was compiled against into an explicit column list, so an instance
+-- running the pre-0028 build asks Postgres for `share_phase` and
+-- `share_digest`, which this migration has just dropped. Every call throws:
+--
+--   * `canAccessFeatureData(...)` for ANY of the six pull features, not just
+--     the oversight-activity one this migration is about — the projection is
+--     what fails, before the requested column is ever looked at;
+--   * therefore `/oversight/health`, via
+--     `src/lib/phase-engine/oversight/read.ts` → `gateNetworkInsights`, is the
+--     surface that visibly breaks, for oversight users only;
+--   * and `enqueue`'s oversight gate, which fails closed — no row is written,
+--     which is the correct direction, but it is a swallowed error rather than
+--     a decision.
+--
+-- Church-level roles are unaffected: `canAccessFeatureData` returns true for
+-- them before it reads anything.
+--
+-- Migrate as close to promotion as possible and accept a brief window (alpha
+-- scale, oversight users only, self-healing the moment the new build serves).
+-- If a future deploy must have NO window, this DDL has to be split in two
+-- releases the expand/contract way: ship code that no longer selects the
+-- dropped columns FIRST, then drop them in a later migration. That is a
+-- meaningful cost, and it is the reason to prefer adding a column over
+-- dropping one when a choice exists.
+--
 --   *** DO NOT EDIT src/db/migrations/meta/_journal.json. ***
 --
 -- Same reasoning as 0023-0026: the journal is the repository's list of
