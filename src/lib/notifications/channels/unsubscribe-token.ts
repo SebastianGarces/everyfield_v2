@@ -122,6 +122,10 @@ export class MissingUnsubscribeSecretError extends Error {
  * can also mint the links that dispatcher needs, instead of sending mail with a
  * dead opt-out. `UNSUBSCRIBE_TOKEN_SECRET` is still preferred: rotating the
  * opt-out capability should not require rotating the scheduler's credential.
+ *
+ * The throw is for the MINT path only. `verifyUnsubscribeToken` catches it and
+ * refuses the token instead, because its callers are public pages that must not
+ * turn a deployment fault into a 500 in front of a stranger.
  */
 export function unsubscribeTokenSecret(): string {
   const secret =
@@ -233,11 +237,21 @@ export interface VerifyUnsubscribeTokenOptions {
 /**
  * Open a token, or refuse it.
  *
- * NOTHING here throws for a bad token — a route that has to distinguish "this
- * threw" from "this returned false" gets that wrong eventually, and this is
- * the one surface where getting it wrong means mutating on an unverified
- * input. The only throw is `MissingUnsubscribeSecretError`, which is a
- * deployment fault rather than a request fault.
+ * NOTHING here throws — not for a bad token, and not for a bad DEPLOYMENT.
+ * A route that has to distinguish "this threw" from "this returned false" gets
+ * that wrong eventually, and this is the one surface where getting it wrong
+ * means mutating on an unverified input.
+ *
+ * That includes the missing-secret case, which is the asymmetry between this
+ * function and `mintUnsubscribeToken`. Minting FAILS CLOSED: an email must not
+ * go out carrying a dead opt-out link, and `deliverEmailGroup` already contains
+ * that throw as a transient delivery error that will be retried once the
+ * environment is fixed. Verifying DEGRADES: its callers are a public Server
+ * Component (`/unsubscribe`) and a public route handler, both reached with no
+ * session from a link in an inbox, and an unconfigured environment there must
+ * render the same refusal card every other bad token renders — not a 500 on a
+ * page a stranger was invited to click. A missing secret cannot open any token,
+ * so "malformed" is also the honest answer: nothing was verified.
  *
  * The category is re-validated against the code registry after decryption. A
  * token minted by a deploy that knew a category this one does not must not
@@ -248,7 +262,12 @@ export function verifyUnsubscribeToken(
   token: string,
   options: VerifyUnsubscribeTokenOptions = {}
 ): UnsubscribeTokenVerification {
-  const secret = options.secret ?? unsubscribeTokenSecret();
+  let secret: string;
+  try {
+    secret = options.secret ?? unsubscribeTokenSecret();
+  } catch {
+    return { valid: false, reason: "malformed" };
+  }
   const now = options.now ?? new Date();
 
   if (typeof token !== "string" || token.length === 0) {

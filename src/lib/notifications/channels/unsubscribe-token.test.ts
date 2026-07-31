@@ -224,3 +224,54 @@ test("the secret fails closed when the environment supplies neither variable", (
   process.env.CRON_SECRET = OTHER_SECRET;
   assert.equal(unsubscribeTokenSecret(), OTHER_SECRET);
 });
+
+test("verification REFUSES rather than throws when the environment has no secret", (t) => {
+  // The asymmetry that matters in production. Minting fails closed — an email
+  // must never go out with a dead opt-out link. Verifying is reached from a
+  // public URL with no session, so an unconfigured environment has to render
+  // the ordinary refusal card, not a 500 in front of whoever clicked the link
+  // in their inbox.
+  const previousDedicated = process.env.UNSUBSCRIBE_TOKEN_SECRET;
+  const previousCron = process.env.CRON_SECRET;
+  t.after(() => {
+    if (previousDedicated === undefined)
+      delete process.env.UNSUBSCRIBE_TOKEN_SECRET;
+    else process.env.UNSUBSCRIBE_TOKEN_SECRET = previousDedicated;
+    if (previousCron === undefined) delete process.env.CRON_SECRET;
+    else process.env.CRON_SECRET = previousCron;
+  });
+
+  // Mint a genuine token BEFORE unsetting, so what the assertions below see is
+  // a well-formed token failing only because the environment cannot open it.
+  const genuine = mint();
+
+  delete process.env.UNSUBSCRIBE_TOKEN_SECRET;
+  delete process.env.CRON_SECRET;
+
+  // The mint path still throws. That fail-closed choice is the point.
+  assert.throws(
+    () => mintUnsubscribeToken({ userId: USER, category: "tasks", now: NOW }),
+    MissingUnsubscribeSecretError
+  );
+
+  // The read path degrades, for every shape of input a public URL can carry.
+  for (const token of [genuine, "", "not-a-token", "a".repeat(200)]) {
+    const verified = verifyUnsubscribeToken(token, { now: NOW });
+    assert.equal(
+      verified.valid,
+      false,
+      "a missing secret must never verify anything"
+    );
+    assert.ok(!verified.valid);
+    assert.equal(verified.reason, "malformed");
+  }
+
+  // And an explicit secret still works while the environment is empty, so the
+  // degradation is scoped to the lookup and has not disabled verification.
+  const withSecret = verifyUnsubscribeToken(genuine, {
+    now: NOW,
+    secret: SECRET,
+  });
+  assert.ok(withSecret.valid);
+  assert.equal(withSecret.userId, USER);
+});

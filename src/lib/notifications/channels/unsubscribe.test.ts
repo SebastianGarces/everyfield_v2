@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { preferenceOwnerFromUnsubscribeToken } from "../preferences";
-import { unsubscribeWriteQuery } from "./unsubscribe";
+import {
+  describeUnsubscribeSubject,
+  unsubscribeWriteQuery,
+} from "./unsubscribe";
 import { mintUnsubscribeToken } from "./unsubscribe-token";
 
 // ============================================================================
@@ -160,4 +163,32 @@ test("an expired token yields no owner either", () => {
   assert.equal(resolved.ok, false);
   assert.ok(!resolved.ok);
   assert.equal(resolved.reason, "expired");
+});
+
+test("an unconfigured environment refuses the token instead of throwing at the page", async (t) => {
+  // `/unsubscribe` is a Server Component rendered for a stranger with no
+  // session. If a missing secret escaped as an exception it would be an HTTP
+  // 500 on a public page rather than the refusal card, so the read path has to
+  // resolve — never reject — when the deployment forgot the variable.
+  const previousDedicated = process.env.UNSUBSCRIBE_TOKEN_SECRET;
+  const previousCron = process.env.CRON_SECRET;
+  t.after(() => {
+    if (previousDedicated === undefined)
+      delete process.env.UNSUBSCRIBE_TOKEN_SECRET;
+    else process.env.UNSUBSCRIBE_TOKEN_SECRET = previousDedicated;
+    if (previousCron === undefined) delete process.env.CRON_SECRET;
+    else process.env.CRON_SECRET = previousCron;
+  });
+
+  delete process.env.UNSUBSCRIBE_TOKEN_SECRET;
+  delete process.env.CRON_SECRET;
+
+  // Both arms of the fallback are empty, and both of these reject before any
+  // query is built — which is also why this test needs no database.
+  for (const token of ["", "not-a-token"]) {
+    const result = await describeUnsubscribeSubject(token);
+    assert.equal(result.status, "rejected");
+    assert.ok(result.status === "rejected");
+    assert.equal(result.reason, "malformed");
+  }
 });
