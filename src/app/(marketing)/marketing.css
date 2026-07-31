@@ -218,12 +218,17 @@ html:has(.marketing) {
 .marketing .lp-sec {
   padding: clamp(56px, 8vw, 88px) clamp(20px, 5vw, 56px);
 }
+.marketing {
+  /* The visual container scales with the viewport (Intercom runs ~77vw on
+     large screens); prose keeps its measure via max-widths on the type. */
+  --vis: min(1560px, calc(100vw - clamp(48px, 10vw, 400px)));
+}
 .marketing .lp-inner {
   max-width: 980px;
   margin: 0 auto;
 }
 .marketing .lp-inner.wide {
-  max-width: 1224px;
+  max-width: var(--vis);
 }
 
 /* ---------- hero — c1 painting under a cream veil ---------- */
@@ -266,7 +271,7 @@ html:has(.marketing) {
   margin-top: 48px;
   margin-bottom: -64px;
   position: relative;
-  width: min(88vw, 1200px);
+  width: var(--vis);
   left: 50%;
   transform: translateX(-50%);
 }
@@ -350,17 +355,79 @@ html:has(.marketing) {
   }
 }
 
-/* ---------- interactive · feature switcher ---------- */
+/* ---------- interactive · feature switcher ----------
+   Tab strip on top, the full-width panel below — the visual gets the whole
+   container (Intercom's tab-section grammar). */
 .marketing .fswitch {
-  display: grid;
-  grid-template-columns: 1.6fr 1fr;
-  gap: clamp(28px, 4vw, 56px);
-  align-items: center;
   margin-top: 36px;
 }
-.marketing .fswitch-shot {
+.marketing .fswitch-tabs {
+  display: flex;
+  border-block: 1px solid var(--hairline);
+}
+.marketing .fs-tab {
+  flex: 1;
+  text-align: start;
+  background: none;
+  border: 0;
+  border-inline-start: 1px solid var(--hairline);
+  font-family: var(--display);
+  font-weight: 500;
+  font-size: 17px;
+  letter-spacing: -0.01em;
+  color: var(--text-2);
+  padding: 16px 20px;
   position: relative;
-  min-height: 480px;
+  cursor: pointer;
+  transition:
+    background 150ms var(--ease),
+    color 150ms var(--ease);
+}
+.marketing .fs-tab:first-child {
+  border-inline-start: 0;
+}
+.marketing .fs-tab::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: transparent;
+  transition: background 150ms var(--ease);
+}
+.marketing .fs-tab:hover {
+  color: var(--ink);
+}
+.marketing .fs-tab.active {
+  color: var(--ink);
+  background: rgba(24, 29, 25, 0.045);
+}
+.marketing .fs-tab.active::before {
+  background: var(--green);
+}
+.marketing .fs-desc {
+  font-family: var(--serif);
+  font-size: 16.5px;
+  color: var(--text-2);
+  max-width: 64ch;
+  margin: 18px 0 22px;
+  min-height: 2.6em;
+}
+.marketing .fswitch-shot {
+  display: none;
+  position: relative;
+  background-position: center;
+  background-size: cover;
+}
+.marketing .fswitch-shot.active {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(28px, 3.5vw, 64px);
+}
+.marketing .fswitch-shot picture {
+  max-width: min(1240px, 84%);
 }
 .marketing .fswitch-shot::before,
 .marketing .fstack-shot::before,
@@ -386,73 +453,6 @@ html:has(.marketing) {
   height: 8px;
   background: var(--green);
 }
-.marketing .fswitch-list {
-  display: flex;
-  flex-direction: column;
-}
-.marketing .fs-item {
-  text-align: start;
-  background: none;
-  border: 0;
-  border-top: 1px solid var(--hairline);
-  padding: 18px 20px;
-  cursor: pointer;
-  position: relative;
-  transition: background 150ms var(--ease);
-}
-.marketing .fs-item::before {
-  content: "";
-  position: absolute;
-  top: -1px;
-  left: 0;
-  right: 0;
-  height: 3px;
-  background: transparent;
-  transition: background 150ms var(--ease);
-}
-.marketing .fs-item.active {
-  background: rgba(24, 29, 25, 0.045);
-}
-.marketing .fs-item.active::before {
-  background: var(--green);
-}
-.marketing .fs-item .t {
-  font-family: var(--display);
-  font-weight: 600;
-  font-size: 17px;
-  letter-spacing: -0.01em;
-  color: var(--ink);
-}
-.marketing .fs-item .d {
-  font-family: var(--serif);
-  font-size: 15px;
-  color: var(--text-2);
-  line-height: 1.55;
-  margin-top: 6px;
-  display: none;
-}
-.marketing .fs-item.active .d {
-  display: block;
-}
-.marketing .fs-item:hover .t {
-  color: var(--field);
-}
-.marketing .fs-item.active:hover .t {
-  color: var(--ink);
-}
-.marketing .shot-view {
-  display: none;
-}
-.marketing .shot-view.active {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  min-height: 480px;
-  padding: clamp(18px, 2.5vw, 32px);
-  background-position: center;
-  background-size: cover;
-}
-
 /* mobile: stacked story sections instead of tabs */
 .marketing .fswitch-stack {
   display: none;
@@ -580,11 +580,11 @@ html:has(.marketing) {
   position: relative;
 }
 .marketing .pshot picture {
-  max-width: 880px;
+  max-width: min(1280px, 88%);
 }
 /* full-bleed beats: the visual escapes the container toward the viewport edge */
 .marketing .pshot.bleed {
-  width: min(94vw, 1360px);
+  width: min(96vw, 1760px);
   left: 50%;
   transform: translateX(-50%);
 }

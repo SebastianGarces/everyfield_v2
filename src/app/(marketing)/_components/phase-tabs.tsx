@@ -84,7 +84,7 @@ const PHASES: readonly Phase[] = [
     ],
     desktop: {
       src: "/marketing/shots/pt-launch-team.webp",
-      width: 1185,
+      width: 1760,
       height: 810,
     },
     mobile: {
@@ -107,7 +107,7 @@ const PHASES: readonly Phase[] = [
     ],
     desktop: {
       src: "/marketing/shots/pt-teams.webp",
-      width: 1155,
+      width: 2295,
       height: 695,
     },
     mobile: {
@@ -115,7 +115,7 @@ const PHASES: readonly Phase[] = [
       width: 578,
       height: 695,
     },
-    alt: "Ministry team cards with staffing bars — Senior Pastor, Launch Coordinator, Facilities, Assimilation.",
+    alt: "Eight ministry team cards with staffing bars and open roles — Senior Pastor through Children's Ministry.",
   },
   {
     key: "pre-launch",
@@ -158,15 +158,15 @@ const PHASES: readonly Phase[] = [
     ],
     desktop: {
       src: "/marketing/shots/pt-launch-day.webp",
-      width: 1560,
-      height: 355,
+      width: 2340,
+      height: 1200,
     },
     mobile: {
       src: "/marketing/shots/pt-launch-day-m.webp",
       width: 775,
       height: 355,
     },
-    alt: "Launch Sunday's cards: ~120 estimated, and the run sheet — 7:30 setup crew, 8:15 band call, 9:15 doors, 10:00 service.",
+    alt: "The Launch Sunday meeting page — in 28 days, ~120 estimated, and the run sheet: 7:30 setup crew, 8:15 band call, 9:15 doors, 10:00 service.",
   },
   {
     key: "beyond",
