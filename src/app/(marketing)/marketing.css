@@ -1,0 +1,1096 @@
+/* ============================================================
+   EVERYFIELD · MARKETING SURFACE — direction: SHARP
+   Source of truth: DESIGN.md (repo root) + docs/design-catalog.html.
+   Scoped under .marketing so none of it leaks into the app.
+   ============================================================ */
+
+.marketing {
+  /* BRAND · 3 */
+  --green: #1ce362;
+  --ink: #181d19;
+  --cream: #fbf8ea;
+
+  /* DERIVED */
+  --card: #fffef6;
+  --text-2: #4e584f;
+  --mute: #616b62;
+  --hairline: rgba(24, 29, 25, 0.12);
+  --dark-text: #fbf8ea;
+  --dark-text-2: rgba(251, 248, 234, 0.64);
+  --hairline-dark: rgba(251, 248, 234, 0.14);
+  --field: #0b7a3f; /* green's text voice on light · 5.2:1 */
+  --danger: #b4432f;
+  --edge: rgba(24, 29, 25, 0.3);
+
+  --display: var(--font-outfit), "DM Sans", sans-serif;
+  --serif: var(--font-newsreader), Georgia, serif;
+  --sans: var(--font-dm-sans), -apple-system, "Segoe UI", sans-serif;
+  --mono: var(--font-dm-mono), "SF Mono", Menlo, monospace;
+
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--ink);
+  background: var(--cream);
+}
+
+html:has(.marketing) {
+  scroll-behavior: smooth;
+}
+
+.marketing a {
+  color: var(--field);
+  text-decoration: none;
+}
+.marketing a:hover {
+  text-decoration: underline;
+}
+.marketing :focus-visible {
+  outline: 2px solid var(--field);
+  outline-offset: 2px;
+}
+.marketing .logo {
+  fill: currentColor;
+  display: block;
+}
+
+/* ---------- type ---------- */
+.marketing .lp-hero-h {
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: clamp(46px, 5.8vw, 80px);
+  line-height: 1;
+  letter-spacing: -0.03em;
+  text-wrap: balance;
+}
+.marketing .lp-h2 {
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: clamp(30px, 3.8vw, 46px);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  max-width: 26ch;
+  text-wrap: balance;
+}
+.marketing .lp-h3 {
+  font-family: var(--display);
+  font-weight: 500;
+  font-size: 21px;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+  max-width: 26ch;
+}
+.marketing .lp-body {
+  font-family: var(--serif);
+  font-size: 17.5px;
+  line-height: 1.6;
+  max-width: 56ch;
+  margin-top: 16px;
+  color: var(--text-2);
+}
+
+/* ---------- the registration marker ---------- */
+.marketing .marker {
+  display: inline-block;
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: 12.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--mute);
+  padding-inline-start: 19px;
+  position: relative;
+}
+.marketing .marker::after {
+  content: "";
+  position: absolute;
+  inset-inline-start: 0;
+  top: 50%;
+  transform: translateY(-55%);
+  width: 9px;
+  height: 9px;
+  background: var(--green);
+}
+.marketing .on-ink .marker {
+  color: var(--dark-text-2);
+}
+.marketing .on-ink .marker::after {
+  background: var(--cream);
+} /* never green on ink */
+
+/* ---------- buttons ---------- */
+.marketing .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--sans);
+  font-weight: 500;
+  font-size: 15px;
+  border: 0;
+  cursor: pointer;
+  text-decoration: none;
+  border-radius: 0;
+  padding: 13px 24px;
+  transition:
+    background 150ms var(--ease),
+    color 150ms var(--ease);
+}
+.marketing .btn:hover {
+  text-decoration: none;
+}
+.marketing .btn.primary {
+  background: var(--ink);
+  color: var(--cream);
+}
+.marketing .btn.primary:hover {
+  background: #000;
+}
+.marketing .btn.ghost {
+  background: none;
+  border: 1px solid var(--ink);
+  color: var(--ink);
+  padding: 12px 22px;
+}
+.marketing .btn.ghost::after {
+  content: "→";
+}
+.marketing .btn.ghost:hover {
+  background: var(--ink);
+  color: var(--cream);
+}
+.marketing .on-ink .btn.primary {
+  background: var(--cream);
+  color: var(--ink);
+} /* no green-on-ink adjacency */
+
+/* ---------- nav ---------- */
+.marketing .lp-nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 14px clamp(20px, 4vw, 40px);
+  transition:
+    background 220ms var(--ease),
+    box-shadow 220ms var(--ease);
+}
+.marketing .lp-nav.scrolled {
+  background: var(--cream);
+  box-shadow: 0 1px 0 var(--ink);
+}
+.marketing .lp-nav .logo {
+  height: 20px;
+  aspect-ratio: 1243 / 212;
+  color: var(--ink);
+}
+.marketing .lp-nav .links {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+.marketing .lp-nav .links a {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+.marketing .lp-nav .links a:hover {
+  color: var(--ink);
+  text-decoration: none;
+}
+.marketing .lp-nav .btn {
+  padding: 10px 18px;
+  font-size: 14px;
+}
+@media (max-width: 800px) {
+  .marketing .lp-nav .links {
+    display: none;
+  }
+}
+
+/* ---------- sections ---------- */
+.marketing .lp-sec {
+  padding: clamp(56px, 8vw, 88px) clamp(20px, 5vw, 56px);
+}
+.marketing .lp-inner {
+  max-width: 980px;
+  margin: 0 auto;
+}
+
+/* ---------- hero — c1 painting under a cream veil ---------- */
+.marketing .lp-hero {
+  padding: 88px 16px 0;
+}
+.marketing .lp-hero .lp-hero-panel {
+  background:
+    linear-gradient(
+      to bottom,
+      rgba(251, 248, 234, 0.96),
+      rgba(251, 248, 234, 0.72) 46%,
+      rgba(251, 248, 234, 0.1)
+    ),
+    url("/marketing/c1-field.webp") center / cover;
+  padding: clamp(48px, 6vw, 76px) clamp(20px, 5vw, 56px) 56px;
+}
+.marketing .lp-hero-sub {
+  font-family: var(--serif);
+  font-size: 17.5px;
+  line-height: 1.6;
+  color: var(--text-2);
+  max-width: 54ch;
+  margin: 22px 0 0;
+}
+.marketing .lp-cta-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-top: 26px;
+  flex-wrap: wrap;
+}
+.marketing .lp-cta-note {
+  font-size: 13px;
+  margin-top: 12px;
+  color: var(--mute);
+}
+.marketing .hero-shot {
+  margin-top: 48px;
+}
+.marketing .hero-shot .app {
+  font-size: 13px;
+}
+
+/* ---------- product mocks — real frames, real words ---------- */
+.marketing .app {
+  width: 100%;
+  background: #fff;
+  overflow: hidden;
+  text-align: start;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.45;
+  box-shadow:
+    0 0 0 1px rgba(24, 29, 25, 0.55),
+    0 20px 40px -18px rgba(24, 29, 25, 0.5);
+}
+.marketing .app-frame {
+  display: grid;
+  grid-template-columns: 132px 1fr;
+  min-height: 372px;
+}
+.marketing .hero-shot .app-frame {
+  grid-template-columns: 156px 1fr;
+  min-height: 400px;
+}
+.marketing .app-side {
+  background: #f7f6ec;
+  border-inline-end: 1px solid rgba(24, 29, 25, 0.07);
+  padding: 12px 8px;
+}
+.marketing .app-brand {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 12px;
+  padding: 4px 8px 12px;
+}
+.marketing .app-brand i {
+  width: 10px;
+  height: 10px;
+  background: var(--green);
+}
+.marketing .app-nav {
+  display: grid;
+  gap: 2px;
+}
+.marketing .app-nav span {
+  padding: 6px 8px;
+  font-size: 11.5px;
+  color: var(--mute);
+}
+.marketing .app-nav span.on {
+  background: rgba(24, 29, 25, 0.06);
+  color: var(--ink);
+  font-weight: 600;
+}
+.marketing .app-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.marketing .app-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(24, 29, 25, 0.07);
+}
+.marketing .app-head .ttl {
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 13px;
+}
+.marketing .app-head .sp,
+.marketing .aprow .sp,
+.marketing .apcard .sp {
+  flex: 1;
+}
+.marketing .app-search {
+  font-size: 11px;
+  color: var(--mute);
+  border: 1px solid rgba(24, 29, 25, 0.12);
+  padding: 4px 9px;
+  min-width: 108px;
+}
+.marketing .app-btn {
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--green);
+  color: var(--ink);
+  padding: 5px 11px;
+}
+.marketing .app-body {
+  padding: 6px 14px 14px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.marketing .app-body .achart {
+  height: auto;
+  flex: 1;
+  min-height: 88px;
+}
+.marketing .app-body .akan {
+  flex: 1;
+}
+
+/* window variant — a focused screen, no sidebar (phase shots) */
+.marketing .appwin {
+  width: 100%;
+  background: #fff;
+  overflow: hidden;
+  text-align: start;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.45;
+  box-shadow:
+    0 0 0 1px rgba(24, 29, 25, 0.55),
+    0 20px 40px -18px rgba(24, 29, 25, 0.5);
+}
+.marketing .appwin-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  border-bottom: 1px solid rgba(24, 29, 25, 0.07);
+}
+.marketing .appwin-top .dot {
+  width: 8px;
+  height: 8px;
+  background: var(--green);
+  flex: none;
+}
+.marketing .appwin-top .ttl {
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 12px;
+}
+.marketing .appwin-top .meta {
+  margin-inline-start: auto;
+  font-size: 10.5px;
+  color: var(--mute);
+}
+.marketing .appwin-body {
+  padding: 10px 14px 14px;
+}
+
+/* mock primitives */
+.marketing .aprow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid rgba(24, 29, 25, 0.06);
+}
+.marketing .aprow:first-child {
+  border-top: 0;
+}
+.marketing .aprow .who {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.marketing .avtr {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  font-size: 9px;
+  font-weight: 700;
+  background: rgba(24, 29, 25, 0.08);
+}
+.marketing .avtr.g {
+  background: rgba(28, 227, 98, 0.22);
+}
+.marketing .avtr.c {
+  background: rgba(180, 67, 47, 0.14);
+}
+.marketing .aprow .nm,
+.marketing .apcard .nm {
+  font-weight: 600;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.marketing .apnext {
+  font-size: 10.5px;
+  color: var(--mute);
+  flex: none;
+  width: 104px;
+  text-align: end;
+}
+.marketing .apill {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 2px 8px;
+  background: rgba(24, 29, 25, 0.06);
+  color: var(--text-2);
+  flex: none;
+  white-space: nowrap;
+}
+.marketing .apill.ok {
+  background: rgba(28, 227, 98, 0.16);
+  color: var(--field); /* 4.9:1 on the tint — checked */
+}
+.marketing .apcard {
+  border: 1px solid rgba(24, 29, 25, 0.09);
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.marketing .apcard .sub {
+  font-size: 11px;
+  color: var(--mute);
+}
+.marketing .astats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 10px 0;
+}
+.marketing .astat {
+  border: 1px solid rgba(24, 29, 25, 0.09);
+  padding: 9px 11px;
+}
+.marketing .astat .k {
+  font-size: 9.5px;
+  color: var(--mute);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  display: block;
+}
+.marketing .astat .v {
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 17px;
+  letter-spacing: -0.01em;
+  display: block;
+  margin-top: 2px;
+}
+.marketing .astat .d {
+  font-size: 10px;
+  color: var(--field);
+  font-weight: 600;
+}
+.marketing .abar {
+  height: 6px;
+  background: rgba(24, 29, 25, 0.08);
+  overflow: hidden;
+  flex: 1;
+}
+.marketing .abar i {
+  display: block;
+  height: 100%;
+  background: var(--green);
+}
+.marketing .acheck {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 0;
+  border-top: 1px solid rgba(24, 29, 25, 0.06);
+  font-size: 12px;
+}
+.marketing .acheck:first-child {
+  border-top: 0;
+}
+.marketing .acheck i {
+  width: 14px;
+  height: 14px;
+  border: 1px solid rgba(24, 29, 25, 0.22);
+  flex: none;
+  display: grid;
+  place-items: center;
+}
+.marketing .acheck.done i {
+  background: var(--green);
+  border-color: var(--green);
+}
+.marketing .acheck.done i::after {
+  content: "✓";
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.marketing .acheck.done span {
+  color: var(--mute);
+}
+.marketing .acheck .apill {
+  margin-inline-start: auto;
+}
+.marketing .aptrain {
+  display: grid;
+  grid-template-columns: 84px 1fr 30px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid rgba(24, 29, 25, 0.06);
+  font-size: 11.5px;
+}
+.marketing .aptrain:first-child {
+  border-top: 0;
+}
+.marketing .aptrain .n {
+  font-size: 10.5px;
+  color: var(--mute);
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+.marketing .aprun {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  border-top: 1px solid rgba(24, 29, 25, 0.06);
+  font-size: 11.5px;
+}
+.marketing .aprun:first-child {
+  border-top: 0;
+}
+.marketing .aprun .tm {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--mute);
+  flex: none;
+  width: 34px;
+}
+.marketing .aprun .sp {
+  flex: 1;
+}
+.marketing .akan {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.marketing .akan .kcol {
+  background: rgba(24, 29, 25, 0.035);
+  padding: 8px;
+}
+.marketing .akan .kh {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mute);
+  display: flex;
+  justify-content: space-between;
+  padding: 0 2px 4px;
+}
+.marketing .akan .kcard {
+  background: #fff;
+  border: 1px solid rgba(24, 29, 25, 0.08);
+  padding: 7px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  margin-top: 6px;
+}
+.marketing .akan .kcard.dim {
+  color: var(--mute);
+  font-weight: 400;
+}
+.marketing .achart {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  height: 110px;
+  margin-top: 12px;
+}
+.marketing .achart .c {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 4px;
+  text-align: center;
+  height: 100%;
+}
+.marketing .achart .c i {
+  display: block;
+  background: rgba(24, 29, 25, 0.12);
+  width: 100%;
+  max-width: 64px;
+  margin: 0 auto;
+}
+.marketing .achart .c.on i {
+  background: var(--green);
+}
+.marketing .achart .c b {
+  font-size: 9px;
+  color: var(--mute);
+  font-weight: 500;
+}
+.marketing .amore {
+  font-size: 10.5px;
+  color: var(--mute);
+  padding-top: 8px;
+  margin-top: auto;
+}
+
+/* ---------- interactive · feature switcher ---------- */
+.marketing .fswitch {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: clamp(28px, 4vw, 56px);
+  align-items: center;
+  margin-top: 36px;
+}
+@media (max-width: 900px) {
+  .marketing .fswitch {
+    grid-template-columns: 1fr;
+  }
+}
+.marketing .fswitch-shot {
+  overflow: hidden;
+  background: url("/marketing/c1-field.webp") center / cover;
+  padding: clamp(18px, 2.5vw, 32px);
+  min-height: 500px;
+  display: flex;
+  align-items: center;
+  position: relative;
+}
+.marketing .fswitch-shot::before,
+.marketing .pshot::before {
+  content: "";
+  position: absolute;
+  top: 10px;
+  inset-inline-start: 10px;
+  width: 8px;
+  height: 8px;
+  background: var(--green);
+}
+.marketing .fswitch-shot::after,
+.marketing .pshot::after {
+  content: "";
+  position: absolute;
+  bottom: 10px;
+  inset-inline-end: 10px;
+  width: 8px;
+  height: 8px;
+  background: var(--green);
+}
+.marketing .fswitch-list {
+  display: flex;
+  flex-direction: column;
+}
+.marketing .fs-item {
+  text-align: start;
+  background: none;
+  border: 0;
+  border-top: 1px solid var(--hairline);
+  padding: 18px 20px;
+  cursor: pointer;
+  position: relative;
+  transition: background 150ms var(--ease);
+}
+.marketing .fs-item::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: transparent;
+  transition: background 150ms var(--ease);
+}
+.marketing .fs-item.active {
+  background: rgba(24, 29, 25, 0.045);
+}
+.marketing .fs-item.active::before {
+  background: var(--green);
+}
+.marketing .fs-item .t {
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 17px;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.marketing .fs-item .d {
+  font-family: var(--serif);
+  font-size: 15px;
+  color: var(--text-2);
+  line-height: 1.55;
+  margin-top: 6px;
+  display: none;
+}
+.marketing .fs-item.active .d {
+  display: block;
+}
+.marketing .fs-item:hover .t {
+  color: var(--field);
+}
+.marketing .fs-item.active:hover .t {
+  color: var(--ink);
+}
+.marketing .shot-view {
+  display: none;
+  width: 100%;
+}
+.marketing .shot-view.active {
+  display: block;
+}
+
+/* ---------- interactive · phase tabs ---------- */
+.marketing .ptabs {
+  margin-top: 32px;
+}
+.marketing .ptabs-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  border-bottom: 1px solid var(--hairline);
+}
+.marketing .ptab {
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  padding: 12px 14px 14px;
+  position: relative;
+}
+.marketing .ptab:hover {
+  color: var(--ink);
+}
+.marketing .ptab::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 3px;
+  background: transparent;
+}
+.marketing .ptab.active {
+  color: var(--ink);
+}
+.marketing .ptab.active::after {
+  background: var(--green);
+}
+.marketing .ppanel {
+  display: none;
+  padding: 32px 4px 0;
+}
+.marketing .ppanel.active {
+  display: grid;
+  grid-template-columns: 1fr 1.35fr;
+  gap: clamp(28px, 4vw, 48px);
+  align-items: center;
+}
+@media (max-width: 900px) {
+  .marketing .ppanel.active {
+    grid-template-columns: 1fr;
+  }
+}
+.marketing .ppanel .pdesc {
+  margin-top: 10px;
+  font-family: var(--serif);
+  font-size: 16px;
+  color: var(--text-2);
+  max-width: 52ch;
+}
+.marketing .ppanel ul {
+  list-style: none;
+  margin: 18px 0 0;
+  padding: 0;
+  max-width: 52ch;
+}
+.marketing .ppanel li {
+  padding: 10px 0 10px 24px;
+  position: relative;
+  font-size: 14.5px;
+  color: var(--text-2);
+  border-top: 1px solid var(--hairline);
+}
+.marketing .ppanel li:first-child {
+  border-top: 0;
+}
+.marketing .ppanel li::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 2px;
+  top: 19px;
+  width: 12px;
+  height: 3px;
+  background: var(--green);
+}
+.marketing .pshot {
+  overflow: hidden;
+  background: url("/marketing/c2-field.webp") center / cover;
+  padding: clamp(20px, 3vw, 36px);
+  min-height: 340px;
+  display: flex;
+  align-items: center;
+  position: relative;
+}
+
+/* ---------- engine — flat ink panel, no glow, no green on ink ---------- */
+.marketing .lp-engine {
+  padding-inline: 16px;
+}
+.marketing .lp-engine-panel {
+  background: var(--ink);
+  color: var(--dark-text);
+  padding: clamp(48px, 6vw, 64px) clamp(20px, 5vw, 56px);
+}
+.marketing .lp-engine .lp-body {
+  color: var(--dark-text-2);
+}
+.marketing .engine-list {
+  list-style: none;
+  margin: 26px 0 0;
+  padding: 0;
+  max-width: 52ch;
+}
+.marketing .engine-list li {
+  padding: 12px 0 12px 24px;
+  position: relative;
+  font-size: 15px;
+  color: var(--dark-text-2);
+  border-top: 1px solid var(--hairline-dark);
+}
+.marketing .engine-list li:first-child {
+  border-top: 0;
+}
+.marketing .engine-list li::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 2px;
+  top: 21px;
+  width: 12px;
+  height: 2px;
+  background: var(--cream);
+}
+.marketing .engine-pull {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 22px;
+  margin-top: 28px;
+  color: var(--cream);
+  max-width: 40ch;
+}
+
+/* ---------- art band ---------- */
+.marketing .lp-art {
+  padding-block: 12px;
+}
+.marketing .lp-art-panel {
+  overflow: hidden;
+}
+.marketing .lp-art-panel img {
+  display: block;
+  width: 100%;
+  height: auto;
+  outline: 1px solid rgba(0, 0, 0, 0.1);
+  outline-offset: -1px;
+}
+
+/* ---------- stats — lead cell is ink-on-green, never green-on-ink ---------- */
+.marketing .stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin-top: 36px;
+}
+@media (max-width: 700px) {
+  .marketing .stats {
+    grid-template-columns: 1fr;
+  }
+}
+.marketing .stat-cell {
+  padding: 30px 34px;
+}
+.marketing .stat-cell .n {
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 56px;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-variant-numeric: lining-nums;
+  margin: 0;
+}
+.marketing .stat-cell .lbl {
+  font-size: 14.5px;
+  margin: 12px 0 0;
+  line-height: 1.5;
+}
+.marketing .stat-cell.lead {
+  background: var(--green);
+}
+.marketing .stat-cell.lead .n {
+  color: var(--ink);
+}
+.marketing .stat-cell.lead .lbl {
+  color: rgba(24, 29, 25, 0.75);
+}
+.marketing .stat-cell.base {
+  background: var(--card);
+  box-shadow: 0 0 0 1px var(--edge);
+}
+.marketing .stat-cell.base .lbl {
+  color: var(--text-2);
+}
+
+/* ---------- cta — solid green panel, ink text, ink rectangle button ---------- */
+.marketing .lp-cta {
+  padding-inline: 16px;
+  text-align: center;
+}
+.marketing .lp-cta .lp-cta-panel {
+  background: var(--green);
+  padding: clamp(56px, 7vw, 72px) clamp(20px, 5vw, 56px);
+}
+.marketing .lp-cta .lp-h2,
+.marketing .lp-cta .lp-body {
+  margin-inline: auto;
+}
+.marketing .lp-cta .lp-body {
+  color: rgba(24, 29, 25, 0.75);
+  margin-bottom: 28px;
+}
+
+/* ---------- invite form ---------- */
+.marketing .invite-form {
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  gap: 12px;
+  flex-wrap: wrap;
+  max-width: 480px;
+  margin: 0 auto;
+}
+.marketing .invite-form label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.marketing .invite-form input[type="email"] {
+  font-family: var(--sans);
+  font-size: 16px;
+  color: var(--ink);
+  background: #fffef9;
+  border: 1px solid rgba(24, 29, 25, 0.45);
+  border-radius: 0;
+  padding: 11px 14px;
+  outline: none;
+  flex: 1;
+  min-width: 220px;
+  transition:
+    border-color 150ms var(--ease),
+    box-shadow 150ms var(--ease);
+}
+.marketing .invite-form input[type="email"]::placeholder {
+  color: var(--mute);
+}
+.marketing .invite-form input[type="email"]:focus {
+  border-color: var(--field);
+  box-shadow: 0 0 0 3px rgba(11, 122, 63, 0.2);
+}
+.marketing .invite-hp {
+  display: none;
+}
+.marketing .invite-note {
+  font-size: 13px;
+  margin-top: 14px;
+  color: rgba(24, 29, 25, 0.75);
+}
+.marketing .invite-error {
+  font-size: 13px;
+  margin-top: 14px;
+  color: var(--danger);
+  font-weight: 600;
+}
+.marketing .invite-done {
+  font-family: var(--serif);
+  font-size: 18px;
+  color: var(--ink);
+  max-width: 44ch;
+  margin: 0 auto;
+}
+
+/* ---------- footer ---------- */
+.marketing .lp-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 34px clamp(20px, 5vw, 56px);
+  background: var(--ink);
+  color: var(--dark-text-2);
+  font-size: 13.5px;
+  margin-top: clamp(56px, 8vw, 88px);
+}
+.marketing .lp-footer .logo {
+  height: 18px;
+  aspect-ratio: 1243 / 212;
+  color: var(--cream);
+}
+.marketing .lp-footer a {
+  color: var(--dark-text-2);
+}
+.marketing .lp-footer a:hover {
+  color: var(--cream);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:has(.marketing) {
+    scroll-behavior: auto;
+  }
+  .marketing * {
+    transition-duration: 0.01ms !important;
+  }
+}

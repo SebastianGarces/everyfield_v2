@@ -2,6 +2,20 @@
 
 > Path shorthand: `(dash)/` = `src/app/(dashboard)/`
 
+## Marketing (public)
+
+| Flow | Entrypoint | Trigger |
+|------|-----------|---------|
+| Landing page | `src/app/(marketing)/page.tsx` | Route `/` (authed users → `/dashboard` via `src/proxy.ts`) |
+| Invite request | `src/app/(marketing)/actions.ts:requestInviteAction()` | Landing CTA form → email to `ADMIN_EMAILS` |
+| SEO shell | `src/app/{robots,sitemap,manifest}.ts` + `src/app/icon.svg` | `/robots.txt`, `/sitemap.xml`, `/manifest.webmanifest` |
+
+**Primary modules:** `src/app/(marketing)/` (layout, page, `marketing.css` scoped under `.marketing`, `_components/`), `public/marketing/` (optimized WebP art)
+
+**Design authority:** `DESIGN.md` at repo root (sharp system, ruled 2026-07-30); footer links `/terms` + `/privacy` are delivered by #189.
+
+---
+
 ## Authentication
 
 | Flow | Entrypoint | Trigger |
