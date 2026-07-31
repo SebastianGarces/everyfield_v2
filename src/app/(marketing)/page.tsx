@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 
+import { Chip } from "./_components/chip";
 import { FeatureSwitcher } from "./_components/feature-switcher";
 import { InviteForm } from "./_components/invite-form";
 import { PhaseTabs } from "./_components/phase-tabs";
+import { Shot } from "./_components/shot";
 
 export const metadata: Metadata = {
   title: "EveryField — Your church plant, understood.",
@@ -39,15 +41,26 @@ export default function LandingPage() {
               networks and churches.
             </p>
             <div className="hero-shot">
-              <Image
-                className="shot-img"
-                src="/marketing/shots/dashboard.webp"
+              <Shot
+                desktop={{
+                  src: "/marketing/shots/hero.webp",
+                  width: 2400,
+                  height: 1333,
+                }}
+                mobile={{
+                  src: "/marketing/shots/hero-m.webp",
+                  width: 800,
+                  height: 1121,
+                }}
                 alt="The EveryField dashboard for Redemption Hill Church in pre-launch: core group of 61, 142 people in the pipeline, zero overdue tasks, and recent activity."
-                width={2880}
-                height={1800}
-                sizes="(max-width: 1012px) 100vw, 980px"
                 priority
               />
+              <Chip className="hero-chip-a" style={{ left: "13%", top: "16%" }}>
+                61 committed adults
+              </Chip>
+              <Chip className="hero-chip-b" style={{ right: "4%", top: "70%" }}>
+                28 days to launch Sunday
+              </Chip>
             </div>
           </div>
         </div>
@@ -69,7 +82,7 @@ export default function LandingPage() {
       </section>
 
       <section className="lp-sec" id="product">
-        <div className="lp-inner">
+        <div className="lp-inner wide">
           <h2 className="lp-h2">One place for the whole work.</h2>
           <FeatureSwitcher />
         </div>
@@ -113,7 +126,7 @@ export default function LandingPage() {
       </section>
 
       <section className="lp-sec">
-        <div className="lp-inner">
+        <div className="lp-inner wide">
           <h2 className="lp-h2">From calling to launch Sunday.</h2>
           <p className="lp-body" style={{ marginBottom: 32 }}>
             A proven path under the whole journey — and at every stop, the app

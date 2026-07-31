@@ -1,11 +1,33 @@
 "use client";
 
-import Image from "next/image";
 import { useState } from "react";
 
-const PHASES = [
+import { Chip } from "./chip";
+import { Shot, type ShotSource } from "./shot";
+
+type Phase = {
+  key: string;
+  num: string;
+  tab: string;
+  title: string;
+  description: string;
+  points: readonly string[];
+  desktop: ShotSource;
+  mobile?: ShotSource;
+  alt: string;
+  /** Full-bleed beat: the visual escapes the container to ~92vw. */
+  bleed?: boolean;
+  chip?: {
+    text: string;
+    style: React.CSSProperties;
+    mobileStyle?: React.CSSProperties;
+  };
+};
+
+const PHASES: readonly Phase[] = [
   {
     key: "discovery",
+    num: "0",
     tab: "Discovery",
     title: "Discern the calling before you bet the family on it.",
     description:
@@ -14,11 +36,21 @@ const PHASES = [
       "The wiki: the whole methodology, readable in order.",
       "Foundations workspace: your 4 Pillars, your vision, written down.",
     ],
-    shot: "/marketing/shots/wiki-discovery.webp",
-    alt: "A wiki chapter in EveryField titled 'Is Church Planting Your Calling?' with reading progress tracked in the sidebar.",
+    desktop: {
+      src: "/marketing/shots/pt-discovery.webp",
+      width: 2180,
+      height: 1150,
+    },
+    mobile: {
+      src: "/marketing/shots/pt-discovery-m.webp",
+      width: 520,
+      height: 760,
+    },
+    alt: "The wiki chapter 'Is Church Planting Your Calling?' with the Phase 0 reading list and reading progress in the sidebar.",
   },
   {
     key: "core-group",
+    num: "1",
     tab: "Core group",
     title: "Grow a room of committed people, not a list of maybes.",
     description:
@@ -27,11 +59,21 @@ const PHASES = [
       "People pipeline: contact → attended → committed.",
       "Vision meeting attendance, trend over trend.",
     ],
-    shot: "/marketing/shots/people-pipeline.webp",
-    alt: "The people pipeline board in EveryField: columns for prospect, attendee, following up, and interviewed, each with live counts.",
+    desktop: {
+      src: "/marketing/shots/pt-pipeline.webp",
+      width: 1740,
+      height: 1160,
+    },
+    mobile: {
+      src: "/marketing/shots/pt-pipeline-m.webp",
+      width: 960,
+      height: 1000,
+    },
+    alt: "Pipeline columns on the people board — 21 attendees and 38 in follow-up, the Riveras among them.",
   },
   {
     key: "launch-team",
+    num: "2",
     tab: "Launch team",
     title: "Commitment cards signed. A launch date on the wall.",
     description:
@@ -40,11 +82,21 @@ const PHASES = [
       "Commitment tracking against your 50-adult floor.",
       "Launch-date timeline with task templates unlocked.",
     ],
-    shot: "/marketing/shots/people-launch-team.webp",
-    alt: "The People screen filtered to core group, launch team, and leaders — the committed adults counted against the launch floor.",
+    desktop: {
+      src: "/marketing/shots/pt-launch-team.webp",
+      width: 1185,
+      height: 700,
+    },
+    mobile: {
+      src: "/marketing/shots/pt-launch-team-m.webp",
+      width: 622,
+      height: 770,
+    },
+    alt: "The People screen filtered to the committed — 61 total, Core Group badges on every card.",
   },
   {
     key: "training",
+    num: "3",
     tab: "Training",
     title: "Every team staffed, every member trained.",
     description:
@@ -53,11 +105,21 @@ const PHASES = [
       "Ministry team rosters and training completion.",
       "Meeting series for corporate and team-specific training.",
     ],
-    shot: "/marketing/shots/teams.webp",
-    alt: "The Ministry Teams screen in EveryField: eleven teams with leaders, staffing bars, and open roles at a glance.",
+    desktop: {
+      src: "/marketing/shots/pt-teams.webp",
+      width: 1155,
+      height: 695,
+    },
+    mobile: {
+      src: "/marketing/shots/pt-teams-m.webp",
+      width: 578,
+      height: 695,
+    },
+    alt: "Ministry team cards with staffing bars — Senior Pastor, Launch Coordinator, Facilities, Assimilation.",
   },
   {
     key: "pre-launch",
+    num: "4",
     tab: "Pre-launch",
     title: "Three weeks out. Nothing left to chance.",
     description:
@@ -66,11 +128,27 @@ const PHASES = [
       "Pre-launch checklist counting down to Sunday.",
       "Dry-run meetings with role assignments.",
     ],
-    shot: "/marketing/shots/launch-checklist.webp",
-    alt: "The Launch Sunday logistics checklist in EveryField: preparation progress at 4 of 8 ready, with materials and setup items ticking down.",
+    desktop: {
+      src: "/marketing/shots/pt-prelaunch.webp",
+      width: 2448,
+      height: 1513,
+    },
+    mobile: {
+      src: "/marketing/shots/pt-prelaunch-m.webp",
+      width: 912,
+      height: 445,
+    },
+    alt: "The Launch Sunday logistics checklist — preparation progress at 4 of 8 ready, promo cards and signage already struck through.",
+    bleed: true,
+    chip: {
+      text: "4 of 8 ready — and counting",
+      style: { left: "26%", top: "20%" },
+      mobileStyle: { left: 12, top: -14 },
+    },
   },
   {
     key: "launch-sunday",
+    num: "5",
     tab: "Launch Sunday",
     title: "One Sunday. Everything you built, public.",
     description: "Day-of execution and honest numbers afterward.",
@@ -78,75 +156,137 @@ const PHASES = [
       "Launch-day run sheet by team and hour.",
       "Attendance and follow-up capture, same day.",
     ],
-    shot: "/marketing/shots/launch-run-sheet.webp",
-    alt: "The Launch Sunday meeting in EveryField: date, location, expected attendance, and the run sheet — setup crew, band call, doors, service.",
+    desktop: {
+      src: "/marketing/shots/pt-launch-day.webp",
+      width: 1560,
+      height: 355,
+    },
+    mobile: {
+      src: "/marketing/shots/pt-launch-day-m.webp",
+      width: 775,
+      height: 355,
+    },
+    alt: "Launch Sunday's cards: ~120 estimated, and the run sheet — 7:30 setup crew, 8:15 band call, 9:15 doors, 10:00 service.",
   },
   {
     key: "beyond",
+    num: "6",
     tab: "Beyond",
     title: "From launch high to healthy rhythm.",
     description:
-      "The weeks after launch decide the years after launch — momentum stays visible.",
+      "The weeks after launch decide the years after launch — momentum stays visible. Trinity Grove launched six weeks ago; this is the other side.",
     points: [
       "Weekly health dashboard: worship, walk, work.",
       "Graduation: hand off to your long-term ChMS when ready.",
     ],
-    shot: "/marketing/shots/beyond-health.webp",
-    alt: "A post-launch dashboard in EveryField: weekly services completed with attendance above one hundred, week after week.",
+    desktop: {
+      src: "/marketing/shots/pt-beyond.webp",
+      width: 2448,
+      height: 1513,
+    },
+    mobile: {
+      src: "/marketing/shots/pt-beyond-m.webp",
+      width: 945,
+      height: 900,
+    },
+    alt: "Trinity Grove's post-launch dashboard: Sunday Gathering week after week — Week 6 completed with 112 attendees.",
+    bleed: true,
+    chip: {
+      text: "Week 6 · 112 in the room",
+      style: { right: "6%", top: "38%" },
+      mobileStyle: { right: 8, top: -14, left: "auto" },
+    },
   },
 ] as const;
 
-export function PhaseTabs() {
-  const [active, setActive] = useState<(typeof PHASES)[number]["key"]>(
-    PHASES[0].key
+function PhaseVisual({
+  phase,
+  isMobile,
+}: {
+  phase: Phase;
+  isMobile?: boolean;
+}) {
+  return (
+    <div className={phase.bleed && !isMobile ? "pshot bleed" : "pshot"}>
+      <Shot
+        desktop={isMobile ? (phase.mobile ?? phase.desktop) : phase.desktop}
+        mobile={isMobile ? undefined : phase.mobile}
+        alt={phase.alt}
+      />
+      {phase.chip ? (
+        <Chip
+          style={
+            isMobile
+              ? (phase.chip.mobileStyle ?? phase.chip.style)
+              : phase.chip.style
+          }
+        >
+          {phase.chip.text}
+        </Chip>
+      ) : null}
+    </div>
   );
+}
+
+export function PhaseTabs() {
+  const [active, setActive] = useState<string>(PHASES[0].key);
 
   return (
-    <div className="ptabs">
-      <div className="ptabs-strip" role="tablist" aria-label="Phases">
+    <>
+      {/* Desktop: tabs, one claim + one big visual per phase */}
+      <div className="ptabs">
+        <div className="ptabs-strip" role="tablist" aria-label="Phases">
+          {PHASES.map((phase) => (
+            <button
+              key={phase.key}
+              type="button"
+              role="tab"
+              aria-selected={phase.key === active}
+              className={
+                phase.key === active
+                  ? "ptab active cursor-pointer"
+                  : "ptab cursor-pointer"
+              }
+              onClick={() => setActive(phase.key)}
+            >
+              {phase.tab}
+            </button>
+          ))}
+        </div>
         {PHASES.map((phase) => (
-          <button
+          <div
             key={phase.key}
-            type="button"
-            role="tab"
-            aria-selected={phase.key === active}
-            className={
-              phase.key === active
-                ? "ptab active cursor-pointer"
-                : "ptab cursor-pointer"
-            }
-            onClick={() => setActive(phase.key)}
+            className={phase.key === active ? "ppanel active" : "ppanel"}
           >
-            {phase.tab}
-          </button>
+            <div className="ppanel-copy">
+              <div>
+                <h3 className="lp-h3">{phase.title}</h3>
+                <p className="pdesc">{phase.description}</p>
+              </div>
+              <ul>
+                {phase.points.map((point) => (
+                  <li key={point}>{point}</li>
+                ))}
+              </ul>
+            </div>
+            <PhaseVisual phase={phase} />
+          </div>
         ))}
       </div>
-      {PHASES.map((phase) => (
-        <div
-          key={phase.key}
-          className={phase.key === active ? "ppanel active" : "ppanel"}
-        >
-          <div>
+
+      {/* Mobile: the whole journey as a numbered vertical scroll */}
+      <div className="pjourney">
+        {PHASES.map((phase) => (
+          <article key={phase.key} className="pj-item">
+            <p className="marker">
+              Phase {phase.num} · {phase.tab}
+            </p>
             <h3 className="lp-h3">{phase.title}</h3>
             <p className="pdesc">{phase.description}</p>
-            <ul>
-              {phase.points.map((point) => (
-                <li key={point}>{point}</li>
-              ))}
-            </ul>
-          </div>
-          <div className="pshot">
-            <Image
-              className="shot-img"
-              src={phase.shot}
-              alt={phase.alt}
-              width={2880}
-              height={1800}
-              sizes="(max-width: 900px) 100vw, 520px"
-            />
-          </div>
-        </div>
-      ))}
-    </div>
+            <PhaseVisual phase={phase} isMobile />
+          </article>
+        ))}
+      </div>
+    </>
   );
 }
