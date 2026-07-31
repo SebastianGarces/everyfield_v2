@@ -147,7 +147,7 @@
 |------|-----------|---------|
 | In-app feed | `(dash)/notifications/page.tsx` → `feed.ts:loadNotificationFeedScreen()` | Route `/notifications` (`?filter=unread` for the unread tab) |
 | Load more | `(dash)/notifications/actions.ts:loadMoreNotificationsAction()` → `feed.ts:loadOlderNotifications()` | "Load more" in the feed |
-| Unread badge | `(dash)/layout.tsx` → `feed.ts:loadUnreadBadgeCount()` → `components/notifications/notification-bell.tsx` | Every dashboard route |
+| Unread badge | `(dash)/layout.tsx` → `(dash)/notification-badge.ts:loadUnreadBadgeCountSafely()` → `feed.ts:loadUnreadBadgeCount()` → `components/notifications/notification-bell.tsx` | Every dashboard route |
 | Mark one read | `(dash)/notifications/actions.ts:markNotificationReadAction()` | Row click / "Mark read" |
 | Mark all read | `(dash)/notifications/actions.ts:markAllNotificationsReadAction()` | Toolbar action |
 | Enqueue (no UI) | `src/lib/notifications/enqueue.ts:enqueue()` / `cancelByEntity()` | Feature callers |
@@ -165,6 +165,8 @@
 **Paging (N-008):** keyset, `(created_at, id)` — `listNotificationPage()` reads `limit + 1` and returns `{rows, nextCursor}`, so "is there another page" is known before the click. Page 1 is a prop; later pages are client state appended by id (a cursor is legitimate client state per data-patterns.md). The tab remounts the feed, so All and Unread never share a cursor.
 
 **Preferences at read time (N-005, ruled 2026-07-27):** a category disabled for `in_app` leaves the feed, the badge and the probe — `resolveInAppCategories()` (`preferences.ts`) is the allow-list, absence = coded default (so `digest` is out by default). Mark-all is bounded by the same list, so a hidden category keeps its unread state. Delivery rows are never touched by any of it.
+
+**Badge failure isolation (#227):** the badge is the one notifications read on EVERY dashboard route, so the layout never awaits it directly. `loadUnreadBadgeCountSafely()` degrades a throwing (or nonsense) count to 0 — `unstable_rethrow` first, so `redirect`/`notFound`/dynamic bailouts still escape — and the `await` sits inside a `<Suspense>`-wrapped `NotificationBellSlot`, so a notifications outage or stall costs the count, not the shell.
 
 **Empty states:** `hasAnyNotifications()` separates cold start ("no notifications yet") from "all caught up"; it shares the feed's visibility rules (allow-list included) so `hasAny === false` implies the feed is empty. Two states only — "all caught up" is reachable only under `?filter=unread`, since on the All tab an empty list and `hasAny` true are contradictory.
 
