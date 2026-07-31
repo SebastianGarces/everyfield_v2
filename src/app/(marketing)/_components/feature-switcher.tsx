@@ -1,8 +1,7 @@
 "use client";
 
+import Image from "next/image";
 import { useState } from "react";
-
-import { GivingShot, MeetingsShot, PeopleShot, TeamsShot } from "./app-mocks";
 
 const FEATURES = [
   {
@@ -11,7 +10,8 @@ const FEATURES = [
     description:
       "Every contact from first conversation to committed core group member — follow-ups, commitments, the 4 C's.",
     art: "/marketing/people.webp",
-    shot: <PeopleShot />,
+    shot: "/marketing/shots/people.webp",
+    alt: "The People screen in EveryField: a pipeline of 142 contacts with statuses, sources, and follow-up state on every card.",
   },
   {
     key: "meetings",
@@ -19,7 +19,8 @@ const FEATURES = [
     description:
       "Vision meetings, orientations, team nights — planned, run, and followed up, with attendance feeding your momentum picture.",
     art: "/marketing/meetings.webp",
-    shot: <MeetingsShot />,
+    shot: "/marketing/shots/meetings.webp",
+    alt: "The Meetings screen in EveryField: upcoming vision meetings, an orientation, a worship team night, and Launch Sunday with locations and countdowns.",
   },
   {
     key: "teams",
@@ -27,15 +28,17 @@ const FEATURES = [
     description:
       "Ministry teams staffed and trained; tasks tracked against the road to launch.",
     art: "/marketing/teams-tasks.webp",
-    shot: <TeamsShot />,
+    shot: "/marketing/shots/tasks.webp",
+    alt: "The Tasks screen in EveryField: this week's follow-ups and launch prep, prioritized, with due dates and pastoral notes.",
   },
   {
-    key: "giving",
-    title: "Giving",
+    key: "wiki",
+    title: "Wiki",
     description:
-      "Commitments, trends, and what launch actually costs. Aggregate only — never transactions.",
+      "The whole planting methodology, readable in order — and the app knows which chapter your plant is living in right now.",
     art: "/marketing/giving.webp",
-    shot: <GivingShot />,
+    shot: "/marketing/shots/wiki.webp",
+    alt: "The Wiki in EveryField: the full launch playbook organized by phase, with a journey tracker showing the plant currently in pre-launch.",
   },
 ] as const;
 
@@ -58,7 +61,14 @@ export function FeatureSwitcher() {
               feature.key === active ? "shot-view active" : "shot-view"
             }
           >
-            {feature.shot}
+            <Image
+              className="shot-img"
+              src={feature.shot}
+              alt={feature.alt}
+              width={2880}
+              height={1800}
+              sizes="(max-width: 900px) 100vw, 560px"
+            />
           </div>
         ))}
       </div>
