@@ -222,6 +222,9 @@ html:has(.marketing) {
   max-width: 980px;
   margin: 0 auto;
 }
+.marketing .lp-inner.wide {
+  max-width: 1224px;
+}
 
 /* ---------- hero — c1 painting under a cream veil ---------- */
 .marketing .lp-hero {
@@ -236,7 +239,7 @@ html:has(.marketing) {
       rgba(251, 248, 234, 0.1)
     ),
     url("/marketing/c1-field.webp") center / cover;
-  padding: clamp(48px, 6vw, 76px) clamp(20px, 5vw, 56px) 56px;
+  padding: clamp(48px, 6vw, 76px) clamp(20px, 5vw, 56px) 0;
 }
 .marketing .lp-hero-sub {
   font-family: var(--serif);
@@ -258,8 +261,28 @@ html:has(.marketing) {
   margin-top: 12px;
   color: var(--mute);
 }
+/* the shot runs wider than the copy column and bleeds past the panel edge */
 .marketing .hero-shot {
   margin-top: 48px;
+  margin-bottom: -64px;
+  position: relative;
+  width: min(88vw, 1200px);
+  left: 50%;
+  transform: translateX(-50%);
+}
+.marketing .lp-hero {
+  margin-bottom: 64px;
+}
+@media (max-width: 899px) {
+  .marketing .hero-shot {
+    width: 100%;
+    left: auto;
+    transform: none;
+    margin-bottom: -40px;
+  }
+  .marketing .lp-hero {
+    margin-bottom: 40px;
+  }
 }
 /* ---------- product shots — the real app standing on the painting ---------- */
 .marketing .shot-img {
@@ -270,33 +293,81 @@ html:has(.marketing) {
     0 0 0 1px rgba(24, 29, 25, 0.55),
     0 20px 40px -18px rgba(24, 29, 25, 0.5);
 }
+.marketing picture {
+  display: block;
+  width: 100%;
+}
+
+/* ---------- chips — the claim sits ON the visual ---------- */
+.marketing .chip {
+  position: absolute;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  background: var(--ink);
+  color: var(--cream);
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  padding: 9px 13px;
+  box-shadow: 0 12px 28px -14px rgba(24, 29, 25, 0.6);
+  opacity: 0;
+  transform: translateY(8px);
+  transition:
+    opacity 420ms var(--ease),
+    transform 420ms var(--ease);
+}
+.marketing .chip.chip-in {
+  opacity: 1;
+  transform: none;
+}
+.marketing .chip .chip-sq {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  background: var(--green);
+}
+.marketing .hero-chip-b {
+  transition-delay: 140ms;
+}
+@media (max-width: 899px) {
+  .marketing .hero-chip-a {
+    display: none;
+  }
+  .marketing .hero-chip-b {
+    top: 25% !important;
+    right: 8px !important;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .marketing .chip {
+    opacity: 1;
+    transform: none;
+  }
+}
 
 /* ---------- interactive · feature switcher ---------- */
 .marketing .fswitch {
   display: grid;
-  grid-template-columns: 1.5fr 1fr;
+  grid-template-columns: 1.6fr 1fr;
   gap: clamp(28px, 4vw, 56px);
   align-items: center;
   margin-top: 36px;
 }
-@media (max-width: 900px) {
-  .marketing .fswitch {
-    grid-template-columns: 1fr;
-  }
-}
 .marketing .fswitch-shot {
-  overflow: hidden;
-  background: url("/marketing/c1-field.webp") center / cover;
-  padding: clamp(18px, 2.5vw, 32px);
-  min-height: 500px;
-  display: flex;
-  align-items: center;
   position: relative;
+  min-height: 480px;
 }
 .marketing .fswitch-shot::before,
+.marketing .fstack-shot::before,
 .marketing .pshot::before {
   content: "";
   position: absolute;
+  z-index: 1;
   top: 10px;
   inset-inline-start: 10px;
   width: 8px;
@@ -304,9 +375,11 @@ html:has(.marketing) {
   background: var(--green);
 }
 .marketing .fswitch-shot::after,
+.marketing .fstack-shot::after,
 .marketing .pshot::after {
   content: "";
   position: absolute;
+  z-index: 1;
   bottom: 10px;
   inset-inline-end: 10px;
   width: 8px;
@@ -369,10 +442,46 @@ html:has(.marketing) {
 }
 .marketing .shot-view {
   display: none;
-  width: 100%;
 }
 .marketing .shot-view.active {
-  display: block;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 480px;
+  padding: clamp(18px, 2.5vw, 32px);
+  background-position: center;
+  background-size: cover;
+}
+
+/* mobile: stacked story sections instead of tabs */
+.marketing .fswitch-stack {
+  display: none;
+}
+.marketing .fstack-item {
+  margin-top: 36px;
+}
+.marketing .fstack-shot {
+  position: relative;
+  padding: 16px;
+  background-position: center;
+  background-size: cover;
+  margin-bottom: 18px;
+}
+.marketing .fstack-d {
+  font-family: var(--serif);
+  font-size: 15.5px;
+  color: var(--text-2);
+  line-height: 1.55;
+  margin-top: 8px;
+  max-width: 52ch;
+}
+@media (max-width: 899px) {
+  .marketing .fswitch {
+    display: none;
+  }
+  .marketing .fswitch-stack {
+    display: block;
+  }
 }
 
 /* ---------- interactive · phase tabs ---------- */
@@ -418,43 +527,42 @@ html:has(.marketing) {
 }
 .marketing .ppanel {
   display: none;
-  padding: 32px 4px 0;
+  padding: 36px 4px 0;
 }
 .marketing .ppanel.active {
+  display: block;
+}
+.marketing .ppanel-copy {
   display: grid;
-  grid-template-columns: 1fr 1.35fr;
-  gap: clamp(28px, 4vw, 48px);
-  align-items: center;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 24px clamp(36px, 5vw, 72px);
+  align-items: start;
+  margin-bottom: 28px;
 }
-@media (max-width: 900px) {
-  .marketing .ppanel.active {
-    grid-template-columns: 1fr;
-  }
-}
-.marketing .ppanel .pdesc {
+.marketing .pdesc {
   margin-top: 10px;
   font-family: var(--serif);
   font-size: 16px;
   color: var(--text-2);
   max-width: 52ch;
 }
-.marketing .ppanel ul {
+.marketing .ppanel-copy ul {
   list-style: none;
-  margin: 18px 0 0;
+  margin: 4px 0 0;
   padding: 0;
   max-width: 52ch;
 }
-.marketing .ppanel li {
+.marketing .ppanel-copy li {
   padding: 10px 0 10px 24px;
   position: relative;
   font-size: 14.5px;
   color: var(--text-2);
   border-top: 1px solid var(--hairline);
 }
-.marketing .ppanel li:first-child {
+.marketing .ppanel-copy li:first-child {
   border-top: 0;
 }
-.marketing .ppanel li::before {
+.marketing .ppanel-copy li::before {
   content: "";
   position: absolute;
   inset-inline-start: 2px;
@@ -464,13 +572,65 @@ html:has(.marketing) {
   background: var(--green);
 }
 .marketing .pshot {
-  overflow: hidden;
   background: url("/marketing/c2-field.webp") center / cover;
   padding: clamp(20px, 3vw, 36px);
-  min-height: 340px;
   display: flex;
   align-items: center;
+  justify-content: center;
   position: relative;
+}
+.marketing .pshot picture {
+  max-width: 880px;
+}
+/* full-bleed beats: the visual escapes the container toward the viewport edge */
+.marketing .pshot.bleed {
+  width: min(94vw, 1360px);
+  left: 50%;
+  transform: translateX(-50%);
+}
+.marketing .pshot.bleed picture {
+  max-width: none;
+}
+
+/* mobile: the journey as a stacked, numbered vertical scroll */
+.marketing .pjourney {
+  display: none;
+}
+.marketing .pj-item {
+  position: relative;
+  padding: 26px 0 10px 22px;
+  border-inline-start: 1px solid var(--hairline);
+}
+.marketing .pj-item::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: -5px;
+  top: 33px;
+  width: 9px;
+  height: 9px;
+  background: var(--green);
+}
+.marketing .pj-item .marker {
+  padding-inline-start: 0;
+}
+.marketing .pj-item .marker::after {
+  display: none;
+}
+.marketing .pj-item .lp-h3 {
+  margin-top: 10px;
+}
+.marketing .pj-item .pshot {
+  margin-top: 16px;
+  padding: 14px;
+}
+@media (max-width: 899px) {
+  .marketing .ptabs {
+    display: none;
+  }
+  .marketing .pjourney {
+    display: block;
+    margin-top: 8px;
+  }
 }
 
 /* ---------- engine — flat ink panel, no glow, no green on ink ---------- */
