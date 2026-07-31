@@ -1,0 +1,74 @@
+-- F12 / OB-001 + OB-002 — planter onboarding: church location and a completion
+-- marker (issue #201).
+--
+-- Four nullable columns on "churches". Three are the location OB-002 asks for
+-- (city, state/region, country); the fourth is how the app knows whether the
+-- onboarding flow still owns a planter's dashboard.
+--
+-- WHY THREE COLUMNS AND NOT ONE ADDRESS. Each part is individually optional per
+-- the FRD: a planter who has a city but no settled region, or a region but no
+-- city, must be able to say so and move on. One "location" text field could not
+-- express that, and could not later be aggregated by region for SEND reporting.
+-- Nullable, no default, no CHECK — every combination including all-null is a
+-- legitimate state, because step 1's only required field is the name.
+--
+-- WHY THE BACKFILL IS THE LOAD-BEARING LINE. "onboarding_completed_at IS NULL"
+-- is read as "this church is still mid-onboarding", so without the UPDATE every
+-- church that already exists would be retro-enrolled into a flow it never saw:
+-- its planter would open /dashboard and find the onboarding wizard instead of
+-- their dashboard. Backfilling to created_at (not now()) records the truth —
+-- these churches finished the one-field creation flow at the moment they were
+-- created — and keeps the column usable as an "onboarded on" date later. Only
+-- churches created AFTER this migration, by the new flow, can hold NULL.
+--
+-- PURELY ADDITIVE OTHERWISE. Postgres 11+ stores ADD COLUMN with no default as
+-- catalog-only, so the three location columns do not rewrite the table. The
+-- backfill UPDATE does touch every row of "churches" once; that table has one
+-- row per church plant (tens, not millions, for the foreseeable alpha), so a
+-- full-table UPDATE is the cheap correct thing rather than a batched job. No
+-- index changes, no constraint changes, nothing outside "churches" is touched.
+--
+-- ROLLBACK — run the four drops, then the ledger delete, in ONE psql session:
+--
+--   ALTER TABLE "churches" DROP COLUMN IF EXISTS "onboarding_completed_at";
+--   ALTER TABLE "churches" DROP COLUMN IF EXISTS "country";
+--   ALTER TABLE "churches" DROP COLUMN IF EXISTS "state_region";
+--   ALTER TABLE "churches" DROP COLUMN IF EXISTS "city";
+--   DELETE FROM drizzle.__drizzle_migrations WHERE hash = '<0027 hash>';
+--
+-- Unconditionally clean: dropping a column cannot fail on data, and no other
+-- object depends on any of the four. What a rollback DISCARDS is any location a
+-- planter typed and every church's onboarding-completion marker. Re-applying
+-- re-creates the columns empty and re-runs the backfill, so completion state is
+-- reconstructed for every church that existed at that point — including ones
+-- that were genuinely mid-flow, which would be marked complete. That is the
+-- correct direction to lose state in: a planter who is falsely marked complete
+-- sees their dashboard (and can edit these fields in settings), whereas the
+-- other direction would trap a working church in a wizard.
+--
+-- Rolling back this migration WITHOUT reverting the application code leaves
+-- the dashboard selecting churches.onboarding_completed_at, which no longer
+-- exists. Revert the code first, or together.
+--
+--   *** DO NOT EDIT src/db/migrations/meta/_journal.json. ***
+--
+-- Same reasoning as 0023-0026: the journal is the repository's list of
+-- migrations, the `drizzle.__drizzle_migrations` ledger is the database's
+-- record of what ran, and only the ledger row is deleted. Removing the journal
+-- entry instead makes drizzle-kit forget the migration while the ledger still
+-- claims it applied, which is unrecoverable by restoring the entry.
+--
+-- `<0027 hash>` is the sha256 of THIS FILE, byte for byte, from the deployed
+-- commit:
+--
+--   shasum -a 256 src/db/migrations/0027_church_onboarding_location.sql
+--
+-- or identify the row by its `_journal.json` "when":
+--
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1785465979525;
+
+ALTER TABLE "churches" ADD COLUMN "city" varchar(255);--> statement-breakpoint
+ALTER TABLE "churches" ADD COLUMN "state_region" varchar(255);--> statement-breakpoint
+ALTER TABLE "churches" ADD COLUMN "country" varchar(255);--> statement-breakpoint
+ALTER TABLE "churches" ADD COLUMN "onboarding_completed_at" timestamp;--> statement-breakpoint
+UPDATE "churches" SET "onboarding_completed_at" = "created_at" WHERE "onboarding_completed_at" IS NULL;

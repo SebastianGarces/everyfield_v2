@@ -1,7 +1,11 @@
 import { getCurrentSession, getCurrentUserChurch } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { ChurchCreatedConfetti } from "./church-created-confetti";
-import { CreateChurchCard } from "./create-church-card";
+import { OnboardingFlow } from "@/components/onboarding/onboarding-flow";
+import {
+  resolveResumeStep,
+  shouldShowOnboarding,
+} from "@/lib/onboarding/steps";
 import {
   getDashboardMetrics,
   getRecentActivity,
@@ -30,15 +34,24 @@ export default async function DashboardPage({
     redirect("/oversight");
   }
 
-  const needsChurch = user?.role === "planter" && !user.churchId;
+  // F12 / OB-001: the onboarding flow is the primary dashboard content for a
+  // planter who has not finished setting up — whether that means no church at
+  // all, or a church created at step 1 and then abandoned. `getCurrentUserChurch`
+  // is request-cached, so reading it here does not cost the render below a query.
+  const churchDuringOnboarding = await getCurrentUserChurch();
 
-  if (needsChurch) {
+  if (
+    shouldShowOnboarding({
+      role: user?.role,
+      churchId: user?.churchId,
+      onboardingCompletedAt: churchDuringOnboarding?.onboardingCompletedAt,
+    })
+  ) {
     return (
       <div className="p-6">
-        {churchCreated === "true" && <ChurchCreatedConfetti />}
-        <div className="flex min-h-[60vh] items-center justify-center">
-          <CreateChurchCard />
-        </div>
+        <OnboardingFlow
+          initialStep={resolveResumeStep({ churchId: user?.churchId })}
+        />
       </div>
     );
   }

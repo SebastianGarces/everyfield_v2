@@ -190,6 +190,13 @@
       "when": 1785180246148,
       "tag": "0026_oversight_notification_privacy",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1785465979525,
+      "tag": "0027_church_onboarding_location",
+      "breakpoints": true
     }
   ]
 }

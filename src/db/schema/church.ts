@@ -13,6 +13,18 @@ export const churches = pgTable("churches", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: varchar("name", { length: 255 }).notNull(),
   currentPhase: integer("current_phase").default(0).notNull(),
+  // Onboarding (F12 / OB-002): where the plant is. Each part is INDIVIDUALLY
+  // optional — a planter who knows the city but not the region must not be
+  // blocked, so these are three nullable columns rather than one required
+  // address. Captured at step 1 and editable later in church settings.
+  city: varchar("city", { length: 255 }),
+  stateRegion: varchar("state_region", { length: 255 }),
+  country: varchar("country", { length: 255 }),
+  // Onboarding (F12 / OB-001): null = the onboarding flow still owns this
+  // planter's dashboard. Set once, when the planter finishes or skips out of
+  // the flow. Existing churches were backfilled to their created_at by
+  // migration 0027, so nobody is retro-enrolled into a flow they never saw.
+  onboardingCompletedAt: timestamp("onboarding_completed_at"),
   sendingChurchId: uuid("sending_church_id").references(
     () => sendingChurches.id
   ),

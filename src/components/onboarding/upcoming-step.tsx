@@ -1,0 +1,126 @@
+import { Button } from "@/components/ui/button";
+import {
+  isLastOnboardingStep,
+  type OnboardingStepId,
+} from "@/lib/onboarding/steps";
+
+/**
+ * The shell body for steps 2-4 (OB-001).
+ *
+ * These steps are declared, ordered, skippable and navigable, but they capture
+ * nothing yet — issues #202-#210 replace each body with its real form. Until
+ * then the step still tells the planter what it will ask, because a step that
+ * says nothing is worse than one that sets an expectation, and every control
+ * out of here is real: Back, skip forward, or leave for the dashboard.
+ *
+ * Nothing here writes, so skipping through from step 1 lands exactly today's
+ * outcome — a named church at phase 0 with no launch date (AC 4).
+ */
+const UPCOMING_COPY: Record<
+  Exclude<OnboardingStepId, "basics">,
+  { intro: string; bullets: string[] }
+> = {
+  leadership: {
+    intro:
+      "Next we'll confirm who leads this plant, so tasks and follow-ups land with a real person.",
+    bullets: [
+      "Whether you are the lead planter or pastor",
+      "What changes if someone else is",
+    ],
+  },
+  journey: {
+    intro:
+      "Then we'll ask where you are today, so the dashboard, wiki and guidance match your stage instead of assuming you are starting from zero.",
+    bullets: [
+      "Your target launch date, or “no date yet”",
+      "Which stage of the journey you are in",
+    ],
+  },
+  people: {
+    intro:
+      "Finally we'll help you bring in the people already walking with you — that is what turns the pipeline, meetings and follow-ups on.",
+    bullets: ["Import a list you already keep", "Or add people one at a time"],
+  },
+};
+
+export function UpcomingStep({
+  step,
+  onBack,
+  onSkip,
+  onFinish,
+  busy,
+}: {
+  step: Exclude<OnboardingStepId, "basics">;
+  /**
+   * `null` on step 2: step 1 has already created the church, so there is
+   * nothing to go back and re-submit. Changing the name or location afterwards
+   * belongs to church settings (OB-008), not to a form that would fail with
+   * "you already have a church".
+   */
+  onBack: (() => void) | null;
+  onSkip: () => void;
+  onFinish: () => void;
+  busy: boolean;
+}) {
+  const copy = UPCOMING_COPY[step];
+  const isLast = isLastOnboardingStep(step);
+
+  return (
+    <div className="space-y-6">
+      <div className="space-y-3">
+        <p className="text-sm">{copy.intro}</p>
+        <ul className="text-muted-foreground list-disc space-y-1 pl-5 text-sm">
+          {copy.bullets.map((bullet) => (
+            <li key={bullet}>{bullet}</li>
+          ))}
+        </ul>
+        <p className="text-muted-foreground bg-muted/50 rounded-md p-3 text-sm">
+          This step is not ready yet. Skip it for now — your church plant is
+          already saved, and we will ask again once it lands.
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        {onBack ? (
+          <Button
+            type="button"
+            variant="outline"
+            className="cursor-pointer"
+            onClick={onBack}
+            disabled={busy}
+          >
+            Back
+          </Button>
+        ) : (
+          <span aria-hidden="true" />
+        )}
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          {!isLast && (
+            <Button
+              type="button"
+              variant="ghost"
+              className="cursor-pointer"
+              onClick={onFinish}
+              disabled={busy}
+            >
+              Skip the rest
+            </Button>
+          )}
+          <Button
+            type="button"
+            className="cursor-pointer"
+            onClick={isLast ? onFinish : onSkip}
+            disabled={busy}
+          >
+            {isLast
+              ? busy
+                ? "Finishing…"
+                : "Go to my dashboard"
+              : "Skip for now"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
