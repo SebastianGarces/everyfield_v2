@@ -209,8 +209,10 @@ scroll. Product shots are full CSS app frames with real words standing on the
 field paintings — never gray-bar skeletons — until real screenshots exist.
 
 **Scope:** this document governs the marketing surface (`(marketing)` routes).
-The in-app UI shares the palette and the rectangle discipline but not the
-serif (Newsreader is never used in UI) or the giant display scale.
+The in-app UI takes exactly two brand colors — green (the signal) and ink
+(text and primary) — plus the rectangle discipline (ruled 2026-07-31: cream
+grounds are marketing-only; the app keeps its neutral surfaces). Newsreader
+and the giant display scale never appear in UI.
 
 ## Colors
 
@@ -489,10 +491,11 @@ Ruled 2026-07-27: **grounded shepherd**. The pitch:
 
 ## Assets
 
-- **Wordmark & mark:** SVG lockup (1243:212) is primary; the standalone mark
-  (293:212) serves avatars, favicons, small spaces. Renders via
-  `currentColor`: ink on cream/green, cream on ink. Functional sizes only —
-  decorative crops and mark-as-pattern are parked.
+- **Wordmark & mark:** SVG lockup (1218:234, 2026-07-31 revision) is primary;
+  the standalone mark (278:208) serves avatars, favicons, small spaces. Both
+  live in `src/components/logo.tsx` and render via `currentColor`: ink on
+  cream/green, cream on ink. Functional sizes only — decorative crops and
+  mark-as-pattern are parked.
 - **Art:** commissioned painterly landscapes in `docs/` — `c1-field.png`
   (dawn; hero backdrop), `c2-field.png` (the path; section panel + phase-tab
   backdrop), per-feature backdrops `people.png`, `meetings.png`,

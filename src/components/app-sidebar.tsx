@@ -1,6 +1,8 @@
 "use client";
 
-import { MessageSquare, Sprout } from "lucide-react";
+import { MessageSquare } from "lucide-react";
+
+import { Mark } from "@/components/logo";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import * as React from "react";
@@ -83,7 +85,7 @@ export function AppSidebar({
             <SidebarMenuButton size="lg" asChild>
               <Link href={navConfig.homeHref}>
                 <div className="bg-ef text-ef-dark flex aspect-square size-8 items-center justify-center rounded-lg">
-                  <Sprout className="size-4" />
+                  <Mark className="h-3.5 w-auto" />
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
                   <span className="truncate font-semibold">EveryField</span>

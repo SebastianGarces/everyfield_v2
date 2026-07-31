@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import { Lockup } from "./logo";
+import { Lockup } from "@/components/logo";
 
 export function MarketingNav() {
   const [scrolled, setScrolled] = useState(false);
@@ -18,7 +18,7 @@ export function MarketingNav() {
   return (
     <nav className={scrolled ? "lp-nav scrolled" : "lp-nav"}>
       <Link href="/" aria-label="EveryField home">
-        <Lockup />
+        <Lockup className="logo" />
       </Link>
       <div className="links">
         <a href="#product">How it works</a>
