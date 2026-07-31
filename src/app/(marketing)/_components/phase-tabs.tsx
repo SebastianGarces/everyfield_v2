@@ -60,16 +60,16 @@ const PHASES: readonly Phase[] = [
       "Vision meeting attendance, trend over trend.",
     ],
     desktop: {
-      src: "/marketing/shots/pt-pipeline.webp",
-      width: 1740,
-      height: 1160,
+      src: "/marketing/shots/pt-coregroup.webp",
+      width: 1720,
+      height: 680,
     },
     mobile: {
-      src: "/marketing/shots/pt-pipeline-m.webp",
-      width: 960,
-      height: 1000,
+      src: "/marketing/shots/pt-coregroup-m.webp",
+      width: 575,
+      height: 680,
     },
-    alt: "Pipeline columns on the people board — 21 attendees and 38 in follow-up, the Riveras among them.",
+    alt: "People cards moving through the pipeline — J. P. Holloway a new prospect from an event, Grace Lin in follow-up from the website.",
   },
   {
     key: "launch-team",
