@@ -75,7 +75,7 @@ export function UpcomingStep({
           ))}
         </ul>
         <p className="text-muted-foreground bg-muted/50 rounded-md p-3 text-sm">
-          This step is not ready yet. Skip it for now — your church plant is
+          This step is not ready yet. Continue for now — your church plant is
           already saved, and we will ask again once it lands.
         </p>
       </div>
@@ -104,7 +104,7 @@ export function UpcomingStep({
               onClick={onFinish}
               disabled={busy}
             >
-              Skip the rest
+              Finish setup later
             </Button>
           )}
           <Button
@@ -117,7 +117,7 @@ export function UpcomingStep({
               ? busy
                 ? "Finishing…"
                 : "Go to my dashboard"
-              : "Skip for now"}
+              : "Continue"}
           </Button>
         </div>
       </div>
