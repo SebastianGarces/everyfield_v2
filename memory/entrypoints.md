@@ -54,10 +54,15 @@
 |------|-----------|---------|
 | Layout auth guard | `(dash)/layout.tsx` | Any `/dashboard/*` route |
 | Dashboard page | `(dash)/dashboard/page.tsx` | Route `/dashboard` |
+| Onboarding flow (F12) | `(dash)/dashboard/page.tsx` → `components/onboarding/onboarding-flow.tsx` | Route `/dashboard` when `shouldShowOnboarding()` |
+| Onboarding step 1 (create church) | `(dash)/dashboard/actions.ts:createChurchBasics()` | Step 1 form submit |
+| Leave onboarding | `(dash)/dashboard/actions.ts:completeOnboarding()` | Finish / skip-the-rest |
 
-**Primary modules:** `(dash)/`, `src/components/`
+**Primary modules:** `(dash)/`, `src/components/`, `src/components/onboarding/`, `src/lib/onboarding/steps.ts`, `src/lib/validations/onboarding.ts`
 
-**Key deps:** `getCurrentSession()`, sidebar state cookie
+**Key deps:** `getCurrentSession()`, `getCurrentUserChurch()`, sidebar state cookie
+
+**Onboarding (F12 / OB-001, OB-002):** the flow — not a create-church card — is the primary dashboard content whenever `shouldShowOnboarding()` says so: a planter with no church, OR a planter whose church exists but whose `churches.onboarding_completed_at` is still null. The church is created at **step 1**, so abandonment leaves a valid named church and the planter resumes rather than losing it; steps 2-4 are updates (shells until #202-#210). `resolveResumeStep()` is the single place that decides where a returning planter lands. `completeOnboarding()` stamps `onboarding_completed_at` (idempotent `IS NULL` guard) and redirects to `/dashboard?churchCreated=true`; it means "done answering", not "answered everything" — which facts are missing stays derivable from the columns.
 
 ---
 

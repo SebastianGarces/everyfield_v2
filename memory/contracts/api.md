@@ -30,7 +30,7 @@
 
 **Login:** Zod validate → `checkRateLimit(identifier, ip, "login")` BEFORE user lookup (generic "Too many attempts") → find user → `verifyPassword` → `recordAttempt` on every outcome → session → redirect to form's `redirect` field if a local path, else `/dashboard`.
 
-**Register:** rate-limit → beta gate: when `BETA_INVITE_CODE` is set, requires valid invite code unless org-invitation bypass applies → entity per `accountType`: `planter` → NO church at signup (`church_id: null`; created later via `createChurch`, which also adds default `churchPrivacySettings`); `sending_church` → new SendingChurch; `network` → new SendingNetwork.
+**Register:** rate-limit → beta gate: when `BETA_INVITE_CODE` is set, requires valid invite code unless org-invitation bypass applies → entity per `accountType`: `planter` → NO church at signup (`church_id: null`; created later via onboarding step 1, `createChurchBasics`, which also adds default `churchPrivacySettings`); `sending_church` → new SendingChurch; `network` → new SendingNetwork.
 
 ---
 
@@ -48,7 +48,7 @@ All files under `src/app/(dashboard)/`. Default auth unless noted: `verifySessio
 - **`phase/signals-actions.ts`**: setManualSignal — Session + `requireChurchAccess`
 - **`feedback/actions.ts`**: submitFeedback (emails `FEEDBACK_EMAIL_TO`)
 - **`admin/feedback/actions.ts`**: updateFeedbackStatus — `requirePlatformAdmin` (ADMIN_EMAILS)
-- **`dashboard/actions.ts`**: `createChurch` (planter creates church post-signup)
+- **`dashboard/actions.ts`**: `createChurchBasics` (onboarding step 1 — creates the church + `churchPrivacySettings`, does NOT redirect), `completeOnboarding` (stamps `churches.onboarding_completed_at`, redirects to `/dashboard?churchCreated=true`) — both `verifySession` + planter-only
 - **`wiki/actions.ts`**: `searchWikiArticles(query)`
 
 Server-side `"use server"` services under `src/lib/phase-engine/`: `feedback/service.ts` (`upsertInsightFeedback`, `getInsightFeedbackForUser`), `signals/attestation-service.ts` (`upsertManualSignal`, `listManualSignals`, `getManualSignal`), `transitions/service.ts` (`transitionPhase`, `getPhaseReadiness`, helpers).
