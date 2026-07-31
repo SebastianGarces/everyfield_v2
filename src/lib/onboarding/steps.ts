@@ -6,11 +6,14 @@
  * planter still onboarding?" and "which step do they land on?" — are unit
  * testable without a browser or a DB.
  *
- * Steps 2-4 exist here as shell steps: they are declared, ordered, skippable
- * and navigable, but they capture nothing yet. Issues #202-#210 fill them in,
- * and when they do, `resolveResumeStep` is the one place that learns to send a
- * returning planter to the first step whose facts are still missing.
+ * Step 2 captures the leadership answer (OB-004). Steps 3-4 are still shells:
+ * declared, ordered, skippable and navigable, but capturing nothing yet.
+ * Issues #205-#210 fill them in, and when they do, `resolveResumeStep` is the
+ * one place that learns to send a returning planter to the first step whose
+ * facts are still missing.
  */
+
+import { leadershipAnswered, type ChurchLeadershipStatus } from "./leadership";
 
 export const ONBOARDING_STEP_IDS = [
   "basics",
@@ -125,15 +128,20 @@ export function shouldShowOnboarding(viewer: OnboardingViewer): boolean {
 /**
  * Where a planter lands when the flow renders.
  *
- * Today the only fact the flow can check is "does the church exist" — steps 2-4
- * capture nothing yet, so a returning planter resumes at step 2. As #202-#210
- * land, each adds its fact here (planter assigned, stage declared, people
- * added) and resumption gets finer-grained; nothing outside this function has
- * to change.
+ * One clause per fact the flow has learned to capture: the church row exists
+ * (step 1), the leadership question has been answered (step 2, OB-004). As
+ * #205-#210 land, each adds its fact here (stage declared, people added) and
+ * resumption gets finer-grained; nothing outside this function has to change.
+ *
+ * The leadership clause reads "answered", not "yes" — a planter who said No
+ * has answered step 2 and must resume past it (FRD AC 5). Getting back to it is
+ * the dashboard nudge's job, not this function's.
  */
 export function resolveResumeStep(viewer: {
   churchId: string | null | undefined;
+  leadershipStatus: ChurchLeadershipStatus | null | undefined;
 }): OnboardingStepId {
   if (!viewer.churchId) return "basics";
-  return "leadership";
+  if (!leadershipAnswered(viewer)) return "leadership";
+  return "journey";
 }

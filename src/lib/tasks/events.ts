@@ -1,5 +1,6 @@
 import { db } from "@/db";
 import {
+  churches,
   persons,
   tasks,
   users,
@@ -8,6 +9,7 @@ import {
 } from "@/db/schema";
 import { and, eq, isNull, ne } from "drizzle-orm";
 import { eventBus } from "@/lib/events/event-bus";
+import { churchHasNoPlanter } from "@/lib/onboarding/leadership";
 
 // ============================================================================
 // Event Types
@@ -191,12 +193,30 @@ export async function handleMeetingAttendanceFinalized(
     return;
   }
 
-  // Look up the planter (church creator) to assign tasks to them
-  const planter = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(and(eq(users.churchId, churchId), eq(users.role, "planter")))
+  // Who owns the follow-ups. Two questions, in order.
+  //
+  // 1. OB-004: did the church SAY it has no planter? A planter who answered
+  //    "no, someone else will lead this plant" is still the operating account —
+  //    role `planter`, linked by `church_id` — so the role lookup below would
+  //    happily assign them work they explicitly said is not theirs. The declared
+  //    answer wins over the inferred one. `null` (never asked, i.e. every church
+  //    created before this step) keeps the inference, so nothing is retro-orphaned.
+  const [church] = await db
+    .select({ leadershipStatus: churches.leadershipStatus })
+    .from(churches)
+    .where(eq(churches.id, churchId))
     .limit(1);
+
+  // 2. Otherwise: infer the planter from the role, as before.
+  const planter = churchHasNoPlanter({
+    leadershipStatus: church?.leadershipStatus,
+  })
+    ? []
+    : await db
+        .select({ id: users.id })
+        .from(users)
+        .where(and(eq(users.churchId, churchId), eq(users.role, "planter")))
+        .limit(1);
 
   const planterId = planter[0]?.id;
   if (!planterId) {

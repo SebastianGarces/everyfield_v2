@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { Church } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -16,7 +17,12 @@ import {
   previousOnboardingStep,
   type OnboardingStepId,
 } from "@/lib/onboarding/steps";
+import {
+  leadershipAnswerForStatus,
+  type ChurchLeadershipStatus,
+} from "@/lib/onboarding/leadership";
 import { ChurchBasicsStep } from "./church-basics-step";
+import { LeadershipStep } from "./leadership-step";
 import { OnboardingStepRail } from "./onboarding-step-rail";
 import { UpcomingStep } from "./upcoming-step";
 
@@ -33,8 +39,11 @@ import { UpcomingStep } from "./upcoming-step";
  */
 export function OnboardingFlow({
   initialStep,
+  leadershipStatus,
 }: {
   initialStep: OnboardingStepId;
+  /** The church's recorded OB-004 answer, so step 2 opens on it. */
+  leadershipStatus: ChurchLeadershipStatus | null | undefined;
 }) {
   const [step, setStep] = useState<OnboardingStepId>(initialStep);
   const [finishing, startFinishing] = useTransition();
@@ -134,6 +143,22 @@ export function OnboardingFlow({
 
           {step === "basics" ? (
             <ChurchBasicsStep onCreated={goForward} />
+          ) : step === "leadership" ? (
+            <LeadershipStep
+              initialAnswer={leadershipAnswerForStatus(leadershipStatus)}
+              onSaved={goForward}
+              secondary={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="cursor-pointer"
+                  onClick={finish}
+                  disabled={finishing}
+                >
+                  Finish setup later
+                </Button>
+              }
+            />
           ) : (
             <UpcomingStep
               step={step}
