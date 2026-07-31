@@ -116,7 +116,7 @@ const FEATURES: readonly Feature[] = [
       width: 450,
       height: 360,
       alt: "My Progress — track your reading progress across all wiki content.",
-      style: { left: "6%", bottom: "14%" },
+      style: { left: "3%", bottom: "10%" },
     },
   },
 ] as const;
