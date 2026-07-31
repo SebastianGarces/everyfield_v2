@@ -1,5 +1,6 @@
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 
 import { AppSidebar } from "@/components/app-sidebar";
 import { DashboardHeader, HeaderProvider } from "@/components/header";
@@ -9,9 +10,33 @@ import { WikiGuide } from "@/components/wiki-guide";
 import { getCurrentSession } from "@/lib/auth";
 import { isPlatformAdmin } from "@/lib/auth/admin";
 import {
-  loadUnreadBadgeCount,
   notificationViewer,
+  type NotificationViewer,
 } from "@/lib/notifications/feed";
+
+import {
+  DEGRADED_UNREAD_COUNT,
+  loadUnreadBadgeCountSafely,
+} from "./notification-badge";
+
+/**
+ * The badge, read inside its own boundary rather than in the layout body.
+ *
+ * Two things follow from that, and both exist because this read runs on EVERY
+ * dashboard route (#227). It cannot fail the shell — `loadUnreadBadgeCountSafely`
+ * degrades a throwing count to zero — and it cannot delay the shell, because the
+ * `await` happens below a `<Suspense>` boundary instead of above the whole tree.
+ * Notifications being slow or broken is now a bell that says "none unread", not
+ * a dashboard nobody can reach.
+ */
+async function NotificationBellSlot({
+  viewer,
+}: {
+  viewer: NotificationViewer;
+}) {
+  const unreadCount = await loadUnreadBadgeCountSafely(viewer);
+  return <NotificationBell unreadCount={unreadCount} />;
+}
 
 function getInitials(name: string | null, email: string): string {
   if (name) {
@@ -46,17 +71,15 @@ export default async function DashboardLayout({
   const cookieStore = await cookies();
   const defaultOpen = cookieStore.get("sidebar_state")?.value === "true";
 
-  // The shell's unread count (N-008). Read here, in the one place that already
-  // holds the session, so the bell itself stays a presentational component and
-  // there is exactly one read behind the badge. A user with no church has no
-  // notifications — every row is church-scoped — so there is no viewer, nothing
-  // to count and no bell to show.
+  // Whether there is a bell at all (N-008). Resolved here, in the one place
+  // that already holds the session, so the bell itself stays a presentational
+  // component. A user with no church has no notifications — every row is
+  // church-scoped — so there is no viewer, nothing to count and no bell to show.
   //
-  // It goes through the same loader the feed does, so the badge counts exactly
-  // the categories the feed lists: a category switched off for `in_app` is
-  // absent from both, never counted here and missing there.
+  // The count itself is NOT awaited here: it is read inside
+  // `NotificationBellSlot`, below the Suspense boundary, so a notifications-side
+  // failure or stall stays inside the bell instead of taking the shell with it.
   const viewer = notificationViewer({ user });
-  const unreadCount = viewer ? await loadUnreadBadgeCount(viewer) : 0;
 
   const sidebarUser = {
     name: user.name || user.email.split("@")[0],
@@ -80,7 +103,18 @@ export default async function DashboardLayout({
       <SidebarInset className="flex h-screen flex-col overflow-hidden">
         <HeaderProvider>
           <DashboardHeader>
-            {viewer && <NotificationBell unreadCount={unreadCount} />}
+            {viewer && (
+              // The fallback is the bell itself at zero, so the header's
+              // geometry and its link to /notifications are there from the
+              // first byte and the count fills in when it arrives.
+              <Suspense
+                fallback={
+                  <NotificationBell unreadCount={DEGRADED_UNREAD_COUNT} />
+                }
+              >
+                <NotificationBellSlot viewer={viewer} />
+              </Suspense>
+            )}
           </DashboardHeader>
           <main className="flex-1 overflow-auto">{children}</main>
           {!isOversightUser && <WikiGuide />}
