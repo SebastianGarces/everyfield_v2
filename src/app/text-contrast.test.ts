@@ -140,9 +140,9 @@ for (const theme of themes) {
 }
 
 test("the old token is kept out because it genuinely fails, not by taste", () => {
-  // Light theme is where it failed: ~3.69:1 with the pre-sharp gray tokens
-  // (the number in the issue); ~3.30:1 since the sharp ink/cream palette.
-  // Either way it sits under the 4.5:1 floor, which is the point.
+  // Light theme is where it failed: ~3.69:1 with the pre-sharp near-black
+  // foreground (the number in the issue); ~3.27:1 since foreground became ink
+  // #181D19. Either way it sits under the 4.5:1 floor, which is the point.
   const surface = readToken("light", "card");
   const faded = composite(readToken("light", "foreground"), surface, 0.5);
   const ratio = contrastRatio(faded, surface);
