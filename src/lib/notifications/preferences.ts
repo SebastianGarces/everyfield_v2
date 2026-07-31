@@ -16,6 +16,7 @@ import {
 import {
   DEFAULT_DIGEST_CADENCE,
   defaultChannelEnabled,
+  NOTIFICATION_CATEGORIES,
   notificationPreferenceMatrixKeys,
 } from "./categories";
 
@@ -215,6 +216,53 @@ export function isChannelEnabled(
 }
 
 /**
+ * The channel a digest cadence is STORED on.
+ *
+ * Cadence is a property of the digest itself — "how often my roll-up arrives" —
+ * but the table's grain is (user, category, channel), so it has to live on one
+ * of the two `digest` rows. It lives on `email` because that is where a digest
+ * is actually read: an in-app digest row would duplicate the feed it summarises
+ * (which is why `digest`/`in_app` is the one coded default that is off).
+ *
+ * Writing it to BOTH digest rows was the alternative and is worse: changing a
+ * cadence would materialise a `digest`/`in_app` row the user never asked for,
+ * freezing today's coded default into an explicit choice they can no longer
+ * inherit a change to. See `resolveDigestCadence` for the read side.
+ */
+export const DIGEST_CADENCE_CHANNEL: NotificationChannel = "email";
+
+/**
+ * The user's digest cadence — a CATEGORY-level answer, not a per-channel one.
+ *
+ * It prefers the row cadence is written to (`DIGEST_CADENCE_CHANNEL`), then any
+ * other `digest` row carrying one, then the coded default. The second step is
+ * not decoration: it means a cadence written by an older shape of this code, or
+ * by `setPreference` with a `digestCadence` on the other channel, is still
+ * honoured rather than silently reverting the user to `weekly`.
+ *
+ * The screen shows exactly one cadence control, so it must read exactly one
+ * value — two `digest` rows disagreeing would otherwise make the answer depend
+ * on which channel you asked about.
+ */
+export function resolveDigestCadence(
+  rows: readonly NotificationPreference[] | Map<string, NotificationPreference>
+): DigestCadence {
+  const map = rows instanceof Map ? rows : buildPreferenceMap(rows);
+
+  const preferred = map.get(
+    preferenceKey("digest", DIGEST_CADENCE_CHANNEL)
+  )?.digestCadence;
+  if (preferred) return preferred;
+
+  for (const channel of notificationChannels) {
+    const cadence = map.get(preferenceKey("digest", channel))?.digestCadence;
+    if (cadence) return cadence;
+  }
+
+  return DEFAULT_DIGEST_CADENCE;
+}
+
+/**
  * The full category × channel matrix the preferences screen renders (N-006),
  * with every cell resolved and its source attributed.
  */
@@ -252,6 +300,196 @@ export function resolveInAppCategories(
   return notificationCategories.filter((category) =>
     isChannelEnabled(map, category, "in_app")
   );
+}
+
+// ----------------------------------------------------------------------------
+// Screen 2 — the preferences screen's view model (N-006)
+// ----------------------------------------------------------------------------
+
+// ============================================================================
+// Everything below is what the settings screen renders, resolved on the server
+// and handed to the client component as a finished object — the same division
+// `feed-view.ts` uses for Screen 1, and for the same two reasons.
+//
+// 1. The matrix is DERIVED, never listed. Its rows come from
+//    `notificationCategories` and its columns from `notificationChannels`, both
+//    code-defined tuples in `@/db/schema/notifications`. A seventh category is
+//    a one-line change in the registry plus its copy — this file, the page, the
+//    component and the tests all pick it up with no edit, and there is nowhere
+//    a hardcoded list could fall out of step with what the dispatcher consults.
+//
+// 2. Resolving here keeps `@/db/schema` — and the whole Drizzle table graph —
+//    out of the client bundle. The component imports only TYPES from this
+//    module, which are erased.
+//
+// The cells carry `source` so the screen can be honest about the N-005 rule
+// that absence means the coded default: a cell showing "on" because nobody has
+// ever touched it is a different fact from one showing "on" because the user
+// switched it on, and the write path uses the same distinction to avoid
+// materialising a row that only restates a default.
+// ============================================================================
+
+/** One toggle in the matrix. */
+export interface PreferenceCellView {
+  category: NotificationCategory;
+  channel: NotificationChannel;
+  enabled: boolean;
+  source: PreferenceSource;
+  /** Stable identity for keys, ids and test hooks — `"tasks:email"`. */
+  key: string;
+}
+
+/** One column of the matrix. */
+export interface PreferenceChannelView {
+  channel: NotificationChannel;
+  label: string;
+}
+
+/** One row of the matrix: a category, its purpose, and its cells. */
+export interface PreferenceCategoryView {
+  category: NotificationCategory;
+  label: string;
+  /** What the user is turning off, in their words. */
+  description: string;
+  cells: PreferenceCellView[];
+}
+
+/** One choice in the cadence selector. */
+export interface DigestCadenceOptionView {
+  value: DigestCadence;
+  label: string;
+}
+
+/**
+ * The cadence control, which belongs to the `digest` row of the matrix.
+ *
+ * SCOPE, because there are two different digests in this product and only one
+ * of them is settable here: this governs the user's OWN open-items digest
+ * (N-013) and nothing else. The oversight activity digest (N-025) is fixed
+ * daily, is not a per-user choice, and is gated by a plant-side sharing toggle
+ * (N-026) that lives on a different screen entirely. So the copy below talks
+ * only about the reader's own open items — it must never suggest that anything
+ * on this screen decides what leaves the plant.
+ */
+export interface DigestCadenceView {
+  category: NotificationCategory;
+  label: string;
+  /** Plain-language scope + effect. */
+  description: string;
+  cadence: DigestCadence;
+  options: DigestCadenceOptionView[];
+}
+
+/** The whole screen, ready to render. */
+export interface PreferenceMatrixView {
+  channels: PreferenceChannelView[];
+  categories: PreferenceCategoryView[];
+  digest: DigestCadenceView;
+}
+
+/**
+ * Channel copy for the screen.
+ *
+ * It lives here rather than in `categories.ts` because it is screen copy for
+ * N-006 and nothing else consults it — a channel is a delivery mechanism with
+ * no per-channel behaviour to describe, unlike a category, whose purpose the
+ * user genuinely has to understand before switching it off.
+ */
+export const NOTIFICATION_CHANNEL_LABELS: Record<NotificationChannel, string> =
+  {
+    email: "Email",
+    in_app: "In app",
+  };
+
+/** Cadence copy for the selector. */
+export const DIGEST_CADENCE_LABELS: Record<DigestCadence, string> = {
+  daily: "Every day",
+  weekly: "Once a week",
+};
+
+/**
+ * The cadence control's help text.
+ *
+ * Exported so a test can hold it to the N-013/N-025 boundary: it says whose
+ * digest this is ("your own open items") and never mentions sharing, sending
+ * churches, networks or plant activity — none of which this control touches.
+ */
+export const DIGEST_CADENCE_DESCRIPTION =
+  "How often your roll-up of your own open items arrives.";
+
+/** Build the whole screen from a user's stored rows. */
+export function buildPreferenceMatrixView(
+  rows: readonly NotificationPreference[]
+): PreferenceMatrixView {
+  const map = buildPreferenceMap(rows);
+
+  return {
+    channels: notificationChannels.map((channel) => ({
+      channel,
+      label: NOTIFICATION_CHANNEL_LABELS[channel],
+    })),
+    categories: notificationCategories.map((category) => ({
+      category,
+      label: NOTIFICATION_CATEGORIES[category].label,
+      description: NOTIFICATION_CATEGORIES[category].description,
+      cells: notificationChannels.map((channel) => {
+        const resolved = resolvePreference(map, category, channel);
+        return {
+          category,
+          channel,
+          enabled: resolved.enabled,
+          source: resolved.source,
+          key: preferenceKey(category, channel),
+        };
+      }),
+    })),
+    digest: {
+      category: "digest",
+      label: "How often",
+      description: DIGEST_CADENCE_DESCRIPTION,
+      cadence: resolveDigestCadence(map),
+      options: digestCadences.map((value) => ({
+        value,
+        label: DIGEST_CADENCE_LABELS[value],
+      })),
+    },
+  };
+}
+
+// ----------------------------------------------------------------------------
+// "Only write a row on an actual change"
+// ----------------------------------------------------------------------------
+
+/**
+ * Would writing this value change anything the user would ever observe?
+ *
+ * N-005's rule is that an ABSENT row means the coded default. That rule only
+ * holds if absence is preserved: a screen that saves every control it rendered
+ * — or a double-submitted toggle — would seed twelve explicit rows that merely
+ * restate today's defaults, and from then on the user is pinned to them. When
+ * N-019 (role-aware defaults) lands, or a default is simply reconsidered, those
+ * users silently keep the old behaviour with no record of ever having chosen
+ * it.
+ *
+ * So the write path asks this first. `false` means "the effective value is
+ * already this" — including the case where it is already this BY DEFAULT — and
+ * the action returns without touching the table.
+ */
+export function preferenceWriteIsNoop(
+  rows: readonly NotificationPreference[],
+  category: NotificationCategory,
+  channel: NotificationChannel,
+  enabled: boolean
+): boolean {
+  return resolvePreference(rows, category, channel).enabled === enabled;
+}
+
+/** The same question for the cadence selector. */
+export function digestCadenceWriteIsNoop(
+  rows: readonly NotificationPreference[],
+  cadence: DigestCadence
+): boolean {
+  return resolveDigestCadence(rows) === cadence;
 }
 
 // ----------------------------------------------------------------------------
@@ -366,5 +604,55 @@ export async function setPreference(
   input: SetPreferenceInput
 ): Promise<NotificationPreference> {
   const [row] = await setPreferenceQuery(owner, input);
+  return row;
+}
+
+/**
+ * The cadence write, as a builder — the same `.toSQL()`-assertable shape as
+ * `setPreferenceQuery`, and the same `PreferenceOwner` boundary.
+ *
+ * It writes ONLY `digest_cadence`. Cadence and "is the digest on at all" are
+ * separate questions asked by separate controls, so the update clause leaves
+ * `enabled` alone: a user who has switched their digest email off and then
+ * changes the cadence has not thereby switched it back on.
+ *
+ * The INSERT arm still has to supply an `enabled`, because the column is NOT
+ * NULL. It supplies the CODED DEFAULT for (digest, `DIGEST_CADENCE_CHANNEL`),
+ * so the row this creates is behaviourally identical to the absence it
+ * replaces — the user changed their cadence and nothing else changed with it.
+ */
+export function setDigestCadenceQuery(
+  owner: PreferenceOwner,
+  cadence: DigestCadence
+) {
+  const ownerId = preferenceUserIdSchema.parse(owner);
+  const parsed = z.enum(digestCadences).parse(cadence);
+
+  return db
+    .insert(notificationPreferences)
+    .values({
+      userId: ownerId,
+      category: "digest",
+      channel: DIGEST_CADENCE_CHANNEL,
+      enabled: defaultChannelEnabled("digest", DIGEST_CADENCE_CHANNEL),
+      digestCadence: parsed,
+    })
+    .onConflictDoUpdate({
+      target: [
+        notificationPreferences.userId,
+        notificationPreferences.category,
+        notificationPreferences.channel,
+      ],
+      set: { digestCadence: parsed, updatedAt: new Date() },
+    })
+    .returning();
+}
+
+/** Write the owner's digest cadence. See `setDigestCadenceQuery`. */
+export async function setDigestCadence(
+  owner: PreferenceOwner,
+  cadence: DigestCadence
+): Promise<NotificationPreference> {
+  const [row] = await setDigestCadenceQuery(owner, cadence);
   return row;
 }
