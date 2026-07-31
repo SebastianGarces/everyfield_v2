@@ -3,7 +3,7 @@
 import { useState } from "react";
 
 import { Chip } from "./chip";
-import { Shot, type ShotSource } from "./shot";
+import { Shot, usePrefetchShots, type ShotSource } from "./shot";
 
 type Overlay = ShotSource & { alt: string; style: React.CSSProperties };
 
@@ -53,13 +53,6 @@ const PHASES: readonly Phase[] = [
     },
     alt: "The wiki chapter 'Is Church Planting Your Calling?' with the Phase 0 reading list and reading progress in the sidebar.",
     anchor: "end",
-    overlay: {
-      src: "/marketing/shots/sec-phase-card.webp",
-      width: 450,
-      height: 360,
-      alt: "What Phase Am I In? — learn about the phases and where you are in the journey.",
-      style: { left: "5%", bottom: "12%" },
-    },
   },
   {
     key: "core-group",
@@ -89,7 +82,7 @@ const PHASES: readonly Phase[] = [
       width: 760,
       height: 515,
       alt: "Vision Meeting #5 — in 14 days, ~32 estimated.",
-      style: { right: "4%", bottom: "10%" },
+      style: { left: "38%", bottom: "8%", width: "min(32%, 470px)" },
     },
   },
   {
@@ -153,15 +146,15 @@ const PHASES: readonly Phase[] = [
     ],
     desktop: {
       src: "/marketing/shots/pt-prelaunch.webp",
-      width: 2448,
-      height: 1513,
+      width: 2365,
+      height: 620,
     },
     mobile: {
       src: "/marketing/shots/pt-prelaunch-m.webp",
       width: 912,
       height: 445,
     },
-    alt: "The Launch Sunday logistics checklist — preparation progress at 4 of 8 ready, promo cards and signage already struck through.",
+    alt: "The Launch Sunday header — in 28 days, still Planning — over the preparation progress bar at 4 of 8 ready.",
     bleed: true,
     chip: {
       text: "4 of 8 ready — and counting",
@@ -204,15 +197,15 @@ const PHASES: readonly Phase[] = [
     ],
     desktop: {
       src: "/marketing/shots/pt-beyond.webp",
-      width: 2448,
-      height: 1513,
+      width: 2365,
+      height: 955,
     },
     mobile: {
       src: "/marketing/shots/pt-beyond-m.webp",
       width: 945,
       height: 900,
     },
-    alt: "Trinity Grove's post-launch dashboard: Sunday Gathering week after week — Week 6 completed with 112 attendees.",
+    alt: "Trinity Grove's post-launch dashboard: health stats up top, and Sunday Gathering week after week — Week 6 completed with 112 attendees.",
     bleed: true,
     chip: {
       text: "Week 6 · 112 in the room",
@@ -269,8 +262,11 @@ function PhaseVisual({
   );
 }
 
+const PREFETCH = PHASES.flatMap((p) => [p.desktop.src, p.overlay?.src]);
+
 export function PhaseTabs() {
   const [active, setActive] = useState<string>(PHASES[0].key);
+  usePrefetchShots(PREFETCH);
 
   return (
     <>

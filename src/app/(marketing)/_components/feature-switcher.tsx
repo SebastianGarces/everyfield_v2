@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { Shot, type ShotSource } from "./shot";
+import { Shot, usePrefetchShots, type ShotSource } from "./shot";
 
 type Overlay = ShotSource & { alt: string; style: React.CSSProperties };
 
@@ -43,7 +43,7 @@ const FEATURES: readonly Feature[] = [
       width: 545,
       height: 302,
       alt: "Core Group stat card: 61 — core group, launch team and leaders.",
-      style: { right: "6%", bottom: "12%" },
+      style: { left: "42%", top: "20%", width: "min(30%, 460px)" },
     },
   },
   {
@@ -64,13 +64,6 @@ const FEATURES: readonly Feature[] = [
     },
     alt: "Upcoming meetings: Worship team night and Orientation #2 at the Riveras' home.",
     anchor: "end",
-    overlay: {
-      src: "/marketing/shots/fs-meetings-m.webp",
-      width: 760,
-      height: 515,
-      alt: "Vision Meeting #5 — in 14 days, ~32 estimated.",
-      style: { left: "5%", bottom: "10%" },
-    },
   },
   {
     key: "teams",
@@ -90,7 +83,7 @@ const FEATURES: readonly Feature[] = [
       width: 570,
       height: 330,
       alt: "Worship Team card — staffing 2 of 10, 8 roles open.",
-      style: { right: "5%", top: "12%" },
+      style: { right: "14%", bottom: "14%" },
     },
   },
   {
@@ -111,19 +104,19 @@ const FEATURES: readonly Feature[] = [
     },
     alt: "The wiki journey line — currently in Phase 4: Pre-Launch — above the recommended chapter 'The Final 3–4 Weeks'.",
     anchor: "end",
-    overlay: {
-      src: "/marketing/shots/sec-wiki-progress.webp",
-      width: 450,
-      height: 360,
-      alt: "My Progress — track your reading progress across all wiki content.",
-      style: { left: "3%", bottom: "10%" },
-    },
   },
 ] as const;
+
+const PREFETCH = FEATURES.flatMap((f) => [
+  f.desktop.src,
+  f.overlay?.src,
+  f.art,
+]);
 
 export function FeatureSwitcher() {
   const [active, setActive] = useState<string>(FEATURES[0].key);
   const activeFeature = FEATURES.find((f) => f.key === active) ?? FEATURES[0];
+  usePrefetchShots(PREFETCH);
 
   return (
     <>

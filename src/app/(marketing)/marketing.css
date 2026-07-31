@@ -295,6 +295,8 @@ html:has(.marketing) {
   display: block;
   width: 100%;
   height: auto;
+  /* translucent frame lets the painting bleed through; the ink ring sits outside it */
+  border: 6px solid rgba(251, 248, 234, 0.55);
   box-shadow:
     0 0 0 1px rgba(24, 29, 25, 0.55),
     0 20px 40px -18px rgba(24, 29, 25, 0.5);
@@ -452,7 +454,7 @@ html:has(.marketing) {
 .marketing .shot-overlay {
   position: absolute;
   z-index: 1;
-  width: clamp(240px, 24%, 400px);
+  width: clamp(260px, 28%, 460px);
   height: auto;
   box-shadow:
     0 0 0 1px rgba(24, 29, 25, 0.45),
@@ -633,11 +635,11 @@ html:has(.marketing) {
   justify-content: flex-end;
 }
 /* full-bleed beats: the visual escapes the container toward the viewport edge */
+/* bleed differs by WIDTH only — every phase panel shares one height */
 .marketing .ppanel .pshot.bleed {
   width: min(96vw, 1760px);
   left: 50%;
   transform: translateX(-50%);
-  height: clamp(540px, 44vw, 760px);
 }
 .marketing .ppanel .pshot.bleed picture {
   max-width: none;
