@@ -19,6 +19,10 @@ import {
   NOTIFICATION_CATEGORIES,
   notificationPreferenceMatrixKeys,
 } from "./categories";
+import {
+  verifyUnsubscribeToken,
+  type UnsubscribeTokenRejection,
+} from "./channels/unsubscribe-token";
 
 // ============================================================================
 // Preference resolution (N-005).
@@ -50,14 +54,13 @@ import {
 // already-verified session and throws when there is none — so the failure mode
 // is a compile error at the call site, not a missing runtime check.
 //
-// NO UNAUTHENTICATED CALLER IS SUPPORTED YET. The logged-out email-footer
-// unsubscribe (N-007) needs a signed token — an HMAC over (user_id, category,
-// channel, expiry), verified server-side — and that token does not exist in
-// this unit. When it lands it gets its OWN minting function
-// (`preferenceOwnerFromUnsubscribeToken`) beside this one, and it is the
-// verification inside that function, not a comment, that earns the brand. Until
-// then, an unsubscribe link that passes a raw user id is not something this
-// module will accept, and that is deliberate.
+// THERE IS EXACTLY ONE UNAUTHENTICATED CALLER, and it is minted here too.
+// The logged-out email-footer unsubscribe (N-007) has its own minting function,
+// `preferenceOwnerFromUnsubscribeToken`, below — and it is the verification
+// INSIDE that function, not a comment, that earns the brand. It takes an opaque
+// sealed token (`./channels/unsubscribe-token`), not a user id: a link that
+// passes a raw user id is still not something this module will accept, and that
+// is deliberate.
 // ============================================================================
 
 // ----------------------------------------------------------------------------
@@ -128,6 +131,52 @@ export function preferenceOwnerFromSession(
     throw new UnauthenticatedPreferenceAccessError();
   }
   return preferenceUserIdSchema.parse(session.user.id) as PreferenceOwner;
+}
+
+export type UnsubscribeOwnerResolution =
+  | {
+      ok: true;
+      owner: PreferenceOwner;
+      /** The ONE category this token may change. */
+      category: NotificationCategory;
+      expiresAt: Date;
+    }
+  | { ok: false; reason: UnsubscribeTokenRejection };
+
+/**
+ * The second — and only other — way to obtain a `PreferenceOwner`: from a
+ * sealed unsubscribe token that this function has just opened and validated.
+ *
+ * It sits beside `preferenceOwnerFromSession` on purpose. Both entrypoints mint
+ * the brand, both do it only after PROVING whose consent record is being
+ * addressed, and there is nowhere else in the codebase that can. A route that
+ * wants to unsubscribe someone therefore has exactly one door, and the door
+ * does the verification.
+ *
+ * It RETURNS a refusal rather than throwing, because the caller is a public
+ * route handler rendering a page for a stranger: the refusal is an outcome to
+ * display, not an exception to log. `reason` is for the log; the page says the
+ * same thing whatever it is (see `UnsubscribeTokenRejection`).
+ *
+ * The category comes out of the token, never out of the request. A query
+ * string that could name the category would let a holder of one category's
+ * link switch off a different one.
+ */
+export function preferenceOwnerFromUnsubscribeToken(
+  token: string,
+  options: { now?: Date; secret?: string } = {}
+): UnsubscribeOwnerResolution {
+  const verified = verifyUnsubscribeToken(token, options);
+  if (!verified.valid) {
+    return { ok: false, reason: verified.reason };
+  }
+
+  return {
+    ok: true,
+    owner: preferenceUserIdSchema.parse(verified.userId) as PreferenceOwner,
+    category: verified.category,
+    expiresAt: verified.expiresAt,
+  };
 }
 
 // ----------------------------------------------------------------------------

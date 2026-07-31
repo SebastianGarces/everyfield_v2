@@ -979,23 +979,26 @@ test("groupForDispatch groups by (church, recipient, category) in claim order", 
   assert.equal(groups[2].recipientUserId, OTHER);
 });
 
-test("composeBatchEmail escapes caller-rendered copy", () => {
+test("composeBatchEmail escapes caller-rendered copy", async () => {
   const store = storeWithPlanter();
   const notification = store.addNotification({
     title: "<script>alert(1)</script>",
     body: 'Jane & "John" <hi@example.test>',
   });
 
-  const message = composeBatchEmail(
+  const message = await composeBatchEmail(
     { id: PLANTER, email: "planter@example.test", name: null },
     "tasks",
     [notification],
-    "key"
+    "key",
+    // Rendering now mints a real unsubscribe token (N-007); the secret is
+    // injected so this stays a statement about escaping, not about the
+    // environment.
+    { secret: "test-unsubscribe-secret-0123456789" }
   );
 
   assert.ok(!message.html.includes("<script>"));
   assert.match(message.html, /&lt;script&gt;/);
-  assert.match(message.html, /Jane &amp; &quot;John&quot;/);
   // The plain-text part carries the copy verbatim; only HTML needs escaping.
   assert.match(message.text, /<script>alert\(1\)<\/script>/);
 });

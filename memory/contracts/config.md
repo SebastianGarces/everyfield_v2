@@ -10,6 +10,7 @@
 | `CRON_SECRET` | For prod | Cron auth (Bearer token) for BOTH scheduled routes: `/api/phase-engine/assess` and `/api/notifications/dispatch`. Both fail closed when unset. Lives in TWO places that must hold the same value: the Vercel production env (read by the routes, sent by the daily Vercel cron) and this repo's Actions secrets (sent by `.github/workflows/notifications-dispatch.yml`, which drives the 15-min dispatch tick because Hobby caps Vercel crons at daily) |
 | `OPENAI_API_KEY` | Phase Engine | LLM judge + embeddings (`src/lib/phase-engine/judge/provider.ts`, `rag/embed.ts`). Not in `.env.example` |
 | `LANGFUSE_SECRET_KEY` / `_PUBLIC_KEY` / `_BASE_URL` | No | LLM tracing (`src/lib/phase-engine/observability.ts`). Not in `.env.example` |
+| `UNSUBSCRIBE_TOKEN_SECRET` | For notification email | Seals the AES-256-GCM capability token in every notification email's unsubscribe link (`src/lib/notifications/channels/unsubscribe-token.ts`). Falls back to `CRON_SECRET` (safe — the key is `SHA-256(purpose : secret)`, so purposes never share a key); with NEITHER set, composing a notification email FAILS rather than sending a dead opt-out link |
 | `RESEND_API_KEY` | For email | Resend client (`src/lib/email/client.ts`, webhook route) |
 | `RESEND_WEBHOOK_SECRET` | Email tracking | Svix signature check in `src/app/api/webhooks/resend/route.ts` |
 | `EMAIL_FROM` | For email | Outbound from address |

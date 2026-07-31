@@ -173,6 +173,9 @@
 | Preferences screen | `(dash)/settings/page.tsx` → `preferences.ts:buildPreferenceMatrixView()` | Route `/settings` (linked from the user menu) |
 | Save a toggle | `(dash)/settings/actions.ts:setNotificationPreferenceAction()` | Switch in the matrix |
 | Save a digest cadence | `(dash)/settings/actions.ts:setDigestCadenceAction()` | Cadence select in the `digest` row |
+| **Unsubscribe (logged out)** | `src/app/api/notifications/unsubscribe/route.ts` → `channels/unsubscribe.ts:applyEmailUnsubscribe()` | Unsubscribe link in a notification email |
+| Unsubscribe confirmation | `src/app/unsubscribe/page.tsx` → `channels/unsubscribe.ts:describeUnsubscribeSubject()` | 303 from the route above |
+| Undo the unsubscribe | `src/app/unsubscribe/actions.ts:setNotificationEmailStateAction()` | Button on the confirmation page |
 
 **Primary modules:** `src/lib/notifications/` (feed, feed-view, queries, mark-read, entity-links, enqueue, preferences, categories), `src/components/notifications/`, `src/db/schema/notifications.ts`
 
@@ -192,6 +195,8 @@
 
 **Digest cadence (N-013 only):** one CATEGORY-level value, stored on the `(digest, email)` row (`DIGEST_CADENCE_CHANNEL`) and read by `resolveDigestCadence()`, which falls back to the other digest row then to `DEFAULT_DIGEST_CADENCE`. `setDigestCadenceQuery` updates `digest_cadence` alone — cadence never switches the digest back on. The screen's copy is scoped to the user's own open-items digest; the oversight activity digest (N-025) is fixed daily and is governed by the plant-side sharing toggle (N-026), which is NOT on this screen.
 **Badge failure isolation (#227):** the badge is the one notifications read on EVERY dashboard route, so the layout never awaits it directly. `loadUnreadBadgeCountSafely()` degrades a throwing (or nonsense) count to 0 — `unstable_rethrow` first, so `redirect`/`notFound`/dynamic bailouts still escape — and the `await` sits inside a `<Suspense>`-wrapped `NotificationBellSlot`, so a notifications outage or stall costs the count, not the shell.
+
+**Email channel + logged-out unsubscribe (N-007, #132):** `src/lib/notifications/channels/` owns how a dispatched group becomes an email — `email.ts` (subject, `composeBatchEmail`, `List-Unsubscribe` header) rendering `src/lib/email/templates/notification-batch.tsx`. One group = ONE email listing each notification; the unsubscribe link is a REQUIRED template prop, so an email without one does not compile. The token is **sealed, not signed**: AES-256-GCM over `{user, category, expiry}` with AAD `everyfield.notifications.unsubscribe.email.v1` — opaque (no user id in the query string), tamper-evident (auth tag), single-purpose (the channel is fixed by the AAD, never a field), 180-day TTL. `preferenceOwnerFromUnsubscribeToken` in `preferences.ts` is the ONLY non-session way to mint a `PreferenceOwner`, and `unsubscribeWriteQuery` pins the channel to `email` — so "one category, one user, nothing else" is a signature, not a review comment. Every refusal renders identical copy (no account oracle). Undo writes explicit `enabled: true` rather than deleting the row, so it is guaranteed observable even if a coded default changes. Composition failure is contained inside `deliverEmailGroup` (settled as a transient delivery failure) rather than stranding a run's claimed rows.
 
 **Empty states:** `hasAnyNotifications()` separates cold start ("no notifications yet") from "all caught up"; it shares the feed's visibility rules (allow-list included) so `hasAny === false` implies the feed is empty. Two states only — "all caught up" is reachable only under `?filter=unread`, since on the All tab an empty list and `hasAny` true are contradictory.
 
