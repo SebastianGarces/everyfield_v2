@@ -113,11 +113,7 @@ export function UpcomingStep({
             onClick={isLast ? onFinish : onSkip}
             disabled={busy}
           >
-            {isLast
-              ? busy
-                ? "Finishing…"
-                : "Go to my dashboard"
-              : "Continue"}
+            {isLast ? (busy ? "Finishing…" : "Go to my dashboard") : "Continue"}
           </Button>
         </div>
       </div>
