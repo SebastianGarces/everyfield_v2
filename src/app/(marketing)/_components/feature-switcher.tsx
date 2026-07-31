@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 
-import { Shot, usePrefetchShots, type ShotSource } from "./shot";
+import { Shot, type ShotSource } from "./shot";
+import { usePrefetchShots } from "./use-prefetch-shots";
 
 type Overlay = ShotSource & { alt: string; style: React.CSSProperties };
 
