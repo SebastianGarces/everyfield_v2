@@ -1,0 +1,102 @@
+-- F11 / N-025 + N-026 — the oversight notification model collapses to a digest,
+-- three milestones, and ONE plant-side toggle (issue #224, FRD ruling
+-- 2026-07-27, landed in PR #226).
+--
+-- Two changes, and they are the same change seen from two sides.
+--
+-- 1. `church_privacy_settings`: `share_phase` + `share_digest` OUT,
+--    `share_activity_with_oversight` IN.
+--
+--    Migration 0026 added those two columns so an oversight recipient could be
+--    made eligible for the `phase` and `digest` notification CATEGORIES, each
+--    gated by its own toggle, alongside the four older `share_*` columns doing
+--    the same job for tasks/meetings/teams/people. The ruling removed the
+--    category model for oversight entirely: an oversight recipient is never
+--    enqueued a granular per-event notification, shared or not. With no
+--    per-category eligibility left there is nothing for per-category toggles to
+--    say, and a planter facing six switches to answer one question ("do I share
+--    with my sending church?") was being asked to model our schema.
+--
+--    DEFAULT FALSE FOR EVERYONE is the ruling, not a convenience. Nobody is
+--    migrated forward — a church that had switched `share_phase` on does NOT
+--    arrive here sharing. Sharing your plant's activity outward is a consent
+--    decision about a different thing (a daily summary and three milestones,
+--    where the old toggle meant "assessment notifications"), and inheriting
+--    consent across a change of meaning is inventing it. Since 0026 shipped
+--    with both columns at false and no UI ever surfaced them, the practical
+--    effect is nil; the principle is what is being written down.
+--
+--    The six `share_*` columns left standing are untouched and unrelated: they
+--    gate what oversight may PULL on the oversight dashboard
+--    (`canAccessFeatureData`, memory/invariants.md → Hierarchical Access
+--    Control). This migration only concerns what is PUSHED.
+--
+-- 2. The `category` CHECK on both notification tables gains `milestones`.
+--
+--    The three milestone events need a category of their own so that "oversight
+--    never receives a granular category" is enforced by a closed allow-list
+--    (`OVERSIGHT_ELIGIBLE_CATEGORIES` = milestones + digest) rather than by a
+--    convention about `type` strings that a future caller can forget. A CHECK
+--    is dropped and re-added rather than altered because Postgres has no
+--    ALTER CONSTRAINT for a CHECK expression. Re-adding scans each table to
+--    validate existing rows — the constraint is strictly WIDER than the one it
+--    replaces, so every existing row passes, and the tables are small at alpha
+--    scale. It is a brief ACCESS EXCLUSIVE lock on `notifications` and
+--    `notification_preferences`, not a rewrite.
+--
+-- ORDER MATTERS. The old CHECKs come off first: with them in place a row could
+-- not carry `milestones`, and drizzle emits the drop/re-add pair around the
+-- column work for exactly that reason. Do not reorder.
+--
+-- ROLLBACK — every statement, then the ledger delete, in ONE psql session:
+--
+--   ALTER TABLE "notifications" DROP CONSTRAINT IF EXISTS "notifications_category_check";
+--   ALTER TABLE "notification_preferences" DROP CONSTRAINT IF EXISTS "notification_preferences_category_check";
+--   DELETE FROM notifications WHERE category = 'milestones';
+--   ALTER TABLE "church_privacy_settings" ADD COLUMN "share_phase" boolean DEFAULT false NOT NULL;
+--   ALTER TABLE "church_privacy_settings" ADD COLUMN "share_digest" boolean DEFAULT false NOT NULL;
+--   ALTER TABLE "church_privacy_settings" DROP COLUMN IF EXISTS "share_activity_with_oversight";
+--   ALTER TABLE "notification_preferences" ADD CONSTRAINT "notification_preferences_category_check" CHECK ("notification_preferences"."category" in ('tasks', 'meetings', 'communication', 'teams', 'phase', 'digest'));
+--   ALTER TABLE "notifications" ADD CONSTRAINT "notifications_category_check" CHECK ("notifications"."category" in ('tasks', 'meetings', 'communication', 'teams', 'phase', 'digest'));
+--   DELETE FROM drizzle.__drizzle_migrations WHERE hash = '<0028 hash>';
+--
+-- Two things a rollback DESTROYS, both deliberately called out:
+--   * Every `milestones` notification. The narrowed CHECK cannot be re-added
+--     while they exist, so they must go — hence the DELETE above, which must
+--     run BEFORE the re-add. They are announcements, not records of anything
+--     that only lives here; the invitation, the transition and the launch date
+--     are all still in their own tables.
+--   * Every sharing opt-in. `share_activity_with_oversight` goes, and the
+--     restored `share_phase`/`share_digest` come back at false. A plant that
+--     had opted in must opt in again. That is the correct direction to lose
+--     data in: rollback fails closed.
+--
+-- Rolling back this migration WITHOUT reverting the application code leaves
+-- `canAccessFeatureData(user, churchId, "oversight_activity")` selecting a
+-- column that no longer exists, and every oversight enqueue erroring. Revert
+-- the code first, or together.
+--
+--   *** DO NOT EDIT src/db/migrations/meta/_journal.json. ***
+--
+-- Same reasoning as 0023-0026: the journal is the repository's list of
+-- migrations, the `drizzle.__drizzle_migrations` ledger is the database's
+-- record of what ran, and only the ledger row is deleted. Removing the journal
+-- entry instead makes drizzle-kit forget the migration while the ledger still
+-- claims it applied, which is unrecoverable by restoring the entry.
+--
+-- `<0028 hash>` is the sha256 of THIS FILE, byte for byte, from the deployed
+-- commit:
+--
+--   shasum -a 256 src/db/migrations/0028_oversight_sharing_toggle.sql
+--
+-- or identify the row by its `_journal.json` "when":
+--
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1785508853175;
+
+ALTER TABLE "notification_preferences" DROP CONSTRAINT "notification_preferences_category_check";--> statement-breakpoint
+ALTER TABLE "notifications" DROP CONSTRAINT "notifications_category_check";--> statement-breakpoint
+ALTER TABLE "church_privacy_settings" ADD COLUMN "share_activity_with_oversight" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "church_privacy_settings" DROP COLUMN "share_phase";--> statement-breakpoint
+ALTER TABLE "church_privacy_settings" DROP COLUMN "share_digest";--> statement-breakpoint
+ALTER TABLE "notification_preferences" ADD CONSTRAINT "notification_preferences_category_check" CHECK ("notification_preferences"."category" in ('tasks', 'meetings', 'communication', 'teams', 'phase', 'milestones', 'digest'));--> statement-breakpoint
+ALTER TABLE "notifications" ADD CONSTRAINT "notifications_category_check" CHECK ("notifications"."category" in ('tasks', 'meetings', 'communication', 'teams', 'phase', 'milestones', 'digest'));

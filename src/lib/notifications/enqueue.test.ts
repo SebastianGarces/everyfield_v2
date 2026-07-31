@@ -6,7 +6,11 @@ import { test } from "node:test";
 import type { NewNotification, Notification } from "@/db/schema";
 import { resend } from "@/lib/email/client";
 
-import { notificationCategories, oversightPrivacyFeature } from "./categories";
+import {
+  OVERSIGHT_ELIGIBLE_CATEGORIES,
+  isOversightEligibleCategory,
+  notificationCategories,
+} from "./categories";
 import {
   cancelByEntitySchema,
   enqueueNotificationSchema,
@@ -56,16 +60,18 @@ class FakeNotificationStore implements EnqueueDeps, CancelByEntityDeps {
   private sequence = 0;
 
   /**
-   * The church's opt-in privacy toggles, faked, per store. An absent church is
-   * an absent `church_privacy_settings` row, which is every feature closed —
-   * the production default, and the one every existing church is on.
+   * The churches whose single sharing toggle (N-026) is ON, faked, per store.
+   * A church that is not listed is one with `share_activity_with_oversight`
+   * false — or with no `church_privacy_settings` row at all, which reads the
+   * same way. That is the production default and the state every existing
+   * church is in.
    */
-  constructor(readonly sharedFeatures: Record<string, string[]> = {}) {}
+  constructor(readonly sharingChurches: readonly string[] = []) {}
 
   /**
    * Mirrors `dbEnqueueDeps.recipientMayBeNotified`: church access first, then —
-   * for oversight users only — the church's privacy toggle for the category's
-   * feature.
+   * for oversight users only — whether the category is one oversight may
+   * receive at all, and then the plant's single sharing toggle.
    */
   async recipientMayBeNotified(
     churchId: string,
@@ -77,11 +83,10 @@ class FakeNotificationStore implements EnqueueDeps, CancelByEntityDeps {
     }
 
     if (recipientUserId === OVERSIGHT) {
-      const feature = oversightPrivacyFeature(category);
-      if (
-        feature === null ||
-        !(this.sharedFeatures[churchId] ?? []).includes(feature)
-      ) {
+      if (!isOversightEligibleCategory(category)) {
+        return { allowed: false, reason: "oversight_privacy" };
+      }
+      if (!this.sharingChurches.includes(churchId)) {
         return { allowed: false, reason: "oversight_privacy" };
       }
     }
@@ -621,16 +626,15 @@ test("membership is checked BEFORE the insert is attempted", async () => {
 });
 
 // ----------------------------------------------------------------------------
-// Oversight recipients are subject to the church's privacy toggles
+// The oversight model (N-025 / N-026, ruled 2026-07-27)
 // ----------------------------------------------------------------------------
 
-test("an oversight recipient is skipped when the church has not opted in", async () => {
+test("a granular category is refused for oversight with the toggle OFF...", async () => {
   // memory/invariants.md → Hierarchical Access Control: oversight users see
-  // aggregate metrics only, gated by `church_privacy_settings`, which defaults
-  // to all-false (an absent settings row is a closed one). `canAccessChurch`
-  // alone returns TRUE for a network admin on every plant beneath them, so
-  // gating on it would ship item-level feature copy — "No contact in 30 days:
-  // Jane Doe" — straight past a toggle the church deliberately left closed.
+  // aggregate metrics only. `canAccessChurch` alone returns TRUE for a network
+  // admin on every plant beneath them, so gating on it would ship item-level
+  // feature copy — "No contact in 30 days: Jane Doe" — straight out of the
+  // plant.
   const store = new FakeNotificationStore();
 
   const result = await runEnqueue(
@@ -649,26 +653,135 @@ test("an oversight recipient is skipped when the church has not opted in", async
   assert.equal(store.rows.length, 0);
 });
 
-test("...and recorded once that church opts in — the gate is the toggle, not the role", async () => {
-  // The same call, the same recipient, the same category. Only the church's
-  // choice differs, which is the whole point of routing this through
-  // `church_privacy_settings` rather than through the role.
-  const store = new FakeNotificationStore({ [CHURCH_A]: ["people"] });
+test("...and refused with the toggle ON — sharing does not buy the per-event stream", async () => {
+  // The heart of N-025, and the reason the check is an ALLOW-LIST of categories
+  // rather than a toggle lookup. Under the model this replaced, a plant that
+  // shared `people` handed its oversight admin a verbatim copy of every
+  // communication notification. Turning sharing on now buys a daily summary and
+  // three milestones; it never buys the stream the plant's own team lives in.
+  const store = new FakeNotificationStore([CHURCH_A]);
 
-  const result = await runEnqueue(
-    store,
-    baseInput({
-      category: "communication",
-      type: "message.failed",
-      entityType: "message",
-      recipientUserId: OVERSIGHT,
-    })
+  for (const category of [
+    "tasks",
+    "meetings",
+    "communication",
+    "teams",
+    "phase",
+  ] as const) {
+    const result = await runEnqueue(
+      store,
+      baseInput({
+        category,
+        type: `${category}.update`,
+        entityType: undefined,
+        entityId: undefined,
+        recipientUserId: OVERSIGHT,
+      })
+    );
+
+    assert.equal(result.status, "skipped", `${category} with sharing ON`);
+    assert.equal(result.reason, "oversight_privacy");
+  }
+
+  // The load-bearing assertion: not "filtered later", not "suppressed at
+  // delivery" — no row was ever written.
+  assert.equal(store.rows.length, 0);
+});
+
+test("the eligible categories are exactly `milestones` and `digest`", async () => {
+  // A closed tuple, asserted against the category registry, so adding a seventh
+  // category cannot quietly make it oversight-eligible: the new one is refused
+  // until someone puts it on the list on purpose.
+  assert.deepEqual(
+    [...OVERSIGHT_ELIGIBLE_CATEGORIES],
+    ["milestones", "digest"]
   );
 
-  assert.equal(result.status, "recorded");
-  assert.equal(result.created, true);
+  for (const category of notificationCategories) {
+    assert.equal(
+      isOversightEligibleCategory(category),
+      category === "milestones" || category === "digest",
+      `${category} eligibility`
+    );
+  }
+});
+
+test("with the toggle ON, a milestone and the digest are recorded for oversight", async () => {
+  const store = new FakeNotificationStore([CHURCH_A]);
+
+  for (const category of ["milestones", "digest"] as const) {
+    const result = await runEnqueue(
+      store,
+      baseInput({
+        category,
+        type:
+          category === "digest"
+            ? "oversight.activity.digest"
+            : "oversight.milestone.phase_advanced",
+        entityType: undefined,
+        entityId: undefined,
+        recipientUserId: OVERSIGHT,
+      })
+    );
+
+    assert.equal(result.status, "recorded", category);
+    assert.equal(result.created, true);
+  }
+
+  assert.equal(store.rows.length, 2);
+  assert.ok(store.rows.every((row) => row.recipientUserId === OVERSIGHT));
+});
+
+test("with the toggle OFF, the milestone and the digest are both refused", async () => {
+  // The same two calls as the test above. Only the plant's choice differs,
+  // which is the whole point of routing this through the plant's own setting
+  // rather than through the recipient's role.
+  const store = new FakeNotificationStore();
+
+  for (const category of ["milestones", "digest"] as const) {
+    const result = await runEnqueue(
+      store,
+      baseInput({
+        category,
+        type: `oversight.${category}`,
+        entityType: undefined,
+        entityId: undefined,
+        recipientUserId: OVERSIGHT,
+      })
+    );
+
+    assert.equal(result.status, "skipped", category);
+    assert.equal(result.reason, "oversight_privacy");
+  }
+
+  assert.equal(store.rows.length, 0);
+});
+
+test("flipping the toggle is honoured at the NEXT enqueue, not the next deploy", async () => {
+  // The gate is read per call, so there is no cached eligibility to invalidate
+  // and no window in which a planter's decision is not yet in force.
+  const sharing: string[] = [];
+  const store = new FakeNotificationStore(sharing);
+
+  const milestone = (key: string) =>
+    baseInput({
+      category: "milestones" as const,
+      type: "oversight.milestone.phase_advanced",
+      entityType: undefined,
+      entityId: undefined,
+      recipientUserId: OVERSIGHT,
+      dedupeKey: key,
+    });
+
+  assert.equal((await runEnqueue(store, milestone("m1"))).status, "skipped");
+
+  sharing.push(CHURCH_A); // the planter turns sharing on
+  assert.equal((await runEnqueue(store, milestone("m2"))).status, "recorded");
+
+  sharing.length = 0; // ...and off again
+  assert.equal((await runEnqueue(store, milestone("m3"))).status, "skipped");
+
   assert.equal(store.rows.length, 1);
-  assert.equal(store.rows[0].recipientUserId, OVERSIGHT);
 });
 
 test("the refusal is NOT a tenancy error — the oversight user can access the church", async () => {
@@ -691,77 +804,16 @@ test("the refusal is NOT a tenancy error — the oversight user can access the c
   assert.deepEqual(outsider, { allowed: false, reason: "outside_church" });
 });
 
-test("phase and digest are gated by their OWN toggles, not refused outright", async () => {
-  // FRD Open Question #3, ruled: oversight roles ARE eligible for `phase` and
-  // `digest`. Both used to map to null — a categorical refusal no church could
-  // lift — and now each has a column of its own in `church_privacy_settings`
-  // (migration 0026).
-  assert.equal(oversightPrivacyFeature("phase"), "phase");
-  assert.equal(oversightPrivacyFeature("digest"), "digest");
-
-  // Default OFF: an existing church, having opted in to nothing, sees exactly
-  // the behaviour it saw before the ruling.
-  const closed = new FakeNotificationStore();
-  for (const category of ["phase", "digest"] as const) {
-    const result = await runEnqueue(
-      closed,
-      baseInput({
-        category,
-        type: `${category}.update`,
-        entityType: undefined,
-        entityId: undefined,
-        recipientUserId: OVERSIGHT,
-      })
-    );
-    assert.equal(result.status, "skipped", `${category} while opted out`);
-    assert.equal(result.reason, "oversight_privacy");
-  }
-  assert.equal(closed.rows.length, 0);
-
-  // Opted in, and each opens INDEPENDENTLY: sharing `phase` does not hand over
-  // the digest, and vice versa.
-  const phaseOnly = new FakeNotificationStore({ [CHURCH_A]: ["phase"] });
-  const asOversight = (category: "phase" | "digest") =>
-    baseInput({
-      category,
-      type: `${category}.update`,
-      entityType: undefined,
-      entityId: undefined,
-      recipientUserId: OVERSIGHT,
-    });
-
-  assert.equal(
-    (await runEnqueue(phaseOnly, asOversight("phase"))).status,
-    "recorded"
-  );
-  assert.equal(
-    (await runEnqueue(phaseOnly, asOversight("digest"))).status,
-    "skipped"
-  );
-  assert.equal(phaseOnly.rows.length, 1);
-
-  const bothOpen = new FakeNotificationStore({
-    [CHURCH_A]: ["phase", "digest"],
-  });
-  for (const category of ["phase", "digest"] as const) {
-    assert.equal(
-      (await runEnqueue(bothOpen, asOversight(category))).status,
-      "recorded"
-    );
-  }
-  assert.equal(bothOpen.rows.length, 2);
-});
-
 test("a toggle for ANOTHER church does not open this one", async () => {
   // The toggle is per plant. A network admin over twenty plants gets whatever
-  // each plant individually granted, not the union.
-  const store = new FakeNotificationStore({ [CHURCH_B]: ["phase"] });
+  // each plant individually granted, never the union.
+  const store = new FakeNotificationStore([CHURCH_B]);
 
   const result = await runEnqueue(
     store,
     baseInput({
-      category: "phase",
-      type: "phase.transition",
+      category: "milestones",
+      type: "oversight.milestone.phase_advanced",
       entityType: undefined,
       entityId: undefined,
       recipientUserId: OVERSIGHT,
@@ -773,13 +825,15 @@ test("a toggle for ANOTHER church does not open this one", async () => {
   assert.equal(store.rows.length, 0);
 });
 
-test("a church-level recipient is never subject to a privacy toggle", async () => {
+test("a church-level recipient is never subject to the sharing toggle", async () => {
   // `canAccessFeatureData` returns true for planter/coach/team_member without
   // consulting settings, and the enqueue gate must not be stricter than the
-  // read gate it mirrors.
+  // read gate it mirrors. The plant's own team keeps the whole per-event
+  // stream, sharing or no sharing — N-025 narrows what leaves the plant, not
+  // what happens inside it.
   const store = new FakeNotificationStore();
 
-  for (const category of ["tasks", "phase", "digest"] as const) {
+  for (const category of notificationCategories) {
     const result = await runEnqueue(
       store,
       baseInput({
@@ -789,10 +843,10 @@ test("a church-level recipient is never subject to a privacy toggle", async () =
         entityId: undefined,
       })
     );
-    assert.equal(result.created, true);
+    assert.equal(result.created, true, category);
   }
 
-  assert.equal(store.rows.length, 3);
+  assert.equal(store.rows.length, notificationCategories.length);
 });
 
 // ----------------------------------------------------------------------------
@@ -897,16 +951,18 @@ test("a skip is not a dedupe hit — the key stays free for a permitted recipien
   assert.equal(store.rows.length, 1);
 });
 
-test("every category maps to a toggle or to an explicit null — none is missing", () => {
-  // A category added without a decision here would otherwise inherit whatever
-  // `?? null` happened to do. Stating it makes the omission visible.
-  for (const category of notificationCategories) {
-    const feature = oversightPrivacyFeature(category);
-    assert.ok(
-      feature === null || typeof feature === "string",
-      `no oversight decision recorded for "${category}"`
-    );
-  }
+test("a category not on the oversight allow-list fails CLOSED", () => {
+  // The direction a missing decision resolves in. Under the model this
+  // replaced, every category had to be mapped to a toggle and an unmapped one
+  // was a hole; now the default for anything unlisted is "oversight does not
+  // get it", so a category added tomorrow with no ruling yet stays inside the
+  // plant until someone decides otherwise.
+  const eligible = notificationCategories.filter(isOversightEligibleCategory);
+  assert.deepEqual(eligible, ["milestones", "digest"]);
+  assert.ok(
+    notificationCategories.length > eligible.length,
+    "every category is oversight-eligible — the allow-list is doing nothing"
+  );
 });
 
 // ----------------------------------------------------------------------------

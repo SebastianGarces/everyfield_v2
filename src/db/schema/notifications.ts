@@ -43,8 +43,16 @@ import { users } from "./user";
 /**
  * The fixed, code-defined category set. The category is the unit of user
  * preference — a user turns off "meeting reminders", not "the 3-day offset of a
- * Vision Meeting". Adding one is a code change plus a coded default; it is
- * deliberately NOT a schema change and needs no backfill.
+ * Vision Meeting". Adding one is a code change plus a coded default; it needs
+ * no backfill (absence resolves to the coded default) but it DOES need the
+ * CHECK constraints in migration 0024 widened — see 0028.
+ *
+ * `milestones` (N-025, ruled 2026-07-27) is the one category an oversight
+ * recipient may receive per event. It exists so "oversight never gets granular
+ * per-event notifications" is a structural fact rather than a rule about
+ * `type` strings: the five granular categories above it are refused for an
+ * oversight recipient outright, toggle or no toggle, and only `milestones` and
+ * `digest` are eligible at all (`OVERSIGHT_ELIGIBLE_CATEGORIES`).
  */
 export const notificationCategories = [
   "tasks",
@@ -52,6 +60,7 @@ export const notificationCategories = [
   "communication",
   "teams",
   "phase",
+  "milestones",
   "digest",
 ] as const;
 export type NotificationCategory = (typeof notificationCategories)[number];

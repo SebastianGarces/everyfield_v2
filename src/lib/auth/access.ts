@@ -115,7 +115,16 @@ export async function canAccessChurch(
 // Privacy Controls
 // ============================================================================
 
-/** Feature keys that map to privacy toggle columns */
+/**
+ * Feature keys that map to privacy toggle columns.
+ *
+ * The first six gate what an oversight user may PULL — a dashboard read.
+ * `oversight_activity` gates what is PUSHED to them (F11 N-026): the daily
+ * activity summary and the three milestones. It replaced the per-category
+ * `phase` and `digest` keys, which migration 0028 dropped along with their
+ * columns — under the 2026-07-27 ruling oversight has no per-category
+ * notification eligibility left to gate.
+ */
 export type PrivacyFeatureKey =
   | "people"
   | "meetings"
@@ -123,8 +132,7 @@ export type PrivacyFeatureKey =
   | "financials"
   | "ministry_teams"
   | "facilities"
-  | "phase"
-  | "digest";
+  | "oversight_activity";
 
 /** Maps feature keys to their corresponding column in church_privacy_settings */
 const PRIVACY_COLUMN_MAP: Record<
@@ -137,8 +145,7 @@ const PRIVACY_COLUMN_MAP: Record<
   financials: "shareFinancials",
   ministry_teams: "shareMinistryTeams",
   facilities: "shareFacilities",
-  phase: "sharePhase",
-  digest: "shareDigest",
+  oversight_activity: "shareActivityWithOversight",
 };
 
 /**

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 
 import { HeaderBreadcrumbs } from "@/components/header";
 import { PreferenceMatrix } from "@/components/notifications/preference-matrix";
@@ -34,8 +35,12 @@ export const metadata: Metadata = {
 };
 
 export default async function SettingsPage() {
-  const owner = preferenceOwnerFromSession(await verifySession());
+  const session = await verifySession();
+  const owner = preferenceOwnerFromSession(session);
   const view = buildPreferenceMatrixView(await loadUserPreferences(owner));
+
+  const isPlanterWithPlant =
+    session.user.role === "planter" && Boolean(session.user.churchId);
 
   return (
     <>
@@ -68,6 +73,33 @@ export default async function SettingsPage() {
 
           <PreferenceMatrix view={view} />
         </section>
+
+        {/* The one setting on the neighbouring screen, linked rather than
+            inlined. It is a different KIND of decision — church-wide, about
+            what leaves the plant, and the planter's alone — and folding it into
+            a personal notification matrix would make a consent choice read as
+            one more switch about email volume (N-026). Shown only to a planter
+            with a plant, which is exactly who the target screen serves. */}
+        {isPlanterWithPlant && (
+          <section aria-labelledby="sharing-link" className="space-y-1">
+            <h2
+              id="sharing-link"
+              className="text-lg font-semibold tracking-tight"
+            >
+              Sharing
+            </h2>
+            <p className="text-muted-foreground text-sm text-pretty">
+              Your sending church and network see nothing about this plant
+              unless you turn sharing on.{" "}
+              <Link
+                href="/settings/sharing"
+                className="cursor-pointer font-medium underline underline-offset-4"
+              >
+                Choose what you share
+              </Link>
+            </p>
+          </section>
+        )}
       </div>
     </>
   );

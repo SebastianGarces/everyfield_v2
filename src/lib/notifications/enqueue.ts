@@ -17,7 +17,10 @@ import {
   isOversightUser,
 } from "@/lib/auth/access";
 
-import { oversightPrivacyFeature } from "./categories";
+import {
+  OVERSIGHT_SHARING_FEATURE,
+  isOversightEligibleCategory,
+} from "./categories";
 
 // ============================================================================
 // The enqueue contract (N-001, N-002, N-011).
@@ -45,13 +48,16 @@ import { oversightPrivacyFeature } from "./categories";
 //      it because N-011 defines reschedule as cancel + re-enqueue: a cancelled
 //      row that kept reserving its key would swallow the notification that
 //      replaces it (migration 0025).
-//   3. The recipient must be ALLOWED to be told. Two separate facts, both
+//   3. The recipient must be ALLOWED to be told. Three separate facts, all
 //      checked here rather than assumed of the caller — see
 //      `recipientMayBeNotified`:
-//        a. they can access the church the row is filed under, and
-//        b. if they are an oversight user, the church has opted in to sharing
-//           this category's feature data.
-//      A recipient who fails either is SKIPPED, not thrown over: `enqueue`
+//        a. they can access the church the row is filed under,
+//        b. if they are an oversight user, the category is one oversight may
+//           receive at all — `milestones` or `digest`, never the granular
+//           per-event stream (N-025), and
+//        c. if they are an oversight user, the plant has turned on the single
+//           sharing toggle (N-026).
+//      A recipient who fails any is SKIPPED, not thrown over: `enqueue`
 //      returns `{status: "skipped", reason}` and writes nothing for them. The
 //      natural caller is a fan-out ("remind all six attendees"), and a throw
 //      there aborts the loop mid-way with rows already written for recipients
@@ -170,8 +176,9 @@ export type EnqueueResult =
 /**
  * Why a recipient was refused — a reason rather than a bare boolean, so the two
  * refusals stay distinguishable in the return value and in a log. They are
- * genuinely different facts: one is a tenancy mismatch, the other is a church
- * exercising a privacy choice it is entitled to.
+ * genuinely different facts: one is a tenancy mismatch, the other is what the
+ * oversight model allows (a category oversight never receives, or a plant
+ * exercising a privacy choice it is entitled to).
  *
  * Both produce a skip rather than a throw (header rule 3). `outside_church` is
  * not always a caller bug: a user whose church changed between the moment the
@@ -194,18 +201,21 @@ export interface EnqueueDeps {
   /**
    * May this user be told about this category, in this church?
    *
-   * TWO gates, resolved against the same `src/lib/auth/access.ts` the rest of
+   * THREE gates, resolved against the same `src/lib/auth/access.ts` the rest of
    * the app authorises reads with:
    *
    *   1. `canAccessChurch` — a caller that derived `recipientUserId` from
    *      request input cannot file a notification for a stranger into a tenant
    *      they do not belong to.
-   *   2. `canAccessFeatureData` for OVERSIGHT recipients — because (1) alone
-   *      returns true for a network admin on every plant in the network,
-   *      whatever `church_privacy_settings` says.
+   *   2. For OVERSIGHT recipients, `isOversightEligibleCategory` — the
+   *      oversight model (N-025) is a digest plus three milestones, so a
+   *      granular category is refused for them unconditionally.
+   *   3. For OVERSIGHT recipients, `canAccessFeatureData` on the single
+   *      sharing toggle (N-026) — because (1) alone returns true for a network
+   *      admin on every plant in the network, whatever the plant decided.
    *
-   * The category is a parameter for gate (2): what an oversight user may be
-   * told depends on which feature's copy the body carries.
+   * The category is a parameter for gate (2). Gate (3) does not vary by
+   * category: there is one toggle and it governs everything oversight gets.
    */
   recipientMayBeNotified(
     churchId: string,
@@ -263,9 +273,9 @@ export interface CancelByEntityDeps {
  * barred recipient in a fan-out costs that recipient their notification and
  * nobody else theirs. `reason` says which refusal applied —
  * `"outside_church"` (no access to the church) or `"oversight_privacy"` (an
- * oversight user whose church has not opted in to this category's feature
- * data). Both are checked here rather than left to a comment about what
- * callers have supposedly already done.
+ * oversight user asked to be told something the oversight model does not give
+ * them, or whose plant has not turned sharing on). Both are checked here rather
+ * than left to a comment about what callers have supposedly already done.
  *
  * The only things that still throw are a malformed input (the Zod parse, a
  * programming error at the boundary) and a dependency that misreports a
@@ -411,22 +421,32 @@ export const dbEnqueueDeps: EnqueueDeps = {
       return { allowed: false, reason: "outside_church" };
     }
 
-    // Gate 2 — and it is a SECOND gate, not the same one. `canAccessChurch`
-    // returns true for a sending-church or network admin on every plant beneath
-    // them, unconditionally; memory/invariants.md → Hierarchical Access Control
-    // says those users see aggregate metrics only, subject to the church's
-    // opt-in `church_privacy_settings`. A notification body is item-level
-    // feature copy, so it is subject to exactly that toggle.
     if (isOversightUser(recipient)) {
-      const feature = oversightPrivacyFeature(category);
-      // Unreachable for the six shipped categories — every one of them maps to
-      // a toggle since `phase` and `digest` got theirs (migration 0026). Kept
-      // so a category added later with no ruling yet fails CLOSED rather than
-      // being pointed at whichever existing toggle looked closest.
-      if (feature === null) {
+      // Gate 2 — the oversight MODEL (N-025). Asked before, and independently
+      // of, the plant's toggle: an oversight recipient receives a daily summary
+      // and three milestones, so a granular per-event category is refused with
+      // sharing on and with sharing off alike. It is also asked before any
+      // further query, so a granular fan-out that happens to include an
+      // oversight user costs one already-loaded row and no extra round trip.
+      if (!isOversightEligibleCategory(category)) {
         return { allowed: false, reason: "oversight_privacy" };
       }
-      if (!(await canAccessFeatureData(recipient, churchId, feature))) {
+
+      // Gate 3 — the plant's consent, and it is a SEPARATE gate from (1).
+      // `canAccessChurch` returns true for a sending-church or network admin on
+      // every plant beneath them, unconditionally; memory/invariants.md →
+      // Hierarchical Access Control says those users see aggregate metrics
+      // only, subject to the plant's opt-in `church_privacy_settings`. Read at
+      // ENQUEUE time, every time — that is what makes a toggle flipped this
+      // morning take effect on this afternoon's digest rather than on the next
+      // deploy.
+      if (
+        !(await canAccessFeatureData(
+          recipient,
+          churchId,
+          OVERSIGHT_SHARING_FEATURE
+        ))
+      ) {
         return { allowed: false, reason: "oversight_privacy" };
       }
     }

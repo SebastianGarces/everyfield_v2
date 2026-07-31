@@ -23,10 +23,22 @@ import {
 // delivery.
 // ----------------------------------------------------------------------------
 
-test("the category set is exactly the six the FRD defines", () => {
+test("the category set is exactly the seven the FRD defines", () => {
+  // `milestones` joined the six in #224 (N-025): the three events an oversight
+  // partner hears about the day they happen needed a category of their own so
+  // that "oversight never receives a granular category" could be enforced by a
+  // closed allow-list rather than by a convention about `type` strings.
   assert.deepEqual(
     [...notificationCategories],
-    ["tasks", "meetings", "communication", "teams", "phase", "digest"]
+    [
+      "tasks",
+      "meetings",
+      "communication",
+      "teams",
+      "phase",
+      "milestones",
+      "digest",
+    ]
   );
 });
 
@@ -108,7 +120,13 @@ test("the preference matrix covers every category on every channel", () => {
     keys.length,
     notificationCategories.length * notificationChannels.length
   );
-  assert.equal(new Set(keys.map((k) => `${k.category}:${k.channel}`)).size, 12);
+  // Derived, not literal: the count is a consequence of the registry, and a
+  // literal here would only ever record how many categories existed the day it
+  // was written.
+  assert.equal(
+    new Set(keys.map((k) => `${k.category}:${k.channel}`)).size,
+    notificationCategories.length * notificationChannels.length
+  );
   // Stable order — the settings screen renders it directly.
   assert.deepEqual(keys[0], { category: "tasks", channel: "email" });
   assert.deepEqual(keys.at(-1), { category: "digest", channel: "in_app" });

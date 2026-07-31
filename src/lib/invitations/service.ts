@@ -13,6 +13,7 @@ import type {
   OrganizationInvitationStatus,
   OrganizationInvitationType,
 } from "@/db/schema/organization-invitation";
+import { announceInvitationAccepted } from "@/lib/notifications/oversight";
 import { and, desc, eq } from "drizzle-orm";
 
 // ============================================================================
@@ -116,7 +117,59 @@ export async function acceptInvitation(
     .where(eq(organizationInvitations.id, invitationId))
     .returning();
 
+  // F11 N-025 — milestone #1, announced at its source.
+  //
+  // Last, and after the durable "accepted" marker, so a notification failure
+  // cannot leave an invitation half-accepted (memory/invariants.md →
+  // Atomicity). `announceInvitationAccepted` never throws and never decides
+  // whether the plant is sharing — `enqueue` does, per recipient, and writes
+  // nothing when it is not.
+  //
+  // Only a PLANT-side acceptance is a milestone: `target_church_id` is set when
+  // a sending church or a network invited a church plant, which is the "planter
+  // accepted invitation" the ruling names. A sending church joining a network
+  // is a different event with no plant to report on.
+  if (updated.targetChurchId) {
+    await announceInvitationAcceptedForChurch(
+      updated.targetChurchId,
+      invitationId
+    );
+  }
+
   return updated;
+}
+
+/**
+ * Look up the plant's name and announce the milestone. Best-effort by
+ * construction: `announceInvitationAccepted` swallows its own failures, and the
+ * name lookup is guarded so a missing church cannot throw into an acceptance
+ * that has already been recorded.
+ */
+async function announceInvitationAcceptedForChurch(
+  churchId: string,
+  invitationId: string
+): Promise<void> {
+  try {
+    const [plant] = await db
+      .select({ name: churches.name })
+      .from(churches)
+      .where(eq(churches.id, churchId))
+      .limit(1);
+
+    if (!plant) return;
+
+    await announceInvitationAccepted({
+      churchId,
+      plantName: plant.name,
+      invitationId,
+    });
+  } catch (error) {
+    console.error("oversight invitation milestone failed", {
+      churchId,
+      invitationId,
+      error,
+    });
+  }
 }
 
 /**

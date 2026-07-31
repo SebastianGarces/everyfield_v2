@@ -28,6 +28,9 @@ import {
 // Handlers owned by PE (Phase Engine / Plant Intelligence)
 import { handleMaterialEvent } from "@/lib/phase-engine/dirty-handler";
 
+// Handlers owned by F11 (Notifications)
+import { handlePhaseChangedForOversight } from "@/lib/notifications/oversight-events";
+
 // Event types from producers
 import type {
   MeetingAttendanceRecordedEvent,
@@ -39,6 +42,7 @@ import type {
   TeamLeaderAssignedEvent,
 } from "@/lib/ministry-teams/events";
 import type { PersonCreatedEvent } from "@/lib/people/events";
+import type { PhaseChangedEvent } from "@/lib/phase-engine/events";
 import type { TaskCompletedEvent } from "@/lib/tasks/events";
 
 /**
@@ -158,6 +162,21 @@ export function registerSubscriptions(bus: EventBusLike): void {
   bus.on<TeamMemberAssignedEvent>("team.member.assigned", handleMaterialEvent);
   bus.on<PersonCreatedEvent>("person.created", handleMaterialEvent);
   bus.on<TaskCompletedEvent>("task.completed", handleMaterialEvent);
+
+  // --------------------------------------------------------------------------
+  // PE (Phase Engine) -> F11 (Notifications) — the oversight phase milestone
+  // --------------------------------------------------------------------------
+
+  // F11 N-025, milestone #2: a plant advancing to a new stage is one of the
+  // three events an oversight partner hears about the day it happens.
+  //
+  // Wired HERE rather than called from `transitions/service.ts`, because the
+  // phase engine already publishes this fact and this file is the single place
+  // cross-feature wiring lives. The handler is best-effort and never throws
+  // back into the transition, and it decides nothing about privacy — `enqueue`
+  // is the gate, per recipient, and writes no row for a plant that is not
+  // sharing.
+  bus.on<PhaseChangedEvent>("phase.changed", handlePhaseChangedForOversight);
 
   // --------------------------------------------------------------------------
   // Future subscriptions (no handlers yet)

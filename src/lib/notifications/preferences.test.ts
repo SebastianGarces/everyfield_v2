@@ -193,10 +193,13 @@ test("cadence is null on every category except digest", () => {
 // The settings matrix
 // ----------------------------------------------------------------------------
 
-test("the matrix resolves all twelve cells for a user with no rows", () => {
+test("the matrix resolves every cell for a user with no rows", () => {
   const matrix = resolvePreferenceMatrix([]);
 
-  assert.equal(matrix.length, 12);
+  assert.equal(
+    matrix.length,
+    notificationCategories.length * notificationChannels.length
+  );
   assert.ok(matrix.every((cell) => cell.source === "default"));
 });
 
@@ -437,15 +440,18 @@ test("the enum sets are CHECK constraints in the database, not just a TS brand",
 test("with no stored rows the allow-list is the coded defaults, not everything", () => {
   const allowed = resolveInAppCategories([]);
 
-  // Five on by default; `digest`/`in_app` is the one coded default that is off,
+  // Everything except `digest`/`in_app`, the one coded default that is off,
   // because an in-app digest row would duplicate the feed it summarises. A
-  // "filter" that returned all six would be indistinguishable from no filter.
+  // "filter" that returned every category would be indistinguishable from no
+  // filter. `milestones` IS in the list: an oversight partner is told about a
+  // launch date once, and that row has to be somewhere they can see it (N-027).
   assert.deepEqual(allowed, [
     "tasks",
     "meetings",
     "communication",
     "teams",
     "phase",
+    "milestones",
   ]);
   assert.ok(!allowed.includes("digest"));
 });

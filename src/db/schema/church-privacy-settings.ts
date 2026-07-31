@@ -18,21 +18,31 @@ export const churchPrivacySettings = pgTable(
       .notNull(),
     shareFacilities: boolean("share_facilities").default(false).notNull(),
     /**
-     * Plant Intelligence — assessments, insights and phase transitions.
-     * Feeds `canAccessFeatureData(user, churchId, "phase")`, which the F11
-     * `phase` notification category consults before an oversight user may be
-     * told anything about a plant's assessment.
+     * F11 N-026 (ruled 2026-07-27) — the ONE control over everything an
+     * oversight recipient (`sending_church_admin`, `network_admin`) is told
+     * about this plant.
+     *
+     * It replaced `share_phase` and `share_digest` (migration 0026, dropped by
+     * 0028). Those were per-category notification toggles, and the ruling
+     * removed the category model for oversight altogether: oversight receives a
+     * daily activity SUMMARY plus three milestones, never granular per-event
+     * notifications, so there is nothing left for a per-category toggle to say.
+     * One switch, phrased in the planter's terms ("share activity with your
+     * sending church or network"), is also the only phrasing a planter can
+     * actually reason about.
+     *
+     * Default FALSE, for every church, including the ones that had opted in to
+     * the columns it replaces — 0028 migrates nobody forward. Sharing your
+     * plant's activity outward is a consent decision, and inheriting it from a
+     * toggle that meant something else would be inventing consent.
+     *
+     * The six `share_*` toggles above are a DIFFERENT question and are
+     * untouched: they gate what an oversight user may PULL on the oversight
+     * dashboard. This one gates what is PUSHED to them.
      */
-    sharePhase: boolean("share_phase").default(false).notNull(),
-    /**
-     * The recurring roll-up (F11 N-013). A separate toggle rather than an
-     * inference from the others: a digest is its own recurring contact, and a
-     * church that shares its task list has not thereby asked for a weekly
-     * email about itself to leave the building. It governs ELIGIBILITY only —
-     * whatever assembles a digest's contents still has to gate each line
-     * against that line's own feature toggle.
-     */
-    shareDigest: boolean("share_digest").default(false).notNull(),
+    shareActivityWithOversight: boolean("share_activity_with_oversight")
+      .default(false)
+      .notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
     updatedBy: uuid("updated_by").references(() => users.id),
   },
