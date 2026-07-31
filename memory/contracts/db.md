@@ -12,7 +12,7 @@ ORM: Drizzle | DB: PostgreSQL (Neon serverless) | **Connection:** `src/db/index.
 
 ## Core
 
-**churches** (`church.ts`) — multi-tenant root: name req; current_phase int =0; sending_church_id / sending_network_id FK null; inactivity_warning_days int =7; inactivity_alert_days int =14; launch_date date null (Phase Engine countdown); last_material_event_at timestamp null (Phase Engine "dirty" marker).
+**churches** (`church.ts`) — multi-tenant root: name req; current_phase int =0; sending_church_id / sending_network_id FK null; inactivity_warning_days int =7; inactivity_alert_days int =14; launch_date date null (Phase Engine countdown); last_material_event_at timestamp null (Phase Engine "dirty" marker); city / state_region / country varchar(255) null (onboarding OB-002 — each INDEPENDENTLY optional, "" normalised to NULL); onboarding_completed_at timestamp null (F12 — null = the onboarding flow still owns this planter's dashboard; churches predating migration 0027 were backfilled to their created_at).
 
 **users** (`user.ts`): email unique req; password_hash Argon2id; name null; role: planter/coach/team_member/sending_church_admin/network_admin; church_id / sending_church_id / sending_network_id FK null.
 
