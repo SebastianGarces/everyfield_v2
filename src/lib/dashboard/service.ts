@@ -179,8 +179,8 @@ export async function getRecentActivity(
 
   for (const meeting of completedMeetings) {
     const label =
-      meeting.type === "vision_meeting"
-        ? `Vision Meeting #${meeting.meetingNumber ?? "?"}`
+      meeting.type === "vision_meeting" && meeting.meetingNumber != null
+        ? `Vision Meeting #${meeting.meetingNumber}`
         : (meeting.title ?? formatMeetingType(meeting.type));
     const attendance = meeting.actualAttendance;
     const description = attendance
