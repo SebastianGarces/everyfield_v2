@@ -24,14 +24,14 @@ const FEATURES: readonly Feature[] = [
     desktop: {
       src: "/marketing/shots/fs-people.webp",
       width: 1155,
-      height: 680,
+      height: 813,
     },
     mobile: {
       src: "/marketing/shots/fs-people-m.webp",
-      width: 580,
-      height: 680,
+      width: 575,
+      height: 813,
     },
-    alt: "People cards from the Redemption Hill pipeline — Sam Torres marked Attendee, Grace Lin marked Following Up.",
+    alt: "People cards from the Redemption Hill pipeline — Grace Lin following up from the website, contact info and source on every card.",
   },
   {
     key: "meetings",

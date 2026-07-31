@@ -62,12 +62,12 @@ const PHASES: readonly Phase[] = [
     desktop: {
       src: "/marketing/shots/pt-coregroup.webp",
       width: 1720,
-      height: 680,
+      height: 830,
     },
     mobile: {
       src: "/marketing/shots/pt-coregroup-m.webp",
       width: 575,
-      height: 680,
+      height: 830,
     },
     alt: "People cards moving through the pipeline — J. P. Holloway a new prospect from an event, Grace Lin in follow-up from the website.",
   },
@@ -85,12 +85,12 @@ const PHASES: readonly Phase[] = [
     desktop: {
       src: "/marketing/shots/pt-launch-team.webp",
       width: 1185,
-      height: 700,
+      height: 810,
     },
     mobile: {
       src: "/marketing/shots/pt-launch-team-m.webp",
       width: 622,
-      height: 770,
+      height: 810,
     },
     alt: "The People screen filtered to the committed — 61 total, Core Group badges on every card.",
   },
