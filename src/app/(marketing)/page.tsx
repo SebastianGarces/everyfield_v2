@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 
-import { DashboardShot } from "./_components/app-mocks";
 import { FeatureSwitcher } from "./_components/feature-switcher";
 import { InviteForm } from "./_components/invite-form";
 import { PhaseTabs } from "./_components/phase-tabs";
@@ -40,7 +39,15 @@ export default function LandingPage() {
               networks and churches.
             </p>
             <div className="hero-shot">
-              <DashboardShot />
+              <Image
+                className="shot-img"
+                src="/marketing/shots/dashboard.webp"
+                alt="The EveryField dashboard for Redemption Hill Church in pre-launch: core group of 61, 142 people in the pipeline, zero overdue tasks, and recent activity."
+                width={2880}
+                height={1800}
+                sizes="(max-width: 1012px) 100vw, 980px"
+                priority
+              />
             </div>
           </div>
         </div>

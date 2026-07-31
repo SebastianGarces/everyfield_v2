@@ -1,16 +1,7 @@
 "use client";
 
+import Image from "next/image";
 import { useState } from "react";
-
-import {
-  ChecklistShot,
-  CommitmentsShot,
-  HealthShot,
-  PipelineShot,
-  RunSheetShot,
-  TrainingShot,
-  WikiShot,
-} from "./app-mocks";
 
 const PHASES = [
   {
@@ -23,7 +14,8 @@ const PHASES = [
       "The wiki: the whole methodology, readable in order.",
       "Foundations workspace: your 4 Pillars, your vision, written down.",
     ],
-    shot: <WikiShot />,
+    shot: "/marketing/shots/wiki-discovery.webp",
+    alt: "A wiki chapter in EveryField titled 'Is Church Planting Your Calling?' with reading progress tracked in the sidebar.",
   },
   {
     key: "core-group",
@@ -35,7 +27,8 @@ const PHASES = [
       "People pipeline: contact → attended → committed.",
       "Vision meeting attendance, trend over trend.",
     ],
-    shot: <PipelineShot />,
+    shot: "/marketing/shots/people-pipeline.webp",
+    alt: "The people pipeline board in EveryField: columns for prospect, attendee, following up, and interviewed, each with live counts.",
   },
   {
     key: "launch-team",
@@ -47,7 +40,8 @@ const PHASES = [
       "Commitment tracking against your 50-adult floor.",
       "Launch-date timeline with task templates unlocked.",
     ],
-    shot: <CommitmentsShot />,
+    shot: "/marketing/shots/people-launch-team.webp",
+    alt: "The People screen filtered to core group, launch team, and leaders — the committed adults counted against the launch floor.",
   },
   {
     key: "training",
@@ -59,7 +53,8 @@ const PHASES = [
       "Ministry team rosters and training completion.",
       "Meeting series for corporate and team-specific training.",
     ],
-    shot: <TrainingShot />,
+    shot: "/marketing/shots/teams.webp",
+    alt: "The Ministry Teams screen in EveryField: eleven teams with leaders, staffing bars, and open roles at a glance.",
   },
   {
     key: "pre-launch",
@@ -71,7 +66,8 @@ const PHASES = [
       "Pre-launch checklist counting down to Sunday.",
       "Dry-run meetings with role assignments.",
     ],
-    shot: <ChecklistShot />,
+    shot: "/marketing/shots/launch-checklist.webp",
+    alt: "The Launch Sunday logistics checklist in EveryField: preparation progress at 4 of 8 ready, with materials and setup items ticking down.",
   },
   {
     key: "launch-sunday",
@@ -82,7 +78,8 @@ const PHASES = [
       "Launch-day run sheet by team and hour.",
       "Attendance and follow-up capture, same day.",
     ],
-    shot: <RunSheetShot />,
+    shot: "/marketing/shots/launch-run-sheet.webp",
+    alt: "The Launch Sunday meeting in EveryField: date, location, expected attendance, and the run sheet — setup crew, band call, doors, service.",
   },
   {
     key: "beyond",
@@ -94,7 +91,8 @@ const PHASES = [
       "Weekly health dashboard: worship, walk, work.",
       "Graduation: hand off to your long-term ChMS when ready.",
     ],
-    shot: <HealthShot />,
+    shot: "/marketing/shots/beyond-health.webp",
+    alt: "A post-launch dashboard in EveryField: weekly services completed with attendance above one hundred, week after week.",
   },
 ] as const;
 
@@ -137,7 +135,16 @@ export function PhaseTabs() {
               ))}
             </ul>
           </div>
-          <div className="pshot">{phase.shot}</div>
+          <div className="pshot">
+            <Image
+              className="shot-img"
+              src={phase.shot}
+              alt={phase.alt}
+              width={2880}
+              height={1800}
+              sizes="(max-width: 900px) 100vw, 520px"
+            />
+          </div>
         </div>
       ))}
     </div>
