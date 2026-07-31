@@ -5,6 +5,8 @@ import { useState } from "react";
 import { Chip } from "./chip";
 import { Shot, type ShotSource } from "./shot";
 
+type Overlay = ShotSource & { alt: string; style: React.CSSProperties };
+
 type Phase = {
   key: string;
   num: string;
@@ -15,6 +17,9 @@ type Phase = {
   desktop: ShotSource;
   mobile?: ShotSource;
   alt: string;
+  /** Horizontal anchor of the primary crop inside the panel. */
+  anchor?: "start" | "end";
+  overlay?: Overlay;
   /** Full-bleed beat: the visual escapes the container to ~92vw. */
   bleed?: boolean;
   chip?: {
@@ -47,6 +52,14 @@ const PHASES: readonly Phase[] = [
       height: 760,
     },
     alt: "The wiki chapter 'Is Church Planting Your Calling?' with the Phase 0 reading list and reading progress in the sidebar.",
+    anchor: "end",
+    overlay: {
+      src: "/marketing/shots/sec-phase-card.webp",
+      width: 450,
+      height: 360,
+      alt: "What Phase Am I In? — learn about the phases and where you are in the journey.",
+      style: { left: "5%", bottom: "12%" },
+    },
   },
   {
     key: "core-group",
@@ -70,6 +83,14 @@ const PHASES: readonly Phase[] = [
       height: 830,
     },
     alt: "People cards moving through the pipeline — J. P. Holloway a new prospect from an event, Grace Lin in follow-up from the website.",
+    anchor: "start",
+    overlay: {
+      src: "/marketing/shots/fs-meetings-m.webp",
+      width: 760,
+      height: 515,
+      alt: "Vision Meeting #5 — in 14 days, ~32 estimated.",
+      style: { right: "4%", bottom: "10%" },
+    },
   },
   {
     key: "launch-team",
@@ -93,6 +114,7 @@ const PHASES: readonly Phase[] = [
       height: 810,
     },
     alt: "The People screen filtered to the committed — 61 total, Core Group badges on every card.",
+    anchor: "end",
   },
   {
     key: "training",
@@ -116,6 +138,7 @@ const PHASES: readonly Phase[] = [
       height: 695,
     },
     alt: "Eight ministry team cards with staffing bars and open roles — Senior Pastor through Children's Ministry.",
+    anchor: "start",
   },
   {
     key: "pre-launch",
@@ -206,13 +229,31 @@ function PhaseVisual({
   phase: Phase;
   isMobile?: boolean;
 }) {
+  const cls = [
+    "pshot",
+    phase.bleed && !isMobile ? "bleed" : "",
+    !isMobile && phase.anchor ? `anchor-${phase.anchor}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
   return (
-    <div className={phase.bleed && !isMobile ? "pshot bleed" : "pshot"}>
+    <div className={cls}>
       <Shot
         desktop={isMobile ? (phase.mobile ?? phase.desktop) : phase.desktop}
         mobile={isMobile ? undefined : phase.mobile}
         alt={phase.alt}
       />
+      {!isMobile && phase.overlay ? (
+        <img
+          className="shot-img shot-overlay"
+          src={phase.overlay.src}
+          alt={phase.overlay.alt}
+          width={phase.overlay.width}
+          height={phase.overlay.height}
+          loading="lazy"
+          style={phase.overlay.style}
+        />
+      ) : null}
       {phase.chip ? (
         <Chip
           style={

@@ -4,6 +4,8 @@ import { useState } from "react";
 
 import { Shot, type ShotSource } from "./shot";
 
+type Overlay = ShotSource & { alt: string; style: React.CSSProperties };
+
 type Feature = {
   key: string;
   title: string;
@@ -12,6 +14,9 @@ type Feature = {
   desktop: ShotSource;
   mobile?: ShotSource;
   alt: string;
+  /** Horizontal anchor of the primary crop inside the panel. */
+  anchor: "start" | "end";
+  overlay?: Overlay;
 };
 
 const FEATURES: readonly Feature[] = [
@@ -32,6 +37,14 @@ const FEATURES: readonly Feature[] = [
       height: 813,
     },
     alt: "People cards from the Redemption Hill pipeline — Grace Lin following up from the website, contact info and source on every card.",
+    anchor: "start",
+    overlay: {
+      src: "/marketing/shots/sec-core-61.webp",
+      width: 545,
+      height: 302,
+      alt: "Core Group stat card: 61 — core group, launch team and leaders.",
+      style: { right: "6%", bottom: "12%" },
+    },
   },
   {
     key: "meetings",
@@ -41,7 +54,7 @@ const FEATURES: readonly Feature[] = [
     art: "/marketing/meetings.webp",
     desktop: {
       src: "/marketing/shots/fs-meetings.webp",
-      width: 2295,
+      width: 1517,
       height: 515,
     },
     mobile: {
@@ -49,7 +62,15 @@ const FEATURES: readonly Feature[] = [
       width: 760,
       height: 515,
     },
-    alt: "Three upcoming meetings: Worship team night, Orientation #2 at the Riveras' home, and Vision Meeting #5 in 14 days with ~32 estimated.",
+    alt: "Upcoming meetings: Worship team night and Orientation #2 at the Riveras' home.",
+    anchor: "end",
+    overlay: {
+      src: "/marketing/shots/fs-meetings-m.webp",
+      width: 760,
+      height: 515,
+      alt: "Vision Meeting #5 — in 14 days, ~32 estimated.",
+      style: { left: "5%", bottom: "10%" },
+    },
   },
   {
     key: "teams",
@@ -63,6 +84,14 @@ const FEATURES: readonly Feature[] = [
       height: 640,
     },
     alt: "Follow-up tasks with priorities and pastoral notes — under Sam Torres: 'Plays bass — introduce him to the worship leader.'",
+    anchor: "start",
+    overlay: {
+      src: "/marketing/shots/sec-team-worship.webp",
+      width: 570,
+      height: 330,
+      alt: "Worship Team card — staffing 2 of 10, 8 roles open.",
+      style: { right: "5%", top: "12%" },
+    },
   },
   {
     key: "wiki",
@@ -81,6 +110,14 @@ const FEATURES: readonly Feature[] = [
       height: 755,
     },
     alt: "The wiki journey line — currently in Phase 4: Pre-Launch — above the recommended chapter 'The Final 3–4 Weeks'.",
+    anchor: "end",
+    overlay: {
+      src: "/marketing/shots/sec-wiki-progress.webp",
+      width: 450,
+      height: 360,
+      alt: "My Progress — track your reading progress across all wiki content.",
+      style: { left: "6%", bottom: "14%" },
+    },
   },
 ] as const;
 
@@ -114,12 +151,27 @@ export function FeatureSwitcher() {
         {FEATURES.map((feature) => (
           <div
             key={feature.key}
-            className={
-              feature.key === active ? "fswitch-shot active" : "fswitch-shot"
-            }
+            className={[
+              "fswitch-shot",
+              `anchor-${feature.anchor}`,
+              feature.key === active ? "active" : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
             style={{ backgroundImage: `url("${feature.art}")` }}
           >
             <Shot desktop={feature.desktop} alt={feature.alt} />
+            {feature.overlay ? (
+              <img
+                className="shot-img shot-overlay"
+                src={feature.overlay.src}
+                alt={feature.overlay.alt}
+                width={feature.overlay.width}
+                height={feature.overlay.height}
+                loading="lazy"
+                style={feature.overlay.style}
+              />
+            ) : null}
           </div>
         ))}
       </div>

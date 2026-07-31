@@ -176,7 +176,9 @@ html:has(.marketing) {
   align-items: center;
   justify-content: space-between;
   gap: 24px;
-  padding: 14px clamp(20px, 4vw, 40px);
+  padding-block: 14px;
+  /* nav content shares the page container's leading edge */
+  padding-inline: max(clamp(20px, 4vw, 40px), calc((100% - var(--vis)) / 2));
   transition:
     background 220ms var(--ease),
     box-shadow 220ms var(--ease);
@@ -223,12 +225,11 @@ html:has(.marketing) {
      large screens); prose keeps its measure via max-widths on the type. */
   --vis: min(1560px, calc(100vw - clamp(48px, 10vw, 400px)));
 }
+/* ONE container for every section — shared leading edges at every width.
+   Prose keeps its measure through max-widths on the type itself. */
 .marketing .lp-inner {
-  max-width: 980px;
-  margin: 0 auto;
-}
-.marketing .lp-inner.wide {
   max-width: var(--vis);
+  margin: 0 auto;
 }
 
 /* ---------- hero — c1 painting under a cream veil ---------- */
@@ -424,10 +425,38 @@ html:has(.marketing) {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* one reserved height across all tabs — no layout shift on switch */
+  height: clamp(460px, 40vw, 660px);
   padding: clamp(28px, 3.5vw, 64px);
 }
+.marketing .fswitch-shot.anchor-start {
+  justify-content: flex-start;
+}
+.marketing .fswitch-shot.anchor-end {
+  justify-content: flex-end;
+}
 .marketing .fswitch-shot picture {
-  max-width: min(1240px, 84%);
+  display: flex;
+  align-items: center;
+  max-width: min(1180px, 74%);
+  height: 100%;
+}
+.marketing .fswitch-shot picture .shot-img {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+/* layered composition: a small complete card floats over the primary crop */
+.marketing .shot-overlay {
+  position: absolute;
+  z-index: 1;
+  width: clamp(240px, 24%, 400px);
+  height: auto;
+  box-shadow:
+    0 0 0 1px rgba(24, 29, 25, 0.45),
+    0 28px 56px -20px rgba(24, 29, 25, 0.55);
 }
 .marketing .fswitch-shot::before,
 .marketing .fstack-shot::before,
@@ -538,6 +567,8 @@ html:has(.marketing) {
   gap: 24px clamp(36px, 5vw, 72px);
   align-items: start;
   margin-bottom: 28px;
+  /* tallest copy across the seven phases — no shift on tab switch */
+  min-height: 132px;
 }
 .marketing .pdesc {
   margin-top: 10px;
@@ -573,22 +604,42 @@ html:has(.marketing) {
 }
 .marketing .pshot {
   background: url("/marketing/c2-field.webp") center / cover;
-  padding: clamp(20px, 3vw, 36px);
+  padding: clamp(20px, 3vw, 48px);
   display: flex;
   align-items: center;
   justify-content: center;
   position: relative;
 }
-.marketing .pshot picture {
-  max-width: min(1280px, 88%);
+/* desktop panels reserve one height; the crop contains inside it */
+.marketing .ppanel .pshot {
+  height: clamp(440px, 36vw, 620px);
+}
+.marketing .ppanel .pshot picture {
+  display: flex;
+  align-items: center;
+  max-width: min(1180px, 76%);
+  height: 100%;
+}
+.marketing .ppanel .pshot picture .shot-img {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+}
+.marketing .pshot.anchor-start {
+  justify-content: flex-start;
+}
+.marketing .pshot.anchor-end {
+  justify-content: flex-end;
 }
 /* full-bleed beats: the visual escapes the container toward the viewport edge */
-.marketing .pshot.bleed {
+.marketing .ppanel .pshot.bleed {
   width: min(96vw, 1760px);
   left: 50%;
   transform: translateX(-50%);
+  height: clamp(540px, 44vw, 760px);
 }
-.marketing .pshot.bleed picture {
+.marketing .ppanel .pshot.bleed picture {
   max-width: none;
 }
 
@@ -829,7 +880,8 @@ html:has(.marketing) {
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 16px;
-  padding: 34px clamp(20px, 5vw, 56px);
+  padding-block: 34px;
+  padding-inline: max(clamp(20px, 5vw, 56px), calc((100% - var(--vis)) / 2));
   background: var(--ink);
   color: var(--dark-text-2);
   font-size: 13.5px;

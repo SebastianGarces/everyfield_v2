@@ -82,7 +82,7 @@ export default function LandingPage() {
       </section>
 
       <section className="lp-sec" id="product">
-        <div className="lp-inner wide">
+        <div className="lp-inner">
           <h2 className="lp-h2">One place for the whole work.</h2>
           <FeatureSwitcher />
         </div>
@@ -126,7 +126,7 @@ export default function LandingPage() {
       </section>
 
       <section className="lp-sec">
-        <div className="lp-inner wide">
+        <div className="lp-inner">
           <h2 className="lp-h2">From calling to launch Sunday.</h2>
           <p className="lp-body" style={{ marginBottom: 32 }}>
             A proven path under the whole journey — and at every stop, the app
