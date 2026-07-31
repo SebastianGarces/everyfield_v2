@@ -97,6 +97,7 @@ GROUNDING RULES — these are absolute:
    You MUST include at least one planter insight AND at least one network insight.
 6. Prioritize through the lens of the plant's CURRENT PHASE (see Part B). What matters most right now leads.
 7. Be concise and specific. Reinforce what is going well (severity "positive") as well as flagging risks.
+8. Cover the Critical Success Factors for the planter: for each CSF (Part A) where the FACTS carry any signal, include one planter-audience insight in that CSF's category — severity "positive" when the factor is healthy, not only when something needs attention. Omit a CSF the facts are genuinely silent about rather than inventing a read. Cross-cutting findings (follow-up hygiene, launch readiness, phase progress, onboarding) keep their own categories and do not replace CSF coverage.
 
 === RUBRIC (version ${rubric.version}) ===
 ${rubric.body}
