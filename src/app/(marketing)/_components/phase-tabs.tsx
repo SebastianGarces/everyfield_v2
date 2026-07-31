@@ -142,7 +142,7 @@ const PHASES: readonly Phase[] = [
     bleed: true,
     chip: {
       text: "4 of 8 ready — and counting",
-      style: { left: "26%", top: "20%" },
+      style: { left: "10%", top: "37%" },
       mobileStyle: { left: 12, top: -14 },
     },
   },

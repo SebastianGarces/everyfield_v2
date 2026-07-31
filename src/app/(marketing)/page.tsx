@@ -55,7 +55,7 @@ export default function LandingPage() {
                 alt="The EveryField dashboard for Redemption Hill Church in pre-launch: core group of 61, 142 people in the pipeline, zero overdue tasks, and recent activity."
                 priority
               />
-              <Chip className="hero-chip-a" style={{ left: "13%", top: "16%" }}>
+              <Chip className="hero-chip-a" style={{ left: "21%", top: "19%" }}>
                 61 committed adults
               </Chip>
               <Chip className="hero-chip-b" style={{ right: "4%", top: "70%" }}>
