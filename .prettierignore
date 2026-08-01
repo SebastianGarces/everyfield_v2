@@ -10,3 +10,10 @@ pnpm-lock.yaml
 # `format:check` fails on another track's in-progress scratch files while a build
 # loop is running. CI never sees them (they are not in any commit).
 .claude/worktrees/
+
+# Vendored impeccable skill (npx impeccable install) — third-party code, don't reformat
+.claude/skills/impeccable/
+.agents/skills/impeccable/
+.github/skills/impeccable/
+.github/hooks/impeccable.json
+.impeccable/
