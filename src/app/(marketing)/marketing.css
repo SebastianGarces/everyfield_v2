@@ -453,7 +453,7 @@ html:has(.marketing) {
 .marketing .fswitch-shot.flush-start picture {
   /* translate is relative to the image itself — cut ~a third of it at the
      pane edge, independent of pane width */
-  transform: translateX(-30%);
+  transform: translateX(-25%);
   max-width: none;
 }
 .marketing .fswitch-shot.flush-start .shot-img:not(.shot-overlay) {

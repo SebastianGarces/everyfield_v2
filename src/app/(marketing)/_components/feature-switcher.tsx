@@ -175,7 +175,7 @@ const FEATURES: readonly Feature[] = [
         width: 1916,
         height: 1152,
         alt: "The Documents library — print-ready commitment cards and core-group expectations, generated with church details filled in.",
-        style: { right: "2%", top: "12%", width: "min(48%, 740px)" },
+        style: { right: "2%", top: "18%", width: "min(54%, 800px)" },
       },
     ],
   },
