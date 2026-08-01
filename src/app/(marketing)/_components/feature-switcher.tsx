@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { Shot, ShotOverlay, type ShotSource } from "./shot";
+import { useInView } from "./use-in-view";
 import { usePrefetchShots } from "./use-prefetch-shots";
 
 type Overlay = ShotSource & { alt: string; style: React.CSSProperties };
@@ -191,11 +192,16 @@ export function FeatureSwitcher() {
   const [active, setActive] = useState<string>(FEATURES[0].key);
   const activeFeature = FEATURES.find((f) => f.key === active) ?? FEATURES[0];
   usePrefetchShots(PREFETCH);
+  // The entrance choreography (primary settles, overlays land after) is pure
+  // CSS keyframes: display:none→flex on tab switch restarts them for free.
+  // This gate holds the FIRST run until the section is actually on screen —
+  // without it the load-time animation finishes before anyone scrolls here.
+  const { ref: switchRef, inView: seen } = useInView<HTMLDivElement>(0.18);
 
   return (
     <>
       {/* Desktop: tab strip on top, the full-width panel below */}
-      <div className="fswitch">
+      <div ref={switchRef} className={seen ? "fswitch fs-seen" : "fswitch"}>
         <div className="fswitch-tabs" role="tablist" aria-label="Features">
           {FEATURES.map((feature) => (
             <button
@@ -214,7 +220,10 @@ export function FeatureSwitcher() {
             </button>
           ))}
         </div>
-        <p className="fs-desc">{activeFeature.description}</p>
+        {/* keyed so each activation remounts it and replays its entrance */}
+        <p className="fs-desc" key={activeFeature.key}>
+          {activeFeature.description}
+        </p>
         {FEATURES.map((feature) => (
           <div
             key={feature.key}
@@ -236,8 +245,17 @@ export function FeatureSwitcher() {
               mobile={feature.mobile}
               alt={feature.alt}
             />
-            {feature.overlays?.map((overlay) => (
-              <ShotOverlay key={overlay.src} overlay={overlay} />
+            {feature.overlays?.map((overlay, i) => (
+              <ShotOverlay
+                key={overlay.src}
+                overlay={{
+                  ...overlay,
+                  style: {
+                    ...overlay.style,
+                    "--ov-i": i,
+                  } as React.CSSProperties,
+                }}
+              />
             ))}
           </div>
         ))}

@@ -476,6 +476,56 @@ html:has(.marketing) {
   height: auto;
   box-shadow: 0 28px 56px -20px rgba(24, 29, 25, 0.55);
 }
+
+/* ---------- vignette choreography — overlays are the moving parts ----------
+   One-shot keyframes on the active pane: the primary crop settles first,
+   then each overlay card lands on it (staggered via --ov-i). display:none →
+   flex on tab switch restarts the run; .fs-seen (IntersectionObserver) holds
+   the first run until the section is on screen. Scoped to .fswitch so the
+   engine-pane overlays are untouched. */
+.marketing
+  .fswitch.fs-seen
+  .fswitch-shot.active
+  picture
+  .shot-img:not(.shot-overlay) {
+  animation: fs-primary-in 420ms var(--ease) both;
+}
+.marketing .fswitch.fs-seen .fswitch-shot.active .shot-overlay {
+  animation: fs-overlay-in 540ms var(--ease) both;
+  animation-delay: calc(300ms + var(--ov-i, 0) * 140ms);
+}
+.marketing .fswitch.fs-seen .fs-desc {
+  animation: fs-desc-in 300ms var(--ease) both;
+}
+@keyframes fs-primary-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+@keyframes fs-overlay-in {
+  from {
+    opacity: 0;
+    transform: translateY(26px) scale(0.97);
+  }
+}
+@keyframes fs-desc-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .marketing
+    .fswitch.fs-seen
+    .fswitch-shot.active
+    picture
+    .shot-img:not(.shot-overlay),
+  .marketing .fswitch.fs-seen .fswitch-shot.active .shot-overlay,
+  .marketing .fswitch.fs-seen .fs-desc {
+    animation: none;
+  }
+}
 .marketing .fswitch-shot::before,
 .marketing .fstack-shot::before,
 .marketing .epane::before,
