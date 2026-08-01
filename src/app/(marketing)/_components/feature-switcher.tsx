@@ -17,6 +17,8 @@ type Feature = {
   alt: string;
   /** Horizontal anchor of the primary crop inside the panel. */
   anchor: "start" | "end";
+  /** Run the primary flush to the pane's leading edge (no start padding). */
+  flush?: boolean;
   /** Layered panels over the primary crop, in stacking order. */
   overlays?: readonly Overlay[];
 };
@@ -46,7 +48,7 @@ const FEATURES: readonly Feature[] = [
         width: 545,
         height: 302,
         alt: "Core Group stat card: 61 — core group, launch team and leaders.",
-        style: { left: "42%", top: "20%", width: "min(30%, 460px)" },
+        style: { left: "64%", top: "28%", width: "min(26%, 400px)" },
       },
     ],
   },
@@ -88,7 +90,7 @@ const FEATURES: readonly Feature[] = [
         width: 1502,
         height: 712,
         alt: "Upcoming meetings — the attendance that creates the follow-up tasks below.",
-        style: { right: "4%", top: "10%", width: "min(42%, 620px)" },
+        style: { right: "3%", top: "58%", width: "min(38%, 560px)" },
       },
     ],
   },
@@ -116,7 +118,7 @@ const FEATURES: readonly Feature[] = [
         width: 1162,
         height: 1052,
         alt: "Six ministry team cards — staffing bars, open roles, and status from Senior Pastor to Promotion.",
-        style: { left: "5%", top: "26%", width: "min(36%, 540px)" },
+        style: { left: "6%", top: "30%", width: "min(30%, 460px)" },
       },
     ],
   },
@@ -144,7 +146,7 @@ const FEATURES: readonly Feature[] = [
         width: 1538,
         height: 1266,
         alt: "My Wiki Progress — overall reading progress and per-phase completion.",
-        style: { right: "4%", top: "26%", width: "min(42%, 620px)" },
+        style: { right: "5%", top: "30%", width: "min(30%, 450px)" },
       },
     ],
   },
@@ -155,31 +157,25 @@ const FEATURES: readonly Feature[] = [
       "Help where you need it — the interview guide opens beside the interview, and print-ready documents come filled in with your church's details.",
     art: "/marketing/c1-field.webp",
     desktop: {
-      src: "/marketing/shots/r5-documents.webp",
-      width: 1916,
-      height: 1152,
+      src: "/marketing/shots/r5-personguide.webp",
+      width: 2880,
+      height: 1800,
     },
     mobile: {
       src: "/marketing/shots/r5-guide.webp",
       width: 1036,
       height: 1740,
     },
-    alt: "The Documents library — print-ready commitment cards and core-group expectations, generated with church details filled in.",
-    anchor: "end",
+    alt: "Jerome Jefferson's profile with the Interview Guide open beside it — The 5 Interview Criteria, right where the interview happens.",
+    anchor: "start",
+    flush: true,
     overlays: [
       {
-        src: "/marketing/shots/r5-person.webp",
-        width: 1808,
-        height: 1800,
-        alt: "Jerome Jefferson's profile — Core Group member, on the assessments tab, ready for a first interview.",
-        style: { left: "-7%", top: "5%", width: "min(44%, 660px)" },
-      },
-      {
-        src: "/marketing/shots/r5-guide.webp",
-        width: 1036,
-        height: 1740,
-        alt: "The Interview Guide panel — The 5 Interview Criteria, opened beside the assessment.",
-        style: { left: "12%", top: "3%", width: "min(24%, 370px)" },
+        src: "/marketing/shots/r5-documents.webp",
+        width: 1916,
+        height: 1152,
+        alt: "The Documents library — print-ready commitment cards and core-group expectations, generated with church details filled in.",
+        style: { right: "3%", top: "14%", width: "min(50%, 740px)" },
       },
     ],
   },
@@ -225,6 +221,7 @@ export function FeatureSwitcher() {
             className={[
               "fswitch-shot",
               `anchor-${feature.anchor}`,
+              feature.flush ? "flush-start" : "",
               feature.key === active ? "active" : "",
             ]
               .filter(Boolean)

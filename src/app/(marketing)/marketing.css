@@ -245,7 +245,8 @@ html:has(.marketing) {
       rgba(251, 248, 234, 0.1)
     ),
     url("/marketing/c1-field.webp") center / cover;
-  padding: clamp(48px, 6vw, 76px) clamp(20px, 5vw, 56px) 0;
+  /* the painting wraps the shot on all sides (round 6 offset ruling) */
+  padding: clamp(48px, 6vw, 76px) clamp(20px, 5vw, 56px) clamp(40px, 5vw, 64px);
 }
 .marketing .lp-hero-sub {
   font-family: var(--serif);
@@ -267,27 +268,20 @@ html:has(.marketing) {
   margin-top: 12px;
   color: var(--mute);
 }
-/* the shot runs wider than the copy column and bleeds past the panel edge */
+/* the shot runs wider than the copy column, inset within the painting —
+   the background stays visible above, beside, and below it */
 .marketing .hero-shot {
   margin-top: 48px;
-  margin-bottom: -64px;
   position: relative;
-  width: var(--vis);
+  width: min(1200px, 88%);
   left: 50%;
   transform: translateX(-50%);
-}
-.marketing .lp-hero {
-  margin-bottom: 64px;
 }
 @media (max-width: 899px) {
   .marketing .hero-shot {
     width: 100%;
     left: auto;
     transform: none;
-    margin-bottom: -40px;
-  }
-  .marketing .lp-hero {
-    margin-bottom: 40px;
   }
 }
 /* ---------- product shots — the real app standing on the painting ---------- */
@@ -295,8 +289,9 @@ html:has(.marketing) {
   display: block;
   width: 100%;
   height: auto;
-  /* translucent frame lets the painting bleed through */
-  border: 8px solid rgba(251, 248, 234, 0.65);
+  /* app-UI frame ruling (round 6): 16px radius, 8px white at 70% */
+  border: 8px solid rgba(255, 255, 255, 0.7);
+  border-radius: 16px;
   box-shadow: 0 20px 40px -18px rgba(24, 29, 25, 0.5);
 }
 .marketing picture {
@@ -440,8 +435,12 @@ html:has(.marketing) {
 .marketing .fswitch-shot picture {
   display: flex;
   align-items: center;
-  max-width: min(1180px, 74%);
+  max-width: min(1280px, 86%);
   height: 100%;
+}
+/* round 6: some panes run the primary flush to the pane's leading edge */
+.marketing .fswitch-shot.flush-start {
+  padding-inline-start: 0;
 }
 .marketing .fswitch-shot picture .shot-img {
   width: auto;
@@ -785,21 +784,6 @@ html:has(.marketing) {
   .marketing .epane .shot-overlay {
     display: none;
   }
-}
-
-/* ---------- art band ---------- */
-.marketing .lp-art {
-  padding-block: 12px;
-}
-.marketing .lp-art-panel {
-  overflow: hidden;
-}
-.marketing .lp-art-panel img {
-  display: block;
-  width: 100%;
-  height: auto;
-  outline: 1px solid rgba(0, 0, 0, 0.1);
-  outline-offset: -1px;
 }
 
 /* ---------- stats — lead cell is ink-on-green, never green-on-ink ---------- */

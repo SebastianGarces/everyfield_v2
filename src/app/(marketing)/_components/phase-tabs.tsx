@@ -81,7 +81,7 @@ const PHASES: readonly Phase[] = [
       width: 760,
       height: 515,
       alt: "Vision Meeting #5 — in 14 days, ~32 estimated.",
-      style: { left: "38%", bottom: "1%", width: "min(32%, 470px)" },
+      style: { right: "6%", bottom: "8%", width: "min(26%, 380px)" },
     },
   },
   {
@@ -120,17 +120,24 @@ const PHASES: readonly Phase[] = [
       "Meeting series for corporate and team-specific training.",
     ],
     desktop: {
-      src: "/marketing/shots/pt-teams.webp",
-      width: 2295,
-      height: 695,
+      src: "/marketing/shots/r6-team-training.webp",
+      width: 2880,
+      height: 1460,
     },
     mobile: {
       src: "/marketing/shots/pt-teams-m.webp",
       width: 578,
       height: 695,
     },
-    alt: "Eight ministry team cards with staffing bars and open roles — Senior Pastor through Children's Ministry.",
-    anchor: "start",
+    alt: "The Children's Ministry training matrix — who has completed kids ministry & safety training, member by member.",
+    anchor: "end",
+    overlay: {
+      src: "/marketing/shots/r6-twocards.webp",
+      width: 588,
+      height: 706,
+      alt: "Two ministry team cards — Worship Team and Facilities, staffing bars and open roles.",
+      style: { left: "14%", top: "22%", width: "min(24%, 350px)" },
+    },
   },
   {
     key: "pre-launch",

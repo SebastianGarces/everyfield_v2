@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Image from "next/image";
 
 import { Chip } from "./_components/chip";
 import { FeatureSwitcher } from "./_components/feature-switcher";
@@ -170,18 +169,6 @@ export default function LandingPage() {
             knows what the work is. Pick a phase.
           </p>
           <PhaseTabs />
-        </div>
-      </section>
-
-      <section className="lp-sec lp-art">
-        <div className="lp-art-panel">
-          <Image
-            src="/marketing/c2-field.webp"
-            alt=""
-            width={1672}
-            height={941}
-            sizes="100vw"
-          />
         </div>
       </section>
 
