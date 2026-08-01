@@ -121,7 +121,7 @@ export default function LandingPage() {
                 />
               </div>
               <div
-                className="epane"
+                className="epane epane-bleed"
                 style={{ backgroundImage: 'url("/marketing/c2-field.webp")' }}
               >
                 <Shot

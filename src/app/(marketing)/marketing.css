@@ -758,6 +758,18 @@ html:has(.marketing) {
   max-width: 100%;
   max-height: 100%;
 }
+/* comp 1 right pane: the shot runs larger than the pane and is cut at its
+   right and bottom edges — the popover floats over the seam */
+@media (min-width: 900px) {
+  .marketing .epane.epane-bleed {
+    justify-content: flex-start;
+  }
+  .marketing .epane.epane-bleed picture {
+    max-width: none;
+    height: 114%;
+    align-self: flex-start;
+  }
+}
 @media (max-width: 899px) {
   .marketing .engine-panes {
     grid-template-columns: 1fr;
