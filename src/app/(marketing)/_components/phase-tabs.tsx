@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { Chip } from "./chip";
 import { Shot, ShotOverlay, type ShotSource } from "./shot";
+import { useInView } from "./use-in-view";
 import { usePrefetchShots } from "./use-prefetch-shots";
 import { useTablistKeys } from "./use-tablist-keys";
 
@@ -264,11 +265,15 @@ export function PhaseTabs() {
   const [active, setActive] = useState<string>(PHASES[0].key);
   const onTabKeyDown = useTablistKeys(KEYS, setActive);
   usePrefetchShots(PREFETCH);
+  // Same entrance choreography as the feature switcher: pure CSS keyframes on
+  // the active panel, restarted for free by the display:none→block swap. The
+  // gate holds the FIRST run until the section is on screen.
+  const { ref: tabsRef, inView: seen } = useInView<HTMLDivElement>(0.18);
 
   return (
     <>
       {/* Desktop: tabs, one claim + one big visual per phase */}
-      <div className="ptabs">
+      <div ref={tabsRef} className={seen ? "ptabs pt-seen" : "ptabs"}>
         <div
           className="ptabs-strip"
           role="tablist"

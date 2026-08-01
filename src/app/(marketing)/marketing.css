@@ -544,6 +544,26 @@ html:has(.marketing) {
 .marketing .fswitch.fs-seen .fs-desc {
   animation: fs-desc-in 300ms var(--ease) both;
 }
+/* The phase tabs are the same layered-comp device, so they run the same
+   choreography off the same keyframes: display:none → block on the panel
+   restarts it, and .pt-seen holds the first run. Scoped to .ptabs, which is
+   itself desktop-only — the .pjourney stack stays static. */
+.marketing
+  .ptabs.pt-seen
+  .ppanel.active
+  .pshot
+  picture
+  .shot-img:not(.shot-overlay) {
+  animation: fs-primary-in 420ms var(--ease) both;
+}
+.marketing .ptabs.pt-seen .ppanel.active .pshot .shot-overlay {
+  animation: fs-overlay-in 480ms var(--ease) both;
+  animation-delay: calc(110ms + var(--ov-i, 0) * 90ms);
+}
+/* the whole claim block is one beat — the panel's copy is swapped wholesale */
+.marketing .ptabs.pt-seen .ppanel.active .ppanel-copy {
+  animation: fs-desc-in 300ms var(--ease) both;
+}
 @keyframes fs-primary-in {
   from {
     opacity: 0;
@@ -569,7 +589,15 @@ html:has(.marketing) {
     picture
     .shot-img:not(.shot-overlay),
   .marketing .fswitch.fs-seen .fswitch-shot.active .shot-overlay,
-  .marketing .fswitch.fs-seen .fs-desc {
+  .marketing .fswitch.fs-seen .fs-desc,
+  .marketing
+    .ptabs.pt-seen
+    .ppanel.active
+    .pshot
+    picture
+    .shot-img:not(.shot-overlay),
+  .marketing .ptabs.pt-seen .ppanel.active .pshot .shot-overlay,
+  .marketing .ptabs.pt-seen .ppanel.active .ppanel-copy {
     animation: none;
   }
 }
