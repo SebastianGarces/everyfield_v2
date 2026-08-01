@@ -630,6 +630,12 @@ html:has(.marketing) {
 .marketing .pshot.anchor-end {
   justify-content: flex-end;
 }
+/* height-constrained imgs are narrower than their picture box — keep them
+   hugging the anchored edge, not the picture's left edge */
+.marketing .pshot.anchor-end picture,
+.marketing .fswitch-shot.anchor-end picture {
+  justify-content: flex-end;
+}
 /* full-bleed beats: the visual escapes the container toward the viewport edge */
 /* mobile: the journey as a stacked, numbered vertical scroll */
 .marketing .pjourney {
