@@ -21,8 +21,6 @@ type Phase = {
   /** Horizontal anchor of the primary crop inside the panel. */
   anchor?: "start" | "end";
   overlay?: Overlay;
-  /** Full-bleed beat: the visual escapes the container to ~92vw. */
-  bleed?: boolean;
   chip?: {
     text: string;
     style: React.CSSProperties;
@@ -83,7 +81,7 @@ const PHASES: readonly Phase[] = [
       width: 760,
       height: 515,
       alt: "Vision Meeting #5 — in 14 days, ~32 estimated.",
-      style: { left: "38%", bottom: "8%", width: "min(32%, 470px)" },
+      style: { left: "38%", bottom: "1%", width: "min(32%, 470px)" },
     },
   },
   {
@@ -147,20 +145,20 @@ const PHASES: readonly Phase[] = [
     ],
     desktop: {
       src: "/marketing/shots/pt-prelaunch.webp",
-      width: 2365,
-      height: 620,
+      width: 2448,
+      height: 1513,
     },
     mobile: {
       src: "/marketing/shots/pt-prelaunch-m.webp",
       width: 912,
       height: 445,
     },
-    alt: "The Launch Sunday header — in 28 days, still Planning — over the preparation progress bar at 4 of 8 ready.",
-    bleed: true,
+    alt: "The Launch Sunday logistics checklist — preparation progress at 4 of 8 ready, promo cards and signage already struck through.",
+    anchor: "start",
     chip: {
       text: "4 of 8 ready — and counting",
-      style: { left: "7%", bottom: "6%" },
-      mobileStyle: { left: 12, top: -14 },
+      style: { left: "7%", bottom: "16%" },
+      mobileStyle: { left: 26, top: 28 },
     },
   },
   {
@@ -198,20 +196,20 @@ const PHASES: readonly Phase[] = [
     ],
     desktop: {
       src: "/marketing/shots/pt-beyond.webp",
-      width: 2365,
-      height: 955,
+      width: 2448,
+      height: 1513,
     },
     mobile: {
       src: "/marketing/shots/pt-beyond-m.webp",
       width: 945,
       height: 900,
     },
-    alt: "Trinity Grove's post-launch dashboard: health stats up top, and Sunday Gathering week after week — Week 6 completed with 112 attendees.",
-    bleed: true,
+    alt: "Trinity Grove's post-launch dashboard: Sunday Gathering week after week — Week 6 completed with 112 attendees.",
+    anchor: "end",
     chip: {
       text: "Week 6 · 112 in the room",
-      style: { right: "6%", top: "38%" },
-      mobileStyle: { right: 8, top: -14, left: "auto" },
+      style: { right: "6%", top: "20%" },
+      mobileStyle: { right: 22, top: 28, left: "auto" },
     },
   },
 ] as const;
@@ -225,7 +223,6 @@ function PhaseVisual({
 }) {
   const cls = [
     "pshot",
-    phase.bleed && !isMobile ? "bleed" : "",
     !isMobile && phase.anchor ? `anchor-${phase.anchor}` : "",
   ]
     .filter(Boolean)

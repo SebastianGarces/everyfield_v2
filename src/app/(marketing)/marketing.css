@@ -631,16 +631,6 @@ html:has(.marketing) {
   justify-content: flex-end;
 }
 /* full-bleed beats: the visual escapes the container toward the viewport edge */
-/* bleed differs by WIDTH only — every phase panel shares one height */
-.marketing .ppanel .pshot.bleed {
-  width: min(96vw, 1760px);
-  left: 50%;
-  transform: translateX(-50%);
-}
-.marketing .ppanel .pshot.bleed picture {
-  max-width: none;
-}
-
 /* mobile: the journey as a stacked, numbered vertical scroll */
 .marketing .pjourney {
   display: none;
