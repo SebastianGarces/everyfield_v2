@@ -60,7 +60,12 @@ html:has(.marketing) {
 .marketing .lp-hero-h {
   font-family: var(--display);
   font-weight: 400;
-  font-size: clamp(46px, 5.8vw, 80px);
+  /* The widest unbreakable run is the nbsp-joined "Your church plant," —
+     7.4px of width per px of font-size. Below 430px the box grows faster
+     than 5.8vw does, so the small-viewport ramp has to track the viewport
+     or the run leaves the panel. At 430px and up this is exactly
+     clamp(46px, 5.8vw, 80px) again. */
+  font-size: clamp(clamp(30px, calc(12.8vw - 9px), 46px), 5.8vw, 80px);
   line-height: 1;
   letter-spacing: -0.03em;
   text-wrap: balance;
@@ -211,8 +216,29 @@ html:has(.marketing) {
   font-size: 14px;
 }
 @media (max-width: 800px) {
-  .marketing .lp-nav .links {
+  /* the marketing jumps go; signing in must never become unreachable, so it
+     stays and rides next to the CTA instead of floating mid-bar */
+  .marketing .lp-nav .links .nav-jump {
     display: none;
+  }
+  .marketing .lp-nav .links {
+    margin-inline-start: auto;
+  }
+  .marketing .lp-nav {
+    gap: 14px;
+  }
+}
+/* below 400px the bar carries the lockup, sign in and the CTA in ~310px —
+   it buys the room from padding and gap, never from the 14px labels */
+@media (max-width: 400px) {
+  .marketing .lp-nav {
+    gap: 12px;
+  }
+  .marketing .lp-nav .logo {
+    height: 18px;
+  }
+  .marketing .lp-nav .btn {
+    padding: 10px 14px;
   }
 }
 
@@ -230,6 +256,11 @@ html:has(.marketing) {
 .marketing .lp-inner {
   max-width: var(--vis);
   margin: 0 auto;
+}
+/* the nav is fixed and 70.4px tall at every width — anchored sections clear
+   it plus a breath, so a jump link never lands on a clipped headline */
+.marketing section[id] {
+  scroll-margin-block-start: 88px;
 }
 
 /* ---------- hero — c1 painting under a cream veil ---------- */
@@ -952,6 +983,10 @@ html:has(.marketing) {
   outline: none;
   flex: 1;
   min-width: 220px;
+  /* 16px + the inherited 1.6 line-height already clears the 44px tap floor;
+     the floor is declared so a browser that resolves the control's
+     line-height to normal cannot drop it under 44px */
+  min-block-size: 44px;
   transition:
     border-color 150ms var(--ease),
     box-shadow 150ms var(--ease);

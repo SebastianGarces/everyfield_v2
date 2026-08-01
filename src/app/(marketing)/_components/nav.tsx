@@ -21,8 +21,12 @@ export function MarketingNav() {
         <Lockup className="logo" />
       </Link>
       <div className="links">
-        <a href="#product">How it works</a>
-        <a href="#networks">For networks</a>
+        <a className="nav-jump" href="#product">
+          How it works
+        </a>
+        <a className="nav-jump" href="#networks">
+          For networks
+        </a>
         <Link href="/login">Sign in</Link>
       </div>
       <a className="btn primary" href="#request-invite">
