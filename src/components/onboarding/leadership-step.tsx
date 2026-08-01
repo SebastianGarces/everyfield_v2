@@ -28,6 +28,11 @@ import {
  * it in `useState` is not the "server data in useState" anti-pattern; the
  * server's copy arrives once as `initialAnswer` and the action + `refresh` are
  * what reconcile it.
+ *
+ * The answer commits the moment it is selected (ruled 2026-08-01, PR #250):
+ * steps commit independently, so leaving via "Finish setup later" right after
+ * choosing No can never silently discard the No. Submit still re-saves and is
+ * what advances the flow; the double write is an idempotent update.
  */
 export function LeadershipStep({
   initialAnswer = DEFAULT_LEADERSHIP_ANSWER,
@@ -48,8 +53,21 @@ export function LeadershipStep({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  function handleSubmit(formData: FormData) {
+  function saveAnswer(value: LeadershipAnswer, onDone?: () => void) {
     setError(null);
+    startTransition(async () => {
+      const result = await confirmLeadership(value);
+
+      if (result.status === "saved") {
+        onDone?.();
+        return;
+      }
+
+      setError(result.error);
+    });
+  }
+
+  function handleSubmit(formData: FormData) {
     const submitted = formData.get("leadership");
 
     if (!isLeadershipAnswer(submitted)) {
@@ -57,16 +75,7 @@ export function LeadershipStep({
       return;
     }
 
-    startTransition(async () => {
-      const result = await confirmLeadership(submitted);
-
-      if (result.status === "saved") {
-        onSaved(submitted);
-        return;
-      }
-
-      setError(result.error);
-    });
+    saveAnswer(submitted, () => onSaved(submitted));
   }
 
   return (
@@ -93,7 +102,9 @@ export function LeadershipStep({
           name="leadership"
           value={answer}
           onValueChange={(value) => {
-            if (isLeadershipAnswer(value)) setAnswer(value);
+            if (!isLeadershipAnswer(value)) return;
+            setAnswer(value);
+            saveAnswer(value);
           }}
           disabled={pending}
           className="gap-2"
