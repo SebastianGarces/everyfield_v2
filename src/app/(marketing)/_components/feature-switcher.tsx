@@ -17,7 +17,8 @@ type Feature = {
   alt: string;
   /** Horizontal anchor of the primary crop inside the panel. */
   anchor: "start" | "end";
-  overlay?: Overlay;
+  /** Layered panels over the primary crop, in stacking order. */
+  overlays?: readonly Overlay[];
 };
 
 const FEATURES: readonly Feature[] = [
@@ -39,13 +40,15 @@ const FEATURES: readonly Feature[] = [
     },
     alt: "People cards from the Redemption Hill pipeline — Grace Lin following up from the website, contact info and source on every card.",
     anchor: "start",
-    overlay: {
-      src: "/marketing/shots/sec-core-61.webp",
-      width: 545,
-      height: 302,
-      alt: "Core Group stat card: 61 — core group, launch team and leaders.",
-      style: { left: "42%", top: "20%", width: "min(30%, 460px)" },
-    },
+    overlays: [
+      {
+        src: "/marketing/shots/sec-core-61.webp",
+        width: 545,
+        height: 302,
+        alt: "Core Group stat card: 61 — core group, launch team and leaders.",
+        style: { left: "42%", top: "20%", width: "min(30%, 460px)" },
+      },
+    ],
   },
   {
     key: "meetings",
@@ -67,50 +70,124 @@ const FEATURES: readonly Feature[] = [
     anchor: "end",
   },
   {
-    key: "teams",
-    title: "Teams & tasks",
+    key: "tasks",
+    title: "Tasks",
     description:
-      "Ministry teams staffed and trained; tasks tracked against the road to launch.",
+      "Every follow-up tracked to done — and meeting attendance creates the follow-up tasks for you, automatically.",
     art: "/marketing/teams-tasks.webp",
     desktop: {
-      src: "/marketing/shots/fs-tasks.webp",
-      width: 2210,
-      height: 640,
+      src: "/marketing/shots/r5-tasks.webp",
+      width: 2348,
+      height: 1194,
     },
-    alt: "Follow-up tasks with priorities and pastoral notes — under Sam Torres: 'Plays bass — introduce him to the worship leader.'",
+    alt: "The Tasks list for Redemption Hill — 13 active, follow-ups with priorities, due dates, and pastoral notes.",
     anchor: "start",
-    overlay: {
-      src: "/marketing/shots/sec-team-worship.webp",
-      width: 570,
-      height: 330,
-      alt: "Worship Team card — staffing 2 of 10, 8 roles open.",
-      style: { right: "14%", bottom: "14%" },
+    overlays: [
+      {
+        src: "/marketing/shots/r5-meetcards.webp",
+        width: 1502,
+        height: 712,
+        alt: "Upcoming meetings — the attendance that creates the follow-up tasks below.",
+        style: { right: "4%", top: "10%", width: "min(42%, 620px)" },
+      },
+    ],
+  },
+  {
+    key: "teams",
+    title: "Teams",
+    description:
+      "Ministry teams staffed and trained — staffing, training, and engagement for every team, on one health dashboard.",
+    art: "/marketing/giving.webp",
+    desktop: {
+      src: "/marketing/shots/r5-teamhealth.webp",
+      width: 2880,
+      height: 2228,
     },
+    mobile: {
+      src: "/marketing/shots/r5-teamcards.webp",
+      width: 1162,
+      height: 1052,
+    },
+    alt: "The Team Health Dashboard — staffing, training, and attendance compared across all eleven ministry teams.",
+    anchor: "end",
+    overlays: [
+      {
+        src: "/marketing/shots/r5-teamcards.webp",
+        width: 1162,
+        height: 1052,
+        alt: "Six ministry team cards — staffing bars, open roles, and status from Senior Pastor to Promotion.",
+        style: { left: "5%", top: "26%", width: "min(36%, 540px)" },
+      },
+    ],
   },
   {
     key: "wiki",
     title: "Wiki",
     description:
       "The whole planting methodology, readable in order — and the app knows which chapter your plant is living in right now.",
-    art: "/marketing/giving.webp",
+    art: "/marketing/c2-field.webp",
     desktop: {
-      src: "/marketing/shots/fs-wiki.webp",
-      width: 1595,
-      height: 740,
+      src: "/marketing/shots/r5-wiki.webp",
+      width: 2360,
+      height: 1648,
     },
     mobile: {
-      src: "/marketing/shots/fs-wiki-m.webp",
-      width: 517,
-      height: 755,
+      src: "/marketing/shots/r5-wikiprog.webp",
+      width: 1538,
+      height: 1266,
     },
-    alt: "The wiki journey line — currently in Phase 4: Pre-Launch — above the recommended chapter 'The Final 3–4 Weeks'.",
+    alt: "The Launch Day Guide chapter, open in the wiki with the whole journey outlined beside it.",
+    anchor: "start",
+    overlays: [
+      {
+        src: "/marketing/shots/r5-wikiprog.webp",
+        width: 1538,
+        height: 1266,
+        alt: "My Wiki Progress — overall reading progress and per-phase completion.",
+        style: { right: "4%", top: "26%", width: "min(42%, 620px)" },
+      },
+    ],
+  },
+  {
+    key: "guides",
+    title: "Guides & documents",
+    description:
+      "Help where you need it — the interview guide opens beside the interview, and print-ready documents come filled in with your church's details.",
+    art: "/marketing/c1-field.webp",
+    desktop: {
+      src: "/marketing/shots/r5-documents.webp",
+      width: 1916,
+      height: 1152,
+    },
+    mobile: {
+      src: "/marketing/shots/r5-guide.webp",
+      width: 1036,
+      height: 1740,
+    },
+    alt: "The Documents library — print-ready commitment cards and core-group expectations, generated with church details filled in.",
     anchor: "end",
+    overlays: [
+      {
+        src: "/marketing/shots/r5-person.webp",
+        width: 1808,
+        height: 1800,
+        alt: "Jerome Jefferson's profile — Core Group member, on the assessments tab, ready for a first interview.",
+        style: { left: "-7%", top: "5%", width: "min(44%, 660px)" },
+      },
+      {
+        src: "/marketing/shots/r5-guide.webp",
+        width: 1036,
+        height: 1740,
+        alt: "The Interview Guide panel — The 5 Interview Criteria, opened beside the assessment.",
+        style: { left: "12%", top: "3%", width: "min(24%, 370px)" },
+      },
+    ],
   },
 ] as const;
 
 const PREFETCH = FEATURES.flatMap((f) => [
   f.desktop.src,
-  f.overlay?.src,
+  ...(f.overlays?.map((o) => o.src) ?? []),
   f.art,
 ]);
 
@@ -162,7 +239,9 @@ export function FeatureSwitcher() {
               mobile={feature.mobile}
               alt={feature.alt}
             />
-            {feature.overlay ? <ShotOverlay overlay={feature.overlay} /> : null}
+            {feature.overlays?.map((overlay) => (
+              <ShotOverlay key={overlay.src} overlay={overlay} />
+            ))}
           </div>
         ))}
       </div>

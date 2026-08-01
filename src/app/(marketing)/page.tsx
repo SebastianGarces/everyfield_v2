@@ -5,7 +5,7 @@ import { Chip } from "./_components/chip";
 import { FeatureSwitcher } from "./_components/feature-switcher";
 import { InviteForm } from "./_components/invite-form";
 import { PhaseTabs } from "./_components/phase-tabs";
-import { Shot } from "./_components/shot";
+import { Shot, ShotOverlay } from "./_components/shot";
 
 export const metadata: Metadata = {
   title: "EveryField — Your church plant, understood.",
@@ -106,6 +106,43 @@ export default function LandingPage() {
               has launched healthy churches for years. You get a short list of
               what matters most right now.
             </p>
+            <div className="engine-panes">
+              <div
+                className="epane"
+                style={{ backgroundImage: 'url("/marketing/c1-field.webp")' }}
+              >
+                <Shot
+                  desktop={{
+                    src: "/marketing/shots/r5-csf.webp",
+                    width: 1864,
+                    height: 1860,
+                  }}
+                  alt="The Plant Intelligence page reading all eight critical success factors — vision casting going well, shared ownership needs attention, two worth a look."
+                />
+              </div>
+              <div
+                className="epane"
+                style={{ backgroundImage: 'url("/marketing/c2-field.webp")' }}
+              >
+                <Shot
+                  desktop={{
+                    src: "/marketing/shots/r5-focus.webp",
+                    width: 1816,
+                    height: 1800,
+                  }}
+                  alt="Your focus — the week's most important next steps, prioritized from the latest assessment: stale follow-ups, a leadership role to fill, training to complete."
+                />
+                <ShotOverlay
+                  overlay={{
+                    src: "/marketing/shots/r5-phasectl.webp",
+                    width: 702,
+                    height: 886,
+                    alt: "Phase control — you decide when to move phases; readiness is advisory and never blocks a change.",
+                    style: { left: "4%", top: "40%", width: "min(34%, 320px)" },
+                  }}
+                />
+              </div>
+            </div>
             <ul className="engine-list">
               <li>
                 Guidance grounded in a proven launch methodology, not generic
