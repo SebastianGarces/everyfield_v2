@@ -15,6 +15,14 @@
 // which asserts the unset-secret behaviour by deleting both variables.
 // The one test below that runs WITHOUT a secret deletes and restores it
 // explicitly.
+//
+// It is also safe despite ESM import HOISTING, which is the non-obvious part:
+// the `import`s below are evaluated BEFORE this assignment runs, so the module
+// graph is already loaded by the time the variable is set. That does not matter
+// because `unsubscribeTokenSecret()` reads `process.env` at CALL time inside the
+// function, never capturing it into a module-level constant at import time — so
+// setting it anywhere before the first `runDispatch` is enough. If that read
+// ever moves to module scope, this file must move to a loader or a `beforeEach`.
 const TEST_UNSUBSCRIBE_SECRET = "test-unsubscribe-secret-0123456789";
 process.env.UNSUBSCRIBE_TOKEN_SECRET = TEST_UNSUBSCRIBE_SECRET;
 

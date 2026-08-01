@@ -1,6 +1,12 @@
-// The renderer mints a real unsubscribe token, which needs a real secret.
-// Set before the module graph is touched so `composeBatchEmail` reads it the
-// way production does — the dispatcher does not pass one through.
+// The renderer mints a real unsubscribe token, which needs a real secret, and
+// `composeBatchEmail` reads it the way production does — the dispatcher does
+// not pass one through.
+//
+// This assignment does NOT run before the module graph is loaded: ESM hoists
+// the `import`s below above it. It works because `unsubscribeTokenSecret()`
+// reads `process.env` at CALL time inside the function rather than capturing it
+// into a module-level constant at import time, so setting it any time before
+// the first compose is enough.
 process.env.UNSUBSCRIBE_TOKEN_SECRET = "test-unsubscribe-secret-0123456789";
 process.env.NEXT_PUBLIC_APP_URL = "https://app.everyfield.test";
 
