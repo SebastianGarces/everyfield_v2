@@ -118,7 +118,7 @@ const FEATURES: readonly Feature[] = [
         width: 1162,
         height: 1052,
         alt: "Six ministry team cards — staffing bars, open roles, and status from Senior Pastor to Promotion.",
-        style: { left: "6%", top: "30%", width: "min(30%, 460px)" },
+        style: { left: "26%", top: "30%", width: "min(30%, 460px)" },
       },
     ],
   },
