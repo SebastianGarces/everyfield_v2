@@ -491,8 +491,10 @@ html:has(.marketing) {
   animation: fs-primary-in 420ms var(--ease) both;
 }
 .marketing .fswitch.fs-seen .fswitch-shot.active .shot-overlay {
-  animation: fs-overlay-in 540ms var(--ease) both;
-  animation-delay: calc(300ms + var(--ov-i, 0) * 140ms);
+  /* starts while the primary is still settling — one fluent motion, the
+     slight lag keeps the "overlay lands on it" read without a staged pause */
+  animation: fs-overlay-in 480ms var(--ease) both;
+  animation-delay: calc(110ms + var(--ov-i, 0) * 90ms);
 }
 .marketing .fswitch.fs-seen .fs-desc {
   animation: fs-desc-in 300ms var(--ease) both;
@@ -506,7 +508,7 @@ html:has(.marketing) {
 @keyframes fs-overlay-in {
   from {
     opacity: 0;
-    transform: translateY(26px) scale(0.97);
+    transform: translateY(16px) scale(0.98);
   }
 }
 @keyframes fs-desc-in {
