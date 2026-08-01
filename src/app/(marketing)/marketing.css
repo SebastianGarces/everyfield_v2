@@ -1019,3 +1019,134 @@ html:has(.marketing) {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ============================================================
+   TRUST BLOCK — appended 2026-08-01. Additive only: every rule
+   below introduces a new class, none redefine anything above.
+   Covers the /terms and /privacy routes, the stats source line,
+   and the invite form's recovery affordance.
+   ============================================================ */
+
+/* ---------- legal routes (/terms, /privacy) ---------- */
+.marketing .lp-legal {
+  padding: clamp(104px, 11vw, 152px) clamp(20px, 5vw, 56px)
+    clamp(56px, 8vw, 88px);
+}
+.marketing .lp-legal-inner {
+  max-width: 60ch;
+  margin: 0 auto;
+}
+.marketing .lp-legal h1 {
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: clamp(30px, 3.8vw, 46px);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  margin: 0;
+  text-wrap: balance;
+}
+.marketing .lp-legal-date {
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: 12.5px;
+  line-height: 1.2;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--mute);
+  margin: 20px 0 0;
+}
+.marketing .lp-legal-lead {
+  font-family: var(--serif);
+  font-size: 20px;
+  line-height: 1.5;
+  color: var(--text-2);
+  margin: 28px 0 0;
+}
+.marketing .lp-legal h2 {
+  font-family: var(--display);
+  font-weight: 500;
+  font-size: 21px;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  margin: 44px 0 0;
+  padding-top: 24px;
+  border-top: 1px solid var(--hairline);
+}
+.marketing .lp-legal p,
+.marketing .lp-legal li {
+  font-family: var(--serif);
+  font-size: 17.5px;
+  line-height: 1.6;
+  color: var(--text-2);
+}
+.marketing .lp-legal p {
+  margin: 16px 0 0;
+}
+.marketing .lp-legal b {
+  font-weight: 500;
+  color: var(--ink);
+}
+.marketing .lp-legal ul {
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.marketing .lp-legal li {
+  margin-top: 14px;
+  padding-inline-start: 24px;
+  position: relative;
+}
+.marketing .lp-legal li::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 0;
+  top: 0.6em;
+  width: 12px;
+  height: 3px;
+  background: var(--green);
+}
+
+/* ---------- where the stats come from ---------- */
+.marketing .stats-src {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--mute); /* 5.2:1 on cream */
+  max-width: 92ch;
+  margin: 18px 0 0;
+  text-wrap: pretty;
+}
+
+/* ---------- invite form: recovery after a success ---------- */
+.marketing .invite-done-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.marketing .invite-done-wrap .invite-done:focus {
+  outline: none;
+}
+.marketing .invite-again {
+  font-family: var(--sans);
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  border-bottom: 1px solid rgba(24, 29, 25, 0.45);
+  border-radius: 0;
+  padding: 0 0 3px;
+  margin-top: 20px;
+  cursor: pointer;
+  transition: border-color 150ms var(--ease);
+}
+.marketing .invite-again:hover {
+  border-bottom-color: var(--ink);
+}
+/* danger red measures 3.2:1 on the green CTA panel — under the 4.5:1 floor.
+   On green the color law allows ink only, so the error carries its weight
+   through the bold face it already has. */
+.marketing .lp-cta .invite-error {
+  color: var(--ink);
+}

@@ -40,6 +40,7 @@ export default function MarketingLayout({
         <Lockup className="logo" />
         <span>Built on a proven launch methodology.</span>
         <span>
+          <a href="mailto:hello@everyfield.app">Contact</a> ·{" "}
           <Link href="/terms">Terms</Link> ·{" "}
           <Link href="/privacy">Privacy</Link> · © 2026 EveryField
         </span>

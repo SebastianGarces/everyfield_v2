@@ -190,17 +190,23 @@ export default function LandingPage() {
               <p className="n">86–90%</p>
               <p className="lbl">
                 of plants with real assessment, training, and coaching are still
-                alive at year four.
+                going four to five years in.
               </p>
             </div>
             <div className="stat-cell base">
               <p className="n">68%</p>
               <p className="lbl">
-                of unsupported plants make it that far. Support is the
-                difference — EveryField is how you give it consistently.
+                of plants overall make it that far. Support is the difference —
+                EveryField is how you give it consistently.
               </p>
             </div>
           </div>
+          <p className="stats-src">
+            86–90%: Evangelical Covenant Church (86% at four years, for plants
+            with training and coaching) and ARC (90% at five years, in network).
+            68%: Lifeway Research and Leadership Network, State of church
+            planting USA (four-year survival, all plants).
+          </p>
         </div>
       </section>
 
