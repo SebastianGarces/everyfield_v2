@@ -1,3 +1,23 @@
+// ----------------------------------------------------------------------------
+// This suite is HERMETIC about the unsubscribe secret, on purpose.
+//
+// `runDispatch` renders a real email, and rendering mints a real unsubscribe
+// token, so every delivery path below needs a secret. It provisions its own
+// deterministic one rather than inheriting whatever the machine happens to
+// have: on a developer box `pnpm test` loads `.env.local`, which carries
+// `CRON_SECRET` — the documented fallback in `unsubscribe-token.ts` — so these
+// tests passed locally and failed in CI, where the job sets neither
+// `UNSUBSCRIBE_TOKEN_SECRET` nor `CRON_SECRET`. A test that only passes
+// because of ambient env is not testing the thing it claims to test.
+//
+// The write is safe to make at module scope: `node --test` runs each test file
+// in its own process, so it cannot leak into `unsubscribe-token.test.ts`,
+// which asserts the unset-secret behaviour by deleting both variables.
+// The one test below that runs WITHOUT a secret deletes and restores it
+// explicitly.
+const TEST_UNSUBSCRIBE_SECRET = "test-unsubscribe-secret-0123456789";
+process.env.UNSUBSCRIBE_TOKEN_SECRET = TEST_UNSUBSCRIBE_SECRET;
+
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
@@ -767,6 +787,56 @@ test("a recipient with no email address fails permanently, never retries", async
 });
 
 // ============================================================================
+// The unset-secret path, asserted HERE rather than left to the environment.
+//
+// This is the failure the hermetic CI job found: with no secret configured,
+// minting the unsubscribe link throws inside composition, and every email
+// delivery in the run fails. The behaviour is correct — N-007 says an email
+// without a working opt-out must not go out — and this test pins it so the
+// module-scope secret above can never be read as "the dispatcher does not
+// need one". It deletes BOTH variables (the dedicated one and the documented
+// `CRON_SECRET` fallback) and restores them, so it is also the proof that the
+// rest of this file is passing on its own secret and not on the machine's.
+// ============================================================================
+
+test("an unset unsubscribe secret fails the email transiently, and sends nothing", async () => {
+  const previousDedicated = process.env.UNSUBSCRIBE_TOKEN_SECRET;
+  const previousCron = process.env.CRON_SECRET;
+  delete process.env.UNSUBSCRIBE_TOKEN_SECRET;
+  delete process.env.CRON_SECRET;
+
+  try {
+    const store = storeWithPlanter();
+    const notification = store.addNotification();
+
+    await runDispatch(store, { now: NOW });
+
+    // Nothing reached the provider: a dead opt-out link is not sent and then
+    // apologised for.
+    assert.equal(store.sends.length, 0, "no email is sent without a secret");
+
+    const delivery = store.deliveryFor(notification.id, "email");
+    assert.equal(delivery?.status, "failed");
+    assert.match(delivery?.error ?? "", /UNSUBSCRIBE_TOKEN_SECRET/);
+    // Transient, not permanent — this is a deployment fault, and the bounded
+    // retry must pick the notification up once the variable is set.
+    assert.ok(
+      !(delivery?.error ?? "").startsWith(PERMANENT_FAILURE_PREFIX),
+      "a missing secret is a configuration fault, not a hard bounce"
+    );
+    assert.equal(store.notificationById(notification.id).status, "pending");
+    // The feed channel is independent and still landed.
+    assert.equal(store.deliveryFor(notification.id, "in_app")?.status, "sent");
+  } finally {
+    if (previousDedicated === undefined)
+      delete process.env.UNSUBSCRIBE_TOKEN_SECRET;
+    else process.env.UNSUBSCRIBE_TOKEN_SECRET = previousDedicated;
+    if (previousCron === undefined) delete process.env.CRON_SECRET;
+    else process.env.CRON_SECRET = previousCron;
+  }
+});
+
+// ============================================================================
 // AC: a batch larger than the bound leaves the remainder pending (N-017)
 // ============================================================================
 
@@ -994,7 +1064,7 @@ test("composeBatchEmail escapes caller-rendered copy", async () => {
     // Rendering now mints a real unsubscribe token (N-007); the secret is
     // injected so this stays a statement about escaping, not about the
     // environment.
-    { secret: "test-unsubscribe-secret-0123456789" }
+    { secret: TEST_UNSUBSCRIBE_SECRET }
   );
 
   assert.ok(!message.html.includes("<script>"));
