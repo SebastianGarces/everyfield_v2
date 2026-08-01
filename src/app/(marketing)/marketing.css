@@ -245,8 +245,7 @@ html:has(.marketing) {
       rgba(251, 248, 234, 0.1)
     ),
     url("/marketing/c1-field.webp") center / cover;
-  /* the painting wraps the shot on all sides (round 6 offset ruling) */
-  padding: clamp(48px, 6vw, 76px) clamp(20px, 5vw, 56px) clamp(40px, 5vw, 64px);
+  padding: clamp(48px, 6vw, 76px) clamp(20px, 5vw, 56px) 0;
 }
 .marketing .lp-hero-sub {
   font-family: var(--serif);
@@ -268,20 +267,28 @@ html:has(.marketing) {
   margin-top: 12px;
   color: var(--mute);
 }
-/* the shot runs wider than the copy column, inset within the painting —
-   the background stays visible above, beside, and below it */
+/* the shot runs wider than the copy column and goes a bit over the
+   painting's bottom edge (round-7 ruling: full size + bottom overlap) */
 .marketing .hero-shot {
   margin-top: 48px;
+  margin-bottom: -72px;
   position: relative;
-  width: min(1200px, 88%);
+  width: var(--vis);
   left: 50%;
   transform: translateX(-50%);
+}
+.marketing .lp-hero {
+  margin-bottom: 72px;
 }
 @media (max-width: 899px) {
   .marketing .hero-shot {
     width: 100%;
     left: auto;
     transform: none;
+    margin-bottom: -40px;
+  }
+  .marketing .lp-hero {
+    margin-bottom: 40px;
   }
 }
 /* ---------- product shots — the real app standing on the painting ---------- */
@@ -421,7 +428,7 @@ html:has(.marketing) {
   align-items: center;
   justify-content: center;
   /* one reserved height across all tabs — no layout shift on switch */
-  height: clamp(460px, 40vw, 660px);
+  height: clamp(520px, 46vw, 780px);
   padding: clamp(28px, 3.5vw, 64px);
   /* layered comps cut off at the pane edge (round 5) */
   overflow: hidden;
@@ -435,12 +442,22 @@ html:has(.marketing) {
 .marketing .fswitch-shot picture {
   display: flex;
   align-items: center;
-  max-width: min(1280px, 86%);
+  max-width: min(1320px, 88%);
   height: 100%;
 }
-/* round 6: some panes run the primary flush to the pane's leading edge */
+/* round 6/7: flush panes cut the primary at the pane's leading edge —
+   square leading corners, no leading border, content clipped */
 .marketing .fswitch-shot.flush-start {
   padding-inline-start: 0;
+}
+.marketing .fswitch-shot.flush-start picture {
+  margin-inline-start: -6%;
+  max-width: min(1320px, 94%);
+}
+.marketing .fswitch-shot.flush-start .shot-img:not(.shot-overlay) {
+  border-inline-start-width: 0;
+  border-start-start-radius: 0;
+  border-end-start-radius: 0;
 }
 .marketing .fswitch-shot picture .shot-img {
   width: auto;
@@ -613,12 +630,12 @@ html:has(.marketing) {
 }
 /* desktop panels reserve one height; the crop contains inside it */
 .marketing .ppanel .pshot {
-  height: clamp(440px, 36vw, 620px);
+  height: clamp(500px, 42vw, 720px);
 }
 .marketing .ppanel .pshot picture {
   display: flex;
   align-items: center;
-  max-width: min(1180px, 76%);
+  max-width: min(1280px, 84%);
   height: 100%;
 }
 .marketing .ppanel .pshot picture .shot-img {
@@ -741,14 +758,14 @@ html:has(.marketing) {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: clamp(400px, 34vw, 600px);
-  padding: clamp(20px, 3vw, 52px);
+  height: clamp(460px, 38vw, 680px);
+  padding: clamp(20px, 3vw, 44px);
 }
 .marketing .epane picture {
   display: flex;
   align-items: center;
   justify-content: center;
-  max-width: min(860px, 86%);
+  max-width: min(920px, 94%);
   height: 100%;
 }
 .marketing .epane picture .shot-img {

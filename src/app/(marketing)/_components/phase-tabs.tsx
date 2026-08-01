@@ -81,7 +81,7 @@ const PHASES: readonly Phase[] = [
       width: 760,
       height: 515,
       alt: "Vision Meeting #5 — in 14 days, ~32 estimated.",
-      style: { right: "6%", bottom: "8%", width: "min(26%, 380px)" },
+      style: { right: "13%", bottom: "20%", width: "min(26%, 380px)" },
     },
   },
   {
@@ -121,8 +121,8 @@ const PHASES: readonly Phase[] = [
     ],
     desktop: {
       src: "/marketing/shots/r6-team-training.webp",
-      width: 2880,
-      height: 1460,
+      width: 2304,
+      height: 1440,
     },
     mobile: {
       src: "/marketing/shots/pt-teams-m.webp",
