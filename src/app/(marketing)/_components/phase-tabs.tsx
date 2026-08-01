@@ -3,7 +3,10 @@
 import { useState } from "react";
 
 import { Chip } from "./chip";
-import { Shot, type ShotSource } from "./shot";
+import { Shot, ShotOverlay, type ShotSource } from "./shot";
+import { usePrefetchShots } from "./use-prefetch-shots";
+
+type Overlay = ShotSource & { alt: string; style: React.CSSProperties };
 
 type Phase = {
   key: string;
@@ -15,8 +18,9 @@ type Phase = {
   desktop: ShotSource;
   mobile?: ShotSource;
   alt: string;
-  /** Full-bleed beat: the visual escapes the container to ~92vw. */
-  bleed?: boolean;
+  /** Horizontal anchor of the primary crop inside the panel. */
+  anchor?: "start" | "end";
+  overlay?: Overlay;
   chip?: {
     text: string;
     style: React.CSSProperties;
@@ -47,6 +51,7 @@ const PHASES: readonly Phase[] = [
       height: 760,
     },
     alt: "The wiki chapter 'Is Church Planting Your Calling?' with the Phase 0 reading list and reading progress in the sidebar.",
+    anchor: "end",
   },
   {
     key: "core-group",
@@ -70,6 +75,14 @@ const PHASES: readonly Phase[] = [
       height: 830,
     },
     alt: "People cards moving through the pipeline — J. P. Holloway a new prospect from an event, Grace Lin in follow-up from the website.",
+    anchor: "start",
+    overlay: {
+      src: "/marketing/shots/fs-meetings-m.webp",
+      width: 760,
+      height: 515,
+      alt: "Vision Meeting #5 — in 14 days, ~32 estimated.",
+      style: { right: "13%", bottom: "20%", width: "min(26%, 380px)" },
+    },
   },
   {
     key: "launch-team",
@@ -84,7 +97,7 @@ const PHASES: readonly Phase[] = [
     ],
     desktop: {
       src: "/marketing/shots/pt-launch-team.webp",
-      width: 1185,
+      width: 1760,
       height: 810,
     },
     mobile: {
@@ -93,6 +106,7 @@ const PHASES: readonly Phase[] = [
       height: 810,
     },
     alt: "The People screen filtered to the committed — 61 total, Core Group badges on every card.",
+    anchor: "end",
   },
   {
     key: "training",
@@ -106,16 +120,24 @@ const PHASES: readonly Phase[] = [
       "Meeting series for corporate and team-specific training.",
     ],
     desktop: {
-      src: "/marketing/shots/pt-teams.webp",
-      width: 1155,
-      height: 695,
+      src: "/marketing/shots/r6-team-training.webp",
+      width: 2304,
+      height: 1440,
     },
     mobile: {
       src: "/marketing/shots/pt-teams-m.webp",
       width: 578,
       height: 695,
     },
-    alt: "Ministry team cards with staffing bars — Senior Pastor, Launch Coordinator, Facilities, Assimilation.",
+    alt: "The Children's Ministry training matrix — who has completed kids ministry & safety training, member by member.",
+    anchor: "end",
+    overlay: {
+      src: "/marketing/shots/r6-twocards.webp",
+      width: 588,
+      height: 706,
+      alt: "Two ministry team cards — Worship Team and Facilities, staffing bars and open roles.",
+      style: { left: "14%", top: "22%", width: "min(24%, 350px)" },
+    },
   },
   {
     key: "pre-launch",
@@ -139,11 +161,11 @@ const PHASES: readonly Phase[] = [
       height: 445,
     },
     alt: "The Launch Sunday logistics checklist — preparation progress at 4 of 8 ready, promo cards and signage already struck through.",
-    bleed: true,
+    anchor: "start",
     chip: {
       text: "4 of 8 ready — and counting",
-      style: { left: "10%", top: "37%" },
-      mobileStyle: { left: 12, top: -14 },
+      style: { left: "7%", bottom: "16%" },
+      mobileStyle: { left: 26, top: 28 },
     },
   },
   {
@@ -158,15 +180,15 @@ const PHASES: readonly Phase[] = [
     ],
     desktop: {
       src: "/marketing/shots/pt-launch-day.webp",
-      width: 1560,
-      height: 355,
+      width: 2340,
+      height: 1200,
     },
     mobile: {
       src: "/marketing/shots/pt-launch-day-m.webp",
       width: 775,
       height: 355,
     },
-    alt: "Launch Sunday's cards: ~120 estimated, and the run sheet — 7:30 setup crew, 8:15 band call, 9:15 doors, 10:00 service.",
+    alt: "The Launch Sunday meeting page — in 28 days, ~120 estimated, and the run sheet: 7:30 setup crew, 8:15 band call, 9:15 doors, 10:00 service.",
   },
   {
     key: "beyond",
@@ -190,11 +212,11 @@ const PHASES: readonly Phase[] = [
       height: 900,
     },
     alt: "Trinity Grove's post-launch dashboard: Sunday Gathering week after week — Week 6 completed with 112 attendees.",
-    bleed: true,
+    anchor: "end",
     chip: {
       text: "Week 6 · 112 in the room",
-      style: { right: "6%", top: "38%" },
-      mobileStyle: { right: 8, top: -14, left: "auto" },
+      style: { right: "6%", top: "20%" },
+      mobileStyle: { right: 22, top: 28, left: "auto" },
     },
   },
 ] as const;
@@ -206,13 +228,22 @@ function PhaseVisual({
   phase: Phase;
   isMobile?: boolean;
 }) {
+  const cls = [
+    "pshot",
+    !isMobile && phase.anchor ? `anchor-${phase.anchor}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
   return (
-    <div className={phase.bleed && !isMobile ? "pshot bleed" : "pshot"}>
+    <div className={cls}>
       <Shot
         desktop={isMobile ? (phase.mobile ?? phase.desktop) : phase.desktop}
         mobile={isMobile ? undefined : phase.mobile}
         alt={phase.alt}
       />
+      {!isMobile && phase.overlay ? (
+        <ShotOverlay overlay={phase.overlay} />
+      ) : null}
       {phase.chip ? (
         <Chip
           style={
@@ -228,8 +259,11 @@ function PhaseVisual({
   );
 }
 
+const PREFETCH = PHASES.flatMap((p) => [p.desktop.src, p.overlay?.src]);
+
 export function PhaseTabs() {
   const [active, setActive] = useState<string>(PHASES[0].key);
+  usePrefetchShots(PREFETCH);
 
   return (
     <>
