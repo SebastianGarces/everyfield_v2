@@ -879,3 +879,56 @@ test("an EXPLICIT preference beats the audience default, both ways", () => {
   const on: NotificationPreference = { ...off, id: "pref-2", enabled: true };
   assert.equal(resolveInAppCategories([on]).includes("digest"), true);
 });
+
+test("the settings matrix resolves with the SAME audience the feed does", () => {
+  // The divergence this closes: `/settings` used to build the matrix with the
+  // church defaults for everyone, so an oversight admin with no stored rows saw
+  // `digest`/`in_app` unchecked while `resolveInAppCategories` — the feed and
+  // the badge — had it ON. The screen was describing a different product than
+  // the one running.
+  const cellFor = (view: ReturnType<typeof buildPreferenceMatrixView>) =>
+    view.categories
+      .find((row) => row.category === "digest")!
+      .cells.find((cell) => cell.channel === "in_app")!;
+
+  const church = cellFor(buildPreferenceMatrixView([]));
+  const oversight = cellFor(buildPreferenceMatrixView([], "oversight"));
+
+  assert.equal(church.enabled, false);
+  assert.equal(oversight.enabled, true);
+  assert.equal(oversight.source, "default");
+
+  // Stated as the invariant rather than as two literals: every cell of the
+  // rendered matrix agrees with what the read path would answer for that
+  // audience, for both audiences and every pair.
+  for (const audience of ["church", "oversight"] as const) {
+    for (const row of buildPreferenceMatrixView([], audience).categories) {
+      for (const cell of row.cells) {
+        assert.equal(
+          cell.enabled,
+          defaultChannelEnabled(cell.category, cell.channel, audience),
+          `${audience} ${cell.key}`
+        );
+      }
+    }
+  }
+});
+
+test("an oversight admin switching their in-app digest OFF is not a no-op", () => {
+  // The write side of the same divergence, and the more damaging half: with the
+  // church defaults the answer to "is it already off?" was YES, so the action
+  // returned success, wrote nothing, and the digest kept appearing in the feed
+  // the admin had just told it to leave.
+  assert.equal(
+    preferenceWriteIsNoop([], "digest", "in_app", false, "oversight"),
+    false
+  );
+  assert.equal(
+    preferenceWriteIsNoop([], "digest", "in_app", true, "oversight"),
+    true
+  );
+
+  // And the church audience keeps exactly today's answers.
+  assert.equal(preferenceWriteIsNoop([], "digest", "in_app", false), true);
+  assert.equal(preferenceWriteIsNoop([], "digest", "in_app", true), false);
+});

@@ -5,6 +5,7 @@ import { HeaderBreadcrumbs } from "@/components/header";
 import { PreferenceMatrix } from "@/components/notifications/preference-matrix";
 import { verifySession } from "@/lib/auth/session";
 import {
+  audienceForRole,
   buildPreferenceMatrixView,
   loadUserPreferences,
   preferenceOwnerFromSession,
@@ -37,7 +38,13 @@ export const metadata: Metadata = {
 export default async function SettingsPage() {
   const session = await verifySession();
   const owner = preferenceOwnerFromSession(session);
-  const view = buildPreferenceMatrixView(await loadUserPreferences(owner));
+  // The matrix must be resolved against the SAME audience the feed, the badge
+  // and the dispatcher resolve against, or an absent row renders as one value
+  // here and behaves as another there (N-027).
+  const view = buildPreferenceMatrixView(
+    await loadUserPreferences(owner),
+    audienceForRole(session.user.role)
+  );
 
   const isPlanterWithPlant =
     session.user.role === "planter" && Boolean(session.user.churchId);

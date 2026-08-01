@@ -10,6 +10,7 @@ import {
   notificationChannels,
 } from "@/lib/notifications/categories";
 import {
+  audienceForRole,
   digestCadenceWriteIsNoop,
   loadUserPreferences,
   preferenceOwnerFromSession,
@@ -91,12 +92,24 @@ export async function setNotificationPreferenceAction(
     return { success: false, error: "That is not a setting we can save" };
   }
 
-  const owner = preferenceOwnerFromSession(await verifySession());
+  const session = await verifySession();
+  const owner = preferenceOwnerFromSession(session);
   const rows = await loadUserPreferences(owner);
 
   const { category, channel, enabled } = parsed.data;
 
-  if (preferenceWriteIsNoop(rows, category, channel, enabled)) {
+  // Same audience the page rendered the matrix with — see `preferenceWriteIsNoop`.
+  // Asking the no-op question with the other audience's defaults would discard
+  // a real change as "already that value".
+  if (
+    preferenceWriteIsNoop(
+      rows,
+      category,
+      channel,
+      enabled,
+      audienceForRole(session.user.role)
+    )
+  ) {
     return { success: true, changed: false };
   }
 

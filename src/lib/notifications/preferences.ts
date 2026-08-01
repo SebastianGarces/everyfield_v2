@@ -448,9 +448,23 @@ export const DIGEST_CADENCE_LABELS: Record<DigestCadence, string> = {
 export const DIGEST_CADENCE_DESCRIPTION =
   "How often your roll-up of your own open items arrives.";
 
-/** Build the whole screen from a user's stored rows. */
+/**
+ * Build the whole screen from a user's stored rows.
+ *
+ * `audience` is the SAME argument the read and dispatch paths resolve with
+ * (`audienceForRole(session.user.role)`). It has to be, or the screen lies: an
+ * oversight recipient's `digest`/`in_app` default is ON (N-027) while the
+ * plant's team's is off, so a matrix built with the "church" defaults would
+ * show an oversight admin an unchecked box for a notification they are in fact
+ * receiving — and their first click would "turn on" something already on.
+ *
+ * It still defaults to "church" so a caller that does not know the recipient's
+ * role gets today's answer rather than a guessed one; the only production
+ * caller is `/settings`, which knows.
+ */
 export function buildPreferenceMatrixView(
-  rows: readonly NotificationPreference[]
+  rows: readonly NotificationPreference[],
+  audience: NotificationAudience = "church"
 ): PreferenceMatrixView {
   const map = buildPreferenceMap(rows);
 
@@ -464,7 +478,7 @@ export function buildPreferenceMatrixView(
       label: NOTIFICATION_CATEGORIES[category].label,
       description: NOTIFICATION_CATEGORIES[category].description,
       cells: notificationChannels.map((channel) => {
-        const resolved = resolvePreference(map, category, channel);
+        const resolved = resolvePreference(map, category, channel, audience);
         return {
           category,
           channel,
@@ -505,14 +519,24 @@ export function buildPreferenceMatrixView(
  * So the write path asks this first. `false` means "the effective value is
  * already this" — including the case where it is already this BY DEFAULT — and
  * the action returns without touching the table.
+ *
+ * `audience` must match the one the matrix was RENDERED with, for the same
+ * reason it exists there: "already this by default" is an audience-dependent
+ * question (N-027). Resolving the write against the church defaults while the
+ * screen showed the oversight ones turns an oversight admin's deliberate
+ * switch-off of their in-app digest into a no-op — the action reports success,
+ * writes nothing, and the notification keeps arriving.
  */
 export function preferenceWriteIsNoop(
   rows: readonly NotificationPreference[],
   category: NotificationCategory,
   channel: NotificationChannel,
-  enabled: boolean
+  enabled: boolean,
+  audience: NotificationAudience = "church"
 ): boolean {
-  return resolvePreference(rows, category, channel).enabled === enabled;
+  return (
+    resolvePreference(rows, category, channel, audience).enabled === enabled
+  );
 }
 
 /** The same question for the cadence selector. */
