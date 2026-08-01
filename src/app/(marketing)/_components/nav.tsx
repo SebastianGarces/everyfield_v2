@@ -20,16 +20,18 @@ export function MarketingNav() {
       <Link href="/" aria-label="EveryField home">
         <Lockup className="logo" />
       </Link>
+      {/* the nav rides every marketing route, so its jumps are rooted at the
+          landing page — a bare fragment points nowhere from /terms or /privacy */}
       <div className="links">
-        <a className="nav-jump" href="#product">
+        <a className="nav-jump" href="/#product">
           How it works
         </a>
-        <a className="nav-jump" href="#networks">
+        <a className="nav-jump" href="/#networks">
           For networks
         </a>
         <Link href="/login">Sign in</Link>
       </div>
-      <a className="btn primary" href="#request-invite">
+      <a className="btn primary" href="/#request-invite">
         Request an invite
       </a>
     </nav>
