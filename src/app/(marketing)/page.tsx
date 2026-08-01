@@ -54,8 +54,14 @@ export default function LandingPage() {
                 alt="The EveryField dashboard for Redemption Hill Church in pre-launch: core group of 61, 142 people in the pipeline, zero overdue tasks, and recent activity."
                 priority
               />
-              <Chip className="hero-chip-a" style={{ left: "21%", top: "19%" }}>
-                61 committed adults
+              {/* the band right of the church name and above the stat row is
+                  the shot's only empty region — and staffing is the one thing
+                  the dashboard behind it does not already count */}
+              <Chip
+                className="hero-chip-a"
+                style={{ left: "45%", top: "11.5%" }}
+              >
+                7 of 8 leadership roles filled
               </Chip>
               <Chip className="hero-chip-b" style={{ right: "4%", top: "70%" }}>
                 28 days to launch Sunday
@@ -137,7 +143,9 @@ export default function LandingPage() {
                     width: 702,
                     height: 886,
                     alt: "Phase control — you decide when to move phases; readiness is advisory and never blocks a change.",
-                    style: { left: "4%", top: "40%", width: "min(34%, 320px)" },
+                    // lands inside the shot's empty left gutter — the pane
+                    // shifts the shot right (see .epane-bleed) to make room
+                    style: { left: "1%", top: "32%", width: "min(30%, 290px)" },
                   }}
                 />
               </div>
@@ -185,6 +193,21 @@ export default function LandingPage() {
             matter most. Planters control what they share; you see health, not
             their people&rsquo;s private records.
           </p>
+          <div className="netshot">
+            <Shot
+              desktop={{
+                src: "/marketing/shots/net-health.webp",
+                width: 2560,
+                height: 1980,
+              }}
+              mobile={{
+                src: "/marketing/shots/net-health-m.webp",
+                width: 940,
+                height: 475,
+              }}
+              alt="Plant Health across a network: Redemption Hill Church needs readiness focus — pre-launch, launching in 27 days, with an observation about prayer coverage — while Trinity Grove Church sits on track after launch."
+            />
+          </div>
           <div className="stats">
             <div className="stat-cell lead">
               <p className="n">86–90%</p>

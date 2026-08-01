@@ -50,7 +50,9 @@ const FEATURES: readonly Feature[] = [
         width: 545,
         height: 302,
         alt: "Core Group stat card: 61 — core group, launch team and leaders.",
-        style: { left: "64%", top: "45%", width: "min(26%, 400px)" },
+        // one card cell wide, cut at the row gutter above it: the stat card
+        // takes the last person card's place instead of slicing two of them
+        style: { left: "58.4%", top: "61%", width: "min(26%, 400px)" },
       },
     ],
   },
@@ -159,25 +161,27 @@ const FEATURES: readonly Feature[] = [
       "Help where you need it — the interview guide opens beside the interview, and print-ready documents come filled in with your church's details.",
     art: "/marketing/c1-field.webp",
     desktop: {
-      src: "/marketing/shots/r5-personguide.webp",
+      src: "/marketing/shots/r8-personguide.webp",
       width: 2880,
       height: 1800,
     },
     mobile: {
-      src: "/marketing/shots/r5-guide.webp",
+      src: "/marketing/shots/r8-guide.webp",
       width: 1036,
       height: 1740,
     },
-    alt: "Jerome Jefferson's profile with the Interview Guide open beside it — The 5 Interview Criteria, right where the interview happens.",
+    alt: "Hannah Carr's profile with the Interview Guide open beside it — her interview came back Qualified on all five criteria, and The 5 Interview Criteria is open right where the interview happens.",
     anchor: "start",
     flush: true,
     overlays: [
       {
-        src: "/marketing/shots/r5-documents.webp",
-        width: 1916,
-        height: 1152,
-        alt: "The Documents library — print-ready commitment cards and core-group expectations, generated with church details filled in.",
-        style: { right: "2%", top: "18%", width: "min(54%, 940px)" },
+        src: "/marketing/shots/r8-doccard.webp",
+        width: 922,
+        height: 700,
+        alt: "A commitment document ready to generate — the Core Group Commitment Card, a one-page PDF founding members sign to commit to GROW, PRAY and GIVE through Launch Sunday.",
+        // sits on the painting clear of the shot, which now runs its full
+        // width so no heading or sentence is cut at the pane's edge
+        style: { right: "1%", top: "26%", width: "min(30%, 400px)" },
       },
     ],
   },

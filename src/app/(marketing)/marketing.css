@@ -482,9 +482,11 @@ html:has(.marketing) {
   padding-inline-start: 0;
 }
 .marketing .fswitch-shot.flush-start picture {
-  /* translate is relative to the image itself — cut ~a third of it at the
-     pane edge, independent of pane width */
-  transform: translateX(-26.5%);
+  /* A shallow bleed, not a third: the cut lands inside the app's icon rail,
+     which is the only vertical band in the guides shot that crosses no
+     heading, sentence or card edge. Anything deeper slices the person's name
+     and the card subtitle. */
+  transform: translateX(-2.8%);
   max-width: none;
 }
 .marketing .fswitch-shot.flush-start .shot-img:not(.shot-overlay) {
@@ -497,6 +499,18 @@ html:has(.marketing) {
   height: auto;
   max-width: 100%;
   max-height: 100%;
+}
+
+/* Narrow desktop (the band between the mobile stack at 900px and a comfortable
+   1180px): the training matrix and the guides shot are both height-constrained
+   and grow to fill the pane, so the painting they stand on runs out and their
+   overlay cards have nowhere to land except across the words. Drop the cards;
+   the primaries still carry the claim. */
+@media (max-width: 1180px) {
+  .marketing #pt-panel-training .shot-overlay,
+  .marketing #fs-panel-guides .shot-overlay {
+    display: none;
+  }
 }
 
 /* layered composition: a small complete card floats over the primary crop */
@@ -562,6 +576,7 @@ html:has(.marketing) {
 .marketing .fswitch-shot::before,
 .marketing .fstack-shot::before,
 .marketing .epane::before,
+.marketing .netshot::before,
 .marketing .pshot::before {
   content: "";
   position: absolute;
@@ -575,6 +590,7 @@ html:has(.marketing) {
 .marketing .fswitch-shot::after,
 .marketing .fstack-shot::after,
 .marketing .epane::after,
+.marketing .netshot::after,
 .marketing .pshot::after {
   content: "";
   position: absolute;
@@ -869,6 +885,9 @@ html:has(.marketing) {
     max-width: none;
     height: 114%;
     align-self: flex-start;
+    /* nudged off the leading edge so the phase-control card can land in the
+       shot's own empty left gutter instead of across its sentences */
+    transform: translateX(6%);
   }
 }
 @media (max-width: 899px) {
@@ -886,6 +905,20 @@ html:has(.marketing) {
   .marketing .epane .shot-overlay {
     display: none;
   }
+}
+
+/* ---------- networks — the buyer gets a product shot too ----------
+   Same treatment as a phase panel: the app frame stands on the c2 painting,
+   corner registration marks, height reserved by the crop's own aspect ratio. */
+.marketing .netshot {
+  position: relative;
+  margin-top: 36px;
+  padding: clamp(16px, 3vw, 44px);
+  background: url("/marketing/c2-field.webp") center / cover;
+}
+.marketing .netshot .shot-img {
+  max-width: 1000px;
+  margin-inline: auto;
 }
 
 /* ---------- stats — lead cell is ink-on-green, never green-on-ink ---------- */
