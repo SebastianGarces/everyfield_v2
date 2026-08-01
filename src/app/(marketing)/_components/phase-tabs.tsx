@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Chip } from "./chip";
 import { Shot, ShotOverlay, type ShotSource } from "./shot";
 import { usePrefetchShots } from "./use-prefetch-shots";
+import { useTablistKeys } from "./use-tablist-keys";
 
 type Overlay = ShotSource & { alt: string; style: React.CSSProperties };
 
@@ -261,21 +262,34 @@ function PhaseVisual({
 
 const PREFETCH = PHASES.flatMap((p) => [p.desktop.src, p.overlay?.src]);
 
+const KEYS = PHASES.map((p) => p.key);
+const tabId = (key: string) => `pt-tab-${key}`;
+const panelId = (key: string) => `pt-panel-${key}`;
+
 export function PhaseTabs() {
   const [active, setActive] = useState<string>(PHASES[0].key);
+  const onTabKeyDown = useTablistKeys(KEYS, setActive);
   usePrefetchShots(PREFETCH);
 
   return (
     <>
       {/* Desktop: tabs, one claim + one big visual per phase */}
       <div className="ptabs">
-        <div className="ptabs-strip" role="tablist" aria-label="Phases">
+        <div
+          className="ptabs-strip"
+          role="tablist"
+          aria-label="Phases"
+          onKeyDown={onTabKeyDown}
+        >
           {PHASES.map((phase) => (
             <button
               key={phase.key}
               type="button"
               role="tab"
+              id={tabId(phase.key)}
+              aria-controls={panelId(phase.key)}
               aria-selected={phase.key === active}
+              tabIndex={phase.key === active ? 0 : -1}
               className={
                 phase.key === active
                   ? "ptab active cursor-pointer"
@@ -290,6 +304,9 @@ export function PhaseTabs() {
         {PHASES.map((phase) => (
           <div
             key={phase.key}
+            id={panelId(phase.key)}
+            role="tabpanel"
+            aria-labelledby={tabId(phase.key)}
             className={phase.key === active ? "ppanel active" : "ppanel"}
           >
             <div className="ppanel-copy">

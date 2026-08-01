@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Shot, ShotOverlay, type ShotSource } from "./shot";
 import { useInView } from "./use-in-view";
 import { usePrefetchShots } from "./use-prefetch-shots";
+import { useTablistKeys } from "./use-tablist-keys";
 
 type Overlay = ShotSource & { alt: string; style: React.CSSProperties };
 
@@ -188,9 +189,14 @@ const PREFETCH = FEATURES.flatMap((f) => [
   f.art,
 ]);
 
+const KEYS = FEATURES.map((f) => f.key);
+const tabId = (key: string) => `fs-tab-${key}`;
+const panelId = (key: string) => `fs-panel-${key}`;
+
 export function FeatureSwitcher() {
   const [active, setActive] = useState<string>(FEATURES[0].key);
   const activeFeature = FEATURES.find((f) => f.key === active) ?? FEATURES[0];
+  const onTabKeyDown = useTablistKeys(KEYS, setActive);
   usePrefetchShots(PREFETCH);
   // The entrance choreography (primary settles, overlays land after) is pure
   // CSS keyframes: display:none→flex on tab switch restarts them for free.
@@ -202,13 +208,21 @@ export function FeatureSwitcher() {
     <>
       {/* Desktop: tab strip on top, the full-width panel below */}
       <div ref={switchRef} className={seen ? "fswitch fs-seen" : "fswitch"}>
-        <div className="fswitch-tabs" role="tablist" aria-label="Features">
+        <div
+          className="fswitch-tabs"
+          role="tablist"
+          aria-label="Features"
+          onKeyDown={onTabKeyDown}
+        >
           {FEATURES.map((feature) => (
             <button
               key={feature.key}
               type="button"
               role="tab"
+              id={tabId(feature.key)}
+              aria-controls={panelId(feature.key)}
               aria-selected={feature.key === active}
+              tabIndex={feature.key === active ? 0 : -1}
               className={
                 feature.key === active
                   ? "fs-tab active cursor-pointer"
@@ -227,6 +241,9 @@ export function FeatureSwitcher() {
         {FEATURES.map((feature) => (
           <div
             key={feature.key}
+            id={panelId(feature.key)}
+            role="tabpanel"
+            aria-labelledby={tabId(feature.key)}
             className={[
               "fswitch-shot",
               `anchor-${feature.anchor}`,
