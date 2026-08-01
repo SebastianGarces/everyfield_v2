@@ -76,9 +76,16 @@ export async function setChurchLaunchDate(
     return { status: "error", error: parsed.error.issues[0].message };
   }
 
+  // The instant this change is written, held so the announcement can key
+  // itself to the CHANGE rather than to the date value — see
+  // `announceLaunchDateChanged`. It is read back from the row rather than
+  // reused from this variable so the key can never describe an instant the
+  // database did not store.
+  const changedAt = new Date();
+
   const [updated] = await db
     .update(churches)
-    .set({ launchDate: parsed.data, updatedAt: new Date() })
+    .set({ launchDate: parsed.data, updatedAt: changedAt })
     .where(
       and(
         eq(churches.id, churchId),
@@ -87,7 +94,11 @@ export async function setChurchLaunchDate(
         or(isNull(churches.launchDate), ne(churches.launchDate, parsed.data))
       )
     )
-    .returning({ id: churches.id, name: churches.name });
+    .returning({
+      id: churches.id,
+      name: churches.name,
+      updatedAt: churches.updatedAt,
+    });
 
   if (!updated) {
     return { status: "unchanged", launchDate: parsed.data };
@@ -97,6 +108,7 @@ export async function setChurchLaunchDate(
     churchId: updated.id,
     plantName: updated.name,
     launchDate: parsed.data,
+    changedAt: updated.updatedAt,
   });
 
   return { status: "changed", launchDate: parsed.data };

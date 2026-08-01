@@ -14,6 +14,7 @@ import {
   notificationPreferenceMatrixKeys,
 } from "./categories";
 import {
+  audienceForRole,
   buildPreferenceMap,
   buildPreferenceMatrixView,
   DIGEST_CADENCE_CHANNEL,
@@ -829,4 +830,52 @@ test("a toggle the user really changed does reach the database", () => {
   assert.ok(params.includes(OWNER_ID));
   assert.ok(params.includes("tasks"));
   assert.ok(params.includes(false));
+});
+
+// ----------------------------------------------------------------------------
+// The audience only ever decides what an ABSENT row means (N-027)
+// ----------------------------------------------------------------------------
+
+test("audienceForRole maps the five roles onto the two audiences", () => {
+  assert.equal(audienceForRole("planter"), "church");
+  assert.equal(audienceForRole("coach"), "church");
+  assert.equal(audienceForRole("team_member"), "church");
+  assert.equal(audienceForRole("sending_church_admin"), "oversight");
+  assert.equal(audienceForRole("network_admin"), "oversight");
+});
+
+test("an oversight recipient's in-app allow-list includes the digest", () => {
+  // No stored rows at all — the state every user starts in.
+  assert.equal(resolveInAppCategories([]).includes("digest"), false);
+  assert.equal(
+    resolveInAppCategories([], "oversight").includes("digest"),
+    true
+  );
+});
+
+test("an EXPLICIT preference beats the audience default, both ways", () => {
+  // The audience decides what absence means and nothing else: an oversight user
+  // who switched the in-app digest off keeps it off.
+  const off: NotificationPreference = {
+    id: "pref-1",
+    userId: "user-1",
+    category: "digest",
+    channel: "in_app",
+    enabled: false,
+    digestCadence: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+
+  assert.equal(
+    resolveInAppCategories([off], "oversight").includes("digest"),
+    false
+  );
+  assert.equal(
+    resolvePreference([off], "digest", "in_app", "oversight").source,
+    "explicit"
+  );
+
+  const on: NotificationPreference = { ...off, id: "pref-2", enabled: true };
+  assert.equal(resolveInAppCategories([on]).includes("digest"), true);
 });

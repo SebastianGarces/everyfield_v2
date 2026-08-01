@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   DEFAULT_DIGEST_CADENCE,
+  OVERSIGHT_CHANNEL_DEFAULT_OVERRIDES,
   defaultChannelEnabled,
   isDigestCadence,
   isNotificationCategory,
@@ -130,4 +131,56 @@ test("the preference matrix covers every category on every channel", () => {
   // Stable order — the settings screen renders it directly.
   assert.deepEqual(keys[0], { category: "tasks", channel: "email" });
   assert.deepEqual(keys.at(-1), { category: "digest", channel: "in_app" });
+});
+
+// ----------------------------------------------------------------------------
+// Audience-aware defaults (N-027)
+// ----------------------------------------------------------------------------
+
+test("an oversight recipient's digest is visible IN APP by default", () => {
+  // The reason `digest`/`in_app` is off is that an in-app digest row would
+  // duplicate the feed it summarises. That is true for the plant's own team and
+  // false for an oversight recipient, who is refused every granular category —
+  // there is no feed for their digest to duplicate. With the shared default the
+  // digest was emailed and then filtered out of the feed, the unread badge and
+  // mark-read, which is ruled N-027 failing quietly in the read path.
+  assert.equal(defaultChannelEnabled("digest", "in_app", "church"), false);
+  assert.equal(defaultChannelEnabled("digest", "in_app", "oversight"), true);
+});
+
+test("the audience defaults to the church, so no caller changes behaviour by omission", () => {
+  for (const category of notificationCategories) {
+    for (const channel of notificationChannels) {
+      assert.equal(
+        defaultChannelEnabled(category, channel),
+        defaultChannelEnabled(category, channel, "church"),
+        `${category}/${channel}`
+      );
+    }
+  }
+});
+
+test("the override table is SPARSE — one exception, not a second table", () => {
+  // If this grows, the reason each entry exists has to grow with it. Two full
+  // tables of defaults would drift; a short list of exceptions cannot.
+  assert.deepEqual(Object.keys(OVERSIGHT_CHANNEL_DEFAULT_OVERRIDES), [
+    "digest",
+  ]);
+
+  for (const category of notificationCategories) {
+    for (const channel of notificationChannels) {
+      if (category === "digest" && channel === "in_app") continue;
+      assert.equal(
+        defaultChannelEnabled(category, channel, "oversight"),
+        defaultChannelEnabled(category, channel, "church"),
+        `${category}/${channel} diverged without an entry in the override table`
+      );
+    }
+  }
+});
+
+test("an unknown category fails closed for BOTH audiences", () => {
+  const unknown = "something_new" as NotificationCategory;
+  assert.equal(defaultChannelEnabled(unknown, "in_app", "oversight"), false);
+  assert.equal(defaultChannelEnabled(unknown, "email", "oversight"), false);
 });

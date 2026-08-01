@@ -1,9 +1,22 @@
-import { and, count, eq, gte, isNotNull, lt } from "drizzle-orm";
+import {
+  and,
+  count,
+  eq,
+  gte,
+  isNotNull,
+  isNull,
+  like,
+  lt,
+  notExists,
+  or,
+  sql,
+} from "drizzle-orm";
 
 import { db } from "@/db";
 import {
   churches,
   churchMeetings,
+  notifications,
   persons,
   phaseTransitions,
   tasks,
@@ -70,6 +83,20 @@ import {
 // writing nothing — and flipping the toggle on changes the very next run's
 // outcome with no other moving part. See the header of `./oversight.ts`.
 // ============================================================================
+
+/** The `type` every digest row carries. One constant, three readers. */
+export const OVERSIGHT_DIGEST_TYPE = "oversight.activity.digest";
+
+/**
+ * The digest's identity: one row per (church, day), per recipient.
+ *
+ * Defined once because THREE things depend on it agreeing — the enqueue that
+ * writes it, the partial unique index that arbitrates a replay, and the sweep's
+ * "has this plant already been digested today?" query below.
+ */
+export function digestDedupeKey(churchId: string, dayKey: string): string {
+  return `${OVERSIGHT_DIGEST_TYPE}:${churchId}:${dayKey}`;
+}
 
 /** Half-open `[from, to)`. One day, in `APP_TIME_ZONE`, unless a caller says otherwise. */
 export interface ActivityWindow {
@@ -243,7 +270,7 @@ export async function runOversightDigest(
       churchId: input.churchId,
       recipientUserId,
       category: "digest",
-      type: "oversight.activity.digest",
+      type: OVERSIGHT_DIGEST_TYPE,
       // The DAY, named. Not "today's summary": the digest speaks for a day that
       // is over by the time it is composed (`previousCompleteDayWindow`), it may
       // be retried tomorrow, and a backfill may run it for a day last week. A
@@ -251,7 +278,7 @@ export async function runOversightDigest(
       // reader has no other way to tell which day the counts belong to.
       title: `${plant.name} — summary for ${formatDate(input.window.from, "short")}`,
       body,
-      dedupeKey: `oversight.activity.digest:${input.churchId}:${dayKey}`,
+      dedupeKey: digestDedupeKey(input.churchId, dayKey),
     })
   );
 
@@ -277,10 +304,24 @@ export async function summarizeChurchActivity(
     and(gte(column, window.from), lt(column, window.to));
 
   const [people, meetings, finishedTasks, stages] = await Promise.all([
+    // `deleted_at IS NULL` on both this and the task count below, for the same
+    // reason the meeting count is narrowed to `completed`: the digest must not
+    // report to a third party something the planter cannot see. `persons` and
+    // `tasks` are soft-deleted everywhere else in the repo (people/metrics.ts,
+    // people/pipeline.ts, tasks/service.ts, ...), so a duplicate person added
+    // and deleted ten minutes later on an otherwise quiet day was producing
+    // "1 new person" to the oversight org for somebody who exists nowhere in
+    // the planter's own app.
     db
       .select({ n: count() })
       .from(persons)
-      .where(and(eq(persons.churchId, churchId), inWindow(persons.createdAt))),
+      .where(
+        and(
+          eq(persons.churchId, churchId),
+          isNull(persons.deletedAt),
+          inWindow(persons.createdAt)
+        )
+      ),
     // "Meetings HELD" — the toggle's copy promises that exact word, so the
     // query has to mean it. `church_meetings.status` starts at `planning` and
     // can reach `cancelled`, so filtering on the datetime alone reported a
@@ -313,6 +354,7 @@ export async function summarizeChurchActivity(
       .where(
         and(
           eq(tasks.churchId, churchId),
+          isNull(tasks.deletedAt),
           isNotNull(tasks.completedAt),
           inWindow(tasks.completedAt)
         )
@@ -370,9 +412,9 @@ export const dbOversightDigestDeps: OversightDigestDeps = {
  * an explicit window. There is deliberately no way to ask this function for a
  * day still in progress.
  *
- * NOT YET SCHEDULED. Nothing in `vercel.json` calls this — see the PR body for
- * issue #224; the cron entry and its route are a follow-up. Whatever wires it
- * must pass the moment it runs and nothing else.
+ * SCHEDULED via `runOversightDigestSweep` below, which the every-15-minute
+ * dispatcher tick calls (ruled 2026-08-01). Whatever wires it passes the moment
+ * it runs and nothing else.
  */
 export function runDailyOversightDigest(
   churchId: string,
@@ -382,4 +424,245 @@ export function runDailyOversightDigest(
     churchId,
     window: previousCompleteDayWindow(at),
   });
+}
+
+// ----------------------------------------------------------------------------
+// The schedule (ruled 2026-08-01) — the dispatcher tick's once-a-day guard
+// ----------------------------------------------------------------------------
+//
+// The digest is a DAILY job, but this app has no daily scheduler it can use:
+// `vercel.json` carries the one cron the Hobby plan allows (the phase engine),
+// and the notifications dispatcher already ticks every 15 minutes from
+// `.github/workflows/notifications-dispatch.yml`. Rather than add a second
+// scheduler, the ruling hangs the digest off the tick that already exists —
+// which means the tick fires ~96 times a day and the digest must happen once.
+//
+// ----------------------------------------------------------------------------
+// The guard is DERIVED, never remembered
+// ----------------------------------------------------------------------------
+//
+// "Have we already run today?" is answered by the database, not by module state
+// or a stored last-run marker. `selectPlantsOwedDigest` asks which plants have
+// no digest row for the day being digested; the first productive tick writes
+// those rows and every later tick that day selects nothing. So the guard is:
+//
+//   * correct across instances — serverless has no memory to trust, and two
+//     overlapping ticks read the same table rather than two private clocks;
+//   * self-healing — a dropped tick (GitHub's scheduler is best-effort) is not
+//     a lost digest, because the next tick still sees the plant as owed;
+//   * needs no new schema, which matters here: migration 0028 is already
+//     applied to a shared Neon branch and this unit adds no DDL.
+//
+// It is the same idiom the phase engine uses for its own once-a-day property
+// (`selectPlantsForAssessment` — dirty-or-stale, derived from what it wrote).
+// The final authority is not this query anyway: it is the partial unique index
+// on (church_id, recipient_user_id, dedupe_key), so even two ticks racing past
+// the selection at the same instant produce one row per recipient
+// (memory/invariants.md → Atomicity).
+//
+// ----------------------------------------------------------------------------
+// The cost this design accepts, stated plainly
+// ----------------------------------------------------------------------------
+//
+// A plant that was QUIET yesterday writes no digest row, so it stays "owed" and
+// is re-summarised on every tick that day: four bounded, church-scoped,
+// date-bounded `count()` queries that write nothing and enqueue nothing. Same
+// for a plant with activity whose oversight recipients are all refused by the
+// sharing toggle.
+//
+// The alternative — teaching the selection query what "activity" is, so quiet
+// plants never get picked — was rejected: it would put a SECOND definition of
+// activity next to `summarizeChurchActivity`, and the two paths that already
+// disagreed about what counts (`phaseAdvanceCondition`, above) are why this
+// module is careful about that. One definition, a few extra counts.
+//
+// ============================================================================
+
+/**
+ * Plants digested per tick. Bounded like `MAX_DISPATCH_BATCH` and for the same
+ * reason: a run has a hard function timeout, and the remainder rolling over to
+ * the next tick (15 minutes later) is a delay, not a loss.
+ */
+export const MAX_DIGEST_SWEEP_BATCH = 25;
+
+/**
+ * Wall-clock budget for the sweep, sized to fit in the headroom between the
+ * dispatcher's own `RUN_BUDGET_MS` (45s) and the route's `maxDuration` (60s).
+ * Crossing it stops between plants; nothing is left half-written, because each
+ * plant's digest is its own independent set of enqueues.
+ */
+export const DIGEST_SWEEP_BUDGET_MS = 10_000;
+
+export interface OversightDigestSweepDeps {
+  /** Plants that have oversight and no digest row for `dayKey` yet. */
+  selectPlantsOwedDigest(dayKey: string, limit: number): Promise<string[]>;
+  /** One plant's digest for one window — `runOversightDigest`, wired. */
+  runDigest(
+    churchId: string,
+    window: ActivityWindow
+  ): Promise<OversightDigestOutcome>;
+}
+
+/** What one tick's sweep did. Returned for observability, like the dispatcher's. */
+export interface OversightDigestSweepSummary {
+  /** The day digested — always the last COMPLETE one. */
+  dayKey: string;
+  /** Plants that still owed a digest when this tick looked. */
+  selected: number;
+  /** Plants that produced one (a dedupe hit counts: the day is served). */
+  digested: number;
+  /** Plants that had no activity, so were deliberately not contacted. */
+  quiet: number;
+  /** Plants that vanished between selection and digest. */
+  unknown: number;
+  /** Plants whose digest threw. Logged, never rethrown — see below. */
+  failed: number;
+  /** True when the budget stopped the sweep early; the rest roll over. */
+  budgetExhausted: boolean;
+  durationMs: number;
+}
+
+/**
+ * One tick's worth of digesting. Never throws.
+ *
+ * A failure on one plant is recorded and the sweep continues, and a failure of
+ * the sweep as a whole must not fail the dispatcher run it is attached to: the
+ * dispatcher's obligation (N-017 — deliver what is due, drop nothing) is
+ * time-sensitive, and the digest's is not. Everything a caller needs to know is
+ * in the summary rather than in an exception.
+ */
+export async function runOversightDigestSweep(
+  deps: OversightDigestSweepDeps,
+  options: {
+    at: Date;
+    limit?: number;
+    budgetMs?: number;
+    elapsedMs?: () => number;
+  }
+): Promise<OversightDigestSweepSummary> {
+  const startedAt = Date.now();
+  const elapsedMs = options.elapsedMs ?? (() => Date.now() - startedAt);
+  const budgetMs = options.budgetMs ?? DIGEST_SWEEP_BUDGET_MS;
+  const limit = Math.min(
+    Math.max(options.limit ?? MAX_DIGEST_SWEEP_BATCH, 1),
+    200
+  );
+
+  // ALWAYS the last complete day — the same window `runDailyOversightDigest`
+  // uses, and the reason a tick's hour cannot change the answer. 00:15 and
+  // 23:45 on the same date digest the same day and agree on every count.
+  const window = previousCompleteDayWindow(options.at);
+  const dayKey = digestDayKey(window);
+
+  const summary: OversightDigestSweepSummary = {
+    dayKey,
+    selected: 0,
+    digested: 0,
+    quiet: 0,
+    unknown: 0,
+    failed: 0,
+    budgetExhausted: false,
+    durationMs: 0,
+  };
+
+  const owed = await deps.selectPlantsOwedDigest(dayKey, limit);
+  summary.selected = owed.length;
+
+  for (const churchId of owed) {
+    if (elapsedMs() >= budgetMs) {
+      summary.budgetExhausted = true;
+      break;
+    }
+
+    try {
+      const outcome = await deps.runDigest(churchId, window);
+      if (outcome.status === "enqueued") summary.digested += 1;
+      else if (outcome.reason === "no_activity") summary.quiet += 1;
+      else summary.unknown += 1;
+    } catch (error) {
+      summary.failed += 1;
+      console.error("[notifications/oversight-digest] plant failed", {
+        churchId,
+        dayKey,
+        error,
+      });
+    }
+  }
+
+  summary.durationMs = elapsedMs();
+  return summary;
+}
+
+/**
+ * Which plants still owe a digest for `dayKey`.
+ *
+ * Two conditions, and neither is a privacy decision:
+ *
+ *   1. The plant has OVERSIGHT at all — a `sending_church_id` or a
+ *      `sending_network_id`. A plant with neither has nobody to digest to, and
+ *      `fanOutToOversight` would consider zero recipients. Both FKs are
+ *      nullable (memory/invariants.md → Multi-Tenancy).
+ *   2. No digest row exists for this church and this day.
+ *
+ * Note what is NOT here: `church_privacy_settings`. Whether the plant is
+ * sharing stays `enqueue`'s question, asked per recipient at the moment the row
+ * would be written — see the header of `./oversight.ts`. Putting it here would
+ * be a second copy of the gate, and a flip would then take effect at the next
+ * SELECT instead of the next enqueue.
+ *
+ * The day match is a suffix `LIKE` on a key this module builds (`YYYY-MM-DD`,
+ * no wildcard characters), narrowed by `church_id` and `type` first — it reads
+ * the day out of the key rather than concatenating a uuid column into SQL.
+ */
+export async function selectPlantsOwedDigest(
+  dayKey: string,
+  limit: number
+): Promise<string[]> {
+  const rows = await db
+    .select({ id: churches.id })
+    .from(churches)
+    .where(
+      and(
+        or(
+          isNotNull(churches.sendingChurchId),
+          isNotNull(churches.sendingNetworkId)
+        ),
+        notExists(
+          db
+            .select({ one: sql`1` })
+            .from(notifications)
+            .where(
+              and(
+                eq(notifications.churchId, churches.id),
+                eq(notifications.type, OVERSIGHT_DIGEST_TYPE),
+                like(notifications.dedupeKey, `%:${dayKey}`)
+              )
+            )
+        )
+      )
+    )
+    // Stable, so a fleet larger than one batch is swept in a repeatable order
+    // and the remainder is reached by the following ticks.
+    .orderBy(churches.id)
+    .limit(limit);
+
+  return rows.map((row) => row.id);
+}
+
+export const dbOversightDigestSweepDeps: OversightDigestSweepDeps = {
+  selectPlantsOwedDigest,
+  runDigest: (churchId, window) =>
+    runOversightDigest(dbOversightDigestDeps, { churchId, window }),
+};
+
+/**
+ * The wired-up entrypoint the dispatcher tick calls.
+ *
+ * `at` is "when the tick fired". Everything else — which day, which plants —
+ * is derived from it and from what is already in the database.
+ */
+export function runDailyOversightDigestSweep(
+  at: Date = new Date()
+): Promise<OversightDigestSweepSummary> {
+  return runOversightDigestSweep(dbOversightDigestSweepDeps, { at });
 }

@@ -8,8 +8,10 @@ import { resend } from "@/lib/email/client";
 
 import {
   OVERSIGHT_ELIGIBLE_CATEGORIES,
+  OVERSIGHT_SHARING_EXEMPT_TYPES,
   isOversightEligibleCategory,
   notificationCategories,
+  oversightGateFor,
 } from "./categories";
 import {
   cancelByEntitySchema,
@@ -21,6 +23,7 @@ import {
   type EnqueueDeps,
   type EnqueueNotificationInput,
   type RecipientCheck,
+  type RecipientNotifiableInput,
 } from "./enqueue";
 
 // ----------------------------------------------------------------------------
@@ -70,23 +73,29 @@ class FakeNotificationStore implements EnqueueDeps, CancelByEntityDeps {
 
   /**
    * Mirrors `dbEnqueueDeps.recipientMayBeNotified`: church access first, then —
-   * for oversight users only — whether the category is one oversight may
-   * receive at all, and then the plant's single sharing toggle.
+   * for oversight users only — `oversightGateFor`, which decides the category
+   * allow-list before the plant's single sharing toggle, and lets a
+   * consent-exempt `type` past the toggle only.
    */
-  async recipientMayBeNotified(
-    churchId: string,
-    recipientUserId: string,
-    category: EnqueueNotificationInput["category"]
-  ): Promise<RecipientCheck> {
+  async recipientMayBeNotified({
+    churchId,
+    recipientUserId,
+    category,
+    type,
+  }: RecipientNotifiableInput): Promise<RecipientCheck> {
     if (!(MEMBERSHIPS[recipientUserId] ?? []).includes(churchId)) {
       return { allowed: false, reason: "outside_church" };
     }
 
     if (recipientUserId === OVERSIGHT) {
-      if (!isOversightEligibleCategory(category)) {
+      const gate = oversightGateFor(category, type);
+      if (gate === "denied") {
         return { allowed: false, reason: "oversight_privacy" };
       }
-      if (!this.sharingChurches.includes(churchId)) {
+      if (
+        gate === "requires_sharing" &&
+        !this.sharingChurches.includes(churchId)
+      ) {
         return { allowed: false, reason: "oversight_privacy" };
       }
     }
@@ -789,18 +798,20 @@ test("the refusal is NOT a tenancy error — the oversight user can access the c
   // passes `canAccessChurch`. What they lack is the church's consent.
   const store = new FakeNotificationStore();
 
-  const check = await store.recipientMayBeNotified(
-    CHURCH_A,
-    OVERSIGHT,
-    "tasks"
-  );
+  const check = await store.recipientMayBeNotified({
+    churchId: CHURCH_A,
+    recipientUserId: OVERSIGHT,
+    category: "tasks",
+    type: "task.overdue",
+  });
   assert.deepEqual(check, { allowed: false, reason: "oversight_privacy" });
 
-  const outsider = await store.recipientMayBeNotified(
-    CHURCH_A,
-    OUTSIDER,
-    "tasks"
-  );
+  const outsider = await store.recipientMayBeNotified({
+    churchId: CHURCH_A,
+    recipientUserId: OUTSIDER,
+    category: "tasks",
+    type: "task.overdue",
+  });
   assert.deepEqual(outsider, { allowed: false, reason: "outside_church" });
 });
 
@@ -1135,4 +1146,128 @@ test("a second cancel is a no-op — cancelled rows are no longer pending", asyn
   const after = store.snapshot();
   assert.equal((await runCancelByEntity(store, input)).cancelledCount, 0);
   assert.equal(store.snapshot(), after);
+});
+
+// ----------------------------------------------------------------------------
+// The consent exemption at the GATE (ruled 2026-08-01, amending N-026)
+// ----------------------------------------------------------------------------
+
+const EXEMPT_TYPE = OVERSIGHT_SHARING_EXEMPT_TYPES[0];
+
+test("the invitation milestone reaches oversight with the plant NOT sharing", async () => {
+  // No church in `sharingChurches` — the toggle is off, which is the default
+  // every plant starts in and the state this milestone is normally emitted in.
+  const store = new FakeNotificationStore();
+
+  const result = await runEnqueue(store, {
+    churchId: CHURCH_A,
+    recipientUserId: OVERSIGHT,
+    category: "milestones",
+    type: EXEMPT_TYPE,
+    title: "Grace Chapel joined you",
+    body: "They accepted your invitation.",
+    dedupeKey: `${EXEMPT_TYPE}:${CHURCH_A}:inv-1`,
+  });
+
+  assert.equal(result.status, "recorded");
+  assert.equal(result.created, true);
+  assert.equal(store.rows.length, 1);
+});
+
+test("the exemption relaxes CONSENT only — never tenancy", async () => {
+  // An oversight user with no reach over this church is still refused, and the
+  // refusal is the TENANCY one, not the privacy one.
+  const store = new FakeNotificationStore();
+
+  const result = await runEnqueue(store, {
+    churchId: CHURCH_B,
+    recipientUserId: OVERSIGHT,
+    category: "milestones",
+    type: EXEMPT_TYPE,
+    title: "Somebody else's plant joined you",
+    body: "They accepted your invitation.",
+  });
+
+  assert.equal(result.status, "skipped");
+  assert.equal(result.reason, "outside_church");
+  assert.equal(store.rows.length, 0);
+});
+
+test("the exemption cannot smuggle a granular category into oversight", async () => {
+  // The ordering property, at the gate rather than in the pure function: an
+  // exempt TYPE filed under a granular category is refused, because eligibility
+  // is decided first.
+  const store = new FakeNotificationStore([CHURCH_A]);
+
+  for (const category of notificationCategories.filter(
+    (c) => !isOversightEligibleCategory(c)
+  )) {
+    const result = await runEnqueue(store, {
+      churchId: CHURCH_A,
+      recipientUserId: OVERSIGHT,
+      category,
+      type: EXEMPT_TYPE,
+      title: "Dressed as a milestone",
+      body: "No contact in 30 days: Jane Doe.",
+    });
+    assert.equal(result.status, "skipped", category);
+    assert.equal(result.reason, "oversight_privacy", category);
+  }
+
+  assert.equal(store.rows.length, 0);
+});
+
+test("the two gated milestones are still refused with the plant not sharing", async () => {
+  const store = new FakeNotificationStore();
+
+  for (const type of [
+    "oversight.milestone.phase_advanced",
+    "oversight.milestone.launch_date_changed",
+  ]) {
+    const result = await runEnqueue(store, {
+      churchId: CHURCH_A,
+      recipientUserId: OVERSIGHT,
+      category: "milestones",
+      type,
+      title: "Grace Chapel reached a new stage",
+      body: "They moved up to stage 3.",
+    });
+    assert.equal(result.status, "skipped", type);
+    assert.equal(result.reason, "oversight_privacy", type);
+  }
+
+  assert.equal(store.rows.length, 0);
+});
+
+test("the digest is still gated — the exemption is one type, not a milestone class", async () => {
+  const store = new FakeNotificationStore();
+
+  const result = await runEnqueue(store, {
+    churchId: CHURCH_A,
+    recipientUserId: OVERSIGHT,
+    category: "digest",
+    type: "oversight.activity.digest",
+    title: "Grace Chapel — summary for Thu, Jul 30, 2026",
+    body: "1 meeting, 2 new people.",
+  });
+
+  assert.equal(result.status, "skipped");
+  assert.equal(result.reason, "oversight_privacy");
+});
+
+test("a plant's own team is untouched by any of this", async () => {
+  // The exemption is asked only for oversight recipients; a church-level
+  // recipient never reaches `oversightGateFor` at all.
+  const store = new FakeNotificationStore();
+
+  const result = await runEnqueue(store, {
+    churchId: CHURCH_A,
+    recipientUserId: USER,
+    category: "tasks",
+    type: "task.overdue",
+    title: "Book the venue is overdue",
+    body: "It was due yesterday.",
+  });
+
+  assert.equal(result.status, "recorded");
 });

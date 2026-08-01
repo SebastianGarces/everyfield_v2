@@ -11,6 +11,12 @@
 // route sends email to real users and an open one is a spam cannon pointed at
 // the cohort. Same contract as `/api/phase-engine/assess`.
 //
+// It also carries the DAILY oversight activity digest (ruled 2026-08-01). That
+// is not a second job bolted on: the digest needs a once-a-day trigger, this app
+// has no daily scheduler to spare, and the sweep's "already done today" test is
+// derived from the rows it writes — so hanging it off a 15-minute tick produces
+// exactly one digest per plant per day. See `sweepOversightDigests` below.
+//
 // Schedule: every 15 minutes, from `.github/workflows/notifications-dispatch.yml`
 // — NOT from vercel.json, which carries only the daily phase-engine cron. The
 // Hobby plan caps Vercel crons at one invocation per day and rejects the
@@ -36,6 +42,10 @@ import {
   RUN_BUDGET_MS,
   type DispatchRunSummary,
 } from "@/lib/notifications/dispatch";
+import {
+  runDailyOversightDigestSweep,
+  type OversightDigestSweepSummary,
+} from "@/lib/notifications/oversight-digest";
 
 // Claims rows and calls a provider — never cache it, never prerender it.
 export const dynamic = "force-dynamic";
@@ -61,6 +71,49 @@ export function isAuthorized(request: NextRequest): boolean {
 export interface DispatchResponseBody extends DispatchRunSummary {
   ok: true;
   timestamp: string;
+  /**
+   * The oversight digest sweep this tick performed, or null if it threw. The
+   * summary is here — not in a separate endpoint — because "did the digest go
+   * out today?" is answered by the same tick log as "did the reminders?".
+   */
+  oversightDigest: OversightDigestSweepSummary | null;
+}
+
+/**
+ * The daily oversight digest, hung off this tick (ruled 2026-08-01).
+ *
+ * WHY HERE. The digest is a daily job and this app has no daily scheduler to
+ * give it: `vercel.json` holds the single cron the Hobby plan permits (the
+ * phase engine), and adding a second GitHub workflow to run one query a day is
+ * a scheduler to maintain for no benefit. The tick that already runs every 15
+ * minutes can carry it, provided the digest happens once — and it does, because
+ * the sweep derives "already done today" from the rows it wrote rather than
+ * from a clock. See the schedule section of `oversight-digest.ts`.
+ *
+ * WHY AFTER THE DISPATCH. Draining due notifications is the time-sensitive
+ * obligation (N-017); a roll-up of a day that is already over is not. Running
+ * the sweep second means it can never eat into the dispatch budget, at the cost
+ * of the digest rows it writes going out on the NEXT tick — at most 15 minutes
+ * later, for a summary of yesterday.
+ *
+ * WHY IT CANNOT FAIL THE RUN. A throw here would turn a successful dispatch —
+ * emails already sent, rows already marked delivered — into a 500, and the
+ * caller's only recovery is to tick again, which re-runs nothing (the deliveries
+ * are claimed) and re-attempts the same broken sweep. So the sweep's failure is
+ * data in the response, not an exception.
+ */
+async function sweepOversightDigests(
+  at: Date
+): Promise<OversightDigestSweepSummary | null> {
+  try {
+    return await runDailyOversightDigestSweep(at);
+  } catch (error) {
+    console.error(
+      "[notifications/dispatch] oversight digest sweep failed:",
+      error
+    );
+    return null;
+  }
 }
 
 /**
@@ -87,9 +140,12 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const oversightDigest = await sweepOversightDigests(new Date());
+
     return NextResponse.json({
       ok: true,
       ...summary,
+      oversightDigest,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {

@@ -6,8 +6,10 @@
  * daily digest and the sharing toggle's reader/writer — against a Postgres that
  * has had every migration applied by `pnpm db:migrate`. Nothing is faked. The
  * unit tests cover the logic; this covers what the database actually does with
- * it, including the migration's own effect (the new column exists at false for
- * every church, and the two columns it replaced are gone).
+ * it, including the migration's own effect — the new column exists at false for
+ * every church, and the two columns it SUPERSEDES are still present and still
+ * readable, because 0028 is expand-only (see §1; the contract migration that
+ * drops them is #255).
  *
  * NEVER point it at a real database: it seeds churches and users and leaves
  * them behind. Create a scratch one first.
@@ -43,8 +45,12 @@ import {
   activityWindowForDay,
   dayKeyInAppZone,
   dbOversightDigestDeps,
+  dbOversightDigestSweepDeps,
+  digestDayKey,
+  previousCompleteDayWindow,
   runDailyOversightDigest,
   runOversightDigest,
+  runOversightDigestSweep,
 } from "@/lib/notifications/oversight-digest";
 import { handlePhaseChangedForOversight } from "@/lib/notifications/oversight-events";
 import {
@@ -253,12 +259,52 @@ async function main() {
     sendingNetworkId: network.id,
   });
   await acceptInvitation(invitationOff.id, planter);
+
+  // RULED 2026-08-01 (amending N-026): this milestone is EXEMPT from the
+  // toggle. "Your invitation was accepted" is the sending church's own event —
+  // they issued the invitation and the acceptance answers it. It is also the
+  // only way this milestone is ever reachable: the toggle defaults off and a
+  // planter decides about sharing after joining, so gating it meant it was
+  // refused in essentially every real case and never retried.
+  const exemptRows = await rowsFor(plant.id);
   assert.equal(
-    (await rowsFor(plant.id)).length,
-    0,
-    "an invitation milestone leaked with sharing off"
+    exemptRows.length,
+    2,
+    "the invitation milestone was refused with sharing off — the exemption is not wired"
   );
-  ok("invitation accepted, sharing OFF → nothing enqueued");
+  assert.ok(
+    exemptRows.every(
+      (row) => row.type === "oversight.milestone.invitation_accepted"
+    )
+  );
+  assert.deepEqual(
+    exemptRows.map((row) => row.recipientUserId).sort(),
+    [adminA.id, adminB.id].sort()
+  );
+  // The body has to be true for a reader who will get nothing further.
+  assert.ok(
+    exemptRows.every((row) => /theirs to switch on/i.test(row.body)),
+    "the invitation body promises updates the plant has not agreed to send"
+  );
+  ok("invitation accepted, sharing OFF → still announced (consent exemption)");
+
+  // The exemption is ONE TYPE, not a relaxation of the model: with sharing
+  // still off, the other two milestones and the digest stay refused. Asserted
+  // here, beside the exemption, because "we accidentally opened the gate" is
+  // the failure this ruling could have caused.
+  await db.delete(notifications).where(eq(notifications.churchId, plant.id));
+  const gatedWhileOff = await enqueue({
+    churchId: plant.id,
+    recipientUserId: adminA.id,
+    category: "milestones",
+    type: "oversight.milestone.phase_advanced",
+    title: "Scratch Plant reached a new stage",
+    body: "They moved up to stage 2.",
+  });
+  assert.equal(gatedWhileOff.status, "skipped");
+  assert.equal(gatedWhileOff.reason, "oversight_privacy");
+  assert.equal((await rowsFor(plant.id)).length, 0);
+  ok("the exemption did not open the gate for the other milestones");
 
   await setSharingActivityWithOversight({
     churchId: plant.id,
@@ -379,6 +425,26 @@ async function main() {
   assert.equal((await rowsFor(plant.id)).length, 2);
   ok("re-saving the same launch date announces nothing");
 
+  // ...but moving BACK to a date already announced is a real change, and was
+  // being swallowed: the dedupe key is permanent, so keying it by the date
+  // value meant the third move produced nothing at all. It is now keyed by the
+  // change (date + the instant it was written).
+  assert.equal(
+    (await setChurchLaunchDate(planter, plant.id, "2026-11-15")).status,
+    "changed"
+  );
+  assert.equal(
+    (await setChurchLaunchDate(planter, plant.id, "2026-10-04")).status,
+    "changed"
+  );
+  const afterRevert = await rowsFor(plant.id);
+  assert.equal(
+    afterRevert.length,
+    6,
+    "a launch date moved back to a previously announced one was swallowed"
+  );
+  ok("moving a launch date BACK to an announced one is still announced");
+
   // The write authorises itself. An oversight admin has church ACCESS to this
   // plant (asserted in §2) and would sail past a bare `requireChurchAccess`;
   // the role check is what stops the milestone from being able to announce
@@ -491,7 +557,22 @@ async function main() {
     },
   ]);
 
-  // Two tasks; one finished. (`completed_at` is the count's own filter.)
+  // A person added AND SOFT-DELETED inside the window. Must NOT be counted:
+  // reporting "1 new person" to the oversight org for somebody who exists
+  // nowhere in the planter's own app is the same class of overstatement as the
+  // cancelled meeting above. `persons` is soft-deleted everywhere else in the
+  // repo; this query was the exception.
+  await db.insert(persons).values({
+    churchId: plant.id,
+    createdBy: planter.id,
+    firstName: "Duplicate",
+    lastName: "Entry",
+    createdAt: at("09:45"),
+    deletedAt: at("09:50"),
+  });
+
+  // Three tasks; one finished and kept, one finished and DELETED (must not
+  // count), one never finished.
   await db.insert(tasks).values([
     {
       churchId: plant.id,
@@ -499,6 +580,14 @@ async function main() {
       title: "Book the venue",
       status: "complete" as const,
       completedAt: at("10:00"),
+    },
+    {
+      churchId: plant.id,
+      createdById: planter.id,
+      title: "Completed then deleted",
+      status: "complete" as const,
+      completedAt: at("10:30"),
+      deletedAt: at("10:45"),
     },
     {
       churchId: plant.id,
@@ -541,9 +630,10 @@ async function main() {
     digestRows.every((row) => row.type === "oversight.activity.digest")
   );
 
-  // THE assertion. Seven rows of activity in the window, four of which must not
+  // THE assertion. Nine rows of activity in the window, SIX of which must not
   // be counted: a cancelled meeting, a meeting not yet held, an unfinished
-  // task, a phase regression. Any of them leaking changes this string.
+  // task, a phase regression, a soft-deleted person, a completed-then-deleted
+  // task. Any of them leaking changes this string.
   const EXPECTED_BODY =
     "1 meeting, 2 new people, 1 task finished, 1 new stage.";
   for (const row of digestRows) {
@@ -633,6 +723,107 @@ async function main() {
   );
 
   await db.delete(persons).where(eq(persons.churchId, plant.id));
+
+  // --------------------------------------------------------------------------
+  // 6c. THE SCHEDULE — the dispatcher tick's once-a-day guard (ruled
+  //     2026-08-01). The acceptance criterion in words: a day with
+  //     oversight-visible activity produces exactly ONE digest per oversight
+  //     recipient even when the tick fires many times that day, and a quiet day
+  //     produces none.
+  //
+  //     This runs the SHIPPED sweep against real Postgres, including the
+  //     selection query whose `NOT EXISTS` IS the guard. Two ticks the same day
+  //     and a quiet day, asserted on rows rather than on return values.
+  //
+  //     CAUTION for anyone extending this: the sweep is fleet-wide by design —
+  //     it selects EVERY church with a sending-church or network FK, not just
+  //     the plant seeded above. On a scratch database that is exactly what we
+  //     want to exercise; it is also why the teardown at the bottom deletes
+  //     notifications for every church this run created, and why this section
+  //     asserts on `rowsFor(plant.id)` rather than on a global count.
+  // --------------------------------------------------------------------------
+  await db.delete(notifications).where(eq(notifications.churchId, plant.id));
+  await setSharingActivityWithOversight({
+    churchId: plant.id,
+    enabled: true,
+    updatedBy: planter.id,
+  });
+
+  // Two ticks on the same date, at hours a 15-minute job really fires. Both
+  // digest the day BEFORE — `sweepDay` — so one person added then is the whole
+  // of the plant's activity for it.
+  const firstTick = new Date("2026-06-11T00:14:00.000Z");
+  const secondTick = new Date("2026-06-11T23:44:00.000Z");
+  const sweepDayKey = digestDayKey(previousCompleteDayWindow(firstTick));
+  assert.equal(sweepDayKey, "2026-06-10");
+
+  await db.insert(persons).values({
+    churchId: plant.id,
+    createdBy: planter.id,
+    firstName: "Swept",
+    lastName: "Person",
+    createdAt: new Date("2026-06-10T09:00:00.000Z"),
+  });
+
+  const tick1 = await runOversightDigestSweep(dbOversightDigestSweepDeps, {
+    at: firstTick,
+  });
+  assert.equal(tick1.dayKey, sweepDayKey);
+  const afterTick1 = await rowsFor(plant.id);
+  assert.equal(afterTick1.length, 2, "the tick did not digest the plant");
+  assert.ok(afterTick1.every((row) => row.category === "digest"));
+  assert.ok(afterTick1.every((row) => row.body === "1 new person."));
+  ok("tick 1 on a day WITH activity → one digest per oversight recipient");
+
+  // THE idempotence assertion. The guard is derived from the rows tick 1 wrote,
+  // so tick 2 does not select this plant at all — and even if it did, the
+  // partial unique index would absorb the insert.
+  const tick2 = await runOversightDigestSweep(dbOversightDigestSweepDeps, {
+    at: secondTick,
+  });
+  assert.equal(tick2.dayKey, sweepDayKey, "two ticks disagreed about the day");
+  assert.equal(
+    (await rowsFor(plant.id)).length,
+    2,
+    "a second tick the same day sent another digest"
+  );
+  ok("tick 2 the same day → nothing further (the once-a-day guard holds)");
+
+  // The plant is no longer among those owed a digest for that day — the guard
+  // itself, read directly rather than inferred from the row count.
+  const owedAfter = await dbOversightDigestSweepDeps.selectPlantsOwedDigest(
+    sweepDayKey,
+    100
+  );
+  assert.ok(
+    !owedAfter.includes(plant.id),
+    "a digested plant is still selected as owing one"
+  );
+  ok("the selection query stops offering a plant once its day is served");
+
+  // A QUIET day: no activity in the window at all, so however many ticks fire,
+  // nothing is written. Note the plant IS still selected (it is owed a digest
+  // for that day and never gets one) — being selected and being contacted are
+  // different things, and only the second one reaches a human.
+  await db.delete(notifications).where(eq(notifications.churchId, plant.id));
+  await db.delete(persons).where(eq(persons.churchId, plant.id));
+
+  const quietTicks = [
+    new Date("2026-06-13T00:14:00.000Z"),
+    new Date("2026-06-13T12:29:00.000Z"),
+    new Date("2026-06-13T23:44:00.000Z"),
+  ];
+  for (const at of quietTicks) {
+    await runOversightDigestSweep(dbOversightDigestSweepDeps, { at });
+  }
+  assert.equal(
+    (await rowsFor(plant.id)).length,
+    0,
+    "a quiet day produced a digest"
+  );
+  ok("a quiet day produces no digest, on any tick");
+
+  await db.delete(notifications).where(eq(notifications.churchId, plant.id));
 
   // --------------------------------------------------------------------------
   // 7. THE TOGGLE TAKES EFFECT AT THE NEXT ENQUEUE.

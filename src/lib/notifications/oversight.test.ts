@@ -3,14 +3,18 @@ import { test } from "node:test";
 
 import {
   OVERSIGHT_ELIGIBLE_CATEGORIES,
+  OVERSIGHT_SHARING_EXEMPT_TYPES,
   OVERSIGHT_SHARING_FEATURE,
   OVERSIGHT_SHARING_TOGGLE,
   isOversightEligibleCategory,
   notificationCategories,
+  oversightGateFor,
 } from "./categories";
 import type { EnqueueNotificationInput, EnqueueResult } from "./enqueue";
 import {
   announceInvitationAccepted,
+  announceLaunchDateChanged,
+  announcePhaseAdvanced,
   composeMilestone,
   fanOutToOversight,
   oversightMilestoneKinds,
@@ -53,7 +57,10 @@ class FakeOversightEnqueue implements OversightFanOutDeps {
   async enqueue(input: EnqueueNotificationInput): Promise<EnqueueResult> {
     this.calls.push(input);
 
-    if (!isOversightEligibleCategory(input.category) || !this.sharing) {
+    // Mirrors `runEnqueue`'s oversight gate: the category allow-list first, then
+    // the plant's toggle — which a consent-exempt `type` is not subject to.
+    const gate = oversightGateFor(input.category, input.type);
+    if (gate === "denied" || (gate === "requires_sharing" && !this.sharing)) {
       return {
         status: "skipped",
         notification: null,
@@ -375,4 +382,176 @@ test("re-running an emitter writes nothing the second time", async () => {
   assert.equal(second.created, 0);
   assert.equal(second.recorded, 1, "a replay should still report the row");
   assert.equal(deps.written.length, 1);
+});
+
+// ----------------------------------------------------------------------------
+// The consent exemption (ruled 2026-08-01, amending N-026)
+// ----------------------------------------------------------------------------
+
+test("the exempt list names a type the emitters actually produce", () => {
+  // The list is spelled out in ./categories to avoid an import cycle, so this
+  // is the only thing stopping it from drifting into an exemption that matches
+  // nothing — a silent revert of the ruling, invisible to every other test.
+  assert.deepEqual(
+    [...OVERSIGHT_SHARING_EXEMPT_TYPES],
+    [oversightMilestoneType("invitation_accepted")]
+  );
+});
+
+test("the gate: category first, exemption second, sharing last", () => {
+  // Eligible + exempt → consent does not apply.
+  assert.equal(
+    oversightGateFor(
+      "milestones",
+      oversightMilestoneType("invitation_accepted")
+    ),
+    "exempt"
+  );
+
+  // Eligible, not exempt → the plant decides. Both remaining milestones.
+  for (const kind of ["phase_advanced", "launch_date_changed"] as const) {
+    assert.equal(
+      oversightGateFor("milestones", oversightMilestoneType(kind)),
+      "requires_sharing"
+    );
+  }
+  assert.equal(
+    oversightGateFor("digest", "oversight.activity.digest"),
+    "requires_sharing"
+  );
+
+  // The safety property: an exempt type smuggled into a granular category is
+  // DENIED, not exempted. Order is what guarantees this, so it is asserted
+  // rather than assumed.
+  for (const category of notificationCategories.filter(
+    (c) => !isOversightEligibleCategory(c)
+  )) {
+    assert.equal(
+      oversightGateFor(category, oversightMilestoneType("invitation_accepted")),
+      "denied",
+      category
+    );
+  }
+});
+
+test("the invitation milestone is emitted with the plant NOT sharing", async () => {
+  // The ruling: "your invitation was accepted" is the SENDING CHURCH'S own
+  // event. Before it, the toggle defaulted off and a planter decided about
+  // sharing only after joining — so this milestone was refused in essentially
+  // every real case and never retried.
+  const fake = new FakeOversightEnqueue([{ id: ADMIN_A }, { id: ADMIN_B }], {
+    sharing: false,
+  });
+
+  const report = await announceInvitationAccepted(
+    { churchId: CHURCH, plantName: "Grace Chapel", invitationId: "inv-1" },
+    fake
+  );
+
+  assert.equal(report.recorded, 2);
+  assert.equal(report.skipped, 0);
+  assert.equal(fake.written.length, 2);
+});
+
+test("the other two milestones are still refused with the plant not sharing", async () => {
+  // The line the exemption does NOT cross: a phase advance and a launch date
+  // are facts about the plant's own progress.
+  const phase = new FakeOversightEnqueue([{ id: ADMIN_A }], { sharing: false });
+  await announcePhaseAdvanced(
+    { churchId: CHURCH, plantName: "Grace Chapel", toPhase: 3 },
+    phase
+  );
+  assert.equal(phase.written.length, 0);
+
+  const launch = new FakeOversightEnqueue([{ id: ADMIN_A }], {
+    sharing: false,
+  });
+  await announceLaunchDateChanged(
+    {
+      churchId: CHURCH,
+      plantName: "Grace Chapel",
+      launchDate: "2026-10-04",
+      changedAt: new Date("2026-08-01T10:00:00.000Z"),
+    },
+    launch
+  );
+  assert.equal(launch.written.length, 0);
+});
+
+test("the invitation body is true whether or not the plant shares", async () => {
+  // Under the exemption this row is read MOST often by someone who will get
+  // nothing further, so a body promising "you'll get a summary" would be a
+  // promise the product does not keep.
+  const fake = new FakeOversightEnqueue([{ id: ADMIN_A }], { sharing: false });
+  await announceInvitationAccepted(
+    { churchId: CHURCH, plantName: "Grace Chapel", invitationId: "inv-1" },
+    fake
+  );
+
+  const body = fake.written[0].body;
+  assert.match(body, /accepted your invitation/i);
+  // It must not assert that anything further WILL arrive.
+  assert.doesNotMatch(body, /you'?ll get/i);
+  assert.doesNotMatch(body, /turn sharing on/i);
+  // It must say whose choice that is.
+  assert.match(body, /theirs to switch on/i);
+});
+
+// ----------------------------------------------------------------------------
+// The launch-date milestone keys the CHANGE, not the value
+// ----------------------------------------------------------------------------
+
+test("moving a launch date BACK to a previously announced one is announced", async () => {
+  // The bug this pins: the dedupe key is permanent, so keying it by the date
+  // value meant 4 Oct → 1 Nov → 4 Oct produced two announcements and then
+  // silence — and a launch date moving back is the most newsworthy version of
+  // this milestone, not a duplicate of it.
+  const fake = new FakeOversightEnqueue([{ id: ADMIN_A }]);
+
+  const move = (launchDate: string, changedAt: string) =>
+    announceLaunchDateChanged(
+      {
+        churchId: CHURCH,
+        plantName: "Grace Chapel",
+        launchDate,
+        changedAt: new Date(changedAt),
+      },
+      fake
+    );
+
+  await move("2026-10-04", "2026-08-01T10:00:00.000Z");
+  await move("2026-11-01", "2026-08-02T10:00:00.000Z");
+  await move("2026-10-04", "2026-08-03T10:00:00.000Z");
+
+  assert.equal(
+    fake.written.length,
+    3,
+    "a revert to an earlier date was swallowed"
+  );
+  assert.equal(
+    new Set(fake.written.map((row) => row.dedupeKey)).size,
+    3,
+    "two changes shared a dedupe key"
+  );
+});
+
+test("replaying ONE launch-date change announces once", async () => {
+  // Replay protection still has to work: the same change carries the same
+  // instant, so a retry of the announcement alone dedupes.
+  const fake = new FakeOversightEnqueue([{ id: ADMIN_A }]);
+  const once = () =>
+    announceLaunchDateChanged(
+      {
+        churchId: CHURCH,
+        plantName: "Grace Chapel",
+        launchDate: "2026-10-04",
+        changedAt: new Date("2026-08-01T10:00:00.000Z"),
+      },
+      fake
+    );
+
+  await once();
+  await once();
+
+  assert.equal(fake.written.length, 1);
 });

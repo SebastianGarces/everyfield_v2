@@ -121,6 +121,31 @@ stored per `(user, category, channel)` and an unknown category falls back to its
 > in-app row they can see. Until the new model ships, nothing changes in practice: the existing toggles
 > default off and no plant has opted in. Board: #224 (model + toggle), #225 (feed).
 
+> **Ruled 2026-08-01 (issue #224; amends the two rulings above).** Two questions the build surfaced,
+> both answered:
+>
+> **1. The digest is scheduled by the notification dispatcher, not by a cron of its own.** The
+> every-15-minute dispatcher tick gains a once-a-day guard that runs the oversight digest for the last
+> COMPLETE day. The guard is derived from the database — a plant is offered to the digest only while no
+> digest row exists for that plant and that day — so a tick that fires 96 times a day produces exactly one
+> digest per oversight recipient, a dropped tick is a delay rather than a lost digest, and no second
+> scheduler has to be maintained. This is why the toggle's copy may keep saying **"once a day"**: it is
+> now true. A day with no activity still produces no contact at all.
+>
+> **2. The invitation-accepted milestone is exempt from the sharing toggle.** "Your invitation was
+> accepted" is the SENDING church's own event — they issued the invitation and the acceptance answers it —
+> so it is emitted whether or not the plant has turned sharing on. The exemption is exactly one
+> notification type and it relaxes **consent only**: the recipient must still be able to access the church,
+> and the category allow-list is still applied first, so nothing granular can reach oversight through it.
+> **Phase/stage and launch-date milestones remain gated**, because those are facts about the plant's own
+> progress. This also un-breaks a milestone that was previously unreachable in practice: the toggle
+> defaults off and a planter decides about sharing only after joining, so the acceptance was refused in
+> essentially every real case and never retried.
+>
+> Consequence for the copy, which N-026 makes a requirement: the toggle now describes **two** governed
+> milestones and names the invitation acceptance as something that reaches the sending church either way.
+> The milestone's own body no longer promises a summary that the plant may not have agreed to send.
+
 ---
 
 ## User-Visible Behavior
@@ -163,7 +188,8 @@ that no longer exists is worse than no notification, because it teaches the user
 | **N-016** | Delivery outcome per channel is recorded — queued, sent, failed, cancelled, suppressed-by-preference — so "did it send?" is answerable without reading provider logs. |
 | **N-017** | The dispatcher completes within the platform function timeout at expected beta volume, and a run that cannot finish leaves the remainder pending rather than dropping it. |
 | **N-025** | Oversight recipients receive only a daily activity digest (sent only when there was activity) and milestone events — planter accepted invitation, phase/stage advanced, launch date set or changed. They are never enqueued granular per-event category notifications. |
-| **N-026** | A single plant-side toggle ("Share activity with your sending church/network"), default **off**, gates everything oversight receives. Its copy states that a summary digest is shared, not a detailed activity list. |
+| **N-026** | A single plant-side toggle ("Share activity with your sending church/network"), default **off**, gates everything oversight receives, with ONE exception: the invitation-accepted milestone is the sending church's own event and is emitted regardless (ruled 2026-08-01). Its copy states that a summary digest is shared, not a detailed activity list, and names that exception. |
+| **N-028** | The oversight digest is scheduled by the recurring notification dispatcher: each tick runs it for the last complete day, guarded so that exactly one digest per oversight recipient is produced per day however many times the tick fires, and none on a day with no activity. |
 | **N-027** | Oversight roles have the in-app feed — bell, unread count, `/notifications`, mark-read. A notification delivered to an oversight user always has an in-app row they can see. |
 
 ### Should Have

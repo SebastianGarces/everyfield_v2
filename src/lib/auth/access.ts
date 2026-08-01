@@ -120,10 +120,18 @@ export async function canAccessChurch(
  *
  * The first six gate what an oversight user may PULL — a dashboard read.
  * `oversight_activity` gates what is PUSHED to them (F11 N-026): the daily
- * activity summary and the three milestones. It replaced the per-category
- * `phase` and `digest` keys, which migration 0028 dropped along with their
- * columns — under the 2026-07-27 ruling oversight has no per-category
+ * activity summary and two of the three milestones — the invitation-accepted
+ * milestone is exempt, being the sending church's own event (ruled 2026-08-01,
+ * `OVERSIGHT_SHARING_EXEMPT_TYPES`). It supersedes the per-category `phase` and
+ * `digest` keys: under the 2026-07-27 ruling oversight has no per-category
  * notification eligibility left to gate.
+ *
+ * Those two columns are still IN the database. Migration 0028 is expand-only —
+ * it adds `share_activity_with_oversight` and drops nothing, because the Neon
+ * branch is shared by local dev, every preview and production, and a pre-0028
+ * build still names `share_phase`/`share_digest` in its SELECT list. The
+ * contract migration that drops them is a follow-up (#255). What changed here
+ * is what the shipped code READS, which is the thing this type governs.
  */
 export type PrivacyFeatureKey =
   | "people"

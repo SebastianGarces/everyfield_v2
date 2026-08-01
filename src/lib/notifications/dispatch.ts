@@ -12,11 +12,12 @@ import {
   type NotificationDelivery,
   type NotificationPreference,
   type NotificationStatus,
+  type UserRole,
 } from "@/db/schema";
 import { sendEmail as sendProviderEmail } from "@/lib/email/client";
 
 import { NOTIFICATION_CATEGORIES } from "./categories";
-import { isChannelEnabled } from "./preferences";
+import { audienceForRole, isChannelEnabled } from "./preferences";
 
 // ============================================================================
 // Scheduled dispatch (N-003, N-004, N-012, N-014, N-015, N-016, N-017).
@@ -347,6 +348,12 @@ export interface DispatchRecipient {
   id: string;
   email: string;
   name: string | null;
+  /**
+   * The recipient's role — carried ONLY to pick which coded preference defaults
+   * apply (`audienceForRole`, N-027). It is not an authorisation input: whether
+   * this row should exist at all was settled by `enqueue` before it was written.
+   */
+  role: UserRole;
 }
 
 const HTML_ESCAPES: Record<string, string> = {
@@ -781,15 +788,25 @@ async function processGroup(
     else results.set(notificationId, [result]);
   };
 
+  // Which coded defaults apply when this recipient has no explicit row. An
+  // unknown recipient (deleted between claim and dispatch) falls back to the
+  // church defaults — the conservative direction, and the delivery fails on the
+  // missing address a few lines down anyway.
+  const audience = ctx.recipient
+    ? audienceForRole(ctx.recipient.role)
+    : "church";
+
   const emailEnabled = isChannelEnabled(
     ctx.preferenceRows,
     group.category,
-    "email"
+    "email",
+    audience
   );
   const inAppEnabled = isChannelEnabled(
     ctx.preferenceRows,
     group.category,
-    "in_app"
+    "in_app",
+    audience
   );
 
   // --- in-app --------------------------------------------------------------
@@ -1002,6 +1019,10 @@ const recipientColumns = {
   id: users.id,
   email: users.email,
   name: users.name,
+  // Needed for `audienceForRole` — an oversight recipient's coded default for
+  // `digest`/`in_app` differs (N-027). Still a projection, not `select()`:
+  // `password_hash` has no business in a dispatcher run.
+  role: users.role,
 };
 
 export const dbDispatchDeps: DispatchDeps = {

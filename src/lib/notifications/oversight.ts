@@ -256,20 +256,20 @@ export function announceInvitationAccepted(
       plantName: input.plantName,
       kind: "invitation_accepted",
       occurrence: input.invitationId,
-      // Present tense, because of WHEN this can be read. The row exists only if
-      // the plant's sharing toggle was already on when `enqueue` looked, so
-      // telling the reader their summary "will start arriving once they turn
-      // sharing on" was false in every case it could be delivered — it described
-      // a toggle that is, by construction, on.
+      // This is the one milestone that arrives with the plant's sharing toggle
+      // in EITHER state (`OVERSIGHT_SHARING_EXEMPT_TYPES`, ruled 2026-08-01),
+      // and the body has to be true in both. The previous copy — "You'll get a
+      // summary on the days something happens" — was written when the row could
+      // only exist with sharing already on; under the exemption it is now
+      // read most often by someone who will get nothing further, which would
+      // make it a promise the product does not keep.
       //
-      // The consequence worth naming: in the ordinary sequence (accept the
-      // invitation, then decide about sharing) the toggle is off at acceptance
-      // time, so this milestone is skipped and never retried. That is the gate
-      // working as ruled — no row without consent — not a bug to route around
-      // here. Prompting the sharing conversation is the planter-side onboarding's
-      // job, not an announcement sent to the other party.
+      // So it states the fact (they accepted) and then says plainly that
+      // anything beyond this is the plant's decision. That is accurate with
+      // sharing off AND with sharing on, and it tells the sending church where
+      // the choice actually lives instead of implying it has already been made.
       detail:
-        "They accepted your invitation. You'll get a summary on the days something happens, plus the occasional milestone.",
+        "They accepted your invitation. Anything beyond this — a summary on the days something happens, plus the occasional milestone — is theirs to switch on.",
     },
     deps
   );
@@ -306,6 +306,11 @@ export function announceLaunchDateChanged(
     plantName: string;
     /** `YYYY-MM-DD`, as stored. */
     launchDate: string;
+    /**
+     * The instant the change was durably written — `churches.updated_at` as
+     * returned by the UPDATE that made it. Half the dedupe key; see below.
+     */
+    changedAt: Date;
   },
   deps: OversightFanOutDeps = dbOversightFanOutDeps
 ): Promise<OversightFanOutReport> {
@@ -314,9 +319,22 @@ export function announceLaunchDateChanged(
       churchId: input.churchId,
       plantName: input.plantName,
       kind: "launch_date_changed",
-      // Keyed by the DATE, so re-saving the same date says nothing and moving it
-      // says something.
-      occurrence: input.launchDate,
+      // Keyed by the CHANGE, not by the value.
+      //
+      // Keying the date alone looked right and was wrong in one direction that
+      // matters: the key is permanent (a delivered row keeps reserving it
+      // forever), so a plant that moved 4 Oct → 1 Nov → back to 4 Oct got the
+      // first two announcements and then SILENCE on the third. Moving a launch
+      // date back to a previously announced one is not a duplicate event — it
+      // is arguably the most newsworthy version of this milestone — and the
+      // sending church would simply never hear it.
+      //
+      // The instant makes the key per-EVENT while keeping replay protection
+      // intact: `setChurchLaunchDate` compare-and-sets, so a re-save of the
+      // same date is `unchanged` and never reaches here at all, and a retry of
+      // only the announcement carries the same `changedAt` and still dedupes.
+      // The date stays in the key so the row is legible in the database.
+      occurrence: `${input.launchDate}@${input.changedAt.toISOString()}`,
       detail: `They are aiming to launch on ${input.launchDate}.`,
     },
     deps

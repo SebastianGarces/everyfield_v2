@@ -7,12 +7,16 @@ import {
   composeDigestBody,
   dayKeyInAppZone,
   digestDayKey,
+  digestDedupeKey,
   previousCompleteDayWindow,
   runOversightDigest,
+  runOversightDigestSweep,
   totalActivity,
   type ActivityWindow,
   type OversightActivitySummary,
   type OversightDigestDeps,
+  type OversightDigestOutcome,
+  type OversightDigestSweepDeps,
 } from "./oversight-digest";
 
 // ----------------------------------------------------------------------------
@@ -419,4 +423,206 @@ test("the day key never follows the runtime's zone", () => {
     dayKeyInAppZone(new Date("2026-07-31T00:00:00.000Z")),
     "2026-07-31"
   );
+});
+
+// ----------------------------------------------------------------------------
+// The schedule: the dispatcher tick's once-a-day guard (ruled 2026-08-01)
+// ----------------------------------------------------------------------------
+//
+// The sweep is what makes the digest DAILY on a job that fires every 15
+// minutes. Its guard is derived, not remembered: a plant drops out of the
+// selection once a digest row exists for the day. The fake below is that
+// database — a set of plants and the (church, day) rows already written.
+// ----------------------------------------------------------------------------
+
+const PLANT_A = "44444444-4444-4444-8444-444444444444";
+const PLANT_B = "55555555-5555-4555-8555-555555555555";
+
+class FakeSweepDeps implements OversightDigestSweepDeps {
+  /** Digest rows already in the database, by dedupe key. */
+  readonly written = new Set<string>();
+  /** Every (church, dayKey) the sweep asked to digest — including no-ops. */
+  readonly attempts: { churchId: string; dayKey: string }[] = [];
+  selections = 0;
+
+  constructor(
+    readonly plants: string[],
+    /** Plants that had activity on the day being digested. */
+    readonly active: Set<string>
+  ) {}
+
+  async selectPlantsOwedDigest(
+    dayKey: string,
+    limit: number
+  ): Promise<string[]> {
+    this.selections += 1;
+    return this.plants
+      .filter((id) => !this.written.has(digestDedupeKey(id, dayKey)))
+      .slice(0, limit);
+  }
+
+  async runDigest(
+    churchId: string,
+    window: ActivityWindow
+  ): Promise<OversightDigestOutcome> {
+    const dayKey = digestDayKey(window);
+    this.attempts.push({ churchId, dayKey });
+
+    if (!this.active.has(churchId)) {
+      return { status: "skipped", reason: "no_activity", dayKey };
+    }
+
+    this.written.add(digestDedupeKey(churchId, dayKey));
+    return {
+      status: "enqueued",
+      dayKey,
+      report: {
+        recorded: 2,
+        created: 2,
+        skipped: 0,
+        considered: 2,
+        failed: 0,
+      },
+    };
+  }
+}
+
+/** Three ticks on the same date, at the hours a 15-minute job really fires. */
+const TICKS = [
+  new Date("2026-07-31T00:14:00.000Z"),
+  new Date("2026-07-31T09:29:00.000Z"),
+  new Date("2026-07-31T23:44:00.000Z"),
+];
+
+test("a day with activity produces ONE digest however many times the tick fires", async () => {
+  const deps = new FakeSweepDeps([PLANT_A], new Set([PLANT_A]));
+
+  const first = await runOversightDigestSweep(deps, { at: TICKS[0] });
+  assert.equal(first.selected, 1);
+  assert.equal(first.digested, 1);
+
+  // Every later tick that day: the plant is no longer owed, so the sweep
+  // selects nothing and calls the digest zero more times.
+  for (const at of TICKS.slice(1)) {
+    const later = await runOversightDigestSweep(deps, { at });
+    assert.equal(
+      later.dayKey,
+      first.dayKey,
+      "the ticks disagreed about the day"
+    );
+    assert.equal(
+      later.selected,
+      0,
+      "an already-digested plant was re-selected"
+    );
+    assert.equal(later.digested, 0);
+  }
+
+  assert.equal(deps.attempts.length, 1, "the digest ran more than once");
+  assert.equal(deps.written.size, 1);
+});
+
+test("a quiet day produces no digest, on any tick", async () => {
+  const deps = new FakeSweepDeps([PLANT_A], new Set());
+
+  for (const at of TICKS) {
+    const summary = await runOversightDigestSweep(deps, { at });
+    assert.equal(summary.digested, 0);
+    assert.equal(summary.quiet, 1);
+  }
+
+  assert.equal(deps.written.size, 0, "a quiet plant was contacted");
+});
+
+test("the sweep always digests the day that is OVER", async () => {
+  const deps = new FakeSweepDeps([PLANT_A], new Set([PLANT_A]));
+  const summary = await runOversightDigestSweep(deps, { at: TICKS[1] });
+
+  // The tick fires on the 31st; the digest speaks for the 30th.
+  assert.equal(summary.dayKey, "2026-07-30");
+  assert.equal(deps.attempts[0].dayKey, "2026-07-30");
+});
+
+test("tomorrow's tick digests tomorrow — the guard is per day, not forever", async () => {
+  const deps = new FakeSweepDeps([PLANT_A], new Set([PLANT_A]));
+
+  await runOversightDigestSweep(deps, { at: TICKS[0] });
+  const nextDay = await runOversightDigestSweep(deps, {
+    at: new Date("2026-08-01T00:14:00.000Z"),
+  });
+
+  assert.equal(nextDay.selected, 1);
+  assert.equal(nextDay.digested, 1);
+  assert.equal(deps.written.size, 2);
+});
+
+test("one plant's failure costs that plant only", async () => {
+  const deps = new FakeSweepDeps([PLANT_A, PLANT_B], new Set([PLANT_B]));
+  const boom = deps.runDigest.bind(deps);
+  deps.runDigest = async (churchId, window) => {
+    if (churchId === PLANT_A) throw new Error("neon said no");
+    return boom(churchId, window);
+  };
+
+  const summary = await runOversightDigestSweep(deps, { at: TICKS[0] });
+
+  assert.equal(summary.failed, 1);
+  assert.equal(summary.digested, 1);
+  // ...and the failed plant is still owed, so the next tick retries it.
+  assert.equal(
+    (await deps.selectPlantsOwedDigest(summary.dayKey, 25)).length,
+    1
+  );
+});
+
+test("the batch is bounded and the remainder rolls over to the next tick", async () => {
+  const plants = Array.from(
+    { length: 5 },
+    (_, i) => `6666666${i}-6666-4666-8666-666666666666`
+  );
+  const deps = new FakeSweepDeps(plants, new Set(plants));
+
+  const first = await runOversightDigestSweep(deps, { at: TICKS[0], limit: 2 });
+  assert.equal(first.selected, 2);
+  assert.equal(first.digested, 2);
+
+  const second = await runOversightDigestSweep(deps, {
+    at: TICKS[1],
+    limit: 2,
+  });
+  assert.equal(second.digested, 2);
+
+  const third = await runOversightDigestSweep(deps, { at: TICKS[2], limit: 2 });
+  assert.equal(third.digested, 1);
+  assert.equal(deps.written.size, 5, "a plant past the cap was dropped");
+});
+
+test("a spent budget stops between plants and leaves the rest owed", async () => {
+  const plants = [PLANT_A, PLANT_B];
+  const deps = new FakeSweepDeps(plants, new Set(plants));
+
+  // Time crosses the budget after the first plant.
+  let calls = 0;
+  const summary = await runOversightDigestSweep(deps, {
+    at: TICKS[0],
+    budgetMs: 100,
+    elapsedMs: () => (calls++ === 0 ? 0 : 500),
+  });
+
+  assert.equal(summary.budgetExhausted, true);
+  assert.equal(summary.digested, 1);
+  assert.equal(
+    (await deps.selectPlantsOwedDigest(summary.dayKey, 25)).length,
+    1
+  );
+});
+
+test("the sweep never throws, so it cannot fail the dispatcher run it rides on", async () => {
+  const deps = new FakeSweepDeps([PLANT_A], new Set([PLANT_A]));
+  deps.runDigest = async () => {
+    throw new Error("everything is on fire");
+  };
+
+  const summary = await runOversightDigestSweep(deps, { at: TICKS[0] });
+  assert.equal(summary.failed, 1);
 });

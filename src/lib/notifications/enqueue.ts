@@ -17,10 +17,7 @@ import {
   isOversightUser,
 } from "@/lib/auth/access";
 
-import {
-  OVERSIGHT_SHARING_FEATURE,
-  isOversightEligibleCategory,
-} from "./categories";
+import { OVERSIGHT_SHARING_FEATURE, oversightGateFor } from "./categories";
 
 // ============================================================================
 // The enqueue contract (N-001, N-002, N-011).
@@ -56,7 +53,13 @@ import {
 //           receive at all — `milestones` or `digest`, never the granular
 //           per-event stream (N-025), and
 //        c. if they are an oversight user, the plant has turned on the single
-//           sharing toggle (N-026).
+//           sharing toggle (N-026) — UNLESS the notification's `type` is one of
+//           the consent-exempt few (`OVERSIGHT_SHARING_EXEMPT_TYPES`, ruled
+//           2026-08-01), which today is the invitation-accepted milestone
+//           alone: the sending church's own event, not a disclosure about the
+//           plant. Note the ordering — (b) is still asked first, so the
+//           exemption can only relax the CONSENT question and can never let a
+//           granular category through.
 //      A recipient who fails any is SKIPPED, not thrown over: `enqueue`
 //      returns `{status: "skipped", reason}` and writes nothing for them. The
 //      natural caller is a fan-out ("remind all six attendees"), and a throw
@@ -197,9 +200,22 @@ export type RecipientCheck =
   | { allowed: true }
   | { allowed: false; reason: RecipientRefusal };
 
+/**
+ * What the recipient gate is asked about. An OBJECT, not four positional
+ * strings: two of them are uuids and two are free-form, so a transposed pair
+ * would type-check and silently gate the wrong thing.
+ */
+export interface RecipientNotifiableInput {
+  churchId: string;
+  recipientUserId: string;
+  category: NotificationCategory;
+  /** The caller's discriminator — read only by the consent exemption (gate 3). */
+  type: string;
+}
+
 export interface EnqueueDeps {
   /**
-   * May this user be told about this category, in this church?
+   * May this user be told about this notification, in this church?
    *
    * THREE gates, resolved against the same `src/lib/auth/access.ts` the rest of
    * the app authorises reads with:
@@ -212,15 +228,16 @@ export interface EnqueueDeps {
    *      granular category is refused for them unconditionally.
    *   3. For OVERSIGHT recipients, `canAccessFeatureData` on the single
    *      sharing toggle (N-026) — because (1) alone returns true for a network
-   *      admin on every plant in the network, whatever the plant decided.
+   *      admin on every plant in the network, whatever the plant decided —
+   *      UNLESS `type` is consent-exempt (`isOversightSharingExemptType`).
    *
-   * The category is a parameter for gate (2). Gate (3) does not vary by
-   * category: there is one toggle and it governs everything oversight gets.
+   * `category` is the parameter for gate (2); `type` is the parameter for gate
+   * (3)'s exemption and is read nowhere else. The ORDER is the safety property:
+   * (2) before (3), so an exempt type can only ever skip the consent question
+   * and can never promote a granular category into oversight's reach.
    */
   recipientMayBeNotified(
-    churchId: string,
-    recipientUserId: string,
-    category: NotificationCategory
+    input: RecipientNotifiableInput
   ): Promise<RecipientCheck>;
   /**
    * `INSERT ... ON CONFLICT (church_id, recipient_user_id, dedupe_key)
@@ -287,11 +304,12 @@ export async function runEnqueue(
 ): Promise<EnqueueResult> {
   const parsed = enqueueNotificationSchema.parse(input);
 
-  const check = await deps.recipientMayBeNotified(
-    parsed.churchId,
-    parsed.recipientUserId,
-    parsed.category
-  );
+  const check = await deps.recipientMayBeNotified({
+    churchId: parsed.churchId,
+    recipientUserId: parsed.recipientUserId,
+    category: parsed.category,
+    type: parsed.type,
+  });
   if (!check.allowed) {
     return skipped(check.reason);
   }
@@ -399,7 +417,7 @@ const accessColumns = {
 };
 
 export const dbEnqueueDeps: EnqueueDeps = {
-  async recipientMayBeNotified(churchId, recipientUserId, category) {
+  async recipientMayBeNotified({ churchId, recipientUserId, category, type }) {
     const [projected] = await db
       .select(accessColumns)
       .from(users)
@@ -422,13 +440,15 @@ export const dbEnqueueDeps: EnqueueDeps = {
     }
 
     if (isOversightUser(recipient)) {
-      // Gate 2 — the oversight MODEL (N-025). Asked before, and independently
-      // of, the plant's toggle: an oversight recipient receives a daily summary
-      // and three milestones, so a granular per-event category is refused with
-      // sharing on and with sharing off alike. It is also asked before any
-      // further query, so a granular fan-out that happens to include an
-      // oversight user costs one already-loaded row and no extra round trip.
-      if (!isOversightEligibleCategory(category)) {
+      // Gates 2 and 3 as one question, asked in that order. `oversightGateFor`
+      // decides the MODEL first (N-025: a granular per-event category is
+      // refused with sharing on and with sharing off alike), and only then
+      // whether this particular `type` is consent-exempt. Both answers come
+      // from already-loaded data, so a granular fan-out that happens to include
+      // an oversight user costs no extra round trip.
+      const gate = oversightGateFor(category, type);
+
+      if (gate === "denied") {
         return { allowed: false, reason: "oversight_privacy" };
       }
 
@@ -440,7 +460,14 @@ export const dbEnqueueDeps: EnqueueDeps = {
       // ENQUEUE time, every time — that is what makes a toggle flipped this
       // morning take effect on this afternoon's digest rather than on the next
       // deploy.
+      //
+      // `exempt` skips exactly THIS check and nothing above it. The recipient
+      // has already cleared `canAccessChurch` and the category allow-list, so
+      // an exemption can never reach a stranger's tenant nor widen what
+      // oversight is eligible for — it relaxes consent for one server-composed
+      // type, the invitation-accepted milestone (ruled 2026-08-01).
       if (
+        gate === "requires_sharing" &&
         !(await canAccessFeatureData(
           recipient,
           churchId,
