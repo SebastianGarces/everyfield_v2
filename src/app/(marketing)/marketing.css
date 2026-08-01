@@ -295,11 +295,9 @@ html:has(.marketing) {
   display: block;
   width: 100%;
   height: auto;
-  /* translucent frame lets the painting bleed through; the ink ring sits outside it */
-  border: 6px solid rgba(251, 248, 234, 0.55);
-  box-shadow:
-    0 0 0 1px rgba(24, 29, 25, 0.55),
-    0 20px 40px -18px rgba(24, 29, 25, 0.5);
+  /* translucent frame lets the painting bleed through */
+  border: 8px solid rgba(251, 248, 234, 0.65);
+  box-shadow: 0 20px 40px -18px rgba(24, 29, 25, 0.5);
 }
 .marketing picture {
   display: block;
@@ -456,9 +454,7 @@ html:has(.marketing) {
   z-index: 1;
   width: clamp(260px, 28%, 460px);
   height: auto;
-  box-shadow:
-    0 0 0 1px rgba(24, 29, 25, 0.45),
-    0 28px 56px -20px rgba(24, 29, 25, 0.55);
+  box-shadow: 0 28px 56px -20px rgba(24, 29, 25, 0.55);
 }
 .marketing .fswitch-shot::before,
 .marketing .fstack-shot::before,
