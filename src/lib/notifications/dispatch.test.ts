@@ -508,6 +508,44 @@ test("twenty tasks notifications produce one email and twenty feed rows (N-012)"
   assert.match(store.sends[0].message.text, /Task 19 is overdue/);
 });
 
+// ============================================================================
+// AC: outgoing notification emails carry the RFC 8058 header pair
+// ============================================================================
+
+test("the message handed to the provider carries both RFC 8058 headers", async () => {
+  // `email.test.ts` asserts that `composeBatchEmail` BUILDS the pair and
+  // `email/client.test.ts` asserts the provider payload KEEPS it. This is the
+  // hop between them: a dispatcher that composed correctly and then forgot to
+  // forward `message.headers` would pass both of those and still deliver mail
+  // with no unsubscribe control.
+  const store = storeWithPlanter();
+  store.addNotification();
+
+  await runDispatch(store, { now: NOW });
+
+  const headers = store.sends[0].message.headers ?? {};
+  assert.equal(
+    headers["List-Unsubscribe-Post"],
+    "List-Unsubscribe=One-Click",
+    "without this header a client GETs the link, and the GET only renders"
+  );
+
+  // The header names the same endpoint the body link does, angle-bracketed per
+  // RFC 2369 — and it is the POST-capable URL, not the confirmation page.
+  const listUnsubscribe = headers["List-Unsubscribe"] ?? "";
+  assert.match(listUnsubscribe, /^<https?:\/\/.+>$/);
+  const url = new URL(listUnsubscribe.slice(1, -1));
+  assert.equal(url.pathname, "/api/notifications/unsubscribe");
+  assert.ok(
+    (url.searchParams.get("token") ?? "").length > 0,
+    "a one-click POST with no token authorises nothing"
+  );
+  assert.ok(
+    store.sends[0].message.text.includes(url.toString()),
+    "the header and the body link must be the same capability, not two"
+  );
+});
+
 test("different recipients and categories are separate emails", async () => {
   const store = storeWithPlanter();
   store.addRecipient(OTHER, "other@example.test");
