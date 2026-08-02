@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
-import Image from "next/image";
 
+import { Chip } from "./_components/chip";
 import { FeatureSwitcher } from "./_components/feature-switcher";
 import { InviteForm } from "./_components/invite-form";
 import { PhaseTabs } from "./_components/phase-tabs";
+import { Shot, ShotOverlay } from "./_components/shot";
 
 export const metadata: Metadata = {
   title: "EveryField — Your church plant, understood.",
@@ -39,15 +40,26 @@ export default function LandingPage() {
               networks and churches.
             </p>
             <div className="hero-shot">
-              <Image
-                className="shot-img"
-                src="/marketing/shots/dashboard.webp"
+              <Shot
+                desktop={{
+                  src: "/marketing/shots/hero.webp",
+                  width: 2400,
+                  height: 1333,
+                }}
+                mobile={{
+                  src: "/marketing/shots/hero-m.webp",
+                  width: 800,
+                  height: 1121,
+                }}
                 alt="The EveryField dashboard for Redemption Hill Church in pre-launch: core group of 61, 142 people in the pipeline, zero overdue tasks, and recent activity."
-                width={2880}
-                height={1800}
-                sizes="(max-width: 1012px) 100vw, 980px"
                 priority
               />
+              <Chip className="hero-chip-a" style={{ left: "21%", top: "19%" }}>
+                61 committed adults
+              </Chip>
+              <Chip className="hero-chip-b" style={{ right: "4%", top: "70%" }}>
+                28 days to launch Sunday
+              </Chip>
             </div>
           </div>
         </div>
@@ -93,6 +105,43 @@ export default function LandingPage() {
               has launched healthy churches for years. You get a short list of
               what matters most right now.
             </p>
+            <div className="engine-panes">
+              <div
+                className="epane"
+                style={{ backgroundImage: 'url("/marketing/c1-field.webp")' }}
+              >
+                <Shot
+                  desktop={{
+                    src: "/marketing/shots/r5-csf.webp",
+                    width: 1864,
+                    height: 1860,
+                  }}
+                  alt="The Plant Intelligence page reading all eight critical success factors — vision casting going well, shared ownership needs attention, two worth a look."
+                />
+              </div>
+              <div
+                className="epane epane-bleed"
+                style={{ backgroundImage: 'url("/marketing/c2-field.webp")' }}
+              >
+                <Shot
+                  desktop={{
+                    src: "/marketing/shots/r5-focus.webp",
+                    width: 1816,
+                    height: 1800,
+                  }}
+                  alt="Your focus — the week's most important next steps, prioritized from the latest assessment: stale follow-ups, a leadership role to fill, training to complete."
+                />
+                <ShotOverlay
+                  overlay={{
+                    src: "/marketing/shots/r5-phasectl.webp",
+                    width: 702,
+                    height: 886,
+                    alt: "Phase control — you decide when to move phases; readiness is advisory and never blocks a change.",
+                    style: { left: "4%", top: "40%", width: "min(34%, 320px)" },
+                  }}
+                />
+              </div>
+            </div>
             <ul className="engine-list">
               <li>
                 Guidance grounded in a proven launch methodology, not generic
@@ -120,18 +169,6 @@ export default function LandingPage() {
             knows what the work is. Pick a phase.
           </p>
           <PhaseTabs />
-        </div>
-      </section>
-
-      <section className="lp-sec lp-art">
-        <div className="lp-art-panel">
-          <Image
-            src="/marketing/c2-field.webp"
-            alt=""
-            width={1672}
-            height={941}
-            sizes="100vw"
-          />
         </div>
       </section>
 

@@ -320,6 +320,38 @@ function fillerName(i: number): { firstName: string; lastName: string } {
   };
 }
 
+// Deterministic personal contact info so people cards never read "No contact
+// info" (ruled 2026-08-02 off the landing crops). Emails come from the name +
+// a rotating consumer domain; phones use the reserved-fictional 555-01xx range
+// (Denton's 940 area code) for roughly two thirds of people.
+const EMAIL_DOMAINS = [
+  "gmail.com",
+  "yahoo.com",
+  "outlook.com",
+  "icloud.com",
+  "hotmail.com",
+] as const;
+const usedEmails = new Set<string>();
+let phoneCounter = 0;
+
+function contactInfo(
+  firstName: string,
+  lastName: string,
+  i: number
+): { email: string; phone: string | null } {
+  const clean = (s: string) => s.toLowerCase().replace(/[^a-z]/g, "");
+  let email = `${clean(firstName)}.${clean(lastName)}@${EMAIL_DOMAINS[i % EMAIL_DOMAINS.length]}`;
+  if (usedEmails.has(email)) {
+    email = `${clean(firstName)}.${clean(lastName)}${i}@${EMAIL_DOMAINS[i % EMAIL_DOMAINS.length]}`;
+  }
+  usedEmails.add(email);
+  const phone =
+    i % 3 !== 0 && phoneCounter < 100
+      ? `(940) 555-01${String(phoneCounter++).padStart(2, "0")}`
+      : null;
+  return { email, phone };
+}
+
 // ============================================================================
 // Cleanup — scoped strictly to marketing-namespaced rows (child-first)
 // ============================================================================
@@ -889,6 +921,14 @@ async function seedRedemptionHill(
     },
   ];
 
+  castRows.forEach((row, i) => {
+    if (!row.email && !row.phone) {
+      const info = contactInfo(row.firstName, row.lastName, i);
+      row.email = info.email;
+      row.phone = info.phone;
+    }
+  });
+
   const cast = await db.insert(persons).values(castRows).returning({
     id: persons.id,
     firstName: persons.firstName,
@@ -994,10 +1034,13 @@ async function seedRedemptionHill(
     const rows: PersonInsert[] = [];
     for (let i = 0; i < bucket.count; i++) {
       const { firstName, lastName } = fillerName(nameIndex++);
+      const info = contactInfo(firstName, lastName, nameIndex);
       rows.push({
         churchId,
         firstName,
         lastName,
+        email: info.email,
+        phone: info.phone,
         status: bucket.status,
         source: bucket.source,
         createdBy: planterId,
@@ -2139,6 +2182,7 @@ async function seedTrinityGrove(
       churchId,
       firstName: "Marcus",
       lastName: "Bell",
+      email: TG_PLANTER_EMAIL,
       status: "leader",
       source: "other",
       createdBy: planterId,
@@ -2158,10 +2202,17 @@ async function seedTrinityGrove(
   ): PersonInsert[] =>
     Array.from({ length: count }, (_, i) => {
       const { firstName, lastName } = fillerName(TG_NAME_OFFSET + startIdx + i);
+      const info = contactInfo(
+        firstName,
+        lastName,
+        TG_NAME_OFFSET + startIdx + i
+      );
       return {
         churchId,
         firstName,
         lastName,
+        email: info.email,
+        phone: info.phone,
         status,
         source: "vision_meeting" as const,
         createdBy: planterId,
