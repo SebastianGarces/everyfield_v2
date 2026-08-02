@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { Resend } from "resend";
 import { db } from "@/db";
 import { communicationRecipients } from "@/db/schema/communication";
 import type { RecipientStatus } from "@/db/schema/communication";
+import { notificationDeliveries } from "@/db/schema/notifications";
+import {
+  notificationDeliveryOutcome,
+  WEBHOOK_OVERWRITABLE_DELIVERY_STATUSES,
+} from "@/lib/notifications/channels/delivery-events";
 
 // Initialize Resend client for webhook verification
 const resend = new Resend(process.env.RESEND_API_KEY);
@@ -27,13 +32,63 @@ interface WebhookEvent {
     from: string;
     to: string[];
     subject?: string;
+    /** Present on `email.bounced`. `Permanent` / `Transient`. */
+    bounce?: { type?: string | null } | null;
   };
 }
 
 /**
+ * Update a notification's delivery row from a provider event (F11 / N-016).
+ *
+ * The provider message id is the only thing correlating a delivery row to a
+ * webhook, and it is unique across both consumers — a given id belongs either
+ * to a communication recipient or to a notification delivery, never both — so
+ * this runs unconditionally and simply matches nothing when the id is not ours.
+ *
+ * WHY THIS EXISTS: without it a hard bounce is invisible. The dispatcher only
+ * learns whether the provider ACCEPTED the message, so a delivery to a dead
+ * address stays `sent` forever, "why did this never arrive?" has no answer, and
+ * the next dispatch mails the same dead address again. What an event MEANS is
+ * decided by `notificationDeliveryOutcome`, which is pure and tested; this
+ * function owns only the write.
+ *
+ * The `status IN (queued, sent)` guard is load-bearing — see
+ * `WEBHOOK_OVERWRITABLE_DELIVERY_STATUSES` for why `failed`, `cancelled` and
+ * `suppressed_by_preference` are excluded.
+ */
+async function applyNotificationDeliveryEvent(
+  event: WebhookEvent,
+  emailId: string
+): Promise<void> {
+  const outcome = notificationDeliveryOutcome({
+    type: event.type,
+    bounceType: event.data.bounce?.type ?? null,
+  });
+  if (outcome.kind === "ignored") return;
+
+  await db
+    .update(notificationDeliveries)
+    .set({
+      status: "failed",
+      // Already carries `PERMANENT_FAILURE_PREFIX` when permanent, which is
+      // what stops `channelEligibility` retrying a hard bounce (N-015).
+      error: outcome.error,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(notificationDeliveries.providerMessageId, emailId),
+        inArray(notificationDeliveries.status, [
+          ...WEBHOOK_OVERWRITABLE_DELIVERY_STATUSES,
+        ])
+      )
+    );
+}
+
+/**
  * Resend webhook handler for email delivery tracking.
- * Updates communication_recipients status based on email events.
- * Verifies webhook signatures to prevent spoofed events.
+ * Updates communication_recipients and notification_deliveries status based on
+ * email events. Verifies webhook signatures to prevent spoofed events.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -61,6 +116,10 @@ export async function POST(req: NextRequest) {
     if (!emailId) {
       return new NextResponse("OK", { status: 200 });
     }
+
+    // F11 notification deliveries. Runs first and independently of the
+    // communication path below, which returns early on an unknown id.
+    await applyNotificationDeliveryEvent(event, emailId);
 
     // Find the recipient record by external ID (Resend email ID)
     const [recipient] = await db
