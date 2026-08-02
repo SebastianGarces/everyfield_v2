@@ -126,12 +126,16 @@ export interface UnsubscribeSubjectView {
   /** Whether this category's email is currently ON for this user. */
   enabled: boolean;
   /**
-   * A freshly minted, short-lived `enable` token — present ONLY when this
-   * category is currently off, i.e. only when there is something to undo.
-   *
-   * It is minted here, server-side, at the moment the page renders, and never
-   * travels in an email. `null` when the environment cannot mint one, so the
-   * page drops the undo button rather than 500-ing in front of a stranger.
+   * A freshly minted, short-lived `enable` token — present ONLY on the result
+   * of a successful opt-out, i.e. minted by the ACT of disabling and never by
+   * rendering. A page describing an already-off category gets `null`: if a
+   * render could mint, any holder of the 180-day emailed link could refresh
+   * the page into a fresh re-enable capability for the link's whole lifetime,
+   * which is exactly the consent defect the 2026-08-01 ruling closed. The
+   * caller threads this token through its redirect into one confirmation
+   * render; it never travels in an email. Also `null` when the environment
+   * cannot mint one, so the page drops the undo button rather than 500-ing in
+   * front of a stranger.
    */
   undoToken: string | null;
 }
@@ -166,8 +170,8 @@ function labelFor(category: NotificationCategory): string {
  *
  * Minting throws when the deployment has no secret. Unreachable from here
  * TODAY — the same secret already opened the emailed token a few lines up, and
- * a secret that can open one can mint one — but the caller is a public page
- * rendering for a stranger, and the cost of the guard is a `try`. If the two
+ * a secret that can open one can mint one — but the caller serves a stranger
+ * who just opted out, and the cost of the guard is a `try`. If the two
  * directions ever take separate secrets, this is the difference between losing
  * the undo BUTTON and returning a 500.
  */
@@ -211,9 +215,12 @@ async function describeSubject(
     categoryLabel: labelFor(category),
     email,
     enabled,
-    // Only an opted-out reader has anything to undo, and only they should be
-    // handed a re-enable capability.
-    undoToken: enabled ? null : mintUndoToken(owner, category, options),
+    // NEVER minted here. This runs on every GET — including a GET with a
+    // months-old emailed token whose category was switched off elsewhere —
+    // and a read must not manufacture a write capability. The undo token is
+    // minted only where the opt-out happens: `applyEmailPreference`'s
+    // disable branch.
+    undoToken: null,
   };
 }
 
@@ -294,9 +301,14 @@ async function applyEmailPreference(
       categoryLabel: labelFor(resolved.category),
       email,
       enabled,
-      // The caller redirects to the confirmation page, which mints the undo as
-      // part of rendering. One place mints it; this one does not.
-      undoToken: null,
+      // The undo exists because THIS request just turned the category off —
+      // the one moment a re-enable is owed to the reader. The caller threads
+      // it through its redirect into one confirmation render. Re-enabling
+      // mints nothing: there is no "undo the undo" capability.
+      undoToken:
+        purpose === "disable"
+          ? mintUndoToken(resolved.owner, resolved.category, options)
+          : null,
     },
   };
 }

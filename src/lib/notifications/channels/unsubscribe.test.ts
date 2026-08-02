@@ -386,12 +386,19 @@ test("the undo token re-enables exactly the one cell it names", async () => {
 });
 
 // ----------------------------------------------------------------------------
-// AC: the undo token is minted server-side, on render, only after an opt-out
+// AC (revised 2026-08-01, HR4 finding): the undo token is minted by the ACT of
+// opting out — never by rendering. If a render could mint, the 180-day emailed
+// disable token would transitively re-enable for its entire lifetime: present
+// it to the page for an already-off category at any point, receive a fresh
+// enable capability, spend it. These tests pin the closed door.
 // ----------------------------------------------------------------------------
 
-test("the confirmation page is handed an undo token only once the category is off", async () => {
+test("rendering never mints an undo token — not even for an off category", async () => {
   const subscribed = recordingStore();
-  const optedOut = recordingStore({ rows: [preferenceRow("tasks", false)] });
+  // The defect's exact posture: the category is ALREADY off (opted out long
+  // ago, or switched off in /settings), and a months-old emailed link is
+  // presented for a plain GET.
+  const alreadyOff = recordingStore({ rows: [preferenceRow("tasks", false)] });
 
   const whileSubscribed = await describeUnsubscribeSubject(emailedToken(), {
     now: NOW,
@@ -399,17 +406,33 @@ test("the confirmation page is handed an undo token only once the category is of
     store: subscribed,
   });
   assert.ok(whileSubscribed.status === "ok");
-  // Nothing to undo, so no re-enable capability is created at all.
   assert.equal(whileSubscribed.subject.undoToken, null);
 
-  const whileOptedOut = await describeUnsubscribeSubject(emailedToken(), {
+  const whileAlreadyOff = await describeUnsubscribeSubject(emailedToken(), {
     now: NOW,
     secret: SECRET,
-    store: optedOut,
+    store: alreadyOff,
   });
-  assert.ok(whileOptedOut.status === "ok");
-  const minted = whileOptedOut.subject.undoToken;
-  assert.ok(minted, "no undo token was minted after the opt-out");
+  assert.ok(whileAlreadyOff.status === "ok");
+  assert.equal(whileAlreadyOff.subject.enabled, false);
+  assert.equal(
+    whileAlreadyOff.subject.undoToken,
+    null,
+    "a READ handed out a re-enable capability — the emailed disable token is bidirectional again"
+  );
+});
+
+test("the opt-out's own result carries the one-hour enable token; the opt-in's carries none", async () => {
+  const store = recordingStore();
+
+  const optedOut = await applyEmailOptOut(emailedToken(), {
+    now: NOW,
+    secret: SECRET,
+    store,
+  });
+  assert.ok(optedOut.status === "ok");
+  const minted = optedOut.subject.undoToken;
+  assert.ok(minted, "the act of opting out owes the reader an undo");
 
   // It is a genuine ENABLE token for the same pair, and it is not the emailed
   // one being handed back.
@@ -426,6 +449,16 @@ test("the confirmation page is handed an undo token only once the category is of
     verified.expiresAt.getTime(),
     NOW.getTime() + RESUBSCRIBE_TOKEN_TTL_MS
   );
+
+  // Undoing mints nothing further — there is no "undo the undo" capability,
+  // so a spent enable token's redirect ends the chain.
+  const undone = await applyEmailOptIn(undoToken(), {
+    now: NOW,
+    secret: SECRET,
+    store: recordingStore({ rows: [preferenceRow("tasks", false)] }),
+  });
+  assert.ok(undone.status === "ok");
+  assert.equal(undone.subject.undoToken, null);
 });
 
 test("an expired undo token re-enables nothing", async () => {

@@ -39,10 +39,19 @@ import { confirmUnsubscribeAction, undoUnsubscribeAction } from "./actions";
 // that mutated on render would opt those readers out without their ever seeing
 // it. The write is on the button below, which is a POST no scanner will make.
 //
-// Three states, because "on" means two different things:
-//   1. on, arrived from an email  → ask ("Unsubscribe from tasks emails?")
-//   2. off                        → confirm, and offer the short-lived undo
-//   3. on, just pressed undo      → confirm the undo, and offer the opt-out again
+// RENDERING MINTS NOTHING either. The undo button appears only when the `undo`
+// search param carries a token, and the only thing that ever issues one is the
+// opt-out action's redirect — the moment the category was actually turned off.
+// A GET for a category that is already off (opted out last week, or switched
+// off in /settings) states the fact and offers the sign-in path, not a
+// capability: if this render could mint, the 180-day emailed link would be a
+// re-enable capability for its whole life (ruled 2026-08-01).
+//
+// Four states:
+//   1. on, arrived from an email    → ask ("Unsubscribe from tasks emails?")
+//   2. off, just opted out          → confirm, offer the one-hour undo (param)
+//   3. off, arrived that way        → state it; sign-in is the way back
+//   4. on, just pressed undo        → confirm the undo, offer the opt-out again
 // ============================================================================
 
 export const dynamic = "force-dynamic";
@@ -56,9 +65,13 @@ export const metadata: Metadata = {
 export default async function UnsubscribePage({
   searchParams,
 }: {
-  searchParams: Promise<{ token?: string; resubscribed?: string }>;
+  searchParams: Promise<{
+    token?: string;
+    resubscribed?: string;
+    undo?: string;
+  }>;
 }) {
-  const { token, resubscribed } = await searchParams;
+  const { token, resubscribed, undo } = await searchParams;
   const result = await describeUnsubscribeSubject(token ?? "");
 
   return (
@@ -68,6 +81,10 @@ export default async function UnsubscribePage({
           token={token ?? ""}
           subject={result.subject}
           justResubscribed={resubscribed === "1"}
+          // Opaque pass-through from the opt-out's redirect. Spending it is
+          // what verifies it; a crafted value buys nothing a valid token
+          // wouldn't already grant its holder.
+          undoToken={undo ?? null}
         />
       ) : (
         <RefusedCard />
@@ -85,15 +102,24 @@ function SubjectCard({
   token,
   subject,
   justResubscribed,
+  undoToken,
 }: {
   token: string;
   subject: UnsubscribeSubjectView;
   justResubscribed: boolean;
+  undoToken: string | null;
 }) {
   const label = subject.categoryLabel.toLowerCase();
 
   if (!subject.enabled) {
-    return <UnsubscribedCard token={token} subject={subject} label={label} />;
+    return (
+      <UnsubscribedCard
+        token={token}
+        subject={subject}
+        label={label}
+        undoToken={undoToken}
+      />
+    );
   }
 
   return (
@@ -139,15 +165,22 @@ function SubjectCard({
   );
 }
 
-/** After the opt-out: what happened, and the one-hour undo. */
+/**
+ * The category is off. With an `undo` param — issued only by the opt-out that
+ * just happened — offer the one-hour undo; without one (arrived at an
+ * already-off category), state the fact and point at sign-in. This card never
+ * creates a capability; it can only spend one it was handed.
+ */
 function UnsubscribedCard({
   token,
   subject,
   label,
+  undoToken,
 }: {
   token: string;
   subject: UnsubscribeSubjectView;
   label: string;
+  undoToken: string | null;
 }) {
   return (
     <Card className="w-full max-w-md">
@@ -160,12 +193,12 @@ function UnsubscribedCard({
       </CardHeader>
 
       <CardContent className="space-y-4">
-        {subject.undoToken ? (
+        {undoToken ? (
           <form action={undoUnsubscribeAction} className="space-y-2">
             <input type="hidden" name="token" value={token} />
-            {/* Minted for this render, valid for an hour, and never mailed —
-                the emailed link cannot do this. */}
-            <input type="hidden" name="undoToken" value={subject.undoToken} />
+            {/* Issued by the opt-out redirect, valid for an hour, never
+                mailed — the emailed link cannot do this. */}
+            <input type="hidden" name="undoToken" value={undoToken} />
             <Button type="submit" className="w-full cursor-pointer">
               Undo — keep sending {label} emails
             </Button>

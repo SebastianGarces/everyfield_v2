@@ -37,8 +37,13 @@ import {
 /**
  * Back to the page, carrying the EMAILED token so it can re-read the subject.
  *
- * The undo token is deliberately not carried: it is spent, and the next render
- * mints a fresh one if there is still something to undo.
+ * The opt-out's result also carries the freshly minted undo token, and it rides
+ * the redirect as `undo` — the ONLY way a render ever gets one. Rendering mints
+ * nothing (ruled 2026-08-01): if it did, any holder of the 180-day emailed link
+ * could refresh an already-off page into a fresh re-enable capability. The
+ * `undo` param is short-lived (~1h), single-purpose, and strictly less
+ * sensitive than the emailed token already in the same URL. A spent undo is
+ * not re-carried: the redirect after a successful opt-in has no `undo`.
  */
 function backToConfirmation(
   result: UnsubscribeResult,
@@ -55,6 +60,9 @@ function backToConfirmation(
     // Distinguishes "you just turned this back on" from "you arrived here and
     // it is on" — both are `enabled: true`, and they want different copy.
     if (resubscribed) destination.searchParams.set("resubscribed", "1");
+    if (result.subject.undoToken) {
+      destination.searchParams.set("undo", result.subject.undoToken);
+    }
   } else {
     console.warn(
       `[notifications/unsubscribe] refused a token from the confirmation page: ${result.reason}`
