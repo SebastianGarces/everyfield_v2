@@ -232,9 +232,12 @@ export async function describeUnsubscribeSubject(
   token: string,
   options: UnsubscribeOptions = {}
 ): Promise<UnsubscribeResult> {
+  // Only the three things verification is entitled to. The storage seam is
+  // deliberately not spread in here.
   const resolved = preferenceOwnerFromUnsubscribeToken(token, {
-    ...options,
     purpose: "disable",
+    now: options.now,
+    secret: options.secret,
   });
   if (!resolved.ok) {
     return { status: "rejected", reason: resolved.reason };
@@ -269,8 +272,9 @@ async function applyEmailPreference(
   const store = options.store ?? liveUnsubscribeStore;
 
   const resolved = preferenceOwnerFromUnsubscribeToken(token, {
-    ...options,
     purpose,
+    now: options.now,
+    secret: options.secret,
   });
   if (!resolved.ok) {
     return { status: "rejected", reason: resolved.reason };
