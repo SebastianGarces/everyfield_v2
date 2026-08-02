@@ -88,12 +88,17 @@ export default async function SettingsPage() {
             one more switch about email volume (N-026). Shown only to a planter
             with a plant, which is exactly who the target screen serves.
 
-            "No updates", not "nothing": this toggle gates what is PUSHED to
-            oversight (the digest, the three milestones). The oversight
-            dashboard already lists the plant with its name, current stage and
-            launch date, ungated — see the header of OVERSIGHT_SHARING_TOGGLE.
-            A teaser that promises more than the setting delivers is the one
-            way this feature can fail its own purpose. */}
+            The copy names the exception rather than omitting it. This toggle
+            gates what is PUSHED to oversight — the digest and the two gated
+            milestones — but NOT "your invitation was accepted", which is
+            exempt (ruled 2026-08-01) because it is the inviting org's own
+            event. "No updates unless you turn sharing on" was therefore false
+            for the one message a planter is most likely to have already
+            caused. It is also not "nothing": the oversight dashboard already
+            lists the plant with its name, current stage and launch date,
+            ungated — see the header of OVERSIGHT_SHARING_TOGGLE. A teaser that
+            promises more than the setting delivers is the one way this feature
+            can fail its own purpose. */}
         {isPlanterWithPlant && (
           <section aria-labelledby="sharing-link" className="space-y-1">
             <h2
@@ -103,8 +108,9 @@ export default async function SettingsPage() {
               Sharing
             </h2>
             <p className="text-muted-foreground text-sm text-pretty">
-              Your sending church and network get no updates about this plant
-              unless you turn sharing on.{" "}
+              Apart from being told you accepted their invitation, your sending
+              church and network get no updates about this plant unless you turn
+              sharing on.{" "}
               <Link
                 href="/settings/sharing"
                 className="cursor-pointer font-medium underline underline-offset-4"

@@ -17,6 +17,7 @@ import {
   type OversightDigestDeps,
   type OversightDigestOutcome,
   type OversightDigestSweepDeps,
+  type OwedDigestPageQuery,
 } from "./oversight-digest";
 
 // ----------------------------------------------------------------------------
@@ -431,8 +432,15 @@ test("the day key never follows the runtime's zone", () => {
 //
 // The sweep is what makes the digest DAILY on a job that fires every 15
 // minutes. Its guard is derived, not remembered: a plant drops out of the
-// selection once a digest row exists for the day. The fake below is that
-// database — a set of plants and the (church, day) rows already written.
+// selection once a digest row exists for the day.
+//
+// The fake below is the SELECTION QUERY's contract, not a convenience: it
+// offers a plant only while it is sharing, has an oversight admin, had
+// activity, and has no digest row for the day — and it honours the keyset
+// anchor. Those are exactly the clauses `selectPlantsOwedDigest` carries, and
+// modelling them is what lets these tests prove the starvation fix rather than
+// assume it. The previous fake modelled only "has no digest row yet", which is
+// why a permanently-owed head-of-list was invisible to the suite.
 // ----------------------------------------------------------------------------
 
 const PLANT_A = "44444444-4444-4444-8444-444444444444";
@@ -443,22 +451,41 @@ class FakeSweepDeps implements OversightDigestSweepDeps {
   readonly written = new Set<string>();
   /** Every (church, dayKey) the sweep asked to digest — including no-ops. */
   readonly attempts: { churchId: string; dayKey: string }[] = [];
+  /** Every page the sweep asked for, so paging itself is assertable. */
+  readonly pageQueries: OwedDigestPageQuery[] = [];
   selections = 0;
+  /** Plants whose digest should throw. */
+  readonly failing = new Set<string>();
 
   constructor(
+    /** Every plant in the fleet, in id order. */
     readonly plants: string[],
     /** Plants that had activity on the day being digested. */
-    readonly active: Set<string>
-  ) {}
+    readonly active: Set<string>,
+    options: {
+      /** Plants with the sharing toggle ON. Defaults to all of `plants`. */
+      sharing?: Set<string>;
+      /** Plants whose oversight org has at least one admin. Defaults to all. */
+      withAdmins?: Set<string>;
+    } = {}
+  ) {
+    this.sharing = options.sharing ?? new Set(plants);
+    this.withAdmins = options.withAdmins ?? new Set(plants);
+  }
 
-  async selectPlantsOwedDigest(
-    dayKey: string,
-    limit: number
-  ): Promise<string[]> {
+  readonly sharing: Set<string>;
+  readonly withAdmins: Set<string>;
+
+  async selectPlantsOwedDigest(query: OwedDigestPageQuery): Promise<string[]> {
     this.selections += 1;
+    this.pageQueries.push(query);
     return this.plants
-      .filter((id) => !this.written.has(digestDedupeKey(id, dayKey)))
-      .slice(0, limit);
+      .filter((id) => query.afterChurchId === null || id > query.afterChurchId)
+      .filter((id) => this.sharing.has(id))
+      .filter((id) => this.withAdmins.has(id))
+      .filter((id) => this.active.has(id))
+      .filter((id) => !this.written.has(digestDedupeKey(id, query.dayKey)))
+      .slice(0, query.limit);
   }
 
   async runDigest(
@@ -467,6 +494,8 @@ class FakeSweepDeps implements OversightDigestSweepDeps {
   ): Promise<OversightDigestOutcome> {
     const dayKey = digestDayKey(window);
     this.attempts.push({ churchId, dayKey });
+
+    if (this.failing.has(churchId)) throw new Error("neon said no");
 
     if (!this.active.has(churchId)) {
       return { status: "skipped", reason: "no_activity", dayKey };
@@ -485,6 +514,16 @@ class FakeSweepDeps implements OversightDigestSweepDeps {
       },
     };
   }
+
+  /** How many plants are still owed — the "did anyone get starved" question. */
+  owed(dayKey: string): Promise<string[]> {
+    return this.selectPlantsOwedDigest({
+      dayKey,
+      window: previousCompleteDayWindow(TICKS[0]),
+      limit: 1000,
+      afterChurchId: null,
+    });
+  }
 }
 
 /** Three ticks on the same date, at the hours a 15-minute job really fires. */
@@ -493,6 +532,14 @@ const TICKS = [
   new Date("2026-07-31T09:29:00.000Z"),
   new Date("2026-07-31T23:44:00.000Z"),
 ];
+
+/** `n` plants in ascending id order — the order the sweep walks. */
+function fleet(n: number): string[] {
+  return Array.from(
+    { length: n },
+    (_, i) => `6666666${i}-6666-4666-8666-666666666666`
+  );
+}
 
 test("a day with activity produces ONE digest however many times the tick fires", async () => {
   const deps = new FakeSweepDeps([PLANT_A], new Set([PLANT_A]));
@@ -522,15 +569,20 @@ test("a day with activity produces ONE digest however many times the tick fires"
   assert.equal(deps.written.size, 1);
 });
 
-test("a quiet day produces no digest, on any tick", async () => {
+test("a quiet day produces no digest, on any tick — and costs no scan", async () => {
   const deps = new FakeSweepDeps([PLANT_A], new Set());
 
   for (const at of TICKS) {
     const summary = await runOversightDigestSweep(deps, { at });
     assert.equal(summary.digested, 0);
-    assert.equal(summary.quiet, 1);
+    // The plant is not even OFFERED now: a quiet day is decided in SQL, from
+    // the same conditions the counts use, so the sweep does not summarise it 96
+    // times to discover the same zero.
+    assert.equal(summary.selected, 0);
+    assert.equal(summary.plantsScanned, 0);
   }
 
+  assert.equal(deps.attempts.length, 0, "a quiet plant was summarised");
   assert.equal(deps.written.size, 0, "a quiet plant was contacted");
 });
 
@@ -541,6 +593,11 @@ test("the sweep always digests the day that is OVER", async () => {
   // The tick fires on the 31st; the digest speaks for the 30th.
   assert.equal(summary.dayKey, "2026-07-30");
   assert.equal(deps.attempts[0].dayKey, "2026-07-30");
+  // ...and the window handed to the selection is the same one.
+  assert.equal(
+    deps.pageQueries[0].window.from.toISOString(),
+    "2026-07-30T00:00:00.000Z"
+  );
 });
 
 test("tomorrow's tick digests tomorrow — the guard is per day, not forever", async () => {
@@ -556,65 +613,192 @@ test("tomorrow's tick digests tomorrow — the guard is per day, not forever", a
   assert.equal(deps.written.size, 2);
 });
 
-test("one plant's failure costs that plant only", async () => {
-  const deps = new FakeSweepDeps([PLANT_A, PLANT_B], new Set([PLANT_B]));
-  const boom = deps.runDigest.bind(deps);
-  deps.runDigest = async (churchId, window) => {
-    if (churchId === PLANT_A) throw new Error("neon said no");
-    return boom(churchId, window);
-  };
+// ----------------------------------------------------------------------------
+// Starvation — the regression this fix exists for
+// ----------------------------------------------------------------------------
 
-  const summary = await runOversightDigestSweep(deps, { at: TICKS[0] });
+test("an eligible plant BEYOND the batch is digested on a day full of ineligible ones", async () => {
+  // The exact shape that used to starve: plants that can never write a digest
+  // row occupy the head of the stable id ordering all day. Under the old sweep
+  // the batch was the SELECTION window, so plant #N+1 was never reached on any
+  // of the day's 96 ticks. Here the first three are ineligible for the three
+  // different reasons that produce a permanently-owed plant, and the batch is
+  // smaller than the fleet.
+  const [quiet, notSharing, noAdmins, eligible] = fleet(4);
 
-  assert.equal(summary.failed, 1);
-  assert.equal(summary.digested, 1);
-  // ...and the failed plant is still owed, so the next tick retries it.
-  assert.equal(
-    (await deps.selectPlantsOwedDigest(summary.dayKey, 25)).length,
-    1
+  const deps = new FakeSweepDeps(
+    [quiet, notSharing, noAdmins, eligible],
+    // `quiet` has no activity; the other three do.
+    new Set([notSharing, noAdmins, eligible]),
+    {
+      sharing: new Set([quiet, noAdmins, eligible]),
+      withAdmins: new Set([quiet, notSharing, eligible]),
+    }
   );
-});
 
-test("the batch is bounded and the remainder rolls over to the next tick", async () => {
-  const plants = Array.from(
-    { length: 5 },
-    (_, i) => `6666666${i}-6666-4666-8666-666666666666`
+  const summary = await runOversightDigestSweep(deps, {
+    at: TICKS[0],
+    limit: 2,
+  });
+
+  assert.equal(summary.digested, 1, "the eligible plant was never reached");
+  assert.deepEqual(
+    deps.attempts.map((a) => a.churchId),
+    [eligible],
+    "an ineligible plant was summarised anyway"
   );
-  const deps = new FakeSweepDeps(plants, new Set(plants));
+  assert.ok(deps.written.has(digestDedupeKey(eligible, summary.dayKey)));
 
-  const first = await runOversightDigestSweep(deps, { at: TICKS[0], limit: 2 });
-  assert.equal(first.selected, 2);
-  assert.equal(first.digested, 2);
-
+  // Same day, second tick: nothing further. Idempotence survives the fix.
   const second = await runOversightDigestSweep(deps, {
     at: TICKS[1],
     limit: 2,
   });
-  assert.equal(second.digested, 2);
-
-  const third = await runOversightDigestSweep(deps, { at: TICKS[2], limit: 2 });
-  assert.equal(third.digested, 1);
-  assert.equal(deps.written.size, 5, "a plant past the cap was dropped");
+  assert.equal(second.selected, 0);
+  assert.equal(second.digested, 0);
+  assert.equal(deps.written.size, 1);
 });
+
+test("a fleet larger than the batch is swept WITHIN one tick, by keyset", async () => {
+  // The batch bounds the WORK, not the window. Five eligible plants, pages of
+  // two: one tick digests all five and the anchor advances across pages.
+  const plants = fleet(5);
+  const deps = new FakeSweepDeps(plants, new Set(plants));
+
+  const summary = await runOversightDigestSweep(deps, {
+    at: TICKS[0],
+    limit: 2,
+  });
+
+  assert.equal(summary.digested, 5);
+  assert.equal(summary.plantsScanned, 5);
+  assert.equal(deps.written.size, 5, "a plant past the batch was dropped");
+  // 2 + 2 + 1 — the short page ends the walk.
+  assert.equal(summary.pages, 3);
+  assert.deepEqual(
+    deps.pageQueries.map((q) => q.afterChurchId),
+    [null, plants[1], plants[3]]
+  );
+});
+
+test("a plant whose digest THROWS does not block the plants behind it", async () => {
+  // The one remaining way a plant stays owed after the selection narrowing. The
+  // keyset anchor advances past a failure, so within the same tick the rest of
+  // the fleet is still reached.
+  const plants = fleet(3);
+  const deps = new FakeSweepDeps(plants, new Set(plants));
+  deps.failing.add(plants[0]);
+
+  const summary = await runOversightDigestSweep(deps, {
+    at: TICKS[0],
+    limit: 1,
+  });
+
+  assert.equal(summary.failed, 1);
+  assert.equal(summary.digested, 2, "a failure blocked the plants behind it");
+  assert.equal(summary.plantsScanned, 3);
+
+  // ...and the failed plant is still owed, so the next tick retries it.
+  assert.deepEqual(await deps.owed(summary.dayKey), [plants[0]]);
+});
+
+test("96 ticks on a starving fleet still serve every eligible plant exactly once", async () => {
+  // The finding was reproduced as "96 ticks, 192 attempts, nothing written".
+  // The same shape, asserted the other way round.
+  const plants = fleet(6);
+  const quietOnes = new Set(plants.slice(0, 4));
+  const eligible = plants.slice(4);
+  const deps = new FakeSweepDeps(plants, new Set(eligible));
+
+  let attemptsAfterFirstTick = 0;
+  for (let tick = 0; tick < 96; tick += 1) {
+    await runOversightDigestSweep(deps, {
+      at: new Date(Date.UTC(2026, 6, 31, 0, 15 * tick)),
+      limit: 2,
+    });
+    if (tick === 0) attemptsAfterFirstTick = deps.attempts.length;
+  }
+
+  assert.equal(deps.written.size, eligible.length);
+  for (const id of eligible) {
+    assert.equal(
+      deps.attempts.filter((a) => a.churchId === id).length,
+      1,
+      "an eligible plant was digested more than once in a day"
+    );
+  }
+  for (const id of quietOnes) {
+    assert.equal(
+      deps.attempts.filter((a) => a.churchId === id).length,
+      0,
+      "a quiet plant was summarised anyway"
+    );
+  }
+  assert.equal(
+    deps.attempts.length,
+    attemptsAfterFirstTick,
+    "later ticks did work the first tick had already done"
+  );
+});
+
+// ----------------------------------------------------------------------------
+// Budgets, failures, and the promise never to throw
+// ----------------------------------------------------------------------------
 
 test("a spent budget stops between plants and leaves the rest owed", async () => {
   const plants = [PLANT_A, PLANT_B];
   const deps = new FakeSweepDeps(plants, new Set(plants));
 
-  // Time crosses the budget after the first plant.
-  let calls = 0;
+  // Time crosses the budget as soon as one plant has been digested — expressed
+  // against the work done rather than a call count, so it stays true if the
+  // sweep's internal clock checks are ever rearranged.
   const summary = await runOversightDigestSweep(deps, {
     at: TICKS[0],
     budgetMs: 100,
-    elapsedMs: () => (calls++ === 0 ? 0 : 500),
+    elapsedMs: () => (deps.attempts.length >= 1 ? 500 : 0),
   });
 
   assert.equal(summary.budgetExhausted, true);
   assert.equal(summary.digested, 1);
-  assert.equal(
-    (await deps.selectPlantsOwedDigest(summary.dayKey, 25)).length,
-    1
-  );
+  assert.equal((await deps.owed(summary.dayKey)).length, 1);
+});
+
+test("the plant ceiling stops a pathological tick and is visible in the summary", async () => {
+  const plants = fleet(6);
+  const deps = new FakeSweepDeps(plants, new Set(plants));
+
+  const summary = await runOversightDigestSweep(deps, {
+    at: TICKS[0],
+    limit: 2,
+    maxPlants: 3,
+  });
+
+  assert.equal(summary.plantsScanned, 3);
+  assert.equal(summary.budgetExhausted, true);
+  // `selected` vs `plantsScanned` is the signal the old summary could not give.
+  assert.ok(summary.selected >= summary.plantsScanned);
+  assert.equal((await deps.owed(summary.dayKey)).length, 3);
+});
+
+test("activity that vanishes between the scan and the digest is counted as quiet", async () => {
+  // Normally zero, because the selection already excluded quiet plants. It is
+  // reachable when a person or task is soft-deleted in between — legitimate,
+  // and it must not read as a failure.
+  const deps = new FakeSweepDeps([PLANT_A], new Set([PLANT_A]));
+  deps.active.delete(PLANT_A);
+  // The selection saw activity; by the time the digest ran, it was gone.
+  let offered = false;
+  deps.selectPlantsOwedDigest = async () => {
+    if (offered) return [];
+    offered = true;
+    return [PLANT_A];
+  };
+
+  const summary = await runOversightDigestSweep(deps, { at: TICKS[0] });
+
+  assert.equal(summary.quiet, 1);
+  assert.equal(summary.failed, 0);
+  assert.equal(deps.written.size, 0);
 });
 
 test("the sweep never throws, so it cannot fail the dispatcher run it rides on", async () => {
@@ -625,4 +809,18 @@ test("the sweep never throws, so it cannot fail the dispatcher run it rides on",
 
   const summary = await runOversightDigestSweep(deps, { at: TICKS[0] });
   assert.equal(summary.failed, 1);
+});
+
+test("a selection query that throws is not the dispatcher's problem either", async () => {
+  // The sweep rides on a run that has already SENT email. A blip in its own
+  // SELECT must be a field in the summary, never an exception that reports a
+  // successful delivery run as a 500.
+  const deps = new FakeSweepDeps([PLANT_A], new Set([PLANT_A]));
+  deps.selectPlantsOwedDigest = async () => {
+    throw new Error("the database went away");
+  };
+
+  const summary = await runOversightDigestSweep(deps, { at: TICKS[0] });
+  assert.equal(summary.failed, 1);
+  assert.equal(summary.digested, 0);
 });

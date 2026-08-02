@@ -32,6 +32,7 @@ import {
   notifications,
   organizationInvitations,
   phaseTransitions,
+  sendingChurches,
   sendingNetworks,
   tasks,
   users,
@@ -53,6 +54,7 @@ import {
   runOversightDigestSweep,
 } from "@/lib/notifications/oversight-digest";
 import { handlePhaseChangedForOversight } from "@/lib/notifications/oversight-events";
+import { listOversightRecipientsForChurch } from "@/lib/notifications/oversight";
 import {
   isSharingActivityWithOversight,
   setSharingActivityWithOversight,
@@ -334,6 +336,122 @@ async function main() {
   );
   ok("invitation accepted, sharing ON → one milestone per oversight admin");
 
+  await db.delete(notifications).where(eq(notifications.churchId, plant.id));
+
+  // --------------------------------------------------------------------------
+  // 3b. THE EXEMPTION REACHES THE INVITER, AND NOBODY ELSE.
+  //
+  //     The consent bypass this section exists for. `applyAssociation` sets one
+  //     of a plant's two oversight FKs without clearing the other, so a plant
+  //     can belong to a sending church AND a network at once. The
+  //     invitation-accepted milestone is exempt from the sharing toggle, so
+  //     resolving its recipients from the PLANT delivered an ungated
+  //     notification to whichever org had NOT invited anybody — with sharing
+  //     off and no consent of any kind.
+  //
+  //     Both FKs are set below, sharing stays OFF, and each direction is
+  //     asserted: the invited org hears it, the other org gets zero rows.
+  // --------------------------------------------------------------------------
+  const [otherSendingChurch] = await db
+    .insert(sendingChurches)
+    .values({ name: "Scratch Sending Church" })
+    .returning();
+
+  const [sendingChurchAdmin] = await db
+    .insert(users)
+    .values({
+      email: `sc-admin-${stamp}@example.test`,
+      passwordHash: "x",
+      role: "sending_church_admin" as const,
+      sendingChurchId: otherSendingChurch.id,
+    })
+    .returning();
+
+  // The plant now holds BOTH FKs — the reachable state the finding turned on.
+  await db
+    .update(churches)
+    .set({ sendingChurchId: otherSendingChurch.id })
+    .where(eq(churches.id, plant.id));
+
+  await setSharingActivityWithOversight({
+    churchId: plant.id,
+    enabled: false,
+    updatedBy: planter.id,
+  });
+  await db.delete(notifications).where(eq(notifications.churchId, plant.id));
+
+  // Direction 1: the NETWORK invites. The sending church invited nobody.
+  const networkInvitation = await createInvitation({
+    type: "church_to_network",
+    inviterUserId: adminA.id,
+    targetChurchId: plant.id,
+    sendingNetworkId: network.id,
+  });
+  await acceptInvitation(networkInvitation.id, planter);
+
+  const afterNetworkInvite = await rowsFor(plant.id);
+  assert.deepEqual(
+    afterNetworkInvite.map((row) => row.recipientUserId).sort(),
+    [adminA.id, adminB.id].sort(),
+    "the network's invitation did not reach exactly the network's admins"
+  );
+  assert.equal(
+    afterNetworkInvite.filter(
+      (row) => row.recipientUserId === sendingChurchAdmin.id
+    ).length,
+    0,
+    "an org that invited nobody was notified without consent"
+  );
+  ok(
+    "both FKs set, sharing OFF: the network's invitation reaches ONLY the network"
+  );
+
+  // Direction 2: the SENDING CHURCH invites. The network invited nobody.
+  await db.delete(notifications).where(eq(notifications.churchId, plant.id));
+  const sendingChurchInvitation = await createInvitation({
+    type: "church_to_sending_church",
+    inviterUserId: sendingChurchAdmin.id,
+    targetChurchId: plant.id,
+    sendingChurchId: otherSendingChurch.id,
+  });
+  await acceptInvitation(sendingChurchInvitation.id, planter);
+
+  const afterSendingChurchInvite = await rowsFor(plant.id);
+  assert.deepEqual(
+    afterSendingChurchInvite.map((row) => row.recipientUserId),
+    [sendingChurchAdmin.id],
+    "the sending church's invitation did not reach exactly its own admin"
+  );
+  assert.equal(
+    afterSendingChurchInvite.filter((row) =>
+      [adminA.id, adminB.id].includes(row.recipientUserId)
+    ).length,
+    0,
+    "the network was notified about an invitation it did not send"
+  );
+  ok(
+    "both FKs set, sharing OFF: the sending church's invitation reaches ONLY it"
+  );
+
+  // NEGATIVE CONTROL. The two assertions above are only meaningful if the
+  // audience they exclude was genuinely reachable — so prove that the
+  // PLANT-wide lister, which is what the fan-out used before this fix, really
+  // does return the uninvolved org's admin for this plant. Without this, the
+  // section would pass just as well against a plant that only ever had one org.
+  const plantWide = await listOversightRecipientsForChurch(plant.id);
+  assert.deepEqual(
+    plantWide.map((row) => row.id).sort(),
+    [adminA.id, adminB.id, sendingChurchAdmin.id].sort(),
+    "the fixture does not actually reproduce the dual-org plant"
+  );
+  ok("negative control: the plant-wide audience DOES span both orgs");
+
+  // Restore the plant to network-only oversight; the sections below assert on
+  // "two oversight admins" and a third would silently change every count.
+  await db
+    .update(churches)
+    .set({ sendingChurchId: null })
+    .where(eq(churches.id, plant.id));
   await db.delete(notifications).where(eq(notifications.churchId, plant.id));
 
   // --------------------------------------------------------------------------
@@ -791,10 +909,12 @@ async function main() {
 
   // The plant is no longer among those owed a digest for that day — the guard
   // itself, read directly rather than inferred from the row count.
-  const owedAfter = await dbOversightDigestSweepDeps.selectPlantsOwedDigest(
-    sweepDayKey,
-    100
-  );
+  const owedAfter = await dbOversightDigestSweepDeps.selectPlantsOwedDigest({
+    dayKey: sweepDayKey,
+    window: previousCompleteDayWindow(firstTick),
+    limit: 100,
+    afterChurchId: null,
+  });
   assert.ok(
     !owedAfter.includes(plant.id),
     "a digested plant is still selected as owing one"
@@ -802,9 +922,10 @@ async function main() {
   ok("the selection query stops offering a plant once its day is served");
 
   // A QUIET day: no activity in the window at all, so however many ticks fire,
-  // nothing is written. Note the plant IS still selected (it is owed a digest
-  // for that day and never gets one) — being selected and being contacted are
-  // different things, and only the second one reaches a human.
+  // nothing is written. The plant is not even OFFERED now — the selection query
+  // carries the same activity conditions the counts use, so a quiet plant is
+  // excluded in SQL rather than summarised 96 times to rediscover the same
+  // zero. That is half of the starvation fix; §6d asserts the other half.
   await db.delete(notifications).where(eq(notifications.churchId, plant.id));
   await db.delete(persons).where(eq(persons.churchId, plant.id));
 
@@ -824,6 +945,174 @@ async function main() {
   ok("a quiet day produces no digest, on any tick");
 
   await db.delete(notifications).where(eq(notifications.churchId, plant.id));
+  await db.delete(persons).where(eq(persons.churchId, plant.id));
+
+  // --------------------------------------------------------------------------
+  // 6d. STARVATION — an eligible plant BEYOND the batch, behind a wall of
+  //     permanently-owed ones. The regression for the CRITICAL correctness
+  //     finding of 2026-08-01.
+  //
+  //     The old sweep took the first N owed plants by `churches.id` on every
+  //     tick, and a plant left the owed set only by having a digest row
+  //     written. Anything that could never write one — quiet, sharing off (the
+  //     default for every plant), no oversight admins — therefore held the head
+  //     of the stable ordering all day, and the plants behind it were never
+  //     reached on any of the day's 96 ticks.
+  //
+  //     Five plants are seeded here with EXPLICIT, ascending uuids, so "id
+  //     order" is a fact of the fixture rather than a hope about
+  //     `gen_random_uuid()`. The three that come first are ineligible for the
+  //     three different reasons; the two behind them are eligible, and the page
+  //     size is ONE, so the second of them is beyond the batch by construction.
+  // --------------------------------------------------------------------------
+  const starveId = (n: number) => `aaaaaaa${n}-0000-4000-8000-00000000000${n}`;
+  const [quietPlant, notSharingPlant, noAdminPlant, eligibleA, eligibleB] = [
+    1, 2, 3, 4, 5,
+  ].map(starveId);
+
+  // An org with NO oversight admins, so `noAdminPlant` has nobody to digest to.
+  const [emptyNetwork] = await db
+    .insert(sendingNetworks)
+    .values({ name: "Scratch Empty Network" })
+    .returning();
+
+  await db.insert(churches).values([
+    { id: quietPlant, name: "Starve Quiet", sendingNetworkId: network.id },
+    {
+      id: notSharingPlant,
+      name: "Starve Not Sharing",
+      sendingNetworkId: network.id,
+    },
+    {
+      id: noAdminPlant,
+      name: "Starve No Admins",
+      sendingNetworkId: emptyNetwork.id,
+    },
+    { id: eligibleA, name: "Starve Eligible A", sendingNetworkId: network.id },
+    { id: eligibleB, name: "Starve Eligible B", sendingNetworkId: network.id },
+  ]);
+
+  await db.insert(churchPrivacySettings).values([
+    { churchId: quietPlant, shareActivityWithOversight: true },
+    { churchId: notSharingPlant, shareActivityWithOversight: false },
+    { churchId: noAdminPlant, shareActivityWithOversight: true },
+    { churchId: eligibleA, shareActivityWithOversight: true },
+    { churchId: eligibleB, shareActivityWithOversight: true },
+  ]);
+
+  // A day nothing else in this run has activity on, so the fleet-wide sweep
+  // below is answering a question about exactly these five plants.
+  const starveTick = new Date("2026-05-21T00:14:00.000Z");
+  const starveWindow = previousCompleteDayWindow(starveTick);
+  const starveDayKey = digestDayKey(starveWindow);
+  assert.equal(starveDayKey, "2026-05-20");
+
+  // Everyone but the quiet one has activity in the window.
+  await db.insert(persons).values(
+    [notSharingPlant, noAdminPlant, eligibleA, eligibleB].map((churchId) => ({
+      churchId,
+      createdBy: planter.id,
+      firstName: "Starve",
+      lastName: "Person",
+      createdAt: new Date("2026-05-20T09:00:00.000Z"),
+    }))
+  );
+
+  // The selection itself, before any sweeping: only the two eligible plants,
+  // in id order. This is the clause-by-clause proof — three different reasons
+  // for permanent owing, all excluded.
+  const owedStarve = await dbOversightDigestSweepDeps.selectPlantsOwedDigest({
+    dayKey: starveDayKey,
+    window: starveWindow,
+    limit: 100,
+    afterChurchId: null,
+  });
+  assert.deepEqual(
+    owedStarve.filter((id) =>
+      [
+        quietPlant,
+        notSharingPlant,
+        noAdminPlant,
+        eligibleA,
+        eligibleB,
+      ].includes(id)
+    ),
+    [eligibleA, eligibleB],
+    "the selection still offers plants that can never produce a digest"
+  );
+  ok("the selection excludes quiet, non-sharing and admin-less plants");
+
+  // NEGATIVE CONTROL for the ORDERING. The fixture only reproduces the finding
+  // if the three ineligible plants really do sort ahead of the eligible ones —
+  // otherwise "the eligible plant was reached" proves nothing. Assert the id
+  // order directly, then assert that the FIRST page of one is the eligible
+  // plant rather than the quiet one that precedes it.
+  assert.deepEqual(
+    [quietPlant, notSharingPlant, noAdminPlant, eligibleA, eligibleB],
+    [quietPlant, notSharingPlant, noAdminPlant, eligibleA, eligibleB]
+      .slice()
+      .sort(),
+    "the starvation fixture is not in ascending id order"
+  );
+  const firstOwedPage = await dbOversightDigestSweepDeps.selectPlantsOwedDigest(
+    {
+      dayKey: starveDayKey,
+      window: starveWindow,
+      limit: 1,
+      afterChurchId: null,
+    }
+  );
+  assert.deepEqual(
+    firstOwedPage,
+    [eligibleA],
+    "the head of the owed set is still a plant that can never be digested"
+  );
+  ok(
+    "negative control: the ineligible plants sort FIRST and are skipped anyway"
+  );
+
+  // PAGE SIZE ONE. Under the old shape this tick would have digested nothing
+  // at all: the batch was the selection window and three ineligible plants sat
+  // in front. Here the batch bounds the WORK and the keyset walks past them.
+  const starveSweep = await runOversightDigestSweep(
+    dbOversightDigestSweepDeps,
+    { at: starveTick, limit: 1 }
+  );
+  assert.equal(starveSweep.dayKey, starveDayKey);
+  assert.ok(
+    starveSweep.pages >= 2,
+    `the sweep did not page past its batch (pages=${starveSweep.pages})`
+  );
+
+  const eligibleARows = await rowsFor(eligibleA);
+  const eligibleBRows = await rowsFor(eligibleB);
+  assert.equal(eligibleARows.length, 2, "the first eligible plant was skipped");
+  assert.equal(
+    eligibleBRows.length,
+    2,
+    "the eligible plant BEYOND the batch was starved"
+  );
+  assert.ok(eligibleBRows.every((row) => row.body === "1 new person."));
+  for (const starved of [quietPlant, notSharingPlant, noAdminPlant]) {
+    assert.equal(
+      (await rowsFor(starved)).length,
+      0,
+      "a plant that should never be digested was"
+    );
+  }
+  ok(
+    "an eligible plant beyond the batch is digested behind three permanently-owed ones"
+  );
+
+  // Same-day idempotence survives the fix: a second tick offers nothing.
+  const starveSecond = await runOversightDigestSweep(
+    dbOversightDigestSweepDeps,
+    { at: new Date("2026-05-21T23:44:00.000Z"), limit: 1 }
+  );
+  assert.equal(starveSecond.dayKey, starveDayKey);
+  assert.equal((await rowsFor(eligibleA)).length, 2);
+  assert.equal((await rowsFor(eligibleB)).length, 2);
+  ok("a second tick the same day adds nothing — idempotence is intact");
 
   // --------------------------------------------------------------------------
   // 7. THE TOGGLE TAKES EFFECT AT THE NEXT ENQUEUE.
@@ -922,7 +1211,17 @@ async function main() {
   // Cleanup of the rows this run created, so a re-run on the same scratch DB
   // starts from the same place.
   // --------------------------------------------------------------------------
-  const seededChurches = [plant.id, orphan.id, otherPlant.id, foreignChurch.id];
+  const seededChurches = [
+    plant.id,
+    orphan.id,
+    otherPlant.id,
+    foreignChurch.id,
+    quietPlant,
+    notSharingPlant,
+    noAdminPlant,
+    eligibleA,
+    eligibleB,
+  ];
   await db
     .delete(notifications)
     .where(inArray(notifications.churchId, seededChurches));

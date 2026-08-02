@@ -19,7 +19,11 @@ import {
   fanOutToOversight,
   oversightMilestoneKinds,
   oversightMilestoneType,
+  fanOutToOversightOrg,
+  listOversightAdminsOfOrg,
   type OversightFanOutDeps,
+  type OversightOrg,
+  type OversightOrgFanOutDeps,
   type OversightRecipient,
 } from "./oversight";
 
@@ -38,20 +42,60 @@ const CHURCH = "11111111-1111-4111-8111-111111111111";
 const ADMIN_A = "22222222-2222-4222-8222-222222222222";
 const ADMIN_B = "33333333-3333-4333-8333-333333333333";
 
-class FakeOversightEnqueue implements OversightFanOutDeps {
+/** The org that issued the invitation, and the one that did not. */
+const SENDING_CHURCH = "77777777-7777-4777-8777-777777777777";
+const NETWORK = "88888888-8888-4888-8888-888888888888";
+const INVITER: OversightOrg = {
+  sendingChurchId: SENDING_CHURCH,
+  sendingNetworkId: null,
+};
+/** An admin of the network the plant ALSO belongs to. Invited nobody. */
+const ADMIN_OF_OTHER_ORG = "99999999-9999-4999-8999-999999999999";
+
+class FakeOversightEnqueue
+  implements OversightFanOutDeps, OversightOrgFanOutDeps
+{
   readonly written: EnqueueNotificationInput[] = [];
   readonly calls: EnqueueNotificationInput[] = [];
+  /** Every org this fake was asked to resolve, in order. */
+  readonly orgsAsked: OversightOrg[] = [];
   sharing: boolean;
 
   constructor(
     readonly recipients: OversightRecipient[],
-    options: { sharing?: boolean } = {}
+    options: {
+      sharing?: boolean;
+      /** Admins by org id, for the one-org audience. */
+      adminsByOrg?: Record<string, OversightRecipient[]>;
+    } = {}
   ) {
     this.sharing = options.sharing ?? true;
+    this.adminsByOrg = options.adminsByOrg;
   }
+
+  readonly adminsByOrg?: Record<string, OversightRecipient[]>;
 
   async listOversightRecipients(): Promise<OversightRecipient[]> {
     return this.recipients;
+  }
+
+  /**
+   * The one-org audience. Note what it CANNOT do: return anybody the caller did
+   * not name. `this.recipients` — the plant-wide union — is not reachable from
+   * here, which is the property the production `listOversightAdminsOfOrg` has
+   * for the same reason.
+   */
+  async listOversightAdminsOfOrg(
+    org: OversightOrg
+  ): Promise<OversightRecipient[]> {
+    this.orgsAsked.push(org);
+    if (this.adminsByOrg) {
+      const key = org.sendingChurchId ?? org.sendingNetworkId;
+      return key ? (this.adminsByOrg[key] ?? []) : [];
+    }
+    // Default: the org has the same admins the plant-wide list names, so the
+    // body/gate tests below read exactly as they did before the audience split.
+    return org.sendingChurchId || org.sendingNetworkId ? this.recipients : [];
   }
 
   async enqueue(input: EnqueueNotificationInput): Promise<EnqueueResult> {
@@ -191,6 +235,7 @@ test("the invitation milestone does not describe the toggle as off", () => {
       churchId: CHURCH,
       plantName: "Grace Chapel",
       invitationId: "inv-1",
+      invitedBy: INVITER,
     },
     fake
   ).then(() => {
@@ -444,7 +489,12 @@ test("the invitation milestone is emitted with the plant NOT sharing", async () 
   });
 
   const report = await announceInvitationAccepted(
-    { churchId: CHURCH, plantName: "Grace Chapel", invitationId: "inv-1" },
+    {
+      churchId: CHURCH,
+      plantName: "Grace Chapel",
+      invitationId: "inv-1",
+      invitedBy: INVITER,
+    },
     fake
   );
 
@@ -484,7 +534,12 @@ test("the invitation body is true whether or not the plant shares", async () => 
   // promise the product does not keep.
   const fake = new FakeOversightEnqueue([{ id: ADMIN_A }], { sharing: false });
   await announceInvitationAccepted(
-    { churchId: CHURCH, plantName: "Grace Chapel", invitationId: "inv-1" },
+    {
+      churchId: CHURCH,
+      plantName: "Grace Chapel",
+      invitationId: "inv-1",
+      invitedBy: INVITER,
+    },
     fake
   );
 
@@ -554,4 +609,148 @@ test("replaying ONE launch-date change announces once", async () => {
   await once();
 
   assert.equal(fake.written.length, 1);
+});
+
+// ----------------------------------------------------------------------------
+// The exemption reaches the INVITER, and nobody else
+// ----------------------------------------------------------------------------
+//
+// The consent bypass this section exists for: the invitation-accepted milestone
+// is exempt from the sharing toggle because it is the inviting org's own event.
+// The fan-out used to resolve its recipients from the PLANT, and a plant can
+// hold a `sending_church_id` AND a `sending_network_id` at once — so accepting
+// one org's invitation notified the other, uninvolved org with no consent.
+// ----------------------------------------------------------------------------
+
+test("the acceptance reaches the inviting org only, with both FKs set", async () => {
+  // The plant belongs to a sending church AND a network. The sending church
+  // invited them; the network did not. Sharing is OFF, so the network is
+  // entitled to hear nothing at all.
+  const fake = new FakeOversightEnqueue(
+    // What the PLANT-wide lister would have returned — both orgs' admins. If
+    // anything reaches for this list, the test fails.
+    [{ id: ADMIN_A }, { id: ADMIN_OF_OTHER_ORG }],
+    {
+      sharing: false,
+      adminsByOrg: {
+        [SENDING_CHURCH]: [{ id: ADMIN_A }],
+        [NETWORK]: [{ id: ADMIN_OF_OTHER_ORG }],
+      },
+    }
+  );
+
+  const report = await announceInvitationAccepted(
+    {
+      churchId: CHURCH,
+      plantName: "Grace Chapel",
+      invitationId: "inv-1",
+      invitedBy: INVITER,
+    },
+    fake
+  );
+
+  assert.equal(report.considered, 1, "an uninvolved org was considered");
+  assert.deepEqual(
+    fake.written.map((row) => row.recipientUserId),
+    [ADMIN_A]
+  );
+  assert.equal(
+    fake.written.some((row) => row.recipientUserId === ADMIN_OF_OTHER_ORG),
+    false,
+    "the org that never invited anybody was notified without consent"
+  );
+  // ...and the audience was asked for by name, from the invitation row.
+  assert.deepEqual(fake.orgsAsked, [INVITER]);
+});
+
+test("a network's invitation reaches the network, not the sending church", async () => {
+  // The mirror image, so the fix cannot be one-directional.
+  const fake = new FakeOversightEnqueue([], {
+    sharing: false,
+    adminsByOrg: {
+      [SENDING_CHURCH]: [{ id: ADMIN_A }],
+      [NETWORK]: [{ id: ADMIN_OF_OTHER_ORG }],
+    },
+  });
+
+  await announceInvitationAccepted(
+    {
+      churchId: CHURCH,
+      plantName: "Grace Chapel",
+      invitationId: "inv-2",
+      invitedBy: { sendingChurchId: null, sendingNetworkId: NETWORK },
+    },
+    fake
+  );
+
+  assert.deepEqual(
+    fake.written.map((row) => row.recipientUserId),
+    [ADMIN_OF_OTHER_ORG]
+  );
+});
+
+test("an invitation naming no org reaches nobody", async () => {
+  // The safe direction. Unreachable in practice — `createInvitation` requires
+  // the id its type implies — but "no org named" must never degrade to
+  // "everyone", which is exactly what the plant-wide union did.
+  const fake = new FakeOversightEnqueue([{ id: ADMIN_A }, { id: ADMIN_B }], {
+    adminsByOrg: { [SENDING_CHURCH]: [{ id: ADMIN_A }] },
+  });
+
+  const report = await announceInvitationAccepted(
+    {
+      churchId: CHURCH,
+      plantName: "Grace Chapel",
+      invitationId: "inv-3",
+      invitedBy: { sendingChurchId: null, sendingNetworkId: null },
+    },
+    fake
+  );
+
+  assert.equal(report.considered, 0);
+  assert.equal(fake.written.length, 0);
+});
+
+test("the org fan-out cannot widen to the plant", async () => {
+  // Structural, not behavioural: `fanOutToOversightOrg` is typed on a deps
+  // shape that has no plant-wide lister on it at all, so there is nothing for a
+  // future edit to reach for by accident.
+  const deps = {
+    async listOversightAdminsOfOrg(): Promise<OversightRecipient[]> {
+      return [{ id: ADMIN_A }];
+    },
+    async enqueue(_input: EnqueueNotificationInput): Promise<EnqueueResult> {
+      return {
+        status: "recorded",
+        notification: null,
+        created: true,
+        reason: null,
+      };
+    },
+  } satisfies OversightOrgFanOutDeps;
+
+  const report = await fanOutToOversightOrg(deps, INVITER, (recipientId) => ({
+    churchId: CHURCH,
+    recipientUserId: recipientId,
+    category: "milestones",
+    type: oversightMilestoneType("invitation_accepted"),
+    title: "t",
+    body: "b",
+  }));
+
+  assert.equal(report.considered, 1);
+  assert.equal(report.created, 1);
+});
+
+test("listOversightAdminsOfOrg refuses an org with no ids without touching the database", async () => {
+  // The production function, called directly. `reaches.length === 0` returns
+  // early, so this asserts the guard rather than the query — and it is the
+  // guard that keeps "no org" from becoming "no WHERE clause".
+  assert.deepEqual(
+    await listOversightAdminsOfOrg({
+      sendingChurchId: null,
+      sendingNetworkId: null,
+    }),
+    []
+  );
 });

@@ -88,6 +88,19 @@ export interface OversightRecipient {
   id: string;
 }
 
+/**
+ * ONE oversight organisation, as identified by the row that names it.
+ *
+ * Exactly one field is set in practice — an invitation is issued by a sending
+ * church or by a network, never both — but the type carries both because the
+ * `organization_invitations` row does, and reading it back is what makes the
+ * audience below provable rather than inferred.
+ */
+export interface OversightOrg {
+  sendingChurchId: string | null;
+  sendingNetworkId: string | null;
+}
+
 /** What a fan-out did, per recipient, without throwing. */
 export interface OversightFanOutReport {
   /** Rows actually written (a dedupe hit counts as recorded, not created). */
@@ -109,30 +122,45 @@ const emptyReport = (): OversightFanOutReport => ({
   failed: 0,
 });
 
-export interface OversightFanOutDeps {
-  /** Who oversees this plant right now. */
-  listOversightRecipients(churchId: string): Promise<OversightRecipient[]>;
+/** Enqueueing is the only thing every fan-out shares. */
+interface OversightEnqueueDep {
   /** The real `enqueue` — the gate, and the only writer. */
   enqueue(input: EnqueueNotificationInput): Promise<EnqueueResult>;
 }
 
+/** The PLANT-wide audience: everyone with oversight of this plant. */
+export interface OversightFanOutDeps extends OversightEnqueueDep {
+  /** Who oversees this plant right now. */
+  listOversightRecipients(churchId: string): Promise<OversightRecipient[]>;
+}
+
 /**
- * Fan a single composed notification out to a plant's oversight recipients.
+ * The ONE-ORG audience, used by the one consent-exempt milestone.
  *
- * One `enqueue` call per recipient, because that is the grain `enqueue` gates
- * at: a recipient the plant is not sharing with is skipped and the loop
- * continues. A shared `dedupeKey` is safe and intended — the index includes
- * `recipient_user_id`, so one key per EVENT does not let admin #1 swallow
- * admin #2's row.
+ * Kept a SEPARATE dependency from the plant-wide one on purpose. "Everyone over
+ * this plant" and "the admins of the org that invited them" are different
+ * questions with different consent stories, and a caller that wants the exempt
+ * one has to ask for it by name — it cannot arrive by accident because a shared
+ * deps object happened to expose it.
  */
-export async function fanOutToOversight(
-  deps: OversightFanOutDeps,
-  churchId: string,
-  compose: (recipientId: string) => EnqueueNotificationInput
+export interface OversightOrgFanOutDeps extends OversightEnqueueDep {
+  listOversightAdminsOfOrg(org: OversightOrg): Promise<OversightRecipient[]>;
+}
+
+/**
+ * The loop both fan-outs share: one `enqueue` call per recipient, because that
+ * is the grain `enqueue` gates at. A recipient the plant is not sharing with is
+ * skipped and the loop continues. A shared `dedupeKey` is safe and intended —
+ * the index includes `recipient_user_id`, so one key per EVENT does not let
+ * admin #1 swallow admin #2's row.
+ */
+async function fanOutTo(
+  deps: OversightEnqueueDep,
+  recipients: OversightRecipient[],
+  compose: (recipientId: string) => EnqueueNotificationInput,
+  context: Record<string, unknown>
 ): Promise<OversightFanOutReport> {
   const report = emptyReport();
-
-  const recipients = await deps.listOversightRecipients(churchId);
   report.considered = recipients.length;
 
   for (const recipient of recipients) {
@@ -149,13 +177,51 @@ export async function fanOutToOversight(
       // them may cost the caller its action.
       report.failed += 1;
       console.error("oversight fan-out failed for a recipient", {
-        churchId,
+        ...context,
         error,
       });
     }
   }
 
   return report;
+}
+
+/** Fan a composed notification out to everyone with oversight of a plant. */
+export async function fanOutToOversight(
+  deps: OversightFanOutDeps,
+  churchId: string,
+  compose: (recipientId: string) => EnqueueNotificationInput
+): Promise<OversightFanOutReport> {
+  return fanOutTo(deps, await deps.listOversightRecipients(churchId), compose, {
+    churchId,
+  });
+}
+
+/**
+ * Fan a composed notification out to the admins of ONE named organisation.
+ *
+ * This exists because of a consent bypass that was reachable in production. The
+ * invitation-accepted milestone is exempt from the sharing toggle (ruled
+ * 2026-08-01) on the grounds that it is the inviting org's OWN event — but the
+ * fan-out resolved its recipients from the PLANT, whose `sending_church_id` and
+ * `sending_network_id` can both be set at once (`applyAssociation` in
+ * `src/lib/invitations/service.ts` sets one without clearing the other). So
+ * accepting a sending church's invitation delivered an ungated notification to
+ * a network that had invited nobody and had never been consented to.
+ *
+ * The exemption is still keyed on notification TYPE, which is what keeps it
+ * from being able to promote a granular category into oversight's reach. What
+ * changed is the AUDIENCE: the org is read off the invitation row, and nothing
+ * in this function can widen it back to the plant.
+ */
+export async function fanOutToOversightOrg(
+  deps: OversightOrgFanOutDeps,
+  org: OversightOrg,
+  compose: (recipientId: string) => EnqueueNotificationInput
+): Promise<OversightFanOutReport> {
+  return fanOutTo(deps, await deps.listOversightAdminsOfOrg(org), compose, {
+    org,
+  });
 }
 
 // ----------------------------------------------------------------------------
@@ -241,38 +307,63 @@ export async function announceMilestone(
  * `deps` is injectable on all three emitters for the same reason: the BODY each
  * one composes is a promise made to a third party, and a promise is worth a
  * test. This one's was wrong for a release.
+ *
+ * `invitedBy` is REQUIRED and is read off the invitation row, not off the
+ * plant. This is the only milestone `enqueue` will write without consent, so
+ * "who invited them" cannot be a guess: a plant that belongs to a sending
+ * church AND a network would otherwise have this ungated row delivered to the
+ * organisation that had nothing to do with it. The audience is narrowed to the
+ * inviting org, and the other org stays exactly where it was — behind the
+ * sharing toggle, hearing nothing.
+ *
+ * An invitation carrying NEITHER id names no org, so it reaches nobody. That is
+ * the safe direction and it is unreachable in practice: `createInvitation`
+ * requires the id its type implies.
  */
-export function announceInvitationAccepted(
+export async function announceInvitationAccepted(
   input: {
     churchId: string;
     plantName: string;
     invitationId: string;
+    invitedBy: OversightOrg;
   },
-  deps: OversightFanOutDeps = dbOversightFanOutDeps
+  deps: OversightOrgFanOutDeps = dbOversightFanOutDeps
 ): Promise<OversightFanOutReport> {
-  return announceMilestone(
-    {
+  const facts: MilestoneFacts = {
+    churchId: input.churchId,
+    plantName: input.plantName,
+    kind: "invitation_accepted",
+    occurrence: input.invitationId,
+    // This is the one milestone that arrives with the plant's sharing toggle
+    // in EITHER state (`OVERSIGHT_SHARING_EXEMPT_TYPES`, ruled 2026-08-01),
+    // and the body has to be true in both. The previous copy — "You'll get a
+    // summary on the days something happens" — was written when the row could
+    // only exist with sharing already on; under the exemption it is now
+    // read most often by someone who will get nothing further, which would
+    // make it a promise the product does not keep.
+    //
+    // So it states the fact (they accepted) and then says plainly that
+    // anything beyond this is the plant's decision. That is accurate with
+    // sharing off AND with sharing on, and it tells the sending church where
+    // the choice actually lives instead of implying it has already been made.
+    detail:
+      "They accepted your invitation. Anything beyond this — a summary on the days something happens, plus the occasional milestone — is theirs to switch on.",
+  };
+
+  // Not `announceMilestone`: this is the one emitter that does NOT address the
+  // plant's oversight union. Same never-throws posture, different audience.
+  try {
+    return await fanOutToOversightOrg(deps, input.invitedBy, (recipientId) =>
+      composeMilestone(facts, recipientId)
+    );
+  } catch (error) {
+    console.error("oversight milestone announcement failed", {
       churchId: input.churchId,
-      plantName: input.plantName,
-      kind: "invitation_accepted",
-      occurrence: input.invitationId,
-      // This is the one milestone that arrives with the plant's sharing toggle
-      // in EITHER state (`OVERSIGHT_SHARING_EXEMPT_TYPES`, ruled 2026-08-01),
-      // and the body has to be true in both. The previous copy — "You'll get a
-      // summary on the days something happens" — was written when the row could
-      // only exist with sharing already on; under the exemption it is now
-      // read most often by someone who will get nothing further, which would
-      // make it a promise the product does not keep.
-      //
-      // So it states the fact (they accepted) and then says plainly that
-      // anything beyond this is the plant's decision. That is accurate with
-      // sharing off AND with sharing on, and it tells the sending church where
-      // the choice actually lives instead of implying it has already been made.
-      detail:
-        "They accepted your invitation. Anything beyond this — a summary on the days something happens, plus the occasional milestone — is theirs to switch on.",
-    },
-    deps
-  );
+      kind: facts.kind,
+      error,
+    });
+    return emptyReport();
+  }
 }
 
 /** Source: the `phase.changed` event, wired in `src/lib/events/subscriptions.ts`. */
@@ -397,7 +488,43 @@ export async function listOversightRecipientsForChurch(
   return rows;
 }
 
-export const dbOversightFanOutDeps: OversightFanOutDeps = {
+/**
+ * The oversight admins of ONE named organisation.
+ *
+ * Deliberately does NOT touch `churches`: the audience of the consent-exempt
+ * invitation milestone is defined by the invitation, and reading the plant's
+ * FKs is exactly the step that let a second, uninvolved org in. Nothing here
+ * can widen — a caller has to name the org, and only the org's own admins come
+ * back.
+ *
+ * A projection, not `select()`, for the same reason as
+ * `listOversightRecipientsForChurch`: this answers "who", so `password_hash`
+ * must not enter application memory.
+ */
+export async function listOversightAdminsOfOrg(
+  org: OversightOrg
+): Promise<OversightRecipient[]> {
+  const reaches = [
+    org.sendingChurchId
+      ? eq(users.sendingChurchId, org.sendingChurchId)
+      : undefined,
+    org.sendingNetworkId
+      ? eq(users.sendingNetworkId, org.sendingNetworkId)
+      : undefined,
+  ].filter((clause) => clause !== undefined);
+
+  // No org named — no recipients. Never "everyone".
+  if (reaches.length === 0) return [];
+
+  return db
+    .select({ id: users.id })
+    .from(users)
+    .where(and(or(...reaches), inArray(users.role, OVERSIGHT_ROLES)));
+}
+
+export const dbOversightFanOutDeps: OversightFanOutDeps &
+  OversightOrgFanOutDeps = {
   listOversightRecipients: listOversightRecipientsForChurch,
+  listOversightAdminsOfOrg,
   enqueue,
 };

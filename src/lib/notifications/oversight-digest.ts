@@ -2,7 +2,10 @@ import {
   and,
   count,
   eq,
+  exists,
+  gt,
   gte,
+  inArray,
   isNotNull,
   isNull,
   like,
@@ -10,17 +13,21 @@ import {
   notExists,
   or,
   sql,
+  type SQL,
 } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
   churches,
   churchMeetings,
+  churchPrivacySettings,
   notifications,
   persons,
   phaseTransitions,
   tasks,
+  users,
 } from "@/db/schema";
+import { OVERSIGHT_ROLES } from "@/lib/auth/access";
 import { APP_TIME_ZONE, formatDate } from "@/lib/datetime";
 
 import {
@@ -290,6 +297,146 @@ export async function runOversightDigest(
 // ----------------------------------------------------------------------------
 
 /**
+ * A church id, either as a literal or as a COLUMN to correlate against.
+ *
+ * The four conditions below are asked two different ways — counted for one
+ * named plant (`summarizeChurchActivity`) and tested as `EXISTS` inside the
+ * sweep's plant selection, where the church is `churches.id` of the outer row.
+ * Accepting both is what lets there be ONE definition of activity instead of
+ * two that can drift apart.
+ */
+type ChurchIdRef = string | typeof churches.id;
+
+/**
+ * WHAT COUNTS AS ACTIVITY — defined once, in four conditions.
+ *
+ * Every one of them is used twice: by the `count()` that composes a digest body
+ * and by the `EXISTS` that decides whether a plant is worth sweeping at all.
+ * That is the whole reason they are extracted. The module used to argue against
+ * teaching the selection query what activity is, on the grounds that it would
+ * create a SECOND definition next to `summarizeChurchActivity` — and it was
+ * right about the hazard and wrong about the remedy. Sharing the conditions
+ * removes the hazard; refusing to narrow the selection cost liveness (see the
+ * sweep header below).
+ */
+function inWindow(
+  column: Parameters<typeof gte>[0],
+  window: ActivityWindow
+): SQL | undefined {
+  return and(gte(column, window.from), lt(column, window.to));
+}
+
+/**
+ * `deleted_at IS NULL` here and on tasks below, for the same reason the meeting
+ * condition is narrowed to `completed`: the digest must not report to a third
+ * party something the planter cannot see. `persons` and `tasks` are
+ * soft-deleted everywhere else in the repo (people/metrics.ts,
+ * people/pipeline.ts, tasks/service.ts, ...), so a duplicate person added and
+ * deleted ten minutes later on an otherwise quiet day was producing "1 new
+ * person" to the oversight org for somebody who exists nowhere in the planter's
+ * own app.
+ */
+function personAddedCondition(churchId: ChurchIdRef, window: ActivityWindow) {
+  return and(
+    eq(persons.churchId, churchId),
+    isNull(persons.deletedAt),
+    inWindow(persons.createdAt, window)
+  );
+}
+
+/**
+ * "Meetings HELD" — the toggle's copy promises that exact word, so the query
+ * has to mean it. `church_meetings.status` starts at `planning` and can reach
+ * `cancelled`, so filtering on the datetime alone reported a meeting cancelled
+ * at 09:00 for a 19:00 slot to the sending church as a meeting that happened.
+ * Overstating a plant's activity to a third party under a consent control is
+ * the exact failure this feature exists to prevent.
+ *
+ * `completed` rather than `actual_attendance IS NOT NULL`
+ * (finalizeAttendance's idempotency marker, memory/invariants.md → Atomicity):
+ * attendance is a separate, optional step, so keying on it would report 0
+ * meetings for a plant that meets weekly and never counts heads. `completed` is
+ * the planter's own statement that the meeting happened — the right authority
+ * for a fact told to their oversight partner. Both rules can only UNDER-report,
+ * which is the safe direction here.
+ */
+function meetingHeldCondition(churchId: ChurchIdRef, window: ActivityWindow) {
+  return and(
+    eq(churchMeetings.churchId, churchId),
+    eq(churchMeetings.status, "completed"),
+    inWindow(churchMeetings.datetime, window)
+  );
+}
+
+function taskFinishedCondition(churchId: ChurchIdRef, window: ActivityWindow) {
+  return and(
+    eq(tasks.churchId, churchId),
+    isNull(tasks.deletedAt),
+    isNotNull(tasks.completedAt),
+    inWindow(tasks.completedAt, window)
+  );
+}
+
+/**
+ * ADVANCES only, via the same predicate the milestone emitter judges a single
+ * event with (`phaseAdvanceCondition`, beside `isPhaseAdvance` in
+ * `./oversight-events.ts`). Counting every transition made a planter's
+ * correction from stage 3 back to 2 read as "1 new stage" — the milestone path
+ * withholding a regression on purpose while the digest path announced it as its
+ * opposite. One rule, one place.
+ */
+function stageReachedCondition(churchId: ChurchIdRef, window: ActivityWindow) {
+  return and(
+    eq(phaseTransitions.churchId, churchId),
+    phaseAdvanceCondition(),
+    inWindow(phaseTransitions.createdAt, window)
+  );
+}
+
+/**
+ * "Did ANYTHING happen for this plant in this window?" as one correlated
+ * `EXISTS ... OR EXISTS ...`, built from the four conditions above.
+ *
+ * Short-circuiting by construction: Postgres stops at the first `EXISTS` that
+ * matches, so an active plant costs one index probe rather than four counts.
+ * `totalActivity(summarizeChurchActivity(...)) > 0` and this predicate are the
+ * same question by construction — they are the same SQL — which is the property
+ * the sweep relies on when it uses this to skip a plant it would otherwise have
+ * summarised and discarded.
+ */
+function hasActivityCondition(
+  churchId: ChurchIdRef,
+  window: ActivityWindow
+): SQL | undefined {
+  return or(
+    exists(
+      db
+        .select({ one: sql`1` })
+        .from(persons)
+        .where(personAddedCondition(churchId, window))
+    ),
+    exists(
+      db
+        .select({ one: sql`1` })
+        .from(churchMeetings)
+        .where(meetingHeldCondition(churchId, window))
+    ),
+    exists(
+      db
+        .select({ one: sql`1` })
+        .from(tasks)
+        .where(taskFinishedCondition(churchId, window))
+    ),
+    exists(
+      db
+        .select({ one: sql`1` })
+        .from(phaseTransitions)
+        .where(stageReachedCondition(churchId, window))
+    )
+  );
+}
+
+/**
  * Four counts, four bounded `count()` queries, all `church_id`-scoped.
  *
  * Deliberately counts rather than reads: there is no code path here that could
@@ -300,81 +447,23 @@ export async function summarizeChurchActivity(
   churchId: string,
   window: ActivityWindow
 ): Promise<OversightActivitySummary> {
-  const inWindow = (column: Parameters<typeof gte>[0]) =>
-    and(gte(column, window.from), lt(column, window.to));
-
   const [people, meetings, finishedTasks, stages] = await Promise.all([
-    // `deleted_at IS NULL` on both this and the task count below, for the same
-    // reason the meeting count is narrowed to `completed`: the digest must not
-    // report to a third party something the planter cannot see. `persons` and
-    // `tasks` are soft-deleted everywhere else in the repo (people/metrics.ts,
-    // people/pipeline.ts, tasks/service.ts, ...), so a duplicate person added
-    // and deleted ten minutes later on an otherwise quiet day was producing
-    // "1 new person" to the oversight org for somebody who exists nowhere in
-    // the planter's own app.
     db
       .select({ n: count() })
       .from(persons)
-      .where(
-        and(
-          eq(persons.churchId, churchId),
-          isNull(persons.deletedAt),
-          inWindow(persons.createdAt)
-        )
-      ),
-    // "Meetings HELD" — the toggle's copy promises that exact word, so the
-    // query has to mean it. `church_meetings.status` starts at `planning` and
-    // can reach `cancelled`, so filtering on the datetime alone reported a
-    // meeting cancelled at 09:00 for a 19:00 slot to the sending church as a
-    // meeting that happened. Overstating a plant's activity to a third party
-    // under a consent control is the exact failure this feature exists to
-    // prevent, so the count is narrowed to `completed`.
-    //
-    // `completed` rather than `actual_attendance IS NOT NULL` (finalizeAttendance's
-    // idempotency marker, memory/invariants.md → Atomicity): attendance is a
-    // separate, optional step, so keying on it would report 0 meetings for a
-    // plant that meets weekly and never counts heads. `completed` is the
-    // planter's own statement that the meeting happened — the right authority
-    // for a fact told to their oversight partner. Both rules can only UNDER-
-    // report, which is the safe direction here; a meeting still sitting at
-    // `in_progress` when the day closes is simply not counted.
+      .where(personAddedCondition(churchId, window)),
     db
       .select({ n: count() })
       .from(churchMeetings)
-      .where(
-        and(
-          eq(churchMeetings.churchId, churchId),
-          eq(churchMeetings.status, "completed"),
-          inWindow(churchMeetings.datetime)
-        )
-      ),
+      .where(meetingHeldCondition(churchId, window)),
     db
       .select({ n: count() })
       .from(tasks)
-      .where(
-        and(
-          eq(tasks.churchId, churchId),
-          isNull(tasks.deletedAt),
-          isNotNull(tasks.completedAt),
-          inWindow(tasks.completedAt)
-        )
-      ),
-    // ADVANCES only, via the same predicate the milestone emitter judges a
-    // single event with (`phaseAdvanceCondition`, beside `isPhaseAdvance` in
-    // `./oversight-events.ts`). Counting every transition made a planter's
-    // correction from stage 3 back to 2 read as "1 new stage" — the milestone
-    // path withholding a regression on purpose while the digest path announced
-    // it as its opposite. One rule, one place, two expressions of it.
+      .where(taskFinishedCondition(churchId, window)),
     db
       .select({ n: count() })
       .from(phaseTransitions)
-      .where(
-        and(
-          eq(phaseTransitions.churchId, churchId),
-          phaseAdvanceCondition(),
-          inWindow(phaseTransitions.createdAt)
-        )
-      ),
+      .where(stageReachedCondition(churchId, window)),
   ]);
 
   return {
@@ -461,29 +550,82 @@ export function runDailyOversightDigest(
 // (memory/invariants.md → Atomicity).
 //
 // ----------------------------------------------------------------------------
+// WHY "OWED" HAS TO MEAN "WILL ACTUALLY PRODUCE A DIGEST" (the starvation fix)
+// ----------------------------------------------------------------------------
+//
+// The first version of this sweep took the first N owed plants by id on every
+// tick and trusted the remainder to "roll over". That was wrong, and the way it
+// was wrong is worth keeping written down, because the shape recurs anywhere a
+// worklist is drained by writing a row:
+//
+//   A plant leaves the owed set ONLY by having a digest row written for it. So
+//   a plant that can never write one — quiet yesterday, sharing switched off
+//   (the default for every plant until it opts in), no oversight admins at the
+//   org — stays owed all day AND, because the ordering is stable, keeps its
+//   place at the head of it. With 25 such plants ahead of it, plant #26 was
+//   never reached on any of the day's 96 ticks. Nothing surfaced it either:
+//   `selected: 25` reads identically on a healthy sweep and a starved one.
+//
+// Two changes, and both are needed:
+//
+//   1. THE SELECTION EXCLUDES WHAT CANNOT PRODUCE A DIGEST. A plant is only
+//      offered if it is sharing, has at least one oversight admin, and actually
+//      had activity in the window. Those three are exactly the reasons a plant
+//      could sit owed forever, and none of them can change for a day that is
+//      already over — except the toggle, which is re-read on the very next tick
+//      15 minutes later. The owed set therefore SHRINKS monotonically through
+//      the day, which is what makes "the remainder rolls over" true instead of
+//      hopeful.
+//
+//      The old comment here argued against this on the grounds that it would
+//      create a SECOND definition of activity next to `summarizeChurchActivity`
+//      and a second copy of the sharing gate. It was right about both hazards
+//      and wrong about the remedy: the activity conditions are now shared
+//      literally (`hasActivityCondition`, built from the same four conditions
+//      the counts use), and the sharing clause here is a NARROWING, not a gate
+//      — `enqueue` still decides, per recipient, at the moment of writing, and
+//      is still the only thing that can refuse. A narrowing that is wrong costs
+//      a wasted scan; the gate being wrong would cost consent, and the gate has
+//      not moved.
+//
+//   2. THE BATCH BOUNDS THE WORK, NOT THE WINDOW. Within a tick the sweep
+//      KEYSET-pages (`id > last id reached`) until the owed set is exhausted or
+//      a budget stops it. The cursor advances past a plant whose digest THREW,
+//      too — which is the one remaining way a plant can stay owed after change
+//      1, and without this it would be a head-of-line block on the plants
+//      behind it. A failure is retried on the next tick, from a fresh scan.
+//
+// What is deliberately NOT here is a stored cursor. Progress across ticks is
+// still DERIVED — from the digest rows themselves plus a selection that only
+// offers plants which will write one — so there is no watermark to keep in step
+// with reality, and a dropped tick is still a delay rather than a loss.
+//
+// ----------------------------------------------------------------------------
 // The cost this design accepts, stated plainly
 // ----------------------------------------------------------------------------
 //
-// A plant that was QUIET yesterday writes no digest row, so it stays "owed" and
-// is re-summarised on every tick that day: four bounded, church-scoped,
-// date-bounded `count()` queries that write nothing and enqueue nothing. Same
-// for a plant with activity whose oversight recipients are all refused by the
-// sharing toggle.
-//
-// The alternative — teaching the selection query what "activity" is, so quiet
-// plants never get picked — was rejected: it would put a SECOND definition of
-// activity next to `summarizeChurchActivity`, and the two paths that already
-// disagreed about what counts (`phaseAdvanceCondition`, above) are why this
-// module is careful about that. One definition, a few extra counts.
+// Selection got more expensive: four correlated `EXISTS` probes per candidate
+// plant instead of none. They are short-circuiting (`OR`), church-and-date
+// bounded, and they replace four unconditional `count()` queries per quiet
+// plant per tick — 96 times a day, for every quiet plant, under the old shape.
+// The trade is strictly favourable and it buys a liveness property.
 //
 // ============================================================================
 
 /**
- * Plants digested per tick. Bounded like `MAX_DISPATCH_BATCH` and for the same
- * reason: a run has a hard function timeout, and the remainder rolling over to
- * the next tick (15 minutes later) is a delay, not a loss.
+ * Plants selected per PAGE. The sweep keyset-pages through the owed set within
+ * a tick, so this bounds one round trip, not the day's work — that is
+ * `MAX_DIGEST_SWEEP_PLANTS` and the wall-clock budget below.
  */
 export const MAX_DIGEST_SWEEP_BATCH = 25;
+
+/**
+ * Hard ceiling on plants CONSIDERED in one tick. A backstop, not the usual
+ * limit: with the selection narrowed to plants that will genuinely produce a
+ * digest, a real fleet is exhausted long before this. Its job is to keep one
+ * pathological tick from running the dispatcher's clock out.
+ */
+export const MAX_DIGEST_SWEEP_PLANTS = 500;
 
 /**
  * Wall-clock budget for the sweep, sized to fit in the headroom between the
@@ -493,9 +635,23 @@ export const MAX_DIGEST_SWEEP_BATCH = 25;
  */
 export const DIGEST_SWEEP_BUDGET_MS = 10_000;
 
+/** One page of the owed set, keyset-anchored. */
+export interface OwedDigestPageQuery {
+  dayKey: string;
+  /** The window the day's activity is judged in — half of "is this plant owed". */
+  window: ActivityWindow;
+  /** Page size. */
+  limit: number;
+  /** Keyset anchor: only plants with a GREATER id. `null` starts the scan. */
+  afterChurchId: string | null;
+}
+
 export interface OversightDigestSweepDeps {
-  /** Plants that have oversight and no digest row for `dayKey` yet. */
-  selectPlantsOwedDigest(dayKey: string, limit: number): Promise<string[]>;
+  /**
+   * Plants that will produce a digest for `dayKey` and have not yet — one
+   * keyset page at a time, ascending by church id.
+   */
+  selectPlantsOwedDigest(query: OwedDigestPageQuery): Promise<string[]>;
   /** One plant's digest for one window — `runOversightDigest`, wired. */
   runDigest(
     churchId: string,
@@ -507,17 +663,29 @@ export interface OversightDigestSweepDeps {
 export interface OversightDigestSweepSummary {
   /** The day digested — always the last COMPLETE one. */
   dayKey: string;
-  /** Plants that still owed a digest when this tick looked. */
+  /** Plants offered across every page this tick read. */
   selected: number;
+  /**
+   * Plants this tick actually reached and attempted. Equal to `selected` unless
+   * a budget stopped the walk — which is precisely the signal the old summary
+   * could not give: a starved sweep and a healthy one both reported `selected`.
+   */
+  plantsScanned: number;
+  /** Keyset pages read. `>1` means the fleet outgrew one batch and was followed. */
+  pages: number;
   /** Plants that produced one (a dedupe hit counts: the day is served). */
   digested: number;
-  /** Plants that had no activity, so were deliberately not contacted. */
+  /**
+   * Plants that turned out to have no activity after all. Normally zero — the
+   * selection excludes quiet plants — so a non-zero value means activity was
+   * soft-deleted between the scan and the digest, which is legitimate and rare.
+   */
   quiet: number;
   /** Plants that vanished between selection and digest. */
   unknown: number;
   /** Plants whose digest threw. Logged, never rethrown — see below. */
   failed: number;
-  /** True when the budget stopped the sweep early; the rest roll over. */
+  /** True when a budget stopped the sweep early; the rest roll over. */
   budgetExhausted: boolean;
   durationMs: number;
 }
@@ -535,7 +703,10 @@ export async function runOversightDigestSweep(
   deps: OversightDigestSweepDeps,
   options: {
     at: Date;
+    /** Page size. Defaults to `MAX_DIGEST_SWEEP_BATCH`. */
     limit?: number;
+    /** Plants considered in this tick, across pages. */
+    maxPlants?: number;
     budgetMs?: number;
     elapsedMs?: () => number;
   }
@@ -547,6 +718,10 @@ export async function runOversightDigestSweep(
     Math.max(options.limit ?? MAX_DIGEST_SWEEP_BATCH, 1),
     200
   );
+  const maxPlants = Math.max(
+    options.maxPlants ?? MAX_DIGEST_SWEEP_PLANTS,
+    limit
+  );
 
   // ALWAYS the last complete day — the same window `runDailyOversightDigest`
   // uses, and the reason a tick's hour cannot change the answer. 00:15 and
@@ -557,6 +732,8 @@ export async function runOversightDigestSweep(
   const summary: OversightDigestSweepSummary = {
     dayKey,
     selected: 0,
+    plantsScanned: 0,
+    pages: 0,
     digested: 0,
     quiet: 0,
     unknown: 0,
@@ -565,28 +742,75 @@ export async function runOversightDigestSweep(
     durationMs: 0,
   };
 
-  const owed = await deps.selectPlantsOwedDigest(dayKey, limit);
-  summary.selected = owed.length;
+  // The keyset cursor. It advances on EVERY plant the sweep reaches, including
+  // one whose digest threw — a failure must not become a head-of-line block on
+  // the plants behind it. The failed plant is still owed and is retried by the
+  // next tick, which starts a fresh scan from the beginning.
+  let afterChurchId: string | null = null;
 
-  for (const churchId of owed) {
+  walk: while (summary.plantsScanned < maxPlants) {
     if (elapsedMs() >= budgetMs) {
       summary.budgetExhausted = true;
       break;
     }
 
+    let page: string[];
     try {
-      const outcome = await deps.runDigest(churchId, window);
-      if (outcome.status === "enqueued") summary.digested += 1;
-      else if (outcome.reason === "no_activity") summary.quiet += 1;
-      else summary.unknown += 1;
-    } catch (error) {
-      summary.failed += 1;
-      console.error("[notifications/oversight-digest] plant failed", {
-        churchId,
+      page = await deps.selectPlantsOwedDigest({
         dayKey,
+        window,
+        limit,
+        afterChurchId,
+      });
+    } catch (error) {
+      // "Never throws" has to include the SELECT. The dispatcher run this rides
+      // on has already sent email by the time the sweep starts; turning a
+      // database blip here into a 500 would report a successful delivery run as
+      // a failure and invite a retry of work that is already done.
+      summary.failed += 1;
+      console.error("[notifications/oversight-digest] selection failed", {
+        dayKey,
+        afterChurchId,
         error,
       });
+      break;
     }
+
+    summary.pages += 1;
+    summary.selected += page.length;
+    if (page.length === 0) break;
+
+    for (const churchId of page) {
+      if (elapsedMs() >= budgetMs) {
+        summary.budgetExhausted = true;
+        break walk;
+      }
+
+      afterChurchId = churchId;
+      summary.plantsScanned += 1;
+
+      try {
+        const outcome = await deps.runDigest(churchId, window);
+        if (outcome.status === "enqueued") summary.digested += 1;
+        else if (outcome.reason === "no_activity") summary.quiet += 1;
+        else summary.unknown += 1;
+      } catch (error) {
+        summary.failed += 1;
+        console.error("[notifications/oversight-digest] plant failed", {
+          churchId,
+          dayKey,
+          error,
+        });
+      }
+
+      if (summary.plantsScanned >= maxPlants) {
+        summary.budgetExhausted = true;
+        break walk;
+      }
+    }
+
+    // A short page is the end of the owed set — nothing further to follow.
+    if (page.length < limit) break;
   }
 
   summary.durationMs = elapsedMs();
@@ -594,39 +818,81 @@ export async function runOversightDigestSweep(
 }
 
 /**
- * Which plants still owe a digest for `dayKey`.
+ * One keyset page of the plants that still owe a digest for `dayKey`.
  *
- * Two conditions, and neither is a privacy decision:
+ * "Owed" means WILL PRODUCE A DIGEST, not merely "has not got one yet" — the
+ * distinction the starvation fix turns on (see the header above). Five
+ * conditions:
  *
  *   1. The plant has OVERSIGHT at all — a `sending_church_id` or a
- *      `sending_network_id`. A plant with neither has nobody to digest to, and
- *      `fanOutToOversight` would consider zero recipients. Both FKs are
- *      nullable (memory/invariants.md → Multi-Tenancy).
- *   2. No digest row exists for this church and this day.
- *
- * Note what is NOT here: `church_privacy_settings`. Whether the plant is
- * sharing stays `enqueue`'s question, asked per recipient at the moment the row
- * would be written — see the header of `./oversight.ts`. Putting it here would
- * be a second copy of the gate, and a flip would then take effect at the next
- * SELECT instead of the next enqueue.
+ *      `sending_network_id`. Both FKs are nullable (memory/invariants.md →
+ *      Multi-Tenancy).
+ *   2. Somebody is actually there to receive it: at least one user in an
+ *      oversight role on that sending church or network. An org with no admins
+ *      yet is a real state, and a plant under one could otherwise sit at the
+ *      head of the owed set forever.
+ *   3. The plant is SHARING. A narrowing, not the gate — `enqueue` still
+ *      decides per recipient at the moment of writing, and is the only thing
+ *      that can refuse. Since sharing off is the default for every plant, this
+ *      is also the clause that removes the dominant permanently-owed
+ *      population. A toggle flipped at 09:00 is honoured by the 09:15 tick
+ *      (and by the 09:01 enqueue on the milestone path, which is untouched).
+ *   4. Something HAPPENED in the window — `hasActivityCondition`, built from
+ *      the same four conditions `summarizeChurchActivity` counts with, so this
+ *      cannot drift from what the digest would have said. The window is over,
+ *      so this answer is final for the day.
+ *   5. No digest row exists for this church and this day.
  *
  * The day match is a suffix `LIKE` on a key this module builds (`YYYY-MM-DD`,
  * no wildcard characters), narrowed by `church_id` and `type` first — it reads
  * the day out of the key rather than concatenating a uuid column into SQL.
  */
 export async function selectPlantsOwedDigest(
-  dayKey: string,
-  limit: number
+  query: OwedDigestPageQuery
 ): Promise<string[]> {
   const rows = await db
     .select({ id: churches.id })
     .from(churches)
     .where(
       and(
+        // 1 — has oversight
         or(
           isNotNull(churches.sendingChurchId),
           isNotNull(churches.sendingNetworkId)
         ),
+        // 2 — somebody in an oversight role over this plant. `=` against a NULL
+        // FK yields NULL, so a plant with only one of the two FKs matches only
+        // on the one it has.
+        exists(
+          db
+            .select({ one: sql`1` })
+            .from(users)
+            .where(
+              and(
+                inArray(users.role, OVERSIGHT_ROLES),
+                or(
+                  eq(users.sendingChurchId, churches.sendingChurchId),
+                  eq(users.sendingNetworkId, churches.sendingNetworkId)
+                )
+              )
+            )
+        ),
+        // 3 — sharing is on. No settings row at all means not sharing, which is
+        // the correct reading of an opt-in control.
+        exists(
+          db
+            .select({ one: sql`1` })
+            .from(churchPrivacySettings)
+            .where(
+              and(
+                eq(churchPrivacySettings.churchId, churches.id),
+                eq(churchPrivacySettings.shareActivityWithOversight, true)
+              )
+            )
+        ),
+        // 4 — there is something to report
+        hasActivityCondition(churches.id, query.window),
+        // 5 — not already digested for this day
         notExists(
           db
             .select({ one: sql`1` })
@@ -635,16 +901,17 @@ export async function selectPlantsOwedDigest(
               and(
                 eq(notifications.churchId, churches.id),
                 eq(notifications.type, OVERSIGHT_DIGEST_TYPE),
-                like(notifications.dedupeKey, `%:${dayKey}`)
+                like(notifications.dedupeKey, `%:${query.dayKey}`)
               )
             )
-        )
+        ),
+        // The keyset anchor. Ascending id is a total order on a uuid primary
+        // key, so `> last reached` never skips and never repeats within a tick.
+        query.afterChurchId ? gt(churches.id, query.afterChurchId) : undefined
       )
     )
-    // Stable, so a fleet larger than one batch is swept in a repeatable order
-    // and the remainder is reached by the following ticks.
     .orderBy(churches.id)
-    .limit(limit);
+    .limit(query.limit);
 
   return rows.map((row) => row.id);
 }

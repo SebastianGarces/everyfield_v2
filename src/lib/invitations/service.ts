@@ -130,10 +130,7 @@ export async function acceptInvitation(
   // accepted invitation" the ruling names. A sending church joining a network
   // is a different event with no plant to report on.
   if (updated.targetChurchId) {
-    await announceInvitationAcceptedForChurch(
-      updated.targetChurchId,
-      invitationId
-    );
+    await announceInvitationAcceptedForChurch(updated);
   }
 
   return updated;
@@ -144,11 +141,22 @@ export async function acceptInvitation(
  * construction: `announceInvitationAccepted` swallows its own failures, and the
  * name lookup is guarded so a missing church cannot throw into an acceptance
  * that has already been recorded.
+ *
+ * The whole INVITATION is passed, not just the church id, because the audience
+ * of this one milestone is the org that issued it — `invitation.sending_church_id`
+ * / `invitation.sending_network_id`, read straight off the row. It is the only
+ * oversight notification `enqueue` writes without consent, and `applyAssociation`
+ * below sets one of the plant's FKs without clearing the other, so a plant can
+ * belong to a sending church AND a network at once. Deriving the audience from
+ * the PLANT would therefore have delivered an ungated row to an organisation
+ * that never invited anyone and never consented to hear anything.
  */
 async function announceInvitationAcceptedForChurch(
-  churchId: string,
-  invitationId: string
+  invitation: OrganizationInvitation
 ): Promise<void> {
+  const churchId = invitation.targetChurchId;
+  if (!churchId) return;
+
   try {
     const [plant] = await db
       .select({ name: churches.name })
@@ -161,12 +169,16 @@ async function announceInvitationAcceptedForChurch(
     await announceInvitationAccepted({
       churchId,
       plantName: plant.name,
-      invitationId,
+      invitationId: invitation.id,
+      invitedBy: {
+        sendingChurchId: invitation.sendingChurchId,
+        sendingNetworkId: invitation.sendingNetworkId,
+      },
     });
   } catch (error) {
     console.error("oversight invitation milestone failed", {
       churchId,
-      invitationId,
+      invitationId: invitation.id,
       error,
     });
   }
