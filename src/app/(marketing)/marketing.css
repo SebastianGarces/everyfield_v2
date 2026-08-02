@@ -514,18 +514,6 @@ html:has(.marketing) {
   max-height: 100%;
 }
 
-/* Narrow desktop (the band between the mobile stack at 900px and a comfortable
-   1180px): the training matrix and the guides shot are both height-constrained
-   and grow to fill the pane, so the painting they stand on runs out and their
-   overlay cards have nowhere to land except across the words. Drop the cards;
-   the primaries still carry the claim. */
-@media (max-width: 1180px) {
-  .marketing #pt-panel-training .shot-overlay,
-  .marketing #fs-panel-guides .shot-overlay {
-    display: none;
-  }
-}
-
 /* layered composition: a small complete card floats over the primary crop */
 .marketing .shot-overlay {
   position: absolute;
@@ -794,6 +782,37 @@ html:has(.marketing) {
 .marketing .pshot.anchor-end picture,
 .marketing .fswitch-shot.anchor-end picture {
   justify-content: flex-end;
+}
+
+/* Narrow desktop — the band between the mobile stack at 900px and a
+   comfortable 1180px.
+
+   Both pane heights carry a px floor (520 / 500) that stops tracking the
+   viewport below ~1130px, but the container keeps shrinking with it. The
+   primaries are height-constrained, so they hold their size while the pane
+   narrows around them: the painting they stand on runs out, and the overlay
+   cards land across the words instead of on chrome. Measured at 900px, the
+   training card covered 524 master px of the matrix — the heading, the column
+   header and three member names — where at 1280px it covers only the 111px
+   icon rail.
+
+   Dropping the floors here restores the proportion the rest of the range
+   already has. Panes, primaries and cards all scale off the same viewport, so
+   every composition in the band is an exact scale of its >=1180px self and each
+   card lands on the same master pixels it was composed against. The panes stay
+   one height across every tab and panel, so a tab switch still shifts nothing;
+   the phase copy reserves the tallest of the seven (the core-group title takes
+   a third line under 980px), which 132px no longer covers down here. */
+@media (max-width: 1179.98px) {
+  .marketing .fswitch-shot.active {
+    height: min(46vw, 780px);
+  }
+  .marketing .ppanel .pshot {
+    height: min(42vw, 720px);
+  }
+  .marketing .ppanel-copy {
+    min-height: 190px;
+  }
 }
 /* full-bleed beats: the visual escapes the container toward the viewport edge */
 /* mobile: the journey as a stacked, numbered vertical scroll */
