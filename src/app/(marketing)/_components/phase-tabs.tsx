@@ -1,9 +1,35 @@
 "use client";
 
-import Image from "next/image";
 import { useState } from "react";
 
-const PHASES = [
+import { Chip } from "./chip";
+import { Shot, ShotOverlay, type ShotSource } from "./shot";
+import { useInView } from "./use-in-view";
+import { usePrefetchShots } from "./use-prefetch-shots";
+import { useTablistKeys } from "./use-tablist-keys";
+
+type Overlay = ShotSource & { alt: string; style: React.CSSProperties };
+
+type Phase = {
+  key: string;
+  tab: string;
+  title: string;
+  description: string;
+  points: readonly string[];
+  desktop: ShotSource;
+  mobile?: ShotSource;
+  alt: string;
+  /** Horizontal anchor of the primary crop inside the panel. */
+  anchor?: "start" | "end";
+  overlay?: Overlay;
+  chip?: {
+    text: string;
+    style: React.CSSProperties;
+    mobileStyle?: React.CSSProperties;
+  };
+};
+
+const PHASES: readonly Phase[] = [
   {
     key: "discovery",
     tab: "Discovery",
@@ -14,8 +40,18 @@ const PHASES = [
       "The wiki: the whole methodology, readable in order.",
       "Foundations workspace: your 4 Pillars, your vision, written down.",
     ],
-    shot: "/marketing/shots/wiki-discovery.webp",
-    alt: "A wiki chapter in EveryField titled 'Is Church Planting Your Calling?' with reading progress tracked in the sidebar.",
+    desktop: {
+      src: "/marketing/shots/pt-discovery.webp",
+      width: 2180,
+      height: 1150,
+    },
+    mobile: {
+      src: "/marketing/shots/pt-discovery-m.webp",
+      width: 520,
+      height: 760,
+    },
+    alt: "The wiki chapter 'Is Church Planting Your Calling?' with the Phase 0 reading list and reading progress in the sidebar.",
+    anchor: "end",
   },
   {
     key: "core-group",
@@ -27,8 +63,25 @@ const PHASES = [
       "People pipeline: contact → attended → committed.",
       "Vision meeting attendance, trend over trend.",
     ],
-    shot: "/marketing/shots/people-pipeline.webp",
-    alt: "The people pipeline board in EveryField: columns for prospect, attendee, following up, and interviewed, each with live counts.",
+    desktop: {
+      src: "/marketing/shots/pt-coregroup.webp",
+      width: 1720,
+      height: 830,
+    },
+    mobile: {
+      src: "/marketing/shots/pt-coregroup-m.webp",
+      width: 575,
+      height: 830,
+    },
+    alt: "People cards moving through the pipeline — J. P. Holloway a new prospect from an event, Grace Lin in follow-up from the website.",
+    anchor: "start",
+    overlay: {
+      src: "/marketing/shots/fs-meetings-m.webp",
+      width: 760,
+      height: 515,
+      alt: "Vision Meeting #5 — in 14 days, ~32 estimated.",
+      style: { right: "13%", bottom: "20%", width: "min(26%, 380px)" },
+    },
   },
   {
     key: "launch-team",
@@ -40,8 +93,18 @@ const PHASES = [
       "Commitment tracking against your 50-adult floor.",
       "Launch-date timeline with task templates unlocked.",
     ],
-    shot: "/marketing/shots/people-launch-team.webp",
-    alt: "The People screen filtered to core group, launch team, and leaders — the committed adults counted against the launch floor.",
+    desktop: {
+      src: "/marketing/shots/pt-launch-team.webp",
+      width: 1760,
+      height: 810,
+    },
+    mobile: {
+      src: "/marketing/shots/pt-launch-team-m.webp",
+      width: 622,
+      height: 810,
+    },
+    alt: "The People screen filtered to the committed — 61 total, Core Group badges on every card.",
+    anchor: "end",
   },
   {
     key: "training",
@@ -53,8 +116,27 @@ const PHASES = [
       "Ministry team rosters and training completion.",
       "Meeting series for corporate and team-specific training.",
     ],
-    shot: "/marketing/shots/teams.webp",
-    alt: "The Ministry Teams screen in EveryField: eleven teams with leaders, staffing bars, and open roles at a glance.",
+    desktop: {
+      src: "/marketing/shots/r6-team-training.webp",
+      width: 2304,
+      height: 1440,
+    },
+    mobile: {
+      src: "/marketing/shots/pt-teams-m.webp",
+      width: 578,
+      height: 695,
+    },
+    alt: "The Children's Ministry training matrix — who has completed kids ministry & safety training, member by member.",
+    anchor: "end",
+    overlay: {
+      src: "/marketing/shots/r6-twocards.webp",
+      width: 588,
+      height: 706,
+      alt: "Two ministry team cards — Worship Team and Facilities, staffing bars and open roles.",
+      // stands on the painting and overlaps only the app's icon rail — the
+      // matrix heading and its column headers stay whole
+      style: { left: "12.1%", top: "20%", width: "min(24%, 350px)" },
+    },
   },
   {
     key: "pre-launch",
@@ -66,8 +148,23 @@ const PHASES = [
       "Pre-launch checklist counting down to Sunday.",
       "Dry-run meetings with role assignments.",
     ],
-    shot: "/marketing/shots/launch-checklist.webp",
-    alt: "The Launch Sunday logistics checklist in EveryField: preparation progress at 4 of 8 ready, with materials and setup items ticking down.",
+    desktop: {
+      src: "/marketing/shots/pt-prelaunch.webp",
+      width: 2448,
+      height: 1513,
+    },
+    mobile: {
+      src: "/marketing/shots/pt-prelaunch-m.webp",
+      width: 912,
+      height: 445,
+    },
+    alt: "The Launch Sunday logistics checklist — preparation progress at 4 of 8 ready, promo cards and signage already struck through.",
+    anchor: "start",
+    chip: {
+      text: "4 of 8 ready — and counting",
+      style: { left: "7%", bottom: "16%" },
+      mobileStyle: { left: 26, top: 28 },
+    },
   },
   {
     key: "launch-sunday",
@@ -78,75 +175,167 @@ const PHASES = [
       "Launch-day run sheet by team and hour.",
       "Attendance and follow-up capture, same day.",
     ],
-    shot: "/marketing/shots/launch-run-sheet.webp",
-    alt: "The Launch Sunday meeting in EveryField: date, location, expected attendance, and the run sheet — setup crew, band call, doors, service.",
+    desktop: {
+      src: "/marketing/shots/pt-launch-day.webp",
+      width: 2340,
+      height: 1200,
+    },
+    mobile: {
+      src: "/marketing/shots/pt-launch-day-m.webp",
+      width: 775,
+      height: 355,
+    },
+    alt: "The Launch Sunday meeting page — in 28 days, ~120 estimated, and the run sheet: 7:30 setup crew, 8:15 band call, 9:15 doors, 10:00 service.",
   },
   {
     key: "beyond",
     tab: "Beyond",
     title: "From launch high to healthy rhythm.",
     description:
-      "The weeks after launch decide the years after launch — momentum stays visible.",
+      "The weeks after launch decide the years after launch — momentum stays visible. Trinity Grove launched six weeks ago; this is the other side.",
     points: [
       "Weekly health dashboard: worship, walk, work.",
       "Graduation: hand off to your long-term ChMS when ready.",
     ],
-    shot: "/marketing/shots/beyond-health.webp",
-    alt: "A post-launch dashboard in EveryField: weekly services completed with attendance above one hundred, week after week.",
+    desktop: {
+      src: "/marketing/shots/pt-beyond.webp",
+      width: 2448,
+      height: 1513,
+    },
+    mobile: {
+      src: "/marketing/shots/pt-beyond-m.webp",
+      width: 945,
+      height: 900,
+    },
+    alt: "Trinity Grove's post-launch dashboard: Sunday Gathering week after week — Week 6 completed with 112 attendees.",
+    anchor: "end",
+    chip: {
+      text: "Week 6 · 112 in the room",
+      style: { right: "6%", top: "20%" },
+      mobileStyle: { right: 22, top: 28, left: "auto" },
+    },
   },
 ] as const;
 
-export function PhaseTabs() {
-  const [active, setActive] = useState<(typeof PHASES)[number]["key"]>(
-    PHASES[0].key
+function PhaseVisual({
+  phase,
+  isMobile,
+}: {
+  phase: Phase;
+  isMobile?: boolean;
+}) {
+  const cls = [
+    "pshot",
+    !isMobile && phase.anchor ? `anchor-${phase.anchor}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return (
+    <div className={cls}>
+      <Shot
+        desktop={isMobile ? (phase.mobile ?? phase.desktop) : phase.desktop}
+        mobile={isMobile ? undefined : phase.mobile}
+        alt={phase.alt}
+      />
+      {!isMobile && phase.overlay ? (
+        <ShotOverlay overlay={phase.overlay} />
+      ) : null}
+      {phase.chip ? (
+        <Chip
+          style={
+            isMobile
+              ? (phase.chip.mobileStyle ?? phase.chip.style)
+              : phase.chip.style
+          }
+        >
+          {phase.chip.text}
+        </Chip>
+      ) : null}
+    </div>
   );
+}
+
+const PREFETCH = PHASES.flatMap((p) => [p.desktop.src, p.overlay?.src]);
+
+const KEYS = PHASES.map((p) => p.key);
+const tabId = (key: string) => `pt-tab-${key}`;
+const panelId = (key: string) => `pt-panel-${key}`;
+
+export function PhaseTabs() {
+  const [active, setActive] = useState<string>(PHASES[0].key);
+  const onTabKeyDown = useTablistKeys(KEYS, setActive);
+  usePrefetchShots(PREFETCH);
+  // Same entrance choreography as the feature switcher: pure CSS keyframes on
+  // the active panel, restarted for free by the display:none→block swap. The
+  // gate holds the FIRST run until the section is on screen.
+  const { ref: tabsRef, inView: seen } = useInView<HTMLDivElement>(0.18);
 
   return (
-    <div className="ptabs">
-      <div className="ptabs-strip" role="tablist" aria-label="Phases">
+    <>
+      {/* Desktop: tabs, one claim + one big visual per phase */}
+      <div ref={tabsRef} className={seen ? "ptabs pt-seen" : "ptabs"}>
+        <div
+          className="ptabs-strip"
+          role="tablist"
+          aria-label="Phases"
+          onKeyDown={onTabKeyDown}
+        >
+          {PHASES.map((phase) => (
+            <button
+              key={phase.key}
+              type="button"
+              role="tab"
+              id={tabId(phase.key)}
+              aria-controls={panelId(phase.key)}
+              aria-selected={phase.key === active}
+              tabIndex={phase.key === active ? 0 : -1}
+              className={
+                phase.key === active
+                  ? "ptab active cursor-pointer"
+                  : "ptab cursor-pointer"
+              }
+              onClick={() => setActive(phase.key)}
+            >
+              {phase.tab}
+            </button>
+          ))}
+        </div>
         {PHASES.map((phase) => (
-          <button
+          <div
             key={phase.key}
-            type="button"
-            role="tab"
-            aria-selected={phase.key === active}
-            className={
-              phase.key === active
-                ? "ptab active cursor-pointer"
-                : "ptab cursor-pointer"
-            }
-            onClick={() => setActive(phase.key)}
+            id={panelId(phase.key)}
+            role="tabpanel"
+            aria-labelledby={tabId(phase.key)}
+            className={phase.key === active ? "ppanel active" : "ppanel"}
           >
-            {phase.tab}
-          </button>
+            <div className="ppanel-copy">
+              <div>
+                <h3 className="lp-h3">{phase.title}</h3>
+                <p className="pdesc">{phase.description}</p>
+              </div>
+              <ul>
+                {phase.points.map((point) => (
+                  <li key={point}>{point}</li>
+                ))}
+              </ul>
+            </div>
+            <PhaseVisual phase={phase} />
+          </div>
         ))}
       </div>
-      {PHASES.map((phase) => (
-        <div
-          key={phase.key}
-          className={phase.key === active ? "ppanel active" : "ppanel"}
-        >
-          <div>
+
+      {/* Mobile: the whole journey as a vertical scroll — stops are named,
+          never numbered (the phase names are the product's own vocabulary) */}
+      <div className="pjourney">
+        {PHASES.map((phase) => (
+          <article key={phase.key} className="pj-item">
+            <p className="marker">{phase.tab}</p>
             <h3 className="lp-h3">{phase.title}</h3>
             <p className="pdesc">{phase.description}</p>
-            <ul>
-              {phase.points.map((point) => (
-                <li key={point}>{point}</li>
-              ))}
-            </ul>
-          </div>
-          <div className="pshot">
-            <Image
-              className="shot-img"
-              src={phase.shot}
-              alt={phase.alt}
-              width={2880}
-              height={1800}
-              sizes="(max-width: 900px) 100vw, 520px"
-            />
-          </div>
-        </div>
-      ))}
-    </div>
+            <PhaseVisual phase={phase} isMobile />
+          </article>
+        ))}
+      </div>
+    </>
   );
 }

@@ -197,6 +197,13 @@
       "when": 1785465979525,
       "tag": "0027_church_onboarding_location",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1785508541869,
+      "tag": "0028_church_leadership_status",
+      "breakpoints": true
     }
   ]
 }

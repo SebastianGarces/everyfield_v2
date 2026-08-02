@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
-import Image from "next/image";
 
+import { Chip } from "./_components/chip";
 import { FeatureSwitcher } from "./_components/feature-switcher";
 import { InviteForm } from "./_components/invite-form";
 import { PhaseTabs } from "./_components/phase-tabs";
+import { Shot, ShotOverlay } from "./_components/shot";
 
 export const metadata: Metadata = {
   title: "EveryField — Your church plant, understood.",
@@ -39,15 +40,32 @@ export default function LandingPage() {
               networks and churches.
             </p>
             <div className="hero-shot">
-              <Image
-                className="shot-img"
-                src="/marketing/shots/dashboard.webp"
+              <Shot
+                desktop={{
+                  src: "/marketing/shots/hero.webp",
+                  width: 2400,
+                  height: 1333,
+                }}
+                mobile={{
+                  src: "/marketing/shots/hero-m.webp",
+                  width: 800,
+                  height: 1121,
+                }}
                 alt="The EveryField dashboard for Redemption Hill Church in pre-launch: core group of 61, 142 people in the pipeline, zero overdue tasks, and recent activity."
-                width={2880}
-                height={1800}
-                sizes="(max-width: 1012px) 100vw, 980px"
                 priority
               />
+              {/* the band right of the church name and above the stat row is
+                  the shot's only empty region — and staffing is the one thing
+                  the dashboard behind it does not already count */}
+              <Chip
+                className="hero-chip-a"
+                style={{ left: "45%", top: "11.5%" }}
+              >
+                7 of 8 leadership roles filled
+              </Chip>
+              <Chip className="hero-chip-b" style={{ right: "4%", top: "70%" }}>
+                28 days to launch Sunday
+              </Chip>
             </div>
           </div>
         </div>
@@ -93,6 +111,45 @@ export default function LandingPage() {
               has launched healthy churches for years. You get a short list of
               what matters most right now.
             </p>
+            <div className="engine-panes">
+              <div
+                className="epane"
+                style={{ backgroundImage: 'url("/marketing/c1-field.webp")' }}
+              >
+                <Shot
+                  desktop={{
+                    src: "/marketing/shots/r5-csf.webp",
+                    width: 1864,
+                    height: 1860,
+                  }}
+                  alt="The Plant Intelligence page reading all eight critical success factors — vision casting going well, shared ownership needs attention, two worth a look."
+                />
+              </div>
+              <div
+                className="epane epane-bleed"
+                style={{ backgroundImage: 'url("/marketing/c2-field.webp")' }}
+              >
+                <Shot
+                  desktop={{
+                    src: "/marketing/shots/r5-focus.webp",
+                    width: 1816,
+                    height: 1800,
+                  }}
+                  alt="Your focus — the week's most important next steps, prioritized from the latest assessment: stale follow-ups, a leadership role to fill, training to complete."
+                />
+                <ShotOverlay
+                  overlay={{
+                    src: "/marketing/shots/r5-phasectl.webp",
+                    width: 702,
+                    height: 886,
+                    alt: "Phase control — you decide when to move phases; readiness is advisory and never blocks a change.",
+                    // lands inside the shot's empty left gutter — the pane
+                    // shifts the shot right (see .epane-bleed) to make room
+                    style: { left: "1%", top: "32%", width: "min(30%, 290px)" },
+                  }}
+                />
+              </div>
+            </div>
             <ul className="engine-list">
               <li>
                 Guidance grounded in a proven launch methodology, not generic
@@ -123,18 +180,6 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <section className="lp-sec lp-art">
-        <div className="lp-art-panel">
-          <Image
-            src="/marketing/c2-field.webp"
-            alt=""
-            width={1672}
-            height={941}
-            sizes="100vw"
-          />
-        </div>
-      </section>
-
       <section className="lp-sec" id="networks">
         <div className="lp-inner">
           <p className="marker">For sending churches &amp; networks</p>
@@ -148,22 +193,43 @@ export default function LandingPage() {
             matter most. Planters control what they share; you see health, not
             their people&rsquo;s private records.
           </p>
+          <div className="netshot">
+            <Shot
+              desktop={{
+                src: "/marketing/shots/net-health.webp",
+                width: 2560,
+                height: 1980,
+              }}
+              mobile={{
+                src: "/marketing/shots/net-health-m.webp",
+                width: 940,
+                height: 475,
+              }}
+              alt="Plant Health across a network: Redemption Hill Church needs readiness focus — pre-launch, launching in 27 days, with an observation about prayer coverage — while Trinity Grove Church sits on track after launch."
+            />
+          </div>
           <div className="stats">
             <div className="stat-cell lead">
               <p className="n">86–90%</p>
               <p className="lbl">
                 of plants with real assessment, training, and coaching are still
-                alive at year four.
+                going four to five years in.
               </p>
             </div>
             <div className="stat-cell base">
               <p className="n">68%</p>
               <p className="lbl">
-                of unsupported plants make it that far. Support is the
-                difference — EveryField is how you give it consistently.
+                of plants overall make it that far. Support is the difference —
+                EveryField is how you give it consistently.
               </p>
             </div>
           </div>
+          <p className="stats-src">
+            86–90%: Evangelical Covenant Church (86% at four years, for plants
+            with training and coaching) and ARC (90% at five years, in network).
+            68%: Lifeway Research and Leadership Network, State of church
+            planting USA (four-year survival, all plants).
+          </p>
         </div>
       </section>
 

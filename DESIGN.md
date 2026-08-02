@@ -19,6 +19,7 @@ colors:
   surface: "#FFFEF6" # card — raised surface
   on-surface: "#181D19"
   danger: "#B4432F"
+  primary-hover: "#000000" # button-primary hover deepens to black (see components.button-primary-hover)
   # Brand names (aliases of the roles above, in catalog vocabulary)
   ink: "#181D19"
   green: "#1CE362"
@@ -50,6 +51,12 @@ typography:
     fontWeight: 400
     lineHeight: 1.05
     letterSpacing: -0.03em
+  stat-numeral:
+    fontFamily: Outfit
+    fontSize: 56px # lining figures — font-variant-numeric: lining-nums
+    fontWeight: 400
+    lineHeight: 1
+    letterSpacing: -0.03em
   title:
     fontFamily: Outfit
     fontSize: 21px
@@ -61,6 +68,11 @@ typography:
     fontSize: 20px
     fontWeight: 400
     lineHeight: 1.5
+  engine-pull:
+    fontFamily: Newsreader
+    fontSize: 22px # italic, on ink
+    fontWeight: 400
+    lineHeight: 1.6
   marketing-body:
     fontFamily: Newsreader
     fontSize: 17.5px
@@ -90,6 +102,7 @@ typography:
 rounded:
   none: 0px
   DEFAULT: 0px # radius is 0 everywhere, by ruling — edges are drawn, not implied
+  shot-frame: 16px # the one exception: product-screenshot frames (see Shapes)
 spacing:
   xs: 8px
   sm: 16px
@@ -268,7 +281,9 @@ The scale (fluid sizes via `clamp()`; front-matter tokens hold the max):
 | --- | --- | --- |
 | `display` | Outfit 400 · clamp(46px, 5.8vw, 80px) · lh 1 · −3% | The hero line. One per page. |
 | `heading` | Outfit 400 · clamp(30px, 3.8vw, 46px) · lh 1.05 · −3% | Section headlines. |
+| `stat-numeral` | Outfit 400 · 56px · lh 1 · −3% | Stat cell numerals, lining figures. |
 | `title` | Outfit 500 · 21px · lh 1.25 · −1.5% | Feature/phase panel headers. |
+| `engine-pull` | Newsreader 400 italic · 22px · lh 1.6 | The engine panel's pull quote. |
 | `serif-lead` | Newsreader 400 · 19–20px · lh 1.5 | Pitch leads, hero sub. |
 | `marketing-body` | Newsreader 400 · 17.5px · lh 1.6 | Section body prose. |
 | `body` | DM Sans 400 · 16px · lh 1.6 | Default working text. |
@@ -335,7 +350,13 @@ The system is deliberately flat: **edges are drawn, not implied**.
 
 **Radius 0 everywhere.** Buttons, cards, panels, inputs, avatars, pills,
 kanban cards, chart bars, browser chrome, checkboxes — rectangles only, by
-ruling. There are no exceptions on the marketing surface.
+ruling.
+
+Radius 0 governs UI elements. Product-screenshot frames are the one exception:
+a real app shot standing on a painting carries a 16px radius and an 8px white
+border at 70% (`shot-frame`), so the captured window reads as a photographed
+object rather than another panel of the page (recorded 2026-08-01; ruled in the
+#252 rounds).
 
 - Defined 1px rings replace rounded softness: `edge` for cards and panels,
   `input-border` (45% ink) for inputs, 55% ink for app-mock frames.

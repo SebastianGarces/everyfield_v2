@@ -50,7 +50,7 @@ All files under `src/app/(dashboard)/`. Default auth unless noted: `verifySessio
 - **`phase/signals-actions.ts`**: setManualSignal — Session + `requireChurchAccess`
 - **`feedback/actions.ts`**: submitFeedback (emails `FEEDBACK_EMAIL_TO`)
 - **`admin/feedback/actions.ts`**: updateFeedbackStatus — `requirePlatformAdmin` (ADMIN_EMAILS)
-- **`dashboard/actions.ts`**: `createChurchBasics` (onboarding step 1 — creates the church + `churchPrivacySettings`, does NOT redirect), `completeOnboarding` (stamps `churches.onboarding_completed_at`, redirects to `/dashboard?churchCreated=true`) — both `verifySession` + planter-only
+- **`dashboard/actions.ts`**: `createChurchBasics` (onboarding step 1 — creates the church + `churchPrivacySettings`, does NOT redirect), `confirmLeadership(answer)` (onboarding step 2 / OB-004 — records `churches.leadership_status` from "yes"/"no"; re-enterable by design, no already-answered guard, and it does NOT re-run the step-1 church-link write), `completeOnboarding` (stamps `churches.onboarding_completed_at`, redirects to `/dashboard?churchCreated=true`) — both `verifySession` + planter-only
 - **`wiki/actions.ts`**: `searchWikiArticles(query)`
 
 Server-side `"use server"` services under `src/lib/phase-engine/`: `feedback/service.ts` (`upsertInsightFeedback`, `getInsightFeedbackForUser`), `signals/attestation-service.ts` (`upsertManualSignal`, `listManualSignals`, `getManualSignal`), `transitions/service.ts` (`transitionPhase`, `getPhaseReadiness`, helpers).

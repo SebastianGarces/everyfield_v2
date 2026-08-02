@@ -1,23 +1,59 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 
 import { requestInviteAction, type RequestInviteState } from "../actions";
 
 const initialState: RequestInviteState = { status: "idle" };
 
 export function InviteForm() {
+  // A fresh key resets useActionState — that is how "use a different email"
+  // gets the form back after a success, typo'd address and all.
+  const [attempt, setAttempt] = useState(0);
+
+  return (
+    <InviteAttempt
+      key={attempt}
+      focusOnMount={attempt > 0}
+      onStartOver={() => setAttempt((n) => n + 1)}
+    />
+  );
+}
+
+function InviteAttempt({
+  focusOnMount,
+  onStartOver,
+}: {
+  focusOnMount: boolean;
+  onStartOver: () => void;
+}) {
   const [state, formAction, pending] = useActionState(
     requestInviteAction,
     initialState
   );
+  const doneRef = useRef<HTMLParagraphElement>(null);
+  const emailRef = useRef<HTMLInputElement>(null);
+  const succeeded = state.status === "success";
 
-  if (state.status === "success") {
+  useEffect(() => {
+    if (succeeded) doneRef.current?.focus();
+  }, [succeeded]);
+
+  useEffect(() => {
+    if (focusOnMount) emailRef.current?.focus();
+  }, [focusOnMount]);
+
+  if (succeeded) {
     return (
-      <p className="invite-done">
-        Thank you — we&rsquo;ve got your request. We&rsquo;ll be in touch as
-        invites open up through sending networks and churches.
-      </p>
+      <div className="invite-done-wrap">
+        <p className="invite-done" role="status" tabIndex={-1} ref={doneRef}>
+          Thank you — we&rsquo;ve got your request. We&rsquo;ll be in touch as
+          invites open up through sending networks and churches.
+        </p>
+        <button className="invite-again" type="button" onClick={onStartOver}>
+          Use a different email
+        </button>
+      </div>
     );
   }
 
@@ -27,6 +63,7 @@ export function InviteForm() {
         <label htmlFor="invite-email">Work email</label>
         <input
           id="invite-email"
+          ref={emailRef}
           type="email"
           name="email"
           required
@@ -52,7 +89,9 @@ export function InviteForm() {
         </p>
       ) : (
         <p className="invite-note">
-          We&rsquo;ll only use this to send your invite.
+          Free while EveryField is in alpha — no card, nothing to cancel. We
+          read every request, and we&rsquo;ll be in touch as invites open up. We
+          only use your email to send your invite.
         </p>
       )}
     </>
