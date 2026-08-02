@@ -8,6 +8,14 @@ p1_count: 4
 timestamp: 2026-08-01T16-55-57Z
 slug: src-app-marketing-page-tsx
 ---
+> **Status (2026-08-02):** historical snapshot — this critique ran against the pre-#256 page.
+> PR #256 (merged 2026-08-02) addressed all four P1s: /terms + /privacy pages shipped (verified
+> 200 in production), stats source line + footer mailto added, hero clamp floor fixed
+> (two-stage clamp in marketing.css), networks section got the net-health product shot, overlays
+> re-cut (r8-*) with the fswitch rework, and tablist arrow keys landed (use-tablist-keys.ts).
+> Not adopted: the "free during the alpha" CTA line — the CTA says "early access with a small
+> cohort" instead, consistent with the org-pays-per-plant ruling (#192/#193).
+
 Method: dual-agent (A: design review sub-agent · B: detector/browser sub-agent)
 
 ## Design Health Score
