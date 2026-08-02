@@ -53,15 +53,37 @@ import {
 // capability cannot be re-cut into another.
 //
 // ----------------------------------------------------------------------------
-// Expiry
+// DIRECTION IS A PURPOSE, NOT A PARAMETER (ruled 2026-08-01)
 // ----------------------------------------------------------------------------
 //
-// Emails sit in inboxes for a long time and an unsubscribe link that has
-// stopped working is a compliance problem, not a security win — so the TTL is
-// generous (180 days) rather than short. What bounds the damage is the width
-// of the capability, not its lifetime: the worst a stolen token can do is
-// silence one category of email for one user, which that user can undo from
-// the confirmation page in one click.
+// The first cut of this file minted ONE token that both disabled and re-enabled
+// a category. That made the emailed link a bidirectional consent control with a
+// six-month reach: anyone holding an old message — a forwarded thread, a shared
+// mailbox, a departed staff member's inbox — could switch a category back ON
+// that the user had deliberately turned off, or re-apply the opt-out after each
+// undo. Not a leak; a consent-integrity defect.
+//
+// So `disable` and `enable` are now separate purposes with separate AADs, and
+// therefore separate KEYS. A disable token fed to the enable verifier does not
+// fail a comparison — its auth tag does not validate at all, because the key it
+// was sealed under is not the key being used to open it. "The emailed link can
+// only ever opt you out" is a cryptographic property here, not a branch.
+//
+// ----------------------------------------------------------------------------
+// Expiry, per direction
+// ----------------------------------------------------------------------------
+//
+// DISABLE: emails sit in inboxes for a long time and an unsubscribe link that
+// has stopped working is a compliance problem, not a security win — so its TTL
+// is generous (180 days). What bounds the damage is the width of the
+// capability, not its lifetime: the worst a stolen disable token can do is
+// silence one category of email for one user.
+//
+// ENABLE: the opposite shape of risk. Consent to RECEIVE should be deliberate
+// and fresh, and the only legitimate holder is someone looking at the
+// confirmation page right now — the token is minted when that page renders,
+// not mailed to anyone. One hour, so the undo survives a distraction but not a
+// forwarded inbox.
 // ============================================================================
 
 /**
@@ -72,15 +94,44 @@ import {
 const TOKEN_VERSION = 1;
 
 /**
- * Purpose + channel, bound into the ciphertext by GCM's AAD and into the key by
- * the derivation below. Changing this string invalidates every token in flight,
- * which is exactly what a purpose change should do.
+ * What a token is allowed to do. There is no third value, and no token can do
+ * both — see "Direction is a purpose" in the header.
  */
-export const UNSUBSCRIBE_TOKEN_AAD =
-  "everyfield.notifications.unsubscribe.email.v1";
+export type UnsubscribeTokenPurpose = "disable" | "enable";
 
-/** How long a minted link keeps working. See the header on why it is long. */
+/**
+ * Purpose + channel, bound into the ciphertext by GCM's AAD and into the key by
+ * the derivation below. Changing either string invalidates every token of that
+ * purpose in flight, which is exactly what a purpose change should do.
+ *
+ * The two strings differ, so the two keys differ, so the two capabilities are
+ * disjoint at the cipher rather than at a comparison.
+ */
+const AAD_BY_PURPOSE: Record<UnsubscribeTokenPurpose, string> = {
+  disable: "everyfield.notifications.unsubscribe.email.v1",
+  enable: "everyfield.notifications.resubscribe.email.v1",
+};
+
+/** The emailed link's AAD. Exported for the same reason it always was: tests. */
+export const UNSUBSCRIBE_TOKEN_AAD = AAD_BY_PURPOSE.disable;
+
+/** The confirmation page's undo AAD. */
+export const RESUBSCRIBE_TOKEN_AAD = AAD_BY_PURPOSE.enable;
+
+/** How long an emailed opt-out link keeps working. Long, deliberately. */
 export const UNSUBSCRIBE_TOKEN_TTL_MS = 180 * 24 * 60 * 60 * 1000;
+
+/**
+ * How long the confirmation page's undo keeps working. Short, deliberately —
+ * it is minted for the person reading the page, and nobody else should be
+ * holding it an hour from now.
+ */
+export const RESUBSCRIBE_TOKEN_TTL_MS = 60 * 60 * 1000;
+
+const TTL_BY_PURPOSE: Record<UnsubscribeTokenPurpose, number> = {
+  disable: UNSUBSCRIBE_TOKEN_TTL_MS,
+  enable: RESUBSCRIBE_TOKEN_TTL_MS,
+};
 
 /**
  * Shortest secret we will mint with. Not a cryptographic bound (the key is a
@@ -136,15 +187,18 @@ export function unsubscribeTokenSecret(): string {
   return secret;
 }
 
-/** Domain-separated key: the same secret under another purpose is another key. */
-function keyFor(secret: string): Buffer {
+/**
+ * Domain-separated key: the same secret under another purpose — including the
+ * other DIRECTION of this same capability — is another key.
+ */
+function keyFor(secret: string, purpose: UnsubscribeTokenPurpose): Buffer {
   return createHash("sha256")
-    .update(`${UNSUBSCRIBE_TOKEN_AAD}:${secret}`)
+    .update(`${AAD_BY_PURPOSE[purpose]}:${secret}`)
     .digest();
 }
 
 /**
- * The sealed payload. Deliberately three short keys: a token travels in a URL
+ * The sealed payload. Deliberately four short keys: a token travels in a URL
  * that has to survive being wrapped by a mail client, and there is nothing
  * else this capability needs to know.
  */
@@ -155,11 +209,24 @@ interface SealedPayload {
   c: string;
   /** Expiry, epoch SECONDS (not ms — shorter, and second precision is plenty). */
   x: number;
+  /**
+   * Direction. Redundant with the AAD by design: the key already makes a
+   * cross-direction token undecryptable, and this field means a future refactor
+   * that accidentally shares a key still cannot confuse the two. Belt to the
+   * cipher's braces, checked after decryption.
+   */
+  p: UnsubscribeTokenPurpose;
 }
 
 export interface MintUnsubscribeTokenInput {
   userId: string;
   category: NotificationCategory;
+  /**
+   * Which direction this token authorises. Defaults to `disable` — the emailed
+   * link, and the LESS powerful of the two. A default that silently produced a
+   * re-enable capability would be the wrong way round.
+   */
+  purpose?: UnsubscribeTokenPurpose;
   /** Clock, injectable so expiry is assertable. */
   now?: Date;
   ttlMs?: number;
@@ -168,7 +235,7 @@ export interface MintUnsubscribeTokenInput {
 }
 
 /**
- * Mint the token for one (user, category) pair.
+ * Mint the token for one (user, category, direction) triple.
  *
  * A fresh random IV per call means two links for the same pair are different
  * strings, so a token is never a stable identifier for a user either — you
@@ -177,17 +244,19 @@ export interface MintUnsubscribeTokenInput {
 export function mintUnsubscribeToken(input: MintUnsubscribeTokenInput): string {
   const secret = input.secret ?? unsubscribeTokenSecret();
   const now = input.now ?? new Date();
-  const ttlMs = input.ttlMs ?? UNSUBSCRIBE_TOKEN_TTL_MS;
+  const purpose = input.purpose ?? "disable";
+  const ttlMs = input.ttlMs ?? TTL_BY_PURPOSE[purpose];
 
   const payload: SealedPayload = {
     u: input.userId,
     c: input.category,
     x: Math.floor((now.getTime() + ttlMs) / 1000),
+    p: purpose,
   };
 
   const iv = randomBytes(IV_BYTES);
-  const cipher = createCipheriv("aes-256-gcm", keyFor(secret), iv);
-  cipher.setAAD(Buffer.from(UNSUBSCRIBE_TOKEN_AAD, "utf8"));
+  const cipher = createCipheriv("aes-256-gcm", keyFor(secret, purpose), iv);
+  cipher.setAAD(Buffer.from(AAD_BY_PURPOSE[purpose], "utf8"));
 
   const ciphertext = Buffer.concat([
     cipher.update(JSON.stringify(payload), "utf8"),
@@ -225,11 +294,18 @@ export type UnsubscribeTokenVerification =
       valid: true;
       userId: string;
       category: NotificationCategory;
+      purpose: UnsubscribeTokenPurpose;
       expiresAt: Date;
     }
   | { valid: false; reason: UnsubscribeTokenRejection };
 
 export interface VerifyUnsubscribeTokenOptions {
+  /**
+   * Which direction the CALLER is about to perform. The token is opened with
+   * this purpose's key, so a token minted for the other direction cannot be
+   * decrypted at all. Defaults to `disable`, matching the mint default.
+   */
+  purpose?: UnsubscribeTokenPurpose;
   now?: Date;
   secret?: string;
 }
@@ -256,7 +332,8 @@ export interface VerifyUnsubscribeTokenOptions {
  * The category is re-validated against the code registry after decryption. A
  * token minted by a deploy that knew a category this one does not must not
  * write a row nothing can ever resolve again (see `defaultChannelEnabled` —
- * an unknown category resolves to "off" forever).
+ * an unknown category resolves to "off" forever). The purpose is re-validated
+ * for the same reason, one layer down from the key that already enforces it.
  */
 export function verifyUnsubscribeToken(
   token: string,
@@ -269,6 +346,7 @@ export function verifyUnsubscribeToken(
     return { valid: false, reason: "malformed" };
   }
   const now = options.now ?? new Date();
+  const purpose = options.purpose ?? "disable";
 
   if (typeof token !== "string" || token.length === 0) {
     return { valid: false, reason: "malformed" };
@@ -297,8 +375,12 @@ export function verifyUnsubscribeToken(
 
   let plaintext: string;
   try {
-    const decipher = createDecipheriv("aes-256-gcm", keyFor(secret), iv);
-    decipher.setAAD(Buffer.from(UNSUBSCRIBE_TOKEN_AAD, "utf8"));
+    const decipher = createDecipheriv(
+      "aes-256-gcm",
+      keyFor(secret, purpose),
+      iv
+    );
+    decipher.setAAD(Buffer.from(AAD_BY_PURPOSE[purpose], "utf8"));
     decipher.setAuthTag(tag);
     plaintext = Buffer.concat([
       decipher.update(ciphertext),
@@ -306,7 +388,9 @@ export function verifyUnsubscribeToken(
     ]).toString("utf8");
   } catch {
     // GCM's auth tag failing is the whole tamper story: a flipped byte
-    // anywhere in the IV, tag, ciphertext or AAD lands here.
+    // anywhere in the IV, tag, ciphertext or AAD lands here — and so does a
+    // perfectly genuine token minted for the OTHER direction, because the key
+    // it was sealed under is not the key being used to open it.
     return { valid: false, reason: "tampered" };
   }
 
@@ -321,7 +405,7 @@ export function verifyUnsubscribeToken(
     return { valid: false, reason: "tampered" };
   }
 
-  const { u, c, x } = parsed as Partial<SealedPayload>;
+  const { u, c, x, p } = parsed as Partial<SealedPayload>;
 
   if (typeof u !== "string" || !UUID_PATTERN.test(u)) {
     return { valid: false, reason: "tampered" };
@@ -332,11 +416,15 @@ export function verifyUnsubscribeToken(
   if (typeof x !== "number" || !Number.isFinite(x)) {
     return { valid: false, reason: "tampered" };
   }
+  // Unreachable while the keys differ — which is the point of asserting it.
+  if (p !== purpose) {
+    return { valid: false, reason: "tampered" };
+  }
 
   const expiresAt = new Date(x * 1000);
   if (now.getTime() >= expiresAt.getTime()) {
     return { valid: false, reason: "expired" };
   }
 
-  return { valid: true, userId: u, category: c, expiresAt };
+  return { valid: true, userId: u, category: c, purpose, expiresAt };
 }

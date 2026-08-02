@@ -500,8 +500,10 @@ test("twenty tasks notifications produce one email and twenty feed rows (N-012)"
   assert.ok(email.every((row) => row?.status === "sent"));
   assert.ok(email.every((row) => row?.providerMessageId === "m-1"));
 
-  // The subject names the count rather than one arbitrary title.
-  assert.match(store.sends[0].message.subject, /^20 tasks updates$/);
+  // The subject names the category and the count rather than one arbitrary
+  // title — and does it in that order, so the already-plural label never has to
+  // agree with the number (ruled 2026-08-01).
+  assert.match(store.sends[0].message.subject, /^Tasks — 20 updates$/);
   assert.match(store.sends[0].message.text, /Task 0 is overdue/);
   assert.match(store.sends[0].message.text, /Task 19 is overdue/);
 });

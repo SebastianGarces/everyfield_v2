@@ -1,12 +1,22 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import type { NotificationPreference } from "@/db/schema";
+
+import type { NotificationCategory } from "../categories";
 import { preferenceOwnerFromUnsubscribeToken } from "../preferences";
 import {
+  applyEmailOptIn,
+  applyEmailOptOut,
   describeUnsubscribeSubject,
   unsubscribeWriteQuery,
+  type UnsubscribeStore,
 } from "./unsubscribe";
-import { mintUnsubscribeToken } from "./unsubscribe-token";
+import {
+  mintUnsubscribeToken,
+  RESUBSCRIBE_TOKEN_TTL_MS,
+  verifyUnsubscribeToken,
+} from "./unsubscribe-token";
 
 // ============================================================================
 // Scope of effect on the unauthenticated surface (N-007).
@@ -163,6 +173,333 @@ test("an expired token yields no owner either", () => {
   assert.equal(resolved.ok, false);
   assert.ok(!resolved.ok);
   assert.equal(resolved.reason, "expired");
+});
+
+// ============================================================================
+// Direction, and who may travel in it (ruled 2026-08-01).
+//
+// The tests below execute the REAL `applyEmailOptOut` / `applyEmailOptIn` /
+// `describeUnsubscribeSubject` against a recording store, so "this path wrote
+// nothing" is an observation about code that ran, not a claim about which
+// function someone remembered not to call.
+// ============================================================================
+
+interface Write {
+  owner: string;
+  category: NotificationCategory;
+  enabled: boolean;
+}
+
+function recordingStore(
+  initial: { email?: string | null; rows?: NotificationPreference[] } = {}
+): UnsubscribeStore & { writes: Write[] } {
+  const writes: Write[] = [];
+  const rows = initial.rows ?? [];
+
+  return {
+    writes,
+    async loadRecipientEmail() {
+      return initial.email === undefined
+        ? "planter@example.test"
+        : initial.email;
+    },
+    async loadPreferences() {
+      return rows;
+    },
+    async writeEmailPreference(owner, category, enabled) {
+      writes.push({ owner, category, enabled });
+    },
+  };
+}
+
+/** An explicit stored row, the way the settings screen or an opt-out writes it. */
+function preferenceRow(
+  category: NotificationCategory,
+  enabled: boolean
+): NotificationPreference {
+  return {
+    id: "44444444-4444-4444-8444-444444444444",
+    userId: USER,
+    category,
+    channel: "email",
+    enabled,
+    digestCadence: null,
+    createdAt: NOW,
+    updatedAt: NOW,
+  } as NotificationPreference;
+}
+
+function emailedToken(userId = USER, category: NotificationCategory = "tasks") {
+  return mintUnsubscribeToken({
+    userId,
+    category,
+    purpose: "disable",
+    now: NOW,
+    secret: SECRET,
+  });
+}
+
+function undoToken(userId = USER, category: NotificationCategory = "tasks") {
+  return mintUnsubscribeToken({
+    userId,
+    category,
+    purpose: "enable",
+    now: NOW,
+    secret: SECRET,
+  });
+}
+
+// ----------------------------------------------------------------------------
+// AC: the GET an emailed link lands on changes nothing
+// ----------------------------------------------------------------------------
+
+test("describing the subject — what the GET renders — performs no write at all", async () => {
+  const store = recordingStore();
+
+  const result = await describeUnsubscribeSubject(emailedToken(), {
+    now: NOW,
+    secret: SECRET,
+    store,
+  });
+
+  assert.equal(result.status, "ok");
+  assert.ok(result.status === "ok");
+  // The page can name the category and the address, which is what the FRD
+  // requires of it...
+  assert.equal(result.subject.category, "tasks");
+  assert.equal(result.subject.email, "planter@example.test");
+  // ...and the reader is still subscribed, because rendering is not consent.
+  assert.equal(result.subject.enabled, true);
+
+  // The property the whole ruling turns on: a mail scanner fetching this URL
+  // changes nothing, so nobody is opted out without seeing the page.
+  assert.deepEqual(store.writes, []);
+});
+
+test("rendering the page repeatedly still writes nothing", async () => {
+  const store = recordingStore();
+  for (let i = 0; i < 5; i += 1) {
+    await describeUnsubscribeSubject(emailedToken(), {
+      now: NOW,
+      secret: SECRET,
+      store,
+    });
+  }
+  assert.equal(store.writes.length, 0);
+});
+
+// ----------------------------------------------------------------------------
+// AC: the POST opts out exactly one (user, category, email) cell
+// ----------------------------------------------------------------------------
+
+test("the opt-out writes exactly one cell, and it is the token's own", async () => {
+  const store = recordingStore();
+
+  const result = await applyEmailOptOut(emailedToken(), {
+    now: NOW,
+    secret: SECRET,
+    store,
+  });
+
+  assert.equal(result.status, "ok");
+  assert.equal(store.writes.length, 1);
+  assert.deepEqual(store.writes[0], {
+    owner: USER,
+    category: "tasks",
+    enabled: false,
+  });
+});
+
+test("a second opt-out is idempotent — one cell, same value", async () => {
+  const store = recordingStore({ rows: [preferenceRow("tasks", false)] });
+
+  await applyEmailOptOut(emailedToken(), { now: NOW, secret: SECRET, store });
+  await applyEmailOptOut(emailedToken(), { now: NOW, secret: SECRET, store });
+
+  assert.equal(store.writes.length, 2);
+  assert.ok(store.writes.every((write) => write.enabled === false));
+  assert.ok(store.writes.every((write) => write.category === "tasks"));
+});
+
+test("a token for a deleted user writes nothing", async () => {
+  const store = recordingStore({ email: null });
+
+  const result = await applyEmailOptOut(emailedToken(), {
+    now: NOW,
+    secret: SECRET,
+    store,
+  });
+
+  assert.equal(result.status, "rejected");
+  assert.ok(result.status === "rejected");
+  assert.equal(result.reason, "unknown_recipient");
+  assert.deepEqual(store.writes, []);
+});
+
+// ----------------------------------------------------------------------------
+// AC: the emailed token cannot re-enable; the undo token cannot disable
+// ----------------------------------------------------------------------------
+
+test("the emailed token is refused by the opt-IN path, and writes nothing", async () => {
+  const store = recordingStore({ rows: [preferenceRow("tasks", false)] });
+
+  const result = await applyEmailOptIn(emailedToken(), {
+    now: NOW,
+    secret: SECRET,
+    store,
+  });
+
+  assert.equal(result.status, "rejected");
+  assert.ok(result.status === "rejected");
+  assert.equal(result.reason, "tampered");
+  assert.deepEqual(store.writes, []);
+});
+
+test("the undo token is refused by the opt-OUT path, and writes nothing", async () => {
+  const store = recordingStore();
+
+  const result = await applyEmailOptOut(undoToken(), {
+    now: NOW,
+    secret: SECRET,
+    store,
+  });
+
+  assert.equal(result.status, "rejected");
+  assert.ok(result.status === "rejected");
+  assert.equal(result.reason, "tampered");
+  assert.deepEqual(store.writes, []);
+});
+
+test("the undo token re-enables exactly the one cell it names", async () => {
+  const store = recordingStore({ rows: [preferenceRow("tasks", false)] });
+
+  const result = await applyEmailOptIn(undoToken(), {
+    now: NOW,
+    secret: SECRET,
+    store,
+  });
+
+  assert.equal(result.status, "ok");
+  assert.deepEqual(store.writes, [
+    { owner: USER, category: "tasks", enabled: true },
+  ]);
+});
+
+// ----------------------------------------------------------------------------
+// AC: the undo token is minted server-side, on render, only after an opt-out
+// ----------------------------------------------------------------------------
+
+test("the confirmation page is handed an undo token only once the category is off", async () => {
+  const subscribed = recordingStore();
+  const optedOut = recordingStore({ rows: [preferenceRow("tasks", false)] });
+
+  const whileSubscribed = await describeUnsubscribeSubject(emailedToken(), {
+    now: NOW,
+    secret: SECRET,
+    store: subscribed,
+  });
+  assert.ok(whileSubscribed.status === "ok");
+  // Nothing to undo, so no re-enable capability is created at all.
+  assert.equal(whileSubscribed.subject.undoToken, null);
+
+  const whileOptedOut = await describeUnsubscribeSubject(emailedToken(), {
+    now: NOW,
+    secret: SECRET,
+    store: optedOut,
+  });
+  assert.ok(whileOptedOut.status === "ok");
+  const minted = whileOptedOut.subject.undoToken;
+  assert.ok(minted, "no undo token was minted after the opt-out");
+
+  // It is a genuine ENABLE token for the same pair, and it is not the emailed
+  // one being handed back.
+  assert.notEqual(minted, emailedToken());
+  const verified = verifyUnsubscribeToken(minted, {
+    purpose: "enable",
+    now: NOW,
+    secret: SECRET,
+  });
+  assert.ok(verified.valid);
+  assert.equal(verified.userId, USER);
+  assert.equal(verified.category, "tasks");
+  assert.equal(
+    verified.expiresAt.getTime(),
+    NOW.getTime() + RESUBSCRIBE_TOKEN_TTL_MS
+  );
+});
+
+test("an expired undo token re-enables nothing", async () => {
+  const store = recordingStore({ rows: [preferenceRow("tasks", false)] });
+
+  const result = await applyEmailOptIn(undoToken(), {
+    now: new Date(NOW.getTime() + RESUBSCRIBE_TOKEN_TTL_MS + 1_000),
+    secret: SECRET,
+    store,
+  });
+
+  assert.equal(result.status, "rejected");
+  assert.ok(result.status === "rejected");
+  assert.equal(result.reason, "expired");
+  assert.deepEqual(store.writes, []);
+});
+
+test("a tampered token changes nothing in either direction", async () => {
+  for (const [token, apply] of [
+    [emailedToken(), applyEmailOptOut],
+    [undoToken(), applyEmailOptIn],
+  ] as const) {
+    const raw = Buffer.from(token, "base64url");
+    raw[raw.length - 2] ^= 0b0000_0001;
+
+    const store = recordingStore();
+    const result = await apply(raw.toString("base64url"), {
+      now: NOW,
+      secret: SECRET,
+      store,
+    });
+
+    assert.equal(result.status, "rejected");
+    assert.ok(result.status === "rejected");
+    assert.equal(result.reason, "tampered");
+    assert.deepEqual(store.writes, []);
+  }
+});
+
+test("an expired emailed token opts nobody out", async () => {
+  const store = recordingStore();
+  const shortLived = mintUnsubscribeToken({
+    userId: USER,
+    category: "tasks",
+    purpose: "disable",
+    ttlMs: 1_000,
+    now: NOW,
+    secret: SECRET,
+  });
+
+  const result = await applyEmailOptOut(shortLived, {
+    now: new Date(NOW.getTime() + 2_000),
+    secret: SECRET,
+    store,
+  });
+
+  assert.equal(result.status, "rejected");
+  assert.ok(result.status === "rejected");
+  assert.equal(result.reason, "expired");
+  assert.deepEqual(store.writes, []);
+});
+
+test("one reader's link cannot reach another reader's preferences", async () => {
+  const store = recordingStore();
+
+  await applyEmailOptOut(emailedToken(OTHER_USER, "meetings"), {
+    now: NOW,
+    secret: SECRET,
+    store,
+  });
+
+  assert.deepEqual(store.writes, [
+    { owner: OTHER_USER, category: "meetings", enabled: false },
+  ]);
 });
 
 test("an unconfigured environment refuses the token instead of throwing at the page", async (t) => {

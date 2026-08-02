@@ -25,12 +25,22 @@ import { mintUnsubscribeToken } from "./unsubscribe-token";
 // their native unsubscribe control, which is both a compliance and a
 // deliverability property: a reader who cannot find the link marks the message
 // as spam instead, and that is far more expensive than the opt-out.
+//
+// It also carries `List-Unsubscribe-Post: List-Unsubscribe=One-Click` (RFC
+// 8058, ruled 2026-08-01). The two headers are a pair and the pair is the whole
+// point of the ruling: the URL's GET now only RENDERS a confirmation page, so a
+// mail scanner that fetches every link in a message cannot opt anyone out — and
+// a real mail client keeps its frictionless one-click by POSTing to the same
+// URL instead. Deliverability and consent integrity in one move.
 // ============================================================================
 
-/** Where the unauthenticated opt-out mutation lives. */
+/**
+ * The unsubscribe endpoint. One URL, two methods, as RFC 8058 requires:
+ * GET renders the confirmation page (no mutation, ever), POST is one-click.
+ */
 export const UNSUBSCRIBE_PATH = "/api/notifications/unsubscribe";
 
-/** Where that mutation sends the browser afterwards. */
+/** The confirmation page the GET renders — and where the button posts from. */
 export const UNSUBSCRIBE_CONFIRMATION_PATH = "/unsubscribe";
 
 /** The full preference screen (N-006), linked from every email and the page. */
@@ -96,8 +106,15 @@ export interface NotificationEmailItem {
 /**
  * The subject line for a group. One notification keeps its own title verbatim —
  * the caller wrote it and it is the most specific thing we could possibly say.
- * Several become a count, because "3 task updates" is what stops the inbox
- * looking like three separate events (N-012).
+ * Several become a count, because one line naming three things is what stops
+ * the inbox looking like three separate events (N-012).
+ *
+ * The shape is `Tasks — 3 updates` (ruled 2026-08-01). The obvious
+ * `${count} ${label} updates` reads "3 tasks updates", because the registry's
+ * labels are already plural, and the fix is not to add a singular form per
+ * category: leading with the label sidesteps pluralisation entirely and forever
+ * — a seventh category needs no grammar. It also scans better in a crowded
+ * inbox, where the first word is the only one a reader is guaranteed to see.
  */
 export function batchSubject(
   category: NotificationCategory,
@@ -105,7 +122,7 @@ export function batchSubject(
 ): string {
   if (items.length === 1) return items[0].title;
   const label = NOTIFICATION_CATEGORIES[category]?.label ?? category;
-  return `${items.length} ${label.toLowerCase()} updates`;
+  return `${label} — ${items.length} updates`;
 }
 
 // ----------------------------------------------------------------------------
@@ -144,9 +161,12 @@ export async function composeBatchEmail(
 ): Promise<OutboundEmail> {
   const baseUrl = options.baseUrl ?? appBaseUrl();
 
+  // DISABLE-only, explicitly. What goes in an inbox can never re-subscribe
+  // anyone — the undo is minted on the confirmation page instead.
   const token = mintUnsubscribeToken({
     userId: recipient.id,
     category,
+    purpose: "disable",
     now: options.now,
     secret: options.secret,
   });
@@ -167,11 +187,17 @@ export async function composeBatchEmail(
     text,
     idempotencyKey,
     headers: {
-      // No `List-Unsubscribe-Post`: RFC 8058 one-click is a cross-origin POST
-      // with no `Origin` header, which `src/proxy.ts` rejects as CSRF. Offering
-      // a one-click control that always fails is worse than offering the link
-      // alone, so mail clients get the URL and use a GET.
+      // RFC 8058. The two headers only mean anything together: the first names
+      // the URL, the second promises that POSTing `List-Unsubscribe=One-Click`
+      // to it opts the reader out without a round trip through a page.
+      //
+      // That POST is cross-origin and carries no `Origin` header by spec, so
+      // `src/proxy.ts` exempts this ONE path from its CSRF check — the same
+      // exemption `/api/webhooks/resend` has, and for the same reason: the
+      // request authenticates itself (a sealed capability token here, a
+      // signature there) rather than by being same-origin.
       "List-Unsubscribe": `<${optOutUrl}>`,
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
     },
   };
 }

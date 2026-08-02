@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   mintUnsubscribeToken,
   MissingUnsubscribeSecretError,
+  RESUBSCRIBE_TOKEN_TTL_MS,
   UNSUBSCRIBE_TOKEN_TTL_MS,
   unsubscribeTokenSecret,
   verifyUnsubscribeToken,
@@ -48,6 +49,8 @@ test("a minted token round-trips to exactly the pair it was minted for", () => {
   assert.ok(verified.valid);
   assert.equal(verified.userId, USER);
   assert.equal(verified.category, "tasks");
+  // The default is the LESS powerful direction — the one that goes in an email.
+  assert.equal(verified.purpose, "disable");
   assert.equal(
     verified.expiresAt.getTime(),
     NOW.getTime() + UNSUBSCRIBE_TOKEN_TTL_MS
@@ -193,6 +196,134 @@ test("the category is carried by the token, not by the request", () => {
   assert.ok(tasks.valid && meetings.valid);
   assert.equal(tasks.category, "tasks");
   assert.equal(meetings.category, "meetings");
+});
+
+// ----------------------------------------------------------------------------
+// AC: the emailed token cannot re-enable; the undo token cannot disable
+// (the capability split, ruled 2026-08-01)
+// ----------------------------------------------------------------------------
+
+test("the emailed (disable) token cannot re-enable anything", () => {
+  const emailed = mint({ purpose: "disable" });
+
+  // It opens as what it is...
+  const asDisable = verifyUnsubscribeToken(emailed, {
+    purpose: "disable",
+    now: NOW,
+    secret: SECRET,
+  });
+  assert.ok(asDisable.valid);
+  assert.equal(asDisable.purpose, "disable");
+
+  // ...and is not merely refused as the other direction — it is undecryptable,
+  // because `enable` uses a different key. A six-month-old email in a forwarded
+  // thread therefore cannot switch a category the user deliberately turned off
+  // back on.
+  const asEnable = verifyUnsubscribeToken(emailed, {
+    purpose: "enable",
+    now: NOW,
+    secret: SECRET,
+  });
+  assert.equal(asEnable.valid, false);
+  assert.ok(!asEnable.valid);
+  assert.equal(asEnable.reason, "tampered");
+});
+
+test("the undo (enable) token cannot disable anything", () => {
+  const undo = mint({ purpose: "enable" });
+
+  const asEnable = verifyUnsubscribeToken(undo, {
+    purpose: "enable",
+    now: NOW,
+    secret: SECRET,
+  });
+  assert.ok(asEnable.valid);
+  assert.equal(asEnable.purpose, "enable");
+  assert.equal(asEnable.userId, USER);
+  assert.equal(asEnable.category, "tasks");
+
+  const asDisable = verifyUnsubscribeToken(undo, {
+    purpose: "disable",
+    now: NOW,
+    secret: SECRET,
+  });
+  assert.equal(asDisable.valid, false);
+  assert.ok(!asDisable.valid);
+  assert.equal(asDisable.reason, "tampered");
+});
+
+test("the two directions do not even produce the same token for the same pair", () => {
+  // Not just different ciphertexts (the IV guarantees that) — different KEYS.
+  // Proven by the cross-direction refusals above; this pins that the mint path
+  // really is producing two distinct artefacts rather than one relabelled one.
+  const disable = mint({ purpose: "disable" });
+  const enable = mint({ purpose: "enable" });
+  assert.notEqual(disable, enable);
+});
+
+test("the undo token expires in an hour, and expiry is reported as expiry", () => {
+  const undo = mint({ purpose: "enable" });
+
+  const fresh = verifyUnsubscribeToken(undo, {
+    purpose: "enable",
+    now: NOW,
+    secret: SECRET,
+  });
+  assert.ok(fresh.valid);
+  assert.equal(
+    fresh.expiresAt.getTime(),
+    NOW.getTime() + RESUBSCRIBE_TOKEN_TTL_MS
+  );
+  assert.equal(RESUBSCRIBE_TOKEN_TTL_MS, 60 * 60 * 1000);
+
+  // Still good a minute before the hour is up.
+  assert.equal(
+    verifyUnsubscribeToken(undo, {
+      purpose: "enable",
+      now: new Date(NOW.getTime() + RESUBSCRIBE_TOKEN_TTL_MS - 60_000),
+      secret: SECRET,
+    }).valid,
+    true
+  );
+
+  // Gone a minute after. The disable token minted at the same instant is still
+  // valid — which is the asymmetry the ruling asked for.
+  const stale = verifyUnsubscribeToken(undo, {
+    purpose: "enable",
+    now: new Date(NOW.getTime() + RESUBSCRIBE_TOKEN_TTL_MS + 60_000),
+    secret: SECRET,
+  });
+  assert.equal(stale.valid, false);
+  assert.ok(!stale.valid);
+  assert.equal(stale.reason, "expired");
+
+  assert.equal(
+    verifyUnsubscribeToken(mint({ purpose: "disable" }), {
+      purpose: "disable",
+      now: new Date(NOW.getTime() + RESUBSCRIBE_TOKEN_TTL_MS + 60_000),
+      secret: SECRET,
+    }).valid,
+    true
+  );
+});
+
+test("a tampered undo token is rejected, byte by byte", () => {
+  const raw = Buffer.from(mint({ purpose: "enable" }), "base64url");
+
+  for (const index of [0, 3, 15, raw.length - 1]) {
+    const edited = Buffer.from(raw);
+    edited[index] ^= 0b0000_0001;
+
+    assert.equal(
+      verifyUnsubscribeToken(edited.toString("base64url"), {
+        purpose: "enable",
+        now: NOW,
+        secret: SECRET,
+      }).valid,
+      false,
+      `byte ${index} was not covered by authentication on the enable token`
+    );
+  }
 });
 
 test("the secret fails closed when the environment supplies neither variable", (t) => {

@@ -19,6 +19,7 @@ import type {
   NotificationPreference,
 } from "@/db/schema";
 
+import { NOTIFICATION_CATEGORIES, notificationCategories } from "../categories";
 import {
   runDispatch,
   type DispatchDeps,
@@ -182,7 +183,9 @@ test("a grouped batch is one provider call listing every notification", async ()
   assert.equal(summary.emailsSent, 1);
 
   const [message] = sent;
-  assert.equal(message.subject, "3 tasks updates");
+  // The label LEADS, so the count never has to agree with it grammatically —
+  // "3 tasks updates" was the bug this shape retires (ruled 2026-08-01).
+  assert.equal(message.subject, "Tasks — 3 updates");
 
   for (const item of items) {
     assert.ok(
@@ -256,6 +259,63 @@ test("the unsubscribe link is in the plain-text part and the List-Unsubscribe he
   assert.equal(message.headers?.["List-Unsubscribe"], `<${link}>`);
 });
 
+// ----------------------------------------------------------------------------
+// AC: outgoing emails carry the RFC 8058 one-click headers
+// ----------------------------------------------------------------------------
+
+test("every email carries the RFC 8058 pair, so one-click survives the move to POST", async () => {
+  // The two headers only mean anything together: the first names the URL, the
+  // second promises that POSTing to it opts the reader out. Without the second,
+  // Gmail and Apple Mail fall back to opening the URL — which now only RENDERS
+  // a confirmation page, so the reader would have lost their one-click control
+  // when the mutation moved off GET (ruled 2026-08-01).
+  for (const category of ["tasks", "meetings", "phase"] as const) {
+    const { deps, sent } = fakeDeps([notification({ category })]);
+    await runDispatch(deps, { now: NOW });
+
+    const [message] = sent;
+    const link = unsubscribeLinkFrom(message);
+    assert.ok(link, `no unsubscribe link in the ${category} email`);
+
+    assert.equal(message.headers?.["List-Unsubscribe"], `<${link}>`);
+    // Verbatim from RFC 8058 §3.1 — mail clients string-match this.
+    assert.equal(
+      message.headers?.["List-Unsubscribe-Post"],
+      "List-Unsubscribe=One-Click"
+    );
+    // The header URL is the endpoint that accepts the POST, not the page.
+    assert.match(link, /\/api\/notifications\/unsubscribe\?token=/);
+  }
+});
+
+test("the emailed token is disable-only — it cannot re-subscribe anyone", async () => {
+  const { deps, sent } = fakeDeps([notification()]);
+  await runDispatch(deps, { now: NOW });
+
+  const link = unsubscribeLinkFrom(sent[0]);
+  assert.ok(link);
+  const token = tokenFrom(link);
+
+  const asDisable = verifyUnsubscribeToken(token, {
+    purpose: "disable",
+    now: NOW,
+    secret: SECRET,
+  });
+  assert.ok(asDisable.valid);
+  assert.equal(asDisable.purpose, "disable");
+
+  // The capability that sits in an inbox for 180 days can only ever take mail
+  // AWAY. Re-enabling needs the short-lived token the confirmation page mints.
+  assert.equal(
+    verifyUnsubscribeToken(token, {
+      purpose: "enable",
+      now: NOW,
+      secret: SECRET,
+    }).valid,
+    false
+  );
+});
+
 test("the email links to the full preference screen as well as the one-category opt-out", async () => {
   const { deps, sent } = fakeDeps([notification()]);
   await runDispatch(deps, { now: NOW });
@@ -311,7 +371,7 @@ test("caller-rendered copy is escaped in HTML and verbatim in text", async () =>
   assert.ok(message.text.includes('Jane & "John"'));
 });
 
-test("batchSubject names the count and the category once there is more than one", () => {
+test("batchSubject names the category and the count once there is more than one", () => {
   const one = [{ title: "Book the venue", body: "" }];
   const many = [
     { title: "Book the venue", body: "" },
@@ -319,8 +379,31 @@ test("batchSubject names the count and the category once there is more than one"
   ];
 
   assert.equal(batchSubject("tasks", one), "Book the venue");
-  assert.equal(batchSubject("tasks", many), "2 tasks updates");
-  assert.equal(batchSubject("meetings", many), "2 meetings updates");
+  assert.equal(batchSubject("tasks", many), "Tasks — 2 updates");
+  assert.equal(batchSubject("meetings", many), "Meetings — 2 updates");
+});
+
+test("no category produces an ungrammatical subject, including the plural ones", () => {
+  // The regression this shape exists to prevent. Every label in the registry is
+  // already plural ("Tasks", "Ministry teams"), so any construction that pastes
+  // a count in FRONT of the label reads "3 ministry teams updates". Asserting it
+  // across the whole registry means a seventh category cannot reintroduce the
+  // bug by having an awkward label.
+  const many = [
+    { title: "a", body: "" },
+    { title: "b", body: "" },
+    { title: "c", body: "" },
+  ];
+
+  for (const category of notificationCategories) {
+    const subject = batchSubject(category, many);
+    const label = NOTIFICATION_CATEGORIES[category].label;
+
+    assert.equal(subject, `${label} — 3 updates`);
+    // No "<n> <plural label> updates" anywhere in it.
+    assert.doesNotMatch(subject, /^\d+\s/);
+    assert.doesNotMatch(subject, /s updates/i);
+  }
 });
 
 test("the idempotency key the dispatcher chose survives composition", async () => {

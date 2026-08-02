@@ -21,6 +21,7 @@ import {
 } from "./categories";
 import {
   verifyUnsubscribeToken,
+  type UnsubscribeTokenPurpose,
   type UnsubscribeTokenRejection,
 } from "./channels/unsubscribe-token";
 
@@ -139,6 +140,8 @@ export type UnsubscribeOwnerResolution =
       owner: PreferenceOwner;
       /** The ONE category this token may change. */
       category: NotificationCategory;
+      /** The ONE direction it may change it in. */
+      purpose: UnsubscribeTokenPurpose;
       expiresAt: Date;
     }
   | { ok: false; reason: UnsubscribeTokenRejection };
@@ -160,11 +163,18 @@ export type UnsubscribeOwnerResolution =
  *
  * The category comes out of the token, never out of the request. A query
  * string that could name the category would let a holder of one category's
- * link switch off a different one.
+ * link switch off a different one. So does the DIRECTION: the caller declares
+ * which way it is about to write, and the token is opened with that
+ * direction's key, so an emailed (disable) token resolves to nothing at all
+ * when a re-enable is what is being attempted.
  */
 export function preferenceOwnerFromUnsubscribeToken(
   token: string,
-  options: { now?: Date; secret?: string } = {}
+  options: {
+    purpose?: UnsubscribeTokenPurpose;
+    now?: Date;
+    secret?: string;
+  } = {}
 ): UnsubscribeOwnerResolution {
   const verified = verifyUnsubscribeToken(token, options);
   if (!verified.valid) {
@@ -175,6 +185,7 @@ export function preferenceOwnerFromUnsubscribeToken(
     ok: true,
     owner: preferenceUserIdSchema.parse(verified.userId) as PreferenceOwner,
     category: verified.category,
+    purpose: verified.purpose,
     expiresAt: verified.expiresAt,
   };
 }
