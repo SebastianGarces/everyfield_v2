@@ -81,11 +81,38 @@ test("no other role is ever put through onboarding", () => {
 });
 
 test("resolveResumeStep starts at basics only while there is no church", () => {
-  assert.equal(resolveResumeStep({ churchId: null }), "basics");
-  assert.equal(resolveResumeStep({ churchId: undefined }), "basics");
+  assert.equal(
+    resolveResumeStep({ churchId: null, leadershipStatus: null }),
+    "basics"
+  );
+  assert.equal(
+    resolveResumeStep({ churchId: undefined, leadershipStatus: undefined }),
+    "basics"
+  );
   // Step 1 is done the moment the church row exists, so a returning planter
   // resumes past it rather than being asked to create a second church.
-  assert.equal(resolveResumeStep({ churchId: CHURCH_ID }), "leadership");
+  assert.equal(
+    resolveResumeStep({ churchId: CHURCH_ID, leadershipStatus: null }),
+    "leadership"
+  );
+});
+
+test("resolveResumeStep resumes past leadership once it has been ANSWERED", () => {
+  // OB-004 / FRD AC 5: abandoning after step 2 and returning lands on step 3 —
+  // and "answered" means either answer. A planter who said No has finished the
+  // step; getting back to it is the dashboard nudge's job, not resumption's,
+  // and re-asking here would trap them in step 2 forever.
+  assert.equal(
+    resolveResumeStep({
+      churchId: CHURCH_ID,
+      leadershipStatus: "planter_confirmed",
+    }),
+    "journey"
+  );
+  assert.equal(
+    resolveResumeStep({ churchId: CHURCH_ID, leadershipStatus: "no_planter" }),
+    "journey"
+  );
 });
 
 // ----------------------------------------------------------------------------
