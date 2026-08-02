@@ -53,7 +53,9 @@ Proves a UI change **works against the running app**. Compiling is not done; thi
    (`browser_click` / `browser_type` / `browser_fill_form`).
 3. **Assert the outcome** the AC promises — prefer `browser_evaluate` to read concrete DOM/state
    (text content, attribute, count, URL) over eyeballing. One assertion per AC, minimum.
-4. `browser_take_screenshot` of the key state (name it `<issue>-<ac-slug>.png`).
+4. `browser_take_screenshot` of the key state (name it `<issue>-<ac-slug>.png`). Save it to your
+   session scratchpad directory — **never the repo root or anywhere inside the working tree**. The
+   screenshot's durable home is the PR body; anything on disk is temporary.
 5. After exercising all ACs, pull `browser_console_messages`. **Any `error` → FAIL** (warnings noted).
    One known exception on previews: a single `403` per page load from a `HEAD` request made by the
    Vercel preview toolbar. It is infrastructure, not the app — confirm that is what you are looking
@@ -83,3 +85,6 @@ Feed these back into the `definition-of-done` report:
 - **Never localhost.** It serves `main`. A pass obtained there is a pass for someone else's code.
 - **Leave it clean.** The preview writes to the shared development database — prefer reading, and
   clean up what you create. `browser_close` the page when done so the next track starts fresh.
+- **No screenshot litter.** Evidence screenshots live in the scratchpad and the PR body only. If
+  any `.png` landed in the working tree during validation, delete it before the track ends —
+  `git status` must show no stray images.

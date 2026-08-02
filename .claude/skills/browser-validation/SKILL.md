@@ -99,7 +99,9 @@ Use the Playwright MCP tools. What counts as evidence:
   assumption. "Clicked Export, a CSV downloaded, it had N rows matching the filtered list" is
   evidence.
 - **The filtered/empty/error states** an AC mentions, not only the happy path.
-- **A snapshot or screenshot reference** in the PR body for anything visual.
+- **A snapshot or screenshot reference** in the PR body for anything visual. Save screenshot
+  files to the session scratchpad, never inside the working tree — the PR body is the durable
+  home; delete any stray `.png` before the track ends.
 - **Console output**, checked. A clean render with a red console is not a pass.
 
 **Known console noise on previews:** one `Failed to load resource: 403` per page load, from a `HEAD`
