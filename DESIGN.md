@@ -19,6 +19,7 @@ colors:
   surface: "#FFFEF6" # card — raised surface
   on-surface: "#181D19"
   danger: "#B4432F"
+  primary-hover: "#000000" # button-primary hover deepens to black (see components.button-primary-hover)
   # Brand names (aliases of the roles above, in catalog vocabulary)
   ink: "#181D19"
   green: "#1CE362"
