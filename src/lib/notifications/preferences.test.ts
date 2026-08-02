@@ -14,6 +14,7 @@ import {
   notificationPreferenceMatrixKeys,
 } from "./categories";
 import {
+  audienceForRole,
   buildPreferenceMap,
   buildPreferenceMatrixView,
   DIGEST_CADENCE_CHANNEL,
@@ -193,10 +194,13 @@ test("cadence is null on every category except digest", () => {
 // The settings matrix
 // ----------------------------------------------------------------------------
 
-test("the matrix resolves all twelve cells for a user with no rows", () => {
+test("the matrix resolves every cell for a user with no rows", () => {
   const matrix = resolvePreferenceMatrix([]);
 
-  assert.equal(matrix.length, 12);
+  assert.equal(
+    matrix.length,
+    notificationCategories.length * notificationChannels.length
+  );
   assert.ok(matrix.every((cell) => cell.source === "default"));
 });
 
@@ -437,15 +441,18 @@ test("the enum sets are CHECK constraints in the database, not just a TS brand",
 test("with no stored rows the allow-list is the coded defaults, not everything", () => {
   const allowed = resolveInAppCategories([]);
 
-  // Five on by default; `digest`/`in_app` is the one coded default that is off,
+  // Everything except `digest`/`in_app`, the one coded default that is off,
   // because an in-app digest row would duplicate the feed it summarises. A
-  // "filter" that returned all six would be indistinguishable from no filter.
+  // "filter" that returned every category would be indistinguishable from no
+  // filter. `milestones` IS in the list: an oversight partner is told about a
+  // launch date once, and that row has to be somewhere they can see it (N-027).
   assert.deepEqual(allowed, [
     "tasks",
     "meetings",
     "communication",
     "teams",
     "phase",
+    "milestones",
   ]);
   assert.ok(!allowed.includes("digest"));
 });
@@ -823,4 +830,105 @@ test("a toggle the user really changed does reach the database", () => {
   assert.ok(params.includes(OWNER_ID));
   assert.ok(params.includes("tasks"));
   assert.ok(params.includes(false));
+});
+
+// ----------------------------------------------------------------------------
+// The audience only ever decides what an ABSENT row means (N-027)
+// ----------------------------------------------------------------------------
+
+test("audienceForRole maps the five roles onto the two audiences", () => {
+  assert.equal(audienceForRole("planter"), "church");
+  assert.equal(audienceForRole("coach"), "church");
+  assert.equal(audienceForRole("team_member"), "church");
+  assert.equal(audienceForRole("sending_church_admin"), "oversight");
+  assert.equal(audienceForRole("network_admin"), "oversight");
+});
+
+test("an oversight recipient's in-app allow-list includes the digest", () => {
+  // No stored rows at all — the state every user starts in.
+  assert.equal(resolveInAppCategories([]).includes("digest"), false);
+  assert.equal(
+    resolveInAppCategories([], "oversight").includes("digest"),
+    true
+  );
+});
+
+test("an EXPLICIT preference beats the audience default, both ways", () => {
+  // The audience decides what absence means and nothing else: an oversight user
+  // who switched the in-app digest off keeps it off.
+  const off: NotificationPreference = {
+    id: "pref-1",
+    userId: "user-1",
+    category: "digest",
+    channel: "in_app",
+    enabled: false,
+    digestCadence: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+
+  assert.equal(
+    resolveInAppCategories([off], "oversight").includes("digest"),
+    false
+  );
+  assert.equal(
+    resolvePreference([off], "digest", "in_app", "oversight").source,
+    "explicit"
+  );
+
+  const on: NotificationPreference = { ...off, id: "pref-2", enabled: true };
+  assert.equal(resolveInAppCategories([on]).includes("digest"), true);
+});
+
+test("the settings matrix resolves with the SAME audience the feed does", () => {
+  // The divergence this closes: `/settings` used to build the matrix with the
+  // church defaults for everyone, so an oversight admin with no stored rows saw
+  // `digest`/`in_app` unchecked while `resolveInAppCategories` — the feed and
+  // the badge — had it ON. The screen was describing a different product than
+  // the one running.
+  const cellFor = (view: ReturnType<typeof buildPreferenceMatrixView>) =>
+    view.categories
+      .find((row) => row.category === "digest")!
+      .cells.find((cell) => cell.channel === "in_app")!;
+
+  const church = cellFor(buildPreferenceMatrixView([]));
+  const oversight = cellFor(buildPreferenceMatrixView([], "oversight"));
+
+  assert.equal(church.enabled, false);
+  assert.equal(oversight.enabled, true);
+  assert.equal(oversight.source, "default");
+
+  // Stated as the invariant rather than as two literals: every cell of the
+  // rendered matrix agrees with what the read path would answer for that
+  // audience, for both audiences and every pair.
+  for (const audience of ["church", "oversight"] as const) {
+    for (const row of buildPreferenceMatrixView([], audience).categories) {
+      for (const cell of row.cells) {
+        assert.equal(
+          cell.enabled,
+          defaultChannelEnabled(cell.category, cell.channel, audience),
+          `${audience} ${cell.key}`
+        );
+      }
+    }
+  }
+});
+
+test("an oversight admin switching their in-app digest OFF is not a no-op", () => {
+  // The write side of the same divergence, and the more damaging half: with the
+  // church defaults the answer to "is it already off?" was YES, so the action
+  // returned success, wrote nothing, and the digest kept appearing in the feed
+  // the admin had just told it to leave.
+  assert.equal(
+    preferenceWriteIsNoop([], "digest", "in_app", false, "oversight"),
+    false
+  );
+  assert.equal(
+    preferenceWriteIsNoop([], "digest", "in_app", true, "oversight"),
+    true
+  );
+
+  // And the church audience keeps exactly today's answers.
+  assert.equal(preferenceWriteIsNoop([], "digest", "in_app", false), true);
+  assert.equal(preferenceWriteIsNoop([], "digest", "in_app", true), false);
 });

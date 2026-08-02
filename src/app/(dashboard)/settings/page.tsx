@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 
 import { HeaderBreadcrumbs } from "@/components/header";
 import { PreferenceMatrix } from "@/components/notifications/preference-matrix";
 import { verifySession } from "@/lib/auth/session";
 import {
+  audienceForRole,
   buildPreferenceMatrixView,
   loadUserPreferences,
   preferenceOwnerFromSession,
@@ -34,8 +36,18 @@ export const metadata: Metadata = {
 };
 
 export default async function SettingsPage() {
-  const owner = preferenceOwnerFromSession(await verifySession());
-  const view = buildPreferenceMatrixView(await loadUserPreferences(owner));
+  const session = await verifySession();
+  const owner = preferenceOwnerFromSession(session);
+  // The matrix must be resolved against the SAME audience the feed, the badge
+  // and the dispatcher resolve against, or an absent row renders as one value
+  // here and behaves as another there (N-027).
+  const view = buildPreferenceMatrixView(
+    await loadUserPreferences(owner),
+    audienceForRole(session.user.role)
+  );
+
+  const isPlanterWithPlant =
+    session.user.role === "planter" && Boolean(session.user.churchId);
 
   return (
     <>
@@ -68,6 +80,46 @@ export default async function SettingsPage() {
 
           <PreferenceMatrix view={view} />
         </section>
+
+        {/* The one setting on the neighbouring screen, linked rather than
+            inlined. It is a different KIND of decision — church-wide, about
+            what leaves the plant, and the planter's alone — and folding it into
+            a personal notification matrix would make a consent choice read as
+            one more switch about email volume (N-026). Shown only to a planter
+            with a plant, which is exactly who the target screen serves.
+
+            The copy names the exception rather than omitting it. This toggle
+            gates what is PUSHED to oversight — the digest and the two gated
+            milestones — but NOT "your invitation was accepted", which is
+            exempt (ruled 2026-08-01) because it is the inviting org's own
+            event. "No updates unless you turn sharing on" was therefore false
+            for the one message a planter is most likely to have already
+            caused. It is also not "nothing": the oversight dashboard already
+            lists the plant with its name, current stage and launch date,
+            ungated — see the header of OVERSIGHT_SHARING_TOGGLE. A teaser that
+            promises more than the setting delivers is the one way this feature
+            can fail its own purpose. */}
+        {isPlanterWithPlant && (
+          <section aria-labelledby="sharing-link" className="space-y-1">
+            <h2
+              id="sharing-link"
+              className="text-lg font-semibold tracking-tight"
+            >
+              Sharing
+            </h2>
+            <p className="text-muted-foreground text-sm text-pretty">
+              Apart from being told you accepted their invitation, your sending
+              church and network get no updates about this plant unless you turn
+              sharing on.{" "}
+              <Link
+                href="/settings/sharing"
+                className="cursor-pointer font-medium underline underline-offset-4"
+              >
+                Choose what you share
+              </Link>
+            </p>
+          </section>
+        )}
       </div>
     </>
   );

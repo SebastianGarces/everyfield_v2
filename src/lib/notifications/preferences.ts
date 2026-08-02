@@ -11,13 +11,16 @@ import {
   type NotificationChannel,
   type NotificationPreference,
   type User,
+  type UserRole,
 } from "@/db/schema";
+import { OVERSIGHT_ROLES } from "@/lib/auth/access";
 
 import {
   DEFAULT_DIGEST_CADENCE,
   defaultChannelEnabled,
   NOTIFICATION_CATEGORIES,
   notificationPreferenceMatrixKeys,
+  type NotificationAudience,
 } from "./categories";
 import {
   verifyUnsubscribeToken,
@@ -239,7 +242,8 @@ export function buildPreferenceMap(
 export function resolvePreference(
   rows: readonly NotificationPreference[] | Map<string, NotificationPreference>,
   category: NotificationCategory,
-  channel: NotificationChannel
+  channel: NotificationChannel,
+  audience: NotificationAudience = "church"
 ): ResolvedPreference {
   const map = rows instanceof Map ? rows : buildPreferenceMap(rows);
   const row = map.get(preferenceKey(category, channel));
@@ -248,7 +252,16 @@ export function resolvePreference(
     return {
       category,
       channel,
-      enabled: defaultChannelEnabled(category, channel),
+      // The ONLY place the audience is consulted: an absent row means "the
+      // coded default", and that default differs for an oversight recipient on
+      // `digest`/`in_app` (N-027 — see OVERSIGHT_CHANNEL_DEFAULT_OVERRIDES).
+      // An EXPLICIT row is returned unchanged below, whoever wrote it, so this
+      // can never override a choice a user actually made.
+      //
+      // It defaults to "church" so every existing caller keeps today's answer
+      // and only a caller that KNOWS the recipient's role can change it —
+      // guessing an audience would be worse than not asking.
+      enabled: defaultChannelEnabled(category, channel, audience),
       source: "default",
       digestCadence: category === "digest" ? DEFAULT_DIGEST_CADENCE : null,
     };
@@ -266,13 +279,27 @@ export function resolvePreference(
   };
 }
 
+/**
+ * Which coded defaults apply to a user in this role (N-027).
+ *
+ * The ONE place the five roles collapse onto the two audiences, so nothing else
+ * in the module branches on a role string. It is a DEFAULTS question, never a
+ * permission one — eligibility is `enqueue`'s and is far stricter.
+ */
+export function audienceForRole(role: UserRole): NotificationAudience {
+  return (OVERSIGHT_ROLES as readonly UserRole[]).includes(role)
+    ? "oversight"
+    : "church";
+}
+
 /** Convenience for the dispatcher: is this channel on for this category? */
 export function isChannelEnabled(
   rows: readonly NotificationPreference[] | Map<string, NotificationPreference>,
   category: NotificationCategory,
-  channel: NotificationChannel
+  channel: NotificationChannel,
+  audience: NotificationAudience = "church"
 ): boolean {
-  return resolvePreference(rows, category, channel).enabled;
+  return resolvePreference(rows, category, channel, audience).enabled;
 }
 
 /**
@@ -327,11 +354,12 @@ export function resolveDigestCadence(
  * with every cell resolved and its source attributed.
  */
 export function resolvePreferenceMatrix(
-  rows: readonly NotificationPreference[]
+  rows: readonly NotificationPreference[],
+  audience: NotificationAudience = "church"
 ): ResolvedPreference[] {
   const map = buildPreferenceMap(rows);
   return notificationPreferenceMatrixKeys().map(({ category, channel }) =>
-    resolvePreference(map, category, channel)
+    resolvePreference(map, category, channel, audience)
   );
 }
 
@@ -346,19 +374,22 @@ export function resolvePreferenceMatrix(
  *
  * It resolves through `isChannelEnabled`, so absence is the coded default here
  * exactly as it is everywhere else — including `digest`/`in_app`, whose default
- * is off because an in-app digest row would duplicate the feed it summarises.
- * Nothing about the defaults is restated in this function; that is the point.
+ * is off for the plant's own team (an in-app digest row would duplicate the
+ * feed it summarises) and ON for an oversight recipient, who has no such feed
+ * (N-027). Nothing about the defaults is restated in this function; that is the
+ * point, and it is why the audience is a parameter rather than a branch.
  *
  * The result can legitimately be EMPTY (a user who turned every category off),
  * and callers must treat that as "nothing is visible" rather than as "no
  * filter" — see `feedVisibility` in ./queries.
  */
 export function resolveInAppCategories(
-  rows: readonly NotificationPreference[]
+  rows: readonly NotificationPreference[],
+  audience: NotificationAudience = "church"
 ): NotificationCategory[] {
   const map = buildPreferenceMap(rows);
   return notificationCategories.filter((category) =>
-    isChannelEnabled(map, category, "in_app")
+    isChannelEnabled(map, category, "in_app", audience)
   );
 }
 
@@ -477,9 +508,23 @@ export const DIGEST_CADENCE_LABELS: Record<DigestCadence, string> = {
 export const DIGEST_CADENCE_DESCRIPTION =
   "How often your roll-up of your own open items arrives.";
 
-/** Build the whole screen from a user's stored rows. */
+/**
+ * Build the whole screen from a user's stored rows.
+ *
+ * `audience` is the SAME argument the read and dispatch paths resolve with
+ * (`audienceForRole(session.user.role)`). It has to be, or the screen lies: an
+ * oversight recipient's `digest`/`in_app` default is ON (N-027) while the
+ * plant's team's is off, so a matrix built with the "church" defaults would
+ * show an oversight admin an unchecked box for a notification they are in fact
+ * receiving — and their first click would "turn on" something already on.
+ *
+ * It still defaults to "church" so a caller that does not know the recipient's
+ * role gets today's answer rather than a guessed one; the only production
+ * caller is `/settings`, which knows.
+ */
 export function buildPreferenceMatrixView(
-  rows: readonly NotificationPreference[]
+  rows: readonly NotificationPreference[],
+  audience: NotificationAudience = "church"
 ): PreferenceMatrixView {
   const map = buildPreferenceMap(rows);
 
@@ -493,7 +538,7 @@ export function buildPreferenceMatrixView(
       label: NOTIFICATION_CATEGORIES[category].label,
       description: NOTIFICATION_CATEGORIES[category].description,
       cells: notificationChannels.map((channel) => {
-        const resolved = resolvePreference(map, category, channel);
+        const resolved = resolvePreference(map, category, channel, audience);
         return {
           category,
           channel,
@@ -534,14 +579,24 @@ export function buildPreferenceMatrixView(
  * So the write path asks this first. `false` means "the effective value is
  * already this" — including the case where it is already this BY DEFAULT — and
  * the action returns without touching the table.
+ *
+ * `audience` must match the one the matrix was RENDERED with, for the same
+ * reason it exists there: "already this by default" is an audience-dependent
+ * question (N-027). Resolving the write against the church defaults while the
+ * screen showed the oversight ones turns an oversight admin's deliberate
+ * switch-off of their in-app digest into a no-op — the action reports success,
+ * writes nothing, and the notification keeps arriving.
  */
 export function preferenceWriteIsNoop(
   rows: readonly NotificationPreference[],
   category: NotificationCategory,
   channel: NotificationChannel,
-  enabled: boolean
+  enabled: boolean,
+  audience: NotificationAudience = "church"
 ): boolean {
-  return resolvePreference(rows, category, channel).enabled === enabled;
+  return (
+    resolvePreference(rows, category, channel, audience).enabled === enabled
+  );
 }
 
 /** The same question for the cadence selector. */
@@ -574,16 +629,18 @@ export async function loadUserPreferences(
 
 /** The resolved matrix for the owner, straight from storage. */
 export async function getPreferenceMatrix(
-  owner: PreferenceOwner
+  owner: PreferenceOwner,
+  audience: NotificationAudience = "church"
 ): Promise<ResolvedPreference[]> {
-  return resolvePreferenceMatrix(await loadUserPreferences(owner));
+  return resolvePreferenceMatrix(await loadUserPreferences(owner), audience);
 }
 
 /** The owner's in-app allow-list, straight from storage. */
 export async function getInAppCategories(
-  owner: PreferenceOwner
+  owner: PreferenceOwner,
+  audience: NotificationAudience = "church"
 ): Promise<NotificationCategory[]> {
-  return resolveInAppCategories(await loadUserPreferences(owner));
+  return resolveInAppCategories(await loadUserPreferences(owner), audience);
 }
 
 /**

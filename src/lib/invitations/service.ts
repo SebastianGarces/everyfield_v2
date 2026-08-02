@@ -13,6 +13,7 @@ import type {
   OrganizationInvitationStatus,
   OrganizationInvitationType,
 } from "@/db/schema/organization-invitation";
+import { announceInvitationAccepted } from "@/lib/notifications/oversight";
 import { and, desc, eq } from "drizzle-orm";
 
 // ============================================================================
@@ -116,7 +117,82 @@ export async function acceptInvitation(
     .where(eq(organizationInvitations.id, invitationId))
     .returning();
 
+  // F11 N-025 — milestone #1, announced at its source.
+  //
+  // Last, and after the durable "accepted" marker, so a notification failure
+  // cannot leave an invitation half-accepted (memory/invariants.md →
+  // Atomicity). `announceInvitationAccepted` never throws and never decides
+  // whether the plant is sharing — `enqueue` does, per recipient, and writes
+  // nothing when it is not.
+  //
+  // Only a PLANT-side acceptance is a milestone: `target_church_id` is set when
+  // a sending church or a network invited a church plant, which is the "planter
+  // accepted invitation" the ruling names. A sending church joining a network
+  // is a different event with no plant to report on.
+  if (updated.targetChurchId) {
+    await announceInvitationAcceptedForChurch(updated);
+  }
+
   return updated;
+}
+
+/**
+ * Look up the plant's name and announce the milestone. Best-effort by
+ * construction: `announceInvitationAccepted` swallows its own failures, and the
+ * name lookup is guarded so a missing church cannot throw into an acceptance
+ * that has already been recorded.
+ *
+ * The whole INVITATION is passed, not just the church id, because the audience
+ * of this one milestone is the org that issued it, and `invitation.type` is
+ * what names that org (`invitingOrgForInvitation`). It is the only oversight
+ * notification `enqueue` writes without consent, so it has to be addressed
+ * exactly, and there are two ways to get it wrong — both of them reachable:
+ *
+ *   * from the PLANT: `applyAssociation` below sets one of the plant's two
+ *     oversight FKs without clearing the other, so a plant can belong to a
+ *     sending church AND a network at once, and the uninvolved one would have
+ *     been notified without consent;
+ *   * from the invitation's two FK COLUMNS: `createInvitation` performs no
+ *     type↔id consistency check and there is no CHECK constraint, so a
+ *     `church_to_sending_church` row carrying a stray `sending_network_id`
+ *     would have reached the network too.
+ *
+ * Deriving from `type` closes both: it is the same field `applyAssociation`
+ * switches on, so the notification goes to precisely the org whose association
+ * was just made.
+ */
+async function announceInvitationAcceptedForChurch(
+  invitation: OrganizationInvitation
+): Promise<void> {
+  const churchId = invitation.targetChurchId;
+  if (!churchId) return;
+
+  try {
+    const [plant] = await db
+      .select({ name: churches.name })
+      .from(churches)
+      .where(eq(churches.id, churchId))
+      .limit(1);
+
+    if (!plant) return;
+
+    await announceInvitationAccepted({
+      churchId,
+      plantName: plant.name,
+      invitationId: invitation.id,
+      invitation: {
+        type: invitation.type,
+        sendingChurchId: invitation.sendingChurchId,
+        sendingNetworkId: invitation.sendingNetworkId,
+      },
+    });
+  } catch (error) {
+    console.error("oversight invitation milestone failed", {
+      churchId,
+      invitationId: invitation.id,
+      error,
+    });
+  }
 }
 
 /**

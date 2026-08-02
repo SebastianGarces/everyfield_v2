@@ -51,6 +51,23 @@ export interface NotificationCategoryDefinition {
 }
 
 /**
+ * WHOSE defaults are being resolved — the plant's own team, or the plant's
+ * oversight partner.
+ *
+ * A coded default answers "what does someone who has never opened the settings
+ * screen get?", and that question genuinely has two answers here, because the
+ * two audiences receive different things. It is NOT a permission: eligibility
+ * is decided in `enqueue`, before any preference is consulted. This only
+ * decides what an ABSENT preference row means, and an explicit row from either
+ * audience still wins outright.
+ *
+ * Deliberately an audience rather than a role, so exactly one place
+ * (`audienceForRole` in `./preferences.ts`) maps the five roles onto the two
+ * behaviours and the rest of the module never branches on a role string.
+ */
+export type NotificationAudience = "church" | "oversight";
+
+/**
  * Defaults are opt-out (on), which is the position the FRD's user-visible
  * behaviour assumes ("I can turn off a whole category").
  *
@@ -63,12 +80,19 @@ export interface NotificationCategoryDefinition {
  * the resolver, the schema and every caller stay put, because nothing is
  * seeded into the database.
  *
- * An oversight user reaches these defaults only after passing the privacy
- * gate, which is a separate and stricter question — see
- * `oversightPrivacyFeature` below and `recipientMayBeNotified` in `enqueue.ts`.
- * FRD Open Question #3 is ruled: oversight eligibility is opt-in per church
- * and defaults to off, so an oversight user's effective default is "nothing"
- * until their plant turns a toggle on, whatever this table says.
+ * An oversight user reaches these defaults only after passing TWO stricter
+ * questions, both asked in `recipientMayBeNotified` (`enqueue.ts`): is the
+ * category oversight-eligible at all (`OVERSIGHT_ELIGIBLE_CATEGORIES` — only
+ * `milestones` and `digest` are), and has the plant turned on
+ * `share_activity_with_oversight`, which defaults to off. So an oversight
+ * user's effective default is "nothing" whatever this table says, and FIVE of
+ * these SEVEN rows — every granular category — are unreachable for them
+ * however the plant decides. (Only the invitation-accepted milestone is exempt
+ * from the second question; see `oversightGateFor`.)
+ *
+ * The one CHANNEL default that differs by audience is `digest`/`in_app`, and it
+ * is overridden below rather than restated — see
+ * `OVERSIGHT_CHANNEL_DEFAULT_OVERRIDES`.
  */
 export const NOTIFICATION_CATEGORIES: Record<
   NotificationCategory,
@@ -99,11 +123,52 @@ export const NOTIFICATION_CATEGORIES: Record<
     description: "New assessments and phase transitions for your plant.",
     defaults: { email: true, in_app: true },
   },
+  milestones: {
+    label: "Milestones",
+    description:
+      "The few moments worth an interruption: an invitation accepted, a new stage, a launch date.",
+    defaults: { email: true, in_app: true },
+  },
   digest: {
     label: "Digest",
     description: "A recurring roll-up of what needs your attention.",
     defaults: { email: true, in_app: false },
   },
+};
+
+/**
+ * Where an OVERSIGHT recipient's coded default differs from the table above
+ * (N-027). Sparse on purpose: anything absent here means "the same default as
+ * everyone else", so there is one table of defaults and a short list of
+ * exceptions, not two tables to keep in step.
+ *
+ * ----------------------------------------------------------------------------
+ * Why `digest`/`in_app` is ON for oversight and OFF for the plant
+ * ----------------------------------------------------------------------------
+ *
+ * The reason `digest`/`in_app` is off is stated where it is set: an in-app
+ * digest row would DUPLICATE the feed it summarises. That reason is a fact
+ * about the plant's own team, who see the granular rows the digest rolls up.
+ * It is false for an oversight recipient, who is refused every granular
+ * category outright (`OVERSIGHT_ELIGIBLE_CATEGORIES`): there is no feed for
+ * their digest to duplicate, so suppressing it in-app removes the only thing
+ * they would have had to look at.
+ *
+ * N-027 already rules the outcome — "a notification delivered to an oversight
+ * user always has an in-app row they can see" — and with the shared default the
+ * digest was delivered by email and then filtered out of the feed, the unread
+ * badge and mark-read by `resolveInAppCategories`. That is the requirement
+ * failing quietly, in the read path, on a category the recipient never chose.
+ *
+ * Note what this is NOT: it is not eligibility (that is `enqueue`'s, and it is
+ * stricter), and it is not a stored row. An oversight user who switches the
+ * digest's in-app channel off gets an explicit `false` and keeps it, exactly
+ * like everyone else.
+ */
+export const OVERSIGHT_CHANNEL_DEFAULT_OVERRIDES: Partial<
+  Record<NotificationCategory, Partial<Record<NotificationChannel, boolean>>>
+> = {
+  digest: { in_app: true },
 };
 
 /**
@@ -114,65 +179,198 @@ export const NOTIFICATION_CATEGORIES: Record<
 export const DEFAULT_DIGEST_CADENCE: DigestCadence = "weekly";
 
 // ----------------------------------------------------------------------------
-// What an oversight recipient's church must be sharing for this category
+// What an oversight recipient may be told (N-025 / N-026, ruled 2026-07-27)
 // ----------------------------------------------------------------------------
 
 /**
- * The privacy toggle that governs whether an OVERSIGHT user
- * (`sending_church_admin`, `network_admin`) may be told about this category.
+ * The ONLY categories an oversight recipient (`sending_church_admin`,
+ * `network_admin`) is ever eligible for.
  *
- * memory/invariants.md → Hierarchical Access Control: oversight users see
- * aggregate metrics only, and `canAccessFeatureData(user, churchId, feature)`
- * gates every feature read against `church_privacy_settings` (default: all
- * false / opt-in). A notification `body` is arbitrary feature copy — "No
- * contact in 30 days: Jane Doe", a giving figure, a message that failed — so
- * enqueue is a feature read wearing a different hat, and it inherits the same
- * gate. `canAccessChurch` alone is not that gate: it returns true for a network
- * admin on every plant in the network, regardless of any toggle.
+ * The ruling: oversight receives a daily activity SUMMARY (`digest`, sent only
+ * on a day that had activity) and three MILESTONES (`milestones` — planter
+ * accepted an invitation, phase/stage advanced, launch date set or changed).
+ * Everything else — the per-event stream a plant's own team lives in — is for
+ * the plant. So the five granular categories are refused for an oversight
+ * recipient outright: not "off by default", not "unless the plant shares
+ * tasks", but never.
  *
- * EVERY category maps to a toggle. `phase` and `digest` used to map to `null`
- * — a categorical refusal — and FRD Open Question #3 has since been ruled the
- * other way: oversight roles ARE eligible for both, gated by the church's
- * privacy settings and DEFAULT OFF (`share_phase`, `share_digest`, added by
- * migration 0026, both `default false`). Eligibility is the church's to grant,
- * not the code's to withhold, and because the columns default to false an
- * existing church sees no change in behaviour until it opts in.
+ * This supersedes `OVERSIGHT_PRIVACY_FEATURE`, the per-category map shipped
+ * with #130, in which each category pointed at its own `share_*` toggle. That
+ * model let a plant that shared its task list hand an oversight admin a
+ * verbatim copy of every task notification — item-level feature copy ("No
+ * contact in 30 days: Jane Doe") arriving one row at a time, which is exactly
+ * what memory/invariants.md → Hierarchical Access Control says oversight does
+ * not get.
  *
- * Two notes on `digest` specifically. It gets its OWN toggle rather than being
- * inferred from the other five: a digest is its own recurring contact, and a
- * church that shares its task list has not thereby asked for a weekly email
- * about itself to leave the building. And that toggle governs ELIGIBILITY
- * only — whatever assembles the digest's contents (N-013) still has to gate
- * each line against that line's own feature toggle, because `share_digest`
- * says "you may receive a digest", not "you may see everything in one".
- *
- * The `| null` arm is kept in the type: a category added later with no ruling
- * yet should be able to say so explicitly and fail closed, rather than being
- * pointed at whichever existing toggle looked closest.
- *
- * Church-level roles (planter, coach, team_member) are unaffected by any of
- * this — `canAccessFeatureData` returns true for them without consulting a
- * toggle at all.
+ * Why an ALLOW-LIST of categories and not a rule about `type` strings: a rule
+ * about types is a convention a future caller can forget. This is checked in
+ * one place (`recipientMayBeNotified`) against a closed tuple, so a category
+ * added tomorrow is refused for oversight until someone deliberately adds it
+ * here.
  */
-export const OVERSIGHT_PRIVACY_FEATURE: Record<
-  NotificationCategory,
-  PrivacyFeatureKey | null
-> = {
-  tasks: "tasks",
-  meetings: "meetings",
-  // Message content is about PEOPLE — recipients, contact details, failures.
-  communication: "people",
-  teams: "ministry_teams",
-  phase: "phase",
-  digest: "digest",
-};
+export const OVERSIGHT_ELIGIBLE_CATEGORIES = [
+  "milestones",
+  "digest",
+] as const satisfies readonly NotificationCategory[];
 
-/** The privacy toggle governing this category, or null if none covers it. */
-export function oversightPrivacyFeature(
+/**
+ * Is this category one an oversight recipient may receive AT ALL?
+ *
+ * Answered BEFORE the sharing toggle is read, and independently of it. A
+ * granular category is refused with the plant's toggle on and with it off —
+ * turning sharing on buys the digest and the milestones, never the per-event
+ * stream.
+ */
+export function isOversightEligibleCategory(
   category: NotificationCategory
-): PrivacyFeatureKey | null {
-  return OVERSIGHT_PRIVACY_FEATURE[category] ?? null;
+): boolean {
+  return (OVERSIGHT_ELIGIBLE_CATEGORIES as readonly string[]).includes(
+    category
+  );
 }
+
+/**
+ * The notification types an oversight recipient receives WHETHER OR NOT the
+ * plant has turned sharing on (ruled 2026-08-01, amending N-026).
+ *
+ * Exactly one, and the reason is whose event it is. "Your invitation was
+ * accepted" is the SENDING CHURCH'S OWN event: they composed the invitation,
+ * they issued it, and the acceptance is the answer to a question they asked. It
+ * discloses nothing about how the plant is doing — only that a handshake the
+ * sending church initiated completed. A plant's consent governs what leaves the
+ * plant ABOUT the plant; it was never a power to withhold from someone the
+ * answer to their own question.
+ *
+ * It also un-breaks the ordinary sequence. The toggle defaults to off and a
+ * planter decides about it AFTER joining, so at the moment of acceptance it was
+ * off in essentially every real case: the milestone was composed, refused by
+ * gate 3, and never retried. The one milestone guaranteed to matter — someone
+ * joined you — was the one guaranteed never to arrive. A control that is
+ * structurally unreachable is not a privacy guarantee, it is dead code.
+ *
+ * The two OTHER milestones stay gated, and the line between them is the same
+ * one: a phase advance and a launch date are facts about the PLANT'S OWN
+ * progress, so the sending church learns them only if the plant says so.
+ *
+ * The literal is spelled out here rather than imported from `./oversight.ts`
+ * (which imports `./enqueue.ts`, which imports this file, so the import would
+ * cycle). `oversight.test.ts` asserts this string is the one
+ * `oversightMilestoneType("invitation_accepted")` actually produces, so the two
+ * cannot drift into an exemption that matches nothing.
+ */
+export const OVERSIGHT_SHARING_EXEMPT_TYPES = [
+  "oversight.milestone.invitation_accepted",
+] as const;
+
+/**
+ * What the oversight gate decides for one (category, type) pair.
+ *
+ * - `denied`            never, whatever the plant decided.
+ * - `requires_sharing`  only with `share_activity_with_oversight` on.
+ * - `exempt`            the sending church's own event; consent does not apply.
+ */
+export type OversightGate = "denied" | "requires_sharing" | "exempt";
+
+/**
+ * The whole oversight rule in one function, so `recipientMayBeNotified` has one
+ * question to ask and a reviewer has one place to read the answer.
+ *
+ * ORDER IS THE SAFETY PROPERTY. Category eligibility is decided FIRST, so the
+ * exemption can only ever relax the CONSENT question — an exempt `type` smuggled
+ * into `tasks` is refused exactly as any other granular row would be, and no
+ * addition to the exempt list can promote a granular category into oversight's
+ * reach.
+ *
+ * Two things this deliberately does NOT do:
+ *   * It does not touch `canAccessChurch`. An admin with no reach over the plant
+ *     is refused, exemption or not — this bypasses CONSENT, never TENANCY.
+ *   * It does not read request input. `type` is composed server-side by the
+ *     emitters in `./oversight.ts`, so the exempt list is not an input surface.
+ */
+export function oversightGateFor(
+  category: NotificationCategory,
+  type: string
+): OversightGate {
+  if (!isOversightEligibleCategory(category)) return "denied";
+  if ((OVERSIGHT_SHARING_EXEMPT_TYPES as readonly string[]).includes(type)) {
+    return "exempt";
+  }
+  return "requires_sharing";
+}
+
+/**
+ * The single privacy toggle gating everything oversight receives (N-026).
+ *
+ * One key, not a per-category lookup: with the category model gone there is
+ * nothing left to vary. `church_privacy_settings.share_activity_with_oversight`
+ * defaults to false, so a plant that has decided nothing shares nothing —
+ * enqueue writes no row for an oversight recipient at all.
+ *
+ * Church-level roles (planter, coach, team_member) never reach this:
+ * `canAccessFeatureData` returns true for them without consulting a toggle.
+ */
+export const OVERSIGHT_SHARING_FEATURE: PrivacyFeatureKey =
+  "oversight_activity";
+
+/**
+ * The plant-side toggle's copy — the single source of truth for what the
+ * setting screen says, so the promise the UI makes and the gate the code
+ * enforces cannot drift apart.
+ *
+ * The copy is load-bearing, not decoration (N-026 names it as a requirement).
+ * A planter deciding whether to share has to know the SHAPE of what leaves:
+ * counts, not names; a summary once a day, not a live feed of everything that
+ * happened. "Share activity" on its own reads like "let them watch me work",
+ * which is both frightening and wrong.
+ *
+ * ----------------------------------------------------------------------------
+ * The copy may only claim what this toggle actually governs
+ * ----------------------------------------------------------------------------
+ *
+ * This toggle gates what is PUSHED: the digest and TWO of the three milestones,
+ * via `enqueue`. The invitation-accepted milestone is exempt
+ * (`OVERSIGHT_SHARING_EXEMPT_TYPES`) because it is the sending church's own
+ * event, so the second and fifth bullets below say two milestones and name the
+ * third as an exception rather than listing all three as governed. That is a
+ * deliberate amendment of copy that was previously frozen: the ruling changed
+ * the facts, and copy whose only virtue is that it has not changed is not
+ * truthful copy.
+ *
+ * It does not gate what oversight may PULL either. `getOversightPlantHealth`
+ * (`src/lib/phase-engine/oversight/read.ts`) already returns each accessible
+ * plant's name, `currentPhase`, `daysUntilLaunch` and health classification to
+ * any `sending_church_admin` / `network_admin` with no privacy gate at all —
+ * that portfolio view is the oversight dashboard's whole reason to exist, and
+ * the six `share_*` columns gate the FEATURE data inside it, not the listing.
+ *
+ * So an earlier draft of this screen ("they see nothing about this plant unless
+ * you turn sharing on") was false the moment it shipped, and false about
+ * precisely the two facts — current stage, launch date — the milestones below
+ * mention. The fourth bullet exists to say that out loud. A consent control
+ * whose promise overstates its own reach is worse than no promise: the planter
+ * makes a decision about a guarantee the system does not offer.
+ *
+ * If a future ruling brings the portfolio's phase/launch exposure under this
+ * toggle, that bullet comes out — and not before.
+ */
+export const OVERSIGHT_SHARING_TOGGLE = {
+  label: "Share activity with your sending church or network",
+  /** One line, for a switch's own description. */
+  summary:
+    "They get a once-a-day summary — how many meetings, people and tasks — plus a few milestones.",
+  /**
+   * The full explanation, as separate sentences so the screen can lay them out
+   * however it likes without re-writing them.
+   */
+  detail: [
+    "Once a day, on days something happened, they get counts: meetings held, people added, tasks finished, stages reached.",
+    "They also hear about two milestones — you move to a new stage, you set or change a launch date.",
+    "They never see names, notes, messages, giving, or a list of what you did. This is a summary, not an activity feed.",
+    "Two things this setting does not cover. Your plant is already listed on their dashboard with its name, current stage and launch date — this is about the updates they receive, not that listing.",
+    "And if they invited you, they were told the moment you accepted. That is their own invitation being answered, so it reaches them either way.",
+    "Turn it off whenever you like. Sharing stops at the next update — nothing already sent is recalled.",
+  ],
+} as const;
 
 // ----------------------------------------------------------------------------
 // Guards + lookups
@@ -221,8 +419,13 @@ export function isDigestCadence(value: unknown): value is DigestCadence {
  */
 export function defaultChannelEnabled(
   category: NotificationCategory,
-  channel: NotificationChannel
+  channel: NotificationChannel,
+  audience: NotificationAudience = "church"
 ): boolean {
+  if (audience === "oversight") {
+    const override = OVERSIGHT_CHANNEL_DEFAULT_OVERRIDES[category]?.[channel];
+    if (override !== undefined) return override;
+  }
   return NOTIFICATION_CATEGORIES[category]?.defaults[channel] ?? false;
 }
 

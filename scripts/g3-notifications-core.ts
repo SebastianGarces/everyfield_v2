@@ -431,13 +431,15 @@ async function main() {
   assert.equal(oversightRowsAfter.length, oversightRowsBefore.length);
   ok("an oversight recipient is skipped while the privacy toggle is closed");
 
-  // Opt in, and the SAME call is accepted — the gate is the toggle, not the
-  // role.
+  // Opting in to a FEATURE changes nothing for a granular category — that is
+  // the 2026-07-27 ruling (N-025), and it supersedes the per-category model
+  // this assertion used to prove. `share_people` is still a real toggle; it
+  // just no longer has anything to do with what oversight is TOLD.
   await db.insert(churchPrivacySettings).values({
     churchId: churchA.id,
     sharePeople: true,
   });
-  const permitted = await enqueue({
+  const stillBarred = await enqueue({
     churchId: churchA.id,
     recipientUserId: oversight.id,
     category: "communication",
@@ -445,42 +447,32 @@ async function main() {
     title: "Delivery failed",
     body: "A message you sent could not be delivered.",
   });
-  assert.equal(permitted.status, "recorded");
-  assert.equal(permitted.created, true);
-  ok("...and accepted once the church opts in to sharing that feature");
+  assert.equal(stillBarred.status, "skipped");
+  assert.equal(stillBarred.reason, "oversight_privacy");
+  ok("...and still skipped when the church shares that feature (N-025)");
 
-  // --------------------------------------------------------------------------
-  // 7d. RULING (FRD Open Question #3) — `phase` and `digest` are eligible, and
-  // gated by their OWN toggles, which migration 0026 added at DEFAULT FALSE.
-  //
-  // The church opted in to `share_people` above and to nothing else, so this
-  // is the state every existing church is in: the new columns exist and are
-  // false, and behaviour is unchanged from before the ruling.
-  // --------------------------------------------------------------------------
-  for (const category of ["phase", "digest"] as const) {
-    const closed = await enqueue({
-      churchId: churchA.id,
-      recipientUserId: oversight.id,
-      category,
-      type: `${category}.update`,
-      title: "Phase changed",
-      body: "Now in Core Group.",
-    });
-    assert.equal(closed.status, "skipped", `${category} while opted out`);
-    assert.equal(closed.reason, "oversight_privacy");
-  }
-  ok(
-    "phase and digest skip an oversight recipient while their toggles are off"
-  );
-
-  // Turn on `share_phase` ALONE: phase opens, digest stays shut. The two are
-  // independent columns, so sharing assessments is not sharing the roll-up.
+  // Turning the ONE sharing toggle on opens the digest — and leaves every
+  // granular category shut. The full oversight model, both sides of the
+  // toggle and all three milestones, is asserted by
+  // `scripts/g3-oversight-model.ts`; what belongs here is that `enqueue` is
+  // where the gate lives.
   await db
     .update(churchPrivacySettings)
-    .set({ sharePhase: true })
+    .set({ shareActivityWithOversight: true })
     .where(eq(churchPrivacySettings.churchId, churchA.id));
 
-  const phaseOpen = await enqueue({
+  const digestOpen = await enqueue({
+    churchId: churchA.id,
+    recipientUserId: oversight.id,
+    category: "digest",
+    type: "oversight.activity.digest",
+    title: "Scratch Church A — today's summary",
+    body: "1 meeting, 2 new people.",
+  });
+  assert.equal(digestOpen.status, "recorded");
+  assert.equal(digestOpen.created, true);
+
+  const granularStillShut = await enqueue({
     churchId: churchA.id,
     recipientUserId: oversight.id,
     category: "phase",
@@ -488,37 +480,9 @@ async function main() {
     title: "Phase changed",
     body: "Now in Core Group.",
   });
-  assert.equal(phaseOpen.status, "recorded");
-  assert.equal(phaseOpen.created, true);
-
-  const digestStillShut = await enqueue({
-    churchId: churchA.id,
-    recipientUserId: oversight.id,
-    category: "digest",
-    type: "digest.weekly",
-    title: "Your week",
-    body: "Three things need attention.",
-  });
-  assert.equal(digestStillShut.status, "skipped");
-  assert.equal(digestStillShut.reason, "oversight_privacy");
-  ok("share_phase opens `phase` for oversight and leaves `digest` shut");
-
-  await db
-    .update(churchPrivacySettings)
-    .set({ shareDigest: true })
-    .where(eq(churchPrivacySettings.churchId, churchA.id));
-
-  const digestOpen = await enqueue({
-    churchId: churchA.id,
-    recipientUserId: oversight.id,
-    category: "digest",
-    type: "digest.weekly",
-    title: "Your week",
-    body: "Three things need attention.",
-  });
-  assert.equal(digestOpen.status, "recorded");
-  assert.equal(digestOpen.created, true);
-  ok("share_digest opens `digest` for oversight");
+  assert.equal(granularStillShut.status, "skipped");
+  assert.equal(granularStillShut.reason, "oversight_privacy");
+  ok("the single toggle opens the digest and never a granular category");
 
   // --------------------------------------------------------------------------
   // 7e. RULING (skip, do not throw) — a fan-out with a barred recipient in the

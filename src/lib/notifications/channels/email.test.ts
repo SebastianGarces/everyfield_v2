@@ -96,7 +96,14 @@ function fakeDeps(
       return 0;
     },
     async loadRecipients() {
-      return [{ id: PLANTER, email: "planter@example.test", name: "Sam" }];
+      return [
+        {
+          id: PLANTER,
+          email: "planter@example.test",
+          name: "Sam",
+          role: "planter" as const,
+        },
+      ];
     },
     async loadPreferences() {
       return options.preferences ?? [];

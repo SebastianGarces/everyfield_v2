@@ -1,0 +1,115 @@
+import { and, eq, ne, or, isNull } from "drizzle-orm";
+import { z } from "zod";
+
+import { db } from "@/db";
+import { churches, type User } from "@/db/schema";
+import { requireChurchAccess, requireRole } from "@/lib/auth/access";
+import { announceLaunchDateChanged } from "@/lib/notifications/oversight";
+
+// ============================================================================
+// The launch date, and the one place it is written.
+//
+// `churches.launch_date` is a `date` column — a calendar day the plant is
+// aiming at, not an instant — so it is stored and compared as `YYYY-MM-DD` and
+// never round-tripped through a `Date` (memory/invariants.md → Date & Time
+// Rendering: a naive day parsed in the runtime's zone is a different day on the
+// server than in the browser).
+//
+// It exists as its own module because setting the launch date is a MILESTONE
+// source (F11 N-025): oversight is told when a plant sets or changes it. Every
+// surface that lets a planter pick the date — onboarding step 3 (#202-#210), a
+// plant-settings screen later — goes through here, so "did anyone announce
+// this?" has one answer instead of one per screen.
+//
+// The announcement is conditional on the value actually CHANGING. A form that
+// re-submits the same date, a double click, a save that touched a different
+// field: none of those are a milestone, and the compare-and-set below makes
+// that a property of the write rather than a check a caller has to remember.
+// ============================================================================
+
+export const launchDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Use a calendar date, like 2026-09-13");
+
+export type SetLaunchDateResult =
+  | { status: "changed"; launchDate: string }
+  | { status: "unchanged"; launchDate: string }
+  | { status: "error"; error: string };
+
+/**
+ * Set (or move) a plant's launch date.
+ *
+ * Returns `unchanged` — successfully — when the stored date already equals the
+ * one supplied, and writes nothing in that case. The `WHERE` clause carries
+ * that condition, so two concurrent saves of the same date produce one update
+ * and one no-op rather than two updates and two milestones; a SELECT-then-
+ * UPDATE guard would let both through (memory/invariants.md → Atomicity).
+ *
+ * Announcing to oversight is best-effort and happens AFTER the durable write:
+ * a notification must never be the reason a planter's date failed to save, and
+ * an announcement for a date that was not stored would be a lie.
+ *
+ * AUTHORISES ITSELF. An earlier draft took a bare `churchId` and deferred
+ * authorisation to "the caller's own action layer" — a layer that does not
+ * exist, since nothing calls this yet. The first surface to wire it (onboarding
+ * step 3, #202-#210) passing a request-supplied id would have had a
+ * cross-tenant write AND a cross-tenant announcement to that tenant's oversight
+ * partners, from a function whose doc said someone else had checked.
+ *
+ * Planter, and the planter of THIS church: `requireRole` refuses a coach or an
+ * oversight admin (a launch date is the planter's to set, and an oversight
+ * admin setting it would be the milestone announcing itself), and
+ * `requireChurchAccess` refuses a planter pointed at somebody else's plant.
+ * Both throw, so a caller cannot proceed by ignoring a return value — unlike
+ * the `error` status, which is reserved for a malformed date the user typed.
+ */
+export async function setChurchLaunchDate(
+  user: User,
+  churchId: string,
+  launchDate: string
+): Promise<SetLaunchDateResult> {
+  requireRole(user, "planter");
+  await requireChurchAccess(user, churchId);
+
+  const parsed = launchDateSchema.safeParse(launchDate);
+  if (!parsed.success) {
+    return { status: "error", error: parsed.error.issues[0].message };
+  }
+
+  // The instant this change is written, held so the announcement can key
+  // itself to the CHANGE rather than to the date value — see
+  // `announceLaunchDateChanged`. It is read back from the row rather than
+  // reused from this variable so the key can never describe an instant the
+  // database did not store.
+  const changedAt = new Date();
+
+  const [updated] = await db
+    .update(churches)
+    .set({ launchDate: parsed.data, updatedAt: changedAt })
+    .where(
+      and(
+        eq(churches.id, churchId),
+        // "Not already this date" — including the null case, which `<>` alone
+        // would silently drop.
+        or(isNull(churches.launchDate), ne(churches.launchDate, parsed.data))
+      )
+    )
+    .returning({
+      id: churches.id,
+      name: churches.name,
+      updatedAt: churches.updatedAt,
+    });
+
+  if (!updated) {
+    return { status: "unchanged", launchDate: parsed.data };
+  }
+
+  await announceLaunchDateChanged({
+    churchId: updated.id,
+    plantName: updated.name,
+    launchDate: parsed.data,
+    changedAt: updated.updatedAt,
+  });
+
+  return { status: "changed", launchDate: parsed.data };
+}

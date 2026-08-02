@@ -119,8 +119,12 @@ class FakeDispatchStore implements DispatchDeps {
 
   // -- seeding --------------------------------------------------------------
 
-  addRecipient(id: string, email: string): DispatchRecipient {
-    const recipient: DispatchRecipient = { id, email, name: null };
+  addRecipient(
+    id: string,
+    email: string,
+    role: DispatchRecipient["role"] = "planter"
+  ): DispatchRecipient {
+    const recipient: DispatchRecipient = { id, email, name: null, role };
     this.recipients.push(recipient);
     return recipient;
   }
@@ -819,7 +823,12 @@ test("a delivered in-app channel keeps the notification delivered when email exh
 
 test("a recipient with no email address fails permanently, never retries", async () => {
   const store = new FakeDispatchStore();
-  store.recipients.push({ id: PLANTER, email: "", name: null });
+  store.recipients.push({
+    id: PLANTER,
+    email: "",
+    name: null,
+    role: "planter" as const,
+  });
   const notification = store.addNotification();
 
   await runDispatch(store, { now: NOW });
