@@ -1,7 +1,7 @@
 import { and, eq, inArray, or } from "drizzle-orm";
 
 import { db } from "@/db";
-import { churches, users } from "@/db/schema";
+import { churches, users, type OrganizationInvitationType } from "@/db/schema";
 import { OVERSIGHT_ROLES } from "@/lib/auth/access";
 
 import {
@@ -89,16 +89,64 @@ export interface OversightRecipient {
 }
 
 /**
- * ONE oversight organisation, as identified by the row that names it.
+ * ONE oversight organisation.
  *
- * Exactly one field is set in practice — an invitation is issued by a sending
- * church or by a network, never both — but the type carries both because the
- * `organization_invitations` row does, and reading it back is what makes the
- * audience below provable rather than inferred.
+ * At most one field is set. The type carries both because the
+ * `organization_invitations` row does, but a value of this type is a NARROWED
+ * reading of that row, produced by `invitingOrgForInvitation` below — never the
+ * row's two FK columns copied across.
  */
 export interface OversightOrg {
   sendingChurchId: string | null;
   sendingNetworkId: string | null;
+}
+
+/** The shape of an `organization_invitations` row this module reads. */
+export interface InvitingInvitation {
+  type: OrganizationInvitationType;
+  sendingChurchId: string | null;
+  sendingNetworkId: string | null;
+}
+
+/**
+ * WHICH org issued an invitation — derived from its TYPE, never from which of
+ * its two FK columns happen to be populated (ruled 2026-08-02).
+ *
+ * `organization_invitations` has a `sending_church_id` AND a
+ * `sending_network_id`, no CHECK constraint tying either to `type`, and
+ * `createInvitation` validates nothing: it inserts whatever it is handed. So a
+ * `church_to_sending_church` row can carry a network id as well, and the
+ * previous code — which copied both columns into the audience — fanned the
+ * consent-EXEMPT invitation milestone out to a network that had invited nobody
+ * and had consented to nothing.
+ *
+ * The type is the invitation's own statement of who issued it, and it is the
+ * field `applyAssociation` acts on, so deriving from it keeps the notification
+ * addressed to exactly the org whose association was just made. A stray FK on
+ * the other column is ignored rather than trusted, and the ignored org stays
+ * where it was: behind the sharing toggle, hearing nothing.
+ *
+ * `sending_church_to_network` names no plant (`target_church_id` is null), so
+ * it never reaches this milestone; it maps to no org here and the caller sends
+ * to nobody rather than guessing.
+ */
+export function invitingOrgForInvitation(
+  invitation: InvitingInvitation
+): OversightOrg {
+  switch (invitation.type) {
+    case "church_to_sending_church":
+      return {
+        sendingChurchId: invitation.sendingChurchId,
+        sendingNetworkId: null,
+      };
+    case "church_to_network":
+      return {
+        sendingChurchId: null,
+        sendingNetworkId: invitation.sendingNetworkId,
+      };
+    case "sending_church_to_network":
+      return { sendingChurchId: null, sendingNetworkId: null };
+  }
 }
 
 /** What a fan-out did, per recipient, without throwing. */
@@ -308,24 +356,28 @@ export async function announceMilestone(
  * one composes is a promise made to a third party, and a promise is worth a
  * test. This one's was wrong for a release.
  *
- * `invitedBy` is REQUIRED and is read off the invitation row, not off the
- * plant. This is the only milestone `enqueue` will write without consent, so
- * "who invited them" cannot be a guess: a plant that belongs to a sending
- * church AND a network would otherwise have this ungated row delivered to the
- * organisation that had nothing to do with it. The audience is narrowed to the
- * inviting org, and the other org stays exactly where it was — behind the
- * sharing toggle, hearing nothing.
+ * `invitation` is REQUIRED and the audience comes from it, not from the plant.
+ * This is the only milestone `enqueue` will write without consent, so "who
+ * invited them" cannot be a guess: a plant that belongs to a sending church AND
+ * a network would otherwise have this ungated row delivered to the organisation
+ * that had nothing to do with it.
  *
- * An invitation carrying NEITHER id names no org, so it reaches nobody. That is
- * the safe direction and it is unreachable in practice: `createInvitation`
- * requires the id its type implies.
+ * Nor can it be "whichever of the invitation's two FKs is set": nothing
+ * constrains a row to one, and `createInvitation` validates nothing at all.
+ * `invitingOrgForInvitation` derives the single org from `invitation.type`, so
+ * a row carrying BOTH ids still reaches only the org its type names. The other
+ * org stays exactly where it was — behind the sharing toggle, hearing nothing.
+ *
+ * An invitation whose type-implied id is null names no org, so it reaches
+ * nobody. That is the safe direction, and it is reachable: nothing validates
+ * the row on the way in.
  */
 export async function announceInvitationAccepted(
   input: {
     churchId: string;
     plantName: string;
     invitationId: string;
-    invitedBy: OversightOrg;
+    invitation: InvitingInvitation;
   },
   deps: OversightOrgFanOutDeps = dbOversightFanOutDeps
 ): Promise<OversightFanOutReport> {
@@ -353,8 +405,10 @@ export async function announceInvitationAccepted(
   // Not `announceMilestone`: this is the one emitter that does NOT address the
   // plant's oversight union. Same never-throws posture, different audience.
   try {
-    return await fanOutToOversightOrg(deps, input.invitedBy, (recipientId) =>
-      composeMilestone(facts, recipientId)
+    return await fanOutToOversightOrg(
+      deps,
+      invitingOrgForInvitation(input.invitation),
+      (recipientId) => composeMilestone(facts, recipientId)
     );
   } catch (error) {
     console.error("oversight milestone announcement failed", {

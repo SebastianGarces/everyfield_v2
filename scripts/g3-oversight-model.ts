@@ -433,6 +433,76 @@ async function main() {
     "both FKs set, sharing OFF: the sending church's invitation reaches ONLY it"
   );
 
+  // Direction 3: THE INVITATION ROW ITSELF CARRIES BOTH IDS.
+  //
+  // The second half of the same bypass (ruled 2026-08-02). Narrowing the
+  // audience to "the invitation's org" is only a fix if the invitation names
+  // ONE org — and `organization_invitations` has both FK columns, no CHECK
+  // tying either to `type`, and a `createInvitation` that validates nothing.
+  // The call below is the proof of that last claim: it inserts a
+  // `church_to_sending_church` row carrying a `sending_network_id` too, and is
+  // accepted without complaint.
+  //
+  // The audience is derived from `type`, so the stray id is ignored and the
+  // network — sharing still OFF, having invited nobody — hears nothing.
+  await db.delete(notifications).where(eq(notifications.churchId, plant.id));
+  const dualIdInvitation = await createInvitation({
+    type: "church_to_sending_church",
+    inviterUserId: sendingChurchAdmin.id,
+    targetChurchId: plant.id,
+    sendingChurchId: otherSendingChurch.id,
+    sendingNetworkId: network.id,
+  });
+  assert.equal(
+    dualIdInvitation.sendingNetworkId,
+    network.id,
+    "createInvitation rejected the ambiguous row — the fixture no longer reproduces the finding"
+  );
+  await acceptInvitation(dualIdInvitation.id, planter);
+
+  const afterDualIdInvite = await rowsFor(plant.id);
+  assert.deepEqual(
+    afterDualIdInvite.map((row) => row.recipientUserId),
+    [sendingChurchAdmin.id],
+    "a stray FK on the invitation row widened the consent-exempt audience"
+  );
+  assert.equal(
+    afterDualIdInvite.filter((row) =>
+      [adminA.id, adminB.id].includes(row.recipientUserId)
+    ).length,
+    0,
+    "the network was notified by an invitation whose TYPE names the sending church"
+  );
+  ok(
+    "invitation row carrying BOTH ids: only the org its TYPE names is notified"
+  );
+
+  // ...and the mirror, so the derivation cannot be one-directional.
+  await db.delete(notifications).where(eq(notifications.churchId, plant.id));
+  const dualIdToNetwork = await createInvitation({
+    type: "church_to_network",
+    inviterUserId: adminA.id,
+    targetChurchId: plant.id,
+    sendingChurchId: otherSendingChurch.id,
+    sendingNetworkId: network.id,
+  });
+  await acceptInvitation(dualIdToNetwork.id, planter);
+
+  const afterDualIdToNetwork = await rowsFor(plant.id);
+  assert.deepEqual(
+    afterDualIdToNetwork.map((row) => row.recipientUserId).sort(),
+    [adminA.id, adminB.id].sort(),
+    "the network's own invitation did not reach exactly the network's admins"
+  );
+  assert.equal(
+    afterDualIdToNetwork.filter(
+      (row) => row.recipientUserId === sendingChurchAdmin.id
+    ).length,
+    0,
+    "the sending church was notified by an invitation whose TYPE names the network"
+  );
+  ok("...and the mirror: a network-typed row ignores its stray sending church");
+
   // NEGATIVE CONTROL. The two assertions above are only meaningful if the
   // audience they exclude was genuinely reachable — so prove that the
   // PLANT-wide lister, which is what the fan-out used before this fix, really
@@ -1115,6 +1185,79 @@ async function main() {
   ok("a second tick the same day adds nothing — idempotence is intact");
 
   // --------------------------------------------------------------------------
+  // 6e. A FAILED RECIPIENT IS RE-OFFERED — the per-recipient owed clause.
+  //
+  //     `fanOutTo` swallows one recipient's `enqueue` throw so the others still
+  //     get theirs. With the selection asking whether ANY digest row existed for
+  //     (church, day), a plant with two oversight admins wrote one row, left the
+  //     owed set, and the admin whose insert failed never got that day's digest
+  //     on any later tick — while `summary.digested` counted the plant as
+  //     served. A transient failure became a permanent, invisible one.
+  //
+  //     `eligibleA` already has both admins' rows for `starveDayKey`. Deleting
+  //     ONE of them is exactly the state a swallowed per-recipient failure
+  //     leaves behind, and it is asserted against the REAL selection query.
+  // --------------------------------------------------------------------------
+  const digestedRows = await rowsFor(eligibleA);
+  assert.equal(digestedRows.length, 2, "the fixture is not a two-admin plant");
+  const failedRecipient = digestedRows[0].recipientUserId;
+  const servedRecipient = digestedRows[1].recipientUserId;
+  await db
+    .delete(notifications)
+    .where(eq(notifications.id, digestedRows[0].id));
+
+  const owedAfterPartial =
+    await dbOversightDigestSweepDeps.selectPlantsOwedDigest({
+      dayKey: starveDayKey,
+      window: starveWindow,
+      limit: 100,
+      afterChurchId: null,
+    });
+  assert.ok(
+    owedAfterPartial.includes(eligibleA),
+    "a plant with one recipient still missing the day's digest was not re-offered"
+  );
+  ok("a partially-delivered plant is still owed — the clause is per recipient");
+
+  const retryTick = await runOversightDigestSweep(dbOversightDigestSweepDeps, {
+    at: new Date("2026-05-21T23:59:00.000Z"),
+    limit: 10,
+  });
+  assert.equal(retryTick.dayKey, starveDayKey);
+
+  const afterRetry = await rowsFor(eligibleA);
+  assert.equal(
+    afterRetry.length,
+    2,
+    "the retry did not restore exactly one row per recipient"
+  );
+  assert.equal(
+    afterRetry.filter((row) => row.recipientUserId === failedRecipient).length,
+    1,
+    "the failed recipient was never retried"
+  );
+  assert.equal(
+    afterRetry.filter((row) => row.recipientUserId === servedRecipient).length,
+    1,
+    "the recipient who already had their digest was sent a second copy"
+  );
+  ok("the failed recipient is retried; the successful one is not duplicated");
+
+  // ...and once everyone has theirs, the plant leaves the owed set again.
+  const owedAfterRetry =
+    await dbOversightDigestSweepDeps.selectPlantsOwedDigest({
+      dayKey: starveDayKey,
+      window: starveWindow,
+      limit: 100,
+      afterChurchId: null,
+    });
+  assert.ok(
+    !owedAfterRetry.includes(eligibleA),
+    "a fully-served plant is still being offered"
+  );
+  ok("...and a fully-served plant drops out of the owed set again");
+
+  // --------------------------------------------------------------------------
   // 7. THE TOGGLE TAKES EFFECT AT THE NEXT ENQUEUE.
   // --------------------------------------------------------------------------
   await db.delete(notifications).where(eq(notifications.churchId, plant.id));
@@ -1235,12 +1378,29 @@ async function main() {
     .where(inArray(phaseTransitions.churchId, seededChurches));
   await db
     .delete(organizationInvitations)
-    .where(
-      and(
-        eq(organizationInvitations.targetChurchId, plant.id),
-        eq(organizationInvitations.status, "accepted")
-      )
-    );
+    .where(inArray(organizationInvitations.targetChurchId, seededChurches));
+
+  // ...and then the ENTITIES themselves, innermost FK first. Deleting only the
+  // child rows left every seeded church, user, network and sending church
+  // behind, which made a second run on the same scratch database fail on the
+  // starvation fixture's FIXED uuids — and, when this was ever pointed at a
+  // shared database, salted it permanently.
+  await db
+    .delete(churchPrivacySettings)
+    .where(inArray(churchPrivacySettings.churchId, seededChurches));
+  await db.delete(users).where(
+    inArray(
+      users.id,
+      [planter, adminA, adminB, sendingChurchAdmin].map((row) => row.id)
+    )
+  );
+  await db.delete(churches).where(inArray(churches.id, seededChurches));
+  await db
+    .delete(sendingChurches)
+    .where(eq(sendingChurches.id, otherSendingChurch.id));
+  await db
+    .delete(sendingNetworks)
+    .where(inArray(sendingNetworks.id, [network.id, emptyNetwork.id]));
 
   console.log(
     "\nALL PASS — the oversight model behaves against real Postgres."

@@ -143,13 +143,23 @@ export async function acceptInvitation(
  * that has already been recorded.
  *
  * The whole INVITATION is passed, not just the church id, because the audience
- * of this one milestone is the org that issued it — `invitation.sending_church_id`
- * / `invitation.sending_network_id`, read straight off the row. It is the only
- * oversight notification `enqueue` writes without consent, and `applyAssociation`
- * below sets one of the plant's FKs without clearing the other, so a plant can
- * belong to a sending church AND a network at once. Deriving the audience from
- * the PLANT would therefore have delivered an ungated row to an organisation
- * that never invited anyone and never consented to hear anything.
+ * of this one milestone is the org that issued it, and `invitation.type` is
+ * what names that org (`invitingOrgForInvitation`). It is the only oversight
+ * notification `enqueue` writes without consent, so it has to be addressed
+ * exactly, and there are two ways to get it wrong — both of them reachable:
+ *
+ *   * from the PLANT: `applyAssociation` below sets one of the plant's two
+ *     oversight FKs without clearing the other, so a plant can belong to a
+ *     sending church AND a network at once, and the uninvolved one would have
+ *     been notified without consent;
+ *   * from the invitation's two FK COLUMNS: `createInvitation` performs no
+ *     type↔id consistency check and there is no CHECK constraint, so a
+ *     `church_to_sending_church` row carrying a stray `sending_network_id`
+ *     would have reached the network too.
+ *
+ * Deriving from `type` closes both: it is the same field `applyAssociation`
+ * switches on, so the notification goes to precisely the org whose association
+ * was just made.
  */
 async function announceInvitationAcceptedForChurch(
   invitation: OrganizationInvitation
@@ -170,7 +180,8 @@ async function announceInvitationAcceptedForChurch(
       churchId,
       plantName: plant.name,
       invitationId: invitation.id,
-      invitedBy: {
+      invitation: {
+        type: invitation.type,
         sendingChurchId: invitation.sendingChurchId,
         sendingNetworkId: invitation.sendingNetworkId,
       },

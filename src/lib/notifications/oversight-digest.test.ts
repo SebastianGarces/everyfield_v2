@@ -7,7 +7,6 @@ import {
   composeDigestBody,
   dayKeyInAppZone,
   digestDayKey,
-  digestDedupeKey,
   previousCompleteDayWindow,
   runOversightDigest,
   runOversightDigestSweep,
@@ -435,19 +434,29 @@ test("the day key never follows the runtime's zone", () => {
 // selection once a digest row exists for the day.
 //
 // The fake below is the SELECTION QUERY's contract, not a convenience: it
-// offers a plant only while it is sharing, has an oversight admin, had
-// activity, and has no digest row for the day — and it honours the keyset
-// anchor. Those are exactly the clauses `selectPlantsOwedDigest` carries, and
-// modelling them is what lets these tests prove the starvation fix rather than
-// assume it. The previous fake modelled only "has no digest row yet", which is
-// why a permanently-owed head-of-list was invisible to the suite.
+// offers a plant only while it is sharing, had activity, and at least one of
+// its oversight recipients is still missing that day's digest row — and it
+// honours the keyset anchor. Those are exactly the clauses
+// `selectPlantsOwedDigest` carries, and modelling them is what lets these tests
+// prove the starvation fix rather than assume it. The previous fake modelled
+// only "has no digest row yet", which is why a permanently-owed head-of-list
+// was invisible to the suite.
+//
+// "Missing" is tracked PER RECIPIENT, matching the query's clause 4. The
+// per-plant version of that set was the second liveness bug: `fanOutTo`
+// swallows one recipient's enqueue failure so the others still get theirs, so a
+// plant could write one row, drop out of the owed set, and leave the failed
+// recipient without that day's digest forever.
 // ----------------------------------------------------------------------------
 
 const PLANT_A = "44444444-4444-4444-8444-444444444444";
 const PLANT_B = "55555555-5555-4555-8555-555555555555";
 
+/** Every plant's default audience — one admin, since most tests do not care. */
+const DEFAULT_RECIPIENTS = [ADMIN_A];
+
 class FakeSweepDeps implements OversightDigestSweepDeps {
-  /** Digest rows already in the database, by dedupe key. */
+  /** Digest rows already in the database, as `church|recipient|day`. */
   readonly written = new Set<string>();
   /** Every (church, dayKey) the sweep asked to digest — including no-ops. */
   readonly attempts: { churchId: string; dayKey: string }[] = [];
@@ -456,6 +465,12 @@ class FakeSweepDeps implements OversightDigestSweepDeps {
   selections = 0;
   /** Plants whose digest should throw. */
   readonly failing = new Set<string>();
+  /**
+   * Recipients whose enqueue throws. Removed on the first attempt, so the
+   * failure is TRANSIENT — which is the whole point: a transient failure must
+   * not become permanent silence.
+   */
+  readonly failingRecipients = new Set<string>();
 
   constructor(
     /** Every plant in the fleet, in id order. */
@@ -467,14 +482,40 @@ class FakeSweepDeps implements OversightDigestSweepDeps {
       sharing?: Set<string>;
       /** Plants whose oversight org has at least one admin. Defaults to all. */
       withAdmins?: Set<string>;
+      /** Per-plant audience, where a test cares who is on it. */
+      recipients?: Record<string, string[]>;
     } = {}
   ) {
     this.sharing = options.sharing ?? new Set(plants);
     this.withAdmins = options.withAdmins ?? new Set(plants);
+    this.recipientsByPlant = options.recipients ?? {};
   }
 
   readonly sharing: Set<string>;
   readonly withAdmins: Set<string>;
+  readonly recipientsByPlant: Record<string, string[]>;
+
+  /**
+   * Who the plant's digest is addressed to. An org with no admins yet has an
+   * EMPTY audience — which is how the production query expresses "nobody is
+   * there to receive it" now that clause 4 absorbed the old clause 2.
+   */
+  recipientsOf(churchId: string): string[] {
+    if (!this.withAdmins.has(churchId)) return [];
+    return this.recipientsByPlant[churchId] ?? DEFAULT_RECIPIENTS;
+  }
+
+  private deliveryKey(churchId: string, recipient: string, dayKey: string) {
+    return `${churchId}|${recipient}|${dayKey}`;
+  }
+
+  /** Clause 4: is ANY recipient of this plant still missing the day's row? */
+  private anyRecipientOwed(churchId: string, dayKey: string): boolean {
+    return this.recipientsOf(churchId).some(
+      (recipient) =>
+        !this.written.has(this.deliveryKey(churchId, recipient, dayKey))
+    );
+  }
 
   async selectPlantsOwedDigest(query: OwedDigestPageQuery): Promise<string[]> {
     this.selections += 1;
@@ -482,9 +523,8 @@ class FakeSweepDeps implements OversightDigestSweepDeps {
     return this.plants
       .filter((id) => query.afterChurchId === null || id > query.afterChurchId)
       .filter((id) => this.sharing.has(id))
-      .filter((id) => this.withAdmins.has(id))
       .filter((id) => this.active.has(id))
-      .filter((id) => !this.written.has(digestDedupeKey(id, query.dayKey)))
+      .filter((id) => this.anyRecipientOwed(id, query.dayKey))
       .slice(0, query.limit);
   }
 
@@ -501,18 +541,43 @@ class FakeSweepDeps implements OversightDigestSweepDeps {
       return { status: "skipped", reason: "no_activity", dayKey };
     }
 
-    this.written.add(digestDedupeKey(churchId, dayKey));
-    return {
-      status: "enqueued",
-      dayKey,
-      report: {
-        recorded: 2,
-        created: 2,
-        skipped: 0,
-        considered: 2,
-        failed: 0,
-      },
+    // `fanOutTo`'s posture, modelled: one recipient's enqueue failure is
+    // recorded and the loop continues, so the plant still reports `enqueued`.
+    const report = {
+      recorded: 0,
+      created: 0,
+      skipped: 0,
+      considered: 0,
+      failed: 0,
     };
+
+    for (const recipient of this.recipientsOf(churchId)) {
+      report.considered += 1;
+      if (this.failingRecipients.has(recipient)) {
+        this.failingRecipients.delete(recipient);
+        report.failed += 1;
+        continue;
+      }
+      const key = this.deliveryKey(churchId, recipient, dayKey);
+      // The partial unique index: a re-offered plant re-enqueues for everyone,
+      // and whoever already has their row gets a dedupe hit, not a copy.
+      if (this.written.has(key)) {
+        report.recorded += 1;
+        continue;
+      }
+      this.written.add(key);
+      report.recorded += 1;
+      report.created += 1;
+    }
+
+    return { status: "enqueued", dayKey, report };
+  }
+
+  /** Every row written for a plant on a day, by recipient. */
+  deliveredTo(churchId: string, dayKey: string): string[] {
+    return this.recipientsOf(churchId).filter((recipient) =>
+      this.written.has(this.deliveryKey(churchId, recipient, dayKey))
+    );
   }
 
   /** How many plants are still owed — the "did anyone get starved" question. */
@@ -647,7 +712,7 @@ test("an eligible plant BEYOND the batch is digested on a day full of ineligible
     [eligible],
     "an ineligible plant was summarised anyway"
   );
-  assert.ok(deps.written.has(digestDedupeKey(eligible, summary.dayKey)));
+  assert.deepEqual(deps.deliveredTo(eligible, summary.dayKey), [ADMIN_A]);
 
   // Same day, second tick: nothing further. Idempotence survives the fix.
   const second = await runOversightDigestSweep(deps, {
@@ -700,6 +765,69 @@ test("a plant whose digest THROWS does not block the plants behind it", async ()
 
   // ...and the failed plant is still owed, so the next tick retries it.
   assert.deepEqual(await deps.owed(summary.dayKey), [plants[0]]);
+});
+
+test("one recipient's enqueue failure is retried; the other is not duplicated", async () => {
+  // The per-recipient liveness bug. `fanOutTo` swallows one recipient's enqueue
+  // throw so the others still get theirs — so with a per-PLANT "already
+  // digested" test, a plant with two admins wrote one row, left the owed set,
+  // and the admin whose insert failed never got that day's digest on any later
+  // tick. `summary.digested` counted the plant as served.
+  const deps = new FakeSweepDeps([PLANT_A], new Set([PLANT_A]), {
+    recipients: { [PLANT_A]: [ADMIN_A, ADMIN_B] },
+  });
+  deps.failingRecipients.add(ADMIN_B);
+
+  const first = await runOversightDigestSweep(deps, { at: TICKS[0] });
+  assert.equal(first.digested, 1);
+  assert.deepEqual(
+    deps.deliveredTo(PLANT_A, first.dayKey),
+    [ADMIN_A],
+    "the fixture did not actually fail one recipient"
+  );
+
+  // The plant is STILL owed, because one of its recipients is still missing the
+  // day's row. This is the assertion the per-plant clause could not make.
+  assert.deepEqual(await deps.owed(first.dayKey), [PLANT_A]);
+
+  const second = await runOversightDigestSweep(deps, { at: TICKS[1] });
+  assert.equal(
+    second.dayKey,
+    first.dayKey,
+    "the ticks disagreed about the day"
+  );
+  assert.equal(second.selected, 1, "the failed recipient was never retried");
+  assert.equal(second.digested, 1);
+
+  // Both admins now have exactly one row for the day: the retry delivered the
+  // failed one and deduped the successful one.
+  assert.deepEqual(deps.deliveredTo(PLANT_A, first.dayKey), [ADMIN_A, ADMIN_B]);
+  assert.equal(deps.written.size, 2, "a recipient was digested twice");
+
+  // ...and now nobody is owed, so the day settles.
+  assert.deepEqual(await deps.owed(first.dayKey), []);
+  const third = await runOversightDigestSweep(deps, { at: TICKS[2] });
+  assert.equal(third.selected, 0);
+  assert.equal(deps.written.size, 2);
+});
+
+test("a plant whose oversight org has no admins is never offered", async () => {
+  // What the old clause 2 said, now said by clause 4: nobody is missing a row
+  // when there is nobody to miss one.
+  const deps = new FakeSweepDeps(
+    [PLANT_A, PLANT_B],
+    new Set([PLANT_A, PLANT_B]),
+    {
+      withAdmins: new Set([PLANT_B]),
+    }
+  );
+
+  const summary = await runOversightDigestSweep(deps, { at: TICKS[0] });
+  assert.deepEqual(
+    deps.attempts.map((a) => a.churchId),
+    [PLANT_B]
+  );
+  assert.deepEqual(await deps.owed(summary.dayKey), []);
 });
 
 test("96 ticks on a starving fleet still serve every eligible plant exactly once", async () => {

@@ -64,7 +64,7 @@
 -- `getChurchPrivacySettings` (`src/lib/auth/access.ts`) is a bare
 -- `db.select()`. Drizzle does NOT emit `SELECT *` for that — it expands the
 -- schema it was compiled against into an explicit column list. So an instance
--- running the PRE-0028 build asks Postgres for `share_phase` and
+-- running the PRE-0029 build asks Postgres for `share_phase` and
 -- `share_digest` by name. Had this migration dropped them, every such call
 -- would throw:
 --
@@ -99,29 +99,90 @@
 -- The generated SQL for this migration DID contain the two `DROP COLUMN`
 -- statements — drizzle-kit emits them because the TS schema no longer declares
 -- those columns. They were removed BY HAND, which is exactly what versioned SQL
--- migrations are for. The snapshot in `meta/0028_snapshot.json` still matches
+-- migrations are for. The snapshot in `meta/0029_snapshot.json` still matches
 -- the TS schema (columns absent), so `drizzle-kit generate` stays clean and
 -- does not re-propose the drops; the database simply carries two columns the
 -- schema has stopped caring about until the contract migration lands.
 --
--- ROLLBACK — every statement, then the ledger delete, in ONE psql session:
+-- ROLLBACK — every statement, then the ledger delete, in ONE psql session run
+-- with ON_ERROR_STOP=1:
+--
+--   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -1 -f rollback-0029.sql
 --
 --   ALTER TABLE "notifications" DROP CONSTRAINT IF EXISTS "notifications_category_check";
 --   ALTER TABLE "notification_preferences" DROP CONSTRAINT IF EXISTS "notification_preferences_category_check";
 --   DELETE FROM notifications WHERE category = 'milestones';
+--   DELETE FROM notification_preferences WHERE category = 'milestones';
 --   ALTER TABLE "church_privacy_settings" DROP COLUMN IF EXISTS "share_activity_with_oversight";
 --   ALTER TABLE "notification_preferences" ADD CONSTRAINT "notification_preferences_category_check" CHECK ("notification_preferences"."category" in ('tasks', 'meetings', 'communication', 'teams', 'phase', 'digest'));
 --   ALTER TABLE "notifications" ADD CONSTRAINT "notifications_category_check" CHECK ("notifications"."category" in ('tasks', 'meetings', 'communication', 'teams', 'phase', 'digest'));
---   DELETE FROM drizzle.__drizzle_migrations WHERE hash = '<0028 hash>';
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1785508853175;
+--
+-- THE FOURTH LINE IS THE ONE THAT WAS MISSING, and it is worth saying why,
+-- because the failure it caused was silent and unrecoverable.
+--
+-- This migration widens the category CHECK on BOTH tables, so `'milestones'`
+-- can land in `notification_preferences` as well as in `notifications` — and it
+-- does, the moment any user touches the Milestones row on `/settings`. A
+-- rollback that deleted only the NOTIFICATION rows then failed on the
+-- `notification_preferences` CHECK re-add, and where it left the database
+-- depended on a psql flag:
+--
+--   * ON_ERROR_STOP=1 (the mode a script should always use): execution halts at
+--     the re-add with BOTH CHECKs already dropped and the ledger delete never
+--     reached. So the tables carry no category constraint at all, while
+--     `drizzle.__drizzle_migrations` still claims 0029 applied — and
+--     `pnpm db:migrate` therefore reports "migrations applied successfully" and
+--     changes nothing. Green tooling, no constraint. This is the dangerous one.
+--   * ON_ERROR_STOP off: execution continues, so `notifications` gets its
+--     narrow CHECK back, `notification_preferences` does not, and the ledger
+--     delete DOES run — after which a forward re-apply fails loudly on the
+--     `DROP CONSTRAINT` that is no longer there.
+--
+-- The block above fixes both directions: it deletes the preference rows too, it
+-- drops with IF EXISTS so a partially-rolled-back database can simply re-run
+-- it, and `-1` wraps the whole thing in one transaction so a failure leaves
+-- nothing half-applied. Postgres runs DDL transactionally, so this genuinely is
+-- all-or-nothing.
+--
+-- DETECTION + REPAIR for a database stranded by the OLD, broken block:
+--
+--   -- Detection: 0 rows returned for a table means its CHECK is gone.
+--   SELECT rel.relname, con.conname
+--     FROM pg_constraint con
+--     JOIN pg_class rel ON rel.oid = con.conrelid
+--    WHERE con.contype = 'c'
+--      AND con.conname IN ('notifications_category_check',
+--                          'notification_preferences_category_check');
+--   -- ...alongside the ledger still claiming the migration ran:
+--   SELECT created_at FROM drizzle.__drizzle_migrations
+--    WHERE created_at = 1785508853175;
+--
+--   -- Repair, forward (keep 0029): re-assert the WIDE constraints. Safe to run
+--   -- whether one, both or neither is missing; leaves the ledger alone.
+--   BEGIN;
+--   ALTER TABLE "notification_preferences" DROP CONSTRAINT IF EXISTS "notification_preferences_category_check";
+--   ALTER TABLE "notifications" DROP CONSTRAINT IF EXISTS "notifications_category_check";
+--   ALTER TABLE "notification_preferences" ADD CONSTRAINT "notification_preferences_category_check" CHECK ("notification_preferences"."category" in ('tasks', 'meetings', 'communication', 'teams', 'phase', 'milestones', 'digest'));
+--   ALTER TABLE "notifications" ADD CONSTRAINT "notifications_category_check" CHECK ("notifications"."category" in ('tasks', 'meetings', 'communication', 'teams', 'phase', 'milestones', 'digest'));
+--   COMMIT;
+--
+--   -- Repair, backward (finish the rollback): run the corrected ROLLBACK block
+--   -- above verbatim. Every statement in it is now idempotent, so it completes
+--   -- from a half-rolled-back state as readily as from a clean one.
 --
 -- Because nothing was dropped going forward, rollback restores nothing — there
 -- is no `share_phase`/`share_digest` re-add step, and old code keeps working
 -- throughout in both directions. Two things a rollback still DESTROYS:
---   * Every `milestones` notification. The narrowed CHECK cannot be re-added
---     while they exist, so they must go — hence the DELETE above, which must
---     run BEFORE the re-add. They are announcements, not records of anything
---     that only lives here; the invitation, the transition and the launch date
---     are all still in their own tables.
+--   * Every `milestones` notification AND every `milestones` PREFERENCE row.
+--     The narrowed CHECK cannot be re-added while either exists, so both must
+--     go — hence the two DELETEs above, which must run BEFORE the re-adds. The
+--     notifications are announcements, not records of anything that only lives
+--     here; the invitation, the transition and the launch date are all still in
+--     their own tables. The preference rows are a user's explicit choice about
+--     a category that no longer exists after the rollback, and absence resolves
+--     to the coded default, so losing them costs nothing a re-migration cannot
+--     re-ask.
 --   * Every sharing opt-in, with `share_activity_with_oversight`. A plant that
 --     had opted in must opt in again. That is the correct direction to lose
 --     data in: rollback fails closed.
@@ -138,17 +199,35 @@
 -- entry instead makes drizzle-kit forget the migration while the ledger still
 -- claims it applied, which is unrecoverable by restoring the entry.
 --
--- `<0028 hash>` is the sha256 of THIS FILE, byte for byte, from the deployed
--- commit:
+-- IDENTIFY THE LEDGER ROW BY `created_at`, NOT BY THE FILE'S HASH.
 --
---   shasum -a 256 src/db/migrations/0028_oversight_sharing_toggle.sql
+-- `created_at` is `_journal.json`'s "when" for this migration (1785508853175),
+-- and it is the ONLY field drizzle's migrator compares: `PgDialect.migrate`
+-- (drizzle-orm/pg-core/dialect.cjs) re-applies a migration when its journal
+-- "when" is greater than the greatest `created_at` in the ledger, and never
+-- looks at the stored hash at all. Two consequences, both verified rather than
+-- assumed:
 --
--- or identify the row by its `_journal.json` "when":
---
---   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1785508853175;
+--   * editing the COMMENTS in this file — including everything above — cannot
+--     cause a re-application, cannot be detected by the migrator, and does not
+--     invalidate an already-applied migration. An earlier revision of this file
+--     claimed a broken rollback "could not be corrected in place" because the
+--     stored hash had to be preserved. That premise was false and the
+--     correction is above; there is never a reason to ship a rollback block
+--     known to be broken.
+--   * do NOT try to find the ledger row with `shasum -a 256` of this file. The
+--     hash stored at apply time is whatever the file said then, and it will not
+--     match the file as edited. `created_at` is stable and is the key the
+--     migrator itself uses.
 
-ALTER TABLE "notification_preferences" DROP CONSTRAINT "notification_preferences_category_check";--> statement-breakpoint
-ALTER TABLE "notifications" DROP CONSTRAINT "notifications_category_check";--> statement-breakpoint
-ALTER TABLE "church_privacy_settings" ADD COLUMN "share_activity_with_oversight" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+-- `IF EXISTS` / `IF NOT EXISTS` on the forward path too, so this file is
+-- re-runnable by hand against a database left half-rolled-back by the earlier,
+-- broken rollback block (see DETECTION + REPAIR above). Drizzle itself will
+-- never re-run it — the migrator gates on `created_at` — so these guards cost
+-- nothing and are the difference between "repair by re-running the file" and
+-- "repair by hand-editing statements out of it".
+ALTER TABLE "notification_preferences" DROP CONSTRAINT IF EXISTS "notification_preferences_category_check";--> statement-breakpoint
+ALTER TABLE "notifications" DROP CONSTRAINT IF EXISTS "notifications_category_check";--> statement-breakpoint
+ALTER TABLE "church_privacy_settings" ADD COLUMN IF NOT EXISTS "share_activity_with_oversight" boolean DEFAULT false NOT NULL;--> statement-breakpoint
 ALTER TABLE "notification_preferences" ADD CONSTRAINT "notification_preferences_category_check" CHECK ("notification_preferences"."category" in ('tasks', 'meetings', 'communication', 'teams', 'phase', 'milestones', 'digest'));--> statement-breakpoint
 ALTER TABLE "notifications" ADD CONSTRAINT "notifications_category_check" CHECK ("notifications"."category" in ('tasks', 'meetings', 'communication', 'teams', 'phase', 'milestones', 'digest'));

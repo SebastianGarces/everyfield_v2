@@ -20,7 +20,9 @@ import {
   oversightMilestoneKinds,
   oversightMilestoneType,
   fanOutToOversightOrg,
+  invitingOrgForInvitation,
   listOversightAdminsOfOrg,
+  type InvitingInvitation,
   type OversightFanOutDeps,
   type OversightOrg,
   type OversightOrgFanOutDeps,
@@ -45,6 +47,13 @@ const ADMIN_B = "33333333-3333-4333-8333-333333333333";
 /** The org that issued the invitation, and the one that did not. */
 const SENDING_CHURCH = "77777777-7777-4777-8777-777777777777";
 const NETWORK = "88888888-8888-4888-8888-888888888888";
+/** A well-formed invitation from the sending church. */
+const INVITATION: InvitingInvitation = {
+  type: "church_to_sending_church",
+  sendingChurchId: SENDING_CHURCH,
+  sendingNetworkId: null,
+};
+/** The org `INVITATION` names — what the fan-out must be asked for. */
 const INVITER: OversightOrg = {
   sendingChurchId: SENDING_CHURCH,
   sendingNetworkId: null,
@@ -235,7 +244,7 @@ test("the invitation milestone does not describe the toggle as off", () => {
       churchId: CHURCH,
       plantName: "Grace Chapel",
       invitationId: "inv-1",
-      invitedBy: INVITER,
+      invitation: INVITATION,
     },
     fake
   ).then(() => {
@@ -493,7 +502,7 @@ test("the invitation milestone is emitted with the plant NOT sharing", async () 
       churchId: CHURCH,
       plantName: "Grace Chapel",
       invitationId: "inv-1",
-      invitedBy: INVITER,
+      invitation: INVITATION,
     },
     fake
   );
@@ -538,7 +547,7 @@ test("the invitation body is true whether or not the plant shares", async () => 
       churchId: CHURCH,
       plantName: "Grace Chapel",
       invitationId: "inv-1",
-      invitedBy: INVITER,
+      invitation: INVITATION,
     },
     fake
   );
@@ -644,7 +653,7 @@ test("the acceptance reaches the inviting org only, with both FKs set", async ()
       churchId: CHURCH,
       plantName: "Grace Chapel",
       invitationId: "inv-1",
-      invitedBy: INVITER,
+      invitation: INVITATION,
     },
     fake
   );
@@ -678,7 +687,11 @@ test("a network's invitation reaches the network, not the sending church", async
       churchId: CHURCH,
       plantName: "Grace Chapel",
       invitationId: "inv-2",
-      invitedBy: { sendingChurchId: null, sendingNetworkId: NETWORK },
+      invitation: {
+        type: "church_to_network",
+        sendingChurchId: null,
+        sendingNetworkId: NETWORK,
+      },
     },
     fake
   );
@@ -690,9 +703,12 @@ test("a network's invitation reaches the network, not the sending church", async
 });
 
 test("an invitation naming no org reaches nobody", async () => {
-  // The safe direction. Unreachable in practice — `createInvitation` requires
-  // the id its type implies — but "no org named" must never degrade to
-  // "everyone", which is exactly what the plant-wide union did.
+  // The safe direction, and it is REACHABLE: `createInvitation` inserts what it
+  // is handed and validates nothing, and no CHECK constraint ties an id to a
+  // type. (An earlier version of this comment claimed the opposite. It was
+  // wrong, and the same false claim sat on the emitter.) "No org named" must
+  // never degrade to "everyone", which is exactly what the plant-wide union
+  // did.
   const fake = new FakeOversightEnqueue([{ id: ADMIN_A }, { id: ADMIN_B }], {
     adminsByOrg: { [SENDING_CHURCH]: [{ id: ADMIN_A }] },
   });
@@ -702,13 +718,135 @@ test("an invitation naming no org reaches nobody", async () => {
       churchId: CHURCH,
       plantName: "Grace Chapel",
       invitationId: "inv-3",
-      invitedBy: { sendingChurchId: null, sendingNetworkId: null },
+      invitation: {
+        type: "church_to_sending_church",
+        sendingChurchId: null,
+        sendingNetworkId: null,
+      },
     },
     fake
   );
 
   assert.equal(report.considered, 0);
   assert.equal(fake.written.length, 0);
+});
+
+// ----------------------------------------------------------------------------
+// ...and the org is derived from the invitation's TYPE, not its FK columns
+// ----------------------------------------------------------------------------
+//
+// The second half of the same bypass (ruled 2026-08-02). Narrowing the audience
+// to "the invitation's org" is only a fix if the invitation names ONE org, and
+// the row does not have to: `organization_invitations` carries both FK columns,
+// has no CHECK tying either to `type`, and `createInvitation` performs no
+// validation whatsoever. A `church_to_sending_church` row with a stray
+// `sending_network_id` therefore reached the network too — ungated, uninvolved,
+// and with sharing off.
+// ----------------------------------------------------------------------------
+
+test("the inviting org comes from the type, whatever the FK columns say", () => {
+  // Both ids set. The type decides, in both directions.
+  assert.deepEqual(
+    invitingOrgForInvitation({
+      type: "church_to_sending_church",
+      sendingChurchId: SENDING_CHURCH,
+      sendingNetworkId: NETWORK,
+    }),
+    { sendingChurchId: SENDING_CHURCH, sendingNetworkId: null }
+  );
+
+  assert.deepEqual(
+    invitingOrgForInvitation({
+      type: "church_to_network",
+      sendingChurchId: SENDING_CHURCH,
+      sendingNetworkId: NETWORK,
+    }),
+    { sendingChurchId: null, sendingNetworkId: NETWORK }
+  );
+
+  // No plant is involved in this type at all, so it names no org rather than
+  // guessing from whichever column happens to be filled.
+  assert.deepEqual(
+    invitingOrgForInvitation({
+      type: "sending_church_to_network",
+      sendingChurchId: SENDING_CHURCH,
+      sendingNetworkId: NETWORK,
+    }),
+    { sendingChurchId: null, sendingNetworkId: null }
+  );
+
+  // The type-implied column being null is a real state — nothing validates the
+  // row — and it must name no org rather than fall back to the other column.
+  assert.deepEqual(
+    invitingOrgForInvitation({
+      type: "church_to_network",
+      sendingChurchId: SENDING_CHURCH,
+      sendingNetworkId: null,
+    }),
+    { sendingChurchId: null, sendingNetworkId: null }
+  );
+});
+
+test("an invitation row carrying BOTH ids notifies only the org its type names", async () => {
+  // End to end through the emitter, both directions, sharing OFF — so the
+  // uninvolved org is entitled to hear nothing at all.
+  const dual = (type: InvitingInvitation["type"]): InvitingInvitation => ({
+    type,
+    sendingChurchId: SENDING_CHURCH,
+    sendingNetworkId: NETWORK,
+  });
+
+  const orgs = {
+    [SENDING_CHURCH]: [{ id: ADMIN_A }],
+    [NETWORK]: [{ id: ADMIN_OF_OTHER_ORG }],
+  };
+
+  const toSendingChurch = new FakeOversightEnqueue([], {
+    sharing: false,
+    adminsByOrg: orgs,
+  });
+  const scReport = await announceInvitationAccepted(
+    {
+      churchId: CHURCH,
+      plantName: "Grace Chapel",
+      invitationId: "inv-dual-1",
+      invitation: dual("church_to_sending_church"),
+    },
+    toSendingChurch
+  );
+
+  assert.equal(scReport.considered, 1, "an uninvolved org was considered");
+  assert.deepEqual(
+    toSendingChurch.written.map((row) => row.recipientUserId),
+    [ADMIN_A]
+  );
+  assert.deepEqual(
+    toSendingChurch.orgsAsked,
+    [{ sendingChurchId: SENDING_CHURCH, sendingNetworkId: null }],
+    "the stray network id was carried into the audience"
+  );
+
+  const toNetwork = new FakeOversightEnqueue([], {
+    sharing: false,
+    adminsByOrg: orgs,
+  });
+  await announceInvitationAccepted(
+    {
+      churchId: CHURCH,
+      plantName: "Grace Chapel",
+      invitationId: "inv-dual-2",
+      invitation: dual("church_to_network"),
+    },
+    toNetwork
+  );
+
+  assert.deepEqual(
+    toNetwork.written.map((row) => row.recipientUserId),
+    [ADMIN_OF_OTHER_ORG]
+  );
+  assert.deepEqual(toNetwork.orgsAsked, [
+    { sendingChurchId: null, sendingNetworkId: NETWORK },
+  ]);
 });
 
 test("the org fan-out cannot widen to the plant", async () => {
