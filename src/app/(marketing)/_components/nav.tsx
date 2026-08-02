@@ -31,8 +31,11 @@ export function MarketingNav() {
         </a>
         <Link href="/login">Sign in</Link>
       </div>
+      {/* the full label wraps the bar to two lines under 360px; CSS swaps in
+          the short one, and only ever shows one — so it is the accessible name */}
       <a className="btn primary" href="/#request-invite">
-        Request an invite
+        <span className="cta-full">Request an invite</span>
+        <span className="cta-short">Get an invite</span>
       </a>
     </nav>
   );

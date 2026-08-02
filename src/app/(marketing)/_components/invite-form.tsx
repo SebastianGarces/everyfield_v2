@@ -90,8 +90,8 @@ function InviteAttempt({
       ) : (
         <p className="invite-note">
           Free while EveryField is in alpha — no card, nothing to cancel. We
-          read every request and reply within a few days, and we&rsquo;ll only
-          use your email to send your invite.
+          read every request, and we&rsquo;ll be in touch as invites open up. We
+          only use your email to send your invite.
         </p>
       )}
     </>

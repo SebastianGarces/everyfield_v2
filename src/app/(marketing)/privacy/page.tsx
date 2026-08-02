@@ -89,7 +89,7 @@ export default function PrivacyPage() {
         <p>
           Email <a href="mailto:hello@everyfield.app">hello@everyfield.app</a>{" "}
           to get a copy of your data, correct something in it, or have it
-          deleted. A person reads it, and we come back to you within a few days.
+          deleted. A person reads it, and we come back to you.
         </p>
 
         <h2>When this page changes</h2>
