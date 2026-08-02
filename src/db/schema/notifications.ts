@@ -45,7 +45,7 @@ import { users } from "./user";
  * preference — a user turns off "meeting reminders", not "the 3-day offset of a
  * Vision Meeting". Adding one is a code change plus a coded default; it needs
  * no backfill (absence resolves to the coded default) but it DOES need the
- * CHECK constraints in migration 0024 widened — see 0028.
+ * CHECK constraints in migration 0024 widened — see 0029.
  *
  * `milestones` (N-025, ruled 2026-07-27) is the one category an oversight
  * recipient may receive per event. It exists so "oversight never gets granular

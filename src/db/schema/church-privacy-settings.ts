@@ -32,7 +32,7 @@ export const churchPrivacySettings = pgTable(
      * actually reason about.
      *
      * Default FALSE, for every church, including the ones that had opted in to
-     * the columns it replaces — 0028 migrates nobody forward. Sharing your
+     * the columns it replaces — 0029 migrates nobody forward. Sharing your
      * plant's activity outward is a consent decision, and inheriting it from a
      * toggle that meant something else would be inventing consent.
      *
@@ -41,14 +41,14 @@ export const churchPrivacySettings = pgTable(
      * dashboard. This one gates what is PUSHED to them.
      *
      * NOTE — `share_phase` and `share_digest` are absent from this schema but
-     * STILL PRESENT IN THE DATABASE. 0028 is deliberately expand-only: it adds
+     * STILL PRESENT IN THE DATABASE. 0029 is deliberately expand-only: it adds
      * the column below without dropping the two it supersedes, because this
      * Neon branch is shared by local dev, every preview AND production, and
-     * dropping a column that pre-0028 builds still name in their SELECT list
+     * dropping a column that pre-0029 builds still name in their SELECT list
      * would break `canAccessFeatureData` everywhere for as long as #224 sat in
      * review. A follow-up contract migration drops them after #224 merges.
      * Leaving them out of this file is what makes the new code stop reading
-     * them; see the 0028 header for the full reasoning.
+     * them; see the 0029 header for the full reasoning.
      */
     shareActivityWithOversight: boolean("share_activity_with_oversight")
       .default(false)

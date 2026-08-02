@@ -540,7 +540,7 @@ export function runDailyOversightDigest(
 //     overlapping ticks read the same table rather than two private clocks;
 //   * self-healing — a dropped tick (GitHub's scheduler is best-effort) is not
 //     a lost digest, because the next tick still sees the plant as owed;
-//   * needs no new schema, which matters here: migration 0028 is already
+//   * needs no new schema, which matters here: migration 0029 is already
 //     applied to a shared Neon branch and this unit adds no DDL.
 //
 // It is the same idiom the phase engine uses for its own once-a-day property
