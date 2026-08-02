@@ -201,8 +201,15 @@
     {
       "idx": 28,
       "version": "7",
+      "when": 1785508541869,
+      "tag": "0028_church_leadership_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
       "when": 1785508853175,
-      "tag": "0028_oversight_sharing_toggle",
+      "tag": "0029_oversight_sharing_toggle",
       "breakpoints": true
     }
   ]

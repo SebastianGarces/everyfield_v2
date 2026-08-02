@@ -1,0 +1,74 @@
+-- F12 / OB-004 — planter onboarding: the pastor confirmation (issue #202).
+--
+-- ONE nullable column on "churches": the answer to "will you be the lead
+-- planter/pastor of this church plant?".
+--
+-- WHY A COLUMN AT ALL, WHEN THE PLANTER IS ALREADY KNOWN. The ASSIGNMENT is
+-- unchanged and stays where it was: users.church_id + the 'planter' role,
+-- written at step 1 through the #183 compare-and-set. What could not be
+-- expressed before this column is a NO: "this church deliberately has no
+-- planter" was indistinguishable from "this church has one", because both
+-- looked like a row in users with role='planter' and this church_id. An
+-- unrecorded No is silently a Yes to every downstream surface — most visibly to
+-- follow-up task generation, which assigns meeting follow-ups to whoever that
+-- role lookup finds.
+--
+-- WHY THREE STATES AND NOT A BOOLEAN. NULL means "never asked", and that is
+-- NOT "no planter". Every church that exists when this ships has NULL here, and
+-- a two-state boolean would force each of them into one of the answers: default
+-- false and every existing plant is retro-declared planter-less (nudge on the
+-- dashboard, no assignee on their follow-up tasks); default true and OB-010's
+-- one-time confirmation prompt for legacy churches has nothing left to ask,
+-- because the answer it wants to collect is already recorded as given. NULL
+-- keeps "we have not asked you yet" sayable. The rule lives in exactly one
+-- place in the app — src/lib/onboarding/leadership.ts — and this column is its
+-- storage.
+--
+-- WHY varchar AND NOT AN ENUM OR A CHECK. Same shape as users.role: a small
+-- vocabulary that grows by product decision, where adding a value must not need
+-- a migration in lockstep with a deploy. The allowed values
+-- ('planter_confirmed', 'no_planter') are enforced at the app boundary, where
+-- the answer arrives as user input and is validated before it is ever written.
+--
+-- PURELY ADDITIVE. Postgres 11+ stores ADD COLUMN with no default as
+-- catalog-only, so this does not rewrite "churches". No backfill (see the three
+-- states above — NULL is the correct value for every existing row), no index,
+-- no constraint, nothing outside "churches" touched.
+--
+-- ROLLBACK — the drop, then the ledger delete, in ONE psql session:
+--
+--   ALTER TABLE "churches" DROP COLUMN IF EXISTS "leadership_status";
+--   DELETE FROM drizzle.__drizzle_migrations WHERE hash = '<0028 hash>';
+--
+-- Unconditionally clean: dropping a column cannot fail on data, and nothing
+-- depends on it. What a rollback DISCARDS is every recorded answer — which for
+-- a "yes" church costs nothing (the planter link is untouched and the role
+-- lookup infers exactly what it inferred before), and for a "no" church means
+-- that plant is once again treated as led by its creating account: the nudge
+-- disappears and follow-up tasks resume being assigned to someone who said they
+-- are not the pastor. Re-applying re-creates the column empty; the answers are
+-- gone and every church is asked again on its next pass through the flow.
+--
+-- Rolling back this migration WITHOUT reverting the application code leaves the
+-- dashboard, the onboarding flow and follow-up task generation all selecting
+-- churches.leadership_status, which no longer exists. Revert the code first, or
+-- together.
+--
+--   *** DO NOT EDIT src/db/migrations/meta/_journal.json. ***
+--
+-- Same reasoning as 0023-0027: the journal is the repository's list of
+-- migrations, the `drizzle.__drizzle_migrations` ledger is the database's
+-- record of what ran, and only the ledger row is deleted. Removing the journal
+-- entry instead makes drizzle-kit forget the migration while the ledger still
+-- claims it applied, which is unrecoverable by restoring the entry.
+--
+-- `<0028 hash>` is the sha256 of THIS FILE, byte for byte, from the deployed
+-- commit:
+--
+--   shasum -a 256 src/db/migrations/0028_church_leadership_status.sql
+--
+-- or identify the row by its `_journal.json` "when":
+--
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1785508541869;
+
+ALTER TABLE "churches" ADD COLUMN "leadership_status" varchar(32);

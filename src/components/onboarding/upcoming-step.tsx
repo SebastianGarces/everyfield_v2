@@ -5,43 +5,39 @@ import {
 } from "@/lib/onboarding/steps";
 
 /**
- * The shell body for steps 2-4 (OB-001).
+ * The shell body for the steps that are still shells (OB-001).
  *
- * These steps are declared, ordered, skippable and navigable, but they capture
- * nothing yet — issues #202-#210 replace each body with its real form. Until
- * then the step still tells the planter what it will ask, because a step that
- * says nothing is worse than one that sets an expectation, and every control
- * out of here is real: Back, skip forward, or leave for the dashboard.
+ * Step 2 graduated to a real form with OB-004 (#202); steps 3-4 are declared,
+ * ordered, skippable and navigable, but they capture nothing yet — issues
+ * #205-#210 replace each body with its real form. Until then the step still
+ * tells the planter what it will ask, because a step that says nothing is worse
+ * than one that sets an expectation, and every control out of here is real:
+ * Back, skip forward, or leave for the dashboard.
  *
- * Nothing here writes, so skipping through from step 1 lands exactly today's
+ * Nothing here writes, so skipping through from step 2 lands exactly today's
  * outcome — a named church at phase 0 with no launch date (AC 4).
  */
-const UPCOMING_COPY: Record<
-  Exclude<OnboardingStepId, "basics">,
-  { intro: string; bullets: string[] }
-> = {
-  leadership: {
-    intro:
-      "Next we'll confirm who leads this plant, so tasks and follow-ups land with a real person.",
-    bullets: [
-      "Whether you are the lead planter or pastor",
-      "What changes if someone else is",
-    ],
-  },
-  journey: {
-    intro:
-      "Then we'll ask where you are today, so the dashboard, wiki and guidance match your stage instead of assuming you are starting from zero.",
-    bullets: [
-      "Your target launch date, or “no date yet”",
-      "Which stage of the journey you are in",
-    ],
-  },
-  people: {
-    intro:
-      "Finally we'll help you bring in the people already walking with you — that is what turns the pipeline, meetings and follow-ups on.",
-    bullets: ["Import a list you already keep", "Or add people one at a time"],
-  },
-};
+type ShellStepId = Extract<OnboardingStepId, "journey" | "people">;
+
+const UPCOMING_COPY: Record<ShellStepId, { intro: string; bullets: string[] }> =
+  {
+    journey: {
+      intro:
+        "Then we'll ask where you are today, so the dashboard, wiki and guidance match your stage instead of assuming you are starting from zero.",
+      bullets: [
+        "Your target launch date, or “no date yet”",
+        "Which stage of the journey you are in",
+      ],
+    },
+    people: {
+      intro:
+        "Finally we'll help you bring in the people already walking with you — that is what turns the pipeline, meetings and follow-ups on.",
+      bullets: [
+        "Import a list you already keep",
+        "Or add people one at a time",
+      ],
+    },
+  };
 
 export function UpcomingStep({
   step,
@@ -50,12 +46,12 @@ export function UpcomingStep({
   onFinish,
   busy,
 }: {
-  step: Exclude<OnboardingStepId, "basics">;
+  step: ShellStepId;
   /**
-   * `null` on step 2: step 1 has already created the church, so there is
-   * nothing to go back and re-submit. Changing the name or location afterwards
-   * belongs to church settings (OB-008), not to a form that would fail with
-   * "you already have a church".
+   * `null` when the previous step cannot be re-entered — step 1 has already
+   * created the church, so there is nothing to go back and re-submit. Changing
+   * the name or location afterwards belongs to church settings (OB-008), not to
+   * a form that would fail with "you already have a church".
    */
   onBack: (() => void) | null;
   onSkip: () => void;

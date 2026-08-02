@@ -6,6 +6,9 @@ import {
   resolveResumeStep,
   shouldShowOnboarding,
 } from "@/lib/onboarding/steps";
+import { churchHasNoPlanter } from "@/lib/onboarding/leadership";
+import { NoPlanterNudge } from "@/components/onboarding/no-planter-nudge";
+import { LeadershipReentry } from "@/components/onboarding/leadership-reentry";
 import {
   getDashboardMetrics,
   getRecentActivity,
@@ -21,13 +24,19 @@ export const dynamic = "force-dynamic";
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ churchCreated?: string }>;
+  searchParams: Promise<{ churchCreated?: string; step?: string }>;
 }) {
   const [{ user }, resolvedSearchParams] = await Promise.all([
     getCurrentSession(),
     searchParams,
   ]);
-  const { churchCreated } = resolvedSearchParams;
+  const { churchCreated, step } = resolvedSearchParams;
+
+  // OB-004: `?step=leadership` is the ONLY step a URL may ask for, and only for
+  // a planter whose church already exists. Honouring an arbitrary `?step=`
+  // would let someone deep-link past step 1 into a form that updates a church
+  // they have not created yet; anything else here is simply ignored.
+  const wantsLeadershipStep = step === "leadership";
 
   // Redirect oversight users to their dedicated dashboard
   if (user?.role === "sending_church_admin" || user?.role === "network_admin") {
@@ -50,11 +59,41 @@ export default async function DashboardPage({
     return (
       <div className="p-6">
         <OnboardingFlow
-          initialStep={resolveResumeStep({ churchId: user?.churchId })}
+          initialStep={
+            wantsLeadershipStep && user?.churchId
+              ? "leadership"
+              : resolveResumeStep({
+                  churchId: user?.churchId,
+                  leadershipStatus: churchDuringOnboarding?.leadershipStatus,
+                })
+          }
+          leadershipStatus={churchDuringOnboarding?.leadershipStatus}
         />
       </div>
     );
   }
+
+  // OB-004: the one way back INTO a finished flow. The no-planter nudge links
+  // here; leaving onboarding is otherwise one-way (ruling 2026-07-31), so this
+  // re-enters the single question rather than the whole wizard, and only for
+  // the planter who can actually answer it.
+  const isPlanterWithChurch = user?.role === "planter" && !!user.churchId;
+
+  if (isPlanterWithChurch && wantsLeadershipStep) {
+    return (
+      <div className="p-6">
+        <LeadershipReentry
+          leadershipStatus={churchDuringOnboarding?.leadershipStatus}
+        />
+      </div>
+    );
+  }
+
+  const showNoPlanterNudge =
+    isPlanterWithChurch &&
+    churchHasNoPlanter({
+      leadershipStatus: churchDuringOnboarding?.leadershipStatus,
+    });
 
   // Fetch dashboard data
   const churchId = user!.churchId!;
@@ -74,6 +113,8 @@ export default async function DashboardPage({
       {churchCreated === "true" && <ChurchCreatedConfetti />}
 
       <div className="mx-auto max-w-6xl space-y-6">
+        {showNoPlanterNudge && <NoPlanterNudge />}
+
         {/* Header */}
         <div>
           <h1 className="text-3xl font-bold tracking-tight">

@@ -56,11 +56,15 @@
 | Dashboard page | `(dash)/dashboard/page.tsx` | Route `/dashboard` |
 | Onboarding flow (F12) | `(dash)/dashboard/page.tsx` → `components/onboarding/onboarding-flow.tsx` | Route `/dashboard` when `shouldShowOnboarding()` |
 | Onboarding step 1 (create church) | `(dash)/dashboard/actions.ts:createChurchBasics()` | Step 1 form submit |
+| Onboarding step 2 (leadership) | `(dash)/dashboard/actions.ts:confirmLeadership()` | Step 2 form submit |
+| Leadership re-entry | `(dash)/dashboard/page.tsx` → `components/onboarding/leadership-reentry.tsx` | `/dashboard?step=leadership` (from the no-planter nudge) |
 | Leave onboarding | `(dash)/dashboard/actions.ts:completeOnboarding()` | Finish / skip-the-rest |
 
 **Primary modules:** `(dash)/`, `src/components/`, `src/components/onboarding/`, `src/lib/onboarding/steps.ts`, `src/lib/validations/onboarding.ts`
 
 **Key deps:** `getCurrentSession()`, `getCurrentUserChurch()`, sidebar state cookie
+
+**Leadership (F12 / OB-004, #202):** step 2 asks "will you be the lead planter/pastor?", default **Yes** (ruling #157 — assume, but ask). The answer lands in `churches.leadership_status`: `planter_confirmed` | `no_planter` | **null = never asked**, and null is NOT no-planter (that three-state rule, plus the copy for what No limits, lives in `src/lib/onboarding/leadership.ts` and nowhere else). The planter ASSIGNMENT is unchanged — `users.church_id` + role, written at step 1 through `linkUserToChurchFilter()` (#183 compare-and-set); step 2 records the answer and never re-links. `churchHasNoPlanter()` has two consumers: the dashboard's `NoPlanterNudge` (persistent, dismissed per SESSION via `sessionStorage` + `useSyncExternalStore`) and `src/lib/tasks/events.ts`, where an explicit No takes the pre-existing sanctioned no-planter path — warn and return, so the meeting still finalizes with no follow-up tasks (FRD AC 4). `/dashboard?step=leadership` re-enters that ONE question as a standalone card (`LeadershipReentry`), which is the single specced exception to onboarding's one-way exit (ruling 2026-07-31).
 
 **Onboarding (F12 / OB-001, OB-002):** the flow — not a create-church card — is the primary dashboard content whenever `shouldShowOnboarding()` says so: a planter with no church, OR a planter whose church exists but whose `churches.onboarding_completed_at` is still null. The church is created at **step 1**, so abandonment leaves a valid named church and the planter resumes rather than losing it; steps 2-4 are updates (shells until #202-#210). `resolveResumeStep()` is the single place that decides where a returning planter lands. `completeOnboarding()` stamps `onboarding_completed_at` (idempotent `IS NULL` guard) and redirects to `/dashboard?churchCreated=true`; it means "done answering", not "answered everything" — which facts are missing stays derivable from the columns.
 
@@ -216,7 +220,7 @@
 
 **Key deps:** `tasks` table
 
-**Events:** `meeting.attendance.finalized` → auto-creates follow-up (48h) + evaluation (24h) tasks; `meeting.evaluation.completed` → auto-completes matching task; `task.completed` → Phase Engine dirty-marking
+**Events:** `meeting.attendance.finalized` → auto-creates follow-up (48h) + evaluation (24h) tasks **assigned to the church's planter** — resolved as "declared answer first, role lookup second": an explicit `churches.leadership_status = 'no_planter'` (OB-004) skips the lookup entirely, so the handler warns and returns without creating tasks rather than assigning them to an account that said it is not the pastor. Finalization still succeeds either way; `meeting.evaluation.completed` → auto-completes matching task; `task.completed` → Phase Engine dirty-marking
 
 **Bulk ops (T-019):** one SQL statement per bulk write; every requested id comes back as a success or a reasoned failure (never dropped). Bulk complete emits one `task.completed` per completed task, awaited **sequentially** so subscribers are not stampeded. Reschedule emits nothing. **Both refuse already-complete tasks** — reschedule too, so the list's Completed group select-all cannot silently re-date finished work. Cap is `MAX_BULK_TASKS` (100) in `src/lib/tasks/types.ts`, enforced in the action schema and shown in the UI before the click.
 
