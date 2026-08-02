@@ -20,15 +20,22 @@ export async function sendEmail({
   html,
   text,
   idempotencyKey,
+  headers: extraHeaders,
 }: {
   to: string | string[];
   subject: string;
   html: string;
   text?: string;
   idempotencyKey?: string;
+  /**
+   * Extra RFC headers. `List-Unsubscribe` is the one that matters today: mail
+   * clients render their own opt-out control from it, and a reader who cannot
+   * find one presses "spam" instead.
+   */
+  headers?: Record<string, string>;
 }): Promise<{ success: boolean; id?: string; error?: string }> {
   try {
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = { ...extraHeaders };
     if (idempotencyKey) {
       headers["Idempotency-Key"] = idempotencyKey;
     }

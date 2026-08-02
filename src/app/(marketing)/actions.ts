@@ -51,7 +51,8 @@ export async function requestInviteAction(
     console.error("[INVITE] ADMIN_EMAILS is not configured");
     return {
       status: "error",
-      message: "Something went wrong on our end. Please try again later.",
+      message:
+        "Something went wrong on our end. Try again in a minute — if it keeps failing, email hello@everyfield.app and we'll take the request by hand.",
     };
   }
 
@@ -67,7 +68,8 @@ export async function requestInviteAction(
   if (!result.success) {
     return {
       status: "error",
-      message: "Something went wrong on our end. Please try again later.",
+      message:
+        "Something went wrong on our end. Try again in a minute — if it keeps failing, email hello@everyfield.app and we'll take the request by hand.",
     };
   }
 

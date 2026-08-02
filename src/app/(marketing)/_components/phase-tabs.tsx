@@ -4,13 +4,14 @@ import { useState } from "react";
 
 import { Chip } from "./chip";
 import { Shot, ShotOverlay, type ShotSource } from "./shot";
+import { useInView } from "./use-in-view";
 import { usePrefetchShots } from "./use-prefetch-shots";
+import { useTablistKeys } from "./use-tablist-keys";
 
 type Overlay = ShotSource & { alt: string; style: React.CSSProperties };
 
 type Phase = {
   key: string;
-  num: string;
   tab: string;
   title: string;
   description: string;
@@ -31,7 +32,6 @@ type Phase = {
 const PHASES: readonly Phase[] = [
   {
     key: "discovery",
-    num: "0",
     tab: "Discovery",
     title: "Discern the calling before you bet the family on it.",
     description:
@@ -55,7 +55,6 @@ const PHASES: readonly Phase[] = [
   },
   {
     key: "core-group",
-    num: "1",
     tab: "Core group",
     title: "Grow a room of committed people, not a list of maybes.",
     description:
@@ -86,7 +85,6 @@ const PHASES: readonly Phase[] = [
   },
   {
     key: "launch-team",
-    num: "2",
     tab: "Launch team",
     title: "Commitment cards signed. A launch date on the wall.",
     description:
@@ -110,7 +108,6 @@ const PHASES: readonly Phase[] = [
   },
   {
     key: "training",
-    num: "3",
     tab: "Training",
     title: "Every team staffed, every member trained.",
     description:
@@ -136,12 +133,13 @@ const PHASES: readonly Phase[] = [
       width: 588,
       height: 706,
       alt: "Two ministry team cards — Worship Team and Facilities, staffing bars and open roles.",
-      style: { left: "14%", top: "22%", width: "min(24%, 350px)" },
+      // stands on the painting and overlaps only the app's icon rail — the
+      // matrix heading and its column headers stay whole
+      style: { left: "12.1%", top: "20%", width: "min(24%, 350px)" },
     },
   },
   {
     key: "pre-launch",
-    num: "4",
     tab: "Pre-launch",
     title: "Three weeks out. Nothing left to chance.",
     description:
@@ -170,7 +168,6 @@ const PHASES: readonly Phase[] = [
   },
   {
     key: "launch-sunday",
-    num: "5",
     tab: "Launch Sunday",
     title: "One Sunday. Everything you built, public.",
     description: "Day-of execution and honest numbers afterward.",
@@ -192,7 +189,6 @@ const PHASES: readonly Phase[] = [
   },
   {
     key: "beyond",
-    num: "6",
     tab: "Beyond",
     title: "From launch high to healthy rhythm.",
     description:
@@ -261,21 +257,38 @@ function PhaseVisual({
 
 const PREFETCH = PHASES.flatMap((p) => [p.desktop.src, p.overlay?.src]);
 
+const KEYS = PHASES.map((p) => p.key);
+const tabId = (key: string) => `pt-tab-${key}`;
+const panelId = (key: string) => `pt-panel-${key}`;
+
 export function PhaseTabs() {
   const [active, setActive] = useState<string>(PHASES[0].key);
+  const onTabKeyDown = useTablistKeys(KEYS, setActive);
   usePrefetchShots(PREFETCH);
+  // Same entrance choreography as the feature switcher: pure CSS keyframes on
+  // the active panel, restarted for free by the display:none→block swap. The
+  // gate holds the FIRST run until the section is on screen.
+  const { ref: tabsRef, inView: seen } = useInView<HTMLDivElement>(0.18);
 
   return (
     <>
       {/* Desktop: tabs, one claim + one big visual per phase */}
-      <div className="ptabs">
-        <div className="ptabs-strip" role="tablist" aria-label="Phases">
+      <div ref={tabsRef} className={seen ? "ptabs pt-seen" : "ptabs"}>
+        <div
+          className="ptabs-strip"
+          role="tablist"
+          aria-label="Phases"
+          onKeyDown={onTabKeyDown}
+        >
           {PHASES.map((phase) => (
             <button
               key={phase.key}
               type="button"
               role="tab"
+              id={tabId(phase.key)}
+              aria-controls={panelId(phase.key)}
               aria-selected={phase.key === active}
+              tabIndex={phase.key === active ? 0 : -1}
               className={
                 phase.key === active
                   ? "ptab active cursor-pointer"
@@ -290,6 +303,9 @@ export function PhaseTabs() {
         {PHASES.map((phase) => (
           <div
             key={phase.key}
+            id={panelId(phase.key)}
+            role="tabpanel"
+            aria-labelledby={tabId(phase.key)}
             className={phase.key === active ? "ppanel active" : "ppanel"}
           >
             <div className="ppanel-copy">
@@ -308,13 +324,12 @@ export function PhaseTabs() {
         ))}
       </div>
 
-      {/* Mobile: the whole journey as a numbered vertical scroll */}
+      {/* Mobile: the whole journey as a vertical scroll — stops are named,
+          never numbered (the phase names are the product's own vocabulary) */}
       <div className="pjourney">
         {PHASES.map((phase) => (
           <article key={phase.key} className="pj-item">
-            <p className="marker">
-              Phase {phase.num} · {phase.tab}
-            </p>
+            <p className="marker">{phase.tab}</p>
             <h3 className="lp-h3">{phase.title}</h3>
             <p className="pdesc">{phase.description}</p>
             <PhaseVisual phase={phase} isMobile />

@@ -16,8 +16,18 @@ import {
 } from "@/db/schema";
 import { sendEmail as sendProviderEmail } from "@/lib/email/client";
 
+import {
+  batchSubject,
+  composeBatchEmail,
+  type OutboundEmail,
+} from "./channels/email";
 import { NOTIFICATION_CATEGORIES } from "./categories";
 import { audienceForRole, isChannelEnabled } from "./preferences";
+
+// The email channel's rendering lives in `./channels/email`; it is re-exported
+// here because the dispatcher is the seam every caller already knows about.
+export { batchSubject, composeBatchEmail };
+export type { OutboundEmail };
 
 // ============================================================================
 // Scheduled dispatch (N-003, N-004, N-012, N-014, N-015, N-016, N-017).
@@ -288,19 +298,6 @@ export function channelEligibility(
 // Provider seam
 // ----------------------------------------------------------------------------
 
-export interface OutboundEmail {
-  to: string;
-  subject: string;
-  html: string;
-  text: string;
-  /**
-   * Provider-side idempotency. Belt to the delivery index's braces: if the
-   * function is killed after the provider accepted but before we settled the
-   * row, the next attempt presents the same key and the provider dedupes.
-   */
-  idempotencyKey: string;
-}
-
 export type EmailSendOutcome =
   | { status: "sent"; providerMessageId: string | null }
   | {
@@ -341,7 +338,8 @@ export function isPermanentEmailError(message: string): boolean {
 }
 
 // ----------------------------------------------------------------------------
-// Composition — deliberately minimal; rendering is a separate unit
+// Composition — owned by ./channels/email, which is what makes an email an
+// email (template, unsubscribe link, List-Unsubscribe header)
 // ----------------------------------------------------------------------------
 
 export interface DispatchRecipient {
@@ -354,66 +352,6 @@ export interface DispatchRecipient {
    * this row should exist at all was settled by `enqueue` before it was written.
    */
   role: UserRole;
-}
-
-const HTML_ESCAPES: Record<string, string> = {
-  "&": "&amp;",
-  "<": "&lt;",
-  ">": "&gt;",
-  '"': "&quot;",
-  "'": "&#39;",
-};
-
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (char) => HTML_ESCAPES[char] ?? char);
-}
-
-/**
- * The subject line for a grouped send. One notification keeps its own title;
- * several become a count, because "3 task updates" is what stops the inbox
- * looking like three separate events (N-012).
- */
-export function batchSubject(
-  category: NotificationCategory,
-  items: readonly Notification[]
-): string {
-  if (items.length === 1) return items[0].title;
-  const label = NOTIFICATION_CATEGORIES[category]?.label ?? category;
-  return `${items.length} ${label.toLowerCase()} updates`;
-}
-
-/**
- * Compose the one email a group becomes.
- *
- * Intentionally plain: templated, branded rendering is a separate unit and is
- * out of scope here. What this owes the rest of the dispatcher is a stable
- * seam — one email per group, whatever it eventually looks like — and the
- * guarantee that caller-rendered copy is escaped before it reaches HTML.
- */
-export function composeBatchEmail(
-  recipient: DispatchRecipient,
-  category: NotificationCategory,
-  items: readonly Notification[],
-  idempotencyKey: string
-): OutboundEmail {
-  const text = items
-    .map((item) => `${item.title}\n${item.body}`)
-    .join("\n\n---\n\n");
-
-  const html = items
-    .map(
-      (item) =>
-        `<li><strong>${escapeHtml(item.title)}</strong><br/>${escapeHtml(item.body)}</li>`
-    )
-    .join("");
-
-  return {
-    to: recipient.email,
-    subject: batchSubject(category, items),
-    text,
-    html: `<ul>${html}</ul>`,
-    idempotencyKey,
-  };
 }
 
 /**
@@ -965,17 +903,46 @@ async function deliverEmailGroup(
   if (owned.length === 0) return;
 
   const items = owned.map((entry) => entry.notification);
-  const message = composeBatchEmail(
-    ctx.recipient,
-    group.category,
-    items,
-    groupIdempotencyKey(
-      group.churchId,
-      group.recipientUserId,
+
+  // Composition can fail — the unsubscribe link is minted here, and N-007 says
+  // an email without a working one must not go out. Contain it: this group's
+  // deliveries are settled as failures (transient, so the bounded retry picks
+  // them up once the configuration is fixed) rather than letting the throw
+  // escape `runDispatch` and strand every claimed row in the run.
+  let message: OutboundEmail;
+  try {
+    message = await composeBatchEmail(
+      ctx.recipient,
       group.category,
-      items.map((item) => item.id)
-    )
-  );
+      items,
+      groupIdempotencyKey(
+        group.churchId,
+        group.recipientUserId,
+        group.category,
+        items.map((item) => item.id)
+      )
+    );
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.error(
+      `[notifications/dispatch] could not compose the email for group ${group.key}:`,
+      reason
+    );
+    for (const { notification, attemptCount } of owned) {
+      await deps.settleDelivery({
+        notificationId: notification.id,
+        channel: "email",
+        status: "failed",
+        error: `could not compose email: ${reason}`,
+        now,
+      });
+      record(
+        notification.id,
+        attemptCount >= maxAttempts ? { kind: "failed" } : { kind: "retry" }
+      );
+    }
+    return;
+  }
 
   const outcome = await deps.sendEmail(message);
   summary.emailsSent += 1;
@@ -1219,6 +1186,8 @@ export const dbDispatchDeps: DispatchDeps = {
       html: message.html,
       text: message.text,
       idempotencyKey: message.idempotencyKey,
+      // `List-Unsubscribe`, so the mail client's own opt-out control works.
+      headers: message.headers,
     });
 
     if (result.success) {

@@ -10,8 +10,21 @@ const AUTH_ROUTES = ["/login", "/register"];
 // Routes that require authentication
 const PROTECTED_ROUTE_PREFIXES = ["/dashboard", "/wiki", "/oversight"];
 
-// Webhook routes that bypass CSRF protection (they use their own signature verification)
-const WEBHOOK_ROUTES = ["/api/webhooks/resend"];
+// Routes that bypass the same-origin CSRF check because the request
+// authenticates ITSELF and carries no ambient authority to abuse. Adding a path
+// here is a security decision: it is only safe when the handler's authority
+// comes entirely from something in the request that an attacker cannot forge.
+const CSRF_EXEMPT_ROUTES = [
+  // Resend verifies its own Svix signature.
+  "/api/webhooks/resend",
+  // RFC 8058 one-click unsubscribe. Mail clients POST here with no `Origin`
+  // header BY SPEC, so the same-origin check below would 403 every one of them.
+  // Safe because the handler reads no session and no cookie: the only thing
+  // that authorises the write is the sealed, disable-only capability token in
+  // the query string, which a cross-site attacker does not have — and the worst
+  // a holder of one can do is stop one category of email for themselves.
+  "/api/notifications/unsubscribe",
+];
 
 // Social media and search engine crawler user agents
 // These need access to pages for metadata/OG tag scraping
@@ -76,8 +89,8 @@ export function proxy(request: NextRequest): NextResponse {
     }
   }
 
-  // 2. CSRF protection for non-GET requests (skip for webhook routes)
-  if (request.method !== "GET" && !WEBHOOK_ROUTES.includes(pathname)) {
+  // 2. CSRF protection for non-GET requests (skip for self-authenticating ones)
+  if (request.method !== "GET" && !CSRF_EXEMPT_ROUTES.includes(pathname)) {
     const originHeader = request.headers.get("Origin");
     const hostHeader = request.headers.get("Host");
 

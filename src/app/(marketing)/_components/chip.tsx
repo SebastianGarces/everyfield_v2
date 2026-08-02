@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { type CSSProperties } from "react";
+
+import { useInView } from "./use-in-view";
 
 /**
  * Floating annotation card that sits ON a product crop and carries its one
@@ -16,30 +18,13 @@ export function Chip({
   className?: string;
   style?: CSSProperties;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [shown, setShown] = useState(false);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const io = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setShown(true);
-          io.disconnect();
-        }
-      },
-      { threshold: 0.5 }
-    );
-    io.observe(el);
-    return () => io.disconnect();
-  }, []);
+  const { ref, inView } = useInView<HTMLDivElement>();
 
   return (
     <div
       ref={ref}
       style={style}
-      className={["chip", className, shown ? "chip-in" : ""]
+      className={["chip", className, inView ? "chip-in" : ""]
         .filter(Boolean)
         .join(" ")}
     >

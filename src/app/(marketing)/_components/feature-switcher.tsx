@@ -3,7 +3,9 @@
 import { useState } from "react";
 
 import { Shot, ShotOverlay, type ShotSource } from "./shot";
+import { useInView } from "./use-in-view";
 import { usePrefetchShots } from "./use-prefetch-shots";
+import { useTablistKeys } from "./use-tablist-keys";
 
 type Overlay = ShotSource & { alt: string; style: React.CSSProperties };
 
@@ -48,7 +50,9 @@ const FEATURES: readonly Feature[] = [
         width: 545,
         height: 302,
         alt: "Core Group stat card: 61 — core group, launch team and leaders.",
-        style: { left: "64%", top: "45%", width: "min(26%, 400px)" },
+        // one card cell wide, cut at the row gutter above it: the stat card
+        // takes the last person card's place instead of slicing two of them
+        style: { left: "58.4%", top: "61%", width: "min(26%, 400px)" },
       },
     ],
   },
@@ -157,25 +161,27 @@ const FEATURES: readonly Feature[] = [
       "Help where you need it — the interview guide opens beside the interview, and print-ready documents come filled in with your church's details.",
     art: "/marketing/c1-field.webp",
     desktop: {
-      src: "/marketing/shots/r5-personguide.webp",
+      src: "/marketing/shots/r8-personguide.webp",
       width: 2880,
       height: 1800,
     },
     mobile: {
-      src: "/marketing/shots/r5-guide.webp",
+      src: "/marketing/shots/r8-guide.webp",
       width: 1036,
       height: 1740,
     },
-    alt: "Jerome Jefferson's profile with the Interview Guide open beside it — The 5 Interview Criteria, right where the interview happens.",
+    alt: "Hannah Carr's profile with the Interview Guide open beside it — her interview came back Qualified on all five criteria, and The 5 Interview Criteria is open right where the interview happens.",
     anchor: "start",
     flush: true,
     overlays: [
       {
-        src: "/marketing/shots/r5-documents.webp",
-        width: 1916,
-        height: 1152,
-        alt: "The Documents library — print-ready commitment cards and core-group expectations, generated with church details filled in.",
-        style: { right: "2%", top: "18%", width: "min(54%, 940px)" },
+        src: "/marketing/shots/r8-doccard.webp",
+        width: 922,
+        height: 700,
+        alt: "A commitment document ready to generate — the Core Group Commitment Card, a one-page PDF founding members sign to commit to GROW, PRAY and GIVE through Launch Sunday.",
+        // sits on the painting clear of the shot, which now runs its full
+        // width so no heading or sentence is cut at the pane's edge
+        style: { right: "1%", top: "26%", width: "min(30%, 400px)" },
       },
     ],
   },
@@ -187,22 +193,40 @@ const PREFETCH = FEATURES.flatMap((f) => [
   f.art,
 ]);
 
+const KEYS = FEATURES.map((f) => f.key);
+const tabId = (key: string) => `fs-tab-${key}`;
+const panelId = (key: string) => `fs-panel-${key}`;
+
 export function FeatureSwitcher() {
   const [active, setActive] = useState<string>(FEATURES[0].key);
   const activeFeature = FEATURES.find((f) => f.key === active) ?? FEATURES[0];
+  const onTabKeyDown = useTablistKeys(KEYS, setActive);
   usePrefetchShots(PREFETCH);
+  // The entrance choreography (primary settles, overlays land after) is pure
+  // CSS keyframes: display:none→flex on tab switch restarts them for free.
+  // This gate holds the FIRST run until the section is actually on screen —
+  // without it the load-time animation finishes before anyone scrolls here.
+  const { ref: switchRef, inView: seen } = useInView<HTMLDivElement>(0.18);
 
   return (
     <>
       {/* Desktop: tab strip on top, the full-width panel below */}
-      <div className="fswitch">
-        <div className="fswitch-tabs" role="tablist" aria-label="Features">
+      <div ref={switchRef} className={seen ? "fswitch fs-seen" : "fswitch"}>
+        <div
+          className="fswitch-tabs"
+          role="tablist"
+          aria-label="Features"
+          onKeyDown={onTabKeyDown}
+        >
           {FEATURES.map((feature) => (
             <button
               key={feature.key}
               type="button"
               role="tab"
+              id={tabId(feature.key)}
+              aria-controls={panelId(feature.key)}
               aria-selected={feature.key === active}
+              tabIndex={feature.key === active ? 0 : -1}
               className={
                 feature.key === active
                   ? "fs-tab active cursor-pointer"
@@ -214,10 +238,16 @@ export function FeatureSwitcher() {
             </button>
           ))}
         </div>
-        <p className="fs-desc">{activeFeature.description}</p>
+        {/* keyed so each activation remounts it and replays its entrance */}
+        <p className="fs-desc" key={activeFeature.key}>
+          {activeFeature.description}
+        </p>
         {FEATURES.map((feature) => (
           <div
             key={feature.key}
+            id={panelId(feature.key)}
+            role="tabpanel"
+            aria-labelledby={tabId(feature.key)}
             className={[
               "fswitch-shot",
               `anchor-${feature.anchor}`,
@@ -236,8 +266,17 @@ export function FeatureSwitcher() {
               mobile={feature.mobile}
               alt={feature.alt}
             />
-            {feature.overlays?.map((overlay) => (
-              <ShotOverlay key={overlay.src} overlay={overlay} />
+            {feature.overlays?.map((overlay, i) => (
+              <ShotOverlay
+                key={overlay.src}
+                overlay={{
+                  ...overlay,
+                  style: {
+                    ...overlay.style,
+                    "--ov-i": i,
+                  } as React.CSSProperties,
+                }}
+              />
             ))}
           </div>
         ))}
