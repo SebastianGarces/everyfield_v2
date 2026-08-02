@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/sidebar";
 import type { UserRole } from "@/db/schema/user";
 import {
+  isPathWithin,
   mainNavItems,
   networkAdminNavItems,
   sendingChurchNavItems,
@@ -75,7 +76,7 @@ export function AppSidebar({
 }: AppSidebarProps) {
   const navConfig = getNavConfig(user.role);
   const pathname = usePathname();
-  const adminActive = pathname.startsWith("/admin");
+  const adminActive = isPathWithin(pathname, "/admin");
 
   return (
     <Sidebar collapsible="icon" {...props}>

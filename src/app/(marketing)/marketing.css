@@ -60,7 +60,12 @@ html:has(.marketing) {
 .marketing .lp-hero-h {
   font-family: var(--display);
   font-weight: 400;
-  font-size: clamp(46px, 5.8vw, 80px);
+  /* The widest unbreakable run is the nbsp-joined "Your church plant," —
+     7.4px of width per px of font-size. Below 430px the box grows faster
+     than 5.8vw does, so the small-viewport ramp has to track the viewport
+     or the run leaves the panel. At 430px and up this is exactly
+     clamp(46px, 5.8vw, 80px) again. */
+  font-size: clamp(clamp(30px, calc(12.8vw - 9px), 46px), 5.8vw, 80px);
   line-height: 1;
   letter-spacing: -0.03em;
   text-wrap: balance;
@@ -210,9 +215,43 @@ html:has(.marketing) {
   padding: 10px 18px;
   font-size: 14px;
 }
+.marketing .lp-nav .btn .cta-short {
+  display: none;
+}
 @media (max-width: 800px) {
-  .marketing .lp-nav .links {
+  /* the marketing jumps go; signing in must never become unreachable, so it
+     stays and rides next to the CTA instead of floating mid-bar */
+  .marketing .lp-nav .links .nav-jump {
     display: none;
+  }
+  .marketing .lp-nav .links {
+    margin-inline-start: auto;
+  }
+  .marketing .lp-nav {
+    gap: 14px;
+  }
+}
+/* below 400px the bar carries the lockup, sign in and the CTA in ~310px —
+   it buys the room from padding and gap, never from the 14px labels */
+@media (max-width: 400px) {
+  .marketing .lp-nav {
+    gap: 12px;
+  }
+  .marketing .lp-nav .logo {
+    height: 18px;
+  }
+  .marketing .lp-nav .btn {
+    padding: 10px 14px;
+  }
+}
+/* below 360px even the trimmed padding leaves "Request an invite" wrapping the
+   bar to two lines — the label shortens instead of the type (ruled 2026-08-01) */
+@media (max-width: 360px) {
+  .marketing .lp-nav .btn .cta-full {
+    display: none;
+  }
+  .marketing .lp-nav .btn .cta-short {
+    display: inline;
   }
 }
 
@@ -230,6 +269,11 @@ html:has(.marketing) {
 .marketing .lp-inner {
   max-width: var(--vis);
   margin: 0 auto;
+}
+/* the nav is fixed and 70.4px tall at every width — anchored sections clear
+   it plus a breath, so a jump link never lands on a clipped headline */
+.marketing section[id] {
+  scroll-margin-block-start: 88px;
 }
 
 /* ---------- hero — c1 painting under a cream veil ---------- */
@@ -451,9 +495,11 @@ html:has(.marketing) {
   padding-inline-start: 0;
 }
 .marketing .fswitch-shot.flush-start picture {
-  /* translate is relative to the image itself — cut ~a third of it at the
-     pane edge, independent of pane width */
-  transform: translateX(-26.5%);
+  /* A shallow bleed, not a third: the cut lands inside the app's icon rail,
+     which is the only vertical band in the guides shot that crosses no
+     heading, sentence or card edge. Anything deeper slices the person's name
+     and the card subtitle. */
+  transform: translateX(-2.8%);
   max-width: none;
 }
 .marketing .fswitch-shot.flush-start .shot-img:not(.shot-overlay) {
@@ -476,9 +522,87 @@ html:has(.marketing) {
   height: auto;
   box-shadow: 0 28px 56px -20px rgba(24, 29, 25, 0.55);
 }
+
+/* ---------- vignette choreography — overlays are the moving parts ----------
+   One-shot keyframes on the active pane: the primary crop settles first,
+   then each overlay card lands on it (staggered via --ov-i). display:none →
+   flex on tab switch restarts the run; .fs-seen (IntersectionObserver) holds
+   the first run until the section is on screen. Scoped to .fswitch so the
+   engine-pane overlays are untouched. */
+.marketing
+  .fswitch.fs-seen
+  .fswitch-shot.active
+  picture
+  .shot-img:not(.shot-overlay) {
+  animation: fs-primary-in 420ms var(--ease) both;
+}
+.marketing .fswitch.fs-seen .fswitch-shot.active .shot-overlay {
+  /* starts while the primary is still settling — one fluent motion, the
+     slight lag keeps the "overlay lands on it" read without a staged pause */
+  animation: fs-overlay-in 480ms var(--ease) both;
+  animation-delay: calc(110ms + var(--ov-i, 0) * 90ms);
+}
+.marketing .fswitch.fs-seen .fs-desc {
+  animation: fs-desc-in 300ms var(--ease) both;
+}
+/* The phase tabs are the same layered-comp device, so they run the same
+   choreography off the same keyframes: display:none → block on the panel
+   restarts it, and .pt-seen holds the first run. Scoped to .ptabs, which is
+   itself desktop-only — the .pjourney stack stays static. */
+.marketing
+  .ptabs.pt-seen
+  .ppanel.active
+  .pshot
+  picture
+  .shot-img:not(.shot-overlay) {
+  animation: fs-primary-in 420ms var(--ease) both;
+}
+.marketing .ptabs.pt-seen .ppanel.active .pshot .shot-overlay {
+  animation: fs-overlay-in 480ms var(--ease) both;
+  animation-delay: calc(110ms + var(--ov-i, 0) * 90ms);
+}
+/* the panel's copy is swapped wholesale, with no entrance of its own — the
+   shot and its overlays carry the beat (ruled 2026-08-01) */
+@keyframes fs-primary-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+@keyframes fs-overlay-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.98);
+  }
+}
+@keyframes fs-desc-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .marketing
+    .fswitch.fs-seen
+    .fswitch-shot.active
+    picture
+    .shot-img:not(.shot-overlay),
+  .marketing .fswitch.fs-seen .fswitch-shot.active .shot-overlay,
+  .marketing .fswitch.fs-seen .fs-desc,
+  .marketing
+    .ptabs.pt-seen
+    .ppanel.active
+    .pshot
+    picture
+    .shot-img:not(.shot-overlay),
+  .marketing .ptabs.pt-seen .ppanel.active .pshot .shot-overlay {
+    animation: none;
+  }
+}
 .marketing .fswitch-shot::before,
 .marketing .fstack-shot::before,
 .marketing .epane::before,
+.marketing .netshot::before,
 .marketing .pshot::before {
   content: "";
   position: absolute;
@@ -492,6 +616,7 @@ html:has(.marketing) {
 .marketing .fswitch-shot::after,
 .marketing .fstack-shot::after,
 .marketing .epane::after,
+.marketing .netshot::after,
 .marketing .pshot::after {
   content: "";
   position: absolute;
@@ -587,8 +712,9 @@ html:has(.marketing) {
   gap: 24px clamp(36px, 5vw, 72px);
   align-items: start;
   margin-bottom: 28px;
-  /* tallest copy across the seven phases — no shift on tab switch */
-  min-height: 132px;
+  /* tallest copy across the seven phases — no shift on tab switch
+     (162px measured at 1180–1440; ruled 2026-08-02, was a stale 132) */
+  min-height: 162px;
 }
 .marketing .pdesc {
   margin-top: 10px;
@@ -657,6 +783,40 @@ html:has(.marketing) {
 .marketing .pshot.anchor-end picture,
 .marketing .fswitch-shot.anchor-end picture {
   justify-content: flex-end;
+}
+
+/* Narrow desktop — the band between the mobile stack at 900px and a
+   comfortable 1180px.
+
+   Both pane heights carry a px floor (520 / 500) that stops tracking the
+   viewport below ~1130px, but the container keeps shrinking with it. The
+   primaries are height-constrained, so they hold their size while the pane
+   narrows around them: the painting they stand on runs out, and the overlay
+   cards land across the words instead of on chrome. Measured at 900px, the
+   training card covered 524 master px of the matrix — the heading, the column
+   header and three member names — where at 1280px it covers only the 111px
+   icon rail.
+
+   Dropping the floors here restores the proportion the rest of the range
+   already has. Panes, primaries and cards all scale off the same viewport, so
+   every composition in the band is an exact scale of its >=1180px self and each
+   card lands on the same master pixels it was composed against. The panes stay
+   one height across every tab and panel, so a tab switch still shifts nothing;
+   the phase copy reserves the tallest of the seven (the core-group title takes
+   a third line under 980px), which 132px no longer covers down here. */
+@media (max-width: 1179.98px) {
+  .marketing .fswitch-shot.active {
+    height: min(46vw, 780px);
+  }
+  .marketing .ppanel .pshot {
+    height: min(42vw, 720px);
+  }
+}
+/* below ~970px the core-group title takes a third line — taller floor there */
+@media (max-width: 969.98px) and (min-width: 900px) {
+  .marketing .ppanel-copy {
+    min-height: 190px;
+  }
 }
 /* full-bleed beats: the visual escapes the container toward the viewport edge */
 /* mobile: the journey as a stacked, numbered vertical scroll */
@@ -786,6 +946,9 @@ html:has(.marketing) {
     max-width: none;
     height: 114%;
     align-self: flex-start;
+    /* nudged off the leading edge so the phase-control card can land in the
+       shot's own empty left gutter instead of across its sentences */
+    transform: translateX(6%);
   }
 }
 @media (max-width: 899px) {
@@ -803,6 +966,20 @@ html:has(.marketing) {
   .marketing .epane .shot-overlay {
     display: none;
   }
+}
+
+/* ---------- networks — the buyer gets a product shot too ----------
+   Same treatment as a phase panel: the app frame stands on the c2 painting,
+   corner registration marks, height reserved by the crop's own aspect ratio. */
+.marketing .netshot {
+  position: relative;
+  margin-top: 36px;
+  padding: clamp(16px, 3vw, 44px);
+  background: url("/marketing/c2-field.webp") center / cover;
+}
+.marketing .netshot .shot-img {
+  max-width: 1000px;
+  margin-inline: auto;
 }
 
 /* ---------- stats — lead cell is ink-on-green, never green-on-ink ---------- */
@@ -900,6 +1077,10 @@ html:has(.marketing) {
   outline: none;
   flex: 1;
   min-width: 220px;
+  /* 16px + the inherited 1.6 line-height already clears the 44px tap floor;
+     the floor is declared so a browser that resolves the control's
+     line-height to normal cannot drop it under 44px */
+  min-block-size: 44px;
   transition:
     border-color 150ms var(--ease),
     box-shadow 150ms var(--ease);
@@ -966,4 +1147,135 @@ html:has(.marketing) {
   .marketing * {
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ============================================================
+   TRUST BLOCK — appended 2026-08-01. Additive only: every rule
+   below introduces a new class, none redefine anything above.
+   Covers the /terms and /privacy routes, the stats source line,
+   and the invite form's recovery affordance.
+   ============================================================ */
+
+/* ---------- legal routes (/terms, /privacy) ---------- */
+.marketing .lp-legal {
+  padding: clamp(104px, 11vw, 152px) clamp(20px, 5vw, 56px)
+    clamp(56px, 8vw, 88px);
+}
+.marketing .lp-legal-inner {
+  max-width: 60ch;
+  margin: 0 auto;
+}
+.marketing .lp-legal h1 {
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: clamp(30px, 3.8vw, 46px);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  margin: 0;
+  text-wrap: balance;
+}
+.marketing .lp-legal-date {
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: 12.5px;
+  line-height: 1.2;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--mute);
+  margin: 20px 0 0;
+}
+.marketing .lp-legal-lead {
+  font-family: var(--serif);
+  font-size: 20px;
+  line-height: 1.5;
+  color: var(--text-2);
+  margin: 28px 0 0;
+}
+.marketing .lp-legal h2 {
+  font-family: var(--display);
+  font-weight: 500;
+  font-size: 21px;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  margin: 44px 0 0;
+  padding-top: 24px;
+  border-top: 1px solid var(--hairline);
+}
+.marketing .lp-legal p,
+.marketing .lp-legal li {
+  font-family: var(--serif);
+  font-size: 17.5px;
+  line-height: 1.6;
+  color: var(--text-2);
+}
+.marketing .lp-legal p {
+  margin: 16px 0 0;
+}
+.marketing .lp-legal b {
+  font-weight: 500;
+  color: var(--ink);
+}
+.marketing .lp-legal ul {
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.marketing .lp-legal li {
+  margin-top: 14px;
+  padding-inline-start: 24px;
+  position: relative;
+}
+.marketing .lp-legal li::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 0;
+  top: 0.6em;
+  width: 12px;
+  height: 3px;
+  background: var(--green);
+}
+
+/* ---------- where the stats come from ---------- */
+.marketing .stats-src {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--mute); /* 5.2:1 on cream */
+  max-width: 92ch;
+  margin: 18px 0 0;
+  text-wrap: pretty;
+}
+
+/* ---------- invite form: recovery after a success ---------- */
+.marketing .invite-done-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.marketing .invite-done-wrap .invite-done:focus {
+  outline: none;
+}
+.marketing .invite-again {
+  font-family: var(--sans);
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  border-bottom: 1px solid rgba(24, 29, 25, 0.45);
+  border-radius: 0;
+  padding: 0 0 3px;
+  margin-top: 20px;
+  cursor: pointer;
+  transition: border-color 150ms var(--ease);
+}
+.marketing .invite-again:hover {
+  border-bottom-color: var(--ink);
+}
+/* danger red measures 3.2:1 on the green CTA panel — under the 4.5:1 floor.
+   On green the color law allows ink only, so the error carries its weight
+   through the bold face it already has. */
+.marketing .lp-cta .invite-error {
+  color: var(--ink);
 }
