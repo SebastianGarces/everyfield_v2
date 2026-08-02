@@ -712,8 +712,9 @@ html:has(.marketing) {
   gap: 24px clamp(36px, 5vw, 72px);
   align-items: start;
   margin-bottom: 28px;
-  /* tallest copy across the seven phases — no shift on tab switch */
-  min-height: 132px;
+  /* tallest copy across the seven phases — no shift on tab switch
+     (162px measured at 1180–1440; ruled 2026-08-02, was a stale 132) */
+  min-height: 162px;
 }
 .marketing .pdesc {
   margin-top: 10px;
@@ -810,6 +811,9 @@ html:has(.marketing) {
   .marketing .ppanel .pshot {
     height: min(42vw, 720px);
   }
+}
+/* below ~970px the core-group title takes a third line — taller floor there */
+@media (max-width: 969.98px) and (min-width: 900px) {
   .marketing .ppanel-copy {
     min-height: 190px;
   }
