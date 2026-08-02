@@ -29,6 +29,38 @@ export type NavSection = {
   items: NavItem[];
 };
 
+/**
+ * A path belongs to an href when it *is* that href or sits under it — the `/`
+ * boundary matters, so `/oversight-archive` is not inside `/oversight`.
+ */
+export function isPathWithin(pathname: string, href: string): boolean {
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+/**
+ * The single href a route lights up, resolved longest-match-first.
+ *
+ * An index route is a prefix of its own siblings (`/oversight` vs
+ * `/oversight/health`), so a plain prefix test lights up two items at once.
+ * Every caller must go through this so exactly one nav item reads as active.
+ */
+export function resolveActiveNavHref(
+  pathname: string,
+  items: NavItem[]
+): string | null {
+  const hrefs = items.flatMap((item) => [
+    ...(item.href ? [item.href] : []),
+    ...(item.items ?? []).flatMap((sub) => (sub.href ? [sub.href] : [])),
+  ]);
+
+  let active: string | null = null;
+  for (const href of hrefs) {
+    if (!isPathWithin(pathname, href)) continue;
+    if (active === null || href.length > active.length) active = href;
+  }
+  return active;
+}
+
 export const mainNavItems: NavItem[] = [
   {
     title: "Dashboard",

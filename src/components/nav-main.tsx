@@ -24,7 +24,7 @@ import {
   SidebarMenuSubButton,
   SidebarMenuSubItem,
 } from "@/components/ui/sidebar";
-import { type NavItem } from "@/lib/navigation";
+import { type NavItem, resolveActiveNavHref } from "@/lib/navigation";
 
 export function NavMain({
   items,
@@ -36,13 +36,18 @@ export function NavMain({
   hasChurch?: boolean;
 }) {
   const pathname = usePathname();
+  const activeHref = resolveActiveNavHref(pathname, items);
 
   return (
     <SidebarGroup>
       <SidebarGroupLabel>{label}</SidebarGroupLabel>
       <SidebarMenu>
         {items.map((item) => {
-          const isActive = item.href ? pathname.startsWith(item.href) : false;
+          const hasActiveSubItem =
+            item.items?.some((sub) => sub.href === activeHref) ?? false;
+          const isActive =
+            (item.href !== undefined && item.href === activeHref) ||
+            hasActiveSubItem;
           const hasSubItems = item.items && item.items.length > 0;
           const needsChurch = item.requiresChurch && !hasChurch;
           const isEffectivelyDisabled = item.isDisabled || needsChurch;
@@ -87,7 +92,8 @@ export function NavMain({
                           <SidebarMenuSubButton
                             asChild
                             isActive={
-                              subItem.href ? pathname === subItem.href : false
+                              subItem.href !== undefined &&
+                              subItem.href === activeHref
                             }
                           >
                             <Link
