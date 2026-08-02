@@ -8,6 +8,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sendingChurches } from "./sending-church";
 import { sendingNetworks } from "./sending-network";
+import type { ChurchLeadershipStatus } from "@/lib/onboarding/leadership";
 
 export const churches = pgTable("churches", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -25,6 +26,16 @@ export const churches = pgTable("churches", {
   // the flow. Existing churches were backfilled to their created_at by
   // migration 0027, so nobody is retro-enrolled into a flow they never saw.
   onboardingCompletedAt: timestamp("onboarding_completed_at"),
+  // Onboarding (F12 / OB-004): the answer to "will you be the lead
+  // planter/pastor?". NULL = never asked (every church predating this step),
+  // which is NOT the same as "no planter" — see
+  // `src/lib/onboarding/leadership.ts`, which owns the three-state rule. The
+  // planter ASSIGNMENT itself is still `users.church_id` + the `planter` role;
+  // this column is what makes "does this church have a planter?" explicit and
+  // queryable instead of inferred.
+  leadershipStatus: varchar("leadership_status", {
+    length: 32,
+  }).$type<ChurchLeadershipStatus>(),
   sendingChurchId: uuid("sending_church_id").references(
     () => sendingChurches.id
   ),
