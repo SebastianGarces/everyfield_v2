@@ -3,13 +3,10 @@ import {
   Activity,
   BookOpenText,
   CalendarCheck,
-  Church,
   FileText,
   LayoutDashboard,
   ListChecks,
   MessageSquare,
-  Network,
-  Settings,
   Sparkles,
   Users,
   UsersRound,
@@ -133,6 +130,15 @@ export const mainNavItems: NavItem[] = [
 /**
  * Navigation items shown to sending church admins.
  * These appear instead of the planter-focused mainNavItems.
+ *
+ * A nav item here MUST have a page under `src/app/(dashboard)/oversight/` —
+ * an oversight admin has no other way in, so a link to a route that does not
+ * exist is a 404 with no recovery (#260). `navigation.test.ts` asserts the
+ * page file exists for every href below; add the item back in the same change
+ * that adds its `page.tsx`, not before.
+ *
+ * Hidden until built (#260): "Church Plants" (/oversight/plants),
+ * "Invitations" (/oversight/invitations), "Settings" (/oversight/settings).
  */
 export const sendingChurchNavItems: NavItem[] = [
   {
@@ -141,30 +147,21 @@ export const sendingChurchNavItems: NavItem[] = [
     icon: LayoutDashboard,
   },
   {
-    title: "Church Plants",
-    href: "/oversight/plants",
-    icon: Church,
-  },
-  {
     title: "Plant Health",
     href: "/oversight/health",
     icon: Activity,
-  },
-  {
-    title: "Invitations",
-    href: "/oversight/invitations",
-    icon: Users,
-  },
-  {
-    title: "Settings",
-    href: "/oversight/settings",
-    icon: Settings,
   },
 ];
 
 /**
  * Navigation items shown to network admins.
  * These appear instead of the planter-focused mainNavItems.
+ *
+ * Same rule as `sendingChurchNavItems`: every href needs a real page.
+ *
+ * Hidden until built (#260): "Sending Churches"
+ * (/oversight/sending-churches), "Church Plants" (/oversight/plants),
+ * "Invitations" (/oversight/invitations), "Settings" (/oversight/settings).
  */
 export const networkAdminNavItems: NavItem[] = [
   {
@@ -173,29 +170,9 @@ export const networkAdminNavItems: NavItem[] = [
     icon: LayoutDashboard,
   },
   {
-    title: "Sending Churches",
-    href: "/oversight/sending-churches",
-    icon: Church,
-  },
-  {
-    title: "Church Plants",
-    href: "/oversight/plants",
-    icon: Network,
-  },
-  {
     title: "Plant Health",
     href: "/oversight/health",
     icon: Activity,
-  },
-  {
-    title: "Invitations",
-    href: "/oversight/invitations",
-    icon: Users,
-  },
-  {
-    title: "Settings",
-    href: "/oversight/settings",
-    icon: Settings,
   },
 ];
 
