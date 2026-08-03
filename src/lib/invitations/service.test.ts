@@ -33,7 +33,7 @@ import {
 // meant to be endpoints move out of the 'use server' module — verify: grep + a
 // forged POST with a foreign respondingUser changes nothing".
 //
-// Three halves, and this file covers all three.
+// Four parts, and this file covers all four.
 //
 // 1. STRUCTURAL — in a `"use server"` module every export is a POSTable
 //    endpoint, so the export surface IS the auth surface. The AUTHORITATIVE
@@ -63,43 +63,55 @@ import {
 //    is not an `InvitationActor`, and `pnpm typecheck` enforces that.
 //
 // 3. AUTHORITY — the check that stood between an anonymous request and a
-//    stranger's association, now unit-tested per invitation type.
+//    stranger's association, now unit-tested per invitation type. §5 adds the
+//    WRITES that authority guards: a response is a compare-and-set on `pending`,
+//    and an accept binds a free slot or re-binds its own but never replaces
+//    another org's (both statements of the batch, both read off the SQL).
+//
+// 4. REACHABILITY — the two ways a `"use server"` module OTHER than `service.ts`
+//    can put `./core` back on the wire: re-exporting from it, or importing from
+//    it and wrapping. Both are closure walks over the real module graph (see
+//    "no 'use server' module republishes …"), and the second is governed by an
+//    allowlist that is asserted exhaustive in both directions, because two
+//    modules do legitimately reach it.
 //
 // GUARDRAIL MUTATIONS — the shapes this file has been WATCHED to reject. A
 // guardrail nobody has seen fail has not been tested, so each of these was
-// appended to the tree, run, and watched go red. 3 and 4 are the two holes HR4
-// found in the first version of this file (#265, evidence comment 2026-08-03),
-// where each of them left the suite green.
+// applied to a clean tree, run, and watched go red; the counts are output, not
+// estimates. 3, 4 and 5 are the three holes HR4 found in earlier versions of
+// this file (#265, evidence comments 2026-08-03), each of which left the suite
+// GREEN — 5 with `tsc` at exit 0 as well.
 //
 // HOW TO RUN ONE (these are recipes, so they have to compile as written):
-// mutations 1–3 are appended to the END of `./service.ts`; 4 adds two new
-// files. Mutations 1 and 3 call `disassociateChurchFromNetwork`, which
-// `service.ts` deliberately does NOT import, so they ALSO require adding the
-// line `disassociateChurchFromNetwork,` to that file's existing
-// `from "./core"` import block — without it you get
+// mutations 1–3 are appended to the END of `./service.ts`; 4 and 5 add two new
+// files each; 6 edits `CORE_REACHING_ACTION_MODULES` below. Mutations 1 and 3
+// call `disassociateChurchFromNetwork`, which `service.ts` deliberately does NOT
+// import, so they ALSO require adding the line
+// `disassociateChurchFromNetwork,` to that file's existing `from "./core"`
+// import block — without it you get
 // `TS2304: Cannot find name 'disassociateChurchFromNetwork'` from
-// `pnpm typecheck` instead of the documented red suite. Baseline for the
-// counts below is 35 tests / 35 pass; take them in a tree nobody else is
-// writing to (`git archive <sha> | tar -x -C <dir>`, node_modules symlinked
-// in), because a shared worktree gives different counts:
+// `pnpm typecheck` instead of the documented red suite. Baseline for the counts
+// below is 37 tests / 37 pass; take them in a tree nobody else is writing to
+// (`git archive <sha> | tar -x -C <dir>`, node_modules symlinked in, `.env.local`
+// copied), because a shared worktree gives different counts:
 //
 //   1. `export const detachPlantFromNetwork = async (churchId: string) => {
 //        await disassociateChurchFromNetwork(churchId);
 //      };`
-//      → 32 pass / 3 fail: "the runtime export surface is exactly the four
-//        lifecycle mutations", "nothing but the four lifecycle mutations is an
-//        endpoint", "every exported invitation action mints its actor from the
-//        session".
+//      → 34 pass / 3 fail: "the runtime export surface is exactly the four
+//        lifecycle mutations", "every exported invitation action mints its actor
+//        from the session", "nothing but the four lifecycle mutations is an
+//        endpoint".
 //
 //   2. `export { disassociateChurchFromSendingChurch } from "./core";`
-//      → 32 pass / 3 fail: "the runtime export surface …", "the action layer
+//      → 34 pass / 3 fail: "the runtime export surface …", "the action layer
 //        publishes nothing it did not declare", "no 'use server' module
 //        republishes the invitation logic layer".
 //
 //   3. `export default async function detachPlantFromNetwork(churchId: string) {
 //        await disassociateChurchFromNetwork(churchId);
 //      }`
-//      → HOLE 1, and 33 pass / 2 fail. The old allowlist matched
+//      → HOLE 1, and 35 pass / 2 fail. The old allowlist matched
 //        `export (async) function|const|let|var|class` and therefore never
 //        `export default`, so this — a real, POSTable, unauthenticated "detach
 //        any church from its network by guessing a uuid" endpoint — passed
@@ -124,16 +136,51 @@ import {
 //        walk is now a CLOSURE over re-export edges (the same shape as the
 //        client-bundle walk in §1d), so `detach-actions.ts → index.ts →
 //        core.ts` fails "no 'use server' module republishes the invitation
-//        logic layer" with the chain in the message — 34 pass / 1 fail. A
-//        three-hop chain through one more intermediate module reports all four
-//        files, so the depth is not two either.
+//        logic layer" with the chain in the message — 36 pass / 1 fail. Adding
+//        one more barrel in between reports all four files, so the depth is not
+//        two either.
+//
+//   5. The SAME barrel, with `import` + a wrapper instead of `export … from`:
+//        `src/lib/invitations/index.ts`
+//          → `export * from "./core";`
+//        `src/app/(dashboard)/oversight/detach-actions.ts`
+//          → `"use server";`
+//            `import { disassociateChurchFromNetwork } from "@/lib/invitations";`
+//            `export async function detachPlantFromNetwork(churchId: string) {`
+//            `  await disassociateChurchFromNetwork(churchId);`
+//            `}`
+//      → HOLE 3, and the reason this file was rejected a second time. Same live
+//        unauthenticated "detach any church by guessing a uuid" endpoint, one
+//        keyword different — and on the tree before this fix (`8a5360c`) it was
+//        35 pass / 0 fail with `npx tsc --noEmit` at exit 0, because check (a)
+//        tested the literal string `invitations/core` plus ONE resolved hop per
+//        `from` specifier. Now 36 pass / 1 fail, same test, with the chain in
+//        the message: the check is a CLOSURE over value imports and the question
+//        it asks is "can this action module REACH core", not "does it spell it".
+//
+//   6. Allowlist rot, both directions — the assertions that stop
+//      `CORE_REACHING_ACTION_MODULES` from becoming a blanket exemption:
+//        (a) delete the `src/app/(auth)/register/actions.ts` entry
+//            → 36 pass / 1 fail, reporting the real chain
+//              `register/actions.ts → register/beta-gate.ts → core.ts`.
+//        (b) add an entry for a module that does NOT reach core (e.g.
+//            `src/app/(dashboard)/settings/actions.ts`)
+//            → 36 pass / 1 fail: "an allowlist entry no longer reaches …". So a
+//              padded or stale list is a failing test, not a quiet exemption.
 //
 // The compare-and-set is covered from both sides: §5 reads it off the generated
 // SQL (the claim's `status = 'pending'`, the association's
-// `EXISTS ... status = 'accepted'`, the expiry's `status = 'pending'`), and the
-// G3 harness (`scripts/g3-oversight-model.ts` §3d) races a real accept against a
-// real revoke on a real database and asserts a lost accept writes nothing. The
-// SQL assertions are what make the harness's result attributable to the guard.
+// `EXISTS ... status = 'accepted'`, the slot rule
+// `fk IS NULL OR fk = <this org>` on BOTH statements, the expiry's
+// `status = 'pending'`), and the G3 harness (`scripts/g3-oversight-model.ts`
+// §3d) races a real accept against a real revoke on a real database, asserts a
+// lost accept writes nothing (cases A–F), and asserts a SECOND accept from a
+// different org is refused while the incumbent association survives (case G).
+// The SQL assertions are what make the harness's result attributable to the
+// guard.
+//
+// §7 is the last of the four: what an action HANDS BACK. `InvitationView`, not
+// the row, because the row carries two internal user uuids.
 // ============================================================================
 
 const SRC = path.join(process.cwd(), "src");
@@ -600,7 +647,10 @@ test("the logic layer is not a 'use server' module", () => {
 });
 
 test("no 'use server' module republishes the invitation logic layer", () => {
-  // Two loopholes, and this covers both.
+  // Two loopholes — republishing and importing — and this covers both, each as a
+  // CLOSURE over the real module graph. What it does NOT do is look for the
+  // string `@/lib/invitations/core`: a barrel makes the same endpoint out of a
+  // different spelling, which is how HOLE 3 shipped through a green suite.
   //
   // (b) REPUBLICATION, transitively — HOLE 2. Any action module, `service.ts`
   // included, whose re-export edges REACH `./core`, however many barrels are in
