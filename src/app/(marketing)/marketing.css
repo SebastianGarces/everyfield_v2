@@ -1696,6 +1696,14 @@ html:has(.marketing) {
     width: 100%;
   }
 }
+/* under ~480px the CSF label and badge collide mid-row — let the header wrap
+   so the badge takes its own line instead of shearing the label */
+@media (max-width: 479.98px) {
+  .marketing .vg-tile-top {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+}
 
 /* reduced motion: base styles are already the finished frame, so switching the
    animations off is the whole fallback */
@@ -1706,9 +1714,19 @@ html:has(.marketing) {
   .marketing .vg-scorecard.vg-seen .vg-reading,
   .marketing .vg-scorecard.vg-seen .vg-basis,
   .marketing .ptabs.pt-seen .ppanel.active .pshot .vg-card,
-  .marketing .ptabs.pt-seen .ppanel.active .vg-check .vg-box,
-  .marketing .ptabs.pt-seen .ppanel.active .vg-check .vg-box::after,
-  .marketing .ptabs.pt-seen .ppanel.active .vg-check .vg-check-t::after,
+  /* :not(.is-pre) repeated here so these match the animated selectors'
+     specificity — without it the tick/strike animations win and still run */
+  .marketing .ptabs.pt-seen .ppanel.active .vg-check:not(.is-pre) .vg-box,
+  .marketing
+    .ptabs.pt-seen
+    .ppanel.active
+    .vg-check:not(.is-pre)
+    .vg-box::after,
+  .marketing
+    .ptabs.pt-seen
+    .ppanel.active
+    .vg-check:not(.is-pre)
+    .vg-check-t::after,
   .marketing .ptabs.pt-seen .ppanel.active .vg-bar-fill,
   .marketing .ptabs.pt-seen .ppanel.active .vg-count-a,
   .marketing .ptabs.pt-seen .ppanel.active .vg-count-b,
