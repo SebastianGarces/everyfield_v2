@@ -102,7 +102,7 @@
 | Accept invitation | `src/lib/invitations/service.ts:acceptInvitation(id)` | Target plant's planter / target sending church's admin |
 | Decline invitation | `src/lib/invitations/service.ts:declineInvitation(id)` | Same authority as accept |
 | Revoke invitation | `src/lib/invitations/service.ts:revokeInvitation(id)` | Original inviter (enforced in the UPDATE) |
-| Disassociate | `src/lib/invitations/core.ts:disassociate*()` | **No entrypoint** — primitive only, no action wrapper until who-may-sever is ruled (#265) |
+| Disassociate | `src/lib/invitations/core.ts:disassociate*()` | **No entrypoint** — primitive only, no action wrapper until who-may-sever is ruled (#274). An accepted association is therefore irrevocable in-product; see `memory/invariants.md` → Multi-Tenancy for why that is a privacy consequence |
 
 **Primary modules:** `src/lib/invitations/service.ts` (the 4 actions, `"use server"`), `src/lib/invitations/core.ts` (logic + reads + primitives, NOT `"use server"`), `src/db/schema/organization-invitation.ts`
 

@@ -15,6 +15,21 @@
 // that this file is not an endpoint surface, and that the action layer never
 // takes an actor as an argument.
 //
+// Dropping the directive also drops the one thing it guaranteed for free: that
+// this module can never be emitted into a client bundle. It holds every raw DB
+// write and read for the feature and imports `@/db`, so a Client Component that
+// imported it would pull `@neondatabase/serverless` into the browser with no
+// build error. `import "server-only"` is the repo's usual rail for exactly this
+// (`src/lib/auth/admin.ts:1`) and CANNOT be used here: the package's default
+// entry is a bare `throw` and resolves to the empty file only under the
+// `react-server` condition, so importing it would break every test that loads
+// this module in a bare node process — which is all of `service.test.ts`. The
+// replacement is a static one, in `service.test.ts` → "no client component can
+// pull the logic layer into the browser": it walks the import graph from every
+// `"use client"` entry and fails, with the offending chain, if this file is
+// reachable. Do not swap it for the import without first making the tests run
+// under `--conditions=react-server`.
+//
 // Every mutation that has an actor takes an `InvitationActor`, which can only
 // be minted from a session (`invitationActorFromSession`). A bare `User` — the
 // shape a forged payload could carry — is not assignable to it, so "trust the

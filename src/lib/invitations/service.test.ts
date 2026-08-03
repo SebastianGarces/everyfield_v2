@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
@@ -39,6 +39,18 @@ import {
 //    its source — the same technique `src/app/(dashboard)/settings/actions.test.ts`
 //    uses. This is the "grep" the AC asks for, executable.
 //
+//    A source-shaped assertion is only as good as its pattern, and the first
+//    version of this one was not good enough: every export check matched
+//    `export async function`, so appending `export const detachPlantFromNetwork
+//    = async (…) => …` and `export { disassociateChurchFromSendingChurch } from
+//    "./core"` to `service.ts` — two real unauthenticated endpoints, verbatim
+//    the vulnerability #265 closed — left the suite green. §1 is now
+//    export-FORM-agnostic, forbids re-exports outright, and resolves module
+//    specifiers instead of grepping for a path substring. Each of those two
+//    lines now fails two tests independently; that was checked by writing them
+//    and watching it go red, because a guardrail nobody has seen fail has not
+//    been tested.
+//
 // 2. FORGERY — a forged POST cannot supply an actor because no action takes
 //    one, and the create path derives the INVITING ORG from the session too, so
 //    ids smuggled onto the payload are absent from the row that gets written.
@@ -76,6 +88,91 @@ function codeOf(file: string): string {
 const SERVICE_CODE = codeOf(SERVICE_PATH);
 const CORE_CODE = codeOf(CORE_PATH);
 
+/**
+ * Every VALUE exported from the action layer, in whatever form it was written.
+ *
+ * Form-agnostic on purpose. An earlier version of this test matched
+ * `export async function` only, which is one of at least four ways to publish an
+ * endpoint — `export const x = async () => …` is the canonical Next.js server
+ * action and is used throughout this repo — so the guardrail passed with two
+ * real unauthenticated mutations appended to `service.ts`. `type` is excluded
+ * because a type export is erased and is not an endpoint; re-exports are not
+ * listed here at all, and are forbidden outright below, because a re-export
+ * publishes an endpoint whose body no assertion in this file can see.
+ */
+const EXPORTED = [
+  ...SERVICE_CODE.matchAll(
+    /^export\s+(?:async\s+)?(?:function|const|let|var|class)\s+(\w+)/gm
+  ),
+].map((match) => match[1]);
+
+// ----------------------------------------------------------------------------
+// Module graph helpers. The two walks below are about which files can REACH
+// `./core`, so they have to resolve specifiers rather than grep for a substring:
+// `from "./core"` and `from "@/lib/invitations/core"` are the same module, and
+// only the second one contains the string "invitations/core".
+// ----------------------------------------------------------------------------
+
+const TS_FILES: string[] = (function collect(dir: string): string[] {
+  const found: string[] = [];
+  for (const entry of readdirSync(dir)) {
+    const full = path.join(dir, entry);
+    if (statSync(full).isDirectory()) {
+      found.push(...collect(full));
+    } else if (/\.tsx?$/.test(entry)) {
+      found.push(full);
+    }
+  }
+  return found;
+})(SRC);
+
+/** `export * from "x"` / `export { a } from "x"` — a published endpoint. */
+const REEXPORT_FROM =
+  /^export\s+(?:\*(?:\s+as\s+\w+)?|\{[^}]*\})\s*from\s*["']([^"']+)["']/gm;
+
+/** Any module specifier at all, type-only imports included. */
+const ANY_FROM = /\bfrom\s*["']([^"']+)["']/g;
+
+/** Specifiers whose module is actually emitted: value imports and `import()`. */
+function valueSpecifiers(code: string): string[] {
+  const statement =
+    /^\s*(?:import|export)\s+(?!type\b)[^;]*?\bfrom\s*["']([^"']+)["']/gm;
+  const sideEffect = /^\s*import\s*["']([^"']+)["']/gm;
+  const dynamic = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
+
+  return [statement, sideEffect, dynamic].flatMap((pattern) =>
+    [...code.matchAll(pattern)].map(([, specifier]) => specifier)
+  );
+}
+
+/** The file a specifier names, or `null` for a bare package. */
+function resolveModule(from: string, specifier: string): string | null {
+  const base = specifier.startsWith("@/")
+    ? path.join(SRC, specifier.slice(2))
+    : specifier.startsWith(".")
+      ? path.resolve(path.dirname(from), specifier)
+      : null;
+  if (base === null) return null;
+
+  for (const candidate of [
+    base,
+    `${base}.ts`,
+    `${base}.tsx`,
+    path.join(base, "index.ts"),
+    path.join(base, "index.tsx"),
+  ]) {
+    if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
+  }
+  return null;
+}
+
+function resolvesToCore(from: string, specifier: string): boolean {
+  return resolveModule(from, specifier) === CORE_PATH;
+}
+
+const isUseServerModule = (full: string) =>
+  /^["']use server["'];/m.test(readFileSync(full, "utf8"));
+
 // ----------------------------------------------------------------------------
 // 1. Structural — the endpoint surface
 // ----------------------------------------------------------------------------
@@ -83,15 +180,25 @@ const CORE_CODE = codeOf(CORE_PATH);
 test("every exported invitation action mints its actor from the session", () => {
   // Not "most of them". An action added later that resolved its user any other
   // way would be the one loose write path, and that is exactly the shape of bug
-  // this counts.
-  const exported = SERVICE_CODE.match(/export async function /g) ?? [];
+  // this counts. Counted against `EXPORTED`, so an arrow-function action is
+  // counted too.
   const minted =
     SERVICE_CODE.match(
       /invitationActorFromSession\(await verifySession\(\)\)/g
     ) ?? [];
 
-  assert.ok(exported.length > 0, "no exported actions found — check the path");
-  assert.equal(minted.length, exported.length);
+  assert.ok(EXPORTED.length > 0, "no exported actions found — check the path");
+  assert.equal(minted.length, EXPORTED.length, EXPORTED.join(", "));
+});
+
+test("the action layer re-exports nothing", () => {
+  // A re-export is the one endpoint shape the assertions above are blind to by
+  // construction: `export { disassociateChurchFromNetwork } from "./core"` adds
+  // a POSTable, unauthenticated, state-changing endpoint whose body lives in a
+  // file this test deliberately treats as non-public. So no `export {` and no
+  // `export *` here, from anywhere, ever — if the action layer needs something
+  // from `./core` it imports it and wraps it in an action that mints an actor.
+  assert.doesNotMatch(SERVICE_CODE, /^export\s*[*{]/m);
 });
 
 test("no invitation action accepts an actor, anywhere", () => {
@@ -128,11 +235,7 @@ test("nothing but the four lifecycle mutations is an endpoint", () => {
   // exported from a `"use server"` module is an unauthenticated data leak, and
   // `disassociateChurchFromSendingChurch(churchId)` was a state change any
   // anonymous POST could aim at any church.
-  const exported = [
-    ...SERVICE_CODE.matchAll(/export async function (\w+)/g),
-  ].map((match) => match[1]);
-
-  assert.deepEqual(exported.sort(), [
+  assert.deepEqual([...EXPORTED].sort(), [
     "acceptInvitation",
     "createInvitation",
     "declineInvitation",
@@ -143,39 +246,105 @@ test("nothing but the four lifecycle mutations is an endpoint", () => {
 test("the logic layer is not a 'use server' module", () => {
   // `./core` holds every read, the association writes, and the actor-explicit
   // mutations. The absence of the directive is what makes them unreachable from
-  // a browser — with it, all of them would be endpoints again.
+  // a browser — with it, all of them would be endpoints again. What that absence
+  // GIVES UP is the client-bundle guarantee, replaced two tests down.
   assert.doesNotMatch(CORE_CODE, /"use server"/);
   assert.doesNotMatch(CORE_CODE, /'use server'/);
   assert.match(SERVICE_CODE, /^"use server";/);
 });
 
-test("no other 'use server' module re-exports the invitation logic layer", () => {
-  // The loophole this closes: `export { disassociateChurchFromNetwork } from
-  // "@/lib/invitations/core"` inside any action file would restore the endpoint
-  // this ticket removed, somewhere nobody would think to look.
+test("no 'use server' module publishes the invitation logic layer", () => {
+  // Two loopholes, and this covers both. (a) Any OTHER action file that so much
+  // as touches `@/lib/invitations/core` — importing a primitive there is one
+  // keystroke from exporting it. (b) `service.ts` itself, which is allowed to
+  // import `./core` and is the whole reason it exists, but must never re-export
+  // from it: `export { disassociateChurchFromNetwork } from "./core"` would
+  // restore the endpoint this ticket removed, in the file whose shape everybody
+  // believes is pinned. The earlier version of this test skipped `service.ts`
+  // outright, so exactly that line passed.
   const offenders: string[] = [];
 
-  const walk = (dir: string) => {
-    for (const entry of readdirSync(dir)) {
-      const full = path.join(dir, entry);
-      if (statSync(full).isDirectory()) {
-        walk(full);
-        continue;
-      }
-      if (!/\.tsx?$/.test(entry)) continue;
-      if (full === SERVICE_PATH) continue;
+  for (const full of TS_FILES) {
+    if (!isUseServerModule(full)) continue;
+    const rel = path.relative(process.cwd(), full);
+    const code = codeOf(full);
 
-      const source = readFileSync(full, "utf8");
-      if (!/^["']use server["'];/m.test(source)) continue;
-      if (/invitations\/core/.test(source)) {
-        offenders.push(path.relative(process.cwd(), full));
+    // (b) Re-exports — checked in every action module, `service.ts` included.
+    for (const [, specifier] of code.matchAll(REEXPORT_FROM)) {
+      if (resolvesToCore(full, specifier)) {
+        offenders.push(`${rel} re-exports from ${specifier}`);
       }
     }
-  };
 
-  walk(SRC);
+    if (full === SERVICE_PATH) continue;
+
+    // (a) Any other reference at all, import or re-export.
+    if (
+      /invitations\/core/.test(code) ||
+      [...code.matchAll(ANY_FROM)].some(([, specifier]) =>
+        resolvesToCore(full, specifier)
+      )
+    ) {
+      offenders.push(rel);
+    }
+  }
 
   assert.deepEqual(offenders, []);
+});
+
+test("no client component can pull the logic layer into the browser", () => {
+  // The rail that `"use server"` used to provide for free. `./core` imports
+  // `@/db` and `@neondatabase/serverless`; before the split, the directive made
+  // it structurally impossible to emit into a client bundle. It has no directive
+  // now — that absence is the endpoint fix — so the guarantee has to be
+  // re-established here.
+  //
+  // `import "server-only"` is the usual rail (`src/lib/auth/admin.ts:1`) and is
+  // NOT usable on `./core`: the package's default entry is a bare `throw`
+  // (`next/dist/compiled/server-only/index.js`) and resolves to the empty file
+  // only under the `react-server` condition, so importing it would make every
+  // test in this file — which imports `./core` directly, in a bare node process
+  // — fail at load. This walk is the replacement: it is transitive, it runs on
+  // every commit, and it fails in `pnpm test` rather than at runtime in a
+  // browser.
+  const clientEntries = TS_FILES.filter((full) =>
+    /^["']use client["'];/m.test(readFileSync(full, "utf8"))
+  );
+
+  assert.ok(clientEntries.length > 0, "no client components found — check SRC");
+
+  const seen = new Set<string>();
+  const queue = [...clientEntries];
+  const parents = new Map<string, string>();
+
+  while (queue.length > 0) {
+    const full = queue.pop()!;
+    if (seen.has(full)) continue;
+    seen.add(full);
+
+    // A `"use server"` module is a boundary, not an import: the client gets a
+    // reference and the body stays on the server. So client → `service.ts` →
+    // `./core` is not a bundle path, and traversing it would make this test
+    // fail the moment the invitation UI lands.
+    if (isUseServerModule(full)) continue;
+
+    for (const specifier of valueSpecifiers(codeOf(full))) {
+      const resolved = resolveModule(full, specifier);
+      if (resolved === null || seen.has(resolved)) continue;
+      parents.set(resolved, full);
+      queue.push(resolved);
+    }
+  }
+
+  const chain = (file: string): string => {
+    const hops = [path.relative(process.cwd(), file)];
+    for (let at = parents.get(file); at; at = parents.get(at)) {
+      hops.push(path.relative(process.cwd(), at));
+    }
+    return hops.reverse().join(" → ");
+  };
+
+  assert.ok(!seen.has(CORE_PATH), seen.has(CORE_PATH) ? chain(CORE_PATH) : "");
 });
 
 // ----------------------------------------------------------------------------

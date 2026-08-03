@@ -21,9 +21,10 @@ Stable truths that must not be violated.
 - Tenant isolation enforced at application layer (DB-layer RLS is a future goal)
 - Hierarchical model: SendingNetwork → SendingChurch → Church (all relationships optional/nullable)
 - All hierarchy FKs (`sending_church_id`, `sending_network_id`) are nullable — entities can exist independently
-- Associations are mutable: created via invitation system, can be added/removed at any time
+- Associations are created via the invitation system, and **as of #265 there is no way to remove one in-product.** The FKs are nullable and the primitives exist (`disassociateChurchFromSendingChurch` / `disassociateChurchFromNetwork` / `disassociateSendingChurchFromNetwork` in `src/lib/invitations/core.ts`) but they have **no action wrapper, no route and no UI** — they were three of the eleven unauthenticated `"use server"` exports #265 removed, because each detached any church from its oversight org for anyone who could guess a uuid. Removing them was right; the capability is nonetheless gone until who-may-sever is ruled (**#274**), so treat "an accepted oversight association is irrevocable" as the current truth and do not write code that assumes otherwise
+- **That irrevocability is a privacy fact, not just a missing button.** Per the Hierarchical Access Control note below, `getOversightPlantHealth()` exposes an associated plant's name, phase, launch countdown and health to its oversight org with **no privacy gate** — the six `share_*` toggles do not cover the portfolio listing. So a plant that accepts once cannot withdraw that exposure by any means the product offers. Restoring a disassociation path (with an authority rule, per #274) is what closes it; a new `share_*` toggle is not
 
-**Source:** `src/db/schema/*.ts`, `product-docs/system-architecture.md`
+**Source:** `src/db/schema/*.ts`, `src/lib/invitations/core.ts`, `product-docs/system-architecture.md`
 
 ## Hierarchical Access Control
 
