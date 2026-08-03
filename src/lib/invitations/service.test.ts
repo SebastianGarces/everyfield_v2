@@ -66,31 +66,47 @@ import {
 // guardrail nobody has seen fail has not been tested, so each of these was
 // appended to the tree, run, and watched go red. 3 and 4 are the two holes HR4
 // found in the first version of this file (#265, evidence comment 2026-08-03),
-// where each of them left the suite green:
+// where each of them left the suite green.
+//
+// HOW TO RUN ONE (these are recipes, so they have to compile as written):
+// mutations 1–3 are appended to the END of `./service.ts`; 4 adds two new
+// files. Mutations 1 and 3 call `disassociateChurchFromNetwork`, which
+// `service.ts` deliberately does NOT import, so they ALSO require adding the
+// line `disassociateChurchFromNetwork,` to that file's existing
+// `from "./core"` import block — without it you get
+// `TS2304: Cannot find name 'disassociateChurchFromNetwork'` from
+// `pnpm typecheck` instead of the documented red suite. Baseline for the
+// counts below is 35 tests / 35 pass; take them in a tree nobody else is
+// writing to (`git archive <sha> | tar -x -C <dir>`, node_modules symlinked
+// in), because a shared worktree gives different counts:
 //
 //   1. `export const detachPlantFromNetwork = async (churchId: string) => {
 //        await disassociateChurchFromNetwork(churchId);
 //      };`
-//      → fails "the runtime export surface is exactly the four lifecycle
-//        mutations", "nothing but the four lifecycle mutations is an endpoint",
-//        "every exported invitation action mints its actor from the session".
+//      → 32 pass / 3 fail: "the runtime export surface is exactly the four
+//        lifecycle mutations", "nothing but the four lifecycle mutations is an
+//        endpoint", "every exported invitation action mints its actor from the
+//        session".
 //
 //   2. `export { disassociateChurchFromSendingChurch } from "./core";`
-//      → fails "the runtime export surface …", "the action layer publishes
-//        nothing it did not declare", "no 'use server' module republishes the
-//        invitation logic layer".
+//      → 32 pass / 3 fail: "the runtime export surface …", "the action layer
+//        publishes nothing it did not declare", "no 'use server' module
+//        republishes the invitation logic layer".
 //
 //   3. `export default async function detachPlantFromNetwork(churchId: string) {
 //        await disassociateChurchFromNetwork(churchId);
 //      }`
-//      → HOLE 1. The old allowlist matched `export (async) function|const|let|
-//        var|class` and therefore never `export default`, so this — a real,
-//        POSTable, unauthenticated "detach any church from its network by
-//        guessing a uuid" endpoint — passed every test. Now fails "the runtime
-//        export surface …" (the namespace grows the key `default`) and "the
-//        action layer publishes nothing it did not declare", which bans a
-//        default export of a `"use server"` module OUTRIGHT: the client names
-//        the reference, so there is no allowlist entry it could ever match.
+//      → HOLE 1, and 33 pass / 2 fail. The old allowlist matched
+//        `export (async) function|const|let|var|class` and therefore never
+//        `export default`, so this — a real, POSTable, unauthenticated "detach
+//        any church from its network by guessing a uuid" endpoint — passed
+//        every test. Now fails "the runtime export surface …" (the namespace
+//        grows the key `default`) and "the action layer publishes nothing it
+//        did not declare", which bans a default export of a `"use server"`
+//        module OUTRIGHT: the client names the reference, so there is no
+//        allowlist entry it could ever match. Note that `pnpm typecheck` does
+//        NOT catch this shape once the import above is supplied — it is exit 0
+//        on the mutated tree, which is exactly why the guardrail has to.
 //
 //   4. Two files, with no direct edge between them:
 //        `src/lib/invitations/index.ts`
@@ -105,7 +121,9 @@ import {
 //        walk is now a CLOSURE over re-export edges (the same shape as the
 //        client-bundle walk in §1d), so `detach-actions.ts → index.ts →
 //        core.ts` fails "no 'use server' module republishes the invitation
-//        logic layer" with the chain in the message.
+//        logic layer" with the chain in the message — 34 pass / 1 fail. A
+//        three-hop chain through one more intermediate module reports all four
+//        files, so the depth is not two either.
 //
 // The compare-and-set is covered from both sides: §5 reads it off the generated
 // SQL (the claim's `status = 'pending'`, the association's
