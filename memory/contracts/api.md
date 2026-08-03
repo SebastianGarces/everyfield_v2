@@ -74,6 +74,8 @@ Split by #265 — it used to be one `"use server"` module with 11 exports, i.e. 
 
 Shape pinned by `src/lib/invitations/service.test.ts` (export list, no actor parameter, `core.ts` has no directive, no other `"use server"` module imports it).
 
+Responding, in order: fetch → **authority** → status/expiry. Authority comes first because these messages reach the client verbatim and invitation ids double as unauthenticated beta-gate tokens; a caller with no authority over the target gets only `NOT_AUTHORIZED_MESSAGE`, for a missing row and for every settled status alike, and cannot trigger the auto-expire write. Accept then claims and binds in one `db.batch` (claim first — see `memory/invariants.md` → Atomicity). Unknown `type` fails closed in both `verifyInvitationAuthority` and `associationStatement` (the column is a `varchar(40)` with a TS-only cast; a pg enum/CHECK would be a separate migration).
+
 ---
 
 ### Access Control Functions

@@ -3,11 +3,15 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
+import type { OrganizationInvitationType } from "@/db/schema/organization-invitation";
+
 import {
   INVITATION_EXPIRY_DAYS,
   InvitationError,
   MAX_EXPIRY_DAYS,
   NOT_AUTHORIZED_MESSAGE,
+  associationStatement,
+  expireInvitationQuery,
   invitationActorFromSession,
   getInvitation,
   isUuid,
@@ -44,9 +48,12 @@ import {
 // 3. AUTHORITY — the check that stood between an anonymous request and a
 //    stranger's association, now unit-tested per invitation type.
 //
-// What is NOT here: the compare-and-set on `status = 'pending'` in accept and
-// decline needs a database (the G3 harness, `scripts/g3-oversight-model.ts`,
-// runs the real accept path end to end).
+// The compare-and-set is covered from both sides: §5 reads it off the generated
+// SQL (the claim's `status = 'pending'`, the association's
+// `EXISTS ... status = 'accepted'`, the expiry's `status = 'pending'`), and the
+// G3 harness (`scripts/g3-oversight-model.ts` §3d) races a real accept against a
+// real revoke on a real database and asserts a lost accept writes nothing. The
+// SQL assertions are what make the harness's result attributable to the guard.
 // ============================================================================
 
 const SRC = path.join(process.cwd(), "src");
@@ -182,6 +189,7 @@ const OTHER_SENDING_CHURCH = "bbbbbbbb-2222-4222-8222-222222222222";
 const NETWORK = "33333333-3333-4333-8333-333333333333";
 const PLANTER_ID = "44444444-4444-4444-8444-444444444444";
 const FOREIGN_ID = "55555555-5555-4555-8555-555555555555";
+const INVITATION_ID = "77777777-7777-4777-8777-777777777777";
 
 function actor(overrides: {
   id?: string;
@@ -348,6 +356,104 @@ test("only the target sending church's admin may join a network", () => {
 });
 
 // ----------------------------------------------------------------------------
+// 3b. Authority fails CLOSED on a type nobody wrote a rule for
+// ----------------------------------------------------------------------------
+
+/**
+ * Types the database can hold but the switch does not know. `type` is a bare
+ * `varchar(40)` with a TypeScript-only `$type<>` cast and `insertInvitation`
+ * validates nothing, so this is not a hypothetical shape — it is any row a
+ * future writer, a migration or a fixture puts there.
+ */
+const UNKNOWN_TYPES = [
+  "CHURCH_TO_NETWORK",
+  "church_to_sending_church ",
+  "anything_else",
+  "",
+] as unknown as OrganizationInvitationType[];
+
+test("an unrecognised invitation type grants nobody authority", () => {
+  // The failure this pins: a switch with no `default:` RETURNS NORMALLY, and
+  // returning normally is how this function says "authorized". A team member of
+  // an unrelated church was granted authority over a foreign church's
+  // invitation for every one of these.
+  const stranger = actor({ role: "team_member", churchId: OTHER_PLANT });
+
+  for (const type of UNKNOWN_TYPES) {
+    assert.throws(
+      () =>
+        verifyInvitationAuthority(
+          {
+            type,
+            targetChurchId: PLANT,
+            targetSendingChurchId: SENDING_CHURCH,
+          },
+          stranger
+        ),
+      (error: unknown) =>
+        error instanceof InvitationError &&
+        error.message === NOT_AUTHORIZED_MESSAGE,
+      type
+    );
+  }
+});
+
+test("an unrecognised invitation type has no association to write either", () => {
+  // Belt and braces on the same premise: the old switch fell through silently,
+  // so an unknown type wrote no association but was still marked `accepted` and
+  // still announced a milestone. Now it cannot get that far.
+  for (const type of UNKNOWN_TYPES) {
+    assert.throws(
+      () =>
+        associationStatement(
+          {
+            type,
+            targetChurchId: PLANT,
+            targetSendingChurchId: SENDING_CHURCH,
+            sendingChurchId: SENDING_CHURCH,
+            sendingNetworkId: NETWORK,
+          },
+          INVITATION_ID
+        ),
+      InvitationError,
+      type
+    );
+  }
+});
+
+test("an invitation whose ids contradict its type writes nothing", () => {
+  // Thrown while BUILDING the statement, so it happens before the claim runs —
+  // an inconsistent row can never be marked accepted and left unassociated.
+  const cases = [
+    { type: "church_to_sending_church" as const, sendingChurchId: null },
+    { type: "church_to_network" as const, sendingNetworkId: null },
+    {
+      type: "sending_church_to_network" as const,
+      targetSendingChurchId: null,
+      sendingNetworkId: NETWORK,
+    },
+  ];
+
+  for (const override of cases) {
+    assert.throws(
+      () =>
+        associationStatement(
+          {
+            targetChurchId: PLANT,
+            targetSendingChurchId: SENDING_CHURCH,
+            sendingChurchId: SENDING_CHURCH,
+            sendingNetworkId: NETWORK,
+            ...override,
+          },
+          INVITATION_ID
+        ),
+      InvitationError,
+      override.type
+    );
+  }
+});
+
+// ----------------------------------------------------------------------------
 // 4. Create — the inviting org comes from the session
 // ----------------------------------------------------------------------------
 
@@ -484,7 +590,7 @@ test("a response records the session's user, and only a pending row", () => {
   // to the actor's id — the value that used to arrive as an argument — and the
   // WHERE clause is a compare-and-set on `pending`, so a second response
   // matches no row (no second association, no second milestone notification).
-  const invitationId = "77777777-7777-4777-8777-777777777777";
+  const invitationId = INVITATION_ID;
 
   for (const status of ["accepted", "declined"] as const) {
     const { sql, params } = respondToInvitationQuery(
@@ -518,6 +624,94 @@ test("the revoke statement is scoped to the session's own user", () => {
   assert.ok(params.includes("pending"));
   assert.ok(!params.includes(FOREIGN_ID));
   assert.match(sql, /inviter_user_id/);
+});
+
+test("the association cannot be written unless the claim was won", () => {
+  // The half-applied accept, read off the SQL. `acceptInvitationAs` batches the
+  // claim (statement 1, `status = 'pending' → 'accepted'`) with this statement,
+  // whose WHERE requires the invitation to ALREADY read `accepted` — a value
+  // only that claim can have written, visible here because both run in one Neon
+  // batched transaction. So an accept that loses to a revoke or a decline
+  // matches no row and the plant is not bound to anything.
+  //
+  // An empty `returning()` is not a driver error and does not roll a batch back,
+  // which is why this predicate — and not `db.batch` alone — is the guard.
+  const cases = [
+    {
+      invitation: {
+        type: "church_to_sending_church" as const,
+        targetChurchId: PLANT,
+        targetSendingChurchId: null,
+        sendingChurchId: SENDING_CHURCH,
+        sendingNetworkId: null,
+      },
+      table: /update "churches"/,
+      column: /"sending_church_id" = \$\d+/,
+      bound: SENDING_CHURCH,
+    },
+    {
+      invitation: {
+        type: "church_to_network" as const,
+        targetChurchId: PLANT,
+        targetSendingChurchId: null,
+        sendingChurchId: null,
+        sendingNetworkId: NETWORK,
+      },
+      table: /update "churches"/,
+      column: /"sending_network_id" = \$\d+/,
+      bound: NETWORK,
+    },
+    {
+      invitation: {
+        type: "sending_church_to_network" as const,
+        targetChurchId: null,
+        targetSendingChurchId: SENDING_CHURCH,
+        sendingChurchId: null,
+        sendingNetworkId: NETWORK,
+      },
+      table: /update "sending_churches"/,
+      column: /"sending_network_id" = \$\d+/,
+      bound: NETWORK,
+    },
+  ];
+
+  for (const { invitation, table, column, bound } of cases) {
+    const { sql, params } = associationStatement(
+      invitation,
+      INVITATION_ID
+    ).toSQL();
+
+    assert.match(sql, table, invitation.type);
+    assert.match(sql, column, invitation.type);
+    assert.match(
+      sql,
+      /exists \(select .* from "organization_invitations"/,
+      invitation.type
+    );
+    assert.ok(params.includes(INVITATION_ID), invitation.type);
+    assert.ok(params.includes("accepted"), invitation.type);
+    assert.ok(params.includes(bound), invitation.type);
+    // Not `pending`: inside the batch the claim has already flipped the row, so
+    // a `pending` predicate here would never match and no association would
+    // EVER be written.
+    assert.ok(!params.includes("pending"), invitation.type);
+  }
+});
+
+test("the auto-expire write is a compare-and-set too", () => {
+  // The sibling status write the first CAS skipped: `WHERE id = ?` alone let two
+  // requests straddling the expiry instant (a double-clicked Accept is enough)
+  // stamp `expired` over a committed `accepted` — leaving `responded_by` set,
+  // the association live and the status contradicting both.
+  const now = new Date("2026-08-03T00:00:00.000Z");
+  const { sql, params } = expireInvitationQuery(INVITATION_ID, now).toSQL();
+
+  assert.match(sql, /update "organization_invitations"/);
+  assert.match(sql, /"status" = \$\d+/);
+  assert.match(sql, /"expires_at" < \$\d+/);
+  assert.ok(params.includes(INVITATION_ID));
+  assert.ok(params.includes("pending"));
+  assert.ok(params.includes("expired"));
 });
 
 // ----------------------------------------------------------------------------

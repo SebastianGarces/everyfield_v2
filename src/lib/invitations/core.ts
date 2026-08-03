@@ -22,7 +22,7 @@
 // `preferenceOwnerFromSession` in `@/lib/notifications/preferences`.
 // ============================================================================
 
-import { and, desc, eq, type SQL } from "drizzle-orm";
+import { and, desc, eq, exists, lt, type SQL } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
@@ -300,27 +300,56 @@ export async function createInvitationAs(
 // ============================================================================
 
 /**
- * Accept an invitation. Updates the target entity's FK to create the
- * association. The actor must have authority over the target entity.
+ * Accept an invitation: CLAIM the invitation, then bind the association — both
+ * statements in ONE `db.batch`, in that order.
+ *
+ * ORDER AND ATOMICITY — memory/invariants.md → Transactions / Atomicity. Both
+ * writes are known up front, so they belong in one Neon batched transaction.
+ * The claim (`respondToInvitationQuery`, a compare-and-set on
+ * `status = 'pending'`) is statement ONE, and the association's own WHERE
+ * additionally requires the invitation to read `accepted` — a value only that
+ * claim can have written, and one statement TWO can see because it runs inside
+ * the same transaction. So:
+ *
+ *   * the claim wins → the EXISTS holds → both writes commit together;
+ *   * the claim loses, because a revoke or a decline committed first → the row
+ *     is not `accepted`, the EXISTS fails, the association writes NOTHING, and
+ *     the empty `returning()` becomes the error below.
+ *
+ * The read in `loadRespondableInvitation` is NOT the guard — two concurrent
+ * accepts both pass it (invariants.md: a SELECT-then-write guard is not a
+ * concurrency guard). And `db.batch` alone would not have been the guard
+ * either: an empty `returning()` is not a driver error and does not roll a
+ * batch back, so with the association written FIRST a lost claim still left the
+ * plant bound to an oversight org — inside `getAccessibleChurchIds`, listed by
+ * `getOversightPlantHealth` — with no accepted invitation anywhere to explain
+ * it and no product path to undo it. Statement order is what closes that.
+ *
+ * Residual, accepted: a crash between the committed batch and the milestone
+ * notification loses the notification, not the acceptance — the notification is
+ * best-effort by construction. And a replay that lost the claim to a CONCURRENT
+ * accept re-writes the association to the value the winner already wrote (the
+ * EXISTS sees the winner's `accepted`), which is an idempotent no-op: same FK,
+ * same value, and the milestone is still gated on our own `returning()` row, so
+ * there is no second announcement.
  */
 export async function acceptInvitationAs(
   actor: InvitationActor,
   invitationId: string
 ): Promise<OrganizationInvitation> {
-  const invitation = await loadPendingInvitation(invitationId);
+  // Authority first, then status: see `loadRespondableInvitation`.
+  const invitation = await loadRespondableInvitation(actor, invitationId);
 
-  // Authorization: the actor must have authority over the target entity
-  verifyInvitationAuthority(invitation, actor);
+  // Built BEFORE anything is written, so an invitation whose FKs contradict its
+  // `type` throws instead of half-applying.
+  const association = associationStatement(invitation, invitationId);
 
-  // Create the association based on invitation type
-  await applyAssociation(invitation);
+  const [claimed] = await db.batch([
+    respondToInvitationQuery(actor, invitationId, "accepted"),
+    association,
+  ]);
 
-  // Mark invitation as accepted.
-  const [updated] = await respondToInvitationQuery(
-    actor,
-    invitationId,
-    "accepted"
-  );
+  const [updated] = claimed;
 
   if (!updated) {
     throw new InvitationError("This invitation is no longer pending");
@@ -328,8 +357,9 @@ export async function acceptInvitationAs(
 
   // F11 N-025 — milestone #1, announced at its source.
   //
-  // Last, and after the durable "accepted" marker, so a notification failure
-  // cannot leave an invitation half-accepted (memory/invariants.md →
+  // Last, and after the committed batch, so it fires only on a genuine FIRST
+  // acceptance (`updated` is the claim's own returned row) and a notification
+  // failure cannot leave an invitation half-accepted (memory/invariants.md →
   // Atomicity). `announceInvitationAccepted` never throws and never decides
   // whether the plant is sharing — `enqueue` does, per recipient, and writes
   // nothing when it is not.
@@ -357,7 +387,7 @@ export async function acceptInvitationAs(
  * notification `enqueue` writes without consent, so it has to be addressed
  * exactly, and there are two ways to get it wrong — both of them reachable:
  *
- *   * from the PLANT: `applyAssociation` below sets one of the plant's two
+ *   * from the PLANT: `associationStatement` below sets one of the plant's two
  *     oversight FKs without clearing the other, so a plant can belong to a
  *     sending church AND a network at once, and the uninvolved one would have
  *     been notified without consent;
@@ -411,10 +441,8 @@ export async function declineInvitationAs(
   actor: InvitationActor,
   invitationId: string
 ): Promise<OrganizationInvitation> {
-  const invitation = await loadPendingInvitation(invitationId);
-
-  // Authorization: the actor must have authority over the target entity
-  verifyInvitationAuthority(invitation, actor);
+  // Authority first, then status: see `loadRespondableInvitation`.
+  await loadRespondableInvitation(actor, invitationId);
 
   const [updated] = await respondToInvitationQuery(
     actor,
@@ -516,6 +544,15 @@ export async function revokeInvitationAs(
 // Wiring one up later means adding an action to `service.ts` that derives the
 // entity from the session (as `setOversightSharingAction` does: whose plant it
 // is must not be an argument), never re-exporting these.
+//
+// This is a KNOWN GAP awaiting a ruling, not a decision taken here:
+// `memory/entrypoints.md` listed Disassociate as a user action, and with no
+// wrapper a plant cannot leave an oversight org at all. It is also the repair
+// path for a wrongly-created association — which is why `acceptInvitationAs`
+// above must never be able to create one that was not accepted. Tracked
+// in #274, alongside the other open question this unit raised: whether
+// responding to an invitation is the planter's alone (see
+// `verifyInvitationAuthority`).
 // ============================================================================
 
 /**
@@ -647,7 +684,7 @@ export async function getInvitationsSentByUser(
 // Internal Helpers
 // ============================================================================
 
-/** `id = ? AND status = 'pending'` — the compare-and-set both responses use. */
+/** `id = ? AND status = 'pending'` — the compare-and-set every write uses. */
 function pendingInvitation(invitationId: string): SQL | undefined {
   return and(
     eq(organizationInvitations.id, invitationId),
@@ -656,25 +693,84 @@ function pendingInvitation(invitationId: string): SQL | undefined {
 }
 
 /**
- * Load an invitation that can still be responded to, auto-expiring it if its
- * window has closed. Throws an `InvitationError` otherwise.
+ * `EXISTS (SELECT 1 FROM organization_invitations WHERE id = ? AND status =
+ * 'accepted')` — the predicate that ties the association write to the claim it
+ * is batched with. Parameterized; nothing is interpolated.
  */
-async function loadPendingInvitation(
+function claimedInvitation(invitationId: string): SQL {
+  return exists(
+    db
+      .select({ id: organizationInvitations.id })
+      .from(organizationInvitations)
+      .where(
+        and(
+          eq(organizationInvitations.id, invitationId),
+          eq(organizationInvitations.status, "accepted")
+        )
+      )
+  );
+}
+
+/**
+ * The statement that auto-expires an invitation whose window has closed.
+ *
+ * Exported so a test can read the bound parameters: the WHERE is the same
+ * compare-and-set the responses use, so an expiry can never overwrite an answer
+ * a concurrent request already recorded — two requests straddling the expiry
+ * instant (a double-clicked Accept is enough) used to be able to stamp
+ * `expired` over a committed `accepted` and its association. `expires_at < now`
+ * is belt and braces: a row whose window was extended between the read and this
+ * write is not expired either.
+ */
+export function expireInvitationQuery(invitationId: string, now: Date) {
+  return db
+    .update(organizationInvitations)
+    .set({ status: "expired" })
+    .where(
+      and(
+        pendingInvitation(invitationId),
+        lt(organizationInvitations.expiresAt, now)
+      )
+    );
+}
+
+/**
+ * Load an invitation the actor may respond to, auto-expiring it if its window
+ * has closed. Throws an `InvitationError` otherwise.
+ *
+ * AUTHORITY FIRST, then status. The order is the security property, not a
+ * style choice: these messages reach the client verbatim, so checking status
+ * first turned any authenticated user with an invitation id into a reader of
+ * "no such row" vs "already accepted/declined/revoked" vs "expired" vs "not
+ * yours" — and invitation ids are not secrets held by the invitee alone, they
+ * double as unauthenticated beta-gate bearer tokens (`hasValidInvitationBypass`
+ * in `(auth)/register/beta-gate.ts`) and travel in registration links. Checking
+ * status first also let any such caller TRIGGER the auto-expire write below
+ * against an arbitrary invitation.
+ *
+ * A missing invitation answers `NOT_AUTHORIZED_MESSAGE` too — with no row there
+ * is nothing to have authority over, and "not found" and "not yours" must be
+ * indistinguishable for the same reason.
+ */
+async function loadRespondableInvitation(
+  actor: InvitationActor,
   invitationId: string
 ): Promise<OrganizationInvitation> {
   const invitation = await getInvitation(invitationId);
 
   if (!invitation) {
-    throw new InvitationError("Invitation not found");
+    throw new InvitationError(NOT_AUTHORIZED_MESSAGE);
   }
+
+  verifyInvitationAuthority(invitation, actor);
 
   if (invitation.status !== "pending") {
     throw new InvitationError(`Invitation is already ${invitation.status}`);
   }
 
-  if (invitation.expiresAt && invitation.expiresAt < new Date()) {
-    // Auto-expire
-    await updateInvitationStatus(invitationId, "expired");
+  const now = new Date();
+  if (invitation.expiresAt && invitation.expiresAt < now) {
+    await expireInvitationQuery(invitationId, now);
     throw new InvitationError("Invitation has expired");
   }
 
@@ -682,11 +778,31 @@ async function loadPendingInvitation(
 }
 
 /**
- * Apply the association by updating the target entity's FK.
+ * The statement that creates the association, by setting the target entity's
+ * FK — guarded on the invitation already reading `accepted`.
+ *
+ * Exported so a test can read the bound parameters: the WHERE carries the
+ * `EXISTS ... status = 'accepted'` that makes this write impossible unless the
+ * claim it is batched with won (see `acceptInvitationAs`). It builds a
+ * statement rather than executing one for the same reason — the caller batches
+ * it, so neither write can apply without the other.
+ *
+ * A row whose FK columns contradict its `type` throws here, before anything is
+ * written.
  */
-async function applyAssociation(
-  invitation: OrganizationInvitation
-): Promise<void> {
+export function associationStatement(
+  invitation: Pick<
+    OrganizationInvitation,
+    | "type"
+    | "targetChurchId"
+    | "targetSendingChurchId"
+    | "sendingChurchId"
+    | "sendingNetworkId"
+  >,
+  invitationId: string
+) {
+  const claimed = claimedInvitation(invitationId);
+
   switch (invitation.type) {
     case "church_to_sending_church": {
       if (!invitation.targetChurchId || !invitation.sendingChurchId) {
@@ -694,14 +810,13 @@ async function applyAssociation(
           "Invalid invitation: missing church or sending church"
         );
       }
-      await db
+      return db
         .update(churches)
         .set({
           sendingChurchId: invitation.sendingChurchId,
           updatedAt: new Date(),
         })
-        .where(eq(churches.id, invitation.targetChurchId));
-      break;
+        .where(and(eq(churches.id, invitation.targetChurchId), claimed));
     }
 
     case "church_to_network": {
@@ -710,14 +825,13 @@ async function applyAssociation(
           "Invalid invitation: missing church or network"
         );
       }
-      await db
+      return db
         .update(churches)
         .set({
           sendingNetworkId: invitation.sendingNetworkId,
           updatedAt: new Date(),
         })
-        .where(eq(churches.id, invitation.targetChurchId));
-      break;
+        .where(and(eq(churches.id, invitation.targetChurchId), claimed));
     }
 
     case "sending_church_to_network": {
@@ -726,14 +840,29 @@ async function applyAssociation(
           "Invalid invitation: missing sending church or network"
         );
       }
-      await db
+      return db
         .update(sendingChurches)
         .set({
           sendingNetworkId: invitation.sendingNetworkId,
           updatedAt: new Date(),
         })
-        .where(eq(sendingChurches.id, invitation.targetSendingChurchId));
-      break;
+        .where(
+          and(eq(sendingChurches.id, invitation.targetSendingChurchId), claimed)
+        );
+    }
+
+    default: {
+      // Fail CLOSED on a `type` this switch does not know. The old switch fell
+      // through and wrote nothing, which reads as safe but was not: silence
+      // here is why an unknown type could still be marked `accepted` and still
+      // announce a milestone. The `never` makes a fourth
+      // `OrganizationInvitationType` a compile error rather than a silent arm.
+      const unknownType: never = invitation.type;
+      console.error("invitation type has no association rule", {
+        invitationId,
+        type: unknownType,
+      });
+      throw new InvitationError(NOT_AUTHORIZED_MESSAGE);
     }
   }
 }
@@ -747,6 +876,16 @@ async function applyAssociation(
  * Pure, exported, and unit-tested: this is the check that stood between an
  * anonymous POST and a stranger's association, and it can only ever be handed
  * an actor minted from a session.
+ *
+ * It FAILS CLOSED on an unrecognised `type`. That matters because the column is
+ * a bare `varchar(40)` with a TypeScript-only `$type<>` cast
+ * (`src/db/schema/organization-invitation.ts`) and `insertInvitation` validates
+ * nothing, so "the type is one of three literals" is a compile-time belief, not
+ * a database fact: a switch with no `default:` returned normally — authority
+ * GRANTED — for `"CHURCH_TO_NETWORK"`, `"church_to_sending_church "` or
+ * anything else. Making the column a pg enum or adding a CHECK constraint would
+ * remove the premise, but that is DDL and a separate unit (this one has an empty
+ * schema delta on purpose); noted here rather than smuggled in.
  */
 export function verifyInvitationAuthority(
   invitation: Pick<
@@ -763,7 +902,8 @@ export function verifyInvitationAuthority(
       // so any team member could bind the plant to a sending church or network.
       // Joining an oversight org is a plant-level decision and the planter's to
       // make, the same rule `setOversightSharingAction` applies to what the
-      // plant then shares.
+      // plant then shares. Narrowing it is behaviour no AC asked for, so it is
+      // out for a ruling in #274 — as is the missing disassociation entrypoint.
       if (
         actor.role !== "planter" ||
         !actor.churchId ||
@@ -785,15 +925,15 @@ export function verifyInvitationAuthority(
       }
       break;
     }
+    default: {
+      // Unknown type → nobody has authority over it. The `never` assignment
+      // makes adding a fourth `OrganizationInvitationType` a compile error, so a
+      // new type cannot silently reach the granting path.
+      const unknownType: never = invitation.type;
+      console.error("invitation type has no authority rule", {
+        type: unknownType,
+      });
+      throw new InvitationError(NOT_AUTHORIZED_MESSAGE);
+    }
   }
-}
-
-async function updateInvitationStatus(
-  invitationId: string,
-  status: OrganizationInvitationStatus
-): Promise<void> {
-  await db
-    .update(organizationInvitations)
-    .set({ status })
-    .where(eq(organizationInvitations.id, invitationId));
 }
