@@ -12,6 +12,7 @@ import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import Link from "next/link";
 import { Fragment, type ReactNode } from "react";
+import { resolveBreadcrumbTrail } from "./breadcrumb-trail";
 import { useHeader } from "./header-context";
 
 /**
@@ -26,7 +27,9 @@ import { useHeader } from "./header-context";
 export function DashboardHeader({ children }: { children?: ReactNode }) {
   const { breadcrumbs, setActionsContainer } = useHeader();
 
-  const hasBreadcrumbs = breadcrumbs.length > 0;
+  // One rule, one place: the last declared crumb names the current page, and the
+  // "Dashboard" fallback applies only to a page that declared nothing (#261).
+  const trail = resolveBreadcrumbTrail(breadcrumbs);
 
   return (
     <header className="bg-card flex h-16 shrink-0 items-center gap-2 border-b px-4">
@@ -38,30 +41,20 @@ export function DashboardHeader({ children }: { children?: ReactNode }) {
 
       <Breadcrumb>
         <BreadcrumbList>
-          {hasBreadcrumbs ? (
-            breadcrumbs.map((item, index) => {
-              const isLast = index === breadcrumbs.length - 1;
-
-              return (
-                <Fragment key={index}>
-                  {index > 0 && <BreadcrumbSeparator />}
-                  <BreadcrumbItem>
-                    {isLast || !item.href ? (
-                      <BreadcrumbPage>{item.label}</BreadcrumbPage>
-                    ) : (
-                      <BreadcrumbLink asChild>
-                        <Link href={item.href}>{item.label}</Link>
-                      </BreadcrumbLink>
-                    )}
-                  </BreadcrumbItem>
-                </Fragment>
-              );
-            })
-          ) : (
-            <BreadcrumbItem>
-              <BreadcrumbPage>Dashboard</BreadcrumbPage>
-            </BreadcrumbItem>
-          )}
+          {trail.map((crumb, index) => (
+            <Fragment key={index}>
+              {index > 0 && <BreadcrumbSeparator />}
+              <BreadcrumbItem>
+                {crumb.href ? (
+                  <BreadcrumbLink asChild>
+                    <Link href={crumb.href}>{crumb.label}</Link>
+                  </BreadcrumbLink>
+                ) : (
+                  <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
+                )}
+              </BreadcrumbItem>
+            </Fragment>
+          ))}
         </BreadcrumbList>
       </Breadcrumb>
 
