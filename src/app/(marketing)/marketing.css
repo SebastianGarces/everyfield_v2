@@ -1114,6 +1114,237 @@ html:has(.marketing) {
   margin: 0 auto;
 }
 
+/* ---------- vignettes — the app's moments, drawn live ----------
+   Marketing-only DOM that carries the shots' frame language (16px radius, 8px
+   white at 70%, the same lift) but is real text, so it stays legible where a
+   scaled capture would not. Nothing below imports or depends on the app; the
+   verdict palette is sampled from the app's attention tokens and re-measured
+   against this card's white ground.
+
+   Choreography follows the same grammar as fs-overlay-in: the BASE styles are
+   the finished frame, and each keyframe supplies the starting state through a
+   `both` fill. So a vignette whose scroll gate never fires — no JS, an
+   observer that never fires, reduced motion — still reads as the completed
+   card rather than an empty one, and the reduced-motion block below only has
+   to switch the animations off. Per-item delays ride on --vg-i, the same
+   pattern as --ov-i. */
+
+.marketing .vg-label {
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: 0.07em;
+  line-height: 1.2;
+  text-transform: uppercase;
+  color: var(--mute);
+}
+
+/* the shared card: an app surface standing on a painting */
+.marketing .vg-scorecard,
+.marketing .vg-card {
+  background: #fff;
+  /* the frame paints only outside the content, so the 70% white stays
+     translucent over the art instead of reading as an opaque band */
+  background-clip: padding-box;
+  border: 8px solid rgba(255, 255, 255, 0.7);
+  border-radius: 16px;
+  box-shadow: 0 20px 40px -18px rgba(24, 29, 25, 0.5);
+  color: var(--ink);
+  font-family: var(--sans);
+}
+
+/* ---------- the engine's scorecard ---------- */
+.marketing .vg-scorecard {
+  width: min(560px, 100%);
+  padding: 18px 20px 16px;
+}
+.marketing .epane .vg-scorecard {
+  max-width: min(560px, 94%);
+}
+.marketing .vg-sc-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  padding-bottom: 13px;
+  border-bottom: 1px solid var(--hairline);
+}
+.marketing .vg-asof {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--mute);
+  white-space: nowrap;
+}
+.marketing .vg-sc-tiles {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* Per-verdict tint + ring + badge ink, sampled from the app's own attention
+   tokens. Measured on this card's #fff ground (WCAG 2; badge text is 12px, so
+   the 4.5:1 floor applies):
+     going well      #0b7a3f on #f0f7f3 → 4.99:1
+     needs attention #ae0006 on #fbeded → 6.58:1
+     worth a look    #7c4700 on #f9efdb → 6.67:1
+   The basis line (--mute) measures 5.10 / 4.87 / 4.86 on the same tints. */
+.marketing .vg-tile {
+  --vg-tint: #fff;
+  --vg-ring: var(--edge);
+  --vg-badge: var(--ink);
+  padding: 11px 13px 12px;
+  background: var(--vg-tint);
+  border: 1px solid var(--vg-ring);
+  border-radius: 0;
+}
+.marketing .vg-tile.v-good {
+  --vg-tint: #f0f7f3;
+  --vg-ring: rgba(11, 122, 63, 0.42);
+  --vg-badge: #0b7a3f;
+}
+.marketing .vg-tile.v-attention {
+  --vg-tint: #fbeded;
+  --vg-ring: rgba(208, 30, 28, 0.38);
+  --vg-badge: #ae0006;
+}
+.marketing .vg-tile.v-look {
+  --vg-tint: #f9efdb;
+  --vg-ring: rgba(212, 142, 0, 0.45);
+  --vg-badge: #7c4700;
+}
+.marketing .vg-tile-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.marketing .vg-tile-k {
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--text-2);
+}
+/* both states share one grid cell, so the badge's width reserves the slot and
+   the stamp-in never nudges the CSF label */
+.marketing .vg-badge-slot {
+  display: grid;
+  flex: none;
+  justify-items: end;
+}
+.marketing .vg-badge-slot > * {
+  grid-area: 1 / 1;
+}
+.marketing .vg-badge-idle {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--mute);
+  opacity: 0;
+}
+.marketing .vg-badge {
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--vg-badge);
+}
+.marketing .vg-reading {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  margin: 8px 0 0;
+  color: var(--ink);
+  text-wrap: pretty;
+}
+.marketing .vg-basis {
+  font-size: 12.5px;
+  line-height: 1.45;
+  margin: 4px 0 0;
+  color: var(--mute);
+  text-wrap: pretty;
+}
+.marketing .vg-sc-foot {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--mute);
+  margin: 12px 0 0;
+  padding-top: 11px;
+  border-top: 1px solid var(--hairline);
+}
+
+/* the resolve: the engine reads one factor at a time, ~350ms apart */
+.marketing .vg-scorecard.vg-seen .vg-tile {
+  animation: vg-tile-in 420ms var(--ease) both;
+  animation-delay: calc(var(--vg-i, 0) * 350ms);
+}
+.marketing .vg-scorecard.vg-seen .vg-badge-idle {
+  animation: vg-idle-out 200ms var(--ease) both;
+  animation-delay: calc(var(--vg-i, 0) * 350ms + 120ms);
+}
+.marketing .vg-scorecard.vg-seen .vg-badge {
+  animation: vg-stamp-in 300ms var(--ease) both;
+  animation-delay: calc(var(--vg-i, 0) * 350ms + 120ms);
+}
+.marketing .vg-scorecard.vg-seen .vg-reading {
+  animation: vg-line-in 340ms var(--ease) both;
+  animation-delay: calc(var(--vg-i, 0) * 350ms + 200ms);
+}
+.marketing .vg-scorecard.vg-seen .vg-basis {
+  animation: vg-line-in 340ms var(--ease) both;
+  animation-delay: calc(var(--vg-i, 0) * 350ms + 260ms);
+}
+/* border-style is a discrete property — it flips at the midpoint, which lands
+   under the tint wash and reads as the ring firming up */
+@keyframes vg-tile-in {
+  from {
+    background: #fff;
+    border-color: var(--hairline);
+    border-style: dashed;
+  }
+}
+@keyframes vg-stamp-in {
+  from {
+    opacity: 0;
+    transform: scale(1.06);
+  }
+}
+@keyframes vg-idle-out {
+  from {
+    opacity: 1;
+  }
+}
+@keyframes vg-line-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* mobile: the scorecard stays and goes full-width — it is the one vignette
+   that is MORE legible small than the capture it replaced */
+@media (max-width: 899px) {
+  .marketing .epane .vg-scorecard {
+    max-width: 100%;
+    width: 100%;
+  }
+}
+
+/* reduced motion: base styles are already the finished frame, so switching the
+   animations off is the whole fallback */
+@media (prefers-reduced-motion: reduce) {
+  .marketing .vg-scorecard.vg-seen .vg-tile,
+  .marketing .vg-scorecard.vg-seen .vg-badge,
+  .marketing .vg-scorecard.vg-seen .vg-badge-idle,
+  .marketing .vg-scorecard.vg-seen .vg-reading,
+  .marketing .vg-scorecard.vg-seen .vg-basis {
+    animation: none;
+  }
+}
+
 /* ---------- footer ---------- */
 .marketing .lp-footer {
   display: flex;
