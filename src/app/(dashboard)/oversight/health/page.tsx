@@ -9,13 +9,15 @@
 // `getOversightPlantHealth`; this page additionally hard-guards on the oversight
 // role before any read runs.
 //
-// This route owns the guard and the read only. Everything visual lives in
+// This route owns the guard, the read, and the one shell-level declaration a
+// page cannot delegate — its header breadcrumb. Everything visual lives in
 // `PlantHealthPortfolio`, so the surface can be rendered and reviewed without a
 // session or a database.
 // ============================================================================
 
 import { redirect } from "next/navigation";
 
+import { HeaderBreadcrumbs } from "@/components/header";
 import { PlantHealthPortfolio } from "@/components/phase-engine/plant-health-portfolio";
 import { getCurrentSession } from "@/lib/auth";
 import { getOversightPlantHealth } from "@/lib/phase-engine/oversight/read";
@@ -36,5 +38,17 @@ export default async function OversightHealthPage() {
   const scopeLabel =
     user.role === "network_admin" ? "network" : "sending church";
 
-  return <PlantHealthPortfolio plants={plants} scopeLabel={scopeLabel} />;
+  return (
+    <>
+      {/*
+        The header breadcrumb is opt-in per page, and without this the shell fell
+        back to naming a different page ("Dashboard", #261). One crumb, not a
+        trail under /oversight: the sidebar lists Plant Health as a SIBLING of
+        the oversight index, not a child of it, and the label matches both the
+        nav item and this page's own <h1>.
+      */}
+      <HeaderBreadcrumbs items={[{ label: "Plant Health" }]} />
+      <PlantHealthPortfolio plants={plants} scopeLabel={scopeLabel} />
+    </>
+  );
 }

@@ -1,3 +1,4 @@
+import { HeaderBreadcrumbs } from "@/components/header";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -49,6 +50,15 @@ export default async function OversightDashboardPage() {
 
   return (
     <div className="space-y-6 p-6">
+      {/*
+        Same fix as /oversight/health (#261): without a declared trail the shell
+        falls back to naming a different page ("Dashboard"). One crumb, because
+        this IS the oversight index — nothing above it in the sidebar — and it
+        carries the same role-derived `title` as the <h1> below, so the header
+        and the page can never name different things. Renders nothing, so it
+        does not participate in `space-y-6`.
+      */}
+      <HeaderBreadcrumbs items={[{ label: title }]} />
       <div>
         <h1 className="text-3xl font-bold">{title}</h1>
         <p className="text-muted-foreground mt-1">{description}</p>
