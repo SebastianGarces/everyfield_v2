@@ -549,25 +549,29 @@ export async function revokeInvitationAs(
 // ============================================================================
 //
 // These three sever an association that an invitation created. They are
-// primitives with no authority check of their own and NO action wrapper: the
-// question "who may sever an association — the plant, the org, or either?" has
-// not been ruled, and until it is, the safe answer is that no browser request
-// can reach them at all. They used to be `"use server"` exports taking a bare
-// id, which meant an anonymous POST could detach any church from its oversight
-// by guessing a uuid.
+// primitives with no authority check of their own and NO action wrapper here.
+// They used to be `"use server"` exports taking a bare id, which meant an
+// anonymous POST could detach any church from its oversight by guessing a uuid.
 //
-// Wiring one up later means adding an action to `service.ts` that derives the
-// entity from the session (as `setOversightSharingAction` does: whose plant it
-// is must not be an argument), never re-exporting these.
+// NOT DEAD CODE — deliberately kept, deliberately unexposed. RULED 2026-08-03
+// (#274; canon in `product-docs/features/oversight/frd.md` OV-007/OV-010):
+// BOTH SIDES may sever. The plant's planter does it from the settings
+// association area (#277) and the org's admin from the plant detail page
+// (#278), each behind a type-to-confirm dialog, each notifying the other side,
+// each writing an `association_events` audit row. Those units import these
+// primitives, so do not delete them and do not narrow their exports.
 //
-// This is a KNOWN GAP awaiting a ruling, not a decision taken here:
-// `memory/entrypoints.md` listed Disassociate as a user action, and with no
-// wrapper a plant cannot leave an oversight org at all. It is also the repair
-// path for a wrongly-created association — which is why `acceptInvitationAs`
-// above must never be able to create one that was not accepted. Tracked
-// in #274, alongside the other open question this unit raised: whether
-// responding to an invitation is the planter's alone (see
-// `verifyInvitationAuthority`).
+// What they must NOT get is a wrapper in `service.ts`. #265's whole finding is
+// that an action layer is an endpoint list; the authenticated wrappers belong
+// with the surfaces that own the authority rule and the audit write, and they
+// derive the entity from the session (as `setOversightSharingAction` does:
+// whose plant it is must not be an argument) rather than re-exporting these.
+// `service.test.ts` → "no 'use server' module republishes the invitation logic
+// layer" enforces that shape transitively, barrels included.
+//
+// Until #277/#278 land, an accepted association has no in-product repair path,
+// which is why `acceptInvitationAs` above must never be able to create one that
+// was not accepted (`memory/invariants.md` → Multi-Tenancy).
 // ============================================================================
 
 /**
@@ -915,10 +919,14 @@ export function verifyInvitationAuthority(
       // The target is a church — the actor must be the planter for that church.
       // The role check is new (#265): "belongs to the church" used to be enough,
       // so any team member could bind the plant to a sending church or network.
-      // Joining an oversight org is a plant-level decision and the planter's to
-      // make, the same rule `setOversightSharingAction` applies to what the
-      // plant then shares. Narrowing it is behaviour no AC asked for, so it is
-      // out for a ruling in #274 — as is the missing disassociation entrypoint.
+      //
+      // RATIFIED 2026-08-03 (#274 (a); canon in
+      // `product-docs/features/oversight/frd.md` OV-010): planter only. Joining
+      // an oversight org is a plant-level decision and the planter's to make,
+      // the same rule `setOversightSharingAction` applies to what the plant then
+      // shares, and OV-010 pins the same rule for severing. A `team_member` or
+      // `coach` of the target church may do neither — server-side, not merely
+      // hidden in a UI.
       if (
         actor.role !== "planter" ||
         !actor.churchId ||

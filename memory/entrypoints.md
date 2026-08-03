@@ -102,13 +102,13 @@
 | Accept invitation | `src/lib/invitations/service.ts:acceptInvitation(id)` | Target plant's planter / target sending church's admin |
 | Decline invitation | `src/lib/invitations/service.ts:declineInvitation(id)` | Same authority as accept |
 | Revoke invitation | `src/lib/invitations/service.ts:revokeInvitation(id)` | Original inviter (enforced in the UPDATE) |
-| Disassociate | `src/lib/invitations/core.ts:disassociate*()` | **No entrypoint** — primitive only, no action wrapper until who-may-sever is ruled (#274). An accepted association is therefore irrevocable in-product; see `memory/invariants.md` → Multi-Tenancy for why that is a privacy consequence |
+| Disassociate | `src/lib/invitations/core.ts:disassociate*()` | **No entrypoint yet** — primitives only, kept importable on purpose. RULED #274/OV-007: BOTH sides may sever, and the authenticated wrappers ship with their surfaces — planter (settings association area) in **#277**, org admin (plant detail page) in **#278**, each type-to-confirm, each notifying the other side, each writing an `association_events` row. Never a wrapper in `service.ts`. Until they land an accepted association is irrevocable in-product; see `memory/invariants.md` → Multi-Tenancy for the privacy consequence |
 
 **Primary modules:** `src/lib/invitations/service.ts` (the 4 actions, `"use server"`), `src/lib/invitations/core.ts` (logic + reads + primitives, NOT `"use server"`), `src/db/schema/organization-invitation.ts`
 
 **Key deps:** `organization_invitations`, `churches`, `sending_churches` tables
 
-**#265:** the four actions take NO actor — each mints one with `invitationActorFromSession(await verifySession())`. Everything else moved to `core.ts` precisely because it must not be an endpoint. See `memory/contracts/api.md` → Invitation Actions + Logic Layer.
+**#265:** the four actions take NO actor — each mints one with `invitationActorFromSession(await verifySession())`. Everything else moved to `core.ts` precisely because it must not be an endpoint. The guardrail is `service.test.ts`, which reads the export surface off the IMPORTED module (so `export default` and re-exports are caught, not just the forms a regex knew) and walks re-export edges TRANSITIVELY, so no barrel can republish `core.ts` from a `"use server"` module. See `memory/contracts/api.md` → Invitation Actions + Logic Layer.
 
 ---
 

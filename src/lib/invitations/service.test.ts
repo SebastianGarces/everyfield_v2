@@ -33,32 +33,79 @@ import {
 // Three halves, and this file covers all three.
 //
 // 1. STRUCTURAL — in a `"use server"` module every export is a POSTable
-//    endpoint, so what is EXPORTED there is the security property. `service.ts`
-//    cannot be imported into a bare node:test process (it would drag
-//    `next/headers` in through `verifySession`), so its shape is asserted from
-//    its source — the same technique `src/app/(dashboard)/settings/actions.test.ts`
-//    uses. This is the "grep" the AC asks for, executable.
+//    endpoint, so the export surface IS the auth surface. The AUTHORITATIVE
+//    assertion (§1a) is not a grep: this file IMPORTS `service.ts` and reads
+//    `Object.keys()` off the real module namespace, so it sees what the module
+//    system actually publishes — `export default` (as the key `default`),
+//    `export const f = async …`, `export { x } from "./core"`, a second
+//    declarator on one `export const` line — rather than what a pattern
+//    remembered to look for. The source-shaped assertions in §1c are belt and
+//    braces on top of it, and they now CLASSIFY every `export` statement in the
+//    file and fail on a form they do not recognise instead of skipping it.
 //
-//    A source-shaped assertion is only as good as its pattern, and the first
-//    version of this one was not good enough: every export check matched
-//    `export async function`, so appending `export const detachPlantFromNetwork
-//    = async (…) => …` and `export { disassociateChurchFromSendingChurch } from
-//    "./core"` to `service.ts` — two real unauthenticated endpoints, verbatim
-//    the vulnerability #265 closed — left the suite green. §1 is now
-//    export-FORM-agnostic, forbids re-exports outright, and resolves module
-//    specifiers instead of grepping for a path substring. Each of those two
-//    lines now fails two tests independently; that was checked by writing them
-//    and watching it go red, because a guardrail nobody has seen fail has not
-//    been tested.
+//    (An earlier version of this file claimed `service.ts` "cannot be imported
+//    into a bare node:test process (it would drag `next/headers` in through
+//    `verifySession`)" and asserted its shape from source only. That claim was
+//    false: nothing runs `cookies()` at module scope, so the import is fine and
+//    only a CALL outside a request throws — which §1b then puts to work. The
+//    holes below are what a source-only guardrail cost.)
 //
-// 2. FORGERY — a forged POST cannot supply an actor because no action takes
-//    one, and the create path derives the INVITING ORG from the session too, so
-//    ids smuggled onto the payload are absent from the row that gets written.
+// 2. FORGERY — §1b calls every real exported action with no session at all and
+//    with a forged foreign user pushed onto the argument list. All four reject
+//    from their first statement: there is no parameter for the forged user to
+//    land in and `verifySession()` runs before anything is read or written. The
+//    create path additionally derives the INVITING ORG from the session, so ids
+//    smuggled onto the payload are absent from the row that gets written (§4).
 //    The compile-time half is the `@ts-expect-error`s below: a bare user object
 //    is not an `InvitationActor`, and `pnpm typecheck` enforces that.
 //
 // 3. AUTHORITY — the check that stood between an anonymous request and a
 //    stranger's association, now unit-tested per invitation type.
+//
+// GUARDRAIL MUTATIONS — the shapes this file has been WATCHED to reject. A
+// guardrail nobody has seen fail has not been tested, so each of these was
+// appended to the tree, run, and watched go red. 3 and 4 are the two holes HR4
+// found in the first version of this file (#265, evidence comment 2026-08-03),
+// where each of them left the suite green:
+//
+//   1. `export const detachPlantFromNetwork = async (churchId: string) => {
+//        await disassociateChurchFromNetwork(churchId);
+//      };`
+//      → fails "the runtime export surface is exactly the four lifecycle
+//        mutations", "nothing but the four lifecycle mutations is an endpoint",
+//        "every exported invitation action mints its actor from the session".
+//
+//   2. `export { disassociateChurchFromSendingChurch } from "./core";`
+//      → fails "the runtime export surface …", "the action layer publishes
+//        nothing it did not declare", "no 'use server' module republishes the
+//        invitation logic layer".
+//
+//   3. `export default async function detachPlantFromNetwork(churchId: string) {
+//        await disassociateChurchFromNetwork(churchId);
+//      }`
+//      → HOLE 1. The old allowlist matched `export (async) function|const|let|
+//        var|class` and therefore never `export default`, so this — a real,
+//        POSTable, unauthenticated "detach any church from its network by
+//        guessing a uuid" endpoint — passed every test. Now fails "the runtime
+//        export surface …" (the namespace grows the key `default`) and "the
+//        action layer publishes nothing it did not declare", which bans a
+//        default export of a `"use server"` module OUTRIGHT: the client names
+//        the reference, so there is no allowlist entry it could ever match.
+//
+//   4. Two files, with no direct edge between them:
+//        `src/lib/invitations/index.ts`
+//          → `export * from "./core";`
+//        `src/app/(dashboard)/oversight/detach-actions.ts`
+//          → `"use server";`
+//            `export { disassociateChurchFromNetwork } from "@/lib/invitations";`
+//      → HOLE 2. That republishes the entire logic layer — all three
+//        disassociation writes, four unguarded reads, `insertInvitation` — as
+//        unauthenticated endpoints. The old walk resolved ONE hop, saw
+//        `@/lib/invitations` was `index.ts` and not `core.ts`, and passed. The
+//        walk is now a CLOSURE over re-export edges (the same shape as the
+//        client-bundle walk in §1d), so `detach-actions.ts → index.ts →
+//        core.ts` fails "no 'use server' module republishes the invitation
+//        logic layer" with the chain in the message.
 //
 // The compare-and-set is covered from both sides: §5 reads it off the generated
 // SQL (the claim's `status = 'pending'`, the association's
@@ -89,22 +136,76 @@ const SERVICE_CODE = codeOf(SERVICE_PATH);
 const CORE_CODE = codeOf(CORE_PATH);
 
 /**
- * Every VALUE exported from the action layer, in whatever form it was written.
+ * Every top-level `export` statement of the action layer, CLASSIFIED — not
+ * pattern-matched for the forms somebody happened to think of.
  *
- * Form-agnostic on purpose. An earlier version of this test matched
- * `export async function` only, which is one of at least four ways to publish an
- * endpoint — `export const x = async () => …` is the canonical Next.js server
- * action and is used throughout this repo — so the guardrail passed with two
- * real unauthenticated mutations appended to `service.ts`. `type` is excluded
- * because a type export is erased and is not an endpoint; re-exports are not
- * listed here at all, and are forbidden outright below, because a re-export
- * publishes an endpoint whose body no assertion in this file can see.
+ * The distinction is the whole of HOLE 1. The old version of this collected
+ * names with one regex (`export (async) function|const|let|var|class NAME`) and
+ * had no branch for a statement that did not match, so `export default async
+ * function …` contributed no name, tripped no assertion, and shipped an
+ * unauthenticated endpoint through a green suite. Here every statement lands in
+ * exactly one bucket and the leftovers bucket is asserted empty, so a form
+ * nobody anticipated fails LOUDLY instead of being ignored:
+ *
+ *   * `erased`       — `export type` / `export interface`: no runtime value, so
+ *                      not an endpoint.
+ *   * `republished`  — `export default`, `export {…}`, `export *`: forbidden
+ *                      outright in a `"use server"` module (see §1c).
+ *   * `EXPORTED`     — a named declaration; the endpoint allowlist and the
+ *                      one-`verifySession()`-per-action count are built on it.
+ *   * `UNCLASSIFIED` — anything else. Asserted empty.
+ *
+ * A source scan can still be out-thought (`export const a = f, b = g` declares
+ * two bindings on one line), which is exactly why the surface assertion that
+ * DECIDES is §1a's real import: the module namespace cannot be out-thought.
  */
-const EXPORTED = [
-  ...SERVICE_CODE.matchAll(
-    /^export\s+(?:async\s+)?(?:function|const|let|var|class)\s+(\w+)/gm
-  ),
-].map((match) => match[1]);
+const EXPORT_STATEMENTS = [...SERVICE_CODE.matchAll(/^export\b.*/gm)].map(
+  (match) => match[0].trim()
+);
+
+const ERASED_EXPORT = /^export\s+(?:type|interface)\b/;
+const DEFAULT_EXPORT = /^export\s+default\b/;
+const REPUBLISHING_EXPORT = /^export\s*[*{]/;
+const NAMED_DECLARATION =
+  /^export\s+(?:async\s+)?(?:function\s*\*?|class|abstract\s+class)\s+(\w+)\s*[(<]|^export\s+(?:const|let|var)\s+(\w+)\s*[:=]/;
+
+const EXPORTED: string[] = [];
+const REPUBLISHED: string[] = [];
+const UNCLASSIFIED: string[] = [];
+
+for (const statement of EXPORT_STATEMENTS) {
+  if (ERASED_EXPORT.test(statement)) continue;
+
+  if (DEFAULT_EXPORT.test(statement) || REPUBLISHING_EXPORT.test(statement)) {
+    REPUBLISHED.push(statement);
+    continue;
+  }
+
+  const declared = NAMED_DECLARATION.exec(statement);
+  if (declared) {
+    EXPORTED.push(declared[1] ?? declared[2]);
+    continue;
+  }
+
+  UNCLASSIFIED.push(statement);
+}
+
+/** The four endpoints this module is allowed to have. */
+const LIFECYCLE_ACTIONS = [
+  "acceptInvitation",
+  "createInvitation",
+  "declineInvitation",
+  "revokeInvitation",
+];
+
+/**
+ * The action layer itself, imported. Node caches the module, so every test
+ * below shares one load, and the load is safe: `service.ts` reads no cookie at
+ * module scope.
+ */
+async function actionModule(): Promise<Record<string, unknown>> {
+  return (await import("./service")) as unknown as Record<string, unknown>;
+}
 
 // ----------------------------------------------------------------------------
 // Module graph helpers. The two walks below are about which files can REACH
@@ -173,9 +274,145 @@ function resolvesToCore(from: string, specifier: string): boolean {
 const isUseServerModule = (full: string) =>
   /^["']use server["'];/m.test(readFileSync(full, "utf8"));
 
+/**
+ * The specifiers a module PUBLISHES through — its re-export edges, which are not
+ * the same set as its imports. Importing `./core` is allowed (`service.ts` does
+ * it, and #277/#278 will); RE-exporting from it turns somebody else's function
+ * into an endpoint.
+ *
+ * `export {…} from "x"` and `export * from "x"` are the obvious edges. The one
+ * that needs saying: the same thing written in two statements —
+ * `import { x } from "./core"; export { x };` — names no source on the export
+ * line at all. So a bare `export {…}` / `export *` with no `from` makes EVERY
+ * value import of that module an edge. Deliberately over-approximate: a missed
+ * edge here is a published endpoint, while a spurious one is a failing test that
+ * prints the chain it objected to.
+ */
+function republishEdges(code: string): string[] {
+  const sourced = [...code.matchAll(REEXPORT_FROM)].map(
+    ([, specifier]) => specifier
+  );
+
+  // Anything still shaped like a republish once the sourced ones are removed is
+  // the two-statement form.
+  if (/^export\s*[*{]/m.test(code.replace(REEXPORT_FROM, ""))) {
+    return [...sourced, ...valueSpecifiers(code)];
+  }
+
+  return sourced;
+}
+
+/**
+ * The re-export chain from `entry` to `core.ts`, or `null` when there is none.
+ *
+ * TRANSITIVE, and that is HOLE 2. One hop was not enough: a barrel in between
+ * (`src/lib/invitations/index.ts` → `export * from "./core"`) let a `"use
+ * server"` module re-export from `@/lib/invitations`, which resolves to the
+ * barrel, not to `core.ts` — republishing the entire logic layer past a green
+ * suite. This is a closure over the edges above, the same shape as the
+ * client-bundle walk in §1d, and it returns the chain so a failure says which
+ * files did it.
+ */
+function republishChainToCore(entry: string): string[] | null {
+  const seen = new Set<string>([entry]);
+  const queue: Array<{ file: string; chain: string[] }> = [
+    { file: entry, chain: [path.relative(process.cwd(), entry)] },
+  ];
+
+  while (queue.length > 0) {
+    const { file, chain } = queue.shift()!;
+
+    for (const specifier of republishEdges(codeOf(file))) {
+      const resolved = resolveModule(file, specifier);
+      if (resolved === null) continue;
+
+      const next = [...chain, path.relative(process.cwd(), resolved)];
+      if (resolved === CORE_PATH) return next;
+      if (seen.has(resolved)) continue;
+
+      seen.add(resolved);
+      queue.push({ file: resolved, chain: next });
+    }
+  }
+
+  return null;
+}
+
 // ----------------------------------------------------------------------------
-// 1. Structural — the endpoint surface
+// 1a. Structural — the endpoint surface, read off the real module
 // ----------------------------------------------------------------------------
+
+test("the runtime export surface is exactly the four lifecycle mutations", async () => {
+  // THE assertion of this file. Next.js publishes one POST endpoint per export
+  // of a `"use server"` module, so the module namespace IS the auth surface —
+  // and unlike a regex it cannot be out-thought. `export default` shows up here
+  // as the key `default`; `export { x } from "./core"` shows up as `x`; a second
+  // declarator smuggled onto an `export const` line shows up as itself.
+  //
+  // The four are the invitation-lifecycle mutations a user performs on their own
+  // behalf. The eleven exports this module used to have were the finding: reads
+  // exported from a `"use server"` module are an unauthenticated data leak, and
+  // `disassociateChurchFromSendingChurch(churchId)` was a state change any
+  // anonymous POST could aim at any church.
+  const mod = await actionModule();
+
+  assert.deepEqual(Object.keys(mod).sort(), LIFECYCLE_ACTIONS);
+});
+
+// ----------------------------------------------------------------------------
+// 1b. Forgery — the actions themselves, called with no session
+// ----------------------------------------------------------------------------
+
+test("every action refuses a call with no session, whatever else it is sent", async () => {
+  // The forged POST, executed. Each action is invoked with an invitation id AND
+  // a foreign user object shoved onto the argument list — the `respondingUser`
+  // that used to be parameter two and was trusted. Every one rejects from its
+  // FIRST statement, `invitationActorFromSession(await verifySession())`, so the
+  // extra argument is never read by anything: there is no parameter for it, and
+  // no code path that looks past the ones declared.
+  //
+  // The message differs by context and both spellings are the same refusal: in a
+  // real request with no session cookie `verifySession()` throws `Unauthorized`;
+  // in this bare process `cookies()` itself refuses, because there is no request
+  // to read one from. Either way it is a throw and not a `{ success: false }`,
+  // so nothing downstream can mistake it for a handled outcome.
+  const mod = await actionModule();
+  const forged = {
+    id: "55555555-5555-4555-8555-555555555555",
+    role: "planter" as const,
+    churchId: "11111111-1111-4111-8111-111111111111",
+  };
+
+  for (const name of LIFECYCLE_ACTIONS) {
+    const action = mod[name];
+    assert.equal(typeof action, "function", name);
+
+    await assert.rejects(
+      async () =>
+        (action as (...args: unknown[]) => Promise<unknown>)(
+          "77777777-7777-4777-8777-777777777777",
+          forged
+        ),
+      (error: unknown) =>
+        error instanceof Error &&
+        /Unauthorized|outside a request scope/.test(error.message),
+      name
+    );
+  }
+});
+
+// ----------------------------------------------------------------------------
+// 1c. Structural — the same surface, asserted from source
+// ----------------------------------------------------------------------------
+
+test("no export statement in the action layer goes unclassified", () => {
+  // The meta-guardrail. Every assertion below is built on `EXPORTED`, so a
+  // statement the classifier cannot place would weaken all of them silently —
+  // which is precisely how `export default` got through. There is no
+  // "no match, no problem" branch any more: an unrecognised form fails here.
+  assert.deepEqual(UNCLASSIFIED, [], EXPORT_STATEMENTS.join(" ⏎ "));
+  assert.ok(EXPORT_STATEMENTS.length > 0, "no exports found — check the path");
+});
 
 test("every exported invitation action mints its actor from the session", () => {
   // Not "most of them". An action added later that resolved its user any other
@@ -191,14 +428,23 @@ test("every exported invitation action mints its actor from the session", () => 
   assert.equal(minted.length, EXPORTED.length, EXPORTED.join(", "));
 });
 
-test("the action layer re-exports nothing", () => {
-  // A re-export is the one endpoint shape the assertions above are blind to by
-  // construction: `export { disassociateChurchFromNetwork } from "./core"` adds
-  // a POSTable, unauthenticated, state-changing endpoint whose body lives in a
-  // file this test deliberately treats as non-public. So no `export {` and no
-  // `export *` here, from anywhere, ever — if the action layer needs something
-  // from `./core` it imports it and wraps it in an action that mints an actor.
-  assert.doesNotMatch(SERVICE_CODE, /^export\s*[*{]/m);
+test("the action layer publishes nothing it did not declare", () => {
+  // Two endpoint shapes whose BODY no assertion in this file can see, so neither
+  // is allowed at all rather than allowed-and-checked.
+  //
+  // A re-export: `export { disassociateChurchFromNetwork } from "./core"` adds a
+  // POSTable, unauthenticated, state-changing endpoint out of a file this test
+  // deliberately treats as non-public. If the action layer needs something from
+  // `./core` it imports it and wraps it in an action that mints an actor.
+  //
+  // A DEFAULT export (HOLE 1): banned outright, because the reference is what
+  // the client holds and the NAME is ours — so there is no allowlist entry it
+  // could match and nothing about `export default async function
+  // detachPlantFromNetwork(churchId)` distinguishes it from an action, except
+  // that it takes its target as an argument and checks nobody.
+  assert.doesNotMatch(SERVICE_CODE, /^export\s+default\b/m, "export default");
+  assert.doesNotMatch(SERVICE_CODE, /^export\s*[*{]/m, "export {…} / export *");
+  assert.deepEqual(REPUBLISHED, []);
 });
 
 test("no invitation action accepts an actor, anywhere", () => {
@@ -235,12 +481,11 @@ test("nothing but the four lifecycle mutations is an endpoint", () => {
   // exported from a `"use server"` module is an unauthenticated data leak, and
   // `disassociateChurchFromSendingChurch(churchId)` was a state change any
   // anonymous POST could aim at any church.
-  assert.deepEqual([...EXPORTED].sort(), [
-    "acceptInvitation",
-    "createInvitation",
-    "declineInvitation",
-    "revokeInvitation",
-  ]);
+  //
+  // The source-side twin of §1a. Both are kept: the namespace says WHAT is
+  // published, this says the source agrees, and a disagreement between them is
+  // itself the bug report.
+  assert.deepEqual([...EXPORTED].sort(), LIFECYCLE_ACTIONS);
 });
 
 test("the logic layer is not a 'use server' module", () => {
@@ -253,15 +498,25 @@ test("the logic layer is not a 'use server' module", () => {
   assert.match(SERVICE_CODE, /^"use server";/);
 });
 
-test("no 'use server' module publishes the invitation logic layer", () => {
-  // Two loopholes, and this covers both. (a) Any OTHER action file that so much
-  // as touches `@/lib/invitations/core` — importing a primitive there is one
-  // keystroke from exporting it. (b) `service.ts` itself, which is allowed to
-  // import `./core` and is the whole reason it exists, but must never re-export
-  // from it: `export { disassociateChurchFromNetwork } from "./core"` would
-  // restore the endpoint this ticket removed, in the file whose shape everybody
-  // believes is pinned. The earlier version of this test skipped `service.ts`
-  // outright, so exactly that line passed.
+test("no 'use server' module republishes the invitation logic layer", () => {
+  // Two loopholes, and this covers both.
+  //
+  // (b) REPUBLICATION, transitively — HOLE 2. Any action module, `service.ts`
+  // included, whose re-export edges REACH `./core`, however many barrels are in
+  // between. `service.ts` is allowed to import `./core` — that is the whole
+  // reason it exists — but `export { disassociateChurchFromNetwork } from
+  // "./core"` would restore the endpoint this ticket removed, in the file whose
+  // shape everybody believes is pinned. The first version of this test skipped
+  // `service.ts` outright, so exactly that line passed; the second resolved ONE
+  // hop, so a barrel (`index.ts` → `export * from "./core"`) plus a one-line
+  // action module republished the whole logic layer and stayed green. Closure,
+  // not one hop, and the chain is in the failure message.
+  //
+  // (a) Any OTHER action file that so much as TOUCHES `@/lib/invitations/core` —
+  // importing a primitive there is one keystroke from exporting it, so the ban is
+  // on the import. When #277/#278 add the authenticated disassociation wrappers,
+  // they belong behind this rule, not around it: an action module derives the
+  // entity from the session and calls into a logic layer it does not re-export.
   const offenders: string[] = [];
 
   for (const full of TS_FILES) {
@@ -269,11 +524,10 @@ test("no 'use server' module publishes the invitation logic layer", () => {
     const rel = path.relative(process.cwd(), full);
     const code = codeOf(full);
 
-    // (b) Re-exports — checked in every action module, `service.ts` included.
-    for (const [, specifier] of code.matchAll(REEXPORT_FROM)) {
-      if (resolvesToCore(full, specifier)) {
-        offenders.push(`${rel} re-exports from ${specifier}`);
-      }
+    // (b) Republication — checked in every action module, `service.ts` included.
+    const chain = republishChainToCore(full);
+    if (chain) {
+      offenders.push(`republishes: ${chain.join(" → ")}`);
     }
 
     if (full === SERVICE_PATH) continue;
@@ -291,6 +545,10 @@ test("no 'use server' module publishes the invitation logic layer", () => {
 
   assert.deepEqual(offenders, []);
 });
+
+// ----------------------------------------------------------------------------
+// 1d. The client-bundle rail the missing directive gave up
+// ----------------------------------------------------------------------------
 
 test("no client component can pull the logic layer into the browser", () => {
   // The rail that `"use server"` used to provide for free. `./core` imports
