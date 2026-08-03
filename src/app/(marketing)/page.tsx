@@ -5,6 +5,7 @@ import { FeatureSwitcher } from "./_components/feature-switcher";
 import { InviteForm } from "./_components/invite-form";
 import { PhaseTabs } from "./_components/phase-tabs";
 import { Shot, ShotOverlay } from "./_components/shot";
+import { EngineScorecard } from "./_components/vignettes/engine-scorecard";
 
 export const metadata: Metadata = {
   title: "EveryField — Your church plant, understood.",
@@ -116,14 +117,10 @@ export default function LandingPage() {
                 className="epane"
                 style={{ backgroundImage: 'url("/marketing/c1-field.webp")' }}
               >
-                <Shot
-                  desktop={{
-                    src: "/marketing/shots/r5-csf.webp",
-                    width: 1864,
-                    height: 1860,
-                  }}
-                  alt="The Plant Intelligence page reading all eight critical success factors — vision casting going well, shared ownership needs attention, two worth a look."
-                />
+                {/* drawn live rather than screenshotted: the tiles resolve
+                    from neutral into their verdicts, which is the one thing a
+                    still of this page could never show */}
+                <EngineScorecard />
               </div>
               <div
                 className="epane epane-bleed"
