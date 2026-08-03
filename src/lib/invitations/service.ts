@@ -27,9 +27,15 @@
 // authenticated wrapper ships with the surface that owns it (#277 planter,
 // #278 org admin) — see `./core` → Disassociation.
 //
+// What comes BACK is narrowed too: `InvitationView`, not the row. The raw row
+// carries `inviter_user_id` and `responded_by`, so returning it told the invitee
+// the inviting admin's user id (and the inviter the responder's). No surface
+// needs either — see `./core` → What a client is told.
+//
 // Errors: an `InvitationError` is a message the user is meant to read (not
-// yours, not pending, expired); anything else is logged server-side and
-// reported generically, so an internal failure never reaches the client.
+// yours, not pending, already associated with another org, expired); anything
+// else is logged server-side and reported generically, so an internal failure
+// never reaches the client.
 // `service.test.ts` pins the shape of this file — its export surface is read off
 // the imported module, so `export default` and re-exports are caught too.
 // ============================================================================
@@ -43,22 +49,30 @@ import {
   createInvitationAs,
   declineInvitationAs,
   invitationActorFromSession,
+  invitationView,
   revokeInvitationAs,
   type InvitationRequest,
+  type InvitationView,
 } from "./core";
 
 export type InvitationActionResult =
-  | { success: true; invitation: OrganizationInvitation }
+  | { success: true; invitation: InvitationView }
   | { success: false; error: string };
 
 const GENERIC_ERROR = "Something went wrong — try that again";
 
+/**
+ * One place where a mutation becomes a result: the row is narrowed to
+ * `InvitationView` (`./core`), which drops the two internal user ids the raw row
+ * carries, and an unexpected failure becomes a generic message with the detail
+ * left in the server log.
+ */
 async function run(
   label: string,
   mutate: () => Promise<OrganizationInvitation>
 ): Promise<InvitationActionResult> {
   try {
-    return { success: true, invitation: await mutate() };
+    return { success: true, invitation: invitationView(await mutate()) };
   } catch (error) {
     if (error instanceof InvitationError) {
       return { success: false, error: error.message };
@@ -82,6 +96,12 @@ export async function createInvitation(
 
 /**
  * Accept an invitation addressed to the actor's own church or sending church.
+ *
+ * An accept BINDS a free association or re-binds its own; it never replaces one
+ * that already points at a different org — that is a sever, and a sever is
+ * audited and notified (#274/OV-007, shipping in #277/#278). Refused with
+ * `ALREADY_ASSOCIATED_MESSAGE` and nothing written; see `./core` →
+ * `acceptInvitationAs`.
  */
 export async function acceptInvitation(
   invitationId: string

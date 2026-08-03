@@ -40,6 +40,7 @@ import {
 import { canAccessChurch } from "@/lib/auth/access";
 import { setChurchLaunchDate } from "@/lib/churches/launch-date";
 import {
+  ALREADY_ASSOCIATED_MESSAGE,
   INVITATION_EXPIRY_DAYS,
   InvitationError,
   NOT_AUTHORIZED_MESSAGE,
@@ -895,6 +896,107 @@ async function main() {
     "no invitation status leaks to a caller without authority over the target"
   );
 
+  // Case G — A SECOND ACCEPT NEVER REPLACES AN ASSOCIATION (#265, ruled
+  // 2026-08-03; sever rules #274 / FRD OV-007). The case `assertConsistent`
+  // cannot see: it only ever inspects ONE invitation, so two accepted
+  // invitations for the same slot satisfy "bound IFF accepted" vacuously.
+  //
+  // Reachable with no forgery at all: `createInvitation` checks no membership,
+  // so a second sending church may invite a plant that already belongs to one,
+  // and the plant's own planter has authority over that invitation too.
+  // Accepting it used to set `churches.sending_church_id` to the newcomer and
+  // sever the incumbent with no type-to-confirm, no notification to it and no
+  // `association_events` row — while its invitation still read `accepted` and it
+  // had already been sent the acceptance milestone. Now the accept is REFUSED
+  // and writes nothing; severing is #277/#278's audited job.
+  const [rivalSendingChurch] = await db
+    .insert(sendingChurches)
+    .values({ name: "Scratch Rival Sending Church" })
+    .returning();
+
+  const [rivalInviter] = await db
+    .insert(users)
+    .values({
+      email: `rival-inviter-${stamp}@example.test`,
+      passwordHash: "x",
+      role: "sending_church_admin" as const,
+      sendingChurchId: rivalSendingChurch.id,
+    })
+    .returning();
+
+  const incumbent = await freshRaceInvitation();
+  await acceptInvitationAs(actorFor(racePlanter), incumbent.id);
+  assert.equal(
+    (await raceState(incumbent.id)).bound,
+    raceSendingChurch.id,
+    "the first accept did not bind the plant"
+  );
+  const milestonesBefore = (await rowsFor(racePlant.id)).length;
+
+  const rival = await seedInvitation({
+    type: "church_to_sending_church",
+    inviterUserId: rivalInviter.id,
+    targetChurchId: racePlant.id,
+    sendingChurchId: rivalSendingChurch.id,
+  });
+
+  await assert.rejects(
+    () => acceptInvitationAs(actorFor(racePlanter), rival.id),
+    (error: unknown) =>
+      error instanceof InvitationError &&
+      error.message === ALREADY_ASSOCIATED_MESSAGE,
+    "a second accept for an already-bound slot was not refused — or was refused with the message a LOST CLAIM gets, which is a different fact"
+  );
+
+  const [afterRival] = await db
+    .select({
+      status: organizationInvitations.status,
+      respondedBy: organizationInvitations.respondedBy,
+    })
+    .from(organizationInvitations)
+    .where(eq(organizationInvitations.id, rival.id));
+
+  assert.equal(
+    afterRival.status,
+    "pending",
+    "the refused accept claimed the invitation anyway — it is now accepted with no association behind it"
+  );
+  assert.equal(afterRival.respondedBy, null);
+
+  const afterIncumbent = await raceState(incumbent.id);
+  assert.equal(
+    afterIncumbent.bound,
+    raceSendingChurch.id,
+    "the refused accept severed the association it was not allowed to replace"
+  );
+  assert.equal(afterIncumbent.invitation.status, "accepted");
+  assert.equal(
+    (await rowsFor(racePlant.id)).length,
+    milestonesBefore,
+    "the refused accept announced a milestone to the newcomer"
+  );
+  ok("a second accept is refused, and the incumbent association survives it");
+
+  // ...and re-accepting the SAME org's slot is still the idempotent no-op the
+  // replay path depends on: the guard is `IS NULL OR = this org`, not `IS NULL`.
+  const sameOrgAgain = await seedInvitation({
+    type: "church_to_sending_church",
+    inviterUserId: raceInviter.id,
+    targetChurchId: racePlant.id,
+    sendingChurchId: raceSendingChurch.id,
+  });
+  await acceptInvitationAs(actorFor(racePlanter), sameOrgAgain.id);
+  assert.equal(
+    (await raceState(sameOrgAgain.id)).bound,
+    raceSendingChurch.id,
+    "re-accepting the org the plant already belongs to was refused"
+  );
+  ok("re-binding the org the plant already belongs to is still allowed");
+
+  await db
+    .update(churches)
+    .set({ sendingChurchId: null })
+    .where(eq(churches.id, racePlant.id));
   await db
     .delete(organizationInvitations)
     .where(eq(organizationInvitations.targetChurchId, racePlant.id));

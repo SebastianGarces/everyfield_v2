@@ -37,7 +37,8 @@
 // `preferenceOwnerFromSession` in `@/lib/notifications/preferences`.
 // ============================================================================
 
-import { and, desc, eq, exists, lt, type SQL } from "drizzle-orm";
+import { and, desc, eq, exists, lt, sql, type SQL } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 
 import { db } from "@/db";
 import {
@@ -85,6 +86,16 @@ export class InvitationError extends Error {
 export const NOT_AUTHORIZED_MESSAGE =
   "You are not authorized to respond to this invitation";
 
+/**
+ * A second accept, for a slot that is already bound to a DIFFERENT org.
+ *
+ * RULED here (#265, 2026-08-03): an accept never REPLACES an association. See
+ * `acceptInvitationAs` for the reasoning and `memory/invariants.md` →
+ * Multi-Tenancy for the consequence.
+ */
+export const ALREADY_ASSOCIATED_MESSAGE =
+  "This organization is already associated with another one — that association has to be removed first";
+
 // ============================================================================
 // The actor
 // ============================================================================
@@ -129,6 +140,41 @@ export function invitationActorFromSession(session: {
 }
 
 // ============================================================================
+// What a client is told
+// ============================================================================
+
+/**
+ * An invitation as an ACTION may return it. The row itself carries two internal
+ * user uuids — `inviter_user_id` and `responded_by` — and the four actions used
+ * to hand the whole row back, so the invitee learned the inviting admin's user
+ * id and vice versa. Neither is anything a surface needs to render (a name would
+ * be a join, not an id), and an id that reaches the client is an id somebody can
+ * aim a request at, so they are dropped HERE rather than remembered at four call
+ * sites. Do this before wiring a surface, not after: #277/#278 will read whatever
+ * shape they find.
+ */
+export type InvitationView = Omit<
+  OrganizationInvitation,
+  "inviterUserId" | "respondedBy"
+>;
+
+/** The row, minus the two internal user ids. Total, so a new column is a compile error away from being reviewed. */
+export function invitationView(row: OrganizationInvitation): InvitationView {
+  return {
+    id: row.id,
+    type: row.type,
+    targetChurchId: row.targetChurchId,
+    targetSendingChurchId: row.targetSendingChurchId,
+    sendingChurchId: row.sendingChurchId,
+    sendingNetworkId: row.sendingNetworkId,
+    status: row.status,
+    respondedAt: row.respondedAt,
+    createdAt: row.createdAt,
+    expiresAt: row.expiresAt,
+  };
+}
+
+// ============================================================================
 // Create
 // ============================================================================
 
@@ -144,6 +190,21 @@ export interface InvitationRequest {
   targetSendingChurchId?: string;
   expiresInDays?: number;
 }
+
+/**
+ * The fields that decide WHAT association an accept makes: the target entity and
+ * the org it is being bound to. Shared by `associationStatement` (the write) and
+ * `unboundTargetSlot` (the guard on the claim batched with it), so the two can
+ * never be built from different premises.
+ */
+export type AssociationFacts = Pick<
+  OrganizationInvitation,
+  | "type"
+  | "targetChurchId"
+  | "targetSendingChurchId"
+  | "sendingChurchId"
+  | "sendingNetworkId"
+>;
 
 /** The row to insert, fully resolved. */
 export interface ResolvedInvitation {
@@ -340,6 +401,28 @@ export async function createInvitationAs(
  * `getOversightPlantHealth` — with no accepted invitation anywhere to explain
  * it and no product path to undo it. Statement order is what closes that.
  *
+ * A SECOND ACCEPT NEVER REPLACES AN ASSOCIATION — ruled here, 2026-08-03
+ * (#265; the sever rules are #274 / `product-docs/features/oversight/frd.md`
+ * OV-007). Plant P accepted sending church A; nothing stops B's admin inviting
+ * P as well (`createInvitation` checks no membership), and P's planter has
+ * authority over that invitation too. Left alone, accepting it would have set
+ * `churches.sending_church_id = B` and severed A silently: no type-to-confirm,
+ * no notification to A, no `association_events` audit row — the three things
+ * OV-007 requires of a sever — while A's invitation still read `accepted` and A
+ * had already been sent the "invitation accepted" milestone.
+ *
+ * So BOTH statements additionally require the target's slot to be free or to
+ * already hold this very org (`unboundTargetSlot` / `associationStatement`).
+ * Re-binding to the same org stays the idempotent no-op it was; binding OVER a
+ * different one matches no row in statement ONE, so the invitation stays
+ * `pending`, nothing is written, and the refusal says which of the two things
+ * went wrong (`ALREADY_ASSOCIATED_MESSAGE` vs "no longer pending" — a lost claim
+ * and an occupied slot are different facts and must not read alike). The plant
+ * severs A through the audited path (#277) and then accepts B, which is exactly
+ * the order OV-007 wants. Guarding statement ONE is what makes this atomic: with
+ * the guard on the association alone, a committed claim would have left the
+ * invitation reading `accepted` with the plant still bound to A.
+ *
  * Residual, accepted: a crash between the committed batch and the milestone
  * notification loses the notification, not the acceptance — the notification is
  * best-effort by construction. And a replay that lost the claim to a CONCURRENT
@@ -355,19 +438,20 @@ export async function acceptInvitationAs(
   // Authority first, then status: see `loadRespondableInvitation`.
   const invitation = await loadRespondableInvitation(actor, invitationId);
 
-  // Built BEFORE anything is written, so an invitation whose FKs contradict its
-  // `type` throws instead of half-applying.
+  // Both built BEFORE anything is written, so an invitation whose FKs contradict
+  // its `type` throws instead of half-applying.
   const association = associationStatement(invitation, invitationId);
+  const slotIsOurs = unboundTargetSlot(invitation);
 
   const [claimed] = await db.batch([
-    respondToInvitationQuery(actor, invitationId, "accepted"),
+    respondToInvitationQuery(actor, invitationId, "accepted", slotIsOurs),
     association,
   ]);
 
   const [updated] = claimed;
 
   if (!updated) {
-    throw new InvitationError("This invitation is no longer pending");
+    throw new InvitationError(await lostClaimReason(invitationId));
   }
 
   // F11 N-025 — milestone #1, announced at its source.
@@ -450,6 +534,25 @@ async function announceInvitationAcceptedForChurch(
 }
 
 /**
+ * Why an accept's claim matched no row — the two reasons told apart.
+ *
+ * The claim's WHERE has exactly three predicates: the id, `status = 'pending'`,
+ * and the slot guard. Authority and status were already checked against a read,
+ * so if the row STILL reads pending the slot guard is the only thing that can
+ * have failed: the target is bound to a different org. Anything else means the
+ * row was answered underneath us.
+ *
+ * One extra read, on the failure path only, and it decides a message rather than
+ * a write — so it is not a concurrency guard and does not need to be.
+ */
+async function lostClaimReason(invitationId: string): Promise<string> {
+  const current = await getInvitation(invitationId);
+  return current?.status === "pending"
+    ? ALREADY_ASSOCIATED_MESSAGE
+    : "This invitation is no longer pending";
+}
+
+/**
  * Decline an invitation. The actor must have authority over the target entity.
  */
 export async function declineInvitationAs(
@@ -482,11 +585,17 @@ export async function declineInvitationAs(
  * is not a concurrency guard), so without it the loser would write a second
  * "accepted" and emit a second milestone notification; and a response can never
  * overwrite an answer that is already recorded.
+ *
+ * `slotGuard` is how an ACCEPT adds `unboundTargetSlot(invitation)` to the same
+ * statement, so that a claim which would replace somebody else's association
+ * matches no row and writes nothing (see `acceptInvitationAs`). A DECLINE passes
+ * none: declining an invitation says nothing about who the plant is bound to.
  */
 export function respondToInvitationQuery(
   actor: InvitationActor,
   invitationId: string,
-  status: Extract<OrganizationInvitationStatus, "accepted" | "declined">
+  status: Extract<OrganizationInvitationStatus, "accepted" | "declined">,
+  slotGuard?: SQL
 ) {
   return db
     .update(organizationInvitations)
@@ -495,8 +604,100 @@ export function respondToInvitationQuery(
       respondedBy: actor.id,
       respondedAt: new Date(),
     })
-    .where(pendingInvitation(invitationId))
+    .where(and(pendingInvitation(invitationId), slotGuard))
     .returning();
+}
+
+/** `(<fk> is null or <fk> = <org>)` — the slot is free, or already ours. */
+function freeOrHolds(column: AnyPgColumn, value: string): SQL {
+  return sql`(${column} is null or ${column} = ${value})`;
+}
+
+/**
+ * `EXISTS (SELECT … WHERE <target>.id = ? AND (<fk> IS NULL OR <fk> = ?))` — the
+ * predicate that stops an accept from REPLACING an association, expressed for a
+ * statement that updates a different table (the claim; see `acceptInvitationAs`).
+ *
+ * `associationStatement` needs the same rule on the row it is already updating,
+ * where it is a plain column predicate and no subquery is required — hence the
+ * two spellings of one idea. They are kept next to each other, and the unit
+ * tests read BOTH off the generated SQL, because a guard on only one of the two
+ * statements is worse than neither: it would commit the claim and skip the bind.
+ *
+ * Throws on a row whose FK columns contradict its `type`, and fails CLOSED on a
+ * `type` no arm knows — the same two rules as `associationStatement`, for the
+ * same reason.
+ */
+export function unboundTargetSlot(invitation: AssociationFacts): SQL {
+  switch (invitation.type) {
+    case "church_to_sending_church": {
+      if (!invitation.targetChurchId || !invitation.sendingChurchId) {
+        throw new InvitationError(
+          "Invalid invitation: missing church or sending church"
+        );
+      }
+      return exists(
+        db
+          .select({ id: churches.id })
+          .from(churches)
+          .where(
+            and(
+              eq(churches.id, invitation.targetChurchId),
+              freeOrHolds(churches.sendingChurchId, invitation.sendingChurchId)
+            )
+          )
+      );
+    }
+
+    case "church_to_network": {
+      if (!invitation.targetChurchId || !invitation.sendingNetworkId) {
+        throw new InvitationError(
+          "Invalid invitation: missing church or network"
+        );
+      }
+      return exists(
+        db
+          .select({ id: churches.id })
+          .from(churches)
+          .where(
+            and(
+              eq(churches.id, invitation.targetChurchId),
+              freeOrHolds(churches.sendingNetworkId, invitation.sendingNetworkId)
+            )
+          )
+      );
+    }
+
+    case "sending_church_to_network": {
+      if (!invitation.targetSendingChurchId || !invitation.sendingNetworkId) {
+        throw new InvitationError(
+          "Invalid invitation: missing sending church or network"
+        );
+      }
+      return exists(
+        db
+          .select({ id: sendingChurches.id })
+          .from(sendingChurches)
+          .where(
+            and(
+              eq(sendingChurches.id, invitation.targetSendingChurchId),
+              freeOrHolds(
+                sendingChurches.sendingNetworkId,
+                invitation.sendingNetworkId
+              )
+            )
+          )
+      );
+    }
+
+    default: {
+      const unknownType: never = invitation.type;
+      console.error("invitation type has no association rule", {
+        type: unknownType,
+      });
+      throw new InvitationError(NOT_AUTHORIZED_MESSAGE);
+    }
+  }
 }
 
 /**
@@ -566,12 +767,20 @@ export async function revokeInvitationAs(
 // with the surfaces that own the authority rule and the audit write, and they
 // derive the entity from the session (as `setOversightSharingAction` does:
 // whose plant it is must not be an argument) rather than re-exporting these.
-// `service.test.ts` → "no 'use server' module republishes the invitation logic
-// layer" enforces that shape transitively, barrels included.
 //
-// Until #277/#278 land, an accepted association has no in-product repair path,
-// which is why `acceptInvitationAs` above must never be able to create one that
-// was not accepted (`memory/invariants.md` → Multi-Tenancy).
+// HOW #277/#278 IMPORT THEM. `service.test.ts` → "no 'use server' module
+// republishes the invitation logic layer" enforces two things transitively,
+// barrels included: no action module may RE-EXPORT anything from this file
+// (ever), and a `"use server"` module may only REACH this file at all if it is
+// named in that test's `CORE_REACHING_ACTION_MODULES` allowlist, with the reason.
+// So each of those units adds its own action module to that list in the same
+// diff — deliberately, and reviewed — instead of discovering that routing the
+// import through a barrel makes the guardrail quiet.
+//
+// Until #277/#278 land, an accepted association has no in-product repair path.
+// That is why `acceptInvitationAs` above must never be able to create one that
+// was not accepted, and why it REFUSES to replace one that already exists
+// (`memory/invariants.md` → Multi-Tenancy).
 // ============================================================================
 
 /**
@@ -806,18 +1015,16 @@ async function loadRespondableInvitation(
  * statement rather than executing one for the same reason — the caller batches
  * it, so neither write can apply without the other.
  *
+ * The WHERE also carries the slot rule — `(fk IS NULL OR fk = <this org>)`, the
+ * same rule `unboundTargetSlot` puts on the claim: an accept may bind a free
+ * slot or re-bind its own, never replace another org's (see
+ * `acceptInvitationAs`).
+ *
  * A row whose FK columns contradict its `type` throws here, before anything is
  * written.
  */
 export function associationStatement(
-  invitation: Pick<
-    OrganizationInvitation,
-    | "type"
-    | "targetChurchId"
-    | "targetSendingChurchId"
-    | "sendingChurchId"
-    | "sendingNetworkId"
-  >,
+  invitation: AssociationFacts,
   invitationId: string
 ) {
   const claimed = claimedInvitation(invitationId);
@@ -835,7 +1042,13 @@ export function associationStatement(
           sendingChurchId: invitation.sendingChurchId,
           updatedAt: new Date(),
         })
-        .where(and(eq(churches.id, invitation.targetChurchId), claimed));
+        .where(
+          and(
+            eq(churches.id, invitation.targetChurchId),
+            claimed,
+            freeOrHolds(churches.sendingChurchId, invitation.sendingChurchId)
+          )
+        );
     }
 
     case "church_to_network": {
@@ -850,7 +1063,13 @@ export function associationStatement(
           sendingNetworkId: invitation.sendingNetworkId,
           updatedAt: new Date(),
         })
-        .where(and(eq(churches.id, invitation.targetChurchId), claimed));
+        .where(
+          and(
+            eq(churches.id, invitation.targetChurchId),
+            claimed,
+            freeOrHolds(churches.sendingNetworkId, invitation.sendingNetworkId)
+          )
+        );
     }
 
     case "sending_church_to_network": {
@@ -866,7 +1085,14 @@ export function associationStatement(
           updatedAt: new Date(),
         })
         .where(
-          and(eq(sendingChurches.id, invitation.targetSendingChurchId), claimed)
+          and(
+            eq(sendingChurches.id, invitation.targetSendingChurchId),
+            claimed,
+            freeOrHolds(
+              sendingChurches.sendingNetworkId,
+              invitation.sendingNetworkId
+            )
+          )
         );
     }
 

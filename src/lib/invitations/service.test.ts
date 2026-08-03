@@ -3,6 +3,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
+import type { OrganizationInvitation } from "@/db/schema";
 import type { OrganizationInvitationType } from "@/db/schema/organization-invitation";
 
 import {
@@ -13,11 +14,13 @@ import {
   associationStatement,
   expireInvitationQuery,
   invitationActorFromSession,
+  invitationView,
   getInvitation,
   isUuid,
   resolveInvitationRequest,
   respondToInvitationQuery,
   revokeInvitationQuery,
+  unboundTargetSlot,
   verifyInvitationAuthority,
   type InvitationActor,
 } from "./core";
@@ -144,10 +147,17 @@ const CORE_PATH = path.join(INVITATIONS_DIR, "core.ts");
  * (`respondingUser`, `db.`), so documenting the fix would otherwise break the
  * test that enforces it.
  */
+const CODE_CACHE = new Map<string, string>();
+
 function codeOf(file: string): string {
-  return readFileSync(file, "utf8")
+  const cached = CODE_CACHE.get(file);
+  if (cached !== undefined) return cached;
+
+  const code = readFileSync(file, "utf8")
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/(^|\s)\/\/.*$/gm, "$1");
+  CODE_CACHE.set(file, code);
+  return code;
 }
 
 const SERVICE_CODE = codeOf(SERVICE_PATH);
@@ -249,9 +259,6 @@ const TS_FILES: string[] = (function collect(dir: string): string[] {
 const REEXPORT_FROM =
   /^export\s+(?:\*(?:\s+as\s+\w+)?|\{[^}]*\})\s*from\s*["']([^"']+)["']/gm;
 
-/** Any module specifier at all, type-only imports included. */
-const ANY_FROM = /\bfrom\s*["']([^"']+)["']/g;
-
 /** Specifiers whose module is actually emitted: value imports and `import()`. */
 function valueSpecifiers(code: string): string[] {
   const statement =
@@ -285,12 +292,18 @@ function resolveModule(from: string, specifier: string): string | null {
   return null;
 }
 
-function resolvesToCore(from: string, specifier: string): boolean {
-  return resolveModule(from, specifier) === CORE_PATH;
+const USE_SERVER_CACHE = new Map<string, boolean>();
+
+function isUseServerModule(full: string): boolean {
+  const cached = USE_SERVER_CACHE.get(full);
+  if (cached !== undefined) return cached;
+
+  const directive = /^["']use server["'];/m.test(readFileSync(full, "utf8"));
+  USE_SERVER_CACHE.set(full, directive);
+  return directive;
 }
 
-const isUseServerModule = (full: string) =>
-  /^["']use server["'];/m.test(readFileSync(full, "utf8"));
+const rel = (full: string) => path.relative(process.cwd(), full);
 
 /**
  * The specifiers a module PUBLISHES through — its re-export edges, which are not
@@ -334,7 +347,7 @@ function republishEdges(code: string): string[] {
 function republishChainToCore(entry: string): string[] | null {
   const seen = new Set<string>([entry]);
   const queue: Array<{ file: string; chain: string[] }> = [
-    { file: entry, chain: [path.relative(process.cwd(), entry)] },
+    { file: entry, chain: [rel(entry)] },
   ];
 
   while (queue.length > 0) {
@@ -344,7 +357,7 @@ function republishChainToCore(entry: string): string[] | null {
       const resolved = resolveModule(file, specifier);
       if (resolved === null) continue;
 
-      const next = [...chain, path.relative(process.cwd(), resolved)];
+      const next = [...chain, rel(resolved)];
       if (resolved === CORE_PATH) return next;
       if (seen.has(resolved)) continue;
 
@@ -355,6 +368,76 @@ function republishChainToCore(entry: string): string[] | null {
 
   return null;
 }
+
+/**
+ * The VALUE-IMPORT chain from `entry` to `core.ts`, or `null` when there is none.
+ *
+ * A ban on REACHABILITY, not on a spelling — HOLE 3. The check this replaces
+ * tested `/invitations\/core/` against the source plus ONE `resolveModule` hop
+ * per `from` specifier, so a one-line barrel (`index.ts` → `export * from
+ * "./core"`) plus `import { disassociateChurchFromNetwork } from
+ * "@/lib/invitations"` wrapped in an exported action was a live, POSTable,
+ * unauthenticated "detach any church by guessing a uuid" endpoint that left the
+ * suite green AND `tsc` at exit 0. Two hops would not have been enough either;
+ * this is a closure.
+ *
+ * A `"use server"` module is a BOUNDARY, not an edge, exactly as in the
+ * client-bundle walk (§1d): the client holds a reference and the body stays
+ * server-side, so `some/actions.ts → service.ts → core.ts` is not this module's
+ * reach — and `service.ts` is checked as its own entry anyway. Traversing it
+ * would make every future action module that merely CALLS `acceptInvitation`
+ * fail this test.
+ */
+function importChainToCore(entry: string): string[] | null {
+  const seen = new Set<string>([entry]);
+  const queue: Array<{ file: string; chain: string[] }> = [
+    { file: entry, chain: [rel(entry)] },
+  ];
+
+  while (queue.length > 0) {
+    const { file, chain } = queue.shift()!;
+
+    for (const specifier of valueSpecifiers(codeOf(file))) {
+      const resolved = resolveModule(file, specifier);
+      if (resolved === null) continue;
+
+      const next = [...chain, rel(resolved)];
+      if (resolved === CORE_PATH) return next;
+      if (seen.has(resolved)) continue;
+
+      seen.add(resolved);
+      if (isUseServerModule(resolved)) continue;
+      queue.push({ file: resolved, chain: next });
+    }
+  }
+
+  return null;
+}
+
+/**
+ * THE ALLOWLIST: every `"use server"` module allowed to reach `./core` at all,
+ * and why. Nothing else may, however many modules it routes through.
+ *
+ * Asserted EXHAUSTIVE IN BOTH DIRECTIONS below — a module that reaches the logic
+ * layer without an entry here fails, and an entry that no longer reaches it fails
+ * too. The second half is the point: without it this list rots into a blanket
+ * exemption, which is how a guardrail ends up reporting success over a hole. When
+ * #277 and #278 add their authenticated `disassociate*` wrappers, each adds its
+ * own line here in the same diff — a reviewer reads the reason and decides, which
+ * is what the prose this replaced only wished for.
+ *
+ * Paths are repo-relative, `/`-separated.
+ */
+const CORE_REACHING_ACTION_MODULES: ReadonlyArray<readonly [string, string]> = [
+  [
+    "src/lib/invitations/service.ts",
+    "the four session-minted lifecycle actions — this module is core's front door, and every other assertion in this file pins its shape",
+  ],
+  [
+    "src/app/(auth)/register/actions.ts",
+    "the private-beta gate: `./beta-gate` → `hasValidInvitationBypass` → `getInvitation`, a READ that must work with no session because an invitation id IS the bypass token (see core.ts → Query Invitations)",
+  ],
+];
 
 // ----------------------------------------------------------------------------
 // 1a. Structural — the endpoint surface, read off the real module
@@ -530,38 +613,59 @@ test("no 'use server' module republishes the invitation logic layer", () => {
   // action module republished the whole logic layer and stayed green. Closure,
   // not one hop, and the chain is in the failure message.
   //
-  // (a) Any OTHER action file that so much as TOUCHES `@/lib/invitations/core` —
-  // importing a primitive there is one keystroke from exporting it, so the ban is
-  // on the import. When #277/#278 add the authenticated disassociation wrappers,
-  // they belong behind this rule, not around it: an action module derives the
-  // entity from the session and calls into a logic layer it does not re-export.
-  const offenders: string[] = [];
+  // (a) REACHABILITY — HOLE 3. Any action module whose VALUE imports can reach
+  // `./core`, transitively, stopping at `"use server"` boundaries exactly as
+  // §1d's walk does. Importing a primitive there is one keystroke from exporting
+  // it, so the ban is on the IMPORT — and on reaching the module, not on writing
+  // the specifier `@/lib/invitations/core`, because a barrel plus an `import`
+  // and a one-line wrapper is the same endpoint spelled differently (it passed
+  // the previous version of this check with `tsc` at exit 0).
+  //
+  // Two action modules legitimately reach it and are allowlisted BY NAME, with
+  // the reason, in `CORE_REACHING_ACTION_MODULES`. The allowlist is asserted
+  // exhaustive in both directions, so it cannot quietly become an exemption for
+  // everything, and #277/#278 have to add themselves on purpose.
+  const republishers: string[] = [];
+  const reaching = new Map<string, string>();
 
   for (const full of TS_FILES) {
     if (!isUseServerModule(full)) continue;
-    const rel = path.relative(process.cwd(), full);
-    const code = codeOf(full);
 
     // (b) Republication — checked in every action module, `service.ts` included.
-    const chain = republishChainToCore(full);
-    if (chain) {
-      offenders.push(`republishes: ${chain.join(" → ")}`);
+    const republished = republishChainToCore(full);
+    if (republished) {
+      republishers.push(`republishes: ${republished.join(" → ")}`);
     }
 
-    if (full === SERVICE_PATH) continue;
-
-    // (a) Any other reference at all, import or re-export.
-    if (
-      /invitations\/core/.test(code) ||
-      [...code.matchAll(ANY_FROM)].some(([, specifier]) =>
-        resolvesToCore(full, specifier)
-      )
-    ) {
-      offenders.push(rel);
+    // (a) Reachability — likewise every action module, `service.ts` included;
+    // the allowlist, not a skip, is what excuses the two that may.
+    const imported = importChainToCore(full);
+    if (imported) {
+      reaching.set(rel(full), imported.join(" → "));
     }
   }
 
-  assert.deepEqual(offenders, []);
+  assert.deepEqual(republishers, []);
+
+  const allowed = new Map(CORE_REACHING_ACTION_MODULES);
+
+  const unexpected = [...reaching]
+    .filter(([module]) => !allowed.has(module))
+    .map(([, chain]) => chain);
+
+  assert.deepEqual(
+    unexpected,
+    [],
+    `a "use server" module reaches ${rel(CORE_PATH)} with no allowlist entry — wrap the primitive in an action that mints an actor, or add the module to CORE_REACHING_ACTION_MODULES with the reason:\n  ${unexpected.join("\n  ")}`
+  );
+
+  const stale = [...allowed.keys()].filter((module) => !reaching.has(module));
+
+  assert.deepEqual(
+    stale,
+    [],
+    `an allowlist entry no longer reaches ${rel(CORE_PATH)} — delete the line rather than leave a standing exemption:\n  ${stale.join("\n  ")}`
+  );
 });
 
 // ----------------------------------------------------------------------------
@@ -847,22 +951,25 @@ test("an unrecognised invitation type has no association to write either", () =>
   // Belt and braces on the same premise: the old switch fell through silently,
   // so an unknown type wrote no association but was still marked `accepted` and
   // still announced a milestone. Now it cannot get that far.
+  //
+  // BOTH accept statements are checked, because both switch on `type` and the
+  // claim's guard is what stops a second accept: an arm missing there would fail
+  // OPEN in the statement that decides whether anything is written at all.
   for (const type of UNKNOWN_TYPES) {
+    const invitation = {
+      type,
+      targetChurchId: PLANT,
+      targetSendingChurchId: SENDING_CHURCH,
+      sendingChurchId: SENDING_CHURCH,
+      sendingNetworkId: NETWORK,
+    };
+
     assert.throws(
-      () =>
-        associationStatement(
-          {
-            type,
-            targetChurchId: PLANT,
-            targetSendingChurchId: SENDING_CHURCH,
-            sendingChurchId: SENDING_CHURCH,
-            sendingNetworkId: NETWORK,
-          },
-          INVITATION_ID
-        ),
+      () => associationStatement(invitation, INVITATION_ID),
       InvitationError,
       type
     );
+    assert.throws(() => unboundTargetSlot(invitation), InvitationError, type);
   }
 });
 
@@ -880,18 +987,23 @@ test("an invitation whose ids contradict its type writes nothing", () => {
   ];
 
   for (const override of cases) {
+    const invitation = {
+      targetChurchId: PLANT,
+      targetSendingChurchId: SENDING_CHURCH,
+      sendingChurchId: SENDING_CHURCH,
+      sendingNetworkId: NETWORK,
+      ...override,
+    };
+
     assert.throws(
-      () =>
-        associationStatement(
-          {
-            targetChurchId: PLANT,
-            targetSendingChurchId: SENDING_CHURCH,
-            sendingChurchId: SENDING_CHURCH,
-            sendingNetworkId: NETWORK,
-            ...override,
-          },
-          INVITATION_ID
-        ),
+      () => associationStatement(invitation, INVITATION_ID),
+      InvitationError,
+      override.type
+    );
+    // Same rule in the claim's guard, or an inconsistent row would be claimed
+    // and then not associated.
+    assert.throws(
+      () => unboundTargetSlot(invitation),
       InvitationError,
       override.type
     );
@@ -1143,6 +1255,91 @@ test("the association cannot be written unless the claim was won", () => {
   }
 });
 
+test("an accept binds a free slot or its own, and never replaces another org's", () => {
+  // The second-accept ruling (#265, 2026-08-03), read off BOTH statements of the
+  // batch. Plant P accepted sending church A; nothing stops B inviting P too, and
+  // P's planter has authority over that invitation as well — so without this the
+  // accept set `sending_church_id = B` and severed A with no type-to-confirm, no
+  // notification to A and no audit row, the three things #274/OV-007 requires of
+  // a sever, while A's invitation still read `accepted`.
+  //
+  // The guard has to be on statement ONE, the claim, and not only on the
+  // association: the batch commits what matched, so a claim that won while the
+  // association matched nothing would leave the invitation reading `accepted`
+  // with the plant still bound to A. Hence both spellings of one rule, and hence
+  // this test reads both. `IS NULL OR = this org` and not `IS NULL`, because
+  // re-binding the same org must stay the idempotent no-op the replay path
+  // depends on.
+  const cases = [
+    {
+      invitation: {
+        type: "church_to_sending_church" as const,
+        targetChurchId: PLANT,
+        targetSendingChurchId: null,
+        sendingChurchId: SENDING_CHURCH,
+        sendingNetworkId: null,
+      },
+      slot: /\("churches"\."sending_church_id" is null or "churches"\."sending_church_id" = \$\d+\)/,
+      target: /exists \(select "id" from "churches"/,
+      org: SENDING_CHURCH,
+    },
+    {
+      invitation: {
+        type: "church_to_network" as const,
+        targetChurchId: PLANT,
+        targetSendingChurchId: null,
+        sendingChurchId: null,
+        sendingNetworkId: NETWORK,
+      },
+      slot: /\("churches"\."sending_network_id" is null or "churches"\."sending_network_id" = \$\d+\)/,
+      target: /exists \(select "id" from "churches"/,
+      org: NETWORK,
+    },
+    {
+      invitation: {
+        type: "sending_church_to_network" as const,
+        targetChurchId: null,
+        targetSendingChurchId: SENDING_CHURCH,
+        sendingChurchId: null,
+        sendingNetworkId: NETWORK,
+      },
+      slot: /\("sending_churches"\."sending_network_id" is null or "sending_churches"\."sending_network_id" = \$\d+\)/,
+      target: /exists \(select "id" from "sending_churches"/,
+      org: NETWORK,
+    },
+  ];
+
+  for (const { invitation, slot, target, org } of cases) {
+    const association = associationStatement(invitation, INVITATION_ID).toSQL();
+    assert.match(association.sql, slot, invitation.type);
+
+    const claim = respondToInvitationQuery(
+      PLANTER,
+      INVITATION_ID,
+      "accepted",
+      unboundTargetSlot(invitation)
+    ).toSQL();
+
+    assert.match(claim.sql, target, invitation.type);
+    assert.match(claim.sql, slot, invitation.type);
+    assert.ok(claim.params.includes(org), invitation.type);
+    // Still a compare-and-set: the slot rule is an EXTRA predicate, not a
+    // replacement for the one that makes a second response match no row.
+    assert.ok(claim.params.includes("pending"), invitation.type);
+  }
+
+  // A DECLINE takes no slot guard: declining says nothing about who the plant is
+  // bound to, and an already-associated plant must still be able to say no.
+  const decline = respondToInvitationQuery(
+    PLANTER,
+    INVITATION_ID,
+    "declined"
+  ).toSQL();
+
+  assert.doesNotMatch(decline.sql, /exists/);
+  assert.ok(decline.params.includes("pending"));
+});
+
 test("the auto-expire write is a compare-and-set too", () => {
   // The sibling status write the first CAS skipped: `WHERE id = ?` alone let two
   // requests straddling the expiry instant (a double-clicked Accept is enough)
@@ -1170,6 +1367,54 @@ test("a malformed invitation id is not a lookup", async () => {
   assert.equal(await getInvitation("not-a-uuid"), null);
   assert.equal(await getInvitation(""), null);
   assert.equal(await getInvitation("' or 1=1 --"), null);
+});
+
+// ----------------------------------------------------------------------------
+// 7. What comes back — a view, not the row
+// ----------------------------------------------------------------------------
+
+test("an action result carries no internal user ids", () => {
+  // The four actions used to return the raw `organization_invitations` row, which
+  // carries `inviter_user_id` and `responded_by` — so the invitee was told the
+  // inviting admin's user id and the inviter the responder's. Nothing renders
+  // either (a name is a join, not an id) and an id that reaches the client is an
+  // id a request can be aimed at. Narrowed in `./core` so all four inherit it,
+  // and pinned here rather than left to four call sites.
+  const row: OrganizationInvitation = {
+    id: INVITATION_ID,
+    type: "church_to_sending_church",
+    inviterUserId: FOREIGN_ID,
+    targetChurchId: PLANT,
+    targetSendingChurchId: null,
+    sendingChurchId: SENDING_CHURCH,
+    sendingNetworkId: null,
+    status: "accepted",
+    respondedBy: PLANTER_ID,
+    respondedAt: new Date("2026-08-03T00:00:00.000Z"),
+    createdAt: new Date("2026-08-01T00:00:00.000Z"),
+    expiresAt: new Date("2026-09-01T00:00:00.000Z"),
+  };
+
+  const view = invitationView(row);
+
+  assert.deepEqual(Object.keys(view).sort(), [
+    "createdAt",
+    "expiresAt",
+    "id",
+    "respondedAt",
+    "sendingChurchId",
+    "sendingNetworkId",
+    "status",
+    "targetChurchId",
+    "targetSendingChurchId",
+    "type",
+  ]);
+  const serialized = JSON.stringify(view);
+  assert.ok(!serialized.includes(FOREIGN_ID), "the inviter's user id leaked");
+  assert.ok(!serialized.includes(PLANTER_ID), "the responder's user id leaked");
+
+  // ...and the action layer returns THAT, not what the mutation handed it.
+  assert.match(SERVICE_CODE, /invitationView\(await mutate\(\)\)/);
 });
 
 test("isUuid accepts a uuid and nothing else", () => {
