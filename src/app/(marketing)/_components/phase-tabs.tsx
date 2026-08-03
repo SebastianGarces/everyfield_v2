@@ -7,6 +7,9 @@ import { Shot, ShotOverlay, type ShotSource } from "./shot";
 import { useInView } from "./use-in-view";
 import { usePrefetchShots } from "./use-prefetch-shots";
 import { useTablistKeys } from "./use-tablist-keys";
+import { PrelaunchChecklist } from "./vignettes/prelaunch-checklist";
+import { RunSheet } from "./vignettes/run-sheet";
+import { WeeklyTicker } from "./vignettes/weekly-ticker";
 
 type Overlay = ShotSource & { alt: string; style: React.CSSProperties };
 
@@ -22,6 +25,12 @@ type Phase = {
   /** Horizontal anchor of the primary crop inside the panel. */
   anchor?: "start" | "end";
   overlay?: Overlay;
+  /**
+   * A drawn-live moment card floated over the crop, desktop only. A phase that
+   * has one does not also get a desktop chip — the vignette carries the claim
+   * (one claim per visual). Positioned in marketing.css, not here.
+   */
+  vignette?: React.ReactNode;
   chip?: {
     text: string;
     style: React.CSSProperties;
@@ -160,6 +169,7 @@ const PHASES: readonly Phase[] = [
     },
     alt: "The Launch Sunday logistics checklist — preparation progress at 4 of 8 ready, promo cards and signage already struck through.",
     anchor: "start",
+    vignette: <PrelaunchChecklist />,
     chip: {
       text: "4 of 8 ready — and counting",
       style: { left: "7%", bottom: "16%" },
@@ -186,6 +196,7 @@ const PHASES: readonly Phase[] = [
       height: 355,
     },
     alt: "The Launch Sunday meeting page — in 28 days, ~120 estimated, and the run sheet: 7:30 setup crew, 8:15 band call, 9:15 doors, 10:00 service.",
+    vignette: <RunSheet />,
   },
   {
     key: "beyond",
@@ -209,6 +220,7 @@ const PHASES: readonly Phase[] = [
     },
     alt: "Trinity Grove's post-launch dashboard: Sunday Gathering week after week — Week 6 completed with 112 attendees.",
     anchor: "end",
+    vignette: <WeeklyTicker />,
     chip: {
       text: "Week 6 · 112 in the room",
       style: { right: "6%", top: "20%" },
@@ -240,7 +252,11 @@ function PhaseVisual({
       {!isMobile && phase.overlay ? (
         <ShotOverlay overlay={phase.overlay} />
       ) : null}
-      {phase.chip ? (
+      {!isMobile && phase.vignette ? phase.vignette : null}
+      {/* the vignette carries the phase's claim on desktop, so the chip stays
+          only where there is no vignette — and on mobile, where vignettes and
+          overlay images are both hidden */}
+      {phase.chip && (isMobile || !phase.vignette) ? (
         <Chip
           style={
             isMobile

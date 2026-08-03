@@ -1324,9 +1324,373 @@ html:has(.marketing) {
   }
 }
 
-/* mobile: the scorecard stays and goes full-width — it is the one vignette
-   that is MORE legible small than the capture it replaced */
+/* ---------- journey moments — cards floated over the phase crops ---------- */
+.marketing .vg-card {
+  position: absolute;
+  z-index: 2;
+  padding: 14px 16px 15px;
+}
+.marketing .vg-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 11px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--hairline);
+}
+/* the same landing as an overlay image: after the primary crop has settled */
+.marketing .ptabs.pt-seen .ppanel.active .pshot .vg-card {
+  animation: fs-overlay-in 480ms var(--ease) both;
+  animation-delay: 110ms;
+}
+
+/* pre-launch · the checklist ending at zero */
+.marketing .vg-checklist {
+  right: 4%;
+  top: 16%;
+  width: min(34%, 380px);
+}
+.marketing .vg-count {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  font-family: var(--mono);
+  font-weight: 500;
+  color: var(--ink);
+}
+.marketing .vg-count-slot {
+  display: grid;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.marketing .vg-count-slot > * {
+  grid-area: 1 / 1;
+}
+.marketing .vg-count-a {
+  opacity: 0;
+}
+.marketing .vg-count-unit {
+  font-size: 12px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--mute);
+}
+.marketing .vg-bar {
+  height: 4px;
+  background: rgba(24, 29, 25, 0.1);
+}
+.marketing .vg-bar-fill {
+  display: block;
+  height: 100%;
+  width: 75%;
+  background: var(--ink);
+}
+.marketing .vg-checks {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+}
+.marketing .vg-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  font-size: 13px;
+  line-height: 1.3;
+  border-top: 1px solid var(--hairline);
+}
+.marketing .vg-check:first-child {
+  border-top: 0;
+}
+/* every row's finished state is ticked and struck; .is-pre simply means the
+   row arrived that way and sits out the ticking sequence below */
+.marketing .vg-box {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  position: relative;
+}
+.marketing .vg-box::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 3px;
+  height: 7px;
+  border: solid var(--cream);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+.marketing .vg-check-t {
+  position: relative;
+  color: var(--text-2);
+}
+.marketing .vg-check-t::after {
+  content: "";
+  position: absolute;
+  inset-inline-start: 0;
+  top: 52%;
+  width: 100%;
+  height: 1px;
+  background: var(--mute);
+  transform-origin: left center;
+}
+
+/* the sequence: two items tick, then the bar and the counter catch up */
+.marketing .ptabs.pt-seen .ppanel.active .vg-check:not(.is-pre) .vg-box {
+  animation: vg-box-fill 240ms var(--ease) both;
+  animation-delay: calc(640ms + var(--vg-i, 0) * 400ms);
+}
+.marketing .ptabs.pt-seen .ppanel.active .vg-check:not(.is-pre) .vg-box::after {
+  animation: vg-tick-in 200ms var(--ease) both;
+  animation-delay: calc(740ms + var(--vg-i, 0) * 400ms);
+}
+.marketing
+  .ptabs.pt-seen
+  .ppanel.active
+  .vg-check:not(.is-pre)
+  .vg-check-t::after {
+  animation: vg-strike 300ms var(--ease) both;
+  animation-delay: calc(820ms + var(--vg-i, 0) * 400ms);
+}
+.marketing .ptabs.pt-seen .ppanel.active .vg-bar-fill {
+  animation: vg-bar-grow 520ms var(--ease) both;
+  animation-delay: 1400ms;
+}
+.marketing .ptabs.pt-seen .ppanel.active .vg-count-a {
+  animation: vg-count-out 260ms var(--ease) both;
+  animation-delay: 1500ms;
+}
+.marketing .ptabs.pt-seen .ppanel.active .vg-count-b {
+  animation: vg-count-in 260ms var(--ease) both;
+  animation-delay: 1500ms;
+}
+@keyframes vg-box-fill {
+  from {
+    background: transparent;
+  }
+}
+@keyframes vg-tick-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes vg-strike {
+  from {
+    transform: scaleX(0);
+  }
+}
+@keyframes vg-bar-grow {
+  from {
+    width: 50%;
+  }
+}
+@keyframes vg-count-out {
+  from {
+    opacity: 1;
+  }
+}
+@keyframes vg-count-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* launch Sunday · the run sheet reaching 10:00 */
+.marketing .vg-runsheet {
+  right: 5%;
+  top: 12%;
+  width: min(30%, 330px);
+}
+.marketing .vg-rs-body {
+  position: relative;
+  padding-inline-start: 14px;
+}
+.marketing .vg-rs-rule {
+  position: absolute;
+  inset-inline-start: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  background: var(--hairline);
+}
+.marketing .vg-rs-rule-fill {
+  display: block;
+  height: 100%;
+  background: var(--green);
+  transform-origin: top;
+}
+.marketing .vg-rs-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.marketing .vg-rs-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 0;
+}
+/* every time carries the chip's box so the label column never moves; only the
+   final hour fills it in */
+.marketing .vg-rs-t {
+  flex: none;
+  min-width: 44px;
+  padding: 2px 5px;
+  margin-inline-start: -5px;
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--field);
+}
+.marketing .vg-rs-l {
+  font-size: 12.5px;
+  line-height: 1.3;
+  color: var(--ink);
+}
+/* the last hour is the one that matters — its chip inverts to ink-on-green,
+   the only dark pairing green is allowed to carry */
+.marketing .vg-rs-row.is-last .vg-rs-t {
+  background: var(--green);
+  color: var(--ink);
+}
+.marketing .vg-rs-row.is-last .vg-rs-l {
+  font-weight: 600;
+}
+.marketing .ptabs.pt-seen .ppanel.active .vg-rs-rule-fill {
+  animation: vg-rule-fill 1900ms var(--ease) both;
+  animation-delay: 480ms;
+}
+.marketing .ptabs.pt-seen .ppanel.active .vg-rs-row {
+  animation: vg-row-reach 300ms var(--ease) both;
+  animation-delay: calc(560ms + var(--vg-i, 0) * 330ms);
+}
+.marketing .ptabs.pt-seen .ppanel.active .vg-rs-row:not(.is-last) .vg-rs-t {
+  animation: vg-time-reach 300ms var(--ease) both;
+  animation-delay: calc(560ms + var(--vg-i, 0) * 330ms);
+}
+.marketing .ptabs.pt-seen .ppanel.active .vg-rs-row.is-last .vg-rs-t {
+  animation: vg-time-invert 340ms var(--ease) both;
+  animation-delay: calc(560ms + var(--vg-i, 0) * 330ms);
+}
+@keyframes vg-rule-fill {
+  from {
+    transform: scaleY(0);
+  }
+}
+@keyframes vg-row-reach {
+  from {
+    opacity: 0.35;
+  }
+}
+@keyframes vg-time-reach {
+  from {
+    color: var(--text-2);
+  }
+}
+@keyframes vg-time-invert {
+  from {
+    background: transparent;
+    color: var(--text-2);
+  }
+}
+
+/* beyond · Trinity Grove week over week */
+.marketing .vg-ticker {
+  right: 5%;
+  top: 14%;
+  width: min(30%, 340px);
+}
+.marketing .vg-wk-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.marketing .vg-wk-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+}
+.marketing .vg-wk-n {
+  flex: none;
+  position: relative;
+  padding-inline-start: 14px;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--text-2);
+}
+.marketing .vg-wk-bar {
+  flex: 1;
+  height: 6px;
+  background: rgba(24, 29, 25, 0.08);
+}
+.marketing .vg-wk-fill {
+  display: block;
+  height: 100%;
+  width: var(--vg-w, 0%);
+  background: var(--ink);
+}
+.marketing .vg-wk-c {
+  flex: none;
+  min-width: 26px;
+  text-align: end;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+/* the closing week carries the claim the desktop chip used to */
+.marketing .vg-wk-row.is-now .vg-wk-n::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 8px;
+  height: 8px;
+  background: var(--green);
+}
+.marketing .vg-wk-row.is-now .vg-wk-n,
+.marketing .vg-wk-row.is-now .vg-wk-c {
+  font-weight: 500;
+  color: var(--ink);
+}
+.marketing .vg-wk-row.is-now .vg-wk-fill {
+  background: var(--field);
+}
+.marketing .ptabs.pt-seen .ppanel.active .vg-wk-row {
+  animation: vg-row-in 320ms var(--ease) both;
+  animation-delay: calc(520ms + var(--vg-i, 0) * 200ms);
+}
+.marketing .ptabs.pt-seen .ppanel.active .vg-wk-fill {
+  animation: vg-wk-grow 420ms var(--ease) both;
+  animation-delay: calc(560ms + var(--vg-i, 0) * 200ms);
+}
+@keyframes vg-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@keyframes vg-wk-grow {
+  from {
+    width: 0%;
+  }
+}
+
+/* mobile: the overlay cards go with the overlay images they live beside; the
+   scorecard stays and goes full-width — it is the one vignette that is MORE
+   legible small than the capture it replaced */
 @media (max-width: 899px) {
+  .marketing .vg-card {
+    display: none;
+  }
   .marketing .epane .vg-scorecard {
     max-width: 100%;
     width: 100%;
@@ -1340,7 +1704,19 @@ html:has(.marketing) {
   .marketing .vg-scorecard.vg-seen .vg-badge,
   .marketing .vg-scorecard.vg-seen .vg-badge-idle,
   .marketing .vg-scorecard.vg-seen .vg-reading,
-  .marketing .vg-scorecard.vg-seen .vg-basis {
+  .marketing .vg-scorecard.vg-seen .vg-basis,
+  .marketing .ptabs.pt-seen .ppanel.active .pshot .vg-card,
+  .marketing .ptabs.pt-seen .ppanel.active .vg-check .vg-box,
+  .marketing .ptabs.pt-seen .ppanel.active .vg-check .vg-box::after,
+  .marketing .ptabs.pt-seen .ppanel.active .vg-check .vg-check-t::after,
+  .marketing .ptabs.pt-seen .ppanel.active .vg-bar-fill,
+  .marketing .ptabs.pt-seen .ppanel.active .vg-count-a,
+  .marketing .ptabs.pt-seen .ppanel.active .vg-count-b,
+  .marketing .ptabs.pt-seen .ppanel.active .vg-rs-rule-fill,
+  .marketing .ptabs.pt-seen .ppanel.active .vg-rs-row,
+  .marketing .ptabs.pt-seen .ppanel.active .vg-rs-t,
+  .marketing .ptabs.pt-seen .ppanel.active .vg-wk-row,
+  .marketing .ptabs.pt-seen .ppanel.active .vg-wk-fill {
     animation: none;
   }
 }
