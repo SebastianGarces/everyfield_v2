@@ -64,11 +64,15 @@ Server-side `"use server"` services under `src/lib/phase-engine/`: `feedback/ser
 
 ---
 
-### Invitation Service Functions
+### Invitation Actions + Logic Layer
 
-All in `src/lib/invitations/service.ts` (11 exports, all Session):
+Split by #265 — it used to be one `"use server"` module with 11 exports, i.e. 11 POSTable endpoints, one of which took the acting user as an argument.
 
-`createInvitation(input)` (oversight role) · `acceptInvitation(id, user)` (target user) · `declineInvitation(id, user)` (target user) · `revokeInvitation(id)` (inviter) · `disassociateChurchFromSendingChurch` · `disassociateChurchFromNetwork` · `disassociateSendingChurchFromNetwork` · `getInvitation` · `getPendingInvitationsForChurch` · `getPendingInvitationsForSendingChurch` · `getInvitationsSentByUser`
+**`src/lib/invitations/service.ts`** — `"use server"`, exactly 4 exports, all Session, none takes an actor: `createInvitation(request)` · `acceptInvitation(id)` · `declineInvitation(id)` · `revokeInvitation(id)`. Each mints its actor with `invitationActorFromSession(await verifySession())` and returns `{ success: true, invitation } | { success: false, error }`. `createInvitation` derives the inviting org AND the invitation `type` from the actor's role — a client names only the target. Authority: create = `sending_church_admin` (own sending church) / `network_admin` (own network); accept + decline = the target plant's **planter**, or the target sending church's admin; revoke = the original inviter (enforced in the UPDATE).
+
+**`src/lib/invitations/core.ts`** — NOT `"use server"`, so unreachable from a browser. Actor-explicit mutations (`createInvitationAs`, `acceptInvitationAs`, `declineInvitationAs`, `revokeInvitationAs`), the pure authority rules (`resolveInvitationRequest`, `verifyInvitationAuthority`), the reads (`getInvitation`, `getPendingInvitationsForChurch`, `getPendingInvitationsForSendingChurch`, `getInvitationsSentByUser` — callers do their own access check; `getInvitation` is deliberately session-free for the register beta gate), and the disassociation primitives (`disassociateChurchFromSendingChurch` / `...FromNetwork` / `disassociateSendingChurchFromNetwork`) which have **no action wrapper** until who-may-sever is ruled. `InvitationActor` is branded and mintable only from a session.
+
+Shape pinned by `src/lib/invitations/service.test.ts` (export list, no actor parameter, `core.ts` has no directive, no other `"use server"` module imports it).
 
 ---
 

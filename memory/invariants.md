@@ -45,8 +45,10 @@ Stable truths that must not be violated.
 - Cookie name: `session` (httpOnly, secure in prod, sameSite=lax)
 - Session expiry: 30 days with 15-day sliding window refresh
 - Fresh session: 10 minutes after login (for sensitive ops)
+- **Every export of a `"use server"` module is a POSTable endpoint — reachable with no session and no UI.** So the export list of such a module IS its auth surface: putting a helper, a read, or a "we'll wire this up later" write there publishes it. Keep logic in a sibling module with no directive and let the `"use server"` file hold only the actions.
+- **A state-changing action never takes its actor as an argument.** It mints one from `verifySession()` (which throws `Unauthorized`), so there is no parameter a forged request can name someone else in. Where the entity is implied by the actor (their own plant, their own org), that is not an argument either. Reference: `src/lib/invitations/service.ts` + `core.ts` (#265 — `acceptInvitation(id, respondingUser)` used to trust the caller), `src/app/(dashboard)/settings/sharing/actions.ts`, `preferenceOwnerFromSession` in `src/lib/notifications/preferences.ts`. Branding the actor/owner type so only the mint can produce one makes it a compile error rather than a review note.
 
-**Source:** `src/lib/auth/session.ts`, `src/lib/auth/cookies.ts`
+**Source:** `src/lib/auth/session.ts`, `src/lib/auth/cookies.ts`, `src/lib/invitations/service.test.ts`
 
 ## Password Security
 

@@ -98,15 +98,17 @@
 
 | Flow | Entrypoint | Trigger |
 |------|-----------|---------|
-| Create invitation | `src/lib/invitations/service.ts:createInvitation()` | Oversight admin action |
-| Accept invitation | `src/lib/invitations/service.ts:acceptInvitation()` | Target user action |
-| Decline invitation | `src/lib/invitations/service.ts:declineInvitation()` | Target user action |
-| Revoke invitation | `src/lib/invitations/service.ts:revokeInvitation()` | Inviter action |
-| Disassociate | `src/lib/invitations/service.ts:disassociate*()` | User action |
+| Create invitation | `src/lib/invitations/service.ts:createInvitation(request)` | Oversight admin action — inviting org + `type` derived from the session, never from the request |
+| Accept invitation | `src/lib/invitations/service.ts:acceptInvitation(id)` | Target plant's planter / target sending church's admin |
+| Decline invitation | `src/lib/invitations/service.ts:declineInvitation(id)` | Same authority as accept |
+| Revoke invitation | `src/lib/invitations/service.ts:revokeInvitation(id)` | Original inviter (enforced in the UPDATE) |
+| Disassociate | `src/lib/invitations/core.ts:disassociate*()` | **No entrypoint** — primitive only, no action wrapper until who-may-sever is ruled (#265) |
 
-**Primary modules:** `src/lib/invitations/`, `src/db/schema/organization-invitation.ts`
+**Primary modules:** `src/lib/invitations/service.ts` (the 4 actions, `"use server"`), `src/lib/invitations/core.ts` (logic + reads + primitives, NOT `"use server"`), `src/db/schema/organization-invitation.ts`
 
 **Key deps:** `organization_invitations`, `churches`, `sending_churches` tables
+
+**#265:** the four actions take NO actor — each mints one with `invitationActorFromSession(await verifySession())`. Everything else moved to `core.ts` precisely because it must not be an endpoint. See `memory/contracts/api.md` → Invitation Actions + Logic Layer.
 
 ---
 
@@ -179,7 +181,7 @@
 | Save a digest cadence | `(dash)/settings/actions.ts:setDigestCadenceAction()` | Cadence select in the `digest` row |
 | Sharing screen (plant → oversight) | `(dash)/settings/sharing/page.tsx` → `oversight-sharing.ts:isSharingActivityWithOversight()` | Route `/settings/sharing` (planter only; linked from `/settings`) |
 | Save the sharing toggle | `(dash)/settings/sharing/actions.ts:setOversightSharingAction()` | The one switch on that screen |
-| Oversight milestone (no UI) | `oversight.ts:announceInvitationAccepted()` / `announcePhaseAdvanced()` / `announceLaunchDateChanged()` | `invitations/service.ts:acceptInvitation()`, the `phase.changed` subscription, `churches/launch-date.ts:setChurchLaunchDate(user, churchId, date)` — which authorises itself (`requireRole("planter")` + `requireChurchAccess`), so a surface wiring it cannot forget |
+| Oversight milestone (no UI) | `oversight.ts:announceInvitationAccepted()` / `announcePhaseAdvanced()` / `announceLaunchDateChanged()` | `invitations/core.ts:acceptInvitationAs()` (behind the session-derived `service.ts:acceptInvitation()`), the `phase.changed` subscription, `churches/launch-date.ts:setChurchLaunchDate(user, churchId, date)` — which authorises itself (`requireRole("planter")` + `requireChurchAccess`), so a surface wiring it cannot forget |
 | Oversight daily digest (no UI) | `oversight-digest.ts:runDailyOversightDigestSweep()` ← the every-15-min dispatch tick (`api/notifications/dispatch/route.ts`) | Per plant, one COMPLETE day — always the day BEFORE the tick, never a partial today (the dedupe key `(church, day)` would freeze a partial count forever). SCHEDULED (ruled 2026-08-01): no cron of its own — `selectPlantsOwedDigest()` offers a plant only while it has no digest row for that day, so 96 ticks produce one digest and a dropped tick is a delay, not a loss |
 | **Unsubscribe link (logged out)** | `src/app/api/notifications/unsubscribe/route.ts:GET` — 303 only, **no write** | Unsubscribe link in a notification email |
 | Unsubscribe confirmation | `src/app/unsubscribe/page.tsx` → `channels/unsubscribe.ts:describeUnsubscribeSubject()` | 303 from the route above |

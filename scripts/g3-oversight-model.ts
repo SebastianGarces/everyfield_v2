@@ -39,7 +39,14 @@ import {
 } from "@/db/schema";
 import { canAccessChurch } from "@/lib/auth/access";
 import { setChurchLaunchDate } from "@/lib/churches/launch-date";
-import { acceptInvitation, createInvitation } from "@/lib/invitations/service";
+import {
+  INVITATION_EXPIRY_DAYS,
+  acceptInvitationAs,
+  insertInvitation,
+  invitationActorFromSession,
+  type InvitationActor,
+  type ResolvedInvitation,
+} from "@/lib/invitations/core";
 import { notificationCategories } from "@/lib/notifications/categories";
 import { enqueue } from "@/lib/notifications/enqueue";
 import {
@@ -60,6 +67,43 @@ import {
   setSharingActivityWithOversight,
 } from "@/lib/notifications/oversight-sharing";
 import { persons } from "@/db/schema";
+
+// ----------------------------------------------------------------------------
+// #265 moved the invitation logic out of the `"use server"` module: the four
+// browser-reachable actions (`@/lib/invitations/service`) now mint their actor
+// from `verifySession()`, so a harness with no request calls the logic layer
+// directly. Nothing about the behaviour under test changed — `acceptInvitationAs`
+// is the function the action calls.
+//
+// `seedInvitation` writes a row verbatim, which §3c needs: it deliberately
+// builds invitations no action would ever produce (both FK columns set) to prove
+// the audience is derived from `type` and not from a stray id.
+// ----------------------------------------------------------------------------
+
+type InvitationSeed = Pick<ResolvedInvitation, "type" | "inviterUserId"> &
+  Partial<ResolvedInvitation>;
+
+async function seedInvitation(seed: InvitationSeed) {
+  return insertInvitation({
+    targetChurchId: null,
+    targetSendingChurchId: null,
+    sendingChurchId: null,
+    sendingNetworkId: null,
+    expiresInDays: INVITATION_EXPIRY_DAYS,
+    ...seed,
+  });
+}
+
+/** The actor a session would mint for this user. */
+function actorFor(user: {
+  id: string;
+  role: (typeof users.$inferSelect)["role"];
+  churchId: string | null;
+  sendingChurchId: string | null;
+  sendingNetworkId: string | null;
+}): InvitationActor {
+  return invitationActorFromSession({ user });
+}
 
 function ok(label: string) {
   console.log(`PASS  ${label}`);
@@ -254,13 +298,13 @@ async function main() {
     updatedBy: planter.id,
   });
 
-  const invitationOff = await createInvitation({
+  const invitationOff = await seedInvitation({
     type: "church_to_network",
     inviterUserId: adminA.id,
     targetChurchId: plant.id,
     sendingNetworkId: network.id,
   });
-  await acceptInvitation(invitationOff.id, planter);
+  await acceptInvitationAs(actorFor(planter), invitationOff.id);
 
   // RULED 2026-08-01 (amending N-026): this milestone is EXEMPT from the
   // toggle. "Your invitation was accepted" is the sending church's own event —
@@ -314,13 +358,13 @@ async function main() {
     updatedBy: planter.id,
   });
 
-  const invitationOn = await createInvitation({
+  const invitationOn = await seedInvitation({
     type: "church_to_network",
     inviterUserId: adminA.id,
     targetChurchId: plant.id,
     sendingNetworkId: network.id,
   });
-  await acceptInvitation(invitationOn.id, planter);
+  await acceptInvitationAs(actorFor(planter), invitationOn.id);
 
   const afterInvitation = await rowsFor(plant.id);
   assert.equal(afterInvitation.length, 2, "one row per oversight admin");
@@ -381,13 +425,13 @@ async function main() {
   await db.delete(notifications).where(eq(notifications.churchId, plant.id));
 
   // Direction 1: the NETWORK invites. The sending church invited nobody.
-  const networkInvitation = await createInvitation({
+  const networkInvitation = await seedInvitation({
     type: "church_to_network",
     inviterUserId: adminA.id,
     targetChurchId: plant.id,
     sendingNetworkId: network.id,
   });
-  await acceptInvitation(networkInvitation.id, planter);
+  await acceptInvitationAs(actorFor(planter), networkInvitation.id);
 
   const afterNetworkInvite = await rowsFor(plant.id);
   assert.deepEqual(
@@ -408,13 +452,13 @@ async function main() {
 
   // Direction 2: the SENDING CHURCH invites. The network invited nobody.
   await db.delete(notifications).where(eq(notifications.churchId, plant.id));
-  const sendingChurchInvitation = await createInvitation({
+  const sendingChurchInvitation = await seedInvitation({
     type: "church_to_sending_church",
     inviterUserId: sendingChurchAdmin.id,
     targetChurchId: plant.id,
     sendingChurchId: otherSendingChurch.id,
   });
-  await acceptInvitation(sendingChurchInvitation.id, planter);
+  await acceptInvitationAs(actorFor(planter), sendingChurchInvitation.id);
 
   const afterSendingChurchInvite = await rowsFor(plant.id);
   assert.deepEqual(
@@ -438,7 +482,7 @@ async function main() {
   // The second half of the same bypass (ruled 2026-08-02). Narrowing the
   // audience to "the invitation's org" is only a fix if the invitation names
   // ONE org — and `organization_invitations` has both FK columns, no CHECK
-  // tying either to `type`, and a `createInvitation` that validates nothing.
+  // tying either to `type`, and an insert path that validates nothing.
   // The call below is the proof of that last claim: it inserts a
   // `church_to_sending_church` row carrying a `sending_network_id` too, and is
   // accepted without complaint.
@@ -446,7 +490,7 @@ async function main() {
   // The audience is derived from `type`, so the stray id is ignored and the
   // network — sharing still OFF, having invited nobody — hears nothing.
   await db.delete(notifications).where(eq(notifications.churchId, plant.id));
-  const dualIdInvitation = await createInvitation({
+  const dualIdInvitation = await seedInvitation({
     type: "church_to_sending_church",
     inviterUserId: sendingChurchAdmin.id,
     targetChurchId: plant.id,
@@ -456,9 +500,9 @@ async function main() {
   assert.equal(
     dualIdInvitation.sendingNetworkId,
     network.id,
-    "createInvitation rejected the ambiguous row — the fixture no longer reproduces the finding"
+    "insertInvitation rejected the ambiguous row — the fixture no longer reproduces the finding"
   );
-  await acceptInvitation(dualIdInvitation.id, planter);
+  await acceptInvitationAs(actorFor(planter), dualIdInvitation.id);
 
   const afterDualIdInvite = await rowsFor(plant.id);
   assert.deepEqual(
@@ -479,14 +523,14 @@ async function main() {
 
   // ...and the mirror, so the derivation cannot be one-directional.
   await db.delete(notifications).where(eq(notifications.churchId, plant.id));
-  const dualIdToNetwork = await createInvitation({
+  const dualIdToNetwork = await seedInvitation({
     type: "church_to_network",
     inviterUserId: adminA.id,
     targetChurchId: plant.id,
     sendingChurchId: otherSendingChurch.id,
     sendingNetworkId: network.id,
   });
-  await acceptInvitation(dualIdToNetwork.id, planter);
+  await acceptInvitationAs(actorFor(planter), dualIdToNetwork.id);
 
   const afterDualIdToNetwork = await rowsFor(plant.id);
   assert.deepEqual(

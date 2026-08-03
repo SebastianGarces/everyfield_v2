@@ -1,4 +1,4 @@
-import { getInvitation } from "@/lib/invitations/service";
+import { getInvitation } from "@/lib/invitations/core";
 
 /**
  * Private-beta gate helpers (server-side only).

@@ -1,479 +1,111 @@
 "use server";
 
-import { db } from "@/db";
+// ============================================================================
+// Organization invitations — the action layer (issue #265).
+//
+// EVERY export of a `"use server"` module is a POSTable endpoint, whether or
+// not any UI calls it. This module used to export all eleven invitation
+// functions, so an unauthenticated request could accept an invitation as
+// somebody else — `respondingUser` was an argument — or detach any church from
+// its sending church by guessing a uuid. Both are closed here:
+//
+//   1. The actor is NEVER an argument. Every action below mints it with
+//      `invitationActorFromSession(await verifySession())`, which throws
+//      "Unauthorized" when there is no session, so a forged POST carrying a
+//      foreign user changes nothing: there is no parameter for it to land in
+//      and no code path that reads one. Same rule as
+//      `src/app/(dashboard)/settings/{,sharing/}actions.ts`.
+//   2. Everything that is not an endpoint — the reads, the association
+//      primitives, the row builders — lives in `./core`, which has no
+//      `"use server"` directive and is therefore unreachable from a browser.
+//      `hasValidInvitationBypass` (register) and the G3 harness import it
+//      directly; the client cannot.
+//
+// The exports here are exactly the four invitation-lifecycle mutations a user
+// performs on their own behalf. Disassociation deliberately has no action —
+// see `./core` → Disassociation for why, and for what adding one requires.
+//
+// Errors: an `InvitationError` is a message the user is meant to read (not
+// yours, not pending, expired); anything else is logged server-side and
+// reported generically, so an internal failure never reaches the client.
+// `service.test.ts` pins the shape of this file.
+// ============================================================================
+
+import type { OrganizationInvitation } from "@/db/schema";
+import { verifySession } from "@/lib/auth/session";
+
 import {
-  churches,
-  organizationInvitations,
-  sendingChurches,
-  type NewOrganizationInvitation,
-  type OrganizationInvitation,
-  type User,
-} from "@/db/schema";
-import type {
-  OrganizationInvitationStatus,
-  OrganizationInvitationType,
-} from "@/db/schema/organization-invitation";
-import { announceInvitationAccepted } from "@/lib/notifications/oversight";
-import { and, desc, eq } from "drizzle-orm";
+  InvitationError,
+  acceptInvitationAs,
+  createInvitationAs,
+  declineInvitationAs,
+  invitationActorFromSession,
+  revokeInvitationAs,
+  type InvitationRequest,
+} from "./core";
 
-// ============================================================================
-// Constants
-// ============================================================================
+export type InvitationActionResult =
+  | { success: true; invitation: OrganizationInvitation }
+  | { success: false; error: string };
 
-/** Default invitation expiry: 30 days */
-const INVITATION_EXPIRY_DAYS = 30;
+const GENERIC_ERROR = "Something went wrong — try that again";
 
-// ============================================================================
-// Create Invitations
-// ============================================================================
-
-export interface CreateInvitationInput {
-  type: OrganizationInvitationType;
-  inviterUserId: string;
-  targetChurchId?: string;
-  targetSendingChurchId?: string;
-  sendingChurchId?: string;
-  sendingNetworkId?: string;
-  expiresInDays?: number;
+async function run(
+  label: string,
+  mutate: () => Promise<OrganizationInvitation>
+): Promise<InvitationActionResult> {
+  try {
+    return { success: true, invitation: await mutate() };
+  } catch (error) {
+    if (error instanceof InvitationError) {
+      return { success: false, error: error.message };
+    }
+    console.error(`${label} failed`, error);
+    return { success: false, error: GENERIC_ERROR };
+  }
 }
 
 /**
- * Create a new organization invitation.
- *
- * Types:
- * - `church_to_sending_church`: Sending church invites a church plant
- * - `sending_church_to_network`: Network invites a sending church
- * - `church_to_network`: Network invites a church plant directly
+ * Issue an invitation. The inviting org and the invitation `type` are derived
+ * from the session — a client says only who is being invited — so an oversight
+ * admin can never enrol a plant into an org that is not theirs.
  */
 export async function createInvitation(
-  input: CreateInvitationInput
-): Promise<OrganizationInvitation> {
-  const expiresAt = new Date(
-    Date.now() +
-      (input.expiresInDays ?? INVITATION_EXPIRY_DAYS) * 24 * 60 * 60 * 1000
-  );
-
-  const values: NewOrganizationInvitation = {
-    type: input.type,
-    inviterUserId: input.inviterUserId,
-    targetChurchId: input.targetChurchId ?? null,
-    targetSendingChurchId: input.targetSendingChurchId ?? null,
-    sendingChurchId: input.sendingChurchId ?? null,
-    sendingNetworkId: input.sendingNetworkId ?? null,
-    status: "pending",
-    expiresAt,
-  };
-
-  const [invitation] = await db
-    .insert(organizationInvitations)
-    .values(values)
-    .returning();
-
-  return invitation;
+  request: InvitationRequest
+): Promise<InvitationActionResult> {
+  const actor = invitationActorFromSession(await verifySession());
+  return run("createInvitation", () => createInvitationAs(actor, request));
 }
 
-// ============================================================================
-// Respond to Invitations
-// ============================================================================
-
 /**
- * Accept an invitation. Updates the target entity's FK to create the association.
- * The responding user must be an admin of the target entity.
+ * Accept an invitation addressed to the actor's own church or sending church.
  */
 export async function acceptInvitation(
-  invitationId: string,
-  respondingUser: User
-): Promise<OrganizationInvitation> {
-  const invitation = await getInvitation(invitationId);
-
-  if (!invitation) {
-    throw new Error("Invitation not found");
-  }
-
-  if (invitation.status !== "pending") {
-    throw new Error(`Invitation is already ${invitation.status}`);
-  }
-
-  if (invitation.expiresAt && invitation.expiresAt < new Date()) {
-    // Auto-expire
-    await updateInvitationStatus(invitationId, "expired");
-    throw new Error("Invitation has expired");
-  }
-
-  // Authorization: verify the responding user has authority over the target entity
-  verifyInvitationAuthority(invitation, respondingUser);
-
-  // Create the association based on invitation type
-  await applyAssociation(invitation);
-
-  // Mark invitation as accepted
-  const [updated] = await db
-    .update(organizationInvitations)
-    .set({
-      status: "accepted",
-      respondedBy: respondingUser.id,
-      respondedAt: new Date(),
-    })
-    .where(eq(organizationInvitations.id, invitationId))
-    .returning();
-
-  // F11 N-025 — milestone #1, announced at its source.
-  //
-  // Last, and after the durable "accepted" marker, so a notification failure
-  // cannot leave an invitation half-accepted (memory/invariants.md →
-  // Atomicity). `announceInvitationAccepted` never throws and never decides
-  // whether the plant is sharing — `enqueue` does, per recipient, and writes
-  // nothing when it is not.
-  //
-  // Only a PLANT-side acceptance is a milestone: `target_church_id` is set when
-  // a sending church or a network invited a church plant, which is the "planter
-  // accepted invitation" the ruling names. A sending church joining a network
-  // is a different event with no plant to report on.
-  if (updated.targetChurchId) {
-    await announceInvitationAcceptedForChurch(updated);
-  }
-
-  return updated;
+  invitationId: string
+): Promise<InvitationActionResult> {
+  const actor = invitationActorFromSession(await verifySession());
+  return run("acceptInvitation", () => acceptInvitationAs(actor, invitationId));
 }
 
 /**
- * Look up the plant's name and announce the milestone. Best-effort by
- * construction: `announceInvitationAccepted` swallows its own failures, and the
- * name lookup is guarded so a missing church cannot throw into an acceptance
- * that has already been recorded.
- *
- * The whole INVITATION is passed, not just the church id, because the audience
- * of this one milestone is the org that issued it, and `invitation.type` is
- * what names that org (`invitingOrgForInvitation`). It is the only oversight
- * notification `enqueue` writes without consent, so it has to be addressed
- * exactly, and there are two ways to get it wrong — both of them reachable:
- *
- *   * from the PLANT: `applyAssociation` below sets one of the plant's two
- *     oversight FKs without clearing the other, so a plant can belong to a
- *     sending church AND a network at once, and the uninvolved one would have
- *     been notified without consent;
- *   * from the invitation's two FK COLUMNS: `createInvitation` performs no
- *     type↔id consistency check and there is no CHECK constraint, so a
- *     `church_to_sending_church` row carrying a stray `sending_network_id`
- *     would have reached the network too.
- *
- * Deriving from `type` closes both: it is the same field `applyAssociation`
- * switches on, so the notification goes to precisely the org whose association
- * was just made.
- */
-async function announceInvitationAcceptedForChurch(
-  invitation: OrganizationInvitation
-): Promise<void> {
-  const churchId = invitation.targetChurchId;
-  if (!churchId) return;
-
-  try {
-    const [plant] = await db
-      .select({ name: churches.name })
-      .from(churches)
-      .where(eq(churches.id, churchId))
-      .limit(1);
-
-    if (!plant) return;
-
-    await announceInvitationAccepted({
-      churchId,
-      plantName: plant.name,
-      invitationId: invitation.id,
-      invitation: {
-        type: invitation.type,
-        sendingChurchId: invitation.sendingChurchId,
-        sendingNetworkId: invitation.sendingNetworkId,
-      },
-    });
-  } catch (error) {
-    console.error("oversight invitation milestone failed", {
-      churchId,
-      invitationId: invitation.id,
-      error,
-    });
-  }
-}
-
-/**
- * Decline an invitation.
- * The responding user must be an admin of the target entity.
+ * Decline an invitation addressed to the actor's own church or sending church.
  */
 export async function declineInvitation(
-  invitationId: string,
-  respondingUser: User
-): Promise<OrganizationInvitation> {
-  const invitation = await getInvitation(invitationId);
-
-  if (!invitation) {
-    throw new Error("Invitation not found");
-  }
-
-  if (invitation.status !== "pending") {
-    throw new Error(`Invitation is already ${invitation.status}`);
-  }
-
-  // Authorization: verify the responding user has authority over the target entity
-  verifyInvitationAuthority(invitation, respondingUser);
-
-  const [updated] = await db
-    .update(organizationInvitations)
-    .set({
-      status: "declined",
-      respondedBy: respondingUser.id,
-      respondedAt: new Date(),
-    })
-    .where(eq(organizationInvitations.id, invitationId))
-    .returning();
-
-  return updated;
+  invitationId: string
+): Promise<InvitationActionResult> {
+  const actor = invitationActorFromSession(await verifySession());
+  return run("declineInvitation", () =>
+    declineInvitationAs(actor, invitationId)
+  );
 }
 
 /**
- * Revoke a pending invitation (by the inviter).
- * Only the original inviter can revoke.
+ * Revoke an invitation the actor sent. The inviter is the session's user and
+ * the check lives in the UPDATE, so anyone else matches no row.
  */
 export async function revokeInvitation(
-  invitationId: string,
-  revokingUserId: string
-): Promise<OrganizationInvitation> {
-  const [updated] = await db
-    .update(organizationInvitations)
-    .set({ status: "revoked" })
-    .where(
-      and(
-        eq(organizationInvitations.id, invitationId),
-        eq(organizationInvitations.status, "pending"),
-        eq(organizationInvitations.inviterUserId, revokingUserId)
-      )
-    )
-    .returning();
-
-  if (!updated) {
-    throw new Error(
-      "Invitation not found, not pending, or you are not the inviter"
-    );
-  }
-
-  return updated;
-}
-
-// ============================================================================
-// Disassociation
-// ============================================================================
-
-/**
- * Remove a church plant's association with its sending church.
- * Sets `churches.sending_church_id` back to null.
- */
-export async function disassociateChurchFromSendingChurch(
-  churchId: string
-): Promise<void> {
-  await db
-    .update(churches)
-    .set({
-      sendingChurchId: null,
-      updatedAt: new Date(),
-    })
-    .where(eq(churches.id, churchId));
-}
-
-/**
- * Remove a church plant's direct association with a network.
- * Sets `churches.sending_network_id` back to null.
- */
-export async function disassociateChurchFromNetwork(
-  churchId: string
-): Promise<void> {
-  await db
-    .update(churches)
-    .set({
-      sendingNetworkId: null,
-      updatedAt: new Date(),
-    })
-    .where(eq(churches.id, churchId));
-}
-
-/**
- * Remove a sending church's association with a network.
- * Sets `sending_churches.sending_network_id` back to null.
- */
-export async function disassociateSendingChurchFromNetwork(
-  sendingChurchId: string
-): Promise<void> {
-  await db
-    .update(sendingChurches)
-    .set({
-      sendingNetworkId: null,
-      updatedAt: new Date(),
-    })
-    .where(eq(sendingChurches.id, sendingChurchId));
-}
-
-// ============================================================================
-// Query Invitations
-// ============================================================================
-
-/**
- * Get a single invitation by ID.
- */
-export async function getInvitation(
-  id: string
-): Promise<OrganizationInvitation | null> {
-  const [invitation] = await db
-    .select()
-    .from(organizationInvitations)
-    .where(eq(organizationInvitations.id, id))
-    .limit(1);
-
-  return invitation ?? null;
-}
-
-/**
- * Get pending invitations for a church plant (as target).
- */
-export async function getPendingInvitationsForChurch(
-  churchId: string
-): Promise<OrganizationInvitation[]> {
-  return db
-    .select()
-    .from(organizationInvitations)
-    .where(
-      and(
-        eq(organizationInvitations.targetChurchId, churchId),
-        eq(organizationInvitations.status, "pending")
-      )
-    )
-    .orderBy(desc(organizationInvitations.createdAt));
-}
-
-/**
- * Get pending invitations for a sending church (as target).
- */
-export async function getPendingInvitationsForSendingChurch(
-  sendingChurchId: string
-): Promise<OrganizationInvitation[]> {
-  return db
-    .select()
-    .from(organizationInvitations)
-    .where(
-      and(
-        eq(organizationInvitations.targetSendingChurchId, sendingChurchId),
-        eq(organizationInvitations.status, "pending")
-      )
-    )
-    .orderBy(desc(organizationInvitations.createdAt));
-}
-
-/**
- * Get all invitations sent by a user (for tracking sent invitations).
- */
-export async function getInvitationsSentByUser(
-  userId: string
-): Promise<OrganizationInvitation[]> {
-  return db
-    .select()
-    .from(organizationInvitations)
-    .where(eq(organizationInvitations.inviterUserId, userId))
-    .orderBy(desc(organizationInvitations.createdAt));
-}
-
-// ============================================================================
-// Internal Helpers
-// ============================================================================
-
-/**
- * Apply the association by updating the target entity's FK.
- */
-async function applyAssociation(
-  invitation: OrganizationInvitation
-): Promise<void> {
-  switch (invitation.type) {
-    case "church_to_sending_church": {
-      if (!invitation.targetChurchId || !invitation.sendingChurchId) {
-        throw new Error("Invalid invitation: missing church or sending church");
-      }
-      await db
-        .update(churches)
-        .set({
-          sendingChurchId: invitation.sendingChurchId,
-          updatedAt: new Date(),
-        })
-        .where(eq(churches.id, invitation.targetChurchId));
-      break;
-    }
-
-    case "church_to_network": {
-      if (!invitation.targetChurchId || !invitation.sendingNetworkId) {
-        throw new Error("Invalid invitation: missing church or network");
-      }
-      await db
-        .update(churches)
-        .set({
-          sendingNetworkId: invitation.sendingNetworkId,
-          updatedAt: new Date(),
-        })
-        .where(eq(churches.id, invitation.targetChurchId));
-      break;
-    }
-
-    case "sending_church_to_network": {
-      if (!invitation.targetSendingChurchId || !invitation.sendingNetworkId) {
-        throw new Error(
-          "Invalid invitation: missing sending church or network"
-        );
-      }
-      await db
-        .update(sendingChurches)
-        .set({
-          sendingNetworkId: invitation.sendingNetworkId,
-          updatedAt: new Date(),
-        })
-        .where(eq(sendingChurches.id, invitation.targetSendingChurchId));
-      break;
-    }
-  }
-}
-
-/**
- * Verify the responding user has authority over the invitation's target entity.
- * - church_to_sending_church → user must be planter for that church
- * - sending_church_to_network → user must be admin of the target sending church
- * - church_to_network → user must be planter for that church
- */
-function verifyInvitationAuthority(
-  invitation: OrganizationInvitation,
-  user: User
-): void {
-  switch (invitation.type) {
-    case "church_to_sending_church":
-    case "church_to_network": {
-      // The target is a church — user must be the planter for that church
-      if (!user.churchId || user.churchId !== invitation.targetChurchId) {
-        throw new Error("You are not authorized to respond to this invitation");
-      }
-      break;
-    }
-    case "sending_church_to_network": {
-      // The target is a sending church — user must be admin of that sending church
-      if (
-        user.role !== "sending_church_admin" ||
-        !user.sendingChurchId ||
-        user.sendingChurchId !== invitation.targetSendingChurchId
-      ) {
-        throw new Error("You are not authorized to respond to this invitation");
-      }
-      break;
-    }
-  }
-}
-
-async function updateInvitationStatus(
-  invitationId: string,
-  status: OrganizationInvitationStatus
-): Promise<void> {
-  await db
-    .update(organizationInvitations)
-    .set({ status })
-    .where(eq(organizationInvitations.id, invitationId));
+  invitationId: string
+): Promise<InvitationActionResult> {
+  const actor = invitationActorFromSession(await verifySession());
+  return run("revokeInvitation", () => revokeInvitationAs(actor, invitationId));
 }
