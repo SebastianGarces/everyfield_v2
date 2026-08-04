@@ -9,6 +9,7 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { WikiGuide } from "@/components/wiki-guide";
 import { getCurrentSession } from "@/lib/auth";
 import { isPlatformAdmin } from "@/lib/auth/admin";
+import { isCrawlerUserAgent } from "@/lib/crawler";
 import {
   notificationViewer,
   type NotificationViewer,
@@ -57,7 +58,13 @@ export default async function DashboardLayout({
 }) {
   const { user } = await getCurrentSession();
   const headersList = await headers();
-  const isCrawler = headersList.get("x-is-crawler") === "true";
+  // Derived here from the request's own `user-agent` — the same input, and the
+  // same predicate, the proxy used to decide not to bounce this request to
+  // /login. It used to read an `x-is-crawler` request header instead, which the
+  // proxy only ever set on the RESPONSE: nothing in the app wrote that header,
+  // so the branch fired only for a client that forged it (#240). See
+  // `src/lib/crawler.ts` for what this check does and does not authorise.
+  const isCrawler = isCrawlerUserAgent(headersList.get("user-agent"));
 
   // For crawlers without auth, render minimal shell for metadata scraping only
   if (!user && isCrawler) {

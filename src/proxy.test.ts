@@ -77,3 +77,88 @@ test("a same-origin POST to a protected path is allowed", () => {
   );
   assert.notEqual(response.status, 403);
 });
+
+// ============================================================================
+// The crawler allowance (#240).
+//
+// An unauthenticated GET of a protected route is bounced to /login unless the
+// request's `user-agent` names a link previewer, which needs the page for its
+// OpenGraph tags. The decision is the User-Agent and nothing else: the proxy no
+// longer emits `x-is-crawler`, because that header went on the RESPONSE, where
+// the layout downstream never saw it — the layout's copy of this branch used to
+// read `x-is-crawler` off the REQUEST, so the only thing that could ever set it
+// was the client. Both sides now call `isCrawlerUserAgent` on the same input.
+// ============================================================================
+
+const GOOGLEBOT =
+  "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)";
+const CHROME =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
+
+function get(path: string, headers: Record<string, string> = {}): NextRequest {
+  return new NextRequest(new Request(`${BASE}${path}`, { headers }));
+}
+
+/** The redirect the proxy issues for an unauthenticated, non-crawler GET. */
+function loginRedirect(response: Response): string | null {
+  return response.status >= 300 && response.status < 400
+    ? response.headers.get("location")
+    : null;
+}
+
+test("an unauthenticated crawler is let through to a protected route", () => {
+  for (const path of ["/dashboard", "/wiki/getting-started", "/oversight"]) {
+    const response = proxy(get(path, { "user-agent": GOOGLEBOT }));
+    assert.equal(
+      loginRedirect(response),
+      null,
+      `${path} bounced a crawler that needs it for metadata`
+    );
+  }
+});
+
+test("an unauthenticated browser is still sent to /login", () => {
+  const response = proxy(get("/dashboard", { "user-agent": CHROME }));
+  assert.equal(
+    loginRedirect(response),
+    `${BASE}/login?redirect=%2Fdashboard`,
+    "a session-less browser reached the dashboard"
+  );
+});
+
+test("forging x-is-crawler buys nothing — with it or without it, same result", () => {
+  // The acceptance criterion, stated directly. A client that sends the header
+  // the layout used to trust must be treated exactly like one that does not.
+  for (const path of ["/dashboard", "/wiki/getting-started"]) {
+    const forged = proxy(
+      get(path, { "user-agent": CHROME, "x-is-crawler": "true" })
+    );
+    const plain = proxy(get(path, { "user-agent": CHROME }));
+
+    assert.equal(forged.status, plain.status, path);
+    assert.equal(
+      loginRedirect(forged),
+      loginRedirect(plain),
+      `a forged x-is-crawler header changed the outcome for ${path}`
+    );
+    assert.notEqual(
+      loginRedirect(forged),
+      null,
+      `a forged x-is-crawler header got past the login redirect for ${path}`
+    );
+  }
+});
+
+test("the proxy never emits an x-is-crawler header", () => {
+  // It only ever went on the response, which is why the layout could not read
+  // it. Nothing writes it now, so any occurrence downstream is client input.
+  const responses = [
+    proxy(get("/dashboard", { "user-agent": GOOGLEBOT })),
+    proxy(get("/wiki/getting-started", { "user-agent": GOOGLEBOT })),
+    proxy(get("/dashboard", { "user-agent": CHROME })),
+    proxy(get("/login")),
+  ];
+  for (const response of responses) {
+    assert.equal(response.headers.get("x-is-crawler"), null);
+  }
+});

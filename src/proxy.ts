@@ -1,6 +1,8 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
+import { isCrawlerUserAgent } from "@/lib/crawler";
+
 const SESSION_COOKIE_NAME = "session";
 const SESSION_EXPIRY_SECONDS = 30 * 24 * 60 * 60; // 30 days
 
@@ -25,26 +27,6 @@ const CSRF_EXEMPT_ROUTES = [
   // a holder of one can do is stop one category of email for themselves.
   "/api/notifications/unsubscribe",
 ];
-
-// Social media and search engine crawler user agents
-// These need access to pages for metadata/OG tag scraping
-const CRAWLER_USER_AGENTS = [
-  "facebookexternalhit",
-  "twitterbot",
-  "linkedinbot",
-  "slackbot",
-  "telegrambot",
-  "whatsapp",
-  "applebot", // iMessage link previews
-  "googlebot",
-  "bingbot",
-  "discordbot",
-];
-
-function isCrawler(userAgent: string): boolean {
-  const ua = userAgent.toLowerCase();
-  return CRAWLER_USER_AGENTS.some((crawler) => ua.includes(crawler));
-}
 
 function isAuthRoute(pathname: string): boolean {
   return pathname === "/" || AUTH_ROUTES.includes(pathname);
@@ -76,16 +58,17 @@ export function proxy(request: NextRequest): NextResponse {
     // Unauthenticated user on protected routes → redirect to login
     // Exception: Allow crawlers through for metadata/OG tag scraping
     if (!hasSessionCookie && isProtectedRoute(pathname)) {
-      const userAgent = request.headers.get("user-agent") || "";
-      if (!isCrawler(userAgent)) {
+      if (!isCrawlerUserAgent(request.headers.get("user-agent"))) {
         const loginUrl = new URL("/login", request.url);
         loginUrl.searchParams.set("redirect", pathname);
         return NextResponse.redirect(loginUrl);
       }
-      // Crawler detected - allow through and set header for layout to check
-      const response = NextResponse.next();
-      response.headers.set("x-is-crawler", "true");
-      return response;
+      // Crawler detected — let it through for the metadata. It is deliberately
+      // NOT told downstream via a header: `response.headers.set(...)` writes to
+      // the response, which the layout never reads, so the old `x-is-crawler`
+      // only ever arrived when a client forged it (#240). The layout re-derives
+      // the same answer from the same `user-agent` via `isCrawlerUserAgent`.
+      return NextResponse.next();
     }
   }
 
