@@ -9,7 +9,9 @@
 // Security: `Authorization: Bearer <CRON_SECRET>`. It FAILS CLOSED — an unset
 // secret rejects everything rather than opening the endpoint, because this
 // route sends email to real users and an open one is a spam cannon pointed at
-// the cohort. Same contract as `/api/phase-engine/assess`.
+// the cohort. Same contract as `/api/phase-engine/assess`. The comparison
+// itself is CONSTANT-TIME (#266) — see `secretsMatch` below for why `===` and a
+// plain length guard are both oracles.
 //
 // It also carries the DAILY oversight activity digest (ruled 2026-08-01). That
 // is not a second job bolted on: the digest needs a once-a-day trigger, this app
@@ -33,6 +35,8 @@
 // gets a disjoint set of rows or none at all. There is no run lock and none is
 // needed; see the dispatch module header.
 // ============================================================================
+
+import { createHash, timingSafeEqual } from "node:crypto";
 
 import { NextRequest, NextResponse } from "next/server";
 
@@ -58,6 +62,42 @@ export const revalidate = 0;
  */
 export const maxDuration = 60;
 
+/**
+ * Constant-time string equality (#266).
+ *
+ * `===` on a secret is a timing oracle: V8 compares byte by byte and returns at
+ * the first difference, so an attacker who can time this endpoint learns the
+ * secret one character at a time. `crypto.timingSafeEqual` compares in time
+ * that does not depend on WHERE the buffers differ — but it throws a
+ * `RangeError` when the two buffers differ in LENGTH, so the lengths have to be
+ * reconciled before it is called, and a naive `if (a.length !== b.length)
+ * return false` in front of it just moves the oracle: it leaks the secret's
+ * length, which is exactly the first thing a guesser wants.
+ *
+ * So both sides are hashed first. SHA-256 digests are always 32 bytes, so the
+ * call can never throw, the same work happens for a 3-byte guess and a 3 KB
+ * one, and nothing about the real secret's length is observable. The raw byte
+ * lengths are compared too — after the constant-time compare, never as an early
+ * return — so the result does not rest on collision resistance alone.
+ *
+ * Not exported: the only way to ask this question is `isAuthorized`, so there
+ * is no second comparison path for a future caller to get wrong.
+ */
+function secretsMatch(presented: string, expected: string): boolean {
+  const presentedBytes = Buffer.from(presented, "utf8");
+  const expectedBytes = Buffer.from(expected, "utf8");
+
+  const presentedDigest = createHash("sha256").update(presentedBytes).digest();
+  const expectedDigest = createHash("sha256").update(expectedBytes).digest();
+
+  // `timingSafeEqual` first, and it is what decides the answer; the length
+  // check is a redundant belt on an already-matching pair, not a short circuit.
+  return (
+    timingSafeEqual(presentedDigest, expectedDigest) &&
+    presentedBytes.length === expectedBytes.length
+  );
+}
+
 /** True when the request carries a valid `Authorization: Bearer <CRON_SECRET>`. */
 export function isAuthorized(request: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
@@ -65,7 +105,12 @@ export function isAuthorized(request: NextRequest): boolean {
   if (!secret) return false;
 
   const header = request.headers.get("authorization");
-  return header === `Bearer ${secret}`;
+  // A missing header is refused before any comparison — the absence of a header
+  // is a fact about the REQUEST, so returning early leaks nothing about the
+  // secret. Everything past this point is compared in constant time.
+  if (header === null) return false;
+
+  return secretsMatch(header, `Bearer ${secret}`);
 }
 
 export interface DispatchResponseBody extends DispatchRunSummary {
