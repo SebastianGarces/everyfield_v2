@@ -39,7 +39,20 @@ import {
 } from "@/db/schema";
 import { canAccessChurch } from "@/lib/auth/access";
 import { setChurchLaunchDate } from "@/lib/churches/launch-date";
-import { acceptInvitation, createInvitation } from "@/lib/invitations/service";
+import {
+  ALREADY_ASSOCIATED_MESSAGE,
+  InvitationError,
+  NOT_AUTHORIZED_MESSAGE,
+  acceptInvitationAs,
+  associationStatement,
+  declineInvitationAs,
+  insertInvitation,
+  invitationActorFromSession,
+  respondToInvitationQuery,
+  revokeInvitationAs,
+  type InvitationActor,
+  type ResolvedInvitation,
+} from "@/lib/invitations/core";
 import { notificationCategories } from "@/lib/notifications/categories";
 import { enqueue } from "@/lib/notifications/enqueue";
 import {
@@ -60,6 +73,42 @@ import {
   setSharingActivityWithOversight,
 } from "@/lib/notifications/oversight-sharing";
 import { persons } from "@/db/schema";
+
+// ----------------------------------------------------------------------------
+// #265 moved the invitation logic out of the `"use server"` module: the four
+// browser-reachable actions (`@/lib/invitations/service`) now mint their actor
+// from `verifySession()`, so a harness with no request calls the logic layer
+// directly. Nothing about the behaviour under test changed — `acceptInvitationAs`
+// is the function the action calls.
+//
+// `seedInvitation` writes a row verbatim, which §3c needs: it deliberately
+// builds invitations no action would ever produce (both FK columns set) to prove
+// the audience is derived from `type` and not from a stray id.
+// ----------------------------------------------------------------------------
+
+type InvitationSeed = Pick<ResolvedInvitation, "type" | "inviterUserId"> &
+  Partial<ResolvedInvitation>;
+
+async function seedInvitation(seed: InvitationSeed) {
+  return insertInvitation({
+    targetChurchId: null,
+    targetSendingChurchId: null,
+    sendingChurchId: null,
+    sendingNetworkId: null,
+    ...seed,
+  });
+}
+
+/** The actor a session would mint for this user. */
+function actorFor(user: {
+  id: string;
+  role: (typeof users.$inferSelect)["role"];
+  churchId: string | null;
+  sendingChurchId: string | null;
+  sendingNetworkId: string | null;
+}): InvitationActor {
+  return invitationActorFromSession({ user });
+}
 
 function ok(label: string) {
   console.log(`PASS  ${label}`);
@@ -254,13 +303,13 @@ async function main() {
     updatedBy: planter.id,
   });
 
-  const invitationOff = await createInvitation({
+  const invitationOff = await seedInvitation({
     type: "church_to_network",
     inviterUserId: adminA.id,
     targetChurchId: plant.id,
     sendingNetworkId: network.id,
   });
-  await acceptInvitation(invitationOff.id, planter);
+  await acceptInvitationAs(actorFor(planter), invitationOff.id);
 
   // RULED 2026-08-01 (amending N-026): this milestone is EXEMPT from the
   // toggle. "Your invitation was accepted" is the sending church's own event —
@@ -314,13 +363,13 @@ async function main() {
     updatedBy: planter.id,
   });
 
-  const invitationOn = await createInvitation({
+  const invitationOn = await seedInvitation({
     type: "church_to_network",
     inviterUserId: adminA.id,
     targetChurchId: plant.id,
     sendingNetworkId: network.id,
   });
-  await acceptInvitation(invitationOn.id, planter);
+  await acceptInvitationAs(actorFor(planter), invitationOn.id);
 
   const afterInvitation = await rowsFor(plant.id);
   assert.equal(afterInvitation.length, 2, "one row per oversight admin");
@@ -381,13 +430,13 @@ async function main() {
   await db.delete(notifications).where(eq(notifications.churchId, plant.id));
 
   // Direction 1: the NETWORK invites. The sending church invited nobody.
-  const networkInvitation = await createInvitation({
+  const networkInvitation = await seedInvitation({
     type: "church_to_network",
     inviterUserId: adminA.id,
     targetChurchId: plant.id,
     sendingNetworkId: network.id,
   });
-  await acceptInvitation(networkInvitation.id, planter);
+  await acceptInvitationAs(actorFor(planter), networkInvitation.id);
 
   const afterNetworkInvite = await rowsFor(plant.id);
   assert.deepEqual(
@@ -408,13 +457,13 @@ async function main() {
 
   // Direction 2: the SENDING CHURCH invites. The network invited nobody.
   await db.delete(notifications).where(eq(notifications.churchId, plant.id));
-  const sendingChurchInvitation = await createInvitation({
+  const sendingChurchInvitation = await seedInvitation({
     type: "church_to_sending_church",
     inviterUserId: sendingChurchAdmin.id,
     targetChurchId: plant.id,
     sendingChurchId: otherSendingChurch.id,
   });
-  await acceptInvitation(sendingChurchInvitation.id, planter);
+  await acceptInvitationAs(actorFor(planter), sendingChurchInvitation.id);
 
   const afterSendingChurchInvite = await rowsFor(plant.id);
   assert.deepEqual(
@@ -438,7 +487,7 @@ async function main() {
   // The second half of the same bypass (ruled 2026-08-02). Narrowing the
   // audience to "the invitation's org" is only a fix if the invitation names
   // ONE org — and `organization_invitations` has both FK columns, no CHECK
-  // tying either to `type`, and a `createInvitation` that validates nothing.
+  // tying either to `type`, and an insert path that validates nothing.
   // The call below is the proof of that last claim: it inserts a
   // `church_to_sending_church` row carrying a `sending_network_id` too, and is
   // accepted without complaint.
@@ -446,7 +495,7 @@ async function main() {
   // The audience is derived from `type`, so the stray id is ignored and the
   // network — sharing still OFF, having invited nobody — hears nothing.
   await db.delete(notifications).where(eq(notifications.churchId, plant.id));
-  const dualIdInvitation = await createInvitation({
+  const dualIdInvitation = await seedInvitation({
     type: "church_to_sending_church",
     inviterUserId: sendingChurchAdmin.id,
     targetChurchId: plant.id,
@@ -456,9 +505,9 @@ async function main() {
   assert.equal(
     dualIdInvitation.sendingNetworkId,
     network.id,
-    "createInvitation rejected the ambiguous row — the fixture no longer reproduces the finding"
+    "insertInvitation rejected the ambiguous row — the fixture no longer reproduces the finding"
   );
-  await acceptInvitation(dualIdInvitation.id, planter);
+  await acceptInvitationAs(actorFor(planter), dualIdInvitation.id);
 
   const afterDualIdInvite = await rowsFor(plant.id);
   assert.deepEqual(
@@ -479,14 +528,14 @@ async function main() {
 
   // ...and the mirror, so the derivation cannot be one-directional.
   await db.delete(notifications).where(eq(notifications.churchId, plant.id));
-  const dualIdToNetwork = await createInvitation({
+  const dualIdToNetwork = await seedInvitation({
     type: "church_to_network",
     inviterUserId: adminA.id,
     targetChurchId: plant.id,
     sendingChurchId: otherSendingChurch.id,
     sendingNetworkId: network.id,
   });
-  await acceptInvitation(dualIdToNetwork.id, planter);
+  await acceptInvitationAs(actorFor(planter), dualIdToNetwork.id);
 
   const afterDualIdToNetwork = await rowsFor(plant.id);
   assert.deepEqual(
@@ -523,6 +572,572 @@ async function main() {
     .set({ sendingChurchId: null })
     .where(eq(churches.id, plant.id));
   await db.delete(notifications).where(eq(notifications.churchId, plant.id));
+
+  // --------------------------------------------------------------------------
+  // 3d. A LOST ACCEPT WRITES NOTHING (#265).
+  //
+  //     The invariant: `churches.sending_church_id` is non-null IF AND ONLY IF
+  //     the invitation reads `accepted`. An accept that loses the race — to a
+  //     revoke, to a decline, or to ANOTHER ACCEPT for the same free slot
+  //     (case H) — must leave the plant unbound and its own invitation pending.
+  //
+  //     Why it needs a real database and not a unit test. `acceptInvitationAs`
+  //     reads the invitation, then writes; two requests both pass that read, so
+  //     the guard has to be in SQL. It is: the claim (compare-and-set on
+  //     `status = 'pending'`) is statement one of a `db.batch` and the FK write
+  //     is statement two, conditioned on the invitation already reading
+  //     `accepted`. Ordering is the whole fix — with the FK write first, a lost
+  //     claim STILL bound the plant to an oversight org (an empty `returning()`
+  //     is not an error and does not roll a batch back), which put the plant
+  //     inside that org's `getAccessibleChurchIds` and onto its
+  //     `getOversightPlantHealth` listing with no acceptance behind it, and
+  //     `disassociate*` has no entrypoint, so nothing could undo it.
+  //
+  //     Timing-dependent by nature: the revoke has to land inside the accept's
+  //     read→write window, so every case runs several times.
+  // --------------------------------------------------------------------------
+  const [raceSendingChurch] = await db
+    .insert(sendingChurches)
+    .values({ name: "Scratch Race Sending Church" })
+    .returning();
+
+  const [raceInviter] = await db
+    .insert(users)
+    .values({
+      email: `race-inviter-${stamp}@example.test`,
+      passwordHash: "x",
+      role: "sending_church_admin" as const,
+      sendingChurchId: raceSendingChurch.id,
+    })
+    .returning();
+
+  const [racePlant] = await db
+    .insert(churches)
+    .values({ name: "Scratch Race Plant" })
+    .returning();
+
+  const [racePlanter] = await db
+    .insert(users)
+    .values({
+      email: `race-planter-${stamp}@example.test`,
+      passwordHash: "x",
+      role: "planter" as const,
+      churchId: racePlant.id,
+    })
+    .returning();
+
+  await db.insert(churchPrivacySettings).values({ churchId: racePlant.id });
+
+  /** The two facts the invariant relates. */
+  async function raceState(invitationId: string) {
+    const [[church], [invitation]] = await Promise.all([
+      db
+        .select({ sendingChurchId: churches.sendingChurchId })
+        .from(churches)
+        .where(eq(churches.id, racePlant.id)),
+      db
+        .select({
+          status: organizationInvitations.status,
+          respondedBy: organizationInvitations.respondedBy,
+        })
+        .from(organizationInvitations)
+        .where(eq(organizationInvitations.id, invitationId)),
+    ]);
+    return { bound: church.sendingChurchId, invitation };
+  }
+
+  /** A fresh pending invitation into the race sending church, plant unbound. */
+  async function freshRaceInvitation() {
+    await db
+      .update(churches)
+      .set({ sendingChurchId: null })
+      .where(eq(churches.id, racePlant.id));
+    await db
+      .delete(notifications)
+      .where(eq(notifications.churchId, racePlant.id));
+    return seedInvitation({
+      type: "church_to_sending_church",
+      inviterUserId: raceInviter.id,
+      targetChurchId: racePlant.id,
+      sendingChurchId: raceSendingChurch.id,
+    });
+  }
+
+  /** The invariant, asserted against whatever the race settled on. */
+  async function assertConsistent(invitationId: string, label: string) {
+    const { bound, invitation } = await raceState(invitationId);
+    if (invitation.status === "accepted") {
+      assert.equal(
+        bound,
+        raceSendingChurch.id,
+        `${label}: the invitation reads accepted but the plant is not bound`
+      );
+      assert.equal(invitation.respondedBy, racePlanter.id, label);
+    } else {
+      assert.equal(
+        bound,
+        null,
+        `${label}: the plant is bound to an oversight org with no accepted invitation (status=${invitation.status})`
+      );
+    }
+    return invitation.status;
+  }
+
+  // Case A — deterministic: the revoke has already COMMITTED when the accept
+  // runs. The accept must be refused and must change nothing at all.
+  const revokedFirst = await freshRaceInvitation();
+  await revokeInvitationAs(actorFor(raceInviter), revokedFirst.id);
+  await assert.rejects(
+    () => acceptInvitationAs(actorFor(racePlanter), revokedFirst.id),
+    InvitationError
+  );
+  const afterRevokedFirst = await raceState(revokedFirst.id);
+  assert.equal(afterRevokedFirst.invitation.status, "revoked");
+  assert.equal(
+    afterRevokedFirst.bound,
+    null,
+    "an accept refused after a revoke still bound the plant"
+  );
+  assert.equal(
+    (await rowsFor(racePlant.id)).length,
+    0,
+    "a refused accept announced a milestone"
+  );
+  ok("a revoked invitation cannot be accepted, and writes nothing");
+
+  // Case B — the exact window, deterministically. Case A's revoke was already
+  // committed when the accept STARTED, so the accept never reached its write:
+  // the read refused it. The window that produced the finding is narrower —
+  // the read saw `pending`, then a revoke committed, and then the write ran. So
+  // run the accept's own two statements against an already-revoked invitation,
+  // which is that state exactly, and assert the pair applies all-or-nothing.
+  const lostClaim = await freshRaceInvitation();
+  await revokeInvitationAs(actorFor(raceInviter), lostClaim.id);
+
+  const [claimRows] = await db.batch([
+    respondToInvitationQuery(actorFor(racePlanter), lostClaim.id, "accepted"),
+    associationStatement(
+      {
+        type: "church_to_sending_church",
+        targetChurchId: racePlant.id,
+        targetSendingChurchId: null,
+        sendingChurchId: raceSendingChurch.id,
+        sendingNetworkId: null,
+      },
+      lostClaim.id
+    ),
+  ]);
+
+  assert.equal(claimRows.length, 0, "the claim matched a non-pending row");
+  const afterLostClaim = await raceState(lostClaim.id);
+  assert.equal(afterLostClaim.invitation.status, "revoked");
+  assert.equal(
+    afterLostClaim.bound,
+    null,
+    "the association was written even though the claim matched no row — the batch is not the guard, the ordering is"
+  );
+  ok("the accept's write pair: a lost claim writes NOTHING (both statements)");
+
+  // Case C — the actual race, N times: the revoke is fired while the accept is
+  // in flight, so it lands somewhere around the accept's read→write window.
+  // Which side wins is timing, hence the repetition; the invariant is asserted
+  // either way, and the accept's refusal message says which window it hit.
+  const RACE_RUNS = 8;
+  const outcomes: string[] = [];
+  const refusals: string[] = [];
+
+  for (let run = 0; run < RACE_RUNS; run += 1) {
+    const invitation = await freshRaceInvitation();
+
+    const accept = acceptInvitationAs(actorFor(racePlanter), invitation.id);
+    const revoke = revokeInvitationAs(actorFor(raceInviter), invitation.id);
+    const [acceptResult, revokeResult] = await Promise.allSettled([
+      accept,
+      revoke,
+    ]);
+
+    // Exactly one of the two may win: both statements compare-and-set on
+    // `pending`, so the loser matches no row and raises.
+    assert.notEqual(
+      acceptResult.status === "fulfilled",
+      revokeResult.status === "fulfilled",
+      `run ${run}: accept and revoke both ${acceptResult.status}`
+    );
+    if (acceptResult.status === "rejected") {
+      assert.ok(acceptResult.reason instanceof InvitationError);
+      refusals.push(acceptResult.reason.message);
+    }
+
+    const status = await assertConsistent(
+      invitation.id,
+      `accept/revoke ${run}`
+    );
+    outcomes.push(status);
+
+    // ...and the milestone follows the winner, not the attempt.
+    const announced = await rowsFor(racePlant.id);
+    assert.equal(
+      announced.length > 0,
+      status === "accepted",
+      `run ${run}: milestone rows disagree with status=${status}`
+    );
+  }
+
+  ok(
+    `accept vs revoke, ${RACE_RUNS} runs: the plant is bound IFF the invitation reads accepted (${outcomes.join(", ")})`
+  );
+  console.log(
+    `      accept refusals: ${refusals.length ? refusals.join(" | ") : "none — the accept won every run"}`
+  );
+
+  // Case D — accept vs DECLINE, the same shape from the plant's own side (a
+  // double-clicked response). The planter is the authority for both, so this is
+  // reachable from one session.
+  for (let run = 0; run < RACE_RUNS; run += 1) {
+    const invitation = await freshRaceInvitation();
+
+    const accept = acceptInvitationAs(actorFor(racePlanter), invitation.id);
+    const decline = declineInvitationAs(actorFor(racePlanter), invitation.id);
+    const [acceptResult, declineResult] = await Promise.allSettled([
+      accept,
+      decline,
+    ]);
+
+    assert.notEqual(
+      acceptResult.status === "fulfilled",
+      declineResult.status === "fulfilled",
+      `run ${run}: accept and decline both ${acceptResult.status}`
+    );
+
+    await assertConsistent(invitation.id, `accept/decline ${run}`);
+  }
+
+  ok(`accept vs decline, ${RACE_RUNS} runs: same invariant holds`);
+
+  // Case E — an expiry can never overwrite a recorded answer. The auto-expire
+  // write is a compare-and-set on `pending` too, so a request that read the row
+  // as pending a moment before the expiry instant cannot stamp `expired` over
+  // the `accepted` a concurrent request committed.
+  const expiring = await freshRaceInvitation();
+  await acceptInvitationAs(actorFor(racePlanter), expiring.id);
+  await db
+    .update(organizationInvitations)
+    .set({ expiresAt: new Date(Date.now() - 60_000) })
+    .where(eq(organizationInvitations.id, expiring.id));
+  await assert.rejects(
+    () => declineInvitationAs(actorFor(racePlanter), expiring.id),
+    InvitationError
+  );
+  const afterExpiryAttempt = await raceState(expiring.id);
+  assert.equal(
+    afterExpiryAttempt.invitation.status,
+    "accepted",
+    "a past-expiry read overwrote a committed acceptance with `expired`"
+  );
+  assert.equal(afterExpiryAttempt.bound, raceSendingChurch.id);
+  ok("a past-expiry response cannot stamp `expired` over a recorded answer");
+
+  // Case F — a foreign actor learns nothing and writes nothing. The status word
+  // used to leak (`Invitation is already accepted` vs `not found` vs `expired`),
+  // and the auto-expire write ran with no authority check at all, so any
+  // authenticated user could flip an arbitrary past-expiry invitation.
+  const foreignActor = actorFor(planter); // a planter, but of a different plant
+  const pastExpiry = await freshRaceInvitation();
+  await db
+    .update(organizationInvitations)
+    .set({ expiresAt: new Date(Date.now() - 60_000) })
+    .where(eq(organizationInvitations.id, pastExpiry.id));
+
+  for (const attempt of [acceptInvitationAs, declineInvitationAs]) {
+    await assert.rejects(
+      () => attempt(foreignActor, pastExpiry.id),
+      (error: unknown) =>
+        error instanceof InvitationError &&
+        error.message === NOT_AUTHORIZED_MESSAGE,
+      "a foreign actor was told something other than 'not authorized'"
+    );
+  }
+
+  const afterForeign = await raceState(pastExpiry.id);
+  assert.equal(
+    afterForeign.invitation.status,
+    "pending",
+    "a foreign actor triggered the auto-expire write"
+  );
+  assert.equal(afterForeign.bound, null);
+  ok(
+    "a foreign actor learns nothing from an expired invitation, and writes nothing"
+  );
+
+  // ...and the same for every settled status: no status word reaches a caller
+  // with no authority over the target.
+  for (const status of [
+    "accepted",
+    "declined",
+    "revoked",
+    "expired",
+  ] as const) {
+    const settled = await freshRaceInvitation();
+    await db
+      .update(organizationInvitations)
+      .set({ status })
+      .where(eq(organizationInvitations.id, settled.id));
+
+    await assert.rejects(
+      () => acceptInvitationAs(foreignActor, settled.id),
+      (error: unknown) =>
+        error instanceof InvitationError &&
+        error.message === NOT_AUTHORIZED_MESSAGE,
+      `the status \`${status}\` leaked to a foreign actor`
+    );
+  }
+  ok(
+    "no invitation status leaks to a caller without authority over the target"
+  );
+
+  // Case G — A SECOND ACCEPT NEVER REPLACES AN ASSOCIATION (#265, ruled
+  // 2026-08-03; sever rules #274 / FRD OV-007). The case `assertConsistent`
+  // cannot see: it only ever inspects ONE invitation, so two accepted
+  // invitations for the same slot satisfy "bound IFF accepted" vacuously.
+  //
+  // Reachable with no forgery at all: `createInvitation` checks no membership,
+  // so a second sending church may invite a plant that already belongs to one,
+  // and the plant's own planter has authority over that invitation too.
+  // Accepting it used to set `churches.sending_church_id` to the newcomer and
+  // sever the incumbent with no type-to-confirm, no notification to it and no
+  // `association_events` row — while its invitation still read `accepted` and it
+  // had already been sent the acceptance milestone. Now the accept is REFUSED
+  // and writes nothing; severing is #277/#278's audited job.
+  const [rivalSendingChurch] = await db
+    .insert(sendingChurches)
+    .values({ name: "Scratch Rival Sending Church" })
+    .returning();
+
+  const [rivalInviter] = await db
+    .insert(users)
+    .values({
+      email: `rival-inviter-${stamp}@example.test`,
+      passwordHash: "x",
+      role: "sending_church_admin" as const,
+      sendingChurchId: rivalSendingChurch.id,
+    })
+    .returning();
+
+  const incumbent = await freshRaceInvitation();
+  await acceptInvitationAs(actorFor(racePlanter), incumbent.id);
+  assert.equal(
+    (await raceState(incumbent.id)).bound,
+    raceSendingChurch.id,
+    "the first accept did not bind the plant"
+  );
+  const milestonesBefore = (await rowsFor(racePlant.id)).length;
+
+  const rival = await seedInvitation({
+    type: "church_to_sending_church",
+    inviterUserId: rivalInviter.id,
+    targetChurchId: racePlant.id,
+    sendingChurchId: rivalSendingChurch.id,
+  });
+
+  await assert.rejects(
+    () => acceptInvitationAs(actorFor(racePlanter), rival.id),
+    (error: unknown) =>
+      error instanceof InvitationError &&
+      error.message === ALREADY_ASSOCIATED_MESSAGE,
+    "a second accept for an already-bound slot was not refused — or was refused with the message a LOST CLAIM gets, which is a different fact"
+  );
+
+  const [afterRival] = await db
+    .select({
+      status: organizationInvitations.status,
+      respondedBy: organizationInvitations.respondedBy,
+    })
+    .from(organizationInvitations)
+    .where(eq(organizationInvitations.id, rival.id));
+
+  assert.equal(
+    afterRival.status,
+    "pending",
+    "the refused accept claimed the invitation anyway — it is now accepted with no association behind it"
+  );
+  assert.equal(afterRival.respondedBy, null);
+
+  const afterIncumbent = await raceState(incumbent.id);
+  assert.equal(
+    afterIncumbent.bound,
+    raceSendingChurch.id,
+    "the refused accept severed the association it was not allowed to replace"
+  );
+  assert.equal(afterIncumbent.invitation.status, "accepted");
+  assert.equal(
+    (await rowsFor(racePlant.id)).length,
+    milestonesBefore,
+    "the refused accept announced a milestone to the newcomer"
+  );
+  ok("a second accept is refused, and the incumbent association survives it");
+
+  // ...and re-accepting the SAME org's slot is still the idempotent no-op the
+  // replay path depends on: the guard is `IS NULL OR = this org`, not `IS NULL`.
+  const sameOrgAgain = await seedInvitation({
+    type: "church_to_sending_church",
+    inviterUserId: raceInviter.id,
+    targetChurchId: racePlant.id,
+    sendingChurchId: raceSendingChurch.id,
+  });
+  await acceptInvitationAs(actorFor(racePlanter), sameOrgAgain.id);
+  assert.equal(
+    (await raceState(sameOrgAgain.id)).bound,
+    raceSendingChurch.id,
+    "re-accepting the org the plant already belongs to was refused"
+  );
+  ok("re-binding the org the plant already belongs to is still allowed");
+
+  // Case H — ACCEPT vs ACCEPT (#265 r3, HR4 evidence 2026-08-03). The race Case G
+  // cannot see and cases C/D cannot either: TWO invitations, from two different
+  // orgs, for ONE free slot, accepted at the same moment.
+  //
+  // Why it slipped past the guard Case G proves. The slot rule on the claim is
+  // `EXISTS (SELECT … FROM churches WHERE … fk IS NULL OR fk = <this org>)` — a
+  // subquery, which reads a snapshot and takes NO lock. The two claims update two
+  // DIFFERENT rows of `organization_invitations`, so they contend on nothing:
+  // both EXISTS were true when evaluated, both claims committed `accepted`, and
+  // READ COMMITTED's re-check made the second association's UPDATE match nothing.
+  // Result, reproduced 6/10 runs on the previous revision: an invitation reading
+  // `accepted` with no association behind it AND an oversight milestone announced
+  // to an org the plant never joined — the one state with no product repair path
+  // until severing ships (#277/#278).
+  //
+  // Closed by `lockTargetRow` — `SELECT … FOR UPDATE` on the plant's own row as
+  // statement ONE of the accept batch. The loser blocks until the winner commits,
+  // then evaluates the slot rule against what the winner wrote and is refused.
+  // Asserted here on a real database because there is nothing to assert in SQL
+  // text: the bug was two snapshots, not a missing predicate.
+  const ACCEPT_RACE_RUNS = 10;
+  const acceptRaceWinners: string[] = [];
+  const acceptRaceRefusals: string[] = [];
+
+  for (let run = 0; run < ACCEPT_RACE_RUNS; run += 1) {
+    // Resets the plant to unbound and clears its notifications.
+    const incumbentSide = await freshRaceInvitation();
+    const rivalSide = await seedInvitation({
+      type: "church_to_sending_church",
+      inviterUserId: rivalInviter.id,
+      targetChurchId: racePlant.id,
+      sendingChurchId: rivalSendingChurch.id,
+    });
+
+    const [first, second] = await Promise.allSettled([
+      acceptInvitationAs(actorFor(racePlanter), incumbentSide.id),
+      acceptInvitationAs(actorFor(racePlanter), rivalSide.id),
+    ]);
+
+    assert.notEqual(
+      first.status === "fulfilled",
+      second.status === "fulfilled",
+      `run ${run}: both accepts ${first.status} — two orgs claimed one slot`
+    );
+
+    for (const settled of [first, second]) {
+      if (settled.status === "rejected") {
+        assert.ok(
+          settled.reason instanceof InvitationError,
+          `run ${run}: the losing accept failed for a non-product reason`
+        );
+        acceptRaceRefusals.push(settled.reason.message);
+      }
+    }
+
+    const [[boundTo], both] = await Promise.all([
+      db
+        .select({ sendingChurchId: churches.sendingChurchId })
+        .from(churches)
+        .where(eq(churches.id, racePlant.id)),
+      db
+        .select({
+          id: organizationInvitations.id,
+          status: organizationInvitations.status,
+          respondedBy: organizationInvitations.respondedBy,
+          sendingChurchId: organizationInvitations.sendingChurchId,
+        })
+        .from(organizationInvitations)
+        .where(
+          inArray(organizationInvitations.id, [incumbentSide.id, rivalSide.id])
+        ),
+    ]);
+
+    const accepted = both.filter((row) => row.status === "accepted");
+    assert.equal(
+      accepted.length,
+      1,
+      `run ${run}: ${accepted.length} of the two invitations read accepted — one slot, one acceptance`
+    );
+    assert.equal(
+      boundTo.sendingChurchId,
+      accepted[0].sendingChurchId,
+      `run ${run}: the plant is bound to an org whose invitation does not read accepted`
+    );
+    acceptRaceWinners.push(
+      accepted[0].sendingChurchId === raceSendingChurch.id
+        ? "incumbent"
+        : "rival"
+    );
+
+    // The loser wrote NOTHING — not even its own status. It stays `pending`, so
+    // the plant can still accept it after severing (#277), which is exactly the
+    // order OV-007 wants.
+    const [loser] = both.filter((row) => row.status !== "accepted");
+    assert.equal(
+      loser.status,
+      "pending",
+      `run ${run}: the refused accept still answered its own invitation (status=${loser.status})`
+    );
+    assert.equal(
+      loser.respondedBy,
+      null,
+      `run ${run}: the refused accept stamped responded_by`
+    );
+
+    // ...and no milestone reached the org that lost. This is the half that made
+    // the race a privacy fault and not merely a data fault: the acceptance
+    // milestone is the ONE oversight notification that bypasses the sharing
+    // toggle, so announcing it to an org the plant never joined cannot be
+    // undone by a preference.
+    const loserAdmin =
+      loser.sendingChurchId === raceSendingChurch.id
+        ? raceInviter.id
+        : rivalInviter.id;
+    const announced = await rowsFor(racePlant.id);
+
+    assert.ok(
+      announced.length > 0,
+      `run ${run}: the winning accept announced no milestone at all`
+    );
+    assert.ok(
+      !announced.some((row) => row.recipientUserId === loserAdmin),
+      `run ${run}: the refused accept announced the acceptance milestone to its own org`
+    );
+  }
+
+  ok(
+    `accept vs accept, ${ACCEPT_RACE_RUNS} runs: exactly one accept commits and the plant is bound to that org (${acceptRaceWinners.join(", ")})`
+  );
+  ok(
+    `accept vs accept, ${ACCEPT_RACE_RUNS} runs: the losing accept writes NOTHING — its invitation is still pending and its org was never announced to`
+  );
+  console.log(
+    `      losing-accept refusals: ${acceptRaceRefusals.join(" | ") || "none"}`
+  );
+
+  await db
+    .update(churches)
+    .set({ sendingChurchId: null })
+    .where(eq(churches.id, racePlant.id));
+  await db
+    .delete(organizationInvitations)
+    .where(eq(organizationInvitations.targetChurchId, racePlant.id));
+  await db
+    .delete(notifications)
+    .where(eq(notifications.churchId, racePlant.id));
 
   // --------------------------------------------------------------------------
   // 4. MILESTONE 2 — the plant advanced a stage.
@@ -1359,6 +1974,7 @@ async function main() {
     orphan.id,
     otherPlant.id,
     foreignChurch.id,
+    racePlant.id,
     quietPlant,
     notSharingPlant,
     noAdminPlant,
@@ -1391,13 +2007,22 @@ async function main() {
   await db.delete(users).where(
     inArray(
       users.id,
-      [planter, adminA, adminB, sendingChurchAdmin].map((row) => row.id)
+      [
+        planter,
+        adminA,
+        adminB,
+        sendingChurchAdmin,
+        raceInviter,
+        racePlanter,
+      ].map((row) => row.id)
     )
   );
   await db.delete(churches).where(inArray(churches.id, seededChurches));
   await db
     .delete(sendingChurches)
-    .where(eq(sendingChurches.id, otherSendingChurch.id));
+    .where(
+      inArray(sendingChurches.id, [otherSendingChurch.id, raceSendingChurch.id])
+    );
   await db
     .delete(sendingNetworks)
     .where(inArray(sendingNetworks.id, [network.id, emptyNetwork.id]));

@@ -98,15 +98,17 @@
 
 | Flow | Entrypoint | Trigger |
 |------|-----------|---------|
-| Create invitation | `src/lib/invitations/service.ts:createInvitation()` | Oversight admin action |
-| Accept invitation | `src/lib/invitations/service.ts:acceptInvitation()` | Target user action |
-| Decline invitation | `src/lib/invitations/service.ts:declineInvitation()` | Target user action |
-| Revoke invitation | `src/lib/invitations/service.ts:revokeInvitation()` | Inviter action |
-| Disassociate | `src/lib/invitations/service.ts:disassociate*()` | User action |
+| Create invitation | `src/lib/invitations/service.ts:createInvitation(request)` | Oversight admin action — inviting org + `type` derived from the session, never from the request. A request names ONLY the target: the expiry is `INVITATION_EXPIRY_DAYS` (30, server-fixed, ruled 2026-08-03 — no client parameter, and #23's create form gets no expiry field) |
+| Accept invitation | `src/lib/invitations/service.ts:acceptInvitation(id)` | Target plant's planter / target sending church's admin. Binds a free slot or re-binds its own; **never replaces** another org's — refused with `ALREADY_ASSOCIATED_MESSAGE`, nothing written, and that holds for a CONCURRENT second accept too because the batch locks the target row (`lockTargetRow`) before it claims (`memory/invariants.md` → Multi-Tenancy + Atomicity) |
+| Decline invitation | `src/lib/invitations/service.ts:declineInvitation(id)` | Same authority as accept |
+| Revoke invitation | `src/lib/invitations/service.ts:revokeInvitation(id)` | Original inviter (enforced in the UPDATE) |
+| Disassociate | `src/lib/invitations/core.ts:disassociate*()` | **No entrypoint yet** — primitives only, kept importable on purpose. RULED #274/OV-007: BOTH sides may sever, and the authenticated wrappers ship with their surfaces — planter (settings association area) in **#277**, org admin (plant detail page) in **#278**, each type-to-confirm, each notifying the other side, each writing an `association_events` row. Never a wrapper in `service.ts`, and an importing action module must add itself to `CORE_REACHING_ACTION_MODULES` in `service.test.ts` (allowlisted with a reason, asserted exhaustive both ways) — a barrel will not make the guardrail quiet. Until they land an accepted association cannot be removed or replaced in-product; see `memory/invariants.md` → Multi-Tenancy for the privacy consequence |
 
-**Primary modules:** `src/lib/invitations/`, `src/db/schema/organization-invitation.ts`
+**Primary modules:** `src/lib/invitations/service.ts` (the 4 actions, `"use server"`), `src/lib/invitations/core.ts` (logic + reads + primitives, NOT `"use server"`), `src/db/schema/organization-invitation.ts`
 
 **Key deps:** `organization_invitations`, `churches`, `sending_churches` tables
+
+**#265:** the four actions take NO actor — each mints one with `invitationActorFromSession(await verifySession())` — and return an `InvitationView`, not the row (no `inviterUserId` / `respondedBy`). Everything else moved to `core.ts` precisely because it must not be an endpoint. The guardrail is `service.test.ts`, which reads the export surface off the IMPORTED module (so `export default` and re-exports are caught, not just the forms a regex knew) and runs two closure walks over the module graph: re-exporting from `core.ts` is banned outright, and REACHING it through value imports is allowed only for the two allowlisted action modules (`service.ts`, `(auth)/register/actions.ts`), exhaustively asserted — so neither a barrel nor a wrapper can quietly put a primitive back on the wire. See `memory/contracts/api.md` → Invitation Actions + Logic Layer.
 
 ---
 
@@ -179,7 +181,7 @@
 | Save a digest cadence | `(dash)/settings/actions.ts:setDigestCadenceAction()` | Cadence select in the `digest` row |
 | Sharing screen (plant → oversight) | `(dash)/settings/sharing/page.tsx` → `oversight-sharing.ts:isSharingActivityWithOversight()` | Route `/settings/sharing` (planter only; linked from `/settings`) |
 | Save the sharing toggle | `(dash)/settings/sharing/actions.ts:setOversightSharingAction()` | The one switch on that screen |
-| Oversight milestone (no UI) | `oversight.ts:announceInvitationAccepted()` / `announcePhaseAdvanced()` / `announceLaunchDateChanged()` | `invitations/service.ts:acceptInvitation()`, the `phase.changed` subscription, `churches/launch-date.ts:setChurchLaunchDate(user, churchId, date)` — which authorises itself (`requireRole("planter")` + `requireChurchAccess`), so a surface wiring it cannot forget |
+| Oversight milestone (no UI) | `oversight.ts:announceInvitationAccepted()` / `announcePhaseAdvanced()` / `announceLaunchDateChanged()` | `invitations/core.ts:acceptInvitationAs()` (behind the session-derived `service.ts:acceptInvitation()`), the `phase.changed` subscription, `churches/launch-date.ts:setChurchLaunchDate(user, churchId, date)` — which authorises itself (`requireRole("planter")` + `requireChurchAccess`), so a surface wiring it cannot forget |
 | Oversight daily digest (no UI) | `oversight-digest.ts:runDailyOversightDigestSweep()` ← the every-15-min dispatch tick (`api/notifications/dispatch/route.ts`) | Per plant, one COMPLETE day — always the day BEFORE the tick, never a partial today (the dedupe key `(church, day)` would freeze a partial count forever). SCHEDULED (ruled 2026-08-01): no cron of its own — `selectPlantsOwedDigest()` offers a plant only while it has no digest row for that day, so 96 ticks produce one digest and a dropped tick is a delay, not a loss |
 | **Unsubscribe link (logged out)** | `src/app/api/notifications/unsubscribe/route.ts:GET` — 303 only, **no write** | Unsubscribe link in a notification email |
 | Unsubscribe confirmation | `src/app/unsubscribe/page.tsx` → `channels/unsubscribe.ts:describeUnsubscribeSubject()` | 303 from the route above |
