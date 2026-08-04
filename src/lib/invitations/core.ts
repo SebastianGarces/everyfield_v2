@@ -60,12 +60,18 @@ import { announceInvitationAccepted } from "@/lib/notifications/oversight";
 // Constants
 // ============================================================================
 
-/** Default invitation expiry: 30 days */
+/**
+ * How long an invitation stays open: 30 days, SERVER-FIXED.
+ *
+ * RULED 2026-08-03 (#265): there is no client-facing expiry parameter, and #23's
+ * create form gets no expiry field. An earlier round of this fix let the caller
+ * name a window (clamped to 1–90 days, with user-facing copy for the refusal) —
+ * nothing in the FRD or any AC asked for it, and an unspecified knob on a
+ * `"use server"` endpoint is surface nobody has decided the rules for. Adding one
+ * later means a ruling, a validation rule and a form field, in that order;
+ * `service.test.ts` fails if `expiresInDays` reappears anywhere in this module.
+ */
 export const INVITATION_EXPIRY_DAYS = 30;
-
-/** Bounds on a caller-supplied expiry, in days. */
-export const MIN_EXPIRY_DAYS = 1;
-export const MAX_EXPIRY_DAYS = 90;
 
 // ============================================================================
 // Errors
@@ -179,16 +185,20 @@ export function invitationView(row: OrganizationInvitation): InvitationView {
 // ============================================================================
 
 /**
- * What a client may say when issuing an invitation: WHO is being invited, and
- * for how long. Never which org is inviting, and never the invitation `type` —
- * both are derived from the actor by `resolveInvitationRequest`, because they
- * are the fields that decide who ends up associated with whom (and who gets
- * notified about it without consent — see `announceInvitationAcceptedForChurch`).
+ * What a client may say when issuing an invitation: WHO is being invited. That
+ * is the whole of it.
+ *
+ * Never which org is inviting, and never the invitation `type` — both are
+ * derived from the actor by `resolveInvitationRequest`, because they are the
+ * fields that decide who ends up associated with whom (and who gets notified
+ * about it without consent — see `announceInvitationAcceptedForChurch`). And
+ * never the expiry: `INVITATION_EXPIRY_DAYS` is server-fixed by the 2026-08-03
+ * ruling, so this type has exactly two optional fields and one of them must be
+ * set.
  */
 export interface InvitationRequest {
   targetChurchId?: string;
   targetSendingChurchId?: string;
-  expiresInDays?: number;
 }
 
 /**
@@ -206,7 +216,11 @@ export type AssociationFacts = Pick<
   | "sendingNetworkId"
 >;
 
-/** The row to insert, fully resolved. */
+/**
+ * The row to insert, fully resolved. No expiry field: the window is
+ * `INVITATION_EXPIRY_DAYS` and `insertInvitation` applies it, so there is no
+ * value for a client to influence and no call site that could pass one on.
+ */
 export interface ResolvedInvitation {
   type: OrganizationInvitationType;
   inviterUserId: string;
@@ -214,7 +228,6 @@ export interface ResolvedInvitation {
   targetSendingChurchId: string | null;
   sendingChurchId: string | null;
   sendingNetworkId: string | null;
-  expiresInDays: number;
 }
 
 export type ResolveResult =
@@ -227,13 +240,6 @@ const UUID_RE =
 /** True for a well-formed uuid. Anything else is a client that guessed. */
 export function isUuid(value: unknown): value is string {
   return typeof value === "string" && UUID_RE.test(value);
-}
-
-function clampExpiry(days: number | undefined): number | null {
-  if (days === undefined) return INVITATION_EXPIRY_DAYS;
-  if (!Number.isInteger(days)) return null;
-  if (days < MIN_EXPIRY_DAYS || days > MAX_EXPIRY_DAYS) return null;
-  return days;
 }
 
 /**
@@ -268,19 +274,10 @@ export function resolveInvitationRequest(
     return { ok: false, error: "That is not a sending church we can invite" };
   }
 
-  const expiresInDays = clampExpiry(request.expiresInDays);
-  if (expiresInDays === null) {
-    return {
-      ok: false,
-      error: `An invitation can stay open for ${MIN_EXPIRY_DAYS}–${MAX_EXPIRY_DAYS} days`,
-    };
-  }
-
   const base = {
     inviterUserId: actor.id,
     targetChurchId,
     targetSendingChurchId,
-    expiresInDays,
   };
 
   if (actor.role === "sending_church_admin") {
@@ -332,12 +329,16 @@ export function resolveInvitationRequest(
  * exactly what it is given, so every caller must have gone through
  * `resolveInvitationRequest` (the action layer) or be deliberately building an
  * odd row for a test harness.
+ *
+ * The expiry is applied HERE, from `INVITATION_EXPIRY_DAYS`, and is not part of
+ * `values` — so there is exactly one place the window is decided and no
+ * parameter for a caller (or a client, one layer up) to name it in.
  */
 export async function insertInvitation(
   values: ResolvedInvitation
 ): Promise<OrganizationInvitation> {
   const expiresAt = new Date(
-    Date.now() + values.expiresInDays * 24 * 60 * 60 * 1000
+    Date.now() + INVITATION_EXPIRY_DAYS * 24 * 60 * 60 * 1000
   );
 
   const row: NewOrganizationInvitation = {
@@ -376,15 +377,15 @@ export async function createInvitationAs(
 // ============================================================================
 
 /**
- * Accept an invitation: CLAIM the invitation, then bind the association — both
- * statements in ONE `db.batch`, in that order.
+ * Accept an invitation: LOCK the target row, CLAIM the invitation, then bind the
+ * association — three statements in ONE `db.batch`, in that order.
  *
  * ORDER AND ATOMICITY — memory/invariants.md → Transactions / Atomicity. Both
  * writes are known up front, so they belong in one Neon batched transaction.
  * The claim (`respondToInvitationQuery`, a compare-and-set on
- * `status = 'pending'`) is statement ONE, and the association's own WHERE
+ * `status = 'pending'`) is statement TWO, and the association's own WHERE
  * additionally requires the invitation to read `accepted` — a value only that
- * claim can have written, and one statement TWO can see because it runs inside
+ * claim can have written, and one statement THREE can see because it runs inside
  * the same transaction. So:
  *
  *   * the claim wins → the EXISTS holds → both writes commit together;
@@ -400,6 +401,31 @@ export async function createInvitationAs(
  * plant bound to an oversight org — inside `getAccessibleChurchIds`, listed by
  * `getOversightPlantHealth` — with no accepted invitation anywhere to explain
  * it and no product path to undo it. Statement order is what closes that.
+ *
+ * WHY THERE IS A ROW LOCK (statement ONE, `lockTargetRow`). The slot guard below
+ * reads a DIFFERENT table from the one the claim updates, and a subquery reads a
+ * snapshot — it takes no lock. So two accepts of DIFFERENT invitations for the
+ * SAME free slot contend on nothing: the claims update two different rows of
+ * `organization_invitations`, and both `EXISTS (… churches … fk IS NULL)`
+ * subqueries were true when each was evaluated. Both claims commit `accepted`,
+ * while Postgres' READ COMMITTED re-check on the second association's UPDATE
+ * (the row changed under it) makes that statement match nothing — so the loser
+ * committed an acceptance with no association behind it, and announced the
+ * milestone for it. Reproduced 6/10 runs on the previous revision (#265, HR4
+ * evidence 2026-08-03).
+ *
+ * `SELECT … FROM <target> WHERE id = ? FOR UPDATE`, as statement ONE of the
+ * batch, is what serialises them: the second accept blocks until the first
+ * COMMITS, and because each statement of a READ COMMITTED transaction takes a
+ * fresh snapshot, its claim then evaluates the slot guard against the row the
+ * winner wrote — sees the slot taken, matches nothing, and refuses with
+ * `ALREADY_ASSOCIATED_MESSAGE`, having written nothing at all. The lock is on
+ * the row the ASSOCIATION writes, which is the resource actually being competed
+ * for; locking the invitation instead would not have helped, since the two
+ * accepts are two different invitations.
+ *
+ * `scripts/g3-oversight-model.ts` §3d case H races accept-vs-accept on a real
+ * database for exactly this.
  *
  * A SECOND ACCEPT NEVER REPLACES AN ASSOCIATION — ruled here, 2026-08-03
  * (#265; the sever rules are #274 / `product-docs/features/oversight/frd.md`
@@ -425,11 +451,10 @@ export async function createInvitationAs(
  *
  * Residual, accepted: a crash between the committed batch and the milestone
  * notification loses the notification, not the acceptance — the notification is
- * best-effort by construction. And a replay that lost the claim to a CONCURRENT
- * accept re-writes the association to the value the winner already wrote (the
- * EXISTS sees the winner's `accepted`), which is an idempotent no-op: same FK,
- * same value, and the milestone is still gated on our own `returning()` row, so
- * there is no second announcement.
+ * best-effort by construction. A retry of THAT accept re-runs the whole batch:
+ * the claim now matches no row (the invitation already reads `accepted`), so the
+ * retry is refused with "no longer pending" and the notification stays lost. It
+ * is a lost notification, not a lost or duplicated acceptance.
  */
 export async function acceptInvitationAs(
   actor: InvitationActor,
@@ -438,12 +463,14 @@ export async function acceptInvitationAs(
   // Authority first, then status: see `loadRespondableInvitation`.
   const invitation = await loadRespondableInvitation(actor, invitationId);
 
-  // Both built BEFORE anything is written, so an invitation whose FKs contradict
-  // its `type` throws instead of half-applying.
+  // All three built BEFORE anything is written, so an invitation whose FKs
+  // contradict its `type` throws instead of half-applying.
+  const lock = lockTargetRow(invitation);
   const association = associationStatement(invitation, invitationId);
   const slotIsOurs = unboundTargetSlot(invitation);
 
-  const [claimed] = await db.batch([
+  const [, claimed, associated] = await db.batch([
+    lock,
     respondToInvitationQuery(actor, invitationId, "accepted", slotIsOurs),
     association,
   ]);
@@ -452,6 +479,20 @@ export async function acceptInvitationAs(
 
   if (!updated) {
     throw new InvitationError(await lostClaimReason(invitationId));
+  }
+
+  // The claim and the association carry the SAME slot rule, evaluated against a
+  // row this transaction holds a lock on — so a won claim and an empty
+  // association cannot both happen. Asserted rather than assumed, because the
+  // consequence of being wrong is the state nothing in the product can repair:
+  // an invitation reading `accepted`, no association, and a milestone announced
+  // for it. Refusing here at least withholds the milestone and tells the user.
+  if (associated.length === 0) {
+    console.error("an accepted invitation wrote no association", {
+      invitationId,
+      type: invitation.type,
+    });
+    throw new InvitationError(ALREADY_ASSOCIATED_MESSAGE);
   }
 
   // F11 N-025 — milestone #1, announced at its source.
@@ -614,6 +655,60 @@ function freeOrHolds(column: AnyPgColumn, value: string): SQL {
 }
 
 /**
+ * `SELECT id FROM <target> WHERE id = ? FOR UPDATE` — statement ONE of the accept
+ * batch, and the only thing that makes the slot rule hold under concurrency.
+ *
+ * The slot rule is a predicate on the TARGET's row, but the claim it guards
+ * updates `organization_invitations`. Two accepts of two different invitations
+ * for one free slot therefore write two different rows and contend on nothing:
+ * each `EXISTS (… fk IS NULL …)` reads a snapshot, takes no lock, and is true for
+ * both. This locks the row they are actually competing for, so the second
+ * transaction waits for the first to COMMIT and then — new statement, new READ
+ * COMMITTED snapshot — evaluates the slot rule against what the winner wrote.
+ *
+ * It writes nothing, which is the point: the lock is the whole contribution, and
+ * it is released by the same COMMIT that applies the two writes.
+ *
+ * Same two rules as `associationStatement` and `unboundTargetSlot`: throws on a
+ * row whose FKs contradict its `type`, and fails CLOSED on a `type` no arm knows,
+ * so an accept can never proceed with nothing locked.
+ */
+export function lockTargetRow(invitation: AssociationFacts) {
+  switch (invitation.type) {
+    case "church_to_sending_church":
+    case "church_to_network": {
+      if (!invitation.targetChurchId) {
+        throw new InvitationError("Invalid invitation: missing church");
+      }
+      return db
+        .select({ id: churches.id })
+        .from(churches)
+        .where(eq(churches.id, invitation.targetChurchId))
+        .for("update");
+    }
+
+    case "sending_church_to_network": {
+      if (!invitation.targetSendingChurchId) {
+        throw new InvitationError("Invalid invitation: missing sending church");
+      }
+      return db
+        .select({ id: sendingChurches.id })
+        .from(sendingChurches)
+        .where(eq(sendingChurches.id, invitation.targetSendingChurchId))
+        .for("update");
+    }
+
+    default: {
+      const unknownType: never = invitation.type;
+      console.error("invitation type has no target row to lock", {
+        type: unknownType,
+      });
+      throw new InvitationError(NOT_AUTHORIZED_MESSAGE);
+    }
+  }
+}
+
+/**
  * `EXISTS (SELECT … WHERE <target>.id = ? AND (<fk> IS NULL OR <fk> = ?))` — the
  * predicate that stops an accept from REPLACING an association, expressed for a
  * statement that updates a different table (the claim; see `acceptInvitationAs`).
@@ -623,6 +718,11 @@ function freeOrHolds(column: AnyPgColumn, value: string): SQL {
  * two spellings of one idea. They are kept next to each other, and the unit
  * tests read BOTH off the generated SQL, because a guard on only one of the two
  * statements is worse than neither: it would commit the claim and skip the bind.
+ *
+ * A subquery reads a snapshot and takes no lock, so this predicate is a guard
+ * against a SEQUENTIAL second accept and nothing more. What makes it hold
+ * against a CONCURRENT one is `lockTargetRow` running first in the same batch —
+ * see `acceptInvitationAs`.
  *
  * Throws on a row whose FK columns contradict its `type`, and fails CLOSED on a
  * `type` no arm knows — the same two rules as `associationStatement`, for the
@@ -662,7 +762,10 @@ export function unboundTargetSlot(invitation: AssociationFacts): SQL {
           .where(
             and(
               eq(churches.id, invitation.targetChurchId),
-              freeOrHolds(churches.sendingNetworkId, invitation.sendingNetworkId)
+              freeOrHolds(
+                churches.sendingNetworkId,
+                invitation.sendingNetworkId
+              )
             )
           )
       );
@@ -1018,7 +1121,9 @@ async function loadRespondableInvitation(
  * The WHERE also carries the slot rule — `(fk IS NULL OR fk = <this org>)`, the
  * same rule `unboundTargetSlot` puts on the claim: an accept may bind a free
  * slot or re-bind its own, never replace another org's (see
- * `acceptInvitationAs`).
+ * `acceptInvitationAs`). It `returning()`s the id it touched so the caller can
+ * tell "bound" from "matched nothing" — the association's own rowcount, not the
+ * claim's, is what gates the oversight milestone.
  *
  * A row whose FK columns contradict its `type` throws here, before anything is
  * written.
@@ -1048,7 +1153,8 @@ export function associationStatement(
             claimed,
             freeOrHolds(churches.sendingChurchId, invitation.sendingChurchId)
           )
-        );
+        )
+        .returning({ id: churches.id });
     }
 
     case "church_to_network": {
@@ -1069,7 +1175,8 @@ export function associationStatement(
             claimed,
             freeOrHolds(churches.sendingNetworkId, invitation.sendingNetworkId)
           )
-        );
+        )
+        .returning({ id: churches.id });
     }
 
     case "sending_church_to_network": {
@@ -1093,7 +1200,8 @@ export function associationStatement(
               invitation.sendingNetworkId
             )
           )
-        );
+        )
+        .returning({ id: sendingChurches.id });
     }
 
     default: {

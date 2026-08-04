@@ -9,7 +9,6 @@ import type { OrganizationInvitationType } from "@/db/schema/organization-invita
 import {
   INVITATION_EXPIRY_DAYS,
   InvitationError,
-  MAX_EXPIRY_DAYS,
   NOT_AUTHORIZED_MESSAGE,
   associationStatement,
   expireInvitationQuery,
@@ -17,6 +16,7 @@ import {
   invitationView,
   getInvitation,
   isUuid,
+  lockTargetRow,
   resolveInvitationRequest,
   respondToInvitationQuery,
   revokeInvitationQuery,
@@ -339,15 +339,57 @@ function resolveModule(from: string, specifier: string): string | null {
   return null;
 }
 
-const USE_SERVER_CACHE = new Map<string, boolean>();
+/**
+ * A module's DIRECTIVE PROLOGUE: the run of string-literal statements at the top
+ * of the file, comments already stripped by `codeOf`.
+ *
+ * Both walks below turn on "is this a `"use server"` module", and getting that
+ * answer wrong is not a cosmetic failure — a `"use server"` module is where the
+ * endpoints are, and it is also the BOUNDARY both walks stop at. So a
+ * false NEGATIVE hides a live endpoint from the reachability check, and a false
+ * POSITIVE cuts the client-bundle walk short at a file that is not a boundary at
+ * all. Neither may be decided by a pattern that happens to fit today's files.
+ *
+ * The bug this replaces (#265 r2, HR4 evidence 2026-08-03): `/^["']use
+ * server["'];/m` required a SEMICOLON. `"use server"` without one is the same
+ * directive — ASI makes it an expression statement either way, and Next.js reads
+ * it — so a `"use server"` module written without the semicolon was invisible to
+ * both closure walks, and a live unauthenticated detach endpoint passed a 37/37
+ * green suite. Only `format:check` objected, and a formatter is not a security
+ * control. It is documented mutation 7.
+ *
+ * Anchoring on the PROLOGUE rather than on a line anywhere in the file is what
+ * keeps it precise: a directive is only a directive as the module's first
+ * statement, so `["use server"]` in an array or `/^["']use server["']/` in a
+ * regex further down cannot be mistaken for one.
+ */
+const PROLOGUE = /^(?:\s*(?:"[^"\n]*"|'[^'\n]*')\s*;?)*/;
 
+/**
+ * Does `code` open with this directive? Takes CODE, not a path, so the rule
+ * itself is unit-testable — see "a directive is a directive without its
+ * semicolon".
+ */
+function declaresDirective(code: string, directive: string): boolean {
+  const prologue = PROLOGUE.exec(code)?.[0] ?? "";
+  return new RegExp(`["']${directive}["']`).test(prologue);
+}
+
+const DIRECTIVE_CACHE = new Map<string, boolean>();
+
+/** `"use server"` / `'use server'`, semicolon or not, as the first statement. */
 function isUseServerModule(full: string): boolean {
-  const cached = USE_SERVER_CACHE.get(full);
+  const cached = DIRECTIVE_CACHE.get(full);
   if (cached !== undefined) return cached;
 
-  const directive = /^["']use server["'];/m.test(readFileSync(full, "utf8"));
-  USE_SERVER_CACHE.set(full, directive);
-  return directive;
+  const declared = declaresDirective(codeOf(full), "use server");
+  DIRECTIVE_CACHE.set(full, declared);
+  return declared;
+}
+
+/** The same rule for the client half of the boundary (see §1d). */
+function isUseClientModule(full: string): boolean {
+  return declaresDirective(codeOf(full), "use client");
 }
 
 const rel = (full: string) => path.relative(process.cwd(), full);
@@ -644,6 +686,51 @@ test("the logic layer is not a 'use server' module", () => {
   assert.doesNotMatch(CORE_CODE, /"use server"/);
   assert.doesNotMatch(CORE_CODE, /'use server'/);
   assert.match(SERVICE_CODE, /^"use server";/);
+
+  // ...and the two walks below agree, since they are what actually decides.
+  assert.ok(isUseServerModule(SERVICE_PATH), "service.ts is the action layer");
+  assert.ok(!isUseServerModule(CORE_PATH), "core.ts must not be an endpoint");
+});
+
+test("a directive is a directive without its semicolon", () => {
+  // The guardrail on the guardrail (#265 r2, HOLE 4 — documented mutation 7).
+  // Both closure walks ask `isUseServerModule`, and the previous detector
+  // required a trailing semicolon: `"use server"` on its own is the same
+  // directive (ASI; Next.js reads it), so a module written that way was invisible
+  // to both walks and shipped a live unauthenticated endpoint through a green
+  // 37/37 suite. Only `format:check` noticed, and a formatter is not a security
+  // control — which is why the rule is pinned here, against synthetic code, and
+  // not only exercised on whatever the repo's files happen to look like today.
+  for (const code of [
+    '"use server";\nexport const a = 1;',
+    '"use server"\nexport const a = 1;',
+    "'use server'\nexport const a = 1;",
+    '"use server"    \n',
+    '\n\n  "use server"\n',
+    '"use strict";\n"use server"\n',
+  ]) {
+    assert.ok(declaresDirective(code, "use server"), JSON.stringify(code));
+  }
+
+  // And a directive is only one as the module's FIRST statement, so a mention
+  // further down — a regex, an array entry, a template — is not one. Over-eager
+  // detection is its own bug: these walks STOP at `"use server"` boundaries, so
+  // a false positive silently prunes the subtree it should have followed.
+  for (const code of [
+    'export const a = 1;\n"use server";',
+    'const directives = ["use server"];',
+    'if (x) { "use server"; }',
+    "export const RE = /[\"']use server[\"']/;",
+    "",
+  ]) {
+    assert.ok(!declaresDirective(code, "use server"), JSON.stringify(code));
+  }
+
+  // The client half of the boundary uses the same rule, and there is at least
+  // one real file of each kind — otherwise §1d walks nothing.
+  assert.ok(declaresDirective('"use client"\n', "use client"));
+  assert.ok(TS_FILES.some(isUseClientModule), "no client entries found");
+  assert.ok(TS_FILES.some(isUseServerModule), "no action modules found");
 });
 
 test("no 'use server' module republishes the invitation logic layer", () => {
@@ -737,9 +824,10 @@ test("no client component can pull the logic layer into the browser", () => {
   // — fail at load. This walk is the replacement: it is transitive, it runs on
   // every commit, and it fails in `pnpm test` rather than at runtime in a
   // browser.
-  const clientEntries = TS_FILES.filter((full) =>
-    /^["']use client["'];/m.test(readFileSync(full, "utf8"))
-  );
+  // Same semicolon-agnostic prologue rule as the server side: a `"use client"`
+  // written without one is still a client entry, and missing it would take the
+  // whole subtree it imports out of this walk.
+  const clientEntries = TS_FILES.filter(isUseClientModule);
 
   assert.ok(clientEntries.length > 0, "no client components found — check SRC");
 
@@ -1002,9 +1090,10 @@ test("an unrecognised invitation type has no association to write either", () =>
   // so an unknown type wrote no association but was still marked `accepted` and
   // still announced a milestone. Now it cannot get that far.
   //
-  // BOTH accept statements are checked, because both switch on `type` and the
-  // claim's guard is what stops a second accept: an arm missing there would fail
-  // OPEN in the statement that decides whether anything is written at all.
+  // ALL THREE accept statements are checked, because all three switch on `type`:
+  // an arm missing from the claim's guard would fail OPEN in the statement that
+  // decides whether anything is written at all, and one missing from the lock
+  // would let an accept run with nothing locked.
   for (const type of UNKNOWN_TYPES) {
     const invitation = {
       type,
@@ -1020,6 +1109,7 @@ test("an unrecognised invitation type has no association to write either", () =>
       type
     );
     assert.throws(() => unboundTargetSlot(invitation), InvitationError, type);
+    assert.throws(() => lockTargetRow(invitation), InvitationError, type);
   }
 });
 
@@ -1077,7 +1167,6 @@ test("a sending church admin invites plants into their OWN sending church", () =
     targetSendingChurchId: null,
     sendingChurchId: SENDING_CHURCH,
     sendingNetworkId: null,
-    expiresInDays: INVITATION_EXPIRY_DAYS,
   });
 });
 
@@ -1169,23 +1258,39 @@ test("the target must be exactly one well-formed id", () => {
   }
 });
 
-test("the expiry window is bounded", () => {
-  for (const expiresInDays of [0, -1, 1.5, MAX_EXPIRY_DAYS + 1, 36500]) {
-    assert.ok(
-      !resolveInvitationRequest(NETWORK_ADMIN, {
-        targetChurchId: PLANT,
-        expiresInDays,
-      }).ok,
-      String(expiresInDays)
-    );
-  }
-
-  const ok = resolveInvitationRequest(NETWORK_ADMIN, {
+test("the expiry window is server-fixed and not a client input", () => {
+  // RULED 2026-08-03 (#265 r3): there is no client-facing expiry. An earlier
+  // round of this fix let the caller name a window, clamped to 1–90 days with
+  // user-facing copy for the refusal — an unspecified knob on a `"use server"`
+  // endpoint, which is exactly the kind of surface this ticket exists to remove.
+  // #23's create form gets no expiry field, so nothing needs one.
+  //
+  // Three assertions, because "we deleted the parameter" has to stay deleted:
+  // the request TYPE rejects it (excess-property check, and an unused
+  // `@ts-expect-error` is itself an error), the resolved row carries no expiry
+  // field for a value to travel in, and the word appears nowhere in the logic
+  // layer's code — so a helpful future `expiresInDays?: number` fails here rather
+  // than shipping.
+  const smuggled = resolveInvitationRequest(NETWORK_ADMIN, {
     targetChurchId: PLANT,
-    expiresInDays: MAX_EXPIRY_DAYS,
+    // @ts-expect-error the ruling, as a compile error: expiry is not a request field
+    expiresInDays: 36500,
   });
-  assert.ok(ok.ok);
-  assert.equal(ok.values.expiresInDays, MAX_EXPIRY_DAYS);
+
+  assert.ok(smuggled.ok);
+  assert.ok(!("expiresInDays" in smuggled.values), "expiry reached the row");
+  assert.deepEqual(Object.keys(smuggled.values).sort(), [
+    "inviterUserId",
+    "sendingChurchId",
+    "sendingNetworkId",
+    "targetChurchId",
+    "targetSendingChurchId",
+    "type",
+  ]);
+
+  assert.doesNotMatch(CORE_CODE, /expiresInDays/);
+  assert.doesNotMatch(SERVICE_CODE, /expiresInDays/);
+  assert.equal(INVITATION_EXPIRY_DAYS, 30);
 });
 
 // ----------------------------------------------------------------------------
@@ -1388,6 +1493,111 @@ test("an accept binds a free slot or its own, and never replaces another org's",
 
   assert.doesNotMatch(decline.sql, /exists/);
   assert.ok(decline.params.includes("pending"));
+});
+
+test("the accept batch locks the row the association will write", () => {
+  // The accept-vs-accept race (#265 r3, HR4 evidence 2026-08-03). The slot rule
+  // above is a SUBQUERY on the target's table, and a subquery reads a snapshot
+  // and takes no lock — while the claim it guards updates a different table. So
+  // two accepts of two DIFFERENT invitations for ONE free slot contended on
+  // nothing: both claims committed `accepted`, READ COMMITTED's re-check made the
+  // second association match nothing, and the loser announced an oversight
+  // milestone for an association it never wrote (reproduced 6/10 runs).
+  //
+  // `lockTargetRow` is statement ONE of the batch and takes a row lock on the
+  // entity the association will update, so the second accept waits for the
+  // first to COMMIT and then evaluates the slot rule against what it wrote. What
+  // is assertable here is that the lock exists, is `FOR UPDATE`, and names the
+  // SAME table and row the association writes — a lock on anything else (the
+  // invitation, say) would serialise nothing, since the two accepts are two
+  // different invitations. That it then behaves is §3d case H, on a real
+  // database, because the fault was two snapshots and not a missing predicate.
+  const cases = [
+    {
+      invitation: {
+        type: "church_to_sending_church" as const,
+        targetChurchId: PLANT,
+        targetSendingChurchId: null,
+        sendingChurchId: SENDING_CHURCH,
+        sendingNetworkId: null,
+      },
+      table: /from "churches"/,
+      id: PLANT,
+    },
+    {
+      invitation: {
+        type: "church_to_network" as const,
+        targetChurchId: PLANT,
+        targetSendingChurchId: null,
+        sendingChurchId: null,
+        sendingNetworkId: NETWORK,
+      },
+      table: /from "churches"/,
+      id: PLANT,
+    },
+    {
+      invitation: {
+        type: "sending_church_to_network" as const,
+        targetChurchId: null,
+        targetSendingChurchId: SENDING_CHURCH,
+        sendingChurchId: null,
+        sendingNetworkId: NETWORK,
+      },
+      table: /from "sending_churches"/,
+      id: SENDING_CHURCH,
+    },
+  ];
+
+  for (const { invitation, table, id } of cases) {
+    const lock = lockTargetRow(invitation).toSQL();
+
+    assert.match(lock.sql, /^select /, invitation.type);
+    assert.match(lock.sql, table, invitation.type);
+    assert.match(lock.sql, /for update\s*$/, invitation.type);
+    assert.deepEqual(lock.params, [id], invitation.type);
+
+    // The same table the association updates — otherwise the lock is on a row
+    // nobody is competing for.
+    const written = associationStatement(invitation, INVITATION_ID).toSQL().sql;
+    const [, locked] = /from "(\w+)"/.exec(lock.sql) ?? [];
+    assert.match(written, new RegExp(`^update "${locked}"`), invitation.type);
+
+    // ...and it writes nothing itself: the lock is the whole contribution, and
+    // a write here would be a third statement nobody accounted for. (The `for
+    // update` clause is stripped first — it is the lock, not a write.)
+    assert.doesNotMatch(
+      lock.sql.replace(/\s*for update\s*$/, ""),
+      /update|insert|delete/,
+      invitation.type
+    );
+  }
+});
+
+test("the association reports whether it bound anything", () => {
+  // The milestone is gated on the ASSOCIATION's rowcount, not the claim's, so
+  // the statement has to return something. Without `returning()` "bound" and
+  // "matched nothing" are indistinguishable, and the one state with no repair
+  // path in the product — accepted, unassociated, milestone already announced —
+  // would be reported to the user as success.
+  for (const invitation of [
+    {
+      type: "church_to_sending_church" as const,
+      targetChurchId: PLANT,
+      targetSendingChurchId: null,
+      sendingChurchId: SENDING_CHURCH,
+      sendingNetworkId: null,
+    },
+    {
+      type: "sending_church_to_network" as const,
+      targetChurchId: null,
+      targetSendingChurchId: SENDING_CHURCH,
+      sendingChurchId: null,
+      sendingNetworkId: NETWORK,
+    },
+  ]) {
+    const { sql } = associationStatement(invitation, INVITATION_ID).toSQL();
+    assert.match(sql, /returning "id"/, invitation.type);
+  }
 });
 
 test("the auto-expire write is a compare-and-set too", () => {

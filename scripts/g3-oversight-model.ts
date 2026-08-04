@@ -41,7 +41,6 @@ import { canAccessChurch } from "@/lib/auth/access";
 import { setChurchLaunchDate } from "@/lib/churches/launch-date";
 import {
   ALREADY_ASSOCIATED_MESSAGE,
-  INVITATION_EXPIRY_DAYS,
   InvitationError,
   NOT_AUTHORIZED_MESSAGE,
   acceptInvitationAs,
@@ -96,7 +95,6 @@ async function seedInvitation(seed: InvitationSeed) {
     targetSendingChurchId: null,
     sendingChurchId: null,
     sendingNetworkId: null,
-    expiresInDays: INVITATION_EXPIRY_DAYS,
     ...seed,
   });
 }
@@ -580,7 +578,8 @@ async function main() {
   //
   //     The invariant: `churches.sending_church_id` is non-null IF AND ONLY IF
   //     the invitation reads `accepted`. An accept that loses the race — to a
-  //     revoke or to a decline — must leave the plant unbound.
+  //     revoke, to a decline, or to ANOTHER ACCEPT for the same free slot
+  //     (case H) — must leave the plant unbound and its own invitation pending.
   //
   //     Why it needs a real database and not a unit test. `acceptInvitationAs`
   //     reads the invitation, then writes; two requests both pass that read, so
@@ -992,6 +991,142 @@ async function main() {
     "re-accepting the org the plant already belongs to was refused"
   );
   ok("re-binding the org the plant already belongs to is still allowed");
+
+  // Case H — ACCEPT vs ACCEPT (#265 r3, HR4 evidence 2026-08-03). The race Case G
+  // cannot see and cases C/D cannot either: TWO invitations, from two different
+  // orgs, for ONE free slot, accepted at the same moment.
+  //
+  // Why it slipped past the guard Case G proves. The slot rule on the claim is
+  // `EXISTS (SELECT … FROM churches WHERE … fk IS NULL OR fk = <this org>)` — a
+  // subquery, which reads a snapshot and takes NO lock. The two claims update two
+  // DIFFERENT rows of `organization_invitations`, so they contend on nothing:
+  // both EXISTS were true when evaluated, both claims committed `accepted`, and
+  // READ COMMITTED's re-check made the second association's UPDATE match nothing.
+  // Result, reproduced 6/10 runs on the previous revision: an invitation reading
+  // `accepted` with no association behind it AND an oversight milestone announced
+  // to an org the plant never joined — the one state with no product repair path
+  // until severing ships (#277/#278).
+  //
+  // Closed by `lockTargetRow` — `SELECT … FOR UPDATE` on the plant's own row as
+  // statement ONE of the accept batch. The loser blocks until the winner commits,
+  // then evaluates the slot rule against what the winner wrote and is refused.
+  // Asserted here on a real database because there is nothing to assert in SQL
+  // text: the bug was two snapshots, not a missing predicate.
+  const ACCEPT_RACE_RUNS = 10;
+  const acceptRaceWinners: string[] = [];
+  const acceptRaceRefusals: string[] = [];
+
+  for (let run = 0; run < ACCEPT_RACE_RUNS; run += 1) {
+    // Resets the plant to unbound and clears its notifications.
+    const incumbentSide = await freshRaceInvitation();
+    const rivalSide = await seedInvitation({
+      type: "church_to_sending_church",
+      inviterUserId: rivalInviter.id,
+      targetChurchId: racePlant.id,
+      sendingChurchId: rivalSendingChurch.id,
+    });
+
+    const [first, second] = await Promise.allSettled([
+      acceptInvitationAs(actorFor(racePlanter), incumbentSide.id),
+      acceptInvitationAs(actorFor(racePlanter), rivalSide.id),
+    ]);
+
+    assert.notEqual(
+      first.status === "fulfilled",
+      second.status === "fulfilled",
+      `run ${run}: both accepts ${first.status} — two orgs claimed one slot`
+    );
+
+    for (const settled of [first, second]) {
+      if (settled.status === "rejected") {
+        assert.ok(
+          settled.reason instanceof InvitationError,
+          `run ${run}: the losing accept failed for a non-product reason`
+        );
+        acceptRaceRefusals.push(settled.reason.message);
+      }
+    }
+
+    const [[boundTo], both] = await Promise.all([
+      db
+        .select({ sendingChurchId: churches.sendingChurchId })
+        .from(churches)
+        .where(eq(churches.id, racePlant.id)),
+      db
+        .select({
+          id: organizationInvitations.id,
+          status: organizationInvitations.status,
+          respondedBy: organizationInvitations.respondedBy,
+          sendingChurchId: organizationInvitations.sendingChurchId,
+        })
+        .from(organizationInvitations)
+        .where(
+          inArray(organizationInvitations.id, [incumbentSide.id, rivalSide.id])
+        ),
+    ]);
+
+    const accepted = both.filter((row) => row.status === "accepted");
+    assert.equal(
+      accepted.length,
+      1,
+      `run ${run}: ${accepted.length} of the two invitations read accepted — one slot, one acceptance`
+    );
+    assert.equal(
+      boundTo.sendingChurchId,
+      accepted[0].sendingChurchId,
+      `run ${run}: the plant is bound to an org whose invitation does not read accepted`
+    );
+    acceptRaceWinners.push(
+      accepted[0].sendingChurchId === raceSendingChurch.id
+        ? "incumbent"
+        : "rival"
+    );
+
+    // The loser wrote NOTHING — not even its own status. It stays `pending`, so
+    // the plant can still accept it after severing (#277), which is exactly the
+    // order OV-007 wants.
+    const [loser] = both.filter((row) => row.status !== "accepted");
+    assert.equal(
+      loser.status,
+      "pending",
+      `run ${run}: the refused accept still answered its own invitation (status=${loser.status})`
+    );
+    assert.equal(
+      loser.respondedBy,
+      null,
+      `run ${run}: the refused accept stamped responded_by`
+    );
+
+    // ...and no milestone reached the org that lost. This is the half that made
+    // the race a privacy fault and not merely a data fault: the acceptance
+    // milestone is the ONE oversight notification that bypasses the sharing
+    // toggle, so announcing it to an org the plant never joined cannot be
+    // undone by a preference.
+    const loserAdmin =
+      loser.sendingChurchId === raceSendingChurch.id
+        ? raceInviter.id
+        : rivalInviter.id;
+    const announced = await rowsFor(racePlant.id);
+
+    assert.ok(
+      announced.length > 0,
+      `run ${run}: the winning accept announced no milestone at all`
+    );
+    assert.ok(
+      !announced.some((row) => row.recipientUserId === loserAdmin),
+      `run ${run}: the refused accept announced the acceptance milestone to its own org`
+    );
+  }
+
+  ok(
+    `accept vs accept, ${ACCEPT_RACE_RUNS} runs: exactly one accept commits and the plant is bound to that org (${acceptRaceWinners.join(", ")})`
+  );
+  ok(
+    `accept vs accept, ${ACCEPT_RACE_RUNS} runs: the losing accept writes NOTHING — its invitation is still pending and its org was never announced to`
+  );
+  console.log(
+    `      losing-accept refusals: ${acceptRaceRefusals.join(" | ") || "none"}`
+  );
 
   await db
     .update(churches)
