@@ -78,40 +78,40 @@ import {
 // GUARDRAIL MUTATIONS — the shapes this file has been WATCHED to reject. A
 // guardrail nobody has seen fail has not been tested, so each of these was
 // applied to a clean tree, run, and watched go red; the counts are output, not
-// estimates. 3, 4 and 5 are the three holes HR4 found in earlier versions of
+// estimates. 3, 4, 5 and 7 are the four holes HR4 found in earlier versions of
 // this file (#265, evidence comments 2026-08-03), each of which left the suite
-// GREEN — 5 with `tsc` at exit 0 as well.
+// GREEN — 5 and 7 with `tsc` at exit 0 as well.
 //
 // HOW TO RUN ONE (these are recipes, so they have to compile as written):
-// mutations 1–3 are appended to the END of `./service.ts`; 4 and 5 add two new
-// files each; 6 edits `CORE_REACHING_ACTION_MODULES` below. Mutations 1 and 3
+// mutations 1-3 are appended to the END of `./service.ts`; 4, 5 and 7 add two
+// new files each; 6 edits `CORE_REACHING_ACTION_MODULES` below. Mutations 1 and 3
 // call `disassociateChurchFromNetwork`, which `service.ts` deliberately does NOT
 // import, so they ALSO require adding the line
 // `disassociateChurchFromNetwork,` to that file's existing `from "./core"`
 // import block — without it you get
 // `TS2304: Cannot find name 'disassociateChurchFromNetwork'` from
 // `pnpm typecheck` instead of the documented red suite. Baseline for the counts
-// below is 37 tests / 37 pass; take them in a tree nobody else is writing to
+// below is 40 tests / 40 pass; take them in a tree nobody else is writing to
 // (`git archive <sha> | tar -x -C <dir>`, node_modules symlinked in, `.env.local`
 // copied), because a shared worktree gives different counts:
 //
 //   1. `export const detachPlantFromNetwork = async (churchId: string) => {
 //        await disassociateChurchFromNetwork(churchId);
 //      };`
-//      → 34 pass / 3 fail: "the runtime export surface is exactly the four
+//      → 37 pass / 3 fail: "the runtime export surface is exactly the four
 //        lifecycle mutations", "every exported invitation action mints its actor
 //        from the session", "nothing but the four lifecycle mutations is an
 //        endpoint".
 //
 //   2. `export { disassociateChurchFromSendingChurch } from "./core";`
-//      → 34 pass / 3 fail: "the runtime export surface …", "the action layer
+//      → 37 pass / 3 fail: "the runtime export surface …", "the action layer
 //        publishes nothing it did not declare", "no 'use server' module
 //        republishes the invitation logic layer".
 //
 //   3. `export default async function detachPlantFromNetwork(churchId: string) {
 //        await disassociateChurchFromNetwork(churchId);
 //      }`
-//      → HOLE 1, and 35 pass / 2 fail. The old allowlist matched
+//      → HOLE 1, and 38 pass / 2 fail. The old allowlist matched
 //        `export (async) function|const|let|var|class` and therefore never
 //        `export default`, so this — a real, POSTable, unauthenticated "detach
 //        any church from its network by guessing a uuid" endpoint — passed
@@ -136,7 +136,7 @@ import {
 //        walk is now a CLOSURE over re-export edges (the same shape as the
 //        client-bundle walk in §1d), so `detach-actions.ts → index.ts →
 //        core.ts` fails "no 'use server' module republishes the invitation
-//        logic layer" with the chain in the message — 36 pass / 1 fail. Adding
+//        logic layer" with the chain in the message — 39 pass / 1 fail. Adding
 //        one more barrel in between reports all four files, so the depth is not
 //        two either.
 //
@@ -151,33 +151,58 @@ import {
 //            `}`
 //      → HOLE 3, and the reason this file was rejected a second time. Same live
 //        unauthenticated "detach any church by guessing a uuid" endpoint, one
-//        keyword different — and on the tree before this fix (`8a5360c`) it was
+//        keyword different — and on the tree before that fix (`8a5360c`) it was
 //        35 pass / 0 fail with `npx tsc --noEmit` at exit 0, because check (a)
 //        tested the literal string `invitations/core` plus ONE resolved hop per
-//        `from` specifier. Now 36 pass / 1 fail, same test, with the chain in
+//        `from` specifier. Now 39 pass / 1 fail, same test, with the chain in
 //        the message: the check is a CLOSURE over value imports and the question
 //        it asks is "can this action module REACH core", not "does it spell it".
 //
 //   6. Allowlist rot, both directions — the assertions that stop
 //      `CORE_REACHING_ACTION_MODULES` from becoming a blanket exemption:
 //        (a) delete the `src/app/(auth)/register/actions.ts` entry
-//            → 36 pass / 1 fail, reporting the real chain
+//            → 39 pass / 1 fail, reporting the real chain
 //              `register/actions.ts → register/beta-gate.ts → core.ts`.
 //        (b) add an entry for a module that does NOT reach core (e.g.
 //            `src/app/(dashboard)/settings/actions.ts`)
-//            → 36 pass / 1 fail: "an allowlist entry no longer reaches …". So a
+//            → 39 pass / 1 fail: "an allowlist entry no longer reaches …". So a
 //              padded or stale list is a failing test, not a quiet exemption.
+//
+//   7. Mutation 5 again, with ONE CHARACTER REMOVED — the directive's semicolon:
+//        `src/lib/invitations/index.ts`
+//          → `export * from "./core";`
+//        `src/app/(dashboard)/oversight/detach-actions.ts`
+//          → `"use server"`      ← no semicolon
+//            `import { disassociateChurchFromNetwork } from "@/lib/invitations";`
+//            `export async function detachPlantFromNetwork(churchId: string) {`
+//            `  await disassociateChurchFromNetwork(churchId);`
+//            `}`
+//      → HOLE 4, and the third rejection. `"use server"` without a semicolon is
+//        the SAME directive — ASI makes it an expression statement either way and
+//        Next.js publishes the module's exports — but the detector required one
+//        (`/^["']use server["'];/m`), so this module was not a `"use server"`
+//        module as far as either closure walk was concerned. Identical live
+//        unauthenticated detach endpoint, 37 pass / 0 fail on `feature/265-…-r2`
+//        with `tsc` at exit 0; the only thing that objected was
+//        `pnpm format:check`, and a formatter is not a security control. Now
+//        39 pass / 1 fail, same test as mutations 4-6, because the directive is
+//        read off the module's PROLOGUE (see `declaresDirective`) — and the rule
+//        is separately pinned against synthetic code by "a directive is a
+//        directive without its semicolon", so it cannot regress unnoticed on a
+//        tree where every real file happens to be formatted.
 //
 // The compare-and-set is covered from both sides: §5 reads it off the generated
 // SQL (the claim's `status = 'pending'`, the association's
 // `EXISTS ... status = 'accepted'`, the slot rule
-// `fk IS NULL OR fk = <this org>` on BOTH statements, the expiry's
-// `status = 'pending'`), and the G3 harness (`scripts/g3-oversight-model.ts`
-// §3d) races a real accept against a real revoke on a real database, asserts a
-// lost accept writes nothing (cases A–F), and asserts a SECOND accept from a
-// different org is refused while the incumbent association survives (case G).
+// `fk IS NULL OR fk = <this org>` on BOTH statements, the `FOR UPDATE` lock on
+// the row the association writes, the expiry's `status = 'pending'`), and the G3
+// harness (`scripts/g3-oversight-model.ts` §3d) races real accepts on a real
+// database: against a revoke and against a decline (cases A-F), against a SECOND
+// sequential accept from another org (case G), and against a CONCURRENT accept
+// for the same free slot (case H, 10 runs — the one the row lock exists for).
 // The SQL assertions are what make the harness's result attributable to the
-// guard.
+// guard; the lock is the half that has nothing to assert in SQL text, since the
+// fault it fixes was two snapshots and not a missing predicate.
 //
 // §7 is the last of the four: what an action HANDS BACK. `InvitationView`, not
 // the row, because the row carries two internal user uuids.
