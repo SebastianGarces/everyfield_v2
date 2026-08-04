@@ -2,6 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   Activity,
   BookOpenText,
+  MailPlus,
   CalendarCheck,
   FileText,
   LayoutDashboard,
@@ -137,8 +138,11 @@ export const mainNavItems: NavItem[] = [
  * page file exists for every href below; add the item back in the same change
  * that adds its `page.tsx`, not before.
  *
- * Hidden until built (#260): "Church Plants" (/oversight/plants),
- * "Invitations" (/oversight/invitations), "Settings" (/oversight/settings).
+ * "Invitations" came BACK in #23, in the same change that added
+ * `/oversight/invitations/page.tsx` — which is the rule above, honoured.
+ *
+ * Still hidden until built (#260): "Church Plants" (/oversight/plants),
+ * "Settings" (/oversight/settings).
  */
 export const sendingChurchNavItems: NavItem[] = [
   {
@@ -151,6 +155,11 @@ export const sendingChurchNavItems: NavItem[] = [
     href: "/oversight/health",
     icon: Activity,
   },
+  {
+    title: "Invitations",
+    href: "/oversight/invitations",
+    icon: MailPlus,
+  },
 ];
 
 /**
@@ -159,9 +168,11 @@ export const sendingChurchNavItems: NavItem[] = [
  *
  * Same rule as `sendingChurchNavItems`: every href needs a real page.
  *
- * Hidden until built (#260): "Sending Churches"
+ * "Invitations" came BACK in #23 with its page.
+ *
+ * Still hidden until built (#260): "Sending Churches"
  * (/oversight/sending-churches), "Church Plants" (/oversight/plants),
- * "Invitations" (/oversight/invitations), "Settings" (/oversight/settings).
+ * "Settings" (/oversight/settings).
  */
 export const networkAdminNavItems: NavItem[] = [
   {
@@ -173,6 +184,11 @@ export const networkAdminNavItems: NavItem[] = [
     title: "Plant Health",
     href: "/oversight/health",
     icon: Activity,
+  },
+  {
+    title: "Invitations",
+    href: "/oversight/invitations",
+    icon: MailPlus,
   },
 ];
 

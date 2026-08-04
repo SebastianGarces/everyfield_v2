@@ -91,6 +91,7 @@ type InvitationSeed = Pick<ResolvedInvitation, "type" | "inviterUserId"> &
 
 async function seedInvitation(seed: InvitationSeed) {
   return insertInvitation({
+    inviteeEmail: "harness-invitee@example.com",
     targetChurchId: null,
     targetSendingChurchId: null,
     sendingChurchId: null,

@@ -13,6 +13,7 @@ import { getCurrentSession } from "@/lib/auth";
 import { getAccessibleChurchIds } from "@/lib/auth/access";
 import { PHASES } from "@/lib/constants";
 import { inArray } from "drizzle-orm";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 export default async function OversightDashboardPage() {
@@ -120,8 +121,18 @@ export default async function OversightDashboardPage() {
         <CardContent>
           {plants.length === 0 ? (
             <p className="text-muted-foreground py-8 text-center">
-              No church plants associated yet. Use the Invitations page to
-              invite planters to join.
+              No church plants associated yet.{" "}
+              {/*
+                This sentence named a page that did not exist until #23. Copy
+                that points at a surface is a promise; the link is what keeps it.
+              */}
+              <Link
+                href="/oversight/invitations"
+                className="text-primary cursor-pointer underline underline-offset-4"
+              >
+                Invite a planter
+              </Link>{" "}
+              to get started.
             </p>
           ) : (
             <div className="space-y-3">

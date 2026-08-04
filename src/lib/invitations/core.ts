@@ -45,6 +45,7 @@ import {
   churches,
   organizationInvitations,
   sendingChurches,
+  users,
   type NewOrganizationInvitation,
   type OrganizationInvitation,
   type User,
@@ -169,6 +170,9 @@ export function invitationView(row: OrganizationInvitation): InvitationView {
   return {
     id: row.id,
     type: row.type,
+    // The address the ADMIN typed, not an identifier anybody can aim a request
+    // at — and the only thing an invitations row has to render.
+    inviteeEmail: row.inviteeEmail,
     targetChurchId: row.targetChurchId,
     targetSendingChurchId: row.targetSendingChurchId,
     sendingChurchId: row.sendingChurchId,
@@ -197,9 +201,76 @@ export function invitationView(row: OrganizationInvitation): InvitationView {
  * set.
  */
 export interface InvitationRequest {
+  /**
+   * The address the invite goes to. The ONLY thing a create form asks for
+   * besides `inviteAs` — see `resolveInvitationTarget` for why there is no
+   * picker of existing plants.
+   */
+  inviteeEmail: string;
+  /**
+   * Which kind of organization is being invited, for an invitee who has no
+   * account yet and therefore no target row. Only a `network_admin` has a
+   * choice to make (a plant or a sending church); a `sending_church_admin` may
+   * only ever invite plants and the field is ignored for them.
+   */
+  inviteAs?: InvitationTargetKind;
+  /**
+   * Resolved from `inviteeEmail` by `resolveInvitationTarget`, NEVER sent by a
+   * client. Kept on the request type — rather than as extra parameters — so
+   * `resolveInvitationRequest` stays pure and unit-testable without a database.
+   */
   targetChurchId?: string;
   targetSendingChurchId?: string;
 }
+
+/** What the invitee is: a church plant, or a sending church. */
+export const invitationTargetKinds = ["church", "sending_church"] as const;
+export type InvitationTargetKind = (typeof invitationTargetKinds)[number];
+
+export function isInvitationTargetKind(
+  value: unknown
+): value is InvitationTargetKind {
+  return (
+    typeof value === "string" &&
+    (invitationTargetKinds as readonly string[]).includes(value)
+  );
+}
+
+/** Trim + lowercase, the form `users.email` is stored and compared in. */
+export function normalizeInviteeEmail(value: unknown): string {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+export const INVALID_EMAIL_MESSAGE = "Enter a valid email address";
+
+/**
+ * Already-taken slot, refused at CREATE time.
+ *
+ * RULED 2026-08-03 (#23): `createInvitation` refuses up front when the target
+ * plant's oversight slot is already held, rather than letting the admin send an
+ * invitation that `acceptInvitationAs` is guaranteed to refuse days later with
+ * nobody watching. Defense in depth — the accept-time guard
+ * (`unboundTargetSlot`) is the one that has to hold under concurrency and is
+ * NOT replaced by this; this one exists so the admin is told immediately, in
+ * the form. Once severing ships (#277/#278) the slot frees and the org
+ * re-invites.
+ */
+export const SLOT_TAKEN_MESSAGE =
+  "That organization already belongs to a sending church or network — it has to leave that one first";
+
+export const ALREADY_OURS_MESSAGE =
+  "That organization is already part of your organization";
+
+export const NO_ORG_TO_INVITE_MESSAGE =
+  "That account has not created its organization yet — ask them to set it up, then invite them";
+
+export const CANNOT_INVITE_ACCOUNT_MESSAGE =
+  "That account cannot be invited — invitations go to a church planter or a sending church admin";
+
+export const KIND_MISMATCH_MESSAGE =
+  "That email belongs to a different kind of organization than the one you chose";
 
 /**
  * The fields that decide WHAT association an accept makes: the target entity and
@@ -224,6 +295,7 @@ export type AssociationFacts = Pick<
 export interface ResolvedInvitation {
   type: OrganizationInvitationType;
   inviterUserId: string;
+  inviteeEmail: string;
   targetChurchId: string | null;
   targetSendingChurchId: string | null;
   sendingChurchId: string | null;
@@ -252,7 +324,12 @@ export function isUuid(value: unknown): value is string {
  *                            THEIR network
  *
  * The inviting org therefore comes from the session and the `type` follows from
- * the role plus which target was named. Exactly one target may be named.
+ * the role plus WHAT is being invited. At most one target may be named, and an
+ * invitation with NO target is legitimate: the invitee has no account yet, so
+ * there is no row to point at until they register (`bindOpenInvitationTarget`).
+ * The `type` of such an "open" invitation comes from `inviteAs`, which is why a
+ * network admin has to say which kind of org they are inviting and a sending
+ * church admin does not.
  */
 export function resolveInvitationRequest(
   actor: InvitationActor,
@@ -260,12 +337,13 @@ export function resolveInvitationRequest(
 ): ResolveResult {
   const targetChurchId = request.targetChurchId ?? null;
   const targetSendingChurchId = request.targetSendingChurchId ?? null;
+  const inviteeEmail = normalizeInviteeEmail(request.inviteeEmail);
 
+  if (!EMAIL_RE.test(inviteeEmail)) {
+    return { ok: false, error: INVALID_EMAIL_MESSAGE };
+  }
   if (targetChurchId && targetSendingChurchId) {
     return { ok: false, error: "Invite one organization at a time" };
-  }
-  if (!targetChurchId && !targetSendingChurchId) {
-    return { ok: false, error: "Choose who to invite" };
   }
   if (targetChurchId && !isUuid(targetChurchId)) {
     return { ok: false, error: "That is not a church we can invite" };
@@ -274,8 +352,17 @@ export function resolveInvitationRequest(
     return { ok: false, error: "That is not a sending church we can invite" };
   }
 
+  // What is being invited: whatever the resolved target IS, or — with no target
+  // yet — whatever the admin said they were inviting.
+  const kind: InvitationTargetKind = targetSendingChurchId
+    ? "sending_church"
+    : targetChurchId
+      ? "church"
+      : (request.inviteAs ?? "church");
+
   const base = {
     inviterUserId: actor.id,
+    inviteeEmail,
     targetChurchId,
     targetSendingChurchId,
   };
@@ -284,7 +371,7 @@ export function resolveInvitationRequest(
     if (!actor.sendingChurchId) {
       return { ok: false, error: "Set up your sending church first" };
     }
-    if (targetSendingChurchId) {
+    if (kind === "sending_church") {
       return {
         ok: false,
         error: "A sending church can only invite church plants",
@@ -309,9 +396,10 @@ export function resolveInvitationRequest(
       ok: true,
       values: {
         ...base,
-        type: targetSendingChurchId
-          ? "sending_church_to_network"
-          : "church_to_network",
+        type:
+          kind === "sending_church"
+            ? "sending_church_to_network"
+            : "church_to_network",
         sendingChurchId: null,
         sendingNetworkId: actor.sendingNetworkId,
       },
@@ -344,6 +432,7 @@ export async function insertInvitation(
   const row: NewOrganizationInvitation = {
     type: values.type,
     inviterUserId: values.inviterUserId,
+    inviteeEmail: values.inviteeEmail,
     targetChurchId: values.targetChurchId,
     targetSendingChurchId: values.targetSendingChurchId,
     sendingChurchId: values.sendingChurchId,
@@ -360,15 +449,234 @@ export async function insertInvitation(
   return invitation;
 }
 
-/** Resolve + insert. The path the action layer takes. */
+/**
+ * Turn the one thing the admin typed — an email — into a target row, if there
+ * is one.
+ *
+ * WHY THERE IS NO PICKER. An oversight admin sees only the plants their org is
+ * associated with (`getAccessibleChurchIds`), and a dropdown of "church plants
+ * you could invite" would have to list every plant in the product to every org
+ * — a directory leak dressed as a form field. So the admin addresses an email,
+ * and the server decides privately whether that address already belongs to an
+ * organization.
+ *
+ * Three outcomes:
+ *   * a planter WITH a church, or (for a network admin) a sending church admin
+ *     WITH a sending church → that row is the target, and the slot rule below
+ *     applies to it;
+ *   * no account at all → an OPEN invitation with no target. The invite link
+ *     carries the token to `/register`, where the organization is created and
+ *     bound in one go (`bindOpenInvitationTarget`);
+ *   * an account that is neither → refused, with a message that says what kind
+ *     of account can be invited.
+ *
+ * A planter who has not created their church yet is the third case in
+ * disguise: there is no row to associate and they cannot register again, so
+ * they are told to create the plant first rather than handed a dead link.
+ */
+export async function resolveInvitationTarget(
+  actor: InvitationActor,
+  inviteeEmail: string,
+  inviteAs: InvitationTargetKind
+): Promise<
+  | {
+      ok: true;
+      target: Pick<
+        InvitationRequest,
+        "targetChurchId" | "targetSendingChurchId"
+      >;
+    }
+  | { ok: false; error: string }
+> {
+  const [existing] = await db
+    .select({
+      role: users.role,
+      churchId: users.churchId,
+      sendingChurchId: users.sendingChurchId,
+    })
+    .from(users)
+    .where(eq(users.email, inviteeEmail))
+    .limit(1);
+
+  // Nobody here yet — an open invitation, redeemed by registering.
+  if (!existing) return { ok: true, target: {} };
+
+  if (existing.role === "planter") {
+    if (inviteAs !== "church") {
+      return { ok: false, error: KIND_MISMATCH_MESSAGE };
+    }
+    if (!existing.churchId) {
+      return { ok: false, error: NO_ORG_TO_INVITE_MESSAGE };
+    }
+    return { ok: true, target: { targetChurchId: existing.churchId } };
+  }
+
+  if (existing.role === "sending_church_admin") {
+    // Only a network invites a sending church; `resolveInvitationRequest`
+    // refuses it for a sending-church admin, but say so from the field the
+    // admin actually filled in rather than from a type they never chose.
+    if (actor.role !== "network_admin") {
+      return {
+        ok: false,
+        error: "A sending church can only invite church plants",
+      };
+    }
+    if (inviteAs !== "sending_church") {
+      return { ok: false, error: KIND_MISMATCH_MESSAGE };
+    }
+    if (!existing.sendingChurchId) {
+      return { ok: false, error: NO_ORG_TO_INVITE_MESSAGE };
+    }
+    return {
+      ok: true,
+      target: { targetSendingChurchId: existing.sendingChurchId },
+    };
+  }
+
+  return { ok: false, error: CANNOT_INVITE_ACCOUNT_MESSAGE };
+}
+
+/**
+ * The occupied-slot refusal, RULED 2026-08-03 (#23) — see `SLOT_TAKEN_MESSAGE`.
+ *
+ * Reads the target's own oversight FK and refuses when it is held. `null`
+ * targets (an open invitation) have nothing to check: the organization does not
+ * exist yet, and the accept path's guard covers it when it does.
+ *
+ * This is NOT the concurrency boundary and does not pretend to be one — a
+ * SELECT-then-INSERT guard never is (`memory/invariants.md`). Two admins racing
+ * still both get an invitation created; what stops BOTH being honoured is
+ * `unboundTargetSlot` + `lockTargetRow` at accept time, which is untouched. The
+ * value of this check is that the admin is told NOW, in the form, instead of
+ * the invitee discovering it when they try to accept.
+ */
+export async function assertTargetSlotFree(
+  values: ResolvedInvitation
+): Promise<void> {
+  const held = await heldOversightSlot(values);
+  if (held === null) return;
+  throw new InvitationError(
+    held === "ours" ? ALREADY_OURS_MESSAGE : SLOT_TAKEN_MESSAGE
+  );
+}
+
+/** `"ours"` / `"other"` when the target's slot is taken, `null` when it is free. */
+async function heldOversightSlot(
+  values: ResolvedInvitation
+): Promise<"ours" | "other" | null> {
+  const verdict = (held: string | null, ours: string | null) =>
+    !held ? null : held === ours ? ("ours" as const) : ("other" as const);
+
+  switch (values.type) {
+    case "church_to_sending_church":
+    case "church_to_network": {
+      if (!values.targetChurchId) return null;
+      const [plant] = await db
+        .select({
+          sendingChurchId: churches.sendingChurchId,
+          sendingNetworkId: churches.sendingNetworkId,
+        })
+        .from(churches)
+        .where(eq(churches.id, values.targetChurchId))
+        .limit(1);
+      if (!plant) return null;
+      return values.type === "church_to_sending_church"
+        ? verdict(plant.sendingChurchId, values.sendingChurchId)
+        : verdict(plant.sendingNetworkId, values.sendingNetworkId);
+    }
+
+    case "sending_church_to_network": {
+      if (!values.targetSendingChurchId) return null;
+      const [org] = await db
+        .select({ sendingNetworkId: sendingChurches.sendingNetworkId })
+        .from(sendingChurches)
+        .where(eq(sendingChurches.id, values.targetSendingChurchId))
+        .limit(1);
+      if (!org) return null;
+      return verdict(org.sendingNetworkId, values.sendingNetworkId);
+    }
+
+    default: {
+      // Fail CLOSED, like every other switch on `type` in this file.
+      const unknownType: never = values.type;
+      console.error("invitation type has no slot rule", { type: unknownType });
+      throw new InvitationError(NOT_AUTHORIZED_MESSAGE);
+    }
+  }
+}
+
+/**
+ * Refuse a second pending invitation from the SAME org to the same address.
+ * Not a concurrency guard (invariants.md) — a duplicate is a nuisance, not a
+ * correctness problem, and both would still be refused at accept time by the
+ * slot rule. It exists so the list stays readable.
+ */
+async function assertNoDuplicatePending(
+  values: ResolvedInvitation
+): Promise<void> {
+  const [duplicate] = await db
+    .select({ id: organizationInvitations.id })
+    .from(organizationInvitations)
+    .where(
+      and(
+        eq(organizationInvitations.status, "pending"),
+        eq(organizationInvitations.inviteeEmail, values.inviteeEmail),
+        invitingOrgFilter(values.sendingChurchId, values.sendingNetworkId)
+      )
+    )
+    .limit(1);
+
+  if (duplicate) {
+    throw new InvitationError(
+      "There is already a pending invitation to that address — revoke it first"
+    );
+  }
+}
+
+/** Resolve + guard + insert. The path the action layer takes. */
 export async function createInvitationAs(
   actor: InvitationActor,
   request: InvitationRequest
 ): Promise<OrganizationInvitation> {
-  const resolved = resolveInvitationRequest(actor, request);
+  const inviteeEmail = normalizeInviteeEmail(request.inviteeEmail);
+  const inviteAs = request.inviteAs ?? "church";
+
+  // AUTHORITY FIRST, and specifically before the address is looked up. The
+  // lookup below reads `users` and its refusals distinguish "no such account"
+  // from "a planter with no church" from "cannot be invited" — which is an
+  // account-enumeration oracle for anyone who may not invite at all. So the
+  // role, the actor's own org and the kind are settled against a target-less
+  // request, exactly the same pure rules, before a single row is read.
+  const authority = resolveInvitationRequest(actor, {
+    inviteeEmail,
+    inviteAs,
+  });
+  if (!authority.ok) {
+    throw new InvitationError(authority.error);
+  }
+
+  // A client never names a target; it is resolved from the address here.
+  const resolvedTarget = await resolveInvitationTarget(
+    actor,
+    inviteeEmail,
+    inviteAs
+  );
+  if (!resolvedTarget.ok) {
+    throw new InvitationError(resolvedTarget.error);
+  }
+
+  const resolved = resolveInvitationRequest(actor, {
+    ...request,
+    inviteeEmail,
+    ...resolvedTarget.target,
+  });
   if (!resolved.ok) {
     throw new InvitationError(resolved.error);
   }
+
+  await assertTargetSlotFree(resolved.values);
+  await assertNoDuplicatePending(resolved.values);
+
   return insertInvitation(resolved.values);
 }
 
@@ -996,6 +1304,129 @@ export async function getPendingInvitationsForSendingChurch(
       )
     )
     .orderBy(desc(organizationInvitations.createdAt));
+}
+
+/**
+ * `sending_church_id = ?` or `sending_network_id = ?` — WHICH ORG issued the
+ * invitation. Shared by the org-scoped list and the duplicate check so the two
+ * can never disagree about what "our invitations" means.
+ *
+ * Both null is impossible for a row `resolveInvitationRequest` produced (each
+ * role arm sets exactly one), but a hand-written row could have neither — so
+ * this returns a predicate that matches NOTHING rather than `undefined`, which
+ * `and()` would drop and turn the query into "every invitation in the product".
+ */
+function invitingOrgFilter(
+  sendingChurchId: string | null,
+  sendingNetworkId: string | null
+): SQL {
+  if (sendingChurchId) {
+    return eq(organizationInvitations.sendingChurchId, sendingChurchId);
+  }
+  if (sendingNetworkId) {
+    return eq(organizationInvitations.sendingNetworkId, sendingNetworkId);
+  }
+  return sql`false`;
+}
+
+/**
+ * Every invitation the actor's ORG has issued, newest first — the read behind
+ * `/oversight/invitations` (#23 / OV-003).
+ *
+ * Scoped to the org rather than the inviting USER: a second admin of the same
+ * sending church has to see the same pending queue, or two people invite the
+ * same planter twice. The scoping is also the leak guard — the WHERE names the
+ * actor's own org id, which comes from the session, so there is no argument a
+ * request could put another org's id into.
+ *
+ * Returns raw rows, not `InvitationView`: the caller is a Server Component that
+ * needs `inviterUserId` to decide whether to render a Revoke button (only the
+ * inviter may revoke) and must not pass that id to the client.
+ */
+export async function getInvitationsForOrg(
+  actor: InvitationActor
+): Promise<OrganizationInvitation[]> {
+  if (actor.role === "sending_church_admin") {
+    if (!actor.sendingChurchId) return [];
+    return db
+      .select()
+      .from(organizationInvitations)
+      .where(invitingOrgFilter(actor.sendingChurchId, null))
+      .orderBy(desc(organizationInvitations.createdAt));
+  }
+
+  if (actor.role === "network_admin") {
+    if (!actor.sendingNetworkId) return [];
+    return db
+      .select()
+      .from(organizationInvitations)
+      .where(invitingOrgFilter(null, actor.sendingNetworkId))
+      .orderBy(desc(organizationInvitations.createdAt));
+  }
+
+  // No other role issues invitations, so no other role has any to list.
+  return [];
+}
+
+/**
+ * Point an OPEN invitation (one addressed to somebody with no account) at the
+ * organization its invitee just created, so the ordinary accept path can run.
+ *
+ * This is the compare-and-set that makes an invite link SINGLE USE. The WHERE
+ * requires the row to still be `pending`, unexpired, and to have NO target yet
+ * — so of two registrations racing one link, exactly one binds and the loser
+ * gets no row back and simply registers unassociated. `expires_at` is checked
+ * here rather than trusted from the read that preceded it, and `respondedBy` is
+ * set to the account that just redeemed it.
+ *
+ * It deliberately does NOT touch `status`: the invitation stays `pending` with
+ * a target, which is precisely the state `acceptInvitationAs` expects. A crash
+ * between this write and the accept therefore leaves a consistent, recoverable
+ * row (pending, unbound) rather than an acceptance with no association behind
+ * it — the one state nothing in the product can repair
+ * (`memory/invariants.md` → Multi-Tenancy).
+ */
+export function bindOpenInvitationTargetQuery(
+  invitationId: string,
+  target: { targetChurchId?: string; targetSendingChurchId?: string },
+  respondedBy: string,
+  now: Date
+) {
+  return db
+    .update(organizationInvitations)
+    .set({
+      targetChurchId: target.targetChurchId ?? null,
+      targetSendingChurchId: target.targetSendingChurchId ?? null,
+      respondedBy,
+    })
+    .where(
+      and(
+        pendingInvitation(invitationId),
+        sql`${organizationInvitations.targetChurchId} is null`,
+        sql`${organizationInvitations.targetSendingChurchId} is null`,
+        sql`(${organizationInvitations.expiresAt} is null or ${organizationInvitations.expiresAt} > ${now})`
+      )
+    )
+    .returning();
+}
+
+/** Run the bind. `null` means somebody else already redeemed the link. */
+export async function bindOpenInvitationTarget(
+  invitationId: string,
+  target: { targetChurchId?: string; targetSendingChurchId?: string },
+  respondedBy: string,
+  now = new Date()
+): Promise<OrganizationInvitation | null> {
+  if (!isUuid(invitationId)) return null;
+
+  const [updated] = await bindOpenInvitationTargetQuery(
+    invitationId,
+    target,
+    respondedBy,
+    now
+  );
+
+  return updated ?? null;
 }
 
 /**
