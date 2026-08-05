@@ -306,6 +306,48 @@ test("the frontier prompt claims issues before returning them", async () => {
   );
 });
 
+// The frontier query reads the whole board in one call, and each of these three
+// assertions guards a failure that actually happened rather than a style rule.
+//
+// `gh issue list` pages at 30. On 2026-08-05 that answered "what is queued?" with
+// 30 rows on an 86-issue board, so every pass selected from a window over the
+// newest third of it — silently, for weeks, with no error anywhere. The REST list
+// endpoint carries issue_dependencies_summary, assignees, labels AND body, so the
+// N+1 fan-out (1 + 2N calls, then a `gh issue view` per issue) is unnecessary as
+// well as slow. And that endpoint returns PULL REQUESTS alongside issues, which
+// `gh issue list` filters and `gh api` does not.
+test("the frontier query reads the whole board in one unpaged-safe call", async () => {
+  const { calls } = await runImplement({
+    frontier: [frontierUnit("solo")],
+    blocked: [],
+    notes: "",
+  });
+  const prompt = calls.find(
+    (c) => c.kind === "agent" && c.phase === "Frontier"
+  ).prompt;
+
+  assert.match(
+    prompt,
+    /--paginate/,
+    "an unpaginated list silently truncates at 30 and hides most of the board"
+  );
+  assert.doesNotMatch(
+    prompt,
+    /gh issue list[^\n]*--label agent:queued/,
+    "the frontier must come from the REST list endpoint, not a pageable gh issue list"
+  );
+  assert.match(
+    prompt,
+    /select\(\.pull_request == null\)/,
+    "the REST issues endpoint returns PRs too; dispatching one as work is a bad day"
+  );
+  assert.match(
+    prompt,
+    /Do NOT run `gh issue view <n>` per issue/,
+    "the body is already in the payload — re-fetching per issue is the N+1 this replaced"
+  );
+});
+
 test("a candidate list is passed through to the frontier query", async () => {
   const { calls } = await runImplement(
     { frontier: [frontierUnit("solo")], blocked: [], notes: "" },
