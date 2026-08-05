@@ -10,6 +10,7 @@ import {
 import type { SelectedPlant } from "@/lib/phase-engine/assessment";
 
 import {
+  GET,
   isAuthorized,
   runAssessmentBatch,
   type RunAssessmentBatchDeps,
@@ -57,6 +58,59 @@ test("fails closed when CRON_SECRET is not configured", () => {
 test("accepts a correct Bearer token", () => {
   process.env.CRON_SECRET = "s3cret";
   assert.equal(isAuthorized(reqWithAuth("Bearer s3cret")), true);
+});
+
+// ----------------------------------------------------------------------------
+// AC (#266): the comparison is constant-time here too, not only on the
+// notifications dispatcher.
+//
+// One CRON_SECRET authorises BOTH scheduled routes (memory/contracts/config.md),
+// so a timing oracle on this endpoint leaks the key that opens the other one —
+// hardening a single route was worth nothing on its own. `timingSafeEqual`
+// throws a RangeError on unequal-length buffers, so the wrong-length cases are
+// the proof the lengths are reconciled before the call rather than after a 500.
+// The comparison itself is unit-tested in
+// `src/lib/security/constant-time.test.ts`; these are the route's own wiring.
+// ----------------------------------------------------------------------------
+
+test("a shorter token is refused, not thrown over", () => {
+  process.env.CRON_SECRET = "s3cret";
+  assert.equal(isAuthorized(reqWithAuth("Bearer s3cre")), false);
+  assert.equal(isAuthorized(reqWithAuth("Bearer ")), false);
+  assert.equal(isAuthorized(reqWithAuth("")), false);
+});
+
+test("a longer token is refused, not thrown over", () => {
+  process.env.CRON_SECRET = "s3cret";
+  // The correct secret with anything appended: the prefix matches, which is
+  // exactly the case a byte-by-byte compare would answer fastest.
+  assert.equal(isAuthorized(reqWithAuth("Bearer s3cretX")), false);
+  assert.equal(
+    isAuthorized(reqWithAuth(`Bearer ${"s3cret".repeat(2000)}`)),
+    false
+  );
+});
+
+test("a token differing only in its last byte is refused", () => {
+  // Same length, so the constant-time compare does the deciding.
+  process.env.CRON_SECRET = "s3cret";
+  assert.equal(isAuthorized(reqWithAuth("Bearer s3creT")), false);
+});
+
+test("a long secret still authorises exactly one value", () => {
+  const secret = "a".repeat(64);
+  process.env.CRON_SECRET = secret;
+  assert.equal(isAuthorized(reqWithAuth(`Bearer ${secret}`)), true);
+  assert.equal(isAuthorized(reqWithAuth(`Bearer ${"a".repeat(63)}b`)), false);
+});
+
+test("an unauthorised GET is refused with 401 and assesses nothing", async () => {
+  process.env.CRON_SECRET = "s3cret";
+
+  const response = await GET(reqWithAuth("Bearer nope"));
+
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { error: "Unauthorized" });
 });
 
 // ----------------------------------------------------------------------------

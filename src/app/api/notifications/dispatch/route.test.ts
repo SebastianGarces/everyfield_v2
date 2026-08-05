@@ -103,28 +103,13 @@ test("a long secret still authorises exactly one value", () => {
   );
 });
 
-test("the secret is never compared with a non-constant-time operator", () => {
-  // The grep half of the AC, kept as a test so it cannot rot: a future edit that
-  // reintroduces `header === ` + "Bearer " + secret (or `.includes`/
-  // `.startsWith` on the secret) fails here rather than in a review nobody runs.
-  const source = readFileSync(path.join(__dirname, "route.ts"), "utf8");
-
-  assert.match(
-    source,
-    /timingSafeEqual\(/,
-    "the cron-secret comparison no longer uses crypto.timingSafeEqual"
-  );
-  assert.doesNotMatch(
-    source,
-    /[!=]==\s*`Bearer \$\{secret\}`/,
-    "the secret is compared with === again — that is a timing oracle (#266)"
-  );
-  assert.doesNotMatch(
-    source,
-    /\b(?:startsWith|endsWith|includes|indexOf|localeCompare)\(\s*`?Bearer/,
-    "the secret is matched with a short-circuiting string method (#266)"
-  );
-});
+// The source-level half of the AC — "no non-constant-time comparison of the
+// secret remains" — is NOT asserted here. A per-file grep in a per-route test
+// is exactly how `/api/phase-engine/assess` kept its `===` while this route was
+// hardened, and a whole-file grep also overclaims: it passes as long as a
+// constant-time helper is *defined* somewhere in the file, even if the guard
+// stopped calling it. It lives once, over every route that reads CRON_SECRET,
+// in `src/lib/security/constant-time.test.ts`, scoped to the guard body.
 
 test("an unauthorised GET is refused with 401 and dispatches nothing", async () => {
   process.env.CRON_SECRET = "s3cret";
