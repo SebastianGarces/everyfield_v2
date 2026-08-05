@@ -25,6 +25,7 @@ import {
 import { ChurchBasicsStep } from "./church-basics-step";
 import { LeadershipStep } from "./leadership-step";
 import { OnboardingStepRail } from "./onboarding-step-rail";
+import { PeopleStep } from "./people-step";
 import { UpcomingStep } from "./upcoming-step";
 
 /**
@@ -207,6 +208,16 @@ export function OnboardingFlow({
                   </Button>
                 </>
               }
+            />
+          ) : step === "people" ? (
+            // OB-006: the last step is real — it surfaces the existing CSV
+            // wizard and quick-add. It still writes nothing of its own, so the
+            // controls it gets are the flow's own skip/finish, unchanged.
+            <PeopleStep
+              onBack={backTarget ? goBack : null}
+              onSkip={goForward}
+              onFinish={finish}
+              busy={finishing}
             />
           ) : (
             <UpcomingStep
