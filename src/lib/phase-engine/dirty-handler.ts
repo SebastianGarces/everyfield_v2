@@ -19,6 +19,19 @@ import { churches } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
 /**
+ * WHAT "dirty" IS, as columns.
+ *
+ * One definition, so a caller that has its own reason to write the churches row
+ * — F12/OB-009 stamps this in the same statement that completes onboarding, to
+ * keep "setup finished" and "worth assessing" from ever disagreeing — spreads
+ * this instead of re-typing the column name and drifting from `markPlantDirty`.
+ * The clock is a parameter so such a caller can share ITS timestamp.
+ */
+export function plantDirtyColumns(now: Date = new Date()) {
+  return { lastMaterialEventAt: now, updatedAt: now };
+}
+
+/**
  * Mark a plant dirty by stamping `last_material_event_at = now` for the given
  * church. Idempotent and tenant-scoped: it only ever updates the one church_id.
  *
@@ -32,7 +45,7 @@ export async function markPlantDirty(churchId: string): Promise<void> {
   try {
     await db
       .update(churches)
-      .set({ lastMaterialEventAt: new Date(), updatedAt: new Date() })
+      .set(plantDirtyColumns())
       .where(eq(churches.id, churchId));
 
     if (process.env.NODE_ENV === "development") {

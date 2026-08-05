@@ -5,10 +5,20 @@ import { OnboardingFlow } from "@/components/onboarding/onboarding-flow";
 import {
   resolveResumeStep,
   shouldShowOnboarding,
+  type OnboardingFacts,
 } from "@/lib/onboarding/steps";
-import { churchHasNoPlanter } from "@/lib/onboarding/leadership";
+import {
+  canAnswerLeadershipQuestion,
+  shouldPromptPastorConfirmation,
+  shouldShowNoPlanterNudge,
+  type ChurchLeadershipState,
+} from "@/lib/onboarding/leadership";
 import { NoPlanterNudge } from "@/components/onboarding/no-planter-nudge";
 import { LeadershipReentry } from "@/components/onboarding/leadership-reentry";
+import { churchHasPlanterUser } from "./confirm-leadership";
+import { incompleteOnboardingItems } from "./incomplete-onboarding";
+import { IncompleteOnboardingIndicator } from "./incomplete-onboarding-indicator";
+import { PastorConfirmationPrompt } from "./pastor-confirmation-prompt";
 import {
   getDashboardMetrics,
   getRecentActivity,
@@ -33,9 +43,9 @@ export default async function DashboardPage({
   const { churchCreated, step } = resolvedSearchParams;
 
   // OB-004: `?step=leadership` is the ONLY step a URL may ask for, and only for
-  // a planter whose church already exists. Honouring an arbitrary `?step=`
-  // would let someone deep-link past step 1 into a form that updates a church
-  // they have not created yet; anything else here is simply ignored.
+  // somebody whose answer would be accepted (below). Honouring an arbitrary
+  // `?step=` would let someone deep-link past step 1 into a form that updates a
+  // church they have not created yet; anything else here is simply ignored.
   const wantsLeadershipStep = step === "leadership";
 
   // Redirect oversight users to their dedicated dashboard
@@ -73,37 +83,77 @@ export default async function DashboardPage({
     );
   }
 
-  // OB-004: the one way back INTO a finished flow. The no-planter nudge links
-  // here; leaving onboarding is otherwise one-way (ruling 2026-07-31), so this
-  // re-enters the single question rather than the whole wizard, and only for
-  // the planter who can actually answer it.
-  const isPlanterWithChurch = user?.role === "planter" && !!user.churchId;
-
-  if (isPlanterWithChurch && wantsLeadershipStep) {
-    return (
-      <div className="p-6">
-        <LeadershipReentry
-          leadershipStatus={churchDuringOnboarding?.leadershipStatus}
-        />
-      </div>
-    );
-  }
-
-  const showNoPlanterNudge =
-    isPlanterWithChurch &&
-    churchHasNoPlanter({
-      leadershipStatus: churchDuringOnboarding?.leadershipStatus,
-    });
-
   // Fetch dashboard data
   const churchId = user!.churchId!;
   const userId = user!.id;
 
-  const [church, metrics, activities] = await Promise.all([
+  const [church, metrics, activities, hasPlanterUser] = await Promise.all([
     getCurrentUserChurch(),
     getDashboardMetrics(churchId, userId),
     getRecentActivity(churchId),
+    // OB-010: the IMPLICIT assignment — a `users` row with the planter role
+    // pointing here. It is what tells a church that predates OB-004 apart from
+    // one that genuinely has nobody leading it, and the two get opposite
+    // treatment: the first is left alone, the second is asked.
+    churchHasPlanterUser(churchId),
   ]);
+
+  const leadership: ChurchLeadershipState = {
+    churchId,
+    leadershipStatus: church?.leadershipStatus,
+    hasPlanterUser,
+  };
+
+  const viewer = { role: user?.role, churchId: user?.churchId };
+
+  // OB-004: the one way back INTO a finished flow. The no-planter nudge and the
+  // incomplete-onboarding indicator link here; leaving onboarding is otherwise
+  // one-way (ruling 2026-07-31), so this re-enters the single question rather
+  // than the whole wizard — and only for somebody whose answer would be
+  // accepted, which under OB-010 includes a team member of a plant with an
+  // empty planter seat.
+  const canAnswerLeadership = canAnswerLeadershipQuestion(viewer, leadership);
+
+  if (wantsLeadershipStep && canAnswerLeadership) {
+    return (
+      <div className="p-6">
+        <LeadershipReentry leadershipStatus={church?.leadershipStatus} />
+      </div>
+    );
+  }
+
+  const showNoPlanterNudge = shouldShowNoPlanterNudge(viewer, leadership);
+  const showPastorPrompt = shouldPromptPastorConfirmation(viewer, leadership);
+
+  // OB-011: which onboarding facts are still missing, read from the church row
+  // rather than from any record of how far the flow got — answering a step's
+  // question anywhere in the product drops it off this list.
+  const onboardingFacts: OnboardingFacts = {
+    churchId,
+    leadershipStatus: church?.leadershipStatus,
+    // Step 3's fact, read from the columns it will write: a declared stage or a
+    // target launch date. Either is a declaration; phase 0 with no date is
+    // exactly the "told us nothing" state. When step 3 ships its own record of
+    // the declaration (including the explicit "no date yet"), this line is what
+    // reads it instead — `OnboardingFacts` is optional per fact so that until
+    // then the answer is honestly "incomplete" rather than wrong.
+    journeyDeclared: !!church?.launchDate || (church?.currentPhase ?? 0) > 0,
+    // Step 4's fact: anybody at all on the plant's list (OB-006).
+    peopleAdded: metrics.totalPeople > 0,
+  };
+
+  // The leadership row is the raw fact — "nobody answered the question" — so it
+  // is filtered twice before it can mislead. It is dropped for anybody whose
+  // answer would be refused (a link that quietly does nothing is worse than no
+  // link), and dropped while the pastor prompt is up, since that IS this
+  // question and asking it twice on one screen reads as a bug. What survives is
+  // the case the indicator is for: somebody who can answer, is not being asked,
+  // and never did — a planter who skipped step 2, or a plant that predates the
+  // flow entirely.
+  const incompleteSteps = incompleteOnboardingItems(onboardingFacts).filter(
+    (item) =>
+      item.id !== "leadership" || (canAnswerLeadership && !showPastorPrompt)
+  );
 
   const phaseLabel =
     PHASES[(church?.currentPhase ?? 0) as PhaseNumber] ?? "Pre-Phase 1";
@@ -113,7 +163,14 @@ export default async function DashboardPage({
       {churchCreated === "true" && <ChurchCreatedConfetti />}
 
       <div className="mx-auto max-w-6xl space-y-6">
+        {showPastorPrompt && <PastorConfirmationPrompt churchId={churchId} />}
+
         {showNoPlanterNudge && <NoPlanterNudge />}
+
+        <IncompleteOnboardingIndicator
+          items={incompleteSteps}
+          churchId={churchId}
+        />
 
         {/* Header */}
         <div>

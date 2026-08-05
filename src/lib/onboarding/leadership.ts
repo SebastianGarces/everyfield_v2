@@ -93,6 +93,152 @@ export function churchHasNoPlanter(church: ChurchLeadership): boolean {
   return church.leadershipStatus === "no_planter";
 }
 
+// ============================================================================
+// OB-010 — the one-time pastor confirmation for churches that predate the step
+// ============================================================================
+
+/**
+ * The signed-in user, as far as the leadership question is concerned. Structural
+ * (not `User`) so the rules below are unit testable without building rows, and
+ * minted from the session by every caller — never accepted from a request
+ * (`memory/invariants.md` → Authentication).
+ */
+export type LeadershipViewer = {
+  role: string | null | undefined;
+  churchId: string | null | undefined;
+};
+
+/**
+ * What a church's leadership actually is, both ways it can be known.
+ *
+ * `leadershipStatus` is the EXPLICIT answer (OB-004's column). `hasPlanterUser`
+ * is the IMPLICIT assignment that predates it and is still the real one — a
+ * `users` row with the `planter` role pointing at this church. The two are
+ * separate inputs because the whole of OB-010 turns on their disagreement: a
+ * church can have a planter and no recorded answer (every church created before
+ * the question shipped), and that is the state the prompt must NOT fire on.
+ */
+export type ChurchLeadershipState = ChurchLeadership & {
+  churchId: string;
+  hasPlanterUser: boolean;
+};
+
+/** In-church roles. Coaches and oversight admins lead nobody's plant. */
+function isInChurchRole(role: string | null | undefined): boolean {
+  return role === "planter" || role === "team_member";
+}
+
+function viewerBelongsTo(
+  viewer: LeadershipViewer,
+  church: ChurchLeadershipState
+): boolean {
+  return !!viewer.churchId && viewer.churchId === church.churchId;
+}
+
+/**
+ * OB-010's ruling (FRD open question 3, answered: no) expressed as a fact:
+ * **an implicit planter counts as a confirmed one.**
+ *
+ * A church whose `users.church_id` + `planter` role already names somebody is
+ * led, whatever the column says, so it is never asked again and never listed as
+ * an unfinished onboarding step. What comes back is *derived and never written
+ * back* — the column stays null, because writing `planter_confirmed` would
+ * record an answer nobody gave and would be indistinguishable from one later.
+ */
+export function resolvedLeadershipStatus(
+  church: ChurchLeadershipState
+): ChurchLeadershipStatus | null {
+  if (leadershipAnswered(church)) {
+    return church.leadershipStatus as ChurchLeadershipStatus;
+  }
+  return church.hasPlanterUser ? "planter_confirmed" : null;
+}
+
+/**
+ * May this viewer answer the leadership question for this church?
+ *
+ * Two ways in, and the second is deliberately narrow:
+ *
+ * - the plant's **planter** — OB-004's path, the person the question is about;
+ * - a **team member of a plant with no planter at all** — OB-010's path. The
+ *   seat is empty, there is nobody above them to ask, and the FRD sends the
+ *   prompt to the church's user(s). Answering Yes therefore *assigns* them,
+ *   which is a role change, so the permission exists only while the seat is
+ *   empty: the moment anyone holds it, this returns false again for everyone
+ *   but the planter.
+ *
+ * Coaches and oversight admins are never in scope — they do not lead the plant,
+ * and `getAccessibleChurchIds` is how they reach it at all.
+ */
+export function canAnswerLeadershipQuestion(
+  viewer: LeadershipViewer,
+  church: ChurchLeadershipState
+): boolean {
+  if (!viewerBelongsTo(viewer, church)) return false;
+  if (!isInChurchRole(viewer.role)) return false;
+  if (viewer.role === "planter") return true;
+  return !church.hasPlanterUser;
+}
+
+/**
+ * OB-010 — show the one-time pastor-confirmation prompt?
+ *
+ * True only for a church that has **no planter at all and no recorded answer**:
+ * the pre-OB-004 hole. A church with a planter never sees it (the implicit
+ * assignment is treated as confirmed), and a church that has answered — either
+ * way — never sees it again, which is most of what "one-time" means. The rest of
+ * "one-time" is the dismissal, which is the component's job.
+ */
+export function shouldPromptPastorConfirmation(
+  viewer: LeadershipViewer,
+  church: ChurchLeadershipState
+): boolean {
+  if (!canAnswerLeadershipQuestion(viewer, church)) return false;
+  return resolvedLeadershipStatus(church) === null;
+}
+
+/**
+ * OB-004 / OB-010 — show the standing no-planter nudge?
+ *
+ * Reads the EXPLICIT column (`churchHasNoPlanter`), never the resolved one: the
+ * nudge is the consequence of an answered No, and a church that was simply never
+ * asked has not said No. Gated on being able to answer, so the nudge is only
+ * ever shown to somebody its "Change this answer" link actually works for —
+ * including the team member who reached the question through OB-010 and said
+ * No, which is the same No path OB-004 specced.
+ */
+export function shouldShowNoPlanterNudge(
+  viewer: LeadershipViewer,
+  church: ChurchLeadershipState
+): boolean {
+  return (
+    canAnswerLeadershipQuestion(viewer, church) && churchHasNoPlanter(church)
+  );
+}
+
+/**
+ * What the answer WRITES, decided before any statement is built.
+ *
+ * - `confirm` — the answerer already holds the planter role; Yes only records
+ *   the answer. This is OB-004's Yes and touches no `users` row.
+ * - `claim` — Yes from a team member of a planterless plant (OB-010): the
+ *   assignment has to be made, not just recorded, so this plan writes the role
+ *   too and is the only one that can be lost to a race.
+ * - `decline` — No, from either. Records `no_planter`; nobody's role changes.
+ */
+export type LeadershipWritePlan = "confirm" | "claim" | "decline";
+
+export function leadershipWritePlan(
+  viewer: LeadershipViewer,
+  church: ChurchLeadershipState,
+  answer: LeadershipAnswer
+): LeadershipWritePlan {
+  if (answer === "no") return "decline";
+  return viewer.role === "planter" && church.hasPlanterUser
+    ? "confirm"
+    : "claim";
+}
+
 /**
  * What answering No actually costs. Shown on the step (so the answer is
  * informed, not just recorded) and echoed by the dashboard nudge.

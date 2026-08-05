@@ -24,6 +24,12 @@ import {
 import type { InsightFeedbackState } from "@/components/phase-engine/insight-card";
 import { PhaseControl } from "@/components/phase-engine/phase-control";
 import { SignalToggles } from "@/components/phase-engine/signal-toggles";
+import {
+  Card,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { db } from "@/db";
 import { churches, insightFeedback } from "@/db/schema";
 import type { InsightFeedbackRating } from "@/db/schema";
@@ -32,6 +38,7 @@ import {
   buildCsfScorecard,
   getLatestAssessment,
 } from "@/lib/phase-engine/assessment";
+import { assessmentColdStart } from "@/lib/phase-engine/cold-start";
 import { listManualSignals } from "@/lib/phase-engine/signals/attestation-service";
 import { getPhaseReadiness } from "@/lib/phase-engine/transitions";
 
@@ -56,7 +63,12 @@ export default async function PhasePage() {
 
   // Current phase for the church (the phase control's starting point).
   const [church] = await db
-    .select({ currentPhase: churches.currentPhase })
+    .select({
+      currentPhase: churches.currentPhase,
+      // OB-009: what makes the cold start "queued" rather than "quiet" — set
+      // when onboarding completes and by every material event since.
+      lastMaterialEventAt: churches.lastMaterialEventAt,
+    })
     .from(churches)
     .where(eq(churches.id, churchId))
     .limit(1);
@@ -115,6 +127,15 @@ export default async function PhasePage() {
   // that into a cold-start state rather than eight empty rows.
   const scorecard = buildCsfScorecard(latest, "planter");
 
+  // OB-009: before the first run this page is eight empty panels, and "nothing
+  // here" reads as a broken product rather than as a schedule. The notice says
+  // which of the two cold starts this is and when the first read arrives; it
+  // disappears the moment there is an assessment to render.
+  const coldStart = assessmentColdStart({
+    hasAssessment: latest !== null,
+    lastMaterialEventAt: church.lastMaterialEventAt,
+  });
+
   return (
     <div className="container mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
       <header>
@@ -126,6 +147,19 @@ export default async function PhasePage() {
           from the latest assessment.
         </p>
       </header>
+
+      {coldStart && (
+        <Card data-testid="assessment-cold-start">
+          <CardHeader>
+            <CardTitle>
+              <h2>{coldStart.title}</h2>
+            </CardTitle>
+            <CardDescription className="max-w-[65ch] text-pretty">
+              {coldStart.body}
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Scorecard first, focus list second: the breakdown says WHERE the
