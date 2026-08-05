@@ -591,6 +591,8 @@ html:has(.marketing) {
 .marketing .fstack-shot::before,
 .marketing .epane::before,
 .marketing .netshot::before,
+/* PROTOTYPE (strip after ruling) — the journal chapters' panes */
+.marketing .jr-shot::before,
 .marketing .pshot::before {
   content: "";
   position: absolute;
@@ -605,6 +607,8 @@ html:has(.marketing) {
 .marketing .fstack-shot::after,
 .marketing .epane::after,
 .marketing .netshot::after,
+/* PROTOTYPE (strip after ruling) — the journal chapters' panes */
+.marketing .jr-shot::after,
 .marketing .pshot::after {
   content: "";
   position: absolute;
@@ -3081,4 +3085,355 @@ html:has(.marketing) {
    through the bold face it already has. */
 .marketing .lp-cta .invite-error {
   color: var(--ink);
+}
+
+/* ============================================================================
+   ===== PROTOTYPE (strip after ruling) =====
+   ============================================================================
+   The landing story/layout ruling: A · Today, B · Journal, C · Hybrid, flipped
+   live on the preview with src/components/prototype-switcher.tsx. Everything
+   below is additive — one fenced block, one class prefix (`jr-`), plus the
+   `pv` gating. Two rules OUTSIDE this block were touched and are marked with
+   their own PROTOTYPE comment: `.jr-shot` was added to the two corner-mark
+   selector lists so the chapters' panes carry the same registration marks as
+   every other art panel.
+
+   To strip: delete this block, delete `.jr-shot` from those two lists, delete
+   _components/proto/journal.tsx, remove the switcher + init script from
+   layout.tsx, and collapse the winner's `pv` classes out of page.tsx.
+
+   THE GATE. Every variant-specific element carries `pv` plus the variants it
+   belongs to; an element with no `pv` is shared by all three, which is how the
+   live app embeds stay mounted exactly once. The `:not()` form means adding a
+   variant to an element is one class, never a second rule. The no-attribute
+   case is variant A, so the page is correct with JavaScript off and before the
+   init script runs. */
+html:not([data-lp-proto]) .pv:not(.pv-a),
+html[data-lp-proto="a"] .pv:not(.pv-a),
+html[data-lp-proto="b"] .pv:not(.pv-b),
+html[data-lp-proto="c"] .pv:not(.pv-c) {
+  display: none !important;
+}
+
+/* the jump target is its own zero-height element now — the section it used to
+   sit on exists in variant A only. Same clearance as `section[id]`: the nav is
+   fixed and 70.4px tall at every width. */
+.marketing #product {
+  scroll-margin-block-start: 88px;
+}
+
+/* ---------- the playbook strip — authority instead of logos ---------- */
+.marketing .jr-strip-sec {
+  padding: clamp(36px, 5vw, 56px) clamp(20px, 5vw, 56px);
+}
+.marketing .jr-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 28px clamp(20px, 3vw, 40px);
+  padding-block: clamp(26px, 3.4vw, 40px);
+  border-block: 1px solid var(--hairline);
+}
+@media (max-width: 700px) {
+  .marketing .jr-strip {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+.marketing .jr-strip-n {
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: clamp(44px, 6vw, 72px);
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-variant-numeric: lining-nums;
+  margin: 0;
+}
+.marketing .jr-strip-l {
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: 12px;
+  line-height: 1.4;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--mute);
+  margin: 10px 0 0;
+  max-width: 22ch;
+}
+/* the strip's bottom hairline is this line's rule above it */
+.marketing .jr-strip-tag {
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  text-align: center;
+  text-wrap: pretty;
+  color: var(--mute);
+  margin: 0;
+  padding-block: 18px;
+}
+
+/* ---------- a chapter's visual pane ----------
+   .fswitch-shot's pane grammar, with none of its tab machinery: one reserved
+   height, the art as ground, corner marks (added to the shared lists above),
+   and the desktop composition swapped for a phone one at 900px.
+
+   The height, padding and picture rules are copied rather than shared because
+   the originals are scoped to `.fswitch-shot` — a live embed dropped into an
+   unscoped div gets its own frame and zoom ladder (those are global) but NOT
+   the pane geometry the ladders were measured against, and lands at the wrong
+   size in the wrong place. The .vg-fs-* overlays are positioned in percentages
+   of the pane, so `position: relative` here is load-bearing.
+
+   `.jr-desk` is `display: contents` rather than a box: the embed and anything
+   floated on it have to be direct flex children of the pane, exactly as they
+   are inside a tab panel. A real wrapper would make the overlay's containing
+   block the wrapper instead of the pane at some widths, and would centre the
+   pair rather than the primary. */
+.marketing .jr-shot {
+  position: relative;
+  background-position: center;
+  background-size: cover;
+}
+.marketing .jr-chapter .jr-shot {
+  margin-top: 36px;
+}
+@media (min-width: 900px) {
+  .marketing .jr-shot {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    /* one reserved height, the switcher's own */
+    height: clamp(520px, 46vw, 780px);
+    padding: clamp(28px, 3.5vw, 64px);
+    /* layered comps cut off at the pane edge */
+    overflow: hidden;
+  }
+  .marketing .jr-shot.anchor-start {
+    justify-content: flex-start;
+  }
+  .marketing .jr-shot.anchor-end {
+    justify-content: flex-end;
+  }
+  .marketing .jr-desk {
+    display: contents;
+  }
+  .marketing .jr-mob {
+    display: none;
+  }
+  .marketing .jr-shot picture {
+    display: flex;
+    align-items: center;
+    max-width: min(1320px, 88%);
+    height: 100%;
+  }
+  .marketing .jr-shot picture .shot-img {
+    width: auto;
+    height: auto;
+    max-width: 100%;
+    max-height: 100%;
+  }
+  .marketing .jr-shot.anchor-end picture {
+    justify-content: flex-end;
+  }
+}
+/* the narrow-desktop band drops the px floor, same reasoning as the switcher's:
+   the primaries are height-constrained, so a floor that stops tracking the
+   viewport leaves the overlay landing across words instead of chrome */
+@media (min-width: 900px) and (max-width: 1179.98px) {
+  .marketing .jr-shot {
+    height: min(46vw, 780px);
+  }
+}
+/* phones: the .fstack-shot grammar — no reserved height, the composition
+   stands at the app's own size */
+@media (max-width: 899.98px) {
+  .marketing .jr-shot {
+    padding: 16px;
+  }
+  .marketing .jr-desk {
+    display: none;
+  }
+}
+
+/* ---------- features as reading matter ----------
+   Hairline rows, no cards, no icons: the title states the thing and the serif
+   line says why a planter should care. */
+.marketing .jr-rows {
+  margin: 36px 0 0;
+  padding: 0;
+}
+.marketing .jr-row {
+  display: grid;
+  grid-template-columns: minmax(200px, 280px) 1fr;
+  gap: 24px;
+  padding-block: 18px;
+  border-top: 1px solid var(--hairline);
+}
+.marketing .jr-row:last-child {
+  border-bottom: 1px solid var(--hairline);
+}
+.marketing .jr-row-t {
+  font-family: var(--display);
+  font-weight: 500;
+  font-size: 18.5px;
+  line-height: 1.3;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  margin: 0;
+}
+.marketing .jr-row-b {
+  font-family: var(--serif);
+  font-size: 16.5px;
+  line-height: 1.55;
+  color: var(--text-2);
+  max-width: 64ch;
+  margin: 0;
+}
+@media (max-width: 700px) {
+  .marketing .jr-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+}
+
+/* ---------- the governance triad, on the ink panel ----------
+   Numerals are CREAM, not the exploration's green: green on ink is banned by
+   ruling (DESIGN.md, the color law), and #188 holds for every variant. */
+.marketing .jr-triad {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 28px clamp(24px, 3vw, 48px);
+  margin: clamp(32px, 4vw, 48px) 0 0;
+  padding: 0;
+}
+@media (max-width: 800px) {
+  .marketing .jr-triad {
+    grid-template-columns: 1fr;
+  }
+}
+.marketing .jr-triad-n {
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: 0.07em;
+  font-variant-numeric: tabular-nums;
+  color: var(--cream);
+  margin: 0;
+}
+.marketing .jr-triad-t {
+  font-family: var(--display);
+  font-weight: 500;
+  font-size: 18px;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+  color: var(--dark-text);
+  margin: 12px 0 0;
+}
+.marketing .jr-triad-b {
+  font-family: var(--serif);
+  font-size: 16px;
+  line-height: 1.55;
+  color: var(--dark-text-2);
+  margin: 8px 0 0;
+  max-width: 40ch;
+}
+.marketing .jr-coda {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 19px;
+  line-height: 1.55;
+  text-align: center;
+  color: var(--dark-text-2);
+  max-width: 560px;
+  margin: clamp(32px, 4vw, 44px) auto 0;
+}
+
+/* ---------- the feature index ----------
+   Coverage as one typographic object instead of thirteen equal sections. The
+   rows are PLAIN TEXT — there is nowhere on this page for them to link to — so
+   no href, no handler, and deliberately no cursor-pointer; the arrow is a
+   hover affordance for the eye and is hidden from assistive tech. */
+.marketing .jr-index-head {
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--mute);
+  margin: 0;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--hairline);
+}
+.marketing .jr-index-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.marketing .jr-index-row {
+  display: grid;
+  grid-template-columns: 56px 1fr auto;
+  align-items: baseline;
+  gap: 0 16px;
+  padding-block: 10px;
+  border-bottom: 1px solid var(--hairline);
+}
+.marketing .jr-index-n {
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: 0.07em;
+  font-variant-numeric: tabular-nums;
+  color: var(--mute);
+}
+.marketing .jr-index-name {
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: clamp(28px, 4.5vw, 60px);
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  color: var(--mute);
+  transition: color 150ms var(--ease);
+}
+.marketing .jr-index-arrow {
+  display: inline-block;
+  margin-inline-start: 0.3em;
+  font-size: 0.42em;
+  vertical-align: middle;
+  opacity: 0;
+  transition: opacity 150ms var(--ease);
+}
+.marketing .jr-index-row:hover .jr-index-name {
+  color: var(--ink);
+}
+.marketing .jr-index-row:hover .jr-index-arrow {
+  opacity: 1;
+}
+.marketing .jr-index-note {
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: 0.07em;
+  color: var(--mute);
+  text-align: end;
+}
+@media (max-width: 700px) {
+  .marketing .jr-index-row {
+    grid-template-columns: 44px 1fr;
+    gap: 0 12px;
+  }
+  .marketing .jr-index-note {
+    display: none;
+  }
+}
+
+/* ---------- the close ----------
+   B and C open the CTA with a marker, and the marker's registration square is
+   green — invisible on the green panel. On green the color law allows ink
+   only, so the square and the label both turn ink here. */
+.marketing .lp-cta .marker {
+  color: rgba(24, 29, 25, 0.75);
+}
+.marketing .lp-cta .marker::after {
+  background: var(--ink);
 }
