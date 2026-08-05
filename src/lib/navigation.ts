@@ -2,6 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   Activity,
   BookOpenText,
+  Church,
   MailPlus,
   CalendarCheck,
   FileText,
@@ -140,15 +141,24 @@ export const mainNavItems: NavItem[] = [
  *
  * "Invitations" came BACK in #23, in the same change that added
  * `/oversight/invitations/page.tsx` — which is the rule above, honoured.
+ * "Church Plants" came back the same way in #303 (OV-001/OV-002), with
+ * `/oversight/plants/page.tsx` and its `[id]` detail in the same change.
  *
- * Still hidden until built (#260): "Church Plants" (/oversight/plants),
- * "Settings" (/oversight/settings).
+ * Still hidden: "Settings" (/oversight/settings) — and it is not merely
+ * unbuilt, it is OUT of alpha by ruling (FRD non-goals; org profile and admin
+ * management belong with core team accounts, board #185), so this one does not
+ * come back when a page appears.
  */
 export const sendingChurchNavItems: NavItem[] = [
   {
     title: "Portfolio",
     href: "/oversight",
     icon: LayoutDashboard,
+  },
+  {
+    title: "Church Plants",
+    href: "/oversight/plants",
+    icon: Church,
   },
   {
     title: "Plant Health",
@@ -168,17 +178,24 @@ export const sendingChurchNavItems: NavItem[] = [
  *
  * Same rule as `sendingChurchNavItems`: every href needs a real page.
  *
- * "Invitations" came BACK in #23 with its page.
+ * "Invitations" came BACK in #23 with its page; "Church Plants" in #303 with
+ * `/oversight/plants` and its `[id]` detail.
  *
  * Still hidden until built (#260): "Sending Churches"
- * (/oversight/sending-churches), "Church Plants" (/oversight/plants),
- * "Settings" (/oversight/settings).
+ * (/oversight/sending-churches). "Settings" (/oversight/settings) stays hidden
+ * permanently for alpha — dropped by ruling, not merely unbuilt (FRD
+ * non-goals; board #185).
  */
 export const networkAdminNavItems: NavItem[] = [
   {
     title: "Network Overview",
     href: "/oversight",
     icon: LayoutDashboard,
+  },
+  {
+    title: "Church Plants",
+    href: "/oversight/plants",
+    icon: Church,
   },
   {
     title: "Plant Health",

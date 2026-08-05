@@ -1,0 +1,116 @@
+// ============================================================================
+// The gated sections of `/oversight/plants/[id]` — catalog and explain-why copy
+// (OV-002).
+//
+// One definition per section, carrying the `share_*` toggle that gates it. The
+// read layer resolves each `privacyFeature` through `canAccessFeatureData`, so
+// the gate a section is subject to is declared HERE and nowhere else: a section
+// cannot be added without naming its toggle, and no component decides
+// visibility on its own.
+//
+// WHY ONLY FOUR. There are six pull toggles (`share_people`, `share_meetings`,
+// `share_tasks`, `share_financials`, `share_ministry_teams`,
+// `share_facilities`). Financials and facilities have no data model in the
+// product yet — they are the two nav items still hidden from the planter's own
+// sidebar — so a section for either could only ever render zeroes, which reads
+// as "this plant has no finances" rather than "EveryField does not track this".
+// They join this list in the change that gives them something to count.
+// ============================================================================
+
+import type { PrivacyFeatureKey } from "@/lib/auth/access";
+import type { OversightSectionKey } from "@/lib/oversight/types";
+
+export interface OversightSectionDefinition {
+  key: OversightSectionKey;
+  /** The `share_*` toggle this section is gated by. */
+  privacyFeature: PrivacyFeatureKey;
+  title: string;
+  /** What the section shows, in one line, above the numbers. */
+  description: string;
+  /**
+   * How the plant's decision is named in the explain-why copy. Lowercase and
+   * noun-shaped, so it reads inside a sentence ("hasn't opened its people
+   * pipeline to…") rather than as a control label.
+   */
+  subject: string;
+}
+
+export const OVERSIGHT_SECTIONS: readonly OversightSectionDefinition[] = [
+  {
+    key: "people",
+    privacyFeature: "people",
+    title: "People",
+    description: "How many people sit at each stage of the plant's pipeline.",
+    subject: "its people pipeline",
+  },
+  {
+    key: "meetings",
+    privacyFeature: "meetings",
+    title: "Meeting cadence",
+    description:
+      "How often the plant is meeting, and how attendance has been running.",
+    subject: "its meeting cadence",
+  },
+  {
+    key: "tasks",
+    privacyFeature: "tasks",
+    title: "Task health",
+    description: "Open, completed and overdue work across the plant.",
+    subject: "its task health",
+  },
+  {
+    key: "ministry_teams",
+    privacyFeature: "ministry_teams",
+    title: "Ministry-team coverage",
+    description: "How many teams exist, and how many of them have a leader.",
+    subject: "its ministry teams",
+  },
+] as const;
+
+/** Definition lookup — total over `OversightSectionKey` by construction. */
+export const OVERSIGHT_SECTIONS_BY_KEY = Object.fromEntries(
+  OVERSIGHT_SECTIONS.map((section) => [section.key, section])
+) as Record<OversightSectionKey, OversightSectionDefinition>;
+
+// ----------------------------------------------------------------------------
+// Explain-why copy (OV-002).
+//
+// "Never a bare blank" is the requirement, and a bare blank includes a card
+// that says only "No data". Each of the two empty states below has to answer a
+// different question, so they are two different sentences:
+//
+//   withheld → why can't I see this, and who can change it? (the plant can)
+//   empty    → they DO share this; there is simply nothing in it yet.
+//
+// Collapsing them would tell an admin that a plant is hiding something when it
+// is not, which is the misreading most likely to cost the org a conversation.
+// The copy never promises a toggle screen the planter does not have: the
+// per-feature pull toggles have no UI yet (board #187), so it says who decides,
+// not where to click.
+// ----------------------------------------------------------------------------
+
+/** Heading on a section the plant has not shared. */
+export const WITHHELD_HEADLINE = "Not shared";
+
+/** Heading on a shared section with nothing recorded yet. */
+export const EMPTY_HEADLINE = "Nothing recorded yet";
+
+/**
+ * Why a section is hidden, and who controls that. `scopeLabel` is the caller's
+ * own org in the reader's words — "network" or "sending church".
+ */
+export function withheldExplanation(
+  section: OversightSectionDefinition,
+  plantName: string,
+  scopeLabel: string
+): string {
+  return `${plantName} has not opened ${section.subject} to your ${scopeLabel}. Each plant decides what it shares, so this stays hidden until they change it.`;
+}
+
+/** Why a shared section shows nothing — sharing is on; the data is not there. */
+export function emptyExplanation(
+  section: OversightSectionDefinition,
+  plantName: string
+): string {
+  return `${plantName} shares ${section.subject}, but has not recorded anything here yet.`;
+}
