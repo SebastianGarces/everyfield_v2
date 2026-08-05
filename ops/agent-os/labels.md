@@ -96,7 +96,7 @@ whose blockers are all closed and which nobody has claimed.
 
 ```bash
 R={owner}/{repo}
-gh issue list --state open --label agent:queued --json number --jq '.[].number' | while read n; do
+gh issue list --limit 200 --state open --label agent:queued --json number --jq '.[].number' | while read n; do
   [ "$(gh api repos/$R/issues/$n --jq '.issue_dependencies_summary.blocked_by')" = "0" ] &&
   [ "$(gh api repos/$R/issues/$n --jq '.assignees | length')" = "0" ] && echo "$n"
 done
