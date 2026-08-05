@@ -7,17 +7,21 @@ import {
 /**
  * The shell body for the steps that are still shells (OB-001).
  *
- * Step 2 graduated to a real form with OB-004 (#202); steps 3-4 are declared,
- * ordered, skippable and navigable, but they capture nothing yet — issues
- * #205-#210 replace each body with its real form. Until then the step still
- * tells the planter what it will ask, because a step that says nothing is worse
- * than one that sets an expectation, and every control out of here is real:
- * Back, skip forward, or leave for the dashboard.
+ * Step 2 graduated to a real form with OB-004 (#202) and step 4 to the
+ * bring-your-people step with OB-006 (`people-step.tsx`); step 3 is declared,
+ * ordered, skippable and navigable, but captures nothing yet — its own issue
+ * replaces this body with the real form. Until then the step still tells the
+ * planter what it will ask, because a step that says nothing is worse than one
+ * that sets an expectation, and every control out of here is real: Back, skip
+ * forward, or leave for the dashboard.
  *
  * Nothing here writes, so skipping through from step 2 lands exactly today's
  * outcome — a named church at phase 0 with no launch date (AC 4).
+ *
+ * The step id is narrowed to what is still a shell rather than left open, so
+ * graduating a step is a type error here until its copy is removed.
  */
-type ShellStepId = Extract<OnboardingStepId, "journey" | "people">;
+type ShellStepId = Extract<OnboardingStepId, "journey">;
 
 const UPCOMING_COPY: Record<ShellStepId, { intro: string; bullets: string[] }> =
   {
@@ -27,14 +31,6 @@ const UPCOMING_COPY: Record<ShellStepId, { intro: string; bullets: string[] }> =
       bullets: [
         "Your target launch date, or “no date yet”",
         "Which stage of the journey you are in",
-      ],
-    },
-    people: {
-      intro:
-        "Finally we'll help you bring in the people already walking with you — that is what turns the pipeline, meetings and follow-ups on.",
-      bullets: [
-        "Import a list you already keep",
-        "Or add people one at a time",
       ],
     },
   };
