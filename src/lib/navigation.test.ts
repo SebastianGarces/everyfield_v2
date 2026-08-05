@@ -136,6 +136,30 @@ test("every oversight nav item resolves to a real page", () => {
   }
 });
 
+test("Invitations is back in the sidebar, and only the built routes with it", () => {
+  // #260 hid four oversight items whose pages did not exist. #23 built one of
+  // them, so it comes back HERE — the item and its `page.tsx` in one change,
+  // which is the rule the test above enforces. The other three stay hidden;
+  // this asserts the un-hiding was surgical rather than a blanket revert.
+  for (const items of [sendingChurchNavItems, networkAdminNavItems]) {
+    const hrefs = items.map((item) => item.href);
+    assert.ok(
+      hrefs.includes("/oversight/invitations"),
+      "/oversight/invitations ships with #23"
+    );
+    for (const stillHidden of [
+      "/oversight/plants",
+      "/oversight/settings",
+      "/oversight/sending-churches",
+    ]) {
+      assert.ok(
+        !hrefs.includes(stillHidden),
+        `${stillHidden} has no page yet (#260) — it must stay hidden`
+      );
+    }
+  }
+});
+
 test("oversight index and health stay reachable from the sidebar", () => {
   for (const items of [sendingChurchNavItems, networkAdminNavItems]) {
     const hrefs = items.map((item) => item.href);

@@ -14,6 +14,7 @@ import {
   expireInvitationQuery,
   invitationActorFromSession,
   invitationView,
+  invitationsForOrgQuery,
   getInvitation,
   isUuid,
   lockTargetRow,
@@ -549,9 +550,13 @@ const CORE_REACHING_ACTION_MODULES: ReadonlyArray<readonly [string, string]> = [
   ],
   [
     "src/app/(auth)/register/actions.ts",
-    "the private-beta gate: `./beta-gate` → `hasValidInvitationBypass` → `getInvitation`, a READ that must work with no session because an invitation id IS the bypass token (see core.ts → Query Invitations)",
+    "two things, both necessarily session-free because no account exists yet: (1) the private-beta gate — `./beta-gate` → `hasValidInvitationBypass` → `getInvitation`, a READ, because an invitation id IS the bypass token (core.ts → Query Invitations); (2) #23's redemption — `bindOpenInvitationTarget` then `acceptInvitationAs`, which turn an invite link into an association. The WRITES are reached only from inside `register`, after the account has been created, and the actor is minted from the user row this same request inserted",
   ],
 ];
+
+// The surface that consumes the four actions is deliberately NOT on that list:
+// `(dash)/oversight/invitations/actions.ts` imports `service.ts` only, so the
+// walk stops at that `"use server"` boundary and #23 added no new reach.
 
 // ----------------------------------------------------------------------------
 // 1a. Structural — the endpoint surface, read off the real module
@@ -902,6 +907,7 @@ const NETWORK = "33333333-3333-4333-8333-333333333333";
 const PLANTER_ID = "44444444-4444-4444-8444-444444444444";
 const FOREIGN_ID = "55555555-5555-4555-8555-555555555555";
 const INVITATION_ID = "77777777-7777-4777-8777-777777777777";
+const INVITEE_EMAIL = "planter@example.com";
 
 function actor(overrides: {
   id?: string;
@@ -1181,6 +1187,7 @@ test("an invitation whose ids contradict its type writes nothing", () => {
 
 test("a sending church admin invites plants into their OWN sending church", () => {
   const resolved = resolveInvitationRequest(SC_ADMIN, {
+    inviteeEmail: INVITEE_EMAIL,
     targetChurchId: PLANT,
   });
 
@@ -1188,6 +1195,7 @@ test("a sending church admin invites plants into their OWN sending church", () =
   assert.deepEqual(resolved.values, {
     type: "church_to_sending_church",
     inviterUserId: PLANTER_ID,
+    inviteeEmail: INVITEE_EMAIL,
     targetChurchId: PLANT,
     targetSendingChurchId: null,
     sendingChurchId: SENDING_CHURCH,
@@ -1201,6 +1209,7 @@ test("org ids smuggled onto the payload are discarded, not written", () => {
   // oversight notification that bypasses consent — so it is derived from the
   // session and a client value for it is dropped on the floor.
   const resolved = resolveInvitationRequest(SC_ADMIN, {
+    inviteeEmail: INVITEE_EMAIL,
     targetChurchId: PLANT,
     // @ts-expect-error the point of the test: a client cannot name the inviter
     sendingChurchId: OTHER_SENDING_CHURCH,
@@ -1220,6 +1229,7 @@ test("org ids smuggled onto the payload are discarded, not written", () => {
 
 test("a network admin invites into their OWN network, either kind of target", () => {
   const plant = resolveInvitationRequest(NETWORK_ADMIN, {
+    inviteeEmail: INVITEE_EMAIL,
     targetChurchId: PLANT,
   });
   assert.ok(plant.ok);
@@ -1227,6 +1237,7 @@ test("a network admin invites into their OWN network, either kind of target", ()
   assert.equal(plant.values.sendingNetworkId, NETWORK);
 
   const sendingChurch = resolveInvitationRequest(NETWORK_ADMIN, {
+    inviteeEmail: INVITEE_EMAIL,
     targetSendingChurchId: SENDING_CHURCH,
   });
   assert.ok(sendingChurch.ok);
@@ -1237,17 +1248,27 @@ test("a network admin invites into their OWN network, either kind of target", ()
 
 test("a sending church cannot invite another sending church", () => {
   const resolved = resolveInvitationRequest(SC_ADMIN, {
+    inviteeEmail: INVITEE_EMAIL,
     targetSendingChurchId: OTHER_SENDING_CHURCH,
   });
 
   assert.ok(!resolved.ok);
+
+  // …nor an OPEN invitation to one: `inviteAs` is the same decision made before
+  // the invitee has an account, and the same rule has to hold there.
+  assert.ok(
+    !resolveInvitationRequest(SC_ADMIN, {
+      inviteeEmail: INVITEE_EMAIL,
+      inviteAs: "sending_church",
+    }).ok
+  );
 });
 
 test("nobody without an oversight role may invite", () => {
   for (const role of ["planter", "coach", "team_member"] as const) {
     const resolved = resolveInvitationRequest(
       actor({ role, churchId: PLANT }),
-      { targetChurchId: OTHER_PLANT }
+      { inviteeEmail: INVITEE_EMAIL, targetChurchId: OTHER_PLANT }
     );
     assert.ok(!resolved.ok, role);
   }
@@ -1256,31 +1277,52 @@ test("nobody without an oversight role may invite", () => {
 test("an oversight admin with no org of their own may not invite", () => {
   assert.ok(
     !resolveInvitationRequest(actor({ role: "sending_church_admin" }), {
+      inviteeEmail: INVITEE_EMAIL,
       targetChurchId: PLANT,
     }).ok
   );
   assert.ok(
     !resolveInvitationRequest(actor({ role: "network_admin" }), {
+      inviteeEmail: INVITEE_EMAIL,
       targetChurchId: PLANT,
     }).ok
   );
 });
 
-test("the target must be exactly one well-formed id", () => {
+test("at most one target, and only a well-formed id", () => {
+  // #23 made "no target" LEGAL — an open invitation to somebody with no account
+  // yet, whose organization does not exist to be pointed at until they register
+  // (`bindOpenInvitationTarget`). Everything else about the rule is unchanged:
+  // never two targets, and never a value that is not a uuid.
   const cases = [
-    {},
     { targetChurchId: PLANT, targetSendingChurchId: SENDING_CHURCH },
     { targetChurchId: "not-a-uuid" },
     { targetChurchId: "' or 1=1 --" },
     { targetSendingChurchId: "42" },
+    // The address is the one field a create form asks for, so it is validated
+    // like one — an unparseable one never reaches a row.
+    { inviteeEmail: "not-an-email", targetChurchId: PLANT },
+    { inviteeEmail: "   ", targetChurchId: PLANT },
   ];
 
   for (const request of cases) {
     assert.ok(
-      !resolveInvitationRequest(NETWORK_ADMIN, request).ok,
+      !resolveInvitationRequest(NETWORK_ADMIN, {
+        inviteeEmail: INVITEE_EMAIL,
+        ...request,
+      }).ok,
       JSON.stringify(request)
     );
   }
+
+  const open = resolveInvitationRequest(NETWORK_ADMIN, {
+    inviteeEmail: INVITEE_EMAIL,
+    inviteAs: "church",
+  });
+  assert.ok(open.ok);
+  assert.equal(open.values.type, "church_to_network");
+  assert.equal(open.values.targetChurchId, null);
+  assert.equal(open.values.targetSendingChurchId, null);
 });
 
 test("the expiry window is server-fixed and not a client input", () => {
@@ -1297,6 +1339,7 @@ test("the expiry window is server-fixed and not a client input", () => {
   // layer's code — so a helpful future `expiresInDays?: number` fails here rather
   // than shipping.
   const smuggled = resolveInvitationRequest(NETWORK_ADMIN, {
+    inviteeEmail: INVITEE_EMAIL,
     targetChurchId: PLANT,
     // @ts-expect-error the ruling, as a compile error: expiry is not a request field
     expiresInDays: 36500,
@@ -1305,6 +1348,7 @@ test("the expiry window is server-fixed and not a client input", () => {
   assert.ok(smuggled.ok);
   assert.ok(!("expiresInDays" in smuggled.values), "expiry reached the row");
   assert.deepEqual(Object.keys(smuggled.values).sort(), [
+    "inviteeEmail",
     "inviterUserId",
     "sendingChurchId",
     "sendingNetworkId",
@@ -1345,22 +1389,103 @@ test("a response records the session's user, and only a pending row", () => {
   }
 });
 
-test("the revoke statement is scoped to the session's own user", () => {
-  // The authority check lives in the UPDATE, so this is where it has to be
-  // read: the bound parameters carry the actor's id and the invitation id, and
-  // a foreign id appears nowhere. Also `status = 'pending'`, so a revoke can
-  // never resurrect an answered invitation.
+/** Just the WHERE clause — `returning()` names every column and would answer for any of them. */
+function whereOf(sql: string): string {
+  const start = sql.indexOf(" where ");
+  const end = sql.indexOf(" returning ");
+  return sql.slice(start, end === -1 ? undefined : end);
+}
+
+test("the revoke statement is scoped to the session's own ORG", () => {
+  // RULED 2026-08-04 (#23): revoke is scoped to the INVITING ORG, not the
+  // inviting user — the pending list already is, so a second admin of the same
+  // sending church was shown a queue whose Revoke button refused them.
+  //
+  // The authority check lives in the UPDATE, so this is where it has to be read:
+  // the bound parameters carry the actor's OWN org id (from the session) and the
+  // invitation id, no foreign org id appears, and `inviter_user_id` is gone from
+  // the WHERE entirely. Also `status = 'pending'`, so a revoke can never
+  // resurrect an answered invitation.
   const invitationId = "66666666-6666-4666-8666-666666666666";
-  const { sql, params } = revokeInvitationQuery(
+
+  const network = revokeInvitationQuery(
     actor({ role: "network_admin", sendingNetworkId: NETWORK }),
     invitationId
   ).toSQL();
 
-  assert.ok(params.includes(PLANTER_ID));
-  assert.ok(params.includes(invitationId));
-  assert.ok(params.includes("pending"));
-  assert.ok(!params.includes(FOREIGN_ID));
-  assert.match(sql, /inviter_user_id/);
+  assert.match(network.sql, /"sending_network_id" = \$\d+/);
+  // The WHERE, not the whole statement: `returning()` names every column, so
+  // `inviter_user_id` appears there and always will.
+  assert.doesNotMatch(whereOf(network.sql), /inviter_user_id/);
+  assert.ok(network.params.includes(NETWORK));
+  assert.ok(network.params.includes(invitationId));
+  assert.ok(network.params.includes("pending"));
+  assert.ok(!network.params.includes(OTHER_SENDING_CHURCH));
+
+  const sendingChurch = revokeInvitationQuery(SC_ADMIN, invitationId).toSQL();
+  assert.match(sendingChurch.sql, /"sending_church_id" = \$\d+/);
+  assert.doesNotMatch(whereOf(sendingChurch.sql), /inviter_user_id/);
+  assert.ok(sendingChurch.params.includes(SENDING_CHURCH));
+  assert.ok(!sendingChurch.params.includes(NETWORK));
+
+  // …and the id of the admin doing the revoking is bound NOWHERE, which is the
+  // whole change: a colleague who did not send it matches the same row.
+  assert.ok(!sendingChurch.params.includes(PLANTER_ID));
+  assert.ok(!sendingChurch.params.includes(FOREIGN_ID));
+});
+
+test("nobody outside an inviting org can revoke anything", () => {
+  // The other half of "keep the checks strict". A planter, a team member, a
+  // coach, and an oversight admin who has no org of their own each produce a
+  // WHERE that matches NOTHING — not a missing predicate that `and()` would
+  // drop, which would turn this statement into "revoke by id" for anyone.
+  const invitationId = "66666666-6666-4666-8666-666666666666";
+
+  for (const caller of [
+    PLANTER,
+    TEAM_MEMBER,
+    actor({ role: "coach" }),
+    actor({ role: "sending_church_admin", sendingChurchId: null }),
+    actor({ role: "network_admin", sendingNetworkId: null }),
+  ]) {
+    const { sql, params } = revokeInvitationQuery(caller, invitationId).toSQL();
+
+    assert.match(sql, /false/, caller.role);
+    assert.doesNotMatch(sql, /"sending_church_id" = \$\d+/, caller.role);
+    assert.doesNotMatch(sql, /"sending_network_id" = \$\d+/, caller.role);
+    assert.ok(!params.includes(SENDING_CHURCH), caller.role);
+    assert.ok(!params.includes(NETWORK), caller.role);
+  }
+});
+
+test("the list and the revoke agree on what 'our invitations' means", () => {
+  // The property the ruling turns on, asserted rather than promised: the org
+  // predicate the pending list is read with is the SAME predicate the revoke
+  // writes with. Two definitions of "ours" is exactly how a screen ends up
+  // showing an admin a row whose button refuses them.
+  for (const admin of [SC_ADMIN, NETWORK_ADMIN]) {
+    const listed = invitationsForOrgQuery(admin).toSQL();
+    const revoked = revokeInvitationQuery(
+      admin,
+      "66666666-6666-4666-8666-666666666666"
+    ).toSQL();
+
+    // Compared by COLUMN, not by rendered fragment: the two statements bind
+    // their parameters at different positions ($1 in a select, $4 in an update),
+    // and the placeholder number is not the thing that has to agree.
+    const orgPredicate = /"(sending_church_id|sending_network_id)" = \$\d+/;
+    const fromList = whereOf(listed.sql).match(orgPredicate);
+    const fromRevoke = whereOf(revoked.sql).match(orgPredicate);
+
+    assert.ok(fromList, admin.role);
+    assert.ok(fromRevoke, admin.role);
+    assert.equal(fromRevoke[1], fromList[1], admin.role);
+
+    const orgId = admin.sendingChurchId ?? admin.sendingNetworkId;
+    assert.ok(orgId, admin.role);
+    assert.ok(listed.params.includes(orgId), admin.role);
+    assert.ok(revoked.params.includes(orgId), admin.role);
+  }
 });
 
 test("the association cannot be written unless the claim was won", () => {
@@ -1669,6 +1794,7 @@ test("an action result carries no internal user ids", () => {
     id: INVITATION_ID,
     type: "church_to_sending_church",
     inviterUserId: FOREIGN_ID,
+    inviteeEmail: INVITEE_EMAIL,
     targetChurchId: PLANT,
     targetSendingChurchId: null,
     sendingChurchId: SENDING_CHURCH,
@@ -1686,6 +1812,9 @@ test("an action result carries no internal user ids", () => {
     "createdAt",
     "expiresAt",
     "id",
+    // The address the ADMIN typed — what the invitations list renders. Not an
+    // identifier a request can be aimed at, unlike the two ids below it.
+    "inviteeEmail",
     "respondedAt",
     "sendingChurchId",
     "sendingNetworkId",

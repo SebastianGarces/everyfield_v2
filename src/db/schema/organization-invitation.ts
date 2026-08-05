@@ -32,6 +32,17 @@ export const organizationInvitations = pgTable(
     inviterUserId: uuid("inviter_user_id")
       .references(() => users.id)
       .notNull(),
+    // Who the invitation was addressed to (#23 / OV-003). An oversight admin
+    // invites an EMAIL — they have no directory of church plants to pick from
+    // and must not be given one, since that would list every plant in the
+    // product to every org. The email is what the surface renders, what the
+    // invite link is sent to, and the only thing the admin types.
+    //
+    // Nullable because rows predating #23 have none. The two target FKs below
+    // stay nullable for a second reason: an invitation to somebody with no
+    // account yet has no target row to point at until they register (see
+    // `bindOpenInvitationTarget` in `src/lib/invitations/core.ts`).
+    inviteeEmail: varchar("invitee_email", { length: 255 }),
     // Target entity being invited
     targetChurchId: uuid("target_church_id").references(() => churches.id),
     targetSendingChurchId: uuid("target_sending_church_id").references(
@@ -61,6 +72,11 @@ export const organizationInvitations = pgTable(
     ),
     index("org_invitations_status_idx").on(table.status),
     index("org_invitations_inviter_user_id_idx").on(table.inviterUserId),
+    // The invitations surface lists by INVITING org, not by inviter (#23): the
+    // list is scoped to the caller's org so a second admin sees the same
+    // pending queue, which is also what stops one org reading another's.
+    index("org_invitations_sending_church_id_idx").on(table.sendingChurchId),
+    index("org_invitations_sending_network_id_idx").on(table.sendingNetworkId),
   ]
 );
 

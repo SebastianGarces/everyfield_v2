@@ -20,5 +20,11 @@ tenant scope; `created_at`/`updated_at` default now.
   categories, gated by `share_activity_with_oversight` read at enqueue time; a recipient who
   fails the gate is skipped and reported, never thrown over. Source: `src/lib/notifications/`
   and `product-docs/features/notifications/frd.md` (N-025/N-026).
+- **`organization_invitations` with BOTH target FKs null is a legitimate OPEN invitation**, not a
+  broken row: the invitee had no account when the admin typed `invitee_email`, so there was
+  nothing to point at. The target is filled in at registration by `bindOpenInvitationTarget`
+  (`src/lib/invitations/core.ts`), whose compare-and-set is also what makes an invite link
+  single-use. `invitee_email` null means the row predates #23 and matches nobody. Full rule:
+  `../invariants.md` → Multi-Tenancy.
 - **Transactions:** `db.transaction()` throws on neon-http — see `../invariants.md` →
   Transactions/Atomicity before writing any multi-statement mutation.

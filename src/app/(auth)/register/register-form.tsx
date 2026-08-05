@@ -16,6 +16,7 @@ import type { AccountType } from "@/lib/validations/auth";
 import Link from "next/link";
 import { useActionState, useState } from "react";
 import { register, type RegisterState } from "./actions";
+import type { RegistrationInvitation } from "./beta-gate";
 
 const initialState: RegisterState = {};
 
@@ -55,24 +56,56 @@ const ACCOUNT_TYPE_CONFIG: Record<
  * The actual code value is NEVER passed to the client — we only learn whether
  * to render the invite-code input. Enforcement happens server-side in the
  * `register` action regardless of this flag.
+ *
+ * `invitation` is the missing half of the invite flow (#23). `register` has
+ * always read an `invitationId` from the form; nothing ever rendered one, so
+ * the token could not reach it and invite-at-registration was dead. The hidden
+ * field below is that wire. Everything else it drives is presentation: the
+ * account type is preselected, the church-plant name becomes required (an
+ * invitation exists to associate a plant, so the plant has to exist), and the
+ * beta-code input steps aside because the invitation IS the invite.
+ *
+ * One thing it drives is NOT presentation, though it looks like it: the email
+ * field is pre-filled and read-only (RULED 2026-08-04). The rule itself lives in
+ * `register` and `hasValidInvitationBypass`, which refuse a registering address
+ * that is not the invited one — this field just stops an honest user walking
+ * into that refusal.
  */
 export function RegisterForm({
   betaGateEnabled,
+  invitation = null,
 }: {
   betaGateEnabled: boolean;
+  invitation?: RegistrationInvitation | null;
 }) {
   const [state, formAction, pending] = useActionState(register, initialState);
-  const [accountType, setAccountType] = useState<AccountType>("planter");
+  const redeeming = invitation?.redeemable ? invitation : null;
+  // A redeemed invitation DECIDES the account type — it was issued to a church
+  // plant or to a sending church, and picking the other one would create an
+  // organization the invitation cannot associate. So the choice is not offered.
+  const [accountType, setAccountType] = useState<AccountType>(
+    redeeming?.accountType ?? "planter"
+  );
 
   // Controlled so a rejected submit (e.g. invalid invite code) keeps everything
   // the user already typed instead of clearing the form.
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  // AN INVITATION DECIDES THE ADDRESS — RULED 2026-08-04. The invitation was
+  // issued to one person; a link holder who typed a different address used to
+  // walk off with somebody else's association. So the field is pre-filled and
+  // read-only (read-only, not `disabled` — a disabled input is not submitted),
+  // and the action re-checks it anyway, since a POST never saw this form.
+  const emailLockedToInvitation = Boolean(invitation);
+  const [email, setEmail] = useState(invitation?.inviteeEmail ?? "");
   const [organizationName, setOrganizationName] = useState("");
   const [password, setPassword] = useState("");
   const [inviteCode, setInviteCode] = useState("");
 
   const config = ACCOUNT_TYPE_CONFIG[accountType];
+  // An invited planter names their plant here; a cold planter signup still
+  // creates no church and is not asked for one.
+  const needsPlantName =
+    redeeming?.accountType === "planter" && accountType === "planter";
 
   return (
     <Card className="w-full max-w-md">
@@ -84,48 +117,76 @@ export function RegisterForm({
       </CardHeader>
       <form action={formAction}>
         <input type="hidden" name="accountType" value={accountType} />
+        {/*
+          THE WIRE. `register/actions.ts` reads `invitationId`; without this
+          field it never arrived, so the beta-gate bypass never fired and an
+          invited planter finished signup unassociated (#23).
+        */}
+        {invitation && (
+          <input type="hidden" name="invitationId" value={invitation.id} />
+        )}
         <CardContent className="space-y-6">
+          {redeeming && (
+            <div
+              role="status"
+              className="border-primary/30 bg-primary/5 rounded-md border p-3 text-sm"
+            >
+              <p className="font-medium">
+                {redeeming.invitingOrgName} invited you to EveryField
+              </p>
+              <p className="text-muted-foreground mt-1">
+                {redeeming.accountType === "planter"
+                  ? "Name your church plant below — it will be associated with them as soon as you finish."
+                  : "Your sending church will be associated with them as soon as you finish."}
+              </p>
+            </div>
+          )}
           {state.error && (
             <div className="bg-destructive/10 text-destructive rounded-md p-3 text-sm">
               {state.error}
             </div>
           )}
 
-          {/* Account Type Selection */}
-          <div className="space-y-3">
-            <Label>I am a...</Label>
-            <RadioGroup
-              value={accountType}
-              onValueChange={(v) => setAccountType(v as AccountType)}
-              className="gap-3"
-            >
-              {(
-                Object.entries(ACCOUNT_TYPE_CONFIG) as [
-                  AccountType,
-                  (typeof ACCOUNT_TYPE_CONFIG)[AccountType],
-                ][]
-              ).map(([type, cfg]) => (
-                <label
-                  key={type}
-                  className="border-input has-data-[state=checked]:border-primary has-data-[state=checked]:bg-primary/5 flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors"
-                >
-                  <RadioGroupItem
-                    value={type}
-                    className="mt-0.5 cursor-pointer"
-                  />
-                  <div className="space-y-0.5">
-                    <div className="text-sm font-medium">{cfg.label}</div>
-                    <div className="text-muted-foreground text-xs">
-                      {cfg.description}
+          {/* Account Type Selection — not offered while redeeming an
+              invitation, which already decided it (see above). */}
+          {!redeeming && (
+            <div className="space-y-3">
+              <Label>I am a...</Label>
+              <RadioGroup
+                value={accountType}
+                onValueChange={(v) => setAccountType(v as AccountType)}
+                className="gap-3"
+              >
+                {(
+                  Object.entries(ACCOUNT_TYPE_CONFIG) as [
+                    AccountType,
+                    (typeof ACCOUNT_TYPE_CONFIG)[AccountType],
+                  ][]
+                ).map(([type, cfg]) => (
+                  <label
+                    key={type}
+                    className="border-input has-data-[state=checked]:border-primary has-data-[state=checked]:bg-primary/5 flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors"
+                  >
+                    <RadioGroupItem
+                      value={type}
+                      className="mt-0.5 cursor-pointer"
+                    />
+                    <div className="space-y-0.5">
+                      <div className="text-sm font-medium">{cfg.label}</div>
+                      <div className="text-muted-foreground text-xs">
+                        {cfg.description}
+                      </div>
                     </div>
-                  </div>
-                </label>
-              ))}
-            </RadioGroup>
-          </div>
+                  </label>
+                ))}
+              </RadioGroup>
+            </div>
+          )}
 
-          {/* Organization Name (only for sending church / network) */}
-          {accountType !== "planter" && (
+          {/* Organization Name — always for sending church / network, and for
+              an INVITED planter, whose plant is created at signup so the
+              invitation has something to associate. */}
+          {(accountType !== "planter" || needsPlantName) && (
             <div className="space-y-2">
               <Label htmlFor="organizationName">{config.orgLabel}</Label>
               <Input
@@ -176,10 +237,25 @@ export function RegisterForm({
               placeholder="you@example.com"
               autoComplete="email"
               required
+              readOnly={emailLockedToInvitation}
+              className={emailLockedToInvitation ? "bg-muted" : undefined}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               aria-invalid={!!state.fieldErrors?.email}
+              aria-describedby={
+                emailLockedToInvitation ? "email-invitation-note" : undefined
+              }
             />
+            {emailLockedToInvitation && (
+              <p
+                id="email-invitation-note"
+                className="text-muted-foreground text-xs"
+              >
+                Your invitation was sent to this address, so the account is
+                created for it. If it is wrong, ask whoever invited you to send
+                a new invitation.
+              </p>
+            )}
             {state.fieldErrors?.email && (
               <p className="text-destructive text-sm">
                 {state.fieldErrors.email}
@@ -211,8 +287,10 @@ export function RegisterForm({
             </p>
           </div>
 
-          {/* Private-beta invite code (only rendered when gating is on). */}
-          {betaGateEnabled && (
+          {/* Private-beta invite code (only rendered when gating is on, and
+              never for an invited user — the invitation IS the invite, and the
+              server grants the same bypass). */}
+          {betaGateEnabled && !invitation && (
             <div className="space-y-2 pb-8">
               <Label htmlFor="inviteCode">Invite code</Label>
               <Input
