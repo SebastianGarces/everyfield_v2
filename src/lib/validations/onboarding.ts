@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { extractFieldErrors } from "./utils";
+
 /**
  * F12 / OB-001 + OB-002 — validation for the onboarding flow's step 1.
  *
@@ -58,4 +60,42 @@ export function churchBasicsFromFormData(formData: FormData) {
     stateRegion: read("stateRegion"),
     country: read("country"),
   });
+}
+
+/**
+ * Step 1's per-field errors, in the `useActionState` shape the flow renders.
+ *
+ * Declared here rather than next to the action because a `"use server"` module
+ * is an auth surface, not a place to keep shared shapes
+ * (`memory/invariants.md` → Authentication); the action re-exports the type for
+ * the form component that already imports it from there.
+ */
+export type ChurchBasicsFieldErrors = {
+  name?: string;
+  city?: string;
+  stateRegion?: string;
+  country?: string;
+};
+
+export type ChurchBasicsParse =
+  | { ok: true; values: ChurchBasicsInput }
+  | { ok: false; fieldErrors: ChurchBasicsFieldErrors };
+
+/**
+ * The whole of step 1's boundary: read the form, validate it, and hand back
+ * either the values to write or the errors to render. One function so the
+ * write path never sees an unvalidated field and never has to remember how a
+ * `ZodError` becomes field errors.
+ */
+export function parseChurchBasics(formData: FormData): ChurchBasicsParse {
+  const parsed = churchBasicsFromFormData(formData);
+
+  if (!parsed.success) {
+    return {
+      ok: false,
+      fieldErrors: extractFieldErrors<ChurchBasicsFieldErrors>(parsed.error),
+    };
+  }
+
+  return { ok: true, values: parsed.data };
 }

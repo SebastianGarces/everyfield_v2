@@ -5,6 +5,7 @@ import {
   CHURCH_TEXT_MAX,
   churchBasicsFromFormData,
   churchBasicsSchema,
+  parseChurchBasics,
 } from "./onboarding";
 
 // ----------------------------------------------------------------------------
@@ -183,4 +184,42 @@ test("a missing name fails instead of creating an unnamed church", () => {
 
   assert.equal(parsed.success, false);
   assert.equal(parsed.error!.issues[0].path[0], "name");
+});
+
+// ----------------------------------------------------------------------------
+// The write path's boundary.
+//
+// `parseChurchBasics` is the single call the church-creation path makes: it
+// either hands back values that are safe to write, or the field errors the step
+// renders. Keeping both shapes here is what stops the action from having to
+// remember how a ZodError becomes a `fieldErrors` object — and what keeps the
+// shape out of the `"use server"` module, which is an auth surface rather than
+// a place for shared types (memory/invariants.md → Authentication).
+// ----------------------------------------------------------------------------
+
+test("a valid submission comes back as values, ready to write", () => {
+  const parsed = parseChurchBasics(
+    formData({ name: "  Grace Church  ", city: "Austin" })
+  );
+
+  assert.equal(parsed.ok, true);
+  assert.deepEqual(parsed.ok && parsed.values, {
+    name: "Grace Church",
+    city: "Austin",
+    stateRegion: null,
+    country: null,
+  });
+});
+
+test("an invalid submission comes back as field errors, one per field", () => {
+  const parsed = parseChurchBasics(
+    formData({ name: "", city: "x".repeat(CHURCH_TEXT_MAX + 1) })
+  );
+
+  assert.equal(parsed.ok, false);
+  if (parsed.ok) return;
+
+  assert.match(parsed.fieldErrors.name!, /name/i);
+  assert.match(parsed.fieldErrors.city!, /255 characters/);
+  assert.equal(parsed.fieldErrors.country, undefined);
 });
