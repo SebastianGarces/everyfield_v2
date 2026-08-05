@@ -4,9 +4,47 @@
 // Wiki routing is slug-based (`memory/invariants.md` → Wiki Articles) and the
 // slug is stored raw: it is authored content, not a sanitized identifier, so it
 // can legitimately contain a space, `#`, `?`, `%` or any other character that
-// means something else inside a URL path. Interpolating such a slug straight
-// into `/wiki/${slug}` produces a malformed href — `#` truncates the path into
-// a fragment, `?` into a query string, a space breaks the link outright.
+// means something else inside a URL path. `/wiki/${slug}` is therefore never
+// safe — but the exact damage differs per character, and knowing which is which
+// is what keeps the rule below from reading as superstition.
+//
+// What the WHATWG URL parser does to a raw `/wiki/${slug}` (path state):
+//
+//   `#`  ENDS the path and starts the fragment. `/wiki/notes/draft #2` parses
+//        to pathname `/wiki/notes/draft%20` + hash `#2` — a valid URL pointing
+//        at an article that does not exist.
+//   `?`  ENDS the path and starts the query, the same way: `/wiki/faq/what now?`
+//        parses to pathname `/wiki/faq/what%20now`. Truncated, not broken.
+//   `%`  is passed through VERBATIM — the parser does not escape it. The damage
+//        lands one step later, when Next percent-DECODES each route param:
+//        `100%` throws `URIError` in `decodeURIComponent`, and a slug that
+//        happens to read `50%20off` silently decodes to a different string
+//        (`50 off`), so the lookup misses.
+//   ` `  IS in the path percent-encode set, so the parser escapes it to `%20`
+//        for you. A space is the one character a *parsed* URL survives.
+//
+// That last line is why the docblock this replaced ("a space breaks the link
+// outright") was wrong, and it is also why the always-go-through-`wikiHref`
+// rule stands unchanged: only some of the call sites are ever parsed as a URL.
+//
+//   PARSED  — `<a href>` / `<Link href>`, `router.push`, and `openGraph.url`
+//             (Next resolves it with `new URL(path, metadataBase)`, and
+//             `metadataBase` is set in `src/app/layout.tsx`). Here a raw space
+//             would have been fixed for us; `#`, `?` and `%` still would not.
+//   LITERAL — `revalidatePath(wikiHref(slug))` in
+//             `src/app/api/wiki/revalidate/route.ts`, and the active-item test
+//             `pathname === wikiHref(item.slug)` in
+//             `src/components/wiki/wiki-sidebar.tsx`. Nothing parses these:
+//             one is matched as a cache key against the request's ALREADY
+//             ENCODED path, the other is a string compare against
+//             `usePathname()`, which is likewise already encoded. A raw space
+//             is a silent mismatch — no revalidation, no highlighted item, no
+//             error anywhere.
+//
+// So: build every wiki path here, whatever the call site. The encoding is a
+// no-op for well-formed slugs (see `encodeWikiSlug`), so there is no cost to
+// routing the parsed call sites through it too, and no judgement call at the
+// point of use about which kind of site this one is.
 //
 // `/wiki/[...slug]` is a catch-all, so `/` must stay a live separator while
 // every other unsafe byte is escaped. That means encoding per SEGMENT, never
