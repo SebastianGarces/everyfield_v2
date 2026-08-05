@@ -42,6 +42,11 @@ import { VignetteGate } from "./vignette-gate";
 const EMBED_LABEL =
   "The Plant Intelligence scorecard reading all eight critical success factors — vision casting going well, shared ownership needs attention, two worth a look.";
 
+/** The phone composition carries three of the eight tiles, so it gets its own
+ *  sentence rather than claiming a card the reader is not being shown. */
+const COMPACT_LABEL =
+  "Three of the Plant Intelligence scorecard's eight critical success factors — vision casting a strength, shared ownership needing attention, and emerging leadership worth a look.";
+
 export function EngineScorecard() {
   return (
     <VignetteGate className="vg-scorecard">
@@ -56,7 +61,7 @@ export function EngineScorecard() {
           <span className="vg-label">Critical success factors</span>
           <span className="vg-asof">As of July 31, 2026</span>
         </div>
-        <div className="vg-app-embed" role="img" aria-label={EMBED_LABEL}>
+        <div className="vg-app-embed" role="img" aria-label={COMPACT_LABEL}>
           <ul aria-label="Critical success factors" className="grid gap-3">
             {CSF_FIXTURE_COMPACT.map((factor) => (
               <FactorTile key={factor.category} factor={factor} />

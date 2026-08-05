@@ -37,9 +37,14 @@ import {
 /** One sentence, because the mount is one picture of the product — and it
  *  carries the section count the crops cut off. It lives on the mount, with
  *  `inert` one level in: an inert element is itself outside the accessibility
- *  tree, so a label on it would never be announced. */
+ *  tree, so a label on it would never be announced.
+ *
+ *  It says "the top of" and puts the sections "further down the page" because
+ *  both compositions are crops of different heights — 596 app px on desktop,
+ *  490 in the narrow band, 272 on a phone — and only the first of those shows
+ *  any section row at all. One sentence has to be true of all three. */
 const EMBED_LABEL =
-  "My Wiki Progress in the app — 4 of 96 articles read, 4% overall, with each of the ten sections of the methodology tracked underneath.";
+  "The top of My Wiki Progress in the app — 4 of 96 articles read, 4% overall, with the methodology's ten sections tracked further down the page.";
 
 function ProgressBody() {
   return <WikiProgressCard {...FS_WIKI_PROGRESS_FIXTURE} />;

@@ -49,9 +49,15 @@ import {
 
 /** The grid is a picture of the product, so it is announced as one — the same
  *  contract as the capture it replaces, and it keeps nine card headings out of
- *  this page's outline. */
+ *  this page's outline.
+ *
+ *  It describes the composition WITHOUT counting it. The pane shows four cards,
+ *  six or nine depending on how wide it is, so a sentence that names a number —
+ *  or names every rung of the pipeline — is a sentence that is false at two
+ *  widths out of three. For a screen-reader user this label IS the content, so
+ *  it has to be the true one at every width. */
 const GRID_LABEL =
-  "Nine contacts on the app's own person cards, one for every rung of the Redemption Hill pipeline — prospect, following up, attendee, interviewed, core group, launch team and leader — each with where they came from and the day they were added.";
+  "Contacts from Redemption Hill's pipeline on the app's own person cards — each showing the stage it has reached, where the person came from, and the day they were added.";
 
 const STAT_LABEL =
   "The dashboard's Core Group card reading 61 — core group, launch team and leaders.";

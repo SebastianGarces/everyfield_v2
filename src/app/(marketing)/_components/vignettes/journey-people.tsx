@@ -57,12 +57,23 @@ import {
  */
 
 /** Announced as one picture of the product — the same contract as the capture
- *  each replaces, and it keeps the cards' own h3s out of the page outline. */
+ *  each replaces, and it keeps the cards' own h3s out of the page outline.
+ *
+ *  Four labels, not two: each composition gets the sentence that is true of it.
+ *  The phone compositions render two cards where the desktop ones render six and
+ *  twelve, so sharing a label would describe a picture the reader is not being
+ *  shown — and for a screen-reader user the label is the only picture there is. */
 const PIPELINE_LABEL =
   "Six of Redemption Hill's people as the app cards them, in pipeline order — two prospects, an attendee, someone in follow-up, someone interviewed, and one now in the core group, each carrying the status the app gave it.";
 
+const PIPELINE_COMPACT_LABEL =
+  "The two ends of Redemption Hill's pipeline as the app cards them: a new prospect, and someone now in the core group.";
+
 const COMMITTED_LABEL =
   "The People screen filtered to the committed — twelve cards with a Core Group badge on every one, and 61 committed in all.";
+
+const COMMITTED_COMPACT_LABEL =
+  "Two cards from the People screen filtered to the committed, a Core Group badge on each — 61 committed in all.";
 
 const MEETING_LABEL =
   "Vision Meeting #4, completed at the Riveras' home on Friday, July 24 — 28 attended, one of them new.";
@@ -116,7 +127,11 @@ export function CoreGroupPipeline() {
           <span className="vg-label">People pipeline</span>
           <span className="vg-asof">{PIPELINE_TOTAL} people</span>
         </div>
-        <div className="vg-app-embed" role="img" aria-label={PIPELINE_LABEL}>
+        <div
+          className="vg-app-embed"
+          role="img"
+          aria-label={PIPELINE_COMPACT_LABEL}
+        >
           <div inert>
             <div className="grid gap-3">
               {PIPELINE_PEOPLE_COMPACT.map((person) => (
@@ -161,7 +176,11 @@ export function LaunchTeamCommitted() {
           <span className="vg-label">Committed</span>
           <span className="vg-asof">{COMMITTED_TOTAL} total</span>
         </div>
-        <div className="vg-app-embed" role="img" aria-label={COMMITTED_LABEL}>
+        <div
+          className="vg-app-embed"
+          role="img"
+          aria-label={COMMITTED_COMPACT_LABEL}
+        >
           <div inert>
             <div className="grid gap-3">
               {COMMITTED_PEOPLE_COMPACT.map((person) => (

@@ -59,6 +59,11 @@ import { VignetteGate } from "./vignette-gate";
 const EMBED_LABEL =
   "Your focus in EveryField — the two next steps the engine ranked highest from the July 31 assessment: clear twelve stale follow-ups, and fill the last of eight ministry roles, each citing the facts behind it and linking the article that says how.";
 
+/** The phone composition is ONE card, so it gets its own sentence — the desktop
+ *  label would promise a second insight that is not on screen. */
+const COMPACT_LABEL =
+  "Your focus in EveryField — the step the engine ranked highest from the July 31 assessment: clear twelve stale follow-ups, with the facts behind it and the article that says how.";
+
 export function EngineFocus() {
   return (
     <VignetteGate className="vg-focus">
@@ -80,7 +85,7 @@ export function EngineFocus() {
           <span className="vg-label">Your focus</span>
           <span className="vg-asof">As of July 31, 2026</span>
         </div>
-        <div className="vg-app-embed" role="img" aria-label={EMBED_LABEL}>
+        <div className="vg-app-embed" role="img" aria-label={COMPACT_LABEL}>
           <div inert>
             {/* One card, not two: the mount is ~245px wide on a phone, where an
                 insight body runs to five lines — one real card is already 330px

@@ -1821,6 +1821,12 @@ html:has(.marketing) {
 .marketing .vg-fs-grid {
   grid-template-columns: repeat(2, 272px);
 }
+/* Each band restores exactly the range the band below it hid, and every rule in
+   the sequence is `> :nth-child(...)` so they all weigh (0,4,0) and source order
+   decides. A `> *` restore looks equivalent and is not — it is (0,3,0), loses to
+   the hide rule at every width, and the band never opens. That was the shipping
+   bug in W2B: five of the nine cards were `display: none` everywhere while the
+   mount stayed sized for all nine. */
 .marketing .vg-fs-people .vg-fs-grid > :nth-child(n + 5) {
   display: none;
 }
@@ -1832,7 +1838,7 @@ html:has(.marketing) {
     grid-template-columns: repeat(3, 272px);
   }
   /* restore first, hide second — the later rule has to be the narrower one */
-  .marketing .vg-fs-people .vg-fs-grid > * {
+  .marketing .vg-fs-people .vg-fs-grid > :nth-child(n + 5) {
     display: block;
   }
   .marketing .vg-fs-people .vg-fs-grid > :nth-child(n + 7) {
@@ -1840,7 +1846,7 @@ html:has(.marketing) {
   }
 }
 @media (min-width: 1400px) {
-  .marketing .vg-fs-people .vg-fs-grid > * {
+  .marketing .vg-fs-people .vg-fs-grid > :nth-child(n + 7) {
     display: block;
   }
 }
@@ -1864,7 +1870,8 @@ html:has(.marketing) {
   .marketing .vg-fs-tasks .vg-fs-primary .vg-app-embed {
     width: 820px;
   }
-  .marketing .vg-fs-tasks .vg-fs-stack > * {
+  /* same specificity as the hide above it — see the note on the people grid */
+  .marketing .vg-fs-tasks .vg-fs-stack > :nth-child(n + 4) {
     display: block;
   }
 }
@@ -1892,7 +1899,10 @@ html:has(.marketing) {
     zoom: 0.66;
   }
 }
-@media (min-width: 1100px) {
+/* the one ladder step measurement moved: at 1100 this was 5% over fit (the pane
+   grows on `46vw` but its height floor only lifts at 1180), so the step waits
+   for 1180 and 1100–1179 holds 0.66 */
+@media (min-width: 1180px) {
   .marketing .vg-fs-meetings .vg-app-embed {
     zoom: 0.7;
   }
@@ -1932,6 +1942,16 @@ html:has(.marketing) {
   left: 26%;
   top: 30%;
 }
+/* Below 1100 the pane is at its shortest and `top: 30%` leaves less room than
+   the tile is tall — measured 54px severed off the bottom at 900, through the
+   Prayer tile's staffing bar. Move the ANCHOR, not the ladder: the tile is at
+   life size and dropping the zoom to fit would put 14px app type at 9.2px for
+   no compositional gain. At 900 this leaves 31px of clearance. */
+@media (max-width: 1099.98px) {
+  .marketing .vg-fs-teams {
+    top: 10%;
+  }
+}
 .marketing .vg-fs-teams .vg-app-embed {
   width: 288px;
   zoom: 0.92;
@@ -1962,6 +1982,16 @@ html:has(.marketing) {
   height: 596px;
   overflow: hidden;
   zoom: 0.6;
+}
+/* 596 app px is more than the pane can hold below 1150 — measured 51px clipped
+   at 900, and the 0.66 step re-broke it by 9.6px at 1100. Band the CROP rather
+   than the zoom: the crop is already expressed in the component's own pixels,
+   so it cannot desynchronise from the ladder, and it costs one section row
+   instead of the 6.5px type a fitting zoom would cost. 490 clears 900–1149. */
+@media (max-width: 1149.98px) {
+  .marketing .vg-fs-wiki .vg-app-embed {
+    height: 490px;
+  }
 }
 @media (min-width: 1100px) {
   .marketing .vg-fs-wiki .vg-app-embed {
@@ -2099,6 +2129,15 @@ html:has(.marketing) {
    drops 1440 BELOW the capture this replaces. Two is the honest maximum. */
 .marketing .epane-focus .vg-focus {
   margin-inline-start: auto;
+  /* Measured: at 84% the phase-control capture overlaps the card by 11 app px
+     (frame chrome only) instead of 143, which was amputating the left margin of
+     every line — the first word of each body line and the start of both insight
+     titles. Costs NOTHING: unlike the fixed-width embeds, FocusPanel carries no
+     width of its own, so its type size comes from `zoom` alone and its column
+     width from the pane. Effective type is 7.92px at 84%, 88% and 100% alike.
+     (`padding-inline-end: 0` on the pane was measured a no-op for the same
+     reason — the fluid panel just grows into the freed space.) */
+  max-width: 84%;
 }
 .marketing .vg-focus .vg-embed-full .vg-app-embed {
   zoom: 0.41;
@@ -2322,27 +2361,22 @@ html:has(.marketing) {
     zoom: 0.66;
   }
 }
+/* From 1280 the grid reflows to four columns and the twelve cards fall into
+   three rows — the surface drops from ~600px tall to 452 in one step. The
+   computed ladder tracked the 1024 reflow but not this one, and sat at 87% of
+   fit from here up, leaving 12–17% of type unclaimed. Measured: life size is
+   reachable at 1400. */
 @media (min-width: 1280px) {
-  .marketing .vg-jp-committed .vg-app-embed {
-    zoom: 0.82;
-  }
-}
-@media (min-width: 1300px) {
-  .marketing .vg-jp-committed .vg-app-embed {
-    zoom: 0.83;
-  }
-}
-@media (min-width: 1400px) {
   .marketing .vg-jp-committed .vg-app-embed {
     zoom: 0.9;
   }
 }
-@media (min-width: 1500px) {
+@media (min-width: 1300px) {
   .marketing .vg-jp-committed .vg-app-embed {
-    zoom: 0.97;
+    zoom: 0.92;
   }
 }
-@media (min-width: 1600px) {
+@media (min-width: 1400px) {
   .marketing .vg-jp-committed .vg-app-embed {
     zoom: 1;
   }
@@ -2394,22 +2428,35 @@ html:has(.marketing) {
   animation: fs-primary-in 420ms var(--ease) both;
 }
 
-/* training · the matrix, and the tile beside it. 1:1 from 1100px up — a live
+/* training · the matrix, and the tile beside it. 1:1 from 1150px up — a live
    table is vector, so actual size is the honest ceiling and the pane simply
-   carries more painting at large widths. */
+   carries more painting at large widths.
+
+   The three steps below 1150 were each measured 1–12px too tall for the pane,
+   which is `overflow: visible` — so instead of cropping, the mount hung off the
+   field painting at every band's lower boundary and healed by mid-band. That
+   sawtooth is the signature of a ladder set from the box model rather than read
+   off the rendered node. These are the measured values: the smallest step that
+   stops the overhang, costing 0.8–1.7px of type. Fitting inside the pane's
+   content box instead would cost 3–5px and buy only padding nobody sees. */
 .marketing .vg-training .vg-embed-full .vg-app-embed {
   width: 560px;
-  zoom: 0.82;
+  zoom: 0.76;
   /* the grid arrives without a heading of its own — it sits under the mono
      head the same way the compact tiles do below 900px */
   margin-top: 12px;
 }
 @media (min-width: 1000px) {
   .marketing .vg-training .vg-embed-full .vg-app-embed {
-    zoom: 0.92;
+    zoom: 0.86;
   }
 }
 @media (min-width: 1100px) {
+  .marketing .vg-training .vg-embed-full .vg-app-embed {
+    zoom: 0.98;
+  }
+}
+@media (min-width: 1150px) {
   .marketing .vg-training .vg-embed-full .vg-app-embed {
     zoom: 1;
   }
@@ -2648,13 +2695,20 @@ html:has(.marketing) {
 .marketing .vg-beyond {
   max-width: 84%;
 }
+/* The two steps below 1050 are measured, not computed: `BeyondDashboard`'s
+   natural height is 724px below 1024 and 565 at/above, because the surface
+   carries a `lg:` Tailwind class — a VIEWPORT query read from inside a
+   fixed-width mount that cannot see the viewport. That is the trap the meetings
+   board avoided by pinning its grid, and it is live here; the durable fix is to
+   pin this grid the same way, which is an app-file change. Until then these two
+   steps are sized for the tall shape. */
 .marketing .vg-beyond .vg-embed-full .vg-app-embed {
   width: 840px;
-  zoom: 0.5;
+  zoom: 0.46;
 }
 @media (min-width: 1000px) {
   .marketing .vg-beyond .vg-embed-full .vg-app-embed {
-    zoom: 0.57;
+    zoom: 0.52;
   }
 }
 @media (min-width: 1100px) {
@@ -2805,7 +2859,11 @@ html:has(.marketing) {
   .marketing .ptabs.pt-seen .ppanel.active .pshot .vg-card,
   .marketing .ptabs.pt-seen .ppanel.active .vg-rs-rule-fill,
   .marketing .ptabs.pt-seen .ppanel.active .vg-rs-row,
-  .marketing .ptabs.pt-seen .ppanel.active .vg-rs-t,
+  /* the .vg-rs-row qualifiers repeated so these match the animated selectors'
+     (0,8,0) — the bare `.vg-rs-t` form is (0,6,0) and lost, so the run sheet's
+     hour chips kept animating under reduced motion (5 animations, measured) */
+  .marketing .ptabs.pt-seen .ppanel.active .vg-rs-row:not(.is-last) .vg-rs-t,
+  .marketing .ptabs.pt-seen .ppanel.active .vg-rs-row.is-last .vg-rs-t,
   .marketing .ptabs.pt-seen .ppanel.active .vg-wk-row,
   .marketing .ptabs.pt-seen .ppanel.active .vg-wk-fill,
   /* --- the live app surfaces (#296), in the same order as their blocks --- */

@@ -58,9 +58,13 @@ const CHECKBOX_STILL = (
 );
 
 /** The list is a picture of the product, so it is announced as one — the same
- *  contract as the capture it replaces. */
+ *  contract as the capture it replaces.
+ *
+ *  It names only the three rows that are visible at every width. The fourth is
+ *  dropped below 1200px (marketing.css), and a label that names a row the pane
+ *  is not showing is a label that is false at the narrow end. */
 const LIST_LABEL =
-  "Four tasks on the app's own rows: a Vision Night #4 evaluation three days overdue, a follow-up with Dana Whitfield a day overdue and carrying its pastoral note, an urgent location to find for Vision Night #5 due today, and the website go-live still ahead.";
+  "Follow-up tasks on the app's own rows: a Vision Night #4 evaluation three days overdue, a follow-up with Dana Whitfield a day overdue and carrying its pastoral note, and an urgent location to find for Vision Night #5, due today.";
 
 const MEETING_LABEL =
   "Vision Night #4 at the Riveras' home, completed — 28 attended, one of them new. This is the attendance that created the follow-ups.";
