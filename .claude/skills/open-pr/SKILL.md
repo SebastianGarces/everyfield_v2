@@ -10,8 +10,10 @@ what makes "a PR means it's actually done" true.
 
 ## Hard precondition
 
-- Input is a `definition-of-done` report. If `verdict` is `FAIL` (or any gate is FAIL, or required
-  evidence is missing) → **do not open a PR**. Return control to the loop to retry/block.
+- Input is a `definition-of-done` report — the track's integration verdict **plus every workstream's
+  scoped report**. If `verdict` is `FAIL` (or any gate is FAIL, or required evidence is missing) →
+  **do not open a PR**. Return control to the loop to retry/block. A workstream report that is absent
+  because its verifier died is missing evidence, not a silent pass (`ops/agent-os/dod.md`).
 - The branch must be pushed: `git push -u origin <branch>`.
 
 ## The DoD is a claim. CI is the anchor.
@@ -61,10 +63,14 @@ That is the intended path — a red check is information, not an emergency.
      --label "agent:in-review" \
      $([ "$HIGH_RISK" = true ] && echo --label risk:high)
    ```
-5. Move the issue into the review queue — **and read the label back** (see below):
+5. Move **every issue the track closes** into the review queue — **and read each label back**
+   (see below). A track that flips two issues of three is the failure mode described in the next
+   section, at track scale:
    ```bash
-   gh issue edit <issue> --add-label agent:in-review --remove-label agent:in-progress
-   gh issue view <issue> --json labels --jq '[.labels[].name]'   # must print agent:in-review
+   for i in <issue>...; do
+     gh issue edit $i --add-label agent:in-review --remove-label agent:in-progress
+     gh issue view $i --json labels --jq '[.labels[].name]'   # must print agent:in-review
+   done
    ```
 6. Return the PR URL.
 
@@ -100,16 +106,23 @@ mechanism.
 
 ```markdown
 ## What & why
-<1–3 sentences. Closes #<issue>.>
+<1–3 sentences. One `Closes #<issue>` line per issue this track closes.>
 
 ## Definition of Done ✅
+
+**Scoped — per workstream, in its own worktree**
+| Workstream | Issues | Stage | G0 ACs mapped | G2 subset | G5 declared files |
+|---|---|---|---|---|---|
+| WS1 <name> | #12 | 0 | ✅ | ✅ 8 passed | ✅ |
+| WS2 <name> | #14, #15 | 1 | ✅ | ✅ 11 passed | ✅ |
+
+**Integration — once, on the track branch**
 | Gate | Status | Evidence |
 |------|--------|----------|
-| G1 Static | ✅ | tsc 0 · lint 0 · build ok |
-| G2 Tests | ✅ | 42 passed |
+| G1 Static | ✅ | tsc 0 · lint 0 · hermetic build ok |
+| G2 Tests | ✅ | 42 passed (full suite) |
 | G3 Functional | ✅ | see ACs + screenshots below |
 | G4 Conventions | ✅ | cursor-pointer ✓ · db:migrate ✓ · memory ✓ |
-| G5 Diff hygiene | ✅ | scoped to declared files |
 | G6 Independent review | ✅ | code-reviewer: PASS |
 
 ### Acceptance criteria
@@ -146,12 +159,14 @@ mechanism.
 ```
 </details>
 
-🤖 Built and validated by the Agent Delivery OS. Closes #<issue>.
+🤖 Built and validated by the Agent Delivery OS.
 ```
 
 ## Rules
 
-- **Closes #<issue>** in the body so merging closes the board item — no manual bookkeeping.
+- **`Closes #<issue>`** in the body so merging closes the board item — **one line per issue the track
+  closes**, no manual bookkeeping. A track whose PR names three issues and closes two is the same
+  class of silent record failure as the label that did not stick.
 - **The PR carries `agent:in-review` too**, not just the issue — `--label agent:in-review` on
   `gh pr create`, verified with `gh pr view <number> --json labels`.
 - **Never open a PR without the evidence table.** The table is the contract with the reviewer.
@@ -162,5 +177,8 @@ mechanism.
   track genuinely has nothing a human should eyeball (a pure refactor, a docs change), say that in one
   line rather than padding the list.
 - Conventional-commit-style title with the issue number.
-- One PR per track/issue. Don't bundle unrelated work.
+- **One PR per track — a track may close several issues.** A track is a connected component over
+  (shared-file ∪ `dependsOn`) edges, so bundling *related* work onto one branch is the design, not a
+  slip: it pays the build, the suite, the preview deploy and the CI wait once for all of it. What is
+  still forbidden is bundling work the track does not contain. Emit one `Closes #` line per issue.
 - End the PR body with the Claude Code attribution line (per repo convention).

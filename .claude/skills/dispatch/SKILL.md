@@ -63,13 +63,20 @@ that is exactly how two loops end up on one branch.
 git status --porcelain && git fetch -q origin && git status -sb | head -1
 ```
 
-Dirty tree or behind `main` → stop. Tracks branch from `main`, and building on a stale base produces
-conflicts a human then has to untangle.
+Dirty tree or behind `main` → stop. Track branches are cut from `main` (workstream worktrees are cut
+from the track branch's HEAD, never from `main`), and building on a stale base produces conflicts a
+human then has to untangle.
 
 ### 4. The frontier is not empty
 
 The frontier is every issue that is open, `agent:queued`, has **zero open blockers**, and has **no
 assignee**. The canonical query is in `ops/agent-os/labels.md` — use it rather than re-deriving one.
+
+A track then **expands from a frontier issue along `dependsOn`** to pull in the dependents it will
+build in later stages, so a dispatched track legitimately contains issues the frontier query itself
+would have excluded. That is the only sanctioned way a blocked issue enters a pass: its blocker is in
+the same track and lands on the track branch first. A blocker **outside** the track is still a hard
+stop.
 
 **Exclude `risk:high` unless the caller explicitly opted in** (`dispatch high-risk`). Not because the
 DoD cannot handle it — HR1–HR4 exist precisely so high-risk work can go autonomously to PR — but
@@ -90,23 +97,36 @@ build loop's subagent usage read as "token-preflight" in /usage. The skill remai
 | small (1–2 files, low risk)     | ~120k |
 | medium (3–6 files)              | ~250k |
 | large / high-risk (2 verifiers) | ~450k |
+| cluster (multi-workstream track) | ~450k + ~120k per workstream beyond the first |
 
-`waveEstimate = Σ trackEstimate`; `reserve` = the largest single track's estimate.
+*(This table is deliberately identical to the one in `token-preflight/SKILL.md`. If you change one,
+change both — two tables that disagree are worse than one table in the wrong place.)*
+
+`waveEstimate = Σ trackEstimate`; `reserve` = the **largest single workstream's** estimate, not the
+largest track's. A track is no longer one indivisible spend: it runs stage by stage, and the thing
+that must never be stranded mid-flight is a workstream. **A stage does not start unless the remaining
+budget covers all of its concurrent workstreams** — a track that has to stop stops cleanly between
+stages, on the track branch, with the completed stages already merged into it.
 
 - **No `+Nk` budget directive** (the normal dispatch case) → **RUN** best-effort. The real guards
-  are the workflow's per-track reserve and `MAX_ATTEMPTS`, plus the track cap below.
+  are the per-workstream reserve and `MAX_ATTEMPTS`, plus the agent cap below.
 - **Directive given** and `remaining ≥ waveEstimate + reserve` → **RUN** all of them.
 - **Directive given** and only some fit (`remaining ≥ largestTrackEstimate + reserve`) → **SPLIT**:
   take only what fits, highest-value first, and say what was left.
 - Otherwise → **DEFER**: stop, and say what a single track needs.
 
-**Cap: 3 tracks per pass**, even when the budget allows more. A pass that opens five PRs at 03:00
-guarantees gate 1 blocks the next four passes. Steady beats bursty.
+**Cap: 6 concurrent agents per pass** — not 3 tracks. A track may now hold eight workstreams, so
+"3 tracks" stopped describing load at all: it could mean three agents or twenty-four. Cap the thing
+that actually consumes budget and wall-clock, which is agents running at once.
 
-This cap and gate 1's are one setting in two places: a pass may not be able to fill the review queue
-on its own, or every pass ends by blocking the next one. Keep gate 1 at roughly **twice** this
-number. Raised 2 → 3 on 2026-07-26 to use more of a session; the binding constraint is the human
-review queue, not tokens, so measure PRs-merged-per-day before raising it again.
+The review-queue relationship still has to hold, and it is about **PRs**, not agents: a pass opens one
+PR per track. Gate 1's cap stays at roughly **twice** the number of tracks a pass can finish — 6 held
+PRs against ~3 tracks — so the agent cap bounds cost and the queue bounds output, and neither
+substitutes for the other. A pass that opens five PRs at 03:00 still guarantees gate 1 blocks the next
+four passes; steady beats bursty. Raised 2 → 3 tracks on 2026-07-26 to use more of a session, and
+re-expressed as an agent cap on 2026-08-05 when a track stopped being one agent
+(`product-docs/board-design-2026-07.md` §13). The binding constraint is still the human review queue,
+not tokens, so measure PRs-merged-per-day before raising either number.
 
 ## The pass
 
@@ -116,15 +136,23 @@ Call the `build-until-done` workflow with the selected tracks:
 Workflow({ name: "build-until-done", args: { units: [...], base: "main", maxAttempts: 3, autoMerge: true } })
 ```
 
+`maxAttempts` is **per workstream**, not per track. A workstream that passed is never re-implemented,
+so one failing AC no longer burns an attempt for every healthy unit beside it.
+
 **`autoMerge: true` is what dispatch adds.** It is off by default so a direct `/deliver` call cannot
 merge to `main` by surprise; a dispatch pass opts in. Under it the loop merges a track only when all
 three hold: the DoD passed **and** the required check is green, the track is not `risk:high`, and no
-warning was classified `spec-question`. Code-quality warnings are filed as follow-up issues and land
-back on the frontier — they do not stall a good branch. See §11's sibling note in
-`product-docs/board-design-2026-07.md` and `DOD_SCHEMA.warnings`.
+warning was classified `spec-question`. Code-quality warnings are appended as unchecked ACs to the
+feature parent's `Follow-ups — <parent title>` rollup **before** the merge — they do not stall a good
+branch, and they no longer spawn an issue apiece. See §12 and §13 of
+`product-docs/board-design-2026-07.md`, `ops/agent-os/labels.md`, and `DOD_SCHEMA.warnings`.
 
-Each unit is `{id, title, lane, files, summary, acceptanceCriteria, issue, risk}` — `files` comes
-from the issue's **Likely files** section, which is what keeps parallel tracks from colliding.
+Each unit is `{id, title, lane, files, summary, acceptanceCriteria, issue, risk, dependsOn}`. The
+loop cuts the units into **tracks** (connected components over shared-file ∪ `dependsOn`), then into
+**stages** (topological levels by `dependsOn`), then into **workstreams** (units in one stage sharing
+a file — one agent, sequential). `files` comes from the issue's **Likely files** section and the
+per-workstream lists from its `## Workstreams` section; the first keeps parallel tracks from
+colliding, the second scopes each workstream's G5.
 
 The loop owns everything after that: claiming (`agent:in-progress`), the DoD gates, retries, opening
 the PR with its evidence bundle and flipping to `agent:in-review`, or labelling `agent:blocked` with

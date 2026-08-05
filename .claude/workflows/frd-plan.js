@@ -224,6 +224,17 @@ const tracks = [...trackMembers.entries()].map(([root, units]) => ({
     files: u.files,
     summary: u.summary,
     acceptanceCriteria: u.acceptanceCriteria,
+    // Intra-track ordering, kept rather than dropped.
+    //
+    // The track-level graph below deliberately ignores an edge whose endpoints
+    // landed in the same track (`if (from !== to)`), because as a BOARD edge it
+    // would be a self-block. But it is still real: it says which of these units
+    // has to exist before the others compile. That is exactly what
+    // build-until-done now needs to split a track into a prerequisite stage and
+    // a parallel fan-out, so it travels with the unit instead of dying here.
+    dependsOn: (u.dependsOn || []).filter((d) =>
+      units.some((sibling) => sibling.id === d)
+    ),
   })),
   files: [...new Set(units.flatMap((u) => (u.files || []).map(normFile)))],
   lane:
@@ -330,6 +341,8 @@ ${gated.map((g) => `  - [${g.id}] ${g.title}\n    reason: ${g.reason}`).join("\n
 **3. Publish the tracks IN THE ORDER GIVEN BELOW.** The order is topological, so every blocker already exists by the time something references it. For each: \`gh issue create --label agent:queued --parent <parent> [--blocked-by <numbers>]\`, using the issue numbers you got from earlier steps for the edges.
 
 Each body must follow the spec-intake template: Goal, Context (link the FRD), Acceptance criteria (each with how it is verified), Validation plan, Risk, **Likely files** (list them exactly — that is what keeps parallel tracks from colliding), Out of scope.
+
+**Where a track holds more than one unit, write them as a \`## Workstreams\` section** — one \`### <name>\` block per unit, each carrying its own AC subset, its own **Likely files** line, and a \`depends on:\` line naming the workstreams that must land first (empty for the prerequisite). \`build-until-done\` reads that structure to run the prerequisite alone and then fan the rest out in parallel; without it the whole track collapses back to a single agent working sequentially. The top-level \`## Likely files\` stays as the union.
 
 ${publishOrder
   .map((t, i) => {

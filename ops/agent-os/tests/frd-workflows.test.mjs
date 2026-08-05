@@ -413,9 +413,19 @@ const labelledOk = (prompt, opts) => ({
   prLabels: [targetOf(opts)],
 });
 
+/**
+ * The track's worktree/branch prep. It runs before any workstream, so every
+ * build-path stub needs it: answering `{}` blocks the track before it starts.
+ */
+const prepped = (prompt) => ({
+  ready: true,
+  branch: prompt.match(/-b (\S+)/)?.[1] || "feature/x",
+});
+
 /** Answers the claim step with `inProgressNow`, and fails any later gate fast. */
 const replyWith = (inProgressNow, claimed) => (prompt, opts) => {
   if (opts.label?.startsWith("start:")) return { claimed, inProgressNow };
+  if (opts.label?.startsWith("prep:")) return prepped(prompt);
   if (opts.label?.startsWith("impl:"))
     return { summary: "did the thing", filesTouched: [], notes: "" };
   if (opts.label?.startsWith("verify:"))
@@ -501,29 +511,57 @@ const warn = (kind, summary) => ({
  * label tests is that the loop must not believe it. `prImpl` overrides the
  * delivery step, for the case where the DoD passes and the push does not.
  */
-const replyShip = (verifyReport, labelImpl, prImpl) => (prompt, opts) => {
-  const l = opts.label || "";
-  if (l.startsWith("label:"))
-    return (labelImpl || labelledOk)(prompt, opts, verifyReport);
-  if (prImpl && l.startsWith("pr:")) return prImpl(prompt, opts);
-  if (l.startsWith("start:")) return { claimed: [101], inProgressNow: [101] };
-  if (l.startsWith("impl:"))
-    return {
-      committed: true,
-      filesChanged: [],
-      summary: "ok",
-      selfCheckPassed: true,
-    };
-  if (l.startsWith("verify:")) return verifyReport;
-  if (l.startsWith("lens:"))
-    return { verdict: "PASS", lens: "x", findings: [], summary: "ok" };
-  if (l.startsWith("pr:"))
-    return { opened: true, url: "https://gh/pr/1", checkConclusion: "success" };
-  if (l.startsWith("merge:"))
-    return { merged: true, state: "merged", followUpIssues: [901] };
-  if (l.startsWith("hold:")) return { merged: false, state: "refused" };
-  return {};
-};
+const replyShip =
+  (verifyReport, labelImpl, prImpl, foldImpl) => (prompt, opts) => {
+    const l = opts.label || "";
+    if (l.startsWith("label:"))
+      return (labelImpl || labelledOk)(prompt, opts, verifyReport);
+    if (prImpl && l.startsWith("pr:")) return prImpl(prompt, opts);
+    if (l.startsWith("start:")) return { claimed: [101], inProgressNow: [101] };
+    if (l.startsWith("prep:")) return prepped(prompt);
+    if (l.startsWith("impl:") || l.startsWith("repair:"))
+      return {
+        committed: true,
+        filesChanged: [],
+        summary: "ok",
+        selfCheckPassed: true,
+      };
+    if (l.startsWith("integrate:"))
+      return { merged: branchesInIntegratePrompt(prompt), conflicts: [] };
+    if (l.startsWith("follow-ups:"))
+      return (foldImpl || foldedOk)(prompt, opts);
+    if (l.startsWith("verify:")) return verifyReport;
+    if (l.startsWith("lens:"))
+      return { verdict: "PASS", lens: "x", findings: [], summary: "ok" };
+    if (l.startsWith("pr:"))
+      return {
+        opened: true,
+        url: "https://gh/pr/1",
+        checkConclusion: "success",
+      };
+    if (l.startsWith("merge:")) return { merged: true, state: "merged" };
+    if (l.startsWith("hold:")) return { merged: false, state: "refused" };
+    return {};
+  };
+
+/** The workstream branches an integrate step was told to merge. */
+const branchesInIntegratePrompt = (prompt) =>
+  [...prompt.matchAll(/^ {2}- (feature\/\S+)$/gm)].map((m) => m[1]);
+
+/** The `- [ ]` lines a fold step was told to append. */
+const linesInFoldPrompt = (prompt) =>
+  [...prompt.matchAll(/^ {3}(- \[ \] .+)$/gm)].map((m) => m[1]);
+
+/** A fold step that honestly confirms every line it was asked to append. */
+const foldedOk = (prompt) => ({
+  followUps: linesInFoldPrompt(prompt).map((anchor) => ({
+    issue: 901,
+    kind: "appended",
+    anchor,
+    confirmed: true,
+  })),
+  rollupLabels: ["follow-ups"],
+});
 
 const passing = (warnings) => ({
   verdict: warnings?.length ? "PASS_WITH_WARNINGS" : "PASS",
@@ -557,12 +595,295 @@ test("code-quality warnings do NOT hold the merge — they become follow-up issu
     merge,
     "a known small defect is not a reason to stall a good branch"
   );
+
+  const fold = calls.find((c) => c.label?.startsWith("follow-ups:"));
+  assert.ok(fold, "the warning must be recorded somewhere before the merge");
+  assert.match(
+    fold.prompt,
+    /BEFORE the merge/,
+    "the finding must be recorded before the merge, so merging cannot lose it"
+  );
+  assert.ok(
+    calls.indexOf(fold) < calls.indexOf(merge),
+    "recorded BEFORE means before — ordering is the guarantee, not the wording"
+  );
+  assert.match(
+    fold.prompt,
+    /Follow-ups — <parent title>/,
+    "findings fold into one rollup per parent, not one issue per warning"
+  );
+  assert.deepEqual(
+    result.shipped[0].followUps.map((f) => f.issue),
+    [901]
+  );
   assert.match(
     merge.prompt,
-    /BEFORE the merge/,
-    "the follow-up issue must exist before the merge, so merging cannot lose it"
+    /Do NOT file them again as issues/,
+    "the merge step must not re-file what the fold already recorded"
   );
-  assert.deepEqual(result.shipped[0].followUpIssues, [901]);
+});
+
+// The fold replaced `gh issue create` with an append to an existing body, and an
+// append is exactly the operation that failed silently on 2026-07-26. So an
+// unconfirmed fold must stop the merge: merging on top of one discards the
+// findings permanently, which is strictly worse than the issue-per-warning it
+// replaced.
+test("a fold that cannot be confirmed stops the merge instead of losing findings", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    replyShip(
+      passing([warn("code-quality", "contrast ratio 4.38:1")]),
+      undefined,
+      undefined,
+      // The silent no-op: the agent reports the write but confirms nothing.
+      () => ({ followUps: [], rollupLabels: [] })
+    ),
+    { autoMerge: true }
+  );
+  assert.ok(
+    !calls.some((c) => c.label === "merge:alpha"),
+    "an unconfirmed fold must not be merged on top of"
+  );
+  assert.equal(result.shipped.length, 0);
+  assert.equal(result.errored.length, 1);
+  assert.match(result.errored[0].reason, /could not be confirmed/);
+});
+
+test("a fold retried until it lands still merges", async () => {
+  let n = 0;
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    replyShip(
+      passing([warn("code-quality", "duplicated constant")]),
+      undefined,
+      undefined,
+      (prompt) => (++n === 1 ? { followUps: [] } : foldedOk(prompt))
+    ),
+    { autoMerge: true }
+  );
+  assert.equal(n, 2, "a fold that did not stick is retried, not abandoned");
+  assert.ok(calls.some((c) => c.label === "merge:alpha"));
+  assert.equal(result.shipped.length, 1);
+});
+
+// ---------------------------------------------------------------------------
+// build-until-done: staged tracks
+//
+// A track used to be one agent, because the file-overlap DSU unioned across the
+// whole thing and `dependsOn` never survived planning. It is now a prerequisite
+// stage followed by parallel workstreams, and these tests pin the parts of that
+// a stubbed run can actually prove: the shape of the schedule, the branch point
+// each workstream is cut from, whose attempt a failure spends, and that a dead
+// workstream cannot be mistaken for an absent one.
+// ---------------------------------------------------------------------------
+
+const wsLabels = (calls, prefix) =>
+  calls
+    .filter((c) => c.kind === "agent" && c.label?.startsWith(prefix))
+    .map((c) => c.label);
+
+test("dependsOn splits one track into a prerequisite stage and a parallel fan-out", async () => {
+  const { calls } = await runBuild(
+    [
+      buildUnit("schema", 101),
+      { ...buildUnit("ui", 102), dependsOn: ["schema"] },
+      { ...buildUnit("api", 103), dependsOn: ["schema"] },
+    ],
+    replyShip(passing([])),
+    { autoMerge: false }
+  );
+
+  // One track: the dependsOn edges connect all three.
+  assert.equal(
+    wsLabels(calls, "prep:").length,
+    1,
+    "units joined by dependsOn belong to one track, one branch, one PR"
+  );
+  const impls = wsLabels(calls, "impl:");
+  assert.equal(impls.length, 3, "each unit is its own workstream");
+  assert.ok(
+    impls[0].includes("s0w1"),
+    "the prerequisite is stage 0 and runs first"
+  );
+  assert.ok(
+    impls[1].includes("s1") && impls[2].includes("s1"),
+    "its dependents are stage 1"
+  );
+
+  const stage1 = calls.filter((c) => c.label?.startsWith("impl:") &&
+    c.label.includes("s1"));
+  for (const c of stage1)
+    assert.match(
+      c.prompt,
+      /git worktree add -b \S+ \S+ feature\/schema\b/,
+      "a fan-out workstream branches from the TRACK branch, so it carries the prerequisite's commits"
+    );
+  assert.ok(
+    calls.some((c) => c.label?.startsWith("integrate:")),
+    "parallel branches must be merged back before the track ships"
+  );
+});
+
+test("a stage's file-sharing units collapse into one agent; disjoint ones do not", async () => {
+  const shared = "src/db/schema/index.ts";
+  const { calls } = await runBuild(
+    [
+      { ...buildUnit("a", 101), files: [shared] },
+      { ...buildUnit("b", 102), files: [shared] },
+      { ...buildUnit("c", 103), files: ["src/c.ts"] },
+    ],
+    replyShip(passing([])),
+    { autoMerge: false }
+  );
+  // a+b share a file so they are one workstream; c is disjoint but in the same
+  // track only because... it is not. Disjoint units with no dependsOn are
+  // separate tracks entirely, each with its own prep.
+  assert.equal(wsLabels(calls, "prep:").length, 2, "c is its own track");
+  const impls = wsLabels(calls, "impl:");
+  assert.equal(
+    impls.length,
+    2,
+    "two agents: one for the shared-file pair, one for c — never two agents on one file"
+  );
+});
+
+test("a workstream that dies fails its track instead of vanishing from it", async () => {
+  // parallel() resolves a thrown thunk to null. One level up, that hole was the
+  // fan-in gap the run-level guard exists for; inside a stage it would let a
+  // track ship with a piece of itself missing and nothing said about it.
+  const { result, calls } = await runBuild(
+    [
+      buildUnit("schema", 101),
+      { ...buildUnit("ui", 102), dependsOn: ["schema"] },
+      { ...buildUnit("api", 103), dependsOn: ["schema"] },
+    ],
+    (prompt, opts) => {
+      if (opts.label?.startsWith("impl:") && opts.label.includes("s1w2"))
+        throw new Error("this agent died");
+      return replyShip(passing([]))(prompt, opts);
+    },
+    { autoMerge: false }
+  );
+  assert.equal(result.shipped.length, 0, "a track with a hole has not shipped");
+  assert.equal(result.blocked.length, 1);
+  assert.ok(
+    !calls.some((c) => c.label?.startsWith("pr:")),
+    "a PR must never be opened for a track whose stage did not complete"
+  );
+});
+
+test("an integration failure blamed on one workstream re-runs only that one", async () => {
+  let integrationSeen = 0;
+  const { calls } = await runBuild(
+    [
+      buildUnit("schema", 101),
+      { ...buildUnit("ui", 102), dependsOn: ["schema"] },
+    ],
+    (prompt, opts) => {
+      const l = opts.label || "";
+      // The integration verifier is the one addressed to the track id.
+      if (l.startsWith("verify:") && !l.includes("s0w") && !l.includes("s1w")) {
+        integrationSeen++;
+        if (integrationSeen === 1)
+          return {
+            verdict: "FAIL",
+            gates: [],
+            acceptanceCriteria: [],
+            summary: "ui broke the build",
+            failingGate: "G1",
+            failingWorkstream: "schema-s1w1",
+            fixInstructions: "fix the import",
+          };
+      }
+      return replyShip(passing([]))(prompt, opts);
+    },
+    { autoMerge: false, maxAttempts: 2 }
+  );
+
+  const uiImpls = calls.filter(
+    (c) => c.label?.startsWith("impl:") && c.label.includes("s1w1")
+  );
+  const schemaImpls = calls.filter(
+    (c) => c.label?.startsWith("impl:") && c.label.includes("s0w1")
+  );
+  assert.equal(uiImpls.length, 2, "the named workstream is rebuilt");
+  assert.equal(
+    schemaImpls.length,
+    1,
+    "the healthy workstream is NOT rebuilt — that is the whole point of scoping the attempt"
+  );
+  assert.ok(
+    !calls.some((c) => c.label?.startsWith("repair:")),
+    "an attributable failure goes to its owner, not to a whole-track repair"
+  );
+});
+
+test("an unattributable integration failure repairs the assembly, not a workstream", async () => {
+  let seen = 0;
+  const { calls } = await runBuild(
+    [
+      buildUnit("schema", 101),
+      { ...buildUnit("ui", 102), dependsOn: ["schema"] },
+    ],
+    (prompt, opts) => {
+      const l = opts.label || "";
+      if (l.startsWith("verify:") && !l.includes("w")) {
+        if (++seen === 1)
+          return {
+            verdict: "FAIL",
+            gates: [],
+            acceptanceCriteria: [],
+            summary: "the two halves contradict each other",
+            failingGate: "G2",
+            failingWorkstream: "",
+            fixInstructions: "reconcile them",
+          };
+      }
+      return replyShip(passing([]))(prompt, opts);
+    },
+    { autoMerge: false, maxAttempts: 2 }
+  );
+  const repair = calls.find((c) => c.label?.startsWith("repair:"));
+  assert.ok(
+    repair,
+    "a contradiction between workstreams cannot be fixed by an agent that sees only one"
+  );
+  assert.match(repair.prompt, /could not be attributed to a single workstream/);
+});
+
+test("a dependsOn cycle inside a track is refused at plan time", async () => {
+  await assert.rejects(
+    () =>
+      runBuild(
+        [
+          { ...buildUnit("a", 101), dependsOn: ["b"] },
+          { ...buildUnit("b", 102), dependsOn: ["a"] },
+        ],
+        replyShip(passing([]))
+      ),
+    /cycle/i,
+    "a cycle can never reach a stage — failing loudly beats hanging"
+  );
+});
+
+test("a single-unit track still runs as one agent in the track worktree", async () => {
+  // The common case must not grow a worktree and a merge it does not need.
+  const { calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    replyShip(passing([])),
+    { autoMerge: false }
+  );
+  assert.equal(wsLabels(calls, "impl:").length, 1);
+  assert.ok(
+    !calls.some((c) => c.label?.startsWith("integrate:")),
+    "nothing to integrate when the stage is one workstream"
+  );
+  const impl = calls.find((c) => c.label?.startsWith("impl:"));
+  assert.match(
+    impl.prompt,
+    /Work in the existing worktree/,
+    "a solo workstream works in the track worktree rather than cutting its own"
+  );
 });
 
 test("a single spec-question holds the track for a human", async () => {
