@@ -1206,10 +1206,13 @@ html:has(.marketing) {
    here, and then a change to the card would silently break the frame — the
    opposite of why this is a live embed.
 
-   The steps are the pane's own geometry, measured rather than guessed: the
-   pane runs 372×460 at 900px and 770×680 from 1800px up, and the card is
-   704×742, so the fit is width-bound on a small laptop and height-bound from
-   about 1300px. Each step sits ~5% under what its narrowest viewport allows. */
+   The steps are the pane's own geometry, measured in-browser at each band's
+   LOWER boundary and set ~3% under that fit (fit = min((innerW·0.94 − 40)/704,
+   (innerH − 40)/742); 40 = the mount's border+padding chrome). The card is
+   704×742, so the fit is height-bound at most widths — which also caps the
+   effective type: ~7.5px at 1440. That is the cost of the whole card in this
+   pane, and still ahead of the capture it replaced (~6.4px there, and bitmap
+   rather than vector). 100px bands keep the mid-band waste under ~5%. */
 .marketing .vg-embed-full .vg-app-embed {
   width: 704px;
   zoom: 0.35;
@@ -1224,24 +1227,34 @@ html:has(.marketing) {
     zoom: 0.45;
   }
 }
+@media (min-width: 1200px) {
+  .marketing .vg-embed-full .vg-app-embed {
+    zoom: 0.47;
+  }
+}
 @media (min-width: 1300px) {
   .marketing .vg-embed-full .vg-app-embed {
-    zoom: 0.48;
+    zoom: 0.49;
   }
 }
 @media (min-width: 1400px) {
   .marketing .vg-embed-full .vg-app-embed {
-    zoom: 0.52;
+    zoom: 0.53;
   }
 }
 @media (min-width: 1500px) {
   .marketing .vg-embed-full .vg-app-embed {
-    zoom: 0.56;
+    zoom: 0.57;
+  }
+}
+@media (min-width: 1600px) {
+  .marketing .vg-embed-full .vg-app-embed {
+    zoom: 0.63;
   }
 }
 @media (min-width: 1700px) {
   .marketing .vg-embed-full .vg-app-embed {
-    zoom: 0.66;
+    zoom: 0.67;
   }
 }
 /* the pane stops growing at 1733px (--vis caps at 1560, the height at 680), so
