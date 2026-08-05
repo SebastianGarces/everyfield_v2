@@ -5,7 +5,7 @@ flowchart TD
         REQ2["DashboardLayout - dashboard/layout.tsx"]
         REQ3["getCurrentSession - session.ts"]
         REQ4{User authenticated?}
-        REQ5{Is crawler?}
+        REQ5{"Crawler preview? - isCrawlerPreviewRequest(user-agent, x-pathname stamped by proxy), lib/crawler.ts - only /dashboard, /wiki, /oversight"}
         REQ6[Render minimal shell]
         REQ7[redirect to /login]
         REQ8[Read sidebar_state cookie]
