@@ -1,7 +1,11 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
-import { isCrawlerUserAgent } from "@/lib/crawler";
+import {
+  CRAWLER_PREVIEWABLE_ROUTE_PREFIXES,
+  isCrawlerPreviewRequest,
+  PATHNAME_HEADER,
+} from "@/lib/crawler";
 
 const SESSION_COOKIE_NAME = "session";
 const SESSION_EXPIRY_SECONDS = 30 * 24 * 60 * 60; // 30 days
@@ -9,8 +13,15 @@ const SESSION_EXPIRY_SECONDS = 30 * 24 * 60 * 60; // 30 days
 // Routes that authenticated users should be redirected away from
 const AUTH_ROUTES = ["/login", "/register"];
 
-// Routes that require authentication
-const PROTECTED_ROUTE_PREFIXES = ["/dashboard", "/wiki", "/oversight"];
+// Routes that require authentication.
+//
+// Spread rather than retyped: every crawler-previewable route MUST be protected,
+// because the crawler branch below is the only door into one without a session.
+// A protected route that is not crawler-previewable is fine — append it here and
+// crawlers get bounced to /login on it like everybody else.
+const PROTECTED_ROUTE_PREFIXES: string[] = [
+  ...CRAWLER_PREVIEWABLE_ROUTE_PREFIXES,
+];
 
 // Routes that bypass the same-origin CSRF check because the request
 // authenticates ITSELF and carries no ambient authority to abuse. Adding a path
@@ -42,6 +53,22 @@ export function proxy(request: NextRequest): NextResponse {
   const { pathname } = request.nextUrl;
   const hasSessionCookie = request.cookies.has(SESSION_COOKIE_NAME);
 
+  /**
+   * Continue to the app, stamping the routed pathname on the REQUEST headers.
+   *
+   * Every `NextResponse.next()` in this file goes through here, and that is the
+   * point: the stamp is unconditional, so whatever `x-pathname` a client sent is
+   * overwritten with the real path before any Server Component can read it. The
+   * `(dashboard)` layout needs it to scope the crawler shell to the same routes
+   * this proxy admits crawlers to (`isCrawlerPreviewRequest`), and a layout has
+   * no other way to learn the pathname.
+   */
+  function proceed(): NextResponse {
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.set(PATHNAME_HEADER, pathname);
+    return NextResponse.next({ request: { headers: requestHeaders } });
+  }
+
   // 1. Auth routing for GET requests
   if (request.method === "GET") {
     // Authenticated user on auth routes → redirect to dashboard (or redirect param)
@@ -56,19 +83,27 @@ export function proxy(request: NextRequest): NextResponse {
     }
 
     // Unauthenticated user on protected routes → redirect to login
-    // Exception: Allow crawlers through for metadata/OG tag scraping
+    // Exception: Allow crawlers through for metadata/OG tag scraping, but ONLY
+    // on the routes that render without a session (ruled 2026-08-04). The
+    // allowance is one predicate over `user-agent` + pathname, defined in
+    // `src/lib/crawler.ts` and called by the dashboard layout too, so what this
+    // proxy admits and what that layout renders a bare shell for cannot drift.
     if (!hasSessionCookie && isProtectedRoute(pathname)) {
-      if (!isCrawlerUserAgent(request.headers.get("user-agent"))) {
+      if (
+        !isCrawlerPreviewRequest(request.headers.get("user-agent"), pathname)
+      ) {
         const loginUrl = new URL("/login", request.url);
         loginUrl.searchParams.set("redirect", pathname);
         return NextResponse.redirect(loginUrl);
       }
-      // Crawler detected — let it through for the metadata. It is deliberately
-      // NOT told downstream via a header: `response.headers.set(...)` writes to
-      // the response, which the layout never reads, so the old `x-is-crawler`
-      // only ever arrived when a client forged it (#240). The layout re-derives
-      // the same answer from the same `user-agent` via `isCrawlerUserAgent`.
-      return NextResponse.next();
+      // Crawler detected on a previewable route — let it through for the
+      // metadata. The verdict is deliberately NOT handed downstream: the old
+      // `x-is-crawler` went on the RESPONSE, which a Server Component never
+      // reads, so the layout's copy of it could only ever have been forged by a
+      // client (#240). The layout re-derives the same answer from the same two
+      // inputs instead — the request's `user-agent`, and the pathname this
+      // proxy stamps on the request in `proceed()`.
+      return proceed();
     }
   }
 
@@ -94,7 +129,7 @@ export function proxy(request: NextRequest): NextResponse {
   // 3. Extend session cookie on GET requests only
   // We only extend on GET because we can't detect if a server action set a new cookie
   if (request.method === "GET") {
-    const response = NextResponse.next();
+    const response = proceed();
     const token = request.cookies.get(SESSION_COOKIE_NAME)?.value ?? null;
 
     if (token !== null) {
@@ -110,7 +145,7 @@ export function proxy(request: NextRequest): NextResponse {
     return response;
   }
 
-  return NextResponse.next();
+  return proceed();
 }
 
 export const config = {

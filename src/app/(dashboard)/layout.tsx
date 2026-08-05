@@ -9,7 +9,7 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { WikiGuide } from "@/components/wiki-guide";
 import { getCurrentSession } from "@/lib/auth";
 import { isPlatformAdmin } from "@/lib/auth/admin";
-import { isCrawlerUserAgent } from "@/lib/crawler";
+import { isCrawlerPreviewRequest, PATHNAME_HEADER } from "@/lib/crawler";
 import {
   notificationViewer,
   type NotificationViewer,
@@ -58,16 +58,27 @@ export default async function DashboardLayout({
 }) {
   const { user } = await getCurrentSession();
   const headersList = await headers();
-  // Derived here from the request's own `user-agent` — the same input, and the
-  // same predicate, the proxy used to decide not to bounce this request to
-  // /login. It used to read an `x-is-crawler` request header instead, which the
-  // proxy only ever set on the RESPONSE: nothing in the app wrote that header,
-  // so the branch fired only for a client that forged it (#240). See
+  // Re-derived here from the same two inputs, and by the same predicate, the
+  // proxy used to decide not to bounce this request to /login: the request's own
+  // `user-agent`, and the pathname the proxy stamped on the request. It used to
+  // read an `x-is-crawler` request header instead, which the proxy only ever set
+  // on the RESPONSE — nothing in the app wrote that header, so the branch fired
+  // only for a client that forged it (#240).
+  //
+  // The pathname half is what keeps this branch to the ~3 routes the proxy
+  // actually admits crawlers to. Without it, every route in the group took the
+  // bare shell, and the six that need a session (/people, /settings, /tasks,
+  // /teams, /meetings, /notifications) answered a crawler-shaped User-Agent with
+  // a 500 from the page's own `verifySession()` instead of this redirect — which
+  // a logged-out human in WhatsApp's in-app browser would have hit too. See
   // `src/lib/crawler.ts` for what this check does and does not authorise.
-  const isCrawler = isCrawlerUserAgent(headersList.get("user-agent"));
+  const isCrawlerPreview = isCrawlerPreviewRequest(
+    headersList.get("user-agent"),
+    headersList.get(PATHNAME_HEADER)
+  );
 
   // For crawlers without auth, render minimal shell for metadata scraping only
-  if (!user && isCrawler) {
+  if (!user && isCrawlerPreview) {
     return <>{children}</>;
   }
 
