@@ -347,6 +347,26 @@ test("the flow reads the completion result optionally", () => {
   assert.doesNotMatch(flow, /result\.error/);
 });
 
+test("a finish that never returns a state is still reported to the planter", () => {
+  // The third outcome, alongside "redirected" and "returned an error": the call
+  // REJECTED. An async transition callback that lets that escape renders
+  // nothing and leaves the button pending — the worst version of the FRD's NFR,
+  // because every earlier step IS saved and the planter cannot tell.
+  const flow = source("components", "onboarding", "onboarding-flow.tsx");
+
+  const finishBody = flow.slice(flow.indexOf("function finish()"));
+  assert.match(
+    finishBody.slice(0, finishBody.indexOf("\n  }")),
+    /try\s*\{[\s\S]*await completeOnboarding\(\)[\s\S]*\}\s*catch/,
+    "the finish call must be guarded — a rejected action has to become a message, not a stuck button"
+  );
+
+  // Finishing is idempotent (`onboarding_completed_at IS NULL`), so the message
+  // is allowed to invite a retry; the action keeps the guard that makes that true.
+  const actions = source("app", "(dashboard)", "dashboard", "actions.ts");
+  assert.match(actions, /isNull\(churches\.onboardingCompletedAt\)/);
+});
+
 test("the action module publishes only actions", () => {
   // Every export of a `"use server"` module is a POSTable endpoint
   // (memory/invariants.md → Authentication), so the write path's helpers live

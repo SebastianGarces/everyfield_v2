@@ -50,6 +50,14 @@ import { UpcomingStep } from "./upcoming-step";
  * `skippable`), which is why a skip is `goForward()` and nothing else — it
  * cannot lose an answer because it never had one.
  */
+/**
+ * Shown when the finish request itself failed — as opposed to `completeOnboarding`
+ * returning a reason, which is rendered verbatim. Says what is safe (everything
+ * already saved) and what to do (press it again), because both are true.
+ */
+const FINISH_FAILED_MESSAGE =
+  "We could not finish setting up just now. Everything you have saved is safe — please try again.";
+
 export function OnboardingFlow({
   initialStep,
   leadershipStatus,
@@ -114,13 +122,30 @@ export function OnboardingFlow({
   function finish() {
     setFinishError(null);
     startFinishing(async () => {
-      // Resolves only on FAILURE — success redirects to
-      // /dashboard?churchCreated=true and this callback never continues. So the
-      // result is optional by contract (#243: `CompleteOnboardingState | void`)
-      // and is read with `?.` rather than on the assumption that `redirect()`
-      // stays typed `never`.
-      const result = await completeOnboarding();
-      setFinishError(result?.error ?? null);
+      try {
+        // Resolves only on FAILURE — success redirects to
+        // /dashboard?churchCreated=true and this callback never continues. So
+        // the result is optional by contract (#243:
+        // `CompleteOnboardingState | void`) and is read with `?.` rather than on
+        // the assumption that `redirect()` stays typed `never`.
+        const result = await completeOnboarding();
+        setFinishError(result?.error ?? null);
+      } catch {
+        // The OTHER way the action can fail to return a state: it REJECTED —
+        // the request never reached the server, or the server threw something
+        // it did not turn into an outcome. Uncaught, that rejection escapes an
+        // async transition callback, so nothing renders and the button is left
+        // sitting in its pending state: the planter's church, their leadership
+        // answer and their people are all safely saved, and the only thing they
+        // can see is a control that no longer responds. Caught, the same
+        // failure is a message and a button they can press again — finishing is
+        // idempotent (the `IS NULL` guard on `onboarding_completed_at`), so a
+        // retry is always safe.
+        //
+        // This does not swallow the success path: `redirect()` in a server
+        // action is carried back as a navigation, not as a rejection here.
+        setFinishError(FINISH_FAILED_MESSAGE);
+      }
     });
   }
 
