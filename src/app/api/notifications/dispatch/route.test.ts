@@ -57,6 +57,60 @@ test("accepts the correct Bearer token", () => {
   assert.equal(isAuthorized(requestWithAuth("Bearer s3cret")), true);
 });
 
+// ----------------------------------------------------------------------------
+// AC (#266): the comparison is constant-time, and length is not a side door
+//
+// `crypto.timingSafeEqual` throws a RangeError on buffers of unequal length, so
+// a guard that only ever sees the happy path would still ship a 500 (or worse, a
+// crash loop) the first time a wrong-length token arrived. These cases are the
+// proof that the length reconciliation happens BEFORE the call and that every
+// wrong shape lands on a plain `false`.
+// ----------------------------------------------------------------------------
+
+test("a shorter token is refused, not thrown over", () => {
+  process.env.CRON_SECRET = "s3cret";
+  assert.equal(isAuthorized(requestWithAuth("Bearer s3cre")), false);
+  assert.equal(isAuthorized(requestWithAuth("Bearer ")), false);
+  assert.equal(isAuthorized(requestWithAuth("")), false);
+});
+
+test("a longer token is refused, not thrown over", () => {
+  process.env.CRON_SECRET = "s3cret";
+  // The correct secret with anything appended: the prefix matches, which is
+  // exactly the case a byte-by-byte compare would answer fastest.
+  assert.equal(isAuthorized(requestWithAuth("Bearer s3cretX")), false);
+  assert.equal(
+    isAuthorized(requestWithAuth(`Bearer ${"s3cret".repeat(2000)}`)),
+    false
+  );
+});
+
+test("a token differing only in its last byte is refused", () => {
+  // Same length, so `timingSafeEqual` does the deciding rather than the guard.
+  process.env.CRON_SECRET = "s3cret";
+  assert.equal(isAuthorized(requestWithAuth("Bearer s3creT")), false);
+});
+
+test("a long secret still authorises exactly one value", () => {
+  // Hashing both sides is what makes the length safe; prove it round-trips for
+  // a realistic secret and refuses a same-length near miss.
+  const secret = "a".repeat(64);
+  process.env.CRON_SECRET = secret;
+  assert.equal(isAuthorized(requestWithAuth(`Bearer ${secret}`)), true);
+  assert.equal(
+    isAuthorized(requestWithAuth(`Bearer ${"a".repeat(63)}b`)),
+    false
+  );
+});
+
+// The source-level half of the AC — "no non-constant-time comparison of the
+// secret remains" — is NOT asserted here. A per-file grep in a per-route test
+// is exactly how `/api/phase-engine/assess` kept its `===` while this route was
+// hardened, and a whole-file grep also overclaims: it passes as long as a
+// constant-time helper is *defined* somewhere in the file, even if the guard
+// stopped calling it. It lives once, over every route that reads CRON_SECRET,
+// in `src/lib/security/constant-time.test.ts`, scoped to the guard body.
+
 test("an unauthorised GET is refused with 401 and dispatches nothing", async () => {
   process.env.CRON_SECRET = "s3cret";
 
