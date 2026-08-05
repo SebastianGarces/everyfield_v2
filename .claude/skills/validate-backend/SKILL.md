@@ -5,8 +5,9 @@ description: Functionally validate a backend/API/data-layer change by exercising
 
 # validate-backend (DoD gate G3 — backend/API/data)
 
-Proves a server change **behaves**, not just type-checks. Asserts against the contracts in
-`memory/contracts/api.md` and `memory/contracts/db.md`.
+Proves a server change **behaves**, not just type-checks. Asserts against the contract as
+declared by the unit's issue/FRD and the source (route handler, action schema, Drizzle schema);
+check `memory/contracts/api.md` and `memory/contracts/db.md` for non-obvious behaviors first.
 
 ## Preconditions
 
@@ -19,7 +20,9 @@ Proves a server change **behaves**, not just type-checks. Asserts against the co
 - **For HTTP routes, use the branch's Vercel preview** (`./scripts/preview-url.sh --wait --bypass
   <pr-number>`), not `localhost:3000`. Localhost serves the **main checkout** — a route added on
   this branch either 404s there or, worse, resolves to the old implementation and passes.
-- Read `memory/contracts/api.md` (route shapes) and `memory/contracts/db.md` (schema) before asserting.
+- Before asserting, read the route/action source and its FRD for the expected shape, plus
+  `memory/contracts/api.md` and `memory/contracts/db.md` for non-obvious behaviors (cron auth,
+  always-200 routes, column semantics).
 
 ## Procedure
 

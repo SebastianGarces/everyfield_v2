@@ -21,9 +21,6 @@ export default tseslint.config(
     ignores: [
       "node_modules/**",
       ".claude/**",
-      // vendored impeccable skill copies (npx impeccable install) — third-party
-      ".agents/skills/impeccable/**",
-      ".github/skills/impeccable/**",
       ".next/**",
       "out/**",
       "dist/**",
