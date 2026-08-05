@@ -16,9 +16,12 @@
 // nothing to ask with.
 //
 // Rows are narrowed HERE, not in the client component: the raw row carries
-// `inviter_user_id`, which only exists on this page to decide `canRevoke` (only
-// the original inviter may revoke) and is never handed to the browser. Dates
-// are formatted here too, against `APP_TIME_ZONE` — a `Date` formatted in the
+// `inviter_user_id`, which nothing on this screen needs and which is never
+// handed to the browser. It used to decide a per-row `canRevoke` — RULED
+// 2026-08-04 that revoke is ORG-scoped like the list, so every pending row this
+// page can see is one this admin may close, and the authority check stays in
+// the UPDATE (`revokeInvitationQuery`) rather than in a prop. Dates are
+// formatted here too, against `APP_TIME_ZONE` — a `Date` formatted in the
 // visitor's zone and again on the server is a hydration mismatch
 // (memory/invariants.md → Date & Time Rendering).
 // ============================================================================
@@ -77,7 +80,6 @@ export default async function OversightInvitationsPage() {
     expiresLabel: invitation.expiresAt
       ? formatDate(invitation.expiresAt, "short")
       : null,
-    canRevoke: invitation.inviterUserId === user.id,
   }));
 
   return (

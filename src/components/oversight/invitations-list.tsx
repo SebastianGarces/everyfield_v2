@@ -9,10 +9,12 @@
 // browser's zone and again on the server produces two different strings and a
 // hydration mismatch).
 //
-// What a row deliberately does NOT carry: the inviter's user id. Only the
-// original inviter may revoke, so the page decides `canRevoke` server-side
-// from the session rather than shipping an id for the client to compare — the
-// same narrowing `invitationView` applies to what the actions return.
+// What a row deliberately does NOT carry: the inviter's user id — the same
+// narrowing `invitationView` applies to what the actions return. It used to
+// come through as a per-row `canRevoke`; RULED 2026-08-04 that revoke is scoped
+// to the inviting ORG, exactly like the list this page reads, so any admin who
+// can see a pending row may close it and there is nothing left for the client
+// to compare. The authority check itself is in the UPDATE, never here.
 // ============================================================================
 
 import { useActionState, useState } from "react";
@@ -47,7 +49,6 @@ export type InvitationListRow = {
   isOpen: boolean;
   sentLabel: string;
   expiresLabel: string | null;
-  canRevoke: boolean;
 };
 
 const STATUS_STYLE: Record<
@@ -76,8 +77,9 @@ export function InvitationsList({ rows }: { rows: InvitationListRow[] }) {
         <CardHeader>
           <CardTitle>Pending invitations</CardTitle>
           <CardDescription>
-            Waiting on an answer. Revoking one closes it immediately — the link
-            stops working.
+            Waiting on an answer. Anyone who can invite for your organization
+            can revoke one, which closes it immediately — the link stops
+            working.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -137,7 +139,7 @@ function InvitationRow({ row }: { row: InvitationListRow }) {
         {row.status === "pending" && row.isOpen && (
           <CopyInviteLinkButton invitationId={row.id} />
         )}
-        {row.status === "pending" && row.canRevoke && (
+        {row.status === "pending" && (
           <RevokeButton invitationId={row.id} email={row.inviteeEmail} />
         )}
       </div>

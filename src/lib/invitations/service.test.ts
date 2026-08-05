@@ -14,6 +14,7 @@ import {
   expireInvitationQuery,
   invitationActorFromSession,
   invitationView,
+  invitationsForOrgQuery,
   getInvitation,
   isUuid,
   lockTargetRow,
@@ -1388,22 +1389,103 @@ test("a response records the session's user, and only a pending row", () => {
   }
 });
 
-test("the revoke statement is scoped to the session's own user", () => {
-  // The authority check lives in the UPDATE, so this is where it has to be
-  // read: the bound parameters carry the actor's id and the invitation id, and
-  // a foreign id appears nowhere. Also `status = 'pending'`, so a revoke can
-  // never resurrect an answered invitation.
+/** Just the WHERE clause — `returning()` names every column and would answer for any of them. */
+function whereOf(sql: string): string {
+  const start = sql.indexOf(" where ");
+  const end = sql.indexOf(" returning ");
+  return sql.slice(start, end === -1 ? undefined : end);
+}
+
+test("the revoke statement is scoped to the session's own ORG", () => {
+  // RULED 2026-08-04 (#23): revoke is scoped to the INVITING ORG, not the
+  // inviting user — the pending list already is, so a second admin of the same
+  // sending church was shown a queue whose Revoke button refused them.
+  //
+  // The authority check lives in the UPDATE, so this is where it has to be read:
+  // the bound parameters carry the actor's OWN org id (from the session) and the
+  // invitation id, no foreign org id appears, and `inviter_user_id` is gone from
+  // the WHERE entirely. Also `status = 'pending'`, so a revoke can never
+  // resurrect an answered invitation.
   const invitationId = "66666666-6666-4666-8666-666666666666";
-  const { sql, params } = revokeInvitationQuery(
+
+  const network = revokeInvitationQuery(
     actor({ role: "network_admin", sendingNetworkId: NETWORK }),
     invitationId
   ).toSQL();
 
-  assert.ok(params.includes(PLANTER_ID));
-  assert.ok(params.includes(invitationId));
-  assert.ok(params.includes("pending"));
-  assert.ok(!params.includes(FOREIGN_ID));
-  assert.match(sql, /inviter_user_id/);
+  assert.match(network.sql, /"sending_network_id" = \$\d+/);
+  // The WHERE, not the whole statement: `returning()` names every column, so
+  // `inviter_user_id` appears there and always will.
+  assert.doesNotMatch(whereOf(network.sql), /inviter_user_id/);
+  assert.ok(network.params.includes(NETWORK));
+  assert.ok(network.params.includes(invitationId));
+  assert.ok(network.params.includes("pending"));
+  assert.ok(!network.params.includes(OTHER_SENDING_CHURCH));
+
+  const sendingChurch = revokeInvitationQuery(SC_ADMIN, invitationId).toSQL();
+  assert.match(sendingChurch.sql, /"sending_church_id" = \$\d+/);
+  assert.doesNotMatch(whereOf(sendingChurch.sql), /inviter_user_id/);
+  assert.ok(sendingChurch.params.includes(SENDING_CHURCH));
+  assert.ok(!sendingChurch.params.includes(NETWORK));
+
+  // …and the id of the admin doing the revoking is bound NOWHERE, which is the
+  // whole change: a colleague who did not send it matches the same row.
+  assert.ok(!sendingChurch.params.includes(PLANTER_ID));
+  assert.ok(!sendingChurch.params.includes(FOREIGN_ID));
+});
+
+test("nobody outside an inviting org can revoke anything", () => {
+  // The other half of "keep the checks strict". A planter, a team member, a
+  // coach, and an oversight admin who has no org of their own each produce a
+  // WHERE that matches NOTHING — not a missing predicate that `and()` would
+  // drop, which would turn this statement into "revoke by id" for anyone.
+  const invitationId = "66666666-6666-4666-8666-666666666666";
+
+  for (const caller of [
+    PLANTER,
+    TEAM_MEMBER,
+    actor({ role: "coach" }),
+    actor({ role: "sending_church_admin", sendingChurchId: null }),
+    actor({ role: "network_admin", sendingNetworkId: null }),
+  ]) {
+    const { sql, params } = revokeInvitationQuery(caller, invitationId).toSQL();
+
+    assert.match(sql, /false/, caller.role);
+    assert.doesNotMatch(sql, /"sending_church_id" = \$\d+/, caller.role);
+    assert.doesNotMatch(sql, /"sending_network_id" = \$\d+/, caller.role);
+    assert.ok(!params.includes(SENDING_CHURCH), caller.role);
+    assert.ok(!params.includes(NETWORK), caller.role);
+  }
+});
+
+test("the list and the revoke agree on what 'our invitations' means", () => {
+  // The property the ruling turns on, asserted rather than promised: the org
+  // predicate the pending list is read with is the SAME predicate the revoke
+  // writes with. Two definitions of "ours" is exactly how a screen ends up
+  // showing an admin a row whose button refuses them.
+  for (const admin of [SC_ADMIN, NETWORK_ADMIN]) {
+    const listed = invitationsForOrgQuery(admin).toSQL();
+    const revoked = revokeInvitationQuery(
+      admin,
+      "66666666-6666-4666-8666-666666666666"
+    ).toSQL();
+
+    // Compared by COLUMN, not by rendered fragment: the two statements bind
+    // their parameters at different positions ($1 in a select, $4 in an update),
+    // and the placeholder number is not the thing that has to agree.
+    const orgPredicate = /"(sending_church_id|sending_network_id)" = \$\d+/;
+    const fromList = whereOf(listed.sql).match(orgPredicate);
+    const fromRevoke = whereOf(revoked.sql).match(orgPredicate);
+
+    assert.ok(fromList, admin.role);
+    assert.ok(fromRevoke, admin.role);
+    assert.equal(fromRevoke[1], fromList[1], admin.role);
+
+    const orgId = admin.sendingChurchId ?? admin.sendingNetworkId;
+    assert.ok(orgId, admin.role);
+    assert.ok(listed.params.includes(orgId), admin.role);
+    assert.ok(revoked.params.includes(orgId), admin.role);
+  }
 });
 
 test("the association cannot be written unless the claim was won", () => {

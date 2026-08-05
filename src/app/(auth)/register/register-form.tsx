@@ -64,6 +64,12 @@ const ACCOUNT_TYPE_CONFIG: Record<
  * account type is preselected, the church-plant name becomes required (an
  * invitation exists to associate a plant, so the plant has to exist), and the
  * beta-code input steps aside because the invitation IS the invite.
+ *
+ * One thing it drives is NOT presentation, though it looks like it: the email
+ * field is pre-filled and read-only (RULED 2026-08-04). The rule itself lives in
+ * `register` and `hasValidInvitationBypass`, which refuse a registering address
+ * that is not the invited one — this field just stops an honest user walking
+ * into that refusal.
  */
 export function RegisterForm({
   betaGateEnabled,
@@ -84,6 +90,12 @@ export function RegisterForm({
   // Controlled so a rejected submit (e.g. invalid invite code) keeps everything
   // the user already typed instead of clearing the form.
   const [name, setName] = useState("");
+  // AN INVITATION DECIDES THE ADDRESS — RULED 2026-08-04. The invitation was
+  // issued to one person; a link holder who typed a different address used to
+  // walk off with somebody else's association. So the field is pre-filled and
+  // read-only (read-only, not `disabled` — a disabled input is not submitted),
+  // and the action re-checks it anyway, since a POST never saw this form.
+  const emailLockedToInvitation = Boolean(invitation);
   const [email, setEmail] = useState(invitation?.inviteeEmail ?? "");
   const [organizationName, setOrganizationName] = useState("");
   const [password, setPassword] = useState("");
@@ -225,10 +237,25 @@ export function RegisterForm({
               placeholder="you@example.com"
               autoComplete="email"
               required
+              readOnly={emailLockedToInvitation}
+              className={emailLockedToInvitation ? "bg-muted" : undefined}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               aria-invalid={!!state.fieldErrors?.email}
+              aria-describedby={
+                emailLockedToInvitation ? "email-invitation-note" : undefined
+              }
             />
+            {emailLockedToInvitation && (
+              <p
+                id="email-invitation-note"
+                className="text-muted-foreground text-xs"
+              >
+                Your invitation was sent to this address, so the account is
+                created for it. If it is wrong, ask whoever invited you to send
+                a new invitation.
+              </p>
+            )}
             {state.fieldErrors?.email && (
               <p className="text-destructive text-sm">
                 {state.fieldErrors.email}

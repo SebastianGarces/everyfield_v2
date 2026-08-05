@@ -34,8 +34,10 @@ import {
   BETA_GATE_INVALID_ERROR,
   describeInvitationForRegistration,
   hasValidInvitationBypass,
+  invitationEmailMismatchMessage,
   isBetaCodeValid,
   isBetaGateEnabled,
+  registrationEmailMatchesInvitation,
   type RegistrationInvitation,
 } from "./beta-gate";
 
@@ -89,11 +91,35 @@ export async function register(
   const invitationId = (formData.get("invitationId") as string | null) || null;
   const invitation = await describeInvitationForRegistration(invitationId);
 
+  // THE TOKEN IS BOUND TO THE INVITED ADDRESS — RULED 2026-08-04 (#23).
+  //
+  // An invitation link is a uuid in a URL: it is forwarded, pasted, archived.
+  // Until this check, whoever held one could register under any address they
+  // liked and receive the association meant for somebody else — the form
+  // pre-fills the invited address, but a pre-filled field is a suggestion, and
+  // this action is a POST endpoint that never saw the form. So the address is
+  // re-checked HERE, before the beta gate (a token is also a bypass of it) and
+  // before any account exists. A wrong address is not re-aimed at: the admin
+  // revokes and re-invites, which is the only path that leaves an audit trail
+  // of who was actually invited.
+  if (
+    invitation &&
+    !registrationEmailMatchesInvitation(invitation.inviteeEmail, identifier)
+  ) {
+    return {
+      fieldErrors: {
+        email: invitationEmailMismatchMessage(invitation.inviteeEmail),
+      },
+    };
+  }
+
   // Private-beta gate (server-side enforced). Skipped entirely when the env
   // var is unset/empty. Org-invitation signups (the invitation IS the invite)
-  // bypass the code. Validated regardless of client-side visibility.
+  // bypass the code — but only for the address the invitation names, or the
+  // link would be a free pass into the beta for anyone it was forwarded to.
+  // Validated regardless of client-side visibility.
   if (isBetaGateEnabled()) {
-    const bypassed = await hasValidInvitationBypass(invitationId);
+    const bypassed = await hasValidInvitationBypass(invitationId, identifier);
 
     if (!bypassed) {
       const submittedCode = formData.get("inviteCode") as string | null;

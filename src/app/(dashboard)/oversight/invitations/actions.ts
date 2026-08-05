@@ -52,8 +52,13 @@ const revokeSchema = z.object({
 
 export type CreateInvitationState = {
   error?: string;
-  /** Set on success — the surface shows the link the invitee should be sent. */
-  created?: { inviteePath: string; inviteeEmail: string; isOpen: boolean };
+  /**
+   * Set on success — the surface shows the link the invitee should be sent.
+   * Every invitation this action can create is an OPEN one (the 2026-08-04
+   * ruling refuses addresses that already have an account), so the link is the
+   * whole delivery mechanism and there is no second shape to render.
+   */
+  created?: { inviteePath: string; inviteeEmail: string };
 };
 
 export type RevokeInvitationState = { error?: string };
@@ -77,10 +82,11 @@ export async function createInvitationAction(
 
   const result = await createInvitation(parsed.data);
 
-  // The occupied-slot refusal (ruled 2026-08-03) arrives here as an ordinary
-  // `InvitationError` message and is rendered verbatim, so the admin learns
-  // immediately that the plant already belongs to an org — rather than the
-  // invitee discovering it days later when the accept is refused.
+  // Both create-time refusals — the occupied slot (ruled 2026-08-03) and an
+  // address that already has an account (ruled 2026-08-04) — arrive here as
+  // ordinary `InvitationError` messages and are rendered verbatim, so the admin
+  // learns immediately rather than the invitation sitting pending for 30 days
+  // in front of somebody who cannot answer it.
   if (!result.success) {
     return { error: result.error };
   }
@@ -91,12 +97,6 @@ export async function createInvitationAction(
     created: {
       inviteePath: `/register?invitation=${result.invitation.id}`,
       inviteeEmail: result.invitation.inviteeEmail ?? parsed.data.inviteeEmail,
-      // An invitation with no target is one the invitee redeems by REGISTERING,
-      // so the link is the whole delivery mechanism. A targeted one is answered
-      // from the invitee's existing account instead.
-      isOpen:
-        result.invitation.targetChurchId === null &&
-        result.invitation.targetSendingChurchId === null,
     },
   };
 }
@@ -113,8 +113,10 @@ export async function revokeInvitationAction(
     return { error: "That is not an invitation we can revoke" };
   }
 
-  // Only the original inviter may revoke, and that check is part of the UPDATE
-  // itself (`revokeInvitationQuery`) — a non-inviter matches no row.
+  // Any admin of the inviting org may revoke (RULED 2026-08-04 — the pending
+  // list is org-scoped, so the button on it has to be), and that check is part
+  // of the UPDATE itself (`revokeInvitationQuery`): another org's admin, or any
+  // non-oversight caller, matches no row.
   const result = await revokeInvitation(parsed.data.invitationId);
 
   if (!result.success) {

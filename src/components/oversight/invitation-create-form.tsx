@@ -8,8 +8,10 @@
 //   * the invitee's EMAIL. There is no picker of existing church plants, on
 //     purpose: an oversight admin sees only the plants their org is associated
 //     with, so a dropdown of invitable plants would list every plant in the
-//     product to every org. The server resolves the address privately —
-//     existing account, or an open invitation redeemed by registering.
+//     product to every org. The server resolves the address privately — and
+//     since 2026-08-04 an address that already has an account is REFUSED there,
+//     because nothing in the product lets that person answer yet (#277). The
+//     copy below says so before the admin types, and the refusal says so after.
 //   * what kind of organization they are. A sending church can only invite
 //     church plants, so it has no choice to make and the field is not rendered.
 //
@@ -68,6 +70,8 @@ export function InvitationCreateForm({
         <CardDescription>
           Send an invitation to a church planter&rsquo;s email address. They
           decide whether to accept — nothing is associated until they do.
+          Invitations go to people who have not signed up yet; an address that
+          already has an EveryField account cannot be invited.
         </CardDescription>
       </CardHeader>
       <form action={formAction}>
@@ -175,9 +179,9 @@ function InviteCreatedNotice({
         Invitation created for {created.inviteeEmail}
       </p>
       <p className="text-muted-foreground">
-        {created.isOpen
-          ? "They do not have an EveryField account yet. Send them this link — it carries the invitation, so the plant they create arrives already associated with you."
-          : "They already have an EveryField account and will answer the invitation from it. You can also send them this link."}
+        Send them this link. It carries the invitation, so the plant they create
+        arrives already associated with you — and it only works for the address
+        above, so if that is wrong, revoke this invitation and send a new one.
       </p>
       <div className="flex flex-wrap items-center gap-2">
         <code className="bg-muted min-w-0 flex-1 truncate rounded px-2 py-1 text-xs">

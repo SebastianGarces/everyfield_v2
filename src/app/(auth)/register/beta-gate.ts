@@ -43,13 +43,60 @@ export function isBetaCodeValid(submitted: string | null | undefined): boolean {
 }
 
 /**
+ * An invitation is addressed to ONE person, and the link is not a bearer token.
+ *
+ * RULED 2026-08-04 (#23): registration with an invitation token must use the
+ * invited address. The token travels by email and is a uuid in a URL — it gets
+ * forwarded, pasted into a group chat, sits in a mail archive — and before this
+ * anyone holding one could register under ANY address and walk off with the
+ * association (and, when the beta gate is on, with a free bypass of it). The
+ * address is now part of the credential: this comparison is what the register
+ * action and the beta-gate bypass both go through, and a mismatch is refused
+ * with `invitationEmailMismatchMessage`. Wrong address = the admin revokes and
+ * re-invites; there is deliberately no way to re-aim a live invitation.
+ *
+ * Both sides are normalized the way `users.email` is stored (trim + lowercase),
+ * so casing or a stray space is a match, not a refusal.
+ *
+ * An invitation with NO recorded address (rows predating #23, when
+ * `invitee_email` was added) matches NOTHING — there is nothing to bind the
+ * link to, which is exactly the bearer token this ruling closes. Such a link no
+ * longer registers anybody; the org re-invites.
+ */
+export function registrationEmailMatchesInvitation(
+  invitationEmail: string | null | undefined,
+  registeringEmail: string | null | undefined
+): boolean {
+  const invited = (invitationEmail ?? "").trim().toLowerCase();
+  const registering = (registeringEmail ?? "").trim().toLowerCase();
+  if (invited.length === 0 || registering.length === 0) return false;
+  return invited === registering;
+}
+
+/** What a mismatch is told. Names the invited address — the link holder can already see it on this page. */
+export function invitationEmailMismatchMessage(
+  invitationEmail: string | null | undefined
+): string {
+  const invited = (invitationEmail ?? "").trim();
+  return invited.length > 0
+    ? `This invitation was sent to ${invited}. Register with that address, or ask them to invite this one instead.`
+    : "This invitation link cannot be used to create an account. Ask your sending church or network to send a new one.";
+}
+
+/**
  * An org invitation IS an invite — invited planters/admins bypass the beta
  * code. Returns true when a non-empty, still-pending, unexpired org invitation
- * id is supplied. Any invalid/expired/used/unknown id falls through to the
- * beta gate rather than granting access.
+ * id is supplied AND the account being registered is the one it was addressed
+ * to. Any invalid/expired/used/unknown id — or the right id with the wrong
+ * address — falls through to the beta gate rather than granting access.
+ *
+ * The address is a parameter and not an afterthought: this bypass is the OTHER
+ * thing an invitation token buys, so binding only the redemption would have
+ * left the link a free pass into a private beta for whoever it was forwarded to.
  */
 export async function hasValidInvitationBypass(
-  invitationId: string | null
+  invitationId: string | null,
+  registeringEmail: string
 ): Promise<boolean> {
   if (!invitationId) return false;
 
@@ -58,7 +105,10 @@ export async function hasValidInvitationBypass(
     if (!invitation) return false;
     if (invitation.status !== "pending") return false;
     if (invitation.expiresAt && invitation.expiresAt < new Date()) return false;
-    return true;
+    return registrationEmailMatchesInvitation(
+      invitation.inviteeEmail,
+      registeringEmail
+    );
   } catch {
     return false;
   }
@@ -76,7 +126,13 @@ export async function hasValidInvitationBypass(
  */
 export type RegistrationInvitation = {
   id: string;
-  inviteeEmail: string | null;
+  /**
+   * The address the invitation was issued to. NOT nullable: since the
+   * 2026-08-04 ruling the registering email must equal this one, so an
+   * invitation with no recorded address describes nothing this page can offer
+   * (see `describeInvitationForRegistration`).
+   */
+  inviteeEmail: string;
   invitingOrgName: string;
   /** The account type this invitation creates when redeemed. */
   accountType: "planter" | "sending_church";
@@ -101,6 +157,10 @@ export async function describeInvitationForRegistration(
     if (!invitation) return null;
     if (invitation.status !== "pending") return null;
     if (invitation.expiresAt && invitation.expiresAt < new Date()) return null;
+    // No recorded address, no invitation to describe: the 2026-08-04 ruling
+    // binds this screen's email field to the invited one, and there is nothing
+    // here to bind it to. Falls back to an ordinary sign-up, beta gate included.
+    if (!invitation.inviteeEmail) return null;
 
     const invitingOrgName = await lookupInvitingOrgName(invitation);
     if (!invitingOrgName) return null;

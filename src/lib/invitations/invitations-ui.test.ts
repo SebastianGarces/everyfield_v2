@@ -4,14 +4,20 @@ import path from "node:path";
 import { test } from "node:test";
 
 import {
+  ACCOUNT_EXISTS_MESSAGE,
   ALREADY_OURS_MESSAGE,
   SLOT_TAKEN_MESSAGE,
   bindOpenInvitationTargetQuery,
+  inviteeAccountRefusal,
   isInvitationTargetKind,
   normalizeInviteeEmail,
   resolveInvitationRequest,
   type InvitationActor,
 } from "./core";
+import {
+  invitationEmailMismatchMessage,
+  registrationEmailMatchesInvitation,
+} from "@/app/(auth)/register/beta-gate";
 
 // ============================================================================
 // #23 — the invitations SURFACE, and the two rulings that shaped it.
@@ -35,12 +41,32 @@ import {
 //
 // Source-shaped assertions are used where the thing being pinned IS a piece of
 // source (a form field, a call site). Everything with behaviour is executed.
+//
+// §6–§8 are the three rulings of 2026-08-04, made on the review of this PR:
+//
+//   6. AN ADDRESS THAT ALREADY HAS AN ACCOUNT IS REFUSED at create, until #277
+//      ships somewhere to answer from. Same family as the occupied slot above:
+//      no invitation that cannot be answered.
+//   7. REVOKE IS ORG-SCOPED, exactly like the list it is rendered on.
+//   8. THE TOKEN IS BOUND TO THE INVITED ADDRESS — a link holder can no longer
+//      register under an address of their choosing.
 // ============================================================================
 
 const ROOT = path.join(process.cwd(), "src");
 
 function read(...segments: string[]): string {
   return readFileSync(path.join(ROOT, ...segments), "utf8");
+}
+
+/**
+ * The code, minus its comments. These files explain their rulings at length, so
+ * an assertion that a name is GONE has to look at what runs — otherwise the
+ * comment recording why it was removed is what fails the test.
+ */
+function code(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:])\/\/.*$/gm, "$1");
 }
 
 const CORE_CODE = read("lib", "invitations", "core.ts");
@@ -63,8 +89,14 @@ const INVITATIONS_PAGE = read(
   "invitations",
   "page.tsx"
 );
+const INVITATIONS_LIST = read(
+  "components",
+  "oversight",
+  "invitations-list.tsx"
+);
 const REGISTER_ACTIONS = read("app", "(auth)", "register", "actions.ts");
 const REGISTER_FORM = read("app", "(auth)", "register", "register-form.tsx");
+const REGISTER_BETA_GATE = read("app", "(auth)", "register", "beta-gate.ts");
 
 const SENDING_CHURCH = "22222222-2222-4222-8222-222222222222";
 const NETWORK = "33333333-3333-4333-8333-333333333333";
@@ -319,4 +351,239 @@ test("registration binds THEN accepts, never the other way round", () => {
     entities,
     /sendingChurchId: invitation|sendingNetworkId: invitation/
   );
+});
+
+// ----------------------------------------------------------------------------
+// 6. Ruling (2026-08-04): an address that already has an account is refused
+// ----------------------------------------------------------------------------
+
+test("every existing account is refused, whatever role it holds", () => {
+  // The ruling, executed. Until #277 gives an existing account somewhere to
+  // answer from, the only place an invitation CAN be answered is `/register` —
+  // and somebody who already registered cannot register again. So an invitation
+  // to them would sit pending for 30 days with no surface to act on, while the
+  // admin believed it was sent.
+  //
+  // Pure, so it is a real behavioural assertion and not a grep: every role is
+  // refused, with or without an organization of its own, and only "nobody here"
+  // proceeds.
+  for (const role of [
+    "planter",
+    "coach",
+    "team_member",
+    "sending_church_admin",
+    "network_admin",
+  ] as const) {
+    assert.equal(inviteeAccountRefusal({ role }), ACCOUNT_EXISTS_MESSAGE, role);
+  }
+
+  assert.equal(inviteeAccountRefusal(undefined), null);
+});
+
+test("the account refusal is in the service, on the forged-call path", () => {
+  // "Service-layer check (a forged direct call is also rejected)" — so the
+  // refusal has to sit inside `createInvitationAs`, which is the single path
+  // `createInvitation` takes, rather than in the form or the action's schema.
+  // `resolveInvitationTarget` is where the address meets `users`, and it is
+  // called before anything is written.
+  const target = CORE_CODE.slice(
+    CORE_CODE.indexOf("export async function resolveInvitationTarget"),
+    CORE_CODE.indexOf("export async function assertTargetSlotFree")
+  );
+  assert.match(target, /inviteeAccountRefusal\(existing\)/);
+  assert.match(target, /if \(refusal\) return \{ ok: false, error: refusal \}/);
+
+  const create = CORE_CODE.slice(
+    CORE_CODE.indexOf("export async function createInvitationAs"),
+    CORE_CODE.indexOf("// Respond")
+  );
+  assert.match(create, /await resolveInvitationTarget\(inviteeEmail\)/);
+  assert.ok(
+    create.indexOf("resolveInvitationTarget") <
+      create.indexOf("insertInvitation"),
+    "the address is judged BEFORE the row is written"
+  );
+  // Authority still comes first: this refusal is itself an account-existence
+  // oracle, so it must be unreachable to anyone who may not invite at all.
+  assert.ok(
+    create.indexOf("const authority = resolveInvitationRequest") <
+      create.indexOf("resolveInvitationTarget"),
+    "a non-oversight caller must be refused before any address is looked up"
+  );
+});
+
+test("the account refusal reads as a next action, not as a failure", () => {
+  // Surfaced as a FORM ERROR — the action returns `result.error` verbatim
+  // (asserted in §2) and the create form renders it — so the wording is the
+  // whole of what the admin gets. It has to say what happened and what to do.
+  assert.match(ACCOUNT_EXISTS_MESSAGE, /account/i);
+  assert.doesNotMatch(ACCOUNT_EXISTS_MESSAGE, /error|failed|invalid/i);
+  assert.notEqual(ACCOUNT_EXISTS_MESSAGE, SLOT_TAKEN_MESSAGE);
+  assert.notEqual(ACCOUNT_EXISTS_MESSAGE, ALREADY_OURS_MESSAGE);
+
+  // And the form says it before the admin types, rather than only after the
+  // refusal — the ruling is a real narrowing of who can be invited today.
+  assert.match(
+    CREATE_FORM,
+    /already has an EveryField account cannot be invited/
+  );
+});
+
+// ----------------------------------------------------------------------------
+// 7. Ruling (2026-08-04): revoke is scoped to the ORG, like the list
+// ----------------------------------------------------------------------------
+
+test("the surface no longer decides revoke from the inviter's id", () => {
+  // `service.test.ts` owns the SQL half (the WHERE names the actor's own org and
+  // no longer names `inviter_user_id`). This is the surface half: the page used
+  // to compute `canRevoke: invitation.inviterUserId === user.id`, which is what
+  // made a colleague's pending invitation unactionable. Any pending row the
+  // org-scoped list can see is now revocable, and the check that matters stays
+  // in the UPDATE.
+  assert.doesNotMatch(code(INVITATIONS_PAGE), /canRevoke/);
+  assert.doesNotMatch(code(INVITATIONS_LIST), /canRevoke/);
+  assert.doesNotMatch(code(INVITATIONS_PAGE), /inviterUserId/);
+
+  // The Revoke button is rendered for a pending row, and for nothing else — a
+  // revoke of an answered invitation is refused by the compare-and-set anyway,
+  // but offering it would be a lie.
+  assert.match(
+    INVITATIONS_LIST,
+    /row\.status === "pending" && \(\s*<RevokeButton/
+  );
+
+  // The list is still read with the actor minted from the session, so "our org"
+  // has no client-supplied half to disagree about.
+  assert.match(INVITATIONS_PAGE, /getInvitationsForOrg\(actor\)/);
+  assert.match(INVITATIONS_PAGE, /invitationActorFromSession\(\{ user \}\)/);
+});
+
+// ----------------------------------------------------------------------------
+// 8. Ruling (2026-08-04): the invite token is bound to the invited address
+// ----------------------------------------------------------------------------
+
+test("only the invited address matches an invitation token", () => {
+  // The bearer-token hole, closed and executed. An invitation link is a uuid in
+  // a URL — forwarded, pasted, archived — so holding one must not be enough to
+  // register under an address of your choosing.
+  assert.ok(
+    registrationEmailMatchesInvitation(
+      "planter@example.com",
+      "planter@example.com"
+    )
+  );
+  // Casing and stray whitespace are the same address, not an attack.
+  assert.ok(
+    registrationEmailMatchesInvitation(
+      "Planter@Example.COM",
+      "  planter@example.com "
+    )
+  );
+
+  assert.ok(
+    !registrationEmailMatchesInvitation(
+      "planter@example.com",
+      "someone-else@example.com"
+    )
+  );
+  // A near miss is still a miss.
+  assert.ok(
+    !registrationEmailMatchesInvitation(
+      "planter@example.com",
+      "planter@example.com.evil.test"
+    )
+  );
+  // An invitation with no recorded address (rows predating #23) binds to
+  // NOBODY — that row is exactly the bearer token this ruling closes.
+  assert.ok(!registrationEmailMatchesInvitation(null, "planter@example.com"));
+  assert.ok(!registrationEmailMatchesInvitation("planter@example.com", ""));
+});
+
+test("the mismatch is refused server-side, before an account exists", () => {
+  // The rule lives in the ACTION, not in the pre-filled field: this endpoint is
+  // a POST that never saw the form. The refusal is returned before the account
+  // is created and before the beta gate, which the same token also bypasses.
+  const body = REGISTER_ACTIONS.slice(
+    REGISTER_ACTIONS.indexOf("export async function register"),
+    REGISTER_ACTIONS.indexOf("async function createAccountEntities")
+  );
+
+  assert.match(
+    body,
+    /!registrationEmailMatchesInvitation\(invitation\.inviteeEmail, identifier\)/
+  );
+  assert.match(
+    body,
+    /invitationEmailMismatchMessage\(invitation\.inviteeEmail\)/
+  );
+  assert.ok(
+    body.includes(".insert(users)"),
+    "the register action no longer inserts the account here — re-aim this check"
+  );
+  assert.ok(
+    body.indexOf("registrationEmailMatchesInvitation") <
+      body.indexOf(".insert(users)"),
+    "the address is checked before an account is created"
+  );
+  assert.ok(
+    body.indexOf("registrationEmailMatchesInvitation") <
+      body.indexOf("isBetaGateEnabled()"),
+    "the address is checked before the beta gate it would otherwise bypass"
+  );
+
+  // The bypass is bound to the address too — otherwise a forwarded link stayed
+  // a free pass into a private beta for whoever received it.
+  assert.match(body, /hasValidInvitationBypass\(invitationId, identifier\)/);
+  const bypass = REGISTER_BETA_GATE.slice(
+    REGISTER_BETA_GATE.indexOf("export async function hasValidInvitationBypass")
+  );
+  assert.match(bypass, /registrationEmailMatchesInvitation\(/);
+});
+
+test("an invitation with no address describes nothing to register with", () => {
+  // `describeInvitationForRegistration` is what the page and the action both
+  // read. A row with no `invitee_email` cannot be bound to anybody, so it stops
+  // being a registration invitation at all rather than becoming an unbindable
+  // one — and the type says so, which is what keeps the form's pre-fill total.
+  const describe = REGISTER_BETA_GATE.slice(
+    REGISTER_BETA_GATE.indexOf(
+      "export async function describeInvitationForRegistration"
+    )
+  );
+  assert.match(describe, /if \(!invitation\.inviteeEmail\) return null/);
+  assert.match(REGISTER_BETA_GATE, /inviteeEmail: string;/);
+});
+
+test("the register form fills the invited address in and locks it", () => {
+  // Not the enforcement — that is above — but the half that stops an honest
+  // user walking into it. `readOnly`, deliberately not `disabled`: a disabled
+  // input is not submitted, so locking it that way would send no address at all.
+  assert.match(
+    REGISTER_FORM,
+    /const emailLockedToInvitation = Boolean\(invitation\)/
+  );
+  assert.match(REGISTER_FORM, /readOnly=\{emailLockedToInvitation\}/);
+  assert.doesNotMatch(REGISTER_FORM, /disabled=\{emailLockedToInvitation\}/);
+  assert.match(REGISTER_FORM, /useState\(invitation\?\.inviteeEmail \?\? ""\)/);
+  // And it says why the field cannot be edited, wired to the input for a screen
+  // reader rather than floating next to it.
+  assert.match(REGISTER_FORM, /aria-describedby=\{/);
+  assert.match(REGISTER_FORM, /id="email-invitation-note"/);
+});
+
+test("the mismatch message says which address the invitation is for", () => {
+  // "Wrong address = admin revokes + re-invites" — so the copy has to name the
+  // address that WILL work and point at the person who can change it. The link
+  // holder can already see that address on this page (the field is pre-filled
+  // from the token), so naming it in the error leaks nothing new.
+  const message = invitationEmailMismatchMessage("planter@example.com");
+  assert.match(message, /planter@example\.com/);
+  assert.match(message, /invite/i);
+  assert.doesNotMatch(message, /error|failed|invalid/i);
+
+  // With no address on the row there is nothing to name, and the copy must not
+  // pretend otherwise.
+  const addressless = invitationEmailMismatchMessage(null);
+  assert.doesNotMatch(addressless, /undefined|null/);
+  assert.match(addressless, /new one/i);
 });

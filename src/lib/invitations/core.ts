@@ -263,14 +263,32 @@ export const SLOT_TAKEN_MESSAGE =
 export const ALREADY_OURS_MESSAGE =
   "That organization is already part of your organization";
 
-export const NO_ORG_TO_INVITE_MESSAGE =
-  "That account has not created its organization yet — ask them to set it up, then invite them";
-
-export const CANNOT_INVITE_ACCOUNT_MESSAGE =
-  "That account cannot be invited — invitations go to a church planter or a sending church admin";
-
-export const KIND_MISMATCH_MESSAGE =
-  "That email belongs to a different kind of organization than the one you chose";
+/**
+ * An address that ALREADY has an EveryField account, refused at CREATE time.
+ *
+ * RULED 2026-08-04 (#23): an invitation nobody can answer is not sent. The only
+ * place an invitation can be answered today is `/register` — the link creates
+ * the organization and redeems the invitation in one request
+ * (`redeemRegistrationInvitation`). Somebody who already has an account cannot
+ * register again, and the in-app place they would answer from — the planter's
+ * association area — ships with #277. So a targeted invitation would sit
+ * `pending` for 30 days with no surface anywhere to accept or decline it, while
+ * the admin believed it was sent.
+ *
+ * Same ruling family as `SLOT_TAKEN_MESSAGE` above and for the same reason: the
+ * refusal happens where the admin is watching, not days later inside somebody
+ * else's dead end.
+ *
+ * WHAT #277 CHANGES. When the association area exists, this refusal becomes the
+ * targeted path again: look the address up in `users`, map the account to its
+ * organization (a `planter` → their `church_id`, and for a network admin a
+ * `sending_church_admin` → their `sending_church_id`), refuse an account that is
+ * neither and a planter who has not created their plant yet, and hand the
+ * resulting id to `resolveInvitationRequest` as the target. `assertTargetSlotFree`
+ * below is already written for exactly that row and stays in place for it.
+ */
+export const ACCOUNT_EXISTS_MESSAGE =
+  "That email already has an EveryField account — there is nowhere for them to answer an invitation yet, so invite an address that has not signed up";
 
 /**
  * The fields that decide WHAT association an accept makes: the target entity and
@@ -450,6 +468,28 @@ export async function insertInvitation(
 }
 
 /**
+ * May this address be invited at all, given what the account lookup found?
+ * `null` to proceed, a user-facing message to refuse.
+ *
+ * Pure, so the 2026-08-04 ruling is executable without a database: EVERY
+ * account is refused — whatever its role, and whether or not it has an
+ * organization of its own — and only an address nobody has registered gets an
+ * invitation. See `ACCOUNT_EXISTS_MESSAGE` for the reasoning and for what #277
+ * puts back here.
+ *
+ * One message for all of them, deliberately. The finer-grained refusals this
+ * replaced ("no organization yet", "cannot be invited", "wrong kind of
+ * organization") told an inviter what KIND of account sits behind an address;
+ * this tells them only that one does, which is the single bit they need to pick
+ * a different address.
+ */
+export function inviteeAccountRefusal(
+  existingAccount: { role: UserRole } | undefined
+): string | null {
+  return existingAccount ? ACCOUNT_EXISTS_MESSAGE : null;
+}
+
+/**
  * Turn the one thing the admin typed — an email — into a target row, if there
  * is one.
  *
@@ -460,25 +500,19 @@ export async function insertInvitation(
  * and the server decides privately whether that address already belongs to an
  * organization.
  *
- * Three outcomes:
- *   * a planter WITH a church, or (for a network admin) a sending church admin
- *     WITH a sending church → that row is the target, and the slot rule below
- *     applies to it;
+ * Two outcomes, since the 2026-08-04 ruling:
  *   * no account at all → an OPEN invitation with no target. The invite link
  *     carries the token to `/register`, where the organization is created and
  *     bound in one go (`bindOpenInvitationTarget`);
- *   * an account that is neither → refused, with a message that says what kind
- *     of account can be invited.
+ *   * an account already exists → refused with `ACCOUNT_EXISTS_MESSAGE`,
+ *     because there is no surface anywhere for that person to answer from
+ *     until #277.
  *
- * A planter who has not created their church yet is the third case in
- * disguise: there is no row to associate and they cannot register again, so
- * they are told to create the plant first rather than handed a dead link.
+ * The refusal lives HERE rather than in the form: this is the path a forged
+ * direct call to `createInvitation` takes too (`createInvitationAs` below), so
+ * skipping the UI does not skip the rule.
  */
-export async function resolveInvitationTarget(
-  actor: InvitationActor,
-  inviteeEmail: string,
-  inviteAs: InvitationTargetKind
-): Promise<
+export async function resolveInvitationTarget(inviteeEmail: string): Promise<
   | {
       ok: true;
       target: Pick<
@@ -489,51 +523,16 @@ export async function resolveInvitationTarget(
   | { ok: false; error: string }
 > {
   const [existing] = await db
-    .select({
-      role: users.role,
-      churchId: users.churchId,
-      sendingChurchId: users.sendingChurchId,
-    })
+    .select({ role: users.role })
     .from(users)
     .where(eq(users.email, inviteeEmail))
     .limit(1);
 
+  const refusal = inviteeAccountRefusal(existing);
+  if (refusal) return { ok: false, error: refusal };
+
   // Nobody here yet — an open invitation, redeemed by registering.
-  if (!existing) return { ok: true, target: {} };
-
-  if (existing.role === "planter") {
-    if (inviteAs !== "church") {
-      return { ok: false, error: KIND_MISMATCH_MESSAGE };
-    }
-    if (!existing.churchId) {
-      return { ok: false, error: NO_ORG_TO_INVITE_MESSAGE };
-    }
-    return { ok: true, target: { targetChurchId: existing.churchId } };
-  }
-
-  if (existing.role === "sending_church_admin") {
-    // Only a network invites a sending church; `resolveInvitationRequest`
-    // refuses it for a sending-church admin, but say so from the field the
-    // admin actually filled in rather than from a type they never chose.
-    if (actor.role !== "network_admin") {
-      return {
-        ok: false,
-        error: "A sending church can only invite church plants",
-      };
-    }
-    if (inviteAs !== "sending_church") {
-      return { ok: false, error: KIND_MISMATCH_MESSAGE };
-    }
-    if (!existing.sendingChurchId) {
-      return { ok: false, error: NO_ORG_TO_INVITE_MESSAGE };
-    }
-    return {
-      ok: true,
-      target: { targetSendingChurchId: existing.sendingChurchId },
-    };
-  }
-
-  return { ok: false, error: CANNOT_INVITE_ACCOUNT_MESSAGE };
+  return { ok: true, target: {} };
 }
 
 /**
@@ -655,12 +654,12 @@ export async function createInvitationAs(
     throw new InvitationError(authority.error);
   }
 
-  // A client never names a target; it is resolved from the address here.
-  const resolvedTarget = await resolveInvitationTarget(
-    actor,
-    inviteeEmail,
-    inviteAs
-  );
+  // A client never names a target; it is resolved from the address here — and
+  // an address that already has an account is refused outright (RULED
+  // 2026-08-04, `ACCOUNT_EXISTS_MESSAGE`). This runs inside the logic layer, so
+  // a forged POST straight at `createInvitation` is refused by the same
+  // statement the form is.
+  const resolvedTarget = await resolveInvitationTarget(inviteeEmail);
   if (!resolvedTarget.ok) {
     throw new InvitationError(resolvedTarget.error);
   }
@@ -1113,8 +1112,19 @@ export function unboundTargetSlot(invitation: AssociationFacts): SQL {
 
 /**
  * The statement that revokes an invitation. Exported so a test can read the
- * bound parameters: the inviter in the WHERE clause is the SESSION's user, and
- * nothing a client sent can put another id there.
+ * bound parameters: the org in the WHERE clause comes from the SESSION, and
+ * nothing a client sent can put another org's id there.
+ *
+ * SCOPED TO THE ORG, NOT THE INVITER — RULED 2026-08-04 (#23). The pending list
+ * is org-scoped (`invitationsForOrgQuery`, same `invitingOrgOf` predicate), so
+ * a second admin of the same sending church sees a queue they could not act on:
+ * the invitation their colleague sent to the wrong address stayed open for 30
+ * days with a Revoke button that refused. Whoever may issue an invitation on the
+ * org's behalf may close one, and both facts are read from the same helper so
+ * the list and the button can never disagree about what "ours" means.
+ *
+ * The role check is not relaxed by this: `invitingOrgOf` matches nothing for any
+ * role that does not invite, and nothing for an admin with no org of their own.
  */
 export function revokeInvitationQuery(
   actor: InvitationActor,
@@ -1123,19 +1133,14 @@ export function revokeInvitationQuery(
   return db
     .update(organizationInvitations)
     .set({ status: "revoked" })
-    .where(
-      and(
-        pendingInvitation(invitationId),
-        eq(organizationInvitations.inviterUserId, actor.id)
-      )
-    )
+    .where(and(pendingInvitation(invitationId), invitingOrgOf(actor)))
     .returning();
 }
 
 /**
- * Revoke a pending invitation. Only the original inviter can revoke, and the
- * inviter is the actor — the check is part of the UPDATE, so a non-inviter
- * matches no row and writes nothing.
+ * Revoke a pending invitation the actor's ORG sent. The check is part of the
+ * UPDATE, so an admin of another org — or any non-oversight caller — matches no
+ * row and writes nothing.
  */
 export async function revokeInvitationAs(
   actor: InvitationActor,
@@ -1149,7 +1154,7 @@ export async function revokeInvitationAs(
 
   if (!updated) {
     throw new InvitationError(
-      "Invitation not found, not pending, or you are not the inviter"
+      "Invitation not found, not pending, or not sent by your organization"
     );
   }
 
@@ -1330,6 +1335,41 @@ function invitingOrgFilter(
 }
 
 /**
+ * "The invitations OUR org issued", as one predicate built from the session.
+ *
+ * The single definition of the scope, shared by the list (`invitationsForOrgQuery`)
+ * and the revoke (`revokeInvitationQuery`) — a screen that shows an admin a
+ * pending invitation and then refuses their Revoke is exactly what two
+ * definitions of "ours" produce. Only the two oversight roles issue invitations,
+ * so every other role matches NOTHING here rather than falling through to a
+ * missing predicate, and so does an oversight admin who has no org yet
+ * (`invitingOrgFilter(null, null)` → `false`).
+ */
+function invitingOrgOf(actor: InvitationActor): SQL {
+  if (actor.role === "sending_church_admin") {
+    return invitingOrgFilter(actor.sendingChurchId, null);
+  }
+  if (actor.role === "network_admin") {
+    return invitingOrgFilter(null, actor.sendingNetworkId);
+  }
+  return sql`false`;
+}
+
+/**
+ * The list statement. Exported alongside `revokeInvitationQuery` so a test can
+ * read both WHERE clauses and assert they carry the SAME org predicate — that
+ * is the property the 2026-08-04 revoke ruling turns on, and prose cannot hold
+ * it.
+ */
+export function invitationsForOrgQuery(actor: InvitationActor) {
+  return db
+    .select()
+    .from(organizationInvitations)
+    .where(invitingOrgOf(actor))
+    .orderBy(desc(organizationInvitations.createdAt));
+}
+
+/**
  * Every invitation the actor's ORG has issued, newest first — the read behind
  * `/oversight/invitations` (#23 / OV-003).
  *
@@ -1339,33 +1379,21 @@ function invitingOrgFilter(
  * actor's own org id, which comes from the session, so there is no argument a
  * request could put another org's id into.
  *
- * Returns raw rows, not `InvitationView`: the caller is a Server Component that
- * needs `inviterUserId` to decide whether to render a Revoke button (only the
- * inviter may revoke) and must not pass that id to the client.
+ * Returns raw rows, not `InvitationView`, so the page can shape its own list
+ * without a second query. Since 2026-08-04 the page needs nothing from
+ * `inviterUserId` — any admin of the inviting org may revoke — and must still
+ * not hand it to the client.
  */
 export async function getInvitationsForOrg(
   actor: InvitationActor
 ): Promise<OrganizationInvitation[]> {
-  if (actor.role === "sending_church_admin") {
-    if (!actor.sendingChurchId) return [];
-    return db
-      .select()
-      .from(organizationInvitations)
-      .where(invitingOrgFilter(actor.sendingChurchId, null))
-      .orderBy(desc(organizationInvitations.createdAt));
+  // No other role issues invitations, so no other role has any to list. The
+  // predicate would match nothing anyway; this saves the round trip.
+  if (actor.role !== "sending_church_admin" && actor.role !== "network_admin") {
+    return [];
   }
 
-  if (actor.role === "network_admin") {
-    if (!actor.sendingNetworkId) return [];
-    return db
-      .select()
-      .from(organizationInvitations)
-      .where(invitingOrgFilter(null, actor.sendingNetworkId))
-      .orderBy(desc(organizationInvitations.createdAt));
-  }
-
-  // No other role issues invitations, so no other role has any to list.
-  return [];
+  return invitationsForOrgQuery(actor);
 }
 
 /**
