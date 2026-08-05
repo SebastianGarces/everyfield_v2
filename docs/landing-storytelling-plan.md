@@ -111,6 +111,11 @@ Sections:
 5. **Screenshot hygiene rules** (standing): no full-window screenshot under
    60vw; no UI text rendered below ~11px effective; every visual carries at
    most ONE claim; chips carry the claim, captions don't repeat it.
+   The 11px floor is what forces the two compositions of the live scorecard
+   (see Traps): the whole eight-tile card cannot clear it inside the engine
+   pane at any width, so it reads as a card-shaped object on desktop — the same
+   read as the capture beside it — and the compact composition carries the
+   actual words at real size everywhere the pane is too small for that to work.
 
 ## PR series (after #248 merges)
 
@@ -126,8 +131,20 @@ Sections:
 
 ## Traps
 
-- Vignettes must not import app components (bundle + coupling); sharp tokens
-  only, `.marketing` scope.
+- ~~Vignettes must not import app components (bundle + coupling); sharp tokens
+  only, `.marketing` scope.~~ **Superseded 2026-08-04 (ruling).** A
+  presentational, server-only app component MAY be rendered live in marketing,
+  fed by a typed fixture snapshotted from a real report — and that is now the
+  PREFERRED way to show an app surface, because it is pixel-identical to the
+  product by construction. The standing principle: *render the real app UI;
+  show the minimum amount of it that gets the idea across* (the whole scorecard
+  on desktop, a three-tile composition of the same real tiles on mobile). No
+  `"use client"` on anything that renders the app component — a small client
+  gate takes it as `children`, so it never reaches the client bundle. Marketing
+  keeps owning stylized distillations (the chips, the run sheet, the ticker):
+  those are claims about the product, not the product. The trade is the point:
+  a live embed tracks the product automatically, so it cannot drift into a lie
+  — and it changes when the app component changes.
 - `prefers-reduced-motion`: every vignette needs a static final frame.
 - The seed's real blemishes ("No contact info" rows, 33% team staffing) are
   invisible at crop scale — crops solve what reseeding would have.
