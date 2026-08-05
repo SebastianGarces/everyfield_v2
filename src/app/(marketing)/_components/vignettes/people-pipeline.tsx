@@ -104,7 +104,7 @@ export function PeoplePipeline() {
 
 export function PeoplePipelineCompact() {
   return (
-    <div className="vg-fs-phone">
+    <div className="vg-fs-m vg-fs-people-m">
       <div className="vg-sc-head">
         <span className="vg-label">People</span>
         <span className="vg-asof">{TOTAL_PEOPLE} total</span>

@@ -87,24 +87,25 @@ export function CoreGroupPipeline() {
               className="vg-app-embed"
               role="img"
               aria-label={PIPELINE_LABEL}
-              inert
             >
-              <div className="vg-jp-grid">
-                {PIPELINE_PEOPLE.map((person) => (
-                  <PersonCard key={person.id} person={person} />
-                ))}
+              {/* inert on a wrapper inside the labelled mount: an inert element
+                  is itself dropped from the accessibility tree, so on the mount
+                  it would take the label with it */}
+              <div inert>
+                <div className="vg-jp-grid">
+                  {PIPELINE_PEOPLE.map((person) => (
+                    <PersonCard key={person.id} person={person} />
+                  ))}
+                </div>
               </div>
             </div>
           </div>
 
           <div className="vg-jp-mount vg-jp-meet">
-            <div
-              className="vg-app-embed"
-              role="img"
-              aria-label={MEETING_LABEL}
-              inert
-            >
-              <MeetingCard meeting={VISION_MEETING_4} isPast />
+            <div className="vg-app-embed" role="img" aria-label={MEETING_LABEL}>
+              <div inert>
+                <MeetingCard meeting={VISION_MEETING_4} isPast />
+              </div>
             </div>
           </div>
         </div>
@@ -115,16 +116,13 @@ export function CoreGroupPipeline() {
           <span className="vg-label">People pipeline</span>
           <span className="vg-asof">{PIPELINE_TOTAL} people</span>
         </div>
-        <div
-          className="vg-app-embed"
-          role="img"
-          aria-label={PIPELINE_LABEL}
-          inert
-        >
-          <div className="grid gap-3">
-            {PIPELINE_PEOPLE_COMPACT.map((person) => (
-              <PersonCard key={person.id} person={person} />
-            ))}
+        <div className="vg-app-embed" role="img" aria-label={PIPELINE_LABEL}>
+          <div inert>
+            <div className="grid gap-3">
+              {PIPELINE_PEOPLE_COMPACT.map((person) => (
+                <PersonCard key={person.id} person={person} />
+              ))}
+            </div>
           </div>
         </div>
         {/* the two cards above are the two ends of it */}
@@ -146,17 +144,14 @@ export function LaunchTeamCommitted() {
     <div className="vg-jp vg-jp-committed">
       <div className="vg-jp-full">
         <div className="vg-jp-mount">
-          <div
-            className="vg-app-embed"
-            role="img"
-            aria-label={COMMITTED_LABEL}
-            inert
-          >
-            <PeopleList
-              people={COMMITTED_PEOPLE}
-              total={COMMITTED_TOTAL}
-              nextCursor={null}
-            />
+          <div className="vg-app-embed" role="img" aria-label={COMMITTED_LABEL}>
+            <div inert>
+              <PeopleList
+                people={COMMITTED_PEOPLE}
+                total={COMMITTED_TOTAL}
+                nextCursor={null}
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -166,16 +161,13 @@ export function LaunchTeamCommitted() {
           <span className="vg-label">Committed</span>
           <span className="vg-asof">{COMMITTED_TOTAL} total</span>
         </div>
-        <div
-          className="vg-app-embed"
-          role="img"
-          aria-label={COMMITTED_LABEL}
-          inert
-        >
-          <div className="grid gap-3">
-            {COMMITTED_PEOPLE_COMPACT.map((person) => (
-              <PersonCard key={person.id} person={person} />
-            ))}
+        <div className="vg-app-embed" role="img" aria-label={COMMITTED_LABEL}>
+          <div inert>
+            <div className="grid gap-3">
+              {COMMITTED_PEOPLE_COMPACT.map((person) => (
+                <PersonCard key={person.id} person={person} />
+              ))}
+            </div>
           </div>
         </div>
         {/* what twelve identical badges say by repetition, said once */}

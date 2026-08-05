@@ -115,7 +115,7 @@ export function TaskFollowupsCompact() {
   const tasks = tasksFixtureCompact();
 
   return (
-    <div className="vg-fs-phone">
+    <div className="vg-fs-m vg-fs-tasks-m">
       <div className="vg-sc-head">
         <span className="vg-label">Tasks</span>
         <span className="vg-asof">{ACTIVE_TASK_COUNT} active</span>

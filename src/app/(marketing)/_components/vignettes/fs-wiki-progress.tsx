@@ -35,8 +35,9 @@ import {
  */
 
 /** One sentence, because the mount is one picture of the product — and it
- *  carries the section count the crops cut off. The `inert` mount is outside
- *  the accessibility tree, so this label lives on the frame around it. */
+ *  carries the section count the crops cut off. It lives on the mount, with
+ *  `inert` one level in: an inert element is itself outside the accessibility
+ *  tree, so a label on it would never be announced. */
 const EMBED_LABEL =
   "My Wiki Progress in the app — 4 of 96 articles read, 4% overall, with each of the ten sections of the methodology tracked underneath.";
 
@@ -47,9 +48,11 @@ function ProgressBody() {
 /** Desktop: the overlay that lands on the open-article crop. */
 export function FsWikiProgressOverlay() {
   return (
-    <div className="vg-fs-ov vg-fs-wiki" role="img" aria-label={EMBED_LABEL}>
-      <div className="vg-app-embed" role="img" aria-label={EMBED_LABEL} inert>
-        <ProgressBody />
+    <div className="vg-fs-overlay vg-fs-wiki">
+      <div className="vg-app-embed" role="img" aria-label={EMBED_LABEL}>
+        <div inert>
+          <ProgressBody />
+        </div>
       </div>
     </div>
   );
@@ -63,13 +66,11 @@ export function FsWikiProgressOverlay() {
  */
 export function FsWikiProgressMobile() {
   return (
-    <div
-      className="vg-fs-stack vg-fs-wiki-m"
-      role="img"
-      aria-label={EMBED_LABEL}
-    >
-      <div className="vg-app-embed" role="img" aria-label={EMBED_LABEL} inert>
-        <ProgressBody />
+    <div className="vg-fs-m vg-fs-wiki-m">
+      <div className="vg-app-embed" role="img" aria-label={EMBED_LABEL}>
+        <div inert>
+          <ProgressBody />
+        </div>
       </div>
       <p className="vg-sc-foot">
         {FS_WIKI_SECTION_COUNT} sections underneath — every phase of the

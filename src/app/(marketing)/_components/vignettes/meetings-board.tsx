@@ -65,7 +65,7 @@ const COMPACT_LABEL =
 
 export function MeetingsBoard() {
   return (
-    <div className="vg-meetings">
+    <div className="vg-fs-primary vg-fs-meetings">
       <div className="vg-app-embed" role="img" aria-label={BOARD_LABEL}>
         <div className="space-y-6" inert>
           <div className="space-y-4">
@@ -102,7 +102,7 @@ export function MeetingsBoard() {
 
 export function MeetingsBoardCompact() {
   return (
-    <div className="vg-meetings-m">
+    <div className="vg-fs-m vg-fs-meetings-m">
       <div className="vg-sc-head">
         <span className="vg-label">Meetings</span>
         <span className="vg-asof">Redemption Hill</span>

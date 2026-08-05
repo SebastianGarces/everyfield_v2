@@ -35,8 +35,9 @@ const EMBED_LABEL =
   "Two of Redemption Hill's eleven ministry team cards — Children's Ministry staffed two of seven roles and flagged red, Prayer two of three and healthy.";
 
 /** The tile is an anchor in the product, so it stays one here: same box, same
- *  layout, same everything. The mount is `inert`, so it is neither focusable
- *  nor clickable — this href exists only so the element keeps its identity. */
+ *  layout, same everything. It sits inside an `inert` wrapper, so it is neither
+ *  focusable nor clickable — this href exists only so the element keeps its
+ *  identity (and so it fails safe where `inert` is unsupported). */
 const INERT_HREF = "#";
 
 function TeamTiles() {
@@ -53,15 +54,18 @@ function TeamTiles() {
 /**
  * Desktop: the overlay that lands on the health-dashboard crop.
  *
- * The frame carries the description and the mount carries `inert`. Both is
- * deliberate: `inert` takes its subtree out of the accessibility tree, so a
- * label on the mount alone would leave this visual unannounced.
+ * The mount carries the description and an `inert` wrapper inside it carries
+ * the tiles: `inert` takes its own element out of the accessibility tree too,
+ * so on the labelled element it would leave this visual unannounced. One image
+ * node per embed, exactly the contract the retired `alt` had.
  */
 export function FsTeamsOverlay() {
   return (
-    <div className="vg-fs-ov vg-fs-teams" role="img" aria-label={EMBED_LABEL}>
-      <div className="vg-app-embed" role="img" aria-label={EMBED_LABEL} inert>
-        <TeamTiles />
+    <div className="vg-fs-overlay vg-fs-teams">
+      <div className="vg-app-embed" role="img" aria-label={EMBED_LABEL}>
+        <div inert>
+          <TeamTiles />
+        </div>
       </div>
     </div>
   );
@@ -76,13 +80,11 @@ export function FsTeamsOverlay() {
  */
 export function FsTeamsMobile() {
   return (
-    <div
-      className="vg-fs-stack vg-fs-teams-m"
-      role="img"
-      aria-label={EMBED_LABEL}
-    >
-      <div className="vg-app-embed" role="img" aria-label={EMBED_LABEL} inert>
-        <TeamTiles />
+    <div className="vg-fs-m vg-fs-teams-m">
+      <div className="vg-app-embed" role="img" aria-label={EMBED_LABEL}>
+        <div inert>
+          <TeamTiles />
+        </div>
       </div>
       <p className="vg-sc-foot">
         {FS_TEAMS_TOTAL - FS_TEAMS_FIXTURE.length} more teams — staffing,

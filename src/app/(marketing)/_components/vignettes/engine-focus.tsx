@@ -53,7 +53,9 @@ import { VignetteGate } from "./vignette-gate";
  *  it replaces, and it keeps the panel's h2/h3s out of this page's heading
  *  outline. `inert` is what makes that contract true: the cards carry real
  *  next/link anchors to the wiki, and nothing inside a picture may be reachable
- *  by keyboard or pointer. */
+ *  by keyboard or pointer. It sits on a wrapper INSIDE the labelled mount
+ *  because an inert element is itself dropped from the accessibility tree —
+ *  on the mount it would take this label with it. */
 const EMBED_LABEL =
   "Your focus in EveryField — the two next steps the engine ranked highest from the July 31 assessment: clear twelve stale follow-ups, and fill the last of eight ministry roles, each citing the facts behind it and linking the article that says how.";
 
@@ -61,13 +63,15 @@ export function EngineFocus() {
   return (
     <VignetteGate className="vg-focus">
       <div className="vg-embed-full">
-        <div className="vg-app-embed" role="img" aria-label={EMBED_LABEL} inert>
-          <FocusPanel
-            assessment={FOCUS_ASSESSMENT}
-            insights={FOCUS_INSIGHTS_LEAD}
-            delta={FOCUS_DELTA}
-            articleRefs={FOCUS_ARTICLE_REFS}
-          />
+        <div className="vg-app-embed" role="img" aria-label={EMBED_LABEL}>
+          <div inert>
+            <FocusPanel
+              assessment={FOCUS_ASSESSMENT}
+              insights={FOCUS_INSIGHTS_LEAD}
+              delta={FOCUS_DELTA}
+              articleRefs={FOCUS_ARTICLE_REFS}
+            />
+          </div>
         </div>
       </div>
 
@@ -76,16 +80,18 @@ export function EngineFocus() {
           <span className="vg-label">Your focus</span>
           <span className="vg-asof">As of July 31, 2026</span>
         </div>
-        <div className="vg-app-embed" role="img" aria-label={EMBED_LABEL} inert>
-          {/* One card, not two: the mount is ~245px wide on a phone, where an
-              insight body runs to five lines — one real card is already 330px
-              tall, and it carries the whole idea (a verdict, the facts behind
-              it, and the article that fixes it). The count below says it is a
-              ranked list. */}
-          <InsightCardView
-            insight={FOCUS_INSIGHTS_LEAD[0]}
-            articleRefs={FOCUS_ARTICLE_REFS}
-          />
+        <div className="vg-app-embed" role="img" aria-label={EMBED_LABEL}>
+          <div inert>
+            {/* One card, not two: the mount is ~245px wide on a phone, where an
+                insight body runs to five lines — one real card is already 330px
+                tall, and it carries the whole idea (a verdict, the facts behind
+                it, and the article that fixes it). The count below says it is a
+                ranked list. */}
+            <InsightCardView
+              insight={FOCUS_INSIGHTS_LEAD[0]}
+              articleRefs={FOCUS_ARTICLE_REFS}
+            />
+          </div>
         </div>
         {/* what the panel's own header says about the rest of the list, in the
             marketing voice, because the card arrives without it */}

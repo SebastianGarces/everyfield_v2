@@ -35,7 +35,7 @@ const EMBED_LABEL =
 
 export function DocCardOverlay() {
   return (
-    <div className="vg-doccard">
+    <div className="vg-fs-overlay vg-fs-doc">
       <div className="vg-app-embed" role="img" aria-label={EMBED_LABEL}>
         <div inert>
           <TemplateCardView template={COMMITMENT_CARD} />
