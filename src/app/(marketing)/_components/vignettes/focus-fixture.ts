@@ -14,7 +14,8 @@
 // below.
 //
 // Every rendered string is verbatim: titles, bodies, cited-fact syntax, article
-// titles, ranks, severities, the generated-at date. Only the inert identifiers
+// titles, ranks, severities, the generated-at date. (One exception, by ruling:
+// the what-changed delta is hand-authored — see FOCUS_DELTA.) Only the inert identifiers
 // were scrubbed — but note these ones are NOT purely inert: the insight card
 // builds a DOM id from `insight.id` (`insight-improve-<id>`, tying its "How to
 // improve" list to its label), so the scrubbed ids must stay unique and
@@ -42,13 +43,43 @@ const CHURCH_ID = "fixture-focus-church";
 const GENERATED_AT = new Date("2026-07-31T06:29:22.536Z");
 const CREATED_AT = new Date("2026-07-31T06:29:32.033Z");
 
-/** The stored what-changed delta (PE-016). This assessment is the plant's
- *  first, so the panel renders its first-assessment line rather than chips —
- *  which is what the product shows for this row, and therefore what this page
- *  shows. */
+/** The stored what-changed delta (PE-016). The source assessment was the
+ *  plant's first, so the panel rendered its "nothing to compare against yet"
+ *  line — the one sentence in this embed that was app boilerplate rather than
+ *  this plant's story. Ruled 2026-08-05 (PR #299 decision 7): the fixture
+ *  carries a hand-authored prior month instead, so the panel renders its real
+ *  what-changed chips. Every `current` value below is a fact the insights
+ *  already cite (28 latest attendance, 7 of 8 roles, 65 training
+ *  completions), so the chips and the cards under them tell one story; the
+ *  fields and their order are exactly what `computeSnapshotDelta` tracks. */
 export const FOCUS_DELTA = {
-  changed: [],
-  isFirstAssessment: true,
+  isFirstAssessment: false,
+  changed: [
+    {
+      path: "visionMeetings.totalCompleted",
+      previous: 3,
+      current: 4,
+      delta: 1,
+    },
+    {
+      path: "visionMeetings.latestAttendance",
+      previous: 24,
+      current: 28,
+      delta: 4,
+    },
+    {
+      path: "ministryRoles.filledCount",
+      previous: 6,
+      current: 7,
+      delta: 1,
+    },
+    {
+      path: "training.completionCount",
+      previous: 52,
+      current: 65,
+      delta: 13,
+    },
+  ],
 } satisfies SnapshotDelta;
 
 export const FOCUS_ASSESSMENT = {

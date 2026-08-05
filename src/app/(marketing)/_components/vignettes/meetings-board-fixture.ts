@@ -30,9 +30,11 @@
 // over are the fourth of each.
 //
 // One deliberate exception to "the first three": the fourth upcoming row is
-// "Launch Sunday" on 2026-08-28, and in this seed data 2026-08-28 is a FRIDAY.
-// That is a fact about the demo database, not about the product, and it is not
-// going on a public page — which is a second reason the board stops at three.
+// "Launch Sunday", which the seed dates 2026-08-28 — a FRIDAY. That is a fact
+// about the demo database, not about the product, and it is not going on a
+// public page — which is a second reason the board stops at three. (The
+// launch-sunday panel renders that meeting from launch-sunday-fixture.ts,
+// where the date is hand-moved to Sunday 2026-08-30 by the 2026-08-05 ruling.)
 //
 // Vision Night #5 comes in with `locationName: null`, so its card renders the
 // app's "No location set" fallback. That stays: it is what the product shows
