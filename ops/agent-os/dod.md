@@ -1,9 +1,10 @@
 # Definition of Done (DoD)
 
-This is the **single source of truth** for when a unit of work is allowed to become a PR.
-Every skill and workflow in the Agent Delivery OS cites this file. A unit is **DONE** only when
-**every applicable gate passes with captured evidence**. No PASS → no PR. The loop
-(`build-until-done`) keeps iterating until DONE or a circuit breaker trips.
+This is the **single source of truth** for when work is allowed to become a PR.
+Every skill and workflow in the Agent Delivery OS cites this file. A track is **DONE** only when
+**every applicable gate passes with captured evidence** — some of those gates scoped to a single
+workstream, the rest run once over the integrated track (see *Scoped vs integration* below). No PASS
+→ no PR. The loop (`build-until-done`) keeps iterating until DONE or a circuit breaker trips.
 
 The evidence collected here becomes the **"Definition of Done ✅"** section of the PR body, so a
 human reviewer can confirm each claim without re-running anything.
@@ -41,9 +42,53 @@ verdict. `open-pr` waits for it, and the loop treats *green DoD + red check* as 
 
 ---
 
+## Scoped vs integration — which gates run where
+
+A track is no longer one agent's worth of work. It is a set of **stages** — topological levels over
+`dependsOn` — and each stage holds one or more **workstreams**, a workstream being the units in that
+stage which share a declared file and therefore need one agent working sequentially. File-disjoint
+workstreams in the same stage run in parallel, each in its own worktree branched from the **track
+branch HEAD**, and merge back before the next stage starts. Still one branch, one PR — but a PR that
+may close several issues.
+
+So the gates split by what they can actually see:
+
+| Scope | Gates | Where it runs |
+|---|---|---|
+| **Per workstream** | G0, G2-subset, G5 | that workstream's own worktree, in parallel with its siblings |
+| **Integration** | G1, G2 (full), G3, G4, G6 (+ HR1–HR4) | once, on the track branch, after the last stage merges |
+
+**The split falls on what is scopable, not on what is convenient.** G0 is about *this* workstream's
+ACs, G5 is a diff against *this* workstream's declared files, and a test subset covering its changed
+files means something on its own. G1 and G3 are neither scopable nor cheap: `pnpm build` is repo-wide
+by construction, and G3 is tied to a **Vercel preview deployment created by the push**, so it is
+one-per-branch (G3 below already says this — it is why a frontend track opens its PR before it can
+validate). Running N builds and N preview cycles on one branch proves nothing that one of each does
+not. Amortising a single G1 + G3 + CI cycle across every workstream in the track is the entire
+throughput argument for staging.
+
+**Aggregation is fail-closed, exactly like HR4.** Any workstream verifier reporting FAIL blocks the
+track, and a workstream verifier that **died counts as a NO** — missing evidence is a FAIL everywhere
+else in this document, and a dead verifier is missing evidence.
+
+Two consequences for the gates as written below:
+
+- **G0's blocker rule is about blockers *outside* the track.** A track is a connected component over
+  `dependsOn`, so a stage-1 unit is by construction blocked by a stage-0 unit in the same track —
+  whose issue stays open until the track's single PR merges. Inside a track that edge is satisfied by
+  **its stage having landed on the track branch**, not by the issue closing. Against anything outside
+  the track `blocked_by == 0` still holds in full; that is what the frontier query filters on, and
+  building past one of those is still how a merge conflict becomes a design conflict.
+- **G5's baseline is the workstream's branch point**, which is the track branch HEAD it was cut from,
+  not `origin/main`. Using `origin/main` would report every earlier stage's files as deviations.
+
+---
+
 ## Gates
 
 ### G0 — Spec mapped
+*Scope: per workstream — its own ACs, not the track's.*
+
 - Every acceptance criterion (AC) on the source GitHub Issue has a declared **verification method**
   (which gate proves it, and how).
 - No AC is left unverifiable ("looks good" is not a method).
@@ -57,6 +102,8 @@ verdict. `open-pr` waits for it, and the loop treats *green DoD + red check* as 
 - **Evidence:** AC → method table, plus the parent issue and blocker count.
 
 ### G1 — Static checks
+*Scope: integration — once, on the track branch. The build is repo-wide; there is no scoped version.*
+
 - `pnpm typecheck` → clean (0 errors).
 - `pnpm lint` → clean (0 errors; warnings noted).
 - `pnpm format:check` → clean.
@@ -70,6 +117,9 @@ verdict. `open-pr` waits for it, and the loop treats *green DoD + red check* as 
   Running these locally is how you avoid a red check; it is not what proves the gate.
 
 ### G2 — Tests
+*Scope: both. A workstream runs the **subset covering its changed files**; the full suite is an
+integration gate. A green subset is not a green suite and may never be reported as one.*
+
 - `pnpm test` → green.
 - New/changed logic has tests (happy path + at least one failure/edge path).
 - No `.only`, no `.skip`, no commented-out tests.
@@ -80,7 +130,11 @@ verdict. `open-pr` waits for it, and the loop treats *green DoD + red check* as 
 - **Evidence:** test summary (counts) + exit code.
 
 ### G3 — Functional validation (the proof — MCP-driven)
-The unit must be demonstrated **working against the running app**, not just compiling.
+*Scope: integration — once, on the track branch. The preview deployment is created by the push, so
+this gate is one-per-branch whether the track holds one workstream or eight.*
+
+The track must be demonstrated **working against the running app**, not just compiling — every AC
+from every workstream in it, on the integrated branch.
 
 **Frontend / fullstack units** → run the `validate-frontend` skill:
 - Drive the branch's **Vercel preview deployment**, not `localhost:3000`. Localhost serves the
@@ -107,6 +161,8 @@ The unit must be demonstrated **working against the running app**, not just comp
 - **Evidence:** request/response transcript, migration output.
 
 ### G4 — Conventions & invariants
+*Scope: integration — once, over the track's whole diff.*
+
 - `cursor-pointer` on every clickable (per `AGENTS.md`).
 - New shadcn components added via `pnpm dlx shadcn@latest add` (never hand-written).
 - Migrations via `pnpm db:migrate` — **never** `db:push`.
@@ -117,19 +173,32 @@ The unit must be demonstrated **working against the running app**, not just comp
 - **Evidence:** checklist with the specific lines/files touched.
 
 ### G5 — Diff hygiene
-- Changes confined to the unit's declared files; any deviation is named and justified.
+*Scope: per workstream — against **that workstream's** declared file set, not the track's union.
+A track-wide G5 would pass a workstream that wandered into a sibling's files, which is precisely the
+collision staging exists to prevent.*
+
+- Changes confined to the workstream's declared files; any deviation is named and justified.
 - Conventional commit messages.
 - No debug logs, no commented dead code, no secrets/keys, no `.env` edits.
 - **Compute the file list, do not recall it.** Run it and compare against the declared set:
   ```bash
   git diff --name-only $(git merge-base origin/main HEAD)...HEAD
   ```
-  Anything in that output and not in the unit's declared files is a deviation, whether or not it
-  felt significant while writing it. "I stayed in scope" is a memory; this command is a fact.
+  In a workstream worktree the baseline is the **track branch HEAD it was cut from**, not
+  `origin/main` — otherwise every earlier stage's files read as deviations of yours:
+  ```bash
+  git diff --name-only $(git merge-base <track-branch> HEAD)...HEAD
+  ```
+  Anything in that output and not in the workstream's declared files is a deviation, whether or not
+  it felt significant while writing it. "I stayed in scope" is a memory; this command is a fact.
 - **Evidence:** the raw command output, plus `git diff --stat` and a one-line deviation note
   (or "none").
 
 ### G6 — Independent sign-off
+*Scope: integration — one reviewer for the track, reading the scoped reports plus the integrated diff.
+It is also the gate that catches what no workstream could see: two file-disjoint workstreams that are
+individually correct and jointly wrong.*
+
 - A **separate** `code-reviewer` agent (NOT the implementer) confirms G1–G5 **from the evidence,
   adversarially** — default to reject when a gate's evidence is missing or unconvincing.
 - Verdict ∈ `PASS` | `PASS_WITH_WARNINGS` | `FAIL`. Only `PASS` / `PASS_WITH_WARNINGS` may open a PR.
@@ -174,11 +243,24 @@ checkpoint), but they must additionally satisfy:
 ## Verdict
 
 ```
-DONE  = G0..G6 all PASS  (+ HR1..HR4 if high-risk)
-        → open PR, attach evidence, label issue `agent:in-review`
-NOT DONE
-        → feed failing gate + evidence back to the implementer, retry (attempt++)
+WORKSTREAM DONE = G0 + G2-subset + G5 all PASS, in its own worktree
+        (a verifier that died counts as a NO — it is not DONE)
+  NOT DONE
+        → feed the failing gate + evidence back to THAT workstream, retry (its attempt++)
+  EXHAUSTED (its MAX_ATTEMPTS, default 3)
+        → the track cannot integrate; block as below
+
+TRACK DONE = every workstream DONE  AND  G1 + G2 (full) + G3 + G4 + G6 PASS
+             (+ HR1..HR4 if high-risk)
+        → open PR, attach evidence, label every issue the track closes `agent:in-review`
+  NOT DONE
+        → an integration failure that NAMES a workstream goes back to that workstream and
+          consumes ITS attempt; an unattributable one consumes a track-level integration attempt
 EXHAUSTED (max attempts or token reserve hit)
         → DO NOT open a PR; label issue `agent:blocked`, comment the failing gate + evidence,
           alert the human. Never stop silently.
 ```
+
+**A workstream that passed is never re-implemented.** Attempt accounting is per workstream precisely
+because the flat `G0..G6` verdict this replaced re-ran the entire track over one failing AC and burned
+an attempt for every healthy unit in it.

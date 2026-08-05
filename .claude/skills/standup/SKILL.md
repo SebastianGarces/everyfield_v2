@@ -14,12 +14,15 @@ work.
 
 1. **Board** — issues by status label:
    ```bash
-   gh issue list --label agent:in-progress --state open --json number,title,labels,updatedAt
-   gh issue list --label agent:queued      --state open --json number,title,labels
-   gh issue list --label agent:blocked     --state open --json number,title,labels,updatedAt
-   gh issue list --label agent:in-review    --state open --json number,title
-   gh issue list --label agent:delivery-failed --state open --json number,title,labels,updatedAt
+   gh issue list --limit 200 --label agent:in-progress --state open --json number,title,labels,updatedAt
+   gh issue list --limit 200 --label agent:queued      --state open --json number,title,labels
+   gh issue list --limit 200 --label agent:blocked     --state open --json number,title,labels,updatedAt
+   gh issue list --limit 200 --label agent:in-review    --state open --json number,title
+   gh issue list --limit 200 --label agent:delivery-failed --state open --json number,title,labels,updatedAt
    ```
+   **`--limit 200` on every `gh issue list`/`gh pr list` is mandatory.** The default is 30 and gh
+   truncates SILENTLY — the 2026-08-05 standup reported a 30-issue queue that was actually 86. If any
+   list returns exactly 200, raise the limit; a truncated board is worse than no board.
    Report `agent:delivery-failed` **separately from** `agent:blocked`, and say what it means: those
    passed the DoD and only the push/PR step failed, so the action is to retry the delivery, not to
    review the code. Folding them together is how a finished build gets re-litigated.
@@ -28,14 +31,14 @@ work.
    misleads:
    ```bash
    R={owner}/{repo}
-   gh issue list --state open --label agent:queued --json number --jq '.[].number' | while read n; do
+   gh issue list --limit 200 --state open --label agent:queued --json number --jq '.[].number' | while read n; do
      b=$(gh api repos/$R/issues/$n --jq '.issue_dependencies_summary.blocked_by')
      [ "$b" = "0" ] && echo "frontier $n" || echo "blocked-by-dep $n ($b open)"
    done
    ```
 1c. **Feature progress** — the roll-up that replaced the checklist files:
    ```bash
-   gh issue list --label feature --state open --json number,title
+   gh issue list --limit 200 --label feature --state open --json number,title
    gh api repos/$R/issues/<parent> --jq '.sub_issues_summary'   # {completed, total, percent_completed}
    ```
    Also surface open `decision` issues. They gate builds, they never close by a PR, and they are the
@@ -56,7 +59,7 @@ work.
    multiple-choice ruling.
 2. **Your review queue** — open PRs the factory has produced:
    ```bash
-   gh pr list --state open --json number,title,headRefName,labels,isDraft,createdAt
+   gh pr list --limit 200 --state open --json number,title,headRefName,labels,isDraft,createdAt
    ```
    Flag `risk:high` PRs first.
 3. **Running loops** — check live background work in this session:
