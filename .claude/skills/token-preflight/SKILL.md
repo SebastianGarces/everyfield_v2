@@ -32,9 +32,21 @@ Per track, one full build-until-done pass ≈ implement + validate + ~1 retry:
 | small (1–2 files, low risk)     | ~120k |
 | medium (3–6 files)              | ~250k |
 | large / high-risk (2 verifiers) | ~450k |
+| cluster (multi-workstream track) | ~450k + ~120k per workstream beyond the first |
 
-`waveEstimate = Σ trackEstimate`. Keep a **reserve** so the loop never strands a track mid-PR
-(default reserve = the single largest track's estimate).
+*(This table is deliberately identical to the one in `dispatch/SKILL.md` gate 5. If you change one,
+change both — two tables that disagree are worse than one table in the wrong place.)*
+
+A **cluster** is what a track usually is now: stages of parallel workstreams on one branch. Its
+integration gates (G1 hermetic build, G2 full suite, G3 preview, G4, G6) are paid once no matter how
+many workstreams it holds — that is why the marginal workstream costs roughly a small track and not a
+large one.
+
+`waveEstimate = Σ trackEstimate`. Keep a **reserve** so the loop never strands work mid-flight —
+**default reserve = the single largest *workstream's* estimate**, not the largest track's. A track
+can stop cleanly between stages with its completed stages already merged into the track branch; a
+workstream cut off mid-implementation cannot. The corollary is a hard rule: **a stage does not start
+unless the remaining budget covers all of its concurrent workstreams.**
 
 ## Decision
 
@@ -65,7 +77,8 @@ else:
 
 ## Rules
 
-- **Reserve is sacred.** Never spend into the reserve; that's what guarantees a started track can finish.
+- **Reserve is sacred.** Never spend into the reserve; that's what guarantees a started **workstream**
+  can finish, and a track that runs out between stages stops on a branch that still integrates.
 - **Prefer SPLIT over a risky RUN.** Shipping fewer, finished tracks beats starting all and stranding some.
 - **Surface the number.** Always tell the user the estimate vs remaining so the run/split/defer call is legible.
 - Re-preflight before each *subsequent* wave (budget is shared and depletes as work runs).

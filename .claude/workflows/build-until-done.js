@@ -1,18 +1,19 @@
 export const meta = {
   name: "build-until-done",
   description:
-    "The loop. Per file-disjoint track: implement → validate against the Definition of Done (independent verifier + MCP) → feed failures back and retry → on PASS open a PR with the evidence bundle. On exhaustion (max attempts / token reserve) label the issue agent:blocked and alert — never a silent stop, never a PR that isn't proven done.",
+    "The loop. Per track: a prerequisite stage, then parallel workstreams in their own worktrees off the track branch, merged back stage by stage. Each workstream passes its own scoped gates; the assembled branch passes ONE integration DoD (independent verifier + MCP) → on PASS open a PR with the evidence bundle. On exhaustion (max attempts / token reserve) label the issue agent:blocked and alert — never a silent stop, never a PR that isn't proven done.",
   whenToUse:
-    "After spec-intake + token-preflight, to actually build a wave of tracks autonomously to PR. Pass args = the wave's units array (each: {id,title,lane,files,summary,acceptanceCriteria,issue,risk}), optionally {units, base, maxAttempts}.",
+    "After spec-intake + token-preflight, to actually build a wave of tracks autonomously to PR. Pass args = the wave's units array (each: {id,title,lane,files,summary,acceptanceCriteria,issue,risk,dependsOn}), optionally {units, base, maxAttempts, maxConcurrentAgents}.",
   phases: [
     {
       title: "Build",
-      detail: "implementer codes the track in an isolated worktree",
+      detail:
+        "stage by stage: one agent per workstream in its own worktree cut from the track branch, merged back before the next stage starts",
     },
     {
       title: "Verify",
       detail:
-        "independent code-reviewer runs the DoD gates incl. MCP G3; high-risk adds three diverse lenses (correctness / security / reproducibility), every one of which must clear",
+        "scoped gates per workstream (G0 / G2-subset / G5), then ONE integration DoD on the assembled branch incl. MCP G3; high-risk adds three diverse lenses (correctness / security / reproducibility), every one of which must clear",
     },
     {
       title: "Ship",
@@ -42,7 +43,16 @@ const LABEL_ATTEMPTS = parsed?.labelAttempts || 3;
 const AUTO_MERGE = parsed?.autoMerge === true;
 const BASE = parsed?.base || "the repository's current branch (HEAD)";
 // Stop starting a NEW attempt if we can't safely finish one. Tunable per run.
+//
+// This is now a PER-WORKSTREAM reserve, not a per-track one. A stage that runs
+// four workstreams in parallel needs four times this before it may start, which
+// is the whole point: the old flat number was sized for a track that was always
+// one agent, and it would happily start a stage it could not finish.
 const RESERVE = parsed?.reserve || 150_000;
+// The cap is on AGENTS, not tracks. One track can now hold eight workstreams, so
+// "3 tracks" stopped saying anything about load. Concurrency bounds cost; the
+// review queue (dispatch gate 1) bounds output. Neither substitutes for the other.
+const MAX_CONCURRENT_AGENTS = parsed?.maxConcurrentAgents || 6;
 
 const CONVENTIONS = `Read AGENTS.md and CLAUDE.md, then memory/entrypoints.md, memory/invariants.md, and relevant memory/contracts/*.md before opening source files. Hard rules: pnpm; Drizzle migrations via db:generate+db:migrate (NEVER db:push); shadcn via pnpm dlx shadcn@latest add; cursor-pointer on clickables; never start a dev server (the human keeps localhost:3000 running).`;
 
@@ -128,6 +138,11 @@ const DOD_SCHEMA = {
       },
     },
     failingGate: { type: "string" },
+    failingWorkstream: {
+      type: "string",
+      description:
+        "the workstream id a failure belongs to, when it belongs to exactly one. Empty for failures of the assembly itself — misattributing one of those sends the fix to an agent that cannot see the other half.",
+    },
     fixInstructions: { type: "string" },
     summary: { type: "string" },
   },
@@ -142,8 +157,128 @@ const MERGE_SCHEMA = {
       enum: ["merged", "queued-for-auto-merge", "refused", "failed"],
       description: "what GitHub actually reported — not what was attempted",
     },
-    followUpIssues: { type: "array", items: { type: "integer" } },
     detail: { type: "string" },
+  },
+};
+
+// ---------------------------------------------------------------------------
+// The SCOPED verdict — one workstream, not one track.
+//
+// Only the gates that can honestly be scoped to a subset of the branch live
+// here: G0 (this workstream's own ACs), G2-subset (the tests covering its files)
+// and G5 (its diff against ITS declared files). G1 and G3 are deliberately
+// absent — the build is repo-wide and G3 needs a preview deployment that only
+// exists per branch, so running either per workstream would buy nothing and cost
+// N times. They run once, at integration.
+// ---------------------------------------------------------------------------
+const SCOPED_DOD_SCHEMA = {
+  type: "object",
+  required: ["verdict", "gates", "acceptanceCriteria", "summary"],
+  properties: {
+    verdict: { type: "string", enum: ["PASS", "PASS_WITH_WARNINGS", "FAIL"] },
+    gates: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["id", "status", "evidence"],
+        properties: {
+          id: { type: "string", description: "G0 | G2-subset | G5" },
+          status: { type: "string", enum: ["PASS", "FAIL", "SKIPPED"] },
+          evidence: { type: "string" },
+        },
+      },
+    },
+    acceptanceCriteria: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["ac", "status", "evidence"],
+        properties: {
+          ac: { type: "string" },
+          status: { type: "string", enum: ["PASS", "FAIL"] },
+          evidence: { type: "string" },
+        },
+      },
+    },
+    failingGate: { type: "string" },
+    fixInstructions: { type: "string" },
+    summary: { type: "string" },
+  },
+};
+
+// Merging a stage's parallel workstream branches back onto the track branch.
+// This is the one place the loop can hit a real conflict, because two agents
+// wrote in separate worktrees; `resolving-merge-conflicts` exists for exactly
+// this and is now called from inside the loop rather than by a human.
+const INTEGRATE_SCHEMA = {
+  type: "object",
+  required: ["merged", "conflicts"],
+  properties: {
+    merged: {
+      type: "array",
+      items: { type: "string" },
+      description: "workstream branches actually merged into the track branch",
+    },
+    conflicts: {
+      type: "array",
+      items: { type: "string" },
+      description: "branches that could NOT be merged cleanly, with the reason",
+    },
+    detail: { type: "string" },
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Folding code-quality warnings into a per-parent rollup (RULED 2026-08-05).
+//
+// The old path filed one `agent:queued` issue per warning, and 12 of an 86-issue
+// backlog arrived that way: a contrast ratio, a docblock, a stale line in a
+// memory contract — each then demanding a branch, a hermetic build, a full test
+// suite, a preview deploy, a CI wait and a human-facing PR. One of them (#231)
+// was the loop filing an issue about its own G0 violation.
+//
+// What must NOT be lost in the change: the warnings still land BEFORE the merge,
+// so a merge cannot swallow them. An append mutates an existing body, which is
+// precisely the operation that failed silently on 2026-07-26 — so, exactly like
+// settleLabels, the agent reports what `gh issue view --json body` PRINTED and
+// the loop asserts it.
+// ---------------------------------------------------------------------------
+const FOLLOWUP_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["followUps"],
+  properties: {
+    followUps: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["issue", "kind", "anchor", "confirmed"],
+        properties: {
+          issue: {
+            type: "integer",
+            description: "the rollup issue the AC was appended to",
+          },
+          kind: { type: "string", enum: ["appended", "created"] },
+          anchor: {
+            type: "string",
+            description:
+              "the exact AC line written, so the loop can find it in the read-back",
+          },
+          confirmed: {
+            type: "boolean",
+            description:
+              "true ONLY if you saw this line in the body `gh issue view` printed AFTER the write",
+          },
+        },
+      },
+    },
+    rollupLabels: {
+      type: "array",
+      items: { type: "string" },
+      description: "labels the rollup carries after the write",
+    },
+    note: { type: "string" },
   },
 };
 const PR_SCHEMA = {
@@ -284,8 +419,23 @@ const HIGH_RISK_LENSES = [
 ];
 
 // ---------------------------------------------------------------------------
-// Defensive regroup: merge any units that share a file into ONE track/branch
-// so parallel worktrees can never collide. (Same DSU as frd-implement.)
+// Grouping, in two layers that used to be one.
+//
+// A TRACK is a connected component over (shared file ∪ dependsOn): everything
+// that must live on one branch because it either touches the same file or needs
+// the other's code to exist. One track is still one branch, one worktree, one PR.
+//
+// Inside a track, STAGES are the topological levels of dependsOn, and inside a
+// stage the file-overlap DSU runs again — but only over that stage's units. That
+// is the change: overlap WITHIN a stage forces one agent (there is no safe way to
+// let two agents write one file concurrently), while overlap ACROSS stages is
+// free, because stages are sequential and the later one starts from the earlier
+// one's commit.
+//
+// The old code unioned by file across the whole track, which is why a track could
+// only ever be one agent. `dependsOn` used to be discarded before it got here
+// (frd-plan dropped same-track edges); it now survives, and it is what makes a
+// prerequisite-then-fan-out shape expressible at all.
 // ---------------------------------------------------------------------------
 const normFile = (f) =>
   String(f)
@@ -310,34 +460,122 @@ function makeDSU(ids) {
   };
   return { find, union };
 }
-const ids = units.map((u) => u.id);
-const dsu = makeDSU(ids);
-const owners = new Map();
-for (const u of units)
-  for (const raw of u.files || []) {
-    const f = normFile(raw);
-    if (!owners.has(f)) owners.set(f, []);
-    owners.get(f).push(u.id);
+
+/** Group `us` into file-disjoint clusters. Shared file => same cluster. */
+function clusterByFile(us) {
+  const dsu = makeDSU(us.map((u) => u.id));
+  const owners = new Map();
+  for (const u of us)
+    for (const raw of u.files || []) {
+      const f = normFile(raw);
+      if (!owners.has(f)) owners.set(f, []);
+      owners.get(f).push(u.id);
+    }
+  for (const [, o] of owners)
+    if (o.length > 1) for (let i = 1; i < o.length; i++) dsu.union(o[0], o[i]);
+  const groups = new Map();
+  for (const u of us) {
+    const r = dsu.find(u.id);
+    if (!groups.has(r)) groups.set(r, []);
+    groups.get(r).push(u);
   }
-for (const [, o] of owners)
-  if (o.length > 1) for (let i = 1; i < o.length; i++) dsu.union(o[0], o[i]);
-const groups = new Map();
-for (const u of units) {
-  const r = dsu.find(u.id);
-  if (!groups.has(r)) groups.set(r, []);
-  groups.get(r).push(u);
+  return [...groups.values()];
 }
-const tracks = [...groups.values()].map((us) => ({
-  id: us[0].id,
+
+const summarise = (us, extra = {}) => ({
   units: us,
   issues: [...new Set(us.map((u) => u.issue).filter((x) => x != null))],
+  files: [...new Set(us.flatMap((u) => (u.files || []).map(normFile)))],
   risk: us.some((u) => u.risk === "high") ? "high" : us[0].risk || "low",
   lane:
     [...new Set(us.map((u) => u.lane))].length === 1 ? us[0].lane : "fullstack",
-}));
-log(
-  `${units.length} unit(s) → ${tracks.length} track(s); max ${MAX_ATTEMPTS} attempt(s) each.`
+  ...extra,
+});
+
+// Layer 1: tracks — connected components over shared file AND dependsOn.
+const trackDsu = makeDSU(units.map((u) => u.id));
+const byUnitId = new Map(units.map((u) => [u.id, u]));
+{
+  const owners = new Map();
+  for (const u of units)
+    for (const raw of u.files || []) {
+      const f = normFile(raw);
+      if (!owners.has(f)) owners.set(f, []);
+      owners.get(f).push(u.id);
+    }
+  for (const [, o] of owners)
+    if (o.length > 1)
+      for (let i = 1; i < o.length; i++) trackDsu.union(o[0], o[i]);
+  for (const u of units)
+    for (const d of u.dependsOn || [])
+      if (byUnitId.has(d)) trackDsu.union(u.id, d);
+}
+const trackGroups = new Map();
+for (const u of units) {
+  const r = trackDsu.find(u.id);
+  if (!trackGroups.has(r)) trackGroups.set(r, []);
+  trackGroups.get(r).push(u);
+}
+
+/**
+ * Layer 2: stages within one track, then workstreams within one stage.
+ *
+ * A cycle here would deadlock the track forever, exactly as a cycle on the board
+ * would deadlock the frontier — so it throws at plan time rather than hanging.
+ */
+function planStages(trackUnits, trackId) {
+  const ids = new Set(trackUnits.map((u) => u.id));
+  const depsOf = (u) => (u.dependsOn || []).filter((d) => ids.has(d));
+  const level = new Map();
+  const visiting = new Set();
+  const depth = (id) => {
+    if (level.has(id)) return level.get(id);
+    if (visiting.has(id))
+      throw new Error(
+        `dependsOn cycle inside track "${trackId}" at unit "${id}". ` +
+          `A cycle can never reach a stage — fix the decomposition.`
+      );
+    visiting.add(id);
+    let d = 0;
+    for (const p of depsOf(byUnitId.get(id))) d = Math.max(d, 1 + depth(p));
+    visiting.delete(id);
+    level.set(id, d);
+    return d;
+  };
+  for (const u of trackUnits) depth(u.id);
+
+  const maxLevel = Math.max(...trackUnits.map((u) => level.get(u.id)));
+  const stages = [];
+  for (let l = 0; l <= maxLevel; l++) {
+    const inLevel = trackUnits.filter((u) => level.get(u.id) === l);
+    if (!inLevel.length) continue;
+    stages.push(
+      clusterByFile(inLevel).map((us, i) =>
+        summarise(us, { id: `${trackId}-s${stages.length}w${i + 1}` })
+      )
+    );
+  }
+  return stages;
+}
+
+const tracks = [...trackGroups.values()].map((us) => {
+  const id = us[0].id;
+  return summarise(us, { id, stages: planStages(us, id) });
+});
+
+const totalWorkstreams = tracks.reduce(
+  (n, t) => n + t.stages.reduce((m, s) => m + s.length, 0),
+  0
 );
+log(
+  `${units.length} unit(s) → ${tracks.length} track(s), ${totalWorkstreams} workstream(s); ` +
+    `max ${MAX_ATTEMPTS} attempt(s) per workstream; ≤${MAX_CONCURRENT_AGENTS} agents at once.`
+);
+for (const t of tracks)
+  if (t.stages.length > 1 || t.stages[0].length > 1)
+    log(
+      `   ${t.id}: ${t.stages.map((s, i) => `stage ${i} × ${s.length}`).join(" → ")}`
+    );
 
 // Every issue this pass is permitted to touch. Any `agent:in-progress` outside
 // this set means a labelling step overreached — see board-design-2026-07.md §11.
@@ -346,8 +584,8 @@ const PASS_ISSUES = [...new Set(tracks.flatMap((t) => t.issues))];
 // ---------------------------------------------------------------------------
 // Per-track verify-until-done loop
 // ---------------------------------------------------------------------------
-function unitBlocks(track) {
-  return track.units
+function unitBlocks(holder) {
+  return holder.units
     .map(
       (
         u,
@@ -359,6 +597,28 @@ Acceptance criteria:
 ${(u.acceptanceCriteria || []).map((a) => `  - ${a}`).join("\n")}`
     )
     .join("\n\n");
+}
+
+const allCriteria = (holder) =>
+  holder.units
+    .map((u) => (u.acceptanceCriteria || []).map((a) => `  - ${a}`).join("\n"))
+    .join("\n");
+
+const hashes = (issues) => issues.map((n) => `#${n}`).join(", ");
+
+/**
+ * `parallel()` with a ceiling. Runs thunks in chunks of `limit` so a track with
+ * eight workstreams cannot put eight agents in flight at once.
+ *
+ * Chunking rather than a rolling window is deliberate: a stage is a barrier
+ * anyway (nothing in stage N+1 may start before stage N integrates), so the
+ * scheduling this gives up is scheduling the design does not want.
+ */
+async function boundedParallel(thunks, limit = MAX_CONCURRENT_AGENTS) {
+  const out = [];
+  for (let i = 0; i < thunks.length; i += limit)
+    out.push(...(await parallel(thunks.slice(i, i + limit))));
+  return out;
 }
 
 /**
@@ -488,11 +748,333 @@ For EACH issue, post a comment (\`gh issue comment <n>\`) with the failing gate 
   return { track, status: "blocked", reason, lastReport, labelState };
 }
 
+/**
+ * Cut the track's branch and worktree before any workstream runs.
+ *
+ * Deterministic on purpose. Every workstream in every stage branches from the
+ * TRACK branch — that is what makes stage N+1 start from stage N's commits
+ * instead of from `main` — so the track branch has to exist before stage 0, not
+ * as a side effect of whichever agent happened to go first.
+ */
+async function prepareTrack(track, branch, wt) {
+  const ready = await agent(
+    `Prepare an isolated build tree. Run exactly this, and nothing that writes code:
+
+\`git worktree add -b ${branch} ${wt} <HEAD of ${BASE}>\`
+
+If ${wt} already exists, skip the add. Then give it a test env:
+
+\`scripts/worktree-env.sh ${wt}\`
+
+It is idempotent; read its header for what it does and why. A fresh worktree has no \`.env.local\`, so \`pnpm test\` fails every DB suite until you run it — do not improvise your own env file.
+
+Report what \`git -C ${wt} rev-parse --abbrev-ref HEAD\` printed. Return strictly the schema.`,
+    {
+      label: `prep:${track.id}`,
+      phase: "Build",
+      // Two git commands and a script. Cheap is safe here because the next step
+      // fails loudly if the tree is not there — unlike the claim step, this
+      // writes nothing shared.
+      model: "haiku",
+      effort: "low",
+      schema: {
+        type: "object",
+        required: ["ready", "branch"],
+        properties: {
+          ready: { type: "boolean" },
+          branch: { type: "string" },
+          note: { type: "string" },
+        },
+      },
+    }
+  );
+  return ready?.ready === true && ready.branch === branch;
+}
+
+/**
+ * One workstream: implement → SCOPED verify → retry, with its own attempt budget.
+ *
+ * The attempt counter living here rather than on the track is the point. It used
+ * to be per track, so one flaky unit re-ran the entire implementation and burned
+ * all three attempts for every healthy unit beside it.
+ *
+ * `solo` means this workstream is the only one in its stage, so it works directly
+ * in the track worktree on the track branch — no sub-worktree and no merge for
+ * the common case of a stage that is one piece of work.
+ */
+async function runWorkstream(track, ws, { stageIndex, trackBranch, trackWt }) {
+  const solo = ws.solo;
+  const branch = solo ? trackBranch : `feature/${ws.id}`;
+  const wt = solo ? trackWt : `.claude/worktrees/bud-${ws.id}`;
+  const implAgent = ws.lane === "backend" ? "backend" : "frontend";
+  let report = null;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    if (budget.total && budget.remaining() < RESERVE)
+      return {
+        ok: false,
+        ws,
+        branch,
+        report,
+        reason: `token reserve hit before ${ws.id} attempt ${attempt} (remaining ${Math.round(budget.remaining() / 1000)}k < ${Math.round(RESERVE / 1000)}k)`,
+      };
+
+    const setup =
+      attempt > 1
+        ? `The branch ${branch} and worktree ${wt} already exist with your prior work. The scoped verifier REJECTED the last attempt. Fix ONLY what is needed:\nFailing gate: ${report?.failingGate}\nFix instructions: ${report?.fixInstructions}`
+        : solo
+          ? `Work in the existing worktree ${wt}, which is already on branch ${branch} with a test env. Just \`cd\` into it.`
+          : `Create your OWN worktree, branched from the TRACK branch — not from ${BASE}. The track branch already carries every earlier stage's commits, and branching anywhere else silently drops the prerequisite this workstream was ordered after:\n\`git worktree add -b ${branch} ${wt} ${trackBranch}\`\nThen \`scripts/worktree-env.sh ${wt}\` (idempotent; a fresh worktree has no \`.env.local\`, so \`pnpm test\` fails every DB suite until you run it).`;
+
+    const impl = await agent(
+      `You are a ${ws.lane} engineer. ${CONVENTIONS}
+
+${setup}
+
+You own ONE workstream of a larger track. Implement exactly the unit(s) below and NOTHING else — other agents are working other workstreams of this same track in parallel, and every file outside your declared list may be theirs. Touching one is how two worktrees collide at integration.
+
+${unitBlocks(ws)}
+
+Your declared files — stay inside them:
+${ws.files.map((f) => `  - ${f}`).join("\n") || "  (none declared)"}
+
+Write code AND tests. Run \`pnpm typecheck\` and \`pnpm lint\` in ${wt} and fix what you can. Commit to ${branch} (conventional commits). Do NOT push, do NOT open a PR, and do NOT merge anything — the loop integrates the workstreams and ships the track. Return strictly the schema.`,
+      {
+        label: `impl:${ws.id}#${attempt}`,
+        phase: "Build",
+        agentType: implAgent,
+        schema: IMPL_SCHEMA,
+      }
+    );
+    if (!impl) {
+      report = {
+        verdict: "FAIL",
+        failingGate: "implementer",
+        fixInstructions: `the implementer died on attempt ${attempt}`,
+        summary: `${ws.id}: implementer produced no result`,
+      };
+      continue;
+    }
+
+    // Scoped verify: only the gates that can honestly be scoped to a subset of
+    // the branch. G1 and G3 are integration-only by nature — see SCOPED_DOD_SCHEMA.
+    const scoped = await agent(
+      `You are the INDEPENDENT verifier for ONE WORKSTREAM of a larger track. Read \`ops/agent-os/dod.md\` — in particular the scoped-vs-integration split. Validate branch ${branch} in worktree ${wt} for issue(s) ${hashes(ws.issues)}.
+
+Run ONLY these gates. The others (G1 hermetic build, G3 functional/preview, G4, G6, and any HR gates) run ONCE at integration on the whole track branch — running them here would cost N times and prove nothing extra:
+
+- **G0** — every acceptance criterion below has a declared verification method; the issue has a \`feature\` parent; no blocker outside this track is open. A dependency on another unit of THIS track is satisfied by that stage already being committed on the branch you are standing on, not by its issue being closed.
+- **G2-subset** — run the tests that cover this workstream's files (\`pnpm test <paths>\`). If the worktree has no \`.env.local\`, run \`scripts/worktree-env.sh ${wt}\` first and re-run; a missing env is a harness problem, not a test failure, and reporting it as one blames the workstream for the harness.
+- **G5** — diff hygiene against THIS workstream's declared files only. Compute it, do not recall it:
+  \`git diff --name-only $(git merge-base ${trackBranch} HEAD)...HEAD\`
+  Note the base is the TRACK branch, not \`origin/main\`: earlier stages are already on the track branch, and diffing against main would report every one of their files as this workstream's deviation.
+  Declared files: ${ws.files.join(", ") || "(none declared)"}
+
+Acceptance criteria to prove:
+${allCriteria(ws)}
+
+Default to FAIL when evidence is missing or unconvincing. Do NOT fix the code — report, and the implementer fixes. Return strictly the schema.`,
+      {
+        label: `verify:${ws.id}#${attempt}`,
+        phase: "Verify",
+        agentType: "code-reviewer",
+        schema: SCOPED_DOD_SCHEMA,
+      }
+    );
+    report = scoped;
+    if (!scoped) continue;
+    if (scoped.verdict === "FAIL") {
+      log(
+        `❌ ${ws.id} attempt ${attempt}: ${scoped.failingGate || "FAIL"} — retrying`
+      );
+      continue;
+    }
+    return { ok: true, ws, branch, wt, report: scoped, attempts: attempt };
+  }
+
+  return {
+    ok: false,
+    ws,
+    branch,
+    report,
+    reason: `${ws.id} did not pass its scoped gates in ${MAX_ATTEMPTS} attempts`,
+  };
+}
+
+/**
+ * One stage: its workstreams in parallel, then merged back onto the track branch.
+ *
+ * Fail-closed, one level below where the guard used to sit. `parallel()` resolves
+ * a thunk that threw to null, so a workstream whose agent died comes back as a
+ * hole — and a hole inside a stage that otherwise passed would let the track ship
+ * with a piece of itself silently missing. That is the same failure the run-level
+ * fan-in guard exists to catch; it needs to exist here too.
+ */
+async function runStage(track, stage, stageIndex, trackBranch, trackWt) {
+  const solo = stage.length === 1;
+  const need = RESERVE * stage.length;
+  if (budget.total && budget.remaining() < need)
+    return {
+      ok: false,
+      reason: `token reserve hit before stage ${stageIndex}: ${stage.length} workstream(s) need ${Math.round(need / 1000)}k, ${Math.round(budget.remaining() / 1000)}k left`,
+    };
+
+  log(
+    `🔨 ${track.id} stage ${stageIndex}: ${stage.length} workstream(s)${solo ? "" : " in parallel"}`
+  );
+  for (const ws of stage) ws.solo = solo;
+
+  const results = await boundedParallel(
+    stage.map(
+      (ws) => () =>
+        runWorkstream(track, ws, { stageIndex, trackBranch, trackWt })
+    )
+  );
+  const settled = stage.map(
+    (ws, i) =>
+      results[i] ?? {
+        ok: false,
+        ws,
+        died: true,
+        reason: `${ws.id} returned no result (its agent died or the budget threw) — nothing was built for it and nothing said so`,
+      }
+  );
+
+  const failed = settled.filter((r) => !r.ok);
+  if (failed.length)
+    return {
+      ok: false,
+      reason: `stage ${stageIndex} failed: ${failed.map((f) => f.reason).join("; ")}`,
+      report: failed.find((f) => f.report)?.report || null,
+    };
+
+  if (solo) return { ok: true, results: settled };
+
+  // Merge the stage's parallel branches back onto the track branch. This is the
+  // one place in the loop where a real conflict is possible, because two agents
+  // wrote in separate worktrees.
+  const integrated = await agent(
+    `Integrate a stage of parallel work onto its track branch.
+
+In the worktree ${trackWt} (on branch ${trackBranch}), merge each of these branches in the order given:
+${settled.map((r) => `  - ${r.branch}`).join("\n")}
+
+For each: \`git -C ${trackWt} merge --no-ff <branch>\`.
+
+These branches were written concurrently against declared-disjoint file sets, so a clean merge is the expected outcome. If one DOES conflict, the file sets were wrong — use the \`resolving-merge-conflicts\` skill (.claude/skills/resolving-merge-conflicts/SKILL.md) and resolve by intent, tracing each side to what its workstream was asked to do. Never resolve by taking one side wholesale to make the conflict go away.
+
+After every merge, run \`pnpm typecheck\` in ${trackWt}. Two individually-correct workstreams can still contradict each other, and this is the first moment that is visible.
+
+Report which branches merged and which did not. A branch you could not merge cleanly and could not resolve belongs in \`conflicts\`, with the reason — do not report it as merged. Return strictly the schema.`,
+    {
+      label: `integrate:${track.id}#s${stageIndex}`,
+      phase: "Build",
+      agentType: "backend",
+      schema: INTEGRATE_SCHEMA,
+    }
+  );
+
+  const wanted = settled.map((r) => r.branch);
+  const merged = integrated?.merged || [];
+  const missing = wanted.filter((b) => !merged.includes(b));
+  if (missing.length)
+    return {
+      ok: false,
+      reason: `stage ${stageIndex} did not integrate: ${missing.join(", ")} ${integrated?.conflicts?.length ? `(${integrated.conflicts.join("; ")})` : "were never reported merged"}`,
+      report: null,
+    };
+
+  log(
+    `🔗 ${track.id} stage ${stageIndex} integrated ${merged.length} branch(es)`
+  );
+  return { ok: true, results: settled };
+}
+
+/**
+ * Fold code-quality warnings into the parent feature's follow-up rollup, then
+ * READ THE BODY BACK and assert every line landed.
+ *
+ * Same shape as settleLabels, for the same reason: the agent reports what
+ * `gh issue view --json body` printed, the loop compares that against what it
+ * asked for, and an unconfirmed write is an error rather than a footnote. The
+ * pre-merge ordering guarantee is unchanged — only the destination moved from
+ * one-issue-per-warning to one rollup per parent.
+ */
+async function foldFollowUps(track, warnings, pr) {
+  const wanted = warnings.map(
+    (w) =>
+      `- [ ] ${w.summary}${w.files?.length ? ` (${w.files.join(", ")})` : ""}`
+  );
+  let followUps = [];
+
+  for (let attempt = 1; attempt <= LABEL_ATTEMPTS; attempt++) {
+    const reply = await agent(
+      `Record ${warnings.length} code-quality finding(s) from PR ${pr.url} on the parent feature's follow-up rollup. They must be recorded BEFORE the merge, so a merge cannot lose them.
+${
+  attempt > 1
+    ? `\nATTEMPT ${attempt}: a previous attempt did not land. These lines were NOT found in the body afterwards:\n${
+        followUps
+          .filter((f) => !f.confirmed)
+          .map((f) => `  ${f.anchor}`)
+          .join("\n") || "  (nothing was reported at all)"
+      }\nRe-apply those and read the body back again.\n`
+    : ""
+}
+1. **Find the parent.** \`gh issue view ${track.issues[0]} --json parent\`. Platform work with no FRD may have none — in that case use the track's own issue as the anchor and say so in \`note\`.
+
+2. **Find or create the rollup.** One open issue per parent, titled exactly \`Follow-ups — <parent title>\`, labelled \`follow-ups\`. Search before creating: \`gh issue list --state open --label follow-ups --limit 200 --search "<parent title> in:title"\`. If it does not exist, create it with \`--label follow-ups --parent <parent>\` and a body that opens with a \`## Follow-up acceptance criteria\` heading. Do NOT give a new rollup any \`agent:*\` label yet — step 4 decides that.
+
+3. **Append**, under \`## Follow-up acceptance criteria\`, exactly these lines — verbatim, one per line, preserving the leading \`- [ ] \`:
+${wanted.map((l) => `   ${l}`).join("\n")}
+   Then, beneath each, an indented detail line naming ${pr.url} and:
+${warnings.map((w) => `   - ${w.summary} → ${w.detail || "(no detail given)"}`).join("\n")}
+   Append — never replace the body. Read the current body, add to it, write it back with \`gh issue edit <n> --body-file\`. Clobbering someone else's follow-ups to add yours is worse than failing.
+
+4. **Takeability.** Count the \`- [ ]\` items under that heading AFTER your append. If there are **3 or more**, the rollup becomes takeable: \`gh issue edit <n> --add-label agent:queued\`. Below 3 it carries NO \`agent:*\` label and waits — dispatch picks it up with the parent's next track regardless of count.
+
+5. **READ IT BACK.** \`gh issue view <n> --json body --jq .body\` and \`gh issue view <n> --json labels --jq '[.labels[].name]'\`. For each line you appended, set \`confirmed\` true ONLY if you can see that exact line in what the command printed. Report what you saw, not what you intended — the loop compares your report against what it asked for, and a false confirmation is worse than a failed write because it makes lost findings look recorded.
+
+Return strictly the schema.`,
+      {
+        label: `follow-ups:${track.id}#${attempt}`,
+        phase: "Ship",
+        // Same tier as the merge node: this writes durable state that a merge
+        // then makes permanent, and it is the last chance to not lose a finding.
+        model: "opus",
+        effort: "low",
+        schema: FOLLOWUP_SCHEMA,
+      }
+    );
+
+    followUps = reply?.followUps || [];
+    const missing = wanted.filter(
+      (line) =>
+        !followUps.some(
+          (f) => f.confirmed && f.anchor && line.includes(f.anchor.trim())
+        ) && !followUps.some((f) => f.confirmed && f.anchor === line)
+    );
+    if (!missing.length)
+      return { settled: true, followUps, attempts: attempt, missing: [] };
+
+    log(
+      `📝 ${track.id} follow-up fold did not stick on attempt ${attempt}/${LABEL_ATTEMPTS} — ${missing.length} finding(s) unconfirmed`
+    );
+    if (attempt === LABEL_ATTEMPTS)
+      return { settled: false, followUps, attempts: attempt, missing };
+  }
+  return {
+    settled: false,
+    followUps,
+    attempts: LABEL_ATTEMPTS,
+    missing: wanted,
+  };
+}
+
 async function buildTrack(track) {
   const branch = `feature/${track.id}`;
   const wt = `.claude/worktrees/bud-${track.id}`;
-  const implAgent = track.lane === "backend" ? "backend" : "frontend";
   let lastReport = null;
+  let followUps = [];
 
   // Claim this track's issues — and ONLY this track's issues.
   //
@@ -539,63 +1121,77 @@ Return {"claimed": [the numbers you edited], "inProgressNow": [every number that
       );
   }
 
+  // -------------------------------------------------------------------------
+  // Build the track, one stage at a time.
+  //
+  // Stage 0 is the shared prerequisite; later stages fan out. Each stage's
+  // workstreams run in parallel and are merged onto the track branch before the
+  // next stage starts, so a stage always begins from everything that came before
+  // it. A stage that cannot finish blocks the track — it never proceeds to the
+  // next one with a hole in the branch.
+  // -------------------------------------------------------------------------
+  if (!(await prepareTrack(track, branch, wt)))
+    return blockTrack(
+      track,
+      `could not create the track worktree ${wt} on ${branch}`,
+      null
+    );
+
+  const wsOutcomes = [];
+  for (const [stageIndex, stage] of track.stages.entries()) {
+    const stageResult = await runStage(track, stage, stageIndex, branch, wt);
+    if (!stageResult.ok)
+      return blockTrack(track, stageResult.reason, stageResult.report);
+    wsOutcomes.push(...stageResult.results);
+  }
+
+  const byWorkstream = new Map(wsOutcomes.map((r) => [r.ws.id, r]));
+
+  // -------------------------------------------------------------------------
+  // Integration verify — the expensive gates, once, on the assembled branch.
+  //
+  // G1 (hermetic build) is repo-wide and G3 needs a preview deployment that only
+  // exists per branch, so neither can be scoped to a workstream. Running them
+  // here instead of N times is the entire throughput argument for staging.
+  //
+  // A failure that names a workstream is sent back to THAT workstream and spends
+  // ITS attempt. Only an unattributable failure spends a track-level one.
+  // -------------------------------------------------------------------------
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     if (budget.total && budget.remaining() < RESERVE)
       return blockTrack(
         track,
-        `token reserve hit before attempt ${attempt} (remaining ${Math.round(budget.remaining() / 1000)}k < reserve ${Math.round(RESERVE / 1000)}k)`,
+        `token reserve hit before integration attempt ${attempt} (remaining ${Math.round(budget.remaining() / 1000)}k < reserve ${Math.round(RESERVE / 1000)}k)`,
         lastReport
       );
 
-    log(`🔨 ${track.id} — attempt ${attempt}/${MAX_ATTEMPTS}`);
-    const fixBlock =
-      attempt === 1
-        ? `Create the worktree and branch:\n\`git worktree add -b ${branch} ${wt} <HEAD of ${BASE}>\` (skip add if ${wt} already exists; just \`cd\` into it).\nThen give it a test env — \`scripts/worktree-env.sh ${wt}\` (idempotent; read its header for what it does and why). A fresh worktree has no \`.env.local\`, so \`pnpm test\` fails every DB suite until you run it. Do not improvise your own env file.`
-        : `The branch ${branch} and worktree ${wt} already exist with your prior work. The verifier REJECTED the last attempt. Fix ONLY what's needed:\nFailing gate: ${lastReport?.failingGate}\nFix instructions: ${lastReport?.fixInstructions}`;
+    log(`🧪 ${track.id} — integration verify ${attempt}/${MAX_ATTEMPTS}`);
 
-    const impl = await agent(
-      `You are a ${track.lane} engineer. ${CONVENTIONS}
-
-Work inside the git worktree ${wt} on branch ${branch}. ${fixBlock}
-
-Implement the following so it satisfies every acceptance criterion:
-
-${unitBlocks(track)}
-
-Write code AND tests. Run \`pnpm typecheck\` and \`pnpm lint\` in the worktree and fix what you can. Commit to ${branch} (conventional commits). Do NOT push and do NOT open a PR — the loop handles that after validation. Stay within the declared files unless strictly necessary (note deviations). Return strictly the schema.`,
-      {
-        label: `impl:${track.id}#${attempt}`,
-        phase: "Build",
-        agentType: implAgent,
-        schema: IMPL_SCHEMA,
-      }
-    );
-    if (!impl)
-      return blockTrack(
-        track,
-        `implementer died on attempt ${attempt}`,
-        lastReport
-      );
-
-    // Independent verifier (G6): a DIFFERENT agent runs the full DoD.
+    // Independent verifier (G6): a DIFFERENT agent runs the integration gates.
     const verify = await agent(
       `You are the code-reviewer and the INDEPENDENT verifier. Use the \`definition-of-done\` skill and \`ops/agent-os/dod.md\`. Validate branch ${branch} in worktree ${wt} for issue(s) ${track.issues.map((n) => `#${n}`).join(", ")}.
-Run every gate yourself — do not trust the implementer's claims:
-- G1 \`pnpm typecheck && pnpm lint && pnpm build\` in ${wt}
-- G2 \`pnpm test\` — if the worktree has no \`.env.local\`, run \`scripts/worktree-env.sh ${wt}\` first and re-run. A missing env is not a test failure, and reporting it as one blames the track for the harness.
+This track was built in ${track.stages.length} stage(s) by ${wsOutcomes.length} workstream(s), each of which already passed its OWN scoped gates (G0, a G2 subset, and G5 against its own declared files) in its own worktree. Those verdicts are inputs, not conclusions — your job is the whole assembled branch, which no scoped verifier has ever seen:
+
+${wsOutcomes.map((r) => `- **${r.ws.id}** (issue(s) ${hashes(r.ws.issues)}) — ${r.report?.summary || "passed its scoped gates"}`).join("\n")}
+
+Run every INTEGRATION gate yourself — do not trust the implementers, and do not re-run the scoped ones:
+- G1 \`pnpm typecheck && pnpm lint && pnpm build\` in ${wt} (hermetic, the way CI runs it)
+- G2 \`pnpm test\` — the FULL suite, not a subset. Two workstreams that each passed their own tests can still break each other's, and this is the first moment that is visible. If the worktree has no \`.env.local\`, run \`scripts/worktree-env.sh ${wt}\` first and re-run. A missing env is not a test failure, and reporting it as one blames the track for the harness.
 - G3 functional: use \`${track.lane === "backend" ? "validate-backend" : "validate-frontend"}\` and PROVE each acceptance criterion with an assertion + screenshot/transcript; console must be error-free; lighthouse a11y ≥ 90 for UI. Frontend validates against the branch's VERCEL PREVIEW (scripts/preview-url.sh --wait --bypass), never localhost:3000 — localhost serves main and would pass code this track never wrote. Backend prefers a tsx harness in the worktree.
-- G4 conventions, G5 diff hygiene.
-Acceptance criteria to prove:
-${track.units.map((u) => (u.acceptanceCriteria || []).map((a) => `  - ${a}`).join("\n")).join("\n")}
+- G4 conventions, and G5 across the WHOLE track (the union of every workstream's declared files, against \`origin/main\`).
+Acceptance criteria to prove — all of them, across every workstream:
+${allCriteria(track)}
 ${track.risk === "high" ? "This is HIGH-RISK: also run HR1–HR3 (migration dry-run + schema diff + rollback proof)." : ""}
 Default to FAIL when evidence is missing or unconvincing.
+
+**If a failure belongs to one workstream, say which** in \`failingWorkstream\` — one of: ${wsOutcomes.map((r) => r.ws.id).join(", ")}. That sends the fix to that workstream alone and spends only its attempt, instead of re-opening the whole track. Leave it empty when the failure is genuinely of the assembly — a contradiction between two workstreams, a build that only breaks once both are present — because attributing that to one of them sends the fix to an agent that cannot see the other half.
 
 FINALLY — classify every warning you raise, because this decides whether the track merges without a human:
 
 - **spec-question** — answering it could change WHAT was built. A requirement that reads two ways, an AC that did not say, a product judgement, a behaviour that satisfies the letter of the AC while arguably missing its intent. Anything you would want the requirement's owner to rule on.
 - **code-quality** — a defect or improvement in HOW it was built, decidable from the codebase alone: a wrong date format, a contrast ratio, a duplicated constant, dead code, an overclaiming comment.
 
-A **spec-question warning holds the track for a human**; code-quality warnings are filed as follow-up issues and the track merges. So the cost is asymmetric: a code-quality item wrongly marked spec-question wastes a little of the human's attention, while a spec-question wrongly marked code-quality ships a product decision they never made. **When genuinely torn, choose spec-question.**
+A **spec-question warning holds the track for a human**; code-quality warnings are folded into the parent feature's follow-up rollup and the track merges. So the cost is asymmetric: a code-quality item wrongly marked spec-question wastes a little of the human's attention, while a spec-question wrongly marked code-quality ships a product decision they never made. **When genuinely torn, choose spec-question.**
 
 Do not invent warnings to seem thorough, and do not suppress one to get a clean merge. An empty list is a real answer.
 
@@ -613,9 +1209,47 @@ Return strictly the DoD report schema.`,
     const passed =
       verify.verdict === "PASS" || verify.verdict === "PASS_WITH_WARNINGS";
     if (!passed) {
+      // Attributable → send it back to that workstream, which still has its own
+      // attempts and its own worktree. Unattributable → the whole track retries.
+      const owner = byWorkstream.get(verify.failingWorkstream);
+      if (owner) {
+        log(
+          `❌ ${track.id} integration ${attempt}: ${verify.failingGate || "FAIL"} — attributed to ${owner.ws.id}, sending it back`
+        );
+        owner.ws.solo = true; // its branch is the track branch now: the stage merged
+        const redo = await runWorkstream(track, owner.ws, {
+          stageIndex: -1,
+          trackBranch: branch,
+          trackWt: wt,
+        });
+        if (!redo.ok) return blockTrack(track, redo.reason, redo.report);
+        byWorkstream.set(owner.ws.id, redo);
+        continue;
+      }
       log(
-        `❌ ${track.id} attempt ${attempt}: ${verify.failingGate || "FAIL"} — retrying`
+        `❌ ${track.id} integration ${attempt}: ${verify.failingGate || "FAIL"} — not attributable to one workstream, retrying the assembly`
       );
+      const repair = await agent(
+        `The integration verifier REJECTED branch ${branch} (worktree ${wt}) for issue(s) ${hashes(track.issues)}, and the failure could not be attributed to a single workstream — it is a property of the assembled branch.
+
+Failing gate: ${verify.failingGate}
+Fix instructions: ${verify.fixInstructions}
+Summary: ${verify.summary}
+
+Work in ${wt} on ${branch}. Fix ONLY what that requires. You are looking at the whole track, so a fix that spans two workstreams' files is legitimate here — that is exactly the kind of failure this step exists for. Run \`pnpm typecheck\` and \`pnpm lint\`, and commit (conventional commits). Do NOT push and do NOT open a PR. Return strictly the schema.`,
+        {
+          label: `repair:${track.id}#${attempt}`,
+          phase: "Build",
+          agentType: track.lane === "backend" ? "backend" : "frontend",
+          schema: IMPL_SCHEMA,
+        }
+      );
+      if (!repair)
+        return blockTrack(
+          track,
+          `integration repair agent died on attempt ${attempt}`,
+          verify
+        );
       continue;
     }
 
@@ -868,20 +1502,42 @@ Return strictly {"merged": false, "state": "refused", "detail": "<one line>"}.`,
           }
         );
       } else {
+        // Fold the code-quality warnings into the parent's rollup BEFORE the
+        // merge, and confirm they landed. If they cannot be confirmed the track
+        // is errored rather than merged — an unconfirmed append is exactly the
+        // silent no-op that lost two tracks' outcomes on 2026-07-26, and merging
+        // on top of one would discard the warnings for good.
+        if (codeQuality.length) {
+          const fold = await foldFollowUps(track, codeQuality, pr);
+          if (!fold.settled)
+            return {
+              track,
+              status: "errored",
+              reason: `PR ${pr.url} is green, but ${fold.missing.length} code-quality warning(s) could not be confirmed on a follow-up rollup after ${fold.attempts} attempt(s): ${fold.missing.join(" | ")}. NOT merged — merging would lose them.`,
+              pr,
+              report: verify,
+              warnings: verify.warnings || [],
+              attempts: attempt,
+              labelState,
+              followUps: fold.followUps,
+            };
+          followUps = fold.followUps;
+        }
+
         log(`🟢 ${track.id} clean pass — auto-merging`);
         merge = await agent(
           `Auto-merge PR ${pr.url} (issue(s) ${track.issues.map((n) => `#${n}`).join(", ")}). It passed the full DoD and the required check is green, with no spec-question warnings.
 
 1. ${
             codeQuality.length
-              ? `FIRST file each of these as its own follow-up issue with \`gh issue create --label agent:queued\`, parented to the same feature parent as the track's issue (\`gh issue view <n> --json parent\`). Title it as the defect, body = the detail plus a link to ${pr.url}. They must exist BEFORE the merge, so a merge cannot lose them:\n${codeQuality.map((w) => `   - **${w.summary}** — ${w.detail || ""} ${(w.files || []).join(", ")}`).join("\n")}`
-              : `No follow-up issues to file.`
+              ? `The ${codeQuality.length} code-quality warning(s) are ALREADY recorded on the follow-up rollup(s) ${[...new Set(followUps.map((f) => `#${f.issue}`))].join(", ")} and confirmed there. Do NOT file them again as issues.`
+              : `No follow-ups to record.`
           }
 2. Then merge: \`gh pr merge <number> --squash --delete-branch --auto\`.
    \`--auto\` is deliberate: the main ruleset requires branches to be up to date, so if this PR is behind main GitHub will re-run the checks and merge only when they pass green against what it actually lands on. If the merge is refused because the branch is behind and auto-merge is unavailable, run \`gh pr update-branch\` first and then retry with \`--auto\`.
 3. Report what GitHub ACTUALLY did — \`merged\` if it merged now, \`queued-for-auto-merge\` if it is waiting on checks, \`failed\` if it refused. Do NOT report success you did not observe; re-read with \`gh pr view <number> --json state,mergedAt\` before answering.
 
-Return strictly the schema, with followUpIssues listing every issue number you created.`,
+Return strictly the schema.`,
           {
             // Opus: this one mutates main and transcribes GitHub's answer, so
             // it stays at the executor tier — same reasoning as the PR node.
@@ -900,6 +1556,7 @@ Return strictly the schema, with followUpIssues listing every issue number you c
       pr,
       merge,
       warnings: verify.warnings || [],
+      followUps,
       report: verify,
       attempts: attempt,
       labelState,
@@ -908,13 +1565,18 @@ Return strictly the schema, with followUpIssues listing every issue number you c
 
   return blockTrack(
     track,
-    `did not reach DoD in ${MAX_ATTEMPTS} attempts`,
+    `every workstream passed its scoped gates, but the assembled branch did not reach the integration DoD in ${MAX_ATTEMPTS} attempts`,
     lastReport
   );
 }
 
 phase("Build");
-const results = await parallel(tracks.map((t) => () => buildTrack(t)));
+// Bounded here too: a pass of three tracks that each fan out to four workstreams
+// is twelve agents, and the cap is on agents.
+const results = await boundedParallel(
+  tracks.map((t) => () => buildTrack(t)),
+  Math.max(1, Math.min(tracks.length, MAX_CONCURRENT_AGENTS))
+);
 
 // ---------------------------------------------------------------------------
 // Fan-in guard
@@ -988,12 +1650,19 @@ return {
   shipped: shipped.map((r) => ({
     track: r.track.id,
     issues: r.track.issues,
+    workstreams: r.track.stages.reduce((n, s) => n + s.length, 0),
+    stages: r.track.stages.length,
     pr: r.pr?.url,
     attempts: r.attempts,
     merge: r.merge?.state || (AUTO_MERGE ? "held-for-review" : "not-attempted"),
     // Not decoration: "shipped" is only true of the board if this is true.
     labelsConfirmed: r.labelState?.settled === true,
-    followUpIssues: r.merge?.followUpIssues || [],
+    // Where the code-quality warnings went, and whether the write was seen.
+    followUps: (r.followUps || []).map((f) => ({
+      issue: f.issue,
+      kind: f.kind,
+      anchor: f.anchor,
+    })),
     heldBy: (r.warnings || [])
       .filter((w) => w.kind === "spec-question")
       .map((w) => w.summary),
@@ -1030,7 +1699,7 @@ return {
       ? `🚨 FIRST: ${errored.length} track(s) errored because their label could not be confirmed. Their PRs may be open and green while their issues still read agent:in-progress — set the labels by hand before reading anything else on the board, because until then the board is lying about them. `
       : "") +
     (AUTO_MERGE
-      ? "Your queue is ONLY the held PRs — each is held because a warning raises a question about what should have been built, so it needs a ruling rather than a code review. Auto-merged PRs need no action; their code-quality warnings were filed as issues and are back on the frontier."
+      ? "Your queue is ONLY the held PRs — each is held because a warning raises a question about what should have been built, so it needs a ruling rather than a code review. Auto-merged PRs need no action; their code-quality warnings were folded into their parent's follow-up rollup, which becomes takeable at 3 items or with that parent's next track."
       : "Review the opened PRs (your queue).") +
     " For blocked issues, read the issue comment for the failing gate + evidence and decide: tighten the spec, raise budget (+Nk), or take it manually." +
     (deliveryFailed.length
