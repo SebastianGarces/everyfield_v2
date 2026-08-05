@@ -9,7 +9,10 @@
 // Security: `Authorization: Bearer <CRON_SECRET>`. It FAILS CLOSED — an unset
 // secret rejects everything rather than opening the endpoint, because this
 // route sends email to real users and an open one is a spam cannon pointed at
-// the cohort. Same contract as `/api/phase-engine/assess`.
+// the cohort. Same contract as `/api/phase-engine/assess` — literally the same
+// code now: both routes call `matchesBearerSecret`, whose comparison is
+// CONSTANT-TIME (#266). See `src/lib/security/constant-time.ts` for why `===`
+// and a plain length guard are both oracles.
 //
 // It also carries the DAILY oversight activity digest (ruled 2026-08-01). That
 // is not a second job bolted on: the digest needs a once-a-day trigger, this app
@@ -46,6 +49,7 @@ import {
   runDailyOversightDigestSweep,
   type OversightDigestSweepSummary,
 } from "@/lib/notifications/oversight-digest";
+import { matchesBearerSecret } from "@/lib/security/constant-time";
 
 // Claims rows and calls a provider — never cache it, never prerender it.
 export const dynamic = "force-dynamic";
@@ -64,8 +68,9 @@ export function isAuthorized(request: NextRequest): boolean {
   // Fail closed: with no secret configured, nothing is authorised.
   if (!secret) return false;
 
-  const header = request.headers.get("authorization");
-  return header === `Bearer ${secret}`;
+  // Constant-time, and shared with `/api/phase-engine/assess` so the two
+  // consumers of this one secret cannot diverge (#266).
+  return matchesBearerSecret(request.headers.get("authorization"), secret);
 }
 
 export interface DispatchResponseBody extends DispatchRunSummary {
