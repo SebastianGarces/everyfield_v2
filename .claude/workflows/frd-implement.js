@@ -154,18 +154,22 @@ const board = await agent(
 
 **The frontier** is every issue that is: open, labelled \`agent:queued\`, has **zero OPEN blockers**, and has **no assignee**.
 
+**Read the whole board in ONE call.** The REST list endpoint carries \`issue_dependencies_summary\`, \`assignees\`, \`labels\` AND the full \`body\`, so this single request returns everything the schema needs:
+
 \`\`\`bash
 R=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
-gh issue list --state open --label agent:queued --json number --jq '.[].number' | while read n; do
-  b=$(gh api repos/$R/issues/$n --jq '.issue_dependencies_summary.blocked_by')
-  a=$(gh api repos/$R/issues/$n --jq '.assignees | length')
-  echo "$n blocked_by=$b assignees=$a"
-done
+gh api --paginate "repos/$R/issues?labels=agent:queued&state=open&per_page=100" \\
+  --jq '.[] | select(.pull_request == null) | {number, title, body, assignees: (.assignees | length), blocked_by: .issue_dependencies_summary.blocked_by, labels: [.labels[].name]}'
 \`\`\`
+
+Three rules about that command, each of which has already gone wrong here:
+- **Use \`--paginate\`.** \`gh issue list\` defaults to **30** rows; on 2026-08-05 that hid 56 of an 86-issue board from this very query, silently, for weeks.
+- **Keep \`select(.pull_request == null)\`.** The REST issues endpoint returns pull requests too. \`gh issue list\` filters them; \`gh api\` does not, and a PR dispatched as buildable work is a bad day.
+- **Do NOT run \`gh issue view <n>\` per issue.** The body is already in the payload above. Parse it from there — one request for the whole board, not one per issue.
 
 \`blocked_by\` counts only OPEN blockers, so it is a live gate rather than a history.
 ${candidates ? `\n**Restrict to these candidates only:** ${candidates.join(", ")}. Ignore everything else on the board.\n` : ""}
-**For each frontier issue**, read its body (\`gh issue view <n>\`) and extract the fields the schema asks for. \`files\` must come from the issue's **Likely files** section — it is what keeps parallel tracks from colliding, so copy it faithfully rather than guessing. \`lane\` comes from the Validation plan; \`risk\` from the Risk section. Give each a short kebab-case \`id\` for its branch name.
+**For each frontier issue**, extract the schema's fields **from the payload you already fetched**. \`files\` must come from the issue body's **Likely files** section — it is what keeps parallel tracks from colliding, so copy it faithfully rather than guessing. \`lane\` comes from the Validation plan; \`risk\` from the Risk section. Give each a short kebab-case \`id\` for its branch name.
 
 **Exclude and report as blocked**, never as frontier:
 - anything with an open blocker (say which, in \`waitingOn\`)

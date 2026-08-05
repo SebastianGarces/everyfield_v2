@@ -19,6 +19,25 @@ flowchart TD
         R8 -->|has articles| R10[Render SectionIndexView]
     end
 
+    subgraph refs [Insight Wiki Links - PE-024]
+        F1["InsightCard - components/phase-engine/insight-card.tsx"]
+        F2["insight.relatedArticleSlugs - stored at assessment time"]
+        F3["getPublishedArticleRefs - lib/wiki/service.ts (React.cache: one query per request, not per card)"]
+        F4["DB: wiki_articles slug+title WHERE church_id IS NULL AND status=published"]
+        F5["buildArticleLinks - focus-presentation.ts"]
+        F6["wikiHref per slug - lib/wiki/href.ts"]
+        F7["Render How to improve links"]
+
+        F1 --> F2
+        F2 -->|no slugs| FE1[No links section]
+        F2 -->|has slugs| F3 --> F4 --> F5
+        F5 -->|slug not in index: stale| FE2[Drop it - never a 404 link]
+        F5 -->|slug resolves| F6 --> F7
+        F5 -->|none resolve| FE1
+    end
+
+    F6 -.->|link target| R1
+
     subgraph search [Search Flow]
         S1["searchWikiArticles - wiki/actions.ts"]
         S2["searchArticles - search.ts"]

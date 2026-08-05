@@ -619,3 +619,102 @@ without it is a race with a broken `main` as the prize.
 - **Follow-up issues inherit the ACs of nothing.** They are filed from a warning, so they are only as
   good as the warning's detail field.
 - Auto-merge is off by default and `dispatch` opts in, so a direct `/deliver` cannot merge by surprise.
+
+---
+
+## 13. Staged tracks — the bottleneck was per-track fixed cost (2026-08-05)
+
+§12 fixed *who* the review queue is for. This fixes *what a track is*, and it starts from a
+measurement rather than a feeling.
+
+### What the board actually measured
+
+Counted 2026-08-05 across the open `agent:queued` set:
+
+| Measure | Value | What it rules out |
+|---|---:|---|
+| Queued issues | 86 | — |
+| Independent of every other queued issue | 78 (91%) | dependency **depth** is not the constraint |
+| Maximum dependency fan-out | 2 | nor is dependency **width** |
+| Queued issues auto-filed one-per-warning | 12 (14%) | the loop generates a meaningful share of its own backlog |
+
+91% independent with a longest chain of two describes a nearly flat DAG, and a flat DAG is not
+something you schedule better — everything was already runnable. The constraint was never *ordering*.
+It is the **fixed cost every track pays regardless of size**: a branch, a hermetic `pnpm build`, a
+full test suite, a preview deployment, a CI round trip, an independent reviewer, and a PR a human has
+to look at. One-agent-per-track pays that per issue. Twelve of the queued issues were one-file fixes
+paying it in full — `#231` was the loop filing an issue about its own G0 violation.
+
+### What changed
+
+A **track** is now a connected component over (shared-file ∪ `dependsOn`) edges — still one branch,
+one worktree, **one PR**, but it may close several issues. Inside it:
+
+- **Stages** are topological levels by `dependsOn`. Stage 0 is the shared prerequisite (schema,
+  contract, shared types).
+- Within a stage, units sharing a declared file union into one **workstream** — one agent, working
+  sequentially. The DSU that used to union across the whole track now unions **within a stage only**.
+- File-disjoint workstreams in the same stage run in **parallel**, each in its own worktree branched
+  from the **track branch HEAD** (not from `main`), and merge back before the next stage starts. A
+  stage with a single workstream runs directly in the track worktree — no sub-worktree, no merge.
+
+And the DoD gates split by what they can see (`ops/agent-os/dod.md`):
+
+| Scope | Gates |
+|---|---|
+| Per workstream, in parallel, in its own worktree | G0 its own ACs · G2 subset over its changed files · G5 diff vs **that** workstream's declared files |
+| Once, on the track branch, after the last stage | G1 hermetic build · G2 full suite · G3 functional · G4 conventions · G6 sign-off · HR1–HR4 when high-risk |
+
+The split falls there because G1 and G3 are the expensive gates and neither is scopable: `pnpm build`
+is repo-wide by construction, and G3 is tied to a Vercel **preview deployment created by the push**,
+so it is one-per-branch whatever the branch contains. Amortising a single G1 + G3 + CI cycle across N
+workstreams instead of running N of them is the entire throughput argument.
+
+**Aggregation is fail-closed, exactly like HR4.** Any workstream verifier FAIL blocks the track, and a
+verifier that **died counts as a NO** — the standing rule in that document is to default to FAIL when
+evidence is missing, and a dead verifier is missing evidence.
+
+**Attempts moved with the scope.** `MAX_ATTEMPTS` (default 3) is now **per workstream**, and a
+workstream that passed is never re-implemented. Under the flat verdict one failing AC re-ran the whole
+track and burned an attempt for every healthy unit in it. A separate **track-level integration
+counter** covers the rest: an integration failure that *names* a workstream goes back to that
+workstream and consumes ITS attempt; only an unattributable failure consumes a track-level one.
+
+**The concurrency cap moved from tracks to agents.** "3 tracks per pass" stopped describing load the
+moment a track could hold eight workstreams — it could mean three agents or twenty-four. `RESERVE`
+likewise scales to the largest **workstream** rather than being flat, and a stage does not start
+unless the remaining budget covers its concurrent workstreams. The review-queue relationship is
+unchanged and is about PRs, not agents: one PR per track, gate 1 at roughly twice the tracks a pass
+can finish.
+
+### The ruling: fold follow-ups into a rollup (2026-08-05)
+
+§12 left this open in as many words — *"follow-up issues inherit the ACs of nothing"* — and 12 of 86
+is what that looked like two weeks later.
+
+**Ruled:** a new kind label `follow-ups`, and **one open rollup issue per feature parent**, titled
+`Follow-ups — <parent title>`. A verifier's code-quality warning is appended to it as an unchecked AC
+under a `## Follow-up acceptance criteria` heading, and **still before the merge**. The guarantee §12
+bought — that a merge cannot lose a warning — is preserved exactly; only its destination changed.
+
+**The append is read back**, asserting every appended line is present, with retries. If it cannot be
+confirmed the track is **ERRORED**, not reported as shipped. This is the same discipline as the label
+read-back in `open-pr`, and for the same reason: on 2026-07-26 a narrative landed while the record
+silently did not, on 2 of 8 tracks, and no step reported an error.
+
+**Takeability — both halves are load-bearing.** The rollup carries **no `agent:*` status label until
+it holds 3 or more** follow-up ACs, at which point it gets `agent:queued`. It **also joins the next
+track dispatched for its parent, regardless of count.** Without the second half, a rollup sitting at
+two ACs would wait forever — strictly worse than the 12 small issues this replaces, which at least
+reached the frontier. With it, a follow-up rides a track's fixed cost that was going to be paid
+anyway, which is the whole point of the redesign.
+
+### Not solved here
+
+- **Nothing sizes a workstream except the intake's guess.** A `## Likely files` list that is wrong low
+  unions two workstreams that should have stayed one, or splits one that should not have been — and a
+  stage discovers it as a merge conflict rather than as a plan error.
+- **A track closes all its issues or none.** One held spec-question on one issue holds the whole
+  track's PR; the unit of merge is still the branch. That is the price of amortising the fixed cost.
+- **Still nothing watches `main` after a merge** (§12) — and a track-sized merge is a larger thing to
+  land unwatched than a single-issue one was.

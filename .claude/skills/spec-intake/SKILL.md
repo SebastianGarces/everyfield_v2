@@ -8,8 +8,13 @@ description: Turn one PM list item (a sentence + maybe a spec) into a rigorous, 
 The front door of the factory. A loop is only as good as the target it's pointed at — this skill
 converts a fuzzy PM ask into a target the `build-until-done` loop can actually verify against.
 
-Follow the EveryField `requirements-docs` conventions for wording. Keep each issue **small and
-file-disjoint** where possible (smaller tracks → cleaner parallel waves, cheaper retries).
+Follow the EveryField `requirements-docs` conventions for wording. Size an issue to its **outcome**,
+then cut that outcome into **workstreams** inside the body. What has to stay small and file-disjoint
+is a *workstream*, not an issue: a track runs its workstreams in parallel stages and pays the build,
+the suite, the preview deploy, the CI wait and the human-facing PR **once** for all of them
+(`ops/agent-os/dod.md`, *Scoped vs integration*). Splitting an outcome into four issues to keep them
+small buys nothing and costs that fixed price four times over — which is how 12 one-file fixes ended
+up on the board (`product-docs/board-design-2026-07.md` §13).
 
 ## Procedure (per list item)
 
@@ -20,8 +25,14 @@ file-disjoint** where possible (smaller tracks → cleaner parallel waves, cheap
    If you can't state how an AC is verified, it isn't an AC yet.
 3. **Classify risk.** `risk:high` iff it touches schema/migrations, auth/permissions, multi-tenant
    boundaries, or payments. (Still autonomous-to-PR, but gets the extra DoD gates + second verifier.)
-4. **Guess file ownership.** List the files/dirs the work will likely create or edit, from `memory/` +
-   a quick look. This is what the planner uses to keep tracks file-disjoint — accuracy keeps merges clean.
+4. **Guess file ownership, then cut the workstreams.** List the files/dirs the work will likely create
+   or edit, from `memory/` + a quick look. Then split them into workstreams: one per agent, each with
+   its own AC subset, its own file list, and a `depends on:` line. One workstream is the normal case;
+   several is correct when the outcome genuinely needs them. Put the shared prerequisite (schema,
+   contract, shared types) in the workstream everything else declares a dependency on — that becomes
+   stage 0. Accuracy decides two things at once: files that overlap union two workstreams into one
+   sequential agent, and a workstream's list is what scopes its **G5** diff check, so a file in the
+   diff and not in the list is a deviation.
 5. **Find its parent.** Every requirement issue hangs off a `feature` issue — the FRD's home on the
    board. `gh issue list --label feature` lists them. If the item belongs to a feature with no parent
    yet, create the parent first (thin body: FRD link, three lines of scope, settled scope decisions —
@@ -29,7 +40,8 @@ file-disjoint** where possible (smaller tracks → cleaner parallel waves, cheap
 6. **Declare blocking edges.** If this item genuinely cannot start until another lands, say so as a
    native dependency, not a sentence. Publish blockers **first** so the edge can reference a real
    number. A dependency is *semantic* — file overlap is a scheduling constraint and belongs in
-   `## Likely files`, not here.
+   `## Likely files`, not here. A dependency **inside** one issue needs no board edge: it is the
+   workstream's `depends on:` line, and the planner reads it as a stage boundary within the track.
 7. **Create the issue** and label it `agent:queued` (+ `risk:high` if applicable):
    ```bash
    gh issue create --title "<concise>" --body-file <path> \
@@ -65,7 +77,21 @@ file-disjoint** where possible (smaller tracks → cleaner parallel waves, cheap
 ## Risk
 low | medium | high   <!-- high → label risk:high -->
 
+## Workstreams
+<one per agent — the unit that must stay small and file-disjoint. One is normal.>
+
+### WS1 — <name>
+- **ACs:** <which of the ACs above this workstream owns>
+- **Likely files:** src/…, src/…
+- **depends on:** —          <!-- another WS here, or an issue number, or — for none -->
+
+### WS2 — <name>
+- **ACs:** …
+- **Likely files:** …
+- **depends on:** WS1
+
 ## Likely files
+<the union of the workstreams' lists — this is what the planner unions issues into tracks over>
 - src/...
 - (cross-cutting chokepoints — barrels/constants — named so one track owns them)
 
@@ -80,7 +106,10 @@ low | medium | high   <!-- high → label risk:high -->
   covers — state that rather than inventing a parent.
 - **Never write a checklist file.** Status lives on the board; the eleven `checklist.md` files were
   deleted on 2026-07-26 precisely because they went stale (`product-docs/board-design-2026-07.md`).
-- **Small & disjoint beats big & tangled.** Split a list item that spans many files into separate issues.
-- **One concern per issue.** It maps 1:1 to a track and a PR.
+- **Small & disjoint applies to a workstream, not to an issue.** A list item spanning many files
+  becomes one issue with several workstreams — not several issues. Splitting it into issues to keep
+  each one small multiplies the fixed cost of a track by the number of pieces.
+- **One outcome per issue.** An issue may carry several workstreams, and a track may close several
+  issues; there is one PR per **track**, not per issue (`.claude/skills/open-pr/SKILL.md`).
 - **Don't design the implementation** — describe the outcome and constraints; let the implementer choose how.
 - Record the issue numbers you created so the orchestrator can preflight + schedule them.

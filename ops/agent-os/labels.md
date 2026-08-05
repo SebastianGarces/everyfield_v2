@@ -46,14 +46,33 @@ board-sync workflow logs a warning rather than guessing which one wins.
 
 ## Kind labels (what the issue *is*)
 
-| Label      | Meaning                                                                        |
-|------------|--------------------------------------------------------------------------------|
-| `feature`  | A feature parent. Links its FRD, holds scope decisions, owns the progress bar.  |
-| `decision` | An open ruling that gates work. **No PR closes it** — it closes by a ruling recorded in the decision ledger. |
-| `deferred` | Off the active roadmap: cut, or kept-but-post-beta. Carries no `agent:*` label. |
+| Label        | Meaning                                                                      |
+|--------------|------------------------------------------------------------------------------|
+| `feature`    | A feature parent. Links its FRD, holds scope decisions, owns the progress bar. |
+| `decision`   | An open ruling that gates work. **No PR closes it** — it closes by a ruling recorded in the decision ledger. |
+| `deferred`   | Off the active roadmap: cut, or kept-but-post-beta. Carries no `agent:*` label. |
+| `follow-ups` | The code-quality rollup for one feature parent — **one open issue per parent**, titled `Follow-ups — <parent title>`. Warnings arrive as unchecked ACs, not as new issues. |
 
 `feature` and `deferred` combine — a cut feature is a closed tombstone, a post-beta feature is an
 open one with no children.
+
+### The follow-ups rollup and its takeability rule
+
+`follow-ups` is the one label that legitimately holds live work with **no `agent:*` label on it**. The
+merge gate appends each code-quality warning to the rollup as an unchecked AC under
+`## Follow-up acceptance criteria`, **before** the merge, then reads the body back and asserts every
+appended line is there — an append it cannot confirm errors the track rather than shipping it. So
+nothing is lost; the ACs simply accumulate on one issue instead of spawning one issue apiece.
+
+It becomes takeable two ways, and both halves are load-bearing:
+
+- **At 3 or more follow-up ACs** it gets `agent:queued` and enters the frontier like anything else.
+- **Regardless of count**, it joins the next track dispatched for its parent.
+
+Without the second, a rollup sitting at two ACs would wait forever — strictly worse than the 12
+one-per-warning issues this replaced, which at least reached the frontier. With it, a follow-up rides
+a fixed cost that was going to be paid anyway. Ruling and measurements:
+`product-docs/board-design-2026-07.md` §13.
 
 ## Modifier labels
 
@@ -94,18 +113,45 @@ Every issue reports `issue_dependencies_summary.blocked_by` — **open blockers 
 gate rather than a historical record. The **frontier** is what that makes queryable: every issue
 whose blockers are all closed and which nobody has claimed.
 
+**Ask for it in one call.** The REST *list* endpoint already carries `issue_dependencies_summary`,
+`assignees`, `labels` and the full `body`, so the whole frontier — and everything needed to size it —
+arrives in a single request:
+
 ```bash
 R={owner}/{repo}
-gh issue list --state open --label agent:queued --json number --jq '.[].number' | while read n; do
-  [ "$(gh api repos/$R/issues/$n --jq '.issue_dependencies_summary.blocked_by')" = "0" ] &&
-  [ "$(gh api repos/$R/issues/$n --jq '.assignees | length')" = "0" ] && echo "$n"
-done
+gh api --paginate "repos/$R/issues?labels=agent:queued&state=open&per_page=100" \
+  --jq '.[]
+        | select(.pull_request == null)
+        | select(.issue_dependencies_summary.blocked_by == 0 and (.assignees | length) == 0)
+        | .number'
 ```
+
+Three things in that command are load-bearing, and each one has drawn blood:
+
+- **`--paginate`, not a bare limit.** `gh issue list` defaults to **30**. On 2026-08-05 an 86-issue
+  board answered this question with 30 rows and every dispatch pass silently selected from a window
+  over the newest third of it — for weeks, with no error anywhere. `--paginate` has no ceiling to
+  outgrow, which is why it is preferred here over the `--limit 200` that PR #300 applied to the
+  remaining `gh issue list` calls.
+- **`select(.pull_request == null)`.** The REST issues endpoint returns **pull requests as well as
+  issues** (verified against this repo). `gh issue list` filters them for you; `gh api` does not. Skip
+  this and a PR can enter the frontier and be dispatched as buildable work.
+- **One request, not 1 + 2N.** The previous form looped `gh api` twice per issue — 173 sequential
+  round trips at 86 issues, before a line of code was written. Anything reading the frontier should
+  reuse this payload rather than re-fetching per issue; `body` is already in it, so
+  `## Likely files` and the ACs need no second call.
 
 **A dependency is semantic; file overlap is not.** Two units that both touch
 `src/db/schema/index.ts` do not block each other — they merely cannot run in the same parallel batch.
 Dependencies hold the first; `## Likely files` in the issue body holds the second. Conflating them
 makes batches coarser than they need to be.
+
+The two are read for **different** decisions. Blocking edges decide a track's **stages** (topological
+levels by `dependsOn`); file overlap decides which units inside a stage union into one **workstream**
+— one agent, sequential — and which run in parallel. The frontier query above is still the entry
+point, but a track expands from it along `dependsOn` to pull in the dependents it will build in later
+stages, so a track legitimately contains issues that are blocked *by the track itself*. `blocked_by`
+against anything **outside** the track is still a hard stop (`ops/agent-os/dod.md` G0).
 
 ## Milestones
 
@@ -125,6 +171,7 @@ gh label create "needs-spec"        --color 5319E7 --description "Not build-read
 gh label create "feature"           --color 0052CC --description "Feature parent issue — the FRD's home on the board" --force
 gh label create "decision"          --color 8B5CF6 --description "An open ruling that gates work; resolution lands in the decision ledger" --force
 gh label create "deferred"          --color BFDADC --description "Off the active roadmap — cut or post-beta" --force
+gh label create "follow-ups"        --color C2E0C6 --description "Code-quality rollup for one feature parent — warnings land here as ACs" --force
 ```
 
 `--force` makes this idempotent (safe to re-run).
