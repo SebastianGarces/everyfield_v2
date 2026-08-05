@@ -15,6 +15,7 @@ import {
   type CreateChurchDeps,
   type OnboardingActor,
 } from "./create-church";
+import { ONBOARDING_STEP_IDS, isSkippableOnboardingStep } from "./steps";
 
 // ----------------------------------------------------------------------------
 // F12 / OB-001 — step 1's write path (#198 + #243).
@@ -365,6 +366,74 @@ test("a finish that never returns a state is still reported to the planter", () 
   // is allowed to invite a retry; the action keeps the guard that makes that true.
   const actions = source("app", "(dashboard)", "dashboard", "actions.ts");
   assert.match(actions, /isNull\(churches\.onboardingCompletedAt\)/);
+});
+
+// ----------------------------------------------------------------------------
+// OB-007 / #307 — the flow's exits.
+//
+// Two acceptance criteria that live entirely in the wiring between `steps.ts`,
+// the flow component and `completeOnboarding`, and that nothing else asserts:
+// every step after step 1 can be moved past, and moving past the LAST one is
+// what finishes. Both are read off the source for the same reason the #243
+// assertions above are: the rules are one-line bindings that a refactor can
+// quietly drop while every other test stays green.
+// ----------------------------------------------------------------------------
+
+test("finishing lands on the dashboard with the confetti flag", () => {
+  // AC: "completing or skipping through the final step lands on the dashboard
+  // with ?churchCreated=true (confetti preserved)". The flag is the confetti's
+  // only trigger — `page.tsx` renders `<ChurchCreatedConfetti />` on it — so the
+  // query string is a contract between two files, not an implementation detail.
+  const actions = source("app", "(dashboard)", "dashboard", "actions.ts");
+
+  assert.match(
+    actions,
+    /redirect\(\s*"\/dashboard\?churchCreated=true"\s*\)/,
+    "the completion redirect carries the flag the dashboard reads to fire the confetti"
+  );
+});
+
+test("moving forward past the last step is what finishes", () => {
+  // AC: "completing OR SKIPPING through the final step" lands on the dashboard.
+  // That is true of every control that advances only because `goForward` falls
+  // through to `finish()` when there is no next step — a skip on the final step
+  // is a finish. If forward ever stops short of `finish()`, the last step
+  // becomes a dead end with a Continue button that does nothing.
+  const flow = source("components", "onboarding", "onboarding-flow.tsx");
+
+  const forward = flow.slice(flow.indexOf("function goForward()"));
+  const body = forward.slice(0, forward.indexOf("\n  }"));
+
+  assert.match(body, /nextOnboardingStep\(step\)/);
+  assert.match(
+    body,
+    /finish\(\);/,
+    "past the last step, forward has to be finishing"
+  );
+});
+
+test("every step after step 1 is wired to a control that advances without writing", () => {
+  // AC: "every step after step 1 has a working skip". `steps.test.ts` pins the
+  // RULE (`skippable` is true for all three); this pins that the flow honours it
+  // for each of them — step 2's inline "Skip for now", and the `onSkip` prop of
+  // the two components rendering steps 3 and 4. A skip is `goForward` and
+  // nothing else, which is what makes it unable to lose an answer: it never had
+  // one to commit.
+  const flow = source("components", "onboarding", "onboarding-flow.tsx");
+
+  const skippableSteps = ONBOARDING_STEP_IDS.filter((id) =>
+    isSkippableOnboardingStep(id)
+  );
+  assert.equal(skippableSteps.length, 3, "steps 2, 3 and 4");
+
+  const inlineSkips = flow.match(/onClick=\{goForward\}/g) ?? [];
+  const propSkips = flow.match(/onSkip=\{goForward\}/g) ?? [];
+
+  assert.equal(
+    inlineSkips.length + propSkips.length,
+    skippableSteps.length,
+    "one skip control per skippable step, each bound to goForward and nothing else"
+  );
 });
 
 test("the action module publishes only actions", () => {
