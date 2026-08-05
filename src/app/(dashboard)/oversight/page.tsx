@@ -30,10 +30,26 @@ export default async function OversightDashboardPage() {
 
   const churchIds = await getAccessibleChurchIds(user);
 
-  // Fetch church plants with their phase info
+  // Fetch church plants with their phase info.
+  //
+  // The projection is EXPLICIT (#241): this page renders three columns, and a
+  // bare `select()` pulled the whole `churches` row — mission statement,
+  // address, onboarding timestamps — across the wire on every load. That is
+  // wasted bytes on an oversight surface whose whole point is that it shows
+  // aggregates, and it is how a column nobody meant to expose ends up one
+  // careless `{...plant}` away from the client. Adding a column here is now a
+  // deliberate act. No behaviour changes: `id`, `name` and `currentPhase` are
+  // exactly what the cards, the phase histogram and the list below read.
   const plants =
     churchIds.length > 0
-      ? await db.select().from(churches).where(inArray(churches.id, churchIds))
+      ? await db
+          .select({
+            id: churches.id,
+            name: churches.name,
+            currentPhase: churches.currentPhase,
+          })
+          .from(churches)
+          .where(inArray(churches.id, churchIds))
       : [];
 
   // Aggregate stats

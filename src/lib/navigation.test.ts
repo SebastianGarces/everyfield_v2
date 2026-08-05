@@ -139,8 +139,9 @@ test("every oversight nav item resolves to a real page", () => {
 test("only the built routes are back in the sidebar", () => {
   // #260 hid four oversight items whose pages did not exist. Each comes back
   // in the change that builds its page — #23 for Invitations, #303 for Church
-  // Plants — which is the rule the test above enforces. This asserts each
-  // un-hiding stayed surgical rather than becoming a blanket revert.
+  // Plants and Sending Churches — which is the rule the test above enforces.
+  // This asserts each un-hiding stayed surgical rather than becoming a blanket
+  // revert.
   for (const items of [sendingChurchNavItems, networkAdminNavItems]) {
     const hrefs = items.map((item) => item.href);
     assert.ok(
@@ -151,19 +152,32 @@ test("only the built routes are back in the sidebar", () => {
       hrefs.includes("/oversight/plants"),
       "/oversight/plants ships with #303 (OV-001/OV-002)"
     );
-    for (const stillHidden of [
-      // Unbuilt (#260 / OV-009) — comes back with its page.
-      "/oversight/sending-churches",
+    assert.ok(
       // NOT merely unbuilt: dropped from alpha by ruling (oversight FRD
       // non-goals, board #185). A page appearing does not re-admit this one.
-      "/oversight/settings",
-    ]) {
-      assert.ok(
-        !hrefs.includes(stillHidden),
-        `${stillHidden} must stay hidden (#260)`
-      );
-    }
+      !hrefs.includes("/oversight/settings"),
+      "/oversight/settings must stay hidden (#260)"
+    );
   }
+});
+
+test("the sending-churches roster is offered to network admins alone", () => {
+  // OV-009: the roster is network-admins-only and its page answers a
+  // sending-church admin with `notFound()`. A nav item they can see but not
+  // open is the #260 failure in a new costume — the two halves of the rule are
+  // asserted together so neither can drift.
+  assert.ok(
+    networkAdminNavItems
+      .map((item) => item.href)
+      .includes("/oversight/sending-churches"),
+    "/oversight/sending-churches ships with #303 (OV-009) for network admins"
+  );
+  assert.ok(
+    !sendingChurchNavItems
+      .map((item) => item.href)
+      .includes("/oversight/sending-churches"),
+    "a sending-church admin is refused the roster, so must not be offered it"
+  );
 });
 
 test("the plants directory and its detail route light the same nav item", () => {

@@ -77,6 +77,29 @@ export interface OversightPlantSummary {
 }
 
 // ----------------------------------------------------------------------------
+// Sending-church roster row (OV-009) — network admins only.
+// ----------------------------------------------------------------------------
+
+/**
+ * One member sending church in `/oversight/sending-churches`.
+ *
+ * Two counts and a name, and nothing that could grow into a person: this is a
+ * network admin reading a MEMBER ORG's shape, one level further from the plants
+ * than the directory row above, so the aggregates-only rule binds harder here
+ * rather than less. `plantCount` is scoped to the caller's own network — see
+ * `listNetworkSendingChurches` rule 2 — so these counts partition
+ * `/oversight/plants` instead of describing plants the network cannot open.
+ */
+export interface NetworkSendingChurchSummary {
+  sendingChurchId: string;
+  name: string;
+  /** Plants in the caller's network attributed to this sending church. */
+  plantCount: number;
+  /** Invitations this sending church has out that are still live. */
+  pendingInvitationCount: number;
+}
+
+// ----------------------------------------------------------------------------
 // Aggregates — the only feature data an oversight user may pull, and only
 // where the plant's corresponding `share_*` toggle is on.
 // ----------------------------------------------------------------------------

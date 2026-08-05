@@ -12,11 +12,13 @@ import {
   ministryTeamsStats,
   peopleStats,
   scopeLabelForRole,
+  summarizeSendingChurchRoster,
   tasksStats,
 } from "./presentation";
 import type {
   MeetingsAggregate,
   MinistryTeamsAggregate,
+  NetworkSendingChurchSummary,
   PeopleAggregate,
   TasksAggregate,
 } from "./types";
@@ -186,4 +188,46 @@ test("task and team stats carry their denominator as a hint", () => {
   );
   // Singular, not "of 1 teams".
   assert.equal(teamByLabel.get("With a leader")?.hint, "of 1 team");
+});
+
+// ----------------------------------------------------------------------------
+// Sending-church roster summary (OV-009)
+// ----------------------------------------------------------------------------
+
+function rosterRow(
+  name: string,
+  plantCount: number,
+  pendingInvitationCount: number
+): NetworkSendingChurchSummary {
+  return {
+    sendingChurchId: `id-${name}`,
+    name,
+    plantCount,
+    pendingInvitationCount,
+  };
+}
+
+test("the roster summary totals every column and pluralises each clause", () => {
+  assert.equal(
+    summarizeSendingChurchRoster([
+      rosterRow("Grace", 5, 2),
+      rosterRow("Hope", 12, 1),
+    ]),
+    "2 sending churches · 17 plants · 3 invitations awaiting a reply"
+  );
+});
+
+test("one of anything reads singular — including the irregular noun", () => {
+  assert.equal(
+    summarizeSendingChurchRoster([rosterRow("Grace", 1, 1)]),
+    "1 sending church · 1 plant · 1 invitation awaiting a reply"
+  );
+});
+
+test("a zero is stated, never dropped", () => {
+  // A missing clause reads as a rendering failure; "0 plants" is the answer.
+  assert.equal(
+    summarizeSendingChurchRoster([rosterRow("Grace", 0, 0)]),
+    "1 sending church · 0 plants · 0 invitations awaiting a reply"
+  );
 });

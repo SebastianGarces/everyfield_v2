@@ -2,6 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   Activity,
   BookOpenText,
+  Building2,
   Church,
   MailPlus,
   CalendarCheck,
@@ -144,6 +145,12 @@ export const mainNavItems: NavItem[] = [
  * "Church Plants" came back the same way in #303 (OV-001/OV-002), with
  * `/oversight/plants/page.tsx` and its `[id]` detail in the same change.
  *
+ * "Sending Churches" (/oversight/sending-churches) is absent for a DIFFERENT
+ * reason than #260: the page exists as of #303, but it is network-admins-only
+ * (OV-009) and refuses this role with `notFound()`. It belongs in
+ * `networkAdminNavItems` only, and it stays out of this list even though its
+ * page.tsx is now on disk.
+ *
  * Still hidden: "Settings" (/oversight/settings) — and it is not merely
  * unbuilt, it is OUT of alpha by ruling (FRD non-goals; org profile and admin
  * management belong with core team accounts, board #185), so this one does not
@@ -178,13 +185,17 @@ export const sendingChurchNavItems: NavItem[] = [
  *
  * Same rule as `sendingChurchNavItems`: every href needs a real page.
  *
- * "Invitations" came BACK in #23 with its page; "Church Plants" in #303 with
- * `/oversight/plants` and its `[id]` detail.
+ * "Invitations" came BACK in #23 with its page; "Church Plants" and "Sending
+ * Churches" in #303, each with its own page in the same change
+ * (`/oversight/plants` + its `[id]` detail, and `/oversight/sending-churches`).
  *
- * Still hidden until built (#260): "Sending Churches"
- * (/oversight/sending-churches). "Settings" (/oversight/settings) stays hidden
- * permanently for alpha — dropped by ruling, not merely unbuilt (FRD
- * non-goals; board #185).
+ * "Sending Churches" is in THIS list and deliberately not in
+ * `sendingChurchNavItems` — the roster is network-admins-only (OV-009), and its
+ * page answers a sending-church admin with `notFound()`. Offering a link that
+ * 404s is the #260 failure in a new costume, so the two halves ship together.
+ *
+ * Still hidden: "Settings" (/oversight/settings) — permanently for alpha,
+ * dropped by ruling rather than merely unbuilt (FRD non-goals; board #185).
  */
 export const networkAdminNavItems: NavItem[] = [
   {
@@ -196,6 +207,11 @@ export const networkAdminNavItems: NavItem[] = [
     title: "Church Plants",
     href: "/oversight/plants",
     icon: Church,
+  },
+  {
+    title: "Sending Churches",
+    href: "/oversight/sending-churches",
+    icon: Building2,
   },
   {
     title: "Plant Health",

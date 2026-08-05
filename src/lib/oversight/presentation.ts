@@ -23,6 +23,7 @@ import { STATUS_LABELS } from "@/lib/people/status.shared";
 import type {
   MeetingsAggregate,
   MinistryTeamsAggregate,
+  NetworkSendingChurchSummary,
   OversightAssociationProvenance,
   OversightStat,
   PeopleAggregate,
@@ -219,11 +220,46 @@ export function isMinistryTeamsEmpty(
 }
 
 // ----------------------------------------------------------------------------
+// Sending-church roster (OV-009).
+// ----------------------------------------------------------------------------
+
+/**
+ * The roster in one line — "4 sending churches · 17 plants · 3 invitations
+ * awaiting a reply".
+ *
+ * Pure, so the sentence an admin skims before reading the table is unit-tested
+ * rather than assembled inline in JSX. Every clause is pluralised, and a zero
+ * is stated ("0 plants") rather than dropped: a missing clause reads as a
+ * rendering failure, where an explicit zero is the answer.
+ */
+export function summarizeSendingChurchRoster(
+  rows: NetworkSendingChurchSummary[]
+): string {
+  const plants = rows.reduce((sum, row) => sum + row.plantCount, 0);
+  const pending = rows.reduce(
+    (sum, row) => sum + row.pendingInvitationCount,
+    0
+  );
+
+  return [
+    `${rows.length} ${plural(rows.length, "sending church", "sending churches")}`,
+    `${plants} ${plural(plants, "plant")}`,
+    `${pending} ${plural(pending, "invitation")} awaiting a reply`,
+  ].join(" · ");
+}
+
+// ----------------------------------------------------------------------------
 // Internal helpers.
 // ----------------------------------------------------------------------------
 
-function plural(count: number, noun: string): string {
-  return Math.abs(count) === 1 ? noun : `${noun}s`;
+/**
+ * `plural(1, "day")` → "day". The third argument is for nouns English does not
+ * pluralise with a bare "s" — "sending church" → "sending churches" — so a
+ * caller never has to hand-build the irregular form at the call site.
+ */
+function plural(count: number, noun: string, pluralForm?: string): string {
+  if (Math.abs(count) === 1) return noun;
+  return pluralForm ?? `${noun}s`;
 }
 
 function daysAgoHint(days: number): string {
