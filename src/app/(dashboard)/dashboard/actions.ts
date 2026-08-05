@@ -8,14 +8,16 @@ import {
   runCreateChurch,
   type CreateChurchOutcome,
 } from "@/lib/onboarding/create-church";
-import {
-  isLeadershipAnswer,
-  leadershipStatusForAnswer,
-} from "@/lib/onboarding/leadership";
+import { plantDirtyColumns } from "@/lib/phase-engine/dirty-handler";
 import type { ChurchBasicsFieldErrors } from "@/lib/validations/onboarding";
 import { and, eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import {
+  confirmLeadershipDeps,
+  runConfirmLeadership,
+  type ConfirmLeadershipOutcome,
+} from "./confirm-leadership";
 
 export type { ChurchBasicsFieldErrors };
 
@@ -60,65 +62,37 @@ export async function createChurchBasics(
   );
 }
 
-export type ConfirmLeadershipState =
-  | { status: "saved" }
-  | { status: "error"; error: string };
+export type ConfirmLeadershipState = ConfirmLeadershipOutcome;
 
 /**
- * F12 / OB-004 — step 2 of onboarding: "Will you be the lead planter/pastor?"
+ * F12 / OB-004 + OB-010 — "Will you be the lead planter/pastor?"
  *
- * What this write is, and what it is NOT. The planter ASSIGNMENT is the
- * existing mechanism — `users.church_id` + the `planter` role — and it was
- * written at step 1 by `createChurchBasics`, through
- * `linkUserToChurchFilter()`, whose #183 compare-and-set (caller's id AND
- * `church_id IS NULL`) is the only thing standing between a double submit and
- * a relink. This step deliberately does not re-run that write: answering Yes
- * confirms the link that already exists, so there is no second church-link
- * write to get the filter wrong on.
+ * What this write is, and what it is NOT. For the planter answering about
+ * themselves the ASSIGNMENT is the existing mechanism — `users.church_id` + the
+ * `planter` role — written at step 1 by `createChurchBasics` through
+ * `linkUserToChurchFilter()`. That path deliberately does not re-run the link:
+ * answering Yes confirms the one that already exists, so there is no second
+ * church-link write to get the filter wrong on. What it adds is the explicit,
+ * queryable answer; before OB-004 an unrecorded No was indistinguishable from a
+ * Yes to every downstream surface.
  *
- * What it adds is the explicit, queryable answer. Before OB-004 "does this
- * church have a planter?" could only be inferred from a role lookup, so
- * answering No could not be recorded at all — and an unrecorded No is
- * indistinguishable from a Yes to every downstream surface.
- *
- * Re-enterable on purpose: the dashboard's no-planter nudge links back here
- * (the one specced re-entry path), so this is an UPDATE with no "already
- * answered" guard — a planter who said No must be able to say Yes.
+ * OB-010 is the case where Yes has to ASSIGN rather than confirm — a church
+ * that predates the question and has no planter at all — and that is a role
+ * change with a race in it. All of it lives in `./confirm-leadership`, which is
+ * ordinary server code the tests can drive; this export exists to mint the actor
+ * from `verifySession()` so there is no parameter a forged POST could name
+ * somebody else in (`memory/invariants.md` → Authentication).
  */
 export async function confirmLeadership(
   answer: string
 ): Promise<ConfirmLeadershipState> {
   const { user } = await verifySession();
 
-  if (user.role !== "planter") {
-    return {
-      status: "error",
-      error: "Only church planters can answer this",
-    };
-  }
-
-  if (!user.churchId) {
-    return {
-      status: "error",
-      error: "Create your church plant before answering this",
-    };
-  }
-
-  if (!isLeadershipAnswer(answer)) {
-    return { status: "error", error: "Please choose yes or no" };
-  }
-
-  await db
-    .update(churches)
-    .set({
-      leadershipStatus: leadershipStatusForAnswer(answer),
-      updatedAt: new Date(),
-    })
-    .where(eq(churches.id, user.churchId));
-
-  revalidateDashboard();
-
-  return { status: "saved" };
+  return runConfirmLeadership(
+    confirmLeadershipDeps(revalidateDashboard),
+    { id: user.id, role: user.role, churchId: user.churchId },
+    answer
+  );
 }
 
 export type CompleteOnboardingState = { status: "error"; error: string };
@@ -136,6 +110,17 @@ export type CompleteOnboardingState = { status: "error"; error: string };
  *
  * The `IS NULL` guard makes this idempotent: a double submit, or a second tab,
  * cannot move a completion timestamp that is already set.
+ *
+ * OB-009 — FINISHING MARKS THE PLANT DIRTY. `last_material_event_at` is stamped
+ * in the SAME statement as the completion, because finishing setup IS the
+ * material event: a plant that just declared its stage, its launch date and its
+ * people has changed enough to be worth assessing, and without the stamp a brand
+ * new plant with no other activity would sit cold behind the 7-day staleness
+ * window (`src/lib/phase-engine/assessment/dirty.ts`). One statement rather than
+ * a follow-up `markPlantDirty()` call so the two facts cannot disagree, and
+ * behind the same `IS NULL` guard so a second submit cannot re-dirty a plant
+ * that finished days ago. Marking dirty is all this does — assessments are
+ * generated by the daily run, never synchronously from a planter's click.
  *
  * RETURN TYPE (#243). On success this `redirect()`s and never returns, and the
  * declared type says so: `CompleteOnboardingState | void`. Writing it as
@@ -160,9 +145,14 @@ export async function completeOnboarding(): Promise<CompleteOnboardingState | vo
     };
   }
 
+  const finishedAt = new Date();
+
   await db
     .update(churches)
-    .set({ onboardingCompletedAt: new Date() })
+    .set({
+      onboardingCompletedAt: finishedAt,
+      ...plantDirtyColumns(finishedAt),
+    })
     .where(
       and(
         eq(churches.id, user.churchId),
