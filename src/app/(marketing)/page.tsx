@@ -4,8 +4,40 @@ import { Chip } from "./_components/chip";
 import { FeatureSwitcher } from "./_components/feature-switcher";
 import { InviteForm } from "./_components/invite-form";
 import { PhaseTabs } from "./_components/phase-tabs";
-import { Shot, ShotOverlay } from "./_components/shot";
+import { ShotOverlay } from "./_components/shot";
+import { BeyondDashboard } from "./_components/vignettes/beyond-dashboard";
+import { DocCardOverlay } from "./_components/vignettes/doc-card";
+import { EngineFocus } from "./_components/vignettes/engine-focus";
 import { EngineScorecard } from "./_components/vignettes/engine-scorecard";
+import {
+  FsTeamsMobile,
+  FsTeamsOverlay,
+} from "./_components/vignettes/fs-teams";
+import {
+  FsWikiProgressMobile,
+  FsWikiProgressOverlay,
+} from "./_components/vignettes/fs-wiki-progress";
+import { HeroDashboard } from "./_components/vignettes/hero-dashboard";
+import {
+  CoreGroupPipeline,
+  LaunchTeamCommitted,
+} from "./_components/vignettes/journey-people";
+import { LaunchPrepChecklist } from "./_components/vignettes/launch-prep-checklist";
+import { LaunchSunday } from "./_components/vignettes/launch-sunday";
+import {
+  MeetingsBoard,
+  MeetingsBoardCompact,
+} from "./_components/vignettes/meetings-board";
+import { NetworkHealth } from "./_components/vignettes/network-health";
+import {
+  PeoplePipeline,
+  PeoplePipelineCompact,
+} from "./_components/vignettes/people-pipeline";
+import {
+  TaskFollowups,
+  TaskFollowupsCompact,
+} from "./_components/vignettes/task-followups";
+import { TeamTraining } from "./_components/vignettes/team-training";
 
 export const metadata: Metadata = {
   title: "EveryField — Your church plant, understood.",
@@ -14,6 +46,21 @@ export const metadata: Metadata = {
 };
 
 export default function LandingPage() {
+  // Every embed below is built HERE, in a server component, and handed to the
+  // two switchers as props. They are `"use client"`, and an app component
+  // imported across that boundary would ship to the browser — the whole point
+  // of these embeds is that they cost no client JavaScript. See _components/
+  // embeds.ts.
+  //
+  // The journey panels each carry their own desktop and phone compositions, so
+  // one node serves both trees; the feature switcher renders two independent
+  // trees, so those get one node each.
+  const coreGroup = <CoreGroupPipeline />;
+  const launchTeam = <LaunchTeamCommitted />;
+  const training = <TeamTraining />;
+  const prelaunch = <LaunchPrepChecklist />;
+  const launchSunday = <LaunchSunday />;
+
   return (
     <>
       <section className="lp-hero">
@@ -41,27 +88,15 @@ export default function LandingPage() {
               networks and churches.
             </p>
             <div className="hero-shot">
-              <Shot
-                desktop={{
-                  src: "/marketing/shots/hero.webp",
-                  width: 2400,
-                  height: 1333,
-                }}
-                mobile={{
-                  src: "/marketing/shots/hero-m.webp",
-                  width: 800,
-                  height: 1121,
-                }}
-                alt="The EveryField dashboard for Redemption Hill Church in pre-launch: core group of 61, 142 people in the pipeline, zero overdue tasks, and recent activity."
-                priority
-              />
+              {/* the dashboard itself, not a picture of it — chrome-less, so
+                  the LCP candidate is text rather than a 2400px WebP */}
+              <HeroDashboard />
               {/* the band right of the church name and above the stat row is
-                  the shot's only empty region — and staffing is the one thing
-                  the dashboard behind it does not already count */}
-              <Chip
-                className="hero-chip-a"
-                style={{ left: "45%", top: "11.5%" }}
-              >
+                  the composition's only empty region — and staffing is the one
+                  thing the dashboard behind it does not already count. The
+                  offset dropped with the app's sidebar and header bar: the
+                  chrome-less card starts ~11% higher than the capture did. */}
+              <Chip className="hero-chip-a" style={{ left: "45%", top: "2%" }}>
                 7 of 8 leadership roles filled
               </Chip>
               <Chip className="hero-chip-b" style={{ right: "4%", top: "70%" }}>
@@ -90,7 +125,33 @@ export default function LandingPage() {
       <section className="lp-sec" id="product">
         <div className="lp-inner">
           <h2 className="lp-h2">One place for the whole work.</h2>
-          <FeatureSwitcher />
+          <FeatureSwitcher
+            embeds={{
+              people: {
+                visual: <PeoplePipeline />,
+                mobile: <PeoplePipelineCompact />,
+              },
+              meetings: {
+                visual: <MeetingsBoard />,
+                mobile: <MeetingsBoardCompact />,
+              },
+              tasks: {
+                visual: <TaskFollowups />,
+                mobile: <TaskFollowupsCompact />,
+              },
+              // teams and wiki keep their primary crops — a recharts radar and
+              // a page of prose — and go live where the claim is
+              teams: {
+                overlay: <FsTeamsOverlay />,
+                mobile: <FsTeamsMobile />,
+              },
+              wiki: {
+                overlay: <FsWikiProgressOverlay />,
+                mobile: <FsWikiProgressMobile />,
+              },
+              guides: { overlay: <DocCardOverlay /> },
+            }}
+          />
         </div>
       </section>
 
@@ -123,26 +184,25 @@ export default function LandingPage() {
                 <EngineScorecard />
               </div>
               <div
-                className="epane epane-bleed"
+                className="epane epane-focus"
                 style={{ backgroundImage: 'url("/marketing/c2-field.webp")' }}
               >
-                <Shot
-                  desktop={{
-                    src: "/marketing/shots/r5-focus.webp",
-                    width: 1816,
-                    height: 1800,
-                  }}
-                  alt="Your focus — the week's most important next steps, prioritized from the latest assessment: stale follow-ups, a leadership role to fill, training to complete."
-                />
+                {/* the app's own focus panel, live, off the same 2026-07-31
+                    assessment the pane beside it grades — one plant, one day,
+                    two readings of it */}
+                <EngineFocus />
                 <ShotOverlay
                   overlay={{
                     src: "/marketing/shots/r5-phasectl.webp",
                     width: 702,
                     height: 886,
                     alt: "Phase control — you decide when to move phases; readiness is advisory and never blocks a change.",
-                    // lands inside the shot's empty left gutter — the pane
-                    // shifts the shot right (see .epane-bleed) to make room
-                    style: { left: "1%", top: "32%", width: "min(30%, 290px)" },
+                    // the retired capture was a page region with an empty left
+                    // gutter, and .epane-bleed shoved it right so the card
+                    // could land in it. A live panel is just the card, so the
+                    // pane right-aligns the mount instead (.epane-focus) and
+                    // the overlay is trimmed to the gutter that opens.
+                    style: { left: "1%", top: "26%", width: "min(24%, 240px)" },
                   }}
                 />
               </div>
@@ -173,7 +233,18 @@ export default function LandingPage() {
             A proven path under the whole journey — and at every stop, the app
             knows what the work is. Pick a phase.
           </p>
-          <PhaseTabs />
+          <PhaseTabs
+            embeds={{
+              "core-group": { visual: coreGroup, mobile: coreGroup },
+              "launch-team": { visual: launchTeam, mobile: launchTeam },
+              training: { visual: training, mobile: training },
+              "pre-launch": { visual: prelaunch, mobile: prelaunch },
+              "launch-sunday": { visual: launchSunday, mobile: launchSunday },
+              // desktop only: the mobile journey keeps pt-beyond-m.webp and
+              // the chip that goes with it (one claim per visual)
+              beyond: { visual: <BeyondDashboard /> },
+            }}
+          />
         </div>
       </section>
 
@@ -191,19 +262,9 @@ export default function LandingPage() {
             their people&rsquo;s private records.
           </p>
           <div className="netshot">
-            <Shot
-              desktop={{
-                src: "/marketing/shots/net-health.webp",
-                width: 2560,
-                height: 1980,
-              }}
-              mobile={{
-                src: "/marketing/shots/net-health-m.webp",
-                width: 940,
-                height: 475,
-              }}
-              alt="Plant Health across a network: Redemption Hill Church needs readiness focus — pre-launch, launching in 27 days, with an observation about prayer coverage — while Trinity Grove Church sits on track after launch."
-            />
+            {/* PlantHealthPortfolio renders its own heading and description,
+                so nothing is reconstructed around it */}
+            <NetworkHealth />
           </div>
           <div className="stats">
             <div className="stat-cell lead">

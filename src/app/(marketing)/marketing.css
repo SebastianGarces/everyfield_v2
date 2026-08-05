@@ -936,21 +936,11 @@ html:has(.marketing) {
   max-width: 100%;
   max-height: 100%;
 }
-/* comp 1 right pane: the shot runs larger than the pane and is cut at its
-   right and bottom edges — the popover floats over the seam */
-@media (min-width: 900px) {
-  .marketing .epane.epane-bleed {
-    justify-content: flex-start;
-  }
-  .marketing .epane.epane-bleed picture {
-    max-width: none;
-    height: 114%;
-    align-self: flex-start;
-    /* nudged off the leading edge so the phase-control card can land in the
-       shot's own empty left gutter instead of across its sentences */
-    transform: translateX(6%);
-  }
-}
+/* .epane-bleed lived here until #296: the right pane's shot was a capture of a
+   page REGION with an empty left gutter, and the bleed shoved it right so the
+   phase-control card could land in that gutter. The pane renders the live
+   FocusPanel now — just the card, no gutter — so the composition is made by
+   right-aligning the mount instead. See .epane-focus. */
 @media (max-width: 899px) {
   .marketing .engine-panes {
     grid-template-columns: 1fr;
@@ -977,8 +967,13 @@ html:has(.marketing) {
   padding: clamp(16px, 3vw, 44px);
   background: url("/marketing/c2-field.webp") center / cover;
 }
-.marketing .netshot .shot-img {
-  max-width: 1000px;
+/* the visual used to be a 2560px capture capped at 1000px, which is right for
+   a bitmap — nothing is gained past its capture width. The portfolio is live
+   now, so every extra pixel is type size instead: 1200 is the oversight
+   content column with the rail collapsed, i.e. what the capture was a picture
+   of. See .vg-networks for the ladder. */
+.marketing .netshot .vg-networks {
+  max-width: 1200px;
   margin-inline: auto;
 }
 
@@ -1117,16 +1112,27 @@ html:has(.marketing) {
 /* ---------- vignettes — the app's moments, live ----------
    Two kinds live here, and they are not the same thing:
 
-   1. The engine's scorecard is THE APP'S OWN COMPONENT, rendered live from a
-      typed fixture (engine-scorecard.tsx). Everything under .vg-app-embed is
-      app DOM: this file's job there is to undo .marketing's inherited type and
-      colour, scale the card into the pane, and animate its resolve — never to
-      restyle it. It cannot drift from the product, because it IS the product.
-   2. The journey cards are marketing distillations (a checklist, a run sheet,
-      a ticker) — marketing-owned DOM, marketing tokens.
+   1. APP EMBEDS — the app's own components, rendered live from typed fixtures
+      (_components/vignettes/*.tsx). Everything under .vg-app-embed is app DOM:
+      this file's job there is to undo .marketing's inherited type and colour,
+      scale the surface into its pane, and animate its own data hooks — never
+      to restyle it. It cannot drift from the product, because it IS the
+      product. Since #296 this is the RULE, not the exception: the hero, the
+      networks portfolio, both engine panes, four feature-switcher panels and
+      five journey panels are all embeds. What stays a capture is deliberate —
+      a page of wiki prose, a person's profile, and the team health dashboard
+      (client-only for its recharts radar, ~100kB gz this page will not ship).
+   2. MARKETING VIGNETTES — distillations of a moment rather than a surface (a
+      run sheet, a weekly ticker): marketing-owned DOM, marketing tokens.
 
    Both carry the shots' frame language: 16px radius, 8px white at 70%, the
-   same lift.
+   same lift. Every mount class is in the one selector list below rather than
+   repeating those five declarations per section.
+
+   Embeds arrive as props from page.tsx (a server component) — see
+   _components/embeds.ts for why. Nothing in this file depends on that, but it
+   is why a class here may have no corresponding import in the switcher that
+   renders it.
 
    Choreography follows the same grammar as fs-overlay-in: the BASE styles are
    the finished frame, and each keyframe supplies the starting state through a
@@ -1146,8 +1152,19 @@ html:has(.marketing) {
   color: var(--mute);
 }
 
-/* the shared card: an app surface standing on a painting */
+/* the shared card: an app surface standing on a painting. Every mount in the
+   file is here — the overlay mounts below only deepen the shadow. */
 .marketing .vg-scorecard,
+.marketing .vg-focus,
+.marketing .vg-hero,
+.marketing .vg-beyond,
+.marketing .vg-networks,
+.marketing .vg-embed-mount,
+.marketing .vg-jp-mount,
+.marketing .vg-jp-compact,
+.marketing .vg-fs-primary,
+.marketing .vg-fs-overlay,
+.marketing .vg-fs-m,
 .marketing .vg-card {
   background: #fff;
   /* the frame paints only outside the content, so the 70% white stays
@@ -1165,12 +1182,21 @@ html:has(.marketing) {
    the app's page background, so the Card's white and its hairline border read
    exactly as they do in the product instead of floating on marketing white.
    One mount, two compositions (engine-scorecard.tsx) — the whole card on
-   desktop, three real tiles below 900px. */
-.marketing .vg-scorecard {
+   desktop, three real tiles below 900px.
+
+   The four mounts that own their pane's whole width share this rule; the ones
+   that hug a scaled render or float over a crop set their own width below. */
+.marketing .vg-scorecard,
+.marketing .vg-focus,
+.marketing .vg-hero,
+.marketing .vg-beyond,
+.marketing .vg-networks {
   width: 100%;
   padding: 12px;
   background: var(--background);
 }
+/* the focus pane is NOT held to 94%: the panel is right-aligned there and the
+   phase-control card needs the gutter that opens on its left */
 .marketing .epane .vg-scorecard {
   max-width: 94%;
 }
@@ -1190,11 +1216,23 @@ html:has(.marketing) {
   text-align: start;
 }
 /* the other inherited rule that could reach in: .marketing paints links green
-   and underlines them on hover. The card has no links today — this is here so
-   that stays true by construction rather than by luck. */
+   and underlines them on hover. Since #296 these mounts DO contain links —
+   person cards, meeting cards, team tiles and quick actions are all anchors —
+   so this rule now does real work. `cursor: default` finishes the job the
+   `inert` wrapper starts: nothing in a picture of the product should advertise
+   itself as clickable. */
 .marketing .vg-app-embed a {
   color: inherit;
   text-decoration: none;
+  cursor: default;
+}
+/* .marketing declares --card as the marketing card colour (#fffef6), and the
+   app's Tailwind theme maps bg-card straight onto it — so without this every
+   Card inside an embed repaints cream. This subtree is app DOM: pin the app's
+   own value back (globals.css :root). --card is the only collision between
+   .marketing's custom properties and the app's, and .dark never applies. */
+.marketing .vg-app-embed {
+  --card: oklch(1 0 0);
 }
 
 /* Desktop: the whole card at the width it has on the Plant Intelligence page
@@ -1213,62 +1251,69 @@ html:has(.marketing) {
    effective type: ~7.5px at 1440. That is the cost of the whole card in this
    pane, and still ahead of the capture it replaced (~6.4px there, and bitmap
    rather than vector). 100px bands keep the mid-band waste under ~5%. */
-.marketing .vg-embed-full .vg-app-embed {
+.marketing .vg-scorecard .vg-embed-full .vg-app-embed {
   width: 704px;
   zoom: 0.35;
 }
 @media (min-width: 1000px) {
-  .marketing .vg-embed-full .vg-app-embed {
+  .marketing .vg-scorecard .vg-embed-full .vg-app-embed {
     zoom: 0.4;
   }
 }
 @media (min-width: 1100px) {
-  .marketing .vg-embed-full .vg-app-embed {
+  .marketing .vg-scorecard .vg-embed-full .vg-app-embed {
     zoom: 0.45;
   }
 }
 @media (min-width: 1200px) {
-  .marketing .vg-embed-full .vg-app-embed {
+  .marketing .vg-scorecard .vg-embed-full .vg-app-embed {
     zoom: 0.47;
   }
 }
 @media (min-width: 1300px) {
-  .marketing .vg-embed-full .vg-app-embed {
+  .marketing .vg-scorecard .vg-embed-full .vg-app-embed {
     zoom: 0.49;
   }
 }
 @media (min-width: 1400px) {
-  .marketing .vg-embed-full .vg-app-embed {
+  .marketing .vg-scorecard .vg-embed-full .vg-app-embed {
     zoom: 0.53;
   }
 }
 @media (min-width: 1500px) {
-  .marketing .vg-embed-full .vg-app-embed {
+  .marketing .vg-scorecard .vg-embed-full .vg-app-embed {
     zoom: 0.57;
   }
 }
 @media (min-width: 1600px) {
-  .marketing .vg-embed-full .vg-app-embed {
+  .marketing .vg-scorecard .vg-embed-full .vg-app-embed {
     zoom: 0.63;
   }
 }
 @media (min-width: 1700px) {
-  .marketing .vg-embed-full .vg-app-embed {
+  .marketing .vg-scorecard .vg-embed-full .vg-app-embed {
     zoom: 0.67;
   }
 }
 /* the pane stops growing at 1733px (--vis caps at 1560, the height at 680), so
    this is the last step there is */
 @media (min-width: 1800px) {
-  .marketing .vg-embed-full .vg-app-embed {
+  .marketing .vg-scorecard .vg-embed-full .vg-app-embed {
     zoom: 0.72;
   }
 }
 
 /* the mount fits the scaled card rather than reserving a column for it */
 @media (min-width: 900px) {
-  .marketing .vg-scorecard {
+  .marketing .vg-scorecard,
+  .marketing .vg-focus,
+  .marketing .vg-hero,
+  .marketing .vg-beyond,
+  .marketing .vg-networks {
     width: max-content;
+    /* a ladder step that overshoots its band clips at the pane rather than
+       pushing the mount through it — the panes are overflow:hidden */
+    max-width: 100%;
   }
   .marketing .vg-embed-compact {
     display: none;
@@ -1329,21 +1374,26 @@ html:has(.marketing) {
    The stagger rides on --vg-i rather than nth-child delays directly, because
    the raised factors are children 1, 2, 7 and 8 of the eight-tile grid — a
    positional stagger would leave 1.7s of dead time waiting on the four the
-   assessment did not raise. */
-.marketing .vg-app-embed li:nth-child(1) {
+   assessment did not raise.
+
+   Scoped to .vg-scorecard, along with the ladder above it: both were written
+   when this was the only embed on the page and both read like shared
+   utilities. They are not — the positions below are the CSF grid's, and every
+   other embed has <li>s of its own that must not inherit them. */
+.marketing .vg-scorecard .vg-app-embed li:nth-child(1) {
   --vg-i: 0;
 }
-.marketing .vg-app-embed li:nth-child(2) {
+.marketing .vg-scorecard .vg-app-embed li:nth-child(2) {
   --vg-i: 1;
 }
-.marketing .vg-app-embed li:nth-child(7) {
+.marketing .vg-scorecard .vg-app-embed li:nth-child(7) {
   --vg-i: 2;
 }
-.marketing .vg-app-embed li:nth-child(8) {
+.marketing .vg-scorecard .vg-app-embed li:nth-child(8) {
   --vg-i: 3;
 }
 /* the compact composition carries the same three tiles as children 1–3 */
-.marketing .vg-embed-compact .vg-app-embed li:nth-child(3) {
+.marketing .vg-scorecard .vg-embed-compact .vg-app-embed li:nth-child(3) {
   --vg-i: 2;
 }
 
@@ -1426,160 +1476,6 @@ html:has(.marketing) {
 .marketing .ptabs.pt-seen .ppanel.active .pshot .vg-card {
   animation: fs-overlay-in 480ms var(--ease) both;
   animation-delay: 110ms;
-}
-
-/* pre-launch · the checklist ending at zero */
-.marketing .vg-checklist {
-  right: 4%;
-  top: 16%;
-  width: min(34%, 380px);
-}
-.marketing .vg-count {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 5px;
-  font-family: var(--mono);
-  font-weight: 500;
-  color: var(--ink);
-}
-.marketing .vg-count-slot {
-  display: grid;
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-}
-.marketing .vg-count-slot > * {
-  grid-area: 1 / 1;
-}
-.marketing .vg-count-a {
-  opacity: 0;
-}
-.marketing .vg-count-unit {
-  font-size: 12px;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--mute);
-}
-.marketing .vg-bar {
-  height: 4px;
-  background: rgba(24, 29, 25, 0.1);
-}
-.marketing .vg-bar-fill {
-  display: block;
-  height: 100%;
-  width: 75%;
-  background: var(--ink);
-}
-.marketing .vg-checks {
-  list-style: none;
-  margin: 12px 0 0;
-  padding: 0;
-}
-.marketing .vg-check {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 0;
-  font-size: 13px;
-  line-height: 1.3;
-  border-top: 1px solid var(--hairline);
-}
-.marketing .vg-check:first-child {
-  border-top: 0;
-}
-/* every row's finished state is ticked and struck; .is-pre simply means the
-   row arrived that way and sits out the ticking sequence below */
-.marketing .vg-box {
-  flex: none;
-  width: 14px;
-  height: 14px;
-  border: 1px solid var(--ink);
-  background: var(--ink);
-  position: relative;
-}
-.marketing .vg-box::after {
-  content: "";
-  position: absolute;
-  left: 4px;
-  top: 1px;
-  width: 3px;
-  height: 7px;
-  border: solid var(--cream);
-  border-width: 0 1.5px 1.5px 0;
-  transform: rotate(45deg);
-}
-.marketing .vg-check-t {
-  position: relative;
-  color: var(--text-2);
-}
-.marketing .vg-check-t::after {
-  content: "";
-  position: absolute;
-  inset-inline-start: 0;
-  top: 52%;
-  width: 100%;
-  height: 1px;
-  background: var(--mute);
-  transform-origin: left center;
-}
-
-/* the sequence: two items tick, then the bar and the counter catch up */
-.marketing .ptabs.pt-seen .ppanel.active .vg-check:not(.is-pre) .vg-box {
-  animation: vg-box-fill 240ms var(--ease) both;
-  animation-delay: calc(640ms + var(--vg-i, 0) * 400ms);
-}
-.marketing .ptabs.pt-seen .ppanel.active .vg-check:not(.is-pre) .vg-box::after {
-  animation: vg-tick-in 200ms var(--ease) both;
-  animation-delay: calc(740ms + var(--vg-i, 0) * 400ms);
-}
-.marketing
-  .ptabs.pt-seen
-  .ppanel.active
-  .vg-check:not(.is-pre)
-  .vg-check-t::after {
-  animation: vg-strike 300ms var(--ease) both;
-  animation-delay: calc(820ms + var(--vg-i, 0) * 400ms);
-}
-.marketing .ptabs.pt-seen .ppanel.active .vg-bar-fill {
-  animation: vg-bar-grow 520ms var(--ease) both;
-  animation-delay: 1400ms;
-}
-.marketing .ptabs.pt-seen .ppanel.active .vg-count-a {
-  animation: vg-count-out 260ms var(--ease) both;
-  animation-delay: 1500ms;
-}
-.marketing .ptabs.pt-seen .ppanel.active .vg-count-b {
-  animation: vg-count-in 260ms var(--ease) both;
-  animation-delay: 1500ms;
-}
-@keyframes vg-box-fill {
-  from {
-    background: transparent;
-  }
-}
-@keyframes vg-tick-in {
-  from {
-    opacity: 0;
-  }
-}
-@keyframes vg-strike {
-  from {
-    transform: scaleX(0);
-  }
-}
-@keyframes vg-bar-grow {
-  from {
-    width: 50%;
-  }
-}
-@keyframes vg-count-out {
-  from {
-    opacity: 1;
-  }
-}
-@keyframes vg-count-in {
-  from {
-    opacity: 0;
-  }
 }
 
 /* launch Sunday · the run sheet reaching 10:00 */
@@ -1683,8 +1579,12 @@ html:has(.marketing) {
 }
 
 /* beyond · Trinity Grove week over week */
+/* the ticker sits on the LEADING side of this pane since #296: the panel's
+   primary is now a live dashboard anchored to the trailing edge, and the
+   embed is height-bound in this pane at every width, so the painting it never
+   fills is on the left. `right: 5%` would put the ticker on top of it. */
 .marketing .vg-ticker {
-  right: 5%;
+  left: 5%;
   top: 14%;
   width: min(30%, 340px);
 }
@@ -1767,6 +1667,1163 @@ html:has(.marketing) {
   }
 }
 
+/* ============================================================================
+   LIVE APP SURFACES (#296) — the rest of the page, in page order
+   ============================================================================
+   Sixteen visuals stopped being crops. What follows is one block per surface,
+   ordered the way the page is: hero, feature switcher, engine focus, journey,
+   networks. The grammar is the scorecard's, above:
+
+   - the mount is a FRAME, not a card. Its ground is the app's page background,
+     so a Card's white and its hairline read as they do in the product. The
+     frame declarations live in the one shared rule at the top of this section;
+     each block below sets only geometry, scale and entrance.
+   - `zoom`, never `transform`. Zoom is layout-aware, so a mount keeps fitting
+     its surface when the surface changes — which is the whole point of a live
+     embed. A transform would need the natural height hard-coded here.
+   - each ladder is measured at its band's LOWER boundary and set ~3% under
+     fit = min((innerW − 40)/W, (innerH − 40)/H), 40 being the mount's
+     border+padding chrome. The values here are COMPUTED from each component's
+     box model, not yet read off a rendered node — they are starting points for
+     the in-browser pass.
+   - a ladder stops at 1.0. A capture can be blown up; a live surface rendered
+     above its own size is the product magnified, which reads as a mock rather
+     than a window. The hero is the one exception (see its block).
+   - only judgement states animate, and only off the app's own data- hooks.
+     Every keyframe carries just its `from`, so what a surface resolves TO is
+     always the component's own value, never this file's.
+
+   Nothing below restyles app DOM. If a rule here changes how something inside
+   .vg-app-embed LOOKS rather than how big it is or when it arrives, it is a
+   bug in this file, not a fix. */
+
+/* ---------- hero · the whole dashboard, at the width the app gives it -------
+   1152px is the dashboard's own content column (max-w-6xl), chrome-less: no
+   sidebar, no header bar, no page padding. That is where the type-size win
+   comes from — the retired capture spent 17% of its width on navigation
+   nobody can click.
+
+   The pane has no height cap here, so the fit is width-bound at every width:
+   fit = (--vis − 40) / 1152. This is the one ladder that passes 1.0, because
+   the capture it replaces was also being displayed above its own render size;
+   holding the embed at 1.0 while the pane grew to 1560 would leave it smaller
+   than the picture it replaced.
+
+   NO ENTRANCE, on purpose: this is the LCP element and it is already on
+   screen when the page opens. An animation here is a measured cost paid for a
+   beat nobody scrolls to see — which is also why HeroDashboard ships no scroll
+   gate, and therefore no client JavaScript. */
+.marketing .vg-hero .vg-embed-full .vg-app-embed {
+  width: 1152px;
+  zoom: 0.65;
+}
+@media (min-width: 1000px) {
+  .marketing .vg-hero .vg-embed-full .vg-app-embed {
+    zoom: 0.72;
+  }
+}
+@media (min-width: 1100px) {
+  .marketing .vg-hero .vg-embed-full .vg-app-embed {
+    zoom: 0.8;
+  }
+}
+@media (min-width: 1200px) {
+  .marketing .vg-hero .vg-embed-full .vg-app-embed {
+    zoom: 0.87;
+  }
+}
+@media (min-width: 1300px) {
+  .marketing .vg-hero .vg-embed-full .vg-app-embed {
+    zoom: 0.95;
+  }
+}
+@media (min-width: 1400px) {
+  .marketing .vg-hero .vg-embed-full .vg-app-embed {
+    zoom: 1.02;
+  }
+}
+@media (min-width: 1500px) {
+  .marketing .vg-hero .vg-embed-full .vg-app-embed {
+    zoom: 1.1;
+  }
+}
+@media (min-width: 1600px) {
+  .marketing .vg-hero .vg-embed-full .vg-app-embed {
+    zoom: 1.17;
+  }
+}
+@media (min-width: 1700px) {
+  .marketing .vg-hero .vg-embed-full .vg-app-embed {
+    zoom: 1.25;
+  }
+}
+/* --vis caps at 1560 from 1733px up, so this is the last step there is */
+@media (min-width: 1800px) {
+  .marketing .vg-hero .vg-embed-full .vg-app-embed {
+    zoom: 1.28;
+  }
+}
+
+/* ---------- the feature switcher's live surfaces ----------
+   Three mount roles, and the panels only ever pick from them:
+     .vg-fs-primary — the desktop pane's primary surface
+     .vg-fs-overlay — a surface floated on the primary, desktop only
+     .vg-fs-m       — the mobile stack's surface
+   plus a per-panel modifier (.vg-fs-people, .vg-fs-tasks, …) that carries the
+   geometry. The switcher renders two independent trees toggled by `display` at
+   899px, so a panel's desktop and phone compositions are two different nodes
+   rather than one node with a media query — six dead cards otherwise.
+
+   None of these carry a VignetteGate: .fswitch already gets `fs-seen` from an
+   IntersectionObserver, and every panel replays its entrance for free through
+   the tab switch's display:none → flex. A second observer would fight both. */
+.marketing .vg-fs-primary,
+.marketing .vg-fs-overlay,
+.marketing .vg-fs-m {
+  padding: 12px;
+  background: var(--background);
+}
+/* the primary hugs its (possibly scaled) surface rather than reserving a
+   column for it */
+.marketing .vg-fs-primary {
+  width: max-content;
+  max-width: 100%;
+}
+/* the floated mounts land on the primary the way the capture overlays did,
+   with the overlay's deeper lift. Anchored by edge rather than centred,
+   because `zoom` scales percentage insets too — so the mount is positioned and
+   only the render inside it is zoomed, never the other way round. */
+.marketing .vg-fs-overlay {
+  position: absolute;
+  z-index: 2;
+  width: max-content;
+  box-shadow: 0 28px 56px -20px rgba(24, 29, 25, 0.55);
+}
+/* the phone mounts sit under a mono head where they have one */
+.marketing .vg-fs-m .vg-sc-head + .vg-app-embed {
+  margin-top: 12px;
+}
+
+/* --- people: nine cards, one per rung of the pipeline ---
+   No zoom ladder here or in tasks. Unlike the scorecard — one fixed card that
+   has to be scaled to fit — these two surfaces are LISTS, so the pane's size
+   is spent on how many rows and columns it can hold rather than on how small
+   the type can get. Every band renders the app at 1:1, which is both the
+   honest reading and a large win on legibility: the retired captures were
+   bitmaps at ~0.45–0.61 scale, i.e. 14px app type arriving at 6–9px.
+
+   272px is the card width the app's own xl:grid-cols-4 grid gives it on a 1440
+   screen. Below 1100px two columns of two; 1100–1399 three columns of two;
+   from 1400 the whole nine. */
+.marketing .vg-fs-people .vg-fs-primary .vg-app-embed {
+  width: 556px; /* 2 x 272 + 12 */
+}
+.marketing .vg-fs-grid {
+  grid-template-columns: repeat(2, 272px);
+}
+/* Each band restores exactly the range the band below it hid, and every rule in
+   the sequence is `> :nth-child(...)` so they all weigh (0,4,0) and source order
+   decides. A `> *` restore looks equivalent and is not — it is (0,3,0), loses to
+   the hide rule at every width, and the band never opens. That was the shipping
+   bug in W2B: five of the nine cards were `display: none` everywhere while the
+   mount stayed sized for all nine. */
+.marketing .vg-fs-people .vg-fs-grid > :nth-child(n + 5) {
+  display: none;
+}
+@media (min-width: 1100px) {
+  .marketing .vg-fs-people .vg-fs-primary .vg-app-embed {
+    width: 840px; /* 3 x 272 + 24 */
+  }
+  .marketing .vg-fs-grid {
+    grid-template-columns: repeat(3, 272px);
+  }
+  /* restore first, hide second — the later rule has to be the narrower one */
+  .marketing .vg-fs-people .vg-fs-grid > :nth-child(n + 5) {
+    display: block;
+  }
+  .marketing .vg-fs-people .vg-fs-grid > :nth-child(n + 7) {
+    display: none;
+  }
+}
+@media (min-width: 1400px) {
+  .marketing .vg-fs-people .vg-fs-grid > :nth-child(n + 7) {
+    display: block;
+  }
+}
+/* the dashboard's Core Group card, taking the last card's place */
+.marketing .vg-fs-stat {
+  right: 5%;
+  bottom: 10%;
+}
+.marketing .vg-fs-stat .vg-app-embed {
+  width: 276px; /* the width the metric card has in the dashboard's 4-up row */
+}
+
+/* --- tasks: the rows, and the meeting that created them --- */
+.marketing .vg-fs-tasks .vg-fs-primary .vg-app-embed {
+  width: 640px;
+}
+.marketing .vg-fs-tasks .vg-fs-stack > :nth-child(n + 4) {
+  display: none;
+}
+@media (min-width: 1200px) {
+  .marketing .vg-fs-tasks .vg-fs-primary .vg-app-embed {
+    width: 820px;
+  }
+  /* same specificity as the hide above it — see the note on the people grid */
+  .marketing .vg-fs-tasks .vg-fs-stack > :nth-child(n + 4) {
+    display: block;
+  }
+}
+.marketing .vg-fs-meeting {
+  right: 3.5%;
+  bottom: 10%;
+}
+.marketing .vg-fs-meeting .vg-app-embed {
+  width: 360px;
+}
+
+/* --- meetings: the board at the width the meetings page gives it ---
+   1152 = three 373px columns + two 16px gutters, pinned rather than the app's
+   md:grid-cols-2 lg:grid-cols-3: inside a fixed-width scaled mount the
+   viewport says nothing about the canvas width, and the responsive classes
+   would silently collapse to two columns between 900 and 1023px, turning the
+   board 1038px tall inside a 457px pane. Pinning is a statement that this is a
+   picture of the desktop meetings page. Height-bound from ~1100px up. */
+.marketing .vg-fs-meetings .vg-app-embed {
+  width: 1152px;
+  zoom: 0.59;
+}
+@media (min-width: 1000px) {
+  .marketing .vg-fs-meetings .vg-app-embed {
+    zoom: 0.66;
+  }
+}
+/* the one ladder step measurement moved: at 1100 this was 5% over fit (the pane
+   grows on `46vw` but its height floor only lifts at 1180), so the step waits
+   for 1180 and 1100–1179 holds 0.66 */
+@media (min-width: 1180px) {
+  .marketing .vg-fs-meetings .vg-app-embed {
+    zoom: 0.7;
+  }
+}
+@media (min-width: 1200px) {
+  .marketing .vg-fs-meetings .vg-app-embed {
+    zoom: 0.74;
+  }
+}
+@media (min-width: 1300px) {
+  .marketing .vg-fs-meetings .vg-app-embed {
+    zoom: 0.81;
+  }
+}
+@media (min-width: 1400px) {
+  .marketing .vg-fs-meetings .vg-app-embed {
+    zoom: 0.88;
+  }
+}
+@media (min-width: 1500px) {
+  .marketing .vg-fs-meetings .vg-app-embed {
+    zoom: 0.95;
+  }
+}
+@media (min-width: 1600px) {
+  .marketing .vg-fs-meetings .vg-app-embed {
+    zoom: 1;
+  }
+}
+
+/* --- teams: two real ministry-team tiles on the health-dashboard crop ---
+   288px sits between the app's own 272px (1440 dashboard) and 368px (lg) cell,
+   and the tile is fluid, so nothing about the render is invented. The ladder
+   only ever steps down, and only at the narrow desktop end where the pane
+   cannot hold the tile at life size. */
+.marketing .vg-fs-teams {
+  left: 26%;
+  top: 30%;
+}
+/* Below 1100 the pane is at its shortest and `top: 30%` leaves less room than
+   the tile is tall — measured 54px severed off the bottom at 900, through the
+   Prayer tile's staffing bar. Move the ANCHOR, not the ladder: the tile is at
+   life size and dropping the zoom to fit would put 14px app type at 9.2px for
+   no compositional gain. At 900 this leaves 31px of clearance. */
+@media (max-width: 1099.98px) {
+  .marketing .vg-fs-teams {
+    top: 10%;
+  }
+}
+.marketing .vg-fs-teams .vg-app-embed {
+  width: 288px;
+  zoom: 0.92;
+}
+@media (min-width: 1200px) {
+  .marketing .vg-fs-teams .vg-app-embed {
+    zoom: 1;
+  }
+}
+
+/* --- wiki: the real My Wiki Progress page, cropped ---
+   624px is the width the app gives this page in a 1024-wide window
+   (wiki/layout.tsx: flex − w-72 aside − p-6 − max-w-3xl − px-8); rendering it
+   narrower than the app ever does would start truncating section names, so 624
+   is the floor of the honest range.
+
+   The height is a CROP, in the component's own unscaled pixels, so the ladder
+   cannot desynchronise from it — 596px lands just past the fourth section row,
+   which is what the retired capture showed (it was itself a crop of the top of
+   this page). MEASURE THIS: the cut should fall in a row gutter with a sliver
+   of the next row visible, so it reads as "more below" rather than as the end. */
+.marketing .vg-fs-wiki {
+  right: 4%;
+  top: 16%;
+}
+.marketing .vg-fs-wiki .vg-app-embed {
+  width: 624px;
+  height: 596px;
+  overflow: hidden;
+  zoom: 0.6;
+}
+/* 596 app px is more than the pane can hold below 1150 — measured 51px clipped
+   at 900, and the 0.66 step re-broke it by 9.6px at 1100. Band the CROP rather
+   than the zoom: the crop is already expressed in the component's own pixels,
+   so it cannot desynchronise from the ladder, and it costs one section row
+   instead of the 6.5px type a fitting zoom would cost. 490 clears 900–1149. */
+@media (max-width: 1149.98px) {
+  .marketing .vg-fs-wiki .vg-app-embed {
+    height: 490px;
+  }
+}
+@media (min-width: 1100px) {
+  .marketing .vg-fs-wiki .vg-app-embed {
+    zoom: 0.66;
+  }
+}
+@media (min-width: 1300px) {
+  .marketing .vg-fs-wiki .vg-app-embed {
+    zoom: 0.74;
+  }
+}
+@media (min-width: 1440px) {
+  .marketing .vg-fs-wiki .vg-app-embed {
+    zoom: 0.79;
+  }
+}
+@media (min-width: 1600px) {
+  .marketing .vg-fs-wiki .vg-app-embed {
+    zoom: 0.85;
+  }
+}
+@media (min-width: 1800px) {
+  .marketing .vg-fs-wiki .vg-app-embed {
+    zoom: 0.9;
+  }
+}
+/* the phone crop is cut just under the overall-progress bar, at the app's own
+   type size — a 375px screen has room for the headline number and little else */
+.marketing .vg-fs-wiki-m .vg-app-embed {
+  height: 272px;
+  overflow: hidden;
+}
+
+/* --- guides: the Core Group Commitment Card, where its capture used to sit ---
+   368px is the documents library's own column (lg:grid-cols-3); native from
+   1700px up, where the pane is wide enough to hold the card at its own size. */
+.marketing .vg-fs-doc {
+  right: 1%;
+  top: 26%;
+  padding: 10px;
+}
+.marketing .vg-fs-doc .vg-app-embed {
+  width: 368px;
+  zoom: 0.7;
+}
+@media (min-width: 1100px) {
+  .marketing .vg-fs-doc .vg-app-embed {
+    zoom: 0.78;
+  }
+}
+@media (min-width: 1300px) {
+  .marketing .vg-fs-doc .vg-app-embed {
+    zoom: 0.88;
+  }
+}
+@media (min-width: 1500px) {
+  .marketing .vg-fs-doc .vg-app-embed {
+    zoom: 0.96;
+  }
+}
+@media (min-width: 1700px) {
+  .marketing .vg-fs-doc .vg-app-embed {
+    zoom: 1;
+  }
+}
+
+/* --- the entrances: the same beat the captures had ---
+   Same keyframes, same delays as .shot-img / .shot-overlay, so a tab switch
+   into a live panel and a tab switch into a captured one are one motion. */
+.marketing .fswitch.fs-seen .fswitch-shot.active .vg-fs-primary {
+  animation: fs-primary-in 420ms var(--ease) both;
+}
+.marketing .fswitch.fs-seen .fswitch-shot.active .vg-fs-overlay {
+  animation: fs-overlay-in 480ms var(--ease) both;
+  animation-delay: 110ms;
+}
+/* the resolve, on the real components' DOM. The hooks are the app's own stable
+   data-slots — `progress-indicator` (ui/progress.tsx) and `badge`
+   (ui/badge.tsx) — so nothing here depends on a class the app could rename.
+   Teams reads as two beats per tile: the staffing bar fills, then the verdict
+   badge stamps, staggered tile by tile. Wiki has one beat, all bars together:
+   there is no stable per-row hook to stagger on, and a positional one would be
+   a class dependency. */
+.marketing .vg-fs-teams [data-slot="team-card"]:nth-child(1) {
+  --vg-i: 0;
+}
+.marketing .vg-fs-teams [data-slot="team-card"]:nth-child(2) {
+  --vg-i: 1;
+}
+.marketing
+  .fswitch.fs-seen
+  .fswitch-shot.active
+  .vg-fs-teams
+  [data-slot="progress-indicator"] {
+  animation: vg-progress-fill 520ms var(--ease) both;
+  animation-delay: calc(300ms + var(--vg-i, 0) * 160ms);
+}
+.marketing
+  .fswitch.fs-seen
+  .fswitch-shot.active
+  .vg-fs-teams
+  [data-slot="badge"] {
+  animation: vg-stamp-in 300ms var(--ease) both;
+  animation-delay: calc(480ms + var(--vg-i, 0) * 160ms);
+}
+.marketing
+  .fswitch.fs-seen
+  .fswitch-shot.active
+  .vg-fs-wiki
+  [data-slot="progress-indicator"] {
+  animation: vg-progress-fill 560ms var(--ease) both;
+  animation-delay: 300ms;
+}
+/* Radix writes the indicator's fill as an inline transform. A CSS animation
+   outranks an inline declaration while it runs, and a keyframe list with only
+   a `from` takes its end value from that same inline style — so this empties
+   the bar and hands it back, and it can never disagree with the number the
+   component computed. Shared by every progress bar in this file. */
+@keyframes vg-progress-fill {
+  from {
+    transform: translateX(-100%);
+  }
+}
+
+/* ---------- the engine's focus list: the app's own panel, live ----------
+   Same mount as the scorecard beside it. Different geometry, though: the panel
+   is 704 x ~588 with the two insights it carries here, so it is wider than
+   tall relative to the scorecard's 704 x 742, and the fit is width-bound below
+   ~1200 and height-bound above it. It also takes the pane's whole content
+   width rather than the scorecard's 94%, because it is right-aligned and the
+   phase-control card needs the gutter that opens on its left.
+
+   Two insights, not five: effective type is proportional to mount width until
+   the fit turns height-bound, and three cards make the panel 818px tall, which
+   drops 1440 BELOW the capture this replaces. Two is the honest maximum. */
+.marketing .epane-focus .vg-focus {
+  margin-inline-start: auto;
+  /* Measured: at 84% the phase-control capture overlaps the card by 11 app px
+     (frame chrome only) instead of 143, which was amputating the left margin of
+     every line — the first word of each body line and the start of both insight
+     titles. Costs NOTHING: unlike the fixed-width embeds, FocusPanel carries no
+     width of its own, so its type size comes from `zoom` alone and its column
+     width from the pane. Effective type is 7.92px at 84%, 88% and 100% alike.
+     (`padding-inline-end: 0` on the pane was measured a no-op for the same
+     reason — the fluid panel just grows into the freed space.) */
+  max-width: 84%;
+}
+.marketing .vg-focus .vg-embed-full .vg-app-embed {
+  zoom: 0.41;
+}
+@media (min-width: 1000px) {
+  .marketing .vg-focus .vg-embed-full .vg-app-embed {
+    zoom: 0.47;
+  }
+}
+@media (min-width: 1100px) {
+  .marketing .vg-focus .vg-embed-full .vg-app-embed {
+    zoom: 0.52;
+  }
+}
+@media (min-width: 1200px) {
+  .marketing .vg-focus .vg-embed-full .vg-app-embed {
+    zoom: 0.56;
+  }
+}
+@media (min-width: 1300px) {
+  .marketing .vg-focus .vg-embed-full .vg-app-embed {
+    zoom: 0.6;
+  }
+}
+@media (min-width: 1400px) {
+  .marketing .vg-focus .vg-embed-full .vg-app-embed {
+    zoom: 0.66;
+  }
+}
+@media (min-width: 1500px) {
+  .marketing .vg-focus .vg-embed-full .vg-app-embed {
+    zoom: 0.71;
+  }
+}
+@media (min-width: 1600px) {
+  .marketing .vg-focus .vg-embed-full .vg-app-embed {
+    zoom: 0.77;
+  }
+}
+@media (min-width: 1700px) {
+  .marketing .vg-focus .vg-embed-full .vg-app-embed {
+    zoom: 0.83;
+  }
+}
+/* the pane stops growing at 1733px, same as the scorecard's */
+@media (min-width: 1800px) {
+  .marketing .vg-focus .vg-embed-full .vg-app-embed {
+    zoom: 0.88;
+  }
+}
+/* the panel stands at the pane's trailing edge so the phase-control card has a
+   gutter to land in — the composition .epane-bleed used to produce with a
+   shot that had an empty gutter of its own */
+@media (min-width: 900px) {
+  .marketing .epane-focus {
+    justify-content: flex-end;
+  }
+}
+
+/* the resolve: the scorecard's grammar, one surface later. There the judgement
+   is a tile resolving out of `not_raised`; here it is the verdict badge
+   landing on a card and the evidence arriving under it — so the title and the
+   body, which are what the engine READ, never move, and what moves is what it
+   CONCLUDED. `> div ~ div` is the two evidence blocks; the title row is the
+   only div they can follow. --vg-i is positional because these cards ARE in
+   rank order, so position and priority are the same thing. */
+.marketing .vg-focus .vg-app-embed article:nth-child(1) {
+  --vg-i: 0;
+}
+.marketing .vg-focus .vg-app-embed article:nth-child(2) {
+  --vg-i: 1;
+}
+.marketing .vg-focus.vg-seen .vg-app-embed article {
+  animation: vg-focus-in 400ms var(--ease) both;
+  animation-delay: calc(var(--vg-i, 0) * 380ms);
+}
+.marketing .vg-focus.vg-seen .vg-app-embed article > div > [data-slot="badge"] {
+  animation: vg-stamp-in 300ms var(--ease) both;
+  animation-delay: calc(var(--vg-i, 0) * 380ms + 150ms);
+}
+.marketing .vg-focus.vg-seen .vg-app-embed article > div ~ div {
+  animation: vg-line-in 340ms var(--ease) both;
+  animation-delay: calc(var(--vg-i, 0) * 380ms + 240ms);
+}
+.marketing .vg-focus.vg-seen .vg-app-embed article > div ~ div ~ div {
+  animation-delay: calc(var(--vg-i, 0) * 380ms + 300ms);
+}
+/* the neutral start is the card before the judge has ruled: the app's own
+   border token, dashed — the same "not raised yet" language the scorecard's
+   tiles use. Only the `from` is here, so the resolved card is the component's. */
+@keyframes vg-focus-in {
+  from {
+    opacity: 0.4;
+    border-style: dashed;
+  }
+}
+
+/* ---------- journey · people — the People screen, live ----------
+   Deliberately not the scorecard's .vg-embed-full/.vg-embed-compact pair:
+   those now carry the scorecard's own 704px ladder. */
+.marketing .vg-jp {
+  max-width: 100%;
+}
+@media (min-width: 900px) {
+  .marketing .vg-jp-compact {
+    display: none;
+  }
+  .marketing .vg-jp {
+    width: max-content;
+  }
+}
+@media (max-width: 899px) {
+  .marketing .vg-jp-full {
+    display: none;
+  }
+  .marketing .vg-jp,
+  .marketing .vg-jp-compact {
+    width: 100%;
+  }
+  .marketing .vg-jp-compact .vg-app-embed {
+    margin-top: 12px;
+  }
+}
+.marketing .vg-jp-mount,
+.marketing .vg-jp-compact {
+  padding: 12px;
+  background: var(--background);
+}
+
+/* core group: two app surfaces at the SAME scale, overlapping by a fixed 20px,
+   the people grid riding 18px high so the meeting card leans on its
+   bottom-right corner. That is the page's layered language expressed as flow
+   rather than as a percentage offset — the overlap cannot drift onto a status
+   badge as the pane grows, because it is 20px at every width. */
+.marketing .vg-jp-stage {
+  display: flex;
+  align-items: flex-end;
+}
+.marketing .vg-jp-people {
+  margin-bottom: 18px;
+}
+.marketing .vg-jp-meet {
+  position: relative;
+  z-index: 2;
+  margin-left: -20px;
+}
+/* our grid, not PeopleList's: PeopleList reflows on VIEWPORT breakpoints, and
+   a mount that changes shape three times needs three ladders. 256px is the
+   card width the app renders at a 1440 window. */
+.marketing .vg-jp-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 256px);
+  gap: 12px;
+}
+/* one property drives both surfaces, so the meeting card is never a different
+   size from the screen it stands on. Height-bound at every width. */
+.marketing .vg-jp-pipeline {
+  --vg-jp-z: 0.6;
+}
+@media (min-width: 1000px) {
+  .marketing .vg-jp-pipeline {
+    --vg-jp-z: 0.68;
+  }
+}
+@media (min-width: 1100px) {
+  .marketing .vg-jp-pipeline {
+    --vg-jp-z: 0.76;
+  }
+}
+@media (min-width: 1200px) {
+  .marketing .vg-jp-pipeline {
+    --vg-jp-z: 0.84;
+  }
+}
+@media (min-width: 1300px) {
+  .marketing .vg-jp-pipeline {
+    --vg-jp-z: 0.92;
+  }
+}
+/* the pane grows past this, the card does not — the app does not render at
+   140%, so the composition simply stands on more painting */
+@media (min-width: 1400px) {
+  .marketing .vg-jp-pipeline {
+    --vg-jp-z: 1;
+  }
+}
+.marketing .vg-jp-people .vg-app-embed {
+  width: 524px;
+  zoom: var(--vg-jp-z);
+}
+.marketing .vg-jp-meet .vg-app-embed {
+  width: 380px;
+  zoom: var(--vg-jp-z);
+}
+
+/* launch team: PeopleList's own grid, so its reflow is the planter's own
+   window reflowing — which is why 1024 and 1280 are bands here alongside the
+   100px steps. They are Tailwind's `lg` and `xl`, where the grid goes 2 → 3 →
+   4 columns and the twelve cards go 6 → 4 → 3 rows. */
+.marketing .vg-jp-committed .vg-app-embed {
+  width: 1088px;
+  zoom: 0.32;
+}
+@media (min-width: 1000px) {
+  .marketing .vg-jp-committed .vg-app-embed {
+    zoom: 0.36;
+  }
+}
+@media (min-width: 1024px) {
+  .marketing .vg-jp-committed .vg-app-embed {
+    zoom: 0.55;
+  }
+}
+@media (min-width: 1100px) {
+  .marketing .vg-jp-committed .vg-app-embed {
+    zoom: 0.6;
+  }
+}
+@media (min-width: 1200px) {
+  .marketing .vg-jp-committed .vg-app-embed {
+    zoom: 0.66;
+  }
+}
+/* From 1280 the grid reflows to four columns and the twelve cards fall into
+   three rows — the surface drops from ~600px tall to 452 in one step. The
+   computed ladder tracked the 1024 reflow but not this one, and sat at 87% of
+   fit from here up, leaving 12–17% of type unclaimed. Measured: life size is
+   reachable at 1400. */
+@media (min-width: 1280px) {
+  .marketing .vg-jp-committed .vg-app-embed {
+    zoom: 0.9;
+  }
+}
+@media (min-width: 1300px) {
+  .marketing .vg-jp-committed .vg-app-embed {
+    zoom: 0.92;
+  }
+}
+@media (min-width: 1400px) {
+  .marketing .vg-jp-committed .vg-app-embed {
+    zoom: 1;
+  }
+}
+/* the phone compositions render at the app's own size — no ladder */
+@media (max-width: 899px) {
+  .marketing .vg-jp-committed .vg-app-embed,
+  .marketing .vg-jp-pipeline .vg-app-embed {
+    width: auto;
+    zoom: 1;
+  }
+}
+/* the same two beats the crops had, off the same keyframes and the same gate.
+   Only two things move: a per-card stagger through the pipeline would read as
+   a slideshow of the page's own making, and the cards are a state of affairs,
+   not a sequence of judgements. */
+.marketing .ptabs.pt-seen .ppanel.active .pshot .vg-jp-people,
+.marketing .ptabs.pt-seen .ppanel.active .pshot .vg-jp-committed .vg-jp-mount {
+  animation: fs-primary-in 420ms var(--ease) both;
+}
+.marketing .ptabs.pt-seen .ppanel.active .pshot .vg-jp-meet {
+  animation: fs-overlay-in 480ms var(--ease) both;
+  animation-delay: 110ms;
+}
+
+/* ---------- journey · moments — training, pre-launch, launch Sunday -------- */
+.marketing .vg-embed-mount {
+  padding: 12px;
+  background: var(--background);
+  /* .pshot is a flex box: hug the (zoomed) contents rather than stretching to
+     the pane or being squeezed by it */
+  width: max-content;
+  max-width: 100%;
+  flex: none;
+}
+@media (max-width: 899px) {
+  .marketing .vg-embed-mount {
+    width: 100%;
+  }
+}
+/* a live card floated over the pane uses the vignette frame it already had —
+   absolute, hidden below 900px, landing on the existing .pshot .vg-card
+   entrance. Only the inside is different: app DOM on the app's ground. */
+.marketing .vg-card.vg-embed-card {
+  padding: 12px;
+  background: var(--background);
+}
+.marketing .ptabs.pt-seen .ppanel.active .pshot .vg-embed-mount {
+  animation: fs-primary-in 420ms var(--ease) both;
+}
+
+/* training · the matrix, and the tile beside it. 1:1 from 1150px up — a live
+   table is vector, so actual size is the honest ceiling and the pane simply
+   carries more painting at large widths.
+
+   The three steps below 1150 were each measured 1–12px too tall for the pane,
+   which is `overflow: visible` — so instead of cropping, the mount hung off the
+   field painting at every band's lower boundary and healed by mid-band. That
+   sawtooth is the signature of a ladder set from the box model rather than read
+   off the rendered node. These are the measured values: the smallest step that
+   stops the overhang, costing 0.8–1.7px of type. Fitting inside the pane's
+   content box instead would cost 3–5px and buy only padding nobody sees. */
+.marketing .vg-training .vg-embed-full .vg-app-embed {
+  width: 560px;
+  zoom: 0.76;
+  /* the grid arrives without a heading of its own — it sits under the mono
+     head the same way the compact tiles do below 900px */
+  margin-top: 12px;
+}
+@media (min-width: 1000px) {
+  .marketing .vg-training .vg-embed-full .vg-app-embed {
+    zoom: 0.86;
+  }
+}
+@media (min-width: 1100px) {
+  .marketing .vg-training .vg-embed-full .vg-app-embed {
+    zoom: 0.98;
+  }
+}
+@media (min-width: 1150px) {
+  .marketing .vg-training .vg-embed-full .vg-app-embed {
+    zoom: 1;
+  }
+}
+/* above 1400 the pane can hold a wider grid AND the tile beside it */
+@media (min-width: 1400px) {
+  .marketing .vg-training .vg-embed-full .vg-app-embed {
+    width: 700px;
+  }
+}
+/* the team tile: on the painting, clear of the grid's leading edge. Below
+   1200px the pane cannot hold both at a readable size, so the panel shows the
+   grid alone — the same rule overlays already follow at 900px. */
+.marketing .vg-teamcard {
+  inset-inline-start: 4%;
+  top: 24%;
+  width: clamp(300px, 24%, 340px);
+}
+@media (max-width: 1199.98px) {
+  .marketing .vg-teamcard {
+    display: none;
+  }
+}
+/* the compact grid is a table, so it cannot reflow — it is pinned and scaled
+   to the phone it is on rather than allowed to overflow the mount */
+.marketing .vg-training .vg-embed-compact .vg-app-embed {
+  width: max-content;
+  margin-inline: auto;
+  zoom: 0.68;
+}
+@media (min-width: 360px) {
+  .marketing .vg-training .vg-embed-compact .vg-app-embed {
+    zoom: 0.8;
+  }
+}
+@media (min-width: 400px) {
+  .marketing .vg-training .vg-embed-compact .vg-app-embed {
+    zoom: 0.91;
+  }
+}
+@media (min-width: 480px) {
+  .marketing .vg-training .vg-embed-compact .vg-app-embed {
+    zoom: 1;
+  }
+}
+/* the resolve: the roster lands a member at a time, then the completions stamp
+   in behind it. The hook is the app's own structure — a COMPLETED cell is the
+   only one that renders a <div> inside its <td> (training-matrix.tsx), an
+   incomplete one renders a <span> — so the judgement is the only thing moving. */
+.marketing .vg-training .vg-app-embed tbody tr:nth-child(1) {
+  --vg-i: 0;
+}
+.marketing .vg-training .vg-app-embed tbody tr:nth-child(2) {
+  --vg-i: 1;
+}
+.marketing .vg-training .vg-app-embed tbody tr:nth-child(3) {
+  --vg-i: 2;
+}
+.marketing .vg-training .vg-app-embed tbody tr:nth-child(4) {
+  --vg-i: 3;
+}
+.marketing .vg-training .vg-app-embed tbody tr:nth-child(5) {
+  --vg-i: 4;
+}
+.marketing .vg-training .vg-app-embed tbody tr:nth-child(6) {
+  --vg-i: 5;
+}
+.marketing .ptabs.pt-seen .ppanel.active .vg-training .vg-app-embed tbody tr {
+  animation: vg-row-in 300ms var(--ease) both;
+  animation-delay: calc(320ms + var(--vg-i, 0) * 90ms);
+}
+.marketing .ptabs.pt-seen .ppanel.active .vg-training .vg-app-embed td > div {
+  animation: vg-stamp-in 300ms var(--ease) both;
+  animation-delay: calc(560ms + var(--vg-i, 0) * 90ms);
+}
+
+/* pre-launch · the checklist. 768 is the app's own max-w-3xl; height-bound in
+   this pane at every width. Four rows, not eight: all eight would be ~8px at
+   1440, i.e. worse than the capture this replaces. */
+.marketing .vg-prelaunch .vg-embed-full .vg-app-embed {
+  width: 768px;
+  zoom: 0.59;
+}
+@media (min-width: 1000px) {
+  .marketing .vg-prelaunch .vg-embed-full .vg-app-embed {
+    zoom: 0.66;
+  }
+}
+@media (min-width: 1100px) {
+  .marketing .vg-prelaunch .vg-embed-full .vg-app-embed {
+    zoom: 0.74;
+  }
+}
+@media (min-width: 1180px) {
+  .marketing .vg-prelaunch .vg-embed-full .vg-app-embed {
+    zoom: 0.8;
+  }
+}
+@media (min-width: 1300px) {
+  .marketing .vg-prelaunch .vg-embed-full .vg-app-embed {
+    zoom: 0.89;
+  }
+}
+@media (min-width: 1400px) {
+  .marketing .vg-prelaunch .vg-embed-full .vg-app-embed {
+    zoom: 0.97;
+  }
+}
+@media (min-width: 1500px) {
+  .marketing .vg-prelaunch .vg-embed-full .vg-app-embed {
+    zoom: 1;
+  }
+}
+/* the resolve: the cards land, the bar fills to the 4-of-8 the meeting is
+   actually at, and the rows that are done resolve from open to struck. Every
+   value it lands on is the fixture's. --vg-i rides on the CARD so the whole
+   row group inherits one delay — a custom property does not reach a sibling,
+   and the struck label is the control's sibling. */
+.marketing .vg-prelaunch .vg-app-embed [data-slot="card"]:nth-child(1) {
+  --vg-i: 0;
+}
+.marketing .vg-prelaunch .vg-app-embed [data-slot="card"]:nth-child(2) {
+  --vg-i: 1;
+}
+.marketing .vg-prelaunch .vg-app-embed [data-slot="card"]:nth-child(3) {
+  --vg-i: 2;
+}
+.marketing
+  .ptabs.pt-seen
+  .ppanel.active
+  .vg-prelaunch
+  .vg-app-embed
+  [data-slot="card"] {
+  animation: vg-row-in 320ms var(--ease) both;
+  animation-delay: calc(300ms + var(--vg-i, 0) * 140ms);
+}
+.marketing
+  .ptabs.pt-seen
+  .ppanel.active
+  .vg-prelaunch
+  .vg-app-embed
+  [data-slot="progress-indicator"] {
+  animation: vg-progress-fill 620ms var(--ease) both;
+  animation-delay: 560ms;
+}
+.marketing
+  .ptabs.pt-seen
+  .ppanel.active
+  .vg-prelaunch
+  [data-slot="checkbox"][data-checked="true"] {
+  animation: vg-cbx-fill 240ms var(--ease) both;
+  animation-delay: calc(700ms + var(--vg-i, 0) * 140ms);
+}
+.marketing
+  .ptabs.pt-seen
+  .ppanel.active
+  .vg-prelaunch
+  [data-slot="checkbox"][data-checked="true"]
+  svg {
+  animation: vg-cbx-tick 200ms var(--ease) both;
+  animation-delay: calc(800ms + var(--vg-i, 0) * 140ms);
+}
+.marketing
+  .ptabs.pt-seen
+  .ppanel.active
+  .vg-prelaunch
+  [data-slot="checkbox"][data-checked="true"]
+  + label {
+  animation: vg-cbx-strike 320ms var(--ease) both;
+  animation-delay: calc(800ms + var(--vg-i, 0) * 140ms);
+}
+@keyframes vg-cbx-fill {
+  from {
+    background-color: transparent;
+    border-color: var(--input);
+  }
+}
+@keyframes vg-cbx-tick {
+  from {
+    opacity: 0;
+  }
+}
+/* text-decoration-color IS animatable, which is how the rule draws itself in
+   without this file touching the app's line-through */
+@keyframes vg-cbx-strike {
+  from {
+    color: var(--foreground);
+    text-decoration-color: transparent;
+  }
+}
+
+/* launch Sunday · the meeting page — the header block over the three summary
+   cards, at the width a narrow app window has. The run sheet keeps the right
+   of the pane, which is why this panel anchors start: at every step below, the
+   mount's trailing edge clears the card's leading edge.
+
+   No resolve here on purpose — the run sheet is this panel's moving part, and
+   two things resolving in one frame is two claims. */
+.marketing .vg-launch .vg-embed-full .vg-app-embed {
+  width: 640px;
+  zoom: 0.63;
+}
+@media (min-width: 1000px) {
+  .marketing .vg-launch .vg-embed-full .vg-app-embed {
+    zoom: 0.7;
+  }
+}
+@media (min-width: 1100px) {
+  .marketing .vg-launch .vg-embed-full .vg-app-embed {
+    zoom: 0.78;
+  }
+}
+@media (min-width: 1180px) {
+  .marketing .vg-launch .vg-embed-full .vg-app-embed {
+    zoom: 0.85;
+  }
+}
+@media (min-width: 1300px) {
+  .marketing .vg-launch .vg-embed-full .vg-app-embed {
+    zoom: 0.94;
+  }
+}
+@media (min-width: 1400px) {
+  .marketing .vg-launch .vg-embed-full .vg-app-embed {
+    zoom: 1;
+  }
+}
+
+/* ---------- journey · beyond — the same dashboard, in a capped pane ----------
+   840 rather than the hero's 1152 — the app's content column in a ~1100px
+   window — because .pshot reserves a fixed height and a taller card only buys
+   a smaller one. The height term binds at every width, which is also what
+   keeps the ticker's side of the pane clear (see .vg-ticker).
+
+   Desktop only: the mobile journey keeps its crop and its chip. */
+.marketing .vg-beyond {
+  max-width: 84%;
+}
+/* The two steps below 1050 are measured, not computed: `BeyondDashboard`'s
+   natural height is 724px below 1024 and 565 at/above, because the surface
+   carries a `lg:` Tailwind class — a VIEWPORT query read from inside a
+   fixed-width mount that cannot see the viewport. That is the trap the meetings
+   board avoided by pinning its grid, and it is live here; the durable fix is to
+   pin this grid the same way, which is an app-file change. Until then these two
+   steps are sized for the tall shape. */
+.marketing .vg-beyond .vg-embed-full .vg-app-embed {
+  width: 840px;
+  zoom: 0.46;
+}
+@media (min-width: 1000px) {
+  .marketing .vg-beyond .vg-embed-full .vg-app-embed {
+    zoom: 0.52;
+  }
+}
+@media (min-width: 1100px) {
+  .marketing .vg-beyond .vg-embed-full .vg-app-embed {
+    zoom: 0.63;
+  }
+}
+@media (min-width: 1200px) {
+  .marketing .vg-beyond .vg-embed-full .vg-app-embed {
+    zoom: 0.69;
+  }
+}
+@media (min-width: 1300px) {
+  .marketing .vg-beyond .vg-embed-full .vg-app-embed {
+    zoom: 0.76;
+  }
+}
+@media (min-width: 1400px) {
+  .marketing .vg-beyond .vg-embed-full .vg-app-embed {
+    zoom: 0.82;
+  }
+}
+@media (min-width: 1500px) {
+  .marketing .vg-beyond .vg-embed-full .vg-app-embed {
+    zoom: 0.88;
+  }
+}
+@media (min-width: 1600px) {
+  .marketing .vg-beyond .vg-embed-full .vg-app-embed {
+    zoom: 0.95;
+  }
+}
+@media (min-width: 1700px) {
+  .marketing .vg-beyond .vg-embed-full .vg-app-embed {
+    zoom: 1.02;
+  }
+}
+@media (min-width: 1800px) {
+  .marketing .vg-beyond .vg-embed-full .vg-app-embed {
+    zoom: 1.03;
+  }
+}
+/* it is the panel's primary, so it lands like one — and the ticker keeps its
+   existing 110ms-later landing */
+.marketing .ptabs.pt-seen .ppanel.active .pshot .vg-beyond {
+  animation: fs-primary-in 420ms var(--ease) both;
+}
+
+/* ---------- networks · the oversight portfolio ----------
+   1200 = an oversight content column with the rail collapsed, which is what
+   the retired capture was. The section used to cap its visual at 1000px, which
+   was right for a bitmap (nothing is gained past its capture width) and wrong
+   for a vector render, where every extra pixel is type size. */
+.marketing .vg-networks .vg-embed-full .vg-app-embed {
+  width: 1200px;
+  zoom: 0.58;
+}
+@media (min-width: 1000px) {
+  .marketing .vg-networks .vg-embed-full .vg-app-embed {
+    zoom: 0.65;
+  }
+}
+@media (min-width: 1100px) {
+  .marketing .vg-networks .vg-embed-full .vg-app-embed {
+    zoom: 0.71;
+  }
+}
+@media (min-width: 1200px) {
+  .marketing .vg-networks .vg-embed-full .vg-app-embed {
+    zoom: 0.78;
+  }
+}
+@media (min-width: 1300px) {
+  .marketing .vg-networks .vg-embed-full .vg-app-embed {
+    zoom: 0.85;
+  }
+}
+@media (min-width: 1400px) {
+  .marketing .vg-networks .vg-embed-full .vg-app-embed {
+    zoom: 0.92;
+  }
+}
+/* the 1200px cap binds from here up — one last step, then it stops */
+@media (min-width: 1500px) {
+  .marketing .vg-networks .vg-embed-full .vg-app-embed {
+    zoom: 0.94;
+  }
+}
+/* the counts arrive, then each group of plants under them. The judgement here
+   IS the grouping — which plants the read put in front of you — so that is the
+   only thing that moves. */
+.marketing .vg-networks .vg-app-embed nav li:nth-child(1) {
+  --vg-i: 0;
+}
+.marketing .vg-networks .vg-app-embed nav li:nth-child(2) {
+  --vg-i: 1;
+}
+.marketing .vg-networks .vg-app-embed nav li:nth-child(3) {
+  --vg-i: 2;
+}
+.marketing .vg-networks .vg-app-embed section:nth-of-type(1) {
+  --vg-i: 0;
+}
+.marketing .vg-networks .vg-app-embed section:nth-of-type(2) {
+  --vg-i: 1;
+}
+.marketing .vg-networks.vg-seen .vg-app-embed nav li {
+  animation: vg-row-in 320ms var(--ease) both;
+  animation-delay: calc(var(--vg-i, 0) * 90ms);
+}
+.marketing .vg-networks.vg-seen .vg-app-embed section {
+  animation: fs-primary-in 420ms var(--ease) both;
+  animation-delay: calc(260ms + var(--vg-i, 0) * 160ms);
+}
+
 /* mobile: the overlay cards go with the overlay images they live beside; the
    scorecard stays and goes full-width — three real tiles at real size are the
    one product surface that survives this width */
@@ -1774,7 +2831,8 @@ html:has(.marketing) {
   .marketing .vg-card {
     display: none;
   }
-  .marketing .epane .vg-scorecard {
+  .marketing .epane .vg-scorecard,
+  .marketing .epane .vg-focus {
     max-width: 100%;
   }
 }
@@ -1799,27 +2857,74 @@ html:has(.marketing) {
     li[data-standing]:not([data-standing="not_raised"])
     > p,
   .marketing .ptabs.pt-seen .ppanel.active .pshot .vg-card,
-  /* :not(.is-pre) repeated here so these match the animated selectors'
-     specificity — without it the tick/strike animations win and still run */
-  .marketing .ptabs.pt-seen .ppanel.active .vg-check:not(.is-pre) .vg-box,
-  .marketing
-    .ptabs.pt-seen
-    .ppanel.active
-    .vg-check:not(.is-pre)
-    .vg-box::after,
-  .marketing
-    .ptabs.pt-seen
-    .ppanel.active
-    .vg-check:not(.is-pre)
-    .vg-check-t::after,
-  .marketing .ptabs.pt-seen .ppanel.active .vg-bar-fill,
-  .marketing .ptabs.pt-seen .ppanel.active .vg-count-a,
-  .marketing .ptabs.pt-seen .ppanel.active .vg-count-b,
   .marketing .ptabs.pt-seen .ppanel.active .vg-rs-rule-fill,
   .marketing .ptabs.pt-seen .ppanel.active .vg-rs-row,
-  .marketing .ptabs.pt-seen .ppanel.active .vg-rs-t,
+  /* the .vg-rs-row qualifiers repeated so these match the animated selectors'
+     (0,8,0) — the bare `.vg-rs-t` form is (0,6,0) and lost, so the run sheet's
+     hour chips kept animating under reduced motion (5 animations, measured) */
+  .marketing .ptabs.pt-seen .ppanel.active .vg-rs-row:not(.is-last) .vg-rs-t,
+  .marketing .ptabs.pt-seen .ppanel.active .vg-rs-row.is-last .vg-rs-t,
   .marketing .ptabs.pt-seen .ppanel.active .vg-wk-row,
-  .marketing .ptabs.pt-seen .ppanel.active .vg-wk-fill {
+  .marketing .ptabs.pt-seen .ppanel.active .vg-wk-fill,
+  /* --- the live app surfaces (#296), in the same order as their blocks --- */
+  .marketing .fswitch.fs-seen .fswitch-shot.active .vg-fs-primary,
+  .marketing .fswitch.fs-seen .fswitch-shot.active .vg-fs-overlay,
+  .marketing
+    .fswitch.fs-seen
+    .fswitch-shot.active
+    .vg-fs-teams
+    [data-slot="progress-indicator"],
+  .marketing
+    .fswitch.fs-seen
+    .fswitch-shot.active
+    .vg-fs-teams
+    [data-slot="badge"],
+  .marketing
+    .fswitch.fs-seen
+    .fswitch-shot.active
+    .vg-fs-wiki
+    [data-slot="progress-indicator"],
+  .marketing .vg-focus.vg-seen .vg-app-embed article,
+  .marketing .vg-focus.vg-seen .vg-app-embed article > div > [data-slot="badge"],
+  .marketing .vg-focus.vg-seen .vg-app-embed article > div ~ div,
+  .marketing .ptabs.pt-seen .ppanel.active .pshot .vg-jp-people,
+  .marketing .ptabs.pt-seen .ppanel.active .pshot .vg-jp-committed .vg-jp-mount,
+  .marketing .ptabs.pt-seen .ppanel.active .pshot .vg-jp-meet,
+  .marketing .ptabs.pt-seen .ppanel.active .pshot .vg-embed-mount,
+  .marketing .ptabs.pt-seen .ppanel.active .vg-training .vg-app-embed tbody tr,
+  .marketing .ptabs.pt-seen .ppanel.active .vg-training .vg-app-embed td > div,
+  .marketing
+    .ptabs.pt-seen
+    .ppanel.active
+    .vg-prelaunch
+    .vg-app-embed
+    [data-slot="card"],
+  .marketing
+    .ptabs.pt-seen
+    .ppanel.active
+    .vg-prelaunch
+    .vg-app-embed
+    [data-slot="progress-indicator"],
+  .marketing
+    .ptabs.pt-seen
+    .ppanel.active
+    .vg-prelaunch
+    [data-slot="checkbox"][data-checked="true"],
+  .marketing
+    .ptabs.pt-seen
+    .ppanel.active
+    .vg-prelaunch
+    [data-slot="checkbox"][data-checked="true"]
+    svg,
+  .marketing
+    .ptabs.pt-seen
+    .ppanel.active
+    .vg-prelaunch
+    [data-slot="checkbox"][data-checked="true"]
+    + label,
+  .marketing .ptabs.pt-seen .ppanel.active .pshot .vg-beyond,
+  .marketing .vg-networks.vg-seen .vg-app-embed nav li,
+  .marketing .vg-networks.vg-seen .vg-app-embed section {
     animation: none;
   }
 }

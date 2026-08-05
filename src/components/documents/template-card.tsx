@@ -1,20 +1,26 @@
 "use client";
 
-import { FileText } from "lucide-react";
+// ============================================================================
+// TemplateCard — the behaviour, and nothing else.
+//
+// The card's markup moved to template-card-view.tsx, which is server-safe and
+// is now the single definition of what a template card looks like. Import the
+// view from there, not through here: this module is a client boundary, so
+// anything re-exported through it becomes a client reference and stops being
+// renderable on the server.
+//
+// What is left is the only thing a template card actually *does* — open the
+// generate dialog — plus the button that fires it, handed to the view as its
+// action slot.
+// ============================================================================
+
 import { useState } from "react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import type { DocumentMergeValues, DocumentTemplate } from "@/lib/documents";
 
 import { GenerateDialog } from "./generate-dialog";
+import { TemplateCardView } from "./template-card-view";
 
 interface TemplateCardProps {
   template: DocumentTemplate;
@@ -26,48 +32,17 @@ export function TemplateCard({ template, defaults }: TemplateCardProps) {
 
   return (
     <>
-      <Card className="flex h-full flex-col">
-        <CardHeader>
-          <div className="text-muted-foreground mb-2">
-            <FileText className="h-6 w-6" />
-          </div>
-          <CardTitle className="text-base leading-snug">
-            {template.name}
-          </CardTitle>
-          <div className="flex flex-wrap items-center gap-1.5 pt-1">
-            {template.formats.map((format) => (
-              <Badge
-                key={format}
-                variant="secondary"
-                className="text-xs uppercase"
-              >
-                {format}
-              </Badge>
-            ))}
-            <Badge variant="outline" className="text-xs">
-              {template.pageCount} page{template.pageCount === 1 ? "" : "s"}
-            </Badge>
-            {typeof template.phase === "number" && (
-              <Badge variant="outline" className="text-xs">
-                Phase {template.phase}
-              </Badge>
-            )}
-          </div>
-        </CardHeader>
-        <CardContent className="flex-1">
-          <p className="text-muted-foreground text-sm">
-            {template.description}
-          </p>
-        </CardContent>
-        <CardFooter>
+      <TemplateCardView
+        template={template}
+        actionSlot={
           <Button
             className="w-full cursor-pointer"
             onClick={() => setOpen(true)}
           >
             Generate
           </Button>
-        </CardFooter>
-      </Card>
+        }
+      />
 
       <GenerateDialog
         template={template}

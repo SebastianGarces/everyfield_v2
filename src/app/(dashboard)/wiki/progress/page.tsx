@@ -1,15 +1,6 @@
-import Link from "next/link";
-import { ArrowRight, Check } from "lucide-react";
-import {
-  getArticles,
-  getProgressStats,
-  getLastInProgress,
-  wikiHref,
-} from "@/lib/wiki";
-import { Progress } from "@/components/ui/progress";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { getArticles, getProgressStats, getLastInProgress } from "@/lib/wiki";
 import { WikiBreadcrumb } from "@/components/wiki/wiki-breadcrumb";
+import { WikiProgressCard } from "@/components/wiki/wiki-progress-card";
 
 // Force dynamic rendering - no caching
 export const dynamic = "force-dynamic";
@@ -96,127 +87,17 @@ export default async function WikiProgressPage() {
     { label: "My Progress", href: "/wiki/progress" },
   ];
 
+  // Everything above is projection; the markup lives in the presentational
+  // view so the marketing site can render the same surface from a fixture.
   return (
-    <div className="space-y-8">
-      <WikiBreadcrumb items={breadcrumbs} />
-
-      {/* Header */}
-      <div className="space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight">My Wiki Progress</h1>
-        <p className="text-muted-foreground">
-          Track your reading progress across all wiki content.
-        </p>
-      </div>
-
-      {/* Overall Progress */}
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-lg font-medium">
-            Overall Progress
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">
-                {totalCompleted} of {totalArticles} articles completed
-              </span>
-              <span className="font-medium">{overallPercentage}%</span>
-            </div>
-            <Progress value={overallPercentage} className="h-3" />
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* By Category */}
-      <div className="space-y-4">
-        <h2 className="text-xl font-semibold">By Section</h2>
-        <div className="space-y-3">
-          {categoryRows.map((row) => (
-            <div
-              key={row.category}
-              className="flex items-center gap-4 rounded-lg border p-4"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  {row.phase !== undefined && (
-                    <span className="text-muted-foreground text-xs">
-                      Phase {row.phase}:
-                    </span>
-                  )}
-                  <span className="truncate font-medium">{row.name}</span>
-                </div>
-              </div>
-              <div className="flex items-center gap-4">
-                <Progress value={row.percentage} className="h-2 w-32" />
-                <div className="text-muted-foreground flex w-24 items-center justify-end gap-1 text-sm">
-                  {row.percentage === 100 ? (
-                    <span className="flex items-center gap-1 text-green-600 dark:text-green-500">
-                      <Check className="h-4 w-4" />
-                      Complete
-                    </span>
-                  ) : (
-                    <span>
-                      {row.completed}/{row.total} ({row.percentage}%)
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Continue Reading */}
-      {lastInProgress && (
-        <div className="space-y-4">
-          <h2 className="text-xl font-semibold">Continue Reading</h2>
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0 flex-1 space-y-1">
-                  <h3 className="truncate font-medium">
-                    {lastInProgress.title}
-                  </h3>
-                  {lastInProgress.description && (
-                    <p className="text-muted-foreground line-clamp-1 text-sm">
-                      {lastInProgress.description}
-                    </p>
-                  )}
-                  <div className="text-muted-foreground flex items-center gap-3 text-xs">
-                    <span className="capitalize">{lastInProgress.type}</span>
-                    <span>{lastInProgress.readTime} min read</span>
-                    <span>
-                      {Math.round((lastInProgress.scrollPosition ?? 0) * 100)}%
-                      complete
-                    </span>
-                  </div>
-                </div>
-                <Button asChild>
-                  <Link href={wikiHref(lastInProgress.slug)}>
-                    Continue
-                    <ArrowRight className="ml-2 h-4 w-4" />
-                  </Link>
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Empty state */}
-      {totalCompleted === 0 && totalInProgress === 0 && (
-        <Card>
-          <CardContent className="p-8 text-center">
-            <p className="text-muted-foreground">
-              You haven&apos;t started reading any wiki articles yet.
-            </p>
-            <Button asChild className="mt-4">
-              <Link href="/wiki">Browse Wiki</Link>
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-    </div>
+    <WikiProgressCard
+      breadcrumbSlot={<WikiBreadcrumb items={breadcrumbs} />}
+      totalArticles={totalArticles}
+      totalCompleted={totalCompleted}
+      totalInProgress={totalInProgress}
+      overallPercentage={overallPercentage}
+      sections={categoryRows}
+      lastInProgress={lastInProgress}
+    />
   );
 }

@@ -3,11 +3,11 @@
 import { useState } from "react";
 
 import { Chip } from "./chip";
+import type { Embed, Embeds } from "./embeds";
 import { Shot, ShotOverlay, type ShotSource } from "./shot";
 import { useInView } from "./use-in-view";
 import { usePrefetchShots } from "./use-prefetch-shots";
 import { useTablistKeys } from "./use-tablist-keys";
-import { PrelaunchChecklist } from "./vignettes/prelaunch-checklist";
 import { RunSheet } from "./vignettes/run-sheet";
 import { WeeklyTicker } from "./vignettes/weekly-ticker";
 
@@ -19,9 +19,11 @@ type Phase = {
   title: string;
   description: string;
   points: readonly string[];
-  desktop: ShotSource;
+  /** A panel is either a crop or a live embed (see embeds.ts) — the crop
+   *  fields are absent on the panels that became the app's own surfaces. */
+  desktop?: ShotSource;
   mobile?: ShotSource;
-  alt: string;
+  alt?: string;
   /** Horizontal anchor of the primary crop inside the panel. */
   anchor?: "start" | "end";
   overlay?: Overlay;
@@ -72,25 +74,9 @@ const PHASES: readonly Phase[] = [
       "People pipeline: contact → attended → committed.",
       "Vision meeting attendance, trend over trend.",
     ],
-    desktop: {
-      src: "/marketing/shots/pt-coregroup.webp",
-      width: 1720,
-      height: 830,
-    },
-    mobile: {
-      src: "/marketing/shots/pt-coregroup-m.webp",
-      width: 575,
-      height: 830,
-    },
-    alt: "People cards moving through the pipeline — J. P. Holloway a new prospect from an event, Grace Lin in follow-up from the website.",
-    anchor: "start",
-    overlay: {
-      src: "/marketing/shots/fs-meetings-m.webp",
-      width: 760,
-      height: 515,
-      alt: "Vision Meeting #5 — in 14 days, ~32 estimated.",
-      style: { right: "13%", bottom: "20%", width: "min(26%, 380px)" },
-    },
+    // live: CoreGroupPipeline. The meeting card is inside the embed rather
+    // than in `overlay` — the primary is a zoomed live mount whose width
+    // changes per band, so a percentage inset would drift onto a status badge.
   },
   {
     key: "launch-team",
@@ -102,18 +88,8 @@ const PHASES: readonly Phase[] = [
       "Commitment tracking against your 50-adult floor.",
       "Launch-date timeline with task templates unlocked.",
     ],
-    desktop: {
-      src: "/marketing/shots/pt-launch-team.webp",
-      width: 1760,
-      height: 810,
-    },
-    mobile: {
-      src: "/marketing/shots/pt-launch-team-m.webp",
-      width: 622,
-      height: 810,
-    },
-    alt: "The People screen filtered to the committed — 61 total, Core Group badges on every card.",
-    anchor: "end",
+    // live: LaunchTeamCommitted — PeopleList itself, which prints the
+    // "Showing 12 of 61 people" line that used to be the panel's claim
   },
   {
     key: "training",
@@ -125,27 +101,9 @@ const PHASES: readonly Phase[] = [
       "Ministry team rosters and training completion.",
       "Meeting series for corporate and team-specific training.",
     ],
-    desktop: {
-      src: "/marketing/shots/r6-team-training.webp",
-      width: 2304,
-      height: 1440,
-    },
-    mobile: {
-      src: "/marketing/shots/pt-teams-m.webp",
-      width: 578,
-      height: 695,
-    },
-    alt: "The Children's Ministry training matrix — who has completed kids ministry & safety training, member by member.",
+    // live: TeamTraining — the matrix AND the team tile floating beside it are
+    // both the app's own components now, so the tile is inside the embed
     anchor: "end",
-    overlay: {
-      src: "/marketing/shots/r6-twocards.webp",
-      width: 588,
-      height: 706,
-      alt: "Two ministry team cards — Worship Team and Facilities, staffing bars and open roles.",
-      // stands on the painting and overlaps only the app's icon rail — the
-      // matrix heading and its column headers stay whole
-      style: { left: "12.1%", top: "20%", width: "min(24%, 350px)" },
-    },
   },
   {
     key: "pre-launch",
@@ -157,24 +115,12 @@ const PHASES: readonly Phase[] = [
       "Pre-launch checklist counting down to Sunday.",
       "Dry-run meetings with role assignments.",
     ],
-    desktop: {
-      src: "/marketing/shots/pt-prelaunch.webp",
-      width: 2448,
-      height: 1513,
-    },
-    mobile: {
-      src: "/marketing/shots/pt-prelaunch-m.webp",
-      width: 912,
-      height: 445,
-    },
-    alt: "The Launch Sunday logistics checklist — preparation progress at 4 of 8 ready, promo cards and signage already struck through.",
+    // live: LaunchPrepChecklist. This panel was a capture WITH a drawn
+    // checklist card over it, and both were pictures of the same surface — so
+    // both are now the surface itself, and the hand-drawn vignette is gone.
+    // No chip either: the app's own progress card says "4/8 ready" at every
+    // width, and the chip would be that claim a second time.
     anchor: "start",
-    vignette: <PrelaunchChecklist />,
-    chip: {
-      text: "4 of 8 ready — and counting",
-      style: { left: "7%", bottom: "16%" },
-      mobileStyle: { left: 26, top: 28 },
-    },
   },
   {
     key: "launch-sunday",
@@ -185,17 +131,11 @@ const PHASES: readonly Phase[] = [
       "Launch-day run sheet by team and hour.",
       "Attendance and follow-up capture, same day.",
     ],
-    desktop: {
-      src: "/marketing/shots/pt-launch-day.webp",
-      width: 2340,
-      height: 1200,
-    },
-    mobile: {
-      src: "/marketing/shots/pt-launch-day-m.webp",
-      width: 775,
-      height: 355,
-    },
-    alt: "The Launch Sunday meeting page — in 28 days, ~120 estimated, and the run sheet: 7:30 setup crew, 8:15 band call, 9:15 doors, 10:00 service.",
+    // live: LaunchSunday — the meeting page itself. The run sheet stays a
+    // marketing vignette (it is a moment, not a surface) and keeps right: 5%,
+    // which is why the meeting page now anchors to the start: at every band
+    // the mount's trailing edge clears the run sheet's leading edge.
+    anchor: "start",
     vignette: <RunSheet />,
   },
   {
@@ -208,11 +148,9 @@ const PHASES: readonly Phase[] = [
       "Weekly health dashboard: worship, walk, work.",
       "Graduation: hand off to your long-term ChMS when ready.",
     ],
-    desktop: {
-      src: "/marketing/shots/pt-beyond.webp",
-      width: 2448,
-      height: 1513,
-    },
+    // live on desktop only (BeyondDashboard); the mobile journey keeps its
+    // crop and its chip. The desktop embed hugs the trailing edge, so the
+    // ticker moved to the left of this pane (see .vg-ticker).
     mobile: {
       src: "/marketing/shots/pt-beyond-m.webp",
       width: 945,
@@ -231,9 +169,11 @@ const PHASES: readonly Phase[] = [
 
 function PhaseVisual({
   phase,
+  embed,
   isMobile,
 }: {
   phase: Phase;
+  embed?: Embed;
   isMobile?: boolean;
 }) {
   const cls = [
@@ -242,21 +182,30 @@ function PhaseVisual({
   ]
     .filter(Boolean)
     .join(" ");
+  // a live embed replaces the crop outright, per tree — a panel can be live on
+  // desktop and still a crop in the mobile journey (Beyond is)
+  const live = isMobile ? embed?.mobile : embed?.visual;
+  const crop = isMobile ? (phase.mobile ?? phase.desktop) : phase.desktop;
   return (
     <div className={cls}>
-      <Shot
-        desktop={isMobile ? (phase.mobile ?? phase.desktop) : phase.desktop}
-        mobile={isMobile ? undefined : phase.mobile}
-        alt={phase.alt}
-      />
+      {live ??
+        (crop ? (
+          <Shot
+            desktop={crop}
+            mobile={isMobile ? undefined : phase.mobile}
+            alt={phase.alt ?? ""}
+          />
+        ) : null)}
       {!isMobile && phase.overlay ? (
         <ShotOverlay overlay={phase.overlay} />
       ) : null}
+      {!isMobile && embed?.overlay ? embed.overlay : null}
       {!isMobile && phase.vignette ? phase.vignette : null}
       {/* the vignette carries the phase's claim on desktop, so the chip stays
           only where there is no vignette — and on mobile, where vignettes and
-          overlay images are both hidden */}
-      {phase.chip && (isMobile || !phase.vignette) ? (
+          overlay images are both hidden. A live embed claims the same way: it
+          prints the app's own numbers, so a chip beside it is the claim twice. */}
+      {phase.chip && (isMobile || (!phase.vignette && !embed?.visual)) ? (
         <Chip
           style={
             isMobile
@@ -271,13 +220,13 @@ function PhaseVisual({
   );
 }
 
-const PREFETCH = PHASES.flatMap((p) => [p.desktop.src, p.overlay?.src]);
+const PREFETCH = PHASES.flatMap((p) => [p.desktop?.src, p.overlay?.src]);
 
 const KEYS = PHASES.map((p) => p.key);
 const tabId = (key: string) => `pt-tab-${key}`;
 const panelId = (key: string) => `pt-panel-${key}`;
 
-export function PhaseTabs() {
+export function PhaseTabs({ embeds = {} }: { embeds?: Embeds }) {
   const [active, setActive] = useState<string>(PHASES[0].key);
   const onTabKeyDown = useTablistKeys(KEYS, setActive);
   usePrefetchShots(PREFETCH);
@@ -335,7 +284,7 @@ export function PhaseTabs() {
                 ))}
               </ul>
             </div>
-            <PhaseVisual phase={phase} />
+            <PhaseVisual phase={phase} embed={embeds[phase.key]} />
           </div>
         ))}
       </div>
@@ -348,7 +297,7 @@ export function PhaseTabs() {
             <p className="marker">{phase.tab}</p>
             <h3 className="lp-h3">{phase.title}</h3>
             <p className="pdesc">{phase.description}</p>
-            <PhaseVisual phase={phase} isMobile />
+            <PhaseVisual phase={phase} embed={embeds[phase.key]} isMobile />
           </article>
         ))}
       </div>

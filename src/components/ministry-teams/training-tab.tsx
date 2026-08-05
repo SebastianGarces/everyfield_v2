@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, GraduationCap, Plus, X } from "lucide-react";
+import { GraduationCap, Plus } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  TrainingMatrix,
+  TrainingMatrixIncompleteMarker,
+} from "@/components/ministry-teams/training-matrix";
 import {
   createTrainingProgramAction,
   markTrainingCompleteAction,
@@ -90,74 +94,23 @@ export function TrainingTab({ teamId, programs, matrix }: TrainingTabProps) {
         />
       </div>
 
-      {/* Training completion matrix */}
-      <div className="overflow-x-auto rounded-lg border">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-muted/50 border-b">
-              <th className="px-4 py-3 text-left font-medium">Team Member</th>
-              {programs.map((program) => (
-                <th
-                  key={program.id}
-                  className="px-3 py-3 text-center font-medium"
-                >
-                  <div className="flex flex-col items-center gap-1">
-                    <span className="max-w-[120px] truncate">
-                      {program.name}
-                    </span>
-                    {program.isRequired && (
-                      <Badge variant="outline" className="text-[10px]">
-                        Required
-                      </Badge>
-                    )}
-                  </div>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {matrix.map((row) => (
-              <tr key={row.personId} className="border-b last:border-b-0">
-                <td className="px-4 py-3 font-medium">{row.personName}</td>
-                {programs.map((program) => {
-                  const isComplete = row.completions[program.id];
-                  return (
-                    <td key={program.id} className="px-3 py-3 text-center">
-                      {isComplete ? (
-                        <div className="flex items-center justify-center">
-                          <Check className="h-5 w-5 text-green-500" />
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          className="hover:bg-muted inline-flex cursor-pointer items-center justify-center rounded p-1 transition-colors"
-                          onClick={() =>
-                            handleMarkComplete(row.personId, program.id)
-                          }
-                          title="Mark as complete"
-                        >
-                          <X className="text-muted-foreground/30 h-5 w-5" />
-                        </button>
-                      )}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-            {matrix.length === 0 && (
-              <tr>
-                <td
-                  colSpan={programs.length + 1}
-                  className="text-muted-foreground px-4 py-8 text-center"
-                >
-                  No team members assigned yet. Assign members on the Members &
-                  Roles tab.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      {/* Training completion matrix. The grid itself is presentational and
+          lives in training-matrix.tsx; this tab only supplies the one
+          interactive cell — the click that marks a training complete. */}
+      <TrainingMatrix
+        programs={programs}
+        matrix={matrix}
+        incompleteCell={({ personId, programId }) => (
+          <button
+            type="button"
+            className="hover:bg-muted inline-flex cursor-pointer items-center justify-center rounded p-1 transition-colors"
+            onClick={() => handleMarkComplete(personId, programId)}
+            title="Mark as complete"
+          >
+            <TrainingMatrixIncompleteMarker />
+          </button>
+        )}
+      />
 
       {/* Training stats */}
       <div className="flex gap-4">

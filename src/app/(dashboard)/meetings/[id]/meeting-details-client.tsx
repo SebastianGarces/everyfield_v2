@@ -2,17 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  CalendarDays,
-  Clock,
-  MapPin,
-  Users,
-  Pencil,
-  Trash2,
-  ArrowRight,
-} from "lucide-react";
+import { Pencil, Trash2, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -36,11 +27,7 @@ import {
   updateMeetingStatusAction,
 } from "@/app/(dashboard)/meetings/actions";
 import { MeetingForm } from "@/components/meetings/meeting-form";
-// This component is SSR'd and then hydrated, so it must format the meeting time
-// through the shared zone-pinned helpers — a locale-default format renders one
-// string on the server and another in the browser (React #418) and drifts away
-// from the server-only header above it. See src/lib/datetime.ts.
-import { formatDate, formatTime } from "@/lib/datetime";
+import { MeetingSummaryCards } from "./meeting-summary-cards";
 import type { MeetingWithCounts } from "@/lib/meetings/types";
 import type { Location, MeetingStatus } from "@/db/schema";
 
@@ -75,10 +62,6 @@ export function MeetingDetails({ meeting, locations }: MeetingDetailsProps) {
 
   const status = meeting.status as MeetingStatus;
   const transition = statusTransitions[status];
-  const locationDisplay =
-    meeting.locationName || meeting.location?.name || "Not set";
-  const addressDisplay =
-    meeting.locationAddress || meeting.location?.address || "";
 
   const handleDelete = async () => {
     setIsDeleting(true);
@@ -172,91 +155,7 @@ export function MeetingDetails({ meeting, locations }: MeetingDetailsProps) {
       </div>
 
       {/* Meeting Info Cards */}
-      <div className="grid gap-6 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Date & Time</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <div className="flex items-center gap-2 text-sm">
-              <CalendarDays className="text-muted-foreground h-4 w-4" />
-              <span>{formatDate(meeting.datetime)}</span>
-            </div>
-            <div className="flex items-center gap-2 text-sm">
-              <Clock className="text-muted-foreground h-4 w-4" />
-              <span>{formatTime(meeting.datetime)}</span>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Location</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <div className="flex items-center gap-2 text-sm">
-              <MapPin className="text-muted-foreground h-4 w-4" />
-              <span>{locationDisplay}</span>
-            </div>
-            {addressDisplay && (
-              <p className="text-muted-foreground pl-6 text-sm">
-                {addressDisplay}
-              </p>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Attendance</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <div className="flex items-center gap-2 text-sm">
-              <Users className="text-muted-foreground h-4 w-4" />
-              {meeting.actualAttendance != null ? (
-                <span>
-                  <span className="font-medium">
-                    {meeting.actualAttendance}
-                  </span>{" "}
-                  actual
-                  {meeting.estimatedAttendance && (
-                    <span className="text-muted-foreground">
-                      {" "}
-                      / {meeting.estimatedAttendance} estimated
-                    </span>
-                  )}
-                </span>
-              ) : (
-                <span>
-                  {meeting.estimatedAttendance ? (
-                    <>
-                      <span className="font-medium">
-                        ~{meeting.estimatedAttendance}
-                      </span>{" "}
-                      estimated
-                    </>
-                  ) : (
-                    <span className="text-muted-foreground">
-                      No estimate set
-                    </span>
-                  )}
-                </span>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        {meeting.notes && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Notes</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm whitespace-pre-wrap">{meeting.notes}</p>
-            </CardContent>
-          </Card>
-        )}
-      </div>
+      <MeetingSummaryCards meeting={meeting} />
     </div>
   );
 }

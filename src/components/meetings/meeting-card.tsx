@@ -11,6 +11,10 @@ import type { MeetingStatus, MeetingType } from "@/db/schema";
 interface MeetingCardProps {
   meeting: MeetingWithCounts;
   isPast?: boolean;
+  /** Render the card as inert markup instead of a link — for presentational
+   *  embeds (the marketing page), where nothing may be clickable, focusable or
+   *  prefetchable. Absent, as in the app, this card is unchanged. */
+  linkStatic?: boolean;
 }
 
 const statusColors: Record<MeetingStatus, string> = {
@@ -56,72 +60,82 @@ function getMeetingTitle(meeting: MeetingWithCounts): string {
   return meeting.title || typeLabels[meeting.type] + " Meeting";
 }
 
-export function MeetingCard({ meeting, isPast }: MeetingCardProps) {
+export function MeetingCard({ meeting, isPast, linkStatic }: MeetingCardProps) {
   const locationDisplay =
     meeting.locationName || meeting.location?.name || "No location set";
   const status = meeting.status as MeetingStatus;
 
-  return (
-    <Link href={`/meetings/${meeting.id}`} className="block cursor-pointer">
-      <Card className="hover:border-primary/50 h-full transition-colors">
-        <CardHeader className="pb-3">
-          <div className="flex items-start justify-between">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <Badge className={typeColors[meeting.type]} variant="secondary">
-                  {typeLabels[meeting.type]}
-                </Badge>
-                {meeting.teamName && meeting.type === "team_meeting" && (
-                  <span className="text-muted-foreground text-xs">
-                    {meeting.teamName}
-                  </span>
-                )}
-              </div>
-              <p className="text-muted-foreground text-sm">
-                {formatDate(meeting.datetime, "short")} &bull;{" "}
-                {formatTime(meeting.datetime)}
-              </p>
-              <h3 className="text-lg leading-tight font-semibold">
-                {getMeetingTitle(meeting)}
-              </h3>
+  const card = (
+    <Card className="hover:border-primary/50 h-full transition-colors">
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <Badge className={typeColors[meeting.type]} variant="secondary">
+                {typeLabels[meeting.type]}
+              </Badge>
+              {meeting.teamName && meeting.type === "team_meeting" && (
+                <span className="text-muted-foreground text-xs">
+                  {meeting.teamName}
+                </span>
+              )}
             </div>
-            <Badge className={statusColors[status]} variant="secondary">
-              {statusLabels[status]}
-            </Badge>
+            <p className="text-muted-foreground text-sm">
+              {formatDate(meeting.datetime, "short")} &bull;{" "}
+              {formatTime(meeting.datetime)}
+            </p>
+            <h3 className="text-lg leading-tight font-semibold">
+              {getMeetingTitle(meeting)}
+            </h3>
           </div>
-        </CardHeader>
-        <CardContent className="space-y-3">
+          <Badge className={statusColors[status]} variant="secondary">
+            {statusLabels[status]}
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="text-muted-foreground flex items-center gap-2 text-sm">
+          <MapPin className="h-4 w-4 shrink-0" />
+          <span className="truncate">{locationDisplay}</span>
+        </div>
+        {isPast && meeting.actualAttendance != null ? (
           <div className="text-muted-foreground flex items-center gap-2 text-sm">
-            <MapPin className="h-4 w-4 shrink-0" />
-            <span className="truncate">{locationDisplay}</span>
+            <Users className="h-4 w-4 shrink-0" />
+            <span>
+              {meeting.actualAttendance} attended
+              {meeting.newAttendees > 0 && (
+                <span className="text-green-600 dark:text-green-400">
+                  {" "}
+                  ({meeting.newAttendees} new)
+                </span>
+              )}
+            </span>
           </div>
-          {isPast && meeting.actualAttendance != null ? (
-            <div className="text-muted-foreground flex items-center gap-2 text-sm">
-              <Users className="h-4 w-4 shrink-0" />
-              <span>
-                {meeting.actualAttendance} attended
-                {meeting.newAttendees > 0 && (
-                  <span className="text-green-600 dark:text-green-400">
-                    {" "}
-                    ({meeting.newAttendees} new)
-                  </span>
-                )}
-              </span>
-            </div>
-          ) : meeting.estimatedAttendance ? (
-            <div className="text-muted-foreground flex items-center gap-2 text-sm">
-              <Users className="h-4 w-4 shrink-0" />
-              <span>~{meeting.estimatedAttendance} estimated</span>
-            </div>
-          ) : null}
-          {!isPast && (
-            <div className="text-muted-foreground flex items-center gap-2 text-sm">
-              <CalendarDays className="h-4 w-4 shrink-0" />
-              <span>{formatRelativeDay(meeting.datetime)}</span>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+        ) : meeting.estimatedAttendance ? (
+          <div className="text-muted-foreground flex items-center gap-2 text-sm">
+            <Users className="h-4 w-4 shrink-0" />
+            <span>~{meeting.estimatedAttendance} estimated</span>
+          </div>
+        ) : null}
+        {!isPast && (
+          <div className="text-muted-foreground flex items-center gap-2 text-sm">
+            <CalendarDays className="h-4 w-4 shrink-0" />
+            <span>{formatRelativeDay(meeting.datetime)}</span>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+
+  // A span with the identical className, not an href-less anchor: a
+  // presentational embed should carry no app URL at all, so there is nothing
+  // left to prefetch by construction. `block` is on the className, so the box
+  // is identical either way.
+  return linkStatic ? (
+    <span className="block cursor-pointer">{card}</span>
+  ) : (
+    <Link href={`/meetings/${meeting.id}`} className="block cursor-pointer">
+      {card}
     </Link>
   );
 }

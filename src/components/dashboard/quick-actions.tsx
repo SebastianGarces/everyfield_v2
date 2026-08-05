@@ -31,25 +31,38 @@ const ACTIONS = [
   },
 ];
 
-export function QuickActions() {
+const ACTION_CLASS =
+  "bg-background hover:border-foreground/15 flex cursor-pointer flex-col items-center gap-2 rounded-lg border p-4 text-center transition-all hover:shadow-sm";
+
+/** `linkStatic` renders the four actions as inert markup instead of links —
+ *  for presentational embeds (the marketing page), where nothing may be
+ *  clickable, focusable or prefetchable. Absent, as in the app, unchanged. */
+export function QuickActions({ linkStatic }: { linkStatic?: boolean } = {}) {
   return (
     <div className="bg-card rounded-xl border p-6 shadow-sm">
       <h2 className="text-lg font-semibold">Quick Actions</h2>
       <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {ACTIONS.map((action) => (
-          <Link
-            key={action.href}
-            href={action.href}
-            className="bg-background hover:border-foreground/15 flex cursor-pointer flex-col items-center gap-2 rounded-lg border p-4 text-center transition-all hover:shadow-sm"
-          >
-            <div
-              className={`flex h-10 w-10 items-center justify-center rounded-full ${action.color}`}
-            >
-              <action.icon className="h-5 w-5" />
-            </div>
-            <span className="text-sm font-medium">{action.label}</span>
-          </Link>
-        ))}
+        {ACTIONS.map((action) => {
+          const body = (
+            <>
+              <div
+                className={`flex h-10 w-10 items-center justify-center rounded-full ${action.color}`}
+              >
+                <action.icon className="h-5 w-5" />
+              </div>
+              <span className="text-sm font-medium">{action.label}</span>
+            </>
+          );
+          return linkStatic ? (
+            <span key={action.href} className={ACTION_CLASS}>
+              {body}
+            </span>
+          ) : (
+            <Link key={action.href} href={action.href} className={ACTION_CLASS}>
+              {body}
+            </Link>
+          );
+        })}
       </div>
     </div>
   );
