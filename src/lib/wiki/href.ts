@@ -31,20 +31,25 @@
 //             (Next resolves it with `new URL(path, metadataBase)`, and
 //             `metadataBase` is set in `src/app/layout.tsx`). Here a raw space
 //             would have been fixed for us; `#`, `?` and `%` still would not.
-//   LITERAL — `revalidatePath(wikiHref(slug))` in
-//             `src/app/api/wiki/revalidate/route.ts`, and the active-item test
-//             `pathname === wikiHref(item.slug)` in
-//             `src/components/wiki/wiki-sidebar.tsx`. Nothing parses these:
-//             one is matched as a cache key against the request's ALREADY
-//             ENCODED path, the other is a string compare against
-//             `usePathname()`, which is likewise already encoded. A raw space
-//             is a silent mismatch — no revalidation, no highlighted item, no
-//             error anywhere.
+//   LITERAL — the active-item test `pathname === wikiHref(item.slug)` in
+//             `src/components/wiki/wiki-sidebar.tsx`. Nothing parses this: it is
+//             a string compare against `usePathname()`, which is already
+//             encoded, so a raw space is a silent mismatch — no highlighted
+//             item, no error anywhere.
 //
 // So: build every wiki path here, whatever the call site. The encoding is a
 // no-op for well-formed slugs (see `encodeWikiSlug`), so there is no cost to
 // routing the parsed call sites through it too, and no judgement call at the
 // point of use about which kind of site this one is.
+//
+// ONE path is deliberately NOT built here: the argument to `revalidatePath()`.
+// It is literal like the sidebar compare, but it is matched against a different
+// encoding — Next derives its implicit cache tag from the DECODED pathname with
+// only the path delimiters re-escaped, not from the encoded href. Passing the
+// href form silently revalidated nothing for any slug that is not URL-safe
+// (#310). That form has its own builder, `wikiRevalidationPath()` in
+// `src/lib/wiki/service.ts`, where the derivation is documented against Next's
+// source and pinned by `service.test.ts`.
 //
 // `/wiki/[...slug]` is a catch-all, so `/` must stay a live separator while
 // every other unsafe byte is escaped. That means encoding per SEGMENT, never
@@ -76,8 +81,10 @@ export function encodeWikiSlug(slug: string): string {
 /**
  * Build the in-app path for a wiki article slug.
  *
- * Use this everywhere a slug becomes an `href`, a `router.push` target, an
- * OpenGraph `url` or a `revalidatePath` argument — never `` `/wiki/${slug}` ``.
+ * Use this everywhere a slug becomes an `href`, a `router.push` target or an
+ * OpenGraph `url` — never `` `/wiki/${slug}` ``. The one exception is a
+ * `revalidatePath` argument, which needs a different encoding: build that with
+ * `wikiRevalidationPath()` from `src/lib/wiki/service.ts` (#310).
  *
  * @example
  * wikiHref("core-group/building-momentum") // "/wiki/core-group/building-momentum"
