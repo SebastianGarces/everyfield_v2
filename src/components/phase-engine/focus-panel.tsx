@@ -11,6 +11,12 @@
 // This component performs NO data access itself — it is handed the assessment,
 // its insights, and the current user's prior feedback by the page. (Its
 // InsightCard child does read the published-wiki slug index; see PE-024 there.)
+//
+// One escape hatch, for the one caller that has no database: pass `articleRefs`
+// and the panel renders the pure `InsightCardView` with them instead of the
+// reading, island-mounting `InsightCard` (issue #296 — the marketing page
+// embeds this panel live from a fixture). Omit it, as the app does, and nothing
+// about this component changes.
 // ============================================================================
 
 import { ArrowDown, ArrowUp, Minus } from "lucide-react";
@@ -20,6 +26,10 @@ import {
   InsightCard,
   type InsightFeedbackState,
 } from "@/components/phase-engine/insight-card";
+import {
+  InsightCardView,
+  type InsightArticleRef,
+} from "@/components/phase-engine/insight-card-view";
 import {
   Card,
   CardContent,
@@ -120,6 +130,16 @@ interface FocusPanelProps {
   delta: SnapshotDelta | null;
   /** Prior feedback keyed by insight id, for the current user. */
   feedbackByInsightId?: Record<string, InsightFeedbackState>;
+  /**
+   * Published-wiki refs to resolve the insights' "how to improve" slugs against
+   * (PE-024) — for callers that cannot reach the database.
+   *
+   * The app omits this: `InsightCard` does that read itself (React.cache-deduped,
+   * one query per panel) and mounts the feedback island. Supplying it swaps in
+   * the pure `InsightCardView`, which means no read and no feedback control —
+   * correct for the marketing embed (issue #296), wrong for the app.
+   */
+  articleRefs?: InsightArticleRef[];
 }
 
 export function FocusPanel({
@@ -127,6 +147,7 @@ export function FocusPanel({
   insights,
   delta,
   feedbackByInsightId = {},
+  articleRefs,
 }: FocusPanelProps) {
   if (!assessment) {
     return (
@@ -176,13 +197,21 @@ export function FocusPanel({
           </p>
         ) : (
           <div className="space-y-3">
-            {insights.map((insight) => (
-              <InsightCard
-                key={insight.id}
-                insight={insight}
-                feedback={feedbackByInsightId[insight.id]}
-              />
-            ))}
+            {insights.map((insight) =>
+              articleRefs ? (
+                <InsightCardView
+                  key={insight.id}
+                  insight={insight}
+                  articleRefs={articleRefs}
+                />
+              ) : (
+                <InsightCard
+                  key={insight.id}
+                  insight={insight}
+                  feedback={feedbackByInsightId[insight.id]}
+                />
+              )
+            )}
           </div>
         )}
       </CardContent>
