@@ -10,7 +10,6 @@ import {
 } from "@/db/schema";
 import { revalidatePath } from "next/cache";
 import { cache } from "react";
-import { wikiHref } from "./href";
 
 // ============================================================================
 // Article Queries
@@ -254,13 +253,84 @@ export async function deleteSection(id: string): Promise<void> {
 
 // ============================================================================
 // Revalidation Helpers
+//
+// `revalidatePath()` does NOT take the same string as an `href` (#310, from
+// #172). The two used to be built with the same `wikiHref()` on the assumption
+// that they were interchangeable; the Next docs never say so, and reading the
+// implementation shows they are not. The evidence, in next@16.1.4:
+//
+//  1. `revalidatePath(path)` uses `path` VERBATIM. It builds the cache tag
+//     `` `${NEXT_CACHE_IMPLICIT_TAG_ID}${removeTrailingSlash(path)}` `` and never
+//     encodes or decodes it — `node_modules/next/dist/server/web/spec-extension/
+//     revalidate.js`, `function revalidatePath`.
+//  2. The tag a RENDERED page carries comes from `getImplicitTags(page,
+//     pathname, …)` (`next/dist/server/lib/implicit-tags.js`), which likewise
+//     concatenates the pathname it is handed.
+//  3. That pathname is `resolvedPathname` from request metadata
+//     (`next/dist/server/app-render/app-render.js`), and
+//     `next/dist/server/route-modules/route-module.js` builds it in three steps,
+//     with its own comment "we decode for cache key/manifest usage, encoded is
+//     for URL building":
+//       - `interpolateDynamicPath` fills `/wiki/[...slug]` with the params,
+//         `encodeURIComponent`-ing each one (`next/dist/server/server-utils.js`);
+//       - `decodePathParams` splits on `/` and, per segment,
+//         `escapePathDelimiters(decodeURIComponent(seg), true)`
+//         (`next/dist/server/lib/router-utils/decode-path-params.js`);
+//       - `removeTrailingSlash`.
+//     `escapePathDelimiters(seg, true)` re-encodes only `/`, `#`, `?` and the
+//     literal sequences `%2f`, `%23`, `%3f`, `%5c`
+//     (`next/dist/shared/lib/router/utils/escape-path-delimiters.js`).
+//
+// So the form `revalidatePath` matches is neither the fully-encoded href nor the
+// raw slug: it is the slug with ONLY the path delimiters escaped. Observed
+// against Next's own `decodePathParams` (this is what `service.test.ts` pins):
+//
+//   slug "faq/what now?"  href "/wiki/faq/what%20now%3F"  tag "/wiki/faq/what now%3F"
+//   slug "guías/año"      href "/wiki/gu%C3%ADas/a%C3%B1o" tag "/wiki/guías/año"
+//
+// The encoded form was therefore WRONG, and silently so: for every URL-safe slug
+// (`A-Z a-z 0-9 - _ . ~` and `/`) both encodings are the identity, so the two
+// forms coincide and every article we ship today revalidated correctly. The
+// moment a slug contains a space, `#`, `?`, `%` or a non-ASCII character the tag
+// missed and the article stayed stale until its own TTL — a no-op with a 200
+// response, which is why nothing noticed. Fixed here rather than left latent.
+//
+// `wikiHref()` is still the ONLY way to build an href/`router.push`/OG url —
+// this helper is for `revalidatePath` and nothing else.
 // ============================================================================
+
+/**
+ * The path form `revalidatePath()` must be given for a wiki article slug.
+ *
+ * Mirrors Next's `escapePathDelimiters(decodeURIComponent(seg), true)` per
+ * segment. Since `encodeURIComponent`/`decodeURIComponent` round-trip exactly,
+ * that composition reduces to "escape the delimiters in the raw segment", which
+ * is what this does — the regex is Next's, character for character.
+ *
+ * @example
+ * wikiRevalidationPath("core-group/building-momentum") // "/wiki/core-group/building-momentum"
+ * wikiRevalidationPath("faq/what now?")                // "/wiki/faq/what now%3F"
+ */
+export function wikiRevalidationPath(slug: string): string {
+  const escaped = slug
+    .split("/")
+    // `/` cannot appear inside a segment after the split; it is kept in the
+    // class so this stays a byte-for-byte copy of Next's own expression.
+    .map((segment) =>
+      segment.replace(/[/#?]|%(?:2f|23|3f|5c)/gi, (delimiter) =>
+        encodeURIComponent(delimiter)
+      )
+    )
+    .join("/");
+
+  return `/wiki/${escaped}`;
+}
 
 /**
  * Revalidate a specific article page
  */
 export function revalidateArticle(slug: string): void {
-  revalidatePath(wikiHref(slug));
+  revalidatePath(wikiRevalidationPath(slug));
 }
 
 /**

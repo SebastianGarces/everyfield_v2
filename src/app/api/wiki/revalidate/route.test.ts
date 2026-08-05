@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { wikiHref } from "@/lib/wiki/href";
+import { wikiRevalidationPath } from "@/lib/wiki/service";
 
 import {
   isAuthorized,
@@ -149,16 +150,38 @@ test("POST with a valid secret revalidates the article and the wiki index", asyn
   ]);
 });
 
-test("POST builds the article path with wikiHref, not by interpolation", async () => {
-  // Slugs are authored content; the encoding invariant survives the guard swap.
+test("POST revalidates a special-character slug in revalidatePath's own form", async () => {
+  // Slugs are authored content, so a space or a `?` is legal — and the form
+  // `revalidatePath` matches is NOT the href form (#310). Next builds its
+  // implicit path tag from the DECODED pathname with only the path delimiters
+  // re-escaped, so the percent-encoded href this route used to pass produced a
+  // tag nothing carried: a 200 that revalidated nothing. The derivation and its
+  // evidence are in `src/lib/wiki/service.ts`; `service.test.ts` pins it against
+  // Next's own `decodePathParams`. Here we only assert the route uses it.
   process.env.REVALIDATION_SECRET = SECRET;
   const { calls, deps } = recorder();
   const slug = "discovery/what now?";
 
   await revalidateArticle(requestWithBody({ slug, secret: SECRET }), deps);
 
-  assert.equal(calls[0].path, wikiHref(slug));
+  assert.equal(calls[0].path, wikiRevalidationPath(slug));
+  assert.equal(calls[0].path, "/wiki/discovery/what now%3F");
+  // Neither of the two forms it is easy to mistake this for.
+  assert.notEqual(calls[0].path, wikiHref(slug));
   assert.notEqual(calls[0].path, `/wiki/${slug}`);
+});
+
+test("POST leaves a URL-safe slug byte-identical to the href form", async () => {
+  // The two forms coincide for every slug the wiki ships today, which is why
+  // the wrong one survived unnoticed — and why this fix changes no live path.
+  process.env.REVALIDATION_SECRET = SECRET;
+  const { calls, deps } = recorder();
+  const slug = "discovery/defining-your-church-values";
+
+  await revalidateArticle(requestWithBody({ slug, secret: SECRET }), deps);
+
+  assert.equal(calls[0].path, wikiHref(slug));
+  assert.equal(calls[0].path, `/wiki/${slug}`);
 });
 
 test("POST with a wrong secret is a 401 and revalidates nothing", async () => {
