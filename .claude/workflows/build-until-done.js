@@ -984,7 +984,9 @@ Report which branches merged and which did not. A branch you could not merge cle
       report: null,
     };
 
-  log(`🔗 ${track.id} stage ${stageIndex} integrated ${merged.length} branch(es)`);
+  log(
+    `🔗 ${track.id} stage ${stageIndex} integrated ${merged.length} branch(es)`
+  );
   return { ok: true, results: settled };
 }
 
@@ -1000,14 +1002,24 @@ Report which branches merged and which did not. A branch you could not merge cle
  */
 async function foldFollowUps(track, warnings, pr) {
   const wanted = warnings.map(
-    (w) => `- [ ] ${w.summary}${w.files?.length ? ` (${w.files.join(", ")})` : ""}`
+    (w) =>
+      `- [ ] ${w.summary}${w.files?.length ? ` (${w.files.join(", ")})` : ""}`
   );
   let followUps = [];
 
   for (let attempt = 1; attempt <= LABEL_ATTEMPTS; attempt++) {
     const reply = await agent(
       `Record ${warnings.length} code-quality finding(s) from PR ${pr.url} on the parent feature's follow-up rollup. They must be recorded BEFORE the merge, so a merge cannot lose them.
-${attempt > 1 ? `\nATTEMPT ${attempt}: a previous attempt did not land. These lines were NOT found in the body afterwards:\n${followUps.filter((f) => !f.confirmed).map((f) => `  ${f.anchor}`).join("\n") || "  (nothing was reported at all)"}\nRe-apply those and read the body back again.\n` : ""}
+${
+  attempt > 1
+    ? `\nATTEMPT ${attempt}: a previous attempt did not land. These lines were NOT found in the body afterwards:\n${
+        followUps
+          .filter((f) => !f.confirmed)
+          .map((f) => `  ${f.anchor}`)
+          .join("\n") || "  (nothing was reported at all)"
+      }\nRe-apply those and read the body back again.\n`
+    : ""
+}
 1. **Find the parent.** \`gh issue view ${track.issues[0]} --json parent\`. Platform work with no FRD may have none — in that case use the track's own issue as the anchor and say so in \`note\`.
 
 2. **Find or create the rollup.** One open issue per parent, titled exactly \`Follow-ups — <parent title>\`, labelled \`follow-ups\`. Search before creating: \`gh issue list --state open --label follow-ups --limit 200 --search "<parent title> in:title"\`. If it does not exist, create it with \`--label follow-ups --parent <parent>\` and a body that opens with a \`## Follow-up acceptance criteria\` heading. Do NOT give a new rollup any \`agent:*\` label yet — step 4 decides that.
@@ -1050,7 +1062,12 @@ Return strictly the schema.`,
     if (attempt === LABEL_ATTEMPTS)
       return { settled: false, followUps, attempts: attempt, missing };
   }
-  return { settled: false, followUps, attempts: LABEL_ATTEMPTS, missing: wanted };
+  return {
+    settled: false,
+    followUps,
+    attempts: LABEL_ATTEMPTS,
+    missing: wanted,
+  };
 }
 
 async function buildTrack(track) {

@@ -710,8 +710,9 @@ test("dependsOn splits one track into a prerequisite stage and a parallel fan-ou
     "its dependents are stage 1"
   );
 
-  const stage1 = calls.filter((c) => c.label?.startsWith("impl:") &&
-    c.label.includes("s1"));
+  const stage1 = calls.filter(
+    (c) => c.label?.startsWith("impl:") && c.label.includes("s1")
+  );
   for (const c of stage1)
     assert.match(
       c.prompt,
