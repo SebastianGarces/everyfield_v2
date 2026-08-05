@@ -101,7 +101,8 @@ The unit must be demonstrated **working against the running app**, not just comp
 
 **Backend / API units** → run the `validate-backend` skill:
 - Exercise the route / server action (curl or a `tsx` harness) and assert response **status + shape**
-  against the contract in `memory/contracts/api.md`.
+  against the contract declared by the unit's issue/FRD and the source (non-obvious behaviors:
+  `memory/contracts/api.md`).
 - `pnpm db:migrate` applies cleanly on a scratch/shadow DB.
 - **Evidence:** request/response transcript, migration output.
 
@@ -109,8 +110,9 @@ The unit must be demonstrated **working against the running app**, not just comp
 - `cursor-pointer` on every clickable (per `AGENTS.md`).
 - New shadcn components added via `pnpm dlx shadcn@latest add` (never hand-written).
 - Migrations via `pnpm db:migrate` — **never** `db:push`.
-- `memory/*` updated **in the same change** if entrypoints, flows, contracts, or invariants moved
-  (per `.agents/memory-first.md` and `memory/invariants.md`).
+- `memory/*` updated **in the same change** if the unit added or altered an invariant, a diagrammed
+  flow, or a non-obvious behavior (per the `memory-maintenance` skill; a new route or table alone
+  does not require it).
 - Tenancy / auth boundaries respected (`memory/invariants.md`).
 - **Evidence:** checklist with the specific lines/files touched.
 
