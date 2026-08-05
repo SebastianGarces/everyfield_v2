@@ -32,7 +32,7 @@ job that no-ops quietly is working correctly.
 ### 1. The review queue has room
 
 ```bash
-gh pr list --state open --json number,labels --jq '[.[] | select(.labels[].name == "agent:in-review")] | length'
+gh pr list --limit 200 --state open --json number,labels --jq '[.[] | select(.labels[].name == "agent:in-review")] | length'
 ```
 
 **Cap: 6.** At or over, stop with "review queue full (N open) — nothing dispatched."
@@ -49,7 +49,7 @@ the cap is too low. Fix the intake, not the number.
 ### 2. Nothing is already in flight
 
 ```bash
-gh issue list --state open --label agent:in-progress --json number,title
+gh issue list --limit 200 --state open --label agent:in-progress --json number,title
 ```
 
 Any result means a previous pass is still running, a human is working, or a run died mid-flight and
