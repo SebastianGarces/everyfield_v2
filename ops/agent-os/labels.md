@@ -94,13 +94,33 @@ Every issue reports `issue_dependencies_summary.blocked_by` — **open blockers 
 gate rather than a historical record. The **frontier** is what that makes queryable: every issue
 whose blockers are all closed and which nobody has claimed.
 
+**Ask for it in one call.** The REST *list* endpoint already carries `issue_dependencies_summary`,
+`assignees`, `labels` and the full `body`, so the whole frontier — and everything needed to size it —
+arrives in a single request:
+
 ```bash
 R={owner}/{repo}
-gh issue list --limit 200 --state open --label agent:queued --json number --jq '.[].number' | while read n; do
-  [ "$(gh api repos/$R/issues/$n --jq '.issue_dependencies_summary.blocked_by')" = "0" ] &&
-  [ "$(gh api repos/$R/issues/$n --jq '.assignees | length')" = "0" ] && echo "$n"
-done
+gh api --paginate "repos/$R/issues?labels=agent:queued&state=open&per_page=100" \
+  --jq '.[]
+        | select(.pull_request == null)
+        | select(.issue_dependencies_summary.blocked_by == 0 and (.assignees | length) == 0)
+        | .number'
 ```
+
+Three things in that command are load-bearing, and each one has drawn blood:
+
+- **`--paginate`, not a bare limit.** `gh issue list` defaults to **30**. On 2026-08-05 an 86-issue
+  board answered this question with 30 rows and every dispatch pass silently selected from a window
+  over the newest third of it — for weeks, with no error anywhere. `--paginate` has no ceiling to
+  outgrow, which is why it is preferred here over the `--limit 200` that PR #300 applied to the
+  remaining `gh issue list` calls.
+- **`select(.pull_request == null)`.** The REST issues endpoint returns **pull requests as well as
+  issues** (verified against this repo). `gh issue list` filters them for you; `gh api` does not. Skip
+  this and a PR can enter the frontier and be dispatched as buildable work.
+- **One request, not 1 + 2N.** The previous form looped `gh api` twice per issue — 173 sequential
+  round trips at 86 issues, before a line of code was written. Anything reading the frontier should
+  reuse this payload rather than re-fetching per issue; `body` is already in it, so
+  `## Likely files` and the ACs need no second call.
 
 **A dependency is semantic; file overlap is not.** Two units that both touch
 `src/db/schema/index.ts` do not block each other — they merely cannot run in the same parallel batch.
