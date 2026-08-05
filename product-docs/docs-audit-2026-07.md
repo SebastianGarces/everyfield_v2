@@ -161,6 +161,12 @@ filed as `risk:high` independently of what the FRD says.
 |---|----------|-------------|
 | 271 | **Launch becomes a first-class entity** (full discovery): one live `launches` row per church (target date, status `planning/scheduled/completed/postponed`, outcome fields) + a date-change journal; **`churches.launch_date` is DROPPED, not mirrored** — the entity is the only owner and every reader (PE countdown, oversight health, launch-date milestone event, settings edits) migrates in one slice, with a dev-DB wipe/reseed accepted (no users yet); readiness = **hybrid**: fixed Playbook-derived milestone rows (operations / launch-team prep / promotion) each linking `launch_prep` tasks; **outcome lives on the launch row** (attendance, decisions, notes, capture-the-day) — no meeting row, the vision-meeting stand-in ends; surface = dedicated `/launch` page + dashboard countdown card; planter-only schedule/postpone/outcome; launch facts join the PE snapshot but completing a launch does NOT auto-advance phase. | FRD written: `product-docs/features/launch/frd.md` (LS-001…LS-009). #271 converts to feature parent with three units (schema+reader-migration risk:high → page → outcome/PE). Post-launch **Services** direction (Service meeting type vs light Services entity, the not-a-ChMS boundary, oversight-data-without-enforcement thesis) deliberately parked as its own `needs-spec` discovery issue. #187 notified: launch-date edits go through the launch entity. |
 
+### Resolved 2026-08-04 — crawler preview polish (#292)
+
+| # | Decision | Consequence |
+|---|----------|-------------|
+| 292 | **(a) `/dashboard` comes OFF `CRAWLER_PREVIEWABLE_ROUTE_PREFIXES`.** The list's contract is "listed ⇒ renders session-free"; `/dashboard` needs a session and 500s for crawlers, so shared dashboard links will preview as the login page instead — honest and clean. No session-free metadata shell is built. **(b) The `whatsapp` UA token is TIGHTENED** to match only WhatsApp's preview-fetcher (UA `WhatsApp/2.x`), not its in-app browser, so a human tapping a shared `/wiki` link inside WhatsApp gets the real page instead of the bare metadata shell. | One build unit against `src/lib/crawler.ts` + `proxy.test.ts` (both halves touch the same files): #297. #292 closed with the ruling. |
+
 ## 5. Pending — evidence gathered, decision outstanding
 
 **All three items below were ruled on 2026-07-27** — rulings in §4 above. Evidence kept for the record.
