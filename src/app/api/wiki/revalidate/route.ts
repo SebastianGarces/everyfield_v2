@@ -11,13 +11,21 @@
 //
 // The guard lives in ONE exported function that both handlers call, so POST and
 // DELETE cannot drift apart the way two inline copies of the check could.
+//
+// Encoding: the article path is built with `wikiRevalidationPath()`, NOT with
+// `wikiHref()` (#310). `revalidatePath` matches Next's implicit path tag, which
+// is derived from the DECODED request pathname with only the path delimiters
+// re-escaped — so the percent-encoded href form missed the tag for every slug
+// containing a space, `#`, `?`, `%` or a non-ASCII character. The derivation and
+// its evidence are documented at the Revalidation Helpers section of
+// `src/lib/wiki/service.ts`.
 // ============================================================================
 
 import { revalidatePath } from "next/cache";
 import { NextRequest, NextResponse } from "next/server";
 
 import { constantTimeEquals } from "@/lib/security/constant-time";
-import { wikiHref } from "@/lib/wiki/href";
+import { wikiRevalidationPath } from "@/lib/wiki/service";
 
 /**
  * True when the request body carries the configured `REVALIDATION_SECRET`.
@@ -85,8 +93,9 @@ export async function revalidateArticle(
       );
     }
 
-    // Revalidate the specific article path
-    deps.revalidatePath(wikiHref(slug));
+    // Revalidate the specific article path — in revalidatePath's own encoding
+    // form, which is not the href form (#310, see the header).
+    deps.revalidatePath(wikiRevalidationPath(slug));
 
     // Also revalidate the wiki index page (navigation might have changed)
     deps.revalidatePath("/wiki");
