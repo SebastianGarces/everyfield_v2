@@ -173,7 +173,15 @@ const MAX_TILE_FACTS = 2;
 // One factor.
 // ----------------------------------------------------------------------------
 
-function FactorTile({ factor }: { factor: CsfFactorStanding }) {
+/**
+ * `data-standing` and `data-slot="csf-standing"` are stable hooks, in the same
+ * spirit as shadcn's `data-slot`s: they name the standing and the badge for
+ * anything styling this tile from outside, without adding a class the tile
+ * would then have to keep. The marketing page's live embed of this card
+ * (app/(marketing)/_components/vignettes/engine-scorecard.tsx) animates the
+ * raised tiles off them. Neither attribute changes what this renders.
+ */
+export function FactorTile({ factor }: { factor: CsfFactorStanding }) {
   const style = STANDING_STYLES[factor.standing];
   const [lead, ...rest] = factor.insights;
   const citedFacts = formatCitedFacts(lead?.citedFacts);
@@ -181,7 +189,10 @@ function FactorTile({ factor }: { factor: CsfFactorStanding }) {
   const hiddenFactCount = citedFacts.length - shownFacts.length;
 
   return (
-    <li className={cn("rounded-lg border p-3.5", style.container)}>
+    <li
+      data-standing={factor.standing}
+      className={cn("rounded-lg border p-3.5", style.container)}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p
@@ -199,6 +210,7 @@ function FactorTile({ factor }: { factor: CsfFactorStanding }) {
         {/* Icon + word + colour. Any two of the three can be lost and the
             standing still reads. */}
         <p
+          data-slot="csf-standing"
           className={cn(
             "inline-flex shrink-0 items-center gap-1 text-[0.6875rem] font-semibold tracking-wide uppercase",
             style.ink

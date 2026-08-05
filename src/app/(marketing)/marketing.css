@@ -1114,12 +1114,19 @@ html:has(.marketing) {
   margin: 0 auto;
 }
 
-/* ---------- vignettes — the app's moments, drawn live ----------
-   Marketing-only DOM that carries the shots' frame language (16px radius, 8px
-   white at 70%, the same lift) but is real text, so it stays legible where a
-   scaled capture would not. Nothing below imports or depends on the app; the
-   verdict palette is sampled from the app's attention tokens and re-measured
-   against this card's white ground.
+/* ---------- vignettes — the app's moments, live ----------
+   Two kinds live here, and they are not the same thing:
+
+   1. The engine's scorecard is THE APP'S OWN COMPONENT, rendered live from a
+      typed fixture (engine-scorecard.tsx). Everything under .vg-app-embed is
+      app DOM: this file's job there is to undo .marketing's inherited type and
+      colour, scale the card into the pane, and animate its resolve — never to
+      restyle it. It cannot drift from the product, because it IS the product.
+   2. The journey cards are marketing distillations (a checklist, a run sheet,
+      a ticker) — marketing-owned DOM, marketing tokens.
+
+   Both carry the shots' frame language: 16px radius, 8px white at 70%, the
+   same lift.
 
    Choreography follows the same grammar as fs-overlay-in: the BASE styles are
    the finished frame, and each keyframe supplies the starting state through a
@@ -1153,19 +1160,127 @@ html:has(.marketing) {
   font-family: var(--sans);
 }
 
-/* ---------- the engine's scorecard ---------- */
+/* ---------- the engine's scorecard: the app's own card, rendered live ----------
+   The frame is a mount rather than a card of its own: inside it the ground is
+   the app's page background, so the Card's white and its hairline border read
+   exactly as they do in the product instead of floating on marketing white.
+   One mount, two compositions (engine-scorecard.tsx) — the whole card on
+   desktop, three real tiles below 900px. */
 .marketing .vg-scorecard {
-  width: min(560px, 100%);
-  padding: 18px 20px 16px;
+  width: 100%;
+  padding: 12px;
+  background: var(--background);
 }
 .marketing .epane .vg-scorecard {
-  max-width: min(560px, 94%);
+  max-width: 94%;
 }
+
+/* The app's rendering, restored.
+   .marketing sets family, size, leading and colour on everything it contains,
+   and this subtree is not marketing DOM: a card inheriting DM Sans at 16/1.6
+   is not the card the product ships. Everything else the app needs is already
+   in scope — marketing renders inside the root layout, so Tailwind, the theme
+   tokens and the Geist variable on <body> are all present. */
+.marketing .vg-app-embed {
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  letter-spacing: normal;
+  color: var(--foreground);
+  text-align: start;
+}
+/* the other inherited rule that could reach in: .marketing paints links green
+   and underlines them on hover. The card has no links today — this is here so
+   that stays true by construction rather than by luck. */
+.marketing .vg-app-embed a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* Desktop: the whole card at the width it has on the Plant Intelligence page
+   (max-w-6xl, two of three columns), scaled down into the pane — which is what
+   the pane already does to the capture beside it.
+
+   `zoom`, not `transform`: zoom is layout-aware, so the mount keeps fitting
+   the card by itself. A transform would need the card's height hard-coded
+   here, and then a change to the card would silently break the frame — the
+   opposite of why this is a live embed.
+
+   The steps are the pane's own geometry, measured rather than guessed: the
+   pane runs 372×460 at 900px and 770×680 from 1800px up, and the card is
+   704×742, so the fit is width-bound on a small laptop and height-bound from
+   about 1300px. Each step sits ~5% under what its narrowest viewport allows. */
+.marketing .vg-embed-full .vg-app-embed {
+  width: 704px;
+  zoom: 0.35;
+}
+@media (min-width: 1000px) {
+  .marketing .vg-embed-full .vg-app-embed {
+    zoom: 0.4;
+  }
+}
+@media (min-width: 1100px) {
+  .marketing .vg-embed-full .vg-app-embed {
+    zoom: 0.45;
+  }
+}
+@media (min-width: 1300px) {
+  .marketing .vg-embed-full .vg-app-embed {
+    zoom: 0.48;
+  }
+}
+@media (min-width: 1400px) {
+  .marketing .vg-embed-full .vg-app-embed {
+    zoom: 0.52;
+  }
+}
+@media (min-width: 1500px) {
+  .marketing .vg-embed-full .vg-app-embed {
+    zoom: 0.56;
+  }
+}
+@media (min-width: 1700px) {
+  .marketing .vg-embed-full .vg-app-embed {
+    zoom: 0.66;
+  }
+}
+/* the pane stops growing at 1733px (--vis caps at 1560, the height at 680), so
+   this is the last step there is */
+@media (min-width: 1800px) {
+  .marketing .vg-embed-full .vg-app-embed {
+    zoom: 0.72;
+  }
+}
+
+/* the mount fits the scaled card rather than reserving a column for it */
+@media (min-width: 900px) {
+  .marketing .vg-scorecard {
+    width: max-content;
+  }
+  .marketing .vg-embed-compact {
+    display: none;
+  }
+}
+@media (max-width: 899px) {
+  .marketing .vg-embed-full {
+    display: none;
+  }
+  /* the compact composition's tiles sit under the mono header */
+  .marketing .vg-embed-compact .vg-app-embed {
+    margin-top: 12px;
+  }
+}
+
+/* the compact composition's chrome: what the card's own header says, in the
+   marketing voice, because the three tiles arrive without it */
 .marketing .vg-sc-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 14px;
+  /* the mount is only ~270px wide on a phone, where the two run out of room:
+     let the date take its own line rather than shearing the label into three */
+  flex-wrap: wrap;
+  gap: 2px 14px;
   padding-bottom: 13px;
   border-bottom: 1px solid var(--hairline);
 }
@@ -1175,96 +1290,6 @@ html:has(.marketing) {
   letter-spacing: 0.04em;
   color: var(--mute);
   white-space: nowrap;
-}
-.marketing .vg-sc-tiles {
-  display: grid;
-  gap: 8px;
-  margin-top: 12px;
-}
-
-/* Per-verdict tint + ring + badge ink, sampled from the app's own attention
-   tokens. Measured on this card's #fff ground (WCAG 2; badge text is 12px, so
-   the 4.5:1 floor applies):
-     going well      #0b7a3f on #f0f7f3 → 4.99:1
-     needs attention #ae0006 on #fbeded → 6.58:1
-     worth a look    #7c4700 on #f9efdb → 6.67:1
-   The basis line (--mute) measures 5.10 / 4.87 / 4.86 on the same tints. */
-.marketing .vg-tile {
-  --vg-tint: #fff;
-  --vg-ring: var(--edge);
-  --vg-badge: var(--ink);
-  padding: 11px 13px 12px;
-  background: var(--vg-tint);
-  border: 1px solid var(--vg-ring);
-  border-radius: 0;
-}
-.marketing .vg-tile.v-good {
-  --vg-tint: #f0f7f3;
-  --vg-ring: rgba(11, 122, 63, 0.42);
-  --vg-badge: #0b7a3f;
-}
-.marketing .vg-tile.v-attention {
-  --vg-tint: #fbeded;
-  --vg-ring: rgba(208, 30, 28, 0.38);
-  --vg-badge: #ae0006;
-}
-.marketing .vg-tile.v-look {
-  --vg-tint: #f9efdb;
-  --vg-ring: rgba(212, 142, 0, 0.45);
-  --vg-badge: #7c4700;
-}
-.marketing .vg-tile-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-.marketing .vg-tile-k {
-  font-family: var(--mono);
-  font-weight: 500;
-  font-size: 12px;
-  letter-spacing: 0.04em;
-  color: var(--text-2);
-}
-/* both states share one grid cell, so the badge's width reserves the slot and
-   the stamp-in never nudges the CSF label */
-.marketing .vg-badge-slot {
-  display: grid;
-  flex: none;
-  justify-items: end;
-}
-.marketing .vg-badge-slot > * {
-  grid-area: 1 / 1;
-}
-.marketing .vg-badge-idle {
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--mute);
-  opacity: 0;
-}
-.marketing .vg-badge {
-  font-family: var(--mono);
-  font-weight: 500;
-  font-size: 12px;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  white-space: nowrap;
-  color: var(--vg-badge);
-}
-.marketing .vg-reading {
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 1.35;
-  margin: 8px 0 0;
-  color: var(--ink);
-  text-wrap: pretty;
-}
-.marketing .vg-basis {
-  font-size: 12.5px;
-  line-height: 1.45;
-  margin: 4px 0 0;
-  color: var(--mute);
-  text-wrap: pretty;
 }
 .marketing .vg-sc-foot {
   font-family: var(--mono);
@@ -1276,33 +1301,83 @@ html:has(.marketing) {
   border-top: 1px solid var(--hairline);
 }
 
-/* the resolve: the engine reads one factor at a time, ~350ms apart */
-.marketing .vg-scorecard.vg-seen .vg-tile {
+/* ---------- the resolve, on the real card's DOM ----------
+   The engine reads one factor at a time, ~350ms apart. ONLY the tiles the
+   assessment actually raised animate: a `not_raised` tile already IS the
+   neutral state — dashed ring, no tint, no verdict — so it has nothing to
+   resolve into, and leaving it still is what makes the four that do move read
+   as judgements rather than as an entrance.
+
+   The hooks are the app's own: `data-standing` on the tile and
+   `data-slot="csf-standing"` on the icon+label pair
+   (components/phase-engine/csf-scorecard.tsx). Nothing here depends on a class
+   the app might rename, and nothing here restyles the card's finished state.
+
+   The stagger rides on --vg-i rather than nth-child delays directly, because
+   the raised factors are children 1, 2, 7 and 8 of the eight-tile grid — a
+   positional stagger would leave 1.7s of dead time waiting on the four the
+   assessment did not raise. */
+.marketing .vg-app-embed li:nth-child(1) {
+  --vg-i: 0;
+}
+.marketing .vg-app-embed li:nth-child(2) {
+  --vg-i: 1;
+}
+.marketing .vg-app-embed li:nth-child(7) {
+  --vg-i: 2;
+}
+.marketing .vg-app-embed li:nth-child(8) {
+  --vg-i: 3;
+}
+/* the compact composition carries the same three tiles as children 1–3 */
+.marketing .vg-embed-compact .vg-app-embed li:nth-child(3) {
+  --vg-i: 2;
+}
+
+.marketing
+  .vg-scorecard.vg-seen
+  .vg-app-embed
+  li[data-standing]:not([data-standing="not_raised"]) {
   animation: vg-tile-in 420ms var(--ease) both;
   animation-delay: calc(var(--vg-i, 0) * 350ms);
 }
-.marketing .vg-scorecard.vg-seen .vg-badge-idle {
-  animation: vg-idle-out 200ms var(--ease) both;
-  animation-delay: calc(var(--vg-i, 0) * 350ms + 120ms);
-}
-.marketing .vg-scorecard.vg-seen .vg-badge {
+.marketing
+  .vg-scorecard.vg-seen
+  .vg-app-embed
+  li[data-standing]:not([data-standing="not_raised"])
+  [data-slot="csf-standing"] {
   animation: vg-stamp-in 300ms var(--ease) both;
   animation-delay: calc(var(--vg-i, 0) * 350ms + 120ms);
 }
-.marketing .vg-scorecard.vg-seen .vg-reading {
+/* the tile's own paragraphs — the reading and the line of evidence under it.
+   Direct children only: the standing badge is a <p> too, one level in. */
+.marketing
+  .vg-scorecard.vg-seen
+  .vg-app-embed
+  li[data-standing]:not([data-standing="not_raised"])
+  > p {
   animation: vg-line-in 340ms var(--ease) both;
   animation-delay: calc(var(--vg-i, 0) * 350ms + 200ms);
 }
-.marketing .vg-scorecard.vg-seen .vg-basis {
-  animation: vg-line-in 340ms var(--ease) both;
+.marketing
+  .vg-scorecard.vg-seen
+  .vg-app-embed
+  li[data-standing]:not([data-standing="not_raised"])
+  > p
+  + p {
   animation-delay: calc(var(--vg-i, 0) * 350ms + 260ms);
 }
-/* border-style is a discrete property — it flips at the midpoint, which lands
-   under the tint wash and reads as the ring firming up */
+/* The neutral start is the app's own untouched tile: no tint, the app's border
+   token, dashed — i.e. exactly what `not_raised` looks like beside it. Only
+   background-color and border are in the keyframe, so whatever tint the tile
+   resolves TO is the component's, never this file's.
+
+   border-style is a discrete property — it flips at the midpoint, which lands
+   under the tint wash and reads as the ring firming up. */
 @keyframes vg-tile-in {
   from {
-    background: #fff;
-    border-color: var(--hairline);
+    background-color: transparent;
+    border-color: var(--border);
     border-style: dashed;
   }
 }
@@ -1310,11 +1385,6 @@ html:has(.marketing) {
   from {
     opacity: 0;
     transform: scale(1.06);
-  }
-}
-@keyframes vg-idle-out {
-  from {
-    opacity: 1;
   }
 }
 @keyframes vg-line-in {
@@ -1685,34 +1755,36 @@ html:has(.marketing) {
 }
 
 /* mobile: the overlay cards go with the overlay images they live beside; the
-   scorecard stays and goes full-width — it is the one vignette that is MORE
-   legible small than the capture it replaced */
+   scorecard stays and goes full-width — three real tiles at real size are the
+   one product surface that survives this width */
 @media (max-width: 899px) {
   .marketing .vg-card {
     display: none;
   }
   .marketing .epane .vg-scorecard {
     max-width: 100%;
-    width: 100%;
-  }
-}
-/* under ~480px the CSF label and badge collide mid-row — let the header wrap
-   so the badge takes its own line instead of shearing the label */
-@media (max-width: 479.98px) {
-  .marketing .vg-tile-top {
-    flex-wrap: wrap;
-    row-gap: 2px;
   }
 }
 
 /* reduced motion: base styles are already the finished frame, so switching the
-   animations off is the whole fallback */
+   animations off is the whole fallback. Every selector below repeats its
+   animated counterpart exactly — an under-specific `animation: none` loses the
+   cascade and the animation still runs. */
 @media (prefers-reduced-motion: reduce) {
-  .marketing .vg-scorecard.vg-seen .vg-tile,
-  .marketing .vg-scorecard.vg-seen .vg-badge,
-  .marketing .vg-scorecard.vg-seen .vg-badge-idle,
-  .marketing .vg-scorecard.vg-seen .vg-reading,
-  .marketing .vg-scorecard.vg-seen .vg-basis,
+  .marketing
+    .vg-scorecard.vg-seen
+    .vg-app-embed
+    li[data-standing]:not([data-standing="not_raised"]),
+  .marketing
+    .vg-scorecard.vg-seen
+    .vg-app-embed
+    li[data-standing]:not([data-standing="not_raised"])
+    [data-slot="csf-standing"],
+  .marketing
+    .vg-scorecard.vg-seen
+    .vg-app-embed
+    li[data-standing]:not([data-standing="not_raised"])
+    > p,
   .marketing .ptabs.pt-seen .ppanel.active .pshot .vg-card,
   /* :not(.is-pre) repeated here so these match the animated selectors'
      specificity — without it the tick/strike animations win and still run */
