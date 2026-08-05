@@ -381,8 +381,8 @@ export default function LandingPage() {
 
           {/* the chapter number is the only thing that differs: B has no
               journey chapter, so oversight is IV there and V in C */}
-          <p className="marker pv pv-b">Chapter IV · Every field, seen</p>
-          <p className="marker pv pv-c">Chapter V · Every field, seen</p>
+          <p className="marker pv pv-b">Chapter IV</p>
+          <p className="marker pv pv-c">Chapter V</p>
           <h2 className="lp-h2 pv pv-b pv-c" style={{ marginTop: 16 }}>
             Every field, seen
           </h2>
