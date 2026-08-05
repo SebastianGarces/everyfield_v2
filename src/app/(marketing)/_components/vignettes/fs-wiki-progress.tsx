@@ -47,7 +47,7 @@ const EMBED_LABEL =
   "The top of My Wiki Progress in the app — 4 of 96 articles read, 4% overall, with the methodology's ten sections tracked further down the page.";
 
 function ProgressBody() {
-  return <WikiProgressCard {...FS_WIKI_PROGRESS_FIXTURE} />;
+  return <WikiProgressCard {...FS_WIKI_PROGRESS_FIXTURE} linkStatic />;
 }
 
 /** Desktop: the overlay that lands on the open-article crop. */

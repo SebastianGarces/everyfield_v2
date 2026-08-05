@@ -34,18 +34,12 @@ import { FS_TEAMS_FIXTURE, FS_TEAMS_TOTAL } from "./fs-teams-fixture";
 const EMBED_LABEL =
   "Two of Redemption Hill's eleven ministry team cards — Children's Ministry staffed two of seven roles and flagged red, Prayer two of three and healthy.";
 
-/** The tile is an anchor in the product, so it stays one here: same box, same
- *  layout, same everything. It sits inside an `inert` wrapper, so it is neither
- *  focusable nor clickable — this href exists only so the element keeps its
- *  identity (and so it fails safe where `inert` is unsupported). */
-const INERT_HREF = "#";
-
 function TeamTiles() {
   return (
     // gap-4 is the app's own teams grid gutter (teams-dashboard.tsx)
     <div className="grid gap-4">
       {FS_TEAMS_FIXTURE.map((team) => (
-        <TeamCardView key={team.id} team={team} href={INERT_HREF} />
+        <TeamCardView key={team.id} team={team} linkStatic />
       ))}
     </div>
   );

@@ -71,6 +71,12 @@ export interface WikiProgressCardProps {
   lastInProgress: WikiProgressContinueItem | null;
   /** Route-specific breadcrumb (a client component in the app). */
   breadcrumbSlot?: ReactNode;
+  /** Render the two call-to-action buttons as inert markup instead of links —
+   *  for presentational embeds (the marketing page), where nothing may be
+   *  clickable, focusable or prefetchable. `Button asChild` clones whichever
+   *  child it is given, so the button's own box is identical either way.
+   *  Absent, as in the app, this card is unchanged. */
+  linkStatic?: boolean;
 }
 
 export function WikiProgressCard({
@@ -81,6 +87,7 @@ export function WikiProgressCard({
   sections,
   lastInProgress,
   breadcrumbSlot,
+  linkStatic,
 }: WikiProgressCardProps) {
   return (
     <div className="space-y-8">
@@ -179,10 +186,17 @@ export function WikiProgressCard({
                   </div>
                 </div>
                 <Button asChild>
-                  <Link href={wikiHref(lastInProgress.slug)}>
-                    Continue
-                    <ArrowRight className="ml-2 h-4 w-4" />
-                  </Link>
+                  {linkStatic ? (
+                    <span>
+                      Continue
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </span>
+                  ) : (
+                    <Link href={wikiHref(lastInProgress.slug)}>
+                      Continue
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </Link>
+                  )}
                 </Button>
               </div>
             </CardContent>
@@ -198,7 +212,11 @@ export function WikiProgressCard({
               You haven&apos;t started reading any wiki articles yet.
             </p>
             <Button asChild className="mt-4">
-              <Link href="/wiki">Browse Wiki</Link>
+              {linkStatic ? (
+                <span>Browse Wiki</span>
+              ) : (
+                <Link href="/wiki">Browse Wiki</Link>
+              )}
             </Button>
           </CardContent>
         </Card>

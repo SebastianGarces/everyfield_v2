@@ -183,6 +183,10 @@ interface TaskCardViewProps {
    * caller owns the pending transition.
    */
   isPending?: boolean;
+  /** Render the title as inert markup instead of a link — for presentational
+   *  embeds (the marketing page), where nothing may be clickable, focusable or
+   *  prefetchable. Absent, as in the app, this row is unchanged. */
+  linkStatic?: boolean;
 }
 
 /**
@@ -198,11 +202,19 @@ export function TaskCardView({
   personNote,
   checkboxSlot,
   isPending = false,
+  linkStatic,
 }: TaskCardViewProps) {
   const isComplete = task.status === "complete";
   const priority = PRIORITY_CONFIG[task.priority] ?? PRIORITY_CONFIG.medium;
   const categoryInfo = task.category ? CATEGORY_CONFIG[task.category] : null;
   const dueDateInfo = getDueDateInfo(task.dueDate);
+  // A span carrying the identical className, not an href-less anchor: a
+  // presentational embed should carry no app URL at all, so there is nothing
+  // left to prefetch by construction.
+  const titleClass = cn(
+    "cursor-pointer text-sm leading-snug font-medium hover:underline",
+    isComplete && "line-through"
+  );
 
   return (
     <div
@@ -220,15 +232,13 @@ export function TaskCardView({
       {/* Content */}
       <div className="min-w-0 flex-1 space-y-1.5">
         <div className="flex items-start justify-between gap-2">
-          <Link
-            href={`/tasks/${task.id}`}
-            className={cn(
-              "cursor-pointer text-sm leading-snug font-medium hover:underline",
-              isComplete && "line-through"
-            )}
-          >
-            {task.title}
-          </Link>
+          {linkStatic ? (
+            <span className={titleClass}>{task.title}</span>
+          ) : (
+            <Link href={`/tasks/${task.id}`} className={titleClass}>
+              {task.title}
+            </Link>
+          )}
 
           {/* Priority indicator */}
           {task.priority !== "medium" && (

@@ -69,12 +69,22 @@ interface InsightCardViewProps {
    * the app (PE-014), nothing at all where the card is a picture of itself.
    */
   feedbackSlot?: ReactNode;
+  /** Render the article references as inert markup instead of links — for
+   *  presentational embeds (the marketing page), where nothing may be
+   *  clickable, focusable or prefetchable. Absent, as in the app, this card is
+   *  unchanged. */
+  linkStatic?: boolean;
 }
+
+/** Shared by the link and its inert twin, so the two can never drift. */
+const ARTICLE_LINK_CLASS =
+  "text-primary inline-flex cursor-pointer items-center gap-1.5 text-xs font-medium hover:underline";
 
 export function InsightCardView({
   insight,
   articleRefs = [],
   feedbackSlot,
+  linkStatic,
 }: InsightCardViewProps) {
   const severity = severityMeta(insight.severity);
   const citedFacts = formatCitedFacts(insight.citedFacts);
@@ -143,13 +153,17 @@ export function InsightCardView({
           >
             {articleLinks.map((link) => (
               <li key={link.slug}>
-                <Link
-                  href={link.href}
-                  className="text-primary inline-flex cursor-pointer items-center gap-1.5 text-xs font-medium hover:underline"
-                >
-                  <BookOpen className="h-3.5 w-3.5" aria-hidden />
-                  {link.label}
-                </Link>
+                {linkStatic ? (
+                  <span className={ARTICLE_LINK_CLASS}>
+                    <BookOpen className="h-3.5 w-3.5" aria-hidden />
+                    {link.label}
+                  </span>
+                ) : (
+                  <Link href={link.href} className={ARTICLE_LINK_CLASS}>
+                    <BookOpen className="h-3.5 w-3.5" aria-hidden />
+                    {link.label}
+                  </Link>
+                )}
               </li>
             ))}
           </ul>

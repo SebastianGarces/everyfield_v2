@@ -105,7 +105,7 @@ export function CoreGroupPipeline() {
               <div inert>
                 <div className="vg-jp-grid">
                   {PIPELINE_PEOPLE.map((person) => (
-                    <PersonCard key={person.id} person={person} />
+                    <PersonCard key={person.id} person={person} linkStatic />
                   ))}
                 </div>
               </div>
@@ -115,7 +115,7 @@ export function CoreGroupPipeline() {
           <div className="vg-jp-mount vg-jp-meet">
             <div className="vg-app-embed" role="img" aria-label={MEETING_LABEL}>
               <div inert>
-                <MeetingCard meeting={VISION_MEETING_4} isPast />
+                <MeetingCard meeting={VISION_MEETING_4} isPast linkStatic />
               </div>
             </div>
           </div>
@@ -135,7 +135,7 @@ export function CoreGroupPipeline() {
           <div inert>
             <div className="grid gap-3">
               {PIPELINE_PEOPLE_COMPACT.map((person) => (
-                <PersonCard key={person.id} person={person} />
+                <PersonCard key={person.id} person={person} linkStatic />
               ))}
             </div>
           </div>
@@ -165,6 +165,7 @@ export function LaunchTeamCommitted() {
                 people={COMMITTED_PEOPLE}
                 total={COMMITTED_TOTAL}
                 nextCursor={null}
+                linkStatic
               />
             </div>
           </div>
@@ -184,7 +185,7 @@ export function LaunchTeamCommitted() {
           <div inert>
             <div className="grid gap-3">
               {COMMITTED_PEOPLE_COMPACT.map((person) => (
-                <PersonCard key={person.id} person={person} />
+                <PersonCard key={person.id} person={person} linkStatic />
               ))}
             </div>
           </div>

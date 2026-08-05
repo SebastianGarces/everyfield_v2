@@ -111,7 +111,7 @@ export function DashboardSurface({
         </div>
         {quickActions ? (
           <div>
-            <QuickActions />
+            <QuickActions linkStatic />
           </div>
         ) : null}
       </div>

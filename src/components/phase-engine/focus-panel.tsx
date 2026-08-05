@@ -140,6 +140,10 @@ interface FocusPanelProps {
    * correct for the marketing embed (issue #296), wrong for the app.
    */
   articleRefs?: InsightArticleRef[];
+  /** Forwarded to each `InsightCardView`: render its article references as
+   *  inert markup instead of links — for presentational embeds (the marketing
+   *  page). Absent, as in the app, this panel is unchanged. */
+  linkStatic?: boolean;
 }
 
 export function FocusPanel({
@@ -148,6 +152,7 @@ export function FocusPanel({
   delta,
   feedbackByInsightId = {},
   articleRefs,
+  linkStatic,
 }: FocusPanelProps) {
   if (!assessment) {
     return (
@@ -200,6 +205,7 @@ export function FocusPanel({
             {insights.map((insight) =>
               articleRefs ? (
                 <InsightCardView
+                  linkStatic={linkStatic}
                   key={insight.id}
                   insight={insight}
                   articleRefs={articleRefs}

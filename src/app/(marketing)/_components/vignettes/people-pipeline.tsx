@@ -82,7 +82,7 @@ export function PeoplePipeline() {
                 the pane is wide enough to hold */}
             <div className="vg-fs-grid grid gap-3">
               {PEOPLE_FIXTURE.map((person) => (
-                <PersonCard key={person.id} person={person} />
+                <PersonCard key={person.id} person={person} linkStatic />
               ))}
             </div>
           </div>
@@ -119,7 +119,7 @@ export function PeoplePipelineCompact() {
         <div className="vg-inert-layer" inert>
           <div className="grid gap-3">
             {PEOPLE_FIXTURE_COMPACT.map((person) => (
-              <PersonCard key={person.id} person={person} />
+              <PersonCard key={person.id} person={person} linkStatic />
             ))}
           </div>
         </div>

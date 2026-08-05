@@ -75,6 +75,7 @@ export function EngineFocus() {
               insights={FOCUS_INSIGHTS_LEAD}
               delta={FOCUS_DELTA}
               articleRefs={FOCUS_ARTICLE_REFS}
+              linkStatic
             />
           </div>
         </div>
@@ -95,6 +96,7 @@ export function EngineFocus() {
             <InsightCardView
               insight={FOCUS_INSIGHTS_LEAD[0]}
               articleRefs={FOCUS_ARTICLE_REFS}
+              linkStatic
             />
           </div>
         </div>

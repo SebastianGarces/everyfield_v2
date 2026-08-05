@@ -80,7 +80,7 @@ export function MeetingsBoard() {
                 meetings page on a desktop. */}
             <div className="grid grid-cols-3 gap-4">
               {MEETINGS_UPCOMING.map((meeting) => (
-                <MeetingCard key={meeting.id} meeting={meeting} />
+                <MeetingCard key={meeting.id} meeting={meeting} linkStatic />
               ))}
             </div>
           </div>
@@ -90,7 +90,12 @@ export function MeetingsBoard() {
             </h2>
             <div className="grid grid-cols-3 gap-4">
               {MEETINGS_PAST.map((meeting) => (
-                <MeetingCard key={meeting.id} meeting={meeting} isPast />
+                <MeetingCard
+                  key={meeting.id}
+                  meeting={meeting}
+                  isPast
+                  linkStatic
+                />
               ))}
             </div>
           </div>
@@ -109,8 +114,8 @@ export function MeetingsBoardCompact() {
       </div>
       <div className="vg-app-embed" role="img" aria-label={COMPACT_LABEL}>
         <div className="grid gap-4" inert>
-          <MeetingCard meeting={MEETINGS_COMPACT_UPCOMING} />
-          <MeetingCard meeting={MEETINGS_COMPACT_PAST} isPast />
+          <MeetingCard meeting={MEETINGS_COMPACT_UPCOMING} linkStatic />
+          <MeetingCard meeting={MEETINGS_COMPACT_PAST} isPast linkStatic />
         </div>
       </div>
       {/* the four cards this width leaves out, in the marketing voice */}

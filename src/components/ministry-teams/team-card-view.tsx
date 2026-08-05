@@ -82,6 +82,11 @@ export interface TeamCardViewProps {
    * either way, so the layout is identical.
    */
   href?: string;
+  /** Render the tile as inert markup instead of a link — for presentational
+   *  embeds (the marketing page), where nothing may be clickable, focusable or
+   *  prefetchable. Takes precedence over `href`. Absent, as in the app, this
+   *  tile is unchanged. */
+  linkStatic?: boolean;
 }
 
 /**
@@ -92,7 +97,7 @@ export interface TeamCardViewProps {
  * outside — the marketing embeds — without adding a class the card would then
  * have to keep. None of them change what this renders.
  */
-export function TeamCardView({ team, href }: TeamCardViewProps) {
+export function TeamCardView({ team, href, linkStatic }: TeamCardViewProps) {
   const Icon = TEAM_ICONS[team.icon ?? ""] ?? Users;
   const staffingPercent =
     team.totalRoles > 0
@@ -102,91 +107,102 @@ export function TeamCardView({ team, href }: TeamCardViewProps) {
   const alertLevel =
     staffingPercent < 40 ? "red" : staffingPercent < 60 ? "yellow" : "green";
 
-  return (
-    <Link
-      href={href ?? `/teams/${team.id}`}
-      data-slot="team-card"
-      data-status={team.status}
-      data-health={alertLevel}
-    >
-      <Card className="flex h-full cursor-pointer flex-col gap-0 py-0 shadow-sm transition-all duration-200 hover:shadow-md">
-        <CardHeader className="flex flex-row items-center gap-3 p-4 pb-2">
-          <div
-            className={cn(
-              "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg",
-              team.type === "custom"
-                ? "bg-purple-100 text-purple-600 dark:bg-purple-950 dark:text-purple-400"
-                : "bg-primary/10 text-primary"
-            )}
-          >
-            <Icon className="h-5 w-5" />
+  const card = (
+    <Card className="flex h-full cursor-pointer flex-col gap-0 py-0 shadow-sm transition-all duration-200 hover:shadow-md">
+      <CardHeader className="flex flex-row items-center gap-3 p-4 pb-2">
+        <div
+          className={cn(
+            "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg",
+            team.type === "custom"
+              ? "bg-purple-100 text-purple-600 dark:bg-purple-950 dark:text-purple-400"
+              : "bg-primary/10 text-primary"
+          )}
+        >
+          <Icon className="h-5 w-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="truncate text-sm leading-none font-semibold tracking-tight">
+              {team.name}
+            </h3>
+            <span
+              className={cn(
+                "inline-block h-2.5 w-2.5 shrink-0 rounded-full",
+                alertLevel === "red" && "bg-red-500",
+                alertLevel === "yellow" && "bg-yellow-500",
+                alertLevel === "green" && "bg-green-500"
+              )}
+              title={`Health: ${alertLevel}`}
+            />
           </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center justify-between gap-2">
-              <h3 className="truncate text-sm leading-none font-semibold tracking-tight">
-                {team.name}
-              </h3>
-              <span
-                className={cn(
-                  "inline-block h-2.5 w-2.5 shrink-0 rounded-full",
-                  alertLevel === "red" && "bg-red-500",
-                  alertLevel === "yellow" && "bg-yellow-500",
-                  alertLevel === "green" && "bg-green-500"
-                )}
-                title={`Health: ${alertLevel}`}
-              />
-            </div>
-            <p className="text-muted-foreground mt-1 truncate text-xs">
-              {team.leaderName
-                ? `Leader: ${team.leaderName}`
-                : "No leader assigned"}
-            </p>
+          <p className="text-muted-foreground mt-1 truncate text-xs">
+            {team.leaderName
+              ? `Leader: ${team.leaderName}`
+              : "No leader assigned"}
+          </p>
+        </div>
+      </CardHeader>
+      <CardContent className="flex flex-1 flex-col gap-3 px-4 pt-1 pb-4">
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-muted-foreground">Staffing</span>
+            <span className="font-medium">
+              {team.filledRoles}/{team.totalRoles}
+            </span>
           </div>
-        </CardHeader>
-        <CardContent className="flex flex-1 flex-col gap-3 px-4 pt-1 pb-4">
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-muted-foreground">Staffing</span>
-              <span className="font-medium">
-                {team.filledRoles}/{team.totalRoles}
-              </span>
-            </div>
-            <Progress value={staffingPercent} className="h-2" />
-          </div>
+          <Progress value={staffingPercent} className="h-2" />
+        </div>
 
-          <div className="mt-auto flex items-center justify-between pt-1">
-            {team.totalRoles - team.filledRoles > 0 ? (
-              <Badge variant="outline" className="text-xs font-normal">
-                {team.totalRoles - team.filledRoles} role
-                {team.totalRoles - team.filledRoles !== 1 ? "s" : ""} open
-              </Badge>
-            ) : team.totalRoles > 0 ? (
-              <Badge
-                variant="secondary"
-                className="bg-green-100 text-xs font-normal text-green-700 dark:bg-green-950 dark:text-green-400"
-              >
-                Fully staffed
-              </Badge>
-            ) : (
-              <Badge variant="outline" className="text-xs font-normal">
-                No roles defined
-              </Badge>
-            )}
+        <div className="mt-auto flex items-center justify-between pt-1">
+          {team.totalRoles - team.filledRoles > 0 ? (
+            <Badge variant="outline" className="text-xs font-normal">
+              {team.totalRoles - team.filledRoles} role
+              {team.totalRoles - team.filledRoles !== 1 ? "s" : ""} open
+            </Badge>
+          ) : team.totalRoles > 0 ? (
             <Badge
               variant="secondary"
-              className={cn(
-                "text-xs font-normal capitalize",
-                team.status === "active" &&
-                  "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-400",
-                team.status === "forming" &&
-                  "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-400"
-              )}
+              className="bg-green-100 text-xs font-normal text-green-700 dark:bg-green-950 dark:text-green-400"
             >
-              {team.status}
+              Fully staffed
             </Badge>
-          </div>
-        </CardContent>
-      </Card>
+          ) : (
+            <Badge variant="outline" className="text-xs font-normal">
+              No roles defined
+            </Badge>
+          )}
+          <Badge
+            variant="secondary"
+            className={cn(
+              "text-xs font-normal capitalize",
+              team.status === "active" &&
+                "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-400",
+              team.status === "forming" &&
+                "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-400"
+            )}
+          >
+            {team.status}
+          </Badge>
+        </div>
+      </CardContent>
+    </Card>
+  );
+
+  // The data- hooks move with the element, because marketing.css staggers the
+  // tiles off `[data-slot="team-card"]`. A span rather than an href-less
+  // anchor: a presentational embed should carry no app URL at all, so there is
+  // nothing left to prefetch by construction.
+  const hooks = {
+    "data-slot": "team-card",
+    "data-status": team.status,
+    "data-health": alertLevel,
+  } as const;
+
+  return linkStatic ? (
+    <span {...hooks}>{card}</span>
+  ) : (
+    <Link href={href ?? `/teams/${team.id}`} {...hooks}>
+      {card}
     </Link>
   );
 }

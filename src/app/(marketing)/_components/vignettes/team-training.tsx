@@ -108,7 +108,7 @@ export function TeamTraining() {
                 login this page sells. Inert already makes it unreachable; the
                 href is aimed back at this page so the markup does not carry a
                 dead app route into a public document either. */}
-            <TeamCardView team={CHILDRENS_MINISTRY_TEAM} href="/" />
+            <TeamCardView team={CHILDRENS_MINISTRY_TEAM} linkStatic />
           </div>
         </div>
       </div>

@@ -96,6 +96,7 @@ export function TaskFollowups() {
                   task={task}
                   personNote={TASK_NOTES[task.id] ?? null}
                   checkboxSlot={CHECKBOX_STILL}
+                  linkStatic
                 />
               ))}
             </div>
@@ -107,7 +108,7 @@ export function TaskFollowups() {
       <div className="vg-fs-overlay vg-fs-meeting">
         <div className="vg-app-embed" role="img" aria-label={MEETING_LABEL}>
           <div className="vg-inert-layer" inert>
-            <MeetingCard meeting={MEETING_FIXTURE} isPast />
+            <MeetingCard meeting={MEETING_FIXTURE} isPast linkStatic />
           </div>
         </div>
       </div>
@@ -133,6 +134,7 @@ export function TaskFollowupsCompact() {
                 task={task}
                 personNote={TASK_NOTES[task.id] ?? null}
                 checkboxSlot={CHECKBOX_STILL}
+                linkStatic
               />
             ))}
           </div>

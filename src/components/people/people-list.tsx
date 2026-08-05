@@ -8,9 +8,19 @@ interface PeopleListProps {
   people: Person[];
   total: number;
   nextCursor: string | null;
+  /** Render every card, and this list's own call to action, as inert markup
+   *  instead of links — for presentational embeds (the marketing page), where
+   *  nothing may be clickable, focusable or prefetchable. Passed straight
+   *  through to each `PersonCard`. Absent, as in the app, unchanged. */
+  linkStatic?: boolean;
 }
 
-export function PeopleList({ people, total, nextCursor }: PeopleListProps) {
+export function PeopleList({
+  people,
+  total,
+  nextCursor,
+  linkStatic,
+}: PeopleListProps) {
   if (people.length === 0) {
     return (
       <div className="animate-in fade-in-50 flex min-h-[400px] flex-col items-center justify-center rounded-lg border border-dashed p-8 text-center">
@@ -23,7 +33,11 @@ export function PeopleList({ people, total, nextCursor }: PeopleListProps) {
           filters, or add a new person.
         </p>
         <Button asChild className="mt-6">
-          <Link href="/people/new">Add Person</Link>
+          {linkStatic ? (
+            <span>Add Person</span>
+          ) : (
+            <Link href="/people/new">Add Person</Link>
+          )}
         </Button>
       </div>
     );
@@ -33,7 +47,7 @@ export function PeopleList({ people, total, nextCursor }: PeopleListProps) {
     <div className="space-y-6">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {people.map((person) => (
-          <PersonCard key={person.id} person={person} />
+          <PersonCard key={person.id} person={person} linkStatic={linkStatic} />
         ))}
       </div>
 
