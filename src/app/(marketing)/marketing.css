@@ -383,18 +383,6 @@ html:has(.marketing) {
   height: 8px;
   background: var(--green);
 }
-.marketing .hero-chip-b {
-  transition-delay: 140ms;
-}
-@media (max-width: 899px) {
-  .marketing .hero-chip-a {
-    display: none;
-  }
-  .marketing .hero-chip-b {
-    top: 25% !important;
-    right: 8px !important;
-  }
-}
 @media (prefers-reduced-motion: reduce) {
   .marketing .chip {
     opacity: 1;

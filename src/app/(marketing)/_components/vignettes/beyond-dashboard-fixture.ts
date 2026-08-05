@@ -75,9 +75,3 @@ export const BEYOND_ACTIVITY = [
     metadata: {},
   },
 ] satisfies ActivityItem[];
-
-/**
- * The phone shows two: the week just finished and the one before it, which is
- * the smallest pair that still reads as a rhythm rather than an event.
- */
-export const BEYOND_ACTIVITY_COMPACT = [BEYOND_ACTIVITY[0], BEYOND_ACTIVITY[1]];
