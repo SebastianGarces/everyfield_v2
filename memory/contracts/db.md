@@ -1,136 +1,30 @@
 # Database Contracts
 
-ORM: Drizzle | DB: PostgreSQL (Neon serverless) | **Connection:** `src/db/index.ts`
-
-48 tables across `src/db/schema/*.ts` (file names cited per table below). Notation — unless stated: `id` uuid PK auto; `church_id` → churches required (tenant scope); `created_at`/`updated_at` timestamps default now; `created_by`/`created_by_id` → users required. `→t` = uuid FK to table t; `(c)` = cascade delete; `=x` = default; untyped columns are varchar/text (lengths in source).
-
-## Hierarchy
-
-**sending_networks** (`sending-network.ts`): name req.
-
-**sending_churches** (`sending-church.ts`): name req; sending_network_id →sending_networks null.
-
-## Core
-
-**churches** (`church.ts`) — multi-tenant root: name req; current_phase int =0; sending_church_id / sending_network_id FK null; inactivity_warning_days int =7; inactivity_alert_days int =14; launch_date date null (Phase Engine countdown); last_material_event_at timestamp null (Phase Engine "dirty" marker); city / state_region / country varchar(255) null (onboarding OB-002 — each INDEPENDENTLY optional, "" normalised to NULL); onboarding_completed_at timestamp null (F12 — null = the onboarding flow still owns this planter's dashboard; churches predating migration 0027 were backfilled to their created_at); leadership_status varchar(32) null (F12 / OB-004, migration 0028 — the pastor-confirmation answer: `planter_confirmed` | `no_planter`, **null = never asked**, which is NOT "no planter" and is why this is not a boolean. The planter ASSIGNMENT is still `users.church_id` + role `planter`, written at step 1 through the #183 compare-and-set; this column is what makes a NO recordable. Read ONLY through `src/lib/onboarding/leadership.ts` — `churchHasNoPlanter()` lights the dashboard nudge and short-circuits follow-up-task assignment, `leadershipAnswered()` drives step resumption. No CHECK: validated at the action boundary like `users.role`).
-
-**users** (`user.ts`): email unique req; password_hash Argon2id; name null; role: planter/coach/team_member/sending_church_admin/network_admin; church_id / sending_church_id / sending_network_id FK null.
-
-**sessions** (`session.ts`): id varchar PK = SHA-256 of token; user_id →users(c); expires_at + created_at timestamptz; ip_address; user_agent; country; city; fresh bool =true.
-
-**auth_attempts** (`auth-attempts.ts`) — login/register rate limiting, NOT church-scoped: identifier req (lowercased email); ip null; kind: login/register; success bool. Indexed by (identifier|ip, kind, created_at).
-
-**feedback** (`feedback.ts`): church_id FK NULL; user_id →users req; category: bug/suggestion/question/other =suggestion; description req; page_url; status: new/reviewed/resolved/dismissed =new.
-
-## Wiki (`wiki.ts`)
-
-**wiki_sections** — hierarchical nav: slug unique; name; description/icon null; parent_section_id FK self; phase int 0-6 null; sort_order int =0.
-
-**wiki_articles**: church_id FK NULL (null = global); slug unique per church; title; content (raw MDX); excerpt null; content_type: tutorial/how_to/explanation/reference/overview/guide; phase int 0-6 null; section_id →wiki_sections; read_time_minutes int; sort_order int =999; related_article_slugs text[]; status: draft/published/archived; published_at. FTS gin index.
-
-**wiki_progress**: user_id →users(c); article_slug (links by slug); status: not_started/in_progress/completed; scroll_position real 0-1; last_viewed_at; completed_at null. Unique (user_id, article_slug).
-
-**wiki_bookmarks**: user_id →users(c); article_slug. Unique (user_id, article_slug).
-
-## People / CRM (`people.ts`)
-
-**persons** — main CRM records: first_name + last_name req; email/phone null; address_* (line1, line2, city, state, postal_code, country); status =prospect; source; source_details + notes; photo_url; household_id →households; household_role: head/spouse/child/other; pipeline_sort_order int =0; created_by; deleted_at soft delete.
-Status enum (7): prospect, attendee, following_up, interviewed, core_group, launch_team, leader.
-Source enum: personal_referral, social_media, vision_meeting, website, event, partner_church, other.
-
-**households** — family groupings: name req; address_*.
-
-**tags**: name req; color hex. No updated_at.
-
-**person_tags** — junction: person_id + tag_id FK(c). Unique (person_id, tag_id).
-
-**assessments** — 4 C's: person_id →persons(c); assessed_by →users; committed/compelled/contagious/courageous_score int 1-5; total_score int 4-20 calculated; *_notes; assessment_date date.
-
-**interviews** — 5-criteria: person_id →persons(c); interviewed_by →users; interview_date date; maturity/gifted/chemistry/right_reasons/season_status: pass/fail/concern; *_notes; overall_result: qualified/qualified_with_notes/not_qualified/follow_up; next_steps.
-
-**commitments**: person_id →persons(c); commitment_type: core_group/launch_team; signed_date date req; witnessed_by →users; document_url; notes.
-
-**skills_inventory**: person_id →persons(c); skill_category: worship/tech/admin/teaching/hospitality/leadership/other; skill_name req; proficiency: beginner/intermediate/advanced/expert; notes.
-
-**person_activities** — timeline: person_id →persons(c); activity_type; metadata jsonb; performed_by →users.
-Activity types (16): status_changed, note_added, person_created, person_updated, interview_completed, assessment_completed, commitment_recorded, tag_added, tag_removed, skill_added, skill_updated, skill_removed, household_created, household_joined, household_left, household_role_changed.
-
-## Access Control
-
-**coach_assignments** (`coach-assignment.ts`): coach_user_id →users req; church_id req; assigned_at; status: active/inactive =active. Unique (coach_user_id, church_id).
-
-**organization_invitations** (`organization-invitation.ts`): type: church_to_sending_church/sending_church_to_network/church_to_network; inviter_user_id →users req; **invitee_email varchar(255) null** (0030 — the address the admin typed; the only thing the create form asks for, and what the list renders. Null only on rows predating #23); target_church_id / target_sending_church_id / sending_church_id / sending_network_id FK null — **both targets null is a legitimate OPEN invitation** (the invitee had no account yet; the target is filled in at registration by `bindOpenInvitationTarget`, which is also the compare-and-set that makes an invite link single-use); status: pending/accepted/declined/expired/revoked; responded_by FK null; responded_at + expires_at null. Indexed on target_church_id, target_sending_church_id, status, inviter_user_id, **sending_church_id, sending_network_id** (0030 — the surface lists by inviting ORG, not by inviter).
-
-**church_privacy_settings** (`church-privacy-settings.ts`) — church_id unique; updated_by FK null; two different questions in one table. **PULL** (what oversight may read on its dashboard): share_people / share_meetings / share_tasks / share_financials / share_ministry_teams / share_facilities, bool =false. **PUSH** (what is sent to oversight, F11 N-026): **share_activity_with_oversight** bool =false — ONE toggle, added by **0029** (`0029_oversight_sharing_toggle`; authored as 0028 and RENUMBERED when main landed a different 0028). **Editing that file is safe and its comments are NOT frozen:** drizzle's migrator (`PgDialect.migrate`) gates re-application on `created_at` vs `_journal.json`'s `when` and never compares the stored hash, so identify its ledger row by `created_at = 1785508853175`, never by `shasum` of the file. Superseding 0026's `share_phase`/`share_digest`. **0029 is EXPAND-ONLY: it adds without dropping**, so those two columns are still in the database, dead and unread — they are absent from the Drizzle schema, which is what stops new code selecting them. Dropping them was rejected because this Neon branch is shared by local dev, every preview AND production, and Drizzle compiles a bare `db.select()` into an explicit column list, so a pre-0029 build naming the dropped columns would fail EVERY `canAccessFeatureData` call (all six pull features, not just the oversight one) for as long as the risk:high PR sat in review. A follow-up contract migration (#255) drops them after #224 merges. **Any rollback that re-narrows a category CHECK must first delete BOTH the `notifications` and the `notification_preferences` rows carrying `milestones`** — 0029's own block omitted the second and, under `ON_ERROR_STOP=1`, halted with both CHECKs dropped and the ledger still claiming 0029 applied, which `pnpm db:migrate` then reports as green while changing nothing. 0029's header now carries the corrected block plus a detection query and a repair snippet for a database stranded that way. Those two were per-category notification eligibility; the 2026-07-27 ruling removed the category model for oversight entirely (see `notifications` below), so there was nothing left for per-category toggles to say, and a planter facing six switches to answer one question was being asked to model the schema. **0029 migrates nobody forward** — a church that had `share_phase` on does NOT arrive sharing; consent across a change of meaning is not inherited. Column names are reached only through `PRIVACY_COLUMN_MAP` in `src/lib/auth/access.ts`, keyed by `PrivacyFeatureKey` — adding a key without a column is a compile error. Read/write for the push toggle: `src/lib/notifications/oversight-sharing.ts` (upsert, so a church with no settings row can still opt in); screen: `(dash)/settings/sharing/`.
-
-## Meetings (`meetings.ts`)
-
-Unified meetings model (replaced the old vision-meetings schema).
-
-**locations** — venues, shared across meeting types: name req; address req; contact_name/phone/email null; cost; capacity int null; notes; is_active bool =true.
-
-**church_meetings** — unified meeting entity: type req: vision_meeting/orientation/team_meeting; title null; datetime req; status: planning/ready/in_progress/completed/cancelled =planning; location_id FK null + location_name/address snapshot; meeting_number int NULL (vision-meeting specific); team_id →ministry_teams null + meeting_subtype: regular/training/planning/special/rehearsal (team-meeting specific); estimated_attendance / actual_attendance / duration_minutes int null; notes; agenda jsonb; created_by. Unique (church_id, meeting_number).
-
-**meeting_attendance**: meeting_id →church_meetings(c); person_id →persons(c); attendance_type null: first_time/returning/core_group; status: attended/absent/excused =attended; invited_by_id →persons null; response_status null: confirmed/declined/interested/ready_commit/questions/not_interested; notes; created_by →users null. Unique (meeting_id, person_id).
-
-**invitations** — who invited whom (vision-meeting focused): meeting_id →church_meetings(c); inviter_id →persons req; invitee_name null; invitee_id →persons null; status: invited/confirmed/maybe/declined/attended/no_show =invited.
-
-**meeting_evaluations** — 8 quality-factor scores: meeting_id →church_meetings(c) unique (one per meeting); attendance/location/logistics/agenda/vibe/message/close/next_steps_score int 1-5 req; total_score varchar average; notes; evaluated_by →users req.
-
-**meeting_checklist_items**: meeting_id →church_meetings(c); item_name req; category: essential/materials/setup/av/organization; is_checked bool =false; notes; assigned_to →persons null.
-
-## Tasks (`tasks.ts`)
-
-**tasks**: title req; description; status: not_started/in_progress/blocked/complete =not_started; priority: low/medium/high/urgent =medium; due_date date + due_time time null; assigned_to_id →users null; category: vision_meeting/follow_up/training/facilities/promotion/administrative/ministry_team/launch_prep/recurring/general; related_type: person/meeting/team/facility + related_id uuid; parent_task_id uuid; is_recurring bool =false + recurrence_rule jsonb; completion_event (auto-complete hook); completed_at + completed_by_id null; created_by_id; deleted_at soft delete. **Partial unique index** `tasks_meeting_evaluation_unique_idx` on (church_id, related_id) WHERE completion_event='meeting.evaluation.completed' AND deleted_at IS NULL — one live evaluation task per meeting; this is what makes follow-up generation idempotent under concurrency (see invariants → Transactions / Atomicity).
-
-## Communication (`communication.ts`)
-
-**message_templates**: church_id FK NULL (null = system template); name req; description; category: meeting_invitation/meeting_reminder/follow_up/core_group/team/announcement/launch/other; channel: email/sms/both =email; subject; body req + body_html; merge_fields jsonb string[]; is_system bool =false; source_template_id uuid (fork origin).
-
-**communications** — main message records: subject; body req + body_html; channel =email; template_id →message_templates null; meeting_id →church_meetings null; status: draft/scheduled/sending/sent/failed =draft; scheduled_at / sent_at null; recipient_count int; created_by_id.
-
-**communication_recipients** — per-recipient delivery tracking (updated by Resend webhook): communication_id FK(c); person_id →persons(c); email / phone; channel =email; status: pending/sent/delivered/opened/clicked/bounced/failed =pending (forward-only); delivered_at/opened_at/clicked_at; external_id (Resend email id); error_message. No created_at/updated_at.
-
-**meeting_confirmation_tokens** — token RSVP (`/api/rsvp/[token]`): token unique req; meeting_id →church_meetings(c); person_id →persons(c); status: pending/confirmed/declined =pending; responded_at null; expires_at req. No updated_at.
-
-## Ministry Teams (`ministry-teams.ts`)
-
-**ministry_teams**: name req; type: predefined/custom =predefined; description; icon; leader_id →persons null; reports_to_team_id uuid; phase_introduced: phase_0..phase_6 =phase_2; status: forming/active/paused =forming; sort_order int =0; created_by.
-
-**team_roles**: team_id →ministry_teams(c); name req; description; reports_to_role_id uuid; is_leadership_role bool =false; time_commitment: low/medium/high; desired_skills; sort_order int =0; status: open/filled =open; created_by.
-
-**team_memberships**: team_id FK(c); person_id →persons(c); role_id →team_roles(c); start_date/end_date date null; status: active/inactive/pending =active; notes; created_by. Partial unique (team_id, person_id, role_id) WHERE status='active' — allows re-assignment after inactive.
-
-**training_programs**: team_id →ministry_teams set-null; name req; description; is_required bool =false; created_by.
-
-**training_completions**: person_id →persons(c); training_program_id FK(c); completed_at req; verified_by →users null; notes; created_by. Unique (person_id, training_program_id).
-
-## Phase Engine (`phase-engine.ts`)
-
-Facts are computed at assessment time — only manual attestations persist (plant_signals). Judge runs persist as immutable snapshots (plant_assessments + plant_insights); UI reads the latest, never a live LLM call. All church_id-scoped.
-
-**phase_transitions** — append-only audit log, soft-gated (forward/backward/skip, never blocked): from_phase + to_phase int req; initiated_by_id →users req; reason req; fact_snapshot jsonb; rubric_version req. No updated_at.
-
-**plant_signals** — manual self-attestations only: signal_key req; value jsonb req; attested_by_id →users req; attested_at =now. Unique (church_id, signal_key) — upserted.
-
-**plant_assessments** — one LLM-judge snapshot; latest `complete` row per church drives all reads: generated_at =now; phase int req; rubric_version req; fact_snapshot jsonb req; model_id null; status: pending/complete/failed =pending. No updated_at.
-
-**plant_insights** — one finding within an assessment: assessment_id FK(c); audience: planter/network (privacy-gated); category; severity: info/low/medium/high/critical =info; title; body; cited_facts jsonb; related_article_slugs text[]; rank int =0. No updated_at.
-
-**insight_feedback** — per-insight rating (rubric-tuning signal): insight_id + assessment_id FK(c); user_id →users req; rubric_version req (denormalized); rating: useful/not_useful; comment. Unique (insight_id, user_id) — upserted.
-
-## Notifications (`notifications.ts`)
-
-F11 foundation. Categories/channels/statuses/entity-types are code-defined tuples in the schema file, re-exported with their coded defaults by `src/lib/notifications/categories.ts`. Enqueue contract: `src/lib/notifications/enqueue.ts` (`enqueue`, `cancelByEntity` — never calls a provider); reads: `queries.ts` (every user-facing builder takes a `NotificationScope` whose `churchId` AND `recipientUserId` are BOTH required — there is no branch that can omit either; the one church-wide read is `listForDispatch(DispatcherScope)`, separately named and separately typed, and the feed/by-id reads are PROJECTED so `dedupe_key`/`status`/`scheduled_for` never reach a client payload); preference resolution + ownership: `preferences.ts`; **read-time preference filter** (N-005, ruled 2026-07-27, PR #218): every user-facing read and both mark-read writes accept an `in_app` category ALLOW-LIST (`resolveInAppCategories`), composed once per request by `feed.ts` — a disabled category leaves the feed, the badge and the cold-start probe together, an EMPTY list renders `false` rather than dropping the predicate, and an OMITTED list means no filter (the dispatcher must never consult a UI preference); paging: `listNotificationPage()` (keyset `(created_at, id)`, reads `limit + 1` to know whether another page exists); read-time preference filter (N-005, ruled 2026-07-27, PR #218): every user-facing read and both mark-read writes take an in_app category ALLOW-LIST (`resolveInAppCategories`), composed once per request by `feed.ts` — a disabled category leaves the feed, the badge and the cold-start probe together, an EMPTY list renders `false` rather than dropping the predicate, and an omitted list means no filter (the dispatcher must not consult a UI preference); read state (N-009): `mark-read.ts` (`markNotificationRead`, `markAllNotificationsRead` — both UPDATEs are built from the SAME `scopedWhere` + exported `feedVisibility` as the reads, both filter `read_at IS NULL` so a replay preserves the first read instant, and NEITHER touches `notification_deliveries` — read state is a fact about the feed row, delivery state is a fact about a send, and #133 keeps them structurally separate).
-
-**notifications** — the queue row AND the in-app feed row, one record: recipient_user_id →users(c) req; category: tasks/meetings/communication/teams/phase/**milestones**/digest (0029 widened 0024's CHECK for `milestones`, the oversight-milestone category); type req (caller discriminator, e.g. `task.overdue`); title + body req (rendered by the caller — F11 never templates); entity_type + entity_id null (cancel-by-entity target + feed link) — entity_type is a CLOSED code tuple (`notificationEntityTypes`), Zod-validated, deliberately NOT a DB CHECK so a follow-on unit can add one without a migration; dedupe_key null; scheduled_for =now; status: pending/claimed/delivered/cancelled/failed =pending; read_at null (independent of delivery). **Partial unique index** `notifications_dedupe_key_unique_idx` on (church_id, recipient_user_id, dedupe_key) WHERE dedupe_key IS NOT NULL **AND status <> 'cancelled'** (0023 created it, **0025 added the liveness term**) — the arbiter for `ON CONFLICT DO NOTHING`, which is what makes enqueue idempotent under concurrency (invariants → Atomicity). RECIPIENT is in the key because a fan-out composes ONE key per event and loops recipients; without it attendee #1 silently swallows #2..N. LIVENESS is in it because N-011 reschedule (and reopen) is cancel + re-enqueue: a cancelled row that kept its key swallowed the replacement — `created:false`, no pending row, nothing in the feed, no error. Delivered/failed rows DO still reserve their key. **The ON CONFLICT predicate in `dbEnqueueDeps.insertIfAbsent` must stay byte-identical to the index predicate** (a test compares both source texts): Postgres infers a partial arbiter only from a matching predicate, so drift = runtime "no unique or exclusion constraint matching the ON CONFLICT specification" on every keyed enqueue. `findByDedupeKey` carries the same `status <> 'cancelled'` filter. Also indexed for feed (church_id, recipient_user_id, created_at), unread (partial, read_at IS NULL), dispatch (status, scheduled_for), entity (church_id, entity_type, entity_id). CHECKs (0024) pin `category`/`status`. ALL THREE user-facing reads — feed, unread count, fetch-by-id — exclude `status='cancelled'` and `scheduled_for > now()`; the queue row and the feed row are one record, so an id is not a way around the feed's rules. **Enqueue authorisation (ruled 2026-07-27; the per-category model of PR #199 is SUPERSEDED by #224):** `recipientMayBeNotified` applies THREE gates — `canAccessChurch`; then, for oversight recipients only, `oversightGateFor(category, type)`, which asks `isOversightEligibleCategory` first and then whether the type is consent-exempt, followed by `canAccessFeatureData(recipient, churchId, "oversight_activity")` unless it is. **Ruled 2026-08-01: `oversight.milestone.invitation_accepted` is CONSENT-EXEMPT** (`OVERSIGHT_SHARING_EXEMPT_TYPES`) — the sending church's own event, emitted with the toggle off; it relaxes consent ONLY, never `canAccessChurch`, and the category allow-list is still applied first so nothing granular rides through it. **The exemption is scoped to the INVITING ORG, not to the plant's oversight union.** `applyAssociation` sets one of a plant's two oversight FKs without clearing the other, so a plant can belong to a sending church AND a network at once — and resolving an exempt notification's recipients from the plant delivered it to whichever org had invited nobody, with sharing off and no consent. The audience is read off the `organization_invitations` row (`announceInvitationAccepted({invitedBy})` → `fanOutToOversightOrg` → `listOversightAdminsOfOrg`), which never touches `churches`; an invitation naming no org reaches nobody. The plant-wide `fanOutToOversight` stays the path for everything consent-GATED. **`OVERSIGHT_ELIGIBLE_CATEGORIES` = `milestones` + `digest`, and nothing else** (`categories.ts`): the five granular categories are refused for an oversight recipient with the plant's toggle ON and with it OFF alike — no row, ever, not a row filtered later. An allow-list of CATEGORIES rather than a rule about `type` strings, because a rule about types is a convention a future caller forgets; a category added tomorrow is refused until someone adds it to the tuple on purpose. The toggle is read at enqueue time, every time, so a flip is honoured by the next enqueue rather than the next deploy. An admin over twenty plants gets what each plant granted, never the union. Church-level roles are never subject to it.
-
-**Enqueue NEVER throws for a refused recipient — it skips and reports.** `enqueue` returns a discriminated per-recipient result: `{status:"recorded", notification, created, reason:null}` or `{status:"skipped", notification:null, created:false, reason}`, where `reason` is `"outside_church"` (tenancy) or `"oversight_privacy"` (the church has not opted in). The error classes that used to carry those two facts are gone. The reason this is not a throw: the natural caller is a fan-out ("remind all six attendees") looping single-recipient calls, and a throw aborts it mid-loop with rows already written for recipients 1..n-1 — a notification permission could fail a meeting action. `outside_church` skips for the same reason, and it is not always a caller bug: a user whose church changed between building the recipient list and running enqueue is a race, not a defect. The refusal stays TOTAL either way — no row is written, and a skipped recipient does not reserve the event's dedupe key, so the next recipient in the loop cannot collapse into a row that never existed. Callers must check `status` before reading `notification`; the union makes that a compile error rather than a convention.
-
-**notification_preferences** — per (user, category, channel); **NOT church-scoped** (a coach across two churches has one set), the one notification table with no church_id: user_id →users(c) req; category; channel: email/in_app; enabled bool =true; digest_cadence: daily/weekly null (only meaningful on `digest`). Unique (user_id, category, channel) — upserted. **An ABSENT row means the category's coded default, not "off"** — rows are never seeded, so a new category needs no backfill. **The coded default is AUDIENCE-AWARE (N-027):** `audienceForRole` collapses the five roles onto `church` | `oversight` and `OVERSIGHT_CHANNEL_DEFAULT_OVERRIDES` (in `categories.ts`) is a sparse table over that — today only `digest`/`in_app`, off for the plant's team (it would duplicate the feed it summarises) and ON for oversight, who have no such feed. An EXPLICIT row always wins, both directions, so the audience decides what ABSENCE means and nothing else. Every path that resolves an absent row must pass the same audience — read (`resolveInAppCategories`), dispatch, the settings matrix (`buildPreferenceMatrixView`) and the no-op test (`preferenceWriteIsNoop`) — or the screen shows one value while the feed behaves as another. **RULED on #259 (2026-08-02): the oversight in-app digest default stays ON**, as the coded-default implementation of N-027. The read path carries the audience on the viewer — `notificationViewer` derives it from the session role and `feed.ts` passes it at all five call sites — so dispatch, the settings screen and the feed cannot disagree about what an absent row means. **Ownership is a branded type:** `setPreference`/`loadUserPreferences`/`getPreferenceMatrix` take a `PreferenceOwner`, mintable only via `preferenceOwnerFromSession(session)` — a bare uuid does not compile, so a consent record cannot be read or flipped by anyone holding another user's id. There are now exactly TWO minting functions: that one, and `preferenceOwnerFromUnsubscribeToken(token)` (N-007, #132), which opens a sealed AES-256-GCM token and returns a refusal rather than throwing. The unauthenticated path writes only through `unsubscribeWriteQuery`, which pins the channel to `email` and takes the category from the token — there is no parameter through which it could reach another user, channel or category. `setPreference` parses `setPreferenceSchema` at the boundary and omits `digest_cadence` from the upsert's SET when the caller supplied none, so a checkbox-only toggle cannot wipe a stored cadence. CHECKs (0024) pin category/channel/digest_cadence. **Settings screen (N-006, #134):** `(dash)/settings/` renders the matrix from the code registry and writes through `setPreference` / `setDigestCadence` only when the value actually CHANGES (`preferenceWriteIsNoop` / `digestCadenceWriteIsNoop`) — a visit to the screen must not seed twelve rows restating today's defaults, or those users are pinned to them when N-019 lands. `digest_cadence` is one CATEGORY-level value stored on the `(digest, email)` row (`DIGEST_CADENCE_CHANNEL`) and read by `resolveDigestCadence` (that row first, then the other digest row, then `DEFAULT_DIGEST_CADENCE`); writing it to both digest rows was rejected because it would materialise a `digest`/`in_app` row nobody asked for. `setDigestCadenceQuery` sets `digest_cadence` ALONE — the INSERT arm supplies the coded default for `enabled`, so the row it creates is behaviourally identical to the absence it replaces and a cadence change never switches a disabled digest back on. The cadence governs the user's OWN open-items digest (N-013) only; the oversight activity digest (N-025) is fixed daily and gated by `church_privacy_settings.share_activity_with_oversight` (N-026) on `(dash)/settings/sharing/`, not by anything on this screen.
-
-**notification_deliveries** — one row per channel attempt: notification_id FK(c); channel; status: queued/sent/failed/suppressed_by_preference/cancelled =queued; attempt_count int =0; error null; provider_message_id null (webhook correlation); sent_at null. Unique (notification_id, channel) — this is what makes at-most-once delivery a DB guarantee rather than a dispatcher intention. CHECK constraints (0024) pin channel/status. **Provider webhooks (N-007/N-016, #132):** `/api/webhooks/resend` settles rows by `provider_message_id` using the pure map in `channels/delivery-events.ts` — bounce/complaint/failure → `failed`; a HARD bounce and a spam complaint carry `PERMANENT_FAILURE_PREFIX` so `channelEligibility` refuses a retry, a soft (`Transient`) bounce and a generic `email.failed` keep their bounded retries, and success/engagement events change nothing. The write is scoped `status IN (queued, sent)`: `cancelled`/`suppressed_by_preference` were never sent, and re-writing an already-`failed` row would reset the `updated_at` the backoff clock reads.
-
-## Methodology RAG (`methodology-embeddings.ts`)
-
-**methodology_embeddings** — GLOBAL corpus, intentionally NOT church-scoped: source: wiki/playbook; doc_key req (wiki slug or "playbook:<section>"); article_slug null; phase int 0-6 null; section; chunk_index int req; content req; embedding vector(1536) req (text-embedding-3-small). Unique (doc_key, chunk_index) for idempotent re-embed; HNSW cosine index.
+ORM: Drizzle | DB: PostgreSQL (Neon serverless) | Connection: `src/db/index.ts`
+Schema: `src/db/schema/*.ts`, one file per feature area — **read the schema files, they are
+the contract.** Migrations: `src/db/migrations/` via `pnpm db:migrate` (never `db:push`).
+The full table-by-table mirror this file used to hold is in git history.
+
+Conventions (unless a schema file says otherwise): `id` uuid PK; `church_id` → churches is the
+tenant scope; `created_at`/`updated_at` default now.
+
+## Non-obvious column semantics
+
+- **`churches.leadership_status`** (`church.ts`): `planter_confirmed` | `no_planter` | **null =
+  never asked** — null is NOT "no planter", which is why it isn't a boolean. Read ONLY through
+  `src/lib/onboarding/leadership.ts`. The planter *assignment* is `users.church_id` + role.
+- **`church_id = null` means global content** (e.g. wiki articles visible to all tenants).
+- **`sessions.id`** is the SHA-256 of the token, not the token.
+- **Soft deletes:** `persons.deleted_at` — feature queries must filter it.
+- **Notifications enqueue gate:** oversight recipients can ONLY receive `milestones` + `digest`
+  categories, gated by `share_activity_with_oversight` read at enqueue time; a recipient who
+  fails the gate is skipped and reported, never thrown over. Source: `src/lib/notifications/`
+  and `product-docs/features/notifications/frd.md` (N-025/N-026).
+- **`organization_invitations` with BOTH target FKs null is a legitimate OPEN invitation**, not a
+  broken row: the invitee had no account when the admin typed `invitee_email`, so there was
+  nothing to point at. The target is filled in at registration by `bindOpenInvitationTarget`
+  (`src/lib/invitations/core.ts`), whose compare-and-set is also what makes an invite link
+  single-use. `invitee_email` null means the row predates #23 and matches nobody. Full rule:
+  `../invariants.md` → Multi-Tenancy.
+- **Transactions:** `db.transaction()` throws on neon-http — see `../invariants.md` →
+  Transactions/Atomicity before writing any multi-statement mutation.

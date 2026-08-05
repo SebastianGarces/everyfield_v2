@@ -1,7 +1,8 @@
 # Memory Context Pack
 
-Summarized architecture, flows, contracts, and invariants. Load this **before** opening source files.
+What the code cannot tell you: invariants, rulings, non-obvious semantics, and flow diagrams.
+It deliberately does NOT mirror schemas, routes, or file layouts — the source is faster and
+never stale. Start at [index.md](index.md).
 
-- Start at [index.md](index.md) — table of contents, reading order, and when memory is enough on its own.
-- Working rules and the maintenance workflow: `.agents/memory-first.md`.
-- Size budget: **≤50 KB total**. Keep summaries + file paths here, never dumped schemas or code.
+- Size budget: **≤50 KB total.** Summaries + file paths, never dumped schemas or code.
+- Maintenance: `.claude/skills/memory-maintenance/SKILL.md` (DoD gate G4).
