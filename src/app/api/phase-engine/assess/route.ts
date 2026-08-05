@@ -13,6 +13,10 @@
 // `Authorization: Bearer <CRON_SECRET>` — this is the header Vercel Cron sends
 // when `CRON_SECRET` is set in the project's environment variables. CRON_SECRET
 // MUST be set both locally (.env / .env.local) and in the Vercel project env.
+// The comparison is CONSTANT-TIME (#266) and shared with
+// `/api/notifications/dispatch`: the same secret opens both routes, so a timing
+// oracle on either one leaks the key to both. See
+// `src/lib/security/constant-time.ts`.
 //
 // There are NO per-pageview LLM calls anywhere — assessments only run here (or
 // via an explicit manual trigger). `generateAssessment` makes a real OpenAI
@@ -26,6 +30,7 @@ import {
   selectPlantsForAssessment,
   type SelectedPlant,
 } from "@/lib/phase-engine/assessment";
+import { matchesBearerSecret } from "@/lib/security/constant-time";
 
 // This runner orchestrates real LLM calls and DB writes — never cache it.
 export const dynamic = "force-dynamic";
@@ -135,8 +140,9 @@ export function isAuthorized(request: NextRequest): boolean {
   // Fail closed: if no secret is configured, reject everything.
   if (!secret) return false;
 
-  const header = request.headers.get("authorization");
-  return header === `Bearer ${secret}`;
+  // Constant-time, and shared with `/api/notifications/dispatch` so the two
+  // consumers of this one secret cannot diverge (#266).
+  return matchesBearerSecret(request.headers.get("authorization"), secret);
 }
 
 /**

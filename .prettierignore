@@ -11,9 +11,5 @@ pnpm-lock.yaml
 # loop is running. CI never sees them (they are not in any commit).
 .claude/worktrees/
 
-# Vendored impeccable skill (npx impeccable install) — third-party code, don't reformat
-.claude/skills/impeccable/
-.agents/skills/impeccable/
-.github/skills/impeccable/
-.github/hooks/impeccable.json
+# Historical impeccable critique outputs (the skill itself was removed 2026-08-04)
 .impeccable/

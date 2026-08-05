@@ -1,3 +1,4 @@
+import { HeaderBreadcrumbs } from "@/components/header";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -12,6 +13,7 @@ import { getCurrentSession } from "@/lib/auth";
 import { getAccessibleChurchIds } from "@/lib/auth/access";
 import { PHASES } from "@/lib/constants";
 import { inArray } from "drizzle-orm";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 export default async function OversightDashboardPage() {
@@ -49,6 +51,15 @@ export default async function OversightDashboardPage() {
 
   return (
     <div className="space-y-6 p-6">
+      {/*
+        Same fix as /oversight/health (#261): without a declared trail the shell
+        falls back to naming a different page ("Dashboard"). One crumb, because
+        this IS the oversight index — nothing above it in the sidebar — and it
+        carries the same role-derived `title` as the <h1> below, so the header
+        and the page can never name different things. Renders nothing, so it
+        does not participate in `space-y-6`.
+      */}
+      <HeaderBreadcrumbs items={[{ label: title }]} />
       <div>
         <h1 className="text-3xl font-bold">{title}</h1>
         <p className="text-muted-foreground mt-1">{description}</p>
@@ -110,8 +121,18 @@ export default async function OversightDashboardPage() {
         <CardContent>
           {plants.length === 0 ? (
             <p className="text-muted-foreground py-8 text-center">
-              No church plants associated yet. Use the Invitations page to
-              invite planters to join.
+              No church plants associated yet.{" "}
+              {/*
+                This sentence named a page that did not exist until #23. Copy
+                that points at a surface is a promise; the link is what keeps it.
+              */}
+              <Link
+                href="/oversight/invitations"
+                className="text-primary cursor-pointer underline underline-offset-4"
+              >
+                Invite a planter
+              </Link>{" "}
+              to get started.
             </p>
           ) : (
             <div className="space-y-3">
