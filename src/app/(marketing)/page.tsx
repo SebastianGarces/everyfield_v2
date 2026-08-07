@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 
-import { Chip } from "./_components/chip";
 import { FeatureSwitcher } from "./_components/feature-switcher";
 import { InviteForm } from "./_components/invite-form";
 import { PhaseTabs } from "./_components/phase-tabs";
@@ -90,18 +89,9 @@ export default function LandingPage() {
             <div className="hero-shot">
               {/* the dashboard itself, not a picture of it — chrome-less, so
                   the LCP candidate is text rather than a 2400px WebP */}
+              {/* no chips on the hero — ruled 2026-08-05 (PR #299 decision 1):
+                  they obscured the surface they were meant to explain */}
               <HeroDashboard />
-              {/* the band right of the church name and above the stat row is
-                  the composition's only empty region — and staffing is the one
-                  thing the dashboard behind it does not already count. The
-                  offset dropped with the app's sidebar and header bar: the
-                  chrome-less card starts ~11% higher than the capture did. */}
-              <Chip className="hero-chip-a" style={{ left: "45%", top: "2%" }}>
-                7 of 8 leadership roles filled
-              </Chip>
-              <Chip className="hero-chip-b" style={{ right: "4%", top: "70%" }}>
-                28 days to launch Sunday
-              </Chip>
             </div>
           </div>
         </div>

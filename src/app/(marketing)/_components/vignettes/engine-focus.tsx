@@ -57,7 +57,7 @@ import { VignetteGate } from "./vignette-gate";
  *  because an inert element is itself dropped from the accessibility tree —
  *  on the mount it would take this label with it. */
 const EMBED_LABEL =
-  "Your focus in EveryField — the two next steps the engine ranked highest from the July 31 assessment: clear twelve stale follow-ups, and fill the last of eight ministry roles, each citing the facts behind it and linking the article that says how.";
+  "Your focus in EveryField — what changed since the last assessment (another vision meeting held, attendance up four, one more ministry role filled, thirteen more training completions) and the two next steps the engine ranked highest on July 31: clear twelve stale follow-ups, and fill the last of eight ministry roles, each citing the facts behind it and linking the article that says how.";
 
 /** The phone composition is ONE card, so it gets its own sentence — the desktop
  *  label would promise a second insight that is not on screen. */

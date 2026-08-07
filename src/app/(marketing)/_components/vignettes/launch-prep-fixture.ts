@@ -2,7 +2,9 @@
 // LAUNCH PREP FIXTURE — the real Launch Sunday preparation checklist, frozen so
 // the landing page can render the app's real MaterialsChecklistView.
 //
-// Source: Redemption Hill Church's "Launch Sunday" meeting (2026-08-28), read
+// Source: Redemption Hill Church's "Launch Sunday" meeting (seed-dated
+// 2026-08-28; the landing renders it as Sunday 2026-08-30 — see
+// launch-sunday-fixture.ts note 2), read
 // 2026-08-05 through the app's own read layer — `getChecklist(churchId,
 // meetingId)` and `getChecklistSummary(churchId, meetingId)`
 // (src/lib/meetings/service.ts:1135 and :1191). Those are the two calls the

@@ -21,14 +21,14 @@
 //      ago" under a "Planning" badge once the date passes. The check is: does
 //      the datetime below still lie in the future? The rest of the composition
 //      is clock-independent.
-//   2. THE WEEKDAY. The source row is 2026-08-28T10:00Z — a FRIDAY, because
-//      the seeded church's launchDate is 2026-08-28. MeetingSummaryCards
-//      prints the weekday, so the phase titled "One Sunday" currently renders
-//      "Friday, August 28, 2026". That is a seed-data artifact, not a product
-//      behaviour, and the fix belongs in the seed (move the church's launch
-//      date to a Sunday, then re-read this fixture and
-//      meetings-board-fixture.ts, which carries the same meeting). It is left
-//      verbatim here so the two fixtures cannot disagree about one meeting.
+//   2. THE WEEKDAY. The source row read from the seed was 2026-08-28T10:00Z —
+//      a FRIDAY, a seed-data artifact that made the phase titled "One Sunday"
+//      print "Friday" three times. Ruled 2026-08-05 (PR #299 decision 2): the
+//      datetime below is hand-moved to Sunday 2026-08-30T10:00Z. Fixtures are
+//      static helpers and hand edits are legitimate; every other field is
+//      still verbatim. If the seed is ever re-dated and this fixture re-read,
+//      keep the date a Sunday — and keep meetings-board-fixture.ts's note on
+//      the same meeting in agreement.
 // ============================================================================
 
 import type { MeetingSummary } from "@/app/(dashboard)/meetings/[id]/meeting-summary-cards";
@@ -59,7 +59,8 @@ export const LAUNCH_SUNDAY_MEETING = {
   churchId: CHURCH_ID,
   type: "vision_meeting",
   title: "Launch Sunday",
-  datetime: new Date("2026-08-28T10:00:00.000Z"),
+  // Sunday — hand-moved from the seed's Friday 2026-08-28 (see header note 2)
+  datetime: new Date("2026-08-30T10:00:00.000Z"),
   status: "planning",
   locationId: LAKEVIEW.id,
   locationName: "Lakeview Elementary — gym",
