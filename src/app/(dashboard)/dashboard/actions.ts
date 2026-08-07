@@ -9,7 +9,6 @@ import {
   type CreateChurchOutcome,
 } from "@/lib/onboarding/create-church";
 import { plantDirtyColumns } from "@/lib/phase-engine/dirty-handler";
-import type { ChurchBasicsFieldErrors } from "@/lib/validations/onboarding";
 import { and, eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -18,8 +17,6 @@ import {
   runConfirmLeadership,
   type ConfirmLeadershipOutcome,
 } from "./confirm-leadership";
-
-export type { ChurchBasicsFieldErrors };
 
 export type ChurchBasicsState = CreateChurchOutcome;
 
