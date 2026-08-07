@@ -43,10 +43,10 @@ import {
  */
 
 const MEETING_LABEL =
-  "The Launch Sunday meeting page — August 28, 2026 at 10:00 AM in Lakeview Elementary's gym, about 120 people estimated, still in planning.";
+  "The Launch Sunday meeting page — Sunday, August 30, 2026 at 10:00 AM in Lakeview Elementary's gym, about 120 people estimated, still in planning.";
 
 const MEETING_COMPACT_LABEL =
-  "Launch Sunday's date, venue and estimate as the app shows them: August 28, 2026 at 10:00 AM, Lakeview Elementary's gym, about 120 estimated.";
+  "Launch Sunday's date, venue and estimate as the app shows them: Sunday, August 30, 2026 at 10:00 AM, Lakeview Elementary's gym, about 120 estimated.";
 
 export function LaunchSunday() {
   return (
