@@ -3,9 +3,11 @@ import type { Metadata } from "next";
 import { FeatureSwitcher } from "./_components/feature-switcher";
 import { InviteForm } from "./_components/invite-form";
 import { PhaseTabs } from "./_components/phase-tabs";
+import { FlowVignette } from "./_components/proto/flow-vignette";
 import {
   CH1_ROWS,
   CH2_ROWS,
+  D_ROWS,
   JrIndex,
   JrRows,
   JrShot,
@@ -110,6 +112,15 @@ export default function LandingPage() {
               guided by a field-tested playbook.
             </p>
 
+            <h1 className="lp-hero-h pv pv-d">
+              Everything for your church plant, in one simple place.
+            </h1>
+            <p className="lp-hero-sub pv pv-d">
+              The people you&rsquo;re reaching, the meetings you&rsquo;re
+              planning, and what to do next — EveryField keeps it together, so
+              Sunday can come without the scramble.
+            </p>
+
             <div className="lp-cta-row">
               <a className="btn primary" href="#request-invite">
                 Request an invite
@@ -120,12 +131,16 @@ export default function LandingPage() {
               <a className="btn ghost pv pv-b pv-c" href="#product">
                 Read the journey
               </a>
+              {/* D carries one CTA and no second ask — neither ghost is
+                  gated for it */}
             </div>
-            <p className="lp-cta-note">
+            <p className="lp-cta-note pv pv-a pv-b pv-c">
               EveryField is in early access. Invites go out through sending
               networks and churches.
             </p>
-            <div className="hero-shot">
+            {/* D's hero is text standing on the painting — no product surface
+                at all, which is the whole premise of the variant */}
+            <div className="hero-shot pv pv-a pv-b pv-c">
               {/* the dashboard itself, not a picture of it — chrome-less, so
                   the LCP candidate is text rather than a 2400px WebP */}
               {/* no chips on the hero — ruled 2026-08-05 (PR #299 decision 1):
@@ -161,6 +176,51 @@ export default function LandingPage() {
           zero-height element rather than an id on the feature-switcher section,
           because that section only exists in variant A. */}
       <div id="product" />
+
+      {/* ---- VARIANT D · Simple ------------------------------------------
+          D's whole page body is these three sections plus the hero and CTA
+          copy blocks in the shared sections above and below. They sit
+          together here rather than scattered through the arc because every
+          neighbour is hidden in D anyway, and one contiguous block is what a
+          reader needs to judge the variant. Everything else on this page —
+          problem statement, strip, chapters, switcher, engine, phase tabs,
+          networks, index — is hidden in D. */}
+
+      <section className="lp-sec jr-flow-sec pv pv-d">
+        <div className="lp-inner">
+          <h2 className="lp-h2">What a week looks like</h2>
+          <p className="lp-body">
+            From a vision night in a living room to Sunday morning — EveryField
+            does its quiet work in the background.
+          </p>
+          <FlowVignette />
+        </div>
+      </section>
+
+      <section className="lp-sec pv pv-d">
+        <div className="lp-inner">
+          {/* no heading: after the week, the three promises ARE the argument */}
+          <JrRows rows={D_ROWS} />
+        </div>
+      </section>
+
+      {/* DRAFT origin story — placeholder built from what we know; Sebastian
+          must replace with the true telling before this ever ships */}
+      <section className="lp-sec pv pv-d">
+        <div className="lp-inner">
+          <h2 className="lp-h2">How it started</h2>
+          <p className="lp-body">
+            EveryField began in 2026, built hand-in-hand with church planters
+            and the networks that send them. We watched planters run their
+            plants out of spreadsheets, group chats, and memory — and started
+            building something better, one real launch at a time.
+          </p>
+          <p className="lp-body">
+            A founding group of plants uses EveryField today, on the road to
+            their launch Sundays. What they need next is what we build next.
+          </p>
+        </div>
+      </section>
 
       <section className="lp-sec jr-chapter pv pv-b pv-c">
         <div className="lp-inner">
@@ -241,7 +301,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <section className="lp-engine on-ink">
+      <section className="lp-engine on-ink pv pv-a pv-b pv-c">
         <div className="lp-engine-panel">
           <div className="lp-inner">
             <p className="marker pv pv-a">Plant intelligence</p>
@@ -365,7 +425,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <section className="lp-sec" id="networks">
+      <section className="lp-sec pv pv-a pv-b pv-c" id="networks">
         <div className="lp-inner">
           <p className="marker pv pv-a">For sending churches &amp; networks</p>
           <h2 className="lp-h2 pv pv-a" style={{ marginTop: 16 }}>
@@ -450,6 +510,13 @@ export default function LandingPage() {
             <p className="lp-body pv pv-b pv-c">
               EveryField is in alpha with a founding cohort of planters and
               sending networks. Your field is waiting.
+            </p>
+
+            <h2 className="lp-h2 pv pv-d">Help us build it.</h2>
+            <p className="lp-body pv pv-d">
+              EveryField is young, and that&rsquo;s the point — the planters who
+              join now shape what it becomes. Request an invite, tell us about
+              your plant, and help us build a better journey for every field.
             </p>
 
             <InviteForm />

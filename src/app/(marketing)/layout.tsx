@@ -73,6 +73,11 @@ export default function MarketingLayout({
             label: "C · Hybrid",
             hint: "Story chapters, but the phase journey keeps its tabs",
           },
+          {
+            id: "d",
+            label: "D · Simple",
+            hint: "70% less text, one animated flow, plain language, origin story",
+          },
         ]}
       />
     </div>

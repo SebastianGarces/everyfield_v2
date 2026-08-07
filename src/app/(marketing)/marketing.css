@@ -3111,7 +3111,8 @@ html:has(.marketing) {
 html:not([data-lp-proto]) .pv:not(.pv-a),
 html[data-lp-proto="a"] .pv:not(.pv-a),
 html[data-lp-proto="b"] .pv:not(.pv-b),
-html[data-lp-proto="c"] .pv:not(.pv-c) {
+html[data-lp-proto="c"] .pv:not(.pv-c),
+html[data-lp-proto="d"] .pv:not(.pv-d) {
   display: none !important;
 }
 
@@ -3436,4 +3437,256 @@ html[data-lp-proto="c"] .pv:not(.pv-c) {
 }
 .marketing .lp-cta .marker::after {
   background: var(--ink);
+}
+
+/* ---------- VARIANT D · Simple ----------
+   D hides `.hero-shot`, so the hero panel loses the only thing that was giving
+   it height — and `.lp-hero-panel` has `padding-block-end: 0` precisely
+   because the shot used to hang out of its bottom edge. Without a floor the
+   panel would crop to the CTA row and the painting would read as a band rather
+   than a backdrop. These two rules give the masthead its air back: a floor to
+   stand on, and no dangling 72px where the shot's negative margin used to
+   cancel the hero's. Scoped to the attribute, so A/B/C never see them. */
+html[data-lp-proto="d"] .marketing .lp-hero-panel {
+  min-height: min(76vh, 640px);
+  padding-block-end: clamp(56px, 8vw, 96px);
+}
+html[data-lp-proto="d"] .marketing .lp-hero {
+  margin-bottom: 0;
+}
+
+/* ---------- the flow vignette — D's single visual ----------
+   A marketing vignette, not an app embed: marketing-owned DOM on marketing
+   tokens, which is the honest register for a claim ABOUT a week rather than a
+   picture of a surface. Four moments down one ink hairline.
+
+   The house grammar holds: base styles are the FINISHED frame and every
+   keyframe carries only its `from`, so the vignette is complete before
+   `vg-seen` arrives and complete again if it never does. Delays ride on
+   `--jr-i` (the step) and `--jr-r` (the row inside a card), the same pattern
+   as `--ov-i` and `--vg-i` above. */
+.marketing .jr-flow {
+  position: relative;
+  margin-top: clamp(28px, 3.5vw, 40px);
+  max-width: 720px;
+}
+.marketing .jr-flow-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+/* the hairline the moments hang from. It sits behind the registration squares
+   and draws downward over the whole 4-card run. */
+.marketing .jr-flow-rule {
+  position: absolute;
+  inset-block: 8px 24px;
+  inset-inline-start: 4px;
+  width: 1px;
+  background: var(--edge);
+  transform-origin: top;
+}
+.marketing .jr-flow-step {
+  position: relative;
+  padding-inline-start: 28px;
+  padding-block-end: 26px;
+}
+.marketing .jr-flow-step:last-child {
+  padding-block-end: 0;
+}
+/* the system's atom, doing its usual job before a mono label — and doubling as
+   the timeline node, centred on the rule */
+.marketing .jr-flow-step::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 0;
+  top: 5px;
+  width: 9px;
+  height: 9px;
+  background: var(--green);
+}
+.marketing .jr-flow-when {
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: 12px;
+  line-height: 1.2;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--mute);
+  margin: 0;
+}
+.marketing .jr-flow-card {
+  background: var(--card);
+  box-shadow: 0 0 0 1px var(--edge);
+  border-radius: 0;
+  padding: 16px 18px 17px;
+  margin-top: 11px;
+}
+.marketing .jr-flow-title {
+  font-family: var(--display);
+  font-weight: 500;
+  font-size: 18px;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  margin: 0;
+}
+.marketing .jr-flow-count {
+  font-size: 14.5px;
+  line-height: 1.4;
+  color: var(--text-2);
+  margin: 8px 0 0;
+}
+.marketing .jr-flow-n {
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 34px;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-variant-numeric: lining-nums;
+  color: var(--ink);
+  margin-inline-end: 8px;
+}
+.marketing .jr-flow-rows {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+}
+.marketing .jr-flow-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding-block: 6px;
+}
+/* drawn rather than rendered — see flow-vignette.tsx. Radius 0, like every
+   checkbox in the system. */
+.marketing .jr-flow-box {
+  flex: none;
+  position: relative;
+  width: 14px;
+  height: 14px;
+  border: 1px solid rgba(24, 29, 25, 0.45);
+}
+.marketing .jr-flow-row.is-done .jr-flow-box {
+  background: var(--green);
+  border-color: var(--green);
+}
+/* ink on green, the one dark pairing green is allowed to carry */
+.marketing .jr-flow-row.is-done .jr-flow-box::after {
+  content: "";
+  position: absolute;
+  inset-inline-start: 4px;
+  top: 1px;
+  width: 4px;
+  height: 8px;
+  border: solid var(--ink);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+.marketing .jr-flow-task {
+  font-size: 14.5px;
+  line-height: 1.4;
+  color: var(--text-2);
+}
+.marketing .jr-flow-row.is-done .jr-flow-task {
+  color: var(--mute);
+}
+.marketing .jr-flow-read {
+  font-family: var(--serif);
+  font-size: 17px;
+  line-height: 1.5;
+  color: var(--ink);
+  margin: 0;
+  text-wrap: pretty;
+}
+.marketing .jr-flow-foot {
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: 11.5px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--mute);
+  margin: 12px 0 0;
+  padding-top: 11px;
+  border-top: 1px solid var(--hairline);
+}
+
+/* --- the run: the rule draws while the four moments land 900ms apart --- */
+.marketing .jr-flow.vg-seen .jr-flow-rule {
+  animation: jr-rule-draw 3200ms var(--ease) both;
+}
+.marketing .jr-flow.vg-seen .jr-flow-when,
+.marketing .jr-flow.vg-seen .jr-flow-step::before {
+  animation: jr-flow-in 380ms var(--ease) both;
+  animation-delay: calc(var(--jr-i, 0) * 900ms);
+}
+.marketing .jr-flow.vg-seen .jr-flow-card {
+  animation: jr-card-in 520ms var(--ease) both;
+  animation-delay: calc(var(--jr-i, 0) * 900ms + 90ms);
+}
+/* Wednesday's follow-ups arrive one at a time, after their card has settled */
+.marketing .jr-flow.vg-seen .jr-flow-row {
+  animation: jr-row-slide 340ms var(--ease) both;
+  animation-delay: calc(
+    var(--jr-i, 0) * 900ms + 300ms + var(--jr-r, 0) * 150ms
+  );
+}
+/* Friday's are the same three, ticking off in the same order */
+.marketing .jr-flow.vg-seen .jr-flow-row.is-done .jr-flow-box {
+  animation: jr-box-fill 260ms var(--ease) both;
+  animation-delay: calc(
+    var(--jr-i, 0) * 900ms + 380ms + var(--jr-r, 0) * 170ms
+  );
+}
+.marketing .jr-flow.vg-seen .jr-flow-row.is-done .jr-flow-box::after {
+  animation: jr-tick-in 200ms var(--ease) both;
+  animation-delay: calc(
+    var(--jr-i, 0) * 900ms + 470ms + var(--jr-r, 0) * 170ms
+  );
+}
+@keyframes jr-rule-draw {
+  from {
+    transform: scaleY(0);
+  }
+}
+@keyframes jr-flow-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes jr-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+@keyframes jr-row-slide {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+}
+/* the square starts as the empty one beside it, so the fill IS the judgement */
+@keyframes jr-box-fill {
+  from {
+    background: transparent;
+    border-color: rgba(24, 29, 25, 0.45);
+  }
+}
+@keyframes jr-tick-in {
+  from {
+    opacity: 0;
+  }
+}
+/* every selector repeats its animated counterpart exactly — an under-specific
+   `animation: none` loses the cascade and the animation still runs */
+@media (prefers-reduced-motion: reduce) {
+  .marketing .jr-flow.vg-seen .jr-flow-rule,
+  .marketing .jr-flow.vg-seen .jr-flow-when,
+  .marketing .jr-flow.vg-seen .jr-flow-step::before,
+  .marketing .jr-flow.vg-seen .jr-flow-card,
+  .marketing .jr-flow.vg-seen .jr-flow-row,
+  .marketing .jr-flow.vg-seen .jr-flow-row.is-done .jr-flow-box,
+  .marketing .jr-flow.vg-seen .jr-flow-row.is-done .jr-flow-box::after {
+    animation: none;
+  }
 }

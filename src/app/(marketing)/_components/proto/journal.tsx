@@ -126,6 +126,24 @@ export const CH2_ROWS: readonly JrRow[] = [
   },
 ];
 
+/** Variant D's three promises — the same hairline rows, in plain language.
+ *  No product nouns a planter would have to learn first: no CRM, no portfolio,
+ *  no assessment. What it knows, what you do next, who is with you. */
+export const D_ROWS: readonly JrRow[] = [
+  {
+    title: "Know your people",
+    body: "Every family you’re reaching, remembered — who came, who’s ready for more, who needs a call.",
+  },
+  {
+    title: "Know your next step",
+    body: "A proven playbook tells you what this season is for and what to do in it.",
+  },
+  {
+    title: "Never walk alone",
+    body: "Your sending church can see how it’s going and show up when it matters.",
+  },
+];
+
 export const NETWORK_ROWS: readonly JrRow[] = [
   {
     title: "Progress dashboards at every scale",

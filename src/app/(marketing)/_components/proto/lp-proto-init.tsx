@@ -26,6 +26,7 @@ export function LpProtoInit() {
           "a",
           "b",
           "c",
+          "d",
         ]),
       }}
     />
