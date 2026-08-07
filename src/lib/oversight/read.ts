@@ -31,7 +31,18 @@
 //     pipeline.
 // ============================================================================
 
-import { and, count, desc, eq, gt, inArray, isNull, lt, ne } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  lt,
+  ne,
+} from "drizzle-orm";
 
 import {
   churchMeetings,
@@ -139,9 +150,11 @@ export async function listOversightPlants(
     readAssociatedAt(org, churchIds),
     // Only a network admin can be reading a plant "through" a sending church;
     // a sending-church admin IS the sending church, so the qualifier would be
-    // their own name repeated back at them.
+    // their own name repeated back at them. The lookup is scoped to the
+    // caller's own network — see `sendingChurchesInNetwork`.
     org.orgType === "network"
       ? readSendingChurchNames(
+          org,
           plants
             .map((plant) => plant.sendingChurchId)
             .filter((id): id is string => id !== null)
@@ -506,6 +519,12 @@ async function resolveCallerOrg(user: User): Promise<CallerOrg | null> {
  * Not a person record: this is the account the org invited by email and whose
  * acceptance created the association (OV-001 lists it as a directory column).
  * The name is all that is selected — no email, no phone, no id.
+ *
+ * Ordered, because nothing stops a church having two planter accounts and the
+ * first row wins below: without an ORDER BY the directory would name one of
+ * them on one render and the other on the next, for no reason a reader could
+ * see. Oldest account first — the one whose acceptance made the association —
+ * with the id breaking a same-timestamp tie so the answer is total.
  */
 async function readPlanterNames(
   churchIds: string[]
@@ -515,7 +534,8 @@ async function readPlanterNames(
   const rows = await db
     .select({ churchId: users.churchId, name: users.name })
     .from(users)
-    .where(and(inArray(users.churchId, churchIds), eq(users.role, "planter")));
+    .where(and(inArray(users.churchId, churchIds), eq(users.role, "planter")))
+    .orderBy(asc(users.createdAt), asc(users.id));
 
   const names = new Map<string, string>();
   for (const row of rows) {
@@ -565,8 +585,43 @@ async function readAssociatedAt(
   return accepted;
 }
 
-/** Names of the sending churches some of these plants also belong to. */
+/**
+ * The tenancy predicate behind the "· through <sending church>" qualifier.
+ *
+ * A plant's `sending_church_id` may name ANY sending church in the system,
+ * including one in a different network entirely — the two association FKs are
+ * independent and an accept never replaces the other (memory/invariants.md →
+ * Multi-Tenancy). So resolving that id to a NAME without asking whose network
+ * the sending church is in discloses a third organization's name to a caller
+ * who is not party to that relationship. Requiring `sending_network_id =` the
+ * caller's own is what keeps the qualifier inside the caller's tenancy: it can
+ * only ever name a member of their own network, which is a position in the
+ * hierarchy they already administer.
+ *
+ * Exported so the predicate itself is asserted rather than described — building
+ * it needs the schema but not the DB client, so the test runs with no
+ * `DATABASE_URL`.
+ */
+export function sendingChurchesInNetwork(
+  networkId: string,
+  sendingChurchIds: string[]
+) {
+  return and(
+    inArray(sendingChurches.id, sendingChurchIds),
+    eq(sendingChurches.sendingNetworkId, networkId)
+  );
+}
+
+/**
+ * Names of the sending churches some of these plants also belong to, restricted
+ * to the ones inside the caller's own network.
+ *
+ * A plant whose sending church sits outside the network is simply absent from
+ * the map, so `viaSendingChurchName` resolves to null and no qualifier renders.
+ * Network callers only — a sending-church admin IS the sending church.
+ */
 async function readSendingChurchNames(
+  org: CallerOrg,
   sendingChurchIds: string[]
 ): Promise<Map<string, string>> {
   if (sendingChurchIds.length === 0) return new Map();
@@ -575,7 +630,7 @@ async function readSendingChurchNames(
   const rows = await db
     .select({ id: sendingChurches.id, name: sendingChurches.name })
     .from(sendingChurches)
-    .where(inArray(sendingChurches.id, sendingChurchIds));
+    .where(sendingChurchesInNetwork(org.orgId, sendingChurchIds));
 
   return new Map(rows.map((row) => [row.id, row.name]));
 }

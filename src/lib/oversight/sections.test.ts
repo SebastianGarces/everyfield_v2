@@ -7,6 +7,7 @@ import {
   OVERSIGHT_SECTIONS_BY_KEY,
   WITHHELD_HEADLINE,
   emptyExplanation,
+  sectionsIntro,
   withheldExplanation,
 } from "./sections";
 
@@ -94,5 +95,31 @@ test("no empty state is blank", () => {
     ]) {
       assert.ok(copy.trim().length > 40, `too terse to explain: "${copy}"`);
     }
+  }
+});
+
+// ----------------------------------------------------------------------------
+// The intro describes the gate; it never asserts sharing that did not happen
+// ----------------------------------------------------------------------------
+
+test("the intro does not claim openness when every section is withheld", () => {
+  const closed = sectionsIntro("Invitation Flow Church", "network", 0);
+  // The bug this replaced: an unconditional "each area below is open to your
+  // network" above four cards that all read "Not shared".
+  assert.ok(!/is open to your|are open to your/.test(closed), closed);
+  assert.match(closed, /has not opened any of these areas to your network/);
+  assert.match(closed, /each plant decides what it shares/);
+});
+
+test("the intro names the gate rather than promising the contents", () => {
+  const open = sectionsIntro("Hope City Church", "sending church", 2);
+  assert.match(
+    open,
+    /decides which of these areas are open to your sending church/
+  );
+  // Both forms carry the aggregates-only promise, which is the one claim that
+  // is true whatever the toggles say.
+  for (const copy of [open, sectionsIntro("Hope City Church", "network", 0)]) {
+    assert.match(copy, /Totals only — never the people behind them\./);
   }
 });

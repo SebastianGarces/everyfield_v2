@@ -37,6 +37,7 @@ import {
   OVERSIGHT_SECTIONS_BY_KEY,
   WITHHELD_HEADLINE,
   emptyExplanation,
+  sectionsIntro,
   withheldExplanation,
 } from "@/lib/oversight/sections";
 import type {
@@ -54,6 +55,9 @@ export function PlantDetail({
   scopeLabel: string;
 }) {
   const { plant, sections } = detail;
+  const sharedCount = sections.filter(
+    (section) => section.state === "shared"
+  ).length;
 
   return (
     <div className="space-y-8 p-6">
@@ -90,8 +94,7 @@ export function PlantDetail({
             What {plant.name} shares
           </h2>
           <p className="text-muted-foreground max-w-2xl text-sm text-pretty">
-            Totals only — never the people behind them. Each area below is open
-            to your {scopeLabel} because the plant chose to open it.
+            {sectionsIntro(plant.name, scopeLabel, sharedCount)}
           </p>
         </div>
 

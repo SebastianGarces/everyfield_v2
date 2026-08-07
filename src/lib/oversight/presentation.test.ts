@@ -47,9 +47,60 @@ test("the countdown is computed at UTC midnight, so it cannot drift with TZ", ()
   const asOf = new Date("2026-08-05T23:30:00.000Z");
   // The launch date is a wall-clock day. Parsed at UTC midnight it is 27 days
   // out; parsed in a negative-offset local zone it would be 26 or 28.
-  assert.equal(daysUntilLaunch("2026-09-01", asOf), 26);
+  assert.equal(daysUntilLaunch("2026-09-01", asOf), 27);
   assert.equal(daysUntilLaunch(null, asOf), null);
   assert.equal(daysUntilLaunch("not-a-date", asOf), null);
+});
+
+test("both sides are floored to a UTC day, so the answer holds all day long", () => {
+  // The same three dates read from midnight, mid-morning and late evening. A
+  // countdown that diffed the launch day against the raw instant lost a whole
+  // day the moment the clock passed 00:00 UTC.
+  for (const at of [
+    "2026-08-05T00:00:00.000Z",
+    "2026-08-05T14:00:00.000Z",
+    "2026-08-05T23:59:59.000Z",
+  ]) {
+    const asOf = new Date(at);
+    assert.equal(
+      daysUntilLaunch("2026-08-05", asOf),
+      0,
+      `launch today @ ${at}`
+    );
+    assert.equal(
+      daysUntilLaunch("2026-08-06", asOf),
+      1,
+      `launch tomorrow @ ${at}`
+    );
+    assert.equal(
+      daysUntilLaunch("2026-08-04", asOf),
+      -1,
+      `launched yesterday @ ${at}`
+    );
+    assert.equal(
+      daysUntilLaunch("2026-08-28", asOf),
+      23,
+      `23 days out @ ${at}`
+    );
+  }
+});
+
+test("the launch-day boundary reads as today, not as already launched", () => {
+  // The sentence a reader acts on, end to end: a plant launching today must not
+  // be reported as having launched yesterday.
+  const morningOfLaunch = new Date("2026-08-05T14:00:00.000Z");
+  assert.equal(
+    formatLaunchCountdown(daysUntilLaunch("2026-08-05", morningOfLaunch)),
+    "Launches today"
+  );
+  assert.equal(
+    formatLaunchCountdown(daysUntilLaunch("2026-08-06", morningOfLaunch)),
+    "1 day to launch"
+  );
+  assert.equal(
+    formatLaunchCountdown(daysUntilLaunch("2026-08-04", morningOfLaunch)),
+    "Launched 1 day ago"
+  );
 });
 
 test("a past launch date reads as past, not as a negative number", () => {
@@ -91,7 +142,10 @@ test("a missing acceptance date says so rather than rendering blank", () => {
   );
 });
 
-test("a network admin sees which sending church the plant came through", () => {
+test("a network admin sees which of THEIR sending churches the plant sits under", () => {
+  // The read layer only ever populates this with a sending church inside the
+  // caller's own network (`sendingChurchesInNetwork`), so the qualifier is a
+  // position in their hierarchy — never a third org's name.
   const line = formatAssociationProvenance({
     orgType: "network",
     orgName: "Redeemer Network",

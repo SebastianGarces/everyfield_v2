@@ -114,3 +114,24 @@ export function emptyExplanation(
 ): string {
   return `${plantName} shares ${section.subject}, but has not recorded anything here yet.`;
 }
+
+/**
+ * The sentence above the section grid.
+ *
+ * It describes the GATE rather than asserting that sharing happened, because a
+ * plant may have every toggle off — in which case "each area below is open to
+ * your network" is read as a promise the cards below then break, and an admin
+ * is left thinking the page is broken rather than that the plant said no. When
+ * nothing at all is shared the page says so once, up front, instead of leaving
+ * the reader to infer it from four identical refusals.
+ */
+export function sectionsIntro(
+  plantName: string,
+  scopeLabel: string,
+  sharedCount: number
+): string {
+  const totals = "Totals only — never the people behind them.";
+  return sharedCount === 0
+    ? `${totals} ${plantName} has not opened any of these areas to your ${scopeLabel} — each plant decides what it shares.`
+    : `${totals} ${plantName} decides which of these areas are open to your ${scopeLabel}.`;
+}

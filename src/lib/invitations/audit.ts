@@ -2,11 +2,19 @@
 // The association audit — OV-008's write side (issue #303).
 //
 // One table (`association_events`, `src/db/schema/association-event.ts`), one
-// writer, and it only ever INSERTs. Every association write (an accepted
-// invitation) and every sever (#277 planter-side, #278 org-side) records a row
-// here, so that "which org was this plant with, who put them there, who took
-// them out, and when" survives the sever that nulls `churches.sending_church_id`
-// / `sending_network_id`.
+// writer, and it only ever INSERTs. The contract it exists to serve: every
+// association write (an accepted invitation) and every sever (#277
+// planter-side, #278 org-side) is to record a row here, so that "which org was
+// this plant with, who put them there, who took them out, and when" survives
+// the sever that nulls `churches.sending_church_id` / `sending_network_id`.
+//
+// AS OF THIS ISSUE THAT CONTRACT HAS NO CALLERS YET — this is the table and the
+// writer, landed ahead of the surfaces that will use them. `acceptInvitationAs`
+// does not call `associationEventStatement`, and severing has no entrypoint at
+// all (`memory/invariants.md` → Multi-Tenancy). The wiring lands with #277/#278,
+// which are also where the "both sides may sever, each notifying the other, each
+// writing an event" ruling (#274 / OV-007) is implemented. Read the paragraph
+// above as what the audit is FOR, not as a description of today's call graph.
 //
 // THIS MODULE HAS NO `"use server"` DIRECTIVE, AND THAT IS DELIBERATE — the same
 // rule `./core` is built on and the finding of #265. In a `"use server"` module

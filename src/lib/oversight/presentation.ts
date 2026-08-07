@@ -79,6 +79,12 @@ export function formatPhase(phase: number): string {
  * The date is parsed at UTC midnight, which is `APP_TIME_ZONE`, so the
  * countdown does not shift with the server's `TZ` — the same `parseDateOnly`
  * the phase-engine signal layer uses for the identical fact.
+ *
+ * BOTH sides must be floored to a UTC day before they are subtracted. A launch
+ * date is a wall-clock DAY, not an instant, so diffing it against the raw `asOf`
+ * instant leaves a fraction of a day in the numerator that rounds the answer a
+ * full day short for every moment after 00:00 UTC — "Launches today" on the eve
+ * of a launch, "Launched 1 day ago" on the morning of one.
  */
 export function daysUntilLaunch(
   launchDate: string | null,
@@ -87,7 +93,12 @@ export function daysUntilLaunch(
   if (!launchDate) return null;
   const target = new Date(`${launchDate}T00:00:00.000Z`);
   if (Number.isNaN(target.getTime())) return null;
-  return Math.floor((target.getTime() - asOf.getTime()) / MS_PER_DAY);
+  const todayUtc = Date.UTC(
+    asOf.getUTCFullYear(),
+    asOf.getUTCMonth(),
+    asOf.getUTCDate()
+  );
+  return Math.round((target.getTime() - todayUtc) / MS_PER_DAY);
 }
 
 /** The countdown as a sentence — never a bare number with no sign. */
@@ -105,6 +116,12 @@ export function formatLaunchCountdown(days: number | null): string {
  * Names the caller's OWN org, never another's. A missing `associatedAt` says so
  * outright: associations can predate the invitation system or arrive by
  * seeding, and "no invitation on record" is the fact, not a formatting failure.
+ *
+ * `viaSendingChurchName` is a position in the caller's OWN hierarchy, not a
+ * causal claim about how the association was made — the read layer only ever
+ * populates it with a sending church inside the caller's network
+ * (`sendingChurchesInNetwork` in `./read.ts`), because the two association FKs
+ * are independent and one is never the route to the other.
  */
 export function formatAssociationProvenance(
   provenance: OversightAssociationProvenance

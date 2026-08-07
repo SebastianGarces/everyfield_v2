@@ -3,7 +3,10 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import { RECENT_MEETING_WINDOW } from "./read";
+import { PgDialect } from "drizzle-orm/pg-core";
+
+import { formatAssociationProvenance } from "./presentation";
+import { RECENT_MEETING_WINDOW, sendingChurchesInNetwork } from "./read";
 import { OVERSIGHT_SECTIONS } from "./sections";
 
 // ============================================================================
@@ -196,6 +199,63 @@ test("both plants routes are oversight-only", () => {
     assert.match(source, /redirect\("\/dashboard"\)/);
     assert.match(source, /redirect\("\/login"\)/);
   }
+});
+
+// ----------------------------------------------------------------------------
+// Provenance stays inside the caller's tenancy
+// ----------------------------------------------------------------------------
+
+test("the 'through' qualifier can only name a sending church in the caller's network", () => {
+  // A plant's `sending_church_id` may name ANY sending church, including one in
+  // a different network — the two association FKs are independent. Resolving it
+  // to a name unscoped would print a third org's name to a caller who is not
+  // party to that relationship, so the network id is part of the predicate and
+  // not a filter applied afterwards.
+  const { sql, params } = new PgDialect().sqlToQuery(
+    sendingChurchesInNetwork("network-1", ["in-network", "outsider"])!
+  );
+
+  assert.match(sql, /"sending_churches"\."sending_network_id" = \$\d/);
+  assert.match(sql, /"sending_churches"\."id" in /);
+  assert.ok(
+    params.includes("network-1"),
+    "the caller's own network id is not bound into the lookup"
+  );
+});
+
+test("a plant whose sending church is outside the network renders no qualifier", () => {
+  // The predicate above means such a sending church never comes back from the
+  // query, so it is absent from the name map. This is the consequence at the
+  // call site: absent → null → the provenance line has no "through" clause.
+  const namesInNetwork = new Map<string, string>([["in-network", "Grace"]]);
+  const outsiderName = namesInNetwork.get("outsider") ?? null;
+  assert.equal(outsiderName, null);
+
+  const line = formatAssociationProvenance({
+    orgType: "network",
+    orgName: "North Texas Network",
+    viaSendingChurchName: outsiderName,
+    associatedAt: new Date("2026-08-03T15:00:00.000Z"),
+  });
+  assert.ok(!line.includes("through"), line);
+  assert.ok(!line.includes("·"), line);
+  assert.match(line, /^Joined North Texas Network on /);
+});
+
+test("the network lookup is the only way a sending church name reaches provenance", () => {
+  const source = readCode(path.join(LIB_DIR, "read.ts"));
+  // One reader of `sendingChurches.name`, and it goes through the scoped
+  // predicate. A second unscoped select would reopen the leak silently.
+  assert.equal(
+    source.match(/name: sendingChurches\.name/g)?.length,
+    2,
+    "an unexpected number of reads of a sending church's name — one is the caller's OWN org (resolveCallerOrg), one is the scoped network lookup"
+  );
+  assert.match(
+    source,
+    /\.where\(sendingChurchesInNetwork\(org\.orgId, sendingChurchIds\)\)/,
+    "the sending-church name lookup is not scoped to the caller's network"
+  );
 });
 
 // ----------------------------------------------------------------------------
