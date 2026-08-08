@@ -165,12 +165,24 @@ test("the flow renders the journey step rather than a shell", () => {
 });
 
 test("the flow advances only once the declaration has committed", () => {
-  assert.match(FLOW_CODE, /onDeclared=\{goForward\}/);
-  assert.match(STEP_CODE, /onDeclared\(\)/);
+  // `handleDeclared` is `goForward` plus one thing: it remembers the phase the
+  // server reported, which is what OB-015's offer is gated on. The forward move
+  // itself is unchanged, and is still the flow's.
+  assert.match(FLOW_CODE, /onDeclared=\{handleDeclared\}/);
+  assert.match(FLOW_CODE, /function handleDeclared\(phase: number\) \{/);
+  assert.match(
+    FLOW_CODE,
+    /function handleDeclared\(phase: number\) \{\s*setDeclaredPhase\(phase\);\s*goForward\(\);/
+  );
+
+  // The step reports the phase the server now HOLDS, not the value submitted —
+  // on a re-declaration those differ, and the offer that follows must match the
+  // dashboard the planter is about to see.
+  assert.match(STEP_CODE, /onDeclared\(result\.phase\)/);
 
   // …and the advance is inside the success arm, after the error arm returns.
   const errorAt = STEP_CODE.indexOf('result.status === "error"');
-  const advanceAt = STEP_CODE.indexOf("onDeclared()");
+  const advanceAt = STEP_CODE.indexOf("onDeclared(result.phase)");
   assert.ok(errorAt > -1 && advanceAt > errorAt);
 });
 

@@ -23,10 +23,12 @@ import {
   type ChurchLeadershipStatus,
 } from "@/lib/onboarding/leadership";
 import { ChurchBasicsStep } from "./church-basics-step";
+import { FinishScreen } from "./finish-screen";
 import { JourneyStep } from "./journey-step";
 import { LeadershipStep } from "./leadership-step";
 import { OnboardingStepRail } from "./onboarding-step-rail";
 import { PeopleStep } from "./people-step";
+import { shouldOfferTeamTemplates } from "./team-template-offer";
 
 /**
  * F12 / OB-001 — the multi-step onboarding flow that replaces the single-field
@@ -58,6 +60,11 @@ import { PeopleStep } from "./people-step";
 const FINISH_FAILED_MESSAGE =
   "We could not finish setting up just now. Everything you have saved is safe — please try again.";
 
+/** The finish screen's own heading and line, in the shape the steps use. */
+const FINISH_SCREEN_TITLE = "You are set up";
+const FINISH_SCREEN_DESCRIPTION =
+  "One suggestion for where you said you are, then your dashboard.";
+
 export function OnboardingFlow({
   initialStep,
   leadershipStatus,
@@ -70,6 +77,19 @@ export function OnboardingFlow({
   const [finishing, startFinishing] = useTransition();
   const [finishError, setFinishError] = useState<string | null>(null);
 
+  // OB-015 — the two facts the finish screen needs.
+  //
+  // `declaredPhase` is NOT a cached copy of `churches.current_phase`
+  // (`memory/contracts/data-patterns.md`): nothing renders it, the database's
+  // copy is written and revalidated by step 3's own action, and this holds only
+  // what that action REPORTED BACK about the answer just given — which of the
+  // remaining screens comes next, in the same way `step` holds which step is
+  // showing. A planter who never passed through step 3 in this visit leaves it
+  // null and is not offered anything, which is the honest answer: the offer
+  // follows the declaration, and /teams carries the same setup permanently.
+  const [declaredPhase, setDeclaredPhase] = useState<number | null>(null);
+  const [atFinishScreen, setAtFinishScreen] = useState(false);
+
   // Focus the step heading whenever the planter moves, so a keyboard or screen
   // reader user is placed at the new step instead of at the top of the document
   // (or, worse, on a control that no longer exists). Skipped on first render —
@@ -80,7 +100,7 @@ export function OnboardingFlow({
   useEffect(() => {
     if (!hasNavigated.current) return;
     headingRef.current?.focus();
-  }, [step]);
+  }, [step, atFinishScreen]);
 
   function goTo(next: OnboardingStepId) {
     hasNavigated.current = true;
@@ -103,6 +123,14 @@ export function OnboardingFlow({
     finish();
   }
 
+  // OB-005 tells us where the planter says they are, and OB-015 spends it: the
+  // stored phase comes back from step 3's action, so a re-declaration reports
+  // the phase the dashboard is about to render rather than the one just typed.
+  function handleDeclared(phase: number) {
+    setDeclaredPhase(phase);
+    goForward();
+  }
+
   // OB-007: skipping is advancing without writing. It shares `goForward` on
   // purpose — a skip that had its own path could grow a save, and the whole
   // point of the control is that nothing is committed by it.
@@ -119,7 +147,26 @@ export function OnboardingFlow({
     if (backTarget) goTo(backTarget);
   }
 
+  /**
+   * The flow's ONE exit, which is why OB-015's offer lives inside it rather
+   * than on the control that happens to be pressed: every way out — Continue
+   * past the last step, "Finish setup later" from any step, the finish screen's
+   * own "not now" — arrives here, so the offer cannot be reachable from one and
+   * missing from another.
+   *
+   * The offer is a screen, not a dialog: it takes over the card the steps were
+   * in, and returning early leaves the planter in the flow with nothing
+   * committed. The `atFinishScreen` guard is what keeps the second press (the
+   * decline, which is this same function) from re-offering forever.
+   */
   function finish() {
+    if (!atFinishScreen && shouldOfferTeamTemplates(declaredPhase)) {
+      hasNavigated.current = true;
+      setFinishError(null);
+      setAtFinishScreen(true);
+      return;
+    }
+
     setFinishError(null);
     startFinishing(async () => {
       try {
@@ -169,13 +216,19 @@ export function OnboardingFlow({
           </div>
         </div>
 
-        <OnboardingStepRail currentStep={step} />
+        {/* The rail describes the four steps, and the finish screen is not one
+            of them — it is what stands between the last step and the dashboard,
+            so leaving it out says "the steps are behind you" rather than
+            inventing a fifth. */}
+        {!atFinishScreen && <OnboardingStepRail currentStep={step} />}
       </div>
 
       <Card>
         <CardHeader>
           <p className="text-muted-foreground text-sm font-medium">
-            Step {current.number} of {ONBOARDING_STEP_IDS.length}
+            {atFinishScreen
+              ? "Setup complete"
+              : `Step ${current.number} of ${ONBOARDING_STEP_IDS.length}`}
           </p>
           {/* tabIndex -1 so focus can be moved here on step change without
               adding a stop to the tab order. */}
@@ -184,9 +237,11 @@ export function OnboardingFlow({
             tabIndex={-1}
             className="text-lg leading-none font-semibold outline-none"
           >
-            {current.title}
+            {atFinishScreen ? FINISH_SCREEN_TITLE : current.title}
           </h2>
-          <CardDescription>{current.description}</CardDescription>
+          <CardDescription>
+            {atFinishScreen ? FINISH_SCREEN_DESCRIPTION : current.description}
+          </CardDescription>
         </CardHeader>
 
         <CardContent className="space-y-4">
@@ -199,7 +254,13 @@ export function OnboardingFlow({
             </p>
           )}
 
-          {step === "basics" ? (
+          {atFinishScreen ? (
+            // OB-015: the stage-gated offer. It is reached only through the
+            // gate in `finish()`, so by here the planter has declared phase 2
+            // or later — the screen itself asks nothing about the phase, and
+            // its "not now" is the same `finish` that put them here.
+            <FinishScreen onDone={finish} busy={finishing} />
+          ) : step === "basics" ? (
             <ChurchBasicsStep onCreated={goForward} />
           ) : step === "leadership" ? (
             <LeadershipStep
@@ -239,7 +300,7 @@ export function OnboardingFlow({
             // service write path — never a column on `churches`) and the
             // initial stage declaration, committed together.
             <JourneyStep
-              onDeclared={goForward}
+              onDeclared={handleDeclared}
               onBack={backTarget ? goBack : null}
               onSkip={goForward}
               onFinish={finish}
@@ -254,6 +315,12 @@ export function OnboardingFlow({
               onSkip={goForward}
               onFinish={finish}
               busy={finishing}
+              // OB-015: on the last step the forward control normally IS the
+              // way to the dashboard, so it says so. When the offer is still to
+              // come, saying so would be a lie by one screen.
+              finishLabel={
+                shouldOfferTeamTemplates(declaredPhase) ? "Continue" : undefined
+              }
             />
           )}
         </CardContent>
@@ -261,7 +328,9 @@ export function OnboardingFlow({
 
       {/* Announced on every step change for assistive tech. */}
       <p aria-live="polite" className="sr-only">
-        Step {current.number} of {ONBOARDING_STEP_IDS.length}: {current.title}
+        {atFinishScreen
+          ? FINISH_SCREEN_TITLE
+          : `Step ${current.number} of ${ONBOARDING_STEP_IDS.length}: ${current.title}`}
       </p>
     </div>
   );

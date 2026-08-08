@@ -45,12 +45,20 @@ export function PeopleStep({
   onSkip,
   onFinish,
   busy,
+  finishLabel = "Go to my dashboard",
 }: {
   /** `null` when the previous step cannot be re-entered. See `JourneyStep`. */
   onBack: (() => void) | null;
   onSkip: () => void;
   onFinish: () => void;
   busy: boolean;
+  /**
+   * What the forward control says on the last step. Defaults to the dashboard,
+   * because that is normally what is on the other side of it; the flow overrides
+   * it when OB-015's offer stands in between, since only the flow knows whether
+   * one more screen is coming.
+   */
+  finishLabel?: string;
 }) {
   // Step 4 is the last step today, so "forward" from here is finishing. Derived
   // rather than assumed so appending a step later changes the control set here
@@ -153,7 +161,7 @@ export function PeopleStep({
             onClick={isLast ? onFinish : onSkip}
             disabled={busy}
           >
-            {isLast ? (busy ? "Finishing…" : "Go to my dashboard") : "Continue"}
+            {isLast ? (busy ? "Finishing…" : finishLabel) : "Continue"}
           </Button>
         </div>
       </div>

@@ -45,8 +45,17 @@ export function JourneyStep({
   onFinish,
   busy,
 }: {
-  /** Called once the declaration has COMMITTED — the flow then advances. */
-  onDeclared: () => void;
+  /**
+   * Called once the declaration has COMMITTED — the flow then advances.
+   *
+   * Carries the phase the SERVER now holds, not the one just submitted: on a
+   * re-declaration the first declaration is the one that is history, and
+   * `declareJourney` reports it back for exactly that reason. OB-015's offer is
+   * gated on this number, so handing up the submitted value would offer a
+   * planter the team structure for a stage their dashboard is not about to show
+   * them.
+   */
+  onDeclared: (phase: number) => void;
   /** `null` when the previous step cannot be re-entered. See `PeopleStep`. */
   onBack: (() => void) | null;
   onSkip: () => void;
@@ -92,7 +101,7 @@ export function JourneyStep({
           return;
         }
 
-        onDeclared();
+        onDeclared(result.phase);
       } catch {
         // The action rejected — the request never reached the server, or the
         // server threw something it did not turn into an outcome. Uncaught,

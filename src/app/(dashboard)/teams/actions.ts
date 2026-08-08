@@ -57,7 +57,10 @@ import type {
   TrainingProgram,
   TrainingCompletion,
 } from "@/db/schema";
-import type { PredefinedTeamKey } from "@/lib/ministry-teams/role-templates";
+import {
+  TEAM_TEMPLATES,
+  type PredefinedTeamKey,
+} from "@/lib/ministry-teams/role-templates";
 import { revalidatePath } from "next/cache";
 
 // ============================================================================
@@ -216,6 +219,76 @@ export async function initializeTeamsAction(
       return { success: false, error: "You must be logged in" };
     return { success: false, error: "Failed to initialize teams" };
   }
+}
+
+/**
+ * Said when the teams landed but a role import did not. Names the half that
+ * worked, because it is durable and the planter will see it on /teams.
+ */
+const TEAM_ROLES_PARTIAL_MESSAGE =
+  "Your ministry teams were created, but we could not add every role description. You can add the missing ones from the Teams page.";
+
+/**
+ * F12 / OB-015 — the onboarding finish screen's one-click offer: the standard
+ * ministry teams AND the role descriptions that belong to them.
+ *
+ * A CALLER, NOT A SECOND WRITE PATH. Everything here is `initializeTeamsAction`
+ * and `importRoleTemplatesAction` — the same two actions `/teams` has always
+ * used — run back to back, because "the standard teams" and "their roles" are
+ * one thought to a planter and two calls to the machinery. No template list,
+ * no insert and no notion of what a standard team is lives in this function;
+ * add a team to `TEAM_TEMPLATES` and both surfaces get it.
+ *
+ * The actor is minted inside each of those actions from `verifySession()` — no
+ * argument names a user, a church or a team, so a forged POST can only
+ * initialize the caller's own plant (`memory/invariants.md` → Authentication).
+ *
+ * ALREADY-INITIALIZED CHURCHES ARE A NO-OP. `initializePredefinedTeams` inserts
+ * unconditionally, so running the offer against a church that already has teams
+ * would give it a second Worship team rather than nothing. The guard is a read,
+ * so it settles the case it is written for — an accept by a planter who already
+ * pressed "Set Up Ministry Teams" on /teams — and NOT two simultaneous accepts
+ * (`memory/invariants.md` → Transactions: SELECT-then-INSERT is not a
+ * concurrency guard). Closing that would need a uniqueness constraint the
+ * schema does not have; the offer is a single disabled-while-pending button on
+ * a screen that navigates away on success, so the race needs two tabs to reach.
+ *
+ * PARTIAL IS REPORTED, NOT ROLLED BACK. If a role import fails the teams are
+ * already real and useful; deleting them to make the call atomic would throw
+ * away the half that worked. The planter is told which half landed.
+ */
+export async function initializeTeamsWithRolesAction(): Promise<
+  ActionResult<MinistryTeam[]>
+> {
+  const existing = await listTeamsAction();
+  if (!existing.success) return { success: false, error: existing.error };
+  if (existing.data.length > 0) return { success: true, data: [] };
+
+  const created = await initializeTeamsAction();
+  if (!created.success) return created;
+
+  // The created rows carry the template's NAME, not its key — the join back to
+  // the role templates has to go through it. Both sides come from
+  // `TEAM_TEMPLATES` moments apart, so an unmatched name means the template
+  // list changed under us: skip that team's roles rather than guess at a key.
+  const keyByTeamName = new Map<string, PredefinedTeamKey>(
+    TEAM_TEMPLATES.map((template) => [
+      template.teamName,
+      template.teamKey as PredefinedTeamKey,
+    ])
+  );
+
+  for (const team of created.data) {
+    const teamKey = keyByTeamName.get(team.name);
+    if (!teamKey) continue;
+
+    const roles = await importRoleTemplatesAction(team.id, teamKey);
+    if (!roles.success) {
+      return { success: false, error: TEAM_ROLES_PARTIAL_MESSAGE };
+    }
+  }
+
+  return { success: true, data: created.data };
 }
 
 // ============================================================================
