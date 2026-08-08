@@ -12,7 +12,7 @@
 
 import {
   formatLaunchDay,
-  journalEventLabel,
+  journalEntryLabel,
 } from "@/components/launch/presentation";
 import { Badge } from "@/components/ui/badge";
 import { formatDateTime } from "@/lib/datetime";
@@ -31,14 +31,19 @@ export function LaunchJournal({ entries }: { entries: LaunchJournalEntry[] }) {
         {[...entries].reverse().map((entry) => (
           <li key={entry.id} className="px-6 py-4">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="outline">{journalEventLabel(entry.event)}</Badge>
+              <Badge variant="outline">{journalEntryLabel(entry)}</Badge>
               <span className="text-muted-foreground text-xs">
                 {formatDateTime(entry.createdAt, "short")}
                 {entry.actorName ? ` · ${entry.actorName}` : ""}
               </span>
             </div>
             <p className="mt-1.5 text-sm">
-              {entry.previousTargetDate && entry.targetDate ? (
+              {/* An arrow means the day CHANGED. An outcome row (recorded or
+                  corrected) carries the same date on both sides, and
+                  "Sep 20 → Sep 20" would suggest a move that never happened. */}
+              {entry.previousTargetDate &&
+              entry.targetDate &&
+              entry.previousTargetDate !== entry.targetDate ? (
                 <>
                   {formatLaunchDay(entry.previousTargetDate, "short")} →{" "}
                   <span className="font-medium">

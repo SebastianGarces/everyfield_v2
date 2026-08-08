@@ -13,8 +13,10 @@ import {
   countdownFigure,
   countdownLabel,
   formatLaunchDay,
-  journalEventLabel,
+  journalEntryLabel,
+  launchedHeadline,
   launchStatusMeta,
+  outcomeSummary,
   progressPercent,
 } from "./presentation";
 
@@ -239,10 +241,82 @@ test("applying a change never mutates the snapshot it was given", () => {
 // ---------------------------------------------------------------------------
 
 test("a reschedule and a postponement read differently (LS-009)", () => {
-  assert.equal(journalEventLabel("moved"), "Date moved");
-  assert.equal(journalEventLabel("postponed"), "Postponed");
-  assert.equal(journalEventLabel("scheduled"), "Scheduled");
-  assert.equal(journalEventLabel("completed"), "Outcome recorded");
+  assert.equal(
+    journalEntryLabel({ event: "moved", previousStatus: "scheduled" }),
+    "Date moved"
+  );
+  assert.equal(
+    journalEntryLabel({ event: "postponed", previousStatus: "scheduled" }),
+    "Postponed"
+  );
+  assert.equal(
+    journalEntryLabel({ event: "scheduled", previousStatus: "planning" }),
+    "Scheduled"
+  );
+  assert.equal(
+    journalEntryLabel({ event: "completed", previousStatus: "scheduled" }),
+    "Outcome recorded"
+  );
+});
+
+test("a correction reads as a correction, not a second launch (LS-006)", () => {
+  // Both rows are `completed` events — the enum has four values and the schema
+  // owns them — so the pair with `previous_status` is what tells them apart.
+  // Labelling a Monday recount "Outcome recorded" a second time would read as a
+  // plant that launched twice.
+  assert.equal(
+    journalEntryLabel({ event: "completed", previousStatus: "completed" }),
+    "Outcome corrected"
+  );
+  assert.equal(
+    journalEntryLabel({ event: "completed", previousStatus: "postponed" }),
+    "Outcome recorded"
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Once it has happened (LS-005/LS-006)
+// ---------------------------------------------------------------------------
+
+test("a plant that launched is never told how overdue it is", () => {
+  // The celebrate state's whole point: after the day, the card stops counting
+  // down. Every number still comes from `daysUntilTarget` — nothing here
+  // subtracts dates (#338).
+  const target = "2026-09-20";
+  assert.equal(
+    launchedHeadline(daysUntilTarget(target, new Date("2026-09-20T09:00:00Z"))),
+    "Launched today"
+  );
+  assert.equal(
+    launchedHeadline(daysUntilTarget(target, new Date("2026-09-21T00:00:01Z"))),
+    "Launched yesterday"
+  );
+  assert.equal(
+    launchedHeadline(daysUntilTarget(target, new Date("2026-09-27T12:00:00Z"))),
+    "Launched 7 days ago"
+  );
+  assert.equal(launchedHeadline(null), "Launched");
+});
+
+test("the card's summary keeps 'not recorded' and zero apart", () => {
+  // Null means nobody counted; 0 means nobody came, or nobody responded. A card
+  // that printed "0 present" for an unfilled field would invent a bad launch.
+  assert.equal(
+    outcomeSummary({ attendanceCount: null, decisionsCount: null }),
+    null
+  );
+  assert.equal(
+    outcomeSummary({ attendanceCount: 0, decisionsCount: 0 }),
+    "0 present · 0 decisions and responses"
+  );
+  assert.equal(
+    outcomeSummary({ attendanceCount: 128, decisionsCount: null }),
+    "128 present"
+  );
+  assert.equal(
+    outcomeSummary({ attendanceCount: 1, decisionsCount: 1 }),
+    "1 person present · 1 decision or response"
+  );
 });
 
 // ---------------------------------------------------------------------------

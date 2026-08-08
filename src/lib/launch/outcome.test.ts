@@ -6,10 +6,13 @@ import { test } from "node:test";
 import { PgDialect } from "drizzle-orm/pg-core";
 
 import {
+  canEditOutcome,
   canRecordOutcome,
   launchOutcomeSchema,
   recordLaunchOutcomeStatement,
+  updateLaunchOutcomeStatement,
 } from "./outcome";
+import { launchTargetDateSchema } from "./validation";
 
 // ============================================================================
 // LS-006 — recording the day.
@@ -123,6 +126,171 @@ test("no meeting row is created — Launch Sunday is not a meeting", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Corrections (LS-006, ruled 2026-08-04: a recorded outcome stays editable)
+// ---------------------------------------------------------------------------
+
+function editSql(
+  overrides: Partial<Parameters<typeof updateLaunchOutcomeStatement>[0]> = {}
+): string {
+  return dialect
+    .sqlToQuery(
+      updateLaunchOutcomeStatement({
+        churchId: CHURCH_ID,
+        actorUserId: ACTOR_ID,
+        attendanceCount: 131,
+        decisionsCount: 5,
+        outcomeNotes: "Recount: 131.",
+        captureTheDay: "Photos in the shared drive.",
+        ...overrides,
+      })
+    )
+    .sql.replace(/\s+/g, " ")
+    .trim();
+}
+
+test("a correction may only touch an outcome that EXISTS", () => {
+  // The mirror of recording's `status <> 'completed'`: this is the correction
+  // path, so it requires the state recording produced. Without it there would be
+  // two ways to complete a launch, one of them skipping the day gate entirely.
+  const sql = editSql();
+  assert.match(sql, /c\.status = 'completed'/);
+  assert.match(sql, /c\.outcome_recorded_at is not null/);
+});
+
+test("a correction is LOCKED, and the update reads the locked row", () => {
+  // Same structure as the recording statement, for the same reason: a lazily
+  // evaluated `for update` re-read AFTER the write comes back empty
+  // (HeapTupleSelfUpdated) and the journal silently writes nothing.
+  const sql = editSql();
+  assert.match(sql, /with current as \( select .* for update \)/);
+  assert.match(sql, /update launches l .* from current c where l\.id = c\.id/);
+  assert.ok(
+    !/join current/.test(sql.slice(sql.indexOf("insert into launch_events"))),
+    "the journal must not re-read `current` after the update"
+  );
+});
+
+test("every correction is journalled, and only for a write that landed", () => {
+  const sql = editSql();
+  assert.match(sql, /insert into launch_events/);
+  assert.match(sql, /from updated u returning id/);
+  assert.ok(
+    sql.indexOf("insert into launch_events") > sql.indexOf("updated as"),
+    "the journal must read from the updated row"
+  );
+});
+
+test("re-saving the same record writes nothing, so the history stays honest", () => {
+  // The compare-and-set is in the WHERE, exactly as it is on the date rail: a
+  // journal row reading "outcome corrected" that corrected nothing is noise in
+  // a history a planter reads. `is distinct from` and not `<>`, because every
+  // one of these columns is nullable and `null <> null` is null — which would
+  // silently drop the case that matters, clearing a count.
+  const sql = editSql();
+  for (const column of [
+    "attendance_count",
+    "decisions_count",
+    "outcome_notes",
+    "capture_the_day",
+  ]) {
+    assert.ok(
+      sql.includes(`c.${column} is distinct from `),
+      `${column} must take part in the compare-and-set`
+    );
+  }
+  // An untyped null parameter leaves Postgres unable to infer the operand type,
+  // so every comparand is cast.
+  assert.match(sql, /::int/);
+  assert.match(sql, /::text/);
+});
+
+test("a correction is a `completed` row that came FROM `completed`", () => {
+  // How the history tells a Monday recount apart from the launch itself. The
+  // event vocabulary is a fixed four-value enum owned by the schema, so the
+  // distinguishing fact is the pair (event, previous_status) — a shape the
+  // first recording can never produce, since it always comes from `scheduled`
+  // or `postponed`. `journalEntryLabel` reads exactly this pair.
+  const sql = editSql();
+  assert.match(sql, /u\.previous_status, u\.status/);
+  assert.match(sql, /c\.status as previous_status/);
+});
+
+test("a correction never rewrites the day, the status, or when it was recorded", () => {
+  // Read the SET clause alone. Matching the whole statement would be satisfied
+  // by the WHERE's own `c.status = 'completed'` and prove nothing.
+  const sql = editSql();
+  const setClause = sql.slice(
+    sql.indexOf(" set "),
+    sql.indexOf(" from current c")
+  );
+  assert.ok(setClause.includes("attendance_count ="), setClause);
+  assert.ok(
+    !setClause.includes("target_date ="),
+    "the day it happened is history"
+  );
+  assert.ok(
+    !setClause.includes("status ="),
+    "a correction is not a state change"
+  );
+  // WHEN the planter first wrote the day down is a fact about the record, not
+  // about the edit; the journal carries the correction's own timestamp.
+  assert.ok(
+    !setClause.includes("outcome_recorded_at ="),
+    "the original recording time survives a correction"
+  );
+});
+
+test("correcting is planter-only and never moves the phase either", () => {
+  const source = readFileSync(
+    path.join(process.cwd(), "src", "lib", "launch", "outcome.ts"),
+    "utf8"
+  );
+  assert.match(
+    source,
+    /export async function updateLaunchOutcome\([\s\S]*?requireRole\(user, "planter"\)/
+  );
+  assert.match(
+    source,
+    /export async function updateLaunchOutcome\([\s\S]*?await requireChurchAccess\(user, churchId\)/
+  );
+  assert.match(
+    source,
+    /export async function updateLaunchOutcome\([\s\S]*?markPlantDirty\(churchId\)/
+  );
+});
+
+test("the correction form appears only for a recorded outcome", () => {
+  const recorded = new Date("2026-09-20T18:00:00Z");
+  assert.equal(
+    canEditOutcome({ status: "completed", outcomeRecordedAt: recorded }),
+    true
+  );
+  assert.equal(
+    canEditOutcome({ status: "scheduled", outcomeRecordedAt: null }),
+    false
+  );
+  // Belt and braces: a `completed` row with no record behind it is a state the
+  // write path cannot produce, and the form must not offer to edit nothing.
+  assert.equal(
+    canEditOutcome({ status: "completed", outcomeRecordedAt: null }),
+    false
+  );
+  assert.equal(canEditOutcome(null), false);
+});
+
+test("a correction has no deadline — nothing here reads a clock", () => {
+  const recorded = new Date("2026-09-20T18:00:00Z");
+  for (const asOf of ["2026-09-21", "2027-04-01"]) {
+    assert.equal(
+      canEditOutcome({ status: "completed", outcomeRecordedAt: recorded }),
+      true,
+      `still correctable as of ${asOf}`
+    );
+  }
+  assert.equal(canEditOutcome.length, 1, "canEditOutcome takes no `asOf`");
+});
+
+// ---------------------------------------------------------------------------
 // Counts
 // ---------------------------------------------------------------------------
 
@@ -220,6 +388,54 @@ test("the outcome module has one countdown and does not re-derive days", () => {
   assert.ok(
     !source.includes("MS_PER_DAY") && !source.includes("86_400_000"),
     "day math belongs in countdown.ts, which pins the UTC-midnight rule (#338)"
+  );
+});
+
+test("postponing is the DATE rail's job, and there is only one of it", () => {
+  // The ruling of 2026-08-04: a postponement carries a NEW target date and
+  // journals through the same write as every other date change (`setLaunchDate`
+  // → `setLaunchDateStatement`). A second postpone path living in the outcome
+  // module — "the day didn't happen, here's a new date" — is exactly the two
+  // write paths that ruling forbids: it would journal a different way, skip the
+  // milestone notification, and let a date move without the lock.
+  const outcome = readFileSync(
+    path.join(process.cwd(), "src", "lib", "launch", "outcome.ts"),
+    "utf8"
+  )
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/.*$/gm, "");
+
+  assert.ok(
+    !/'postponed'/.test(outcome),
+    "the outcome module must not write a postponement"
+  );
+  assert.ok(
+    !/set[\s\S]{0,400}target_date\s*=/.test(outcome),
+    "the outcome module must not move the launch date"
+  );
+
+  // And a postponement is unrepresentable without a day: the one rail validates
+  // its date, so "postpone" with nothing to postpone TO cannot be written.
+  assert.equal(launchTargetDateSchema.safeParse("").success, false);
+  assert.equal(launchTargetDateSchema.safeParse("2026-09-20").success, true);
+
+  // The action layer routes both arms of the rail through that one service.
+  const actions = readFileSync(
+    path.join(
+      process.cwd(),
+      "src",
+      "app",
+      "(dashboard)",
+      "launch",
+      "actions.ts"
+    ),
+    "utf8"
+  );
+  assert.match(actions, /setLaunchDate\(user, churchId, input\.targetDate, \{/);
+  assert.equal(
+    actions.match(/setLaunchDate\(/g)?.length,
+    1,
+    "one call site, so postponing and moving cannot diverge"
   );
 });
 

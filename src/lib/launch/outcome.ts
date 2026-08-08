@@ -39,6 +39,15 @@ export const OUTCOME_NO_LAUNCH_MESSAGE =
 export const OUTCOME_TOO_EARLY_MESSAGE =
   "You can record the outcome on Launch Sunday, once the day has arrived.";
 
+/**
+ * Editing is the CORRECTION path (LS-006, ruled 2026-08-04: "a recorded outcome
+ * stays editable by the planter with edits journaled"), so it needs something to
+ * correct. A launch with no outcome yet is recorded, not edited — different
+ * write, different guard, different journal row.
+ */
+export const OUTCOME_NOT_RECORDED_MESSAGE =
+  "There is no recorded outcome to correct yet — record the day first.";
+
 // ----------------------------------------------------------------------------
 // Validation
 // ----------------------------------------------------------------------------
@@ -158,6 +167,106 @@ export function recordLaunchOutcomeStatement(input: {
   `;
 }
 
+/**
+ * CORRECT an already-recorded outcome, and journal the correction (LS-006).
+ *
+ * Corrections happen: a headcount is re-done on Monday, a decision card turns up
+ * late, a note was typed in a hurry. So a recorded outcome is not frozen — but
+ * neither is it quietly mutable, which is why this writes a `launch_events` row
+ * exactly as the first recording did.
+ *
+ * THE SAME STRUCTURE, FOR THE SAME REASON. `current` is a DEPENDENCY of the
+ * UPDATE (`update … from current c`), never a sibling CTE the journal joins
+ * afterwards — see the long note on `recordLaunchOutcomeStatement`: a lazily
+ * evaluated `SELECT … FOR UPDATE` re-read after the write finds a row its own
+ * command just modified, skips it, and the journal silently writes nothing.
+ *
+ * WHAT IT DELIBERATELY DOES NOT TOUCH:
+ *   `status`               already `completed`; a correction is not a state
+ *                          change, and the guard `c.status = 'completed'` is
+ *                          what makes this the correction path rather than a
+ *                          second way to complete a launch.
+ *   `target_date`          the day it happened on is history. Moving it is
+ *                          refused by `setLaunchDate` too
+ *                          (`LAUNCH_ALREADY_COMPLETED_MESSAGE`).
+ *   `outcome_recorded_at`  WHEN the planter first wrote the day down is a fact
+ *                          about the record, not about the edit. The journal
+ *                          carries the edit's own timestamp.
+ *
+ * A RE-SAVE OF THE SAME VALUES WRITES NOTHING. The `is distinct from` block is a
+ * compare-and-set, the same one `setLaunchDateStatement` uses on the date and
+ * for the same reason: the journal is history a planter reads, and a row saying
+ * "outcome corrected" that corrected nothing is noise in it. `is distinct from`
+ * rather than `<>` because every one of these columns is nullable and `null <>
+ * null` is null, which would drop exactly the case that matters (clearing a
+ * count). The casts are not decoration — an untyped `null` parameter leaves
+ * Postgres unable to infer the operand's type.
+ *
+ * HOW A CORRECTION READS IN THE JOURNAL. `launch_events.event` is a fixed
+ * vocabulary (`scheduled` / `moved` / `postponed` / `completed`) owned by the
+ * schema, so a correction is a `completed` row whose `previous_status` is
+ * ALREADY `completed` — a shape the first recording can never produce, since it
+ * always comes from `scheduled` or `postponed`. The surfaces read exactly that
+ * pair (`journalEntryLabel` in `src/components/launch/presentation.ts`), so no
+ * enum value had to be invented in a workstream that does not own the schema.
+ */
+export function updateLaunchOutcomeStatement(input: {
+  churchId: string;
+  actorUserId: string;
+  attendanceCount: number | null;
+  decisionsCount: number | null;
+  outcomeNotes: string | null;
+  captureTheDay: string | null;
+}): SQL {
+  return sql`
+    with current as (
+      select id, target_date, status, outcome_recorded_at,
+             attendance_count, decisions_count, outcome_notes, capture_the_day
+      from launches
+      where church_id = ${input.churchId}
+      for update
+    ), updated as (
+      update launches l
+      set attendance_count = ${input.attendanceCount},
+          decisions_count = ${input.decisionsCount},
+          outcome_notes = ${input.outcomeNotes},
+          capture_the_day = ${input.captureTheDay},
+          updated_at = now()
+      from current c
+      where l.id = c.id
+        and c.status = 'completed'
+        and c.outcome_recorded_at is not null
+        and (
+          c.attendance_count is distinct from ${input.attendanceCount}::int
+          or c.decisions_count is distinct from ${input.decisionsCount}::int
+          or c.outcome_notes is distinct from ${input.outcomeNotes}::text
+          or c.capture_the_day is distinct from ${input.captureTheDay}::text
+        )
+      returning
+        l.id,
+        c.target_date as previous_target_date,
+        c.status as previous_status,
+        l.target_date,
+        l.status
+    ), journal as (
+      insert into launch_events (
+        launch_id, church_id, event,
+        previous_target_date, target_date,
+        previous_status, status,
+        actor_user_id, note
+      )
+      select
+        u.id, ${input.churchId}, 'completed',
+        u.previous_target_date, u.target_date,
+        u.previous_status, u.status,
+        ${input.actorUserId}, ${input.outcomeNotes}
+      from updated u
+      returning id
+    )
+    select u.id as launch_id, u.target_date as target_date from updated u
+  `;
+}
+
 // ----------------------------------------------------------------------------
 // The action-facing entrypoint
 // ----------------------------------------------------------------------------
@@ -223,6 +332,71 @@ export async function recordLaunchOutcome(
   return { status: "recorded", targetDate: written.target_date };
 }
 
+export type UpdateLaunchOutcomeResult =
+  | { status: "updated"; targetDate: string }
+  /** The submitted values were already the stored ones — nothing was written. */
+  | { status: "unchanged"; targetDate: string }
+  | { status: "error"; error: string };
+
+/**
+ * Correct a recorded outcome (LS-006). Planter-only, journaled, and available
+ * for as long as the record exists — corrections happen, and a plant's own
+ * account of its launch is not something the product locks away from it.
+ *
+ * AUTHORISES ITSELF on the same terms as `recordLaunchOutcome`: the PLANTER of
+ * THIS plant, both checks THROWING. An oversight admin has church ACCESS to an
+ * associated plant, so `requireChurchAccess` alone would let them rewrite a
+ * plant's history — which is worse here than at recording time, because a
+ * correction overwrites something a planter already wrote.
+ *
+ * Marks the plant dirty afterwards for LS-008's reason: the corrected counts are
+ * facts the snapshot reads, so the next assessment must see them. Best-effort
+ * and after the durable write, exactly as recording is. And exactly as recording
+ * does, it does NOT touch `current_phase` — the engine stays advisory.
+ */
+export async function updateLaunchOutcome(
+  user: User,
+  churchId: string,
+  input: LaunchOutcomeInput
+): Promise<UpdateLaunchOutcomeResult> {
+  requireRole(user, "planter");
+  await requireChurchAccess(user, churchId);
+
+  const parsed = launchOutcomeSchema.safeParse(input);
+  if (!parsed.success) {
+    return { status: "error", error: parsed.error.issues[0].message };
+  }
+
+  const result = await db.execute<{ launch_id: string; target_date: string }>(
+    updateLaunchOutcomeStatement({
+      churchId,
+      actorUserId: user.id,
+      ...parsed.data,
+    })
+  );
+
+  const written = result.rows[0];
+
+  if (!written) {
+    // Nothing was written, and the reasons are different answers: there is
+    // nothing recorded to correct, or the correction WAS the stored record.
+    // The second is a success — a saved form that changed nothing — and must
+    // not be reported as a failure.
+    const stored = await getLaunchForChurch(churchId);
+    if (!stored?.targetDate) {
+      return { status: "error", error: OUTCOME_NO_LAUNCH_MESSAGE };
+    }
+    if (stored.status !== "completed" || stored.outcomeRecordedAt === null) {
+      return { status: "error", error: OUTCOME_NOT_RECORDED_MESSAGE };
+    }
+    return { status: "unchanged", targetDate: stored.targetDate };
+  }
+
+  await markPlantDirty(churchId);
+
+  return { status: "updated", targetDate: written.target_date };
+}
+
 /**
  * The caller's UTC calendar day as `YYYY-MM-DD`.
  *
@@ -248,4 +422,16 @@ export function canRecordOutcome(
   if (launch.status === "completed") return false;
   const days = daysUntilTarget(launch.targetDate, asOf);
   return days !== null && days <= 0;
+}
+
+/**
+ * May the recorded outcome still be corrected? The UI's copy of
+ * `updateLaunchOutcomeStatement`'s guard, and NO CLOCK — a correction has no
+ * deadline, so nothing here compares days. The write is what decides; this only
+ * stops the page offering a form the server would refuse.
+ */
+export function canEditOutcome(
+  launch: { status: string; outcomeRecordedAt: Date | null } | null
+): boolean {
+  return launch?.status === "completed" && launch.outcomeRecordedAt !== null;
 }

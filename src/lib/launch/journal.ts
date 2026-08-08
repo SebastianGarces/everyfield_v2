@@ -17,12 +17,22 @@ import { inArray } from "drizzle-orm";
 
 import { db } from "@/db";
 import { users } from "@/db/schema";
-import type { LaunchEventType } from "@/db/schema/launch";
+import type { LaunchEventType, LaunchStatus } from "@/db/schema/launch";
 import { getLaunchJournal } from "./queries";
 
 export interface LaunchJournalEntry {
   id: string;
   event: LaunchEventType;
+  /**
+   * The status the launch held BEFORE this row, carried through because it is
+   * what distinguishes the first recording of an outcome from a later
+   * CORRECTION of it (LS-006): both are `completed` events, and only a
+   * correction comes from a launch that was already `completed`. The label the
+   * history shows is derived from the pair — see `journalEntryLabel`
+   * (`src/components/launch/presentation.ts`).
+   */
+  previousStatus: LaunchStatus;
+  status: LaunchStatus;
   previousTargetDate: string | null;
   targetDate: string | null;
   note: string | null;
@@ -50,6 +60,8 @@ export async function getLaunchJournalEntries(
   return rows.map((row) => ({
     id: row.id,
     event: row.event,
+    previousStatus: row.previousStatus,
+    status: row.status,
     previousTargetDate: row.previousTargetDate,
     targetDate: row.targetDate,
     note: row.note,

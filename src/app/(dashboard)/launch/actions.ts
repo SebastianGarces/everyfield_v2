@@ -37,6 +37,7 @@ import {
 } from "@/lib/launch/milestones";
 import {
   recordLaunchOutcome,
+  updateLaunchOutcome,
   type LaunchOutcomeInput,
 } from "@/lib/launch/outcome";
 import { completeTask, reopenTask } from "@/lib/tasks/service";
@@ -293,5 +294,45 @@ export async function recordLaunchOutcomeAction(
     return { success: true, data: { targetDate: result.targetDate } };
   } catch (error) {
     return toActionError(error, "record the launch outcome");
+  }
+}
+
+/**
+ * Correct a recorded outcome (LS-006, ruled 2026-08-04). Planter-only, and every
+ * correction is journaled — `updateLaunchOutcome` enforces both, and writes the
+ * `launch_events` row in the same statement as the correction so a change can
+ * never exist without its history.
+ *
+ * A SEPARATE ACTION FROM RECORDING, deliberately, because the two are different
+ * writes with different guards: recording completes a launch and may happen only
+ * once, from the target date onward; correcting requires a launch that is
+ * ALREADY completed and has no deadline. One action switching on stored state
+ * would have to decide which it is from data the client cannot be trusted for.
+ */
+export async function updateLaunchOutcomeAction(
+  input: LaunchOutcomeInput
+): Promise<ActionResult<{ targetDate: string; changed: boolean }>> {
+  try {
+    const { user, churchId } = await requireChurchSession();
+    if (!user) return { success: false, error: NO_CHURCH_MESSAGE };
+
+    const result = await updateLaunchOutcome(user, churchId, input);
+    if (result.status === "error") {
+      return { success: false, error: result.error };
+    }
+
+    revalidateLaunchSurfaces();
+    return {
+      success: true,
+      data: {
+        targetDate: result.targetDate,
+        // `false` when the form was saved without changing anything: the write
+        // is a no-op by compare-and-set, so no correction reached the journal
+        // and the planter should not be told one did.
+        changed: result.status === "updated",
+      },
+    };
+  } catch (error) {
+    return toActionError(error, "update the launch outcome");
   }
 }

@@ -16,7 +16,7 @@
 // of a plant's own launch.
 // ============================================================================
 
-import type { LaunchStatus } from "@/db/schema/launch";
+import type { LaunchEventType, LaunchStatus } from "@/db/schema/launch";
 import { formatDate } from "@/lib/datetime";
 import { parseTargetDate } from "@/lib/launch/countdown";
 // Type-only: erased at build time, so importing the server module's shapes here
@@ -225,11 +225,22 @@ export function applyReadinessChange(
 // The journal
 // ----------------------------------------------------------------------------
 
-/** How a journal row reads in the history list (LS-002/LS-009). */
-export function journalEventLabel(
-  event: "scheduled" | "moved" | "postponed" | "completed"
-): string {
-  switch (event) {
+/**
+ * How a journal row reads in the history list (LS-002/LS-006/LS-009).
+ *
+ * IT TAKES THE ROW, NOT THE EVENT, and that is the whole point. A CORRECTION to
+ * a recorded outcome is a `completed` row like the first recording — the event
+ * vocabulary is a fixed four-value enum owned by the schema — and the pair that
+ * tells them apart is `previous_status`: only a correction comes from a launch
+ * that was ALREADY `completed`. Reading the event alone would label a Monday
+ * fix-up "Outcome recorded" a second time, which reads as a launch that
+ * happened twice.
+ */
+export function journalEntryLabel(entry: {
+  event: LaunchEventType;
+  previousStatus: LaunchStatus;
+}): string {
+  switch (entry.event) {
     case "scheduled":
       return "Scheduled";
     case "moved":
@@ -237,6 +248,58 @@ export function journalEventLabel(
     case "postponed":
       return "Postponed";
     case "completed":
-      return "Outcome recorded";
+      return entry.previousStatus === "completed"
+        ? "Outcome corrected"
+        : "Outcome recorded";
   }
+}
+
+// ----------------------------------------------------------------------------
+// The launch itself, once it has happened
+// ----------------------------------------------------------------------------
+
+/**
+ * The dashboard card's celebrate state (LS-005/LS-006): a plant that has
+ * launched should not be told how many days late it is.
+ *
+ * `days` is `daysUntilTarget`'s answer and nothing else — this function does no
+ * day arithmetic, on the same terms as everything else in this file (#338).
+ * A completed launch always has a date (the schema's `launches_target_date_check`
+ * guarantees it), so `null` is defensive rather than expected.
+ */
+export function launchedHeadline(days: number | null): string {
+  if (days === null) return "Launched";
+  if (days >= 0) return "Launched today";
+  const ago = Math.abs(days);
+  if (ago === 1) return "Launched yesterday";
+  return `Launched ${ago} days ago`;
+}
+
+/**
+ * The one-line account of the day for a card that has no room for the record
+ * itself. `null` when neither count was recorded — an empty answer is a
+ * sentence the card should not print, and "0 attended" is a real answer that
+ * must not be confused with "not recorded" (the nullable counts exist for
+ * exactly that distinction).
+ */
+export function outcomeSummary(outcome: {
+  attendanceCount: number | null;
+  decisionsCount: number | null;
+}): string | null {
+  const parts: string[] = [];
+  if (outcome.attendanceCount !== null) {
+    parts.push(
+      outcome.attendanceCount === 1
+        ? "1 person present"
+        : `${outcome.attendanceCount} present`
+    );
+  }
+  if (outcome.decisionsCount !== null) {
+    parts.push(
+      outcome.decisionsCount === 1
+        ? "1 decision or response"
+        : `${outcome.decisionsCount} decisions and responses`
+    );
+  }
+  return parts.length > 0 ? parts.join(" · ") : null;
 }

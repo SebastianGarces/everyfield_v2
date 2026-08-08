@@ -46,7 +46,7 @@ import { verifySession } from "@/lib/auth/session";
 import { daysUntilTarget } from "@/lib/launch/countdown";
 import { getLaunchJournalEntries } from "@/lib/launch/journal";
 import { getLaunchReadiness } from "@/lib/launch/milestones";
-import { canRecordOutcome } from "@/lib/launch/outcome";
+import { canEditOutcome, canRecordOutcome } from "@/lib/launch/outcome";
 import { getLaunchForChurch } from "@/lib/launch/queries";
 import { CHURCH_LEVEL_ROLES } from "@/lib/auth/access";
 import type { UserRole } from "@/db/schema";
@@ -88,6 +88,10 @@ export default async function LaunchPage() {
   const meta = launchStatusMeta(status);
   const figure = countdownFigure(daysUntil);
   const showOutcomeForm = isPlanter && canRecordOutcome(launch, now);
+  // A recorded outcome stays correctable by the planter, with every correction
+  // journalled (LS-006, ruled 2026-08-04) — the record is the plant's own
+  // account of its day, and getting a headcount right on Monday is normal.
+  const showOutcomeEditor = isPlanter && canEditOutcome(launch);
 
   return (
     <>
@@ -179,6 +183,23 @@ export default async function LaunchPage() {
 
           {/* ---- Recording it, on the day ------------------------------- */}
           {showOutcomeForm && <OutcomeForm />}
+
+          {/* ---- Correcting it afterwards ------------------------------- */}
+          {showOutcomeEditor && launch && (
+            // `key` on what is stored: a saved correction remounts the form on
+            // the server's values instead of leaving the planter's old draft in
+            // the inputs (memory/contracts/data-patterns.md).
+            <OutcomeForm
+              key={`${launch.attendanceCount}|${launch.decisionsCount}|${launch.outcomeNotes ?? ""}|${launch.captureTheDay ?? ""}`}
+              mode="edit"
+              initial={{
+                attendanceCount: launch.attendanceCount,
+                decisionsCount: launch.decisionsCount,
+                outcomeNotes: launch.outcomeNotes,
+                captureTheDay: launch.captureTheDay,
+              }}
+            />
+          )}
 
           {/* ---- Scheduling (planter only) ------------------------------ */}
           {isPlanter && status !== "completed" && (

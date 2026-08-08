@@ -10,14 +10,16 @@
 // string on the server than after hydration.
 // ============================================================================
 
-import { CalendarPlus, Rocket } from "lucide-react";
+import { CalendarPlus, PartyPopper, Rocket } from "lucide-react";
 import Link from "next/link";
 
 import {
   countdownFigure,
   countdownLabel,
   formatLaunchDay,
+  launchedHeadline,
   launchStatusMeta,
+  outcomeSummary,
   progressPercent,
 } from "@/components/launch/presentation";
 import { Badge } from "@/components/ui/badge";
@@ -32,6 +34,13 @@ export interface LaunchStatusCardProps {
   daysUntil: number | null;
   /** Readiness, when the launch has been scheduled and seeded (LS-003). */
   readiness?: { completedCount: number; totalCount: number } | null;
+  /**
+   * The recorded counts, once the day has been recorded (LS-006). Optional
+   * because the card is useful without them: a completed launch celebrates
+   * whether or not the planter filled the counts in, and `null` counts mean
+   * "not recorded", never zero.
+   */
+  outcome?: { attendanceCount: number | null; decisionsCount: number | null };
 }
 
 export function LaunchStatusCard({
@@ -39,9 +48,50 @@ export function LaunchStatusCard({
   status,
   daysUntil,
   readiness,
+  outcome,
 }: LaunchStatusCardProps) {
   const figure = countdownFigure(daysUntil);
   const meta = launchStatusMeta(status ?? "planning");
+
+  // ---- Launched (LS-006) --------------------------------------------------
+  // A plant that has launched is not "3 days past due" — it is a plant that
+  // launched. The countdown card becomes the celebrate state the moment the
+  // outcome is recorded, which is what `status = 'completed'` means and the only
+  // thing that sets it. It is checked BEFORE the no-date branch below: a
+  // completed launch always has a day (`launches_target_date_check`), and a
+  // launched plant being told "No date yet" would be the worst reading of all.
+  if (status === "completed" && targetDate) {
+    const summary = outcome ? outcomeSummary(outcome) : null;
+
+    return (
+      <Link
+        href="/launch"
+        className="from-primary/10 hover:border-primary/50 border-primary/30 block cursor-pointer rounded-xl border bg-gradient-to-br to-transparent p-6 shadow-sm transition-colors"
+      >
+        <div className="flex items-center justify-between">
+          <p className="text-muted-foreground text-sm font-medium">
+            Launch Sunday
+          </p>
+          <div className="bg-primary/15 text-primary flex h-9 w-9 items-center justify-center rounded-lg">
+            <PartyPopper className="h-5 w-5" />
+          </div>
+        </div>
+
+        <p className="mt-3 text-2xl font-bold tracking-tight">
+          {launchedHeadline(daysUntil)}
+        </p>
+
+        <p className="text-muted-foreground mt-1 text-xs">
+          {formatLaunchDay(targetDate, "short")}
+          {summary ? ` · ${summary}` : ""}
+        </p>
+
+        <div className="mt-3">
+          <Badge variant={meta.badgeVariant}>{meta.label}</Badge>
+        </div>
+      </Link>
+    );
+  }
 
   // No date yet: the card's job is to ask for one, not to show a zero.
   if (!targetDate || !figure) {

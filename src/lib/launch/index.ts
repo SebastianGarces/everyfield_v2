@@ -27,13 +27,18 @@ export {
   type LaunchReadiness,
 } from "./milestones";
 export {
+  canEditOutcome,
   canRecordOutcome,
   launchOutcomeSchema,
   OUTCOME_ALREADY_RECORDED_MESSAGE,
   OUTCOME_NO_LAUNCH_MESSAGE,
+  OUTCOME_NOT_RECORDED_MESSAGE,
   OUTCOME_TOO_EARLY_MESSAGE,
   recordLaunchOutcome,
+  updateLaunchOutcome,
   type LaunchOutcomeInput,
+  type RecordLaunchOutcomeResult,
+  type UpdateLaunchOutcomeResult,
 } from "./outcome";
 export {
   getLaunchDatesForChurches,
