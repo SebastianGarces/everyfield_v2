@@ -388,6 +388,137 @@ export async function getWikiNavigation(
   return groups;
 }
 
+// ============================================================================
+// Article navigation — related articles and prev/next (W-009, #317)
+//
+// Both affordances are derived, not stored: `related_article_slugs` is an
+// authored list of slugs (it carries no titles, and nothing enforces that a
+// slug still resolves), and "previous/next" is simply where an article sits
+// among its siblings. So both resolve against the SAME visible corpus the rest
+// of the wiki reads — `getArticles(churchId)` — which is what makes them obey
+// tenancy, publication status and the church-override rule for free.
+//
+// The resolution steps are pure functions over `ArticleMeta[]` so they can be
+// asserted without a database; `getArticleNavigation` is the one call site
+// that touches Postgres, and it does so ONCE for both.
+// ============================================================================
+
+/**
+ * The path an article hangs off — `""` for a top-level slug.
+ *
+ * This, not `ArticleMeta.section`, is what "the same section" means for
+ * prev/next: `section` is a display grouping that collapses to `"_root"` for
+ * two-segment slugs, so every phase-level article in the wiki would count as
+ * one another's siblings. The parent path is the navigation tree the reader
+ * actually sees in the sidebar.
+ */
+export function articleParentPath(slug: string): string {
+  return slug.split("/").slice(0, -1).join("/");
+}
+
+/**
+ * Navigation order: `sortOrder` first, title as the stable tie-break.
+ *
+ * The tie-break matters — `sort_order` defaults to 999 for every article, so
+ * without it "next" would be whatever order Postgres happened to return.
+ */
+export function byNavigationOrder(a: ArticleMeta, b: ArticleMeta): number {
+  if (a.order !== b.order) return a.order - b.order;
+  return a.title.localeCompare(b.title);
+}
+
+export type ArticleNavigation = {
+  /** Authored cross-links, in the order they were authored. */
+  related: ArticleMeta[];
+  /** The sibling before this one, or null when this is the first. */
+  previous: ArticleMeta | null;
+  /** The sibling after this one, or null when this is the last. */
+  next: ArticleMeta | null;
+};
+
+/**
+ * Resolve `related_article_slugs` against the corpus the reader can see.
+ *
+ * A slug that resolves to nothing is DROPPED rather than rendered dead: the
+ * column is authored content with no foreign key behind it, so it accumulates
+ * slugs that were renamed, unpublished, or belong to another church. Dropping
+ * is also the tenancy behaviour — an article may not advertise a title the
+ * reader is not allowed to open.
+ *
+ * The article's own slug is excluded, and repeats collapse, so a hand-edited
+ * list cannot produce a self-link or duplicate React keys.
+ */
+export function resolveRelatedArticles(
+  articles: ArticleMeta[],
+  relatedSlugs: readonly string[] | null | undefined,
+  currentSlug: string
+): ArticleMeta[] {
+  if (!relatedSlugs || relatedSlugs.length === 0) {
+    return [];
+  }
+
+  const bySlug = new Map(articles.map((article) => [article.slug, article]));
+  const taken = new Set<string>([currentSlug]);
+  const related: ArticleMeta[] = [];
+
+  for (const slug of relatedSlugs) {
+    if (taken.has(slug)) continue;
+
+    const article = bySlug.get(slug);
+    if (!article) continue;
+
+    taken.add(slug);
+    related.push(article);
+  }
+
+  return related;
+}
+
+/**
+ * Where `slug` sits among its siblings — the previous and next article.
+ *
+ * A slug that is not in `articles` (a section index, an unpublished article)
+ * has no position, and therefore no neighbours, rather than borrowing the
+ * first pair.
+ */
+export function resolveSiblingNavigation(
+  articles: ArticleMeta[],
+  slug: string
+): Pick<ArticleNavigation, "previous" | "next"> {
+  const parent = articleParentPath(slug);
+  const siblings = articles
+    .filter((article) => articleParentPath(article.slug) === parent)
+    .sort(byNavigationOrder);
+
+  const index = siblings.findIndex((article) => article.slug === slug);
+  if (index === -1) {
+    return { previous: null, next: null };
+  }
+
+  return {
+    previous: siblings[index - 1] ?? null,
+    next: siblings[index + 1] ?? null,
+  };
+}
+
+/**
+ * Everything the article footer needs, from one read of the visible corpus.
+ *
+ * @param churchId - the reader's church; omit (or pass null) for global only.
+ */
+export async function getArticleNavigation(
+  slug: string,
+  relatedSlugs: readonly string[] | null | undefined,
+  churchId: string | null = null
+): Promise<ArticleNavigation> {
+  const articles = await getArticles(churchId);
+
+  return {
+    related: resolveRelatedArticles(articles, relatedSlugs, slug),
+    ...resolveSiblingNavigation(articles, slug),
+  };
+}
+
 function formatSectionTitle(section: string): string {
   return section
     .split("-")

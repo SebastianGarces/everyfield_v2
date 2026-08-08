@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Clock, FileText, ChevronRight } from "lucide-react";
 import {
   getArticle,
+  getArticleNavigation,
   compileArticle,
   getBreadcrumbs,
   getArticlesByPrefix,
@@ -19,6 +20,9 @@ import { TableOfContents } from "@/components/wiki/table-of-contents";
 import { ArticleProgressBadge } from "@/components/wiki/article-progress-badge";
 import { BookmarkButton } from "@/components/wiki/bookmark-button";
 import { BookmarkIndicator } from "@/components/wiki/bookmark-indicator";
+import { RelatedArticles } from "@/components/wiki/related-articles";
+import { ArticlePager } from "@/components/wiki/article-pager";
+import type { ArticleWithRelated } from "@/lib/wiki/get-article";
 import type { ArticleMeta } from "@/lib/wiki/types";
 import type { WikiProgressStatus } from "@/db/schema";
 
@@ -119,7 +123,7 @@ export default async function WikiPage({ params }: Props) {
   const article = await getArticle(slugPath, churchId);
 
   if (article) {
-    return <ArticleView article={article} />;
+    return <ArticleView article={article} churchId={churchId} />;
   }
 
   // Otherwise, try to render section index
@@ -135,12 +139,18 @@ export default async function WikiPage({ params }: Props) {
 // Article view component
 async function ArticleView({
   article,
+  churchId,
 }: {
-  article: ArticleMeta & { content: string };
+  article: ArticleWithRelated;
+  churchId: string | null;
 }) {
-  const [content, bookmarked] = await Promise.all([
+  // The navigation read is scoped to the same church as the article itself, so
+  // the footer can never advertise a title this reader is not allowed to open
+  // (`memory/invariants.md` → Multi-Tenancy).
+  const [content, bookmarked, navigation] = await Promise.all([
     compileArticle(article),
     isBookmarked(article.slug),
+    getArticleNavigation(article.slug, article.relatedArticleSlugs, churchId),
   ]);
   const breadcrumbs = getBreadcrumbs(article.slug, article.title);
 
@@ -188,6 +198,10 @@ async function ArticleView({
           <div className="prose prose-neutral dark:prose-invert max-w-none">
             {content}
           </div>
+
+          <RelatedArticles articles={navigation.related} />
+
+          <ArticlePager previous={navigation.previous} next={navigation.next} />
         </article>
 
         <TableOfContents headings={headings} />

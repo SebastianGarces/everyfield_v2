@@ -8,6 +8,19 @@ import { encodeWikiSlug, wikiHref } from "./href";
 import { mdxComponents } from "@/components/wiki/mdx-components";
 
 /**
+ * An article plus the raw cross-link list the row carries (W-009).
+ *
+ * `relatedArticleSlugs` stays UNRESOLVED here — it is authored text with no
+ * foreign key behind it, and turning it into articles needs the visible corpus
+ * (`getArticleNavigation` in `get-articles.ts`). Normalised to `[]` so callers
+ * never branch on null, and kept off `ArticleMeta` because a list card has no
+ * use for it.
+ */
+export type ArticleWithRelated = Article & {
+  relatedArticleSlugs: string[];
+};
+
+/**
  * Get a single article by slug, scoped to a church.
  *
  * Until #317 this passed a hardcoded `null`, which made every church-scoped
@@ -20,7 +33,7 @@ import { mdxComponents } from "@/components/wiki/mdx-components";
 export async function getArticle(
   slug: string,
   churchId: string | null = null
-): Promise<Article | null> {
+): Promise<ArticleWithRelated | null> {
   // Same override rule as the lists, one implementation: the church's own copy
   // of a slug wins over the global article of that name.
   const [dbArticle] = preferChurchOverride(
@@ -34,7 +47,10 @@ export async function getArticle(
   // Extract section from slug (e.g., "discovery/defining-your-church-values" -> "discovery")
   const sectionSlug = slug.split("/")[0] ?? "";
 
-  return toArticle(dbArticle, sectionSlug);
+  return {
+    ...toArticle(dbArticle, sectionSlug),
+    relatedArticleSlugs: dbArticle.relatedArticleSlugs ?? [],
+  };
 }
 
 /**
