@@ -1,3 +1,6 @@
+import { and, asc, eq, isNull, or, type SQL } from "drizzle-orm";
+import { db } from "@/db";
+import { wikiArticles, type WikiArticle } from "@/db/schema";
 import type {
   ArticleMeta,
   ArticleCategory,
@@ -5,14 +8,117 @@ import type {
   NavGroup,
 } from "./types";
 import { toArticleMeta } from "./types";
-import { getAllPublishedArticles } from "./service";
 import { wikiHref } from "./href";
 
+// ============================================================================
+// Tenancy — every wiki read starts here (#317, from #16)
+//
+// `wiki_articles.church_id` is nullable and means two different things:
+// NULL = global content every plant sees, a uuid = content belonging to that
+// one church (FRD `product-docs/features/wiki/frd.md`, data model). The read
+// the FRD specifies is therefore
+//
+//     WHERE church_id IS NULL OR church_id = :current_church_id
+//
+// and NOT "church_id = :id" — a church sees the global corpus PLUS its own,
+// never only its own. Isolation here is application-layer; there is no RLS
+// behind these queries (`memory/invariants.md` → Multi-Tenancy), so this
+// predicate IS the boundary and it is asserted at the SQL level in
+// `tenancy.test.ts` rather than trusted.
+//
+// The reads default to `churchId = null` (global only) so that a call site
+// which forgets to thread a church fails CLOSED — it under-fetches its own
+// content instead of leaking somebody else's.
+// ============================================================================
+
 /**
- * Get all wiki articles with metadata
+ * The visibility predicate: global articles, plus this church's own.
+ *
+ * `null` narrows to the global corpus alone — never "everything".
  */
-export async function getArticles(): Promise<ArticleMeta[]> {
-  const dbArticles = await getAllPublishedArticles();
+export function visibleToChurch(churchId: string | null): SQL {
+  if (!churchId) {
+    return isNull(wikiArticles.churchId);
+  }
+
+  return or(
+    isNull(wikiArticles.churchId),
+    eq(wikiArticles.churchId, churchId)
+  ) as SQL;
+}
+
+/**
+ * Every published article visible to `churchId`, in navigation order.
+ *
+ * Exported as a builder (not a result) so the tenancy predicate can be
+ * rendered with `.toSQL()` and asserted without a database — the same shape
+ * `src/lib/notifications/queries.ts` uses for its church boundary.
+ */
+export function visibleArticlesQuery(churchId: string | null) {
+  return db
+    .select()
+    .from(wikiArticles)
+    .where(and(visibleToChurch(churchId), eq(wikiArticles.status, "published")))
+    .orderBy(asc(wikiArticles.sortOrder));
+}
+
+/**
+ * One slug, resolved against what `churchId` may see.
+ *
+ * At most two rows can match: `wiki_articles_slug_church_idx` is unique on
+ * (slug, church_id), and the predicate admits exactly two church scopes — the
+ * global one and the caller's.
+ *
+ * This builder backs `getArticle` but lives here, next to the predicate it
+ * shares, because `get-article.ts` imports the MDX compiler and so cannot be
+ * loaded by the test runner — the tenancy assertions in `tenancy.test.ts`
+ * would have nothing to inspect.
+ */
+export function articleBySlugQuery(slug: string, churchId: string | null) {
+  return db
+    .select()
+    .from(wikiArticles)
+    .where(
+      and(
+        eq(wikiArticles.slug, slug),
+        visibleToChurch(churchId),
+        eq(wikiArticles.status, "published")
+      )
+    )
+    .limit(2);
+}
+
+/**
+ * Collapse a global article and a church's article of the SAME slug to one.
+ *
+ * `wiki_articles_slug_church_idx` is unique on (slug, church_id), so a church
+ * may hold its own version of a global slug; the church's copy wins (it is an
+ * override, and two rows with one slug would otherwise duplicate the article
+ * in lists, navigation and React keys). Insertion order — sort order — is
+ * preserved.
+ */
+export function preferChurchOverride(articles: WikiArticle[]): WikiArticle[] {
+  const bySlug = new Map<string, WikiArticle>();
+
+  for (const article of articles) {
+    const held = bySlug.get(article.slug);
+    if (!held || (held.churchId === null && article.churchId !== null)) {
+      bySlug.set(article.slug, article);
+    }
+  }
+
+  return Array.from(bySlug.values());
+}
+
+/**
+ * Get all wiki articles with metadata, scoped to a church.
+ *
+ * @param churchId - the reader's church; omit (or pass null) for global only.
+ */
+export async function getArticles(
+  churchId: string | null = null
+): Promise<ArticleMeta[]> {
+  const dbArticles = preferChurchOverride(await visibleArticlesQuery(churchId));
 
   return dbArticles.map((article) => {
     // Extract section from slug:
@@ -28,19 +134,26 @@ export async function getArticles(): Promise<ArticleMeta[]> {
  * Get articles that match a path prefix
  * e.g., "phase-1" returns all articles in phase 1
  * e.g., "phase-1/introduction" returns all articles in that section
+ *
+ * @param churchId - the reader's church; omit (or pass null) for global only.
  */
 export async function getArticlesByPrefix(
-  prefix: string
+  prefix: string,
+  churchId: string | null = null
 ): Promise<ArticleMeta[]> {
-  const articles = await getArticles();
+  const articles = await getArticles(churchId);
   return articles.filter((article) => article.slug.startsWith(prefix + "/"));
 }
 
 /**
  * Build navigation structure from articles, grouped by category
+ *
+ * @param churchId - the reader's church; omit (or pass null) for global only.
  */
-export async function getWikiNavigation(): Promise<NavGroup[]> {
-  const articles = await getArticles();
+export async function getWikiNavigation(
+  churchId: string | null = null
+): Promise<NavGroup[]> {
+  const articles = await getArticles(churchId);
 
   // Group articles by category, then phase/section
   const categoryMap = new Map<

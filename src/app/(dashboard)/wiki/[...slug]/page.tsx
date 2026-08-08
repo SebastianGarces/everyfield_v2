@@ -12,6 +12,7 @@ import {
   wikiHref,
 } from "@/lib/wiki";
 import { extractHeadings } from "@/lib/wiki/toc";
+import { getCurrentSession } from "@/lib/auth";
 import { WikiBreadcrumb } from "@/components/wiki/wiki-breadcrumb";
 import { ProgressTracker } from "@/components/wiki/progress-tracker";
 import { TableOfContents } from "@/components/wiki/table-of-contents";
@@ -41,13 +42,30 @@ type Props = {
   params: Promise<{ slug: string[] }>;
 };
 
+/**
+ * The church whose wiki this request is reading (#317).
+ *
+ * Read off the session rather than passed in: an entity implied by the actor
+ * is never an argument (`memory/invariants.md` → Authentication).
+ * `getCurrentSession` is `React.cache`d and the dashboard layout has already
+ * called it, so this costs no extra query — and `generateMetadata` and the
+ * page below share the one result, which is why they can never disagree about
+ * whose article this is.
+ *
+ * No session (or a user with no church) reads the global corpus only.
+ */
+async function readerChurchId(): Promise<string | null> {
+  const { user } = await getCurrentSession();
+  return user?.churchId ?? null;
+}
+
 export async function generateMetadata({ params }: Props) {
   const { slug } = await params;
   const slugPath = slug.join("/");
   const appDescription = "Navigate your church plant from calling to launch";
 
   // Try to get article first
-  const article = await getArticle(slugPath);
+  const article = await getArticle(slugPath, await readerChurchId());
   if (article) {
     const title = `EveryField | ${article.title}`;
     const description = article.description || appDescription;
@@ -95,16 +113,17 @@ export async function generateMetadata({ params }: Props) {
 export default async function WikiPage({ params }: Props) {
   const { slug } = await params;
   const slugPath = slug.join("/");
+  const churchId = await readerChurchId();
 
   // Try to get article first
-  const article = await getArticle(slugPath);
+  const article = await getArticle(slugPath, churchId);
 
   if (article) {
     return <ArticleView article={article} />;
   }
 
   // Otherwise, try to render section index
-  const articles = await getArticlesByPrefix(slugPath);
+  const articles = await getArticlesByPrefix(slugPath, churchId);
 
   if (articles.length === 0) {
     notFound();
