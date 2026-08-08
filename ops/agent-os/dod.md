@@ -151,7 +151,16 @@ from every workstream in it, on the integrated branch.
 - Capture a **screenshot** of each key state.
 - Run a **chrome-devtools `lighthouse_audit`** on the touched page; **accessibility ≥ 90**
   (perf/best-practices recorded, not blocking unless the AC says so).
-- **Evidence:** per-AC pass/fail, screenshot refs, console dump, lighthouse summary.
+- **Design review (mandatory, ruled 2026-08-08):** run the **`better-interface`** skill against the
+  touched surfaces on the preview — layout, hierarchy, and copy, not just defects. Every finding is
+  **dispositioned**: applied on the branch, or carried in the PR body as a named limitation with a
+  reason. A frontend/fullstack track whose evidence bundle shows no better-interface disposition
+  table has **not passed G3**. (Why: two tracks — #303's oversight pages and #305's /launch — shipped
+  through every correctness gate and were flagged as structurally wrong by the reviewer on sight.
+  Correctness gates do not see layout. Workflow-script plumbing for this gate is #337's AC; this
+  document binds verifiers regardless.)
+- **Evidence:** per-AC pass/fail, screenshot refs, console dump, lighthouse summary, and the
+  better-interface disposition table.
 
 **Backend / API units** → run the `validate-backend` skill:
 - Exercise the route / server action (curl or a `tsx` harness) and assert response **status + shape**
