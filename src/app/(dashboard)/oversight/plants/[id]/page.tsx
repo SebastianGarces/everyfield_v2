@@ -20,6 +20,8 @@ import { notFound, redirect } from "next/navigation";
 import { HeaderBreadcrumbs } from "@/components/header";
 import { PlantDetail } from "@/components/oversight/plant-detail";
 import { getCurrentSession } from "@/lib/auth";
+import { oversightOrgOfUser } from "@/lib/invitations/core";
+import { getAssociationHistoryForOrg } from "@/lib/invitations/history";
 import { scopeLabelForRole } from "@/lib/oversight/presentation";
 import { getOversightPlantDetail } from "@/lib/oversight/read";
 
@@ -54,6 +56,19 @@ export default async function OversightPlantPage({
     notFound();
   }
 
+  // OV-011 — the audit trail, scoped to the CALLER'S OWN org in the WHERE clause
+  // (`memory/invariants.md` → Hierarchical Access Control: reaching a plant is
+  // not permission to name the orgs behind it). The org comes from the session,
+  // never from the URL, and it is the same derivation the sever is guarded by, so
+  // what this page shows and what its Remove action can touch cannot disagree.
+  //
+  // `oversightOrgOfUser` cannot be null here — the role guard above admits only
+  // the two oversight roles, and `getOversightPlantDetail` already answered null
+  // for an admin with no org (they reach no plants at all). The empty history is
+  // the fail-closed answer rather than an unscoped read.
+  const org = oversightOrgOfUser(user);
+  const history = org ? await getAssociationHistoryForOrg(org, id) : [];
+
   return (
     <>
       <HeaderBreadcrumbs
@@ -62,7 +77,11 @@ export default async function OversightPlantPage({
           { label: detail.plant.name },
         ]}
       />
-      <PlantDetail detail={detail} scopeLabel={scopeLabelForRole(user.role)} />
+      <PlantDetail
+        detail={detail}
+        scopeLabel={scopeLabelForRole(user.role)}
+        history={history}
+      />
     </>
   );
 }

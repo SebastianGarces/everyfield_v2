@@ -61,6 +61,7 @@ import {
   announceInvitationAccepted,
   announceInvitationDeclined,
 } from "@/lib/notifications/oversight";
+import { announceRemovedFromOversightOrg } from "@/lib/notifications/plant-association";
 
 import {
   acceptedAssociationEventStatement,
@@ -1320,12 +1321,20 @@ export async function revokeInvitationAs(
 // diff — deliberately, and reviewed — instead of discovering that routing the
 // import through a barrel makes the guardrail quiet.
 //
-// THE PLANTER SIDE NOW HAS ONE: `leaveOversightOrgAs` below (#304/WS1). It does
-// NOT call the three primitives — `set fk = null where id = ?` cannot express
-// the tenancy assertion a sever needs (see `severAssociationWithAuditStatement`
-// in `./audit`), and it has no place to put the audit row that has to commit
-// with it. The primitives stay for the org side (#278/WS2) to reason about and
-// are still exported, still unwrapped, still not endpoints.
+// BOTH SIDES NOW HAVE ONE, and NEITHER CALLS THESE THREE: `leaveOversightOrgAs`
+// (the planter, #304/OV-007a) and `removePlantFromOrgAs` (the org's admin,
+// #304/OV-007b) both go through `severAssociationWithAuditStatement` in
+// `./audit`. `set fk = null where id = ?` — the shape below — cannot express the
+// tenancy assertion a sever needs (it severs whichever org happens to be there,
+// for whoever asks), and it has no place to put the audit row that has to commit
+// with it.
+//
+// So the three are now genuinely unreferenced, and they are kept anyway, for one
+// reason: `service.test.ts`'s guardrail-mutation recipes are written in terms of
+// them, and those recipes are the evidence that the endpoint-surface tests have
+// been WATCHED to fail. Removing the primitives would silently retire that
+// evidence. They stay exported, unwrapped, and not endpoints; nothing new may
+// call them.
 // ============================================================================
 
 /**
@@ -1528,6 +1537,194 @@ export async function leaveOversightOrgAs(
   });
 
   return { orgType, orgId };
+}
+
+// ----------------------------------------------------------------------------
+// The org's sever (#304 / OV-007b, OV-011)
+// ----------------------------------------------------------------------------
+
+export const ORG_ADMIN_ONLY_SEVER_MESSAGE =
+  "Only a sending church or network admin can remove a plant from their organization";
+
+export const NO_ORG_TO_REMOVE_FROM_MESSAGE =
+  "Set up your organization before removing a plant from it";
+
+/**
+ * ONE message for "no such plant", "not a uuid" and "belongs to somebody else".
+ *
+ * The same symmetry `/oversight/plants/[id]` gets from its 404
+ * (`getOversightPlantDetail` answers null for all three): a refusal that told
+ * "exists, but not yours" apart from "does not exist" would answer a question
+ * about ANOTHER org's portfolio, one guessed uuid at a time, to an admin who is
+ * authenticated but not party to it.
+ */
+export const PLANT_NOT_IN_ORG_MESSAGE =
+  "That church plant is not part of your organization";
+
+/**
+ * WHICH oversight org a user speaks for — the org side's answer to "which of
+ * the plant's two associations is this about", and it is not an argument.
+ *
+ * A `sending_church_admin` can only ever end the plant's SENDING CHURCH
+ * association, a `network_admin` only its NETWORK one, and the id is their own
+ * (`memory/invariants.md` → Authentication: an entity implied by the actor is
+ * not an argument). So the org KIND is not a parameter here either — unlike the
+ * planter's `leaveOversightOrgAs`, where one actor genuinely has two
+ * associations to choose between.
+ *
+ * Pure, and deliberately structural rather than branded: the page renders the
+ * button from the same derivation the write is guarded by, so what an admin can
+ * see and what they can do cannot come from two different rules. Every actual
+ * WRITE still takes an `InvitationActor`.
+ */
+export function oversightOrgOfUser(user: {
+  role: UserRole;
+  sendingChurchId: string | null;
+  sendingNetworkId: string | null;
+}): { orgType: AssociationOrgType; orgId: string } | null {
+  if (user.role === "sending_church_admin") {
+    return user.sendingChurchId
+      ? { orgType: "sending_church", orgId: user.sendingChurchId }
+      : null;
+  }
+  if (user.role === "network_admin") {
+    return user.sendingNetworkId
+      ? { orgType: "network", orgId: user.sendingNetworkId }
+      : null;
+  }
+  return null;
+}
+
+/**
+ * `churches.<fk> = <org>` — "this plant is ours", as a predicate on the plant's
+ * own row. Built from the two-valued org kind, so there is no column name here
+ * that a request could influence.
+ *
+ * Exported so a test can read the generated SQL: which of the two independent
+ * oversight FKs a kind maps to is exactly the sort of thing an edit inverts
+ * silently, and a network admin whose predicate named `sending_church_id` would
+ * read and sever another org's associations.
+ */
+export function plantHeldByOrg(org: {
+  orgType: AssociationOrgType;
+  orgId: string;
+}): SQL {
+  return org.orgType === "sending_church"
+    ? eq(churches.sendingChurchId, org.orgId)
+    : eq(churches.sendingNetworkId, org.orgId);
+}
+
+/**
+ * REMOVE A PLANT FROM THE CALLER'S OWN ORG — the org side of the #274 sever
+ * ruling (OV-007b), and the mirror of `leaveOversightOrgAs` above.
+ *
+ * WHAT IS AN ARGUMENT AND WHAT IS NOT. `churchId` is, and has to be: an org has
+ * many plants, so which one is a genuine choice the admin makes. Nothing else
+ * is. The ORG comes from the session (`oversightOrgOfUser`), and so does the org
+ * KIND — a sending church admin has exactly one association with this plant to
+ * end, and a network admin has the other one. There is therefore no parameter on
+ * this function that could aim it at another org's association, which is the
+ * whole of the "an admin of a different org cannot sever this org's
+ * association" rule.
+ *
+ * THE TENANCY ASSERTION IS THE WRITE'S OWN WHERE, not the read above it
+ * (#304's high-risk extra). `severAssociationWithAuditStatement` nulls the FK
+ * only while it still points at THIS org, so:
+ *
+ *   * a plant in another org matches nothing, and nothing is written — the read
+ *     that precedes it only turns that into a legible message;
+ *   * a plant that belongs to a sending church AND a network keeps the other
+ *     one: the statement does not mention the other column at all;
+ *   * the `association_events` row is written FROM that UPDATE, so a refused
+ *     sever cannot leave an audit row claiming one happened.
+ *
+ * The moment it commits, `churches.<fk>` is null — which is the same column
+ * `getAccessibleChurchIds` resolves an oversight admin's reach from and the same
+ * one `listOversightPlants` filters on. So the plant leaves the directory, the
+ * detail page and the org's notification fan-out together, with no second write
+ * to keep in step.
+ *
+ * THE PLANTER IS TOLD LAST, after the commit and best-effort. Unlike the org's
+ * side of the planter's sever, this notification is an ordinary church-role one:
+ * its recipient is inside the plant, `canAccessChurch` is true for them by
+ * construction, and no oversight consent toggle applies (they are not an
+ * oversight user). Announcing before the write would tell a planter they had
+ * been removed while they still had not been.
+ */
+export async function removePlantFromOrgAs(
+  actor: InvitationActor,
+  churchId: string
+): Promise<{
+  orgType: AssociationOrgType;
+  orgId: string;
+  plantName: string;
+}> {
+  if (actor.role !== "sending_church_admin" && actor.role !== "network_admin") {
+    throw new InvitationError(ORG_ADMIN_ONLY_SEVER_MESSAGE);
+  }
+
+  const org = oversightOrgOfUser(actor);
+  if (!org) {
+    throw new InvitationError(NO_ORG_TO_REMOVE_FROM_MESSAGE);
+  }
+
+  if (!isUuid(churchId)) {
+    throw new InvitationError(PLANT_NOT_IN_ORG_MESSAGE);
+  }
+
+  // Scoped by the SAME predicate the write carries, so this read can never say
+  // yes to a plant the write would refuse. It is not the guard — a read never is
+  // (`memory/invariants.md`) — it exists for the message and for the plant's
+  // name, which the notification needs and which must not be read unscoped.
+  const [plant] = await db
+    .select({ name: churches.name })
+    .from(churches)
+    .where(and(eq(churches.id, churchId), plantHeldByOrg(org)))
+    .limit(1);
+
+  if (!plant) {
+    throw new InvitationError(PLANT_NOT_IN_ORG_MESSAGE);
+  }
+
+  const severed = await severAssociationWithAuditStatement(actor, {
+    churchId,
+    orgType: org.orgType,
+    orgId: org.orgId,
+  });
+
+  // No audit row means the UPDATE matched nothing: the association moved between
+  // the read and the write. Nothing was written — not the null, not the row — so
+  // the refusal is honest and the planter is told nothing.
+  if (!severed) {
+    throw new InvitationError(PLANT_NOT_IN_ORG_MESSAGE);
+  }
+
+  await announcePlantRemovedFor({
+    churchId,
+    orgType: org.orgType,
+    orgId: org.orgId,
+    occurrence: severed.id,
+  });
+
+  return { orgType: org.orgType, orgId: org.orgId, plantName: plant.name };
+}
+
+/** Tell the plant it was removed. Best-effort; never throws into a committed sever. */
+async function announcePlantRemovedFor(input: {
+  churchId: string;
+  orgType: AssociationOrgType;
+  orgId: string;
+  occurrence: string;
+}): Promise<void> {
+  try {
+    await announceRemovedFromOversightOrg(input);
+  } catch (error) {
+    console.error("plant removal announcement failed", {
+      churchId: input.churchId,
+      orgType: input.orgType,
+      error,
+    });
+  }
 }
 
 /** Tell the org that was left. Best-effort; never throws into a committed sever. */

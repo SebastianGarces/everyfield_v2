@@ -553,6 +553,10 @@ const CORE_REACHING_ACTION_MODULES: ReadonlyArray<readonly [string, string]> = [
     "#304/OV-007a — the PLANTER'S sever, which by ruling #274 ships with the surface that owns its authority rule rather than as a fifth lifecycle action. `leaveOversightOrgAs` takes the actor and a two-valued org KIND, never a church or org id; the FK null, its tenancy assertion and the audit row are one statement inside the logic layer. Accept and decline are re-wrapped here only to add `refresh()`",
   ],
   [
+    "src/app/(dashboard)/oversight/plants/[id]/actions.ts",
+    "#304/OV-007b — the ORG ADMIN'S sever, the mirror of the planter's and on the same ruling (#274): each side's wrapper ships with the surface that owns its authority rule, never as a fifth lifecycle action. `removePlantFromOrgAs` takes a church id — an org has many plants, so which one is a real choice — and NOTHING else: the org, its kind and the actor all come from the session, and the FK is nulled only while it still points at that org",
+  ],
+  [
     "src/app/(auth)/register/actions.ts",
     "two things, both necessarily session-free because no account exists yet: (1) the private-beta gate — `./beta-gate` → `hasValidInvitationBypass` → `getInvitation`, a READ, because an invitation id IS the bypass token (core.ts → Query Invitations); (2) #23's redemption — `bindOpenInvitationTarget` then `acceptInvitationAs`, which turn an invite link into an association. The WRITES are reached only from inside `register`, after the account has been created, and the actor is minted from the user row this same request inserted",
   ],
