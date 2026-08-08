@@ -21,6 +21,7 @@ import { ArticleProgressBadge } from "@/components/wiki/article-progress-badge";
 import { BookmarkButton } from "@/components/wiki/bookmark-button";
 import { BookmarkIndicator } from "@/components/wiki/bookmark-indicator";
 import { RelatedArticles } from "@/components/wiki/related-articles";
+import { RelatedTemplates } from "@/components/wiki/related-templates";
 import { ArticlePager } from "@/components/wiki/article-pager";
 import type { ArticleWithRelated } from "@/lib/wiki/get-article";
 import type { ArticleMeta } from "@/lib/wiki/types";
@@ -200,6 +201,13 @@ async function ArticleView({
           </div>
 
           <RelatedArticles articles={navigation.related} />
+
+          {/*
+            The documents this article hands out (W-010). Resolved from the
+            code-defined F6 catalog, not the database, so it needs nothing from
+            the reads above and renders nothing when the article offers none.
+          */}
+          <RelatedTemplates articleSlug={article.slug} />
 
           <ArticlePager previous={navigation.previous} next={navigation.next} />
         </article>
