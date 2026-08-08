@@ -1,22 +1,19 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
-import { test, type TestContext } from "node:test";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { test } from "node:test";
 
-import { inArray, like, sql } from "drizzle-orm";
-
-import { db } from "@/db";
-import { churches, wikiArticles, type WikiArticle } from "@/db/schema";
+import { type WikiArticle } from "@/db/schema";
 
 import {
   articleBySlugQuery,
-  getArticles,
-  getArticlesByPrefix,
   preferChurchOverride,
   visibleArticlesQuery,
 } from "./get-articles";
 
 // ----------------------------------------------------------------------------
-// The multi-tenant boundary on the wiki read path (#317, from #16).
+// The multi-tenant boundary on the wiki read path (#317, from #16) — the half
+// that needs no database and therefore runs EVERYWHERE, CI included.
 //
 // `get-article.ts` used to call `getArticleBySlug(slug, null)` with the null
 // hardcoded, so a church-scoped article was unreachable — including to the
@@ -25,30 +22,30 @@ import {
 // a cross-tenant read, and nothing behind it would catch the mistake
 // (isolation is application-layer — `memory/invariants.md` → Multi-Tenancy).
 //
-// Two layers of assertion, because they fail differently:
+// Three things are asserted here, none of which touch Postgres:
 //
-//  1. QUERY LEVEL (always runs). Each builder is rendered with `.toSQL()` and
-//     inspected, so what is asserted is the SQL that would reach Postgres.
-//     A read that stopped ORing on church_id — or that started admitting a
-//     church it was not given — fails here even though it still type-checks
-//     and still returns rows. No query is executed; `.toSQL()` renders, it
-//     does not connect. A DATABASE_URL must be PRESENT (importing `@/db`
-//     constructs the Neon client at module load), which `pnpm test` and CI
-//     both supply as a placeholder.
+//  1. PREDICATE SHAPE. Each builder is rendered with `.toSQL()` and inspected,
+//     so what is asserted is the SQL that would reach the database. A read
+//     that stopped ORing on church_id — or that started admitting a church it
+//     was not given — fails here even though it still type-checks and still
+//     returns rows. `.toSQL()` renders; it does not connect. A DATABASE_URL
+//     must be PRESENT (importing `@/db` constructs the Neon client at module
+//     load), which `pnpm test` and CI both supply as a placeholder.
 //
-//  2. LIVE (skips when that placeholder points nowhere). Seeds two churches
-//     and four articles and reads them back through the same functions the
-//     wiki pages call, which is the only way to observe the ABSENCE the
-//     acceptance criterion is really about: church B's user must not see
-//     church A's article. CI's DATABASE_URL is unreachable by design, so the
-//     live half skips there and runs wherever a real database is configured
-//     (a worktree with `.env.local` — `scripts/worktree-env.sh`).
+//  2. THE OVERRIDE RULE, as a pure function over rows.
 //
-// `getArticle` itself cannot be imported here: `get-article.ts` pulls in
-// `next-mdx-remote/rsc`, whose dependency chain does not load under `tsx
-// --test`. That is why `articleBySlugQuery` and `preferChurchOverride` — the
-// two halves of what `getArticle` does before it maps to `Article` — live in
-// `get-articles.ts` and are exercised directly.
+//  3. CALL-SITE WIRING. AC1 says "the wiki pages" pass the session's church —
+//     plural — and a page that quietly drops back to the global-only default
+//     is a silent under-fetch, not a crash. Those call sites cannot be
+//     imported here (they are RSCs pulling in MDX and next/link), so the
+//     wiring is pinned on the source, the technique `service.test.ts` uses for
+//     the `revalidatePath` form it likewise cannot observe.
+//
+// The seeded, executing half lives in `tenancy-live.test.ts` — it is the only
+// way to observe the ABSENCE the acceptance criterion is about, and it SKIPS
+// wherever DATABASE_URL points nowhere (CI, by design). This file is what
+// anchors the PR check; a green CI here is not evidence that the live half
+// ran. See that file's header.
 // ----------------------------------------------------------------------------
 
 const CHURCH_A = "11111111-1111-4111-8111-111111111111";
@@ -167,135 +164,62 @@ test("articles with no override pass through in sort order", () => {
 });
 
 // ============================================================================
-// 3. Live — the seeded article, and the absence of the other church's
+// 3. Call-site wiring — every wiki read passes a church
 // ============================================================================
 
-async function databaseReachable(): Promise<boolean> {
-  try {
-    await db.execute(sql`select 1`);
-    return true;
-  } catch {
-    return false;
-  }
+/**
+ * A wiki read invoked with NO argument at all: `getArticles()`.
+ *
+ * The parameters default to `null`, which fails CLOSED — the caller gets the
+ * global corpus rather than someone else's content — so this regression is
+ * invisible at runtime and invisible to `tsc`. It is exactly the bug #317
+ * fixes, and the only thing that can catch it coming back is the source.
+ */
+const UNSCOPED_LIST = /\b(?:getArticles|getWikiNavigation)\(\s*\)/;
+
+/** A slug-taking read invoked with one argument: `getArticle(slug)`. */
+const UNSCOPED_SLUG_READ = /\b(?:getArticle|getArticlesByPrefix)\(\s*[^,)]*\)/;
+
+/**
+ * Every module that turns a wiki read into rendered output. `[...slug]/page.tsx`
+ * is WS2/WS3 territory at the file level but is listed here anyway: the point
+ * of the assertion is the set being complete, and a workstream that removes the
+ * church argument there should fail this test rather than ship a detail route
+ * that cannot open its own church's article.
+ */
+const WIKI_READ_CALL_SITES = [
+  "src/app/(dashboard)/wiki/layout.tsx",
+  "src/app/(dashboard)/wiki/page.tsx",
+  "src/app/(dashboard)/wiki/progress/page.tsx",
+  "src/app/(dashboard)/wiki/[...slug]/page.tsx",
+  "src/app/api/wiki/article/route.ts",
+  "src/lib/wiki/bookmarks.ts",
+  "src/lib/wiki/progress.ts",
+];
+
+/** Reads a repo file; `pnpm test` always runs from the repo root. */
+function readRepoFile(relativePath: string): string {
+  return readFileSync(path.join(process.cwd(), relativePath), "utf8");
 }
 
-/** Enough columns to satisfy the table's NOT NULLs; the rest is scaffolding. */
-function seedArticle(slug: string, churchId: string | null, title: string) {
-  return {
-    slug,
-    churchId,
-    title,
-    content: `# ${title}`,
-    contentType: "reference" as const,
-    status: "published" as const,
-  };
-}
+test("no wiki read is called without a church", () => {
+  for (const file of WIKI_READ_CALL_SITES) {
+    const source = readRepoFile(file);
 
-test("a church-scoped article reaches its own church and no other", async (t: TestContext) => {
-  if (!(await databaseReachable())) {
-    return t.skip(
-      "no reachable DATABASE_URL — run in a worktree with .env.local linked (scripts/worktree-env.sh)"
+    assert.doesNotMatch(
+      source,
+      UNSCOPED_LIST,
+      `${file} lists wiki articles without passing a church — it will silently show the global corpus only (#317)`
     );
-  }
-
-  // Namespaced per run so concurrent runs cannot see each other's fixtures,
-  // and so cleanup can be a prefix match that never touches real content.
-  const prefix = `__t317-${randomUUID().slice(0, 8)}`;
-  const [churchA, churchB] = await db
-    .insert(churches)
-    .values([{ name: `${prefix} A` }, { name: `${prefix} B` }])
-    .returning();
-
-  try {
-    await db
-      .insert(wikiArticles)
-      .values([
-        seedArticle(`${prefix}/global`, null, "Global article"),
-        seedArticle(`${prefix}/global`, churchA.id, "Church A's version"),
-        seedArticle(`${prefix}/a-only`, churchA.id, "Church A only"),
-        seedArticle(`${prefix}/b-only`, churchB.id, "Church B only"),
-      ]);
-
-    const mine = (articles: { slug: string }[]) =>
-      articles
-        .filter((article) => article.slug.startsWith(`${prefix}/`))
-        .map((article) => article.slug)
-        .sort();
-
-    // --- the list, as `/wiki/<section>` renders it -------------------------
-    const forA = await getArticles(churchA.id);
-    const forB = await getArticles(churchB.id);
-    const forNobody = await getArticles(null);
-
-    assert.deepEqual(
-      mine(forA),
-      [`${prefix}/a-only`, `${prefix}/global`],
-      "church A sees its own article and the global one, exactly once each"
+    assert.doesNotMatch(
+      source,
+      UNSCOPED_SLUG_READ,
+      `${file} reads a wiki article by slug without passing a church — a church-scoped article resolves to null there (#317)`
     );
-    assert.deepEqual(
-      mine(forB),
-      [`${prefix}/b-only`, `${prefix}/global`],
-      "church B must not see church A's article"
+    assert.match(
+      source,
+      /churchId/,
+      `${file} never mentions churchId, so it cannot be passing the session's church (#317)`
     );
-    assert.deepEqual(
-      mine(forNobody),
-      [`${prefix}/global`],
-      "with no church the list is the global corpus alone"
-    );
-
-    // The override is resolved per reader, not globally.
-    assert.equal(
-      forA.find((article) => article.slug === `${prefix}/global`)?.title,
-      "Church A's version"
-    );
-    assert.equal(
-      forB.find((article) => article.slug === `${prefix}/global`)?.title,
-      "Global article"
-    );
-
-    // --- the section index, which is the same read through a prefix --------
-    assert.deepEqual(mine(await getArticlesByPrefix(prefix, churchA.id)), [
-      `${prefix}/a-only`,
-      `${prefix}/global`,
-    ]);
-    assert.deepEqual(mine(await getArticlesByPrefix(prefix, churchB.id)), [
-      `${prefix}/b-only`,
-      `${prefix}/global`,
-    ]);
-
-    // --- the detail route -------------------------------------------------
-    const detail = async (slug: string, churchId: string | null) =>
-      preferChurchOverride(await articleBySlugQuery(slug, churchId))[0] ?? null;
-
-    assert.equal(
-      (await detail(`${prefix}/a-only`, churchA.id))?.title,
-      "Church A only",
-      "church A cannot reach its own article by slug"
-    );
-    assert.equal(
-      await detail(`${prefix}/a-only`, churchB.id),
-      null,
-      "church B reached church A's article — cross-tenant read"
-    );
-    assert.equal(
-      await detail(`${prefix}/a-only`, null),
-      null,
-      "a churchless reader reached a church-scoped article"
-    );
-    assert.equal(
-      (await detail(`${prefix}/global`, churchB.id))?.title,
-      "Global article",
-      "a global article must stay reachable by everyone"
-    );
-    assert.equal(
-      (await detail(`${prefix}/global`, churchA.id))?.title,
-      "Church A's version",
-      "the church's own copy of a global slug must win for that church"
-    );
-  } finally {
-    await db.delete(wikiArticles).where(like(wikiArticles.slug, `${prefix}/%`));
-    await db
-      .delete(churches)
-      .where(inArray(churches.id, [churchA.id, churchB.id]));
   }
 });

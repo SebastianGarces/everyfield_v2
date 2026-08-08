@@ -1,3 +1,4 @@
+import { getCurrentSession } from "@/lib/auth";
 import { getArticles, getProgressStats, getLastInProgress } from "@/lib/wiki";
 import { WikiBreadcrumb } from "@/components/wiki/wiki-breadcrumb";
 import { WikiProgressCard } from "@/components/wiki/wiki-progress-card";
@@ -27,8 +28,14 @@ const CATEGORY_NAMES: Record<
 };
 
 export default async function WikiProgressPage() {
+  // Scoped to the reader's church (#317). The denominators on this page are
+  // counts of articles, so an unscoped read would measure progress against a
+  // corpus the user cannot see: a church with its own articles would show a
+  // percentage that can never reach 100.
+  const { user } = await getCurrentSession();
+
   const [articles, progressStats, lastInProgress] = await Promise.all([
-    getArticles(),
+    getArticles(user?.churchId ?? null),
     getProgressStats(),
     getLastInProgress(),
   ]);
