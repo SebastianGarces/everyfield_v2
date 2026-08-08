@@ -431,7 +431,13 @@ test("postponing is the DATE rail's job, and there is only one of it", () => {
     ),
     "utf8"
   );
-  assert.match(actions, /setLaunchDate\(user, churchId, input\.targetDate, \{/);
+  // `parsed.data`, not `input`: the action zod-parses its body first, so the
+  // note carried alongside the date is bounded before it reaches the
+  // append-only journal.
+  assert.match(
+    actions,
+    /setLaunchDate\(user, churchId, parsed\.data\.targetDate, \{/
+  );
   assert.equal(
     actions.match(/setLaunchDate\(/g)?.length,
     1,

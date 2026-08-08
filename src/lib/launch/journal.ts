@@ -42,9 +42,10 @@ export interface LaunchJournalEntry {
 
 /** One launch's history, oldest first — the order the story happened in. */
 export async function getLaunchJournalEntries(
-  launchId: string
+  launchId: string,
+  churchId: string
 ): Promise<LaunchJournalEntry[]> {
-  const rows = await getLaunchJournal(launchId);
+  const rows = await getLaunchJournal(launchId, churchId);
   if (rows.length === 0) return [];
 
   const actorIds = [...new Set(rows.map((row) => row.actorUserId))];

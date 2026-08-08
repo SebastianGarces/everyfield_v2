@@ -40,7 +40,12 @@ tenant scope; `created_at`/`updated_at` default now.
     carries no launch-shaped column.
   - **Cleanup order trap:** `launches.church_id` and `launch_events.actor_user_id` do NOT cascade,
     so any script deleting churches or users must delete `launches` first (milestones, milestone
-    links and the journal all cascade from it). All four seed/G3 scripts do.
+    links and the journal all cascade from it). **`tasks` must go before `users` too, and this is
+    the one that actually bit:** scheduling a launch seeds 23 `launch_prep` tasks, the
+    `launch_milestone_tasks` link cascades but the TASK does not, and `tasks.created_by_id` →
+    `users.id` then refuses the users delete (`tasks_created_by_id_users_id_fk`) — `pnpm db:seed`
+    failed on any database where /launch had ever been used until `seed-dev-db.ts` deleted tasks
+    between launches and users. The order is sessions → launches → tasks → users → churches.
 - **`church_id = null` means global content** (e.g. wiki articles visible to all tenants).
 - **`sessions.id`** is the SHA-256 of the token, not the token.
 - **Soft deletes:** `persons.deleted_at` — feature queries must filter it.

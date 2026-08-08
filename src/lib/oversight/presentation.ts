@@ -31,8 +31,6 @@ import type {
 } from "@/lib/oversight/types";
 import type { UserRole } from "@/db/schema";
 
-const MS_PER_DAY = 1000 * 60 * 60 * 24;
-
 /** Shown wherever a number was never recorded, rather than an empty cell. */
 export const NOT_RECORDED = "Not recorded";
 
@@ -73,33 +71,13 @@ export function formatPhase(phase: number): string {
   return PHASES[phase as keyof typeof PHASES] ?? `Phase ${phase}`;
 }
 
-/**
- * Whole days from `asOf` to a yyyy-mm-dd launch date; negative once past.
- *
- * The date is parsed at UTC midnight, which is `APP_TIME_ZONE`, so the
- * countdown does not shift with the server's `TZ` — the same `parseDateOnly`
- * the phase-engine signal layer uses for the identical fact.
- *
- * BOTH sides must be floored to a UTC day before they are subtracted. A launch
- * date is a wall-clock DAY, not an instant, so diffing it against the raw `asOf`
- * instant leaves a fraction of a day in the numerator that rounds the answer a
- * full day short for every moment after 00:00 UTC — "Launches today" on the eve
- * of a launch, "Launched 1 day ago" on the morning of one.
- */
-export function daysUntilLaunch(
-  launchDate: string | null,
-  asOf: Date
-): number | null {
-  if (!launchDate) return null;
-  const target = new Date(`${launchDate}T00:00:00.000Z`);
-  if (Number.isNaN(target.getTime())) return null;
-  const todayUtc = Date.UTC(
-    asOf.getUTCFullYear(),
-    asOf.getUTCMonth(),
-    asOf.getUTCDate()
-  );
-  return Math.round((target.getTime() - todayUtc) / MS_PER_DAY);
-}
+// THE COUNTDOWN ITSELF IS NOT HERE. This module carried a byte-for-byte copy
+// of `daysUntilTarget` (`src/lib/launch/countdown.ts`) — written first, in PR
+// #339, and left in place when the canon was extracted. It is gone: two
+// implementations of exactly this calculation is HOW #338 shipped twice, once
+// in this layer and once in the phase-engine signal layer, and the copy is
+// always the one that does not get the fix. Oversight's readers call the canon
+// (`read.ts`), and what stays here is the SENTENCE that number is rendered as.
 
 /** The countdown as a sentence — never a bare number with no sign. */
 export function formatLaunchCountdown(days: number | null): string {

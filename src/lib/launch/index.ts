@@ -44,7 +44,6 @@ export {
   getLaunchDatesForChurches,
   getLaunchForChurch,
   getLaunchJournal,
-  getLaunchMilestones,
   type LaunchRecord,
 } from "./queries";
 export {

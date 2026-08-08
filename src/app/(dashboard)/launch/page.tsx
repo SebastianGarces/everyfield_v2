@@ -80,7 +80,7 @@ export default async function LaunchPage() {
   const [readiness, journal] = launch
     ? await Promise.all([
         getLaunchReadiness(launch.id, churchId),
-        getLaunchJournalEntries(launch.id),
+        getLaunchJournalEntries(launch.id, churchId),
       ])
     : [null, []];
 
@@ -208,6 +208,10 @@ export default async function LaunchPage() {
             <ScheduleLaunchForm
               key={launch?.targetDate ?? "unscheduled"}
               targetDate={launch?.targetDate ?? null}
+              // The status, not just the day: a postponed launch can be
+              // re-committed to the SAME Sunday, which is a real write and the
+              // one case where an unchanged date still has something to save.
+              status={status}
             />
           )}
 

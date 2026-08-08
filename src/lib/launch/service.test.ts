@@ -6,7 +6,11 @@ import { test } from "node:test";
 import { PgDialect } from "drizzle-orm/pg-core";
 
 import { setLaunchDateStatement } from "./service";
-import { launchTargetDateSchema } from "./validation";
+import {
+  LAUNCH_NOTE_MAX_LENGTH,
+  launchNoteSchema,
+  launchTargetDateSchema,
+} from "./validation";
 
 // ============================================================================
 // LS-001/2/7 — the launch write path.
@@ -70,10 +74,36 @@ test("the first schedule cannot double-insert: the unique index is the guard", (
 
 test("re-saving the same date writes nothing — the compare-and-set is in the WHERE", () => {
   const sql = sqlFor();
-  assert.match(sql, /target_date is distinct from/);
+  assert.match(sql, /c\.target_date is distinct from/);
   // `is distinct from`, not `<>`: the null case is a `planning` launch getting
   // its first date, and `<>` silently drops it.
   assert.doesNotMatch(sql, /target_date <> /);
+});
+
+test("a POSTPONED launch can be re-confirmed on the same day", () => {
+  // The compare-and-set may not key on the date ALONE. A planter who postpones
+  // and then decides to go ahead on that very Sunday after all is changing the
+  // STATUS and nothing else; a date-only predicate writes nothing, and the
+  // plant — and its sending church — keep reading `Postponed` until the date is
+  // moved somewhere else and back.
+  const sql = sqlFor();
+  assert.match(sql, /c\.status is distinct from \$\d+::varchar/);
+  assert.ok(
+    /c\.target_date is distinct from \$\d+::date or c\.status is distinct from/.test(
+      sql
+    ),
+    "the guard must be date-changed OR status-changed, not date alone"
+  );
+});
+
+test("re-confirming the same day journals `scheduled`, not `moved`", () => {
+  // The event describes what happened. Nothing moved, so `moved` would be a
+  // false entry in an append-only history — and `scheduled` next to a
+  // `previous_status` of `postponed` is exactly "the launch is back on".
+  assert.match(
+    sqlFor({ postpone: false }),
+    /when w\.previous_target_date = w\.target_date then 'scheduled'/
+  );
 });
 
 test("a completed launch's date is not re-datable", () => {
@@ -86,11 +116,41 @@ test("the journal is sourced from what was WRITTEN, never from the request", () 
   // happened, and a journal in a second round trip could not see `RETURNING`.
   const sql = sqlFor();
   assert.match(sql, /insert into launch_events/);
-  assert.match(sql, /from written w left join current c on true/);
+  assert.match(sql, /from written w returning id/);
   assert.ok(
     sql.indexOf("insert into launch_events") > sql.indexOf("written as"),
     "the journal must read from the written rows, so it comes after them"
   );
+});
+
+test("the UPDATE reads the locked row, so the journal keeps its OLD values", () => {
+  // THE SAME REGRESSION `outcome.test.ts` pins, and it was live here: the
+  // UPDATE did not reference `current`, so nothing forced the locked read
+  // before the write — only the SIBLING `inserted` CTE's `where not exists
+  // (select 1 from current)` did, by accident of plan ordering. A plain CTE is
+  // lazy, and a `SELECT … FOR UPDATE` first pulled AFTER the update finds a row
+  // its own command just wrote and SKIPS it (`HeapTupleSelfUpdated`). Because
+  // the journal joined `current` with a LEFT join, an empty `current` did not
+  // suppress the row — it wrote one carrying `previous_target_date` NULL and
+  // `previous_status` coalesced to 'planning'. A believable FALSE entry in an
+  // append-only history is worse than a missing one.
+  //
+  // Structural fix, identical to `recordLaunchOutcomeStatement`: `current` is a
+  // DEPENDENCY of the UPDATE, and the old values travel to the journal in the
+  // same RETURNING rather than through a second read that cannot see them.
+  const sql = sqlFor();
+  assert.match(sql, /update launches l .* from current c where l\.id = c\.id/);
+  assert.match(sql, /c\.target_date as previous_target_date/);
+  assert.match(sql, /c\.status as previous_status/);
+  assert.ok(
+    !/current/.test(sql.slice(sql.indexOf("insert into launch_events"))),
+    "the journal must not re-read `current` after the update — it cannot see it"
+  );
+  // The insert arm has no previous row to carry, so it supplies the same two
+  // columns as constants rather than leaving the union ragged.
+  assert.match(sql, /null::date as previous_target_date/);
+  assert.match(sql, /'planning'::varchar as previous_status/);
+  assert.doesNotMatch(sql, /coalesce\(c\.status/);
 });
 
 test("the journal records the actor, and the actor is a bound parameter", () => {
@@ -128,7 +188,7 @@ test("a FIRST commitment is `scheduled` even when the postpone flag is set", () 
   for (const postpone of [true, false]) {
     assert.match(
       sqlFor({ postpone }),
-      /case when c\.target_date is null then 'scheduled'/
+      /case when w\.previous_target_date is null then 'scheduled'/
     );
   }
 });
@@ -168,6 +228,34 @@ test("a launch date is a calendar day, and a shape check is not enough", () => {
   // would see a driver error instead of a sentence.
   assert.equal(launchTargetDateSchema.safeParse("2026-02-31").success, false);
   assert.equal(launchTargetDateSchema.safeParse("2026-13-01").success, false);
+});
+
+test("the journal note is BOUNDED, and the service is where it is bounded", () => {
+  // `launch_events` is append-only and nothing prunes it, so the note's length
+  // is a durable cost. The textarea's `maxLength` is a courtesy to the person
+  // typing; `scheduleLaunchAction` is a public POST and the service has callers
+  // that are not that form, so the bound lives at both layers (Zod at every
+  // boundary) — mirroring how `launchOutcomeSchema` bounds its free text.
+  assert.equal(LAUNCH_NOTE_MAX_LENGTH, 2_000);
+  assert.equal(launchNoteSchema.safeParse("Venue fell through").success, true);
+  assert.equal(launchNoteSchema.safeParse(null).success, true);
+  assert.equal(
+    launchNoteSchema.safeParse("x".repeat(LAUNCH_NOTE_MAX_LENGTH)).success,
+    true
+  );
+  assert.equal(
+    launchNoteSchema.safeParse("x".repeat(LAUNCH_NOTE_MAX_LENGTH + 1)).success,
+    false
+  );
+
+  // And the service must actually apply it, rather than pass the note through
+  // to the statement unchecked.
+  const source = readFileSync(path.join(LAUNCH_DIR, "service.ts"), "utf8");
+  assert.match(
+    source,
+    /launchNoteSchema\.safeParse\(options\.note \?\? null\)/
+  );
+  assert.match(source, /note: parsedNote\.data/);
 });
 
 // ---------------------------------------------------------------------------

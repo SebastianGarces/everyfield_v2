@@ -24,7 +24,7 @@ import type { User } from "@/db/schema";
 import type { LaunchStatus } from "@/db/schema/launch";
 import { requireChurchAccess, requireRole } from "@/lib/auth/access";
 import { announceLaunchDateChanged } from "@/lib/notifications/oversight";
-import { launchTargetDateSchema } from "./validation";
+import { launchNoteSchema, launchTargetDateSchema } from "./validation";
 
 // ----------------------------------------------------------------------------
 // Messages
@@ -106,14 +106,36 @@ export interface SetLaunchDateOptions {
  *               schedules both see an empty `current`, and the unique index —
  *               not this CTE — is what makes one of them lose. The loser writes
  *               nothing at all, including no journal row.
- *   `updated`   compare-and-set on `target_date IS DISTINCT FROM` the new one,
- *               so re-saving the same date writes nothing and announces
- *               nothing. `IS DISTINCT FROM` rather than `<>` so the null case
- *               (a `planning` launch acquiring its first date) is not silently
- *               dropped. `status <> 'completed'` refuses to re-date history.
+ *   `updated`   compare-and-set on `target_date IS DISTINCT FROM` the new one
+ *               OR `status IS DISTINCT FROM` the new one, so re-saving an
+ *               unchanged row writes nothing and announces nothing — while a
+ *               planter who POSTPONED and then re-commits to the SAME Sunday
+ *               still lands a write, which a date-only predicate refused and
+ *               left showing `Postponed` to the plant and to oversight.
+ *               `IS DISTINCT FROM` rather than `<>` so the null case (a
+ *               `planning` launch acquiring its first date) is not silently
+ *               dropped. `c.status <> 'completed'` refuses to re-date history.
  *   `journal`   sources its rows from `written`, so it can only ever fire for a
  *               write that actually landed. That is the whole reason the insert
  *               and the journal are not two statements.
+ *
+ * WHY THE UPDATE READS `FROM current c`, and why the journal does NOT join
+ * `current`. A plain CTE is evaluated LAZILY, when something first pulls from
+ * it. Written the obvious way — `update … where church_id = $1`, then a journal
+ * that says `left join current c on true` — nothing pulls `current` until AFTER
+ * the UPDATE has run, and a `SELECT … FOR UPDATE` re-read at that point finds a
+ * row whose latest version its own command just wrote and SKIPS it
+ * (`HeapTupleSelfUpdated`). `current` comes back empty, and because the join is
+ * a LEFT one the journal still writes a row — carrying `previous_target_date`
+ * NULL and `previous_status` coalesced to `'planning'`. That is a plausible
+ * looking FALSE entry in an append-only history, which is worse than a missing
+ * one. The same trap was diagnosed and fixed in `recordLaunchOutcomeStatement`
+ * (`outcome.ts`); this is the identical fix. `current` is a DEPENDENCY of the
+ * UPDATE, so it is evaluated and the row locked BEFORE anything modifies it,
+ * and the old values travel to the journal through the same `RETURNING` rather
+ * than through a second read that can no longer see them. The `inserted` arm
+ * supplies the same two columns as constants, since a launch that did not exist
+ * has no previous date and no previous status.
  *
  * The final `SELECT` returns zero rows when nothing was written, which the
  * caller resolves against the stored row: same date = `unchanged`, different
@@ -129,11 +151,21 @@ export function setLaunchDateStatement(input: {
   const nextStatus: LaunchStatus = input.postpone ? "postponed" : "scheduled";
 
   // A FIRST commitment is `scheduled` however it was reached — there is no
-  // scheduled date to postpone from — so the event arm is chosen on whether a
-  // previous date existed, not on the flag alone.
+  // scheduled date to postpone from — so the event arm is chosen on what the
+  // write actually did, not on the flag alone. A RE-COMMITMENT is `scheduled`
+  // for the same reason: when the day did not move, nothing was moved, and a
+  // journal row saying `moved` from a date to itself is a false description of
+  // what the planter did.
   const eventExpression = input.postpone
-    ? sql`case when c.target_date is null then 'scheduled' else 'postponed' end`
-    : sql`case when c.target_date is null then 'scheduled' else 'moved' end`;
+    ? sql`case
+            when w.previous_target_date is null then 'scheduled'
+            else 'postponed'
+          end`
+    : sql`case
+            when w.previous_target_date is null then 'scheduled'
+            when w.previous_target_date = w.target_date then 'scheduled'
+            else 'moved'
+          end`;
 
   return sql`
     with current as (
@@ -146,16 +178,32 @@ export function setLaunchDateStatement(input: {
       select ${input.churchId}, ${input.targetDate}, ${nextStatus}
       where not exists (select 1 from current)
       on conflict (church_id) do nothing
-      returning id, target_date, status, updated_at
+      returning
+        id,
+        null::date as previous_target_date,
+        'planning'::varchar as previous_status,
+        target_date,
+        status,
+        updated_at
     ), updated as (
-      update launches
+      update launches l
       set target_date = ${input.targetDate},
           status = ${nextStatus},
           updated_at = now()
-      where church_id = ${input.churchId}
-        and status <> 'completed'
-        and target_date is distinct from ${input.targetDate}::date
-      returning id, target_date, status, updated_at
+      from current c
+      where l.id = c.id
+        and c.status <> 'completed'
+        and (
+          c.target_date is distinct from ${input.targetDate}::date
+          or c.status is distinct from ${nextStatus}::varchar
+        )
+      returning
+        l.id,
+        c.target_date as previous_target_date,
+        c.status as previous_status,
+        l.target_date,
+        l.status,
+        l.updated_at
     ), written as (
       select * from inserted
       union all
@@ -171,14 +219,13 @@ export function setLaunchDateStatement(input: {
         w.id,
         ${input.churchId},
         ${eventExpression},
-        c.target_date,
+        w.previous_target_date,
         w.target_date,
-        coalesce(c.status, 'planning'),
+        w.previous_status,
         w.status,
         ${input.actorUserId},
         ${input.note}
       from written w
-      left join current c on true
       returning id
     )
     select
@@ -235,13 +282,22 @@ export async function setLaunchDate(
     return { status: "error", error: parsed.error.issues[0].message };
   }
 
+  // The note is free text bound for an APPEND-ONLY table, so its length is
+  // checked here and not only in the textarea that usually types it: the
+  // textarea is not the endpoint, and this service has callers that are not
+  // that form (Zod at every boundary).
+  const parsedNote = launchNoteSchema.safeParse(options.note ?? null);
+  if (!parsedNote.success) {
+    return { status: "error", error: parsedNote.error.issues[0].message };
+  }
+
   const result = await db.execute<WriteRow>(
     setLaunchDateStatement({
       churchId,
       targetDate: parsed.data,
       actorUserId: user.id,
       postpone: options.postpone ?? false,
-      note: options.note ?? null,
+      note: parsedNote.data,
     })
   );
 

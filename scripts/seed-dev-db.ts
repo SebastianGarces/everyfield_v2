@@ -17,6 +17,7 @@ import {
   churches,
   launchEvents,
   launches,
+  tasks,
   users,
   sessions,
   type NewChurch,
@@ -61,6 +62,16 @@ async function cleanDatabase(): Promise<void> {
   // cascade from the launch itself.
   const deletedLaunches = await db.delete(launches).returning();
   console.log(`   Deleted ${deletedLaunches.length} launches`);
+
+  // Tasks go BEFORE users, and this is not theoretical: scheduling one launch
+  // seeds 23 `launch_prep` tasks (#305/LS-003), and `tasks.created_by_id` →
+  // `users.id` does not cascade, so a single use of /launch on a dev database
+  // was enough to make `pnpm db:seed` fail on
+  // `tasks_created_by_id_users_id_fk`. The launch/milestone JOIN rows cascade
+  // from the launch above; the tasks themselves are ordinary tasks owned by the
+  // task system and nothing deletes them for us.
+  const deletedTasks = await db.delete(tasks).returning();
+  console.log(`   Deleted ${deletedTasks.length} tasks`);
 
   const deletedUsers = await db.delete(users).returning();
   console.log(`   Deleted ${deletedUsers.length} users`);

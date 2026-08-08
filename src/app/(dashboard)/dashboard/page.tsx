@@ -24,6 +24,7 @@ import {
   getRecentActivity,
 } from "@/lib/dashboard/service";
 import { getLaunchForChurch } from "@/lib/launch/queries";
+import { getLaunchReadiness } from "@/lib/launch/milestones";
 import { daysUntilTarget } from "@/lib/launch/countdown";
 import { LaunchStatusCard } from "@/components/launch/launch-status-card";
 import { PHASES, type PhaseNumber } from "@/lib/constants";
@@ -90,7 +91,7 @@ export default async function DashboardPage({
   const churchId = user!.churchId!;
   const userId = user!.id;
 
-  const [church, metrics, activities, hasPlanterUser, launch] =
+  const [church, metrics, activities, hasPlanterUser, launchCard] =
     await Promise.all([
       getCurrentUserChurch(),
       getDashboardMetrics(churchId, userId),
@@ -102,8 +103,25 @@ export default async function DashboardPage({
       churchHasPlanterUser(churchId),
       // LS-001: the launch date moved off the church row onto its own entity
       // (migration 0032), so step 3's fact is read from here now.
-      getLaunchForChurch(churchId),
+      //
+      // LS-003/LS-005: readiness rides along on this ARM rather than beside it,
+      // because it is keyed by the launch's id and cannot start until the launch
+      // read has answered. Chained here, the other three arms still overlap
+      // both; hoisted out, the card's progress bar would cost the dashboard a
+      // serial round trip. It is skipped for a launch that has no day (nothing
+      // is seeded until one is named) and for a completed one (the celebrate
+      // card shows the outcome, not a progress bar) — so the extra query is only
+      // run when the card will actually render its answer.
+      getLaunchForChurch(churchId).then(async (row) => ({
+        launch: row,
+        readiness:
+          row?.targetDate && row.status !== "completed"
+            ? await getLaunchReadiness(row.id, churchId)
+            : null,
+      })),
     ]);
+
+  const { launch, readiness: launchReadiness } = launchCard;
 
   const leadership: ChurchLeadershipState = {
     churchId,
@@ -240,6 +258,15 @@ export default async function DashboardPage({
                 launch?.targetDate ?? null,
                 new Date()
               )}
+              readiness={launchReadiness}
+              outcome={
+                launch
+                  ? {
+                      attendanceCount: launch.attendanceCount,
+                      decisionsCount: launch.decisionsCount,
+                    }
+                  : undefined
+              }
             />
             <QuickActions />
           </div>

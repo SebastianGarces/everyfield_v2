@@ -151,7 +151,11 @@ export function LaunchStatusCard({
         <Badge variant={meta.badgeVariant}>{meta.label}</Badge>
         {percent !== null && readiness && readiness.totalCount > 0 && (
           <span className="text-muted-foreground text-xs">
-            {readiness.completedCount}/{readiness.totalCount} milestones
+            {/* One string for the same reason the readiness summary on
+                /launch is one: the space before "milestones" is content, and
+                JSX whitespace between expression containers is not something
+                to trust it with. */}
+            {`${readiness.completedCount}/${readiness.totalCount} milestones`}
           </span>
         )}
       </div>

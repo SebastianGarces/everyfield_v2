@@ -12,10 +12,10 @@
 // (`launches_church_id_unique`), so "the plant's launch" is a row, not a list.
 // ============================================================================
 
-import { inArray, eq } from "drizzle-orm";
+import { and, inArray, eq } from "drizzle-orm";
 
 import { db } from "@/db";
-import { launches, launchMilestones, launchEvents } from "@/db/schema";
+import { launches, launchEvents } from "@/db/schema";
 import type { LaunchStatus } from "@/db/schema/launch";
 
 /** The launch as every reader in the app sees it. */
@@ -86,26 +86,29 @@ export async function getLaunchDatesForChurches(
   return dates;
 }
 
-/** One plant's readiness milestones, in template order (LS-003). */
-export async function getLaunchMilestones(launchId: string) {
-  return db
-    .select()
-    .from(launchMilestones)
-    .where(eq(launchMilestones.launchId, launchId))
-    .orderBy(launchMilestones.sortOrder, launchMilestones.templateKey);
-}
-
 /**
  * The date/status journal for one launch, oldest first (LS-002/LS-009) — a
  * journal is read as a story, so it is ordered the way the story happened.
  *
+ * TAKES THE CHURCH TOO, and not because a caller is known to get it wrong: the
+ * header above this file promises that every read here is church-scoped, and a
+ * helper taking a bare id under that promise is how the promise stops being
+ * true. Every caller already holds the church id — it is what resolved the
+ * launch in the first place — so scoping costs nothing and the predicate is
+ * `and`ed into the same index lookup.
+ *
  * Append-only by convention — see `src/db/schema/launch.ts`. There is no update
  * or delete query in this module, and there is not meant to be one.
  */
-export async function getLaunchJournal(launchId: string) {
+export async function getLaunchJournal(launchId: string, churchId: string) {
   return db
     .select()
     .from(launchEvents)
-    .where(eq(launchEvents.launchId, launchId))
+    .where(
+      and(
+        eq(launchEvents.launchId, launchId),
+        eq(launchEvents.churchId, churchId)
+      )
+    )
     .orderBy(launchEvents.createdAt);
 }

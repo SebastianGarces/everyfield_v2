@@ -101,9 +101,14 @@ export function MilestoneBoard({ readiness, canEdit }: MilestoneBoardProps) {
           >
             Readiness
           </h2>
+          {/* ONE string, built in JS, rather than five JSX children. The
+              spaces around "milestones" are content, and JSX text nodes that
+              sit between expression containers and wrap across lines are at
+              the mercy of the compiler's whitespace trimming — which is how
+              this shipped reading "0 of 9milestones". A template literal has
+              no whitespace rules to lose. */}
           <p className="text-muted-foreground text-sm">
-            {optimistic.completedCount} of {optimistic.totalCount} milestones
-            &middot; {optimistic.openTaskCount} tasks open
+            {`${optimistic.completedCount} of ${optimistic.totalCount} milestones · ${optimistic.openTaskCount} tasks open`}
           </p>
         </div>
         <Progress

@@ -64,7 +64,6 @@ import {
   type OversightSectionDefinition,
 } from "@/lib/oversight/sections";
 import {
-  daysUntilLaunch,
   formatPlantLocation,
   isMeetingsEmpty,
   isMinistryTeamsEmpty,
@@ -75,6 +74,10 @@ import {
   peopleStats,
   tasksStats,
 } from "@/lib/oversight/presentation";
+// The ONE countdown implementation (#338): the oversight listing, the /launch
+// page and the phase-engine fact snapshot all read the same number from it, and
+// the copy this layer used to keep is gone.
+import { daysUntilTarget } from "@/lib/launch/countdown";
 import { getLaunchDatesForChurches } from "@/lib/launch/queries";
 import type {
   MeetingsAggregate,
@@ -194,7 +197,7 @@ export async function listOversightPlants(
         planterName: planterNames.get(plant.id) ?? null,
         currentPhase: plant.currentPhase,
         launchDate,
-        daysUntilLaunch: daysUntilLaunch(launchDate, asOf),
+        daysUntilLaunch: daysUntilTarget(launchDate, asOf),
         provenance,
       } satisfies OversightPlantSummary;
     })

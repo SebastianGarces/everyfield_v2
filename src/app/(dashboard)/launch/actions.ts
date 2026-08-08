@@ -25,8 +25,13 @@
 // ============================================================================
 
 import { refresh, revalidatePath } from "next/cache";
+import { z } from "zod";
 
 import { verifySession } from "@/lib/auth/session";
+import {
+  launchNoteSchema,
+  launchTargetDateSchema,
+} from "@/lib/launch/validation";
 import { getLaunchForChurch } from "@/lib/launch/queries";
 import { setLaunchDate } from "@/lib/launch/service";
 import {
@@ -119,6 +124,23 @@ export interface ScheduleLaunchActionInput {
   note?: string | null;
 }
 
+/**
+ * The POST body, as a schema rather than as a type assertion.
+ *
+ * NOT exported: an export of this module is an endpoint (see the header), and
+ * this is a constant, not one. It exists because `input` arrives from the
+ * network and `ScheduleLaunchActionInput` is erased at runtime — the interface
+ * describes what a caller SHOULD send, and only the parse makes it true. The
+ * note's bound in particular is the one that matters: it lands in the
+ * append-only `launch_events.note`, and `maxLength` on a textarea is a courtesy
+ * to the person typing, not a limit on what can be posted.
+ */
+const scheduleLaunchInputSchema = z.object({
+  targetDate: launchTargetDateSchema,
+  postpone: z.boolean().optional(),
+  note: launchNoteSchema.optional(),
+});
+
 export interface ScheduleLaunchActionResult {
   targetDate: string;
   /** `false` when the submitted date was already the stored one. */
@@ -147,9 +169,14 @@ export async function scheduleLaunchAction(
     const { user, churchId } = await requireChurchSession();
     if (!user) return { success: false, error: NO_CHURCH_MESSAGE };
 
-    const result = await setLaunchDate(user, churchId, input.targetDate, {
-      postpone: input.postpone ?? false,
-      note: input.note?.trim() || null,
+    const parsed = scheduleLaunchInputSchema.safeParse(input);
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0].message };
+    }
+
+    const result = await setLaunchDate(user, churchId, parsed.data.targetDate, {
+      postpone: parsed.data.postpone ?? false,
+      note: parsed.data.note?.trim() || null,
     });
 
     if (result.status === "error") {
@@ -217,6 +244,14 @@ export async function reopenMilestoneAction(
     if (!user) return { success: false, error: NO_CHURCH_MESSAGE };
 
     const result = await reopenLaunchMilestone(user, churchId, milestoneId);
+    // The same guard `completeMilestoneAction` has, for the same reason: this
+    // function's declared return type includes the error arm, and a result the
+    // caller never reads is a refusal reported to the planter as a success.
+    // `reopenLaunchMilestone` has no error path TODAY — dropping the check
+    // would mean the first one added is silently swallowed.
+    if (result.status === "error") {
+      return { success: false, error: result.error };
+    }
 
     revalidateLaunchSurfaces();
     return { success: true, data: { changed: result.status === "changed" } };

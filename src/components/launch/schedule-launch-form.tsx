@@ -40,26 +40,44 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import type { LaunchStatus } from "@/db/schema/launch";
 
 export interface ScheduleLaunchFormProps {
   /** The stored day, or `null` when none has been named yet. */
   targetDate: string | null;
+  /**
+   * The launch's stored status. Load-bearing for ONE case: a `postponed` launch
+   * whose planter has decided to go ahead on the very same Sunday after all.
+   * The date has not changed, so a form that keys "is there anything to save?"
+   * on the date alone leaves them stuck showing `Postponed` — to their sending
+   * church too — until they move the day somewhere else and back.
+   */
+  status: LaunchStatus;
 }
 
-export function ScheduleLaunchForm({ targetDate }: ScheduleLaunchFormProps) {
+export function ScheduleLaunchForm({
+  targetDate,
+  status,
+}: ScheduleLaunchFormProps) {
   // Form state, not server state: the input's working value while the planter
   // types. The page gives this component a `key` of the stored date, so a
   // saved change remounts it rather than leaving a stale draft behind
   // (memory/contracts/data-patterns.md — never sync props into state).
   const [value, setValue] = useState(targetDate ?? "");
   const [note, setNote] = useState("");
-  const [confirming, setConfirming] = useState<"move" | "postpone" | null>(
-    null
-  );
+  const [confirming, setConfirming] = useState<
+    "move" | "postpone" | "reconfirm" | null
+  >(null);
   const [isPending, startTransition] = useTransition();
 
   const hasDate = !!targetDate;
   const isUnchanged = value === (targetDate ?? "");
+  /**
+   * The postponement is being taken back on the same day it was postponed from.
+   * That is a real write — status `postponed` → `scheduled` — and the only case
+   * where an unchanged date has something to save.
+   */
+  const isReconfirm = hasDate && isUnchanged && status === "postponed";
 
   function submit(postpone: boolean) {
     startTransition(async () => {
@@ -91,6 +109,8 @@ export function ScheduleLaunchForm({ targetDate }: ScheduleLaunchFormProps) {
    * nothing is being undone. Changing a date that already exists always
    * confirms, because the plant has been preparing against it and the change
    * is journalled and announced to oversight (FRD non-functional requirements).
+   * Taking a postponement back confirms too, and for the same reason: oversight
+   * was told the launch was off, and this is what tells them it is on again.
    */
   function requestSubmit(postpone: boolean) {
     if (!value) {
@@ -101,7 +121,7 @@ export function ScheduleLaunchForm({ targetDate }: ScheduleLaunchFormProps) {
       submit(false);
       return;
     }
-    setConfirming(postpone ? "postpone" : "move");
+    setConfirming(postpone ? "postpone" : isUnchanged ? "reconfirm" : "move");
   }
 
   return (
@@ -130,11 +150,17 @@ export function ScheduleLaunchForm({ targetDate }: ScheduleLaunchFormProps) {
             <Button
               type="button"
               className="cursor-pointer"
-              disabled={isPending || !value || (hasDate && isUnchanged)}
+              disabled={
+                isPending || !value || (hasDate && isUnchanged && !isReconfirm)
+              }
               onClick={() => requestSubmit(false)}
             >
               {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {hasDate ? "Move the date" : "Schedule launch"}
+              {isReconfirm
+                ? "Confirm this date"
+                : hasDate
+                  ? "Move the date"
+                  : "Schedule launch"}
             </Button>
             {hasDate && (
               <Button
@@ -150,7 +176,9 @@ export function ScheduleLaunchForm({ targetDate }: ScheduleLaunchFormProps) {
           </div>
           {hasDate && isUnchanged && (
             <p className="text-muted-foreground text-xs">
-              Pick a different day to move or postpone the launch.
+              {isReconfirm
+                ? "Still going ahead on this day? Confirm it to take the postponement back. Or pick a different day."
+                : "Pick a different day to move or postpone the launch."}
             </p>
           )}
         </div>
@@ -181,31 +209,48 @@ export function ScheduleLaunchForm({ targetDate }: ScheduleLaunchFormProps) {
             <AlertDialogTitle>
               {confirming === "postpone"
                 ? "Postpone Launch Sunday?"
-                : "Move Launch Sunday?"}
+                : confirming === "reconfirm"
+                  ? "Launch Sunday is back on?"
+                  : "Move Launch Sunday?"}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {targetDate && (
+              {confirming === "reconfirm" ? (
                 <>
-                  The day moves from{" "}
-                  <span className="font-medium">
-                    {formatLaunchDay(targetDate)}
-                  </span>{" "}
-                  to{" "}
+                  Launch Sunday stays on{" "}
                   <span className="font-medium">
                     {value && formatLaunchDay(value)}
                   </span>
-                  .{" "}
+                  , and the launch is no longer postponed. The change is
+                  recorded, and your sending church is notified.
+                </>
+              ) : (
+                <>
+                  {targetDate && (
+                    <>
+                      The day moves from{" "}
+                      <span className="font-medium">
+                        {formatLaunchDay(targetDate)}
+                      </span>{" "}
+                      to{" "}
+                      <span className="font-medium">
+                        {value && formatLaunchDay(value)}
+                      </span>
+                      .{" "}
+                    </>
+                  )}
+                  {confirming === "postpone"
+                    ? "The launch is marked postponed, the change is recorded, and your sending church is notified."
+                    : "The change is recorded, and your sending church is notified."}
                 </>
               )}
-              {confirming === "postpone"
-                ? "The launch is marked postponed, the change is recorded, and your sending church is notified."
-                : "The change is recorded, and your sending church is notified."}
             </AlertDialogDescription>
           </AlertDialogHeader>
 
           <AlertDialogFooter>
             <AlertDialogCancel className="cursor-pointer" disabled={isPending}>
-              Keep the current date
+              {confirming === "reconfirm"
+                ? "Leave it postponed"
+                : "Keep the current date"}
             </AlertDialogCancel>
             <Button
               type="button"
@@ -218,7 +263,11 @@ export function ScheduleLaunchForm({ targetDate }: ScheduleLaunchFormProps) {
               ) : (
                 <CalendarDays className="mr-2 h-4 w-4" />
               )}
-              {confirming === "postpone" ? "Postpone" : "Move the date"}
+              {confirming === "postpone"
+                ? "Postpone"
+                : confirming === "reconfirm"
+                  ? "Confirm this date"
+                  : "Move the date"}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

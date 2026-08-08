@@ -1289,7 +1289,7 @@ async function main() {
   // every later move is `moved` (a `postponed` arm exists for the postpone flow
   // and is not exercised from this harness). The refused writes must appear
   // nowhere: a journal that records attempts is not a journal of what happened.
-  const journal = await getLaunchJournal(unmoved!.id);
+  const journal = await getLaunchJournal(unmoved!.id, plant.id);
   assert.deepEqual(
     journal.map((row) => row.event),
     ["scheduled", "moved", "moved", "moved"],
