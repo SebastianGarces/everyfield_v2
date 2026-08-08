@@ -26,7 +26,7 @@ compose an essay.
 **Look up facts; ask only for decisions.** If something can be discovered from the environment,
 discover it — never spend a question on it. In this repo, in order:
 
-1. `memory/` — `invariants.md`, `flows/`, `contracts/` (non-obvious behaviors; see `memory/index.md`)
+1. `memory/` — `invariants.md`, `invariants/`, `flows/`, `contracts/` (non-obvious behaviors; see `memory/index.md`)
 2. `product-docs/features/<feature>/frd.md` for existing requirements
 3. The codebase, `gh issue view`, `git log`
 

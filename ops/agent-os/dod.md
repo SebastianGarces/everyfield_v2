@@ -151,7 +151,16 @@ from every workstream in it, on the integrated branch.
 - Capture a **screenshot** of each key state.
 - Run a **chrome-devtools `lighthouse_audit`** on the touched page; **accessibility ≥ 90**
   (perf/best-practices recorded, not blocking unless the AC says so).
-- **Evidence:** per-AC pass/fail, screenshot refs, console dump, lighthouse summary.
+- **Design review (mandatory, ruled 2026-08-08):** run the **`better-interface`** skill against the
+  touched surfaces on the preview — layout, hierarchy, and copy, not just defects. Every finding is
+  **dispositioned**: applied on the branch, or carried in the PR body as a named limitation with a
+  reason. A frontend/fullstack track whose evidence bundle shows no better-interface disposition
+  table has **not passed G3**. (Why: two tracks — #303's oversight pages and #305's /launch — shipped
+  through every correctness gate and were flagged as structurally wrong by the reviewer on sight.
+  Correctness gates do not see layout. Workflow-script plumbing for this gate is #337's AC; this
+  document binds verifiers regardless.)
+- **Evidence:** per-AC pass/fail, screenshot refs, console dump, lighthouse summary, and the
+  better-interface disposition table.
 
 **Backend / API units** → run the `validate-backend` skill:
 - Exercise the route / server action (curl or a `tsx` harness) and assert response **status + shape**
@@ -169,7 +178,8 @@ from every workstream in it, on the integrated branch.
 - `memory/*` updated **in the same change** if the unit added or altered an invariant, a diagrammed
   flow, or a non-obvious behavior (per the `memory-maintenance` skill; a new route or table alone
   does not require it).
-- Tenancy / auth boundaries respected (`memory/invariants.md`).
+- Tenancy / auth boundaries respected (`memory/invariants.md`, plus the `memory/invariants/*.md`
+  domain files matching the files touched).
 - **Evidence:** checklist with the specific lines/files touched.
 
 ### G5 — Diff hygiene
@@ -222,7 +232,7 @@ checkpoint), but they must additionally satisfy:
   | Lens | The question it owns |
   |---|---|
   | `correctness` | Does it do what the ACs asked, including the edge cases nobody wrote an AC for? Is the DDL itself right, and does existing data survive it? |
-  | `security` | Auth on every new entrypoint, multi-tenant boundaries, injection, secrets or internal data leaking to a client bundle or log. Holds `memory/invariants.md` as hard requirements. |
+  | `security` | Auth on every new entrypoint, multi-tenant boundaries, injection, secrets or internal data leaking to a client bundle or log. Reads `memory/invariants.md` AND every file under `memory/invariants/`, and holds all of it as hard requirements. |
   | `reproducibility` | Re-runs the migration dry-run, the rollback, and `pnpm test`, and re-derives the schema diff — then checks the first verifier's claims against what it actually observed. |
 
   This replaced *two identical `code-reviewer` passes*. Two identical reviewers largely reproduce
