@@ -26,6 +26,7 @@ import {
 import { getLaunchForChurch } from "@/lib/launch/queries";
 import { getLaunchReadiness } from "@/lib/launch/milestones";
 import { daysUntilTarget } from "@/lib/launch/countdown";
+import { hasInitialPhaseDeclaration } from "@/lib/phase-engine/transitions";
 import { LaunchStatusCard } from "@/components/launch/launch-status-card";
 import { PHASES, type PhaseNumber } from "@/lib/constants";
 import { MetricCard } from "@/components/dashboard/metric-card";
@@ -70,6 +71,14 @@ export default async function DashboardPage({
       onboardingCompletedAt: churchDuringOnboarding?.onboardingCompletedAt,
     })
   ) {
+    // OB-003/005: step 3's fact is asked of phase HISTORY, not of
+    // `current_phase` or of the launch row — "not sure, and no date yet" is a
+    // real answer that leaves both of those exactly as a planter who never saw
+    // the step would leave them. Only asked when there is a church to ask about.
+    const journeyDeclared = user?.churchId
+      ? await hasInitialPhaseDeclaration(user.churchId)
+      : false;
+
     return (
       <div className="p-6">
         <OnboardingFlow
@@ -79,6 +88,7 @@ export default async function DashboardPage({
               : resolveResumeStep({
                   churchId: user?.churchId,
                   leadershipStatus: churchDuringOnboarding?.leadershipStatus,
+                  journeyDeclared,
                 })
           }
           leadershipStatus={churchDuringOnboarding?.leadershipStatus}
@@ -91,35 +101,45 @@ export default async function DashboardPage({
   const churchId = user!.churchId!;
   const userId = user!.id;
 
-  const [church, metrics, activities, hasPlanterUser, launchCard] =
-    await Promise.all([
-      getCurrentUserChurch(),
-      getDashboardMetrics(churchId, userId),
-      getRecentActivity(churchId),
-      // OB-010: the IMPLICIT assignment — a `users` row with the planter role
-      // pointing here. It is what tells a church that predates OB-004 apart from
-      // one that genuinely has nobody leading it, and the two get opposite
-      // treatment: the first is left alone, the second is asked.
-      churchHasPlanterUser(churchId),
-      // LS-001: the launch date moved off the church row onto its own entity
-      // (migration 0032), so step 3's fact is read from here now.
-      //
-      // LS-003/LS-005: readiness rides along on this ARM rather than beside it,
-      // because it is keyed by the launch's id and cannot start until the launch
-      // read has answered. Chained here, the other three arms still overlap
-      // both; hoisted out, the card's progress bar would cost the dashboard a
-      // serial round trip. It is skipped for a launch that has no day (nothing
-      // is seeded until one is named) and for a completed one (the celebrate
-      // card shows the outcome, not a progress bar) — so the extra query is only
-      // run when the card will actually render its answer.
-      getLaunchForChurch(churchId).then(async (row) => ({
-        launch: row,
-        readiness:
-          row?.targetDate && row.status !== "completed"
-            ? await getLaunchReadiness(row.id, churchId)
-            : null,
-      })),
-    ]);
+  const [
+    church,
+    metrics,
+    activities,
+    hasPlanterUser,
+    launchCard,
+    journeyDeclared,
+  ] = await Promise.all([
+    getCurrentUserChurch(),
+    getDashboardMetrics(churchId, userId),
+    getRecentActivity(churchId),
+    // OB-010: the IMPLICIT assignment — a `users` row with the planter role
+    // pointing here. It is what tells a church that predates OB-004 apart from
+    // one that genuinely has nobody leading it, and the two get opposite
+    // treatment: the first is left alone, the second is asked.
+    churchHasPlanterUser(churchId),
+    // LS-001: the launch date moved off the church row onto its own entity
+    // (migration 0032), so step 3's fact is read from here now.
+    //
+    // LS-003/LS-005: readiness rides along on this ARM rather than beside it,
+    // because it is keyed by the launch's id and cannot start until the launch
+    // read has answered. Chained here, the other three arms still overlap
+    // both; hoisted out, the card's progress bar would cost the dashboard a
+    // serial round trip. It is skipped for a launch that has no day (nothing
+    // is seeded until one is named) and for a completed one (the celebrate
+    // card shows the outcome, not a progress bar) — so the extra query is only
+    // run when the card will actually render its answer.
+    getLaunchForChurch(churchId).then(async (row) => ({
+      launch: row,
+      readiness:
+        row?.targetDate && row.status !== "completed"
+          ? await getLaunchReadiness(row.id, churchId)
+          : null,
+    })),
+    // OB-003/005: step 3's fact. Phase HISTORY, not `current_phase` and not
+    // the launch row — "not sure, and no date yet" is a real answer that
+    // leaves both of those looking exactly like never having been asked.
+    hasInitialPhaseDeclaration(churchId),
+  ]);
 
   const { launch, readiness: launchReadiness } = launchCard;
 
@@ -156,13 +176,12 @@ export default async function DashboardPage({
   const onboardingFacts: OnboardingFacts = {
     churchId,
     leadershipStatus: church?.leadershipStatus,
-    // Step 3's fact, read from the columns it will write: a declared stage or a
-    // target launch date. Either is a declaration; phase 0 with no date is
-    // exactly the "told us nothing" state. When step 3 ships its own record of
-    // the declaration (including the explicit "no date yet"), this line is what
-    // reads it instead — `OnboardingFacts` is optional per fact so that until
-    // then the answer is honestly "incomplete" rather than wrong.
-    journeyDeclared: !!launch?.targetDate || (church?.currentPhase ?? 0) > 0,
+    // Step 3's fact, read from the record the declaration itself writes (#306).
+    // It used to be inferred from the columns — a launch date, or a phase above
+    // 0 — and that inference could not see the honest answer: a planter who
+    // said "not sure" and "no date yet" leaves phase 0 and no launch row, and
+    // was nagged forever to answer a question they had answered.
+    journeyDeclared,
     // Step 4's fact: anybody at all on the plant's list (OB-006).
     peopleAdded: metrics.totalPeople > 0,
   };

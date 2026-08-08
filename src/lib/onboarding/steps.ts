@@ -6,12 +6,20 @@
  * planter still onboarding?" and "which step do they land on?" — are unit
  * testable without a browser or a DB.
  *
- * Step 2 captures the leadership answer (OB-004). Steps 3-4 are filled in by
- * their own workstreams; what lives here is the rule that does not care which
- * of them has landed — `onboardingStepComplete` asks one question per step,
- * and every "where does this planter go?" answer is derived from it.
+ * Step 2 captures the leadership answer (OB-004), step 3 the journey
+ * declaration (OB-003/005) and step 4 the people import (OB-006); what lives
+ * here is the rule that does not care which of them has landed —
+ * `onboardingStepComplete` asks one question per step, and every "where does
+ * this planter go?" answer is derived from it.
+ *
+ * Step 3's OPTIONS live here too, for the same reason the step model does: what
+ * the stage picker offers, and which phase each choice means, is a decision the
+ * product made, not a detail of a radio group. Keeping it here means the picker
+ * and the write path read the SAME list, and `phaseForJourneyStage` is the one
+ * place a submitted value becomes a phase number.
  */
 
+import { PHASES, type PhaseNumber } from "@/lib/constants";
 import { leadershipAnswered, type ChurchLeadershipStatus } from "./leadership";
 
 export const ONBOARDING_STEP_IDS = [
@@ -157,7 +165,15 @@ export type OnboardingFacts = {
   churchId?: string | null;
   /** Step 2 — OB-004's question has an explicit answer, either way. */
   leadershipStatus?: ChurchLeadershipStatus | null;
-  /** Step 3 — the planter declared a stage or a target launch date. */
+  /**
+   * Step 3 — the planter declared where they are (OB-003/005). The durable
+   * record is the INITIAL DECLARATION row in `phase_transitions`
+   * (`isInitialDeclaration`, `src/lib/phase-engine/transitions/service.ts`),
+   * because that is the one fact both answers write: "not sure, and no date
+   * yet" writes no launch row and leaves `current_phase` at 0, so neither
+   * column can tell a planter who answered apart from one who never saw the
+   * step.
+   */
   journeyDeclared?: boolean | null;
   /** Step 4 — at least one person is on the plant's list (OB-006). */
   peopleAdded?: boolean | null;
@@ -213,4 +229,134 @@ export function incompleteOnboardingSteps(
  */
 export function resolveResumeStep(facts: OnboardingFacts): OnboardingStepId {
   return incompleteOnboardingSteps(facts)[0] ?? LAST_ONBOARDING_STEP;
+}
+
+// ============================================================================
+// Step 3 — the journey declaration (OB-003 + OB-005)
+// ============================================================================
+
+/**
+ * The launch-date half of step 3. "No date yet" is an ANSWER, not an empty
+ * field — a planter in Discovery genuinely does not have a day, and the FRD
+ * asks for that to be sayable rather than inferred from a blank input.
+ *
+ * `none` writes NOTHING: no launch row, no `planning` placeholder. The launch
+ * entity's absence and its `planning` status are already two different facts
+ * (`src/lib/phase-engine/signals/queries.ts` — "no launch record at all" vs "a
+ * launch being planned with no day named"), and a plant that has not named a
+ * day has not started planning a launch either. The countdown reads `null` from
+ * `daysUntilTarget` and renders empty rather than zero, which is the AC.
+ */
+export const LAUNCH_DATE_CHOICES = ["date", "none"] as const;
+export type LaunchDateChoice = (typeof LAUNCH_DATE_CHOICES)[number];
+
+export function isLaunchDateChoice(value: unknown): value is LaunchDateChoice {
+  return (
+    typeof value === "string" &&
+    (LAUNCH_DATE_CHOICES as readonly string[]).includes(value)
+  );
+}
+
+/** The value the stage picker submits for "not sure — start me at the beginning". */
+export const JOURNEY_STAGE_NOT_SURE = "not_sure";
+
+/** The phase "not sure" resolves to. Discovery — the beginning (FRD AC). */
+export const JOURNEY_STAGE_NOT_SURE_PHASE: PhaseNumber = 0;
+
+export type JourneyStageOption = {
+  /** `"0"`…`"6"`, or `not_sure`. A form value, so a string. */
+  value: string;
+  /** What declaring this option sets `churches.current_phase` to. */
+  phase: PhaseNumber;
+  /** Plain language — what the planter is actually doing right now. */
+  label: string;
+  /** One line of "does this sound like us?". */
+  hint: string;
+  /** The methodology's own name for it, shown small so the two can be matched. */
+  phaseName: string;
+};
+
+/**
+ * The seven phases in plain language, plus the escape hatch (FRD AC).
+ *
+ * PLAIN LANGUAGE FIRST, methodology name second, and deliberately in that
+ * order: a planter arriving at onboarding has not read the Playbook yet, so
+ * "Phase 2: Launch Team Formation" is a label they cannot place themselves
+ * against. `phaseName` keeps the vocabulary visible so the dashboard header
+ * they land on afterwards is recognisable.
+ */
+export const JOURNEY_STAGE_OPTIONS: readonly JourneyStageOption[] = [
+  {
+    value: "0",
+    phase: 0,
+    label: "We are still discerning the call",
+    hint: "Praying, learning the ground, looking for a coach. Nobody gathered yet.",
+    phaseName: PHASES[0],
+  },
+  {
+    value: "1",
+    phase: 1,
+    label: "We are gathering a core group",
+    hint: "Vision meetings and follow-up, praying people toward commitment.",
+    phaseName: PHASES[1],
+  },
+  {
+    value: "2",
+    phase: 2,
+    label: "We are forming the launch team",
+    hint: "The core group is becoming a team and leaders are being named.",
+    phaseName: PHASES[2],
+  },
+  {
+    value: "3",
+    phase: 3,
+    label: "We are training the teams",
+    hint: "Ministry teams are in training and the systems are being built.",
+    phaseName: PHASES[3],
+  },
+  {
+    value: "4",
+    phase: 4,
+    label: "We are in the final weeks before launch",
+    hint: "Promotion, run-throughs and the last checks before the day.",
+    phaseName: PHASES[4],
+  },
+  {
+    value: "5",
+    phase: 5,
+    label: "Launch Sunday is here",
+    hint: "The first public service is this week.",
+    phaseName: PHASES[5],
+  },
+  {
+    value: "6",
+    phase: 6,
+    label: "We have launched",
+    hint: "The church is meeting weekly and we are settling into rhythms.",
+    phaseName: PHASES[6],
+  },
+  {
+    value: JOURNEY_STAGE_NOT_SURE,
+    phase: JOURNEY_STAGE_NOT_SURE_PHASE,
+    label: "Not sure — start me at the beginning",
+    hint: "We will set you at Discovery. You can move phases any time from the phase page.",
+    phaseName: PHASES[JOURNEY_STAGE_NOT_SURE_PHASE],
+  },
+];
+
+/**
+ * The submitted stage value as a phase number, or `null` when it is not one of
+ * the offered options.
+ *
+ * The ONE place a form value becomes a phase, so "not sure means 0" is stated
+ * once. Returns `null` rather than defaulting to 0 on garbage: a POST carrying
+ * `stage=9` is a caller error and must be refused, not quietly recorded as a
+ * Discovery declaration the planter never made.
+ */
+export function phaseForJourneyStage(value: unknown): PhaseNumber | null {
+  if (typeof value !== "string") return null;
+  return (
+    JOURNEY_STAGE_OPTIONS.find((option) => option.value === value)?.phase ??
+    null
+  );
 }

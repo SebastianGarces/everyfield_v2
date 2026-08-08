@@ -12,6 +12,7 @@ import {
 import { hasDocxRenderer, renderDocumentDocx } from "@/lib/documents/docx";
 import { hasRenderer, renderDocumentPdf } from "@/lib/documents/pdf";
 import { hasXlsxRenderer, renderDocumentXlsx } from "@/lib/documents/xlsx";
+import { getLaunchForChurch } from "@/lib/launch/queries";
 
 // react-pdf / docx / exceljs need the Node.js runtime (not edge).
 export const runtime = "nodejs";
@@ -75,18 +76,20 @@ export async function GET(
     if (value !== null) provided[field.key] = value;
   }
 
+  // The launch date comes from the LAUNCH ENTITY (`launches.target_date`,
+  // LS-001) — `churches.launch_date` was dropped by migration 0032. Read the
+  // same way as `(dashboard)/documents/page.tsx`, which is what keeps the
+  // dialog's preview and the generated file agreeing about the day (#306). A
+  // request-supplied `?launch_date=` still overrides it: `provided` wins in
+  // `resolveMergeValues`, and this is only the auto-fill default.
+  const launch = await getLaunchForChurch(church.id);
+
   const values = resolveMergeValues(
     template,
     {
       churchName: church.name,
       userName: user.name ?? null,
-      // Null because merge-field sourcing is #203, not because there is nothing
-      // to read: the launch date lives on the launch entity
-      // (`launches.target_date`, LS-001) since migration 0032 dropped
-      // `churches.launch_date`. Same stub as `(dashboard)/documents/page.tsx`,
-      // and the two must stay in step — a request-supplied `?launch_date=` still
-      // overrides whatever this resolves to.
-      launchDate: null,
+      launchDate: launch?.targetDate ?? null,
     },
     provided
   );

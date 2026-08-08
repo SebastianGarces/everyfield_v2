@@ -19,7 +19,7 @@
 // from I/O so it is unit-testable without a database.
 // ============================================================================
 
-import { eq } from "drizzle-orm";
+import { and, eq, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db";
@@ -46,25 +46,82 @@ export const MIN_PHASE = 0;
 /** Highest valid phase (Post-Launch). Mirrors rubric-v0 Part B. */
 export const MAX_PHASE = 6;
 
+/** A well-formed phase number, reused by both write paths below. */
+const phaseNumberSchema = z
+  .number()
+  .int("Phase must be an integer")
+  .min(MIN_PHASE, `Phase must be >= ${MIN_PHASE}`)
+  .max(MAX_PHASE, `Phase must be <= ${MAX_PHASE}`);
+
+// ----------------------------------------------------------------------------
+// Initial declaration (OB-005) — a phase-history row that is NOT a transition
+// ----------------------------------------------------------------------------
+
+/**
+ * The reason constant that marks a `phase_transitions` row as the planter's
+ * INITIAL DECLARATION rather than a transition they made (OB-005; FRD
+ * `planter-onboarding`, "Data notes" — "a distinguished transition kind or
+ * reason constant on the existing phase-transition record. No new table
+ * expected.").
+ *
+ * WHY A REASON CONSTANT AND NOT A COLUMN. The FRD offers both and the constant
+ * is the smaller change: `reason` is already `NOT NULL` on every row, already
+ * rendered by the history surface, and already the field that explains why a
+ * row exists. A new column would need a migration, a back-fill decision for
+ * every existing row, and a default that says "transition" — which is exactly
+ * what this constant's ABSENCE already says.
+ *
+ * WHAT MAKES IT A REAL DISCRIMINATOR rather than a convention: it is RESERVED.
+ * `transitionPhaseSchema` refuses a planter-typed reason equal to it (below),
+ * so the only writer that can produce this string is
+ * `declareInitialPhaseStatement`. Without that refusal a planter could type it
+ * on `/phase` and manufacture a row `isInitialDeclaration` would misread.
+ */
+export const INITIAL_DECLARATION_REASON =
+  "Declared at setup — where this plant already was when it joined EveryField.";
+
+/**
+ * Is this phase-history row the initial declaration (as opposed to a
+ * transition the planter performed)? The one predicate — history surfaces,
+ * analytics and the onboarding "did they answer step 3?" fact all ask it here
+ * so none of them can disagree about what "declared" means.
+ */
+export function isInitialDeclaration(row: { reason: string }): boolean {
+  return row.reason === INITIAL_DECLARATION_REASON;
+}
+
 /**
  * Validates a transition request. Kept here (not in the "use server" action) so
  * it is unit-testable. Soft-gated: the *only* constraints are a well-formed
  * target phase and a non-empty reason — readiness is never enforced (PE-001).
+ *
+ * The one thing a reason may NOT be is `INITIAL_DECLARATION_REASON`: that
+ * string is the marker distinguishing "declared at setup" from "moved", and a
+ * planter able to type it could forge one. See the constant's note.
  */
 export const transitionPhaseSchema = z.object({
-  toPhase: z
-    .number()
-    .int("Phase must be an integer")
-    .min(MIN_PHASE, `Phase must be >= ${MIN_PHASE}`)
-    .max(MAX_PHASE, `Phase must be <= ${MAX_PHASE}`),
+  toPhase: phaseNumberSchema,
   reason: z
     .string()
     .trim()
     .min(1, "A reason is required")
-    .max(2000, "Reason is too long"),
+    .max(2000, "Reason is too long")
+    .refine(
+      (reason) => reason !== INITIAL_DECLARATION_REASON,
+      "That wording is reserved for the stage you declared when you set up. Say what changed instead."
+    ),
 });
 
 export type TransitionPhaseInput = z.infer<typeof transitionPhaseSchema>;
+
+/** The stage a planter declares at onboarding. No reason — the row carries one. */
+export const initialPhaseDeclarationSchema = z.object({
+  phase: phaseNumberSchema,
+});
+
+export type InitialPhaseDeclarationInput = z.infer<
+  typeof initialPhaseDeclarationSchema
+>;
 
 // ----------------------------------------------------------------------------
 // Transition direction (pure)
@@ -348,6 +405,216 @@ export async function transitionPhase(
     toPhase,
     direction: classifyTransition(fromPhase, toPhase),
   };
+}
+
+// ----------------------------------------------------------------------------
+// Initial declaration (I/O) — OB-005
+// ----------------------------------------------------------------------------
+
+/**
+ * ONE row, never a ladder — the whole point of OB-005.
+ *
+ * A planter who arrives mid-journey and says "we are at phase 3" did not walk
+ * 0→1→2→3 inside this product, and the obvious implementation — a loop calling
+ * `transitionPhase` for each step — would write three rows claiming they did.
+ * That is fabricated history: it would put dates on transitions that never
+ * happened, capture three identical fact snapshots seconds apart, and make
+ * every "how long did this plant spend in phase 1?" analytic a lie. So the
+ * declaration is a SINGLE insert whose `to_phase` is the declared phase and
+ * whose `from_phase` is wherever the row already sat (0 at onboarding), marked
+ * with `INITIAL_DECLARATION_REASON`.
+ *
+ * THE GUARDS, in order:
+ *
+ *   `current`   `SELECT … FOR UPDATE` on the church row — the row the update at
+ *               the end of this statement writes, so it is a real lock and not
+ *               a snapshot predicate. Two submits (a double click, a second
+ *               tab) serialise here; the second re-reads what the first
+ *               committed (memory/invariants.md → Atomicity).
+ *   `declared`  the insert. It reads `from current c`, so `current` is a
+ *               DEPENDENCY and is evaluated — and the row locked — BEFORE
+ *               anything modifies it. Written as a lazy sibling instead, the
+ *               CTE would be pulled only after the UPDATE and a re-read would
+ *               skip the tuple its own command just wrote
+ *               (`HeapTupleSelfUpdated`), landing a row with a false
+ *               `from_phase`. Same trap, same fix, as `setLaunchDateStatement`.
+ *               `NOT EXISTS` makes the declaration once-only: a planter may
+ *               revisit step 3, but the FIRST answer is the one that is
+ *               history, and later corrections are ordinary transitions on
+ *               `/phase` with their own reasons.
+ *   `moved`     `update churches … from declared d` — sourced from the insert,
+ *               so `current_phase` can only move when a declaration row
+ *               actually landed. A refused (already-declared) call writes
+ *               nothing at all, including no phase change.
+ *
+ * The final SELECT returns zero rows when the declaration was refused, which
+ * the caller reports as `already_declared` rather than as a failure.
+ */
+export function declareInitialPhaseStatement(input: {
+  churchId: string;
+  toPhase: number;
+  initiatedById: string;
+  factSnapshot: PlantFactSnapshot;
+  rubricVersion: string;
+}): SQL {
+  return sql`
+    with current as (
+      select id, current_phase
+      from churches
+      where id = ${input.churchId}
+      for update
+    ), declared as (
+      insert into phase_transitions (
+        church_id, from_phase, to_phase, initiated_by_id, reason,
+        fact_snapshot, rubric_version
+      )
+      select
+        c.id,
+        c.current_phase,
+        ${input.toPhase}::integer,
+        ${input.initiatedById}::uuid,
+        ${INITIAL_DECLARATION_REASON}::text,
+        ${JSON.stringify(input.factSnapshot)}::jsonb,
+        ${input.rubricVersion}::varchar
+      from current c
+      where not exists (
+        select 1
+        from phase_transitions p
+        where p.church_id = c.id
+          and p.reason = ${INITIAL_DECLARATION_REASON}
+      )
+      returning id, from_phase, to_phase, created_at
+    ), moved as (
+      update churches ch
+      set current_phase = ${input.toPhase}::integer,
+          updated_at = now()
+      from declared d
+      where ch.id = ${input.churchId}
+      returning ch.id
+    )
+    select
+      d.id as transition_id,
+      d.from_phase as from_phase,
+      d.to_phase as to_phase
+    from declared d
+  `;
+}
+
+interface DeclarationRow extends Record<string, unknown> {
+  transition_id: string;
+  from_phase: number;
+  to_phase: number;
+}
+
+/** What a declaration attempt did. */
+export type DeclareInitialPhaseResult =
+  | {
+      status: "declared";
+      transitionId: string;
+      fromPhase: number;
+      phase: number;
+    }
+  /** A declaration already exists — the first answer is the one that is history. */
+  | { status: "already_declared"; phase: number };
+
+/**
+ * Record the planter's own read of where this plant already is (OB-005).
+ *
+ * Sets `churches.current_phase` and writes ONE `phase_transitions` row marked
+ * as the initial declaration. No intermediate rows are synthesised — declaring
+ * 3 produces nothing for 1 and 2 (FRD AC 3), which is a property of the
+ * statement above and is pinned by `service.test.ts`.
+ *
+ * The caller (the onboarding action) is responsible for verifying that
+ * `initiatedById` is a planter with access to `churchId`.
+ *
+ * @throws ChurchNotFoundError if the church does not exist.
+ */
+export async function declareInitialPhase(
+  churchId: string,
+  initiatedById: string,
+  input: InitialPhaseDeclarationInput
+): Promise<DeclareInitialPhaseResult> {
+  const { phase } = initialPhaseDeclarationSchema.parse(input);
+
+  const [church] = await db
+    .select({ id: churches.id, currentPhase: churches.currentPhase })
+    .from(churches)
+    .where(eq(churches.id, churchId))
+    .limit(1);
+
+  if (!church) {
+    throw new ChurchNotFoundError();
+  }
+
+  // The same snapshot every transition captures (AC-PE-1). Taken AFTER the
+  // launch date has been written by the caller, so the row records the plant as
+  // it stands at the moment it is declared — countdown included — rather than
+  // as it stood one write earlier.
+  const factSnapshot = await buildFactSnapshot(churchId);
+
+  const result = await db.execute<DeclarationRow>(
+    declareInitialPhaseStatement({
+      churchId,
+      toPhase: phase,
+      initiatedById,
+      factSnapshot,
+      rubricVersion: ACTIVE_RUBRIC.version,
+    })
+  );
+
+  const written = result.rows[0];
+
+  if (!written) {
+    // Refused by the `NOT EXISTS` guard: this plant has already declared. Its
+    // stored phase is the answer, not the one just submitted — nothing moved.
+    return { status: "already_declared", phase: church.currentPhase };
+  }
+
+  // PE-003. Emitted only when the phase actually MOVED: "not sure — start me at
+  // the beginning" on a plant already at 0 is a declaration worth recording and
+  // a `phase.changed` that would be false.
+  if (written.from_phase !== written.to_phase) {
+    await emitPhaseChanged({
+      churchId,
+      fromPhase: written.from_phase,
+      toPhase: written.to_phase,
+      initiatedById,
+      rubricVersion: ACTIVE_RUBRIC.version,
+    });
+  }
+
+  return {
+    status: "declared",
+    transitionId: written.transition_id,
+    fromPhase: written.from_phase,
+    phase: written.to_phase,
+  };
+}
+
+/**
+ * Has this plant recorded its initial declaration (OB-005)?
+ *
+ * The onboarding "did they answer step 3?" fact. It is asked of phase HISTORY
+ * and not of `churches.current_phase` or of the launch row, because the honest
+ * answer to "not sure, and no date yet" leaves both of those exactly as a
+ * planter who never saw the step would leave them.
+ */
+export async function hasInitialPhaseDeclaration(
+  churchId: string
+): Promise<boolean> {
+  const rows = await db
+    .select({ id: phaseTransitions.id })
+    .from(phaseTransitions)
+    .where(
+      and(
+        eq(phaseTransitions.churchId, churchId),
+        eq(phaseTransitions.reason, INITIAL_DECLARATION_REASON)
+      )
+    )
+    .limit(1);
+
+  return rows.length > 0;
 }
 
 /**

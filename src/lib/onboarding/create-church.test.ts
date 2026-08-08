@@ -445,7 +445,9 @@ test("the action module publishes only actions", () => {
 
   assert.deepEqual(
     exported.map((match) => match[1]),
-    ["async", "async", "async"],
+    // createChurchBasics, confirmLeadership, declareJourney (#306),
+    // completeOnboarding.
+    ["async", "async", "async", "async"],
     "only `export async function` may appear in a 'use server' module"
   );
 });

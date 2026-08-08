@@ -46,7 +46,7 @@ export function PeopleStep({
   onFinish,
   busy,
 }: {
-  /** `null` when the previous step cannot be re-entered. See `UpcomingStep`. */
+  /** `null` when the previous step cannot be re-entered. See `JourneyStep`. */
   onBack: (() => void) | null;
   onSkip: () => void;
   onFinish: () => void;

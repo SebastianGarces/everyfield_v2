@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { PgDialect } from "drizzle-orm/pg-core";
+
 import {
   buildTransitionRow,
   classifyTransition,
+  declareInitialPhaseStatement,
   deriveReadiness,
+  initialPhaseDeclarationSchema,
+  INITIAL_DECLARATION_REASON,
+  isInitialDeclaration,
   MAX_PHASE,
   MIN_PHASE,
   transitionPhaseSchema,
@@ -268,4 +274,197 @@ test("also treats phase_progress as a readiness category", () => {
     insight({ category: "phase_progress", severity: "watch" }),
   ]);
   assert.equal(r.state, "approaching");
+});
+
+// ============================================================================
+// Initial declaration (OB-005) — the row that is NOT a transition
+//
+// The rules this half has to hold are properties of the STATEMENT, not of a
+// return value: that ONE row is written however far along the planter says they
+// are, that the row is marked, that the marker cannot be forged, and that the
+// phase cannot move without the row landing. So they are asserted against the
+// generated SQL, the way `src/lib/launch/service.test.ts` reads its `WITH`
+// chain. A guard that lives only in a comment is a guard that comes back.
+// ============================================================================
+
+const DECLARE_CHURCH_ID = "33333333-3333-4333-8333-333333333333";
+const DECLARE_ACTOR_ID = "44444444-4444-4444-8444-444444444444";
+
+const declareDialect = new PgDialect();
+
+function declareQuery(toPhase: number) {
+  return declareDialect.sqlToQuery(
+    declareInitialPhaseStatement({
+      churchId: DECLARE_CHURCH_ID,
+      toPhase,
+      initiatedById: DECLARE_ACTOR_ID,
+      factSnapshot: fakeSnapshot(),
+      rubricVersion: "v0",
+    })
+  );
+}
+
+function declareSql(toPhase: number): string {
+  return declareQuery(toPhase).sql.replace(/\s+/g, " ").trim();
+}
+
+// ---------------------------------------------------------------------------
+// FRD AC 3 — declaring N fabricates nothing for 1..N-1 (the high-risk assertion)
+// ---------------------------------------------------------------------------
+
+test("declaring phase N writes exactly ONE phase_transitions row", () => {
+  for (const phase of [0, 1, 2, 3, 4, 5, 6]) {
+    const sql = declareSql(phase);
+    const inserts = sql.match(/insert into phase_transitions/g) ?? [];
+    assert.equal(
+      inserts.length,
+      1,
+      `declaring ${phase} must write one row, not a ladder`
+    );
+  }
+});
+
+test("declaring 3 produces NO record for phases 1 or 2", () => {
+  // The only phase NUMBERS the statement can write are the declared one and
+  // whatever `churches.current_phase` already holds — read from the locked row,
+  // never enumerated. So the intermediate phases are not merely unwritten, they
+  // are unrepresentable: there is no parameter carrying them and no
+  // set-generating construct that could invent one.
+  const { sql, params } = declareQuery(3);
+  const flat = sql.replace(/\s+/g, " ").trim();
+
+  assert.equal(
+    params.filter((value) => value === 1 || value === 2).length,
+    0,
+    "phases 1 and 2 must not appear as parameters"
+  );
+  assert.equal(
+    params.filter((value) => value === 3).length,
+    2,
+    "the declared phase appears twice: the insert's to_phase and the update"
+  );
+
+  for (const generator of ["generate_series", "unnest", "values ("]) {
+    assert.equal(
+      flat.includes(generator),
+      false,
+      `${generator} would be a way to synthesise intermediate rows`
+    );
+  }
+
+  // `from_phase` is read, not computed: wherever the row already sat.
+  assert.match(flat, /select c\.id, c\.current_phase,/);
+});
+
+// ---------------------------------------------------------------------------
+// The marker, and why it cannot be forged
+// ---------------------------------------------------------------------------
+
+test("the declaration row carries the reserved reason constant", () => {
+  const { params } = declareQuery(2);
+  assert.equal(
+    params.filter((value) => value === INITIAL_DECLARATION_REASON).length,
+    2,
+    "the constant is both what is written and what the once-only guard reads"
+  );
+});
+
+test("isInitialDeclaration reads the marker, and only the marker", () => {
+  assert.equal(
+    isInitialDeclaration({ reason: INITIAL_DECLARATION_REASON }),
+    true
+  );
+  assert.equal(isInitialDeclaration({ reason: "Core group at target" }), false);
+  assert.equal(
+    isInitialDeclaration({ reason: `${INITIAL_DECLARATION_REASON} ` }),
+    false
+  );
+});
+
+test("a planter cannot type the reserved reason on a real transition", () => {
+  // Without this refusal the marker is a convention, not a discriminator: a
+  // planter pasting the constant into /phase's reason box would manufacture a
+  // row that `isInitialDeclaration` misreads as history they never declared.
+  const forged = transitionPhaseSchema.safeParse({
+    toPhase: 4,
+    reason: INITIAL_DECLARATION_REASON,
+  });
+  assert.equal(forged.success, false);
+
+  // And the ordinary case still passes, so the refusal is narrow.
+  assert.equal(
+    transitionPhaseSchema.safeParse({ toPhase: 4, reason: "Teams trained" })
+      .success,
+    true
+  );
+});
+
+// ---------------------------------------------------------------------------
+// The guards, read off the statement
+// ---------------------------------------------------------------------------
+
+test("the church row is LOCKED before anything is written", () => {
+  // A row lock, not a snapshot predicate: it is the row the UPDATE at the end
+  // of this statement writes, so two submits serialise here
+  // (memory/invariants.md → Atomicity).
+  const sql = declareSql(1);
+  assert.match(
+    sql,
+    /^with current as \( select id, current_phase from churches where .* for update \)/
+  );
+});
+
+test("the insert DEPENDS on the locked read, so from_phase cannot be lost", () => {
+  // `current` must be pulled BEFORE anything modifies the row. As a lazy
+  // sibling it would be evaluated after the UPDATE, the re-read would skip the
+  // tuple its own command just wrote, and the row would land with a false
+  // `from_phase` — the trap diagnosed in `setLaunchDateStatement`.
+  const sql = declareSql(1);
+  const insertAt = sql.indexOf("insert into phase_transitions");
+  const fromCurrentAt = sql.indexOf("from current c");
+  const updateAt = sql.indexOf("update churches");
+
+  assert.ok(insertAt > -1 && fromCurrentAt > insertAt);
+  assert.ok(
+    fromCurrentAt < updateAt,
+    "the insert reads `current` before the update runs"
+  );
+});
+
+test("the declaration is once-only", () => {
+  const sql = declareSql(5);
+  assert.match(
+    sql,
+    /where not exists \( select 1 from phase_transitions p where p\.church_id = c\.id and p\.reason = \$\d+ \)/
+  );
+});
+
+test("current_phase cannot move unless the declaration row landed", () => {
+  // The UPDATE is sourced from the insert's `RETURNING`, so a refused
+  // declaration writes nothing at all — including no phase change.
+  const sql = declareSql(6);
+  assert.match(
+    sql,
+    /update churches ch set current_phase = .* from declared d/
+  );
+  assert.match(sql, /select d\.id as transition_id/);
+});
+
+// ---------------------------------------------------------------------------
+// The declaration's own validation surface
+// ---------------------------------------------------------------------------
+
+test("a declared stage must be a real phase", () => {
+  for (const phase of [0, 3, 6]) {
+    assert.equal(
+      initialPhaseDeclarationSchema.safeParse({ phase }).success,
+      true
+    );
+  }
+  for (const phase of [-1, 7, 1.5]) {
+    assert.equal(
+      initialPhaseDeclarationSchema.safeParse({ phase }).success,
+      false
+    );
+  }
 });

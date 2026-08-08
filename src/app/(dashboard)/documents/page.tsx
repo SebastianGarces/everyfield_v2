@@ -8,6 +8,7 @@ import {
   DOCUMENT_TEMPLATES,
   getTemplateById,
 } from "@/lib/documents";
+import { getLaunchForChurch } from "@/lib/launch/queries";
 
 export const dynamic = "force-dynamic";
 
@@ -30,17 +31,17 @@ export default async function DocumentsPage({
     redirect("/dashboard");
   }
 
+  // The launch date is read from the LAUNCH ENTITY (`launches.target_date`,
+  // LS-001) and never from the church row, whose `launch_date` column migration
+  // 0032 dropped. `null` here now means what it says — this plant has no launch
+  // row, or one still `planning` with no day named — rather than "nobody has
+  // wired this up yet" (#306).
+  const launch = await getLaunchForChurch(church.id);
+
   const context = {
     churchName: church.name,
     userName: user.name ?? null,
-    // The launch date is a real, readable value now — it lives on the launch
-    // entity (`launches.target_date`, LS-001) and NOT on the church row, whose
-    // `launch_date` column migration 0032 dropped. It is still passed as null
-    // here because sourcing merge-field values is #203's job, not this slice's:
-    // the only template that names `launch_date` is the Phase-4 Launch Sunday
-    // checklist, whose field is optional and planter-editable. Wiring it is one
-    // `getLaunchForChurch(church.id)` away — see `src/lib/launch/queries.ts`.
-    launchDate: null,
+    launchDate: launch?.targetDate ?? null,
   };
 
   // Resolve auto-fill defaults server-side; the client library filters/renders.

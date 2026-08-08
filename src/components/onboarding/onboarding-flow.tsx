@@ -23,10 +23,10 @@ import {
   type ChurchLeadershipStatus,
 } from "@/lib/onboarding/leadership";
 import { ChurchBasicsStep } from "./church-basics-step";
+import { JourneyStep } from "./journey-step";
 import { LeadershipStep } from "./leadership-step";
 import { OnboardingStepRail } from "./onboarding-step-rail";
 import { PeopleStep } from "./people-step";
-import { UpcomingStep } from "./upcoming-step";
 
 /**
  * F12 / OB-001 — the multi-step onboarding flow that replaces the single-field
@@ -234,19 +234,22 @@ export function OnboardingFlow({
                 </>
               }
             />
-          ) : step === "people" ? (
-            // OB-006: the last step is real — it surfaces the existing CSV
-            // wizard and quick-add. It still writes nothing of its own, so the
-            // controls it gets are the flow's own skip/finish, unchanged.
-            <PeopleStep
+          ) : step === "journey" ? (
+            // OB-003 + OB-005: the launch date (through the launch entity's
+            // service write path — never a column on `churches`) and the
+            // initial stage declaration, committed together.
+            <JourneyStep
+              onDeclared={goForward}
               onBack={backTarget ? goBack : null}
               onSkip={goForward}
               onFinish={finish}
               busy={finishing}
             />
           ) : (
-            <UpcomingStep
-              step={step}
+            // OB-006: the last step is real — it surfaces the existing CSV
+            // wizard and quick-add. It still writes nothing of its own, so the
+            // controls it gets are the flow's own skip/finish, unchanged.
+            <PeopleStep
               onBack={backTarget ? goBack : null}
               onSkip={goForward}
               onFinish={finish}

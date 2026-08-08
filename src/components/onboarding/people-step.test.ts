@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
@@ -142,13 +142,17 @@ test("the flow renders the people step rather than the shell", () => {
   );
   assert.match(ONBOARDING_FLOW, /<PeopleStep/);
 
-  // The shell's copy for step 4 is gone — two descriptions of the same step is
-  // how they drift.
-  const shell = read("components", "onboarding", "upcoming-step.tsx");
+  // The shell is GONE, not merely bypassed. It carried a placeholder
+  // description of every not-yet-built step, and two descriptions of the same
+  // step is how they drift; with step 3 built (#306) there is no step left for
+  // it to describe, so the file that once held the second description no longer
+  // exists.
   assert.equal(
-    /\bpeople:\s*\{/.test(shell),
+    existsSync(
+      path.join(ROOT, "components", "onboarding", "upcoming-step.tsx")
+    ),
     false,
-    "upcoming-step must no longer carry copy for the people step"
+    "upcoming-step.tsx is dead once every onboarding step is real"
   );
 });
 

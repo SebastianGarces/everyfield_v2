@@ -2,10 +2,15 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  JOURNEY_STAGE_NOT_SURE,
+  JOURNEY_STAGE_OPTIONS,
   LAST_ONBOARDING_STEP,
+  LAUNCH_DATE_CHOICES,
   ONBOARDING_STEPS,
   ONBOARDING_STEP_IDS,
   incompleteOnboardingSteps,
+  isLaunchDateChoice,
+  phaseForJourneyStage,
   isFirstOnboardingStep,
   isLastOnboardingStep,
   isSkippableOnboardingStep,
@@ -244,4 +249,63 @@ test("a planter with every fact in lands on the last step, not back at 3", () =>
     LAST_ONBOARDING_STEP
   );
   assert.equal(LAST_ONBOARDING_STEP, "people");
+});
+
+// ----------------------------------------------------------------------------
+// Step 3's options (OB-003 + OB-005)
+//
+// The picker's list is product surface, not component detail: what a planter is
+// offered, and which phase each answer means, decides what gets written to
+// `churches.current_phase` and to phase history. So it is pinned here, where
+// both the picker and the write path read it from.
+// ----------------------------------------------------------------------------
+
+test("the stage picker offers the seven phases plus an escape hatch", () => {
+  assert.equal(JOURNEY_STAGE_OPTIONS.length, 8);
+
+  // Every phase 0-6 exactly once, in order, before the escape hatch.
+  const phases = JOURNEY_STAGE_OPTIONS.slice(0, 7).map((o) => o.phase);
+  assert.deepEqual(phases, [0, 1, 2, 3, 4, 5, 6]);
+
+  const last = JOURNEY_STAGE_OPTIONS[JOURNEY_STAGE_OPTIONS.length - 1];
+  assert.equal(last.value, JOURNEY_STAGE_NOT_SURE);
+});
+
+test("the options are in plain language, not phase numbers", () => {
+  // FRD AC: "the seven phases in plain language". The methodology's own name
+  // rides along in `phaseName` so the vocabulary is still visible — but a
+  // planter who has not read the Playbook has to be able to place themselves,
+  // which "Phase 2: Launch Team Formation" alone does not let them do.
+  for (const option of JOURNEY_STAGE_OPTIONS) {
+    assert.doesNotMatch(option.label, /^Phase \d/);
+    assert.ok(option.hint.length > 0);
+    assert.match(option.phaseName, /^Phase \d/);
+  }
+});
+
+test("'not sure' starts the planter at the beginning", () => {
+  assert.equal(phaseForJourneyStage(JOURNEY_STAGE_NOT_SURE), 0);
+});
+
+test("a submitted stage becomes a phase in exactly one place", () => {
+  assert.equal(phaseForJourneyStage("0"), 0);
+  assert.equal(phaseForJourneyStage("3"), 3);
+  assert.equal(phaseForJourneyStage("6"), 6);
+});
+
+test("an unknown stage is refused, never defaulted to Discovery", () => {
+  // A POST carrying `stage=9` is a caller error. Defaulting it to 0 would
+  // record a Discovery declaration the planter never made — and phase history
+  // is append-only, so there is no taking it back.
+  for (const bad of ["9", "-1", "", "phase-3", null, undefined, 3]) {
+    assert.equal(phaseForJourneyStage(bad), null);
+  }
+});
+
+test("'no date yet' is one of two explicit answers, not a blank field", () => {
+  assert.deepEqual([...LAUNCH_DATE_CHOICES], ["date", "none"]);
+  assert.equal(isLaunchDateChoice("none"), true);
+  assert.equal(isLaunchDateChoice("date"), true);
+  assert.equal(isLaunchDateChoice("maybe"), false);
+  assert.equal(isLaunchDateChoice(null), false);
 });
