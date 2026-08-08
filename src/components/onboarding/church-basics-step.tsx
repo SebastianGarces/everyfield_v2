@@ -4,11 +4,11 @@ import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { createChurchBasics } from "@/app/(dashboard)/dashboard/actions";
 import {
-  createChurchBasics,
+  CHURCH_TEXT_MAX,
   type ChurchBasicsFieldErrors,
-} from "@/app/(dashboard)/dashboard/actions";
-import { CHURCH_TEXT_MAX } from "@/lib/validations/onboarding";
+} from "@/lib/validations/onboarding";
 
 type Props = {
   /** Called once the church row exists. The flow advances to step 2. */

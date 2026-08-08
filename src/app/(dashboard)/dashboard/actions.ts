@@ -1,37 +1,48 @@
 "use server";
 
 import { db } from "@/db";
-import { churches, churchPrivacySettings, users } from "@/db/schema";
+import { churches } from "@/db/schema";
 import { verifySession } from "@/lib/auth/session";
-import { linkUserToChurchFilter } from "@/lib/churches/link-user";
 import {
-  isLeadershipAnswer,
-  leadershipStatusForAnswer,
-} from "@/lib/onboarding/leadership";
-import { churchBasicsFromFormData } from "@/lib/validations/onboarding";
-import { extractFieldErrors } from "@/lib/validations/utils";
+  createChurchDeps,
+  runCreateChurch,
+  type CreateChurchOutcome,
+} from "@/lib/onboarding/create-church";
+import { plantDirtyColumns } from "@/lib/phase-engine/dirty-handler";
 import { and, eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import {
+  confirmLeadershipDeps,
+  runConfirmLeadership,
+  type ConfirmLeadershipOutcome,
+} from "./confirm-leadership";
 
-export type ChurchBasicsFieldErrors = {
-  name?: string;
-  city?: string;
-  stateRegion?: string;
-  country?: string;
-};
+export type ChurchBasicsState = CreateChurchOutcome;
 
-export type ChurchBasicsState =
-  | { status: "created" }
-  | { status: "error"; error?: string; fieldErrors?: ChurchBasicsFieldErrors };
+/**
+ * Re-render everything below the root layout.
+ *
+ * Every write here changes what the dashboard shell renders — the flow itself
+ * is the dashboard's primary content while onboarding is unfinished — so the
+ * layout is the level that has to be revalidated, not the page.
+ */
+function revalidateDashboard() {
+  revalidatePath("/", "layout");
+}
 
 /**
  * F12 / OB-001 + OB-002 — step 1 of onboarding: create the church.
  *
  * The church is created HERE, at the first step, not at the end of the flow.
- * That is the point of OB-001: a planter who closes the tab after typing a
- * name owns a real, valid church and comes back to the remaining steps rather
- * than to nothing. Everything steps 2-4 will capture is an UPDATE to this row.
+ * That is the point of OB-001: a planter who closes the tab after typing a name
+ * owns a real, valid church and comes back to the remaining steps rather than
+ * to nothing. Everything steps 2-4 capture is an UPDATE to that row.
+ *
+ * The action is a wrapper on purpose. It mints the actor from `verifySession()`
+ * — there is no parameter a forged POST could name someone else in — and hands
+ * the rest to `runCreateChurch`, which owns the atomicity rules and is unit
+ * tested through its deps (`src/lib/onboarding/create-church.ts`, #198).
  *
  * Deliberately does NOT redirect — the flow advances to step 2 in place, and
  * only `completeOnboarding` leaves the flow.
@@ -41,116 +52,44 @@ export async function createChurchBasics(
 ): Promise<ChurchBasicsState> {
   const { user } = await verifySession();
 
-  // Only planters without a church can create one
-  if (user.role !== "planter") {
-    return {
-      status: "error",
-      error: "Only church planters can create a church",
-    };
-  }
-
-  if (user.churchId) {
-    return { status: "error", error: "You already have a church" };
-  }
-
-  const parsed = churchBasicsFromFormData(formData);
-
-  if (!parsed.success) {
-    return {
-      status: "error",
-      fieldErrors: extractFieldErrors<ChurchBasicsFieldErrors>(parsed.error),
-    };
-  }
-
-  const { name, city, stateRegion, country } = parsed.data;
-
-  // Create church, link user, and create privacy settings.
-  const [church] = await db
-    .insert(churches)
-    .values({ name, city, stateRegion, country })
-    .returning();
-
-  const [updated] = await db
-    .update(users)
-    .set({ churchId: church.id })
-    .where(linkUserToChurchFilter(user.id))
-    .returning();
-
-  if (!updated) {
-    // Another request already linked a church — clean up the orphan
-    await db.delete(churches).where(eq(churches.id, church.id));
-    return { status: "error", error: "Church already created" };
-  }
-
-  await db.insert(churchPrivacySettings).values({
-    churchId: church.id,
-    updatedBy: user.id,
-  });
-
-  revalidatePath("/", "layout");
-
-  return { status: "created" };
+  return runCreateChurch(
+    createChurchDeps(revalidateDashboard),
+    { id: user.id, role: user.role, churchId: user.churchId },
+    formData
+  );
 }
 
-export type ConfirmLeadershipState =
-  | { status: "saved" }
-  | { status: "error"; error: string };
+export type ConfirmLeadershipState = ConfirmLeadershipOutcome;
 
 /**
- * F12 / OB-004 — step 2 of onboarding: "Will you be the lead planter/pastor?"
+ * F12 / OB-004 + OB-010 — "Will you be the lead planter/pastor?"
  *
- * What this write is, and what it is NOT. The planter ASSIGNMENT is the
- * existing mechanism — `users.church_id` + the `planter` role — and it was
- * written at step 1 by `createChurchBasics`, through
- * `linkUserToChurchFilter()`, whose #183 compare-and-set (caller's id AND
- * `church_id IS NULL`) is the only thing standing between a double submit and
- * a relink. This step deliberately does not re-run that write: answering Yes
- * confirms the link that already exists, so there is no second church-link
- * write to get the filter wrong on.
+ * What this write is, and what it is NOT. For the planter answering about
+ * themselves the ASSIGNMENT is the existing mechanism — `users.church_id` + the
+ * `planter` role — written at step 1 by `createChurchBasics` through
+ * `linkUserToChurchFilter()`. That path deliberately does not re-run the link:
+ * answering Yes confirms the one that already exists, so there is no second
+ * church-link write to get the filter wrong on. What it adds is the explicit,
+ * queryable answer; before OB-004 an unrecorded No was indistinguishable from a
+ * Yes to every downstream surface.
  *
- * What it adds is the explicit, queryable answer. Before OB-004 "does this
- * church have a planter?" could only be inferred from a role lookup, so
- * answering No could not be recorded at all — and an unrecorded No is
- * indistinguishable from a Yes to every downstream surface.
- *
- * Re-enterable on purpose: the dashboard's no-planter nudge links back here
- * (the one specced re-entry path), so this is an UPDATE with no "already
- * answered" guard — a planter who said No must be able to say Yes.
+ * OB-010 is the case where Yes has to ASSIGN rather than confirm — a church
+ * that predates the question and has no planter at all — and that is a role
+ * change with a race in it. All of it lives in `./confirm-leadership`, which is
+ * ordinary server code the tests can drive; this export exists to mint the actor
+ * from `verifySession()` so there is no parameter a forged POST could name
+ * somebody else in (`memory/invariants.md` → Authentication).
  */
 export async function confirmLeadership(
   answer: string
 ): Promise<ConfirmLeadershipState> {
   const { user } = await verifySession();
 
-  if (user.role !== "planter") {
-    return {
-      status: "error",
-      error: "Only church planters can answer this",
-    };
-  }
-
-  if (!user.churchId) {
-    return {
-      status: "error",
-      error: "Create your church plant before answering this",
-    };
-  }
-
-  if (!isLeadershipAnswer(answer)) {
-    return { status: "error", error: "Please choose yes or no" };
-  }
-
-  await db
-    .update(churches)
-    .set({
-      leadershipStatus: leadershipStatusForAnswer(answer),
-      updatedAt: new Date(),
-    })
-    .where(eq(churches.id, user.churchId));
-
-  revalidatePath("/", "layout");
-
-  return { status: "saved" };
+  return runConfirmLeadership(
+    confirmLeadershipDeps(revalidateDashboard),
+    { id: user.id, role: user.role, churchId: user.churchId },
+    answer
+  );
 }
 
 export type CompleteOnboardingState = { status: "error"; error: string };
@@ -169,9 +108,27 @@ export type CompleteOnboardingState = { status: "error"; error: string };
  * The `IS NULL` guard makes this idempotent: a double submit, or a second tab,
  * cannot move a completion timestamp that is already set.
  *
- * On success this redirects and never returns.
+ * OB-009 — FINISHING MARKS THE PLANT DIRTY. `last_material_event_at` is stamped
+ * in the SAME statement as the completion, because finishing setup IS the
+ * material event: a plant that just declared its stage, its launch date and its
+ * people has changed enough to be worth assessing, and without the stamp a brand
+ * new plant with no other activity would sit cold behind the 7-day staleness
+ * window (`src/lib/phase-engine/assessment/dirty.ts`). One statement rather than
+ * a follow-up `markPlantDirty()` call so the two facts cannot disagree, and
+ * behind the same `IS NULL` guard so a second submit cannot re-dirty a plant
+ * that finished days ago. Marking dirty is all this does — assessments are
+ * generated by the daily run, never synchronously from a planter's click.
+ *
+ * RETURN TYPE (#243). On success this `redirect()`s and never returns, and the
+ * declared type says so: `CompleteOnboardingState | void`. Writing it as
+ * `Promise<CompleteOnboardingState>` typechecked only because `redirect` is
+ * currently typed `never` — a framework internal the app's public contract had
+ * no business resting on, and one whose relaxation would silently make every
+ * `result.error` in the client a possible crash. With `| void` declared, the
+ * caller is forced to write `result?.error`, which is true whatever `redirect`
+ * is typed as.
  */
-export async function completeOnboarding(): Promise<CompleteOnboardingState> {
+export async function completeOnboarding(): Promise<CompleteOnboardingState | void> {
   const { user } = await verifySession();
 
   if (user.role !== "planter") {
@@ -185,9 +142,14 @@ export async function completeOnboarding(): Promise<CompleteOnboardingState> {
     };
   }
 
+  const finishedAt = new Date();
+
   await db
     .update(churches)
-    .set({ onboardingCompletedAt: new Date() })
+    .set({
+      onboardingCompletedAt: finishedAt,
+      ...plantDirtyColumns(finishedAt),
+    })
     .where(
       and(
         eq(churches.id, user.churchId),
@@ -195,6 +157,9 @@ export async function completeOnboarding(): Promise<CompleteOnboardingState> {
       )
     );
 
-  revalidatePath("/", "layout");
+  revalidateDashboard();
+
+  // The confetti's trigger, preserved (OB-001 AC): finishing OR skipping
+  // through the final step lands here, and the dashboard reads the flag.
   redirect("/dashboard?churchCreated=true");
 }

@@ -12,6 +12,7 @@ import {
 import { completeOnboarding } from "@/app/(dashboard)/dashboard/actions";
 import {
   ONBOARDING_STEP_IDS,
+  isSkippableOnboardingStep,
   nextOnboardingStep,
   onboardingStep,
   previousOnboardingStep,
@@ -24,6 +25,7 @@ import {
 import { ChurchBasicsStep } from "./church-basics-step";
 import { LeadershipStep } from "./leadership-step";
 import { OnboardingStepRail } from "./onboarding-step-rail";
+import { PeopleStep } from "./people-step";
 import { UpcomingStep } from "./upcoming-step";
 
 /**
@@ -36,7 +38,26 @@ import { UpcomingStep } from "./upcoming-step";
  * knows), the planter decides where they go from there. A page reload re-derives
  * the landing step from the database, so an abandoned flow resumes correctly
  * without anything being persisted per step.
+ *
+ * OB-007 — STEPS COMMIT INDEPENDENTLY, and this component is what makes that
+ * true rather than merely intended. It holds no draft of anybody's answers:
+ * each step owns its own form, saves through its own action, and only calls
+ * back here once its write has committed. So there is no "submit the wizard"
+ * moment, nothing accumulated in memory for a later failure to lose, and a step
+ * that fails to save leaves every earlier step exactly as saved.
+ *
+ * Skipping is the same move minus the write (every step after step 1 is
+ * `skippable`), which is why a skip is `goForward()` and nothing else — it
+ * cannot lose an answer because it never had one.
  */
+/**
+ * Shown when the finish request itself failed — as opposed to `completeOnboarding`
+ * returning a reason, which is rendered verbatim. Says what is safe (everything
+ * already saved) and what to do (press it again), because both are true.
+ */
+const FINISH_FAILED_MESSAGE =
+  "We could not finish setting up just now. Everything you have saved is safe — please try again.";
+
 export function OnboardingFlow({
   initialStep,
   leadershipStatus,
@@ -69,12 +90,28 @@ export function OnboardingFlow({
 
   function goForward() {
     const next = nextOnboardingStep(step);
-    if (next) goTo(next);
+
+    if (next) {
+      goTo(next);
+      return;
+    }
+
+    // Past the last step there is only the dashboard, so "forward" from there
+    // is finishing — which is what makes "completing OR skipping through the
+    // final step lands on /dashboard?churchCreated=true" true of every control
+    // that moves forward, not just of the one labelled Finish (OB-001 AC).
+    finish();
   }
 
-  // Step 1 is not re-enterable: it has already created the church, and a second
-  // submit would fail rather than edit. Editing the name or location later is
-  // church settings' job (OB-008).
+  // OB-007: skipping is advancing without writing. It shares `goForward` on
+  // purpose — a skip that had its own path could grow a save, and the whole
+  // point of the control is that nothing is committed by it.
+  const canSkip = isSkippableOnboardingStep(step) && !finishing;
+
+  // Step 1 is not re-enterable: the church already exists, so a second submit
+  // would be a no-op that advances again rather than an edit (see the
+  // already-have-church branch in `runCreateChurch`). Changing the name or
+  // location later is church settings' job (OB-008).
   const previousStep = previousOnboardingStep(step);
   const backTarget = previousStep === "basics" ? null : previousStep;
 
@@ -85,9 +122,30 @@ export function OnboardingFlow({
   function finish() {
     setFinishError(null);
     startFinishing(async () => {
-      // Resolves only on failure — success redirects to the dashboard.
-      const result = await completeOnboarding();
-      setFinishError(result.error);
+      try {
+        // Resolves only on FAILURE — success redirects to
+        // /dashboard?churchCreated=true and this callback never continues. So
+        // the result is optional by contract (#243:
+        // `CompleteOnboardingState | void`) and is read with `?.` rather than on
+        // the assumption that `redirect()` stays typed `never`.
+        const result = await completeOnboarding();
+        setFinishError(result?.error ?? null);
+      } catch {
+        // The OTHER way the action can fail to return a state: it REJECTED —
+        // the request never reached the server, or the server threw something
+        // it did not turn into an outcome. Uncaught, that rejection escapes an
+        // async transition callback, so nothing renders and the button is left
+        // sitting in its pending state: the planter's church, their leadership
+        // answer and their people are all safely saved, and the only thing they
+        // can see is a control that no longer responds. Caught, the same
+        // failure is a message and a button they can press again — finishing is
+        // idempotent (the `IS NULL` guard on `onboarding_completed_at`), so a
+        // retry is always safe.
+        //
+        // This does not swallow the success path: `redirect()` in a server
+        // action is carried back as a navigation, not as a rejection here.
+        setFinishError(FINISH_FAILED_MESSAGE);
+      }
     });
   }
 
@@ -148,16 +206,43 @@ export function OnboardingFlow({
               initialAnswer={leadershipAnswerForStatus(leadershipStatus)}
               onSaved={goForward}
               secondary={
-                <Button
-                  type="button"
-                  variant="ghost"
-                  className="cursor-pointer"
-                  onClick={finish}
-                  disabled={finishing}
-                >
-                  Finish setup later
-                </Button>
+                <>
+                  {/* OB-007: step 2 is skippable like every step after the
+                      first. Without this the only ways out were answering the
+                      question or leaving the flow entirely — which is the
+                      "wizard prison" the FRD is written against. Skipping
+                      writes nothing, so the question stays unanswered and the
+                      planter resumes here on their next visit. */}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="cursor-pointer"
+                    onClick={goForward}
+                    disabled={!canSkip}
+                  >
+                    Skip for now
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="cursor-pointer"
+                    onClick={finish}
+                    disabled={finishing}
+                  >
+                    Finish setup later
+                  </Button>
+                </>
               }
+            />
+          ) : step === "people" ? (
+            // OB-006: the last step is real — it surfaces the existing CSV
+            // wizard and quick-add. It still writes nothing of its own, so the
+            // controls it gets are the flow's own skip/finish, unchanged.
+            <PeopleStep
+              onBack={backTarget ? goBack : null}
+              onSkip={goForward}
+              onFinish={finish}
+              busy={finishing}
             />
           ) : (
             <UpcomingStep
