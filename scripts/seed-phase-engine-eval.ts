@@ -38,13 +38,16 @@ import { and, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-http";
 
 import {
+  associationEvents,
   churches,
   churchMeetings,
   churchPrivacySettings,
   commitments,
   insightFeedback,
+  launches,
   meetingAttendance,
   ministryTeams,
+  organizationInvitations,
   persons,
   phaseTransitions,
   plantAssessments,
@@ -535,6 +538,12 @@ async function cleanEvalData(): Promise<void> {
       .delete(churchPrivacySettings)
       .where(inArray(churchPrivacySettings.churchId, churchIds));
 
+    // The launch entity (#305/LS-001) — where the countdown fact comes from now
+    // that `churches.launch_date` is gone. Journal, milestones and milestone
+    // links cascade from it; the launch itself must go before `users` (its
+    // journal names an actor) and before `churches`.
+    await db.delete(launches).where(inArray(launches.churchId, churchIds));
+
     await db
       .delete(meetingAttendance)
       .where(inArray(meetingAttendance.churchId, churchIds));
@@ -572,11 +581,47 @@ async function cleanEvalData(): Promise<void> {
   const evalUserIds = evalUsers
     .filter((u) => u.email.endsWith(`@${EVAL_EMAIL_DOMAIN}`))
     .map((u) => u.id);
+  // Oversight associations and the invitations behind them (#23/#303). Not
+  // seeded here — they are created by USING the product against the eval
+  // corpus — but they FK into these users and churches and neither FK cascades,
+  // so without this sweep the `users` delete fails on
+  // `organization_invitations_inviter_user_id_users_id_fk`. Audit rows first:
+  // `association_events.source_invitation_id` points at an invitation.
+  if (churchIds.length > 0) {
+    await db
+      .delete(associationEvents)
+      .where(inArray(associationEvents.churchId, churchIds));
+  }
+  if (evalUserIds.length > 0) {
+    await db
+      .delete(associationEvents)
+      .where(inArray(associationEvents.actorUserId, evalUserIds));
+    await db
+      .delete(organizationInvitations)
+      .where(inArray(organizationInvitations.inviterUserId, evalUserIds));
+    await db
+      .delete(organizationInvitations)
+      .where(inArray(organizationInvitations.respondedBy, evalUserIds));
+  }
+  if (churchIds.length > 0) {
+    await db
+      .delete(organizationInvitations)
+      .where(inArray(organizationInvitations.targetChurchId, churchIds));
+  }
+  await db
+    .delete(organizationInvitations)
+    .where(eq(organizationInvitations.sendingNetworkId, networkId));
+
   if (evalUserIds.length > 0) {
     await db.delete(users).where(inArray(users.id, evalUserIds));
   }
 
   if (churchIds.length > 0) {
+    // A user pointing INTO an eval church but not carrying an eval email —
+    // anyone who registered against the corpus — blocks the church delete on
+    // `users_church_id_churches_id_fk`. The email-domain scope above cannot see
+    // them, so they are cleared here rather than left to fail the run.
+    await db.delete(users).where(inArray(users.churchId, churchIds));
     await db.delete(churches).where(inArray(churches.id, churchIds));
   }
   if (sendingChurchIds.length > 0) {
@@ -611,10 +656,6 @@ async function seedChurch(
       currentPhase: profile.currentPhase,
       sendingNetworkId: EVAL_IDS.networkId,
       sendingChurchId: EVAL_IDS.sendingChurchId,
-      launchDate:
-        profile.launchOffsetDays === null
-          ? null
-          : launchInDays(profile.launchOffsetDays),
       lastMaterialEventAt:
         profile.lastMaterialEventDaysAgo === null
           ? null
@@ -623,6 +664,28 @@ async function seedChurch(
     .returning({ id: churches.id });
 
   const churchId = church.id;
+
+  // The countdown fact's source (#305/LS-001). It used to be a column on the
+  // insert above; the eval corpus's `launchOffsetDays` is unchanged, so every
+  // profile produces the SAME `launch.launchDate` / `daysUntilLaunch` fact it
+  // did before — which is the point: the corpus is a fixed input, and a schema
+  // migration must not move the baseline the judge is graded against.
+  //
+  // `launchOffsetDays === null` means "no date", and that is seeded as NO LAUNCH
+  // ROW rather than a `planning` launch with a null date. Both produce an empty
+  // countdown; a plant that has not begun planning is the truer fixture, and the
+  // eval corpus predates the entity having a status at all.
+  if (profile.launchOffsetDays !== null) {
+    await db.insert(launches).values({
+      churchId,
+      targetDate: launchInDays(profile.launchOffsetDays),
+      // Past-dated profiles (EVAL-10 at −5d, EVAL-11 at −120d) stay `scheduled`
+      // rather than `completed`: no outcome was ever recorded for them, and
+      // `completed` with empty outcome fields would be a fixture asserting
+      // something the corpus never said.
+      status: "scheduled",
+    });
+  }
 
   // ---- The planter (created_by for all rows, and a person record exists) ----
   // Persons need a created_by user; we reuse the church owner for everything.

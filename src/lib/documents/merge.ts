@@ -6,22 +6,36 @@
 // profile and the current user, and merges them with planter-supplied values.
 // ============================================================================
 
+import { APP_TIME_ZONE } from "@/lib/datetime";
+import { parseTargetDate } from "@/lib/launch/countdown";
 import type { DocumentMergeValues, DocumentTemplate } from "./types";
 
 interface MergeContext {
   churchName: string;
   /** Current user's display name, used for pastor_name auto-fill. */
   userName: string | null;
-  /** Church launch date as stored (YYYY-MM-DD) or null. */
+  /**
+   * The plant's launch day as stored (`launches.target_date`, YYYY-MM-DD), or
+   * null when it has no launch or no date yet. NOT a church column — migration
+   * 0032 dropped `churches.launch_date` and the launch entity owns it (LS-001).
+   * Callers resolve it with `getLaunchForChurch` (`src/lib/launch/queries.ts`);
+   * both of today's callers pass null pending #203.
+   */
   launchDate: string | null;
 }
 
 function formatLaunchDate(launchDate: string | null): string {
   if (!launchDate) return "";
-  // Stored as a date-only string; format without timezone drift.
-  const parsed = new Date(`${launchDate}T00:00:00`);
+  // A stored launch day is a WALL CLOCK, so both halves of this are pinned:
+  // `parseTargetDate` reads it at UTC midnight, and the formatter names
+  // `APP_TIME_ZONE` explicitly. Without the zone `Intl` follows the RUNTIME's,
+  // which is UTC on the server and the visitor's in a browser — the document
+  // would name a different day depending on where it was rendered
+  // (memory/invariants.md → Date & Time Rendering).
+  const parsed = parseTargetDate(launchDate);
   if (Number.isNaN(parsed.getTime())) return "";
   return parsed.toLocaleDateString("en-US", {
+    timeZone: APP_TIME_ZONE,
     year: "numeric",
     month: "long",
     day: "numeric",

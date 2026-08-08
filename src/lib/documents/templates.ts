@@ -271,6 +271,8 @@ export const DOCUMENT_TEMPLATES: DocumentTemplate[] = [
         autoFill: "church_name",
       },
       {
+        // The token name, not a column name: the day is resolved from the
+        // launch entity (LS-001) — `churches.launch_date` no longer exists.
         key: "launch_date",
         label: "Launch Date",
         required: false,

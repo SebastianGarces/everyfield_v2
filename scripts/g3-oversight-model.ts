@@ -29,6 +29,7 @@ import {
   churches,
   churchMeetings,
   churchPrivacySettings,
+  launches,
   notifications,
   organizationInvitations,
   phaseTransitions,
@@ -38,7 +39,11 @@ import {
   users,
 } from "@/db/schema";
 import { canAccessChurch } from "@/lib/auth/access";
-import { setChurchLaunchDate } from "@/lib/churches/launch-date";
+import {
+  getLaunchForChurch,
+  getLaunchJournal,
+  setLaunchDate,
+} from "@/lib/launch";
 import {
   ALREADY_ASSOCIATED_MESSAGE,
   InvitationError,
@@ -1199,7 +1204,7 @@ async function main() {
     updatedBy: planter.id,
   });
   assert.equal(
-    (await setChurchLaunchDate(planter, plant.id, "2026-09-13")).status,
+    (await setLaunchDate(planter, plant.id, "2026-09-13")).status,
     "changed"
   );
   assert.equal((await rowsFor(plant.id)).length, 0);
@@ -1211,7 +1216,7 @@ async function main() {
     updatedBy: planter.id,
   });
   assert.equal(
-    (await setChurchLaunchDate(planter, plant.id, "2026-10-04")).status,
+    (await setLaunchDate(planter, plant.id, "2026-10-04")).status,
     "changed"
   );
   const afterLaunch = await rowsFor(plant.id);
@@ -1224,7 +1229,7 @@ async function main() {
   ok("launch date changed, sharing ON → one milestone per oversight admin");
 
   // Re-saving the same date is not a milestone, and writes nothing.
-  const resave = await setChurchLaunchDate(planter, plant.id, "2026-10-04");
+  const resave = await setLaunchDate(planter, plant.id, "2026-10-04");
   assert.equal(resave.status, "unchanged");
   assert.equal((await rowsFor(plant.id)).length, 2);
   ok("re-saving the same launch date announces nothing");
@@ -1234,11 +1239,11 @@ async function main() {
   // value meant the third move produced nothing at all. It is now keyed by the
   // change (date + the instant it was written).
   assert.equal(
-    (await setChurchLaunchDate(planter, plant.id, "2026-11-15")).status,
+    (await setLaunchDate(planter, plant.id, "2026-11-15")).status,
     "changed"
   );
   assert.equal(
-    (await setChurchLaunchDate(planter, plant.id, "2026-10-04")).status,
+    (await setLaunchDate(planter, plant.id, "2026-10-04")).status,
     "changed"
   );
   const afterRevert = await rowsFor(plant.id);
@@ -1254,7 +1259,7 @@ async function main() {
   // the role check is what stops the milestone from being able to announce
   // itself. A planter aimed at somebody else's plant fails the access check.
   await assert.rejects(
-    () => setChurchLaunchDate(adminA, plant.id, "2026-11-01"),
+    () => setLaunchDate(adminA, plant.id, "2026-11-01"),
     /Forbidden/,
     "an oversight admin set a plant's launch date"
   );
@@ -1263,16 +1268,50 @@ async function main() {
     .values({ name: "Scratch Foreign Plant" })
     .returning();
   await assert.rejects(
-    () => setChurchLaunchDate(planter, foreignChurch.id, "2026-11-01"),
+    () => setLaunchDate(planter, foreignChurch.id, "2026-11-01"),
     /Forbidden/,
     "a planter set another church's launch date"
   );
-  const [unmoved] = await db
-    .select({ launchDate: churches.launchDate })
-    .from(churches)
-    .where(eq(churches.id, plant.id));
-  assert.equal(unmoved.launchDate, "2026-10-04", "a refused write still wrote");
-  ok("setChurchLaunchDate refuses a non-planter and a foreign church");
+  // Rewritten against the ENTITY (#305/LS-001): the date this used to read off
+  // `churches.launch_date` now lives on `launches.target_date`, and the column
+  // is gone. Same assertion, same reason — a refused write must not have moved
+  // the day — read from the row that owns it.
+  const unmoved = await getLaunchForChurch(plant.id);
+  assert.equal(
+    unmoved?.targetDate,
+    "2026-10-04",
+    "a refused write still wrote"
+  );
+  ok("setLaunchDate refuses a non-planter and a foreign church");
+
+  // LS-002 — the journal. Every set/move above is recorded with actor, old → new
+  // and the status either side, and the FIRST commitment is `scheduled` while
+  // every later move is `moved` (a `postponed` arm exists for the postpone flow
+  // and is not exercised from this harness). The refused writes must appear
+  // nowhere: a journal that records attempts is not a journal of what happened.
+  const journal = await getLaunchJournal(unmoved!.id, plant.id);
+  assert.deepEqual(
+    journal.map((row) => row.event),
+    ["scheduled", "moved", "moved", "moved"],
+    "the launch journal did not match the four dates that were actually written"
+  );
+  assert.equal(
+    journal[0].previousTargetDate,
+    null,
+    "first commitment had a from-date"
+  );
+  assert.equal(journal[0].targetDate, "2026-09-13");
+  assert.equal(journal[0].previousStatus, "planning");
+  assert.equal(journal[0].status, "scheduled");
+  assert.equal(journal[1].previousTargetDate, "2026-09-13");
+  assert.equal(journal[1].targetDate, "2026-10-04");
+  assert.ok(
+    journal.every((row) => row.actorUserId === planter.id),
+    "the journal attributed a change to somebody other than the planter"
+  );
+  ok(
+    "every launch-date change is journaled with actor and old → new; refusals are not"
+  );
 
   await db.delete(notifications).where(eq(notifications.churchId, plant.id));
 
@@ -1996,6 +2035,11 @@ async function main() {
   await db
     .delete(organizationInvitations)
     .where(inArray(organizationInvitations.targetChurchId, seededChurches));
+  // The launch entity (#305/LS-001). Deleting the launch cascades its journal,
+  // milestones and milestone/task links — but it must happen BEFORE `users`
+  // below, because `launch_events.actor_user_id` points at the planter and that
+  // FK does not cascade.
+  await db.delete(launches).where(inArray(launches.churchId, seededChurches));
 
   // ...and then the ENTITIES themselves, innermost FK first. Deleting only the
   // child rows left every seeded church, user, network and sending church

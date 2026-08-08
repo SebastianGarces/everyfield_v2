@@ -23,6 +23,10 @@ import {
   getDashboardMetrics,
   getRecentActivity,
 } from "@/lib/dashboard/service";
+import { getLaunchForChurch } from "@/lib/launch/queries";
+import { getLaunchReadiness } from "@/lib/launch/milestones";
+import { daysUntilTarget } from "@/lib/launch/countdown";
+import { LaunchStatusCard } from "@/components/launch/launch-status-card";
 import { PHASES, type PhaseNumber } from "@/lib/constants";
 import { MetricCard } from "@/components/dashboard/metric-card";
 import { ActivityFeed } from "@/components/dashboard/activity-feed";
@@ -87,16 +91,37 @@ export default async function DashboardPage({
   const churchId = user!.churchId!;
   const userId = user!.id;
 
-  const [church, metrics, activities, hasPlanterUser] = await Promise.all([
-    getCurrentUserChurch(),
-    getDashboardMetrics(churchId, userId),
-    getRecentActivity(churchId),
-    // OB-010: the IMPLICIT assignment — a `users` row with the planter role
-    // pointing here. It is what tells a church that predates OB-004 apart from
-    // one that genuinely has nobody leading it, and the two get opposite
-    // treatment: the first is left alone, the second is asked.
-    churchHasPlanterUser(churchId),
-  ]);
+  const [church, metrics, activities, hasPlanterUser, launchCard] =
+    await Promise.all([
+      getCurrentUserChurch(),
+      getDashboardMetrics(churchId, userId),
+      getRecentActivity(churchId),
+      // OB-010: the IMPLICIT assignment — a `users` row with the planter role
+      // pointing here. It is what tells a church that predates OB-004 apart from
+      // one that genuinely has nobody leading it, and the two get opposite
+      // treatment: the first is left alone, the second is asked.
+      churchHasPlanterUser(churchId),
+      // LS-001: the launch date moved off the church row onto its own entity
+      // (migration 0032), so step 3's fact is read from here now.
+      //
+      // LS-003/LS-005: readiness rides along on this ARM rather than beside it,
+      // because it is keyed by the launch's id and cannot start until the launch
+      // read has answered. Chained here, the other three arms still overlap
+      // both; hoisted out, the card's progress bar would cost the dashboard a
+      // serial round trip. It is skipped for a launch that has no day (nothing
+      // is seeded until one is named) and for a completed one (the celebrate
+      // card shows the outcome, not a progress bar) — so the extra query is only
+      // run when the card will actually render its answer.
+      getLaunchForChurch(churchId).then(async (row) => ({
+        launch: row,
+        readiness:
+          row?.targetDate && row.status !== "completed"
+            ? await getLaunchReadiness(row.id, churchId)
+            : null,
+      })),
+    ]);
+
+  const { launch, readiness: launchReadiness } = launchCard;
 
   const leadership: ChurchLeadershipState = {
     churchId,
@@ -137,7 +162,7 @@ export default async function DashboardPage({
     // the declaration (including the explicit "no date yet"), this line is what
     // reads it instead — `OnboardingFacts` is optional per fact so that until
     // then the answer is honestly "incomplete" rather than wrong.
-    journeyDeclared: !!church?.launchDate || (church?.currentPhase ?? 0) > 0,
+    journeyDeclared: !!launch?.targetDate || (church?.currentPhase ?? 0) > 0,
     // Step 4's fact: anybody at all on the plant's list (OB-006).
     peopleAdded: metrics.totalPeople > 0,
   };
@@ -220,7 +245,29 @@ export default async function DashboardPage({
           <div className="lg:col-span-2">
             <ActivityFeed activities={activities} />
           </div>
-          <div>
+          <div className="space-y-6">
+            {/* LS-005: the compact countdown/status card. The countdown is
+                computed HERE with `daysUntilTarget` — the one implementation,
+                shared with /launch and the phase-engine snapshot — and handed
+                down as a number, so no card can re-derive it and disagree
+                (#338). */}
+            <LaunchStatusCard
+              targetDate={launch?.targetDate ?? null}
+              status={launch?.status ?? null}
+              daysUntil={daysUntilTarget(
+                launch?.targetDate ?? null,
+                new Date()
+              )}
+              readiness={launchReadiness}
+              outcome={
+                launch
+                  ? {
+                      attendanceCount: launch.attendanceCount,
+                      decisionsCount: launch.decisionsCount,
+                    }
+                  : undefined
+              }
+            />
             <QuickActions />
           </div>
         </div>

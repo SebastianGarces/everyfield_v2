@@ -16,6 +16,11 @@
 //     queries; the snapshot itself carries `churchId` for auditability.
 // ============================================================================
 
+// Type-only import: erased at build time, so the snapshot contract names the
+// launch lifecycle the schema defines instead of re-declaring it as a string
+// union that could drift from `launches.status`.
+import type { LaunchStatus } from "@/db/schema/launch";
+
 /**
  * The 8 canonical ministry roles a plant must fill before launch
  * (CSF-7, rubric-v0 Part A). Coverage of these 8 is a load-bearing signal.
@@ -158,7 +163,12 @@ export interface TrainingSignals {
   isEmpty: boolean;
 }
 
-/** Launch-date countdown (PE-004). `launch_date` lives on the church entity. */
+/**
+ * Launch-date countdown (PE-004). The date lives on the LAUNCH entity
+ * (`launches.target_date`) as of LS-001 / migration 0032 — the church row's
+ * `launch_date` column was dropped, and the field names below are kept as they
+ * were so no consumer of the snapshot had to change.
+ */
 export interface LaunchSignals {
   /** ISO date (yyyy-mm-dd) of the target launch, or `null` if unset. */
   launchDate: string | null;
@@ -171,6 +181,53 @@ export interface LaunchSignals {
   isPastDue: boolean;
   /** No launch date set yet. */
   isEmpty: boolean;
+
+  // --------------------------------------------------------------------------
+  // Status, readiness and outcome (LS-008). ADDITIVE, AND THEREFORE OPTIONAL.
+  //
+  // This interface is also the shape a PERSISTED snapshot is read back as
+  // (`computeSnapshotDelta` compares an assessment's stored JSON against a fresh
+  // one), and every snapshot written before LS-008 lacks these keys. Optional is
+  // the honest description of that: the builder always sets them, a stored
+  // snapshot from last month does not have them, and a reader must not assume.
+  //
+  // WHAT THEY ARE NOT: none of these advance anything. Recording a launch is a
+  // material event and nothing more — the engine stays ADVISORY (ruled
+  // 2026-08-04), `current_phase` is copied from the church row, and no fact here
+  // is consulted to change it. `assembleFactSnapshot` is pure; the phase only
+  // ever moves through the transition service.
+  // --------------------------------------------------------------------------
+
+  /**
+   * The launch lifecycle: `planning` | `scheduled` | `postponed` | `completed`.
+   * `null` means the plant has no launch row at all — a different fact from a
+   * launch being planned with no day named, which the countdown fields collapse
+   * together but this one does not.
+   */
+  status?: LaunchStatus | null;
+  /** The day happened and the planter recorded it (`status = 'completed'`). */
+  isCompleted?: boolean;
+  /** The day was committed to and then moved (LS-009). */
+  isPostponed?: boolean;
+  /** An outcome record exists (`outcome_recorded_at is not null`). */
+  outcomeRecorded?: boolean;
+  /**
+   * People present on the day. `null` = not recorded, which is NOT `0` — zero
+   * is a real answer and the judge must not be told nobody came when nobody
+   * counted.
+   */
+  attendanceCount?: number | null;
+  /** Decisions/responses on the day. `null` = not recorded, never `0`. */
+  decisionsCount?: number | null;
+  /** Playbook readiness milestones seeded for this launch (LS-003). */
+  readinessTotalCount?: number;
+  /** How many of them are complete. */
+  readinessCompletedCount?: number;
+  /**
+   * Completed ÷ total, 0..1. `null` when nothing has been seeded — a plant with
+   * no readiness list is not 0% ready, it has no list.
+   */
+  readinessCompletionRate?: number | null;
 }
 
 /** One manual self-attestation merged in from `plant_signals` (PE-005). */

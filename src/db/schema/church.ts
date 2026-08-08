@@ -1,5 +1,4 @@
 import {
-  date,
   integer,
   pgTable,
   timestamp,
@@ -47,8 +46,14 @@ export const churches = pgTable("churches", {
     .default(7)
     .notNull(),
   inactivityAlertDays: integer("inactivity_alert_days").default(14).notNull(),
-  // Phase Engine: target public launch date, feeds the countdown signal (PE-004).
-  launchDate: date("launch_date"),
+  // NO `launch_date` HERE. It lived on this row until migration 0032 dropped it
+  // (LS-001, #285's ruling): Launch Sunday is an entity now — `launches`, one
+  // live row per church, in `./launch.ts` — and the entity is its ONLY owner.
+  // A mirrored copy on the church row is what makes two surfaces disagree about
+  // the same day, so there is deliberately nothing to mirror. Read the date
+  // through `src/lib/launch/queries.ts`; write it through
+  // `src/lib/launch/service.ts`.
+  //
   // Phase Engine: set when a material event occurs; compared against the latest
   // assessment's generated_at to mark a plant "dirty" for re-assessment (PE-010).
   lastMaterialEventAt: timestamp("last_material_event_at"),

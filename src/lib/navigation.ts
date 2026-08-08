@@ -10,6 +10,7 @@ import {
   LayoutDashboard,
   ListChecks,
   MessageSquare,
+  Rocket,
   Sparkles,
   Users,
   UsersRound,
@@ -71,6 +72,17 @@ export const mainNavItems: NavItem[] = [
     title: "Plant Intelligence",
     href: "/phase",
     icon: Sparkles,
+    requiresChurch: true,
+  },
+  // LS-004's "nav-level entry". CHURCH-ROLE NAV ONLY, and deliberately absent
+  // from both oversight lists: `/launch` is the plant's own surface and answers
+  // an oversight admin with a redirect, so offering them the link would be the
+  // #260 failure (a nav item that goes nowhere) in a new costume. Oversight
+  // reads the same launch date from `/oversight/plants`.
+  {
+    title: "Launch",
+    href: "/launch",
+    icon: Rocket,
     requiresChurch: true,
   },
   {

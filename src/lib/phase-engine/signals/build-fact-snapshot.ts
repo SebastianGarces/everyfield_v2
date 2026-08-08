@@ -17,6 +17,7 @@
 // essentially no activity so the judge can produce onboarding guidance.
 // ============================================================================
 
+import { daysUntilTarget } from "@/lib/launch/countdown";
 import {
   getActiveMembershipsByPerson,
   getChurch,
@@ -29,9 +30,13 @@ import {
   getPlantSignals,
   getTeamLeaderPersonIds,
   getTrainingCompletions,
+  getLaunch,
+  getLaunchMilestoneRows,
   getTrainingPrograms,
   type ChurchRow,
   type CommitmentRow,
+  type LaunchRow,
+  type LaunchMilestoneRow,
   type FollowUpRow,
   type LeadershipPersonRow,
   type MinistryTeamRow,
@@ -380,27 +385,92 @@ function buildTrainingSignals(
 // Launch countdown
 // ----------------------------------------------------------------------------
 
+/**
+ * PE-004's countdown, now sourced from the LAUNCH ENTITY (`launches.target_date`)
+ * rather than the dropped `churches.launch_date` column (LS-001, migration 0032).
+ * A launch with no row, and a `planning` launch with no day named, both produce
+ * the same empty countdown — the signal's question is only ever "which day".
+ *
+ * FIXED HERE: #338, the off-by-one #303 hit first. This used to be
+ * `diffInDays(asOf, target)`, which subtracts a wall-clock DAY from an INSTANT
+ * and floors the leftover fraction away — so from 00:00:01 UTC onward the answer
+ * was a full day short and a plant read "past due" on the morning of its own
+ * launch, while `/oversight/plants` (fixed in PR #339) read it correctly. Both
+ * sides are floored to a UTC midnight before subtracting, and the one
+ * implementation lives in `src/lib/launch/countdown.ts` so the two surfaces
+ * cannot drift again.
+ *
+ * Note the sibling `diffInDays` call sites in this file are NOT the same bug and
+ * must not be "fixed": days-since-last-meeting, idle days and tenure compare two
+ * genuine instants, where flooring is correct.
+ */
+/**
+ * STATUS, READINESS AND OUTCOME JOINED THE COUNTDOWN with LS-008: the snapshot
+ * now carries what the launch IS (planning / scheduled / postponed / completed),
+ * how far its Playbook readiness list has got, and — once the day is on the
+ * record — the counts the planter wrote down.
+ *
+ * WHAT THIS DELIBERATELY DOES NOT DO. It does not touch `currentPhase`, and
+ * nothing downstream of it may: recording a completed launch is a MATERIAL
+ * event, not an advancement (ruled 2026-08-04 — the engine stays ADVISORY).
+ * `assembleFactSnapshot` copies `currentPhase` straight off the church row, so
+ * two snapshots that differ only by a recorded launch differ only in this
+ * section — pinned by `build-fact-snapshot.test.ts`.
+ *
+ * `isEmpty` still means "no day named", unchanged, because that is what every
+ * existing consumer reads it as. A launch that exists in `planning` with no date
+ * is still an empty countdown; `status` is what tells the two apart now.
+ */
 function buildLaunchSignals(
-  launchDate: string | null,
+  launch: LaunchRow | null,
+  milestones: LaunchMilestoneRow[],
   asOf: Date
 ): LaunchSignals {
-  if (!launchDate) {
+  const targetDate = launch?.targetDate ?? null;
+  const daysUntilLaunch = daysUntilTarget(targetDate, asOf);
+
+  const readinessTotalCount = milestones.length;
+  const readinessCompletedCount = milestones.filter(
+    (milestone) => milestone.completedAt !== null
+  ).length;
+
+  const facts = {
+    status: launch?.status ?? null,
+    isCompleted: launch?.status === "completed",
+    isPostponed: launch?.status === "postponed",
+    outcomeRecorded: launch?.outcomeRecordedAt != null,
+    attendanceCount: launch?.attendanceCount ?? null,
+    decisionsCount: launch?.decisionsCount ?? null,
+    readinessTotalCount,
+    readinessCompletedCount,
+    // No list is not 0% ready — it is no list, which is a different instruction
+    // to the judge (PE-018's cold-start rule, applied to readiness).
+    readinessCompletionRate:
+      readinessTotalCount === 0
+        ? null
+        : readinessCompletedCount / readinessTotalCount,
+  } satisfies Partial<LaunchSignals>;
+
+  if (targetDate === null || daysUntilLaunch === null) {
     return {
       launchDate: null,
       daysUntilLaunch: null,
       isPastDue: false,
       isEmpty: true,
+      ...facts,
     };
   }
 
-  const target = parseDateOnly(launchDate);
-  const daysUntilLaunch = diffInDays(asOf, target);
-
   return {
-    launchDate,
+    launchDate: targetDate,
     daysUntilLaunch,
-    isPastDue: daysUntilLaunch < 0,
+    // A launch that HAPPENED is not overdue. `isPastDue` is read as "the day
+    // came and went with nothing to show for it", so a completed launch is
+    // false here however long ago it was — otherwise every plant that launches
+    // successfully accrues an escalating warning for the rest of its life.
+    isPastDue: daysUntilLaunch < 0 && launch?.status !== "completed",
     isEmpty: false,
+    ...facts,
   };
 }
 
@@ -433,6 +503,19 @@ function buildManualSignals(rows: PlantSignalRow[]): ManualSignals {
 /** All church_id-scoped raw rows needed to assemble a snapshot. */
 export interface SnapshotInputs {
   church: ChurchRow;
+  /**
+   * The plant's launch entity, or `null` when it has none (LS-001). Separate
+   * from `church` because it is a separate row now — the countdown used to read
+   * `church.launchDate`, and the whole point of migration 0032 is that it no
+   * longer can.
+   */
+  launch: LaunchRow | null;
+  /**
+   * The launch's Playbook readiness milestones (LS-003/LS-008). Empty when
+   * nothing has been seeded — which is not the same as nothing being done, and
+   * the builder keeps the two apart.
+   */
+  launchMilestones: LaunchMilestoneRow[];
   commitments: CommitmentRow[];
   visionMeetings: VisionMeetingRow[];
   followUp: FollowUpRow[];
@@ -476,7 +559,11 @@ export function assembleFactSnapshot(
     committedPeople,
     coreGroup.committedCount
   );
-  const launch = buildLaunchSignals(inputs.church.launchDate, asOf);
+  const launch = buildLaunchSignals(
+    inputs.launch ?? null,
+    inputs.launchMilestones,
+    asOf
+  );
   const manual = buildManualSignals(inputs.plantSignals);
 
   // Cold-start (PE-018): no meaningful activity anywhere in the system.
@@ -531,8 +618,12 @@ export async function buildFactSnapshot(
     throw new Error(`buildFactSnapshot: church not found: ${churchId}`);
   }
 
-  // Independent church_id-scoped reads (NFR-PE-6), run concurrently.
+  // Independent church_id-scoped reads (NFR-PE-6), run concurrently. The launch
+  // joined this list with LS-001: it is a row of its own now, not a column on
+  // the church, so it is one more parallel read rather than one more column.
   const [
+    launch,
+    launchMilestones,
     commitments,
     visionMeetings,
     followUp,
@@ -545,6 +636,8 @@ export async function buildFactSnapshot(
     trainingCompletions,
     plantSignals,
   ] = await Promise.all([
+    getLaunch(churchId),
+    getLaunchMilestoneRows(churchId),
     getCommitments(churchId),
     getCompletedVisionMeetings(churchId),
     getOpenFollowUpContacts(churchId),
@@ -562,6 +655,8 @@ export async function buildFactSnapshot(
     churchId,
     {
       church,
+      launch,
+      launchMilestones,
       commitments,
       visionMeetings,
       followUp,

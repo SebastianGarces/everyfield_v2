@@ -225,6 +225,13 @@
       "when": 1785946522697,
       "tag": "0031_association_events",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1786162726034,
+      "tag": "0032_launches",
+      "breakpoints": true
     }
   ]
 }

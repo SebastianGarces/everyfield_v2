@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
 
 import {
   NOT_RECORDED,
-  daysUntilLaunch,
   formatAssociationProvenance,
   formatLaunchCountdown,
   formatPhase,
@@ -15,6 +16,12 @@ import {
   summarizeSendingChurchRoster,
   tasksStats,
 } from "./presentation";
+// The countdown oversight renders is the CANON, not a local copy: this module
+// used to carry a byte-for-byte duplicate of it (PR #339), which is how #338
+// shipped twice. These cases stay here because they pin what the oversight
+// listing composes — `formatLaunchCountdown(daysUntilTarget(...))` — and that
+// pairing is this module's, even though the arithmetic no longer is.
+import { daysUntilTarget } from "@/lib/launch/countdown";
 import type {
   MeetingsAggregate,
   MinistryTeamsAggregate,
@@ -47,9 +54,9 @@ test("the countdown is computed at UTC midnight, so it cannot drift with TZ", ()
   const asOf = new Date("2026-08-05T23:30:00.000Z");
   // The launch date is a wall-clock day. Parsed at UTC midnight it is 27 days
   // out; parsed in a negative-offset local zone it would be 26 or 28.
-  assert.equal(daysUntilLaunch("2026-09-01", asOf), 27);
-  assert.equal(daysUntilLaunch(null, asOf), null);
-  assert.equal(daysUntilLaunch("not-a-date", asOf), null);
+  assert.equal(daysUntilTarget("2026-09-01", asOf), 27);
+  assert.equal(daysUntilTarget(null, asOf), null);
+  assert.equal(daysUntilTarget("not-a-date", asOf), null);
 });
 
 test("both sides are floored to a UTC day, so the answer holds all day long", () => {
@@ -63,22 +70,22 @@ test("both sides are floored to a UTC day, so the answer holds all day long", ()
   ]) {
     const asOf = new Date(at);
     assert.equal(
-      daysUntilLaunch("2026-08-05", asOf),
+      daysUntilTarget("2026-08-05", asOf),
       0,
       `launch today @ ${at}`
     );
     assert.equal(
-      daysUntilLaunch("2026-08-06", asOf),
+      daysUntilTarget("2026-08-06", asOf),
       1,
       `launch tomorrow @ ${at}`
     );
     assert.equal(
-      daysUntilLaunch("2026-08-04", asOf),
+      daysUntilTarget("2026-08-04", asOf),
       -1,
       `launched yesterday @ ${at}`
     );
     assert.equal(
-      daysUntilLaunch("2026-08-28", asOf),
+      daysUntilTarget("2026-08-28", asOf),
       23,
       `23 days out @ ${at}`
     );
@@ -90,15 +97,15 @@ test("the launch-day boundary reads as today, not as already launched", () => {
   // be reported as having launched yesterday.
   const morningOfLaunch = new Date("2026-08-05T14:00:00.000Z");
   assert.equal(
-    formatLaunchCountdown(daysUntilLaunch("2026-08-05", morningOfLaunch)),
+    formatLaunchCountdown(daysUntilTarget("2026-08-05", morningOfLaunch)),
     "Launches today"
   );
   assert.equal(
-    formatLaunchCountdown(daysUntilLaunch("2026-08-06", morningOfLaunch)),
+    formatLaunchCountdown(daysUntilTarget("2026-08-06", morningOfLaunch)),
     "1 day to launch"
   );
   assert.equal(
-    formatLaunchCountdown(daysUntilLaunch("2026-08-04", morningOfLaunch)),
+    formatLaunchCountdown(daysUntilTarget("2026-08-04", morningOfLaunch)),
     "Launched 1 day ago"
   );
 });
@@ -110,6 +117,33 @@ test("a past launch date reads as past, not as a negative number", () => {
   assert.equal(formatLaunchCountdown(42), "42 days to launch");
   assert.equal(formatLaunchCountdown(-1), "Launched 1 day ago");
   assert.equal(formatLaunchCountdown(-30), "Launched 30 days ago");
+});
+
+test("this module owns no launch-countdown arithmetic of its own", () => {
+  // The counterpart of the guard in `src/components/launch/presentation.test.ts`
+  // — and this one has teeth, because THIS file is where the second copy of
+  // `daysUntilTarget` actually lived (PR #339). Two implementations of exactly
+  // this calculation is how #338 shipped twice; the canon is
+  // `src/lib/launch/countdown.ts` and there is to be no third.
+  //
+  // Scoped to this file on purpose. `read.ts` still owns day math, and rightly:
+  // its meeting cadence and idle-day figures diff two genuine INSTANTS, where
+  // flooring is correct. The bug was never flooring — it was mixing a
+  // wall-clock DAY with an instant (memory/invariants.md → Date & Time
+  // Rendering).
+  const code = readFileSync(
+    path.join(process.cwd(), "src/lib/oversight/presentation.ts"),
+    "utf8"
+  )
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/.*$/gm, "");
+  assert.ok(
+    !/86_?400_?000|1000 \* 60 \* 60 \* 24|MS_PER_DAY/.test(code),
+    "presentation.ts does day arithmetic — call daysUntilTarget (#338)"
+  );
+  // And it must not re-acquire the old name as a local function, which would be
+  // the same duplication wearing the same label.
+  assert.doesNotMatch(code, /function daysUntilLaunch/);
 });
 
 // ----------------------------------------------------------------------------

@@ -31,6 +31,10 @@ Two team members of a planterless plant write two DIFFERENT rows — `users` for
 
 The one path left unguarded is an answer from whoever already holds the seat: once filled, `canAnswerLeadershipQuestion` admits only the planter, so there is no second writer.
 
+## The snapshot CTE must be a dependency of the write (#305, WS2)
+
+A plain CTE evaluates lazily. In `with current as (select … for update), updated as (update …), journal as (insert … from updated join current …)` nothing pulls `current` until the journal — *after* the UPDATE. `FOR UPDATE` then skips the row the current command just wrote, `current` comes back empty, the join matches nothing, and the journal row is silently absent. Fix structurally: the UPDATE reads the snapshot (`update launches l … from current c where l.id = c.id`) and returns the old values itself. Reference: `recordLaunchOutcomeStatement` (`src/lib/launch/outcome.ts`), pinned by `outcome.test.ts`; `setLaunchDateStatement`'s `inserted` CTE forces `current` first via its `not exists` predicate — deleting that predicate breaks its journal the same silent way.
+
 ## Marker-last (`finalizeAttendance`)
 
 `church_meetings.actual_attendance` is written only by `finalizeAttendance()`, so non-null *is* the idempotency key — and because its compare-and-set runs after the downstream emit, a meeting can never be finalized without its follow-up tasks. Duplicates are blocked by `tasks_meeting_evaluation_unique_idx`.
