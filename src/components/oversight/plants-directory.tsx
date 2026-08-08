@@ -12,6 +12,18 @@
 // The header says so in one line, so an admin is never left guessing whether a
 // short list means "few plants" or "several hiding".
 //
+// THE PAGE IS CAPPED, NOT FLUID. `container mx-auto max-w-6xl` is the same
+// wrapper `/phase` uses — the app's existing shape for a read-dense page. Left
+// fluid, a row spread its three facts across ~2000px on a wide display and the
+// eye could no longer carry a label to its value.
+//
+// A ROW IS A SURFACE, NOT A HAIRLINE. The dashboard shell paints
+// `bg-background`, so a row drawn with `border` alone was a 1.17:1 edge on a
+// near-identical field — invisible at arm's length. Rows now use the same
+// `bg-card` + `border` + `shadow-sm` recipe as the panels on /people and
+// /tasks, so the card carries a real surface and the elevation does the
+// separating.
+//
 // The whole card is clickable through the title link's `after:` overlay rather
 // than by wrapping the card in an anchor: the accessible name of the link stays
 // the plant's name instead of a paragraph of facts read aloud in sequence.
@@ -33,10 +45,18 @@ export function PlantsDirectory({
   scopeLabel: string;
 }) {
   return (
-    <div className="space-y-8 p-6">
-      <header className="space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight">Church plants</h1>
-        <p className="text-muted-foreground max-w-2xl text-pretty">
+    <div className="container mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
+      <header className="space-y-1">
+        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+          Church plants
+        </h1>
+        {/*
+          Ink, not the muted role: this paragraph sits on the shell's
+          `bg-background`, where muted measures 4.39:1 — below WCAG AA for
+          normal text. Its subordination to the heading comes from size, which
+          is free, rather than from a gray that costs legibility.
+        */}
+        <p className="text-foreground max-w-2xl text-sm text-pretty">
           Every plant associated with your {scopeLabel}. All of them are listed
           here — what each one shares beyond this row is the plant&apos;s own
           decision, and you will see it on their page.
@@ -58,10 +78,10 @@ export function PlantsDirectory({
 
 function PlantRow({ plant }: { plant: OversightPlantSummary }) {
   return (
-    <li className="hover:border-foreground/25 hover:bg-accent/40 relative rounded-lg border p-5 transition-colors">
+    <li className="bg-card hover:border-foreground/20 relative space-y-4 rounded-xl border p-5 shadow-sm transition-[border-color,box-shadow] hover:shadow-md">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
-          <h2 className="text-lg font-semibold tracking-tight">
+          <h2 className="text-xl font-semibold tracking-tight">
             <Link
               href={`/oversight/plants/${plant.churchId}`}
               className="cursor-pointer after:absolute after:inset-0 after:content-['']"
@@ -69,26 +89,36 @@ function PlantRow({ plant }: { plant: OversightPlantSummary }) {
               {plant.name}
             </Link>
           </h2>
-          <p className="text-muted-foreground text-sm">
-            {plant.location ?? "Location not set"}
-          </p>
+          {/*
+            An unset location renders NOTHING here rather than "Location not
+            set". Repeated verbatim down every row, that line carried no
+            information and competed with the plant's own name for the eye. The
+            detail page still states it outright — there it is a fact about the
+            one plant you are reading, not noise multiplied by the row count.
+          */}
+          {plant.location ? (
+            <p className="text-muted-foreground text-sm">{plant.location}</p>
+          ) : null}
         </div>
-        <Badge variant="outline" className="shrink-0">
+        {/*
+          Filled, not outlined. Phase is the one attribute an admin compares
+          straight down the list, so it holds a fixed trailing position and
+          needs enough weight to be found there — an outline chip on a white
+          card had neither containment nor presence.
+        */}
+        <Badge variant="secondary" className="shrink-0 font-medium">
           {formatPhase(plant.currentPhase)}
         </Badge>
       </div>
 
-      <PlantFacts
-        plant={plant}
-        className="mt-4 grid gap-x-8 gap-y-3 text-sm sm:grid-cols-2 lg:grid-cols-3"
-      />
+      <PlantFacts plant={plant} />
     </li>
   );
 }
 
 function EmptyDirectory({ scopeLabel }: { scopeLabel: string }) {
   return (
-    <div className="rounded-lg border border-dashed p-10 text-center">
+    <div className="bg-card rounded-xl border border-dashed p-10 text-center">
       <h2 className="font-semibold">No plants yet</h2>
       <p className="text-muted-foreground mx-auto mt-2 max-w-md text-sm text-pretty">
         A plant appears here once its planter accepts an invitation from your{" "}
@@ -97,7 +127,7 @@ function EmptyDirectory({ scopeLabel }: { scopeLabel: string }) {
       <p className="mt-4 text-sm">
         <Link
           href="/oversight/invitations"
-          className="text-primary cursor-pointer underline underline-offset-4"
+          className="text-primary cursor-pointer font-medium underline underline-offset-4"
         >
           Invite a planter
         </Link>
