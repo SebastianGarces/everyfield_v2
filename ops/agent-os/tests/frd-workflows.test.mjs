@@ -458,18 +458,37 @@ const labelledOk = (prompt, opts) => ({
 /**
  * The track's worktree/branch prep. It runs before any workstream, so every
  * build-path stub needs it: answering `{}` blocks the track before it starts.
+ *
+ * The two shas are equal because a freshly cut branch IS its base commit. The
+ * loop asserts that, which is what "cut from the remote tip" is anchored on.
  */
+const BASE_SHA = "700c33300000000000000000000000000000cafe";
 const prepped = (prompt) => ({
   ready: true,
   branch: prompt.match(/-b (\S+)/)?.[1] || "feature/x",
+  headSha: BASE_SHA,
+  baseSha: BASE_SHA,
+});
+
+/** The publish step before integration G3: worktree and remote agree. */
+const pushedOk = () => ({
+  pushed: true,
+  headSha: "f604b2b00000000000000000000000000000beef",
+  remoteSha: "f604b2b00000000000000000000000000000beef",
 });
 
 /** Answers the claim step with `inProgressNow`, and fails any later gate fast. */
 const replyWith = (inProgressNow, claimed) => (prompt, opts) => {
   if (opts.label?.startsWith("start:")) return { claimed, inProgressNow };
   if (opts.label?.startsWith("prep:")) return prepped(prompt);
+  if (opts.label?.startsWith("push:")) return pushedOk();
   if (opts.label?.startsWith("impl:"))
-    return { summary: "did the thing", filesTouched: [], notes: "" };
+    return {
+      summary: "did the thing",
+      filesTouched: [],
+      notes: "",
+      rootCauseAddressed: "answered",
+    };
   if (opts.label?.startsWith("verify:"))
     return { verdict: "FAIL", gates: [], blockingReason: "stubbed fail" };
   if (opts.label?.startsWith("block:")) return { commented: true };
@@ -561,12 +580,18 @@ const replyShip =
     if (prImpl && l.startsWith("pr:")) return prImpl(prompt, opts);
     if (l.startsWith("start:")) return { claimed: [101], inProgressNow: [101] };
     if (l.startsWith("prep:")) return prepped(prompt);
+    if (l.startsWith("push:")) return pushedOk();
+    if (l.startsWith("cleanup:")) return { removed: ["everything"] };
     if (l.startsWith("impl:") || l.startsWith("repair:"))
       return {
         committed: true,
         filesChanged: [],
         summary: "ok",
         selfCheckPassed: true,
+        // A retry must answer the named cause; a first attempt has none to
+        // answer. Filling both is what an honest implementer returns.
+        rootCause: "the named ReferenceError",
+        rootCauseAddressed: "moved the import; `pnpm test` is green",
       };
     if (l.startsWith("integrate:"))
       return { merged: branchesInIntegratePrompt(prompt), conflicts: [] };
@@ -1280,6 +1305,505 @@ test("a delivery failure is reported in its own bucket, not folded into blocked"
     result.nextStep,
     /do NOT review or rebuild the code/,
     "the report must spend the reader's attention on the retry, not the diff"
+  );
+});
+
+// ---------------------------------------------------------------------------
+// build-until-done: the track base is the REMOTE tip
+//
+// The maiden staged-tracks run (wf_74fd1c21) cut its track branch from the local
+// `main` at 14c5d33 while `origin/main` was at 700c333. Its verifiers then read a
+// two-commit-old `ops/agent-os/dod.md` out of their worktrees and graded against
+// it, and PR #333 landed on `mergeStateStatus: BEHIND` — the ruleset requires
+// up-to-date branches — so auto-merge could not fire without a manual
+// `gh pr update-branch`. A local ref is whatever the checkout last fetched.
+// ---------------------------------------------------------------------------
+
+const prepPrompt = (calls) =>
+  calls.find((c) => c.kind === "agent" && c.label?.startsWith("prep:"))?.prompt;
+
+test("the track branch is fetched and cut from origin/main, not the local ref", async () => {
+  const { calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    replyShip(passing([]))
+  );
+  const prompt = prepPrompt(calls);
+  assert.match(
+    prompt,
+    /git fetch origin/,
+    "an unfetched remote-tracking ref is just a stale local ref with a longer name"
+  );
+  assert.match(
+    prompt,
+    /git worktree add -b \S+ \S+ origin\/main\b/,
+    "the branch is cut from the remote tip"
+  );
+  assert.doesNotMatch(
+    prompt,
+    /git worktree add -b \S+ \S+ main\b/,
+    "cutting from the local `main` is the maiden run's defect verbatim"
+  );
+});
+
+test("a bare base is normalised onto the remote; an explicit sha is not", async () => {
+  const bare = await runBuild(
+    [buildUnit("alpha", 101)],
+    replyShip(passing([])),
+    {
+      base: "main",
+    }
+  );
+  assert.match(prepPrompt(bare.calls), /origin\/main/);
+
+  const sha = "14c5d33abc0000000000000000000000000000ff";
+  const pinned = await runBuild(
+    [buildUnit("alpha", 101)],
+    replyShip(passing([])),
+    { base: sha }
+  );
+  assert.match(
+    prepPrompt(pinned.calls),
+    new RegExp(`git worktree add -b \\S+ \\S+ ${sha}`),
+    "a deliberate pin must survive normalisation"
+  );
+});
+
+test("a track cut from a stale base is blocked before a workstream runs", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    (prompt, opts) =>
+      opts.label?.startsWith("prep:")
+        ? {
+            ready: true,
+            branch: prompt.match(/-b (\S+)/)?.[1],
+            // What the maiden run actually did: cut from two commits back.
+            headSha: "14c5d33abc0000000000000000000000000000ff",
+            baseSha: BASE_SHA,
+          }
+        : replyShip(passing([]))(prompt, opts)
+  );
+  assert.ok(
+    !calls.some((c) => c.label?.startsWith("impl:")),
+    "building on a stale base is caught before any code is written on it"
+  );
+  assert.equal(result.blocked.length, 1);
+  assert.match(
+    result.blocked[0].reason,
+    /origin\/main is at/,
+    "the report must name both shas, not just say something was wrong"
+  );
+});
+
+// ---------------------------------------------------------------------------
+// build-until-done: push BEFORE the integration verifier
+//
+// G3 drives the branch's preview deployment, and the preview is built from
+// `origin/<branch>`. On #307 the worktree sat a commit ahead of the remote for
+// two attempts, so the gate kept reporting — convincingly — on code the fix had
+// already replaced. The ordering is the guarantee.
+// ---------------------------------------------------------------------------
+
+const integrationVerify = (calls, track = "alpha") =>
+  calls.filter(
+    (c) => c.kind === "agent" && c.label?.startsWith(`verify:${track}#`)
+  );
+
+test("the branch is pushed and the shas asserted before integration G3 runs", async () => {
+  const { calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    replyShip(passing([]))
+  );
+  const push = calls.find((c) => c.label?.startsWith("push:"));
+  const verify = integrationVerify(calls)[0];
+  assert.ok(
+    push,
+    "the loop must publish the branch itself, not hope open-pr did"
+  );
+  assert.ok(
+    calls.indexOf(push) < calls.indexOf(verify),
+    "pushing after the verifier would validate a preview built from the previous commit"
+  );
+  assert.match(push.prompt, /git -C \S+ push -u origin \S+/);
+  assert.match(
+    push.prompt,
+    /rev-parse origin\/\S+/,
+    "the assertion is a sha comparison, not a successful push"
+  );
+  assert.match(
+    verify.prompt,
+    /origin\/feature\/alpha` is at `f604b2b/,
+    "the verifier is told which sha it is entitled to see"
+  );
+});
+
+test("a worktree ahead of its remote is never validated", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    (prompt, opts) =>
+      opts.label?.startsWith("push:")
+        ? {
+            pushed: true,
+            // #307 exactly: local a4c5ede, origin f604b2b.
+            headSha: "a4c5ede00000000000000000000000000000beef",
+            remoteSha: "f604b2b00000000000000000000000000000beef",
+          }
+        : replyShip(passing([]))(prompt, opts)
+  );
+  assert.equal(
+    integrationVerify(calls).length,
+    0,
+    "a stale preview burns an attempt and teaches the loop something false"
+  );
+  assert.equal(result.blocked.length, 1);
+  assert.match(result.blocked[0].failingGate, /G3/);
+});
+
+// ---------------------------------------------------------------------------
+// build-until-done: the retry carries the root cause, and the fix answers it
+//
+// #307 burned attempts 2 and 3 on a stuck button and a pinned test while the
+// `ReferenceError: ChurchBasicsFieldErrors` module-eval crash the verifier had
+// NAMED shipped unfixed three times. Two things failed: the fixer was handed a
+// one-line paraphrase instead of the evidence, and nothing ever asked it what it
+// had done about the named cause.
+// ---------------------------------------------------------------------------
+
+const CRASH =
+  "ReferenceError: ChurchBasicsFieldErrors is not defined\n    at eval (src/app/onboarding/church-basics.tsx:1:1)";
+
+const scopedVerify = (calls) =>
+  calls.filter(
+    (c) => c.kind === "agent" && /^verify:\S+-s\d+w\d+#/.test(c.label || "")
+  );
+
+/** A scoped verifier that fails once with real evidence, then passes. */
+const failsOnceWithEvidence = (impl) => {
+  let seen = 0;
+  return (prompt, opts) => {
+    const l = opts.label || "";
+    if (/^verify:\S+-s\d+w\d+#/.test(l) && ++seen === 1)
+      return {
+        verdict: "FAIL",
+        gates: [{ id: "G2-subset", status: "FAIL", evidence: CRASH }],
+        acceptanceCriteria: [],
+        failingGate: "G2-subset",
+        fixInstructions: "make the page render",
+        summary: "the module crashes on evaluation",
+      };
+    if (impl && l.startsWith("impl:")) return impl(prompt, opts);
+    return replyShip(passing([]))(prompt, opts);
+  };
+};
+
+test("a retry quotes the failing gate's evidence verbatim, not a paraphrase", async () => {
+  const { calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    failsOnceWithEvidence(),
+    { maxAttempts: 2 }
+  );
+  const retry = calls.filter((c) => c.label?.startsWith("impl:"))[1];
+  assert.ok(retry, "a failed scoped verdict must produce a second attempt");
+  assert.ok(
+    retry.prompt.includes(CRASH),
+    "the named error is the whole diagnosis — a summary of it is how #307 went hunting for a button"
+  );
+  assert.match(retry.prompt, /rootCauseAddressed/);
+  assert.match(
+    retry.prompt,
+    /reproduce it yourself/i,
+    "the fixer starts from the named failure, not from what looks wrong to it"
+  );
+});
+
+test("a fix that will not say how it addressed the cause is refused before the verifier", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    failsOnceWithEvidence((prompt) =>
+      /THE ROOT CAUSE IS BELOW/.test(prompt)
+        ? {
+            committed: true,
+            filesChanged: ["src/alpha.ts"],
+            summary: "fixed the stuck button and pinned the test",
+            selfCheckPassed: true,
+            rootCause: "",
+            rootCauseAddressed: "",
+          }
+        : {
+            committed: true,
+            filesChanged: [],
+            summary: "ok",
+            selfCheckPassed: true,
+          }
+    ),
+    { maxAttempts: 2 }
+  );
+  assert.equal(
+    calls.filter((c) => c.label?.startsWith("impl:")).length,
+    2,
+    "the retry still runs — it is the verdict on it that changes"
+  );
+  assert.equal(
+    scopedVerify(calls).length,
+    1,
+    "spending a verifier on a fix that dodged the named cause is how attempts 2 and 3 were burned"
+  );
+  assert.equal(result.blocked.length, 1);
+});
+
+test("an integration failure sent back to a workstream carries its evidence", async () => {
+  // It used to arrive as a fresh attempt 1 with no report at all: the agent was
+  // told to build the unit, not that anything had gone wrong with it.
+  let seen = 0;
+  const { calls } = await runBuild(
+    [
+      buildUnit("schema", 101),
+      { ...buildUnit("ui", 102), dependsOn: ["schema"] },
+    ],
+    (prompt, opts) => {
+      const l = opts.label || "";
+      if (l.startsWith("verify:schema#") && ++seen === 1)
+        return {
+          verdict: "FAIL",
+          gates: [{ id: "G3", status: "FAIL", evidence: CRASH }],
+          acceptanceCriteria: [],
+          failingGate: "G3",
+          failingWorkstream: "schema-s1w1",
+          fixInstructions: "make the page render",
+          summary: "the module crashes on evaluation",
+        };
+      return replyShip(passing([]))(prompt, opts);
+    },
+    { autoMerge: false, maxAttempts: 2 }
+  );
+  const redo = calls.filter(
+    (c) => c.label?.startsWith("impl:") && c.label.includes("s1w1")
+  )[1];
+  assert.ok(redo, "the named workstream is re-run");
+  assert.ok(
+    redo.prompt.includes(CRASH),
+    "the re-run must see the failure it was sent back to fix"
+  );
+  assert.match(redo.prompt, /rootCauseAddressed/);
+});
+
+test("the assembly repair is held to the same root-cause contract", async () => {
+  let seen = 0;
+  const { calls } = await runBuild(
+    [
+      buildUnit("schema", 101),
+      { ...buildUnit("ui", 102), dependsOn: ["schema"] },
+    ],
+    (prompt, opts) => {
+      const l = opts.label || "";
+      if (l.startsWith("verify:schema#") && ++seen === 1)
+        return {
+          verdict: "FAIL",
+          gates: [{ id: "G1", status: "FAIL", evidence: CRASH }],
+          acceptanceCriteria: [],
+          failingGate: "G1",
+          failingWorkstream: "",
+          fixInstructions: "reconcile them",
+          summary: "the two halves contradict each other",
+        };
+      return replyShip(passing([]))(prompt, opts);
+    },
+    { autoMerge: false, maxAttempts: 2 }
+  );
+  const repair = calls.find((c) => c.label?.startsWith("repair:"));
+  assert.ok(repair.prompt.includes(CRASH), "verbatim evidence, here too");
+  assert.match(repair.prompt, /rootCauseAddressed/);
+});
+
+// ---------------------------------------------------------------------------
+// build-until-done: who owns the worktrees at each exit
+//
+// PR #333 was held with `bud-310-ws1*` still on disk (removed by hand later) and
+// #303/#307 blocked with their trees intact — useful only because a human knew
+// where to look. A merged track's tree is dead weight; a held or blocked one's
+// tree is the only re-runnable copy of the work. So one is cleaned and the other
+// is handed over BY NAME.
+// ---------------------------------------------------------------------------
+
+test("a merged track removes its own worktree and branch", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    replyShip(passing([])),
+    { autoMerge: true }
+  );
+  const cleanup = calls.find((c) => c.label === "cleanup:alpha");
+  const merge = calls.find((c) => c.label === "merge:alpha");
+  assert.ok(cleanup, "a merged track owns its leftovers");
+  assert.ok(
+    calls.indexOf(merge) < calls.indexOf(cleanup),
+    "never delete the tree of a branch that has not landed"
+  );
+  assert.match(cleanup.prompt, /\.claude\/worktrees\/bud-alpha/);
+  assert.match(cleanup.prompt, /git worktree remove/);
+  assert.match(cleanup.prompt, /git branch -D/);
+  assert.deepEqual(
+    result.shipped[0].survivingWorktrees,
+    [],
+    "a merged track leaves none"
+  );
+});
+
+test("a PR only queued for auto-merge keeps its worktree", async () => {
+  const { calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    (prompt, opts) =>
+      opts.label?.startsWith("merge:")
+        ? { merged: false, state: "queued-for-auto-merge" }
+        : replyShip(passing([]))(prompt, opts),
+    { autoMerge: true }
+  );
+  assert.ok(
+    !calls.some((c) => c.label === "cleanup:alpha"),
+    "queued is not merged — deleting the tree under it is how the work disappears"
+  );
+});
+
+test("a held track names its surviving worktrees in the PR comment", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    replyShip(passing([warn("spec-question", "is this the intended read?")])),
+    { autoMerge: true }
+  );
+  const hold = calls.find((c) => c.label === "hold:alpha");
+  assert.match(hold.prompt, /Surviving worktrees/);
+  assert.match(
+    hold.prompt,
+    /\.claude\/worktrees\/bud-alpha` on branch `feature\/alpha/,
+    "path AND branch — a path alone does not say what it holds"
+  );
+  assert.ok(
+    !calls.some((c) => c.label === "cleanup:alpha"),
+    "a held track's tree may still be needed to rule on it"
+  );
+  assert.deepEqual(result.shipped[0].survivingWorktrees, [
+    ".claude/worktrees/bud-alpha",
+  ]);
+});
+
+test("a blocked track hands its worktrees over in the exit comment", async () => {
+  const { result, calls } = await runBuild(
+    [
+      buildUnit("schema", 101),
+      { ...buildUnit("ui", 102), dependsOn: ["schema"] },
+      { ...buildUnit("api", 103), dependsOn: ["schema"] },
+    ],
+    (prompt, opts) => {
+      const l = opts.label || "";
+      if (/^verify:\S+-s1w\d+#/.test(l))
+        return {
+          verdict: "FAIL",
+          gates: [{ id: "G2-subset", status: "FAIL", evidence: CRASH }],
+          acceptanceCriteria: [],
+          failingGate: "G2-subset",
+          fixInstructions: "fix it",
+          summary: "nope",
+        };
+      return replyShip(passing([]))(prompt, opts);
+    }
+  );
+  const block = calls.find((c) => c.label === "block:schema");
+  assert.ok(block, "an exhausted track must comment before it goes quiet");
+  assert.match(block.prompt, /Surviving worktrees/);
+  assert.match(
+    block.prompt,
+    /\.claude\/worktrees\/bud-schema-s1w1` on branch `feature\/schema-s1w1/,
+    "the fan-out workstreams' trees are survivors too, not just the track's"
+  );
+  assert.ok(
+    block.prompt.includes(CRASH),
+    "the evidence goes to the human verbatim, as it does to a fixer"
+  );
+  assert.match(
+    block.prompt,
+    /Do NOT remove any worktree/,
+    "a blocked track's tree is the evidence"
+  );
+  assert.ok(
+    result.blocked[0].survivingWorktrees.includes(
+      ".claude/worktrees/bud-schema"
+    ),
+    "the run report repeats them — the first two passes were cleaned up from memory"
+  );
+});
+
+// ---------------------------------------------------------------------------
+// The two file-level mechanisms: the parent idiom and the format hook.
+//
+// Neither is exercised by a stubbed run — one is a doctrine about which command
+// agents are told to use, the other is a shell hook. Both were re-derived live
+// by agents in the first two passes, so both are pinned here as text.
+// ---------------------------------------------------------------------------
+
+const read = (p) => fs.readFileSync(path.join(ROOT, p), "utf8");
+
+const PARENT_DOC_FILES = [
+  ".claude/workflows/build-until-done.js",
+  "ops/agent-os/dod.md",
+  "ops/agent-os/labels.md",
+];
+
+test("no prompt or doc READS the parent through REST", async () => {
+  // `gh api repos/{owner}/{repo}/issues/<n> --jq .parent` returns null even when
+  // a parent exists, and G0 treats a missing parent as a finding — so a false
+  // null there fails a gate on a lie. The form may only appear as a warning.
+  for (const file of PARENT_DOC_FILES) {
+    for (const line of read(file).split("\n")) {
+      if (!/gh api[^\n]*issues\/[^\n]*parent/.test(line)) continue;
+      assert.match(
+        line,
+        /do NOT|never|returns `null`|trap/i,
+        `${file} reads the parent through REST: ${line.trim()}`
+      );
+    }
+  }
+});
+
+test("the GraphQL parent idiom is recorded where agents will meet it", async () => {
+  for (const file of PARENT_DOC_FILES)
+    assert.match(
+      read(file),
+      /gh issue view [^\n]*--json parent/,
+      `${file} must state the working idiom, not leave it to be re-derived`
+    );
+});
+
+test("the format hook escapes the worktree ignore, and the walk still skips it", async () => {
+  // `.prettierignore` applies to explicitly-named paths exactly as it does to
+  // walked ones, so while the hook ran from the repo root this line made it
+  // silently skip every file an agent wrote in a worktree — exit 0, no output,
+  // no change — and CI became the only formatter check that could see them
+  // (a CI fail on #302). The hook now resolves the NEAREST .prettierignore
+  // walking up from the file, which inside a worktree is that worktree's own.
+  const ignore = read(".prettierignore");
+  assert.match(
+    ignore,
+    /^\.claude\/worktrees\/$/m,
+    "dropping this makes `pnpm format:check` walk every sibling checkout"
+  );
+
+  const settings = JSON.parse(read(".claude/settings.json"));
+  const hook = settings.hooks.PostToolUse.flatMap((m) => m.hooks).find((h) =>
+    /prettier/.test(h.command)
+  );
+  assert.ok(hook, "the PostToolUse format hook must exist");
+  assert.match(
+    hook.command,
+    /--ignore-path/,
+    "without an explicit ignore path the hook resolves .prettierignore from the session cwd, which is the repo root"
+  );
+  assert.match(
+    hook.command,
+    /\.prettierignore/,
+    "the ignore file it walks up to find is the worktree's own"
+  );
+  assert.match(
+    hook.command,
+    /while \[/,
+    "nearest-ancestor resolution, so a main-checkout edit behaves exactly as before"
   );
 });
 

@@ -94,7 +94,9 @@ Two consequences for the gates as written below:
 - No AC is left unverifiable ("looks good" is not a method).
 - The issue **has a parent**, and that parent is a `feature` issue linking an FRD. An orphan unit is
   work nobody can trace back to a requirement — check with
-  `gh api repos/{owner}/{repo}/issues/<n> --jq .parent`.
+  `gh issue view <n> --json parent --jq .parent`. **Use that form, not the REST field.**
+  `gh api repos/{owner}/{repo}/issues/<n> --jq .parent` returns `null` even when a parent exists, so
+  reading it there reports a false orphan and fails this gate on a lie (`ops/agent-os/labels.md`).
   The one standing exception is platform work that no FRD covers (oversight, CI, the factory itself);
   say so explicitly in the evidence rather than inventing a parent.
 - The issue is **not blocked** — `issue_dependencies_summary.blocked_by == 0`. Building past an open
@@ -135,6 +137,22 @@ this gate is one-per-branch whether the track holds one workstream or eight.*
 
 The track must be demonstrated **working against the running app**, not just compiling — every AC
 from every workstream in it, on the integrated branch.
+
+**Before this gate runs, the branch is pushed and the two shas are compared.** A preview deployment
+is built from `origin/<branch>`, not from the worktree, so a worktree that is one commit ahead means
+the gate is examining code the fix has already replaced — and it will keep saying so, convincingly,
+until the attempts run out. That is what happened on #307: local `a4c5ede` against origin `f604b2b`,
+two attempts spent on a preview of the previous commit. So:
+
+```bash
+git -C <wt> push -u origin <branch> && git -C <wt> fetch origin <branch>
+git -C <wt> rev-parse HEAD            # must equal…
+git -C <wt> rev-parse origin/<branch> # …this, before anything validates a preview
+```
+
+The loop does this itself and refuses to call the verifier while they differ. A verifier that drives
+a preview must still confirm the deployment it opened was built from that sha; if it was not, **FAIL
+G3 and name the sha the preview came from** rather than reporting on it anyway.
 
 **Frontend / fullstack units** → run the `validate-frontend` skill:
 - Drive the branch's **Vercel preview deployment**, not `localhost:3000`. Localhost serves the
@@ -274,3 +292,31 @@ EXHAUSTED (max attempts or token reserve hit)
 **A workstream that passed is never re-implemented.** Attempt accounting is per workstream precisely
 because the flat `G0..G6` verdict this replaced re-ran the entire track over one failing AC and burned
 an attempt for every healthy unit in it.
+
+### What a retry must carry, and what it must answer
+
+A failing verdict travels to the fixer **as evidence, not as a summary**. The retry prompt quotes the
+failing gate's evidence and the failed ACs' evidence verbatim; `fixInstructions` rides along but does
+not replace them. A paraphrase is where a named `ReferenceError` becomes "the page doesn't render".
+
+The fix's structured result must then answer that named cause — `rootCause` (the cause restated) and
+`rootCauseAddressed` (what changed, and the command output proving it is gone) — and **nothing else it
+did counts until it does**: the loop rejects the attempt without spending a verifier on it. This is
+the #307 failure written down. The verifier named a module-eval crash; attempts 2 and 3 came back
+having fixed a stuck button and pinned a test, both plausible, both against a page that still crashed,
+and the track exhausted its attempts with the named cause untouched. An honest "could not fix it, here
+is why" is a better attempt than a fix report for something else.
+
+### Exit hygiene — who owns the worktrees
+
+Every exit says what happened to the build trees, because both live passes left them unowned (PR #333
+held with `bud-310-ws1*` still on disk; #303/#307 blocked with theirs intact, found only because a
+human knew to look).
+
+- **Merged** — the track removes its own worktrees and local branches (`git worktree remove` +
+  `git branch -D` + `git worktree prune`) and reports what `git worktree list` printed afterwards.
+  Only on a *confirmed* merge: a PR queued for auto-merge has not landed, and deleting the tree under
+  it is how the work disappears.
+- **Held / blocked / delivery-failed** — the trees stay, and the exit comment **names every one**:
+  path, branch, and what it holds. Those trees are the only re-runnable copy of the work, so they are
+  handed over explicitly rather than left for someone to discover.
