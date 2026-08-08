@@ -14,7 +14,8 @@ which is why this is a deliberate step.
 
 | File | Holds |
 |------|-------|
-| `memory/invariants.md` | Rules that must not be violated — security, tenancy, auth, atomicity |
+| `memory/invariants.md` | EVERY rule that must not be violated — security, tenancy, auth, atomicity — stated as one self-sufficient line each. The index IS the rule set |
+| `memory/invariants/<domain>.md` | The elaboration behind those lines: the why, the SQL/code pattern, worked examples. One file per domain; some domains are index-only |
 | `memory/flows/*.mmd` | Mermaid diagrams of control/data flow (intent, not code) |
 | `memory/contracts/*.md` | ONLY non-obvious behaviors: cron/webhook/tokened routes, column semantics a reader would misread, env-var gotchas |
 | `memory/entrypoints.md` | Conventions for finding flows — not an enumeration of them |
@@ -34,6 +35,20 @@ non-obvious behavior**?
 
 A new route, action, or table does **not** by itself require a memory update — only the
 non-obvious part of it does.
+
+## Adding an invariant
+
+Two steps, in this order, and the first is not optional:
+
+1. **Write the one-liner in `memory/invariants.md`**, under its domain heading. It must state the
+   rule on its own — a reader who opens nothing else has still been told what not to do. Not "see
+   the domain file for the batching rule": the rule itself.
+2. **Add the elaboration to `memory/invariants/<domain>.md`** — the why, the pattern, the worked
+   example. If there is nothing to add beyond the one-liner, stop at step 1; index-only is a valid
+   outcome, and a domain with no elaboration file simply carries no pointer.
+
+**Never elaboration without an index line.** A rule that exists only in a domain file is invisible
+to every agent that reads the index and stops, which is most of them. If you find one, promote it.
 
 ## Quality rules
 

@@ -58,7 +58,7 @@ Available components: https://ui.shadcn.com/docs/components
 |------|------------|
 | Next.js APIs, components, config | `.next-docs/` |
 | Invariants, rulings, flow diagrams, non-obvious semantics | `memory/` (TOC: `memory/index.md`) |
-| Before ANY mutation | `memory/invariants.md` |
+| Before ANY mutation | `memory/invariants.md` (every rule, one line each) + the `memory/invariants/<domain>.md` files matching what you are touching |
 | Updating `memory/` after a change (DoD gate G4) | `.claude/skills/memory-maintenance/SKILL.md` |
 | Email/notification features | `.agents/skills/email-best-practices/`, `.agents/skills/resend/` |
 | UI/UX work — implementation, polish, accessibility, typography, color, copy | `.agents/skills/better-interface/` (coordinates the `better-*` suite) |

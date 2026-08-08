@@ -5,7 +5,8 @@ For everything else, the source is the source of truth — read it directly.
 
 | File | Purpose |
 |------|---------|
-| [invariants.md](invariants.md) | Rules that must not be violated — **read before any mutation** |
+| [invariants.md](invariants.md) | Every rule that must not be violated, one line each — **read before any mutation** |
+| [invariants/](invariants/) | Per-domain elaboration behind those one-liners: the why, the pattern, worked examples. Read the domain file matching the files you are touching |
 | [entrypoints.md](entrypoints.md) | Conventions for finding where flows start |
 | [contracts/api.md](contracts/api.md) | Non-obvious route behaviors (cron, webhooks, tokened routes) |
 | [contracts/db.md](contracts/db.md) | Non-obvious column semantics + migration rules |
