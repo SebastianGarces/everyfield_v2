@@ -1,4 +1,5 @@
 import { and, asc, eq, isNull, or, type SQL } from "drizzle-orm";
+import { cache } from "react";
 import { db } from "@/db";
 import { wikiArticles, type WikiArticle } from "@/db/schema";
 import type {
@@ -113,9 +114,18 @@ export function preferChurchOverride(articles: WikiArticle[]): WikiArticle[] {
 /**
  * Get all wiki articles with metadata, scoped to a church.
  *
+ * Deduped per request with `React.cache`, keyed on `churchId` — the same
+ * pattern `getPublishedArticleRefs` in `service.ts` uses. Rendering one article
+ * reads the whole visible corpus at least twice (the sidebar's
+ * `getWikiNavigation` in the wiki layout, and `getArticleNavigation` in the
+ * page), and every read is the identical ~90-row query; without this each
+ * derived affordance costs its own round trip. Outside a React request scope —
+ * the test runner — `cache` calls straight through, so nothing is memoised
+ * across the fixtures a live test sets up between reads.
+ *
  * @param churchId - the reader's church; omit (or pass null) for global only.
  */
-export async function getArticles(
+export const getArticles = cache(async function getArticles(
   churchId: string | null = null
 ): Promise<ArticleMeta[]> {
   const dbArticles = preferChurchOverride(await visibleArticlesQuery(churchId));
@@ -128,7 +138,7 @@ export async function getArticles(
     const sectionSlug = slugParts.length > 2 ? slugParts[1] : "_root";
     return toArticleMeta(article, sectionSlug ?? "_root");
   });
-}
+});
 
 /**
  * Get articles that match a path prefix
@@ -419,8 +429,13 @@ export function articleParentPath(slug: string): string {
 /**
  * Navigation order: `sortOrder` first, title as the stable tie-break.
  *
- * The tie-break matters — `sort_order` defaults to 999 for every article, so
- * without it "next" would be whatever order Postgres happened to return.
+ * The tie-break is not the load-bearing part, and an earlier version of this
+ * comment overstated it: `sort_order` DEFAULTS to 999, but every row in the
+ * corpus carries an explicit 1–11 authored per section, so ties are the
+ * exception rather than the rule. The tie-break is here for the rows that
+ * arrive without one — an article inserted straight into the table, or a
+ * church's own copy — where the alternative is whatever order Postgres
+ * happened to return, which would make "next" non-deterministic.
  */
 export function byNavigationOrder(a: ArticleMeta, b: ArticleMeta): number {
   if (a.order !== b.order) return a.order - b.order;

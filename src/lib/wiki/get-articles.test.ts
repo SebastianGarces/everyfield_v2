@@ -266,3 +266,39 @@ test("the article page renders related articles and the pager", () => {
     `${ARTICLE_PAGE} resolves article navigation without passing a church — the footer would advertise the wrong corpus (#317)`
   );
 });
+
+// ============================================================================
+// 4. The fixture — "Related articles" is reachable in a real environment
+// ============================================================================
+
+/**
+ * The corpus authors NO cross-links: every published global article ships
+ * `related_article_slugs` as NULL. Without a fixture the Related Articles
+ * section is correct code that no browser can be pointed at, which is a
+ * feature that cannot be verified rather than a feature that works.
+ *
+ * `scripts/seed-dev-db.ts` carries that fixture. Pinning it here is the point:
+ * a later edit that drops it would not fail typecheck, lint or any other test —
+ * it would simply make this criterion unprovable again, silently.
+ */
+const DEV_SEED = "scripts/seed-dev-db.ts";
+
+test("the dev seed gives at least one article resolvable cross-links", () => {
+  const source = readFileSync(path.join(process.cwd(), DEV_SEED), "utf8");
+
+  assert.match(
+    source,
+    /relatedArticleSlugs:/,
+    `${DEV_SEED} no longer seeds related_article_slugs — no environment can render the Related Articles section (#317 / W-009)`
+  );
+  assert.match(
+    source,
+    /pre-launch\/the-final-3-4-weeks/,
+    `${DEV_SEED} no longer links pre-launch/the-final-3-4-weeks, the article the W-009 validation plan asserts against (#317)`
+  );
+  assert.match(
+    source,
+    /DEAD_SLUG_MARKER/,
+    `${DEV_SEED} no longer seeds a deliberately unresolvable slug — dropping dead cross-links is then untested against a real database (#317 / W-009)`
+  );
+});

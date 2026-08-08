@@ -7,11 +7,14 @@
  *
  * Usage:
  *   bun run scripts/seed-dev-db.ts
- *   bun run scripts/seed-dev-db.ts --clean-only  # Only clean, don't seed
+ *   bun run scripts/seed-dev-db.ts --clean-only       # Only clean, don't seed
+ *   bun run scripts/seed-dev-db.ts --wiki-links-only  # Only the wiki cross-link
+ *                                                     # fixture; cleans nothing
  */
 
 import { neon } from "@neondatabase/serverless";
 import { config } from "dotenv";
+import { and, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-http";
 import {
   churches,
@@ -20,6 +23,7 @@ import {
   tasks,
   users,
   sessions,
+  wikiArticles,
   type NewChurch,
   type NewUser,
 } from "../src/db/schema";
@@ -30,6 +34,7 @@ config({ path: ".env.local" });
 
 // Parse command line args
 const cleanOnly = process.argv.includes("--clean-only");
+const wikiLinksOnly = process.argv.includes("--wiki-links-only");
 
 // Database connection
 const connectionString = process.env.DATABASE_URL;
@@ -190,6 +195,91 @@ const SEED_USERS: SeedUser[] = [
 ];
 
 // ============================================================================
+// Wiki cross-links (#317 / W-009)
+//
+// `wiki_articles.related_article_slugs` is AUTHORED content, and nothing in the
+// corpus authors it: all 91 published global articles ship the column as NULL.
+// So "an article with non-empty relatedArticleSlugs renders a Related Articles
+// section" is a feature no environment can currently show — the code path is
+// correct and unreachable, which makes it unverifiable rather than done.
+//
+// This fixture is the substrate that makes it reachable in development. Two
+// articles carry cross-links, chosen so ONE page proves several behaviours at
+// once rather than needing a tour:
+//
+//   - `pre-launch/the-final-3-4-weeks` is sort_order 1 of the 8 articles under
+//     `pre-launch/`, i.e. the FIRST — so it renders Next but no Previous.
+//   - `pre-launch/final-checklist-review` is sort_order 8, the LAST — Previous
+//     but no Next.
+//   - Each list carries one deliberately DEAD slug. The column has no foreign
+//     key behind it, so a renamed or unpublished target is the normal case;
+//     dropping it (rather than rendering a link into a 404) is the behaviour,
+//     and it is only observable if something exercises it.
+//   - Every other article keeps a NULL column, which is what proves the
+//     "no related slugs renders no empty section" criterion.
+//
+// The write is an idempotent UPDATE keyed by slug — it SETS the array rather
+// than appending, so re-running converges instead of accumulating, and it
+// touches only global (`church_id IS NULL`) published rows.
+// ============================================================================
+
+const DEAD_SLUG_MARKER = "this-article-was-renamed";
+
+const SEED_WIKI_CROSS_LINKS: { slug: string; related: string[] }[] = [
+  {
+    slug: "pre-launch/the-final-3-4-weeks",
+    related: [
+      "pre-launch/final-checklist-review",
+      "pre-launch/the-promotion-plan",
+      // Dead on purpose: must be dropped, not rendered.
+      `pre-launch/${DEAD_SLUG_MARKER}`,
+    ],
+  },
+  {
+    slug: "pre-launch/final-checklist-review",
+    related: [
+      "pre-launch/the-final-3-4-weeks",
+      "launch-sunday/launch-day-guide",
+      // Dead on purpose, and cross-section: also not rendered.
+      `launch-sunday/${DEAD_SLUG_MARKER}`,
+    ],
+  },
+];
+
+/**
+ * Point two published global articles at their siblings. Safe to re-run, and
+ * safe to run alone (`--wiki-links-only`) — it deletes nothing.
+ */
+async function seedWikiCrossLinks(): Promise<void> {
+  console.log("🔗 Linking wiki articles...");
+
+  for (const { slug, related } of SEED_WIKI_CROSS_LINKS) {
+    const updated = await db
+      .update(wikiArticles)
+      .set({ relatedArticleSlugs: related, updatedAt: new Date() })
+      .where(
+        and(
+          eq(wikiArticles.slug, slug),
+          isNull(wikiArticles.churchId),
+          eq(wikiArticles.status, "published")
+        )
+      )
+      .returning({ slug: wikiArticles.slug });
+
+    if (updated.length === 0) {
+      // Not fatal: a database that has never had the wiki corpus loaded simply
+      // has nothing to link, and the rest of the seed is still valid.
+      console.log(`   ⚠️  No published global article at ${slug} — skipped`);
+      continue;
+    }
+
+    console.log(`   ${slug} → ${related.length} slug(s)`);
+  }
+
+  console.log();
+}
+
+// ============================================================================
 // Seed Procedure
 // ============================================================================
 
@@ -263,6 +353,11 @@ async function seedDatabase(): Promise<void> {
   }
   console.log();
 
+  // 4. Link wiki articles to each other (#317 / W-009). Not church data, so it
+  // survives `cleanDatabase` — it is re-applied here only so a full seed leaves
+  // the Related Articles section reachable without a second command.
+  await seedWikiCrossLinks();
+
   // Summary
   console.log("✅ Database seeded successfully!\n");
   console.log(
@@ -289,6 +384,14 @@ async function seedDatabase(): Promise<void> {
 
 async function main(): Promise<void> {
   try {
+    // `--wiki-links-only` is the non-destructive door: it applies the wiki
+    // cross-link fixture to a database that already has the corpus without
+    // wiping the churches, users and launches on it.
+    if (wikiLinksOnly) {
+      await seedWikiCrossLinks();
+      process.exit(0);
+    }
+
     await cleanDatabase();
 
     if (!cleanOnly) {
