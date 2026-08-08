@@ -28,6 +28,14 @@
  * until the winner commits, then re-evaluates against what the winner wrote,
  * matches nothing, and writes nothing at all — its status write is gated on
  * ITS OWN role write having landed, not on the plant having a planter.
+ *
+ * WHY THE DECLINE IS LOCKED TOO (`declineUnseatedStatements`). The race is not
+ * Yes-versus-Yes only: a No from a team member competes with every Yes in
+ * flight for the same empty seat, and as a bare UPDATE it used to win by
+ * arriving last, recording `no_planter` on a plant that had just acquired a
+ * planter. Only an answer about a seat the actor ALREADY holds is unguarded,
+ * and that one races nobody by construction — once the seat is filled,
+ * `canAnswerLeadershipQuestion` admits only the planter.
  */
 
 import { db } from "@/db";
@@ -37,12 +45,13 @@ import {
   isLeadershipAnswer,
   leadershipStatusForAnswer,
   leadershipWritePlan,
+  viewerHoldsPlanterSeat,
   type ChurchLeadershipState,
   type LeadershipAnswer,
   type LeadershipViewer,
   type LeadershipWritePlan,
 } from "@/lib/onboarding/leadership";
-import { and, eq, exists, notExists } from "drizzle-orm";
+import { and, eq, exists, inArray, notExists } from "drizzle-orm";
 
 /** The actor, minted from the session. Never a parameter of the action. */
 export type LeadershipActor = LeadershipViewer & { id: string };
@@ -69,8 +78,10 @@ export type ConfirmLeadershipDeps = {
   /** The church's leadership, both explicit and implicit. `null` if it is gone. */
   readLeadership: (churchId: string) => Promise<ChurchLeadershipState | null>;
   /**
-   * Write the answer. Resolves `false` only for a `claim` that lost its race —
-   * every other plan is an idempotent UPDATE that cannot lose.
+   * Write the answer. Resolves `false` for either answer that can LOSE a race
+   * for the empty seat — a `claim`, or a `decline` from somebody who does not
+   * hold the seat. An answer about a seat the actor already holds is an
+   * idempotent UPDATE that cannot lose.
    */
   writeAnswer: (write: LeadershipWrite) => Promise<boolean>;
   /** `revalidatePath` — injected so `next/cache` stays in the action. */
@@ -82,6 +93,14 @@ export type LeadershipWrite = {
   churchId: string;
   actorId: string;
   answer: LeadershipAnswer;
+  /**
+   * Does the actor already hold the planter seat? Decided from the church state
+   * the permission was derived from (`viewerHoldsPlanterSeat`), because it is
+   * what tells a settled answer apart from one that is racing — see
+   * `declineUnseatedStatements`. Required rather than optional: a caller that
+   * forgets it should be a compile error, not a silently unguarded write.
+   */
+  actorHoldsSeat: boolean;
 };
 
 /**
@@ -123,6 +142,7 @@ export async function runConfirmLeadership(
       churchId: actor.churchId,
       actorId: actor.id,
       answer,
+      actorHoldsSeat: viewerHoldsPlanterSeat(actor, church),
     });
   } catch (error) {
     console.error("leadership answer failed", error);
@@ -169,8 +189,14 @@ function actorIsPlanterOf(churchId: string, actorId: string) {
 
 /**
  * OB-004's write: record the answer against a plant whose assignment is already
- * settled. One idempotent UPDATE — there is no race to lose, because nothing
- * about who leads the plant changes.
+ * SETTLED — a Yes or No from the planter about their own seat. One idempotent
+ * UPDATE, and there is genuinely no race to lose here: once anybody holds the
+ * seat, `canAnswerLeadershipQuestion` lets only the planter answer, so there is
+ * no second writer to interleave with.
+ *
+ * NOT the path for a decline from somebody who does NOT hold the seat — that
+ * one competes with every Yes in flight and goes through
+ * `declineUnseatedStatements`.
  */
 export function recordLeadershipStatement(write: LeadershipWrite) {
   return db
@@ -180,6 +206,53 @@ export function recordLeadershipStatement(write: LeadershipWrite) {
       updatedAt: new Date(),
     })
     .where(eq(churches.id, write.churchId));
+}
+
+/**
+ * OB-010's write: DECLINE the empty planter seat — "someone else will lead
+ * this plant", from somebody who is not the planter.
+ *
+ * This is the claim's mirror image and needs the claim's guards, for the same
+ * reason. Two team members of a planterless plant can answer at once: A says No
+ * while B says Yes. B's claim locks the church, promotes B and records
+ * `planter_confirmed`. A's answer was true when A read it and is false by the
+ * time it commits — and as a bare `UPDATE churches SET leadership_status =
+ * 'no_planter'` it would commit anyway, last write winning, leaving a plant that
+ * HAS a planter recorded as having none.
+ *
+ * That is not a cosmetic disagreement. `handleMeetingAttendanceFinalized`
+ * (`src/lib/tasks/events.ts`) reads `churchHasNoPlanter` FIRST and skips the
+ * planter lookup entirely when it is true, so every post-meeting follow-up and
+ * evaluation task silently stops being created on a plant that is perfectly
+ * well led — a warning in the log and no tasks, indistinguishable from a plant
+ * that really has nobody. The no-planter nudge relights too.
+ *
+ * So: lock the church row first (statement one, exactly as the claim does — the
+ * lock is what serialises A against B, since their two updates otherwise touch
+ * different rows), then write `no_planter` only while the seat is still empty.
+ * A decline that lost matches nothing, writes nothing, and is reported as a
+ * lost race rather than silently discarded.
+ */
+export function declineUnseatedStatements(write: LeadershipWrite) {
+  const now = new Date();
+
+  return [
+    db
+      .select({ id: churches.id })
+      .from(churches)
+      .where(eq(churches.id, write.churchId))
+      .for("update"),
+    db
+      .update(churches)
+      .set({ leadershipStatus: "no_planter", updatedAt: now })
+      .where(
+        and(
+          eq(churches.id, write.churchId),
+          notExists(planterOfChurch(write.churchId))
+        )
+      )
+      .returning({ id: churches.id }),
+  ] as const;
 }
 
 /**
@@ -216,6 +289,12 @@ export function claimPlanterStatements(write: LeadershipWrite) {
         and(
           eq(users.id, write.actorId),
           eq(users.churchId, write.churchId),
+          // Defense in depth. `canAnswerLeadershipQuestion` already refuses a
+          // coach or an oversight admin in JS, so today this predicate can
+          // never be the thing that saves us — but this statement PROMOTES
+          // somebody, and a promotion should not be one forgotten JS check away
+          // from being reachable if these statements ever gain a second caller.
+          inArray(users.role, ["team_member", "planter"]),
           notExists(planterOfChurch(write.churchId))
         )
       )
@@ -277,13 +356,21 @@ export function confirmLeadershipDeps(
     readLeadership: readChurchLeadershipState,
 
     async writeAnswer(write) {
-      if (write.plan !== "claim") {
-        await recordLeadershipStatement(write);
-        return true;
+      if (write.plan === "claim") {
+        const [, , confirmed] = await db.batch(claimPlanterStatements(write));
+        return confirmed.length > 0;
       }
 
-      const [, , confirmed] = await db.batch(claimPlanterStatements(write));
-      return confirmed.length > 0;
+      // A decline from somebody who does not hold the seat is competing with
+      // every Yes in flight, so it is guarded exactly like a claim. Only an
+      // answer about a seat the actor already holds is safe to write plainly.
+      if (write.plan === "decline" && !write.actorHoldsSeat) {
+        const [, declined] = await db.batch(declineUnseatedStatements(write));
+        return declined.length > 0;
+      }
+
+      await recordLeadershipStatement(write);
+      return true;
     },
   };
 }

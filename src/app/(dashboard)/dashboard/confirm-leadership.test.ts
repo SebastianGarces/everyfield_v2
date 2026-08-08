@@ -10,6 +10,7 @@ import {
   LEADERSHIP_SAVE_FAILED_MESSAGE,
   NOT_YOURS_TO_ANSWER_MESSAGE,
   claimPlanterStatements,
+  declineUnseatedStatements,
   recordLeadershipStatement,
   runConfirmLeadership,
   type ConfirmLeadershipDeps,
@@ -241,6 +242,39 @@ test("a failed write is reported, not thrown, and nothing is revalidated", async
 });
 
 // ---------------------------------------------------------------------------
+// Which writes are told they are racing (HR4 W1)
+// ---------------------------------------------------------------------------
+
+test("a team member's No is marked as NOT holding the seat, so the write path guards it", async () => {
+  const h = harness(state());
+
+  await runConfirmLeadership(h.deps, actor(), "no");
+
+  assert.equal(h.writes[0].plan, "decline");
+  assert.equal(h.writes[0].actorHoldsSeat, false);
+});
+
+test("a planter's No about their own seat is marked as holding it, and stays unguarded", async () => {
+  const h = harness(state({ hasPlanterUser: true }));
+
+  await runConfirmLeadership(h.deps, actor({ role: "planter" }), "no");
+
+  assert.equal(h.writes[0].plan, "decline");
+  assert.equal(h.writes[0].actorHoldsSeat, true);
+});
+
+test("a decline that lost the seat is reported, not silently swallowed", async () => {
+  const h = harness(state(), { written: false });
+
+  const result = await runConfirmLeadership(h.deps, actor(), "no");
+
+  assert.deepEqual(result, { status: "error", error: CLAIM_LOST_MESSAGE });
+  // Revalidated anyway: somebody else IS the planter now, and the surface
+  // reporting the loss should be rendering that fact.
+  assert.equal(h.revalidations(), 1);
+});
+
+// ---------------------------------------------------------------------------
 // The SQL
 // ---------------------------------------------------------------------------
 
@@ -257,6 +291,16 @@ const CLAIM: LeadershipWrite = {
   churchId: CHURCH_ID,
   actorId: USER_ID,
   answer: "yes",
+  actorHoldsSeat: false,
+};
+
+/** A No from somebody who does NOT hold the seat — the guarded decline. */
+const UNSEATED_DECLINE: LeadershipWrite = {
+  plan: "decline",
+  churchId: CHURCH_ID,
+  actorId: USER_ID,
+  answer: "no",
+  actorHoldsSeat: false,
 };
 
 test("the claim batch locks the church row FIRST", () => {
@@ -284,13 +328,80 @@ test("the status write is gated on THIS actor holding the role, not on any plant
   assert.doesNotMatch(status, /not exists/i);
 });
 
+test("the role claim only lands for an in-church role", () => {
+  const [, claim] = claimPlanterStatements(CLAIM).map(render);
+
+  // Defense in depth: `canAnswerLeadershipQuestion` already refuses coaches and
+  // oversight admins, but this statement promotes somebody, so the promotion
+  // must not be one forgotten JS check away from reachable.
+  assert.match(claim, /"role" in \(/i);
+
+  const params = dialect.sqlToQuery(
+    claimPlanterStatements(CLAIM)[1].getSQL()
+  ).params;
+
+  assert.ok(params.includes("team_member"));
+  assert.ok(params.includes("planter"));
+  assert.ok(!params.includes("coach"));
+});
+
 test("recording an answer is a plain church update — no users row is touched", () => {
   const sql = render(
-    recordLeadershipStatement({ ...CLAIM, plan: "decline", answer: "no" })
+    recordLeadershipStatement({
+      ...CLAIM,
+      plan: "decline",
+      answer: "no",
+      actorHoldsSeat: true,
+    })
   );
 
   assert.match(sql, /update "churches" set/i);
   assert.doesNotMatch(sql, /"users"/i);
+});
+
+// ---------------------------------------------------------------------------
+// The guarded decline (HR4 W1).
+//
+// A No from somebody who does not hold the seat races every Yes in flight for
+// that same empty seat. Unguarded it won by arriving last, recording
+// `no_planter` on a plant that had just acquired a planter — which makes
+// `handleMeetingAttendanceFinalized` stop creating post-meeting tasks on a
+// perfectly well led plant. It gets the claim's guards, for the claim's reason.
+// ---------------------------------------------------------------------------
+
+test("the decline batch locks the church row FIRST, exactly as the claim does", () => {
+  const [lock] = declineUnseatedStatements(UNSEATED_DECLINE).map(render);
+
+  assert.match(lock, /select .* from "churches" where .* for update/i);
+});
+
+test("the decline only lands while NOBODY holds the planter seat", () => {
+  const [, decline] = declineUnseatedStatements(UNSEATED_DECLINE).map(render);
+
+  assert.match(decline, /update "churches" set/i);
+  assert.match(decline, /not exists/i);
+  // The loser must be detectable, so the caller can report the lost race
+  // instead of silently discarding an answer that never landed.
+  assert.match(decline, /returning/i);
+});
+
+test("the decline never writes a users row — it records an answer, it does not unassign anybody", () => {
+  const [, decline] = declineUnseatedStatements(UNSEATED_DECLINE).map(render);
+
+  assert.doesNotMatch(decline, /update "users"/i);
+});
+
+test("a planter declining about their OWN seat stays an unguarded plain update", () => {
+  // This one races nobody by construction: once the seat is filled,
+  // `canAnswerLeadershipQuestion` admits only the planter, so there is no
+  // second writer to interleave with.
+  const sql = render(
+    recordLeadershipStatement({ ...UNSEATED_DECLINE, actorHoldsSeat: true })
+  );
+
+  assert.match(sql, /update "churches" set/i);
+  assert.doesNotMatch(sql, /not exists/i);
+  assert.doesNotMatch(sql, /for update/i);
 });
 
 test("the claim never names anybody but the acting user", () => {

@@ -241,15 +241,31 @@ export function shouldShowNoPlanterNudge(
  */
 export type LeadershipWritePlan = "confirm" | "claim" | "decline";
 
+/**
+ * Is the planter seat already this viewer's? — the one question that decides
+ * whether an answer is settling something or competing for it.
+ *
+ * Exported because the write path needs the same fact for a DECLINE that
+ * `leadershipWritePlan` needs for a Yes: a planter answering about their own
+ * seat races nobody (only the planter may answer once the seat is filled), so
+ * their write needs no guard, while anyone else's decline is competing with
+ * every Yes in flight and must be guarded like one. One definition, so the two
+ * cannot drift into disagreeing about who is settled.
+ */
+export function viewerHoldsPlanterSeat(
+  viewer: LeadershipViewer,
+  church: ChurchLeadershipState
+): boolean {
+  return viewer.role === "planter" && church.hasPlanterUser;
+}
+
 export function leadershipWritePlan(
   viewer: LeadershipViewer,
   church: ChurchLeadershipState,
   answer: LeadershipAnswer
 ): LeadershipWritePlan {
   if (answer === "no") return "decline";
-  return viewer.role === "planter" && church.hasPlanterUser
-    ? "confirm"
-    : "claim";
+  return viewerHoldsPlanterSeat(viewer, church) ? "confirm" : "claim";
 }
 
 /**
