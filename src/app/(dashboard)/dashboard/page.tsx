@@ -32,6 +32,8 @@ import { MetricCard } from "@/components/dashboard/metric-card";
 import { ActivityFeed } from "@/components/dashboard/activity-feed";
 import { QuickActions } from "@/components/dashboard/quick-actions";
 import { AlertCircle, CalendarCheck, Users, UsersRound } from "lucide-react";
+import { getPendingInvitationsForPlant } from "@/app/(dashboard)/settings/association/queries";
+import { AssociationReminder } from "./association-reminder";
 
 export const dynamic = "force-dynamic";
 
@@ -91,35 +93,48 @@ export default async function DashboardPage({
   const churchId = user!.churchId!;
   const userId = user!.id;
 
-  const [church, metrics, activities, hasPlanterUser, launchCard] =
-    await Promise.all([
-      getCurrentUserChurch(),
-      getDashboardMetrics(churchId, userId),
-      getRecentActivity(churchId),
-      // OB-010: the IMPLICIT assignment — a `users` row with the planter role
-      // pointing here. It is what tells a church that predates OB-004 apart from
-      // one that genuinely has nobody leading it, and the two get opposite
-      // treatment: the first is left alone, the second is asked.
-      churchHasPlanterUser(churchId),
-      // LS-001: the launch date moved off the church row onto its own entity
-      // (migration 0032), so step 3's fact is read from here now.
-      //
-      // LS-003/LS-005: readiness rides along on this ARM rather than beside it,
-      // because it is keyed by the launch's id and cannot start until the launch
-      // read has answered. Chained here, the other three arms still overlap
-      // both; hoisted out, the card's progress bar would cost the dashboard a
-      // serial round trip. It is skipped for a launch that has no day (nothing
-      // is seeded until one is named) and for a completed one (the celebrate
-      // card shows the outcome, not a progress bar) — so the extra query is only
-      // run when the card will actually render its answer.
-      getLaunchForChurch(churchId).then(async (row) => ({
-        launch: row,
-        readiness:
-          row?.targetDate && row.status !== "completed"
-            ? await getLaunchReadiness(row.id, churchId)
-            : null,
-      })),
-    ]);
+  const [
+    church,
+    metrics,
+    activities,
+    hasPlanterUser,
+    launchCard,
+    pendingInvitations,
+  ] = await Promise.all([
+    getCurrentUserChurch(),
+    getDashboardMetrics(churchId, userId),
+    getRecentActivity(churchId),
+    // OB-010: the IMPLICIT assignment — a `users` row with the planter role
+    // pointing here. It is what tells a church that predates OB-004 apart from
+    // one that genuinely has nobody leading it, and the two get opposite
+    // treatment: the first is left alone, the second is asked.
+    churchHasPlanterUser(churchId),
+    // LS-001: the launch date moved off the church row onto its own entity
+    // (migration 0032), so step 3's fact is read from here now.
+    //
+    // LS-003/LS-005: readiness rides along on this ARM rather than beside it,
+    // because it is keyed by the launch's id and cannot start until the launch
+    // read has answered. Chained here, the other three arms still overlap
+    // both; hoisted out, the card's progress bar would cost the dashboard a
+    // serial round trip. It is skipped for a launch that has no day (nothing
+    // is seeded until one is named) and for a completed one (the celebrate
+    // card shows the outcome, not a progress bar) — so the extra query is only
+    // run when the card will actually render its answer.
+    getLaunchForChurch(churchId).then(async (row) => ({
+      launch: row,
+      readiness:
+        row?.targetDate && row.status !== "completed"
+          ? await getLaunchReadiness(row.id, churchId)
+          : null,
+    })),
+    // OV-005: the persistent reminder's data. Only a PLANTER can answer an
+    // invitation (OV-010), so nobody else is asked — a banner whose buttons
+    // the server refuses is worse than no banner. It rides this same
+    // `Promise.all`, so the reminder costs the dashboard no serial round trip.
+    user!.role === "planter"
+      ? getPendingInvitationsForPlant(churchId)
+      : Promise.resolve([]),
+  ]);
 
   const { launch, readiness: launchReadiness } = launchCard;
 
@@ -188,6 +203,11 @@ export default async function DashboardPage({
       {churchCreated === "true" && <ChurchCreatedConfetti />}
 
       <div className="mx-auto max-w-6xl space-y-6">
+        {/* OV-005 — first, and not dismissible. An unanswered invitation
+            decides who can see this plant, so it outranks every other banner
+            here and stays until it is ANSWERED. */}
+        <AssociationReminder invitations={pendingInvitations} />
+
         {showPastorPrompt && <PastorConfirmationPrompt churchId={churchId} />}
 
         {showNoPlanterNudge && <NoPlanterNudge />}

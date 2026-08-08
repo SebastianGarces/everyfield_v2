@@ -69,9 +69,10 @@ export function InvitationCreateForm({
         <CardTitle>Invite an organization</CardTitle>
         <CardDescription>
           Send an invitation to a church planter&rsquo;s email address. They
-          decide whether to accept — nothing is associated until they do.
-          Invitations go to people who have not signed up yet; an address that
-          already has an EveryField account cannot be invited.
+          decide whether to accept — nothing is associated until they do. An
+          address that has not signed up yet gets a link that creates their
+          account; a planter who is already here answers it in their own
+          settings.
         </CardDescription>
       </CardHeader>
       <form action={formAction}>

@@ -230,16 +230,84 @@ export function isOversightEligibleCategory(
 }
 
 /**
+ * The two events that END an org's relationship with a plant (#304, OV-006 /
+ * OV-007) — and the ONLY types for which `enqueue`'s tenancy gate accepts a
+ * RECORDED RELATIONSHIP instead of current access.
+ *
+ * ----------------------------------------------------------------------------
+ * Why these two need their own list, when the consent exemption already covers
+ * them
+ * ----------------------------------------------------------------------------
+ *
+ * Consent and tenancy are different gates and only one of them is the problem
+ * here. `canAccessChurch` resolves an oversight admin's reach from the PLANT'S
+ * CURRENT FK (`getAccessibleChurchIds`), so for both of these events the answer
+ * is false at the moment they happen, and false for the same structural reason:
+ *
+ *   * a DECLINED invitation never set the FK at all, so the plant was never in
+ *     the org's scope;
+ *   * an association that ENDED nulled the FK in the write these announce, so
+ *     the plant left the org's scope in the very act being reported.
+ *
+ * Composed with the plant's `church_id` — the only tenant an event about a
+ * plant can be filed under — both would therefore be skipped `outside_church`
+ * and the org would never hear that its own relationship had changed. The
+ * consent exemption cannot help: it deliberately relaxes gate 3 and nothing
+ * above it.
+ *
+ * ----------------------------------------------------------------------------
+ * This is a tenancy BASIS, not a tenancy bypass
+ * ----------------------------------------------------------------------------
+ *
+ * What `enqueue` accepts for these types is not "no check". It is a different,
+ * narrower fact, verified server-side against the database:
+ * `orgHasRecordedRelationshipWithChurch` (`./oversight-relationship.ts`) — this
+ * org and this plant have an invitation or an `association_events` row between
+ * them. An org with no such record is refused exactly as before, and the
+ * fallback is unreachable for every other notification type in the product,
+ * including the two GATED milestones and the digest.
+ *
+ * The list is a subset of `OVERSIGHT_SHARING_EXEMPT_TYPES` below and both are
+ * spelled out rather than imported from `./oversight.ts` (which imports
+ * `./enqueue.ts`, which imports this file — the import would cycle).
+ * `oversight.test.ts` asserts each string is the one the emitters actually
+ * produce, so neither list can drift into an exemption that matches nothing.
+ */
+export const OVERSIGHT_OWN_RELATIONSHIP_TYPES = [
+  "oversight.milestone.invitation_declined",
+  "oversight.milestone.association_ended",
+] as const;
+
+/**
+ * Is this the kind of event whose tenancy basis is a RECORDED relationship
+ * rather than current access? Asked by `enqueue` only after `canAccessChurch`
+ * has already said no.
+ */
+export function isOwnRelationshipType(type: string): boolean {
+  return (OVERSIGHT_OWN_RELATIONSHIP_TYPES as readonly string[]).includes(type);
+}
+
+/**
  * The notification types an oversight recipient receives WHETHER OR NOT the
  * plant has turned sharing on (ruled 2026-08-01, amending N-026).
  *
- * Exactly one, and the reason is whose event it is. "Your invitation was
+ * Three, and the reason is whose event each one is. "Your invitation was
  * accepted" is the SENDING CHURCH'S OWN event: they composed the invitation,
  * they issued it, and the acceptance is the answer to a question they asked. It
  * discloses nothing about how the plant is doing — only that a handshake the
  * sending church initiated completed. A plant's consent governs what leaves the
  * plant ABOUT the plant; it was never a power to withhold from someone the
  * answer to their own question.
+ *
+ * #304 / OV-006 + OV-007 add the two events that CLOSE that same relationship,
+ * on exactly the same reasoning: an invitation DECLINED is the other answer to
+ * the org's own question, and an association ENDED is the org being told that a
+ * relationship it is a party to has stopped. Neither says anything about how the
+ * plant is doing, and both are facts the org can already see in its own
+ * invitations list and its own plants directory a moment later. Gating them
+ * would mean the org's own relationship changing under it in silence — which is
+ * the same "structurally unreachable control" the 2026-08-01 ruling rejected,
+ * only worse: a plant that leaves has, by definition, stopped sharing.
  *
  * It also un-breaks the ordinary sequence. The toggle defaults to off and a
  * planter decides about it AFTER joining, so at the moment of acceptance it was
@@ -260,6 +328,7 @@ export function isOversightEligibleCategory(
  */
 export const OVERSIGHT_SHARING_EXEMPT_TYPES = [
   "oversight.milestone.invitation_accepted",
+  ...OVERSIGHT_OWN_RELATIONSHIP_TYPES,
 ] as const;
 
 /**

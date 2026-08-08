@@ -33,8 +33,9 @@ Each section links `invariants/<domain>.md` for the why, the pattern and the wor
 - An invite token is bound to the invited ADDRESS, not the link holder: the registering email must equal `invitee_email` (trim+lowercase) for both the association and the beta bypass. Fix a wrong address by revoking, never by re-aiming a live invitation.
 - "Is the slot free" is asked twice and the two are not interchangeable: at create for a legible refusal, at accept as the real guard.
 - An invitation belongs to the inviting ORG, not the admin who typed it — list and revoke share ONE predicate, `invitingOrgOf(actor)`.
-- There is still no in-product way to SEVER an association; the `disassociate*` primitives stay out of every `"use server"` module until #277/#278 ship them with type-to-confirm, a notification to the other side and an `association_events` row.
-- That missing sever is a privacy fact: the oversight portfolio listing is deliberately ungated, so a plant that accepts once cannot withdraw the exposure and no `share_*` toggle would close it.
+- The PLANTER can now sever (#304, `leaveOversightOrgAs`); the org side (#278) cannot yet. The three bare `disassociate*` primitives stay out of every `"use server"` module and are NOT what the planter's sever calls — a sever's FK write must assert the org it is severing (`fk = <this org>`) or it severs the wrong one for a plant that belongs to two.
+- A sever's FK null and its `association_events` row are ONE statement — `insert … select … from severed` — because an UPDATE that matched nothing is not a batch error and would otherwise commit an audit row for a sever that never happened.
+- An oversight admin is told about a plant they can no longer reach in exactly two cases (a declined invitation, an association ended); `enqueue`'s gate 1 rests those two server-composed types on a RECORDED relationship (an invitation or an `association_events` row), never on nothing.
 
 ## Hierarchical Access Control
 
@@ -45,6 +46,7 @@ Each section links `invariants/<domain>.md` for the why, the pattern and the wor
 - Call `canAccessFeatureData(user, churchId, feature)` before returning feature data; the six `share_*` toggles default false and gate what oversight may PULL.
 - PUSH is far narrower: an oversight recipient gets ONLY the daily digest and three milestone events; `enqueue` refuses every granular category for them unconditionally, gated by `share_activity_with_oversight` read at enqueue time.
 - That toggle gates PUSH only and the consent copy may not claim more — `getOversightPlantHealth()` returns name, phase, launch countdown and health with NO privacy gate.
+- Three notification types are consent-EXEMPT and all three are the org's OWN relationship changing: an invitation accepted, an invitation declined, an association ended. The exemption relaxes consent, never the category allow-list.
 - Reaching a plant is not permission to name the orgs BEHIND it: every org name on an oversight surface must be the caller's own or inside it, scoped in the `WHERE` clause.
 - A launch countdown compares two DAYS — floor `asOf` to its UTC day BEFORE subtracting a `yyyy-mm-dd` target date. ONE implementation: `daysUntilTarget` (`src/lib/launch/countdown.ts`); never a second copy under any name — the copy is always the one that misses the fix.
 

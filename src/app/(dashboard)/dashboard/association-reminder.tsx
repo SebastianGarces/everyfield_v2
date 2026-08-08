@@ -1,0 +1,78 @@
+import Link from "next/link";
+import { MailQuestion } from "lucide-react";
+
+import { InvitationAnswer } from "@/app/(dashboard)/settings/association/invitation-answer";
+import type { PendingInvitationView } from "@/app/(dashboard)/settings/association/queries";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+
+// ============================================================================
+// The persistent invitation reminder (#304, OV-005).
+//
+// NOT DISMISSIBLE — and that is the requirement, not an omission. Every other
+// banner on this dashboard uses `useDismissed`; this one deliberately does not,
+// because OV-005 says the reminder stands "while an association invitation is
+// unanswered" and is "dismissed only by answering". Joining a sending church or
+// a network decides who can see this plant, so a planter must not be able to
+// make the question go away without answering it. The two buttons ARE the
+// dismissal: answering either one changes the invitation's status, `refresh()`
+// re-renders the dashboard, and `getPendingInvitationsForPlant` no longer
+// returns it.
+//
+// It is therefore a SERVER component with no state of its own — the pending
+// list arrives as props from the page, which read it per request. The only
+// client code is `InvitationAnswer`, shared with `/settings/association` so the
+// same question is answered the same way in both places.
+//
+// `role="status"` rather than `role="alert"`: this is standing, unanswered
+// business, not something that just happened, and an assertive live region that
+// re-announced on every dashboard render would be hostile.
+// ============================================================================
+
+export function AssociationReminder({
+  invitations,
+}: {
+  invitations: PendingInvitationView[];
+}) {
+  if (invitations.length === 0) return null;
+
+  return (
+    <Alert role="status" data-testid="association-reminder">
+      <MailQuestion />
+      <AlertTitle>
+        {invitations.length === 1
+          ? `${invitations[0].orgName} invited your plant`
+          : `${invitations.length} organizations invited your plant`}
+      </AlertTitle>
+      <AlertDescription>
+        <p className="text-pretty">
+          Nothing is associated until you answer. Accepting lists your plant in
+          their directory with its name, stage and launch date — what else they
+          hear about stays yours to decide.
+        </p>
+
+        <ul className="w-full space-y-3">
+          {invitations.map((invitation) => (
+            <li key={invitation.id} className="space-y-2">
+              {invitations.length > 1 && (
+                <p className="text-foreground font-medium">
+                  {invitation.orgName}
+                </p>
+              )}
+              <InvitationAnswer
+                invitationId={invitation.id}
+                orgName={invitation.orgName}
+              />
+            </li>
+          ))}
+        </ul>
+
+        <Link
+          href="/settings/association"
+          className="cursor-pointer text-sm font-medium underline underline-offset-4"
+        >
+          See the details first
+        </Link>
+      </AlertDescription>
+    </Alert>
+  );
+}

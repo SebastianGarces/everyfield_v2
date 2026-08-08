@@ -99,6 +99,32 @@ export default async function SettingsPage() {
             ungated — see the header of OVERSIGHT_SHARING_TOGGLE. A teaser that
             promises more than the setting delivers is the one way this feature
             can fail its own purpose. */}
+        {/* #304 / OV-004 — the other church-wide, planter-only decision, on the
+            same "linked rather than inlined" footing as Sharing below. The two
+            are neighbours on purpose: this one decides WHO your plant belongs
+            to, that one decides what they hear about it, and neither is a
+            preference about email volume. */}
+        {isPlanterWithPlant && (
+          <section aria-labelledby="association-link" className="space-y-1">
+            <h2
+              id="association-link"
+              className="text-lg font-semibold tracking-tight"
+            >
+              Association
+            </h2>
+            <p className="text-muted-foreground text-sm text-pretty">
+              Answer an invitation from a sending church or network, see who
+              your plant belongs to, and leave an organization.{" "}
+              <Link
+                href="/settings/association"
+                className="cursor-pointer font-medium underline underline-offset-4"
+              >
+                Manage your association
+              </Link>
+            </p>
+          </section>
+        )}
+
         {isPlanterWithPlant && (
           <section aria-labelledby="sharing-link" className="space-y-1">
             <h2

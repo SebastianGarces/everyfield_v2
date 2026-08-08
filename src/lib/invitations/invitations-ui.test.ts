@@ -4,11 +4,11 @@ import path from "node:path";
 import { test } from "node:test";
 
 import {
-  ACCOUNT_EXISTS_MESSAGE,
+  ACCOUNT_NOT_INVITABLE_MESSAGE,
   ALREADY_OURS_MESSAGE,
   SLOT_TAKEN_MESSAGE,
   bindOpenInvitationTargetQuery,
-  inviteeAccountRefusal,
+  inviteeAccountTarget,
   isInvitationTargetKind,
   normalizeInviteeEmail,
   resolveInvitationRequest,
@@ -354,30 +354,63 @@ test("registration binds THEN accepts, never the other way round", () => {
 });
 
 // ----------------------------------------------------------------------------
-// 6. Ruling (2026-08-04): an address that already has an account is refused
+// 6. #304 restored the targeted path — an existing account now maps to its org
+// ----------------------------------------------------------------------------
+//
+// The 2026-08-04 ruling refused EVERY existing account, on a premise it stated
+// out loud: the only place an invitation could be answered was `/register`, and
+// somebody who already registered cannot register again. #304 removed that
+// premise by building `/settings/association` and the dashboard reminder, so the
+// mapping the ruling described as the restoration is what is asserted here.
 // ----------------------------------------------------------------------------
 
-test("every existing account is refused, whatever role it holds", () => {
-  // The ruling, executed. Until #277 gives an existing account somewhere to
-  // answer from, the only place an invitation CAN be answered is `/register` —
-  // and somebody who already registered cannot register again. So an invitation
-  // to them would sit pending for 30 days with no surface to act on, while the
-  // admin believed it was sent.
-  //
-  // Pure, so it is a real behavioural assertion and not a grep: every role is
-  // refused, with or without an organization of its own, and only "nobody here"
-  // proceeds.
-  for (const role of [
-    "planter",
-    "coach",
-    "team_member",
-    "sending_church_admin",
-    "network_admin",
-  ] as const) {
-    assert.equal(inviteeAccountRefusal({ role }), ACCOUNT_EXISTS_MESSAGE, role);
-  }
+test("an existing account maps to the organization it speaks for", () => {
+  // Pure, so this is a real behavioural assertion and not a grep.
+  assert.deepEqual(
+    inviteeAccountTarget({
+      role: "planter",
+      churchId: PLANT,
+      sendingChurchId: null,
+    }),
+    { ok: true, target: { targetChurchId: PLANT } }
+  );
 
-  assert.equal(inviteeAccountRefusal(undefined), null);
+  assert.deepEqual(
+    inviteeAccountTarget({
+      role: "sending_church_admin",
+      churchId: null,
+      sendingChurchId: SENDING_CHURCH,
+    }),
+    { ok: true, target: { targetSendingChurchId: SENDING_CHURCH } }
+  );
+
+  // No account at all is still the OPEN invitation path, untouched: no target,
+  // and `/register` binds one when they sign up.
+  assert.deepEqual(inviteeAccountTarget(undefined), { ok: true, target: {} });
+});
+
+test("an account that speaks for no invitable org is refused, with ONE message", () => {
+  // The account-enumeration property the 2026-08-04 ruling introduced survives
+  // the restoration: a team member, a coach, a network admin and a planter with
+  // no plant yet are four different facts about an address, and the inviter is
+  // told none of them — only "not this address".
+  const refusals = [
+    { role: "team_member", churchId: PLANT, sendingChurchId: null },
+    { role: "coach", churchId: PLANT, sendingChurchId: null },
+    { role: "network_admin", churchId: null, sendingChurchId: null },
+    // A planter who has not created their plant yet: there is no row to target.
+    { role: "planter", churchId: null, sendingChurchId: null },
+    // A sending church admin with no sending church yet, likewise.
+    { role: "sending_church_admin", churchId: null, sendingChurchId: null },
+  ] as const;
+
+  for (const account of refusals) {
+    assert.deepEqual(
+      inviteeAccountTarget(account),
+      { ok: false, error: ACCOUNT_NOT_INVITABLE_MESSAGE },
+      account.role
+    );
+  }
 });
 
 test("the account refusal is in the service, on the forged-call path", () => {
@@ -390,8 +423,11 @@ test("the account refusal is in the service, on the forged-call path", () => {
     CORE_CODE.indexOf("export async function resolveInvitationTarget"),
     CORE_CODE.indexOf("export async function assertTargetSlotFree")
   );
-  assert.match(target, /inviteeAccountRefusal\(existing\)/);
-  assert.match(target, /if \(refusal\) return \{ ok: false, error: refusal \}/);
+  assert.match(target, /return inviteeAccountTarget\(existing\)/);
+  // The projection is the three columns the pure mapper reads — and nothing
+  // else. Selecting the row would pull `password_hash` into memory to answer
+  // "which org is this".
+  assert.doesNotMatch(target, /\.select\(\)/);
 
   const create = CORE_CODE.slice(
     CORE_CODE.indexOf("export async function createInvitationAs"),
@@ -416,17 +452,21 @@ test("the account refusal reads as a next action, not as a failure", () => {
   // Surfaced as a FORM ERROR — the action returns `result.error` verbatim
   // (asserted in §2) and the create form renders it — so the wording is the
   // whole of what the admin gets. It has to say what happened and what to do.
-  assert.match(ACCOUNT_EXISTS_MESSAGE, /account/i);
-  assert.doesNotMatch(ACCOUNT_EXISTS_MESSAGE, /error|failed|invalid/i);
-  assert.notEqual(ACCOUNT_EXISTS_MESSAGE, SLOT_TAKEN_MESSAGE);
-  assert.notEqual(ACCOUNT_EXISTS_MESSAGE, ALREADY_OURS_MESSAGE);
+  assert.match(ACCOUNT_NOT_INVITABLE_MESSAGE, /account/i);
+  assert.doesNotMatch(ACCOUNT_NOT_INVITABLE_MESSAGE, /error|failed|invalid/i);
+  assert.notEqual(ACCOUNT_NOT_INVITABLE_MESSAGE, SLOT_TAKEN_MESSAGE);
+  assert.notEqual(ACCOUNT_NOT_INVITABLE_MESSAGE, ALREADY_OURS_MESSAGE);
 
-  // And the form says it before the admin types, rather than only after the
-  // refusal — the ruling is a real narrowing of who can be invited today.
-  assert.match(
+  // The form's own copy has to describe TODAY's rule, not the one #304
+  // replaced: an existing planter can now be invited and answers from
+  // `/settings/association`. Copy that survives only because nobody changed it
+  // is not truthful copy — the same standard `OVERSIGHT_SHARING_TOGGLE` is held
+  // to.
+  assert.doesNotMatch(
     CREATE_FORM,
     /already has an EveryField account cannot be invited/
   );
+  assert.match(CREATE_FORM, /planter/i);
 });
 
 // ----------------------------------------------------------------------------

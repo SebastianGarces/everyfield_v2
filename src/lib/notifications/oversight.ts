@@ -17,10 +17,15 @@ import {
 // is ever told about a plant is composed here or in `./oversight-digest.ts`.
 // There are exactly two shapes:
 //
-//   MILESTONES  three events, delivered per event (this file):
+//   MILESTONES  five events, delivered per event (this file):
 //                 - the planter accepted an invitation,
+//                 - the planter declined an invitation           (#304/OV-006),
+//                 - the planter left the org                     (#304/OV-007),
 //                 - the plant advanced a phase/stage,
 //                 - a launch date was set or changed.
+//               The first three are the ORG'S OWN relationship changing and go
+//               to that one org, consent-exempt; the last two are facts about
+//               the plant and go to the plant's whole oversight union, gated.
 //   DIGEST      one daily activity SUMMARY, and only on a day that had
 //               activity (`./oversight-digest.ts`).
 //
@@ -72,6 +77,8 @@ import {
  */
 export const oversightMilestoneKinds = [
   "invitation_accepted",
+  "invitation_declined",
+  "association_ended",
   "phase_advanced",
   "launch_date_changed",
 ] as const;
@@ -314,6 +321,10 @@ function milestoneTitle(facts: MilestoneFacts): string {
   switch (facts.kind) {
     case "invitation_accepted":
       return `${facts.plantName} joined you`;
+    case "invitation_declined":
+      return `${facts.plantName} declined your invitation`;
+    case "association_ended":
+      return `${facts.plantName} left your organization`;
     case "phase_advanced":
       return `${facts.plantName} reached a new stage`;
     case "launch_date_changed":
@@ -402,18 +413,126 @@ export async function announceInvitationAccepted(
       "They accepted your invitation. Anything beyond this — a summary on the days something happens, plus the occasional milestone — is theirs to switch on.",
   };
 
-  // Not `announceMilestone`: this is the one emitter that does NOT address the
-  // plant's oversight union. Same never-throws posture, different audience.
+  // Not `announceMilestone`: this is one of the three emitters that do NOT
+  // address the plant's oversight union. Same never-throws posture, different
+  // audience — `announceToOrg` is that posture, shared.
+  return announceToOrg(
+    deps,
+    invitingOrgForInvitation(input.invitation),
+    facts,
+    input.invitationId
+  );
+}
+
+/**
+ * Source: `declineAssociationInvitation()` — the planter said no (#304, OV-006).
+ *
+ * The mirror image of `announceInvitationAccepted`, and deliberately the same
+ * shape: the audience is the ONE org that issued the invitation, derived from
+ * the invitation's `type` by `invitingOrgForInvitation` and never from the
+ * plant's FKs, so a plant that already belongs to a second org cannot leak this
+ * to it. Same never-throws posture — a decline is recorded whether or not the
+ * org hears about it.
+ *
+ * Its tenancy basis is not the plant's FK (a decline never set one); `enqueue`
+ * rests it on the invitation ON RECORD instead — `OVERSIGHT_OWN_RELATIONSHIP_TYPES`
+ * in ./categories.ts.
+ *
+ * The body says what the org can DO about it, because the alternative reading
+ * of a bare "declined" — that the address was wrong, or that the product ate
+ * the invitation — is the one an admin will act on. The plant is named for the
+ * same reason every milestone names it: an admin over twenty needs to know
+ * which.
+ */
+export async function announceInvitationDeclined(
+  input: {
+    churchId: string;
+    plantName: string;
+    invitationId: string;
+    invitation: InvitingInvitation;
+  },
+  deps: OversightOrgFanOutDeps = dbOversightFanOutDeps
+): Promise<OversightFanOutReport> {
+  return announceToOrg(
+    deps,
+    invitingOrgForInvitation(input.invitation),
+    {
+      churchId: input.churchId,
+      plantName: input.plantName,
+      kind: "invitation_declined",
+      occurrence: input.invitationId,
+      detail:
+        "They declined your invitation. Nothing is associated, and they keep no link to your organization — you can invite them again whenever it makes sense.",
+    },
+    input.invitationId
+  );
+}
+
+/**
+ * Source: `leaveOversightOrg()` — the planter severed the association (#304,
+ * OV-007a).
+ *
+ * The org is passed EXPLICITLY, and it is the org whose FK was just nulled —
+ * never re-derived from the plant, which by now points at neither it nor
+ * (possibly) its other oversight org. A plant that belongs to a sending church
+ * AND a network leaves one of them; the other must hear nothing, because
+ * nothing about it changed.
+ *
+ * Announced AFTER the sever commits, which is why the tenancy basis has to be
+ * the `association_events` row written in the same statement rather than the FK
+ * (`OVERSIGHT_OWN_RELATIONSHIP_TYPES`). Announcing first would have kept gate 1
+ * happy and told an org that a plant had left it before that was true.
+ */
+export async function announceAssociationEnded(
+  input: {
+    churchId: string;
+    plantName: string;
+    /** The org that was left — exactly one field set. */
+    org: OversightOrg;
+    /**
+     * What makes this event unique. The audit row's id: one sever, one
+     * announcement, and a plant that leaves, rejoins and leaves again is three
+     * distinct events rather than one swallowed by a permanent dedupe key.
+     */
+    occurrence: string;
+  },
+  deps: OversightOrgFanOutDeps = dbOversightFanOutDeps
+): Promise<OversightFanOutReport> {
+  return announceToOrg(
+    deps,
+    input.org,
+    {
+      churchId: input.churchId,
+      plantName: input.plantName,
+      kind: "association_ended",
+      occurrence: input.occurrence,
+      detail:
+        "They have left your organization. They no longer appear in your plants directory, and you will receive no further updates about them.",
+    },
+    input.occurrence
+  );
+}
+
+/**
+ * The one-org fan-out with the never-throws posture, shared by the three
+ * own-relationship milestones so none of them can be the one that lets an
+ * infrastructure error escape into the action that caused it.
+ */
+async function announceToOrg(
+  deps: OversightOrgFanOutDeps,
+  org: OversightOrg,
+  facts: MilestoneFacts,
+  context: string
+): Promise<OversightFanOutReport> {
   try {
-    return await fanOutToOversightOrg(
-      deps,
-      invitingOrgForInvitation(input.invitation),
-      (recipientId) => composeMilestone(facts, recipientId)
+    return await fanOutToOversightOrg(deps, org, (recipientId) =>
+      composeMilestone(facts, recipientId)
     );
   } catch (error) {
     console.error("oversight milestone announcement failed", {
-      churchId: input.churchId,
+      churchId: facts.churchId,
       kind: facts.kind,
+      context,
       error,
     });
     return emptyReport();

@@ -55,7 +55,17 @@ import type {
   OrganizationInvitationStatus,
   OrganizationInvitationType,
 } from "@/db/schema/organization-invitation";
-import { announceInvitationAccepted } from "@/lib/notifications/oversight";
+import type { AssociationOrgType } from "@/db/schema";
+import {
+  announceAssociationEnded,
+  announceInvitationAccepted,
+  announceInvitationDeclined,
+} from "@/lib/notifications/oversight";
+
+import {
+  acceptedAssociationEventStatement,
+  severAssociationWithAuditStatement,
+} from "./audit";
 
 // ============================================================================
 // Constants
@@ -264,31 +274,40 @@ export const ALREADY_OURS_MESSAGE =
   "That organization is already part of your organization";
 
 /**
- * An address that ALREADY has an EveryField account, refused at CREATE time.
+ * An address whose account maps to NO organization we can invite — refused at
+ * CREATE time.
  *
- * RULED 2026-08-04 (#23): an invitation nobody can answer is not sent. The only
- * place an invitation can be answered today is `/register` — the link creates
- * the organization and redeems the invitation in one request
- * (`redeemRegistrationInvitation`). Somebody who already has an account cannot
- * register again, and the in-app place they would answer from — the planter's
- * association area — ships with #277. So a targeted invitation would sit
- * `pending` for 30 days with no surface anywhere to accept or decline it, while
- * the admin believed it was sent.
+ * ----------------------------------------------------------------------------
+ * The history, because the rule inverted twice
+ * ----------------------------------------------------------------------------
  *
- * Same ruling family as `SLOT_TAKEN_MESSAGE` above and for the same reason: the
- * refusal happens where the admin is watching, not days later inside somebody
- * else's dead end.
+ * RULED 2026-08-04 (#23): an invitation nobody can answer is not sent. At that
+ * point the only place an invitation could be answered was `/register` — the
+ * link creates the organization and redeems the invitation in one request — and
+ * somebody who already has an account cannot register again. So EVERY existing
+ * account was refused, with one message, and a targeted invitation would have
+ * sat `pending` for 30 days with no surface anywhere to answer it.
  *
- * WHAT #277 CHANGES. When the association area exists, this refusal becomes the
- * targeted path again: look the address up in `users`, map the account to its
- * organization (a `planter` → their `church_id`, and for a network admin a
- * `sending_church_admin` → their `sending_church_id`), refuse an account that is
- * neither and a planter who has not created their plant yet, and hand the
- * resulting id to `resolveInvitationRequest` as the target. `assertTargetSlotFree`
- * below is already written for exactly that row and stays in place for it.
+ * #304 REMOVES THAT PREMISE, which is the condition the ruling itself named: the
+ * planter's association area (`/settings/association`) and the dashboard
+ * reminder are now the in-product place an existing account answers from. So the
+ * targeted path is restored exactly as `ACCOUNT_EXISTS_MESSAGE` (this constant's
+ * previous name) described it should be — the address is looked up, the account
+ * is mapped to its organization, and the id becomes the invitation's target.
+ *
+ * What survives is the shape of the refusal: an account that maps to NO
+ * invitable organization is still refused where the admin is watching, rather
+ * than days later inside somebody else's dead end.
+ *
+ * ONE MESSAGE FOR EVERY REFUSAL, deliberately — and this matters more now, not
+ * less. The cases behind it are "a team member", "a coach", "another org's
+ * admin" and "a planter who has not created their plant yet"; distinguishing
+ * them would tell an inviter what KIND of account sits behind an address they do
+ * not otherwise know anything about. One message says only "not this address",
+ * which is the single bit they need in order to pick another.
  */
-export const ACCOUNT_EXISTS_MESSAGE =
-  "That email already has an EveryField account — there is nowhere for them to answer an invitation yet, so invite an address that has not signed up";
+export const ACCOUNT_NOT_INVITABLE_MESSAGE =
+  "That email belongs to an account we cannot invite — invite the planter's own address, or an address that has not signed up yet";
 
 /**
  * The fields that decide WHAT association an accept makes: the target entity and
@@ -468,25 +487,56 @@ export async function insertInvitation(
 }
 
 /**
- * May this address be invited at all, given what the account lookup found?
- * `null` to proceed, a user-facing message to refuse.
+ * WHAT ORGANIZATION does an existing account speak for? `undefined` for an
+ * address nobody has registered (the open-invitation path), a target for an
+ * account we can invite, and a user-facing message for one we cannot.
  *
- * Pure, so the 2026-08-04 ruling is executable without a database: EVERY
- * account is refused — whatever its role, and whether or not it has an
- * organization of its own — and only an address nobody has registered gets an
- * invitation. See `ACCOUNT_EXISTS_MESSAGE` for the reasoning and for what #277
- * puts back here.
+ * Pure, so the whole rule is executable without a database (#304 restores the
+ * targeted path; see `ACCOUNT_NOT_INVITABLE_MESSAGE` for the history):
  *
- * One message for all of them, deliberately. The finer-grained refusals this
- * replaced ("no organization yet", "cannot be invited", "wrong kind of
- * organization") told an inviter what KIND of account sits behind an address;
- * this tells them only that one does, which is the single bit they need to pick
- * a different address.
+ *   * `planter` WITH a `church_id`  → their plant is the target.
+ *   * `sending_church_admin` WITH a `sending_church_id` → their sending church.
+ *   * everything else — a team member, a coach, a network admin, and a planter
+ *     who has not created their plant yet — is refused, with ONE message.
+ *
+ * Only these two roles map to something an oversight org can associate with, and
+ * the mapping is the account's OWN organization: there is no parameter here a
+ * caller could aim at somebody else's church, and `resolveInvitationRequest`
+ * still decides independently whether the actor may invite that KIND of org at
+ * all (a sending church admin inviting a sending church is refused there).
  */
-export function inviteeAccountRefusal(
-  existingAccount: { role: UserRole } | undefined
-): string | null {
-  return existingAccount ? ACCOUNT_EXISTS_MESSAGE : null;
+export type InviteeTarget = Pick<
+  InvitationRequest,
+  "targetChurchId" | "targetSendingChurchId"
+>;
+
+export function inviteeAccountTarget(
+  existingAccount:
+    | {
+        role: UserRole;
+        churchId: string | null;
+        sendingChurchId: string | null;
+      }
+    | undefined
+): { ok: true; target: InviteeTarget } | { ok: false; error: string } {
+  // Nobody here yet — an open invitation, redeemed by registering.
+  if (!existingAccount) return { ok: true, target: {} };
+
+  if (existingAccount.role === "planter" && existingAccount.churchId) {
+    return { ok: true, target: { targetChurchId: existingAccount.churchId } };
+  }
+
+  if (
+    existingAccount.role === "sending_church_admin" &&
+    existingAccount.sendingChurchId
+  ) {
+    return {
+      ok: true,
+      target: { targetSendingChurchId: existingAccount.sendingChurchId },
+    };
+  }
+
+  return { ok: false, error: ACCOUNT_NOT_INVITABLE_MESSAGE };
 }
 
 /**
@@ -500,39 +550,37 @@ export function inviteeAccountRefusal(
  * and the server decides privately whether that address already belongs to an
  * organization.
  *
- * Two outcomes, since the 2026-08-04 ruling:
+ * Three outcomes since #304 restored the targeted path:
  *   * no account at all → an OPEN invitation with no target. The invite link
  *     carries the token to `/register`, where the organization is created and
  *     bound in one go (`bindOpenInvitationTarget`);
- *   * an account already exists → refused with `ACCOUNT_EXISTS_MESSAGE`,
- *     because there is no surface anywhere for that person to answer from
- *     until #277.
+ *   * an account that speaks for an organization → that organization is the
+ *     target, and the invitee answers from `/settings/association`;
+ *   * any other account → refused with `ACCOUNT_NOT_INVITABLE_MESSAGE`.
+ *
+ * The projection is exactly the three columns `inviteeAccountTarget` reads.
+ * Answering "which org is this" must not pull `password_hash` into application
+ * memory — the same reasoning as `accessColumns` in
+ * `@/lib/notifications/enqueue`.
  *
  * The refusal lives HERE rather than in the form: this is the path a forged
  * direct call to `createInvitation` takes too (`createInvitationAs` below), so
  * skipping the UI does not skip the rule.
  */
-export async function resolveInvitationTarget(inviteeEmail: string): Promise<
-  | {
-      ok: true;
-      target: Pick<
-        InvitationRequest,
-        "targetChurchId" | "targetSendingChurchId"
-      >;
-    }
-  | { ok: false; error: string }
-> {
+export async function resolveInvitationTarget(
+  inviteeEmail: string
+): Promise<{ ok: true; target: InviteeTarget } | { ok: false; error: string }> {
   const [existing] = await db
-    .select({ role: users.role })
+    .select({
+      role: users.role,
+      churchId: users.churchId,
+      sendingChurchId: users.sendingChurchId,
+    })
     .from(users)
     .where(eq(users.email, inviteeEmail))
     .limit(1);
 
-  const refusal = inviteeAccountRefusal(existing);
-  if (refusal) return { ok: false, error: refusal };
-
-  // Nobody here yet — an open invitation, redeemed by registering.
-  return { ok: true, target: {} };
+  return inviteeAccountTarget(existing);
 }
 
 /**
@@ -770,17 +818,35 @@ export async function acceptInvitationAs(
   // Authority first, then status: see `loadRespondableInvitation`.
   const invitation = await loadRespondableInvitation(actor, invitationId);
 
-  // All three built BEFORE anything is written, so an invitation whose FKs
+  // All of them built BEFORE anything is written, so an invitation whose FKs
   // contradict its `type` throws instead of half-applying.
   const lock = lockTargetRow(invitation);
   const association = associationStatement(invitation, invitationId);
   const slotIsOurs = unboundTargetSlot(invitation);
 
-  const [, claimed, associated] = await db.batch([
-    lock,
-    respondToInvitationQuery(actor, invitationId, "accepted", slotIsOurs),
-    association,
-  ]);
+  // OV-008 — the audit row travels IN the batch, so an association cannot commit
+  // without the record of who made it. It re-asserts the association's own
+  // outcome rather than trusting the batch (see
+  // `acceptedAssociationEventStatement`); `null` for a sending church joining a
+  // network, which this table does not record.
+  const auditedOrg = auditableAssociationOrg(invitation);
+  const audit = auditedOrg
+    ? acceptedAssociationEventStatement(actor, {
+        ...auditedOrg,
+        invitationId,
+      })
+    : null;
+
+  const claim = respondToInvitationQuery(
+    actor,
+    invitationId,
+    "accepted",
+    slotIsOurs
+  );
+
+  const [, claimed, associated] = audit
+    ? await db.batch([lock, claim, association, audit])
+    : await db.batch([lock, claim, association]);
 
   const [updated] = claimed;
 
@@ -854,17 +920,12 @@ async function announceInvitationAcceptedForChurch(
   if (!churchId) return;
 
   try {
-    const [plant] = await db
-      .select({ name: churches.name })
-      .from(churches)
-      .where(eq(churches.id, churchId))
-      .limit(1);
-
-    if (!plant) return;
+    const plantName = await plantNameOf(churchId);
+    if (!plantName) return;
 
     await announceInvitationAccepted({
       churchId,
-      plantName: plant.name,
+      plantName,
       invitationId: invitation.id,
       invitation: {
         type: invitation.type,
@@ -901,7 +962,18 @@ async function lostClaimReason(invitationId: string): Promise<string> {
 }
 
 /**
- * Decline an invitation. The actor must have authority over the target entity.
+ * Decline an invitation. The actor must have authority over the target entity —
+ * which for a plant means the PLANTER and nobody else
+ * (`verifyInvitationAuthority`, OV-010).
+ *
+ * ONE STATEMENT, no batch: a decline associates nothing, so there is no second
+ * write to be atomic with, and nothing is audited — `association_events` records
+ * associations and severs, and a declined invitation is neither (the invitation
+ * row is its own record, carrying `responded_by` and `responded_at`).
+ *
+ * OV-006 — the org that asked is told, LAST and best-effort, exactly like the
+ * accept's milestone: the answer is recorded whether or not the announcement
+ * lands, and `announceInvitationDeclined` never throws.
  */
 export async function declineInvitationAs(
   actor: InvitationActor,
@@ -920,7 +992,62 @@ export async function declineInvitationAs(
     throw new InvitationError("This invitation is no longer pending");
   }
 
+  // Only a PLANT-side decline reaches the milestone rail, for the same reason
+  // the accept's does: a sending church declining a network names no plant, and
+  // every milestone is about a plant.
+  if (updated.targetChurchId) {
+    await announceInvitationDeclinedForChurch(updated);
+  }
+
   return updated;
+}
+
+/**
+ * Look the plant's name up and announce the decline to the org that issued the
+ * invitation. Best-effort by construction, and a mirror of
+ * `announceInvitationAcceptedForChurch` — including the reason the whole
+ * invitation is passed rather than a church id: the audience is derived from
+ * `invitation.type` by `invitingOrgForInvitation`, never from the plant's FKs,
+ * so a plant that already belongs to another org cannot leak this to it.
+ */
+async function announceInvitationDeclinedForChurch(
+  invitation: OrganizationInvitation
+): Promise<void> {
+  const churchId = invitation.targetChurchId;
+  if (!churchId) return;
+
+  try {
+    const plantName = await plantNameOf(churchId);
+    if (!plantName) return;
+
+    await announceInvitationDeclined({
+      churchId,
+      plantName,
+      invitationId: invitation.id,
+      invitation: {
+        type: invitation.type,
+        sendingChurchId: invitation.sendingChurchId,
+        sendingNetworkId: invitation.sendingNetworkId,
+      },
+    });
+  } catch (error) {
+    console.error("oversight invitation decline milestone failed", {
+      churchId,
+      invitationId: invitation.id,
+      error,
+    });
+  }
+}
+
+/** The plant's display name, or null when there is no such row. */
+async function plantNameOf(churchId: string): Promise<string | null> {
+  const [plant] = await db
+    .select({ name: churches.name })
+    .from(churches)
+    .where(eq(churches.id, churchId))
+    .limit(1);
+
+  return plant?.name ?? null;
 }
 
 /**
@@ -1193,10 +1320,12 @@ export async function revokeInvitationAs(
 // diff — deliberately, and reviewed — instead of discovering that routing the
 // import through a barrel makes the guardrail quiet.
 //
-// Until #277/#278 land, an accepted association has no in-product repair path.
-// That is why `acceptInvitationAs` above must never be able to create one that
-// was not accepted, and why it REFUSES to replace one that already exists
-// (`memory/invariants.md` → Multi-Tenancy).
+// THE PLANTER SIDE NOW HAS ONE: `leaveOversightOrgAs` below (#304/WS1). It does
+// NOT call the three primitives — `set fk = null where id = ?` cannot express
+// the tenancy assertion a sever needs (see `severAssociationWithAuditStatement`
+// in `./audit`), and it has no place to put the audit row that has to commit
+// with it. The primitives stay for the org side (#278/WS2) to reason about and
+// are still exported, still unwrapped, still not endpoints.
 // ============================================================================
 
 /**
@@ -1245,6 +1374,191 @@ export async function disassociateSendingChurchFromNetwork(
       updatedAt: new Date(),
     })
     .where(eq(sendingChurches.id, sendingChurchId));
+}
+
+// ----------------------------------------------------------------------------
+// The planter's sever (#304 / OV-007a, OV-010)
+// ----------------------------------------------------------------------------
+
+/**
+ * WHICH oversight org an invitation's association is with, in the audit's own
+ * vocabulary — derived from `type`, never from whichever of the row's two FK
+ * columns happens to be populated.
+ *
+ * Same rule, and the same reason, as `invitingOrgForInvitation` in
+ * `@/lib/notifications/oversight`: nothing constrains an
+ * `organization_invitations` row to one FK and `insertInvitation` validates
+ * none, so a `church_to_sending_church` row carrying a stray network id would
+ * otherwise get an audit row naming a network that associated nobody. `null`
+ * for `sending_church_to_network`, whose subject is not a church and which this
+ * table deliberately does not record.
+ */
+export function auditableAssociationOrg(invitation: AssociationFacts): {
+  churchId: string;
+  orgType: AssociationOrgType;
+  orgId: string;
+} | null {
+  if (!invitation.targetChurchId) return null;
+
+  switch (invitation.type) {
+    case "church_to_sending_church":
+      return invitation.sendingChurchId
+        ? {
+            churchId: invitation.targetChurchId,
+            orgType: "sending_church",
+            orgId: invitation.sendingChurchId,
+          }
+        : null;
+    case "church_to_network":
+      return invitation.sendingNetworkId
+        ? {
+            churchId: invitation.targetChurchId,
+            orgType: "network",
+            orgId: invitation.sendingNetworkId,
+          }
+        : null;
+    case "sending_church_to_network":
+      return null;
+  }
+}
+
+/** The two orgs a plant can leave, as the planter's surface names them. */
+export const oversightOrgTypes = ["sending_church", "network"] as const;
+
+export function isAssociationOrgType(
+  value: unknown
+): value is AssociationOrgType {
+  return (
+    typeof value === "string" &&
+    (oversightOrgTypes as readonly string[]).includes(value)
+  );
+}
+
+export const NOT_ASSOCIATED_MESSAGE =
+  "Your plant is not part of that organization";
+
+export const PLANTER_ONLY_SEVER_MESSAGE =
+  "Only the church planter can leave a sending church or network";
+
+/**
+ * LEAVE AN OVERSIGHT ORG — the planter side of the #274 sever ruling (OV-007a).
+ *
+ * THE ENTITY IS NOT AN ARGUMENT. There is no `churchId` parameter and there
+ * never may be: the plant is the actor's own (`actor.churchId`), minted from the
+ * session, which is the same shape `setOversightSharingAction` uses and the rule
+ * `memory/invariants.md` → Authentication states. All a caller says is WHICH OF
+ * ITS TWO oversight associations to end, and that is a two-valued enum, not an
+ * id.
+ *
+ * PLANTER ONLY, SERVER-SIDE (OV-010, ruled #274). A `team_member` or a `coach`
+ * of the plant is refused here, in the logic layer, so a forged POST straight at
+ * the action is refused by the same statement the button is. The role check is
+ * repeated in the SQL by construction — the statement's WHERE names
+ * `actor.churchId`, so an actor with no plant matches nothing whatever their
+ * role — but the explicit refusal is what produces a legible message rather than
+ * a silent no-op.
+ *
+ * ONE STATEMENT does the FK null and the audit row (`./audit` →
+ * `severAssociationWithAuditStatement`), so the association and the record of
+ * how it ended commit together or not at all. Its WHERE is the tenancy
+ * assertion: the FK is nulled only if it still points at the org being left, so
+ * a plant that belongs to a sending church AND a network keeps the other one,
+ * and a request naming an org the plant does not belong to writes nothing at
+ * all.
+ *
+ * THE ORG IS TOLD LAST, after the commit and best-effort — the sever is not
+ * undone by a notification failure, and `announceAssociationEnded` never throws.
+ * It has to be last for a second reason too: its recipients are told about a
+ * plant that is, by then, outside their access, and `enqueue` rests that on the
+ * `association_events` row this statement just wrote
+ * (`OVERSIGHT_OWN_RELATIONSHIP_TYPES`). Announcing first would have been a
+ * message saying a plant had left before it had.
+ */
+export async function leaveOversightOrgAs(
+  actor: InvitationActor,
+  orgType: AssociationOrgType
+): Promise<{ orgType: AssociationOrgType; orgId: string }> {
+  if (actor.role !== "planter") {
+    throw new InvitationError(PLANTER_ONLY_SEVER_MESSAGE);
+  }
+  if (!actor.churchId) {
+    throw new InvitationError("Create your church plant first");
+  }
+
+  const [plant] = await db
+    .select({
+      name: churches.name,
+      sendingChurchId: churches.sendingChurchId,
+      sendingNetworkId: churches.sendingNetworkId,
+    })
+    .from(churches)
+    .where(eq(churches.id, actor.churchId))
+    .limit(1);
+
+  const orgId =
+    orgType === "sending_church"
+      ? (plant?.sendingChurchId ?? null)
+      : (plant?.sendingNetworkId ?? null);
+
+  // A read, so not the guard — the statement below carries the same rule and is
+  // what actually decides. This only turns "nothing to leave" into a message.
+  if (!plant || !orgId) {
+    throw new InvitationError(NOT_ASSOCIATED_MESSAGE);
+  }
+
+  const severed = await severAssociationWithAuditStatement(actor, {
+    churchId: actor.churchId,
+    orgType,
+    orgId,
+  });
+
+  // No audit row means the UPDATE matched nothing: the association moved between
+  // the read above and the write. Nothing was written — not the null, not the
+  // row — so the refusal is honest.
+  if (!severed) {
+    throw new InvitationError(NOT_ASSOCIATED_MESSAGE);
+  }
+
+  await announceAssociationEndedFor({
+    churchId: actor.churchId,
+    plantName: plant.name,
+    orgType,
+    orgId,
+    occurrence: severed.id,
+  });
+
+  return { orgType, orgId };
+}
+
+/** Tell the org that was left. Best-effort; never throws into a committed sever. */
+async function announceAssociationEndedFor(input: {
+  churchId: string;
+  plantName: string;
+  orgType: AssociationOrgType;
+  orgId: string;
+  occurrence: string;
+}): Promise<void> {
+  try {
+    await announceAssociationEnded({
+      churchId: input.churchId,
+      plantName: input.plantName,
+      // The ONE org that was left, spelled out — never the plant's remaining
+      // FKs, which is how the other org would have been told about a change
+      // that did not involve it.
+      org: {
+        sendingChurchId:
+          input.orgType === "sending_church" ? input.orgId : null,
+        sendingNetworkId: input.orgType === "network" ? input.orgId : null,
+      },
+      occurrence: input.occurrence,
+    });
+  } catch (error) {
+    console.error("association ended announcement failed", {
+      churchId: input.churchId,
+      orgType: input.orgType,
+      error,
+    });
+  }
 }
 
 // ============================================================================

@@ -17,7 +17,12 @@ import {
   isOversightUser,
 } from "@/lib/auth/access";
 
-import { OVERSIGHT_SHARING_FEATURE, oversightGateFor } from "./categories";
+import {
+  isOwnRelationshipType,
+  OVERSIGHT_SHARING_FEATURE,
+  oversightGateFor,
+} from "./categories";
+import { orgHasRecordedRelationshipWithChurch } from "./oversight-relationship";
 
 // ============================================================================
 // The enqueue contract (N-001, N-002, N-011).
@@ -48,7 +53,12 @@ import { OVERSIGHT_SHARING_FEATURE, oversightGateFor } from "./categories";
 //   3. The recipient must be ALLOWED to be told. Three separate facts, all
 //      checked here rather than assumed of the caller — see
 //      `recipientMayBeNotified`:
-//        a. they can access the church the row is filed under,
+//        a. they can access the church the row is filed under — or, for the
+//           two own-relationship events of #304 alone, this org and this plant
+//           have a relationship ON RECORD (an invitation, or an
+//           `association_events` row). Those two report the END of a
+//           relationship, so current access is false by construction; see the
+//           branch itself and `OVERSIGHT_OWN_RELATIONSHIP_TYPES`,
 //        b. if they are an oversight user, the category is one oversight may
 //           receive at all — `milestones` or `digest`, never the granular
 //           per-event stream (N-025), and
@@ -436,7 +446,32 @@ export const dbEnqueueDeps: EnqueueDeps = {
     // drift apart: a coach reached via coach_assignments qualifies, a planter
     // in another plant does not.
     if (!(await canAccessChurch(recipient, churchId))) {
-      return { allowed: false, reason: "outside_church" };
+      // ...with ONE alternative basis, for the two events that END an org's
+      // relationship with a plant (#304, OV-006/OV-007). Both are structurally
+      // unreachable through the check above — a declined invitation never put
+      // the plant in the org's scope, and a sever takes it out in the very write
+      // being announced — so composing them under the plant's `church_id`, which
+      // is the only tenant an event about a plant can be filed under, would skip
+      // them every time and the org would never learn its own relationship had
+      // changed. See `OVERSIGHT_OWN_RELATIONSHIP_TYPES` in ./categories.ts.
+      //
+      // NOT a bypass, and the ordering says so. `type` must be one of two
+      // server-composed literals (no caller-supplied string reaches this list),
+      // the recipient must be an oversight user with an org of their own, and
+      // there must be a RECORD in the database of a relationship between that
+      // org and this plant — an invitation, or an `association_events` row. An
+      // org with none of that is refused with the same `outside_church` it was
+      // refused with before, and every other notification type in the product
+      // — including the two gated milestones and the digest — cannot reach this
+      // branch at all.
+      const mayRestOnRecord =
+        isOwnRelationshipType(type) &&
+        isOversightUser(recipient) &&
+        (await orgHasRecordedRelationshipWithChurch(recipient, churchId));
+
+      if (!mayRestOnRecord) {
+        return { allowed: false, reason: "outside_church" };
+      }
     }
 
     if (isOversightUser(recipient)) {
