@@ -10,6 +10,15 @@
  * product and it drops off this list; answer them all and the indicator is gone
  * without anything having to be marked complete.
  *
+ * LEADERSHIP IS FED THE RAW COLUMN, on purpose. The caller passes
+ * `churches.leadership_status` itself, not `resolvedLeadershipStatus()`, so a
+ * plant with an implicit planter (a `users` row with the role, no recorded
+ * answer) still sees this row while it never sees the pastor-confirmation
+ * prompt. Ruled 2026-08-08 (Sebastian, PR #335): the prompt is a demand and
+ * must stay quiet for a plant that is plainly led; the indicator is a standing
+ * list of facts still worth having, and an explicit answer is worth something
+ * on its own. See the note on `resolvedLeadershipStatus` before changing it.
+ *
  * Pure, so the copy and the links are unit testable without a database.
  */
 

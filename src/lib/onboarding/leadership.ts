@@ -137,13 +137,26 @@ function viewerBelongsTo(
 
 /**
  * OB-010's ruling (FRD open question 3, answered: no) expressed as a fact:
- * **an implicit planter counts as a confirmed one.**
+ * **an implicit planter counts as a confirmed one — for the purpose of being
+ * ASKED.**
  *
  * A church whose `users.church_id` + `planter` role already names somebody is
- * led, whatever the column says, so it is never asked again and never listed as
- * an unfinished onboarding step. What comes back is *derived and never written
- * back* — the column stays null, because writing `planter_confirmed` would
- * record an answer nobody gave and would be indistinguishable from one later.
+ * led, whatever the column says, so it is never prompted again: that is what
+ * `shouldPromptPastorConfirmation` reads, and it is unchanged. What comes back
+ * is *derived and never written back* — the column stays null, because writing
+ * `planter_confirmed` would record an answer nobody gave and would be
+ * indistinguishable from one later.
+ *
+ * It does NOT follow that such a church is finished with the question, and the
+ * incomplete-onboarding indicator deliberately says so: it reads the RAW column
+ * (`dashboard/page.tsx` → `onboardingFacts`), so leadership stays on its list
+ * until an EXPLICIT answer is recorded, implicit planter or not. The two
+ * surfaces disagree on purpose — a prompt that fires at somebody is a demand
+ * and must not nag a plant that is plainly led, whereas the indicator is a
+ * standing list of facts the product would still like to have, and the recorded
+ * answer is worth something in itself. Ruled 2026-08-08 (Sebastian, PR #335)
+ * after the two behaviours were observed side by side; do not "fix" the
+ * indicator to call this function without re-opening that ruling.
  */
 export function resolvedLeadershipStatus(
   church: ChurchLeadershipState
