@@ -36,12 +36,15 @@ export function LaunchJournal({ entries }: { entries: LaunchJournalEntry[] }) {
 
   return (
     <section aria-labelledby="launch-date-history-heading">
-      <h3
+      {/* An h2, not an h3, though it is set small: the page's only h1 is the
+          card's title, so an h3 here would skip a level. Heading LEVEL is the
+          document outline; the size is a separate decision. */}
+      <h2
         id="launch-date-history-heading"
         className="text-sm font-medium tracking-tight"
       >
         Date history
-      </h3>
+      </h2>
       <ol className="mt-3 space-y-3">
         {/* Newest first for reading; the query returns the story in order. */}
         {[...dateEntries].reverse().map((entry) => (

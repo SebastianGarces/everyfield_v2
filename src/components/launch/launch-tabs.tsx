@@ -22,29 +22,22 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 export interface LaunchTabsProps {
   tasks: ReactNode;
   history: ReactNode;
-  /** Open milestones, for the count beside the Tasks label. */
-  openCount: number;
   /** Rows in the history, for the count beside the History label. */
   historyCount: number;
 }
 
-export function LaunchTabs({
-  tasks,
-  history,
-  openCount,
-  historyCount,
-}: LaunchTabsProps) {
+export function LaunchTabs({ tasks, history, historyCount }: LaunchTabsProps) {
   return (
     <Tabs defaultValue="tasks">
       <TabsList>
-        <TabsTrigger value="tasks">
-          Tasks
-          {openCount > 0 && (
-            <span className="bg-foreground/10 ml-2 rounded-full px-2 py-0.5 text-xs font-medium tabular-nums">
-              {openCount}
-            </span>
-          )}
-        </TabsTrigger>
+        {/* NO count on Tasks. A number beside a tab labelled "Tasks" reads as a
+            number of tasks, and the only count worth showing there is a count
+            of MILESTONES — the readiness card two rows below states both
+            precisely ("1 of 9 milestones · 20 tasks open"), and a tab that is
+            selected on arrival does not need a badge to advertise itself. The
+            History count earns its place because it is a row count for a panel
+            you cannot see. */}
+        <TabsTrigger value="tasks">Tasks</TabsTrigger>
         <TabsTrigger value="history">
           History
           {historyCount > 0 && (

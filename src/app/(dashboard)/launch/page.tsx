@@ -215,9 +215,6 @@ export default async function LaunchPage() {
           {/* ---- The work, and the record of it ------------------------- */}
           {(hasReadiness || history.length > 0) && (
             <LaunchTabs
-              openCount={
-                readiness ? readiness.totalCount - readiness.completedCount : 0
-              }
               historyCount={history.length}
               tasks={
                 hasReadiness && readiness ? (

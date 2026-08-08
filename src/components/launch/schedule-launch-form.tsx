@@ -126,12 +126,14 @@ export function ScheduleLaunchForm({
   return (
     <section className="space-y-4" aria-labelledby="launch-schedule-heading">
       <div>
-        <h3
+        {/* An h2, not an h3, though it is set small: the page's only h1 is the
+            date card's title, so an h3 here would skip a level. */}
+        <h2
           id="launch-schedule-heading"
           className="text-sm font-medium tracking-tight"
         >
           {hasDate ? "Move or postpone the launch" : "Set the date"}
-        </h3>
+        </h2>
         <p className="text-muted-foreground mt-1 text-sm">
           {hasDate
             ? "The change is recorded below — who changed it, when, and from what — and your sending church is notified."
