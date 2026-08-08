@@ -2,6 +2,8 @@ import type { LucideIcon } from "lucide-react";
 import {
   Activity,
   BookOpenText,
+  Building2,
+  Church,
   MailPlus,
   CalendarCheck,
   FileText,
@@ -140,15 +142,30 @@ export const mainNavItems: NavItem[] = [
  *
  * "Invitations" came BACK in #23, in the same change that added
  * `/oversight/invitations/page.tsx` — which is the rule above, honoured.
+ * "Church Plants" came back the same way in #303 (OV-001/OV-002), with
+ * `/oversight/plants/page.tsx` and its `[id]` detail in the same change.
  *
- * Still hidden until built (#260): "Church Plants" (/oversight/plants),
- * "Settings" (/oversight/settings).
+ * "Sending Churches" (/oversight/sending-churches) is absent for a DIFFERENT
+ * reason than #260: the page exists as of #303, but it is network-admins-only
+ * (OV-009) and refuses this role with `notFound()`. It belongs in
+ * `networkAdminNavItems` only, and it stays out of this list even though its
+ * page.tsx is now on disk.
+ *
+ * Still hidden: "Settings" (/oversight/settings) — and it is not merely
+ * unbuilt, it is OUT of alpha by ruling (FRD non-goals; org profile and admin
+ * management belong with core team accounts, board #185), so this one does not
+ * come back when a page appears.
  */
 export const sendingChurchNavItems: NavItem[] = [
   {
     title: "Portfolio",
     href: "/oversight",
     icon: LayoutDashboard,
+  },
+  {
+    title: "Church Plants",
+    href: "/oversight/plants",
+    icon: Church,
   },
   {
     title: "Plant Health",
@@ -168,17 +185,33 @@ export const sendingChurchNavItems: NavItem[] = [
  *
  * Same rule as `sendingChurchNavItems`: every href needs a real page.
  *
- * "Invitations" came BACK in #23 with its page.
+ * "Invitations" came BACK in #23 with its page; "Church Plants" and "Sending
+ * Churches" in #303, each with its own page in the same change
+ * (`/oversight/plants` + its `[id]` detail, and `/oversight/sending-churches`).
  *
- * Still hidden until built (#260): "Sending Churches"
- * (/oversight/sending-churches), "Church Plants" (/oversight/plants),
- * "Settings" (/oversight/settings).
+ * "Sending Churches" is in THIS list and deliberately not in
+ * `sendingChurchNavItems` — the roster is network-admins-only (OV-009), and its
+ * page answers a sending-church admin with `notFound()`. Offering a link that
+ * 404s is the #260 failure in a new costume, so the two halves ship together.
+ *
+ * Still hidden: "Settings" (/oversight/settings) — permanently for alpha,
+ * dropped by ruling rather than merely unbuilt (FRD non-goals; board #185).
  */
 export const networkAdminNavItems: NavItem[] = [
   {
     title: "Network Overview",
     href: "/oversight",
     icon: LayoutDashboard,
+  },
+  {
+    title: "Church Plants",
+    href: "/oversight/plants",
+    icon: Church,
+  },
+  {
+    title: "Sending Churches",
+    href: "/oversight/sending-churches",
+    icon: Building2,
   },
   {
     title: "Plant Health",
