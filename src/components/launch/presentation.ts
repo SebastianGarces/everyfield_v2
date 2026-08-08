@@ -58,6 +58,40 @@ export function countdownFigure(
   };
 }
 
+/**
+ * The countdown as ONE headline, so a card never says the same thing twice.
+ *
+ * Both launch surfaces used to print the figure AND the label side by side,
+ * which read "302 days out · Sunday, June 6, 2027 · 302 days out". The rule
+ * here: within a day either side of the launch the WORD carries it — "Today"
+ * on the morning of a plant's launch is the whole message, and "0 days out"
+ * beside it is worse than nothing — and beyond that the number does, with the
+ * date supplying everything else.
+ *
+ * Does no day arithmetic: `days` is `daysUntilTarget`'s answer, and every
+ * branch below is a comparison, never a subtraction (#338).
+ */
+export type CountdownHeadline =
+  | { kind: "word"; word: string }
+  | { kind: "figure"; value: string; unit: string; direction: "out" | "ago" };
+
+export function countdownHeadline(
+  days: number | null
+): CountdownHeadline | null {
+  if (days === null) return null;
+  const figure = countdownFigure(days);
+  if (!figure) return null;
+  // "Today" / "Tomorrow" / "Yesterday" — the three days a number tells worse
+  // than a word does.
+  if (Math.abs(days) <= 1) return { kind: "word", word: countdownLabel(days) };
+  return {
+    kind: "figure",
+    value: figure.value,
+    unit: figure.unit,
+    direction: days < 0 ? "ago" : "out",
+  };
+}
+
 /** `"Sunday, September 20, 2026"` — pinned to `APP_TIME_ZONE`, never the runtime's. */
 export function formatLaunchDay(
   targetDate: string,
@@ -252,6 +286,111 @@ export function journalEntryLabel(entry: {
         ? "Outcome corrected"
         : "Outcome recorded";
   }
+}
+
+// ----------------------------------------------------------------------------
+// Two histories, cut from one journal
+// ----------------------------------------------------------------------------
+
+/**
+ * Is this row about the DAY, or about what happened on it?
+ *
+ * The split is what lets the page put each half where it belongs: scheduling,
+ * moving and postponing are admin context and live with the date control, while
+ * recording and correcting the outcome are the plant's own story and belong in
+ * the history the whole team reads. The enum has four values and the schema owns
+ * them, so this is a partition rather than a filter with a default.
+ */
+export function isLaunchDateEvent(event: LaunchEventType): boolean {
+  return event !== "completed";
+}
+
+/** The date journal: scheduled, moved, postponed. Order preserved. */
+export function launchDateEvents<T extends { event: LaunchEventType }>(
+  entries: T[]
+): T[] {
+  return entries.filter((entry) => isLaunchDateEvent(entry.event));
+}
+
+/**
+ * One row of the plant-facing history: a milestone somebody closed, or the
+ * outcome being recorded or corrected.
+ */
+export type LaunchHistoryEntry =
+  | {
+      kind: "milestone";
+      key: string;
+      at: Date;
+      title: string;
+      actorName: string | null;
+    }
+  | {
+      kind: "outcome";
+      key: string;
+      at: Date;
+      label: string;
+      note: string | null;
+      actorName: string | null;
+    };
+
+/**
+ * The launch's activity, newest first — milestone completions interleaved with
+ * the outcome events, because they are the same story told by two tables.
+ *
+ * MILESTONE COMPLETIONS ARE READ, NOT JOURNALLED. `launch_milestones` already
+ * stores `completed_at` and `completed_by_user_id`; this reads that pair rather
+ * than adding a second event log that could disagree with it. A milestone that
+ * is reopened therefore leaves this list — which is correct, because the row is
+ * a statement about the milestone's state, not a claim about the past that a
+ * reopen would falsify.
+ *
+ * Ties break on the key so two milestones closed in the same millisecond render
+ * in a stable order instead of shuffling between renders.
+ */
+export function buildLaunchHistory(
+  milestones: {
+    milestoneId: string;
+    title: string;
+    completedAt: Date;
+    actorName: string | null;
+  }[],
+  journal: {
+    id: string;
+    event: LaunchEventType;
+    previousStatus: LaunchStatus;
+    note: string | null;
+    actorName: string | null;
+    createdAt: Date;
+  }[]
+): LaunchHistoryEntry[] {
+  const entries: LaunchHistoryEntry[] = [
+    ...milestones.map(
+      (milestone): LaunchHistoryEntry => ({
+        kind: "milestone",
+        key: `milestone:${milestone.milestoneId}`,
+        at: milestone.completedAt,
+        title: milestone.title,
+        actorName: milestone.actorName,
+      })
+    ),
+    ...journal
+      .filter((entry) => !isLaunchDateEvent(entry.event))
+      .map(
+        (entry): LaunchHistoryEntry => ({
+          kind: "outcome",
+          key: `outcome:${entry.id}`,
+          at: entry.createdAt,
+          label: journalEntryLabel(entry),
+          note: entry.note,
+          actorName: entry.actorName,
+        })
+      ),
+  ];
+
+  return entries.sort((a, b) => {
+    const byTime = b.at.getTime() - a.at.getTime();
+    return byTime !== 0 ? byTime : a.key.localeCompare(b.key);
+  });
 }
 
 // ----------------------------------------------------------------------------

@@ -14,8 +14,7 @@ import { CalendarPlus, PartyPopper, Rocket } from "lucide-react";
 import Link from "next/link";
 
 import {
-  countdownFigure,
-  countdownLabel,
+  countdownHeadline,
   formatLaunchDay,
   launchedHeadline,
   launchStatusMeta,
@@ -50,7 +49,7 @@ export function LaunchStatusCard({
   readiness,
   outcome,
 }: LaunchStatusCardProps) {
-  const figure = countdownFigure(daysUntil);
+  const headline = countdownHeadline(daysUntil);
   const meta = launchStatusMeta(status ?? "planning");
 
   // ---- Launched (LS-006) --------------------------------------------------
@@ -94,7 +93,7 @@ export function LaunchStatusCard({
   }
 
   // No date yet: the card's job is to ask for one, not to show a zero.
-  if (!targetDate || !figure) {
+  if (!targetDate || !headline) {
     return (
       <Link
         href="/launch"
@@ -116,7 +115,6 @@ export function LaunchStatusCard({
     );
   }
 
-  const isPast = daysUntil !== null && daysUntil < 0;
   const percent = readiness
     ? progressPercent(readiness.completedCount, readiness.totalCount)
     : null;
@@ -135,16 +133,27 @@ export function LaunchStatusCard({
         </div>
       </div>
 
+      {/* ONE countdown, not two. The card used to print the figure and then the
+          same fact again in words underneath — "302 days out · Sun, Jun 6, 2027
+          · 302 days out". `countdownHeadline` decides which form says it best,
+          and the line below carries only the day. */}
       <div className="mt-3 flex items-baseline gap-2">
-        <p className="text-3xl font-bold tracking-tight">{figure.value}</p>
-        <p className="text-muted-foreground text-sm">
-          {figure.unit} {isPast ? "ago" : "out"}
-        </p>
+        {headline.kind === "word" ? (
+          <p className="text-3xl font-bold tracking-tight">{headline.word}</p>
+        ) : (
+          <>
+            <p className="text-3xl font-bold tracking-tight tabular-nums">
+              {headline.value}
+            </p>
+            <p className="text-muted-foreground text-sm">
+              {`${headline.unit} ${headline.direction}`}
+            </p>
+          </>
+        )}
       </div>
 
       <p className="text-muted-foreground mt-1 text-xs">
-        {formatLaunchDay(targetDate, "short")} &middot;{" "}
-        {countdownLabel(daysUntil)}
+        {formatLaunchDay(targetDate, "short")}
       </p>
 
       <div className="mt-3 flex items-center gap-2">

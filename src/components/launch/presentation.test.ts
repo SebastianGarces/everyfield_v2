@@ -8,12 +8,16 @@ import type { LaunchReadiness } from "@/lib/launch/milestones";
 
 import {
   applyReadinessChange,
+  buildLaunchHistory,
   canCompleteMilestone,
   completeMilestoneBlockedReason,
   countdownFigure,
+  countdownHeadline,
   countdownLabel,
   formatLaunchDay,
+  isLaunchDateEvent,
   journalEntryLabel,
+  launchDateEvents,
   launchedHeadline,
   launchStatusMeta,
   outcomeSummary,
@@ -66,6 +70,48 @@ test("the big number is a magnitude, singular when it is one", () => {
   assert.deepEqual(countdownFigure(1), { value: "1", unit: "day" });
   assert.deepEqual(countdownFigure(-1), { value: "1", unit: "day" });
   assert.deepEqual(countdownFigure(0), { value: "0", unit: "days" });
+});
+
+test("the countdown is ONE headline, so no surface says it twice", () => {
+  // Both launch surfaces printed the figure and then the same fact again in
+  // words: "302 days out · Sunday, June 6, 2027 · 302 days out". The headline
+  // decides which form carries it, and the date line carries only the date.
+  assert.deepEqual(countdownHeadline(302), {
+    kind: "figure",
+    value: "302",
+    unit: "days",
+    direction: "out",
+  });
+  assert.deepEqual(countdownHeadline(-7), {
+    kind: "figure",
+    value: "7",
+    unit: "days",
+    direction: "ago",
+  });
+});
+
+test("within a day of launch the WORD carries the countdown, not a number", () => {
+  // "0 days out" is the worst possible way to say "Today", and it is the string
+  // a plant would have read on the morning of its own launch.
+  assert.deepEqual(countdownHeadline(0), { kind: "word", word: "Today" });
+  assert.deepEqual(countdownHeadline(1), { kind: "word", word: "Tomorrow" });
+  assert.deepEqual(countdownHeadline(-1), { kind: "word", word: "Yesterday" });
+  assert.equal(countdownHeadline(null), null);
+});
+
+test("the headline does no day arithmetic of its own (#338)", () => {
+  // Same rule as everything else in this file: the number arrives from
+  // `daysUntilTarget` and is only ever compared, never subtracted.
+  const target = "2026-09-20";
+  for (const hour of ["00:00:01", "09:30:00", "23:59:59"]) {
+    assert.deepEqual(
+      countdownHeadline(
+        daysUntilTarget(target, new Date(`2026-09-20T${hour}Z`))
+      ),
+      { kind: "word", word: "Today" },
+      `launch morning at ${hour} must read "Today"`
+    );
+  }
 });
 
 test("a launch day is formatted in the app's zone, not the runtime's", () => {
@@ -272,6 +318,171 @@ test("a correction reads as a correction, not a second launch (LS-006)", () => {
     journalEntryLabel({ event: "completed", previousStatus: "postponed" }),
     "Outcome recorded"
   );
+});
+
+// ---------------------------------------------------------------------------
+// Two histories, cut from one journal
+// ---------------------------------------------------------------------------
+
+function journalRow(
+  overrides: Partial<{
+    id: string;
+    event: "scheduled" | "moved" | "postponed" | "completed";
+    previousStatus: "planning" | "scheduled" | "postponed" | "completed";
+    note: string | null;
+    actorName: string | null;
+    createdAt: Date;
+  }> = {}
+) {
+  return {
+    id: "e1",
+    event: "scheduled" as const,
+    previousStatus: "planning" as const,
+    note: null,
+    actorName: "John Planter",
+    createdAt: new Date("2026-08-01T10:00:00Z"),
+    ...overrides,
+  };
+}
+
+test("the journal splits into a DATE half and an OUTCOME half", () => {
+  // The two halves answer different questions and live in different places: the
+  // date rows sit with the control that writes them, the outcome rows sit in the
+  // history the whole team reads.
+  assert.equal(isLaunchDateEvent("scheduled"), true);
+  assert.equal(isLaunchDateEvent("moved"), true);
+  assert.equal(isLaunchDateEvent("postponed"), true);
+  assert.equal(isLaunchDateEvent("completed"), false);
+});
+
+test("the date journal keeps every date row, in order, and no outcome row", () => {
+  const entries = [
+    journalRow({ id: "a", event: "scheduled" }),
+    journalRow({ id: "b", event: "completed", previousStatus: "scheduled" }),
+    journalRow({ id: "c", event: "moved", previousStatus: "scheduled" }),
+  ];
+  assert.deepEqual(
+    launchDateEvents(entries).map((entry) => entry.id),
+    ["a", "c"]
+  );
+});
+
+test("the history is the plant's WORK — milestones, with who closed them", () => {
+  // The section headed "History" used to show a date audit and nothing else,
+  // which is what made it unreadable as history. Milestone completions are read
+  // straight off `completed_at` / `completed_by_user_id` — no second journal.
+  const history = buildLaunchHistory(
+    [
+      {
+        milestoneId: "m1",
+        title: "Set-up equipment on site",
+        completedAt: new Date("2026-08-05T09:00:00Z"),
+        actorName: "Alex Team",
+      },
+    ],
+    []
+  );
+
+  assert.equal(history.length, 1);
+  assert.deepEqual(history[0], {
+    kind: "milestone",
+    key: "milestone:m1",
+    at: new Date("2026-08-05T09:00:00Z"),
+    title: "Set-up equipment on site",
+    actorName: "Alex Team",
+  });
+});
+
+test("milestones and outcome rows interleave by time, newest first", () => {
+  const history = buildLaunchHistory(
+    [
+      {
+        milestoneId: "m1",
+        title: "Older milestone",
+        completedAt: new Date("2026-08-01T09:00:00Z"),
+        actorName: null,
+      },
+      {
+        milestoneId: "m2",
+        title: "Newest milestone",
+        completedAt: new Date("2026-08-09T09:00:00Z"),
+        actorName: "Alex Team",
+      },
+    ],
+    [
+      journalRow({
+        id: "o1",
+        event: "completed",
+        previousStatus: "scheduled",
+        createdAt: new Date("2026-08-05T09:00:00Z"),
+      }),
+    ]
+  );
+
+  assert.deepEqual(
+    history.map((entry) => entry.key),
+    ["milestone:m2", "outcome:o1", "milestone:m1"]
+  );
+});
+
+test("date rows never leak into the history tab", () => {
+  // They render inside the date card's edit surface. A "Date moved" row in the
+  // plant's activity list is the confusion this restructure exists to remove.
+  const history = buildLaunchHistory(
+    [],
+    [
+      journalRow({ id: "s", event: "scheduled" }),
+      journalRow({ id: "m", event: "moved", previousStatus: "scheduled" }),
+      journalRow({ id: "p", event: "postponed", previousStatus: "scheduled" }),
+    ]
+  );
+  assert.deepEqual(history, []);
+});
+
+test("an outcome row keeps the label that tells a correction from the first record", () => {
+  const history = buildLaunchHistory(
+    [],
+    [
+      journalRow({
+        id: "o1",
+        event: "completed",
+        previousStatus: "scheduled",
+        createdAt: new Date("2026-08-05T09:00:00Z"),
+      }),
+      journalRow({
+        id: "o2",
+        event: "completed",
+        previousStatus: "completed",
+        note: "Recount from the door log.",
+        createdAt: new Date("2026-08-06T09:00:00Z"),
+      }),
+    ]
+  );
+
+  assert.deepEqual(
+    history.map((entry) => (entry.kind === "outcome" ? entry.label : null)),
+    ["Outcome corrected", "Outcome recorded"]
+  );
+  assert.equal(
+    history[0].kind === "outcome" ? history[0].note : null,
+    "Recount from the door log."
+  );
+});
+
+test("two things closed in the same millisecond render in a stable order", () => {
+  // Ties break on the key, so the list does not shuffle between renders.
+  const at = new Date("2026-08-05T09:00:00Z");
+  const order = () =>
+    buildLaunchHistory(
+      [
+        { milestoneId: "b", title: "B", completedAt: at, actorName: null },
+        { milestoneId: "a", title: "A", completedAt: at, actorName: null },
+      ],
+      []
+    ).map((entry) => entry.key);
+
+  assert.deepEqual(order(), ["milestone:a", "milestone:b"]);
+  assert.deepEqual(order(), order());
 });
 
 // ---------------------------------------------------------------------------

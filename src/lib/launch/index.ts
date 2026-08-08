@@ -16,6 +16,7 @@ export {
 } from "./milestone-areas";
 export {
   completeLaunchMilestone,
+  getLaunchMilestoneHistory,
   getLaunchReadiness,
   isLaunchTask,
   LAUNCH_MILESTONE_TEMPLATES,
@@ -23,6 +24,7 @@ export {
   MILESTONE_NOT_FOUND_MESSAGE,
   reopenLaunchMilestone,
   seedLaunchMilestones,
+  type LaunchMilestoneCompletion,
   type LaunchMilestoneView,
   type LaunchReadiness,
 } from "./milestones";

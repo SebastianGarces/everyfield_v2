@@ -31,7 +31,7 @@
 // descriptions; the dates are the planter's.
 // ============================================================================
 
-import { and, eq, isNull, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, sql, type SQL } from "drizzle-orm";
 
 import { db } from "@/db";
 import type { User } from "@/db/schema";
@@ -533,6 +533,70 @@ export async function getLaunchReadiness(
       0
     ),
   };
+}
+
+export interface LaunchMilestoneCompletion {
+  milestoneId: string;
+  title: string;
+  area: LaunchMilestoneArea;
+  completedAt: Date;
+  /** `null` for a milestone closed before the column carried an actor. */
+  actorName: string | null;
+}
+
+/**
+ * Who closed which milestone, and when — the plant-facing half of the launch
+ * history (LS-003/LS-004).
+ *
+ * READ-TIME ONLY. `completed_at` and `completed_by_user_id` are already on the
+ * row; this is the pair being READ rather than a second journal being written.
+ * There is deliberately no `launch_events` row per milestone: the milestone
+ * table already answers "who and when" for the state it holds, and a parallel
+ * event log would be a second truth to keep in step with it.
+ *
+ * A LEFT join on the actor, not an inner one: a milestone whose closer has
+ * since been deleted is still a milestone that was closed, and an inner join
+ * would silently drop it out of the history.
+ */
+export async function getLaunchMilestoneHistory(
+  launchId: string,
+  churchId: string
+): Promise<LaunchMilestoneCompletion[]> {
+  const rows = await db
+    .select({
+      milestoneId: launchMilestones.id,
+      title: launchMilestones.title,
+      area: launchMilestones.area,
+      completedAt: launchMilestones.completedAt,
+      actorName: users.name,
+      actorEmail: users.email,
+    })
+    .from(launchMilestones)
+    .leftJoin(users, eq(users.id, launchMilestones.completedByUserId))
+    .where(
+      and(
+        eq(launchMilestones.launchId, launchId),
+        eq(launchMilestones.churchId, churchId),
+        isNotNull(launchMilestones.completedAt)
+      )
+    )
+    .orderBy(desc(launchMilestones.completedAt));
+
+  return rows.flatMap((row) =>
+    // `isNotNull` above already guarantees it; the guard is what lets the
+    // returned type promise a `Date` instead of pushing the null onto callers.
+    row.completedAt
+      ? [
+          {
+            milestoneId: row.milestoneId,
+            title: row.title,
+            area: row.area,
+            completedAt: row.completedAt,
+            actorName: row.actorName || row.actorEmail || null,
+          },
+        ]
+      : []
+  );
 }
 
 // ----------------------------------------------------------------------------

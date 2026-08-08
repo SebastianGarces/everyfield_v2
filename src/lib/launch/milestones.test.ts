@@ -268,6 +268,47 @@ test("milestone completion follows TASK rules, not the planter-only rule", () =>
   );
 });
 
+test("the milestone history is a READ of the row, church-scoped, losing nobody", () => {
+  // The History tab's source. Three properties, and each one is a bug if it
+  // goes: it must be scoped by church as well as launch (a launch id is a uuid
+  // a caller could hold from anywhere); it must return only CLOSED milestones,
+  // because an open one has no completion to report; and the actor join must be
+  // LEFT, or a milestone whose closer was since deleted would vanish from the
+  // history it belongs to.
+  const code = readFileSync(
+    path.join(process.cwd(), "src", "lib", "launch", "milestones.ts"),
+    "utf8"
+  )
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/.*$/gm, "");
+
+  const read = code.slice(
+    code.indexOf("export async function getLaunchMilestoneHistory")
+  );
+  assert.ok(read.length > 0, "getLaunchMilestoneHistory is gone");
+  assert.match(read, /eq\(launchMilestones\.launchId, launchId\)/);
+  assert.match(read, /eq\(launchMilestones\.churchId, churchId\)/);
+  assert.match(read, /isNotNull\(launchMilestones\.completedAt\)/);
+  assert.match(
+    read,
+    /leftJoin\(\s*users,\s*eq\(users\.id, launchMilestones\.completedByUserId\)\s*\)/
+  );
+});
+
+test("the history read adds no journal — it reads what the row already stores", () => {
+  // The ruling for this pass was explicit: read-time only, no schema change and
+  // no new journalling. A milestone completion is `completed_at` +
+  // `completed_by_user_id`, which the write path already sets.
+  const code = readFileSync(
+    path.join(process.cwd(), "src", "lib", "launch", "milestones.ts"),
+    "utf8"
+  );
+  assert.ok(
+    !/launchEvents/.test(code),
+    "milestones.ts writes or reads launch_events — the milestone row is the record"
+  );
+});
+
 test("the milestone modules are not endpoints (#265)", () => {
   for (const file of ["milestones.ts", "milestone-areas.ts", "journal.ts"]) {
     const code = readFileSync(

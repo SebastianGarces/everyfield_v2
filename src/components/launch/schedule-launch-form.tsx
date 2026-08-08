@@ -8,6 +8,12 @@
 // refuses a forged call from a team member regardless of what the page rendered
 // (LS-007). A hidden button is a courtesy; the server check is the rule.
 //
+// IT IS NOT A CARD. It renders as a plain section because it lives inside the
+// date card's disclosure (`launch-date-card.tsx`), which owns the surface, the
+// heading and the decision about when it is on screen at all. Standing alone as
+// a permanent card is what gave a once-a-launch admin act the same weight as
+// the plant's readiness list.
+//
 // The date is a `YYYY-MM-DD` string end to end — it is never round-tripped
 // through a `Date`, because a naive day parsed in the runtime's zone is a
 // different day in the browser than on the server (memory/invariants.md → Date
@@ -30,13 +36,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -125,17 +124,22 @@ export function ScheduleLaunchForm({
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{hasDate ? "Change the date" : "Name the day"}</CardTitle>
-        <CardDescription>
+    <section className="space-y-4" aria-labelledby="launch-schedule-heading">
+      <div>
+        <h3
+          id="launch-schedule-heading"
+          className="text-sm font-medium tracking-tight"
+        >
+          {hasDate ? "Move or postpone the launch" : "Set the date"}
+        </h3>
+        <p className="text-muted-foreground mt-1 text-sm">
           {hasDate
-            ? "Moving or postponing the date is recorded — who changed it, when, and from what."
+            ? "The change is recorded below — who changed it, when, and from what — and your sending church is notified."
             : "Set Launch Sunday and we'll seed your readiness milestones from the Launch Playbook."}
-        </CardDescription>
-      </CardHeader>
+        </p>
+      </div>
 
-      <CardContent className="space-y-4">
+      <div className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="launch-target-date">Launch Sunday</Label>
           <div className="flex flex-wrap items-center gap-2">
@@ -198,7 +202,7 @@ export function ScheduleLaunchForm({
             />
           </div>
         )}
-      </CardContent>
+      </div>
 
       <AlertDialog
         open={confirming !== null}
@@ -272,6 +276,6 @@ export function ScheduleLaunchForm({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </Card>
+    </section>
   );
 }
