@@ -180,6 +180,47 @@ test("the sending-churches roster is offered to network admins alone", () => {
   );
 });
 
+// ----------------------------------------------------------------------------
+// Launch (LS-004) — a church-role entry, and only that
+// ----------------------------------------------------------------------------
+
+test("Launch is in the church-role nav, with a page behind it", () => {
+  const launch = mainNavItems.find((item) => item.href === "/launch");
+  assert.ok(
+    launch,
+    "/launch must be reachable from the planter sidebar (LS-004)"
+  );
+  // Same rule #260 wrote for the oversight lists, applied to the item this
+  // change adds: the nav item and its page.tsx ship together.
+  assert.ok(
+    new Set(collectStaticRoutes(APP_DIR)).has("/launch"),
+    "/launch is in the nav, so src/app/(dashboard)/launch/page.tsx must exist"
+  );
+  // A launch belongs to a plant. Without a church there is nothing to count
+  // down to, and the page redirects — so the sidebar says CHURCH REQUIRED
+  // rather than offering a link that bounces.
+  assert.equal(launch.requiresChurch, true);
+  assert.notEqual(launch.isDisabled, true);
+});
+
+test("Launch is offered to church roles alone, never to oversight", () => {
+  // `/launch` is the plant's own surface: it admits planter/coach/team_member
+  // and redirects everyone else. An oversight admin sees ONLY their own
+  // sidebar, so a link that redirects them is the #260 failure in a new
+  // costume. Their launch date comes from /oversight/plants — the same entity,
+  // a different surface.
+  for (const items of [sendingChurchNavItems, networkAdminNavItems]) {
+    assert.ok(
+      !items.map((item) => item.href).includes("/launch"),
+      "oversight navs must not offer /launch"
+    );
+  }
+});
+
+test("the launch page lights Launch, not Dashboard", () => {
+  assert.deepEqual(activeTitles("/launch", mainNavItems), ["Launch"]);
+});
+
 test("the plants directory and its detail route light the same nav item", () => {
   // The detail page is a child route, not a sibling nav item: landing on it
   // must keep "Church Plants" lit rather than falling back to the oversight

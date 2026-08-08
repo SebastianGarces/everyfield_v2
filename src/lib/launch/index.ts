@@ -9,6 +9,32 @@
 // ============================================================================
 
 export { daysUntilTarget, parseTargetDate } from "./countdown";
+export { getLaunchJournalEntries, type LaunchJournalEntry } from "./journal";
+export {
+  LAUNCH_MILESTONE_AREA_LABELS,
+  LAUNCH_MILESTONE_AREA_ORDER,
+} from "./milestone-areas";
+export {
+  completeLaunchMilestone,
+  getLaunchReadiness,
+  isLaunchTask,
+  LAUNCH_MILESTONE_TEMPLATES,
+  MILESTONE_HAS_OPEN_TASKS_MESSAGE,
+  MILESTONE_NOT_FOUND_MESSAGE,
+  reopenLaunchMilestone,
+  seedLaunchMilestones,
+  type LaunchMilestoneView,
+  type LaunchReadiness,
+} from "./milestones";
+export {
+  canRecordOutcome,
+  launchOutcomeSchema,
+  OUTCOME_ALREADY_RECORDED_MESSAGE,
+  OUTCOME_NO_LAUNCH_MESSAGE,
+  OUTCOME_TOO_EARLY_MESSAGE,
+  recordLaunchOutcome,
+  type LaunchOutcomeInput,
+} from "./outcome";
 export {
   getLaunchDatesForChurches,
   getLaunchForChurch,

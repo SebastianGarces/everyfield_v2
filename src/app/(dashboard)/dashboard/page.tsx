@@ -24,6 +24,8 @@ import {
   getRecentActivity,
 } from "@/lib/dashboard/service";
 import { getLaunchForChurch } from "@/lib/launch/queries";
+import { daysUntilTarget } from "@/lib/launch/countdown";
+import { LaunchStatusCard } from "@/components/launch/launch-status-card";
 import { PHASES, type PhaseNumber } from "@/lib/constants";
 import { MetricCard } from "@/components/dashboard/metric-card";
 import { ActivityFeed } from "@/components/dashboard/activity-feed";
@@ -225,7 +227,20 @@ export default async function DashboardPage({
           <div className="lg:col-span-2">
             <ActivityFeed activities={activities} />
           </div>
-          <div>
+          <div className="space-y-6">
+            {/* LS-005: the compact countdown/status card. The countdown is
+                computed HERE with `daysUntilTarget` — the one implementation,
+                shared with /launch and the phase-engine snapshot — and handed
+                down as a number, so no card can re-derive it and disagree
+                (#338). */}
+            <LaunchStatusCard
+              targetDate={launch?.targetDate ?? null}
+              status={launch?.status ?? null}
+              daysUntil={daysUntilTarget(
+                launch?.targetDate ?? null,
+                new Date()
+              )}
+            />
             <QuickActions />
           </div>
         </div>

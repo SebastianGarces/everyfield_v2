@@ -1,0 +1,242 @@
+// ============================================================================
+// Launch — the pure presentation rules (LS-004/LS-005).
+//
+// A plain `.ts` module, extracted from the components for the reason
+// `focus-presentation.ts` was: the repo's harness runs `src/**/*.test.ts` with
+// node:test and no DOM, so the load-bearing decisions — what the countdown SAYS,
+// which milestone may be closed — are only testable outside a `.tsx` file.
+//
+// THE ONE RULE THIS FILE MUST NOT BREAK. Nothing here computes a day
+// difference. Every countdown number arrives already computed by
+// `daysUntilTarget` (`src/lib/launch/countdown.ts`), which is also what the
+// phase-engine snapshot and the oversight listing use. A second hand-rolled
+// diff here is exactly bug #338 in a new place: it shipped twice, once in the
+// oversight presentation layer and once in the signal layer, and both times the
+// second implementation floored a day away and read "past due" on the morning
+// of a plant's own launch.
+// ============================================================================
+
+import type { LaunchStatus } from "@/db/schema/launch";
+import { formatDate } from "@/lib/datetime";
+import { parseTargetDate } from "@/lib/launch/countdown";
+// Type-only: erased at build time, so importing the server module's shapes here
+// pulls no `@/db` into the client bundle.
+import type { LaunchReadiness } from "@/lib/launch/milestones";
+
+// ----------------------------------------------------------------------------
+// The countdown, as words
+// ----------------------------------------------------------------------------
+
+/**
+ * The headline over the number: `"Launch Sunday is today"`, `"Tomorrow"`,
+ * `"12 days out"`, `"3 days ago"`.
+ *
+ * `days` is `daysUntilTarget`'s answer and nothing else — `null` means there is
+ * no committed date, which is a different sentence from "0 days".
+ */
+export function countdownLabel(days: number | null): string {
+  if (days === null) return "No date yet";
+  if (days === 0) return "Today";
+  if (days === 1) return "Tomorrow";
+  if (days === -1) return "Yesterday";
+  return days > 0 ? `${days} days out` : `${Math.abs(days)} days ago`;
+}
+
+/**
+ * The big number a countdown card shows, and the word under it. `null` when
+ * there is no date — the card shows a call to action instead of a zero, because
+ * a zero here would read as "today".
+ */
+export function countdownFigure(
+  days: number | null
+): { value: string; unit: string } | null {
+  if (days === null) return null;
+  const magnitude = Math.abs(days);
+  return {
+    value: String(magnitude),
+    unit: magnitude === 1 ? "day" : "days",
+  };
+}
+
+/** `"Sunday, September 20, 2026"` — pinned to `APP_TIME_ZONE`, never the runtime's. */
+export function formatLaunchDay(
+  targetDate: string,
+  variant: "long" | "short" = "long"
+): string {
+  return formatDate(parseTargetDate(targetDate), variant);
+}
+
+// ----------------------------------------------------------------------------
+// Status
+// ----------------------------------------------------------------------------
+
+export interface LaunchStatusMeta {
+  label: string;
+  badgeVariant: "default" | "secondary" | "destructive" | "outline";
+  /** One line of plain English, for a card that has room for it. */
+  description: string;
+}
+
+/**
+ * `postponed` is deliberately NOT terminal and NOT an error state: a
+ * postponement carries a NEW date and the plant goes on preparing (LS-009). It
+ * reads as a neutral fact, which is why it is `secondary` rather than
+ * `destructive`.
+ */
+export function launchStatusMeta(status: LaunchStatus): LaunchStatusMeta {
+  switch (status) {
+    case "scheduled":
+      return {
+        label: "Scheduled",
+        badgeVariant: "default",
+        description: "The day is set. Work the readiness list.",
+      };
+    case "postponed":
+      return {
+        label: "Postponed",
+        badgeVariant: "secondary",
+        description: "The day moved. The new date is below, and so is why.",
+      };
+    case "completed":
+      return {
+        label: "Launched",
+        badgeVariant: "outline",
+        description: "Launch Sunday happened, and the day is on the record.",
+      };
+    case "planning":
+    default:
+      return {
+        label: "Planning",
+        badgeVariant: "secondary",
+        description: "No day named yet.",
+      };
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Readiness
+// ----------------------------------------------------------------------------
+
+/** Whole percent, 0 when there is nothing to be a percent of. */
+export function progressPercent(completed: number, total: number): number {
+  if (total <= 0) return 0;
+  return Math.round((completed / total) * 100);
+}
+
+/**
+ * May this milestone be closed by hand?
+ *
+ * The hybrid model's rule (LS-003, ruled 2026-08-04): task completion moves the
+ * milestone's progress, and a milestone with NO OPEN TASKS — including one with
+ * no tasks at all — is manually completable. This is the button's copy of the
+ * rule; the guard that decides is the `not exists` in
+ * `completeLaunchMilestoneStatement`, because a teammate can reopen the last
+ * task between this render and that write.
+ */
+export function canCompleteMilestone(milestone: {
+  isComplete: boolean;
+  openTaskCount: number;
+}): boolean {
+  return !milestone.isComplete && milestone.openTaskCount === 0;
+}
+
+/** Why the "Mark complete" control is unavailable, for a title/tooltip. */
+export function completeMilestoneBlockedReason(milestone: {
+  isComplete: boolean;
+  openTaskCount: number;
+}): string | null {
+  if (milestone.isComplete) return null;
+  if (milestone.openTaskCount === 0) return null;
+  return milestone.openTaskCount === 1
+    ? "1 task still open"
+    : `${milestone.openTaskCount} tasks still open`;
+}
+
+// ----------------------------------------------------------------------------
+// Optimistic readiness
+// ----------------------------------------------------------------------------
+
+/**
+ * What a click changes before the server answers.
+ *
+ * `milestone` carries no "did it succeed" — the optimistic state is a GUESS,
+ * and the server's `refresh()` is what reconciles it. The guess still has to
+ * obey the model's own rule, which is why completing a milestone with open
+ * tasks is a no-op here as well as in SQL: a checkbox that ticks and then
+ * silently untick itself is worse than one that does not tick.
+ */
+export type ReadinessChange =
+  | { kind: "task"; taskId: string; complete: boolean }
+  | { kind: "milestone"; milestoneId: string; complete: boolean };
+
+/**
+ * Apply one change to a readiness snapshot, deriving every count exactly the
+ * way the server derives it (`getLaunchReadiness`) — so the optimistic frame
+ * and the reconciled frame agree about the numbers instead of flickering.
+ *
+ * Pure and immutable: `useOptimistic` calls this during render.
+ */
+export function applyReadinessChange(
+  readiness: LaunchReadiness,
+  change: ReadinessChange
+): LaunchReadiness {
+  const milestones = readiness.milestones.map((milestone) => {
+    if (change.kind === "milestone") {
+      if (milestone.id !== change.milestoneId) return milestone;
+      // The button's rule, applied to the guess as well: a milestone with open
+      // tasks does not close.
+      if (change.complete && milestone.openTaskCount > 0) return milestone;
+      return { ...milestone, isComplete: change.complete };
+    }
+
+    if (!milestone.tasks.some((task) => task.id === change.taskId)) {
+      return milestone;
+    }
+
+    const tasks = milestone.tasks.map((task) =>
+      task.id === change.taskId
+        ? { ...task, isComplete: change.complete }
+        : task
+    );
+    const completedTaskCount = tasks.filter((task) => task.isComplete).length;
+
+    return {
+      ...milestone,
+      tasks,
+      completedTaskCount,
+      openTaskCount: tasks.length - completedTaskCount,
+    };
+  });
+
+  return {
+    ...readiness,
+    milestones,
+    completedCount: milestones.filter((milestone) => milestone.isComplete)
+      .length,
+    totalCount: milestones.length,
+    openTaskCount: milestones.reduce(
+      (total, milestone) => total + milestone.openTaskCount,
+      0
+    ),
+  };
+}
+
+// ----------------------------------------------------------------------------
+// The journal
+// ----------------------------------------------------------------------------
+
+/** How a journal row reads in the history list (LS-002/LS-009). */
+export function journalEventLabel(
+  event: "scheduled" | "moved" | "postponed" | "completed"
+): string {
+  switch (event) {
+    case "scheduled":
+      return "Scheduled";
+    case "moved":
+      return "Date moved";
+    case "postponed":
+      return "Postponed";
+    case "completed":
+      return "Outcome recorded";
+  }
+}
