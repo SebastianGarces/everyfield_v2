@@ -39,8 +39,16 @@ tidier. In this repo the primary sources, in order of authority:
 1. **The issue the branch closes** — `gh issue view <n>`. The acceptance criteria are the intent.
 2. **The PR body** — it carries the DoD evidence bundle, so it states what was actually proven.
 3. **Commit messages** and `git log -p <file>` on each side.
-4. **`memory/`** — `invariants.md` and `contracts/` settle conflicts that are really contract
-   disagreements. An invariant always wins over either side of the hunk.
+4. **`memory/`** — `invariants.md`, everything under `invariants/`, and `contracts/` settle
+   conflicts that are really contract disagreements. An invariant always wins over either side of
+   the hunk. Along with the DoD's security lens, this is one of the two deliberate full-price
+   readers: read the index AND every domain file, not just the index.
+
+   Conflicts *inside* `memory/invariants.md` are now mostly trivial. Parallel tracks each append
+   their elaboration to a different `invariants/<domain>.md`, so they rarely touch the same file at
+   all; what collides is one-liners under the same domain heading, and the resolution is the union
+   of both lines. A branch that added elaboration with no index line is not a conflict to resolve —
+   it is an incomplete change: add the missing one-liner (see the `memory-maintenance` skill).
 
 ### 3. Resolve each hunk
 
@@ -51,8 +59,9 @@ tidier. In this repo the primary sources, in order of authority:
 - **Do not invent new behaviour.** A resolution that is neither side is a change nobody reviewed and
   nobody's DoD covered. If the correct answer is a third thing, resolve to one side and raise the
   third thing separately.
-- Check the resolved file against `memory/invariants.md` before moving on — tenancy and auth
-  boundaries are exactly what a careless "take both" breaks.
+- Check the resolved file against `memory/invariants.md` and the `memory/invariants/*.md` domain
+  files covering it before moving on — tenancy and auth boundaries are exactly what a careless
+  "take both" breaks.
 
 ### 4. Finish and verify
 

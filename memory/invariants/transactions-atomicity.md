@@ -1,0 +1,36 @@
+# Transactions / Atomicity
+
+Why and how, for the Transactions / Atomicity rules in [`../invariants.md`](../invariants.md).
+
+**Source:** `src/db/index.ts`, `src/lib/invitations/core.ts`, `src/lib/onboarding/create-church.ts`, `src/app/(dashboard)/dashboard/confirm-leadership.ts`, `src/lib/meetings/service.ts`, `src/lib/tasks/events.ts`
+
+## The model
+
+`drizzle-orm/neon-http` speaks one HTTP request per statement, so there is no session to hold a transaction open. `db.batch([...])` is the only atomic unit available: one round trip, all-or-nothing, and **each statement sees the previous one's writes** — which is what makes it usable as a guard, and where the traps are.
+
+Two failure modes, two tools:
+
+- **Replay** (one request retried after a crash) → ordering + idempotency. Marker last, every earlier step redo-safe.
+- **Concurrency** (two requests in flight) → ordering does nothing; both pass the same SELECT. You need a DB-level guard: a (partial) unique index, a compare-and-set as statement one, or `SELECT … FOR UPDATE`.
+
+## The subquery trap
+
+A compare-and-set serialises only writers of the **same row**. An `EXISTS (… another table …)` predicate is a snapshot read: two requests updating two different rows contend on nothing, both subqueries evaluate true, both commit, and under READ COMMITTED the second one's dependent statement silently matches nothing.
+
+`acceptInvitationAs()` shows both halves. It batches the claim (`pending → accepted`) with the FK write, whose `WHERE` re-asserts the claim, so a lost claim writes nothing — but that held only against a *sequential* second accept. Two accepts of two DIFFERENT invitations for one free oversight slot both committed until `lockTargetRow` (`SELECT … FOR UPDATE` on the row the association writes) became statement ONE and success was gated on the dependent write's rowcount rather than the claim's. Raced by `scripts/g3-oversight-model.ts` §3d case H (#265 r3).
+
+## Why the church batch is one batch (#198)
+
+As three awaited statements, a failure at the last left a church LINKED to a planter with no privacy row and **nothing could repair it**: the retry is refused by the "you already have a church" guard, while every `canAccessFeatureData` read answered from a row that did not exist.
+
+The batch is not the concurrency guard here — `linkUserToChurchFilter` is, and a real one, because both requests update the same `users` row. What it cannot undo is the loser's own church insert, so `discardChurchStatements` sweeps it afterwards under a `NOT EXISTS` on the link, so cleanup can only ever delete a church nobody is linked to.
+
+## Why the planter-seat No is locked too (#307, OB-010)
+
+Two team members of a planterless plant write two DIFFERENT rows — `users` for a Yes, `churches` for a No — so without the church row lock they contend on nothing. The No is the one that was missed, and it is not cosmetic: as a bare `UPDATE churches SET leadership_status = 'no_planter'` it won by arriving last, and `handleMeetingAttendanceFinalized` reads `churchHasNoPlanter` first, so a plant that had just acquired a planter got no post-meeting follow-up or evaluation tasks at all.
+
+The one path left unguarded is an answer from whoever already holds the seat: once filled, `canAnswerLeadershipQuestion` admits only the planter, so there is no second writer.
+
+## Marker-last (`finalizeAttendance`)
+
+`church_meetings.actual_attendance` is written only by `finalizeAttendance()`, so non-null *is* the idempotency key — and because its compare-and-set runs after the downstream emit, a meeting can never be finalized without its follow-up tasks. Duplicates are blocked by `tasks_meeting_evaluation_unique_idx`.

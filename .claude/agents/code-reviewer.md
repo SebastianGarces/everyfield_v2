@@ -9,7 +9,8 @@ good code looks like — what's below is the repo-specific bar the generic revie
 
 ## This repo's known failure modes
 
-Check the diff against `memory/invariants.md`; these are the recurring ones:
+Check the diff against `memory/invariants.md` (every rule, one line each) and the
+`memory/invariants/<domain>.md` files covering what the diff touches; these are the recurring ones:
 
 - Any `db.transaction()` call (throws at runtime on neon-http) or a multi-statement mutation
   without a real concurrency guard — SELECT-then-INSERT is not one.

@@ -9,7 +9,9 @@ for everything else, trust your judgment and match the surrounding code.
 
 ## Read before mutating anything
 
-`memory/invariants.md` — it is short and every section is load-bearing. The ones that bite:
+`memory/invariants.md` — it is short, and every rule is stated there in one line, so reading it
+alone means you have seen all of them. For the why and the pattern behind a rule you are about to
+lean on, open the matching `memory/invariants/<domain>.md`. The ones that bite:
 
 - **`db.transaction()` throws at runtime** (neon-http has no interactive transactions). Use
   `db.batch([...])`, ordering + idempotency, unique indexes as the real concurrency guards,
