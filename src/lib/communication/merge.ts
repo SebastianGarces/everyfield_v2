@@ -197,7 +197,14 @@ export function buildChurchMergeData(church: {
 }): Record<string, string> {
   return {
     church_name: church.name,
-    // pastor_name and launch_date come from extended church profile (future)
+    // Both still render empty, for two DIFFERENT reasons — worth keeping
+    // straight now that one of them is no longer "the column doesn't exist":
+    //   pastor_name — no church-profile field sources it yet.
+    //   launch_date — the day exists and is readable
+    //     (`launches.target_date`, LS-001; `churches.launch_date` was dropped by
+    //     migration 0032), but this builder takes only a church name, and
+    //     widening it to fetch is #203's call. The FRD's own note
+    //     (`communication-hub/frd.md`) says these two render empty.
     pastor_name: "",
     launch_date: "",
   };

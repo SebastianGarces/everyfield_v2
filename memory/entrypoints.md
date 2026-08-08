@@ -15,6 +15,10 @@ real thing faster with the conventions below.
   tokened public routes) are listed in `contracts/api.md`.
 - **DB schema:** `src/db/schema/*.ts` (one file per feature area). Non-obvious column semantics:
   `contracts/db.md`.
+- **The launch date** is not a column on `churches` — it is the `launches` entity
+  (`src/db/schema/launch.ts`, migration 0032). Reads: `src/lib/launch/queries.ts`. The one write
+  path: `setLaunchDate` in `src/lib/launch/service.ts`. Countdown math: `countdown.ts` there, and
+  only there (`invariants.md` → Hierarchical Access Control, the day-vs-instant rule).
 - **Auth:** `src/lib/auth/` (`session.ts:getCurrentSession()` runs on every authed request).
 - **Events:** `src/lib/events/event-bus.ts`; feature handlers subscribe in `src/lib/tasks/events.ts` etc.
 - **Redirect/proxy behavior** (authed users hitting `/`, CSRF exemptions): `src/proxy.ts`.

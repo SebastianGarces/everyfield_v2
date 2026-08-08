@@ -13,6 +13,7 @@ import {
   churches,
   churchMeetings,
   commitments,
+  launches,
   meetingAttendance,
   ministryTeams,
   persons,
@@ -21,6 +22,7 @@ import {
   trainingCompletions,
   trainingPrograms,
 } from "@/db/schema";
+import type { LaunchStatus } from "@/db/schema/launch";
 import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 
 /** Statuses that count as "open" follow-up (warm, pre-commitment) contacts. */
@@ -44,19 +46,56 @@ export const LEADERSHIP_CANDIDATE_STATUSES = [
 export interface ChurchRow {
   id: string;
   currentPhase: number;
-  launchDate: string | null;
 }
 
-/** Loads the church row (phase + launch date). `null` when the church is absent. */
+/**
+ * Loads the church row. `null` when the church is absent.
+ *
+ * NO LAUNCH DATE HERE. It used to be `churches.launch_date`; migration 0032
+ * dropped that column and Launch Sunday is an entity now (LS-001), so the
+ * countdown signal reads `getLaunch()` below. Adding it back to this row — even
+ * as a join — would re-create the two-owners state the entity exists to end.
+ */
 export async function getChurch(churchId: string): Promise<ChurchRow | null> {
   const rows = await db
     .select({
       id: churches.id,
       currentPhase: churches.currentPhase,
-      launchDate: churches.launchDate,
     })
     .from(churches)
     .where(eq(churches.id, churchId))
+    .limit(1);
+
+  return rows[0] ?? null;
+}
+
+// ----------------------------------------------------------------------------
+// Launch (LS-001 / PE-004)
+// ----------------------------------------------------------------------------
+
+export interface LaunchRow {
+  /** yyyy-mm-dd, or `null` while the launch is still `planning`. */
+  targetDate: string | null;
+  status: LaunchStatus;
+}
+
+/**
+ * The plant's launch, or `null` when it has none yet.
+ *
+ * `null` and `{ targetDate: null }` are DIFFERENT facts — "no launch record at
+ * all" vs "a launch being planned with no day named" — and the builder collapses
+ * them to the same empty countdown deliberately, because the countdown's
+ * question is only ever "which day". Anything that wants to tell them apart
+ * (the `/launch` page, the outcome facts) reads the row.
+ */
+export async function getLaunch(churchId: string): Promise<LaunchRow | null> {
+  const rows = await db
+    .select({
+      targetDate: launches.targetDate,
+      status: launches.status,
+    })
+    .from(launches)
+    .where(eq(launches.churchId, churchId))
     .limit(1);
 
   return rows[0] ?? null;

@@ -444,7 +444,7 @@ export function announcePhaseAdvanced(
   );
 }
 
-/** Source: `setChurchLaunchDate()` in `src/lib/churches/launch-date.ts`. */
+/** Source: `setLaunchDate()` in `src/lib/launch/service.ts` (LS-001/LS-002). */
 export function announceLaunchDateChanged(
   input: {
     churchId: string;
@@ -452,8 +452,8 @@ export function announceLaunchDateChanged(
     /** `YYYY-MM-DD`, as stored. */
     launchDate: string;
     /**
-     * The instant the change was durably written — `churches.updated_at` as
-     * returned by the UPDATE that made it. Half the dedupe key; see below.
+     * The instant the change was durably written — `launches.updated_at` as
+     * returned by the statement that made it. Half the dedupe key; see below.
      */
     changedAt: Date;
   },
@@ -475,7 +475,7 @@ export function announceLaunchDateChanged(
       // sending church would simply never hear it.
       //
       // The instant makes the key per-EVENT while keeping replay protection
-      // intact: `setChurchLaunchDate` compare-and-sets, so a re-save of the
+      // intact: `setLaunchDate` compare-and-sets, so a re-save of the
       // same date is `unchanged` and never reaches here at all, and a retry of
       // only the announcement carries the same `changedAt` and still dedupes.
       // The date stays in the key so the row is legible in the database.

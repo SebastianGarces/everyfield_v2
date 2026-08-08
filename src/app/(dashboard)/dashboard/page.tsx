@@ -23,6 +23,7 @@ import {
   getDashboardMetrics,
   getRecentActivity,
 } from "@/lib/dashboard/service";
+import { getLaunchForChurch } from "@/lib/launch/queries";
 import { PHASES, type PhaseNumber } from "@/lib/constants";
 import { MetricCard } from "@/components/dashboard/metric-card";
 import { ActivityFeed } from "@/components/dashboard/activity-feed";
@@ -87,16 +88,20 @@ export default async function DashboardPage({
   const churchId = user!.churchId!;
   const userId = user!.id;
 
-  const [church, metrics, activities, hasPlanterUser] = await Promise.all([
-    getCurrentUserChurch(),
-    getDashboardMetrics(churchId, userId),
-    getRecentActivity(churchId),
-    // OB-010: the IMPLICIT assignment — a `users` row with the planter role
-    // pointing here. It is what tells a church that predates OB-004 apart from
-    // one that genuinely has nobody leading it, and the two get opposite
-    // treatment: the first is left alone, the second is asked.
-    churchHasPlanterUser(churchId),
-  ]);
+  const [church, metrics, activities, hasPlanterUser, launch] =
+    await Promise.all([
+      getCurrentUserChurch(),
+      getDashboardMetrics(churchId, userId),
+      getRecentActivity(churchId),
+      // OB-010: the IMPLICIT assignment — a `users` row with the planter role
+      // pointing here. It is what tells a church that predates OB-004 apart from
+      // one that genuinely has nobody leading it, and the two get opposite
+      // treatment: the first is left alone, the second is asked.
+      churchHasPlanterUser(churchId),
+      // LS-001: the launch date moved off the church row onto its own entity
+      // (migration 0032), so step 3's fact is read from here now.
+      getLaunchForChurch(churchId),
+    ]);
 
   const leadership: ChurchLeadershipState = {
     churchId,
@@ -137,7 +142,7 @@ export default async function DashboardPage({
     // the declaration (including the explicit "no date yet"), this line is what
     // reads it instead — `OnboardingFacts` is optional per fact so that until
     // then the answer is honestly "incomplete" rather than wrong.
-    journeyDeclared: !!church?.launchDate || (church?.currentPhase ?? 0) > 0,
+    journeyDeclared: !!launch?.targetDate || (church?.currentPhase ?? 0) > 0,
     // Step 4's fact: anybody at all on the plant's list (OB-006).
     peopleAdded: metrics.totalPeople > 0,
   };

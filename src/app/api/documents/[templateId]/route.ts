@@ -80,7 +80,12 @@ export async function GET(
     {
       churchName: church.name,
       userName: user.name ?? null,
-      // `churches.launch_date` lands with the Phase Engine schema (not on main yet).
+      // Null because merge-field sourcing is #203, not because there is nothing
+      // to read: the launch date lives on the launch entity
+      // (`launches.target_date`, LS-001) since migration 0032 dropped
+      // `churches.launch_date`. Same stub as `(dashboard)/documents/page.tsx`,
+      // and the two must stay in step — a request-supplied `?launch_date=` still
+      // overrides whatever this resolves to.
       launchDate: null,
     },
     provided

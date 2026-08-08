@@ -17,6 +17,7 @@
 // essentially no activity so the judge can produce onboarding guidance.
 // ============================================================================
 
+import { daysUntilTarget } from "@/lib/launch/countdown";
 import {
   getActiveMembershipsByPerson,
   getChurch,
@@ -29,9 +30,11 @@ import {
   getPlantSignals,
   getTeamLeaderPersonIds,
   getTrainingCompletions,
+  getLaunch,
   getTrainingPrograms,
   type ChurchRow,
   type CommitmentRow,
+  type LaunchRow,
   type FollowUpRow,
   type LeadershipPersonRow,
   type MinistryTeamRow,
@@ -380,11 +383,32 @@ function buildTrainingSignals(
 // Launch countdown
 // ----------------------------------------------------------------------------
 
+/**
+ * PE-004's countdown, now sourced from the LAUNCH ENTITY (`launches.target_date`)
+ * rather than the dropped `churches.launch_date` column (LS-001, migration 0032).
+ * A launch with no row, and a `planning` launch with no day named, both produce
+ * the same empty countdown — the signal's question is only ever "which day".
+ *
+ * FIXED HERE: #338, the off-by-one #303 hit first. This used to be
+ * `diffInDays(asOf, target)`, which subtracts a wall-clock DAY from an INSTANT
+ * and floors the leftover fraction away — so from 00:00:01 UTC onward the answer
+ * was a full day short and a plant read "past due" on the morning of its own
+ * launch, while `/oversight/plants` (fixed in PR #339) read it correctly. Both
+ * sides are floored to a UTC midnight before subtracting, and the one
+ * implementation lives in `src/lib/launch/countdown.ts` so the two surfaces
+ * cannot drift again.
+ *
+ * Note the sibling `diffInDays` call sites in this file are NOT the same bug and
+ * must not be "fixed": days-since-last-meeting, idle days and tenure compare two
+ * genuine instants, where flooring is correct.
+ */
 function buildLaunchSignals(
-  launchDate: string | null,
+  targetDate: string | null,
   asOf: Date
 ): LaunchSignals {
-  if (!launchDate) {
+  const daysUntilLaunch = daysUntilTarget(targetDate, asOf);
+
+  if (targetDate === null || daysUntilLaunch === null) {
     return {
       launchDate: null,
       daysUntilLaunch: null,
@@ -393,11 +417,8 @@ function buildLaunchSignals(
     };
   }
 
-  const target = parseDateOnly(launchDate);
-  const daysUntilLaunch = diffInDays(asOf, target);
-
   return {
-    launchDate,
+    launchDate: targetDate,
     daysUntilLaunch,
     isPastDue: daysUntilLaunch < 0,
     isEmpty: false,
@@ -433,6 +454,13 @@ function buildManualSignals(rows: PlantSignalRow[]): ManualSignals {
 /** All church_id-scoped raw rows needed to assemble a snapshot. */
 export interface SnapshotInputs {
   church: ChurchRow;
+  /**
+   * The plant's launch entity, or `null` when it has none (LS-001). Separate
+   * from `church` because it is a separate row now — the countdown used to read
+   * `church.launchDate`, and the whole point of migration 0032 is that it no
+   * longer can.
+   */
+  launch: LaunchRow | null;
   commitments: CommitmentRow[];
   visionMeetings: VisionMeetingRow[];
   followUp: FollowUpRow[];
@@ -476,7 +504,7 @@ export function assembleFactSnapshot(
     committedPeople,
     coreGroup.committedCount
   );
-  const launch = buildLaunchSignals(inputs.church.launchDate, asOf);
+  const launch = buildLaunchSignals(inputs.launch?.targetDate ?? null, asOf);
   const manual = buildManualSignals(inputs.plantSignals);
 
   // Cold-start (PE-018): no meaningful activity anywhere in the system.
@@ -531,8 +559,11 @@ export async function buildFactSnapshot(
     throw new Error(`buildFactSnapshot: church not found: ${churchId}`);
   }
 
-  // Independent church_id-scoped reads (NFR-PE-6), run concurrently.
+  // Independent church_id-scoped reads (NFR-PE-6), run concurrently. The launch
+  // joined this list with LS-001: it is a row of its own now, not a column on
+  // the church, so it is one more parallel read rather than one more column.
   const [
+    launch,
     commitments,
     visionMeetings,
     followUp,
@@ -545,6 +576,7 @@ export async function buildFactSnapshot(
     trainingCompletions,
     plantSignals,
   ] = await Promise.all([
+    getLaunch(churchId),
     getCommitments(churchId),
     getCompletedVisionMeetings(churchId),
     getOpenFollowUpContacts(churchId),
@@ -562,6 +594,7 @@ export async function buildFactSnapshot(
     churchId,
     {
       church,
+      launch,
       commitments,
       visionMeetings,
       followUp,

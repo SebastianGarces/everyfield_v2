@@ -66,7 +66,14 @@ export interface DocumentMergeField {
   key: string;
   label: string;
   required: boolean;
-  /** Source of the auto-filled default value, if any. */
+  /**
+   * Source of the auto-filled default value, if any.
+   *
+   * `launch_date` is the TOKEN's name, not a column's — it resolves from the
+   * launch entity (`launches.target_date`, LS-001) via `MergeContext`, since
+   * migration 0032 dropped `churches.launch_date`. Renaming the token would
+   * break every generated document's search-param contract, so it stays.
+   */
   autoFill?: "church_name" | "pastor_name" | "launch_date";
   placeholder?: string;
   /** Optional hint rendered under the input. */

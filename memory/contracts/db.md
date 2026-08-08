@@ -13,6 +13,34 @@ tenant scope; `created_at`/`updated_at` default now.
 - **`churches.leadership_status`** (`church.ts`): `planter_confirmed` | `no_planter` | **null =
   never asked** — null is NOT "no planter", which is why it isn't a boolean. Read ONLY through
   `src/lib/onboarding/leadership.ts`. The planter *assignment* is `users.church_id` + role.
+- **`churches` has NO `launch_date` column** — migration 0032 dropped it (LS-001, ruled on #285:
+  deliberately not expand-only, landed with every reader in one slice). Launch Sunday is an entity:
+  `launches`, at most one row per church, and it is the only owner of the day. Read it with
+  `getLaunchForChurch` / `getLaunchDatesForChurches` (`src/lib/launch/queries.ts` — the second
+  exists so the oversight portfolio listing stays one query); write it ONLY through
+  `setLaunchDate` (`src/lib/launch/service.ts`), which journals the change and fires the existing
+  `launch_date_changed` oversight milestone. Nothing under `src/lib/launch/` carries `"use server"`.
+  - `launches.target_date` is nullable **only** while `status = 'planning'` — the
+    `launches_target_date_check` CHECK makes "scheduled with no day" unrepresentable, so no
+    countdown reader has to defend against it. Statuses are `planning | scheduled | completed |
+    postponed`, closed by CHECK; `postponed` is NOT terminal (it carries a new date).
+  - **One live launch per church is the `launches_church_id_unique` index, not a check in the
+    service.** Two concurrent first schedules both pass any SELECT-then-INSERT
+    (`../invariants.md` → Atomicity); the insert carries `ON CONFLICT (church_id) DO NOTHING` and
+    the loser writes nothing at all, journal included.
+  - The write is ONE statement, not a `db.batch`: a `WITH` chain that locks the row
+    (`SELECT … FOR UPDATE`), inserts-or-compare-and-sets, and inserts the journal row from what
+    was actually written. A batch cannot do it — the journal needs the OLD values (which the
+    update destroys) and, on the create path, an id that does not exist until the insert runs.
+  - **`launch_events` is APPEND-ONLY, on the same terms as `association_events`:** one writer,
+    INSERT only, no `updated_at`, no soft-delete column, and no database rule enforcing it.
+    `previous_target_date` null = the first commitment, a fact rather than a gap. `moved` vs
+    `postponed` is LS-009's distinction and is chosen by the CALLER's intent, not derived.
+  - `launch_milestone_tasks` is a join table rather than a column on `tasks`, so the task system
+    carries no launch-shaped column.
+  - **Cleanup order trap:** `launches.church_id` and `launch_events.actor_user_id` do NOT cascade,
+    so any script deleting churches or users must delete `launches` first (milestones, milestone
+    links and the journal all cascade from it). All four seed/G3 scripts do.
 - **`church_id = null` means global content** (e.g. wiki articles visible to all tenants).
 - **`sessions.id`** is the SHA-256 of the token, not the token.
 - **Soft deletes:** `persons.deleted_at` — feature queries must filter it.

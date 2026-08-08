@@ -158,7 +158,12 @@ export interface TrainingSignals {
   isEmpty: boolean;
 }
 
-/** Launch-date countdown (PE-004). `launch_date` lives on the church entity. */
+/**
+ * Launch-date countdown (PE-004). The date lives on the LAUNCH entity
+ * (`launches.target_date`) as of LS-001 / migration 0032 — the church row's
+ * `launch_date` column was dropped, and the field names below are kept as they
+ * were so no consumer of the snapshot had to change.
+ */
 export interface LaunchSignals {
   /** ISO date (yyyy-mm-dd) of the target launch, or `null` if unset. */
   launchDate: string | null;

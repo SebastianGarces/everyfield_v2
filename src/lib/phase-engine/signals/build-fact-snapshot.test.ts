@@ -34,7 +34,9 @@ function daysBefore(ref: Date, days: number): Date {
 /** A populated input bundle exercising every signal section. */
 function richInputs(): SnapshotInputs {
   return {
-    church: { id: CHURCH_ID, currentPhase: 2, launchDate: "2026-09-20" },
+    church: { id: CHURCH_ID, currentPhase: 2 },
+    // The launch is its own row now (LS-001) — `churches.launch_date` is gone.
+    launch: { targetDate: "2026-09-20", status: "scheduled" },
     commitments: [
       // person A committed long ago (prior baseline)
       { personId: "A", commitmentType: "core_group", signedDate: "2026-01-10" },
@@ -112,7 +114,9 @@ function richInputs(): SnapshotInputs {
 /** An empty input bundle for the cold-start case. */
 function coldStartInputs(): SnapshotInputs {
   return {
-    church: { id: CHURCH_ID, currentPhase: 0, launchDate: null },
+    church: { id: CHURCH_ID, currentPhase: 0 },
+    // A cold-start plant has no launch row at all — not a launch with no date.
+    launch: null,
     commitments: [],
     visionMeetings: [],
     followUp: [],
@@ -217,10 +221,84 @@ test("PE-004: launch countdown is computed from asOf", () => {
 
 test("launch in the past is flagged isPastDue", () => {
   const inputs = richInputs();
-  inputs.church = { ...inputs.church, launchDate: "2026-05-01" };
+  inputs.launch = { targetDate: "2026-05-01", status: "scheduled" };
   const snap = assembleFactSnapshot(CHURCH_ID, inputs, AS_OF);
   assert.equal(snap.launch.isPastDue, true);
   assert.ok((snap.launch.daysUntilLaunch ?? 0) < 0);
+});
+
+test("a plant with no launch row has an empty countdown, not a zero one", () => {
+  const inputs = richInputs();
+  inputs.launch = null;
+  const snap = assembleFactSnapshot(CHURCH_ID, inputs, AS_OF);
+  assert.equal(snap.launch.launchDate, null);
+  assert.equal(snap.launch.daysUntilLaunch, null);
+  assert.equal(snap.launch.isPastDue, false);
+  assert.equal(snap.launch.isEmpty, true);
+});
+
+test("a launch still in `planning` has no day, so no countdown", () => {
+  const inputs = richInputs();
+  inputs.launch = { targetDate: null, status: "planning" };
+  const snap = assembleFactSnapshot(CHURCH_ID, inputs, AS_OF);
+  assert.equal(snap.launch.launchDate, null);
+  assert.equal(snap.launch.isEmpty, true);
+});
+
+// ---------------------------------------------------------------------------
+// #338 — the countdown is DAY-vs-DAY, at every hour of the day.
+//
+// The old implementation subtracted a UTC-midnight target from the RAW `asOf`
+// instant and floored, so the answer was a full day short from 00:00:01 UTC
+// onward: a plant read "Launched 1 day ago" on the morning of its own launch,
+// and `/oversight/health` disagreed with `/oversight/plants` (fixed in PR #339)
+// about the same plant. Three times of day on the launch date itself, plus the
+// day either side, are what pin it — one assertion at midnight passes under
+// BOTH implementations, which is why the bug survived review the first time.
+// ---------------------------------------------------------------------------
+
+const LAUNCH_DAY = "2026-09-20";
+
+function countdownAt(iso: string): number | null {
+  const inputs = richInputs();
+  inputs.launch = { targetDate: LAUNCH_DAY, status: "scheduled" };
+  return assembleFactSnapshot(CHURCH_ID, inputs, new Date(iso)).launch
+    .daysUntilLaunch;
+}
+
+test("#338: the countdown reads 0 all day on launch day, not −1 after midnight", () => {
+  assert.equal(countdownAt("2026-09-20T00:00:00.000Z"), 0);
+  assert.equal(countdownAt("2026-09-20T09:30:00.000Z"), 0);
+  assert.equal(countdownAt("2026-09-20T23:59:59.000Z"), 0);
+});
+
+test("#338: the day either side is ±1 at every hour", () => {
+  assert.equal(countdownAt("2026-09-19T00:00:00.000Z"), 1);
+  assert.equal(countdownAt("2026-09-19T18:45:00.000Z"), 1);
+  assert.equal(countdownAt("2026-09-21T00:00:00.000Z"), -1);
+  assert.equal(countdownAt("2026-09-21T06:15:00.000Z"), -1);
+});
+
+test("#338: isPastDue does not turn true until the day after the launch", () => {
+  const onTheDay = richInputs();
+  onTheDay.launch = { targetDate: LAUNCH_DAY, status: "scheduled" };
+  assert.equal(
+    assembleFactSnapshot(
+      CHURCH_ID,
+      onTheDay,
+      new Date("2026-09-20T22:00:00.000Z")
+    ).launch.isPastDue,
+    false,
+    "a plant was past due on the morning of its own launch"
+  );
+  assert.equal(
+    assembleFactSnapshot(
+      CHURCH_ID,
+      onTheDay,
+      new Date("2026-09-21T00:00:01.000Z")
+    ).launch.isPastDue,
+    true
+  );
 });
 
 test("PE-005: manual attestations are merged; only attested keys appear", () => {

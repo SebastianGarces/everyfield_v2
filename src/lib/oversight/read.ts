@@ -75,6 +75,7 @@ import {
   peopleStats,
   tasksStats,
 } from "@/lib/oversight/presentation";
+import { getLaunchDatesForChurches } from "@/lib/launch/queries";
 import type {
   MeetingsAggregate,
   MinistryTeamsAggregate,
@@ -139,31 +140,40 @@ export async function listOversightPlants(
       stateRegion: churches.stateRegion,
       country: churches.country,
       currentPhase: churches.currentPhase,
-      launchDate: churches.launchDate,
       sendingChurchId: churches.sendingChurchId,
     })
     .from(churches)
     .where(inArray(churches.id, churchIds));
 
-  const [planterNames, associatedAt, sendingChurchNames] = await Promise.all([
-    readPlanterNames(churchIds),
-    readAssociatedAt(org, churchIds),
-    // Only a network admin can be reading a plant "through" a sending church;
-    // a sending-church admin IS the sending church, so the qualifier would be
-    // their own name repeated back at them. The lookup is scoped to the
-    // caller's own network — see `sendingChurchesInNetwork`.
-    org.orgType === "network"
-      ? readSendingChurchNames(
-          org,
-          plants
-            .map((plant) => plant.sendingChurchId)
-            .filter((id): id is string => id !== null)
-        )
-      : Promise.resolve(new Map<string, string>()),
-  ]);
+  // The launch date used to be a column on the row above. Migration 0032 moved
+  // it to the launch entity (LS-001), so it is one more parallel read keyed by
+  // church id — deliberately a BATCH read and not a per-plant lookup, which is
+  // the N+1 the column gave us immunity from. `getLaunchDatesForChurches`
+  // returns no entry for a plant with no launch, and absent reads exactly as the
+  // null column did.
+  const [planterNames, associatedAt, sendingChurchNames, launchDates] =
+    await Promise.all([
+      readPlanterNames(churchIds),
+      readAssociatedAt(org, churchIds),
+      // Only a network admin can be reading a plant "through" a sending church;
+      // a sending-church admin IS the sending church, so the qualifier would be
+      // their own name repeated back at them. The lookup is scoped to the
+      // caller's own network — see `sendingChurchesInNetwork`.
+      org.orgType === "network"
+        ? readSendingChurchNames(
+            org,
+            plants
+              .map((plant) => plant.sendingChurchId)
+              .filter((id): id is string => id !== null)
+          )
+        : Promise.resolve(new Map<string, string>()),
+      getLaunchDatesForChurches(churchIds),
+    ]);
 
   return plants
     .map((plant) => {
+      const launchDate = launchDates.get(plant.id) ?? null;
+
       const provenance: OversightAssociationProvenance = {
         orgType: org.orgType,
         orgName: org.orgName,
@@ -183,8 +193,8 @@ export async function listOversightPlants(
         ),
         planterName: planterNames.get(plant.id) ?? null,
         currentPhase: plant.currentPhase,
-        launchDate: plant.launchDate,
-        daysUntilLaunch: daysUntilLaunch(plant.launchDate, asOf),
+        launchDate,
+        daysUntilLaunch: daysUntilLaunch(launchDate, asOf),
         provenance,
       } satisfies OversightPlantSummary;
     })

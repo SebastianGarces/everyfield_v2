@@ -33,8 +33,13 @@ export default async function DocumentsPage({
   const context = {
     churchName: church.name,
     userName: user.name ?? null,
-    // `churches.launch_date` lands with the Phase Engine schema; wire it in when
-    // that merges. No Phase-1 template uses the launch_date merge field yet.
+    // The launch date is a real, readable value now — it lives on the launch
+    // entity (`launches.target_date`, LS-001) and NOT on the church row, whose
+    // `launch_date` column migration 0032 dropped. It is still passed as null
+    // here because sourcing merge-field values is #203's job, not this slice's:
+    // the only template that names `launch_date` is the Phase-4 Launch Sunday
+    // checklist, whose field is optional and planter-editable. Wiring it is one
+    // `getLaunchForChurch(church.id)` away — see `src/lib/launch/queries.ts`.
     launchDate: null,
   };
 

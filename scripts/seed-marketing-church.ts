@@ -41,10 +41,11 @@
 
 import { neon } from "@neondatabase/serverless";
 import { config } from "dotenv";
-import { desc, eq, inArray, and, isNull } from "drizzle-orm";
+import { desc, eq, inArray, and, isNull, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-http";
 
 import {
+  associationEvents,
   churches,
   churchMeetings,
   churchPrivacySettings,
@@ -55,6 +56,8 @@ import {
   insightFeedback,
   interviews,
   invitations,
+  launchEvents,
+  launches,
   locations,
   meetingAttendance,
   meetingChecklistItems,
@@ -64,6 +67,7 @@ import {
   ministryTeams,
   notifications,
   notificationDeliveries,
+  organizationInvitations,
   personActivities,
   persons,
   personTags,
@@ -405,11 +409,24 @@ async function cleanNetwork(networkId: string): Promise<void> {
     .where(eq(churches.sendingNetworkId, networkId));
   const churchIds = churchRows.map((r) => r.id);
 
-  // Marketing users are the ones carrying the marketing network id.
+  // Marketing users are the ones carrying the marketing network id — OR sitting
+  // inside a marketing church. The second arm is not decoration: an account
+  // created by REGISTERING against a marketing plant (an invite link, a team
+  // member) carries `church_id` and no network id, so the network-only scope
+  // left it behind and the `churches` delete below then failed on
+  // `users_church_id_churches_id_fk`. Cleanup scope must match every FK INTO the
+  // namespace, not the one the seeder happens to write.
   const userRows = await db
     .select({ id: users.id })
     .from(users)
-    .where(eq(users.sendingNetworkId, networkId));
+    .where(
+      churchIds.length > 0
+        ? or(
+            eq(users.sendingNetworkId, networkId),
+            inArray(users.churchId, churchIds)
+          )
+        : eq(users.sendingNetworkId, networkId)
+    );
   const userIds = userRows.map((r) => r.id);
 
   if (churchIds.length > 0) {
@@ -432,6 +449,12 @@ async function cleanNetwork(networkId: string): Promise<void> {
     await db
       .delete(churchPrivacySettings)
       .where(inArray(churchPrivacySettings.churchId, churchIds));
+
+    // The launch entity (#305/LS-001). Its journal, milestones and milestone
+    // links all cascade from `launches`, but the launch itself must go before
+    // `users` — `launch_events.actor_user_id` points at the planter and that FK
+    // does not cascade — and before `churches`, whose FK does not either.
+    await db.delete(launches).where(inArray(launches.churchId, churchIds));
 
     // Notifications (deliveries cascade from notifications, explicit anyway).
     const notificationRows = await db
@@ -515,6 +538,46 @@ async function cleanNetwork(networkId: string): Promise<void> {
     await db.delete(tags).where(inArray(tags.churchId, churchIds));
     await db.delete(households).where(inArray(households.churchId, churchIds));
   }
+
+  // Oversight associations and the invitations behind them (#23/#303). These
+  // are NOT seeded by this script — they are created by using the product
+  // against the marketing network — but they FK into the marketing users,
+  // churches and orgs, so a clean run has to sweep them or the `users` delete
+  // below fails on `organization_invitations_inviter_user_id_users_id_fk`. That
+  // is exactly what it did the first time this script was run after #305's
+  // migration, on a dev database where invitations had since been created.
+  // Audit rows go first: `association_events.source_invitation_id` points at an
+  // invitation and `actor_user_id` at a user, and neither FK cascades.
+  const invitationScope = [
+    userIds.length > 0
+      ? inArray(organizationInvitations.inviterUserId, userIds)
+      : null,
+    userIds.length > 0
+      ? inArray(organizationInvitations.respondedBy, userIds)
+      : null,
+    churchIds.length > 0
+      ? inArray(organizationInvitations.targetChurchId, churchIds)
+      : null,
+    sendingChurchIds.length > 0
+      ? inArray(organizationInvitations.targetSendingChurchId, sendingChurchIds)
+      : null,
+    sendingChurchIds.length > 0
+      ? inArray(organizationInvitations.sendingChurchId, sendingChurchIds)
+      : null,
+    eq(organizationInvitations.sendingNetworkId, networkId),
+  ].filter((clause) => clause !== null);
+
+  if (churchIds.length > 0) {
+    await db
+      .delete(associationEvents)
+      .where(inArray(associationEvents.churchId, churchIds));
+  }
+  if (userIds.length > 0) {
+    await db
+      .delete(associationEvents)
+      .where(inArray(associationEvents.actorUserId, userIds));
+  }
+  await db.delete(organizationInvitations).where(or(...invitationScope));
 
   if (userIds.length > 0) {
     // Wiki progress/bookmarks are user-scoped, not church-scoped.
@@ -689,6 +752,115 @@ interface RedemptionHillIds {
   planterUserId: string;
 }
 
+// ============================================================================
+// The launch entity (#305 / LS-001)
+// ============================================================================
+
+/**
+ * Seed a plant's launch AND its journal.
+ *
+ * Written directly rather than through `setLaunchDate` on purpose: the service
+ * announces the milestone to oversight, and a seed run that emailed a network
+ * admin about six invented date changes would be indistinguishable from the
+ * product misbehaving. The ROWS are what the surfaces read, so the rows are what
+ * this writes — including the journal, which is the only reason a seeded plant's
+ * `/launch` history is not blank.
+ */
+async function seedScheduledLaunch(input: {
+  churchId: string;
+  planterId: string;
+  targetDate: string;
+  /** A previous date, so the journal has a `moved` entry as well as the first. */
+  movedFrom?: string;
+}): Promise<string> {
+  const [launch] = await db
+    .insert(launches)
+    .values({
+      churchId: input.churchId,
+      targetDate: input.targetDate,
+      status: "scheduled",
+    })
+    .returning({ id: launches.id });
+
+  const journal: (typeof launchEvents.$inferInsert)[] = [
+    {
+      launchId: launch.id,
+      churchId: input.churchId,
+      event: "scheduled",
+      previousTargetDate: null,
+      targetDate: input.movedFrom ?? input.targetDate,
+      previousStatus: "planning",
+      status: "scheduled",
+      actorUserId: input.planterId,
+    },
+  ];
+  if (input.movedFrom) {
+    journal.push({
+      launchId: launch.id,
+      churchId: input.churchId,
+      event: "moved",
+      previousTargetDate: input.movedFrom,
+      targetDate: input.targetDate,
+      previousStatus: "scheduled",
+      status: "scheduled",
+      actorUserId: input.planterId,
+    });
+  }
+  await db.insert(launchEvents).values(journal);
+
+  return launch.id;
+}
+
+/** A launch that already happened, with its outcome recorded (LS-006). */
+async function seedCompletedLaunch(input: {
+  churchId: string;
+  planterId: string;
+  targetDate: string;
+  attendanceCount: number;
+  decisionsCount: number;
+  outcomeNotes: string;
+  captureTheDay: string;
+}): Promise<string> {
+  const [launch] = await db
+    .insert(launches)
+    .values({
+      churchId: input.churchId,
+      targetDate: input.targetDate,
+      status: "completed",
+      outcomeRecordedAt: new Date(`${input.targetDate}T18:00:00.000Z`),
+      attendanceCount: input.attendanceCount,
+      decisionsCount: input.decisionsCount,
+      outcomeNotes: input.outcomeNotes,
+      captureTheDay: input.captureTheDay,
+    })
+    .returning({ id: launches.id });
+
+  await db.insert(launchEvents).values([
+    {
+      launchId: launch.id,
+      churchId: input.churchId,
+      event: "scheduled",
+      previousTargetDate: null,
+      targetDate: input.targetDate,
+      previousStatus: "planning",
+      status: "scheduled",
+      actorUserId: input.planterId,
+    },
+    {
+      launchId: launch.id,
+      churchId: input.churchId,
+      event: "completed",
+      previousTargetDate: input.targetDate,
+      targetDate: input.targetDate,
+      previousStatus: "scheduled",
+      status: "completed",
+      actorUserId: input.planterId,
+    },
+  ]);
+
+  return launch.id;
+}
+
 async function seedRedemptionHill(
   networkId: string,
   sendingChurchId: string,
@@ -707,7 +879,6 @@ async function seedRedemptionHill(
       currentPhase: 4,
       sendingNetworkId: networkId,
       sendingChurchId,
-      launchDate: dateOnly(LAUNCH),
     })
     .returning({ id: churches.id });
   const churchId = church.id;
@@ -727,6 +898,19 @@ async function seedRedemptionHill(
     })
     .returning({ id: users.id });
   const planterId = daniel.id;
+
+  // The launch entity (#305/LS-001) — the day used to be a column on the church
+  // row above. It is seeded AFTER the planter because the journal names an
+  // actor, and the journal is seeded too: a plant whose launch has no history
+  // is not a plant the `/launch` page has anything to show.
+  await seedScheduledLaunch({
+    churchId,
+    planterId,
+    targetDate: dateOnly(LAUNCH),
+    // Redemption Hill moved its date once, six weeks out — the shape every
+    // countdown surface and the milestone notification are built around.
+    movedFrom: dateOnly(daysAhead(21)),
+  });
 
   // ------------------------------------------------------------------
   // Households + the catalog cast
@@ -2156,7 +2340,6 @@ async function seedTrinityGrove(
       currentPhase: 6,
       sendingNetworkId: networkId,
       sendingChurchId,
-      launchDate: dateOnly(daysAgo(42)),
       lastMaterialEventAt: daysAgo(2),
     })
     .returning({ id: churches.id });
@@ -2175,6 +2358,20 @@ async function seedTrinityGrove(
     })
     .returning({ id: users.id });
   const planterId = marcus.id;
+
+  // Trinity Grove launched six weeks ago — the "Beyond" shot, and the only
+  // seeded launch with an OUTCOME on it (LS-006).
+  await seedCompletedLaunch({
+    churchId,
+    planterId,
+    targetDate: dateOnly(daysAgo(42)),
+    attendanceCount: 214,
+    decisionsCount: 9,
+    outcomeNotes:
+      "Every seat full and forty chairs added at 9:40. The launch team ran set-up in under an hour.",
+    captureTheDay:
+      "Photos on the church drive; Marcus's note to the core group is pinned in the launch-team channel.",
+  });
 
   const [marcusPerson] = await db
     .insert(persons)
