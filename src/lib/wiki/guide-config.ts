@@ -70,6 +70,30 @@ export const wikiGuideConfig: Record<string, WikiGuideEntry> = {
     ],
   },
 
+  // ── Launch Sunday ────────────────────────────────────────────────────
+  // Ordered to follow the page itself: the day it counts down to first (the
+  // panel opens on `slugs[0]`), then the three readiness areas the milestone
+  // board actually renders — operations, launch team, promotion
+  // (`src/lib/launch/milestone-areas.ts`) — so every entry answers a question
+  // the surrounding UI raises rather than being phase-4/5 in bulk.
+  //
+  // These slugs are fetched live and a slug that is missing or unpublished
+  // renders an error inside the panel, not nothing (`wiki-guide-panel.tsx`), so
+  // each one below was verified published against the wiki read layer
+  // (2026-08-08). Re-verify before changing this list — `guide-config.test.ts`
+  // pins it to force exactly that.
+  "/launch": {
+    label: "Launch Sunday Guide",
+    slugs: [
+      "launch-sunday/launch-day-guide",
+      "launch-sunday/5-priority-details",
+      "pre-launch/final-checklist-review",
+      "pre-launch/operations-setup-teardown",
+      "pre-launch/launch-team-spiritual-preparation",
+      "pre-launch/the-promotion-plan",
+    ],
+  },
+
   // ── Extend: add more routes below ────────────────────────────────────
   // "/vision-meetings/*": {
   //   label: "Vision Meetings Guide",
