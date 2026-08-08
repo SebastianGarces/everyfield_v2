@@ -7,6 +7,10 @@ import {
   isSkippableOnboardingStep,
   onboardingStep,
 } from "@/lib/onboarding/steps";
+import {
+  assembleFactSnapshot,
+  type SnapshotInputs,
+} from "@/lib/phase-engine/signals/build-fact-snapshot";
 
 // ============================================================================
 // F12 / OB-003 + OB-005 — step 3, the journey declaration.
@@ -256,4 +260,102 @@ test("both document call sites source the launch date from the entity", () => {
       `${name} must no longer hardcode a null launch date`
     );
   }
+});
+
+// ----------------------------------------------------------------------------
+// 7. What each answer does to the COUNTDOWN SIGNAL
+//
+// The tests above pin what the action writes; these pin what the phase engine
+// then reads, which is the half of the AC a call-site scan cannot reach. Both
+// step-3 answers are asserted here rather than only the empty one, because the
+// interesting claim is that they DIFFER — "no date yet" has to be empty while a
+// named day is a live countdown, and a builder that returned `isEmpty: true`
+// for both would pass a one-sided test.
+//
+// `assembleFactSnapshot` is the pure, DB-free assembly the snapshot is built
+// from, so the two onboarding outcomes are expressible as inputs: "no date yet"
+// writes no launch row at all (`launch: null`), and a named day is the row
+// `setLaunchDate` leaves behind.
+// ----------------------------------------------------------------------------
+
+const SNAPSHOT_CHURCH_ID = "11111111-1111-4111-8111-111111111111";
+/** Fixed reference instant — the countdown is day-vs-day, never "now". */
+const SNAPSHOT_AS_OF = new Date("2026-08-08T13:45:00.000Z");
+
+/**
+ * A freshly onboarded plant: nothing but a church row and whatever step 3
+ * wrote. Every other signal is empty on purpose — this is the state the
+ * declaration's own fact snapshot is captured in.
+ */
+function onboardedInputs(launch: SnapshotInputs["launch"]): SnapshotInputs {
+  return {
+    church: { id: SNAPSHOT_CHURCH_ID, currentPhase: 3 },
+    launch,
+    launchMilestones: [],
+    commitments: [],
+    visionMeetings: [],
+    followUp: [],
+    ministryTeams: [],
+    leadershipCandidates: [],
+    meetingsAttendedByPerson: [],
+    activeMembershipsByPerson: [],
+    teamLeaderPersonIds: [],
+    trainingPrograms: [],
+    trainingCompletions: [],
+    plantSignals: [],
+  };
+}
+
+test("'no date yet' leaves the countdown EMPTY, not zero", () => {
+  // The AC's snapshot assertion. Zero is a countdown that has run out — it is
+  // what "launch is today" looks like — so a plant that never named a day must
+  // not produce it. `isEmpty` is the flag every downstream reader branches on.
+  const snap = assembleFactSnapshot(
+    SNAPSHOT_CHURCH_ID,
+    onboardedInputs(null),
+    SNAPSHOT_AS_OF
+  );
+
+  assert.equal(snap.launch.isEmpty, true);
+  assert.equal(snap.launch.launchDate, null);
+  assert.equal(snap.launch.daysUntilLaunch, null);
+  assert.notEqual(snap.launch.daysUntilLaunch, 0);
+  // Nor is a plant with no launch overdue for one.
+  assert.equal(snap.launch.isPastDue, false);
+  assert.equal(snap.launch.status, null);
+});
+
+test("a declared date feeds the countdown signal immediately", () => {
+  // The other half of the same AC: what `setLaunchDate` leaves behind is what
+  // the engine reads, with no further step. 43 days from the reference instant.
+  const snap = assembleFactSnapshot(
+    SNAPSHOT_CHURCH_ID,
+    onboardedInputs({
+      targetDate: "2026-09-20",
+      status: "scheduled",
+      outcomeRecordedAt: null,
+      attendanceCount: null,
+      decisionsCount: null,
+    }),
+    SNAPSHOT_AS_OF
+  );
+
+  assert.equal(snap.launch.isEmpty, false);
+  assert.equal(snap.launch.launchDate, "2026-09-20");
+  assert.equal(snap.launch.daysUntilLaunch, 43);
+  assert.equal(snap.launch.isPastDue, false);
+});
+
+test("the declared phase is the snapshot's phase, with no ladder behind it", () => {
+  // The declaration sets `churches.current_phase` and the snapshot copies it
+  // straight off that row — so a plant that declared 3 is scored as a phase-3
+  // plant from its first assessment, without three transitions having been
+  // invented to get it there (FRD AC 1 + AC 3).
+  const snap = assembleFactSnapshot(
+    SNAPSHOT_CHURCH_ID,
+    onboardedInputs(null),
+    SNAPSHOT_AS_OF
+  );
+
+  assert.equal(snap.currentPhase, 3);
 });
