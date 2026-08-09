@@ -994,6 +994,66 @@ test("risk:high never auto-merges, even on a spotless pass", async () => {
   assert.match(hold.prompt, /risk:high/);
 });
 
+// ---------------------------------------------------------------------------
+// build-until-done: the `hold` flag
+//
+// The standing policy is that a change to the factory itself keeps a human. The
+// loop had no way to express that, so the pass that changed it had to run with
+// `autoMerge: false` globally — which also refused the merge to every clean
+// track beside it. `hold` is per unit, so a mixed wave keeps auto-merge on and
+// only the declared track is held.
+// ---------------------------------------------------------------------------
+
+test("a unit's hold flag holds its whole track", async () => {
+  const { result, calls } = await runBuild(
+    [
+      { ...buildUnit("factory", 101), hold: true },
+      // Same track: the shared file unions them, so one unit's hold must reach
+      // the PR the other one is also riding on.
+      { ...buildUnit("beside", 102), files: ["src/factory.ts"] },
+    ],
+    replyShip(passing([])),
+    { autoMerge: true }
+  );
+  assert.ok(
+    !calls.some((c) => c.label?.startsWith("merge:")),
+    "one held unit holds the branch its track-mates share"
+  );
+  const hold = calls.find((c) => c.label?.startsWith("hold:"));
+  assert.match(hold.prompt, /declared never-auto-merge/);
+  assert.equal(result.shipped[0].merge, "held-for-review");
+});
+
+test("a held track never auto-merges, even low-risk and warning-free", async () => {
+  const { calls } = await runBuild(
+    [{ ...buildUnit("alpha", 101), risk: "low", hold: true }],
+    replyShip(passing([])),
+    { autoMerge: true }
+  );
+  assert.ok(
+    !calls.some((c) => c.label === "merge:alpha"),
+    "a spotless factory change is exactly the case the flag exists for"
+  );
+  const hold = calls.find((c) => c.label === "hold:alpha");
+  assert.ok(hold, "the reviewer must be told why it is sitting there");
+  assert.match(hold.prompt, /factory policy or issue directive/);
+});
+
+test("an un-held low-risk track still auto-merges beside a held one", async () => {
+  const { result, calls } = await runBuild(
+    [{ ...buildUnit("factory", 101), hold: true }, buildUnit("clean", 102)],
+    replyShip(passing([])),
+    { autoMerge: true }
+  );
+  assert.ok(
+    calls.some((c) => c.label === "merge:clean"),
+    "holding one track must not cost the pass every other track's merge"
+  );
+  assert.ok(!calls.some((c) => c.label === "merge:factory"));
+  const clean = result.shipped.find((s) => s.track === "clean");
+  assert.equal(clean.merge, "merged");
+});
+
 test("auto-merge is off by default, so a direct call cannot merge to main", async () => {
   const { result, calls } = await runBuild(
     [buildUnit("alpha", 101)],

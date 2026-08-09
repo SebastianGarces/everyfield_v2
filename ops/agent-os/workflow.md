@@ -42,7 +42,7 @@ flowchart TD
   end
 
   subgraph gate ["4 · The auto-merge gate"]
-    N -->|"green"| O{"risk:high?<br/>any spec-question warning?"}
+    N -->|"green"| O{"risk:high?<br/>hold: true on any unit?<br/>any spec-question warning?"}
     O -->|"clean pass"| Q["merge agent:<br/>1. append code-quality warnings as ACs to the<br/>   follow-ups rollup FIRST, then read the body back —<br/>   unconfirmed ⇒ ERRORED, never reported as shipped<br/>2. squash-merge with --auto<br/>3. ⚓ report GitHub's answer, not its own"]
     O -->|"HOLD"| P["hold agent posts a DECISION —<br/>options to rule on, not a defect report;<br/>direction questions arrive as live prototypes"]
     Q --> R["every issue the track closes → board shows Done"]
@@ -91,6 +91,14 @@ silently did not on 2 of 8 tracks. The rollup takes `agent:queued` once it holds
 follow-up ACs, and joins the next track dispatched for its parent regardless of count.
 `risk:high` (schema/auth/tenancy) never auto-merges, because that is where a bad merge is
 unrecoverable.
+
+Two other things never auto-merge, and both arrive as a per-unit **`hold: true`** flag that dispatch
+sets on the way in: an issue whose body declares never-auto-merge, and — always — any unit whose files
+touch the factory itself (`.claude/workflows/`, the delivery-OS skills, `ops/agent-os/`). A change to
+the machine that decides what merges keeps a human, because the thing being changed is the thing that
+would otherwise have caught the mistake. A track holds if *any* of its units does, and the loop treats
+it exactly like `risk:high`. The flag is per unit on purpose: holding one factory track used to mean
+`autoMerge: false` for the entire pass, which stalled every clean track beside it.
 
 The human's attention is the scarcest resource in the system: the queue contains only
 decisions, never "please re-check what the gates already proved".

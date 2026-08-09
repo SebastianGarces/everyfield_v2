@@ -155,13 +155,33 @@ so one failing AC no longer burns an attempt for every healthy unit beside it.
 
 **`autoMerge: true` is what dispatch adds.** It is off by default so a direct `/deliver` call cannot
 merge to `main` by surprise; a dispatch pass opts in. Under it the loop merges a track only when all
-three hold: the DoD passed **and** the required check is green, the track is not `risk:high`, and no
-warning was classified `spec-question`. Code-quality warnings are appended as unchecked ACs to the
-feature parent's `Follow-ups — <parent title>` rollup **before** the merge — they do not stall a good
-branch, and they no longer spawn an issue apiece. See §12 and §13 of
+four hold: the DoD passed **and** the required check is green, the track is not `risk:high`, no unit
+in it carries `hold: true`, and no warning was classified `spec-question`. Code-quality warnings are
+appended as unchecked ACs to the feature parent's `Follow-ups — <parent title>` rollup **before** the
+merge — they do not stall a good branch, and they no longer spawn an issue apiece. See §12 and §13 of
 `product-docs/board-design-2026-07.md`, `ops/agent-os/labels.md`, and `DOD_SCHEMA.warnings`.
 
-Each unit is `{id, title, lane, files, summary, acceptanceCriteria, issue, risk, dependsOn}`. The
+### When to set `hold: true` on a unit
+
+`hold` is a per-unit boolean meaning **this never auto-merges**. A track holds if *any* of its units
+does, and a held track is treated exactly like `risk:high`: the PR opens, the issues flip to
+`agent:in-review`, the hold agent comments why, and the loop never merges it.
+
+Set it in the units array — the loop cannot infer it — in **two** cases:
+
+1. **The issue body declares it.** Anything that says never-auto-merge, hold for review, or names a
+   human as the merge decision.
+2. **ALWAYS when the unit's files touch the factory** — `.claude/workflows/`, the delivery-OS entries
+   under `.claude/skills/` (`dispatch`, `build-until-done`, `definition-of-done`, `open-pr`,
+   `frd-plan`, `frd-implement`), or `ops/agent-os/`. A change to the machine that decides what merges
+   keeps a human, because the thing being changed is the thing that would otherwise have caught the
+   mistake. This is a standing policy, not a judgement call per pass.
+
+Set the flag rather than dropping the whole pass to `autoMerge: false`. Turning auto-merge off
+globally to hold one factory track also stalls every clean track beside it in a mixed wave, and those
+are exactly the PRs the queue can absorb.
+
+Each unit is `{id, title, lane, files, summary, acceptanceCriteria, issue, risk, dependsOn, hold}`. The
 loop cuts the units into **tracks** (connected components over shared-file ∪ `dependsOn`), then into
 **stages** (topological levels by `dependsOn`), then into **workstreams** (units in one stage sharing
 a file — one agent, sequential). `files` comes from the issue's **Likely files** section and the
@@ -197,6 +217,8 @@ scope because the frontier looked thin.
   a PR it is looking at. If a PR is held, it is held — reaching past the gate to merge it is the same
   class of error as clearing another run's claim.
 - **Never merge a `risk:high` PR, auto or otherwise.** Schema, auth and tenancy keep a human.
+- **Never merge a factory change, auto or otherwise.** Mark its units `hold: true` on the way in;
+  do not reach past the gate on the way out.
 - **Never clear an `agent:in-progress` claim** that this pass did not set.
 - **Never dispatch `risk:high` unattended** without an explicit opt-in.
 - **One pass, then stop.** Do not loop waiting for PRs to be merged so more work unblocks — that is

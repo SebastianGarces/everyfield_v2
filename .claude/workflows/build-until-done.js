@@ -3,7 +3,7 @@ export const meta = {
   description:
     "The loop. Per track: a prerequisite stage, then parallel workstreams in their own worktrees off the track branch, merged back stage by stage. Each workstream passes its own scoped gates; the assembled branch passes ONE integration DoD (independent verifier + MCP) → on PASS open a PR with the evidence bundle. On exhaustion (max attempts / token reserve) label the issue agent:blocked and alert — never a silent stop, never a PR that isn't proven done.",
   whenToUse:
-    "After spec-intake + token-preflight, to actually build a wave of tracks autonomously to PR. Pass args = the wave's units array (each: {id,title,lane,files,summary,acceptanceCriteria,issue,risk,dependsOn}), optionally {units, base, maxAttempts, maxConcurrentAgents}.",
+    "After spec-intake + token-preflight, to actually build a wave of tracks autonomously to PR. Pass args = the wave's units array (each: {id,title,lane,files,summary,acceptanceCriteria,issue,risk,dependsOn,hold?}), optionally {units, base, maxAttempts, maxConcurrentAgents}.",
   phases: [
     {
       title: "Build",
@@ -587,6 +587,12 @@ const summarise = (us, extra = {}) => ({
   issues: [...new Set(us.map((u) => u.issue).filter((x) => x != null))],
   files: [...new Set(us.flatMap((u) => (u.files || []).map(normFile)))],
   risk: us.some((u) => u.risk === "high") ? "high" : us[0].risk || "low",
+  // Both of these are one-way: a unit can only ever make its track MORE held,
+  // never less. `hold` is the declared never-auto-merge flag — a factory change
+  // (this loop, the delivery-OS skills, ops/agent-os) or an issue that says so —
+  // and it rides with the unit so a mixed wave can still auto-merge the tracks
+  // beside it. See the auto-merge gate below.
+  hold: us.some((u) => u.hold === true),
   lane:
     [...new Set(us.map((u) => u.lane))].length === 1 ? us[0].lane : "fullstack",
   ...extra,
@@ -1812,11 +1818,18 @@ Do NOT remove any worktree or branch yourself. Do NOT open a PR yourself and do 
     // -----------------------------------------------------------------------
     // Auto-merge — the review queue, not the budget, is what caps this factory.
     //
-    // Three things must all hold, and each is a different kind of guarantee:
+    // Four things must all hold, and each is a different kind of guarantee:
     //   1. the DoD passed AND the real CI check is green (proven above),
     //   2. the track is not risk:high — schema/auth/tenancy is where a bad
     //      merge is unrecoverable, so those keep a human regardless,
-    //   3. no warning is a spec-question — see DOD_SCHEMA.warnings.
+    //   3. the track is not `hold` — the standing policy is that a change to
+    //      the factory itself (this loop, the delivery-OS skills, ops/agent-os)
+    //      keeps a human, because the thing being changed is the thing that
+    //      would have caught the mistake. Before the flag existed the only way
+    //      to honour that was `autoMerge: false` for the whole pass, which
+    //      punished every clean track in a mixed wave; the flag is per unit so
+    //      only the factory track is held,
+    //   4. no warning is a spec-question — see DOD_SCHEMA.warnings.
     //
     // Code-quality warnings do NOT hold the merge. They are filed as issues and
     // re-enter this same loop, which is the whole point: small known defects
@@ -1830,6 +1843,10 @@ Do NOT remove any worktree or branch yourself. Do NOT open a PR yourself and do 
       const codeQuality = warnings.filter((w) => w.kind === "code-quality");
       const holds = [];
       if (track.risk === "high") holds.push("risk:high — never auto-merges");
+      if (track.hold)
+        holds.push(
+          "hold — declared never-auto-merge (factory policy or issue directive)"
+        );
       if (specQuestions.length)
         holds.push(
           `${specQuestions.length} spec-question warning(s): ${specQuestions.map((w) => w.summary).join(" | ")}`
