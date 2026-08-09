@@ -139,6 +139,96 @@ for (const theme of themes) {
   });
 }
 
+// --- --muted-foreground on every surface it can land on (#341, #238) --------
+//
+// The token is app-wide, so "does it pass" is not a question about one screen:
+// `text-muted-foreground` is painted on the page ground, on cards and popovers,
+// on the sidebar, and on the muted/secondary/accent tiles. Before #341 it
+// cleared 4.5:1 on white ONLY — which is why the audits disagreed with each
+// other: /communication/history measured it on `bg-card` and passed, while
+// /settings and /notifications measured it on `bg-background` and failed at
+// 4.38:1. Enumerating the surfaces is what stops that from recurring.
+//
+// The list is deliberately the full set rather than the two pages in the
+// issues: a token fix that only satisfies the reported screens is a token fix
+// that fails on the next screen.
+const MUTED_FOREGROUND_SURFACES = [
+  "background",
+  "card",
+  "popover",
+  "muted",
+  "secondary",
+  "accent",
+  "sidebar",
+  "sidebar-accent",
+] as const;
+
+for (const theme of themes) {
+  for (const surface of MUTED_FOREGROUND_SURFACES) {
+    test(`--muted-foreground clears AA body text on --${surface} in the ${theme} theme`, () => {
+      const ratio = contrastRatio(
+        readToken(theme, "muted-foreground"),
+        readToken(theme, surface)
+      );
+
+      assert.ok(
+        ratio >= AA_BODY_TEXT,
+        `text-muted-foreground on --${surface} in ${theme} is ${ratio.toFixed(2)}:1, below ${AA_BODY_TEXT}:1 — fix the token in globals.css, never with a per-component color override`
+      );
+    });
+  }
+}
+
+test("the avatar fallback reads at AA because of the token, not an override", () => {
+  // #238's sidebar finding measured 3.97:1. That is not a sidebar bug: the
+  // fallback is `bg-muted text-muted-foreground`, and --muted is the darkest
+  // light surface the token lands on, so it was the worst case of the SAME
+  // failure #341 describes. This test exists to keep the two facts wired
+  // together — if AvatarFallback ever stops using this pair, the ratio asserted
+  // above stops being the ratio a user sees, and the assertion below says so.
+  const avatar = readFileSync(
+    path.join(SRC, "components", "ui", "avatar.tsx"),
+    "utf8"
+  );
+  const fallback = avatar.slice(avatar.indexOf("function AvatarFallback"));
+
+  assert.match(
+    fallback,
+    /bg-muted text-muted-foreground/,
+    "AvatarFallback no longer pairs bg-muted with text-muted-foreground — re-measure the fallback against whatever surface it now uses (#238)"
+  );
+
+  const ratio = contrastRatio(
+    readToken("light", "muted-foreground"),
+    readToken("light", "muted")
+  );
+  assert.ok(
+    ratio >= AA_BODY_TEXT,
+    `avatar-fallback initials measure ${ratio.toFixed(2)}:1, below ${AA_BODY_TEXT}:1`
+  );
+});
+
+test("the pre-#341 --muted-foreground genuinely failed, so the fix is not taste", () => {
+  // Records what was wrong, so a revert to the shadcn default cannot be argued
+  // back in as "it was fine on cards" — it was, and that was the trap.
+  const PRE_341 = oklchToSrgb(0.556, 0, 0);
+
+  const onBackground = contrastRatio(PRE_341, readToken("light", "background"));
+  const onMuted = contrastRatio(PRE_341, readToken("light", "muted"));
+  const onCard = contrastRatio(PRE_341, readToken("light", "card"));
+
+  assert.ok(
+    Math.abs(onBackground - 4.38) < 0.02,
+    `expected the reported ~4.38:1 on --background, got ${onBackground.toFixed(2)}:1 — the surface tokens moved and these numbers are stale`
+  );
+  assert.ok(
+    Math.abs(onMuted - 3.97) < 0.02,
+    `expected the reported ~3.97:1 on --muted (the avatar fallback), got ${onMuted.toFixed(2)}:1`
+  );
+  // The reason the failure survived an earlier audit: on white it passed.
+  assert.ok(onCard > AA_BODY_TEXT);
+});
+
 test("the old token is kept out because it genuinely fails, not by taste", () => {
   // Light theme is where it failed: ~3.69:1 with the pre-sharp near-black
   // foreground (the number in the issue); ~3.27:1 since foreground became ink
