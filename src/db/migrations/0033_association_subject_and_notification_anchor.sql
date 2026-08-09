@@ -54,7 +54,7 @@
 --   ALTER TABLE "association_events" DROP COLUMN IF EXISTS "subject_type";
 --   ALTER TABLE "notifications" ALTER COLUMN "church_id" SET NOT NULL;
 --   ALTER TABLE "association_events" ALTER COLUMN "church_id" SET NOT NULL;
---   DELETE FROM drizzle.__drizzle_migrations WHERE hash = '<0033 hash>';
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1786312591041;
 --
 -- ONE TRAP, the same one 0031 recorded, and it bit again here. The FK name
 -- drizzle generates below,
@@ -73,10 +73,15 @@
 -- migrations, `drizzle.__drizzle_migrations` is the database's record of what
 -- ran, and only the ledger row is deleted.
 --
--- `<0033 hash>` is the sha256 of THIS FILE, byte for byte, from the deployed
--- commit:
---
---   shasum -a 256 src/db/migrations/0033_association_subject_and_notification_anchor.sql
+-- THE LEDGER ROW IS IDENTIFIED BY `created_at`, NOT BY A FILE HASH. This block
+-- used to say `WHERE hash = '<0033 hash>'` and call that hash the sha256 of
+-- this file; it is not. `drizzle.__drizzle_migrations.hash` is drizzle's own
+-- digest of the statements it executed, so the shasum of the file on disk
+-- matches nothing and the DELETE reports `DELETE 0` — after which
+-- `pnpm db:migrate` prints success and applies nothing, leaving the database
+-- silently pre-0033 with the ledger still claiming otherwise. The value below
+-- is this migration's `"when"` in `_journal.json`, which IS the ledger's
+-- `created_at`; it is the same form 0031 and 0023 settled on.
 
 ALTER TABLE "association_events" ALTER COLUMN "church_id" DROP NOT NULL;--> statement-breakpoint
 ALTER TABLE "notifications" ALTER COLUMN "church_id" DROP NOT NULL;--> statement-breakpoint

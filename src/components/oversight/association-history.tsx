@@ -5,7 +5,6 @@ import {
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { formatDate } from "@/lib/datetime";
 import type { AssociationHistoryEntry } from "@/lib/invitations/history";
@@ -47,7 +46,20 @@ export function AssociationHistory({
   return (
     <Card className="shadow-sm">
       <CardHeader>
-        <CardTitle className="text-base">Association history</CardTitle>
+        {/*
+          A REAL HEADING, not `CardTitle` (design pass, #304 "UI ruling round
+          3"). `CardTitle` renders a `div`, so the page used to carry a
+          `sr-only` h2 saying "Association history" directly above a visible
+          title saying it again — a screen reader heard the section named
+          twice. One element now does both jobs, and `plant-detail.tsx` points
+          its `<section aria-labelledby>` at this id.
+        */}
+        <h2
+          id="plant-association-history"
+          className="text-base leading-none font-semibold tracking-tight"
+        >
+          Association history
+        </h2>
         <CardDescription className="text-pretty">
           Every time {plantName} joined or left your organization, and who
           recorded it.
@@ -62,7 +74,12 @@ export function AssociationHistory({
             that the plant is not associated at all, which the rest of this page
             contradicts.
           */
-          <p className="text-muted-foreground rounded-lg border border-dashed p-4 text-sm text-pretty">
+          /*
+            Centered, not a dashed rectangle inside the card. A dashed box
+            nested in a bordered surface reads as a drop target and adds a
+            second edge one step in from the card's own.
+          */
+          <p className="text-muted-foreground mx-auto max-w-prose py-4 text-center text-sm text-pretty">
             Nothing recorded yet. This association was made before EveryField
             started keeping a history of them.
           </p>

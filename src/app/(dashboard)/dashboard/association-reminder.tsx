@@ -4,6 +4,7 @@ import { MailQuestion } from "lucide-react";
 import { InvitationAnswer } from "@/app/(dashboard)/settings/association/invitation-answer";
 import type { PendingInvitationView } from "@/app/(dashboard)/settings/association/queries";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 
 // ============================================================================
 // The persistent invitation reminder (#304, OV-005).
@@ -36,12 +37,30 @@ export function AssociationReminder({
   if (invitations.length === 0) return null;
 
   return (
-    <Alert role="status" data-testid="association-reminder">
+    // `border-primary/40`: the ONLY thing that told this banner apart from the
+    // dismissible setup nudge directly beneath it was the ABSENCE of an X,
+    // which is not a cue anyone reads. The heavier edge and the badge below say
+    // it is standing business, and they say it without color alone.
+    <Alert
+      role="status"
+      data-testid="association-reminder"
+      className="border-primary/40 shadow-sm"
+    >
       <MailQuestion />
-      <AlertTitle>
-        {invitations.length === 1
-          ? `${invitations[0].orgName} invited your plant`
-          : `${invitations.length} organizations invited your plant`}
+      {/*
+        `line-clamp-none`: `AlertTitle` clamps to one line, and an organization
+        with a long name would have its name cut off in the sentence that names
+        the decision — with nowhere else on this surface to read it.
+      */}
+      <AlertTitle className="line-clamp-none flex flex-wrap items-center gap-x-2 gap-y-1 text-pretty">
+        <span>
+          {invitations.length === 1
+            ? `${invitations[0].orgName} invited your plant`
+            : `${invitations.length} organizations invited your plant`}
+        </span>
+        <Badge variant="secondary" className="font-medium">
+          Waiting on your answer
+        </Badge>
       </AlertTitle>
       <AlertDescription>
         <p className="text-pretty">

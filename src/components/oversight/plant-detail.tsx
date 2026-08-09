@@ -177,10 +177,12 @@ export function PlantDetail({
         </div>
       </section>
 
+      {/*
+        The heading this points at is the card's own visible title (design
+        pass, #304). It used to be a `sr-only` h2 here duplicating that title
+        word for word, so the section announced its name twice.
+      */}
       <section aria-labelledby="plant-association-history">
-        <h2 id="plant-association-history" className="sr-only">
-          Association history
-        </h2>
         <AssociationHistory entries={history} plantName={plant.name} />
       </section>
     </div>

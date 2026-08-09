@@ -85,12 +85,17 @@ export function LeaveOrgDialog({
 
   return (
     <AlertDialog open={open} onOpenChange={reset}>
+      {/*
+        RED IS FOR THE BUTTON THAT COMMITS, NOT THE ONE THAT ASKS (design pass,
+        #304 "UI ruling round 3"). See `leave-network-dialog.tsx` — the same
+        change, for the same reason, on the planter's side.
+      */}
       <AlertDialogTrigger asChild>
         <Button
           type="button"
           variant="outline"
           size="sm"
-          className="text-destructive hover:text-destructive cursor-pointer"
+          className="cursor-pointer"
         >
           Leave {noun}
         </Button>

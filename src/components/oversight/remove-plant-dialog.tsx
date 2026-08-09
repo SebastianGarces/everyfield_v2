@@ -101,12 +101,19 @@ export function RemovePlantDialog({
 
   return (
     <AlertDialog open={open} onOpenChange={reset}>
+      {/*
+        RED IS FOR THE BUTTON THAT COMMITS, NOT THE ONE THAT ASKS (design pass,
+        #304 "UI ruling round 3"). The trigger wore `text-destructive` while
+        doing nothing but opening this dialog; the removal itself is the filled
+        destructive button in the footer, which is now the only red control in
+        the flow.
+      */}
       <AlertDialogTrigger asChild>
         <Button
           type="button"
           variant="outline"
           size="sm"
-          className="text-destructive hover:text-destructive shrink-0 cursor-pointer"
+          className="shrink-0 cursor-pointer"
         >
           Remove from your {noun}
         </Button>

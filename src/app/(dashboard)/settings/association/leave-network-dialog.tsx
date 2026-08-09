@@ -76,12 +76,21 @@ export function LeaveNetworkDialog({ networkName }: { networkName: string }) {
 
   return (
     <AlertDialog open={open} onOpenChange={reset}>
+      {/*
+        RED IS FOR THE BUTTON THAT COMMITS, NOT THE ONE THAT ASKS (design pass,
+        #304 "UI ruling round 3"). This trigger used to be an outline button
+        wearing `text-destructive`, which is two signals at once — neutral
+        chrome saying "ordinary control", alarm color saying "this is the
+        dangerous one" — and it opened a dialog rather than severing anything.
+        The sever is the filled destructive button in the footer below, and it
+        is now the only red thing on the screen.
+      */}
       <AlertDialogTrigger asChild>
         <Button
           type="button"
           variant="outline"
           size="sm"
-          className="text-destructive hover:text-destructive cursor-pointer"
+          className="cursor-pointer"
         >
           Leave network
         </Button>

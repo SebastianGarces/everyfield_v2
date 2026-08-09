@@ -21,7 +21,6 @@ import {
   composeBatchEmail,
   type OutboundEmail,
 } from "./channels/email";
-import { NOTIFICATION_CATEGORIES } from "./categories";
 import { audienceForRole, isChannelEnabled } from "./preferences";
 
 // The email channel's rendering lives in `./channels/email`; it is re-exported

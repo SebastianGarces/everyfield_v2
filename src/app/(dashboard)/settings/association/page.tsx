@@ -1,8 +1,14 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
+import { Building2, Inbox } from "lucide-react";
 
 import { HeaderBreadcrumbs } from "@/components/header";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+} from "@/components/ui/card";
 import { verifySession } from "@/lib/auth/session";
 import { formatDate } from "@/lib/datetime";
 
@@ -61,6 +67,25 @@ import {
 // (`force-dynamic`); nothing is cached and nothing is copied into client state,
 // so the moment an invitation is answered `refresh()` re-renders this tree and
 // the row is simply gone (`memory/contracts/data-patterns.md`).
+//
+// ----------------------------------------------------------------------------
+// WHY EACH SECTION IS A CARD (design pass, #304 "UI ruling round 3")
+// ----------------------------------------------------------------------------
+//
+// The first build put heading, helper sentence and content box on the shell's
+// bare background at one shared left edge with near-uniform gaps, so nothing
+// on the screen said which sentence belonged to which box — the reviewer read
+// the empty state as unrelated to the heading above it. A card is the
+// project's existing answer to that, and `/oversight/invitations` — the other
+// half of this same feature — already uses it: one surface per question, the
+// question's title and its explanation inside that surface, the answer
+// underneath. Matching it means an admin and a planter looking at the two ends
+// of one invitation see the same structure.
+//
+// The semantics do NOT come from the card. `CardTitle` is a `div`; the section
+// headings here stay real `<h2>` elements owned by their `<section
+// aria-labelledby=…>`, so the page keeps a navigable outline that the
+// reference surface does not have.
 // ============================================================================
 
 export const dynamic = "force-dynamic";
@@ -103,15 +128,62 @@ function AssociationShell({
         ]}
       />
 
+      {/*
+        Two spacing steps, not one. The page header sits 32px above the stack of
+        cards and the cards sit 24px apart, while the gaps inside a card are
+        8px and under — so every gap is at least double the gap one level down
+        and the grouping reads without a single separator line.
+      */}
       <div className="mx-auto w-full max-w-3xl space-y-8 p-4 md:p-6">
         <div className="space-y-1">
           <h1 className="text-2xl font-semibold tracking-tight">Association</h1>
           <p className="text-muted-foreground text-sm text-pretty">{intro}</p>
         </div>
 
-        {children}
+        <div className="space-y-6">{children}</div>
       </div>
     </>
+  );
+}
+
+/**
+ * The section title, styled like `CardTitle` but kept a real heading.
+ *
+ * `CardTitle` renders a `div`, which would leave this page with an `h1` and no
+ * sections under it. The id is what its `<section aria-labelledby>` points at.
+ */
+function SectionTitle({ id, children }: { id: string; children: string }) {
+  return (
+    <h2 id={id} className="leading-none font-semibold tracking-tight">
+      {children}
+    </h2>
+  );
+}
+
+/**
+ * A section with nothing in it yet — oriented, not a shrug.
+ *
+ * Centered inside its card rather than left-aligned in a dashed box: the dashed
+ * rectangle the first build used reads as a drop target, and left-aligning it
+ * on the same edge as the heading was half of why the two looked unrelated.
+ */
+function EmptySection({
+  icon: Icon,
+  title,
+  detail,
+}: {
+  icon: typeof Inbox;
+  title: string;
+  detail: string;
+}) {
+  return (
+    <div className="flex flex-col items-center gap-2 py-6 text-center">
+      <Icon className="text-muted-foreground size-5" aria-hidden="true" />
+      <p className="font-medium">{title}</p>
+      <p className="text-muted-foreground max-w-prose text-sm text-pretty">
+        {detail}
+      </p>
+    </div>
   );
 }
 
@@ -122,72 +194,106 @@ function AssociationShell({
  * same two buttons and the same "nothing happens until you accept" promise, so
  * they get one component. What differs is the sentence explaining what
  * accepting exposes, which is a prop.
+ *
+ * THE PROMISE AND THE EMPTY STATE ARE NEVER BOTH ON SCREEN. "Nothing is
+ * associated until you accept" is addressed to somebody who has an invitation
+ * in front of them; when there is none it said nothing and sat one line above
+ * an empty state that repeated it. It is now the card's description in the one
+ * state where it has a referent, and the empty state speaks alone in the other.
+ * The consequence sentence moved up here for the same reason — it is a property
+ * of accepting, not of one invitation, and it was repeated per row.
  */
 function PendingInvitations({
   invitations,
   subjectNoun,
-  emptyCopy,
+  emptyDetail,
   consequence,
 }: {
   invitations: PendingInvitationView[];
-  /** What is being invited, so the title names it: "your plant", "your sending church". */
+  /** What is being invited, so the row names it: "your plant", "your sending church". */
   subjectNoun: string;
-  emptyCopy: string;
+  emptyDetail: string;
   consequence: string;
 }) {
   return (
-    <section aria-labelledby="pending-invitations" className="space-y-4">
-      <div className="space-y-1">
-        <h2
-          id="pending-invitations"
-          className="text-lg font-semibold tracking-tight"
-        >
-          Invitations
-        </h2>
-        <p className="text-muted-foreground text-sm">
-          Nothing is associated until you accept.
-        </p>
-      </div>
+    <section aria-labelledby="pending-invitations">
+      <Card className="shadow-sm">
+        <CardHeader>
+          <SectionTitle id="pending-invitations">Invitations</SectionTitle>
+          {invitations.length > 0 && (
+            <CardDescription className="text-pretty">
+              Nothing is associated until you accept. {consequence}
+            </CardDescription>
+          )}
+        </CardHeader>
 
-      {invitations.length === 0 ? (
-        <p className="text-muted-foreground rounded-md border border-dashed p-4 text-sm">
-          {emptyCopy}
-        </p>
-      ) : (
-        <ul className="space-y-3">
-          {invitations.map((invitation) => (
-            <li key={invitation.id}>
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">
-                    {invitation.orgName} invited {subjectNoun}
-                  </CardTitle>
-                  <p className="text-muted-foreground text-sm">
-                    {invitation.orgType === "sending_church"
-                      ? "A sending church"
-                      : "A church planting network"}
-                    {" · sent "}
-                    {formatDate(invitation.createdAt, "short")}
-                    {invitation.expiresAt
-                      ? ` · expires ${formatDate(invitation.expiresAt, "short")}`
-                      : ""}
-                  </p>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <p className="text-muted-foreground text-sm text-pretty">
-                    {consequence}
-                  </p>
+        <CardContent>
+          {invitations.length === 0 ? (
+            <EmptySection
+              icon={Inbox}
+              title="No invitations waiting"
+              detail={emptyDetail}
+            />
+          ) : (
+            <ul className="divide-border divide-y">
+              {invitations.map((invitation) => (
+                <li
+                  key={invitation.id}
+                  className="space-y-3 py-4 first:pt-0 last:pb-0"
+                >
+                  <div className="space-y-0.5">
+                    <p className="font-medium">
+                      {invitation.orgName} invited {subjectNoun}
+                    </p>
+                    <p className="text-muted-foreground text-sm">
+                      {invitation.orgType === "sending_church"
+                        ? "A sending church"
+                        : "A church planting network"}
+                      {" · sent "}
+                      {formatDate(invitation.createdAt, "short")}
+                      {invitation.expiresAt
+                        ? ` · expires ${formatDate(invitation.expiresAt, "short")}`
+                        : ""}
+                    </p>
+                  </div>
                   <InvitationAnswer
                     invitationId={invitation.id}
                     orgName={invitation.orgName}
                   />
-                </CardContent>
-              </Card>
-            </li>
-          ))}
-        </ul>
-      )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
     </section>
+  );
+}
+
+/**
+ * One organization you belong to, with the control that ends it.
+ *
+ * The name and what it is to you lead; the sever sits on the trailing edge in
+ * the same place on every row, which is what keeps it from reading as one more
+ * piece of the record.
+ */
+function AssociationRow({
+  orgName,
+  roleLabel,
+  action,
+}: {
+  orgName: string;
+  roleLabel: string;
+  action: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="min-w-0 space-y-0.5">
+        <p className="font-medium">{orgName}</p>
+        <p className="text-muted-foreground text-sm">{roleLabel}</p>
+      </div>
+      {action}
+    </div>
   );
 }
 
@@ -206,52 +312,56 @@ async function PlantAssociation({ churchId }: { churchId: string }) {
       <PendingInvitations
         invitations={pending}
         subjectNoun="your plant"
-        emptyCopy="No invitations are waiting. A sending church or network invites you by email, and it appears here."
+        emptyDetail="A sending church or network invites you by email. Their invitation appears here for you to accept or decline."
         consequence="Accepting lists your plant in their directory with its name, stage and launch date. What else they hear about stays yours to decide, on the sharing screen."
       />
 
-      <section aria-labelledby="current-associations" className="space-y-4">
-        <div className="space-y-1">
-          <h2
-            id="current-associations"
-            className="text-lg font-semibold tracking-tight"
-          >
-            Who you belong to
-          </h2>
-          <p className="text-muted-foreground text-sm">
-            A plant can belong to a sending church and to a network. Leaving one
-            leaves the other standing.
-          </p>
-        </div>
+      <section aria-labelledby="current-associations">
+        <Card className="shadow-sm">
+          <CardHeader>
+            <SectionTitle id="current-associations">
+              Who you belong to
+            </SectionTitle>
+            <CardDescription className="text-pretty">
+              A plant can belong to a sending church and to a network. Leaving
+              one leaves the other standing.
+            </CardDescription>
+          </CardHeader>
 
-        {associations.length === 0 ? (
-          <p className="text-muted-foreground rounded-md border border-dashed p-4 text-sm">
-            Your plant is independent — it belongs to no sending church or
-            network.
-          </p>
-        ) : (
-          <ul className="space-y-3">
-            {associations.map((association) => (
-              <li
-                key={`${association.orgType}:${association.orgId}`}
-                className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4"
-              >
-                <div className="space-y-0.5">
-                  <p className="font-medium">{association.orgName}</p>
-                  <p className="text-muted-foreground text-sm">
-                    {association.orgType === "sending_church"
-                      ? "Your sending church"
-                      : "Your network"}
-                  </p>
-                </div>
-                <LeaveOrgDialog
-                  orgType={association.orgType}
-                  orgName={association.orgName}
-                />
-              </li>
-            ))}
-          </ul>
-        )}
+          <CardContent>
+            {associations.length === 0 ? (
+              <EmptySection
+                icon={Building2}
+                title="Your plant is independent"
+                detail="It belongs to no sending church or network."
+              />
+            ) : (
+              <ul className="divide-border divide-y">
+                {associations.map((association) => (
+                  <li
+                    key={`${association.orgType}:${association.orgId}`}
+                    className="py-4 first:pt-0 last:pb-0"
+                  >
+                    <AssociationRow
+                      orgName={association.orgName}
+                      roleLabel={
+                        association.orgType === "sending_church"
+                          ? "Your sending church"
+                          : "Your network"
+                      }
+                      action={
+                        <LeaveOrgDialog
+                          orgType={association.orgType}
+                          orgName={association.orgName}
+                        />
+                      }
+                    />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
       </section>
     </AssociationShell>
   );
@@ -276,7 +386,7 @@ async function SendingChurchAssociation({
       <PendingInvitations
         invitations={pending}
         subjectNoun="your sending church"
-        emptyCopy="No invitations are waiting. A church planting network invites you by email, and it appears here."
+        emptyDetail="A church planting network invites you by email. Their invitation appears here for you to accept or decline."
         consequence="Accepting lists your sending church in that network's directory. It does not change what your own church plants share with you, or with anyone else."
       />
 
@@ -305,32 +415,33 @@ function NetworkAssociation({
   network: CurrentAssociationView | null;
 }) {
   return (
-    <section aria-labelledby="current-associations" className="space-y-4">
-      <div className="space-y-1">
-        <h2
-          id="current-associations"
-          className="text-lg font-semibold tracking-tight"
-        >
-          Who you belong to
-        </h2>
-        <p className="text-muted-foreground text-sm">
-          A sending church belongs to at most one church planting network.
-        </p>
-      </div>
+    <section aria-labelledby="current-associations">
+      <Card className="shadow-sm">
+        <CardHeader>
+          <SectionTitle id="current-associations">
+            Who you belong to
+          </SectionTitle>
+          <CardDescription className="text-pretty">
+            A sending church belongs to at most one church planting network.
+          </CardDescription>
+        </CardHeader>
 
-      {network === null ? (
-        <p className="text-muted-foreground rounded-md border border-dashed p-4 text-sm">
-          Your sending church is independent — it belongs to no network.
-        </p>
-      ) : (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4">
-          <div className="space-y-0.5">
-            <p className="font-medium">{network.orgName}</p>
-            <p className="text-muted-foreground text-sm">Your network</p>
-          </div>
-          <LeaveNetworkDialog networkName={network.orgName} />
-        </div>
-      )}
+        <CardContent>
+          {network === null ? (
+            <EmptySection
+              icon={Building2}
+              title="Your sending church is independent"
+              detail="It belongs to no network."
+            />
+          ) : (
+            <AssociationRow
+              orgName={network.orgName}
+              roleLabel="Your network"
+              action={<LeaveNetworkDialog networkName={network.orgName} />}
+            />
+          )}
+        </CardContent>
+      </Card>
     </section>
   );
 }
