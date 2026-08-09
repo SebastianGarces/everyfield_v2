@@ -83,7 +83,7 @@ test("/launch does not swallow deeper or sibling routes", () => {
   // not claim a nested route that will want its own entry later.
   assert.equal(resolveGuideEntry("/launch/settings"), null);
   assert.equal(resolveGuideEntry("/launches"), null);
-  assert.equal(resolveGuideEntry("/dashboard"), null);
+  assert.equal(resolveGuideEntry("/tasks"), null);
 });
 
 test("/launch still matches when the URL carries unrelated search params", () => {
@@ -91,6 +91,300 @@ test("/launch still matches when the URL carries unrelated search params", () =>
   // whatever the page happens to carry, or a stray `?ref=` hides the button.
   const entry = resolveGuideEntry("/launch", { ref: "email", tab: "anything" });
   assert.equal(entry?.label, "Launch Sunday Guide");
+});
+
+// ----------------------------------------------------------------------------
+// Meetings, teams and the onboarding journey step (#318, from #21 + #209).
+//
+// Same rule as `LAUNCH_GUIDE_SLUGS` above: publication cannot be asserted from a
+// pure harness, so each list below was verified published against the wiki read
+// layer on 2026-08-09 (all 96 articles are global and published) and is pinned
+// here. Change the config and you must re-verify, not just re-paste.
+// ----------------------------------------------------------------------------
+
+const MEETINGS_LIST_SLUGS = [
+  "core-group/vision-meetings/what-is-a-vision-meeting",
+  "frameworks/meeting-objectives",
+  "core-group/building-your-core-group/core-group-meeting-format",
+  "training/launch-team-meeting-objectives",
+];
+
+const MEETING_DETAIL_SLUGS = [
+  "core-group/vision-meetings/planning-your-vision-meeting",
+  "core-group/vision-meetings/vision-meeting-agenda-deep-dive",
+  "core-group/vision-meetings/the-vision-meeting-kit",
+  "core-group/vision-meetings/invitation-strategies",
+  "core-group/vision-meetings/running-the-meeting",
+  "core-group/vision-meetings/8-critical-success-factors-for-vision-meetings",
+];
+
+const TEAMS_LIST_SLUGS = [
+  "launch-team/leadership/key-leadership-roles-overview",
+  "launch-team/launch-date/transitioning-to-launch-team",
+  "training/training-programs-overview",
+];
+
+const TEAM_DETAIL_SLUGS = [
+  "launch-team/leadership/key-leadership-roles-overview",
+  "training/ministry-specific-training",
+  "training/launch-team-meeting-objectives",
+];
+
+const JOURNEY_SLUGS = [
+  "getting-started/welcome-to-the-launch-playbook",
+  "getting-started/launch-process-goals",
+  "launch-team/launch-date/setting-your-launch-date",
+  "launch-team/launch-date/variables-that-drive-your-launch-date",
+];
+
+test("/meetings resolves to the meetings list guide", () => {
+  const entry = resolveGuideEntry("/meetings");
+
+  assert.ok(
+    entry,
+    "/meetings has no guide entry — the panel button never shows"
+  );
+  assert.equal(entry.label, "Meetings Guide");
+  assert.deepEqual(entry.slugs, MEETINGS_LIST_SLUGS);
+});
+
+test("the meetings list guide represents every meeting type the page lists", () => {
+  // `meetingTypes` in `src/db/schema/meetings.ts` is vision_meeting,
+  // orientation and team_meeting, and the list page renders all three. One
+  // article per type, so no type on the page is unanswered by its guide.
+  const slugs = resolveGuideEntry("/meetings")?.slugs ?? [];
+
+  for (const [type, slug] of [
+    ["vision_meeting", "core-group/vision-meetings/what-is-a-vision-meeting"],
+    [
+      "orientation",
+      "core-group/building-your-core-group/core-group-meeting-format",
+    ],
+    ["team_meeting", "training/launch-team-meeting-objectives"],
+  ]) {
+    assert.ok(slugs.includes(slug), `meeting type unrepresented: ${type}`);
+  }
+});
+
+test("a single meeting resolves to the meeting guide, whatever its id", () => {
+  for (const id of ["abc123", "550e8400-e29b-41d4-a716-446655440000"]) {
+    const entry = resolveGuideEntry(`/meetings/${id}`);
+    assert.equal(entry?.label, "Meeting Guide", `no entry for /meetings/${id}`);
+    assert.deepEqual(entry?.slugs, MEETING_DETAIL_SLUGS);
+  }
+});
+
+test("the meeting guide opens on planning and ends on the evaluation rubric", () => {
+  // `slugs[0]` is what the provider fetches when the panel opens, and a meeting
+  // is created in `planning` status onto this page. The last slug is the
+  // rubric behind the evaluation tab's eight scores.
+  const slugs = resolveGuideEntry("/meetings/abc123")?.slugs ?? [];
+
+  assert.equal(
+    slugs[0],
+    "core-group/vision-meetings/planning-your-vision-meeting"
+  );
+  assert.ok(
+    slugs.includes(
+      "core-group/vision-meetings/8-critical-success-factors-for-vision-meetings"
+    ),
+    "the evaluation tab's eight scores have no article behind them"
+  );
+});
+
+test("/meetings/new inherits the meeting guide rather than showing none", () => {
+  // One wildcard segment claims the create form too. Documented in the config:
+  // the planning article is the right first read there as well.
+  const entry = resolveGuideEntry("/meetings/new");
+  assert.equal(entry?.label, "Meeting Guide");
+});
+
+test("the meeting tabs are left free for their own entries", () => {
+  // `matchPattern` compares segment counts, so a one-wildcard pattern must not
+  // claim the deeper tabs — they can be configured separately later.
+  for (const tab of [
+    "/meetings/abc123/attendance",
+    "/meetings/abc123/evaluation",
+    "/meetings/abc123/logistics",
+    "/meetings/abc123/invitations",
+    "/meetings/abc123/analytics",
+  ]) {
+    assert.equal(resolveGuideEntry(tab), null, `unexpected entry for ${tab}`);
+  }
+});
+
+test("/teams resolves to the ministry teams guide", () => {
+  const entry = resolveGuideEntry("/teams");
+
+  assert.ok(entry, "/teams has no guide entry — the panel button never shows");
+  assert.equal(entry.label, "Ministry Teams Guide");
+  assert.deepEqual(entry.slugs, TEAMS_LIST_SLUGS);
+});
+
+test("a single team resolves to the team guide, whatever its id", () => {
+  const entry = resolveGuideEntry("/teams/team-42");
+
+  assert.equal(entry?.label, "Team Guide");
+  assert.deepEqual(entry?.slugs, TEAM_DETAIL_SLUGS);
+});
+
+test("the team guide answers each tab of a team", () => {
+  // `components/ministry-teams/team-tabs.tsx`: Members & Roles (the landing
+  // tab, hence `slugs[0]`), Responsibilities, Training, Meetings.
+  const slugs = resolveGuideEntry("/teams/team-42")?.slugs ?? [];
+
+  assert.equal(
+    slugs[0],
+    "launch-team/leadership/key-leadership-roles-overview"
+  );
+  assert.ok(slugs.includes("training/ministry-specific-training"));
+  assert.ok(slugs.includes("training/launch-team-meeting-objectives"));
+});
+
+test("the teams siblings inherit the team guide instead of showing none", () => {
+  // `/teams/health` and `/teams/org-chart` are real pages that the one-wildcard
+  // pattern also matches. Both ask who fills which role, which is what this
+  // list answers — so the inheritance is intended, and pinned so a future
+  // narrower entry is a deliberate change here.
+  for (const sibling of ["/teams/health", "/teams/org-chart"]) {
+    assert.equal(
+      resolveGuideEntry(sibling)?.label,
+      "Team Guide",
+      `no entry for ${sibling}`
+    );
+  }
+});
+
+test("the team tabs are left free for their own entries", () => {
+  for (const tab of [
+    "/teams/team-42/responsibilities",
+    "/teams/team-42/training",
+    "/teams/team-42/meetings",
+  ]) {
+    assert.equal(resolveGuideEntry(tab), null, `unexpected entry for ${tab}`);
+  }
+});
+
+test("the onboarding journey step resolves to the phase-discernment guide", () => {
+  // OB-014 / FRD AC 8. The onboarding flow has no route of its own — it renders
+  // as the dashboard while `onboarding_completed_at` is null, and the step is
+  // client state, so `/dashboard` IS the journey step's URL.
+  const entry = resolveGuideEntry("/dashboard");
+
+  assert.ok(entry, "the journey step has no guide entry — FRD AC 8 fails");
+  assert.equal(entry.label, "Your Journey Guide");
+  assert.deepEqual(entry.slugs, JOURNEY_SLUGS);
+});
+
+test("the journey guide opens on the phase overview", () => {
+  // The step's first question is "which stage of the journey are you in", and
+  // this is the one article that lays out phases 0-6 and tells the reader to
+  // find their own. It must be `slugs[0]` — that is what the panel fetches.
+  const entry = resolveGuideEntry("/dashboard");
+  assert.equal(
+    entry?.slugs[0],
+    "getting-started/welcome-to-the-launch-playbook"
+  );
+});
+
+test("the journey guide also answers the step's launch-date question", () => {
+  const slugs = resolveGuideEntry("/dashboard")?.slugs ?? [];
+
+  for (const slug of [
+    "launch-team/launch-date/setting-your-launch-date",
+    "launch-team/launch-date/variables-that-drive-your-launch-date",
+  ]) {
+    assert.ok(slugs.includes(slug), `launch-date question unanswered: ${slug}`);
+  }
+});
+
+test("the dashboard entry stays on the dashboard", () => {
+  // A bare path pattern must not claim the routes nested under it, several of
+  // which already have or will want their own guide.
+  assert.equal(resolveGuideEntry("/dashboard/anything"), null);
+});
+
+test("a step deep-link does not lose the journey guide", () => {
+  // `/dashboard?step=leadership` is a real entry point (OB-004). A pattern with
+  // no params is a subset test, so the guide survives it — and if the flow ever
+  // syncs `?step=`, a narrower entry would outrank this one by specificity.
+  assert.equal(
+    resolveGuideEntry("/dashboard", { step: "leadership" })?.label,
+    "Your Journey Guide"
+  );
+});
+
+// ----------------------------------------------------------------------------
+// The /people entries predate this change and must survive it — the new
+// patterns share no prefix with them, but `resolveGuideEntry` sorts the WHOLE
+// config by specificity, so every addition is a chance to shadow an old entry.
+// ----------------------------------------------------------------------------
+
+test("the existing /people guides are unchanged", () => {
+  const cases: [string, Record<string, string>, string, string[]][] = [
+    [
+      "/people",
+      {},
+      "Core Group Funnel",
+      ["core-group/building-your-core-group/the-core-group-funnel"],
+    ],
+    [
+      "/people/p1/assessments",
+      { tab: "assessments" },
+      "Assessments Overview",
+      ["frameworks/the-4-cs"],
+    ],
+    [
+      "/people/p1/assessments",
+      { tab: "interviews" },
+      "Interview Guide",
+      [
+        "frameworks/the-5-interview-criteria",
+        "core-group/follow-up/interviewing-for-fit",
+      ],
+    ],
+    [
+      "/people/p1/assessments",
+      { tab: "commitments" },
+      "Commitment Guide",
+      [
+        "core-group/commitment/why-formalized-commitment-matters",
+        "core-group/commitment/the-three-key-documents",
+        "core-group/commitment/core-group-commitments-explained",
+      ],
+    ],
+    [
+      "/people/p1/assessments/new",
+      {},
+      "4Cs Assessment Guide",
+      ["frameworks/the-4-cs"],
+    ],
+    [
+      "/people/p1/assessments/interview",
+      {},
+      "Interview Guide",
+      [
+        "frameworks/the-5-interview-criteria",
+        "core-group/follow-up/interviewing-for-fit",
+      ],
+    ],
+    [
+      "/people/p1/assessments/commitment",
+      {},
+      "Commitment Guide",
+      [
+        "core-group/commitment/why-formalized-commitment-matters",
+        "core-group/commitment/the-three-key-documents",
+        "core-group/commitment/core-group-commitments-explained",
+      ],
+    ],
+  ];
+
+  for (const [pathname, params, label, slugs] of cases) {
+    const entry = resolveGuideEntry(pathname, params);
+    assert.equal(entry?.label, label, `${pathname} lost its guide entry`);
+    assert.deepEqual(entry?.slugs, slugs, `${pathname} changed articles`);
+  }
 });
 
 // ----------------------------------------------------------------------------
