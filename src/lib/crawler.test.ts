@@ -17,13 +17,28 @@ import {
 // nothing in this codebase and so can only ever have come from the client.
 // ============================================================================
 
+/**
+ * WhatsApp's link-preview fetcher: a bot. The token IS the whole UA, and the
+ * trailing letter is the platform (A|I|N for Android/iOS/native).
+ */
+const WHATSAPP_FETCHER = "WhatsApp/2.23.20.0";
+
+/**
+ * WhatsApp's in-app browser: a HUMAN who tapped a shared link inside the app.
+ * An ordinary WebView UA that merely mentions WhatsApp after the `Mozilla/5.0`
+ * prefix — which is why the bare `whatsapp` substring used to misclassify them,
+ * and why the token is anchored to the start of the UA (#297).
+ */
+const WHATSAPP_IN_APP =
+  "Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/120.0.6099.230 Mobile Safari/537.36 WhatsApp/2.24.15.78";
+
 const KNOWN_CRAWLERS = [
   "facebookexternalhit/1.1",
   "Twitterbot/1.0",
   "LinkedInBot/1.0 (compatible; Mozilla/5.0)",
   "Slackbot-LinkExpanding 1.0",
   "TelegramBot (like TwitterBot)",
-  "WhatsApp/2.23.20.0",
+  WHATSAPP_FETCHER,
   "Mozilla/5.0 (compatible; Applebot/0.1)",
   "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
   "Mozilla/5.0 (compatible; bingbot/2.0)",
@@ -48,6 +63,46 @@ test("an ordinary browser is not a crawler", () => {
   }
 });
 
+// ============================================================================
+// The WhatsApp token (#297, ruled 2026-08-04). WhatsApp sends two different
+// User-Agents and only one of them is a bot. One real example of each is pinned
+// below, because the whole tightening turns on what actually separates them:
+// the fetcher's UA STARTS with the token, the in-app browser's starts with
+// `Mozilla/5.0` and only mentions it later.
+// ============================================================================
+
+test("WhatsApp's link-preview fetcher is a crawler", () => {
+  for (const ua of [
+    WHATSAPP_FETCHER,
+    "WhatsApp/2.24.15.78 A", // Android
+    "WhatsApp/2.18.61 i", // iOS
+    "WhatsApp/2.2412.54 N", // native/desktop
+  ]) {
+    assert.equal(isCrawlerUserAgent(ua), true, ua);
+    assert.equal(isCrawlerUserAgent(ua.toUpperCase()), true, ua);
+  }
+
+  // A leading space is not a different client — the anchor is on the token, not
+  // on the raw byte the header happens to begin with.
+  assert.equal(isCrawlerUserAgent(`  ${WHATSAPP_FETCHER}`), true);
+});
+
+test("WhatsApp's in-app browser is NOT a crawler — it is a person", () => {
+  // The defect the tightening fixes: a human tapping a shared link inside
+  // WhatsApp was classified as a bot by the bare `whatsapp` substring.
+  assert.equal(isCrawlerUserAgent(WHATSAPP_IN_APP), false);
+  assert.equal(isCrawlerUserAgent(WHATSAPP_IN_APP.toUpperCase()), false);
+
+  // Other shapes of the same mistake: the token anywhere but the start.
+  for (const ua of [
+    "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Mobile Safari/537.36 [FB_IAB/Orca-Android;FBAV/;WhatsApp/2.23]",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 WhatsAppBusiness/2.24",
+    "Mozilla/5.0 whatsapp",
+  ]) {
+    assert.equal(isCrawlerUserAgent(ua), false, ua);
+  }
+});
+
 test("a missing or empty user-agent is not a crawler", () => {
   // `headers().get()` returns null when the header is absent, and the predicate
   // takes that value raw so no caller has to remember to normalise it.
@@ -67,13 +122,9 @@ const GOOGLEBOT =
   "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)";
 const CHROME =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
-/** WhatsApp's in-app browser: a HUMAN, matched by the bare `whatsapp` token. */
-const WHATSAPP_IN_APP =
-  "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Mobile Safari/537.36 [FB_IAB/Orca-Android;FBAV/;WhatsApp/2.23]";
 
 /** The routes the proxy admits a session-less crawler to. */
 const PREVIEWABLE = [
-  "/dashboard",
   "/wiki",
   "/wiki/getting-started",
   "/wiki/church-planting/first-steps",
@@ -83,6 +134,12 @@ const PREVIEWABLE = [
 
 /** Everything else under `(dashboard)` — each one needs a session. */
 const NOT_PREVIEWABLE = [
+  // `/dashboard` is protected but NOT previewable (#297): the page calls
+  // `verifySession()`, so the listing promised what the page could not keep and
+  // every crawler-UA request to it 500'd. Off the list, a crawler gets the
+  // proxy's 307 to /login exactly like a session-less browser.
+  "/dashboard",
+  "/dashboard/overview",
   "/people",
   "/people/abc-123",
   "/settings",
@@ -151,19 +208,27 @@ test("the allowance needs BOTH halves: a crawler AND a previewable route", () =>
   assert.equal(isCrawlerPreviewRequest(null, null), false);
 });
 
-test("a human in WhatsApp's in-app browser reaches /login, not a broken page", () => {
-  // The bare `whatsapp` token matches the in-app browser a real person is
-  // inside, not just the link-preview fetcher. That stays true — tightening the
-  // token is its own decision — but off the previewable routes it now costs
-  // that person nothing: the layout redirects them exactly like any other
-  // logged-out visitor instead of rendering a shell the page then throws inside.
-  for (const pathname of NOT_PREVIEWABLE) {
+test("a human in WhatsApp's in-app browser is never given the crawler shell", () => {
+  // Belt and braces, and deliberately so: this person is now excluded by BOTH
+  // halves of the allowance. The token no longer matches their UA at all (#297),
+  // and even the routes a real fetcher may preview are closed to them.
+  for (const pathname of [...NOT_PREVIEWABLE, ...PREVIEWABLE]) {
     assert.equal(
       isCrawlerPreviewRequest(WHATSAPP_IN_APP, pathname),
       false,
       pathname
     );
   }
+});
+
+test("WhatsApp's fetcher previews a wiki article and nothing else", () => {
+  // The other side of the same tightening: the bot still gets what it came for.
+  assert.equal(
+    isCrawlerPreviewRequest(WHATSAPP_FETCHER, "/wiki/getting-started"),
+    true
+  );
+  assert.equal(isCrawlerPreviewRequest(WHATSAPP_FETCHER, "/dashboard"), false);
+  assert.equal(isCrawlerPreviewRequest(WHATSAPP_FETCHER, "/people"), false);
 });
 
 // --- the regression guard ---------------------------------------------------

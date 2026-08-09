@@ -22,14 +22,38 @@
  * belongs behind `getCurrentSession()` in the page, not behind this check.
  */
 
-/** Social-media and search-engine crawlers that need pages for metadata/OG scraping. */
+/**
+ * Social-media and search-engine crawlers that need pages for metadata/OG
+ * scraping. A plain string is a substring test against the lowercased UA; a
+ * RegExp is tested against it instead, for the one token a substring gets wrong.
+ *
+ * **WhatsApp sends two different User-Agents and only one of them is a crawler**
+ * (tightened 2026-08-04, #297):
+ *
+ * - The **link-preview fetcher** — the thing that renders the card in a chat —
+ *   sends the token AS the whole UA: `WhatsApp/2.23.20.0`, `WhatsApp/2.24.15.78 A`,
+ *   `WhatsApp/2.18.61 i` (the trailing letter is A|I|N for Android/iOS/native).
+ *   That is a bot, and it is the one this list wants.
+ * - The **in-app browser** — a WebView with a HUMAN looking at it, opened by
+ *   tapping a shared link inside WhatsApp — sends an ordinary browser UA that
+ *   merely *mentions* WhatsApp somewhere after the `Mozilla/5.0` prefix, e.g.
+ *   `Mozilla/5.0 (Linux; Android 14; …) … Mobile Safari/537.36 … WhatsApp/2.24…`.
+ *   That is a person, and a bare `whatsapp` substring classified them as a bot.
+ *
+ * So the token is anchored at the START of the UA (`^whatsapp/<digit>`): the
+ * fetcher's UA begins with it, the in-app browser's begins with `Mozilla/5.0`.
+ * The anchor is what separates them — the version-slash alone appears in both.
+ * An unrecognised WhatsApp variant therefore fails CLOSED and is treated as a
+ * human: it gets the same `/login` redirect anyone else gets, which costs a
+ * preview card at worst and never breaks a page for a real person.
+ */
 export const CRAWLER_USER_AGENTS = [
   "facebookexternalhit",
   "twitterbot",
   "linkedinbot",
   "slackbot",
   "telegrambot",
-  "whatsapp",
+  /^whatsapp\/\d/, // the link-preview fetcher ONLY — see above
   "applebot", // iMessage link previews
   "googlebot",
   "bingbot",
@@ -47,8 +71,12 @@ export function isCrawlerUserAgent(
   userAgent: string | null | undefined
 ): boolean {
   if (!userAgent) return false;
-  const ua = userAgent.toLowerCase();
-  return CRAWLER_USER_AGENTS.some((crawler) => ua.includes(crawler));
+  // Trimmed as well as lowercased: the anchored tokens above are anchored to the
+  // first character of the UA, and a stray leading space is not a different client.
+  const ua = userAgent.trim().toLowerCase();
+  return CRAWLER_USER_AGENTS.some((crawler) =>
+    typeof crawler === "string" ? ua.includes(crawler) : crawler.test(ua)
+  );
 }
 
 /**
@@ -64,13 +92,18 @@ export function isCrawlerUserAgent(
  * it bounces anyone else, and adding one is a deliberate act that says "this
  * page is safe and sane to render with no user".
  *
- * Keep this a SUBSET of the proxy's `PROTECTED_ROUTE_PREFIXES`: the proxy's
- * crawler branch is the only door into these routes without a session, and
- * `proxy.test.ts` pins that both halves — pass a crawler, bounce a browser —
- * still hold for every prefix here.
+ * `/dashboard` was listed here and should not have been (#297, ruled
+ * 2026-08-04): the page itself calls `verifySession()`, so listing it made the
+ * exact promise it could not keep and every crawler-UA request to it 500'd.
+ * It is still PROTECTED by the proxy — off this list it simply gets the same
+ * 307 to /login a session-less browser gets.
+ *
+ * Keep this a SUBSET of the proxy's `PROTECTED_ROUTE_PREFIXES` — a strict one
+ * now: the proxy's crawler branch is the only door into these routes without a
+ * session, and `proxy.test.ts` pins that both halves — pass a crawler, bounce a
+ * browser — still hold for every prefix here.
  */
 export const CRAWLER_PREVIEWABLE_ROUTE_PREFIXES = [
-  "/dashboard",
   "/wiki",
   "/oversight",
 ] as const;

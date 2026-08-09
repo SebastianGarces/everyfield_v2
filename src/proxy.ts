@@ -19,7 +19,12 @@ const AUTH_ROUTES = ["/login", "/register"];
 // because the crawler branch below is the only door into one without a session.
 // A protected route that is not crawler-previewable is fine — append it here and
 // crawlers get bounced to /login on it like everybody else.
+//
+// `/dashboard` is exactly that case (#297): the page calls `verifySession()`, so
+// it is protected here but NOT previewable, and a crawler gets the same 307 to
+// /login a session-less browser gets instead of the 500 the preview used to cause.
 const PROTECTED_ROUTE_PREFIXES: string[] = [
+  "/dashboard",
   ...CRAWLER_PREVIEWABLE_ROUTE_PREFIXES,
 ];
 

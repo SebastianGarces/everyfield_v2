@@ -58,7 +58,9 @@ Each section links `invariants/<domain>.md` for the why, the pattern and the wor
 - A state-changing action never takes its actor as an argument — it mints one from `verifySession()`. An entity implied by the actor (their own plant, their own org) is not an argument either.
 - A shared secret is never compared with `===`: use `matchesBearerSecret`/`constantTimeEquals` from `src/lib/security/constant-time.ts`, which hashes both sides to a fixed length first. Covers `CRON_SECRET` and `REVALIDATION_SECRET`.
 - A request header the app does not write UNCONDITIONALLY is client input and nothing may branch on it. `x-pathname` (`PATHNAME_HEADER`) is the one trusted header, and its absence must fail closed.
-- The crawler allowance is ONE predicate, `isCrawlerPreviewRequest(userAgent, pathname)`, over a fixed route list that is a subset of the protected list. It buys the unauthenticated shell, never a session and never per-user data.
+- The crawler allowance is ONE predicate, `isCrawlerPreviewRequest(userAgent, pathname)`, over a fixed route list that is a STRICT subset of the protected list — `/wiki` and `/oversight` only. It buys the unauthenticated shell, never a session and never per-user data.
+- Listing a route there is the promise "this page renders with no session". `/dashboard` never kept it (it calls `verifySession()`), so it is protected but NOT previewable: crawlers get the same 307 to /login as anyone else, not a shell around a page that 500s.
+- The `whatsapp` crawler token is anchored — `^whatsapp/<digit>`, which is WhatsApp's link-preview FETCHER, whose UA is only the token. Its in-app browser is a human behind a `Mozilla/5.0 …` UA that also says WhatsApp; a bare substring called that person a bot.
 
 ## Password Security
 

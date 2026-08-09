@@ -22,8 +22,12 @@ One `CRON_SECRET` authorises BOTH `/api/notifications/dispatch` and `/api/phase-
 
 `src/proxy.ts` set `x-is-crawler` on the RESPONSE (`NextResponse.next()`), so to the dashboard layout reading it off the REQUEST a proxy-set value and a forged one were *indistinguishable* — which is precisely why branching on it was unsafe (#240, removed). The trustworthy channel is `NextResponse.next({ request: { headers } })`, and only when the proxy writes the header on every continuation so a client value is always overwritten.
 
-## The crawler allowance (ruled 2026-08-04)
+## The crawler allowance (ruled 2026-08-04, tightened by #297)
 
-The previewable route list (`/dashboard`, `/wiki`, `/oversight`) is exactly the pages that render without a session, and it is spread into the proxy's `PROTECTED_ROUTE_PREFIXES` so "previewable ⊆ protected" holds structurally. Every other route bounces a crawler to `/login` like anyone else: handing the session-less shell to a page that needs a session turns a clean 307 into a 500 for anything carrying a crawler token, WhatsApp's in-app browser (a human) included.
+The previewable route list (`/wiki`, `/oversight`) is exactly the pages that render without a session, and it is spread into the proxy's `PROTECTED_ROUTE_PREFIXES` so "previewable ⊆ protected" holds structurally. Every other route bounces a crawler to `/login` like anyone else: handing the session-less shell to a page that needs a session turns a clean 307 into a 500.
+
+`/dashboard` is why the subset is now strict. It was listed, but the page calls `verifySession()` — so the list made a promise the page could not keep and every crawler-UA request to it 500'd. It stays in `PROTECTED_ROUTE_PREFIXES`, named explicitly rather than by the spread, so the bounce is the proxy's clean 307 rather than the layout's.
+
+WhatsApp sends two User-Agents and only one is a bot. The link-preview fetcher's UA *is* the token (`WhatsApp/2.23.20.0`, `WhatsApp/2.24.15.78 A`); the in-app browser is a person who tapped a shared link, behind an ordinary `Mozilla/5.0 …` UA that also mentions WhatsApp. The bare substring matched both, so the token is anchored to the start of the UA (`^whatsapp/<digit>`) — the version-slash alone appears in both and does not separate them. An unrecognised WhatsApp build therefore fails closed as a human: a missing preview card, never a broken page.
 
 It is a User-Agent allowance and always was — a forged UA gets the unauthenticated shell around pages that already render session-less (wiki articles, for their OG tags), never per-user data, which stays behind `getCurrentSession()` in the page.
