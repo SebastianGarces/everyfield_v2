@@ -31,6 +31,7 @@ import {
   MERGE_FIELDS,
 } from "@/lib/communication/merge";
 import type { MessageTemplate } from "@/db/schema/communication";
+import type { RecipientTeamOption } from "@/lib/communication/service";
 
 interface Recipient {
   id: string;
@@ -61,6 +62,7 @@ interface ComposeFormProps {
   meetings?: MeetingOption[];
   initialRecipients?: Recipient[];
   churchName?: string;
+  teams?: RecipientTeamOption[];
 }
 
 export function ComposeForm({
@@ -70,6 +72,7 @@ export function ComposeForm({
   meetings = [],
   initialRecipients = [],
   churchName = "",
+  teams = [],
 }: ComposeFormProps) {
   const router = useRouter();
 
@@ -310,7 +313,11 @@ export function ComposeForm({
           )}
 
           {/* Recipients */}
-          <RecipientPicker selected={recipients} onChange={setRecipients} />
+          <RecipientPicker
+            selected={recipients}
+            onChange={setRecipients}
+            teams={teams}
+          />
 
           {/* Subject */}
           <div className="space-y-2">

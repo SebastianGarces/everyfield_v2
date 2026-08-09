@@ -7,7 +7,7 @@
 // and the merge field engine for personalization.
 // ============================================================================
 
-import { and, desc, eq, gte, inArray, sql, count } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql, count } from "drizzle-orm";
 import { db } from "@/db";
 import {
   communications,
@@ -21,6 +21,7 @@ import {
 import { persons, type PersonStatus } from "@/db/schema/people";
 import { churches } from "@/db/schema/church";
 import { churchMeetings } from "@/db/schema/meetings";
+import { ministryTeams, teamMemberships } from "@/db/schema/ministry-teams";
 import { render } from "@react-email/components";
 import { resend, EMAIL_FROM } from "@/lib/email/client";
 import {
@@ -39,6 +40,29 @@ import {
   buildCommunicationsWhere,
   type CommunicationQueryFilters,
 } from "./filters";
+import {
+  DELIVERED_STATUSES,
+  OPENED_STATUSES,
+  type DeliveryTotals,
+  churchDeliveryScope,
+  countAttempted,
+  countOfStatus,
+  countOfStatuses,
+  isTeamGroup,
+  messageRecipientScope,
+  nonOpenerScope,
+  parseTeamGroup,
+  selectableTeamsOrder,
+  selectableTeamsScope,
+  sentMessagesScope,
+  sentSinceScope,
+  teamGroup,
+  teamMemberScope,
+} from "./queries";
+import {
+  evaluateResendEligibility,
+  resendBlockedMessage,
+} from "./resend-policy";
 import type { ComposeMessageInput } from "@/lib/validations/communication";
 
 // ---------------------------------------------------------------------------
@@ -382,9 +406,10 @@ export async function countCommunications(
 /**
  * How many messages this church actually SENT since `since`.
  *
- * `status = 'sent'` is load-bearing, not decoration: a COM-020 logged contact
- * also carries a `sent_at` (the moment the contact happened), so counting on
- * `sent_at` alone would report contacts where nothing was sent as sends.
+ * The predicate lives in `queries.ts` (`sentSinceScope`) with the rest of the
+ * aggregation scopes, where `queries.test.ts` compiles it and pins the church
+ * bound parameter — the boundary is application-layer, so the clause IS the
+ * boundary.
  */
 export async function countSentSince(
   churchId: string,
@@ -393,12 +418,7 @@ export async function countSentSince(
   const [{ total }] = await db
     .select({ total: count() })
     .from(communications)
-    .where(
-      and(
-        buildCommunicationsWhere(churchId, { status: "sent" }),
-        gte(communications.sentAt, since)
-      )
-    );
+    .where(sentSinceScope(churchId, since));
   return total;
 }
 
@@ -671,62 +691,311 @@ export async function getMeetingTrackingByPerson(
 }
 
 // ---------------------------------------------------------------------------
-// Recipient Group Resolution
+// Delivery Statistics — church-wide overview (COM-019)
 // ---------------------------------------------------------------------------
 
 /**
- * Resolve a quick-select group into person IDs.
+ * Aggregate delivery, open and click telemetry across every message the church
+ * has sent. One grouped scan of `communication_recipients` joined to its
+ * `communications` row, plus a count of the sent messages themselves for
+ * context — never a per-message fan-out.
+ *
+ * Rates are NOT computed here. The counts are the facts; turning them into
+ * percentages (and refusing to divide by zero) is `summarizeDelivery` in
+ * `@/components/communication/delivery-stats-presentation`.
+ */
+export async function getChurchDeliveryTotals(
+  churchId: string
+): Promise<DeliveryTotals> {
+  const [[telemetry], [messages]] = await Promise.all([
+    db
+      .select({
+        recipients: count(),
+        attempted: countAttempted(),
+        delivered: countOfStatuses(DELIVERED_STATUSES),
+        opened: countOfStatuses(OPENED_STATUSES),
+        clicked: countOfStatus("clicked"),
+        bounced: countOfStatus("bounced"),
+        failed: countOfStatus("failed"),
+      })
+      .from(communicationRecipients)
+      .innerJoin(
+        communications,
+        eq(communicationRecipients.communicationId, communications.id)
+      )
+      .where(churchDeliveryScope(churchId)),
+    db
+      .select({ total: count() })
+      .from(communications)
+      .where(sentMessagesScope(churchId)),
+  ]);
+
+  return {
+    messagesSent: messages?.total ?? 0,
+    recipients: telemetry?.recipients ?? 0,
+    attempted: telemetry?.attempted ?? 0,
+    delivered: telemetry?.delivered ?? 0,
+    opened: telemetry?.opened ?? 0,
+    clicked: telemetry?.clicked ?? 0,
+    bounced: telemetry?.bounced ?? 0,
+    failed: telemetry?.failed ?? 0,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Resend to non-openers (COM-018)
+// ---------------------------------------------------------------------------
+
+export interface NonOpenerSummary {
+  /** Recipient rows on the original message. */
+  total: number;
+  /** Of those, the ones the provider confirmed as delivered. */
+  delivered: number;
+  /** Of those, the ones that recorded an open (a click implies an open). */
+  opened: number;
+  /** People a resend would actually reach — the count shown before confirming. */
+  personIds: string[];
+}
+
+/**
+ * Who a resend of this message would go to, and who it would skip.
+ *
+ * The resolved list is the contract: `resendToNonOpeners` sends to exactly
+ * these ids, so the number the user confirms is the number that is sent.
+ */
+export async function getNonOpenerSummary(
+  churchId: string,
+  communicationId: string
+): Promise<NonOpenerSummary> {
+  const [nonOpeners, [totals]] = await Promise.all([
+    db
+      .selectDistinct({ personId: communicationRecipients.personId })
+      .from(communicationRecipients)
+      .innerJoin(
+        communications,
+        eq(communicationRecipients.communicationId, communications.id)
+      )
+      .innerJoin(persons, eq(communicationRecipients.personId, persons.id))
+      .where(nonOpenerScope(churchId, communicationId)),
+    db
+      .select({
+        total: count(),
+        delivered: countOfStatuses(DELIVERED_STATUSES),
+        opened: countOfStatuses(OPENED_STATUSES),
+      })
+      .from(communicationRecipients)
+      .where(messageRecipientScope(churchId, communicationId)),
+  ]);
+
+  return {
+    total: totals?.total ?? 0,
+    delivered: totals?.delivered ?? 0,
+    opened: totals?.opened ?? 0,
+    personIds: nonOpeners.map((row) => row.personId),
+  };
+}
+
+/** Thrown when a resend has nobody left to reach. */
+export const NO_NON_OPENERS_MESSAGE = resendBlockedMessage("noNonOpeners");
+
+/**
+ * Send the original message again, to the recipients who recorded no open.
+ *
+ * This creates a NEW communication. The original is never touched: its
+ * recipient rows and its tracking stay exactly as they were, and history shows
+ * two messages, which is what the delivery figures depend on.
+ *
+ * The eligibility gate is enforced HERE, not only on the button. The button
+ * can be stale, and the action is callable directly — a resend inside the
+ * cooldown, or before anything is confirmed delivered, is refused either way.
+ */
+export async function resendToNonOpeners(
+  churchId: string,
+  userId: string,
+  communicationId: string
+): Promise<Communication> {
+  const [original] = await db
+    .select()
+    .from(communications)
+    .where(
+      and(
+        eq(communications.id, communicationId),
+        eq(communications.churchId, churchId)
+      )
+    )
+    .limit(1);
+
+  if (!original) throw new Error("Message not found");
+
+  const { delivered, personIds } = await getNonOpenerSummary(
+    churchId,
+    communicationId
+  );
+
+  const { allowed, reason } = evaluateResendEligibility({
+    status: original.status,
+    sentAt: original.sentAt,
+    deliveredCount: delivered,
+    nonOpenerCount: personIds.length,
+  });
+  if (!allowed && reason) throw new Error(resendBlockedMessage(reason));
+
+  return sendCommunication(churchId, userId, {
+    subject: original.subject ?? "",
+    body: original.body,
+    channel: original.channel,
+    templateId: original.templateId ?? undefined,
+    meetingId: original.meetingId ?? undefined,
+    recipientIds: personIds,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Recipient Group Resolution
+// ---------------------------------------------------------------------------
+
+/** A person as the recipient picker needs them. */
+export interface GroupRecipient {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string | null;
+}
+
+/** The ministry teams offered as recipient quick-selects (MT-015). */
+export interface RecipientTeamOption {
+  id: string;
+  name: string;
+  /**
+   * The group selector to hand back to `getGroupRecipients` — built here so
+   * the client component never has to import the query module (and drizzle
+   * with it) just to spell `team:<id>`.
+   */
+  selector: string;
+  /** Active members — a team with none is offered, and resolves to zero. */
+  memberCount: number;
+}
+
+const personColumns = {
+  id: persons.id,
+  firstName: persons.firstName,
+  lastName: persons.lastName,
+  email: persons.email,
+};
+
+/** Status groups, by their quick-select id. */
+const STATUS_GROUPS: Record<string, PersonStatus[]> = {
+  core_group: ["core_group"],
+  launch_team: ["launch_team"],
+  leaders: ["leader"],
+  prospects: ["prospect"],
+  all: [],
+};
+
+/**
+ * Resolve a quick-select group into the people it names.
+ *
+ * Two kinds of selector:
+ *  - a status group (`core_group`, `leaders`, `all`, …);
+ *  - `team:<teamId>`, the active members of one ministry team (MT-015).
+ *
+ * An unknown selector resolves to every active person, matching the previous
+ * behaviour of the status switch. A team with no active members resolves to
+ * an empty list — the caller shows that as "0 recipients", not as an error.
+ */
+export async function getGroupRecipients(
+  churchId: string,
+  group: string
+): Promise<GroupRecipient[]> {
+  if (isTeamGroup(group)) {
+    const teamId = parseTeamGroup(group);
+    // A malformed team selector names nobody. It must NOT fall through to the
+    // status branch, where an unrecognised group means every active person.
+    if (!teamId) return [];
+
+    // A person holding two roles on one team has two membership rows, so the
+    // select must be distinct or they would be added to the picker twice.
+    return db
+      .selectDistinct(personColumns)
+      .from(teamMemberships)
+      .innerJoin(persons, eq(teamMemberships.personId, persons.id))
+      .where(teamMemberScope(churchId, teamId));
+  }
+
+  const statusFilter = STATUS_GROUPS[group] ?? [];
+  const conditions = [
+    eq(persons.churchId, churchId),
+    isNull(persons.deletedAt),
+  ];
+  if (statusFilter.length > 0) {
+    conditions.push(inArray(persons.status, statusFilter));
+  }
+
+  return db
+    .select(personColumns)
+    .from(persons)
+    .where(and(...conditions));
+}
+
+/**
+ * Resolve a quick-select group into person IDs. Same resolution as
+ * `getGroupRecipients` — including `team:<teamId>` — narrowed to ids.
  */
 export async function getRecipientsByGroup(
   churchId: string,
   group: string
 ): Promise<string[]> {
-  let statusFilter: PersonStatus[];
-
-  switch (group) {
-    case "core_group":
-      statusFilter = ["core_group"];
-      break;
-    case "launch_team":
-      statusFilter = ["launch_team"];
-      break;
-    case "leaders":
-      statusFilter = ["leader"];
-      break;
-    case "prospects":
-      statusFilter = ["prospect"];
-      break;
-    case "all":
-      statusFilter = [];
-      break;
-    default:
-      statusFilter = [];
-  }
-
-  const conditions = [
-    eq(persons.churchId, churchId),
-    isNull(persons.deletedAt),
-  ];
-
-  if (statusFilter.length > 0) {
-    conditions.push(inArray(persons.status, statusFilter));
-  }
-
-  const people = await db
-    .select({ id: persons.id })
-    .from(persons)
-    .where(and(...conditions));
-
+  const people = await getGroupRecipients(churchId, group);
   return people.map((p) => p.id);
+}
+
+/**
+ * The church's ministry teams, as recipient quick-selects with their active
+ * member counts. Paused teams are left out; a `forming` team is one a planter
+ * is actively staffing and very much wants to email.
+ */
+export async function listRecipientTeams(
+  churchId: string
+): Promise<RecipientTeamOption[]> {
+  const rows = await db
+    .select({
+      id: ministryTeams.id,
+      name: ministryTeams.name,
+      sortOrder: ministryTeams.sortOrder,
+      memberCount: sql<number>`count(distinct ${persons.id})::int`,
+    })
+    .from(ministryTeams)
+    .leftJoin(
+      teamMemberships,
+      and(
+        eq(teamMemberships.teamId, ministryTeams.id),
+        eq(teamMemberships.churchId, churchId),
+        eq(teamMemberships.status, "active")
+      )
+    )
+    .leftJoin(
+      persons,
+      and(
+        eq(persons.id, teamMemberships.personId),
+        isNull(persons.deletedAt),
+        eq(persons.churchId, churchId)
+      )
+    )
+    .where(selectableTeamsScope(churchId))
+    .groupBy(ministryTeams.id, ministryTeams.name, ministryTeams.sortOrder)
+    .orderBy(...selectableTeamsOrder);
+
+  return rows.map(({ id, name, memberCount }) => ({
+    id,
+    name,
+    selector: teamGroup(id),
+    memberCount,
+  }));
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function isNull(column: typeof persons.deletedAt) {
-  return sql`${column} IS NULL`;
-}
 
 async function updateRecipientStatus(
   recipientId: string,

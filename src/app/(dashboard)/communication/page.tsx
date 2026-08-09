@@ -6,10 +6,12 @@ import { HeaderBreadcrumbs } from "@/components/header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { DeliveryOverview } from "@/components/communication/delivery-overview";
 import { verifySession } from "@/lib/auth/session";
 import {
   countCommunications,
   countSentSince,
+  getChurchDeliveryTotals,
   getCommunications,
   resolveSubjects,
 } from "@/lib/communication/service";
@@ -36,11 +38,13 @@ export default async function CommunicationPage() {
   const [
     { communications: recentMessages, total },
     templates,
+    deliveryTotals,
     sentThisWeek,
     loggedCount,
   ] = await Promise.all([
     getCommunications(user.churchId, { limit: 10 }),
     getTemplates(user.churchId),
+    getChurchDeliveryTotals(user.churchId),
     countSentSince(user.churchId, weekAgo),
     countCommunications(user.churchId, { status: "logged" }),
   ]);
@@ -130,6 +134,11 @@ export default async function CommunicationPage() {
                 <div className="text-2xl font-bold">{templates.length}</div>
               </CardContent>
             </Card>
+          </div>
+
+          {/* Delivery performance (COM-019) */}
+          <div className="mt-6">
+            <DeliveryOverview totals={deliveryTotals} />
           </div>
 
           {/* Quick Actions */}

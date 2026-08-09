@@ -84,6 +84,16 @@ Each section links `invariants/<domain>.md` for the why, the pattern and the wor
 - Every `churchId` parameter on the wiki reads defaults to `null`, so a call site that forgets to thread the session fails CLOSED — it under-fetches the church's own content rather than leaking another church's.
 - Cross-links live ONLY in `related_article_slugs`, never in an article's prose — the authored `## Related Articles` section was migrated out of all 96 articles (#317). Writing one back into `content` renders the list twice, and no test catches it.
 
+## Communication — Resend & Delivery Figures
+
+Applies to `src/lib/communication/**` and the `/communication` surfaces. Ruled 2026-08-09 on PR #371.
+
+- A resend to non-openers is offered ONLY when both hold: at least `RESEND_COOLDOWN_HOURS` (24) since `sent_at`, AND at least one recipient row confirmed delivered. One decision — `evaluateResendEligibility` (`src/lib/communication/resend-policy.ts`) — drives the button and is re-checked inside `resendToNonOpeners`; the UI gate is never the only gate.
+- A `sent` message with a null `sent_at` is `tooSoon`, not eligible. The cooldown that cannot be proven elapsed has not elapsed.
+- `UNREACHABLE_STATUSES` = `bounced` AND `failed`, and `nonOpenerScope` excludes both. A `failed` row is an address the provider refused — retrying it cannot succeed and spends sender reputation. Never re-split the two.
+- "Delivery rate" names exactly ONE figure: `delivered / attempted`, on the church-wide overview only. A single message's tiles report COUNTS with the denominator in the caption ("Delivered · 6 · of 10 recipients") and claim no rate — the tile once divided by all recipient rows and called that the delivery rate too, which is a different number under the same name.
+- A rate with a zero denominator is UNKNOWN (`toPercent` → `null`, rendered as `—`), never `0%`. "0% open rate" is a claim about a send that never arrived.
+
 ## Dev Seeds
 
 Why and how: [`contracts/db.md`](contracts/db.md) → The dev-seed wipe. Applies to
