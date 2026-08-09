@@ -45,7 +45,11 @@ tenant scope; `created_at`/`updated_at` default now.
     `launch_milestone_tasks` link cascades but the TASK does not, and `tasks.created_by_id` →
     `users.id` then refuses the users delete (`tasks_created_by_id_users_id_fk`) — `pnpm db:seed`
     failed on any database where /launch had ever been used until `seed-dev-db.ts` deleted tasks
-    between launches and users. The order is sessions → launches → tasks → users → churches.
+    between launches and users. **That order is no longer written down anywhere and must not be
+    re-introduced as a list:** `planWipe()` in `scripts/seed-dev-db.ts` derives it at runtime from
+    `pg_constraint`, so a table added next month joins the wipe on its own and nothing has to be
+    kept in step. The FK facts above are still why the derivation matters — they are exactly the
+    edges a hand-kept list kept missing. See "The dev-seed wipe" below.
 - **`church_id = null` means global content** (e.g. wiki articles visible to all tenants).
 - **`sessions.id`** is the SHA-256 of the token, not the token.
 - **Soft deletes:** `persons.deleted_at` — feature queries must filter it.
@@ -83,3 +87,37 @@ tenant scope; `created_at`/`updated_at` default now.
     warns about.
 - **Transactions:** `db.transaction()` throws on neon-http — see `../invariants.md` →
   Transactions/Atomicity before writing any multi-statement mutation.
+
+## The dev-seed wipe (`scripts/seed-dev-db.ts`, #326)
+
+Rules: `../invariants.md` → Dev Seeds. Why they are not guessable from the source:
+
+- **`pnpm db:seed` is not scoped to the rows it creates.** `WIPE_ROOTS` is `users` + `churches`
+  and both are deleted with a bare `DELETE FROM` — the fixture IS the whole database. That is
+  precisely what makes the `everyfield.dev` → `everyfield.app` retirement (ruled 2026-07-31)
+  converge: there is no email predicate to keep in step, so no account can survive by carrying an
+  address the script no longer mentions. The same property is the cost — pointed at the shared
+  `development` branch it takes the alpha-cohort logins, the marketing-church fixture and every
+  hand-registered plant with them. **The guard is this paragraph and the comment on
+  `cleanDatabase()`, not code.**
+- **The order is derived, not enumerated.** `planWipe()` reads every `public` foreign key from
+  `pg_constraint`, walks out from the roots taking anything that (transitively) points into the
+  set, and emits children before parents. A table unreachable from a user or a church is not
+  fixture and is left alone (`sending_networks`, `sending_churches`). Self-referencing keys are
+  dropped from the ordering — one `DELETE FROM t` removes the referencing rows with the rest. A
+  cycle of non-cascading keys throws with the table names rather than half-wiping.
+- **`wiki_articles` and `wiki_sections` are `PROTECTED_TABLES`, which means two things:** never
+  deleted, *and* never walked THROUGH — so nothing downstream of them is dragged into the wipe
+  either. The corpus is migrated content that no script rebuilds (#317), including the
+  `related_article_slugs` cross-links.
+- **`assertProtectedTablesAreSafe()` aborts the entire seed BEFORE the first DELETE** if any
+  protected row points at a table the wipe deletes — today that is a church-scoped
+  `wiki_articles.church_id`. The honest answer to that FK is to stop and let a human re-point the
+  rows, not to delete an article; stopping late (after the users are gone) would be the worst of
+  both.
+- **Every script that inserts a `churches` row stamps `onboarding_completed_at`.** A null stamp
+  means the onboarding wizard still owns that planter's dashboard (`shouldShowOnboarding`,
+  `src/lib/onboarding/steps.ts`), so an unstamped fixture puts every seeded planter in the wizard.
+  The value is `now()` evaluated inside the same INSERT as `created_at`'s `DEFAULT now()`, so the
+  two are the same instant rather than milliseconds apart. `src/lib/onboarding/seeded-churches.test.ts`
+  pins the script list.

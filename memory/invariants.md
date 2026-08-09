@@ -83,6 +83,17 @@ Each section links `invariants/<domain>.md` for the why, the pattern and the wor
 - Every `churchId` parameter on the wiki reads defaults to `null`, so a call site that forgets to thread the session fails CLOSED — it under-fetches the church's own content rather than leaking another church's.
 - Cross-links live ONLY in `related_article_slugs`, never in an article's prose — the authored `## Related Articles` section was migrated out of all 96 articles (#317). Writing one back into `content` renders the list twice, and no test catches it.
 
+## Dev Seeds
+
+Why and how: [`contracts/db.md`](contracts/db.md) → The dev-seed wipe. Applies to
+`scripts/seed-dev-db.ts` and anything that inserts a `churches` row.
+
+- `pnpm db:seed` deletes ALL users and ALL churches unscoped — the fixture is the whole database, not the rows the script created. Run it against your own or a throwaway database ONLY; on the shared `development` branch it takes the alpha-cohort logins, the marketing fixture and every hand-registered plant. Nothing in code stops you.
+- The wipe ORDER is derived at runtime from `pg_constraint` by `planWipe()`. Never re-introduce a hand-kept table list — the derivation is what makes a new table join the wipe on its own.
+- `wiki_articles` and `wiki_sections` are `PROTECTED_TABLES`: never deleted AND never walked through, so nothing downstream of them is dragged in either. The corpus is migrated content no script rebuilds (#317).
+- A protected row pointing at a table the wipe deletes (a church-scoped wiki article) ABORTS the whole seed before its first DELETE — `assertProtectedTablesAreSafe()`. Stop and re-point by hand; never widen the wipe to cover it.
+- Every script that inserts a `churches` row stamps `onboarding_completed_at` with `now()` in that same INSERT — an unstamped seeded church puts its planter in the onboarding wizard instead of the dashboard. Pinned by `src/lib/onboarding/seeded-churches.test.ts`.
+
 ## Request Deduplication
 
 - `getCurrentSession()` is wrapped in `React.cache()`, so repeat calls in one request hit the cache, not the DB (`src/lib/auth/session.ts`).
