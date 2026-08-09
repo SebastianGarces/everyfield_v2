@@ -73,6 +73,32 @@ interface AttendanceCaptureProps {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * The displayed name of a guest. `lastName` can be blank for a quick-added
+ * walk-in, so the parts are joined and trimmed rather than concatenated with a
+ * hard space — a trailing space is invisible on screen but is read out, and it
+ * would put "Mark Ana  as attended" into the accessible name below.
+ */
+export function guestFullName(guest: {
+  firstName: string;
+  lastName: string;
+}): string {
+  return `${guest.firstName} ${guest.lastName}`.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * The accessible name of an attendance checkbox. The row's only visible label
+ * is the "Here" column header, which does not say WHOSE attendance the control
+ * toggles, so each checkbox names its person (issue #159, Lighthouse
+ * `button-name` — Radix renders the checkbox as a `<button role="checkbox">`).
+ * The label is deliberately state-free: `aria-checked` already announces on/off,
+ * and a name that flipped with the state would be read as a different control.
+ */
+export function attendanceCheckboxLabel(guestName: string): string {
+  const name = guestName.trim();
+  return name ? `Mark ${name} as attended` : "Mark this guest as attended";
+}
+
 const rsvpBadge: Record<
   string,
   { label: string; className: string; icon: typeof CheckCircle2 }
@@ -407,6 +433,7 @@ export function AttendanceCapture({
                 const rsvp = guest.responseStatus
                   ? rsvpBadge[guest.responseStatus]
                   : null;
+                const guestName = guestFullName(guest);
 
                 return (
                   <div
@@ -421,6 +448,7 @@ export function AttendanceCapture({
                           handleToggle(guest.personId, guest.attendanceStatus)
                         }
                         disabled={isPending}
+                        aria-label={attendanceCheckboxLabel(guestName)}
                         className="cursor-pointer"
                       />
                     </div>
@@ -432,7 +460,7 @@ export function AttendanceCapture({
                           isAttended ? "" : "text-muted-foreground"
                         }`}
                       >
-                        {guest.firstName} {guest.lastName}
+                        {guestName}
                       </p>
                     </div>
 
