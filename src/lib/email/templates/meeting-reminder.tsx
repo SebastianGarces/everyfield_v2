@@ -1,5 +1,9 @@
 import { Heading, Section, Text, render } from "@react-email/components";
 import { BaseLayout } from "../components/base-layout";
+// Zone-pinned formatters, not `toLocale*`: this email renders in a worker whose
+// zone is whatever the platform sets, and it must state the same wall clock the
+// meeting pages show. memory/invariants.md → Date & Time Rendering.
+import { formatDate, formatTime } from "@/lib/datetime";
 
 interface MeetingReminderEmailProps {
   personName: string;
@@ -20,16 +24,8 @@ function MeetingReminderEmail({
   agenda,
   churchName,
 }: MeetingReminderEmailProps) {
-  const formattedDate = datetime.toLocaleDateString("en-US", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-  const formattedTime = datetime.toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  const formattedDate = formatDate(datetime);
+  const formattedTime = formatTime(datetime);
 
   return (
     <BaseLayout

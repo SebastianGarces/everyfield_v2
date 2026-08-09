@@ -1,8 +1,11 @@
 import { notFound } from "next/navigation";
-import { format } from "date-fns";
 import { CalendarDays, MapPin, Check, X } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
+// Zone-pinned formatters, not date-fns: the guest reading this page and the
+// planter reading /meetings/[id] must be told the same wall clock, whatever the
+// runtime's zone is. memory/invariants.md → Date & Time Rendering.
+import { formatDate, formatTime } from "@/lib/datetime";
 import { getConfirmationDetails } from "@/lib/communication/confirmation";
 import { RsvpActions } from "./rsvp-actions";
 
@@ -55,11 +58,9 @@ export default async function RsvpPage({
             <div className="flex items-center gap-3 text-sm">
               <CalendarDays className="text-muted-foreground h-5 w-5 flex-shrink-0" />
               <div>
-                <p className="font-medium">
-                  {format(meeting.datetime, "EEEE, MMMM d, yyyy")}
-                </p>
+                <p className="font-medium">{formatDate(meeting.datetime)}</p>
                 <p className="text-muted-foreground">
-                  {format(meeting.datetime, "h:mm a")}
+                  {formatTime(meeting.datetime)}
                 </p>
               </div>
             </div>
