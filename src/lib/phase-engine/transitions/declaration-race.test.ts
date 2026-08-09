@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { after, test } from "node:test";
+import { after, test, type TestContext } from "node:test";
 
 import { eq, like, sql } from "drizzle-orm";
 
@@ -27,20 +27,49 @@ import type { PlantFactSnapshot } from "@/lib/phase-engine/signals";
 // pre-wait snapshot (`memory/invariants/transactions-atomicity.md` → the
 // subquery trap).
 //
-// So the assertion has to be made against a real database. It needs
-// `DATABASE_URL`, which `pnpm test` loads from `.env.local` when there is one,
-// and SKIPS itself otherwise rather than failing a hermetic CI run — the guard
-// it protects is `phase_transitions_initial_declaration_unique_idx` (migration
-// 0033), which CI proves exists by applying the migration.
+// So the assertion has to be made against a real, REACHABLE database, and it
+// is therefore OPT-IN: run it with `LIVE_DB_TESTS=1 pnpm test`. Without that
+// flag the file skips, so the hermetic suite stays green. The guard it protects
+// is `phase_transitions_initial_declaration_unique_idx` (migration 0033), which
+// CI proves exists by applying the migration.
+//
+// `DATABASE_URL` is deliberately NOT the signal. CI sets an unreachable
+// placeholder (`postgresql://ci:ci@localhost:5432/ci`) on every `pnpm test` run
+// — see the Test step in `.github/workflows/pull-request-checks.yml`, whose own
+// comment records the contract: the suite is "verified to pass with no
+// .env.local and an unreachable database". Keying on presence made this file
+// connect in CI, take ECONNREFUSED, and fail the very hermetic run it was
+// written to sit out of. An explicit flag cannot be switched back on by
+// accident by some future environment. Behind the flag there is a second layer
+// — a `select 1` reachability probe, the same one the other live-DB file in
+// `src/` uses (`src/lib/wiki/tenancy-live.test.ts`) — so even an explicit
+// opt-in against a dead database skips loudly instead of failing.
 //
 // Everything it writes is namespaced by `SCRATCH_NAME` and swept in `after`,
 // including on failure.
 // ----------------------------------------------------------------------------
 
-const LIVE_DB = Boolean(process.env.DATABASE_URL);
+const LIVE_DB = process.env.LIVE_DB_TESTS === "1";
 const skip = LIVE_DB
   ? false
-  : "needs DATABASE_URL — a real Postgres is the only place this bug is visible";
+  : "opt-in: run `LIVE_DB_TESTS=1 pnpm test` with a reachable DATABASE_URL — a real Postgres is the only place this bug is visible";
+
+/**
+ * Defence in depth behind the opt-in flag: even when someone asks for the live
+ * run, refuse to fail the suite over a database that is not there. Matches
+ * `src/lib/wiki/tenancy-live.test.ts`, the other live-DB file in `src/`.
+ */
+const UNREACHABLE =
+  "SKIPPED — LIVE_DB_TESTS=1 was set but DATABASE_URL points at no reachable Postgres, so the race did NOT run";
+
+async function databaseReachable(): Promise<boolean> {
+  try {
+    await db.execute(sql`select 1`);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** Namespaces every row this file writes, so the sweep cannot touch real data. */
 const SCRATCH_NAME = "__t306 declaration race scratch__";
@@ -79,13 +108,16 @@ async function sweep(): Promise<void> {
 
 after(async () => {
   if (!LIVE_DB) return;
+  if (!(await databaseReachable())) return;
   await sweep();
 });
 
 test(
   "two concurrent declarations leave exactly ONE declaration row, every run",
   { skip },
-  async () => {
+  async (t: TestContext) => {
+    if (!(await databaseReachable())) return t.skip(UNREACHABLE);
+
     // Any real user — `initiated_by_id` is a FK and this test is about the
     // write guard, not about who submitted.
     const [actor] = await db.select({ id: users.id }).from(users).limit(1);
@@ -177,7 +209,9 @@ test(
 test(
   "the guard is the index, not the statement — a raw duplicate insert is refused",
   { skip },
-  async () => {
+  async (t: TestContext) => {
+    if (!(await databaseReachable())) return t.skip(UNREACHABLE);
+
     // The statement above can only be as safe as the constraint under it. This
     // asserts the constraint directly, so a future rewrite of the CTE chain
     // cannot quietly remove the thing that makes duplicates impossible.

@@ -379,9 +379,7 @@ function ChoiceOption({
           </Label>
           <p className="text-muted-foreground text-sm">{hint}</p>
           {tag && (
-            <p className="text-muted-foreground/80 text-xs tracking-wide">
-              {tag}
-            </p>
+            <p className="text-muted-foreground text-xs tracking-wide">{tag}</p>
           )}
           {children}
         </div>
