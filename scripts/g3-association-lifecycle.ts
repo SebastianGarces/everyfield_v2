@@ -379,11 +379,26 @@ async function main() {
     assert.equal(associatedOrg.sendingNetworkId, network.id);
     ok("accept associated the sending church with the network");
 
-    // The documented residual (`memory/invariants.md` → Multi-Tenancy): this
-    // association is recorded by the INVITATION ROW and nothing else, because
-    // both `association_events.church_id` and `notifications.church_id` are NOT
-    // NULL and its subject is a sending church. Asserted so the day a subject
-    // column lands, this line fails and is updated deliberately.
+    // AN OPEN GAP, NOT A SETTLED RULE — see #351.
+    //
+    // #304's WS3 acceptance criterion asks this accept to write an
+    // `association_events` row and put a milestone in front of the network. It
+    // does neither, and this assertion records that it does neither. Read it as
+    // a tripwire on a known debt, NOT as the product's intended behaviour: the
+    // three code sites are one-liners (`auditableAssociationOrg`'s
+    // `sending_church_to_network` arm, and the `if (updated.targetChurchId)`
+    // gates on accept and decline), but all three are blocked by a constraint
+    // above them. `association_events.church_id` and `notifications.church_id`
+    // are both NOT NULL with a CHURCH as their subject, and a sending church
+    // joining a network names no church, so the row has nowhere honest to be
+    // filed until the subject column `src/db/schema/association-event.ts`'s own
+    // header asks for exists. That is the ruling #351 carries.
+    //
+    // Until then the association is recorded by the INVITATION ROW alone
+    // (`status`, `responded_by`, `responded_at`) and the network reads the
+    // answer in its own invitations list. Asserted at 0 so the day the subject
+    // column lands this line FAILS and is updated deliberately — which is the
+    // point of pinning it.
     const scAudit = await db
       .select({ id: associationEvents.id })
       .from(associationEvents)
@@ -391,9 +406,9 @@ async function main() {
     assert.equal(
       scAudit.length,
       0,
-      "an association_events row appeared for a sending church — update the invariant"
+      "an association_events row appeared for a sending church — #351 has landed, so require the row here instead of forbidding it"
     );
-    ok("sc→network is recorded by the invitation row only (known residual)");
+    ok("sc→network is recorded by the invitation row only (OPEN GAP — #351)");
 
     console.log("\nALL ASSERTIONS PASSED");
   } finally {

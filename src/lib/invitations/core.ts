@@ -1054,10 +1054,15 @@ export async function acceptInvitationAs(
   // whether the plant is sharing — `enqueue` does, per recipient, and writes
   // nothing when it is not.
   //
-  // Only a PLANT-side acceptance is a milestone: `target_church_id` is set when
-  // a sending church or a network invited a church plant, which is the "planter
-  // accepted invitation" the ruling names. A sending church joining a network
-  // is a different event with no plant to report on.
+  // Only a PLANT-side acceptance reaches this rail: `target_church_id` is set
+  // when a sending church or a network invited a church plant, which is the
+  // "planter accepted invitation" the ruling names. A sending church joining a
+  // network has no plant, so `composeMilestone`'s NOT NULL `church_id` has no
+  // honest value.
+  //
+  // #304's WS3 AC asks for that notification anyway, and OPEN RULING #351
+  // carries the tenant-anchor question that blocks it. Do not read this gate as
+  // the settled shape.
   if (updated.targetChurchId) {
     await announceInvitationAcceptedForChurch(updated);
   }
@@ -1171,7 +1176,13 @@ export async function declineInvitationAs(
 
   // Only a PLANT-side decline reaches the milestone rail, for the same reason
   // the accept's does: a sending church declining a network names no plant, and
-  // every milestone is about a plant.
+  // every milestone is about a plant — `notifications.church_id` is NOT NULL
+  // and is the boundary every read filters on (N-010).
+  //
+  // #304's WS3 AC asks for this notification and OPEN RULING #351 is what
+  // unblocks it. This gate is not a design decision defended on its merits; it
+  // is where the missing tenant anchor surfaces. When #351 lands, this line and
+  // its twin on the accept path (above) are two of the three edits.
   if (updated.targetChurchId) {
     await announceInvitationDeclinedForChurch(updated);
   }
@@ -1587,9 +1598,15 @@ export async function disassociateSendingChurchFromNetwork(
  * `@/lib/notifications/oversight`: nothing constrains an
  * `organization_invitations` row to one FK and `insertInvitation` validates
  * none, so a `church_to_sending_church` row carrying a stray network id would
- * otherwise get an audit row naming a network that associated nobody. `null`
- * for `sending_church_to_network`, whose subject is not a church and which this
- * table deliberately does not record.
+ * otherwise get an audit row naming a network that associated nobody.
+ *
+ * `null` for `sending_church_to_network` — NOT because that association is
+ * unworthy of an audit, but because `association_events.church_id` is NOT NULL
+ * with a CHURCH as its subject, and a sending church joining a network names no
+ * church. #304's WS3 acceptance criterion asks for the row; OPEN RULING #351
+ * carries the subject column that `src/db/schema/association-event.ts`'s own
+ * header says this case needs. When #351 lands, this arm is the first of the
+ * three edits that close it.
  */
 export function auditableAssociationOrg(invitation: AssociationFacts): {
   churchId: string;
