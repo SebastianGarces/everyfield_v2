@@ -37,7 +37,7 @@
  */
 import assert from "node:assert/strict";
 
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, like } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
@@ -367,7 +367,41 @@ async function main() {
     );
     ok("only the target sending church's ADMIN may answer");
 
-    const accepted = await acceptInvitationAs(actorFor(scAdmin), invitation.id);
+    // THE DECLINE HALF FIRST, so the accept below needs no reset. Declining
+    // leaves `sending_churches.sending_network_id` untouched, which is exactly
+    // the state the second invitation needs — nulling it between the two would
+    // be an out-of-band write mid-sequence, the reproducibility failure that
+    // blocked this issue's first build.
+    const declined = await declineInvitationAs(
+      actorFor(scAdmin),
+      invitation.id
+    );
+    assert.equal(declined.status, "declined");
+    assert.equal(declined.respondedBy, scAdmin.id);
+    const [notAssociated] = await db
+      .select({ sendingNetworkId: sendingChurches.sendingNetworkId })
+      .from(sendingChurches)
+      .where(eq(sendingChurches.id, sendingChurch.id))
+      .limit(1);
+    assert.equal(notAssociated.sendingNetworkId, null);
+    ok("the sending church's admin declined; nothing was associated");
+
+    const acceptInvite = await insertInvitation({
+      type: "sending_church_to_network",
+      inviterUserId: netAdmin.id,
+      inviteeEmail: scAdmin.email,
+      targetChurchId: null,
+      targetSendingChurchId: sendingChurch.id,
+      sendingChurchId: null,
+      sendingNetworkId: network.id,
+    });
+    createdInvitationIds.push(acceptInvite.id);
+    id("sc→network invitation (2)", acceptInvite.id);
+
+    const accepted = await acceptInvitationAs(
+      actorFor(scAdmin),
+      acceptInvite.id
+    );
     assert.equal(accepted.status, "accepted");
     assert.equal(accepted.respondedBy, scAdmin.id);
 
@@ -379,38 +413,104 @@ async function main() {
     assert.equal(associatedOrg.sendingNetworkId, network.id);
     ok("accept associated the sending church with the network");
 
-    // AN OPEN GAP, NOT A SETTLED RULE — see #351.
+    // ------------------------------------------------------------------------
+    // THE UNMET ACCEPTANCE CRITERION, PRINTED IN FULL — OPEN RULING #351.
     //
-    // #304's WS3 acceptance criterion asks this accept to write an
-    // `association_events` row and put a milestone in front of the network. It
-    // does neither, and this assertion records that it does neither. Read it as
-    // a tripwire on a known debt, NOT as the product's intended behaviour: the
-    // three code sites are one-liners (`auditableAssociationOrg`'s
+    // #304's WS3 AC has three clauses on the accept and two on the decline:
+    //
+    //   "Accept associates the sending church with the network via the existing
+    //    service contract, WRITES AN `association_events` ROW, and NOTIFIES THE
+    //    NETWORK on the milestone rail; decline updates status and NOTIFIES,
+    //    mirroring the planter flow."
+    //
+    // The association and the status hold. THE AUDIT ROW AND BOTH NOTIFICATIONS
+    // DO NOT, and this block prints that in the run's own output rather than
+    // leaving it to a commit message — a green assertion that a row is absent
+    // is not evidence that an AC passes, and reading it as one is how a
+    // documented miss gets mistaken for a pass.
+    //
+    // The three code sites are one-liners (`auditableAssociationOrg`'s
     // `sending_church_to_network` arm, and the `if (updated.targetChurchId)`
-    // gates on accept and decline), but all three are blocked by a constraint
-    // above them. `association_events.church_id` and `notifications.church_id`
-    // are both NOT NULL with a CHURCH as their subject, and a sending church
-    // joining a network names no church, so the row has nowhere honest to be
-    // filed until the subject column `src/db/schema/association-event.ts`'s own
-    // header asks for exists. That is the ruling #351 carries.
+    // gates on the accept and decline paths in `src/lib/invitations/core.ts`),
+    // and NONE of them may be changed on its own: both target tables make a
+    // CHURCH the mandatory tenant of the row. `association_events.church_id` is
+    // NOT NULL because its subject is a plant (that table's own header asks for
+    // a subject column AND A RULING before this changes), and
+    // `notifications.church_id` is NOT NULL because it is the tenancy boundary
+    // every read filters on (N-010) — 121 references across
+    // `src/lib/notifications/` depend on it, and `memory/invariants.md:27` gives
+    // a null `church_id` the repo-wide meaning "global content". A sending
+    // church joining a network names no church, so neither row has anywhere
+    // honest to be filed. Nulling either tenant column is the one move that is
+    // not available here.
     //
-    // Until then the association is recorded by the INVITATION ROW alone
-    // (`status`, `responded_by`, `responded_at`) and the network reads the
-    // answer in its own invitations list. Asserted at 0 so the day the subject
-    // column lands this line FAILS and is updated deliberately — which is the
-    // point of pinning it.
+    // #351 carries the ruling: which subject column `association_events` gets,
+    // and what a notification about a plantless event is anchored to (one of
+    // the answers on the table is "org-only milestones stay off the rail", which
+    // would strike the notification clauses instead of implementing them).
+    //
+    // The assertions below PIN THE ABSENCE so that the day #351 lands, all three
+    // fail and have to be flipped to require the rows deliberately. They are a
+    // tripwire on a known debt, not a statement of intended behaviour.
+    // ------------------------------------------------------------------------
+    const unmet = (clause: string, found: number, want: string) =>
+      console.log(
+        `UNMET #351  ${clause.padEnd(46)} found ${found}, want ${want}`
+      );
+
     const scAudit = await db
       .select({ id: associationEvents.id })
       .from(associationEvents)
-      .where(eq(associationEvents.sourceInvitationId, invitation.id));
+      .where(eq(associationEvents.sourceInvitationId, acceptInvite.id));
+    unmet("accept writes an association_events row", scAudit.length, "1");
+
+    // `composeMilestone` keys every milestone `<type>:<churchId>:<occurrence>`
+    // with the invitation id as the occurrence, so this matches the rows THIS
+    // answer would have written and nothing the earlier steps enqueued.
+    const acceptNotices = await db
+      .select({ id: notifications.id })
+      .from(notifications)
+      .where(
+        and(
+          eq(notifications.recipientUserId, netAdmin.id),
+          like(notifications.dedupeKey, `%:${acceptInvite.id}`)
+        )
+      );
+    unmet("accept notifies the network", acceptNotices.length, ">= 1");
+
+    const declineNotices = await db
+      .select({ id: notifications.id })
+      .from(notifications)
+      .where(
+        and(
+          eq(notifications.recipientUserId, netAdmin.id),
+          like(notifications.dedupeKey, `%:${invitation.id}`)
+        )
+      );
+    unmet("decline notifies the network", declineNotices.length, ">= 1");
+
     assert.equal(
       scAudit.length,
       0,
       "an association_events row appeared for a sending church — #351 has landed, so require the row here instead of forbidding it"
     );
+    assert.equal(
+      acceptNotices.length,
+      0,
+      "the network was notified of an accept — #351 has landed, so require the milestone here instead of forbidding it"
+    );
+    assert.equal(
+      declineNotices.length,
+      0,
+      "the network was notified of a decline — #351 has landed, so require the milestone here instead of forbidding it"
+    );
     ok("sc→network is recorded by the invitation row only (OPEN GAP — #351)");
 
-    console.log("\nALL ASSERTIONS PASSED");
+    console.log(
+      "\nALL ASSERTIONS PASSED — but see the UNMET #351 lines above: #304 WS3's" +
+        "\naudit-row and milestone clauses are NOT implemented and cannot be" +
+        "\nimplemented inside the current schema. This run is not a pass of that AC."
+    );
   } finally {
     if (KEEP) {
       console.log("\n--kept: fixtures left in place for inspection");
