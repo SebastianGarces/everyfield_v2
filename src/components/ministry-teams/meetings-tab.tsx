@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { format } from "date-fns";
 import { CalendarDays, Clock, ExternalLink, MapPin, Plus } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -26,6 +25,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+// Zone-pinned formatters, not date-fns: this card renders in the browser while
+// /meetings/[id] renders on the server, and an unpinned formatter makes the two
+// disagree about the same meeting (React #418). memory/invariants.md → Date &
+// Time Rendering.
+import { calendarTileParts, formatTime } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
 import { createMeetingAction } from "@/app/(dashboard)/teams/actions";
 import type { MeetingWithCounts } from "@/lib/meetings/types";
@@ -235,6 +239,7 @@ function TeamMeetingCard({
   isPast?: boolean;
 }) {
   const meetingDate = new Date(meeting.datetime);
+  const [tileMonth, tileDay] = calendarTileParts(meetingDate);
   const subtype = meeting.meetingSubtype ?? "regular";
   const typeColor =
     SUBTYPE_COLORS[subtype] ??
@@ -250,12 +255,8 @@ function TeamMeetingCard({
       >
         <CardContent className="flex items-center gap-4 p-4">
           <div className="bg-muted flex h-12 w-12 shrink-0 flex-col items-center justify-center rounded-lg text-center">
-            <span className="text-xs font-medium uppercase">
-              {format(meetingDate, "MMM")}
-            </span>
-            <span className="text-lg leading-none font-bold">
-              {format(meetingDate, "d")}
-            </span>
+            <span className="text-xs font-medium uppercase">{tileMonth}</span>
+            <span className="text-lg leading-none font-bold">{tileDay}</span>
           </div>
 
           <div className="min-w-0 flex-1">
@@ -270,7 +271,7 @@ function TeamMeetingCard({
             <div className="text-muted-foreground mt-1 flex items-center gap-4 text-xs">
               <span className="flex items-center gap-1">
                 <Clock className="h-3 w-3" />
-                {format(meetingDate, "h:mm a")}
+                {formatTime(meetingDate)}
                 {meeting.durationMinutes && ` (${meeting.durationMinutes} min)`}
               </span>
               {meeting.locationName && (

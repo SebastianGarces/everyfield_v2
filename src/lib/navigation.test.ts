@@ -3,6 +3,7 @@ import { readdirSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
+import type { NavItem } from "./navigation";
 import {
   isPathWithin,
   mainNavItems,
@@ -80,7 +81,7 @@ test("an unmatched route activates nothing", () => {
 });
 
 // ----------------------------------------------------------------------------
-// Every oversight nav item points at a page that exists
+// Every nav item points at a page that exists
 //
 // #260: the two oversight nav sets shipped items for /oversight/plants,
 // /oversight/sending-churches, /oversight/invitations and /oversight/settings
@@ -89,6 +90,11 @@ test("an unmatched route activates nothing", () => {
 // missing feature. This test reads the App Router tree so the guard cannot go
 // stale: it fails when someone adds a nav href before its page.tsx, and stops
 // failing the moment the page lands.
+//
+// #272 extends the same guard to `mainNavItems`. `wikiNavSections` stays OUT of
+// it: its hrefs are served by the catch-all `/wiki/[...slug]`, and the walker
+// below skips dynamic segments by design, so every wiki item would read as
+// missing.
 // ----------------------------------------------------------------------------
 
 const APP_DIR = path.join(process.cwd(), "src", "app");
@@ -117,6 +123,20 @@ function collectStaticRoutes(dir: string, route = ""): string[] {
   return routes;
 }
 
+/**
+ * Items a user can actually click: an href, and not greyed out. A disabled row
+ * renders `pointer-events-none` with a COMING SOON label (`nav-main.tsx`), so it
+ * is a promise rather than a dead link — the guard below judges links only.
+ */
+function navigableItems(items: NavItem[]): { title: string; href: string }[] {
+  return items.flatMap((item) => [
+    ...(item.href && !item.isDisabled
+      ? [{ title: item.title, href: item.href }]
+      : []),
+    ...navigableItems(item.items ?? []),
+  ]);
+}
+
 test("every oversight nav item resolves to a real page", () => {
   const routes = new Set(collectStaticRoutes(APP_DIR));
   // Sanity-check the walker itself before trusting its verdict.
@@ -134,6 +154,36 @@ test("every oversight nav item resolves to a real page", () => {
       );
     }
   }
+});
+
+test("every main nav item resolves to a real page", () => {
+  // #272: the church-role sidebar gets the #260 guard too. It differs in one
+  // way, and only one: an unbuilt feature MAY stay visible here as a disabled
+  // COMING SOON row (the oversight sets must drop the item instead), so the
+  // guard checks the items that are actually clickable.
+  const routes = new Set(collectStaticRoutes(APP_DIR));
+  // Sanity-check the walker itself before trusting its verdict.
+  assert.ok(routes.has("/dashboard"), "walker should find /dashboard");
+
+  for (const item of navigableItems(mainNavItems)) {
+    assert.ok(
+      routes.has(item.href),
+      `mainNavItems → "${item.title}" links to ${item.href}, which has no page.tsx — ship the page in the same change, or mark the item isDisabled until it lands (#272)`
+    );
+  }
+});
+
+test("a COMING SOON row is exempt from the main-nav page-exists guard", () => {
+  // The nav-family split, pinned: `mainNavItems` may keep an unbuilt feature as
+  // a disabled row, so the guard passes over it. The oversight sets have no
+  // such escape — the test below asserts they carry no disabled item at all.
+  assert.deepEqual(
+    navigableItems([
+      { title: "Financial", href: "/financial", isDisabled: true },
+      { title: "Tasks", href: "/tasks" },
+    ]).map((item) => item.href),
+    ["/tasks"]
+  );
 });
 
 test("only the built routes are back in the sidebar", () => {
