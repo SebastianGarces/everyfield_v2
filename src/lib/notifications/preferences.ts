@@ -16,8 +16,10 @@ import {
 import { OVERSIGHT_ROLES } from "@/lib/auth/access";
 
 import {
+  audienceMayReceiveCategory,
   DEFAULT_DIGEST_CADENCE,
   defaultChannelEnabled,
+  ineligibleCategoriesForAudience,
   NOTIFICATION_CATEGORIES,
   notificationPreferenceMatrixKeys,
   type NotificationAudience,
@@ -508,6 +510,21 @@ export interface PreferenceCategoryView {
   /** What the user is turning off, in their words. */
   description: string;
   cells: PreferenceCellView[];
+  /**
+   * Is this reader EVER served this category? (ruled 2026-08-09)
+   *
+   * True for every row a church reader sees. False for the five granular
+   * categories an oversight reader is refused outright by
+   * `OVERSIGHT_ELIGIBLE_CATEGORIES` — rows whose switches render, accept a
+   * click and save, and change nothing that reaches them. #254 established that
+   * a user is not offered a control that cannot affect what they receive, and
+   * the ruling extends it from the cadence selector to the category rows.
+   *
+   * It is a FACT about the row, not an instruction to the screen: what the
+   * screen does with an ineligible row — hide it, disable it, label it — is a
+   * separate decision, and this field is the same either way.
+   */
+  eligible: boolean;
 }
 
 /** One choice in the cadence selector. */
@@ -571,6 +588,15 @@ export interface PreferenceMatrixView {
   channels: PreferenceChannelView[];
   categories: PreferenceCategoryView[];
   digest: DigestCadenceView;
+  /**
+   * Why some rows are not this reader's to choose — `null` when every row is.
+   *
+   * One sentence for the whole screen rather than one per row: the reason is
+   * the same for all five, and repeating it five times would make a settings
+   * screen read like a refusal notice. A screen that hides the rows entirely
+   * may ignore it; a screen that shows them has something true to say.
+   */
+  ineligibleNote: string | null;
 }
 
 /**
@@ -618,6 +644,27 @@ export const OVERSIGHT_DIGEST_CADENCE_NOTE =
   "Your summary of plant activity arrives once a day, on the days there is something to report. That timing is fixed.";
 
 /**
+ * Why five of the seven rows are not an oversight reader's to choose (ruled
+ * 2026-08-09).
+ *
+ * It says what they DO receive first, because that is the useful half: a reader
+ * who learns only that something is unavailable has been told about an absence,
+ * while a reader told "milestones and the daily summary" knows what to expect
+ * from the product. The second clause gives the reason — these updates belong to
+ * the plant's own team — so the row reads as a boundary the product keeps rather
+ * than a feature the reader has failed to unlock.
+ *
+ * It does not say "your role", "permissions" or "not eligible". Those are the
+ * system's words for it; the reader's word for it is who the updates are for.
+ *
+ * Exported so a test can hold it to N-025/N-026, and so the refused write says
+ * the same sentence the screen does — the same pairing
+ * `OVERSIGHT_DIGEST_CADENCE_NOTE` has with the cadence action.
+ */
+export const OVERSIGHT_INELIGIBLE_CATEGORY_NOTE =
+  "You receive milestones and the daily summary — the day-to-day updates stay with the plant's own team.";
+
+/**
  * Build the whole screen from a user's stored rows.
  *
  * `audience` is the SAME argument the read and dispatch paths resolve with
@@ -646,6 +693,11 @@ export function buildPreferenceMatrixView(
       category,
       label: NOTIFICATION_CATEGORIES[category].label,
       description: NOTIFICATION_CATEGORIES[category].description,
+      // Derived from the delivery allow-list, never listed here — see
+      // `ineligibleCategoriesForAudience`. A category added to the enum is
+      // ineligible for an oversight reader from its first deploy, with no edit
+      // to this file and none to the component.
+      eligible: audienceMayReceiveCategory(audience, category),
       cells: notificationChannels.map((channel) => {
         const resolved = resolvePreference(map, category, channel, audience);
         return {
@@ -662,6 +714,12 @@ export function buildPreferenceMatrixView(
     // not the role, so this stays the one place the five roles collapse onto
     // the two behaviours (`audienceForRole`).
     digest: buildDigestCadenceView(map, audience),
+    // The note is present only when it has something to explain, so a screen
+    // can ask `ineligibleNote` rather than re-deriving the audience.
+    ineligibleNote:
+      ineligibleCategoriesForAudience(audience).length > 0
+        ? OVERSIGHT_INELIGIBLE_CATEGORY_NOTE
+        : null,
   };
 }
 

@@ -3,15 +3,17 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import type { NotificationPreference } from "@/db/schema";
+import type { NotificationPreference, UserRole } from "@/db/schema";
 
 import {
   DEFAULT_DIGEST_CADENCE,
   defaultChannelEnabled,
   digestCadences,
+  ineligibleCategoriesForAudience,
   notificationCategories,
   notificationChannels,
   notificationPreferenceMatrixKeys,
+  OVERSIGHT_ELIGIBLE_CATEGORIES,
 } from "./categories";
 import {
   audienceForRole,
@@ -22,6 +24,7 @@ import {
   isChannelEnabled,
   isUnauthenticatedPreferenceError,
   OVERSIGHT_DIGEST_CADENCE_NOTE,
+  OVERSIGHT_INELIGIBLE_CATEGORY_NOTE,
   PREFERENCE_SAVE_FAILED_MESSAGE,
   PREFERENCE_SESSION_EXPIRED_MESSAGE,
   preferenceKey,
@@ -1272,4 +1275,110 @@ test("both failure messages tell the user what to do next", () => {
     assert.ok(message.endsWith("."), message);
     assert.doesNotMatch(message, /\bError\b|\bnull\b|undefined/, message);
   }
+});
+
+// ----------------------------------------------------------------------------
+// Rows this reader is never served (ruled 2026-08-09, extending #254)
+//
+// The view model carries the FACT — `eligible` per row, and one note for the
+// screen — and says nothing about what a screen should do with it. These tests
+// pin the fact for both audiences and both oversight roles, and pin that a
+// planter's screen is untouched.
+// ----------------------------------------------------------------------------
+
+test("a church reader's rows are all eligible, and there is no note", () => {
+  const view = buildPreferenceMatrixView([], "church");
+
+  assert.equal(
+    view.categories.every((row) => row.eligible),
+    true
+  );
+  assert.equal(view.ineligibleNote, null);
+
+  // The default audience is the church one, so a caller that does not know the
+  // role still gets today's screen — the same promise `defaultChannelEnabled`
+  // makes about its own audience parameter.
+  assert.deepEqual(
+    buildPreferenceMatrixView([]).categories.map((row) => row.eligible),
+    view.categories.map((row) => row.eligible)
+  );
+});
+
+test("an oversight reader's rows are eligible exactly where the allow-list says", () => {
+  const view = buildPreferenceMatrixView([], "oversight");
+
+  const eligible = view.categories
+    .filter((row) => row.eligible)
+    .map((row) => row.category);
+  const ineligible = view.categories
+    .filter((row) => !row.eligible)
+    .map((row) => row.category);
+
+  assert.deepEqual(eligible, [...OVERSIGHT_ELIGIBLE_CATEGORIES]);
+  assert.deepEqual(ineligible, ineligibleCategoriesForAudience("oversight"));
+  assert.equal(view.ineligibleNote, OVERSIGHT_INELIGIBLE_CATEGORY_NOTE);
+});
+
+test("both oversight roles produce the same ineligible rows", () => {
+  // `audienceForRole` collapses `sending_church_admin` and `network_admin` onto
+  // one audience, so that seam — not the browser — is where the two roles are
+  // proved to agree. The dev seed has no `sending_church_admin`.
+  const rowsFor = (role: UserRole) =>
+    buildPreferenceMatrixView([], audienceForRole(role)).categories.map(
+      (row) => [row.category, row.eligible] as const
+    );
+
+  assert.deepEqual(rowsFor("sending_church_admin"), rowsFor("network_admin"));
+  assert.notDeepEqual(rowsFor("network_admin"), rowsFor("planter"));
+
+  for (const role of ["planter", "coach", "team_member"] as const) {
+    assert.deepEqual(
+      rowsFor(role).filter(([, eligible]) => !eligible),
+      [],
+      `${role} lost a row they are served`
+    );
+  }
+});
+
+test("the rows themselves are unchanged — only the flag is new", () => {
+  // The ruling is about what is OFFERED, not about what is resolved. An
+  // ineligible row still carries its resolved cells, so ruling for "hide" and
+  // ruling for "disable" both read the same view model, and neither changes
+  // what `dispatch` or the feed would compute for the same user.
+  const view = buildPreferenceMatrixView([], "oversight");
+
+  for (const row of view.categories) {
+    assert.equal(row.cells.length, notificationChannels.length, row.category);
+    for (const cell of row.cells) {
+      assert.equal(
+        cell.enabled,
+        defaultChannelEnabled(row.category, cell.channel, "oversight"),
+        `${cell.key} stopped resolving against the oversight defaults`
+      );
+      assert.equal(cell.source, "default");
+    }
+  }
+});
+
+test("the note explains without naming a role or a permission", () => {
+  // It is the reader's sentence, not the system's. "Your role", "permission",
+  // "eligible" and "not available" are all words about the mechanism; the
+  // reader's question is who these updates are for.
+  const note = OVERSIGHT_INELIGIBLE_CATEGORY_NOTE;
+
+  for (const jargon of [
+    /role/i,
+    /permission/i,
+    /eligib/i,
+    /unavailable/i,
+    /oversight/i,
+  ]) {
+    assert.doesNotMatch(note, jargon, String(jargon));
+  }
+
+  // And it says what DOES arrive, so the reader learns the product rather than
+  // an absence. Both eligible categories are named in plain words.
+  assert.match(note, /milestone/i);
+  assert.match(note, /summary/i);
+  assert.equal(note.trim().endsWith("."), true);
 });

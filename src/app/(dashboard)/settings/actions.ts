@@ -6,6 +6,7 @@ import { z } from "zod";
 
 import { verifySession } from "@/lib/auth/session";
 import {
+  audienceMayReceiveCategory,
   digestCadences,
   notificationCategories,
   notificationChannels,
@@ -15,6 +16,7 @@ import {
   digestCadenceWriteIsNoop,
   loadUserPreferences,
   OVERSIGHT_DIGEST_CADENCE_NOTE,
+  OVERSIGHT_INELIGIBLE_CATEGORY_NOTE,
   preferenceOwnerFromSession,
   preferenceSaveFailure,
   preferenceWriteIsNoop,
@@ -102,6 +104,15 @@ const setDigestCadenceInputSchema = z.enum(digestCadences);
  * default, and seeding a row that merely restates today's default pins the user
  * to it forever (see `preferenceWriteIsNoop`). A no-op save is a success with
  * nothing to save, so the UI has nothing to undo and nothing to report.
+ *
+ * A category this caller is never served is REFUSED, for the reason the cadence
+ * action refuses an oversight caller (#254, extended by the ruling of
+ * 2026-08-09): the screen no longer offers those five rows, and an endpoint that
+ * still accepted them would store a choice about a notification the user cannot
+ * receive — a row nothing will ever read, on a decision they were never really
+ * offered. The refusal is derived from `OVERSIGHT_ELIGIBLE_CATEGORIES` through
+ * `audienceMayReceiveCategory`, so it cannot fall out of step with the delivery
+ * gate that makes it true.
  */
 export async function setNotificationPreferenceAction(
   input: SetPreferenceActionInput
@@ -114,22 +125,23 @@ export async function setNotificationPreferenceAction(
   try {
     const session = await verifySession();
     const owner = preferenceOwnerFromSession(session);
-    const rows = await loadUserPreferences(owner);
 
     const { category, channel, enabled } = parsed.data;
 
     // Same audience the page rendered the matrix with — see
     // `preferenceWriteIsNoop`. Asking the no-op question with the other
     // audience's defaults would discard a real change as "already that value".
-    if (
-      preferenceWriteIsNoop(
-        rows,
-        category,
-        channel,
-        enabled,
-        audienceForRole(session.user.role)
-      )
-    ) {
+    const audience = audienceForRole(session.user.role);
+
+    // Asked BEFORE the rows are loaded: a refused category has nothing to
+    // compare against, and a write that will not happen should not cost a query.
+    if (!audienceMayReceiveCategory(audience, category)) {
+      return { success: false, error: OVERSIGHT_INELIGIBLE_CATEGORY_NOTE };
+    }
+
+    const rows = await loadUserPreferences(owner);
+
+    if (preferenceWriteIsNoop(rows, category, channel, enabled, audience)) {
       return { success: true, changed: false };
     }
 

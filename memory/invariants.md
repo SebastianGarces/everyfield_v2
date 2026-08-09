@@ -45,6 +45,7 @@ Each section links `invariants/<domain>.md` for the why, the pattern and the wor
 - Call `canAccessFeatureData(user, churchId, feature)` before returning feature data; the six `share_*` toggles default false and gate what oversight may PULL.
 - PUSH is far narrower: an oversight recipient gets ONLY the daily digest and three milestone events; `enqueue` refuses every granular category for them unconditionally, gated by `share_activity_with_oversight` read at enqueue time.
 - That toggle gates PUSH only and the consent copy may not claim more — `getOversightPlantHealth()` returns name, phase, launch countdown and health with NO privacy gate.
+- A refused category is never OFFERED either (ruled 2026-08-09, extending #254): the settings screen and `setNotificationPreferenceAction` both derive from `OVERSIGHT_ELIGIBLE_CATEGORIES` via `audienceMayReceiveCategory` — never a second list of the five granular names.
 - Reaching a plant is not permission to name the orgs BEHIND it: every org name on an oversight surface must be the caller's own or inside it, scoped in the `WHERE` clause.
 - A launch countdown compares two DAYS — floor `asOf` to its UTC day BEFORE subtracting a `yyyy-mm-dd` target date. ONE implementation: `daysUntilTarget` (`src/lib/launch/countdown.ts`); never a second copy under any name — the copy is always the one that misses the fix.
 
