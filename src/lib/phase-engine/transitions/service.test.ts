@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 
 import { PgDialect } from "drizzle-orm/pg-core";
@@ -9,11 +11,13 @@ import {
   declareInitialPhaseStatement,
   deriveReadiness,
   initialPhaseDeclarationSchema,
+  INITIAL_DECLARATION_KIND,
   INITIAL_DECLARATION_REASON,
   isInitialDeclaration,
   MAX_PHASE,
   MIN_PHASE,
   transitionPhaseSchema,
+  TRANSITION_KIND,
 } from "./service";
 import type { PlantFactSnapshot } from "@/lib/phase-engine/signals";
 
@@ -360,23 +364,48 @@ test("declaring 3 produces NO record for phases 1 or 2", () => {
 // The marker, and why it cannot be forged
 // ---------------------------------------------------------------------------
 
-test("the declaration row carries the reserved reason constant", () => {
-  const { params } = declareQuery(2);
+test("the declaration row is marked with the stored discriminator", () => {
+  const { sql, params } = declareQuery(2);
+  const flat = sql.replace(/\s+/g, " ").trim();
+
+  assert.match(
+    flat,
+    /insert into phase_transitions \( church_id, from_phase, to_phase, initiated_by_id, reason, kind,/,
+    "`kind` must be written, not left to the column default"
+  );
+  assert.equal(
+    params.filter((value) => value === INITIAL_DECLARATION_KIND).length,
+    1,
+    "the kind is written once — the guard reads the index, not a second copy"
+  );
+  // The reason still rides along as display copy for the history surface.
   assert.equal(
     params.filter((value) => value === INITIAL_DECLARATION_REASON).length,
-    2,
-    "the constant is both what is written and what the once-only guard reads"
+    1
   );
 });
 
+test("an ordinary transition row is built as kind `transition`", () => {
+  const row = buildTransitionRow({
+    churchId: "c",
+    fromPhase: 1,
+    toPhase: 2,
+    initiatedById: "u",
+    reason: "Core group at target",
+    factSnapshot: fakeSnapshot(),
+    rubricVersion: "v0",
+  });
+  assert.equal(row.kind, TRANSITION_KIND);
+  assert.equal(isInitialDeclaration({ kind: row.kind as string }), false);
+});
+
 test("isInitialDeclaration reads the marker, and only the marker", () => {
+  assert.equal(isInitialDeclaration({ kind: INITIAL_DECLARATION_KIND }), true);
+  assert.equal(isInitialDeclaration({ kind: TRANSITION_KIND }), false);
+  // Not the reason text — that is display copy, and a row whose reason happens
+  // to read like a declaration is still whatever `kind` says it is.
   assert.equal(
-    isInitialDeclaration({ reason: INITIAL_DECLARATION_REASON }),
-    true
-  );
-  assert.equal(isInitialDeclaration({ reason: "Core group at target" }), false);
-  assert.equal(
-    isInitialDeclaration({ reason: `${INITIAL_DECLARATION_REASON} ` }),
+    isInitialDeclaration({ kind: `${INITIAL_DECLARATION_KIND} ` }),
     false
   );
 });
@@ -431,11 +460,46 @@ test("the insert DEPENDS on the locked read, so from_phase cannot be lost", () =
   );
 });
 
-test("the declaration is once-only", () => {
+test("the declaration is once-only, and the DATABASE is what makes it so", () => {
+  // The predicate this replaced (`where not exists (select 1 from
+  // phase_transitions …)`) read a different table than the `FOR UPDATE` locks,
+  // so under READ COMMITTED both racers passed it and both inserted — raced
+  // live on #306, 2 of 3 runs wrote a fabricated second row. A statement-shape
+  // test cannot see that, which is why the real proof lives in
+  // `declaration-race.test.ts`. What THIS asserts is that the mechanism is the
+  // index and that the old trap has not crept back.
   const sql = declareSql(5);
+
   assert.match(
     sql,
-    /where not exists \( select 1 from phase_transitions p where p\.church_id = c\.id and p\.reason = \$\d+ \)/
+    /on conflict \(church_id\) where kind = 'initial_declaration' do nothing/,
+    "the guard must be ON CONFLICT inferred against the partial unique index"
+  );
+  assert.equal(
+    sql.includes("not exists"),
+    false,
+    "a NOT EXISTS subquery over phase_transitions is the bug, not the guard"
+  );
+});
+
+test("the once-only index the statement infers against actually exists", () => {
+  // The `ON CONFLICT` inference above is a promise about the schema. If the
+  // index is ever renamed or dropped, every declaration starts failing at
+  // runtime with "there is no unique or exclusion constraint matching the ON
+  // CONFLICT specification" — so the two are pinned to each other here.
+  const migration = readFileSync(
+    join(process.cwd(), "src/db/migrations/0033_phase_transition_kind.sql"),
+    "utf8"
+  );
+  assert.match(
+    migration,
+    /CREATE UNIQUE INDEX "phase_transitions_initial_declaration_unique_idx" ON "phase_transitions" USING btree \("church_id"\) WHERE "phase_transitions"\."kind" = 'initial_declaration'/
+  );
+  // And the backfill runs BEFORE the index is built, or it indexes nothing.
+  assert.ok(
+    migration.indexOf('UPDATE "phase_transitions" SET "kind"') <
+      migration.indexOf("CREATE UNIQUE INDEX"),
+    "existing declarations must be re-marked before the index is built"
   );
 });
 
@@ -448,6 +512,17 @@ test("current_phase cannot move unless the declaration row landed", () => {
     /update churches ch set current_phase = .* from declared d/
   );
   assert.match(sql, /select d\.id as transition_id/);
+});
+
+test("a refused declaration still reports the LOCKED church's phase", () => {
+  // `left join declared d on true` is what makes the refusal answerable: the
+  // statement returns one row either way, with `stored_phase` read off the row
+  // this request holds the lock on — the winner's value, not the stale one the
+  // caller read before it queued. A plain `from declared d` returns nothing and
+  // the caller has to guess from a pre-lock snapshot.
+  const sql = declareSql(2);
+  assert.match(sql, /c\.current_phase as stored_phase/);
+  assert.match(sql, /from current c left join declared d on true/);
 });
 
 // ---------------------------------------------------------------------------

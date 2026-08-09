@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState, useTransition } from "react";
+import { useId, useRef, useState, useTransition } from "react";
 
 import { declareJourney } from "@/app/(dashboard)/dashboard/actions";
 import { Button } from "@/components/ui/button";
@@ -37,7 +37,20 @@ import {
  * The step is skippable like every step after the first (OB-007): skipping
  * writes nothing, leaves phase 0 and no launch, and the planter is asked again
  * by the dashboard nudge.
+ *
+ * WHERE THE ERROR IS RENDERED IS PART OF THE ERROR. This is the tallest step in
+ * the flow — two fieldsets and nine options — so a single message pinned to the
+ * top is, on a phone, a message the planter cannot see from the button that
+ * produced it. Each failure is therefore attached to the question that failed:
+ * rendered under that fieldset and named by its `aria-describedby`, so it is
+ * both reachable by eye and reported by a screen reader when the group takes
+ * focus, not only announced once as it appears.
  */
+
+/** Which question a validation message belongs to. */
+type JourneyErrorField = "date" | "stage" | "form";
+
+type JourneyError = { field: JourneyErrorField; message: string };
 export function JourneyStep({
   onDeclared,
   onBack,
@@ -65,25 +78,45 @@ export function JourneyStep({
   const [dateChoice, setDateChoice] = useState<LaunchDateChoice | null>(null);
   const [targetDate, setTargetDate] = useState("");
   const [stage, setStage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<JourneyError | null>(null);
   const [pending, startTransition] = useTransition();
 
   const dateInputId = useId();
+  const dateErrorId = useId();
+  const stageErrorId = useId();
+  const formErrorId = useId();
   const disabled = pending || busy;
+
+  /**
+   * Set when the planter picks "We have a date in mind", consumed by the date
+   * input's ref the moment it mounts. Revealing a field and leaving the caret
+   * where it was makes the planter hunt for what just appeared — and a keyboard
+   * planter has to Tab back through the radio group to reach it.
+   */
+  const focusDateOnMount = useRef(false);
 
   function handleSubmit() {
     if (!dateChoice) {
-      setError("Let us know whether you have a launch date in mind.");
+      setError({
+        field: "date",
+        message: "Let us know whether you have a launch date in mind.",
+      });
       return;
     }
 
     if (dateChoice === "date" && !targetDate) {
-      setError("Pick the Sunday you are aiming at, or choose “no date yet”.");
+      setError({
+        field: "date",
+        message: "Pick the Sunday you are aiming at, or choose “no date yet”.",
+      });
       return;
     }
 
     if (phaseForJourneyStage(stage) === null) {
-      setError("Choose where you are on the journey.");
+      setError({
+        field: "stage",
+        message: "Choose where you are on the journey.",
+      });
       return;
     }
 
@@ -97,7 +130,7 @@ export function JourneyStep({
         });
 
         if (result.status === "error") {
-          setError(result.error);
+          setError({ field: "form", message: result.error });
           return;
         }
 
@@ -109,24 +142,31 @@ export function JourneyStep({
         // button stuck pending with nothing rendered. Caught, it is a sentence
         // and a button they can press again; re-submitting is safe (the date
         // write is a compare-and-set, the declaration is once-only).
-        setError(
-          "We could not save that just now. Nothing else you have entered is affected — please try again."
-        );
+        setError({
+          field: "form",
+          message:
+            "We could not save that just now. Nothing else you have entered is affected — please try again.",
+        });
       }
     });
   }
 
-  return (
-    <div className="space-y-6">
-      {error && (
-        <p
-          role="alert"
-          className="bg-destructive/10 text-destructive rounded-md p-3 text-sm"
-        >
-          {error}
-        </p>
-      )}
+  const dateError = error?.field === "date" ? error.message : null;
+  const stageError = error?.field === "stage" ? error.message : null;
+  const formError = error?.field === "form" ? error.message : null;
 
+  return (
+    // A real form, like every other step in this flow: pressing Enter in the
+    // date field submits instead of doing nothing. `onSubmit` rather than
+    // `action`, because the inputs are controlled and the submit already runs
+    // inside `startTransition`.
+    <form
+      className="space-y-6"
+      onSubmit={(event) => {
+        event.preventDefault();
+        handleSubmit();
+      }}
+    >
       {/* ---- OB-003: the launch date, or an explicit "no date yet" ---- */}
       <fieldset className="space-y-3">
         <legend className="text-sm font-medium">
@@ -144,9 +184,12 @@ export function JourneyStep({
           onValueChange={(value) => {
             if (!isLaunchDateChoice(value)) return;
             setDateChoice(value);
+            focusDateOnMount.current = value === "date";
             setError(null);
           }}
           disabled={disabled}
+          aria-invalid={dateError ? true : undefined}
+          aria-describedby={dateError ? dateErrorId : undefined}
           className="gap-2"
         >
           <ChoiceOption
@@ -165,6 +208,11 @@ export function JourneyStep({
                   name="targetDate"
                   type="date"
                   value={targetDate}
+                  ref={(node) => {
+                    if (!node || !focusDateOnMount.current) return;
+                    focusDateOnMount.current = false;
+                    node.focus();
+                  }}
                   onChange={(event) => {
                     setTargetDate(event.target.value);
                     setError(null);
@@ -180,9 +228,13 @@ export function JourneyStep({
             id="launch-date-none"
             value="none"
             label="No date yet"
-            hint="Nothing is recorded, and the countdown stays empty until you name a day."
+            // "Nothing is recorded" read like "this step saves nothing", which
+            // is the opposite of true — the stage below is still recorded.
+            hint="We record no launch date, and the countdown stays empty until you name a day."
           />
         </RadioGroup>
+
+        <FieldError id={dateErrorId} message={dateError} />
       </fieldset>
 
       {/* ---- OB-005: the stage declaration ---- */}
@@ -203,6 +255,8 @@ export function JourneyStep({
             setError(null);
           }}
           disabled={disabled}
+          aria-invalid={stageError ? true : undefined}
+          aria-describedby={stageError ? stageErrorId : undefined}
           className="gap-2"
         >
           {JOURNEY_STAGE_OPTIONS.map((option) => (
@@ -216,7 +270,21 @@ export function JourneyStep({
             />
           ))}
         </RadioGroup>
+
+        <FieldError id={stageErrorId} message={stageError} />
       </fieldset>
+
+      {/* A failure of the SAVE, not of a field — it belongs beside the button
+          that tried, not under a question the planter answered correctly. */}
+      {formError && (
+        <p
+          id={formErrorId}
+          role="alert"
+          className="bg-destructive/10 text-destructive rounded-md p-3 text-sm"
+        >
+          {formError}
+        </p>
+      )}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         {onBack ? (
@@ -252,17 +320,29 @@ export function JourneyStep({
           >
             Finish setup later
           </Button>
-          <Button
-            type="button"
-            className="cursor-pointer"
-            onClick={handleSubmit}
-            disabled={disabled}
-          >
+          <Button type="submit" className="cursor-pointer" disabled={disabled}>
             {pending ? "Saving…" : "Continue"}
           </Button>
         </div>
       </div>
-    </div>
+    </form>
+  );
+}
+
+/**
+ * A validation message for ONE question, rendered under it and named by its
+ * `aria-describedby`.
+ *
+ * `role="alert"` announces it when it appears; the `id` link is what makes it
+ * readable AGAIN when the planter moves focus back into the group they got
+ * wrong — an announcement alone is gone the moment it is spoken.
+ */
+function FieldError({ id, message }: { id: string; message: string | null }) {
+  if (!message) return null;
+  return (
+    <p id={id} role="alert" className="text-destructive text-sm">
+      {message}
+    </p>
   );
 }
 

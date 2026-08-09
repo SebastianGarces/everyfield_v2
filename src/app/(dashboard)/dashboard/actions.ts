@@ -146,7 +146,10 @@ export type DeclareJourneyState =
  * date is already saved and journaled, and the planter is told what went wrong
  * rather than being handed a rollback that would also throw away a date they
  * successfully set. Re-submitting is safe: the date write is a compare-and-set
- * (an unchanged date writes nothing) and the declaration is once-only.
+ * (an unchanged date writes nothing) and the declaration is once-only —
+ * enforced by `phase_transitions_initial_declaration_unique_idx` (migration
+ * 0033), not by a check this action performs, so a double submit cannot land
+ * two declarations however the two requests interleave.
  *
  * The actor is minted from `verifySession()` — no parameter names a user or a
  * church, so a forged POST cannot declare somebody else's plant

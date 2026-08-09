@@ -28,6 +28,7 @@ import {
   phaseTransitions,
   type NewPhaseTransition,
   type PhaseTransition,
+  type PhaseTransitionKind,
 } from "@/db/schema";
 import { getLatestAssessment } from "@/lib/phase-engine/assessment";
 import { emitPhaseChanged } from "@/lib/phase-engine/events";
@@ -58,24 +59,34 @@ const phaseNumberSchema = z
 // ----------------------------------------------------------------------------
 
 /**
- * The reason constant that marks a `phase_transitions` row as the planter's
+ * The `kind` value that marks a `phase_transitions` row as the planter's
  * INITIAL DECLARATION rather than a transition they made (OB-005; FRD
  * `planter-onboarding`, "Data notes" — "a distinguished transition kind or
  * reason constant on the existing phase-transition record. No new table
  * expected.").
  *
- * WHY A REASON CONSTANT AND NOT A COLUMN. The FRD offers both and the constant
- * is the smaller change: `reason` is already `NOT NULL` on every row, already
- * rendered by the history surface, and already the field that explains why a
- * row exists. A new column would need a migration, a back-fill decision for
- * every existing row, and a default that says "transition" — which is exactly
- * what this constant's ABSENCE already says.
- *
- * WHAT MAKES IT A REAL DISCRIMINATOR rather than a convention: it is RESERVED.
- * `transitionPhaseSchema` refuses a planter-typed reason equal to it (below),
- * so the only writer that can produce this string is
- * `declareInitialPhaseStatement`. Without that refusal a planter could type it
- * on `/phase` and manufacture a row `isInitialDeclaration` would misread.
+ * THE FRD OFFERED BOTH AND THE COLUMN WON, on the second pass. The first cut
+ * used the reserved `reason` sentence below as the discriminator, which reads
+ * fine until you need to ENFORCE once-only-ness: the guard has to become a
+ * partial unique index, the index predicate has to repeat the sentence as a SQL
+ * literal in a generated file, and the day the copy is reworded the index
+ * silently stops covering the rows it exists for. `kind` is a closed set
+ * (`phase_transitions_kind_check`), defaulted to `transition`, and is what
+ * `phase_transitions_initial_declaration_unique_idx` is written against.
+ */
+export const INITIAL_DECLARATION_KIND: PhaseTransitionKind =
+  "initial_declaration";
+
+/** What an ordinary planter-made move is stored as. */
+export const TRANSITION_KIND: PhaseTransitionKind = "transition";
+
+/**
+ * The `reason` text a declaration row carries. Display copy now, not the
+ * discriminator — but still RESERVED: `transitionPhaseSchema` refuses a
+ * planter-typed reason equal to it (below), so a row that reads like a
+ * declaration in the history list is always one. Without that refusal a planter
+ * could paste it into `/phase`'s reason box and produce a row that looks
+ * declared to a human while `kind` says otherwise.
  */
 export const INITIAL_DECLARATION_REASON =
   "Declared at setup — where this plant already was when it joined EveryField.";
@@ -85,9 +96,11 @@ export const INITIAL_DECLARATION_REASON =
  * transition the planter performed)? The one predicate — history surfaces,
  * analytics and the onboarding "did they answer step 3?" fact all ask it here
  * so none of them can disagree about what "declared" means.
+ *
+ * It reads `kind`, the stored discriminator, and never the reason text.
  */
-export function isInitialDeclaration(row: { reason: string }): boolean {
-  return row.reason === INITIAL_DECLARATION_REASON;
+export function isInitialDeclaration(row: { kind: string }): boolean {
+  return row.kind === INITIAL_DECLARATION_KIND;
 }
 
 /**
@@ -174,6 +187,10 @@ export function buildTransitionRow(
     toPhase: input.toPhase,
     initiatedById: input.initiatedById,
     reason: input.reason,
+    // Written explicitly rather than left to the column default: this builder
+    // is the ONLY producer of ordinary transition rows, and stating the kind
+    // here is what keeps `initial_declaration` unreachable from this path.
+    kind: TRANSITION_KIND,
     factSnapshot: input.factSnapshot,
     rubricVersion: input.rubricVersion,
   };
@@ -438,17 +455,34 @@ export async function transitionPhase(
  *               skip the tuple its own command just wrote
  *               (`HeapTupleSelfUpdated`), landing a row with a false
  *               `from_phase`. Same trap, same fix, as `setLaunchDateStatement`.
- *               `NOT EXISTS` makes the declaration once-only: a planter may
- *               revisit step 3, but the FIRST answer is the one that is
- *               history, and later corrections are ordinary transitions on
- *               `/phase` with their own reasons.
  *   `moved`     `update churches … from declared d` — sourced from the insert,
  *               so `current_phase` can only move when a declaration row
  *               actually landed. A refused (already-declared) call writes
  *               nothing at all, including no phase change.
  *
- * The final SELECT returns zero rows when the declaration was refused, which
- * the caller reports as `already_declared` rather than as a failure.
+ * WHAT MAKES IT ONCE-ONLY IS THE INDEX, NOT A PREDICATE. The first cut gated
+ * the insert on `WHERE NOT EXISTS (SELECT 1 FROM phase_transitions …)`, which
+ * looks like a guard and is not one: the `FOR UPDATE` above locks a `churches`
+ * row, the subquery reads a DIFFERENT table, and under READ COMMITTED
+ * EvalPlanQual re-checks only the changed row when the waiter unblocks — so the
+ * second submitter's subquery still answers from its pre-wait snapshot and both
+ * insert. Raced live on #306: 2 of 3 runs wrote a second row reading
+ * `from_phase 5 → to_phase 3`, a move the planter never made. The guard is now
+ * `ON CONFLICT (church_id) WHERE kind = 'initial_declaration' DO NOTHING`,
+ * inferred against `phase_transitions_initial_declaration_unique_idx`
+ * (migration 0033) — the database refuses the duplicate, so no interleaving can
+ * produce one. The lock stays, because it is what makes `from_phase` right.
+ *
+ * A planter may still revisit step 3; the FIRST answer is the one that is
+ * history, and later corrections are ordinary transitions on `/phase` with
+ * their own reasons.
+ *
+ * The final SELECT reads `from current c left join declared d`, so it returns
+ * ONE row either way: `transition_id` null means refused, and `stored_phase`
+ * carries the LOCKED church's phase — the winner's value, not the stale one
+ * this request read before it queued on the lock. Zero rows means no such
+ * church. (`moved` is unreferenced there on purpose; a data-modifying CTE runs
+ * to completion whether or not the primary query reads it.)
  */
 export function declareInitialPhaseStatement(input: {
   churchId: string;
@@ -465,7 +499,7 @@ export function declareInitialPhaseStatement(input: {
       for update
     ), declared as (
       insert into phase_transitions (
-        church_id, from_phase, to_phase, initiated_by_id, reason,
+        church_id, from_phase, to_phase, initiated_by_id, reason, kind,
         fact_snapshot, rubric_version
       )
       select
@@ -474,15 +508,12 @@ export function declareInitialPhaseStatement(input: {
         ${input.toPhase}::integer,
         ${input.initiatedById}::uuid,
         ${INITIAL_DECLARATION_REASON}::text,
+        ${INITIAL_DECLARATION_KIND}::varchar,
         ${JSON.stringify(input.factSnapshot)}::jsonb,
         ${input.rubricVersion}::varchar
       from current c
-      where not exists (
-        select 1
-        from phase_transitions p
-        where p.church_id = c.id
-          and p.reason = ${INITIAL_DECLARATION_REASON}
-      )
+      on conflict (church_id) where kind = 'initial_declaration'
+      do nothing
       returning id, from_phase, to_phase, created_at
     ), moved as (
       update churches ch
@@ -495,15 +526,20 @@ export function declareInitialPhaseStatement(input: {
     select
       d.id as transition_id,
       d.from_phase as from_phase,
-      d.to_phase as to_phase
-    from declared d
+      d.to_phase as to_phase,
+      c.current_phase as stored_phase
+    from current c
+    left join declared d on true
   `;
 }
 
 interface DeclarationRow extends Record<string, unknown> {
-  transition_id: string;
-  from_phase: number;
-  to_phase: number;
+  /** Null when the declaration was refused — this plant already has one. */
+  transition_id: string | null;
+  from_phase: number | null;
+  to_phase: number | null;
+  /** The locked church's phase, whoever set it. */
+  stored_phase: number;
 }
 
 /** What a declaration attempt did. */
@@ -537,8 +573,10 @@ export async function declareInitialPhase(
 ): Promise<DeclareInitialPhaseResult> {
   const { phase } = initialPhaseDeclarationSchema.parse(input);
 
+  // An existence check only — every phase this function REPORTS comes back from
+  // the locked read inside the statement below, never from this snapshot.
   const [church] = await db
-    .select({ id: churches.id, currentPhase: churches.currentPhase })
+    .select({ id: churches.id })
     .from(churches)
     .where(eq(churches.id, churchId))
     .limit(1);
@@ -565,20 +603,37 @@ export async function declareInitialPhase(
 
   const written = result.rows[0];
 
+  // Zero rows means the locked SELECT matched nothing — the church was deleted
+  // between the read above and this statement.
   if (!written) {
-    // Refused by the `NOT EXISTS` guard: this plant has already declared. Its
-    // stored phase is the answer, not the one just submitted — nothing moved.
-    return { status: "already_declared", phase: church.currentPhase };
+    throw new ChurchNotFoundError();
   }
+
+  if (
+    written.transition_id === null ||
+    written.from_phase === null ||
+    written.to_phase === null
+  ) {
+    // Refused by `phase_transitions_initial_declaration_unique_idx` via
+    // `ON CONFLICT DO NOTHING`: this plant has already declared. Nothing moved,
+    // because the UPDATE is sourced from the insert that wrote no row. The
+    // phase reported is `stored_phase` — read off the LOCKED church row inside
+    // the same statement, so a loser of a genuine race reports the winner's
+    // value rather than the one it read before it queued on the lock.
+    return { status: "already_declared", phase: written.stored_phase };
+  }
+
+  const fromPhase = written.from_phase;
+  const toPhase = written.to_phase;
 
   // PE-003. Emitted only when the phase actually MOVED: "not sure — start me at
   // the beginning" on a plant already at 0 is a declaration worth recording and
   // a `phase.changed` that would be false.
-  if (written.from_phase !== written.to_phase) {
+  if (fromPhase !== toPhase) {
     await emitPhaseChanged({
       churchId,
-      fromPhase: written.from_phase,
-      toPhase: written.to_phase,
+      fromPhase,
+      toPhase,
       initiatedById,
       rubricVersion: ACTIVE_RUBRIC.version,
     });
@@ -587,8 +642,8 @@ export async function declareInitialPhase(
   return {
     status: "declared",
     transitionId: written.transition_id,
-    fromPhase: written.from_phase,
-    phase: written.to_phase,
+    fromPhase,
+    phase: toPhase,
   };
 }
 
@@ -609,7 +664,10 @@ export async function hasInitialPhaseDeclaration(
     .where(
       and(
         eq(phaseTransitions.churchId, churchId),
-        eq(phaseTransitions.reason, INITIAL_DECLARATION_REASON)
+        // The stored discriminator, not the reason text — the same predicate
+        // `phase_transitions_initial_declaration_unique_idx` is built on, so
+        // this read and the write guard can never disagree.
+        eq(phaseTransitions.kind, INITIAL_DECLARATION_KIND)
       )
     )
     .limit(1);

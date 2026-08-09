@@ -15,6 +15,7 @@ Each section links `invariants/<domain>.md` for the why, the pattern and the wor
 - In a batch the compare-and-set goes FIRST and the dependent write's `WHERE` re-asserts what the claim set — an empty `returning()` is not an error and rolls nothing back.
 - A compare-and-set serialises only same-row writers; a predicate about another table is a snapshot read. To compete for a row elsewhere, `SELECT … FOR UPDATE` it as statement ONE and gate on the dependent write's own rowcount.
 - In a `WITH` chain a `FOR UPDATE` snapshot CTE must be a DEPENDENCY of the write (`update … from current c`), never a sibling only the journal joins — pulled lazily after the UPDATE it reads nothing, and the history row is silently lost.
+- A plant declares its starting phase ONCE, and the DATABASE is what says so: `phase_transitions_initial_declaration_unique_idx` (partial, on `church_id where kind = 'initial_declaration'`) plus `ON CONFLICT … DO NOTHING` — never a `NOT EXISTS` over `phase_transitions`, which is the same-lock-different-table trap and was raced into fabricating history.
 - A church and its `church_privacy_settings` row are created by ONE batch; the loser's orphan church is swept afterwards under a `NOT EXISTS` guard.
 - Both answers to an empty planter seat — the No as well as the Yes — open with `SELECT … FROM churches … FOR UPDATE` and are gated on their own rowcount.
 - `finalizeAttendance()` emits downstream first, then compare-and-sets `actual_attendance` (non-null = finalized = its idempotency key); `meeting.attendance.finalized` is emitted STRICTLY.

@@ -210,6 +210,46 @@ test("the step holds no server data in state", () => {
 });
 
 // ----------------------------------------------------------------------------
+// 4b. The step behaves like every other step in the flow (better-interface G3)
+// ----------------------------------------------------------------------------
+
+test("the step is a real form, so Enter in the date field submits", () => {
+  // Every other step is a `<form>` (`church-basics-step.tsx`,
+  // `leadership-step.tsx`). As a bare `<div>` with a click handler, typing a
+  // date and pressing Enter did nothing here and worked everywhere else.
+  assert.match(STEP_CODE, /<form/);
+  assert.match(STEP_CODE, /event\.preventDefault\(\)/);
+  assert.match(STEP_CODE, /type="submit"/);
+});
+
+test("a validation message is attached to the question that failed", () => {
+  // This is the tallest step in the flow — nine options across two fieldsets —
+  // so one message pinned to the top is, on a phone, a message the planter
+  // cannot see from the button that produced it. Each error renders under its
+  // own fieldset and is named by that group's `aria-describedby`, so it is
+  // readable again when focus returns rather than only announced once.
+  assert.match(STEP_CODE, /aria-describedby=\{dateError \? dateErrorId/);
+  assert.match(STEP_CODE, /aria-describedby=\{stageError \? stageErrorId/);
+  assert.match(STEP_CODE, /aria-invalid=\{dateError \? true : undefined\}/);
+  assert.match(STEP_CODE, /aria-invalid=\{stageError \? true : undefined\}/);
+  assert.match(STEP_CODE, /role="alert"/);
+
+  // Field errors are field-scoped, never a single shared string again.
+  assert.match(STEP_CODE, /field: "date"/);
+  assert.match(STEP_CODE, /field: "stage"/);
+  // A failed SAVE is not a field error — it sits by the button that tried.
+  assert.match(STEP_CODE, /field: "form"/);
+});
+
+test("revealing the date input moves the caret into it", () => {
+  // Choosing "We have a date in mind" mounts a field below the radio. Leaving
+  // focus on the radio makes a keyboard planter Tab back through the group to
+  // reach what their own click just produced.
+  assert.match(STEP_CODE, /focusDateOnMount/);
+  assert.match(STEP_CODE, /node\.focus\(\)/);
+});
+
+// ----------------------------------------------------------------------------
 // 5. "Did they answer step 3?" is asked of phase history
 // ----------------------------------------------------------------------------
 
@@ -351,6 +391,34 @@ function onboardedInputs(launch: SnapshotInputs["launch"]): SnapshotInputs {
     plantSignals: [],
   };
 }
+
+test("the visible countdown lives on /launch, and NOT on /phase", () => {
+  // Ruling 2 (2026-08-09): AC2 originally asked for the browser assertion on
+  // `/phase`, which has no countdown UI and is not getting one — that surface
+  // belongs to #319. `/launch` (#305) is where the date this step writes
+  // becomes visible, through the ONE countdown implementation
+  // (`daysUntilTarget`; memory/invariants.md → the day-vs-instant rule). This
+  // pins both halves so neither a second copy of the maths nor a countdown
+  // smuggled onto `/phase` can land unnoticed.
+  const launchPage = read("app", "(dashboard)", "launch", "page.tsx");
+  assert.match(
+    stripComments(launchPage),
+    /import \{ daysUntilTarget \} from "@\/lib\/launch\/countdown"/
+  );
+  assert.match(
+    stripComments(launchPage),
+    /daysUntilTarget\(launch\?\.targetDate/
+  );
+
+  const phasePage = stripComments(
+    read("app", "(dashboard)", "phase", "page.tsx")
+  );
+  assert.equal(
+    /daysUntilTarget|countdown/i.test(phasePage),
+    false,
+    "no countdown UI on /phase — #319 owns that surface"
+  );
+});
 
 test("'no date yet' leaves the countdown EMPTY, not zero", () => {
   // The AC's snapshot assertion. Zero is a countdown that has run out — it is
