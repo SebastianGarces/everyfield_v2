@@ -18,7 +18,7 @@ import type { ArticleMeta } from "./types";
 // Both affordances are DERIVED from the visible corpus rather than stored, and
 // each has a failure mode that still type-checks and still renders:
 //
-//   - Related articles: `related_article_slugs` is authored text with no
+//   - Related articles: `related_article_slugs` is plain text with no
 //     foreign key behind it. A slug that was renamed, unpublished, or belongs
 //     to another church must vanish, not render a link into a 404 — and must
 //     not drag an empty "Related articles" heading onto every article that has
@@ -165,7 +165,7 @@ test("equal sort orders fall back to title, not database order", () => {
 });
 
 // ============================================================================
-// 2. Related articles — authored slugs resolved against the visible corpus
+// 2. Related articles — stored slugs resolved against the visible corpus
 // ============================================================================
 
 test("related slugs resolve in the order they were authored", () => {
@@ -268,37 +268,46 @@ test("the article page renders related articles and the pager", () => {
 });
 
 // ============================================================================
-// 4. The fixture — "Related articles" is reachable in a real environment
+// 4. Where the cross-links come from — the corpus, not a fixture
 // ============================================================================
 
 /**
- * The corpus authors NO cross-links: every published global article ships
- * `related_article_slugs` as NULL. Without a fixture the Related Articles
- * section is correct code that no browser can be pointed at, which is a
- * feature that cannot be verified rather than a feature that works.
+ * Every article in the corpus authored its own "## Related Articles" section in
+ * prose, so shipping `RelatedArticles` on top of it showed the reader the same
+ * list twice. The ruling was that the derived component is canonical:
+ * `scripts/migrate-wiki-related-sections.ts` lifted those 358 links into
+ * `related_article_slugs` and deleted the prose (#317).
  *
- * `scripts/seed-dev-db.ts` carries that fixture. Pinning it here is the point:
- * a later edit that drops it would not fail typecheck, lint or any other test —
- * it would simply make this criterion unprovable again, silently.
+ * That makes the column REAL data now, which is what these two assertions
+ * protect. The parser itself is unit-tested in `related-sections.test.ts`; what
+ * cannot be caught there is someone re-adding a hardcoded fixture, which would
+ * overwrite an article's genuine cross-links with invented ones — the previous
+ * fixture wrote deliberately dead slugs, and it ran on every `pnpm db:seed`.
  */
+const MIGRATION = "scripts/migrate-wiki-related-sections.ts";
 const DEV_SEED = "scripts/seed-dev-db.ts";
 
-test("the dev seed gives at least one article resolvable cross-links", () => {
-  const source = readFileSync(path.join(process.cwd(), DEV_SEED), "utf8");
+test("the prose-to-column migration both fills the column and strips the section", () => {
+  const source = readFileSync(path.join(process.cwd(), MIGRATION), "utf8");
 
   assert.match(
     source,
     /relatedArticleSlugs:/,
-    `${DEV_SEED} no longer seeds related_article_slugs — no environment can render the Related Articles section (#317 / W-009)`
+    `${MIGRATION} no longer writes related_article_slugs — nothing populates the column the Related Articles section reads (#317 / W-009)`
   );
   assert.match(
     source,
-    /pre-launch\/the-final-3-4-weeks/,
-    `${DEV_SEED} no longer links pre-launch/the-final-3-4-weeks, the article the W-009 validation plan asserts against (#317)`
+    /parseRelatedSection/,
+    `${MIGRATION} no longer strips the authored section — the reader would see Related Articles twice (#317)`
   );
-  assert.match(
+});
+
+test("the dev seed does not overwrite the corpus's own cross-links", () => {
+  const source = readFileSync(path.join(process.cwd(), DEV_SEED), "utf8");
+
+  assert.doesNotMatch(
     source,
-    /DEAD_SLUG_MARKER/,
-    `${DEV_SEED} no longer seeds a deliberately unresolvable slug — dropping dead cross-links is then untested against a real database (#317 / W-009)`
+    /relatedArticleSlugs/,
+    `${DEV_SEED} writes related_article_slugs again — a fixture there replaces an article's real cross-links with invented ones (#317)`
   );
 });

@@ -32,6 +32,19 @@ That default is also why threading `churchId` reached further than the article r
 
 `getPublishedArticleRefs`, `getAllPublishedArticles` and `getArticlesByPhase` are hardcoded `church_id IS NULL` — global-only by design, for callers (PE-024 insight links, admin) that want the shared corpus. They are safe but they are **not** tenant-aware; do not "fix" one by swapping in `eq(churchId)`, which is the mine-alone shape the invariant forbids. Reader-facing article access goes through `get-articles.ts` / `get-article.ts`.
 
+## Cross-links: the column is canonical, the prose is gone (#317)
+
+`related_article_slugs` is the ONLY place an article's cross-links live. `RelatedArticles` renders them at the foot of the page, resolved against the visible corpus so a renamed, unpublished or other-church target vanishes rather than rendering a link into a 404.
+
+That was not true when the column was added. Every one of the 96 articles ended with a hand-written section — `---`, `## Related Articles`, a bullet list of `/wiki/...` links, `---`, a closing `<Callout>` — so the derived component showed the reader the same list a second time. The ruling was that the component is canonical: `scripts/migrate-wiki-related-sections.ts` lifted all 358 links into the column and deleted the prose, in one pass over the shared dev database.
+
+So the column is **derived-once**, not authored and not maintained: it was written from prose by that migration and nothing in the product writes it now. Two consequences:
+
+- **Do not re-add a `## Related Articles` section to an article's `content`.** Nothing fails — it renders, twice, under two headings. Add the slug to the column instead.
+- **Do not seed the column.** `seed-dev-db.ts` used to write a hardcoded fixture (including deliberately dead slugs, to prove they get dropped); that block is gone, because a fixture now overwrites an article's real cross-links with invented ones on every `pnpm db:seed`. `get-articles.test.ts` §4 asserts the seed stays out.
+
+The parser lives in `src/lib/wiki/related-sections.ts` rather than in the script, because its boundaries are the whole risk and needed unit tests: the section ends at the end of its **link list**, not at the next heading — it is the last heading in every article, so the obvious rule would have deleted the closing Callout with it — and the leading `---` goes with the section, or the two surviving rules end up adjacent. A list item that is not a plain markdown link aborts that article instead of half-stripping it.
+
 ## Slugs and paths: the two builders
 
 `wikiHref(slug)` builds every path that will be *parsed as a URL or compared against one*. `wikiRevalidationPath(slug)` builds the argument to `revalidatePath()` — and only that.

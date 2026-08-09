@@ -10,7 +10,7 @@ import { mdxComponents } from "@/components/wiki/mdx-components";
 /**
  * An article plus the raw cross-link list the row carries (W-009).
  *
- * `relatedArticleSlugs` stays UNRESOLVED here — it is authored text with no
+ * `relatedArticleSlugs` stays UNRESOLVED here — it is plain text with no
  * foreign key behind it, and turning it into articles needs the visible corpus
  * (`getArticleNavigation` in `get-articles.ts`). Normalised to `[]` so callers
  * never branch on null, and kept off `ArticleMeta` because a list card has no
