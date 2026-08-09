@@ -3,15 +3,42 @@ import remarkGfm from "remark-gfm";
 import rehypeSlug from "rehype-slug";
 import type { Article } from "./types";
 import { toArticle } from "./types";
-import { getArticleBySlug } from "./service";
+import { articleBySlugQuery, preferChurchOverride } from "./get-articles";
 import { encodeWikiSlug, wikiHref } from "./href";
 import { mdxComponents } from "@/components/wiki/mdx-components";
 
 /**
- * Get a single article by slug
+ * An article plus the raw cross-link list the row carries (W-009).
+ *
+ * `relatedArticleSlugs` stays UNRESOLVED here — it is plain text with no
+ * foreign key behind it, and turning it into articles needs the visible corpus
+ * (`getArticleNavigation` in `get-articles.ts`). Normalised to `[]` so callers
+ * never branch on null, and kept off `ArticleMeta` because a list card has no
+ * use for it.
  */
-export async function getArticle(slug: string): Promise<Article | null> {
-  const dbArticle = await getArticleBySlug(slug, null);
+export type ArticleWithRelated = Article & {
+  relatedArticleSlugs: string[];
+};
+
+/**
+ * Get a single article by slug, scoped to a church.
+ *
+ * Until #317 this passed a hardcoded `null`, which made every church-scoped
+ * article unreachable — including to the church that owns it. It now reads
+ * "global OR mine" (see the tenancy header in `get-articles.ts`), with the
+ * church's own copy of a slug winning over the global one of the same name.
+ *
+ * @param churchId - the reader's church; omit (or pass null) for global only.
+ */
+export async function getArticle(
+  slug: string,
+  churchId: string | null = null
+): Promise<ArticleWithRelated | null> {
+  // Same override rule as the lists, one implementation: the church's own copy
+  // of a slug wins over the global article of that name.
+  const [dbArticle] = preferChurchOverride(
+    await articleBySlugQuery(slug, churchId)
+  );
 
   if (!dbArticle) {
     return null;
@@ -20,7 +47,10 @@ export async function getArticle(slug: string): Promise<Article | null> {
   // Extract section from slug (e.g., "discovery/defining-your-church-values" -> "discovery")
   const sectionSlug = slug.split("/")[0] ?? "";
 
-  return toArticle(dbArticle, sectionSlug);
+  return {
+    ...toArticle(dbArticle, sectionSlug),
+    relatedArticleSlugs: dbArticle.relatedArticleSlugs ?? [],
+  };
 }
 
 /**

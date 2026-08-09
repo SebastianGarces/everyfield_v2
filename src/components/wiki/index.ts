@@ -8,3 +8,6 @@ export * from "./table-of-contents";
 export * from "./article-progress-badge";
 export * from "./bookmark-button";
 export * from "./bookmark-indicator";
+export * from "./related-articles";
+export * from "./related-templates";
+export * from "./article-pager";
