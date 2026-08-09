@@ -51,6 +51,15 @@ export const OPENED_STATUSES = ["opened", "clicked"] as const;
  */
 export const DELIVERED_STATUSES = ["delivered", "opened", "clicked"] as const;
 
+/**
+ * Statuses that say the address itself did not work. `bounced` was accepted
+ * then returned; `failed` the provider refused outright. Ruled 2026-08-09 on
+ * PR #371: a resend treats the two identically and skips both. Retrying an
+ * address the provider has already rejected spends sender reputation and
+ * cannot succeed.
+ */
+export const UNREACHABLE_STATUSES = ["bounced", "failed"] as const;
+
 // ---------------------------------------------------------------------------
 // Delivery statistics (COM-019)
 // ---------------------------------------------------------------------------
@@ -136,8 +145,9 @@ export function countAttempted(): SQL<number> {
  * The recipients of one message that recorded no open, resolved for a resend.
  *
  * Two guards beyond "did not open":
- *  - `bounced` is excluded. The address rejected the first attempt; sending to
- *    it again buys nothing and costs sender reputation.
+ *  - `UNREACHABLE_STATUSES` are excluded — `bounced` AND `failed` alike. The
+ *    address rejected the first attempt; sending to it again buys nothing and
+ *    costs sender reputation.
  *  - the person must still exist, still belong to this church and still have
  *    an address, so the count shown before confirming is the count that will
  *    actually be sent to.
@@ -152,7 +162,7 @@ export function nonOpenerScope(churchId: string, communicationId: string): SQL {
     eq(communicationRecipients.communicationId, communicationId),
     notInArray(communicationRecipients.status, [...OPENED_STATUSES]),
     isNull(communicationRecipients.openedAt),
-    ne(communicationRecipients.status, "bounced"),
+    notInArray(communicationRecipients.status, [...UNREACHABLE_STATUSES]),
     eq(persons.churchId, churchId),
     isNull(persons.deletedAt),
     isNotNull(persons.email)

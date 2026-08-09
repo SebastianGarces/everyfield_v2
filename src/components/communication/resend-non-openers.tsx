@@ -17,6 +17,10 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { resendToNonOpenersAction } from "@/app/(dashboard)/communication/actions";
+import {
+  resendBlockedHint,
+  type ResendEligibility,
+} from "@/lib/communication/resend-policy";
 
 interface ResendNonOpenersProps {
   communicationId: string;
@@ -24,8 +28,12 @@ interface ResendNonOpenersProps {
   nonOpenerCount: number;
   /** People who did open it — the other half of the sentence. */
   openedCount: number;
-  /** Only a message that was actually sent can be resent. */
-  canResend: boolean;
+  /**
+   * Decided on the server by `evaluateResendEligibility`, never re-derived
+   * here: the 24-hour gate must not shift between render and hydration, and
+   * the button must agree with the action that enforces it.
+   */
+  eligibility: ResendEligibility;
 }
 
 /**
@@ -34,18 +42,23 @@ interface ResendNonOpenersProps {
  * The count is resolved on the server and shown before the user confirms, so
  * what they agree to is what gets sent. The resend becomes its own message —
  * the original's tracking is left exactly as it was.
+ *
+ * When the resend is not yet available the control still renders, disabled,
+ * with the reason in plain text beside it. A disabled button cannot hold focus
+ * and so cannot carry a tooltip anyone can reach — the reason has to be text.
  */
 export function ResendNonOpeners({
   communicationId,
   nonOpenerCount,
   openedCount,
-  canResend,
+  eligibility,
 }: ResendNonOpenersProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
 
-  if (!canResend) return null;
+  // A draft has no send to resend; there is nothing useful to show at all.
+  if (eligibility.reason === "notSent") return null;
 
   // Nobody left to reach: say so plainly rather than offering a button that
   // can only fail.
@@ -59,6 +72,30 @@ export function ResendNonOpeners({
           ? "Everyone opened this message — there is nobody left to resend to."
           : "There is nobody left to resend to."}
       </p>
+    );
+  }
+
+  if (!eligibility.allowed && eligibility.reason) {
+    return (
+      <div className="flex flex-col items-start gap-1.5">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="cursor-pointer"
+          data-testid="resend-non-openers"
+          disabled
+        >
+          <RotateCcw className="mr-2 h-4 w-4" />
+          Resend to {nonOpenerCount} who have not opened
+        </Button>
+        <p
+          className="text-muted-foreground text-xs"
+          data-testid="resend-blocked-reason"
+        >
+          {resendBlockedHint(eligibility.reason)}
+        </p>
+      </div>
     );
   }
 

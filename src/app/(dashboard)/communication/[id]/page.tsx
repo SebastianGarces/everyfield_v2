@@ -8,6 +8,7 @@ import {
   AlertTriangle,
   Calendar,
   ExternalLink,
+  type LucideIcon,
 } from "lucide-react";
 
 import { HeaderBreadcrumbs } from "@/components/header";
@@ -15,12 +16,17 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ResendNonOpeners } from "@/components/communication/resend-non-openers";
+import {
+  summarizeMessageDelivery,
+  type MessageTileKey,
+} from "@/components/communication/delivery-stats-presentation";
 import { verifySession } from "@/lib/auth/session";
 import {
   getCommunication,
   getCommunicationRecipients,
   getNonOpenerSummary,
 } from "@/lib/communication/service";
+import { evaluateResendEligibility } from "@/lib/communication/resend-policy";
 import {
   renderTemplate,
   buildChurchMergeData,
@@ -62,6 +68,13 @@ const recipientStatusConfig: Record<
   },
   bounced: { label: "Bounced", color: "bg-red-100 text-red-700", icon: "" },
   failed: { label: "Failed", color: "bg-red-100 text-red-700", icon: "" },
+};
+
+const tileIcons: Record<MessageTileKey, LucideIcon> = {
+  sent: Mail,
+  delivered: CheckCheck,
+  opened: Eye,
+  issues: AlertTriangle,
 };
 
 const meetingTypeLabels: Record<string, string> = {
@@ -135,14 +148,16 @@ export default async function MessageDetailPage({
     : "(No subject)";
   const resolvedBody = renderTemplate(comm.body, mergeData);
 
-  const deliveryRate =
-    comm.stats.total > 0
-      ? Math.round((comm.stats.delivered / comm.stats.total) * 100)
-      : 0;
-  const openRate =
-    comm.stats.delivered > 0
-      ? Math.round((comm.stats.opened / comm.stats.delivered) * 100)
-      : 0;
+  const tiles = summarizeMessageDelivery(comm.stats);
+
+  // The gate is decided on the server so the button and the action agree, and
+  // so a 24-hour boundary can never differ between render and hydration.
+  const resendEligibility = evaluateResendEligibility({
+    status: comm.status,
+    sentAt: comm.sentAt,
+    deliveredCount: nonOpeners.delivered,
+    nonOpenerCount: nonOpeners.personIds.length,
+  });
 
   return (
     <>
@@ -194,7 +209,7 @@ export default async function MessageDetailPage({
               communicationId={comm.id}
               nonOpenerCount={nonOpeners.personIds.length}
               openedCount={nonOpeners.opened}
-              canResend={comm.status === "sent"}
+              eligibility={resendEligibility}
             />
           </div>
         </div>
@@ -202,59 +217,30 @@ export default async function MessageDetailPage({
         <div className="flex-1 overflow-auto p-6">
           {/* Delivery Stats */}
           <div className="mb-6 grid gap-4 md:grid-cols-4">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Sent</CardTitle>
-                <Mail className="text-muted-foreground h-4 w-4" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{comm.stats.sent}</div>
-                <p className="text-muted-foreground text-xs">
-                  of {comm.stats.total} recipients
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Delivered</CardTitle>
-                <CheckCheck className="text-muted-foreground h-4 w-4" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{comm.stats.delivered}</div>
-                <p className="text-muted-foreground text-xs">
-                  {deliveryRate}% delivery rate
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Opened</CardTitle>
-                <Eye className="text-muted-foreground h-4 w-4" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{comm.stats.opened}</div>
-                <p className="text-muted-foreground text-xs">
-                  {openRate}% open rate
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Issues</CardTitle>
-                <AlertTriangle className="text-muted-foreground h-4 w-4" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">
-                  {comm.stats.bounced + comm.stats.failed}
-                </div>
-                <p className="text-muted-foreground text-xs">
-                  bounced or failed
-                </p>
-              </CardContent>
-            </Card>
+            {tiles.map((tile) => {
+              const Icon = tileIcons[tile.key];
+              return (
+                <Card key={tile.key} data-testid={`message-tile-${tile.key}`}>
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-sm font-medium">
+                      {tile.label}
+                    </CardTitle>
+                    <Icon className="text-muted-foreground h-4 w-4" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold tabular-nums">
+                      {tile.value}
+                    </div>
+                    <p
+                      className="text-muted-foreground text-xs"
+                      data-testid={`message-tile-${tile.key}-caption`}
+                    >
+                      {tile.caption}
+                    </p>
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
 
           {/* Recipients */}

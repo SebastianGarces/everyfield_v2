@@ -9,7 +9,10 @@ import {
   formatRatio,
   meterWidth,
   summarizeDelivery,
+  summarizeMessageDelivery,
   toPercent,
+  type MessageDeliveryStats,
+  type MessageTileKey,
 } from "./delivery-stats-presentation";
 
 // ----------------------------------------------------------------------------
@@ -176,4 +179,101 @@ test("the three rates come back in funnel order", () => {
     overview.rates.map((r) => r.key),
     ["delivered", "opened", "clicked"]
   );
+});
+
+// --- summarizeMessageDelivery -----------------------------------------------
+//
+// Ruled 2026-08-09 (PR #371). One message's "Delivered" tile used to caption
+// itself "60% delivery rate", dividing by every recipient row; the church-wide
+// card calls `delivered / attempted` the delivery rate. Same name, different
+// division, one click apart. The tile now reports the count it holds, with the
+// denominator spelled out, and claims no rate at all.
+
+function messageStats(
+  overrides: Partial<MessageDeliveryStats> = {}
+): MessageDeliveryStats {
+  return {
+    total: 0,
+    sent: 0,
+    delivered: 0,
+    opened: 0,
+    clicked: 0,
+    bounced: 0,
+    failed: 0,
+    ...overrides,
+  };
+}
+
+function tile(stats: MessageDeliveryStats, key: MessageTileKey) {
+  return summarizeMessageDelivery(stats).find((t) => t.key === key)!;
+}
+
+test("the delivered tile is a count of recipients, not a delivery rate", () => {
+  const delivered = tile(
+    messageStats({ total: 10, sent: 8, delivered: 6 }),
+    "delivered"
+  );
+
+  assert.equal(delivered.label, "Delivered");
+  assert.equal(delivered.value, 6);
+  assert.equal(delivered.caption, "of 10 recipients");
+});
+
+test("no tile on a single message calls itself a delivery rate", () => {
+  const tiles = summarizeMessageDelivery(
+    messageStats({ total: 10, sent: 10, delivered: 6, opened: 3 })
+  );
+
+  for (const t of tiles) {
+    assert.doesNotMatch(
+      t.caption,
+      /delivery rate/i,
+      `${t.key} must not claim a delivery rate`
+    );
+  }
+});
+
+test("the four tiles come back in funnel order", () => {
+  assert.deepEqual(
+    summarizeMessageDelivery(messageStats()).map((t) => t.key),
+    ["sent", "delivered", "opened", "issues"]
+  );
+});
+
+test("the sent tile counts attempts against every recipient row", () => {
+  const sent = tile(messageStats({ total: 10, sent: 8 }), "sent");
+
+  assert.equal(sent.value, 8);
+  assert.equal(sent.caption, "of 10 recipients");
+});
+
+test("the open rate on one message divides by delivered, like the overview", () => {
+  const opened = tile(
+    messageStats({ total: 10, sent: 10, delivered: 8, opened: 4 }),
+    "opened"
+  );
+
+  assert.equal(opened.value, 4);
+  assert.equal(opened.caption, "50% of 8 delivered");
+});
+
+test("a message with nothing delivered shows no open rate at all", () => {
+  // "0% open rate" would blame the message for a delivery that never happened.
+  const opened = tile(
+    messageStats({ total: 4, sent: 4, delivered: 0, bounced: 4 }),
+    "opened"
+  );
+
+  assert.doesNotMatch(opened.caption, /%/);
+  assert.equal(opened.caption, "nothing delivered yet");
+});
+
+test("the issues tile adds bounced and failed", () => {
+  const issues = tile(
+    messageStats({ total: 10, sent: 10, bounced: 2, failed: 1 }),
+    "issues"
+  );
+
+  assert.equal(issues.value, 3);
+  assert.equal(issues.caption, "bounced or failed");
 });

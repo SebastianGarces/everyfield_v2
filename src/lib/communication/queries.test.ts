@@ -8,6 +8,7 @@ import {
   DELIVERED_STATUSES,
   OPENED_STATUSES,
   TEAM_GROUP_PREFIX,
+  UNREACHABLE_STATUSES,
   churchDeliveryScope,
   countAttempted,
   countOfStatus,
@@ -156,11 +157,21 @@ test("anyone who opened is excluded twice over — by status and by timestamp", 
   assert.match(text, /"communication_recipients"\."opened_at" is null/);
 });
 
-test("a bounced address is never resent to", () => {
+test("an address that bounced OR failed is never resent to", () => {
+  // Ruled 2026-08-09 (PR #371): `failed` is excluded exactly like `bounced`.
+  // The provider refused the address; retrying it immediately cannot succeed
+  // and spends sender reputation to find that out again.
   const { text, params } = compile(nonOpenerScope(CHURCH_ID, COMMUNICATION_ID));
 
-  assert.match(text, /"communication_recipients"\."status" <> \$6/);
-  assert.equal(params[5], "bounced");
+  assert.match(
+    text,
+    /"communication_recipients"\."status" not in \(\$6, \$7\)/
+  );
+  assert.deepEqual(params.slice(5, 7), ["bounced", "failed"]);
+});
+
+test("the unreachable statuses are exactly bounced and failed", () => {
+  assert.deepEqual([...UNREACHABLE_STATUSES], ["bounced", "failed"]);
 });
 
 test("the non-opener scope excludes deleted people and people with no address", () => {

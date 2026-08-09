@@ -121,3 +121,79 @@ export function summarizeDelivery(totals: DeliveryTotals): DeliveryOverview {
     isEmpty: totals.recipients === 0,
   };
 }
+
+// ---------------------------------------------------------------------------
+// One message's tiles
+// ---------------------------------------------------------------------------
+
+/** Recipient counts for a single message, as `getCommunication` reports them. */
+export interface MessageDeliveryStats {
+  total: number;
+  sent: number;
+  delivered: number;
+  opened: number;
+  clicked: number;
+  bounced: number;
+  failed: number;
+}
+
+export type MessageTileKey = "sent" | "delivered" | "opened" | "issues";
+
+export interface MessageTile {
+  key: MessageTileKey;
+  label: string;
+  /** The headline figure — always a count on these tiles, never a rate. */
+  value: number;
+  /** What the count is out of, shown under it. */
+  caption: string;
+}
+
+/**
+ * The four tiles above one message's recipient table.
+ *
+ * Every headline here is a COUNT of recipient rows, and every caption names
+ * the denominator. That is the ruling of 2026-08-09 (PR #371): the tile that
+ * used to read "60% delivery rate" measured `delivered / all recipient rows`,
+ * while the church-wide overview measures `delivered / attempted` and calls
+ * that the delivery rate. Two different divisions one click apart, under one
+ * name. The rate now lives only on the overview; this page reports the counts
+ * it actually holds, so the two can never be read as the same figure.
+ *
+ * Opens keep a percentage because that division IS the overview's — opened
+ * over delivered — and an unknown rate stays unknown rather than becoming 0%.
+ */
+export function summarizeMessageDelivery(
+  stats: MessageDeliveryStats
+): MessageTile[] {
+  const openPercent = toPercent(stats.opened, stats.delivered);
+
+  return [
+    {
+      key: "sent",
+      label: "Sent",
+      value: stats.sent,
+      caption: `of ${stats.total} recipients`,
+    },
+    {
+      key: "delivered",
+      label: "Delivered",
+      value: stats.delivered,
+      caption: `of ${stats.total} recipients`,
+    },
+    {
+      key: "opened",
+      label: "Opened",
+      value: stats.opened,
+      caption:
+        openPercent === null
+          ? "nothing delivered yet"
+          : `${openPercent}% of ${stats.delivered} delivered`,
+    },
+    {
+      key: "issues",
+      label: "Issues",
+      value: stats.bounced + stats.failed,
+      caption: "bounced or failed",
+    },
+  ];
+}

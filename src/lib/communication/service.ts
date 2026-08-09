@@ -55,6 +55,10 @@ import {
   teamGroup,
   teamMemberScope,
 } from "./queries";
+import {
+  evaluateResendEligibility,
+  resendBlockedMessage,
+} from "./resend-policy";
 import type { ComposeMessageInput } from "@/lib/validations/communication";
 
 // ---------------------------------------------------------------------------
@@ -706,6 +710,8 @@ export async function getChurchDeliveryTotals(
 export interface NonOpenerSummary {
   /** Recipient rows on the original message. */
   total: number;
+  /** Of those, the ones the provider confirmed as delivered. */
+  delivered: number;
   /** Of those, the ones that recorded an open (a click implies an open). */
   opened: number;
   /** People a resend would actually reach — the count shown before confirming. */
@@ -735,6 +741,7 @@ export async function getNonOpenerSummary(
     db
       .select({
         total: count(),
+        delivered: countOfStatuses(DELIVERED_STATUSES),
         opened: countOfStatuses(OPENED_STATUSES),
       })
       .from(communicationRecipients)
@@ -743,14 +750,14 @@ export async function getNonOpenerSummary(
 
   return {
     total: totals?.total ?? 0,
+    delivered: totals?.delivered ?? 0,
     opened: totals?.opened ?? 0,
     personIds: nonOpeners.map((row) => row.personId),
   };
 }
 
 /** Thrown when a resend has nobody left to reach. */
-export const NO_NON_OPENERS_MESSAGE =
-  "Everyone who received this message has already opened it.";
+export const NO_NON_OPENERS_MESSAGE = resendBlockedMessage("noNonOpeners");
 
 /**
  * Send the original message again, to the recipients who recorded no open.
@@ -758,6 +765,10 @@ export const NO_NON_OPENERS_MESSAGE =
  * This creates a NEW communication. The original is never touched: its
  * recipient rows and its tracking stay exactly as they were, and history shows
  * two messages, which is what the delivery figures depend on.
+ *
+ * The eligibility gate is enforced HERE, not only on the button. The button
+ * can be stale, and the action is callable directly — a resend inside the
+ * cooldown, or before anything is confirmed delivered, is refused either way.
  */
 export async function resendToNonOpeners(
   churchId: string,
@@ -776,12 +787,19 @@ export async function resendToNonOpeners(
     .limit(1);
 
   if (!original) throw new Error("Message not found");
-  if (original.status !== "sent") {
-    throw new Error("Only a sent message can be resent.");
-  }
 
-  const { personIds } = await getNonOpenerSummary(churchId, communicationId);
-  if (personIds.length === 0) throw new Error(NO_NON_OPENERS_MESSAGE);
+  const { delivered, personIds } = await getNonOpenerSummary(
+    churchId,
+    communicationId
+  );
+
+  const { allowed, reason } = evaluateResendEligibility({
+    status: original.status,
+    sentAt: original.sentAt,
+    deliveredCount: delivered,
+    nonOpenerCount: personIds.length,
+  });
+  if (!allowed && reason) throw new Error(resendBlockedMessage(reason));
 
   return sendCommunication(churchId, userId, {
     subject: original.subject ?? "",
