@@ -19,6 +19,11 @@ import { RecipientPicker } from "@/components/communication/recipient-picker";
 import { MergeFieldInserter } from "@/components/communication/merge-field-inserter";
 import { EmailPreview } from "@/components/communication/email-preview";
 import { sendMessageAction } from "@/app/(dashboard)/communication/actions";
+// Zone-pinned, not `toLocaleDateString`: this picker renders in the browser
+// while the meeting pages render on the server, and an unpinned formatter makes
+// the two disagree about the same meeting (React #418).
+// memory/invariants.md → Date & Time Rendering.
+import { formatDateTime } from "@/lib/datetime";
 import {
   extractMergeFields,
   getSampleData,
@@ -299,11 +304,7 @@ export function ComposeForm({
                       className="cursor-pointer"
                     >
                       {m.title ?? meetingTypeLabels[m.type] ?? m.type} —{" "}
-                      {new Date(m.datetime).toLocaleDateString("en-US", {
-                        month: "short",
-                        day: "numeric",
-                        year: "numeric",
-                      })}
+                      {formatDateTime(new Date(m.datetime), "short")}
                     </SelectItem>
                   ))}
                 </SelectContent>

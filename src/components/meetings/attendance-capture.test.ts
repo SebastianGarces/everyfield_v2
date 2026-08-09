@@ -173,3 +173,107 @@ test("no guests means no unnamed controls sneak in through the empty state", () 
   assert.equal(checkboxes(html).length, 0);
   assert.ok(html.includes("No guests on the list yet"));
 });
+
+// ----------------------------------------------------------------------------
+// Issue #361: the guest list was a grid of divs with a "Table header" comment,
+// so "Here", "RSVP" and "Status" were headers only to someone who could see
+// which column a cell sat under. A screen reader announced a bare badge with no
+// idea what it measured. Real table semantics are what associate the two.
+// ----------------------------------------------------------------------------
+
+interface RenderedCell {
+  tag: string;
+  attrs: Record<string, string>;
+  text: string;
+}
+
+/** Every `<th>` / `<td>` in the markup, in document order, with its text. */
+function cells(html: string): RenderedCell[] {
+  const cellPattern = /<(th|td)\b([^>]*)>([\s\S]*?)<\/\1>/g;
+  const attrPattern = /([\w:.-]+)="([^"]*)"/g;
+
+  return [...html.matchAll(cellPattern)].map((match) => {
+    const attrs: Record<string, string> = {};
+    for (const attr of (match[2] ?? "").matchAll(attrPattern)) {
+      attrs[attr[1]] = attr[2];
+    }
+    // Drop nested markup (badges, icons) — only the cell's own words matter.
+    const text = (match[3] ?? "").replace(/<[^>]*>/g, "").trim();
+    return { tag: match[1], attrs, text };
+  });
+}
+
+test("the guest list is a real table, and every column header is a th[scope=col]", () => {
+  const html = renderCapture([guest({ id: "1" })]);
+
+  assert.ok(/<table\b/.test(html), "the guest list must be a <table>");
+  assert.ok(/<thead\b/.test(html), "the column headers must live in a <thead>");
+
+  const columnHeaders = cells(html).filter(
+    (cell) => cell.tag === "th" && cell.attrs["scope"] === "col"
+  );
+
+  assert.deepEqual(
+    columnHeaders.map((cell) => cell.text),
+    ["Here", "Name", "Contact", "RSVP", "Status"],
+    "all five columns must be scoped headers — a cell is only meaningful when it is announced with its header"
+  );
+});
+
+test("each guest row carries the person's name as its row header", () => {
+  const html = renderCapture([
+    guest({ id: "1", firstName: "Ada", lastName: "Lovelace" }),
+    guest({ id: "2", firstName: "Grace", lastName: "Hopper" }),
+  ]);
+
+  const rowHeaders = cells(html).filter(
+    (cell) => cell.tag === "th" && cell.attrs["scope"] === "row"
+  );
+
+  // Without this, "Confirmed" read on its own never says whose RSVP it is.
+  assert.deepEqual(
+    rowHeaders.map((cell) => cell.text),
+    ["Ada Lovelace", "Grace Hopper"]
+  );
+});
+
+test("a row's cells stay in the order its headers promise", () => {
+  const html = renderCapture([
+    guest({
+      id: "1",
+      firstName: "Grace",
+      lastName: "Hopper",
+      email: "grace@example.com",
+      responseStatus: "confirmed",
+      attendanceStatus: "attended",
+    }),
+  ]);
+
+  // Everything after the five column headers is the single guest row: the
+  // checkbox cell, the name row-header, then contact / RSVP / status.
+  const row = cells(html).filter((cell) => cell.attrs["scope"] !== "col");
+
+  assert.equal(row.length, 5);
+  assert.equal(row[1].text, "Grace Hopper");
+  assert.equal(row[2].text, "grace@example.com");
+  assert.equal(row[3].text, "Confirmed");
+  assert.equal(row[4].text, "Attended");
+});
+
+test("the running attendance total is announced, not just repainted", () => {
+  const html = renderCapture([
+    guest({ id: "1", attendanceStatus: "attended" }),
+    guest({ id: "2" }),
+  ]);
+
+  const region = /<p([^>]*\brole="status"[^>]*)>([\s\S]*?)<\/p>/.exec(html);
+  assert.ok(region, "the attendance total must sit in a live region");
+  assert.match(region[1], /aria-live="polite"/);
+  assert.equal(
+    region[2]
+      .replace(/<[^>]*>/g, "")
+      .replace(/\s+/g, " ")
+      .trim(),
+    "1 of 2 marked as attended"
+  );
+});
