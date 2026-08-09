@@ -15,7 +15,27 @@ import {
 } from "@/lib/invitations/core";
 
 // ============================================================================
-// The planter's association area — its three writes (#304, OV-004/006/007a).
+// The association area — its three writes (#304, OV-004/006/007a; WS3).
+//
+// ----------------------------------------------------------------------------
+// ACCEPT and DECLINE serve BOTH answering roles; LEAVE is the planter's alone
+// ----------------------------------------------------------------------------
+//
+// The two answers take an invitation id and nothing else, and WHO may answer it
+// is `verifyInvitationAuthority`'s question, asked per invitation TYPE: the
+// planter of the target plant for `church_to_sending_church` /
+// `church_to_network`, the admin of the target sending church for
+// `sending_church_to_network`. So the sending-church view added by #304 WS3
+// (ruled 2026-08-09) reuses these two verbatim — there is no second pair of
+// endpoints, no role branch here, and therefore no way for the two surfaces to
+// disagree about who may answer what. A non-admin member of the target sending
+// church is refused by that same rule, server-side, exactly as a team member of
+// a plant is.
+//
+// LEAVE is not shared. `leaveOversightOrgAs` is planter-only (OV-010) and takes
+// the plant from the session; a sending church leaving a network has no audited
+// sever yet, so this module deliberately exposes no endpoint for one — see
+// `page.tsx` → `NetworkAssociation`.
 //
 // ----------------------------------------------------------------------------
 // Why this module reaches `@/lib/invitations/core` at all
@@ -97,7 +117,8 @@ async function run(
 }
 
 /**
- * Accept an invitation addressed to the planter's own plant (OV-004).
+ * Accept an invitation addressed to the actor's own organization — their plant
+ * (OV-004) or, since #304 WS3, their sending church.
  *
  * The association, the audit row and the milestone to the inviting org are all
  * `acceptInvitationAs`'s — including the rule that an accept BINDS a free slot
@@ -120,12 +141,17 @@ export async function acceptAssociationInvitation(
 }
 
 /**
- * Decline an invitation addressed to the planter's own plant (OV-006).
+ * Decline an invitation addressed to the actor's own organization (OV-006) —
+ * their plant, or their sending church (#304 WS3).
  *
  * Sets the status, which is what removes the dashboard reminder and what the
  * inviting org's invitations list renders as "Declined"; the notification to
  * that org rides the consent-exempt own-relationship rail and is
- * `declineInvitationAs`'s to send.
+ * `declineInvitationAs`'s to send. That milestone is filed under the PLANT, so
+ * a sending church's decline sends none — the notifications table is
+ * church-scoped and a `sending_church_to_network` row names no church. The
+ * network reads the answer in its own invitations list, which is where its own
+ * outstanding invitations already live.
  */
 export async function declineAssociationInvitation(
   invitationId: string

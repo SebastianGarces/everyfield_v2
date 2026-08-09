@@ -37,7 +37,7 @@
 // `preferenceOwnerFromSession` in `@/lib/notifications/preferences`.
 // ============================================================================
 
-import { and, desc, eq, exists, lt, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, exists, gte, lt, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 
 import { db } from "@/db";
@@ -84,6 +84,29 @@ import {
  * `service.test.ts` fails if `expiresInDays` reappears anywhere in this module.
  */
 export const INVITATION_EXPIRY_DAYS = 30;
+
+/**
+ * How many times ONE inviting org may address ONE email address inside a
+ * rolling `INVITATION_EXPIRY_DAYS` window (#304, HR4 2026-08-09).
+ *
+ * WHAT THIS IS FOR. #304 restored the targeted path, so an invitation addressed
+ * to somebody who already has an account produces a DASHBOARD REMINDER on their
+ * plant — and OV-005 makes that reminder dismissible ONLY by answering. The org
+ * chooses its own display name, so without a cap an oversight admin could park
+ * an attacker-chosen banner on an arbitrary planter's dashboard and, each time
+ * the planter declined, put it straight back. Declining has to END something.
+ *
+ * `assertNoDuplicatePending` already stops two banners standing at once; it does
+ * nothing about the replay, because a declined row is no longer pending. This
+ * counts EVERY invitation the org has addressed to that address in the window,
+ * whatever its status, so a decline–reinvite loop exhausts the allowance instead
+ * of resetting it.
+ *
+ * Three, not one: an admin genuinely does mistype an address, revoke, and send
+ * again, and the window is a month. Three attempts a month is far more than that
+ * needs and far less than a nuisance channel.
+ */
+export const INVITES_PER_INVITEE_PER_WINDOW = 3;
 
 // ============================================================================
 // Errors
@@ -738,6 +761,86 @@ async function assertNoDuplicatePending(
   }
 }
 
+/**
+ * What an admin reads when their org has used up its attempts at one address.
+ *
+ * It names the org's OWN behaviour and nothing else — how many invitations THEY
+ * sent, to an address THEY typed — so it is legible without being an oracle
+ * (see `assertInviteRateLimit` for why position, not wording, is what makes that
+ * true here).
+ */
+export const INVITE_RATE_LIMITED_MESSAGE =
+  "Your organization has already sent that address several invitations recently — wait for an answer, or reach them another way";
+
+/**
+ * The statement behind the cap. Exported so a test can read its bound
+ * parameters: the scope is the ORG's own rows and the window is the SERVER's
+ * instant, neither of which a request can influence.
+ *
+ * No `status` predicate on purpose. The abuse this exists to stop is a
+ * decline–reinvite loop, and every one of those rows reads `declined`; counting
+ * only pending ones would count exactly the invitations that are not the
+ * problem. `limit` is the cap itself — the question is "are there at least N?",
+ * so there is no reason to read the whole history.
+ */
+export function invitesFromOrgToAddressQuery(
+  values: Pick<
+    ResolvedInvitation,
+    "inviteeEmail" | "sendingChurchId" | "sendingNetworkId"
+  >,
+  since: Date
+) {
+  return db
+    .select({ id: organizationInvitations.id })
+    .from(organizationInvitations)
+    .where(
+      and(
+        eq(organizationInvitations.inviteeEmail, values.inviteeEmail),
+        invitingOrgFilter(values.sendingChurchId, values.sendingNetworkId),
+        gte(organizationInvitations.createdAt, since)
+      )
+    )
+    .limit(INVITES_PER_INVITEE_PER_WINDOW);
+}
+
+/**
+ * Refuse an org that has already addressed this person
+ * `INVITES_PER_INVITEE_PER_WINDOW` times inside the window (#304, HR4).
+ *
+ * WHERE IT RUNS IS THE SECURITY PROPERTY, not the wording. Every refusal
+ * reachable AFTER `resolveInvitationTarget` has to be the one message
+ * (`ACCOUNT_NOT_INVITABLE_MESSAGE`) because it would otherwise describe a
+ * stranger. This one is deliberately placed BEFORE the address is looked up, so
+ * it cannot be that kind of refusal by construction: it reads only rows the
+ * caller's own org wrote, to an address the caller itself typed, and it answers
+ * identically whether or not an account exists behind it.
+ *
+ * That ordering also closes the obvious variant of the same oracle. A cap that
+ * applied only to the TARGETED path would itself be a probe — "this address is
+ * rate-limited, therefore somebody has an account here" — so the cap applies to
+ * every invitation the org addresses, open ones included.
+ *
+ * Like `assertNoDuplicatePending` this is SELECT-then-INSERT and therefore not a
+ * concurrency guard (`memory/invariants.md`): two simultaneous submissions can
+ * both pass the fourth attempt. That is acceptable — the property being defended
+ * is "an org cannot keep a banner up indefinitely", which one extra row does not
+ * threaten, and the alternative is a counter table for a nuisance control.
+ */
+export async function assertInviteRateLimit(
+  values: ResolvedInvitation,
+  now = new Date()
+): Promise<void> {
+  const since = new Date(
+    now.getTime() - INVITATION_EXPIRY_DAYS * 24 * 60 * 60 * 1000
+  );
+
+  const recent = await invitesFromOrgToAddressQuery(values, since);
+
+  if (recent.length >= INVITES_PER_INVITEE_PER_WINDOW) {
+    throw new InvitationError(INVITE_RATE_LIMITED_MESSAGE);
+  }
+}
+
 /** Resolve + guard + insert. The path the action layer takes. */
 export async function createInvitationAs(
   actor: InvitationActor,
@@ -759,6 +862,16 @@ export async function createInvitationAs(
   if (!authority.ok) {
     throw new InvitationError(authority.error);
   }
+
+  // THE CAP, and it runs HERE — before the lookup — on purpose (#304, HR4
+  // 2026-08-09). A targeted invitation puts a banner on a planter's dashboard
+  // that OV-005 makes dismissible only by answering, so an org that could
+  // re-issue after every decline would own a permanent, attacker-chosen slot on
+  // a stranger's screen. Placing the cap ahead of `resolveInvitationTarget`
+  // keeps it out of the post-resolution rule (`ACCOUNT_NOT_INVITABLE_MESSAGE`):
+  // it reads only the caller's own org's rows and answers the same whether or
+  // not an account exists behind the address, so it discloses nothing to probe.
+  await assertInviteRateLimit(authority.values);
 
   // A client never names a target; it is resolved from the address here. An
   // account that speaks for no invitable organization is refused with the one

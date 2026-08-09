@@ -8,10 +8,12 @@
 //   * the invitee's EMAIL. There is no picker of existing church plants, on
 //     purpose: an oversight admin sees only the plants their org is associated
 //     with, so a dropdown of invitable plants would list every plant in the
-//     product to every org. The server resolves the address privately — and
-//     since 2026-08-04 an address that already has an account is REFUSED there,
-//     because nothing in the product lets that person answer yet (#277). The
-//     copy below says so before the admin types, and the refusal says so after.
+//     product to every org. The server resolves the address privately, and
+//     since #304 an address that already has an account is a legitimate target
+//     — there is now somewhere in the product for that person to answer from
+//     (`/settings/association`). Which of the two kinds was created is the one
+//     thing the success notice branches on; the refusal, whatever its reason,
+//     is always the same sentence (`ACCOUNT_NOT_INVITABLE_MESSAGE`).
 //   * what kind of organization they are. A sending church can only invite
 //     church plants, so it has no choice to make and the field is not rendered.
 //
@@ -155,22 +157,28 @@ export function InvitationCreateForm({
 }
 
 /**
- * What to do next, shown once the row exists. Email delivery is not part of
- * this surface yet, so the link is handed to the admin rather than implied —
- * telling somebody an invitation was "sent" when nothing left the building is
- * the kind of copy that costs a user a week.
+ * What to do next, shown once the row exists — and there are TWO next things,
+ * because since #304 there are two kinds of invitation.
+ *
+ * Email delivery is not part of this surface yet, so an OPEN invitation's link
+ * is handed to the admin rather than implied: telling somebody an invitation
+ * was "sent" when nothing left the building is the kind of copy that costs a
+ * user a week.
+ *
+ * A TARGETED invitation gets NO LINK AT ALL (#304, HR4 2026-08-09). The
+ * addressee already has an EveryField account, `/register` is the one place
+ * that link goes, and somebody who has registered cannot register again — so
+ * the Copy button used to hand an admin a dead end to forward, and the invitee
+ * a page that would refuse them. The action reports the difference as a null
+ * `inviteePath` (see `CreateInvitationState`), which is the whole of the branch
+ * below: the admin is told where the answer will happen instead of being given
+ * something useless to send.
  */
 function InviteCreatedNotice({
   created,
 }: {
   created: NonNullable<CreateInvitationState["created"]>;
 }) {
-  const [copied, setCopied] = useState(false);
-  const url =
-    typeof window === "undefined"
-      ? created.inviteePath
-      : `${window.location.origin}${created.inviteePath}`;
-
   return (
     <div
       role="status"
@@ -179,6 +187,30 @@ function InviteCreatedNotice({
       <p className="font-medium">
         Invitation created for {created.inviteeEmail}
       </p>
+      {created.inviteePath === null ? (
+        <p className="text-muted-foreground">
+          They already have an EveryField account, so there is no link to send:
+          the invitation is waiting for them in their own settings and on their
+          dashboard. You will hear as soon as they answer, and until then it
+          sits in the list below, where you can revoke it.
+        </p>
+      ) : (
+        <InviteLink path={created.inviteePath} />
+      )}
+    </div>
+  );
+}
+
+/** The register link for an OPEN invitation, with a copy control. */
+function InviteLink({ path }: { path: string }) {
+  const [copied, setCopied] = useState(false);
+  // `window` is absent on the server render, where the origin is unknown and a
+  // relative path is the honest thing to show.
+  const url =
+    typeof window === "undefined" ? path : `${window.location.origin}${path}`;
+
+  return (
+    <>
       <p className="text-muted-foreground">
         Send them this link. It carries the invitation, so the plant they create
         arrives already associated with you — and it only works for the address
@@ -201,6 +233,6 @@ function InviteCreatedNotice({
           {copied ? "Copied" : "Copy link"}
         </Button>
       </div>
-    </div>
+    </>
   );
 }

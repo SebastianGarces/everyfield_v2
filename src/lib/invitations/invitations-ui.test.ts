@@ -773,3 +773,63 @@ test("the mismatch message says which address the invitation is for", () => {
   assert.doesNotMatch(addressless, /undefined|null/);
   assert.match(addressless, /new one/i);
 });
+
+// ----------------------------------------------------------------------------
+// 9. The success notice may only offer a link that works (#304, HR4 2026-08-09)
+// ----------------------------------------------------------------------------
+
+test("a targeted invitation is created with no register link at all", () => {
+  const action = code(INVITATIONS_ACTIONS);
+
+  // The distinction is read off the ROW the server just wrote, never guessed
+  // from the address: `resolveInvitationTarget` is the only thing that knows
+  // whether an account was found, and it answered inside the service.
+  assert.match(action, /result\.invitation\.targetChurchId !== null/);
+  assert.match(action, /result\.invitation\.targetSendingChurchId !== null/);
+  assert.match(action, /inviteePath: targeted\s*\?\s*null/);
+
+  // …and the type says null is possible, so the surface cannot forget the case.
+  assert.match(
+    action,
+    /created\?: \{ inviteePath: string \| null; inviteeEmail: string \}/
+  );
+});
+
+test("the notice branches on the null path rather than rendering a dead link", () => {
+  const form = code(CREATE_FORM);
+
+  // `/register` is the ONE place that link goes, and somebody who already has
+  // an account cannot register again — so a targeted invitation's admin was
+  // previously handed a dead end to forward, with a Copy button on it.
+  assert.match(form, /created\.inviteePath === null/);
+
+  // The link, the URL and the clipboard all live in the branch that has a path.
+  const link = form.slice(form.indexOf("function InviteLink"));
+  assert.match(link, /navigator\.clipboard\.writeText/);
+  assert.match(link, /window\.location\.origin/);
+
+  // Nothing outside that component composes the register URL, so the null case
+  // cannot reach one by another route.
+  const outsideLink = form.slice(0, form.indexOf("function InviteLink"));
+  assert.doesNotMatch(outsideLink, /clipboard/);
+  assert.doesNotMatch(outsideLink, /location\.origin/);
+
+  // The copy for a targeted invitation says where the answer will happen. An
+  // admin who is told "created" and given nothing to do is the failure this
+  // branch exists to prevent.
+  assert.match(form, /waiting for them in their own settings/);
+});
+
+test("the register path is still handed over for an OPEN invitation", () => {
+  // The other half of the branch, and the one that must not regress: with no
+  // account behind the address the link IS the delivery mechanism — email
+  // delivery is not part of this surface yet.
+  assert.match(
+    code(INVITATIONS_ACTIONS),
+    /\/register\?invitation=\$\{result\.invitation\.id\}/
+  );
+  assert.match(
+    code(CREATE_FORM),
+    /<InviteLink path=\{created\.inviteePath\} \/>/
+  );
+});

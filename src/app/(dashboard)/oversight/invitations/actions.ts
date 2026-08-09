@@ -53,12 +53,22 @@ const revokeSchema = z.object({
 export type CreateInvitationState = {
   error?: string;
   /**
-   * Set on success — the surface shows the link the invitee should be sent.
-   * Every invitation this action can create is an OPEN one (the 2026-08-04
-   * ruling refuses addresses that already have an account), so the link is the
-   * whole delivery mechanism and there is no second shape to render.
+   * Set on success. `inviteePath` is the `/register?invitation=…` link, and it
+   * is NULL for a TARGETED invitation (#304, HR4 2026-08-09).
+   *
+   * The 2026-08-04 ruling that refused every address with an account was
+   * repealed by #304, so this action now creates two shapes. An OPEN
+   * invitation's link IS the delivery mechanism: it carries the token to
+   * `/register`, where the invitee's organization is created and bound in one
+   * request. A TARGETED one goes to somebody who already has an account and
+   * therefore cannot register again — handing their admin that link has them
+   * send a dead end, and the invitee answers from `/settings/association`
+   * instead.
+   *
+   * Null rather than absent, so the two cases are one exhaustive check at the
+   * single place that renders them.
    */
-  created?: { inviteePath: string; inviteeEmail: string };
+  created?: { inviteePath: string | null; inviteeEmail: string };
 };
 
 export type RevokeInvitationState = { error?: string };
@@ -93,9 +103,20 @@ export async function createInvitationAction(
 
   refresh();
 
+  // TARGETED or OPEN, read off the row the server just wrote rather than
+  // guessed from the address: `resolveInvitationTarget` is the only thing that
+  // knows, and it answered inside the service. A row with either target set
+  // names an organization that already exists, whose admin/planter answers it
+  // in-app — so there is no registration for a link to carry.
+  const targeted =
+    result.invitation.targetChurchId !== null ||
+    result.invitation.targetSendingChurchId !== null;
+
   return {
     created: {
-      inviteePath: `/register?invitation=${result.invitation.id}`,
+      inviteePath: targeted
+        ? null
+        : `/register?invitation=${result.invitation.id}`,
       inviteeEmail: result.invitation.inviteeEmail ?? parsed.data.inviteeEmail,
     },
   };

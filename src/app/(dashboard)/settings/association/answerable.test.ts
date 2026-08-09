@@ -3,7 +3,10 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import { pendingInvitationsForPlantQuery } from "./queries";
+import {
+  pendingInvitationsForPlantQuery,
+  pendingInvitationsForSendingChurchQuery,
+} from "./queries";
 
 // ============================================================================
 // #304 / OV-005 — what the planter is offered an ANSWER to.
@@ -45,6 +48,7 @@ const PAGE = read("settings", "association", "page.tsx");
 const LEAVE_DIALOG = read("settings", "association", "leave-org-dialog.tsx");
 
 const PLANT = "11111111-1111-4111-8111-111111111111";
+const SENDING_CHURCH = "22222222-2222-4222-8222-222222222222";
 const NOW = new Date("2026-08-09T12:00:00.000Z");
 
 // ----------------------------------------------------------------------------
@@ -127,8 +131,53 @@ test("the dashboard only asks for invitations somebody may answer", () => {
 });
 
 test("the settings surface redirects anyone who could not act on it", () => {
-  assert.match(PAGE, /user\.role !== "planter" \|\| !user\.churchId/);
+  // TWO roles can act here since #304 WS3, and the guard is positive — each
+  // view is entered by the role that owns it, and the redirect is what is left
+  // over. Stated that way round so a third answering role cannot be admitted by
+  // forgetting to add it to a negation.
+  assert.match(PAGE, /user\.role === "planter" && user\.churchId/);
+  assert.match(
+    PAGE,
+    /user\.role === "sending_church_admin" && user\.sendingChurchId/
+  );
   assert.match(PAGE, /redirect\("\/settings"\)/);
+
+  // The redirect is the LAST thing, so it cannot be reached by a role that has
+  // a view above it.
+  assert.ok(
+    PAGE.indexOf('redirect("/settings")') >
+      PAGE.indexOf('user.role === "sending_church_admin"'),
+    "the redirect must be the fall-through, not a gate in front of a view"
+  );
+});
+
+test("the sending church's pending list refuses rows whose window has closed", () => {
+  // The same three clauses as the plant-side query, on the other target column.
+  // A second surface that offers an ANSWER is a second place the lazy-expiry
+  // trap can be re-opened, so it is read off the SQL here too rather than
+  // trusted to have been copied correctly.
+  const { sql, params } = pendingInvitationsForSendingChurchQuery(
+    SENDING_CHURCH,
+    NOW
+  ).toSQL();
+
+  assert.match(sql, /"target_sending_church_id" = \$1/);
+  assert.match(sql, /"status" = \$2/);
+  assert.match(
+    sql,
+    /\("organization_invitations"\."expires_at" is null or "organization_invitations"\."expires_at" > \$3\)/
+  );
+
+  assert.deepEqual(params.slice(0, 2), [SENDING_CHURCH, "pending"]);
+  assert.equal(
+    new Date(params[2] as string | Date).toISOString(),
+    NOW.toISOString()
+  );
+
+  // And it names the SENDING CHURCH's own column only. Matching on
+  // `target_church_id` here would hand a sending-church admin the invitations
+  // addressed to a plant that happens to share the id.
+  assert.doesNotMatch(sql, /"target_church_id"/);
 });
 
 // ----------------------------------------------------------------------------

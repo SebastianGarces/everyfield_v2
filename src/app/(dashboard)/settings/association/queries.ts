@@ -34,6 +34,28 @@ import {
 // client is an id somebody can aim a request at.
 // ============================================================================
 
+// ----------------------------------------------------------------------------
+// TWO ROLES ANSWER HERE, NOT ONE (#304 WS3, ruled 2026-08-09)
+// ----------------------------------------------------------------------------
+//
+// `inviteeAccountTarget` maps TWO roles to a target: a `planter` to their plant,
+// and a `sending_church_admin` to their sending church. So two of the three
+// invitation types can name an existing account, and the rule
+// (`memory/invariants.md` → Multi-Tenancy, "No invitation that cannot be
+// answered") is per TYPE:
+//
+//   * `church_to_sending_church` / `church_to_network` → the planter answers,
+//     from the reads below that take a CHURCH id;
+//   * `sending_church_to_network` → the sending church's ADMIN answers, from
+//     the reads below that take a SENDING CHURCH id.
+//
+// #304's first build shipped only the first pair, which is the dead end HR4
+// found: a `sending_church_admin` was targetable with nowhere in the product to
+// answer. The second pair is the fix, and it is deliberately the same shape —
+// same answerable predicate, same "derive the org from `type`" rule, same
+// refusal to render an invitation whose counterparty does not resolve.
+// ----------------------------------------------------------------------------
+
 /** One pending invitation, as the association area and the dashboard render it. */
 export interface PendingInvitationView {
   id: string;
@@ -202,4 +224,120 @@ export async function getCurrentAssociations(
   }
 
   return associations;
+}
+
+// ----------------------------------------------------------------------------
+// The SENDING CHURCH's side of the same screen (#304 WS3)
+// ----------------------------------------------------------------------------
+
+/**
+ * The statement behind the sending church's pending list. Exported for the same
+ * reason its plant-side twin is: the ANSWERABLE predicate is three clauses and
+ * losing the third is invisible in behaviour until a 30-day-old row hits it.
+ *
+ * The `target_sending_church_id` predicate is also what keeps this list to the
+ * ONE type a sending-church admin can answer — `sending_church_to_network` is
+ * the only type whose target is a sending church.
+ */
+export function pendingInvitationsForSendingChurchQuery(
+  sendingChurchId: string,
+  now: Date
+) {
+  return db
+    .select({
+      id: organizationInvitations.id,
+      createdAt: organizationInvitations.createdAt,
+      expiresAt: organizationInvitations.expiresAt,
+      type: organizationInvitations.type,
+      sendingNetworkName: sendingNetworks.name,
+    })
+    .from(organizationInvitations)
+    .leftJoin(
+      sendingNetworks,
+      eq(sendingNetworks.id, organizationInvitations.sendingNetworkId)
+    )
+    .where(
+      and(
+        eq(organizationInvitations.targetSendingChurchId, sendingChurchId),
+        eq(organizationInvitations.status, "pending"),
+        // UNEXPIRED — the same clause the plant-side query carries, for the
+        // same reason: expiry is LAZY (`expireInvitationQuery` runs only when
+        // somebody tries to answer), so `pending` alone would render Accept and
+        // Decline buttons the server then refuses.
+        sql`(${organizationInvitations.expiresAt} is null or ${organizationInvitations.expiresAt} > ${now})`
+      )
+    )
+    .orderBy(desc(organizationInvitations.createdAt));
+}
+
+/**
+ * Every ANSWERABLE invitation addressed to this SENDING CHURCH, newest first,
+ * with the inviting network's name resolved.
+ *
+ * Only a network invites a sending church, so there is one join and one org
+ * kind — but the org is still derived from `type` rather than from whichever FK
+ * column happens to be populated, because nothing constrains an
+ * `organization_invitations` row to one FK and `insertInvitation` validates
+ * none. A row of the wrong type that somehow carried this sending church as its
+ * target names no counterparty and is dropped rather than rendered blank.
+ */
+export async function getPendingInvitationsForSendingChurch(
+  sendingChurchId: string,
+  now = new Date()
+): Promise<PendingInvitationView[]> {
+  const rows = await pendingInvitationsForSendingChurchQuery(
+    sendingChurchId,
+    now
+  );
+
+  return rows.flatMap((row) => {
+    if (row.type !== "sending_church_to_network") return [];
+    if (!row.sendingNetworkName) return [];
+
+    return [
+      {
+        id: row.id,
+        orgName: row.sendingNetworkName,
+        // The counterparty of a `sending_church_to_network` invitation is
+        // always a network; the field says which KIND of org is asking, and
+        // that is the one thing it can be.
+        orgType: "network" as const,
+        createdAt: row.createdAt,
+        expiresAt: row.expiresAt,
+      },
+    ];
+  });
+}
+
+/**
+ * The sending church's CURRENT network, or null.
+ *
+ * One association, not two: `sending_churches` has a single oversight FK. The
+ * screen shows it read-only — there is no sever for this side of the hierarchy
+ * (`leaveOversightOrgAs` is the PLANT's, and takes no sending-church shape), so
+ * offering a Leave button here would be a control with nothing behind it.
+ */
+export async function getCurrentNetworkAssociation(
+  sendingChurchId: string
+): Promise<CurrentAssociationView | null> {
+  const [row] = await db
+    .select({
+      sendingNetworkId: sendingChurches.sendingNetworkId,
+      sendingNetworkName: sendingNetworks.name,
+    })
+    .from(sendingChurches)
+    .leftJoin(
+      sendingNetworks,
+      eq(sendingNetworks.id, sendingChurches.sendingNetworkId)
+    )
+    .where(eq(sendingChurches.id, sendingChurchId))
+    .limit(1);
+
+  if (!row?.sendingNetworkId || !row.sendingNetworkName) return null;
+
+  return {
+    orgType: "network",
+    orgId: row.sendingNetworkId,
+    orgName: row.sendingNetworkName,
+  };
 }

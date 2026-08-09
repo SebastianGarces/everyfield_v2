@@ -22,10 +22,37 @@ Registration binds before accepting because binding leaves the row `pending` wit
 
 The rule survives; the blanket refusal it produced does not. In 2026-08-04 the only place an invitation could be answered was `/register` — the link creates the org and redeems in one request — and somebody who already registered cannot register again, so EVERY existing account was refused and `createInvitation` issued only OPEN invitations. #304 built the surface that removes the premise; see "An existing account can be invited again" below. `assertTargetSlotFree`/`heldOversightSlot` are live again as a result, on the path they were written for.
 
-**The rule is per INVITATION TYPE, and it is checked per type.** `inviteeAccountTarget` maps two roles to a target, so two of the three types can name an existing account, and each needs its own in-app answer:
+**The rule is per INVITATION TYPE, and it is checked per type.** `inviteeAccountTarget` maps two roles to a target, so two of the three types can name an existing account, and each needs its own in-app answer. As of #304 WS3 (ruled 2026-08-09) **both of them have one**:
 
 * `church_to_sending_church` / `church_to_network` → the target is a plant, the answerer is its planter, and the surface is `/settings/association` plus the dashboard reminder (#304 WS1);
-* `sending_church_to_network` → the target is a sending church and the answerer is its admin. `verifyInvitationAuthority` has always accepted that answer (`core.ts`, the `sending_church_to_network` arm); the SURFACE that offers it is #304 WS3, and until that lands a `sending_church_admin` can be targeted with nowhere in the product to answer from. That gap is the one HR4 found on 2026-08-09, and Sebastian ruled it closed by BUILDING the surface, not by re-gating the path.
+* `sending_church_to_network` → the target is a sending church and the answerer is its admin. `verifyInvitationAuthority` has always accepted that answer (`core.ts`, the `sending_church_to_network` arm); the SURFACE that offers it is the second view of `/settings/association` (#304 WS3).
+
+That second view is what closes the gap HR4 found on 2026-08-09 — a `sending_church_admin` was targetable with nowhere in the product to answer from — and Sebastian ruled it closed by BUILDING the surface, not by re-gating the path. The first build's own rewrite of this file declared the rule resolved for all roles while it was true only for planters; it is now true, and it is true by a test rather than by this paragraph.
+
+**ONE ROUTE, TWO VIEWS, and the authority rule is shared.** `/settings/association` branches on the session's role: a `planter` with a plant gets the plant view, a `sending_church_admin` with a sending church gets the network view, everyone else is redirected. The redirect is not the control — both views hand the same `acceptAssociationInvitation` / `declineAssociationInvitation` actions an invitation id and nothing else, so WHO may answer is decided once, per invitation TYPE, by `verifyInvitationAuthority`. A non-admin member of the target sending church is refused there, exactly as a `team_member` of a plant is. There is no second pair of endpoints for the two surfaces to disagree about.
+
+**How the claim stays true.** `answer-surfaces.test.ts` enumerates `organizationInvitationTypes` and, for each type that `inviteeAccountTarget` can produce, asserts three things: the role that answers it, that a surface reads a pending list for that role, and that `/settings` links the surface to that role. A fourth invitation type, or a third role added to `inviteeAccountTarget`, fails that test until its answering view exists — which is the only form of this invariant that cannot rot.
+
+**WHAT THE SENDING CHURCH'S ACCEPT DOES NOT DO, and why.** It sets `sending_churches.sending_network_id` through the ordinary accept batch, and that is all: there is **no `association_events` row and no milestone notification**. Both tables are CHURCH-scoped by a NOT NULL `church_id` — `association_events.church_id` because its subject is a plant (see that table's own header, which asks for a subject column and a ruling before this changes), and `notifications.church_id` because it is the tenancy boundary every read filters on (N-010). A sending church joining a network names no church, so neither row has anywhere to be filed. The record it does leave is the invitation itself — `status`, `responded_by`, `responded_at` — and the network reads the answer in its own invitations list, which is where its outstanding invitations already live. Nulling either tenant column to make room for this is the change neither table permits; the subject column is.
+
+For the same reason the sending-church view offers **no Leave control**. A sever has to be audited (#274/OV-007: type-to-confirm, a notification, an `association_events` row), and the audit has nowhere to go — so the button waits on that ruling rather than shipping a sever with no record of who ended it.
+
+## An org cannot keep a banner up (#304, HR4 2026-08-09)
+
+Restoring the targeted path gave an oversight admin a write onto a stranger's screen: a targeted invitation raises the dashboard reminder, the reminder is dismissible only by ANSWERING (OV-005), and the org's own display name is inside it. `assertNoDuplicatePending` stops two standing at once and does nothing about the replay — a declined row is no longer pending, so the org could re-issue immediately and forever.
+
+`assertInviteRateLimit` caps it: `INVITES_PER_INVITEE_PER_WINDOW` (3) invitations from one inviting org to one address per `INVITATION_EXPIRY_DAYS`, counting **every status**. Counting only pending rows would count exactly the invitations that are not the problem.
+
+Two placement facts matter more than the numbers:
+
+* it runs **before `resolveInvitationTarget`**, so it is not one of the post-resolution refusals that must collapse into `ACCOUNT_NOT_INVITABLE_MESSAGE`. It reads only rows the caller's own org wrote, to an address the caller itself typed;
+* it applies to **open invitations too**. A cap that only bit on the targeted path would be the oracle in another costume — "that address is rate-limited, so somebody has an account there".
+
+It is SELECT-then-INSERT and therefore not a concurrency guard (`transactions-atomicity.md`). Accepted: two simultaneous submissions can both pass the fourth attempt, and one extra row does not threaten "an org cannot keep a banner up indefinitely".
+
+## The success notice may only offer a link that works (#304, HR4 2026-08-09)
+
+`/register?invitation=…` is the delivery mechanism for an OPEN invitation and a dead end for a targeted one: the addressee already has an account and cannot register again. `createInvitationAction` therefore reports `inviteePath: null` when the row it just wrote carries either target, read off the row rather than guessed from the address — `resolveInvitationTarget` is the only thing that knows. The notice then tells the admin the invitee answers in-app, instead of handing them something useless to forward.
 
 ## A token is bound to the address (ruled 2026-08-04, #23)
 
