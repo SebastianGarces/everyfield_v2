@@ -14,10 +14,12 @@ import { HeaderBreadcrumbs } from "@/components/header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { ResendNonOpeners } from "@/components/communication/resend-non-openers";
 import { verifySession } from "@/lib/auth/session";
 import {
   getCommunication,
   getCommunicationRecipients,
+  getNonOpenerSummary,
 } from "@/lib/communication/service";
 import {
   renderTemplate,
@@ -75,9 +77,10 @@ export default async function MessageDetailPage({
   if (!user.churchId) redirect("/dashboard");
 
   const { id } = await params;
-  const [comm, recipients] = await Promise.all([
+  const [comm, recipients, nonOpeners] = await Promise.all([
     getCommunication(user.churchId, id),
     getCommunicationRecipients(id),
+    getNonOpenerSummary(user.churchId, id),
   ]);
 
   if (!comm) notFound();
@@ -184,6 +187,15 @@ export default async function MessageDetailPage({
                 <ExternalLink className="h-3 w-3" />
               </Link>
             )}
+          </div>
+          {/* Resend to non-openers (COM-018) */}
+          <div className="mt-4">
+            <ResendNonOpeners
+              communicationId={comm.id}
+              nonOpenerCount={nonOpeners.personIds.length}
+              openedCount={nonOpeners.opened}
+              canResend={comm.status === "sent"}
+            />
           </div>
         </div>
 
