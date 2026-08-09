@@ -60,8 +60,10 @@ function stripComments(source: string): string {
 
 const STEP = read("components", "onboarding", "journey-step.tsx");
 const STEP_CODE = stripComments(STEP);
+// The interactive half of the flow — `onboarding-flow.tsx` is the server
+// component that resolves OB-015's facts and renders this one.
 const FLOW_CODE = stripComments(
-  read("components", "onboarding", "onboarding-flow.tsx")
+  read("components", "onboarding", "onboarding-flow-client.tsx")
 );
 const ACTIONS_CODE = stripComments(
   read("app", "(dashboard)", "dashboard", "actions.ts")
@@ -178,7 +180,7 @@ test("the flow advances only once the declaration has committed", () => {
   assert.match(FLOW_CODE, /function handleDeclared\(phase: number\) \{/);
   assert.match(
     FLOW_CODE,
-    /function handleDeclared\(phase: number\) \{\s*setDeclaredPhase\(phase\);\s*goForward\(\);/
+    /function handleDeclared\(phase: number\) \{\s*setDeclaredThisVisit\(phase\);\s*goForward\(\);/
   );
 
   // The step reports the phase the server now HOLDS, not the value submitted —

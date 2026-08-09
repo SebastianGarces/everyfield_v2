@@ -4,10 +4,16 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { JOURNEY_STAGE_OPTIONS } from "@/lib/onboarding/steps";
+import {
+  TEAM_TEMPLATES,
+  getTotalRoleTemplateCount,
+} from "@/lib/ministry-teams/role-templates";
 
 import {
   TEAM_TEMPLATE_OFFER_MIN_PHASE,
+  meetsTeamTemplateOfferPhase,
   shouldOfferTeamTemplates,
+  teamTemplateOfferSummary,
 } from "./team-template-offer";
 
 // ============================================================================
@@ -18,7 +24,9 @@ import {
 //   * THE GATE is a real function with a real boundary, so it is tested as one
 //     — every stage a planter can declare, against the answer the FRD gives.
 //     "Phase 0 or 1 never sees the offer" is the criterion that has to survive
-//     someone later deciding the offer would be nice for everyone.
+//     someone later deciding the offer would be nice for everyone, and the
+//     2026-08-09 ruling adds the other half: the gate reads the PLANT'S STATE,
+//     so a resumed session gets the same answer as a straight-through one.
 //
 //   * THE CALLER is source-shaped, the form this repo already uses for a call
 //     site (`people-step.test.ts`, `journey-step.test.ts`). What OB-015 asks
@@ -48,14 +56,20 @@ function stripComments(source: string): string {
 
 const SCREEN = read("components", "onboarding", "finish-screen.tsx");
 const SCREEN_CODE = stripComments(SCREEN);
+const OFFER_CODE = stripComments(
+  read("components", "onboarding", "team-template-offer.ts")
+);
 const FLOW_CODE = stripComments(
+  read("components", "onboarding", "onboarding-flow-client.tsx")
+);
+const FLOW_SERVER_CODE = stripComments(
   read("components", "onboarding", "onboarding-flow.tsx")
 );
 const TEAM_ACTIONS = read("app", "(dashboard)", "teams", "actions.ts");
 const TEAM_ACTIONS_CODE = stripComments(TEAM_ACTIONS);
 
 /**
- * The new action's body, for assertions about what it is made of. Bounded by
+ * The offer action's body, for assertions about what it is made of. Bounded by
  * the next export, because the comment banners are gone from the stripped
  * source this slices.
  */
@@ -77,12 +91,12 @@ const OFFER_ACTION = (() => {
 test("phase 0 and 1 never see the offer; 2 and later always do", () => {
   assert.equal(TEAM_TEMPLATE_OFFER_MIN_PHASE, 2);
 
-  assert.equal(shouldOfferTeamTemplates(0), false);
-  assert.equal(shouldOfferTeamTemplates(1), false);
+  assert.equal(meetsTeamTemplateOfferPhase(0), false);
+  assert.equal(meetsTeamTemplateOfferPhase(1), false);
 
   for (const phase of [2, 3, 4, 5, 6]) {
     assert.equal(
-      shouldOfferTeamTemplates(phase),
+      meetsTeamTemplateOfferPhase(phase),
       true,
       `a planter declaring phase ${phase} is forming teams already`
     );
@@ -95,7 +109,10 @@ test("every stage the picker offers gets a defined answer", () => {
   // the point: an unsure planter is not handed ten empty teams.
   for (const option of JOURNEY_STAGE_OPTIONS) {
     assert.equal(
-      shouldOfferTeamTemplates(option.phase),
+      shouldOfferTeamTemplates({
+        declaredPhase: option.phase,
+        teamsInitialized: false,
+      }),
       option.phase >= TEAM_TEMPLATE_OFFER_MIN_PHASE,
       `stage "${option.value}" (phase ${option.phase})`
     );
@@ -103,18 +120,124 @@ test("every stage the picker offers gets a defined answer", () => {
 });
 
 test("an unknown declaration is a no, never a guess", () => {
-  // A planter who skipped step 3, or who is finishing from a step they reached
-  // without declaring. Guessing high would push the whole team structure onto a
-  // plant that never said it was ready for it.
-  assert.equal(shouldOfferTeamTemplates(null), false);
-  assert.equal(shouldOfferTeamTemplates(undefined), false);
-  assert.equal(shouldOfferTeamTemplates(Number.NaN), false);
-  assert.equal(shouldOfferTeamTemplates(2.5), false);
-  assert.equal(shouldOfferTeamTemplates("3" as unknown as number), false);
+  // A plant with no church row yet, or one whose phase could not be read.
+  // Guessing high would push the whole team structure onto a plant that never
+  // said it was ready for it.
+  for (const phase of [
+    null,
+    undefined,
+    Number.NaN,
+    2.5,
+    "3" as unknown as number,
+  ]) {
+    assert.equal(
+      shouldOfferTeamTemplates({
+        declaredPhase: phase,
+        teamsInitialized: false,
+      }),
+      false,
+      `${String(phase)} is not a declaration`
+    );
+  }
 });
 
 // ----------------------------------------------------------------------------
-// 2. The flow shows the screen only through the gate
+// 2. Ruling 2026-08-09 — the offer is STATE-driven, not path-driven
+// ----------------------------------------------------------------------------
+
+test("a plant at phase 2+ with no teams is offered them, whatever the path", () => {
+  // The reproduced defect this pins: a planter who declared phase 3 in an
+  // earlier session and resumed onboarding today reached a finish screen with
+  // nothing on it but "Go to my dashboard". The gate now takes the phase the
+  // CHURCH ROW holds, so the two paths cannot answer differently — there is no
+  // input to this function that says how the planter got here.
+  assert.equal(
+    shouldOfferTeamTemplates({ declaredPhase: 3, teamsInitialized: false }),
+    true
+  );
+  assert.equal(
+    shouldOfferTeamTemplates({ declaredPhase: 2, teamsInitialized: false }),
+    true
+  );
+});
+
+test("a plant that already has teams is offered nothing", () => {
+  // Pressing the card would be a no-op: `initializeTeamsWithRolesAction` refuses
+  // a church that already has teams, because the initialization inserts
+  // unconditionally. An offer that does nothing is worse than no offer.
+  for (const phase of [2, 3, 6]) {
+    assert.equal(
+      shouldOfferTeamTemplates({
+        declaredPhase: phase,
+        teamsInitialized: true,
+      }),
+      false,
+      `phase ${phase} with teams already initialized`
+    );
+  }
+
+  // …and the two halves are AND, not OR: no teams is not enough on its own.
+  assert.equal(
+    shouldOfferTeamTemplates({ declaredPhase: 1, teamsInitialized: false }),
+    false
+  );
+});
+
+test("the server half resolves both facts and hands them down", () => {
+  // The ruling only holds if the phase comes from the church row on EVERY
+  // render, so the resumed session sees the same thing the straight-through one
+  // does. Reading it in the server component is what makes that true — and is
+  // why the client half can hold no copy of it (`data-patterns.md`).
+  assert.match(
+    FLOW_SERVER_CODE,
+    /import \{ getCurrentUserChurch \} from "@\/lib\/auth"/
+  );
+  assert.match(
+    FLOW_SERVER_CODE,
+    /import \{ listTeams \} from "@\/lib\/ministry-teams\/service"/
+  );
+  assert.match(FLOW_SERVER_CODE, /await getCurrentUserChurch\(\)/);
+  assert.match(
+    FLOW_SERVER_CODE,
+    /declaredPhase=\{church\?\.currentPhase \?\? null\}/
+  );
+  assert.match(FLOW_SERVER_CODE, /teamsInitialized=\{teams\.length > 0\}/);
+
+  // No church means no plant to ask about — and no team read either.
+  assert.match(
+    FLOW_SERVER_CODE,
+    /church \? await listTeams\(church\.id\) : \[\]/
+  );
+
+  // The server half is a resolver, not a second flow: it renders the client one
+  // and nothing else.
+  assert.match(FLOW_SERVER_CODE, /<OnboardingFlowClient/);
+  assert.equal(
+    FLOW_SERVER_CODE.includes("use client"),
+    false,
+    "the resolving half must stay a server component"
+  );
+});
+
+test("the client half never stores the declared phase, it only overrides it", () => {
+  // memory/contracts/data-patterns.md — server data arrives as props. The one
+  // piece of state is the answer step 3 just reported, which takes precedence
+  // over a prop resolved before the declaration existed and is null on every
+  // later visit.
+  assert.match(
+    FLOW_CODE,
+    /shouldOfferTeamTemplates\(\{\s*declaredPhase: declaredThisVisit \?\? declaredPhase,\s*teamsInitialized,\s*\}\)/
+  );
+  assert.equal(
+    /useState<number \| null>\(declaredPhase\)/.test(FLOW_CODE),
+    false,
+    "the prop must not be seeded into state — it would go stale on revalidation"
+  );
+  assert.equal(/useEffect\(\(\) => set/.test(FLOW_CODE), false);
+});
+
+// ----------------------------------------------------------------------------
+// 3. The flow shows the screen only through the gate
 // ----------------------------------------------------------------------------
 
 test("the finish screen is reached through the gate, on every way out", () => {
@@ -131,7 +254,7 @@ test("the finish screen is reached through the gate, on every way out", () => {
   const finishBody = FLOW_CODE.slice(FLOW_CODE.indexOf("function finish() {"));
   assert.match(
     finishBody,
-    /function finish\(\) \{\s*if \(!atFinishScreen && shouldOfferTeamTemplates\(declaredPhase\)\) \{[\s\S]*?setAtFinishScreen\(true\);\s*return;\s*\}/
+    /function finish\(\) \{\s*if \(!atFinishScreen && offerTeamTemplates\) \{[\s\S]*?setAtFinishScreen\(true\);\s*return;\s*\}/
   );
   assert.ok(
     finishBody.indexOf("setAtFinishScreen(true)") <
@@ -152,12 +275,13 @@ test("the finish screen is reached through the gate, on every way out", () => {
   // and the flow would have no way out at all.
   assert.match(FLOW_CODE, /<FinishScreen onDone=\{finish\} busy=\{finishing\}/);
 
-  // The gate decides the screen and the last step's label, and nothing else.
+  // The gate is evaluated ONCE, and its answer decides the screen and the last
+  // step's label — nothing else.
   assert.equal(
-    (FLOW_CODE.match(/shouldOfferTeamTemplates\(declaredPhase\)/g) ?? [])
-      .length,
-    2
+    (FLOW_CODE.match(/shouldOfferTeamTemplates\(/g) ?? []).length,
+    1
   );
+  assert.equal((FLOW_CODE.match(/offerTeamTemplates/g) ?? []).length, 3);
 });
 
 test("the flow still owns no write of its own", () => {
@@ -174,11 +298,16 @@ test("the flow still owns no write of its own", () => {
       false,
       `${symbol} belongs to the component that owns it, never to the flow`
     );
+    assert.equal(
+      FLOW_SERVER_CODE.includes(symbol),
+      false,
+      `${symbol} belongs to the component that owns it, never to the flow`
+    );
   }
 });
 
 // ----------------------------------------------------------------------------
-// 3. Accepting runs the EXISTING initialization; declining does nothing
+// 4. Accepting runs the EXISTING initialization; declining does nothing
 // ----------------------------------------------------------------------------
 
 test("accepting calls the one action, and declining calls none", () => {
@@ -242,7 +371,8 @@ test("the offer's action is a caller of the shipped initialization", () => {
   }
 
   // Running it against a church that already has teams would duplicate them,
-  // because the initialization inserts unconditionally.
+  // because the initialization inserts unconditionally. The card asks the same
+  // question before it appears at all (`shouldOfferTeamTemplates`).
   assert.match(OFFER_ACTION, /await listTeamsAction\(\)/);
   assert.match(OFFER_ACTION, /existing\.data\.length > 0/);
 });
@@ -258,7 +388,7 @@ test("the action takes no argument that names an actor or a church", () => {
 });
 
 // ----------------------------------------------------------------------------
-// 4. No roster assignment, no role editing — the card links out instead
+// 5. No roster assignment, no role editing — the card links out instead
 // ----------------------------------------------------------------------------
 
 test("the finish screen carries no staffing or editing surface", () => {
@@ -286,33 +416,63 @@ test("the finish screen carries no staffing or editing surface", () => {
   assert.match(SCREEN_CODE, /href="\/teams"/);
 });
 
+// ----------------------------------------------------------------------------
+// 6. The copy: counts come from the templates, and keep their spaces
+// ----------------------------------------------------------------------------
+
 test("the offer says what it creates, from the templates themselves", () => {
   // Hard-coded counts in the copy are a promise the templates can break
   // silently, so the numbers are read from the same list the action initializes.
   assert.match(
-    SCREEN_CODE,
+    OFFER_CODE,
     /import \{\s*TEAM_TEMPLATES,\s*getTotalRoleTemplateCount,\s*\} from "@\/lib\/ministry-teams\/role-templates"/
   );
-  assert.match(SCREEN_CODE, /TEAM_TEMPLATES\.length/);
-  assert.match(SCREEN_CODE, /getTotalRoleTemplateCount\(\)/);
 
-  // And it is honest about what it does not do.
+  const summary = teamTemplateOfferSummary();
+  assert.ok(summary.includes(String(TEAM_TEMPLATES.length)));
+  assert.ok(summary.includes(String(getTotalRoleTemplateCount())));
+
+  // And the screen renders that one string rather than assembling its own.
+  assert.match(SCREEN_CODE, /\{teamTemplateOfferSummary\(\)\}/);
+  assert.equal(SCREEN_CODE.includes("TEAM_TEMPLATES.length"), false);
+
+  // It is honest about what it does not do.
   assert.match(SCREEN, /teams start empty/i);
 });
 
+test("no count is ever fused to the word after it", () => {
+  // The G4 copy defect: a number rendered next to a JSX expression lost its
+  // space ("10ministry teams"). The sentence is one string now, so the space is
+  // part of it — and this is the assertion that says so for any counts.
+  for (const [teams, roles] of [
+    [TEAM_TEMPLATES.length, getTotalRoleTemplateCount()],
+    [3, 7],
+    [1, 1],
+  ]) {
+    const summary = teamTemplateOfferSummary(teams, roles);
+    assert.doesNotMatch(
+      summary,
+      /\d\p{L}/u,
+      `a count is fused to the word after it: ${summary}`
+    );
+    assert.match(summary, new RegExp(`\\b${teams} standard ministry teams\\b`));
+    assert.match(summary, new RegExp(`\\b${roles} role descriptions\\b`));
+  }
+});
+
 // ----------------------------------------------------------------------------
-// 5. Repo rules (FRD AC 7)
+// 7. Repo rules (FRD AC 7)
 // ----------------------------------------------------------------------------
 
-test("every button on the finish screen carries cursor-pointer", () => {
-  const buttons = SCREEN.match(/<Button\b[\s\S]*?>/g) ?? [];
-  assert.ok(buttons.length > 0, "expected the screen to render buttons");
+test("every clickable on the finish screen carries cursor-pointer", () => {
+  const clickables = SCREEN.match(/<(?:Button|Link)\b[\s\S]*?>/g) ?? [];
+  assert.ok(clickables.length > 0, "expected the screen to render controls");
 
-  for (const button of buttons) {
+  for (const clickable of clickables) {
     assert.match(
-      button,
+      clickable,
       /cursor-pointer/,
-      `a <Button> in finish-screen.tsx is missing cursor-pointer: ${button}`
+      `a control in finish-screen.tsx is missing cursor-pointer: ${clickable}`
     );
   }
 });

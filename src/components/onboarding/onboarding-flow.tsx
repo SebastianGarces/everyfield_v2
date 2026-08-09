@@ -1,71 +1,33 @@
-"use client";
+import { getCurrentUserChurch } from "@/lib/auth";
+import { listTeams } from "@/lib/ministry-teams/service";
+import type { ChurchLeadershipStatus } from "@/lib/onboarding/leadership";
+import type { OnboardingStepId } from "@/lib/onboarding/steps";
 
-import { useEffect, useRef, useState, useTransition } from "react";
-import { Church } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-} from "@/components/ui/card";
-import { completeOnboarding } from "@/app/(dashboard)/dashboard/actions";
-import {
-  ONBOARDING_STEP_IDS,
-  isSkippableOnboardingStep,
-  nextOnboardingStep,
-  onboardingStep,
-  previousOnboardingStep,
-  type OnboardingStepId,
-} from "@/lib/onboarding/steps";
-import {
-  leadershipAnswerForStatus,
-  type ChurchLeadershipStatus,
-} from "@/lib/onboarding/leadership";
-import { ChurchBasicsStep } from "./church-basics-step";
-import { FinishScreen } from "./finish-screen";
-import { JourneyStep } from "./journey-step";
-import { LeadershipStep } from "./leadership-step";
-import { OnboardingStepRail } from "./onboarding-step-rail";
-import { PeopleStep } from "./people-step";
-import { shouldOfferTeamTemplates } from "./team-template-offer";
+import { OnboardingFlowClient } from "./onboarding-flow-client";
 
 /**
- * F12 / OB-001 — the multi-step onboarding flow that replaces the single-field
- * create-church card as the primary dashboard content for a planter who has not
- * finished setting up.
+ * F12 / OB-001 + OB-015 — the onboarding flow as a call site sees it: give it
+ * the two things only the page knows (where to land, and the recorded
+ * leadership answer) and it resolves the rest itself.
  *
- * Which step is showing is UI state, not server state: the server decides where
- * the planter LANDS (`initialStep`, derived from what the church already
- * knows), the planter decides where they go from there. A page reload re-derives
- * the landing step from the database, so an abandoned flow resumes correctly
- * without anything being persisted per step.
+ * WHY THERE IS A SERVER HALF AT ALL (ruling 2026-08-09). OB-015's offer is
+ * gated on two facts about the PLANT — the phase it declared and whether it
+ * already has teams — and both of them outlive the visit that produced them.
+ * The first build read the phase from a variable set by step 3, so a planter
+ * who declared phase 3, closed the tab, and resumed the next day reached the
+ * end of onboarding with no offer: their answer was on the church row the whole
+ * time and nothing was reading it. Resolving both facts here makes the offer
+ * state-driven — the same answer however the planter arrived — and keeps them
+ * out of client state entirely (`memory/contracts/data-patterns.md`: server
+ * data flows through props).
  *
- * OB-007 — STEPS COMMIT INDEPENDENTLY, and this component is what makes that
- * true rather than merely intended. It holds no draft of anybody's answers:
- * each step owns its own form, saves through its own action, and only calls
- * back here once its write has committed. So there is no "submit the wizard"
- * moment, nothing accumulated in memory for a later failure to lose, and a step
- * that fails to save leaves every earlier step exactly as saved.
- *
- * Skipping is the same move minus the write (every step after step 1 is
- * `skippable`), which is why a skip is `goForward()` and nothing else — it
- * cannot lose an answer because it never had one.
+ * BOTH READS ARE CHEAP AT THIS POINT IN THE PRODUCT. `getCurrentUserChurch` is
+ * `React.cache()`d and the dashboard page has already called it, so it costs
+ * this render nothing. `listTeams` is a single indexed select while a plant has
+ * no teams — which is every plant that will be shown the offer — and it is only
+ * reached at all while onboarding is unfinished.
  */
-/**
- * Shown when the finish request itself failed — as opposed to `completeOnboarding`
- * returning a reason, which is rendered verbatim. Says what is safe (everything
- * already saved) and what to do (press it again), because both are true.
- */
-const FINISH_FAILED_MESSAGE =
-  "We could not finish setting up just now. Everything you have saved is safe — please try again.";
-
-/** The finish screen's own heading and line, in the shape the steps use. */
-const FINISH_SCREEN_TITLE = "You are set up";
-const FINISH_SCREEN_DESCRIPTION =
-  "One suggestion for where you said you are, then your dashboard.";
-
-export function OnboardingFlow({
+export async function OnboardingFlow({
   initialStep,
   leadershipStatus,
 }: {
@@ -73,265 +35,23 @@ export function OnboardingFlow({
   /** The church's recorded OB-004 answer, so step 2 opens on it. */
   leadershipStatus: ChurchLeadershipStatus | null | undefined;
 }) {
-  const [step, setStep] = useState<OnboardingStepId>(initialStep);
-  const [finishing, startFinishing] = useTransition();
-  const [finishError, setFinishError] = useState<string | null>(null);
-
-  // OB-015 — the two facts the finish screen needs.
-  //
-  // `declaredPhase` is NOT a cached copy of `churches.current_phase`
-  // (`memory/contracts/data-patterns.md`): nothing renders it, the database's
-  // copy is written and revalidated by step 3's own action, and this holds only
-  // what that action REPORTED BACK about the answer just given — which of the
-  // remaining screens comes next, in the same way `step` holds which step is
-  // showing. A planter who never passed through step 3 in this visit leaves it
-  // null and is not offered anything, which is the honest answer: the offer
-  // follows the declaration, and /teams carries the same setup permanently.
-  const [declaredPhase, setDeclaredPhase] = useState<number | null>(null);
-  const [atFinishScreen, setAtFinishScreen] = useState(false);
-
-  // Focus the step heading whenever the planter moves, so a keyboard or screen
-  // reader user is placed at the new step instead of at the top of the document
-  // (or, worse, on a control that no longer exists). Skipped on first render —
-  // arriving on a page should not yank focus.
-  const headingRef = useRef<HTMLHeadingElement>(null);
-  const hasNavigated = useRef(false);
-
-  useEffect(() => {
-    if (!hasNavigated.current) return;
-    headingRef.current?.focus();
-  }, [step, atFinishScreen]);
-
-  function goTo(next: OnboardingStepId) {
-    hasNavigated.current = true;
-    setFinishError(null);
-    setStep(next);
-  }
-
-  function goForward() {
-    const next = nextOnboardingStep(step);
-
-    if (next) {
-      goTo(next);
-      return;
-    }
-
-    // Past the last step there is only the dashboard, so "forward" from there
-    // is finishing — which is what makes "completing OR skipping through the
-    // final step lands on /dashboard?churchCreated=true" true of every control
-    // that moves forward, not just of the one labelled Finish (OB-001 AC).
-    finish();
-  }
-
-  // OB-005 tells us where the planter says they are, and OB-015 spends it: the
-  // stored phase comes back from step 3's action, so a re-declaration reports
-  // the phase the dashboard is about to render rather than the one just typed.
-  function handleDeclared(phase: number) {
-    setDeclaredPhase(phase);
-    goForward();
-  }
-
-  // OB-007: skipping is advancing without writing. It shares `goForward` on
-  // purpose — a skip that had its own path could grow a save, and the whole
-  // point of the control is that nothing is committed by it.
-  const canSkip = isSkippableOnboardingStep(step) && !finishing;
-
-  // Step 1 is not re-enterable: the church already exists, so a second submit
-  // would be a no-op that advances again rather than an edit (see the
-  // already-have-church branch in `runCreateChurch`). Changing the name or
-  // location later is church settings' job (OB-008).
-  const previousStep = previousOnboardingStep(step);
-  const backTarget = previousStep === "basics" ? null : previousStep;
-
-  function goBack() {
-    if (backTarget) goTo(backTarget);
-  }
-
-  /**
-   * The flow's ONE exit, which is why OB-015's offer lives inside it rather
-   * than on the control that happens to be pressed: every way out — Continue
-   * past the last step, "Finish setup later" from any step, the finish screen's
-   * own "not now" — arrives here, so the offer cannot be reachable from one and
-   * missing from another.
-   *
-   * The offer is a screen, not a dialog: it takes over the card the steps were
-   * in, and returning early leaves the planter in the flow with nothing
-   * committed. The `atFinishScreen` guard is what keeps the second press (the
-   * decline, which is this same function) from re-offering forever.
-   */
-  function finish() {
-    if (!atFinishScreen && shouldOfferTeamTemplates(declaredPhase)) {
-      hasNavigated.current = true;
-      setFinishError(null);
-      setAtFinishScreen(true);
-      return;
-    }
-
-    setFinishError(null);
-    startFinishing(async () => {
-      try {
-        // Resolves only on FAILURE — success redirects to
-        // /dashboard?churchCreated=true and this callback never continues. So
-        // the result is optional by contract (#243:
-        // `CompleteOnboardingState | void`) and is read with `?.` rather than on
-        // the assumption that `redirect()` stays typed `never`.
-        const result = await completeOnboarding();
-        setFinishError(result?.error ?? null);
-      } catch {
-        // The OTHER way the action can fail to return a state: it REJECTED —
-        // the request never reached the server, or the server threw something
-        // it did not turn into an outcome. Uncaught, that rejection escapes an
-        // async transition callback, so nothing renders and the button is left
-        // sitting in its pending state: the planter's church, their leadership
-        // answer and their people are all safely saved, and the only thing they
-        // can see is a control that no longer responds. Caught, the same
-        // failure is a message and a button they can press again — finishing is
-        // idempotent (the `IS NULL` guard on `onboarding_completed_at`), so a
-        // retry is always safe.
-        //
-        // This does not swallow the success path: `redirect()` in a server
-        // action is carried back as a navigation, not as a rejection here.
-        setFinishError(FINISH_FAILED_MESSAGE);
-      }
-    });
-  }
-
-  const current = onboardingStep(step);
+  // Step 1 may not have run yet, in which case there is no plant to ask about
+  // and no offer to make. `getCurrentUserChurch` is the session's own church,
+  // so nothing here takes a church from the caller (`memory/invariants.md` →
+  // Multi-Tenancy).
+  const church = await getCurrentUserChurch();
+  const teams = church ? await listTeams(church.id) : [];
 
   return (
-    <div className="mx-auto w-full max-w-2xl space-y-6">
-      <div className="space-y-4">
-        <div className="flex items-center gap-3">
-          <div className="bg-primary/10 flex size-10 items-center justify-center rounded-lg">
-            <Church className="text-primary size-5" aria-hidden="true" />
-          </div>
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight">
-              Set up your church plant
-            </h1>
-            <p className="text-muted-foreground text-sm">
-              A few quick questions so EveryField matches where you actually
-              are. Only the first step is required.
-            </p>
-          </div>
-        </div>
-
-        {/* The rail describes the four steps, and the finish screen is not one
-            of them — it is what stands between the last step and the dashboard,
-            so leaving it out says "the steps are behind you" rather than
-            inventing a fifth. */}
-        {!atFinishScreen && <OnboardingStepRail currentStep={step} />}
-      </div>
-
-      <Card>
-        <CardHeader>
-          <p className="text-muted-foreground text-sm font-medium">
-            {atFinishScreen
-              ? "Setup complete"
-              : `Step ${current.number} of ${ONBOARDING_STEP_IDS.length}`}
-          </p>
-          {/* tabIndex -1 so focus can be moved here on step change without
-              adding a stop to the tab order. */}
-          <h2
-            ref={headingRef}
-            tabIndex={-1}
-            className="text-lg leading-none font-semibold outline-none"
-          >
-            {atFinishScreen ? FINISH_SCREEN_TITLE : current.title}
-          </h2>
-          <CardDescription>
-            {atFinishScreen ? FINISH_SCREEN_DESCRIPTION : current.description}
-          </CardDescription>
-        </CardHeader>
-
-        <CardContent className="space-y-4">
-          {finishError && (
-            <p
-              role="alert"
-              className="bg-destructive/10 text-destructive rounded-md p-3 text-sm"
-            >
-              {finishError}
-            </p>
-          )}
-
-          {atFinishScreen ? (
-            // OB-015: the stage-gated offer. It is reached only through the
-            // gate in `finish()`, so by here the planter has declared phase 2
-            // or later — the screen itself asks nothing about the phase, and
-            // its "not now" is the same `finish` that put them here.
-            <FinishScreen onDone={finish} busy={finishing} />
-          ) : step === "basics" ? (
-            <ChurchBasicsStep onCreated={goForward} />
-          ) : step === "leadership" ? (
-            <LeadershipStep
-              initialAnswer={leadershipAnswerForStatus(leadershipStatus)}
-              onSaved={goForward}
-              secondary={
-                <>
-                  {/* OB-007: step 2 is skippable like every step after the
-                      first. Without this the only ways out were answering the
-                      question or leaving the flow entirely — which is the
-                      "wizard prison" the FRD is written against. Skipping
-                      writes nothing, so the question stays unanswered and the
-                      planter resumes here on their next visit. */}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="cursor-pointer"
-                    onClick={goForward}
-                    disabled={!canSkip}
-                  >
-                    Skip for now
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="cursor-pointer"
-                    onClick={finish}
-                    disabled={finishing}
-                  >
-                    Finish setup later
-                  </Button>
-                </>
-              }
-            />
-          ) : step === "journey" ? (
-            // OB-003 + OB-005: the launch date (through the launch entity's
-            // service write path — never a column on `churches`) and the
-            // initial stage declaration, committed together.
-            <JourneyStep
-              onDeclared={handleDeclared}
-              onBack={backTarget ? goBack : null}
-              onSkip={goForward}
-              onFinish={finish}
-              busy={finishing}
-            />
-          ) : (
-            // OB-006: the last step is real — it surfaces the existing CSV
-            // wizard and quick-add. It still writes nothing of its own, so the
-            // controls it gets are the flow's own skip/finish, unchanged.
-            <PeopleStep
-              onBack={backTarget ? goBack : null}
-              onSkip={goForward}
-              onFinish={finish}
-              busy={finishing}
-              // OB-015: on the last step the forward control normally IS the
-              // way to the dashboard, so it says so. When the offer is still to
-              // come, saying so would be a lie by one screen.
-              finishLabel={
-                shouldOfferTeamTemplates(declaredPhase) ? "Continue" : undefined
-              }
-            />
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Announced on every step change for assistive tech. */}
-      <p aria-live="polite" className="sr-only">
-        {atFinishScreen
-          ? FINISH_SCREEN_TITLE
-          : `Step ${current.number} of ${ONBOARDING_STEP_IDS.length}: ${current.title}`}
-      </p>
-    </div>
+    <OnboardingFlowClient
+      initialStep={initialStep}
+      leadershipStatus={leadershipStatus}
+      declaredPhase={church?.currentPhase ?? null}
+      // ANY team means the initialization would do nothing —
+      // `initializeTeamsWithRolesAction` refuses a church that already has
+      // teams, because `initializePredefinedTeams` inserts unconditionally. The
+      // card and the action therefore ask the same question.
+      teamsInitialized={teams.length > 0}
+    />
   );
 }

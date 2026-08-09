@@ -6,20 +6,19 @@ import { Users } from "lucide-react";
 
 import { initializeTeamsWithRolesAction } from "@/app/(dashboard)/teams/actions";
 import { Button } from "@/components/ui/button";
-import {
-  TEAM_TEMPLATES,
-  getTotalRoleTemplateCount,
-} from "@/lib/ministry-teams/role-templates";
+
+import { teamTemplateOfferSummary } from "./team-template-offer";
 
 /**
  * F12 / OB-015 — the onboarding finish screen.
  *
- * ONE OFFER, AND ONLY FOR PLANTERS WHO SAID THEY ARE THERE. A planter who
- * declared phase 2 or later is already forming teams in real life, so the
- * structure EveryField would otherwise ask them to build by hand is offered in
- * one press. Whether this screen appears at all is the flow's decision
- * (`shouldOfferTeamTemplates`, `./team-template-offer`); by the time this
- * component renders, the answer is yes.
+ * ONE OFFER, AND ONLY FOR PLANTERS WHO SAID THEY ARE THERE. A plant at phase 2
+ * or later is already forming teams in real life, so the structure EveryField
+ * would otherwise ask them to build by hand is offered in one press. Whether
+ * this screen appears at all is the flow's decision
+ * (`shouldOfferTeamTemplates`, `./team-template-offer`), taken from the plant's
+ * state rather than from the path through the flow; by the time this component
+ * renders, the answer is yes.
  *
  * DECLINING WRITES NOTHING. It is the same move as finishing without the offer
  * — `onDone()` and nothing else — which is why there is no "maybe later" state
@@ -64,8 +63,6 @@ export function FinishScreen({
   const [pressed, setPressed] = useState<"accept" | "decline" | null>(null);
 
   const disabled = pending || busy;
-  const teamCount = TEAM_TEMPLATES.length;
-  const roleCount = getTotalRoleTemplateCount();
 
   function decline() {
     setPressed("decline");
@@ -111,8 +108,7 @@ export function FinishScreen({
       )}
 
       <p className="text-sm">
-        Your church plant is saved and your dashboard is ready. One thing before
-        you go, because of where you said you are.
+        Your church plant is saved and your dashboard is ready.
       </p>
 
       <div className="border-border space-y-4 rounded-md border p-4">
@@ -121,17 +117,19 @@ export function FinishScreen({
           <h3 className="text-sm font-medium">
             Start with the standard ministry teams
           </h3>
+          {/* One expression, one sentence: the counts are built into the string
+              by `teamTemplateOfferSummary` rather than interpolated between JSX
+              children, which is where a rendered space goes missing. */}
           <p className="text-muted-foreground text-sm">
-            You are forming a launch team already, so we can create the{" "}
-            {teamCount} ministry teams a plant this far along usually needs —
-            worship, children&rsquo;s ministry, facilities, small groups and the
-            rest — each with its role descriptions ready to fill, {roleCount}{" "}
-            roles in all.
+            {teamTemplateOfferSummary()}
           </p>
           <p className="text-muted-foreground text-sm">
             The teams start empty. Naming leaders, filling roles and adding
             teams of your own all happen on{" "}
-            <Link href="/teams" className="underline underline-offset-4">
+            <Link
+              href="/teams"
+              className="cursor-pointer underline underline-offset-4"
+            >
               Teams
             </Link>
             , whenever you are ready — and so does this same setup if you would
@@ -144,6 +142,7 @@ export function FinishScreen({
           className="w-full cursor-pointer sm:w-auto"
           onClick={accept}
           disabled={disabled}
+          aria-busy={pending}
         >
           {pending
             ? "Setting up teams…"
@@ -160,6 +159,7 @@ export function FinishScreen({
           className="cursor-pointer"
           onClick={decline}
           disabled={disabled}
+          aria-busy={pressed === "decline" && busy}
         >
           {pressed === "decline" && busy
             ? "Finishing…"

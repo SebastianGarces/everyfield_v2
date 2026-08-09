@@ -53,7 +53,13 @@ function stripComments(source: string): string {
 
 const PEOPLE_STEP = read("components", "onboarding", "people-step.tsx");
 const PEOPLE_PAGE = read("app", "(dashboard)", "people", "page.tsx");
-const ONBOARDING_FLOW = read("components", "onboarding", "onboarding-flow.tsx");
+// The interactive half of the flow — `onboarding-flow.tsx` is the server
+// component that resolves OB-015's facts and renders this one.
+const ONBOARDING_FLOW = read(
+  "components",
+  "onboarding",
+  "onboarding-flow-client.tsx"
+);
 
 const IMPORT_WIZARD_MODULE = "@/components/people/import-wizard";
 const QUICK_ADD_MODULE = "@/components/people/quick-add-form";
