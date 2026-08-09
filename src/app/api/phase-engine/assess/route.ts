@@ -3,11 +3,13 @@
 //
 // Invoked ~daily by Vercel Cron (see vercel.json). Selects the plants that are
 // dirty-or-stale via the orchestrator's selection query and runs
-// `generateAssessment` for each, bounded and sequential so:
+// `generateAssessment` for each, bounded, sequential and PACED so:
 //   - quiet plants are skipped (no material event since last assessment),
 //   - each plant runs at most ~once/day with a max-staleness floor (NFR-PE-2),
 //   - one slow plant cannot blow the function timeout (the batch is capped and
-//     runs one-at-a-time; remaining plants roll over to the next run).
+//     runs one-at-a-time; remaining plants roll over to the next run),
+//   - the batch stays inside the OpenAI TPM ceiling instead of tripping it and
+//     losing plants to 429s (#36).
 //
 // Security: guarded by a CRON_SECRET bearer token. The request must carry
 // `Authorization: Bearer <CRON_SECRET>` — this is the header Vercel Cron sends
@@ -21,6 +23,43 @@
 // There are NO per-pageview LLM calls anywhere — assessments only run here (or
 // via an explicit manual trigger). `generateAssessment` makes a real OpenAI
 // call per plant, so the batch is intentionally bounded.
+//
+// ---------------------------------------------------------------------------
+// Pacing arithmetic (#36) — why MAX_BATCH is what it is
+// ---------------------------------------------------------------------------
+// One assessment costs ~13.5k tokens (whole rubric + fact ledger + up to 8
+// retrieved passages + structured output) against a 30k TPM key. The bucket
+// refills at 30000/60s = 500 tokens/s, and a run starts against an unspent
+// window, so N plants can only start once the budget for them exists:
+//
+//     tokens(N) = 13500N            must satisfy  13500N ≤ 30000 + 500·t
+//     t(N)      = (13500N - 30000) / 500  =  27N - 60   seconds
+//     total(N)  = t(N) + one call's latency (~10s)
+//
+// Against the 300s function ceiling, with a 270s soft budget (10% headroom for
+// selection, the DB writes and the event bus):
+//
+//     N = 10 → 210 + 10 = 220s   ✅
+//     N = 11 → 237 + 10 = 247s   ✅
+//     N = 12 → 264 + 10 = 274s   ❌ over the soft budget
+//
+// 11 is the true maximum, so MAX_BATCH = 10 — one whole call of headroom,
+// because judge latency is the variable nobody controls.
+//
+// The old MAX_BATCH of 25 needed 27×25 − 60 + 10 = 625s: more than twice the
+// ceiling, which is exactly why the tail of every batch was lost.
+//
+// None of those constants are load-bearing at runtime: RUN_BUDGET_MS is the
+// real guard, and the pacer re-derives the ceiling and the per-call cost from
+// the provider's own `x-ratelimit-*` headers, so a tier upgrade to 150k TPM
+// makes the batch five times faster with no code change (the budget stop then
+// lets all 10 through in ~60s). MAX_BATCH is the hard ceiling for the tier we
+// are actually on.
+//
+// Cohort note: at ~10-15 alpha plants a daily cron with MAX_BATCH=10 can leave
+// the tail a day stale. The fix is frequency, not a bigger batch — drive this
+// route twice daily from the GitHub Actions tick that already exists for
+// `/api/notifications/dispatch` (Hobby caps Vercel crons at daily).
 // ============================================================================
 
 import { NextRequest, NextResponse } from "next/server";
@@ -30,6 +69,11 @@ import {
   selectPlantsForAssessment,
   type SelectedPlant,
 } from "@/lib/phase-engine/assessment";
+import {
+  isRateLimitDeferral,
+  TokenPacer,
+  type RateLimitEvent,
+} from "@/lib/phase-engine/judge";
 import { matchesBearerSecret } from "@/lib/security/constant-time";
 
 // This runner orchestrates real LLM calls and DB writes — never cache it.
@@ -37,17 +81,45 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 /**
- * Max number of plants assessed in a single cron run. Each plant makes a real
- * OpenAI call, so we cap the batch to keep the function well under its timeout.
- * Plants beyond the cap remain dirty/stale and are picked up on the next run.
+ * The function's own ceiling. Stated here rather than inherited so the batch
+ * arithmetic above and the platform agree in one place.
  */
-export const MAX_BATCH = 25;
+export const maxDuration = 300;
+
+/**
+ * Max number of plants assessed in a single cron run. Derived from the pacing
+ * arithmetic in the header comment: at 30k TPM and ~13.5k tokens per
+ * assessment, 10 plants fill the 300s function budget. Plants beyond the cap
+ * remain dirty/stale and are picked up on the next run.
+ */
+export const MAX_BATCH = 10;
+
+/**
+ * Soft wall-clock budget for one run — 90% of `maxDuration`. The loop stops
+ * starting new plants once the projected pacing wait would cross it, so the
+ * run always returns a summary instead of being killed mid-plant by the
+ * platform (a killed run leaves a `pending` row nobody flips to `failed`).
+ */
+export const RUN_BUDGET_MS = 270_000;
+
+/** Attempts per plant, including the first, before a 429 becomes a deferral. */
+export const MAX_ATTEMPTS_PER_PLANT = 4;
+
+/** Why a selected plant was not attempted in this run. */
+export type DeferralReason = "rate_limit" | "time_budget";
 
 /** Per-plant outcome, surfaced in the response body for observability. */
 export interface AssessOutcome {
   churchId: string;
   reason: SelectedPlant["reason"];
-  status: "assessed" | "failed";
+  /**
+   * `deferred` is NOT a failure: the provider throttled us, or the run ran out
+   * of wall clock. The plant keeps its last good snapshot, stays dirty, and is
+   * re-selected next run. Keeping it out of `failed` is the point — a
+   * throttled run must not read as a broken judge (#36).
+   */
+  status: "assessed" | "failed" | "deferred";
+  deferralReason?: DeferralReason;
   error?: string;
 }
 
@@ -57,7 +129,18 @@ export interface AssessRunSummary {
   attempted: number;
   assessed: number;
   failed: number;
+  /** Selected, over the cap, never attempted. */
   skipped: number;
+  /** Attempted-or-reached but stood down: throttled or out of time. */
+  deferred: number;
+  /** Subset of `deferred` caused by provider throttling. */
+  rateLimited: number;
+  /** Milliseconds this run spent waiting on the token bucket. */
+  pacedWaitMs: number;
+  /** The TPM ceiling the run actually paced against (header-derived). */
+  tpmLimit: number;
+  /** The per-call token cost the pacer learned from the provider's usage. */
+  tokensPerAssessment: number;
   outcomes: AssessOutcome[];
 }
 
@@ -66,6 +149,13 @@ export interface RunAssessmentBatchDeps {
   selectPlantsForAssessment: typeof selectPlantsForAssessment;
   generateAssessment: typeof generateAssessment;
   maxBatch: number;
+  /** The run's shared token budget. Defaults to a fresh real-clock pacer. */
+  pacer?: TokenPacer;
+  /** Wall clock for the run budget. Defaults to the pacer's clock. */
+  now?: () => number;
+  /** Soft wall-clock budget for the whole run. */
+  runBudgetMs?: number;
+  maxAttempts?: number;
 }
 
 const DEFAULT_DEPS: RunAssessmentBatchDeps = {
@@ -75,17 +165,37 @@ const DEFAULT_DEPS: RunAssessmentBatchDeps = {
 };
 
 /**
- * Select dirty-or-stale plants and (re-)assess each, bounded and sequential.
+ * Select dirty-or-stale plants and (re-)assess each, bounded, sequential and
+ * paced against the provider's TPM ceiling.
  *
  * Quiet, recently-assessed plants are never returned by the selection query, so
  * they are never re-assessed (PE-010). The batch is capped at `maxBatch`; any
- * plants past the cap are logged as skipped and left for the next run. A failure
- * on one plant is recorded and the run continues — `generateAssessment` already
- * marks the failed plant's row `failed` without touching its last good snapshot.
+ * plants past the cap are logged as skipped and left for the next run.
+ *
+ * Three ways a plant can come out of this loop, and they are deliberately NOT
+ * the same thing:
+ *   - `assessed` — the judge ran and persisted.
+ *   - `failed`   — the judge or persistence broke. `generateAssessment` already
+ *                  marked the row `failed` without touching the last good
+ *                  snapshot; the run continues to the next plant.
+ *   - `deferred` — the provider throttled us past our retries, or the run's
+ *                  wall-clock budget ran out. Nothing is broken. The plant is
+ *                  still dirty and comes back next run.
+ *
+ * Rollover is identical in all three non-assessed cases (selection joins on the
+ * latest COMPLETE assessment), so a deferral costs staleness, never data.
  */
 export async function runAssessmentBatch(
   deps: RunAssessmentBatchDeps = DEFAULT_DEPS
 ): Promise<AssessRunSummary> {
+  const pacer = deps.pacer ?? new TokenPacer();
+  const now = deps.now ?? (() => pacer.clock.now());
+  const runBudgetMs = deps.runBudgetMs ?? RUN_BUDGET_MS;
+  const maxAttempts = deps.maxAttempts ?? MAX_ATTEMPTS_PER_PLANT;
+
+  const startedAt = now();
+  const deadlineAt = startedAt + runBudgetMs;
+
   const selected = await deps.selectPlantsForAssessment();
 
   const batch = selected.slice(0, deps.maxBatch);
@@ -101,9 +211,48 @@ export async function runAssessmentBatch(
 
   // Sequential on purpose: one slow plant must not blow the timeout via a
   // fan-out of concurrent OpenAI calls, and back-pressure is preferable here.
-  for (const plant of batch) {
+  // The pacing wait happens inside the judge (`runPacedCall`), so the loop only
+  // has to decide whether the NEXT plant still fits in the run's budget.
+  for (const [index, plant] of batch.entries()) {
+    const projectedWaitMs = pacer.projectedWaitMs();
+
+    // Always attempt at least one plant — a run that assesses nothing is worse
+    // than a run that overshoots its soft budget by one call.
+    if (index > 0 && now() + projectedWaitMs >= deadlineAt) {
+      const remaining = batch.slice(index);
+      console.warn(
+        `[phase-engine/assess] run budget spent after ${index} plant(s) ` +
+          `(next plant needs ${Math.round(projectedWaitMs / 1000)}s of pacing); ` +
+          `deferring ${remaining.length} plant(s) to the next run.`
+      );
+      for (const deferredPlant of remaining) {
+        outcomes.push({
+          churchId: deferredPlant.churchId,
+          reason: deferredPlant.reason,
+          status: "deferred",
+          deferralReason: "time_budget",
+        });
+      }
+      break;
+    }
+
+    const onRateLimit = (event: RateLimitEvent) => {
+      // Distinct from `console.error` below on purpose: this line means the
+      // provider is throttling, not that the judge is broken.
+      console.warn(
+        `[phase-engine/assess] rate limited on church ${plant.churchId} ` +
+          `(attempt ${event.attempt}/${event.maxAttempts}, ` +
+          `retry-after ${event.retryAfterMs ?? "unstated"}ms, ` +
+          `waiting ${Math.round(event.waitMs)}ms)`
+      );
+    };
+
     try {
-      await deps.generateAssessment(plant.churchId);
+      await deps.generateAssessment(plant.churchId, undefined, {
+        pacer,
+        maxAttempts,
+        onRateLimit,
+      });
       outcomes.push({
         churchId: plant.churchId,
         reason: plant.reason,
@@ -111,6 +260,22 @@ export async function runAssessmentBatch(
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+
+      if (isRateLimitDeferral(error)) {
+        console.warn(
+          `[phase-engine/assess] rate-limit deferral for church ${plant.churchId} (${plant.reason}): ` +
+            `${message} The plant stays dirty and is retried on the next run.`
+        );
+        outcomes.push({
+          churchId: plant.churchId,
+          reason: plant.reason,
+          status: "deferred",
+          deferralReason: "rate_limit",
+          error: message,
+        });
+        continue;
+      }
+
       console.error(
         `[phase-engine/assess] assessment failed for church ${plant.churchId} (${plant.reason}):`,
         message
@@ -124,12 +289,20 @@ export async function runAssessmentBatch(
     }
   }
 
+  const stats = pacer.stats;
+
   return {
     selected: selected.length,
-    attempted: batch.length,
+    attempted: outcomes.filter((o) => o.status !== "deferred").length,
     assessed: outcomes.filter((o) => o.status === "assessed").length,
     failed: outcomes.filter((o) => o.status === "failed").length,
     skipped,
+    deferred: outcomes.filter((o) => o.status === "deferred").length,
+    rateLimited: outcomes.filter((o) => o.deferralReason === "rate_limit")
+      .length,
+    pacedWaitMs: stats.totalWaitMs,
+    tpmLimit: stats.limitTokens,
+    tokensPerAssessment: stats.estimatedTokensPerCall,
     outcomes,
   };
 }

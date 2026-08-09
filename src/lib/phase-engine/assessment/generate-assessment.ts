@@ -22,7 +22,12 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { plantAssessments, type PlantAssessment } from "@/db/schema";
 import { buildFactSnapshot } from "@/lib/phase-engine/signals";
-import { runAssessment, type AssessmentResult } from "@/lib/phase-engine/judge";
+import {
+  runAssessment,
+  type AssessmentResult,
+  type RateLimitEvent,
+  type TokenPacer,
+} from "@/lib/phase-engine/judge";
 
 import { emitPlantAssessmentCreated } from "../events";
 import { getLatestCompleteSnapshot } from "./queries";
@@ -46,6 +51,22 @@ const DEFAULT_DEPS: GenerateAssessmentDeps = {
   getLatestCompleteSnapshot,
 };
 
+/**
+ * Per-RUN throttle state (#36) — distinct from `deps`, which are test seams.
+ *
+ * The cron batch creates one {@link TokenPacer} for the whole run and passes it
+ * to every plant so they queue behind ONE TPM budget. Omitting it (the manual
+ * trigger, a seed script) gives the judge a throwaway bucket that starts full,
+ * so a single assessment never waits.
+ */
+export interface AssessmentRunOptions {
+  pacer?: TokenPacer;
+  /** Attempts, including the first, before a rate limit becomes a deferral. */
+  maxAttempts?: number;
+  /** Called on every 429 — lets the caller log throttling apart from failure. */
+  onRateLimit?: (event: RateLimitEvent) => void;
+}
+
 export interface GenerateAssessmentResult {
   assessment: PlantAssessment;
   result: AssessmentResult;
@@ -59,11 +80,14 @@ export interface GenerateAssessmentResult {
  *
  * @throws re-throws the underlying error AFTER the pending row is marked
  *         `failed`, so callers can observe/retry without the last good snapshot
- *         being overwritten.
+ *         being overwritten. A `RateLimitDeferralError` travels the same path:
+ *         the plant keeps its last good complete snapshot, stays dirty, and is
+ *         re-selected on the next run (#36).
  */
 export async function generateAssessment(
   churchId: string,
-  deps: GenerateAssessmentDeps = DEFAULT_DEPS
+  deps: GenerateAssessmentDeps = DEFAULT_DEPS,
+  run: AssessmentRunOptions = {}
 ): Promise<GenerateAssessmentResult> {
   // 1. Prior complete snapshot for the what-changed delta (PE-016). Read BEFORE
   //    we insert the new pending row so it reflects the last GOOD assessment.
@@ -89,8 +113,13 @@ export async function generateAssessment(
     .returning();
 
   try {
-    // 4. Run the judge over the snapshot (PE-007/009).
-    const result = await deps.runAssessment(snapshot, snapshot.currentPhase);
+    // 4. Run the judge over the snapshot (PE-007/009), queued behind the run's
+    //    shared token budget (#36).
+    const result = await deps.runAssessment(snapshot, snapshot.currentPhase, {
+      pacer: run.pacer,
+      maxAttempts: run.maxAttempts,
+      onRateLimit: run.onRateLimit,
+    });
 
     // 5. Privacy-filter + rank, then persist insights (PE-012/013). The
     //    retrieved passages travel with the result so each insight's wiki links

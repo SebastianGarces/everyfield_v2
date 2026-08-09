@@ -28,3 +28,40 @@ export type {
 } from "./schema";
 
 export { JUDGE_MODEL_ID } from "./provider";
+
+// Throttle surface (#36). The cron batch owns one `TokenPacer` per run and
+// threads it through every plant; `isRateLimitDeferral` is how the runner tells
+// throttling apart from a genuine judge failure.
+export {
+  TokenPacer,
+  realClock,
+  resolveTpmLimit,
+  DEFAULT_TPM_LIMIT,
+  DEFAULT_TOKENS_PER_ASSESSMENT,
+  TPM_WINDOW_MS,
+  type PacerClock,
+  type PacerStats,
+  type TokenPacerOptions,
+} from "./token-pacer";
+
+export {
+  runPacedCall,
+  isRateLimitDeferral,
+  RateLimitDeferralError,
+  DEFAULT_MAX_ATTEMPTS,
+  type PacedCallOptions,
+  type PacedCallResult,
+  type RateLimitEvent,
+} from "./paced-call";
+
+export {
+  isRateLimitError,
+  isRetryableError,
+  retryAfterMsFromError,
+  readRateLimitSnapshot,
+  parseDurationMs,
+  normalizeHeaders,
+  headersFromError,
+  type HeaderLike,
+  type RateLimitSnapshot,
+} from "./rate-limit";

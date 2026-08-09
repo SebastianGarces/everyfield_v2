@@ -26,6 +26,8 @@ import { retrieve, type RetrievedPassage } from "@/lib/phase-engine/rag";
 import { ACTIVE_RUBRIC, type Rubric } from "@/lib/phase-engine/rubric";
 import { startJudgeTrace } from "@/lib/phase-engine/observability";
 import { getJudgeModel, JUDGE_MODEL_ID } from "./provider";
+import { runPacedCall, type RateLimitEvent } from "./paced-call";
+import { TokenPacer } from "./token-pacer";
 import {
   buildRetrievalQuery,
   buildSystemPrompt,
@@ -48,6 +50,18 @@ export interface RunAssessmentOptions {
    * tests/eval harnesses). When omitted, the pipeline calls `retrieve()`.
    */
   passages?: RetrievedPassage[];
+  /**
+   * The token budget this call must queue behind (#36). The cron batch creates
+   * ONE pacer for the whole run and threads it through every plant, so the
+   * plants share a TPM window instead of racing each other into a 429. Omitted
+   * (a manual, single-plant assessment) means a throwaway bucket that starts
+   * full — so a one-off run never waits.
+   */
+  pacer?: TokenPacer;
+  /** Attempts, including the first, before a rate limit becomes a deferral. */
+  maxAttempts?: number;
+  /** Called on every 429, so throttling can be logged apart from failure. */
+  onRateLimit?: (event: RateLimitEvent) => void;
 }
 
 const DEFAULT_RETRIEVAL_LIMIT = 8;
@@ -65,6 +79,9 @@ export async function runAssessment(
   options: RunAssessmentOptions = {}
 ): Promise<AssessmentResult> {
   const rubric = options.rubric ?? ACTIVE_RUBRIC;
+  // A throwaway bucket starts full, so a manual one-off assessment never waits;
+  // the cron batch passes its shared one in (#36).
+  const pacer = options.pacer ?? new TokenPacer();
 
   // 1. Retrieve phase-relevant methodology passages to ground the insights
   //    (unless the caller supplied them). Retrieval failures must not sink the
@@ -95,20 +112,44 @@ export async function runAssessment(
   });
 
   try {
-    // 4. The single validated generateObject call — Zod-constrained output.
-    const { object, usage } = await generateObject({
-      model: getJudgeModel(),
-      schema: judgeOutputSchema,
-      system,
-      prompt: user,
-      // NFR-PE-4: do not let OpenAI retain this call. The AI SDK's OpenAI
-      // provider resolves `openai(modelId)` to the **Responses API**, which
-      // stores prompts and completions in the org's logs by default — the SDK
-      // itself defaults `store` to `true`. Plant data is real church data, so
-      // it is opted out explicitly here rather than relying on a dashboard
-      // toggle, which does not travel with the code, the key, or a new project.
-      providerOptions: { openai: { store: false } },
-    });
+    // 4. The single validated generateObject call — Zod-constrained output,
+    //    made under the run's shared TPM budget (#36). `runPacedCall` waits its
+    //    turn on the bucket, honours Retry-After on a 429, and feeds the
+    //    response's `x-ratelimit-*` headers back so the batch re-paces itself.
+    const { object, usage } = await runPacedCall(
+      async () => {
+        const generated = await generateObject({
+          model: getJudgeModel(),
+          schema: judgeOutputSchema,
+          system,
+          prompt: user,
+          // The retry policy lives in `runPacedCall`, not in the SDK. The SDK's
+          // 2s/4s exponential backoff retries INSIDE the same TPM minute that
+          // just refused us, so all three attempts are spent before the budget
+          // could possibly have refilled — which is how #36 lost plants.
+          maxRetries: 0,
+          // NFR-PE-4: do not let OpenAI retain this call. The AI SDK's OpenAI
+          // provider resolves `openai(modelId)` to the **Responses API**, which
+          // stores prompts and completions in the org's logs by default — the
+          // SDK itself defaults `store` to `true`. Plant data is real church
+          // data, so it is opted out explicitly here rather than relying on a
+          // dashboard toggle, which does not travel with the code, the key, or
+          // a new project.
+          providerOptions: { openai: { store: false } },
+        });
+        return {
+          value: { object: generated.object, usage: generated.usage },
+          headers: generated.response?.headers,
+          totalTokens: generated.usage?.totalTokens,
+        };
+      },
+      {
+        pacer,
+        maxAttempts: options.maxAttempts,
+        label: snapshot.churchId,
+        onRateLimit: options.onRateLimit,
+      }
+    );
 
     // 5. Coverage guard (PE-012): both audiences must be represented. The schema
     //    can't express "at least one of each", so we assert it here and fail
