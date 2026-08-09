@@ -114,8 +114,16 @@ function applyMatrixAction(
 export function PreferenceMatrix({ view }: PreferenceMatrixProps) {
   const [, startTransition] = useTransition();
 
-  // ⚠️ PROTOTYPE — DISPOSABLE (#369 presentation ruling). `"now"` is as built.
+  // ⚠️ PROTOTYPE — DISPOSABLE (#369 presentation ruling) —— start.
+  // `"now"` is as built. `firstIneligible` is B's: the reason is the same for
+  // all five rows, so B says it ONCE, on the first of them, and the remaining
+  // four point their switches at that one sentence. Repeating it five times
+  // would judge B on repetition rather than on the approach.
   const variant = useOversightEligibilityVariant();
+  const firstIneligible =
+    view.categories.find((row) => !row.eligible)?.category ?? null;
+  const ineligibleNoteId = "preference-ineligible-note";
+  // ⚠️ PROTOTYPE — DISPOSABLE —— end.
 
   // Hoisted so TypeScript narrows the union once, rather than at each use.
   const digest = view.digest;
@@ -202,7 +210,6 @@ export function PreferenceMatrix({ view }: PreferenceMatrixProps) {
           const ineligible = !row.eligible;
           if (ineligible && variant === "a") return null;
           const inert = ineligible && variant !== "now";
-          const noteId = `preference-ineligible-${row.category}`;
           // ⚠️ PROTOTYPE — DISPOSABLE —— end.
 
           return (
@@ -239,18 +246,22 @@ export function PreferenceMatrix({ view }: PreferenceMatrixProps) {
                   {row.description}
                 </p>
 
-                {/* ⚠️ PROTOTYPE — DISPOSABLE: B's one line. It is the server's
-                    sentence (`view.ineligibleNote`), not the component's, so
-                    the screen and the refused write say the same thing. */}
-                {inert && variant === "b" && view.ineligibleNote && (
-                  <p
-                    id={noteId}
-                    data-testid={`preference-ineligible-note-${row.category}`}
-                    className="text-muted-foreground pt-1 text-xs text-pretty"
-                  >
-                    {view.ineligibleNote}
-                  </p>
-                )}
+                {/* ⚠️ PROTOTYPE — DISPOSABLE: B's one line, on the first of the
+                    five rows it covers. It is the server's sentence
+                    (`view.ineligibleNote`), not the component's, so the screen
+                    and the refused write say the same thing. */}
+                {inert &&
+                  variant === "b" &&
+                  row.category === firstIneligible &&
+                  view.ineligibleNote && (
+                    <p
+                      id={ineligibleNoteId}
+                      data-testid="preference-ineligible-note"
+                      className="text-muted-foreground pt-1 text-xs text-pretty"
+                    >
+                      {view.ineligibleNote}
+                    </p>
+                  )}
 
                 {row.category === digest.category && (
                   <div className="pt-3">
@@ -352,7 +363,9 @@ export function PreferenceMatrix({ view }: PreferenceMatrixProps) {
                         // carries the token in the row's accessible name.
                         disabled={inert}
                         aria-describedby={
-                          inert && variant === "b" ? noteId : undefined
+                          inert && variant === "b"
+                            ? ineligibleNoteId
+                            : undefined
                         }
                       />
                       <Label
