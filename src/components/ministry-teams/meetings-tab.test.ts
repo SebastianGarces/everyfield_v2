@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import { formatDate, formatTime } from "@/lib/datetime";
+import { calendarTileParts, formatDate, formatTime } from "@/lib/datetime";
 
 // ----------------------------------------------------------------------------
 // Team meetings tab — the pinned wall clock (#169)
@@ -15,28 +15,18 @@ import { formatDate, formatTime } from "@/lib/datetime";
 // which formats through the pinned helpers, disagreed with the card forever.
 // memory/invariants.md → Date & Time Rendering.
 //
-// The component cannot be imported here: it pulls in the teams server actions,
-// which open a database connection at import time. So the tile derivation is
-// mirrored below (and the guard test holds the source to it), and the strings
-// are checked against the same helpers the detail page calls.
+// The component still cannot be imported here: it pulls in the teams server
+// actions, which open a database connection at import time. But the derivation
+// it renders no longer lives inside it — `calendarTileParts` moved into
+// `@/lib/datetime`, which imports nothing — so these tests exercise the real
+// helper rather than a copy of it (#361).
 // ----------------------------------------------------------------------------
-
-const SOURCE_PATH = path.join(__dirname, "meetings-tab.tsx");
-const source = readFileSync(SOURCE_PATH, "utf8");
-
-/** The derivation `calendarTileParts` performs, mirrored. */
-function calendarTileParts(date: Date): [month: string, day: string] {
-  const [, monthAndDay = ""] = formatDate(date, "short").split(", ");
-  const [month = "", day = ""] = monthAndDay.split(" ");
-  return [month, day];
-}
 
 // A meeting late in the UTC evening: the hour at which an unpinned formatter
 // east of UTC has already rolled the card onto the next calendar day.
 const LATE_NIGHT = new Date("2026-07-30T23:30:00Z");
 
-test("the calendar tile splits the pinned short date, so it never rolls a day", () => {
-  assert.equal(formatDate(LATE_NIGHT, "short"), "Thu, Jul 30, 2026");
+test("the calendar tile is zone-pinned, so it never rolls a day", () => {
   assert.deepEqual(calendarTileParts(LATE_NIGHT), ["Jul", "30"]);
 });
 
@@ -45,6 +35,14 @@ test("a single-digit day keeps the tile to the bare number", () => {
     "Mar",
     "1",
   ]);
+});
+
+test("the tile agrees with the short date the rest of the app renders", () => {
+  // The tile used to be carved out of this string. It is its own formatter now,
+  // so hold the two together explicitly instead of by construction.
+  const [month, day] = calendarTileParts(LATE_NIGHT);
+  assert.equal(formatDate(LATE_NIGHT, "short"), "Thu, Jul 30, 2026");
+  assert.ok(formatDate(LATE_NIGHT, "short").includes(`${month} ${day},`));
 });
 
 test("the card and the meeting detail page state the same day and time", () => {
@@ -67,6 +65,10 @@ test("the card and the meeting detail page state the same day and time", () => {
 });
 
 test("the component holds no unpinned formatter", () => {
+  // The one thing the helper cannot prove about a component it does not import:
+  // that nothing ELSE in the file formats a date the runtime-local way. Kept as
+  // a pattern guard, not as a copy of the component's source text.
+  const source = readFileSync(path.join(__dirname, "meetings-tab.tsx"), "utf8");
   assert.ok(
     !/from "date-fns"/.test(source),
     "date-fns follows the runtime's zone — format through @/lib/datetime"
@@ -74,17 +76,5 @@ test("the component holds no unpinned formatter", () => {
   assert.ok(
     !/\btoLocale(Date|Time)?String\s*\(/.test(source),
     "`toLocale*` follows the runtime's zone — format through @/lib/datetime"
-  );
-  assert.ok(source.includes('from "@/lib/datetime"'));
-});
-
-test("the tile and the time still come from the pinned helpers", () => {
-  assert.ok(
-    source.includes('formatDate(date, "short").split(", ")'),
-    "the tile derivation moved — keep it sourced from the pinned short date"
-  );
-  assert.ok(
-    source.includes("formatTime(meetingDate)"),
-    "the card's time must come from the same helper the detail page uses"
   );
 });

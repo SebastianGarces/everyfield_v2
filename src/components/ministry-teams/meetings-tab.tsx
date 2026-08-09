@@ -29,7 +29,7 @@ import { Textarea } from "@/components/ui/textarea";
 // /meetings/[id] renders on the server, and an unpinned formatter makes the two
 // disagree about the same meeting (React #418). memory/invariants.md → Date &
 // Time Rendering.
-import { formatDate, formatTime } from "@/lib/datetime";
+import { calendarTileParts, formatTime } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
 import { createMeetingAction } from "@/app/(dashboard)/teams/actions";
 import type { MeetingWithCounts } from "@/lib/meetings/types";
@@ -229,19 +229,6 @@ export function MeetingsTab({ teamId, meetings }: MeetingsTabProps) {
       )}
     </div>
   );
-}
-
-/**
- * The two lines of the calendar tile — `["Jul", "30"]`.
- *
- * Derived from the one pinned short date (`"Thu, Jul 30, 2026"`) rather than
- * from a formatter of its own, so the tile cannot drift from the time beside it
- * or from the meeting detail page.
- */
-function calendarTileParts(date: Date): [month: string, day: string] {
-  const [, monthAndDay = ""] = formatDate(date, "short").split(", ");
-  const [month = "", day = ""] = monthAndDay.split(" ");
-  return [month, day];
 }
 
 function TeamMeetingCard({
