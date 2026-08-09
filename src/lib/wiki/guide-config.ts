@@ -166,27 +166,30 @@ export const wikiGuideConfig: Record<string, WikiGuideEntry> = {
   },
 
   // ── Onboarding: the journey step (OB-014) ────────────────────────────
+  // DORMANT UNTIL THE STEP IS IN THE URL. This entry matches nothing today, and
+  // that is deliberate.
+  //
   // The onboarding flow has no route of its own — it renders AS the dashboard
   // for a planter who has not finished it (`app/(dashboard)/dashboard/page.tsx`
   // → `shouldShowOnboarding`), and which step is showing is client state, not a
-  // URL (`components/onboarding/onboarding-flow.tsx`). So the pattern that
-  // reaches the journey step is the bare dashboard path: a planter resuming at
-  // step 3 is at `/dashboard`, with nothing in the URL to match on.
+  // URL (`components/onboarding/onboarding-flow.tsx`). So the only pattern that
+  // could reach the journey step today is the bare dashboard path — and that
+  // path is also every other onboarding step and the finished dashboard.
   //
-  // Step 3 asks two things — "which stage of the journey are you in" and "your
-  // target launch date, or no date yet" (`components/onboarding/upcoming-step.tsx`)
-  // — and the list answers them in that order. `slugs[0]` is the phase overview,
-  // the one article that lays out phases 0-6 and tells a planter to find their
-  // own; the launch-date pair answers the second question honestly, by
-  // readiness rather than by calendar.
+  // Ruled on PR #367 (2026-08-09), option C: the guide is scoped to the one
+  // step that raises the question. No guide on the finished dashboard, and none
+  // on steps 1/2/4. A bare `/dashboard` entry cannot express that, so there is
+  // none; this entry waits for the flow to sync its step into the URL (#373),
+  // after which `/dashboard?step=journey` starts matching with no change here —
+  // `patternSpecificity` already scores a query pattern above a bare path.
   //
-  // The finished dashboard therefore carries this guide too. That is the right
-  // outcome, not a leak: the dashboard's own subtitle is the plant's phase, so
-  // "which phase am I in" is the question that page raises whether or not the
-  // planter is still onboarding. If the flow ever puts its step in the URL, add
-  // a narrower `"/dashboard?step=journey"` entry — query patterns outrank bare
-  // paths in `patternSpecificity`, so it would take over with no other change.
-  "/dashboard": {
+  // The journey step asks two things — "which stage of the journey are you in"
+  // and "your target launch date, or no date yet"
+  // (`components/onboarding/upcoming-step.tsx`) — and the list answers them in
+  // that order. `slugs[0]` is the phase overview, the one article that lays out
+  // phases 0-6 and tells a planter to find their own; the launch-date pair
+  // answers the second question honestly, by readiness rather than by calendar.
+  "/dashboard?step=journey": {
     label: "Your Journey Guide",
     slugs: [
       "getting-started/welcome-to-the-launch-playbook",

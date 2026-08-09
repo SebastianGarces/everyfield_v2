@@ -265,52 +265,105 @@ test("the team tabs are left free for their own entries", () => {
   }
 });
 
-test("the onboarding journey step resolves to the phase-discernment guide", () => {
-  // OB-014 / FRD AC 8. The onboarding flow has no route of its own — it renders
-  // as the dashboard while `onboarding_completed_at` is null, and the step is
-  // client state, so `/dashboard` IS the journey step's URL.
-  const entry = resolveGuideEntry("/dashboard");
+// ----------------------------------------------------------------------------
+// Onboarding: the journey step (OB-014 / FRD AC 8), as RULED on PR #367
+// (2026-08-09), option C — step-scoped.
+//
+// The flow renders as the dashboard while `onboarding_completed_at` is null and
+// the step is client state, so the bare `/dashboard` path is every onboarding
+// step AND the finished dashboard at once. The ruling is that the guide belongs
+// to ONE step, so the bare path carries no entry at all and the guide waits on
+// `/dashboard?step=journey` — dormant until the flow syncs its step into the
+// URL (#373).
+//
+// The pair of tests below is the whole ruling: nothing on the bare path, the
+// step-scoped entry ready and correct. Deleting either one lets the guide leak
+// back onto every step and onto the finished dashboard.
+// ----------------------------------------------------------------------------
+
+test("the bare dashboard has no guide, on any of the surfaces it renders", () => {
+  // The finished dashboard and onboarding steps 1/2/4 all resolve to exactly
+  // this pathname. No entry may match it — a bare `/dashboard` entry would show
+  // the journey guide on all of them, which is what the ruling rejected.
+  assert.equal(
+    resolveGuideEntry("/dashboard"),
+    null,
+    "the bare dashboard matched a guide entry — the guide leaks onto the finished dashboard and onboarding steps 1/2/4"
+  );
+
+  // Other steps once #373 lands, and a stray unrelated param today. Only
+  // `step=journey` may match.
+  const nonJourney: Record<string, string>[] = [
+    { step: "welcome" },
+    { step: "leadership" },
+    { step: "invite" },
+    { ref: "email" },
+  ];
+
+  for (const params of nonJourney) {
+    assert.equal(
+      resolveGuideEntry("/dashboard", params),
+      null,
+      `unexpected guide entry for /dashboard with ${JSON.stringify(params)}`
+    );
+  }
+});
+
+test("the journey step resolves to the phase-discernment guide once ?step=journey is in the URL", () => {
+  const entry = resolveGuideEntry("/dashboard", { step: "journey" });
 
   assert.ok(entry, "the journey step has no guide entry — FRD AC 8 fails");
   assert.equal(entry.label, "Your Journey Guide");
   assert.deepEqual(entry.slugs, JOURNEY_SLUGS);
-});
 
-test("the journey guide opens on the phase overview", () => {
   // The step's first question is "which stage of the journey are you in", and
   // this is the one article that lays out phases 0-6 and tells the reader to
   // find their own. It must be `slugs[0]` — that is what the panel fetches.
-  const entry = resolveGuideEntry("/dashboard");
   assert.equal(
-    entry?.slugs[0],
+    entry.slugs[0],
     "getting-started/welcome-to-the-launch-playbook"
   );
-});
 
-test("the journey guide also answers the step's launch-date question", () => {
-  const slugs = resolveGuideEntry("/dashboard")?.slugs ?? [];
-
+  // The step's second question — a target launch date, or no date yet.
   for (const slug of [
     "launch-team/launch-date/setting-your-launch-date",
     "launch-team/launch-date/variables-that-drive-your-launch-date",
   ]) {
-    assert.ok(slugs.includes(slug), `launch-date question unanswered: ${slug}`);
+    assert.ok(
+      entry.slugs.includes(slug),
+      `launch-date question unanswered: ${slug}`
+    );
   }
+
+  // The entry survives whatever else the URL carries — pattern params are a
+  // subset test, so a stray `?ref=` must not hide the button once #373 lands.
+  assert.equal(
+    resolveGuideEntry("/dashboard", { step: "journey", ref: "email" })?.label,
+    "Your Journey Guide"
+  );
+});
+
+test("the journey entry is keyed on the step, not the path", () => {
+  // The config key itself is the contract with #373: the flow must write
+  // exactly `?step=journey`. Pinned so a rename on either side is a deliberate
+  // two-sided change rather than a guide that silently stops appearing.
+  assert.ok(
+    "/dashboard?step=journey" in wikiGuideConfig,
+    "the step-scoped journey entry is missing from the config"
+  );
+  assert.ok(
+    !("/dashboard" in wikiGuideConfig),
+    "a bare /dashboard entry is back — the ruling on PR #367 forbids it"
+  );
 });
 
 test("the dashboard entry stays on the dashboard", () => {
-  // A bare path pattern must not claim the routes nested under it, several of
-  // which already have or will want their own guide.
+  // A pattern must not claim the routes nested under it, several of which
+  // already have or will want their own guide.
   assert.equal(resolveGuideEntry("/dashboard/anything"), null);
-});
-
-test("a step deep-link does not lose the journey guide", () => {
-  // `/dashboard?step=leadership` is a real entry point (OB-004). A pattern with
-  // no params is a subset test, so the guide survives it — and if the flow ever
-  // syncs `?step=`, a narrower entry would outrank this one by specificity.
   assert.equal(
-    resolveGuideEntry("/dashboard", { step: "leadership" })?.label,
-    "Your Journey Guide"
+    resolveGuideEntry("/dashboard/anything", { step: "journey" }),
+    null
   );
 });
 
