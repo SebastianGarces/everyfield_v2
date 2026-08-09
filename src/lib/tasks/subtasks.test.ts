@@ -1,12 +1,23 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { and, type SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
+
+import type { NewTask, Task } from "@/db/schema";
 import {
   SUBTASK_DEPTH_ERROR,
   SUBTASK_HAS_CHILDREN_ERROR,
   SUBTASK_PARENT_MISSING_ERROR,
   SUBTASK_SELF_ERROR,
   checkSubtaskNesting,
+  createNextRecurrence,
+  planRecurrenceChildren,
+  resolveSubtaskAssignee,
+  taskCountConditions,
+  taskListConditions,
+  type RecurrenceChild,
+  type RecurrenceDeps,
 } from "./service";
 
 // ----------------------------------------------------------------------------
@@ -81,4 +92,297 @@ test("the self check runs before the depth check", () => {
     }),
     SUBTASK_SELF_ERROR
   );
+});
+
+// ----------------------------------------------------------------------------
+// Who owns a subtask (ruling on #370).
+//
+// Before the ruling a subtask was created with no assignee at all, which made
+// it invisible to "My tasks" and to every assignee filter. It now starts on
+// the parent's assignee — as a DEFAULT, so an explicit choice still wins.
+// ----------------------------------------------------------------------------
+
+const PLANTER = "33333333-3333-4333-8333-333333333333";
+const CO_LEADER = "44444444-4444-4444-8444-444444444444";
+
+test("a subtask inherits the parent's assignee", () => {
+  assert.equal(resolveSubtaskAssignee(undefined, PLANTER), PLANTER);
+  assert.equal(resolveSubtaskAssignee(null, PLANTER), PLANTER);
+  // The quick-add form posts an empty string for "nobody picked".
+  assert.equal(resolveSubtaskAssignee("", PLANTER), PLANTER);
+});
+
+test("an explicit assignee beats the parent's", () => {
+  assert.equal(resolveSubtaskAssignee(CO_LEADER, PLANTER), CO_LEADER);
+});
+
+test("an unassigned parent leaves the subtask unassigned", () => {
+  // Inheritance, not invention: there is nobody to inherit from here.
+  assert.equal(resolveSubtaskAssignee(undefined, null), null);
+  assert.equal(resolveSubtaskAssignee("", null), null);
+});
+
+// ----------------------------------------------------------------------------
+// The badges count what the list shows (decision C on #370).
+//
+// `listTasks` filtered subtasks out and `getTaskCounts` did not, so the header
+// read "3 completed" over a list with no completed rows. The two condition
+// builders are rendered here and compared: no database, just the SQL they
+// would send.
+// ----------------------------------------------------------------------------
+
+const CHURCH_ID = "11111111-1111-4111-8111-111111111111";
+const PARENT_ONLY = `"tasks"."parent_task_id" is null`;
+
+const dialect = new PgDialect();
+
+function renderConditions(conditions: SQL[]): string {
+  return dialect.sqlToQuery(and(...conditions)!).sql;
+}
+
+test("the count query excludes subtasks, exactly as the list does", () => {
+  const listed = renderConditions(taskListConditions(CHURCH_ID));
+  const counted = renderConditions(taskCountConditions(CHURCH_ID));
+
+  assert.ok(
+    listed.includes(PARENT_ONLY),
+    `the list should exclude subtasks, got: ${listed}`
+  );
+  assert.ok(
+    counted.includes(PARENT_ONLY),
+    `the badges should exclude subtasks, got: ${counted}`
+  );
+});
+
+test("the badges exclude subtasks in the completed view too", () => {
+  // The view that exposed the contradiction: `?view=all&includeCompleted=true`.
+  const listed = renderConditions(
+    taskListConditions(CHURCH_ID, { includeCompleted: true })
+  );
+
+  assert.ok(listed.includes(PARENT_ONLY));
+  assert.ok(
+    renderConditions(taskCountConditions(CHURCH_ID)).includes(PARENT_ONLY)
+  );
+});
+
+test("no option makes the badges count checklist items as tasks", () => {
+  // `listTasks` has an `includeSubtasks` escape hatch for callers that really
+  // want the rows. `getTaskCounts` deliberately has none — a badge that says
+  // "3 completed" means three tasks in every view.
+  const withSubtasks = renderConditions(
+    taskListConditions(CHURCH_ID, { includeSubtasks: true })
+  );
+
+  assert.ok(!withSubtasks.includes(PARENT_ONLY));
+  assert.ok(
+    renderConditions(taskCountConditions(CHURCH_ID)).includes(PARENT_ONLY)
+  );
+});
+
+// ----------------------------------------------------------------------------
+// The checklist carries over to the next instance (decision A on #370).
+//
+// The checklist is part of the task's template. Completing a recurring task
+// hands the successor the SAME list, every box unticked — ticked items and
+// never-started items alike, one rule for both.
+// ----------------------------------------------------------------------------
+
+const CREATOR = "22222222-2222-4222-8222-222222222222";
+const SERIES_ID = "55555555-5555-4555-8555-555555555555";
+const SUCCESSOR_ID = "66666666-6666-4666-8666-666666666666";
+
+function recurringTask(overrides: Partial<Task> = {}): Task {
+  return {
+    id: SERIES_ID,
+    churchId: CHURCH_ID,
+    title: "Weekly service prep",
+    description: null,
+    status: "complete",
+    priority: "medium",
+    dueDate: "2026-09-01",
+    dueTime: null,
+    assignedToId: PLANTER,
+    category: null,
+    relatedType: null,
+    relatedId: null,
+    parentTaskId: null,
+    isRecurring: true,
+    recurrenceRule: { interval: "weekly", endDate: null },
+    completionEvent: null,
+    completedAt: new Date("2026-09-01T12:00:00Z"),
+    completedById: PLANTER,
+    createdById: CREATOR,
+    createdAt: new Date("2026-08-01T12:00:00Z"),
+    updatedAt: new Date("2026-09-01T12:00:00Z"),
+    deletedAt: null,
+    ...overrides,
+  };
+}
+
+function checklistItem(
+  title: string,
+  overrides: Partial<RecurrenceChild> = {}
+): RecurrenceChild {
+  return {
+    title,
+    description: null,
+    priority: "medium",
+    dueTime: null,
+    assignedToId: PLANTER,
+    category: null,
+    relatedType: null,
+    relatedId: null,
+    ...overrides,
+  };
+}
+
+/** A `RecurrenceDeps` backed by arrays, recording every write it is asked for. */
+function fakeRecurrenceDeps(
+  children: RecurrenceChild[],
+  openInSeries: string[] = []
+) {
+  const successors: NewTask[] = [];
+  const insertedChildren: NewTask[] = [];
+
+  const deps: RecurrenceDeps = {
+    async findOpenInSeries() {
+      return openInSeries;
+    },
+    async insertSuccessor(values) {
+      successors.push(values);
+      return { ...recurringTask(), ...values, id: SUCCESSOR_ID } as Task;
+    },
+    async listChildren() {
+      return children;
+    },
+    async insertChildren(values) {
+      insertedChildren.push(...values);
+    },
+  };
+
+  return { deps, successors, insertedChildren };
+}
+
+test("the successor gets the whole checklist back, unticked", async () => {
+  // Three items, two of them already ticked on the instance being completed.
+  // `listChildren` returns completed children too — that is the point.
+  const { deps, successors, insertedChildren } = fakeRecurrenceDeps([
+    checklistItem("Book the room"),
+    checklistItem("Print the flyers"),
+    checklistItem("Confirm the band"),
+  ]);
+
+  const next = await createNextRecurrence(recurringTask(), "2026-09-01", deps);
+
+  assert.ok(next, "a successor should have been minted");
+  assert.equal(next.dueDate, "2026-09-08");
+
+  // Exactly one future instance, and exactly one checklist.
+  assert.equal(successors.length, 1);
+  assert.equal(insertedChildren.length, 3);
+
+  assert.deepEqual(
+    insertedChildren.map((row) => row.title),
+    ["Book the room", "Print the flyers", "Confirm the band"]
+  );
+
+  for (const row of insertedChildren) {
+    assert.equal(row.status, "not_started", `${row.title} should arrive open`);
+    assert.equal(row.completedAt, null);
+    assert.equal(row.completedById, null);
+    assert.equal(row.parentTaskId, SUCCESSOR_ID);
+    assert.equal(row.churchId, CHURCH_ID);
+    // A checklist item never repeats on its own; the parent is the series.
+    assert.equal(row.isRecurring, false);
+  }
+});
+
+test("the successor's checklist keeps the order it was written in", async () => {
+  // `listSubtasks` sorts by `created_at`, and one multi-row INSERT would stamp
+  // every row with the same transaction timestamp — leaving the order to a
+  // random-UUID tiebreak. The planner stamps them apart.
+  const stamps = planRecurrenceChildren(
+    [checklistItem("First"), checklistItem("Second"), checklistItem("Third")],
+    { id: SUCCESSOR_ID, churchId: CHURCH_ID, createdById: CREATOR },
+    new Date("2026-09-08T00:00:00Z")
+  ).map((row) => (row.createdAt as Date).getTime());
+
+  assert.ok(stamps[0]! < stamps[1]!, "item 1 must sort before item 2");
+  assert.ok(stamps[1]! < stamps[2]!, "item 2 must sort before item 3");
+});
+
+test("a checklist item's own due date is not carried into the new cycle", async () => {
+  // It belonged to the cycle that just closed. Carrying it would hand the new
+  // checklist a set of already-overdue items.
+  const [row] = planRecurrenceChildren(
+    [checklistItem("Book the room")],
+    { id: SUCCESSOR_ID, churchId: CHURCH_ID, createdById: CREATOR },
+    new Date("2026-09-08T00:00:00Z")
+  );
+
+  assert.equal(row!.dueDate, null);
+  // The rest of the item survives intact.
+  assert.equal(row!.title, "Book the room");
+  assert.equal(row!.assignedToId, PLANTER);
+});
+
+test("a recurring task with no checklist mints no checklist", async () => {
+  const { deps, successors, insertedChildren } = fakeRecurrenceDeps([]);
+
+  const next = await createNextRecurrence(recurringTask(), "2026-09-01", deps);
+
+  assert.ok(next);
+  assert.equal(successors.length, 1);
+  assert.equal(insertedChildren.length, 0);
+});
+
+test("an instance already open in the series mints nothing at all", async () => {
+  // The one-open-instance guard runs BEFORE the successor insert, so a series
+  // that was resurrected by reopening an older instance does not gain a second
+  // open task — nor a duplicate checklist.
+  const { deps, successors, insertedChildren } = fakeRecurrenceDeps(
+    [checklistItem("Book the room")],
+    ["an-already-open-instance"]
+  );
+
+  const next = await createNextRecurrence(recurringTask(), "2026-09-01", deps);
+
+  assert.equal(next, null);
+  assert.equal(successors.length, 0);
+  assert.equal(insertedChildren.length, 0);
+});
+
+test("a checklist that fails to copy does not lose the successor", async () => {
+  // The completion has already landed and the successor row exists. Reporting
+  // "no successor" here would be a lie, and a worse one than a missing list.
+  const { deps, successors } = fakeRecurrenceDeps([
+    checklistItem("Book the room"),
+  ]);
+  deps.insertChildren = async () => {
+    throw new Error("insert failed");
+  };
+
+  const next = await createNextRecurrence(recurringTask(), "2026-09-01", deps);
+
+  assert.ok(next, "the successor must still be returned");
+  assert.equal(successors.length, 1);
+});
+
+test("a series past its end date mints neither a task nor a checklist", async () => {
+  const { deps, successors, insertedChildren } = fakeRecurrenceDeps([
+    checklistItem("Book the room"),
+  ]);
+
+  const next = await createNextRecurrence(
+    recurringTask({
+      recurrenceRule: { interval: "weekly", endDate: "2026-09-05" },
+    }),
+    "2026-09-01",
+    deps
+  );
+
+  assert.equal(next, null);
+  assert.equal(successors.length, 0);
+  assert.equal(insertedChildren.length, 0);
 });

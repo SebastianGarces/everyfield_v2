@@ -246,7 +246,8 @@ export function TaskForm({ task, users = [] }: TaskFormProps) {
           </Select>
           <p className="text-muted-foreground text-sm">
             The next one is created when you complete this task, so a repeating
-            task never piles up while you are away.
+            task never piles up while you are away. Its subtasks come across
+            too, with every box unticked.
           </p>
         </div>
 

@@ -17,12 +17,15 @@ import {
   gte,
   ilike,
   inArray,
+  isNotNull,
   isNull,
   lte,
   ne,
   or,
   sql,
+  type SQL,
 } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import type { ListTasksResult, TaskCounts, TaskWithAssignee } from "./types";
 import { MAX_BULK_TASKS } from "./types";
 import { emitTaskCompleted } from "./events";
@@ -116,16 +119,30 @@ export async function getTask(
 }
 
 /**
- * List tasks with filtering, sorting, and cursor-based pagination.
- * By default excludes completed and soft-deleted tasks.
+ * The condition that separates a task from a checklist item (T-016).
+ *
+ * Exported and shared rather than written out at each call site because the
+ * list and the badges above it MUST agree on what they are counting. They
+ * disagreed once — the badges read "3 completed" over a list with no completed
+ * rows — and the ruling on #370 is that the badges mirror the list. Anything
+ * that reports a number of *tasks* applies this.
  */
-export async function listTasks(
+export function topLevelTasksOnly(): SQL {
+  return isNull(tasks.parentTaskId);
+}
+
+/**
+ * Every WHERE condition `listTasks` applies, as a list.
+ *
+ * Extracted so the count query and the page query cannot drift apart, and so a
+ * test can render the conditions and compare them against `taskCountConditions`
+ * without a database.
+ */
+export function taskListConditions(
   churchId: string,
   options: ListTasksOptions = {}
-): Promise<ListTasksResult> {
+): SQL[] {
   const {
-    cursor,
-    limit = 50,
     status,
     priority,
     category,
@@ -135,14 +152,9 @@ export async function listTasks(
     search,
     includeCompleted = false,
     includeSubtasks = false,
-    sortBy = "due_date",
-    sortDir = "asc",
   } = options;
 
-  const safeLimit = Math.min(Math.max(1, limit), 100);
-
-  // Build base conditions
-  const baseConditions = [
+  const baseConditions: SQL[] = [
     eq(tasks.churchId, churchId),
     isNull(tasks.deletedAt),
   ];
@@ -155,7 +167,7 @@ export async function listTasks(
   // Top-level rows only unless requested (T-016). Applied to the count query
   // as well as the page query — both are built from `baseConditions`.
   if (!includeSubtasks) {
-    baseConditions.push(isNull(tasks.parentTaskId));
+    baseConditions.push(topLevelTasksOnly());
   }
 
   // Filter by status
@@ -189,9 +201,25 @@ export async function listTasks(
   // Filter by search term
   if (search) {
     const searchLike = `%${search}%`;
-    const searchCondition = ilike(tasks.title, searchLike);
-    baseConditions.push(searchCondition);
+    baseConditions.push(ilike(tasks.title, searchLike));
   }
+
+  return baseConditions;
+}
+
+/**
+ * List tasks with filtering, sorting, and cursor-based pagination.
+ * By default excludes completed and soft-deleted tasks.
+ */
+export async function listTasks(
+  churchId: string,
+  options: ListTasksOptions = {}
+): Promise<ListTasksResult> {
+  const { cursor, limit = 50, sortBy = "due_date", sortDir = "asc" } = options;
+
+  const safeLimit = Math.min(Math.max(1, limit), 100);
+
+  const baseConditions = taskListConditions(churchId, options);
 
   // Get total count
   const [countResult] = await db
@@ -292,46 +320,89 @@ export async function listTasks(
 }
 
 /**
+ * Every WHERE condition the status badges count over.
+ *
+ * Shares `topLevelTasksOnly()` with `taskListConditions` — see the ruling note
+ * there. Note there is no `includeSubtasks` escape hatch: a badge that says
+ * "3 completed" always means three tasks, in every view.
+ */
+export function taskCountConditions(churchId: string, userId?: string): SQL[] {
+  const conditions: SQL[] = [
+    eq(tasks.churchId, churchId),
+    isNull(tasks.deletedAt),
+    topLevelTasksOnly(),
+  ];
+
+  if (userId) {
+    conditions.push(eq(tasks.assignedToId, userId));
+  }
+
+  return conditions;
+}
+
+/**
  * Get task counts grouped by status for a church.
  * Optionally filtered to a specific user's assigned tasks.
+ *
+ * Checklist items are counted separately, in `checklistTotal` /
+ * `checklistComplete`, and are scoped by their PARENT rather than by their own
+ * assignee: the question the line answers is "how much checklist work sits
+ * inside the tasks I am looking at", so a subtask follows the task it itemises
+ * into or out of view.
  */
 export async function getTaskCounts(
   churchId: string,
   userId?: string
 ): Promise<TaskCounts> {
-  const baseConditions = [
-    eq(tasks.churchId, churchId),
-    isNull(tasks.deletedAt),
-  ];
-
-  if (userId) {
-    baseConditions.push(eq(tasks.assignedToId, userId));
-  }
+  const baseConditions = taskCountConditions(churchId, userId);
 
   const today = new Date().toISOString().split("T")[0];
 
-  const result = await db
-    .select({
-      notStarted: sql<number>`count(*) filter (where ${tasks.status} = 'not_started')::int`,
-      inProgress: sql<number>`count(*) filter (where ${tasks.status} = 'in_progress')::int`,
-      blocked: sql<number>`count(*) filter (where ${tasks.status} = 'blocked')::int`,
-      complete: sql<number>`count(*) filter (where ${tasks.status} = 'complete')::int`,
-      overdue: sql<number>`count(*) filter (where ${tasks.status} != 'complete' and ${tasks.dueDate} < ${today})::int`,
-      total: sql<number>`count(*)::int`,
-    })
-    .from(tasks)
-    .where(and(...baseConditions));
+  const parents = alias(tasks, "checklist_parent");
 
-  return (
-    result[0] ?? {
+  const [statusResult, checklistResult] = await Promise.all([
+    db
+      .select({
+        notStarted: sql<number>`count(*) filter (where ${tasks.status} = 'not_started')::int`,
+        inProgress: sql<number>`count(*) filter (where ${tasks.status} = 'in_progress')::int`,
+        blocked: sql<number>`count(*) filter (where ${tasks.status} = 'blocked')::int`,
+        complete: sql<number>`count(*) filter (where ${tasks.status} = 'complete')::int`,
+        overdue: sql<number>`count(*) filter (where ${tasks.status} != 'complete' and ${tasks.dueDate} < ${today})::int`,
+        total: sql<number>`count(*)::int`,
+      })
+      .from(tasks)
+      .where(and(...baseConditions)),
+
+    db
+      .select({
+        checklistComplete: sql<number>`count(*) filter (where ${tasks.status} = 'complete')::int`,
+        checklistTotal: sql<number>`count(*)::int`,
+      })
+      .from(tasks)
+      .innerJoin(parents, eq(tasks.parentTaskId, parents.id))
+      .where(
+        and(
+          eq(tasks.churchId, churchId),
+          isNull(tasks.deletedAt),
+          isNotNull(tasks.parentTaskId),
+          eq(parents.churchId, churchId),
+          isNull(parents.deletedAt),
+          ...(userId ? [eq(parents.assignedToId, userId)] : [])
+        )
+      ),
+  ]);
+
+  return {
+    ...(statusResult[0] ?? {
       notStarted: 0,
       inProgress: 0,
       blocked: 0,
       complete: 0,
       overdue: 0,
       total: 0,
-    }
-  );
+    }),
+    ...(checklistResult[0] ?? { checklistComplete: 0, checklistTotal: 0 }),
+  };
 }
 
 // ============================================================================
@@ -391,16 +462,42 @@ export function checkSubtaskNesting({
 }
 
 /**
+ * Pure: who owns a new subtask?
+ *
+ * A checklist item with no owner is invisible — it never reaches "My tasks",
+ * never counts in an assignee filter, and nobody is accountable for it. So a
+ * subtask starts on the parent's assignee (ruling on #370). This is a default,
+ * not a lock: an explicit assignee on the form wins, and the subtask can be
+ * reassigned afterwards like any other task.
+ */
+export function resolveSubtaskAssignee(
+  requestedAssigneeId: string | null | undefined,
+  parentAssignedToId: string | null
+): string | null {
+  return requestedAssigneeId || parentAssignedToId || null;
+}
+
+/**
  * Load the two rows `checkSubtaskNesting` needs and throw if the parenting is
  * illegal. Church-scoped, so a parent id from another tenant reads as missing.
+ *
+ * Returns the parent row, because the caller also needs its assignee.
  */
 async function assertSubtaskNesting(
   churchId: string,
   parentTaskId: string,
   childId?: string
-): Promise<void> {
+): Promise<{
+  id: string;
+  parentTaskId: string | null;
+  assignedToId: string | null;
+}> {
   const [parentRow] = await db
-    .select({ id: tasks.id, parentTaskId: tasks.parentTaskId })
+    .select({
+      id: tasks.id,
+      parentTaskId: tasks.parentTaskId,
+      assignedToId: tasks.assignedToId,
+    })
     .from(tasks)
     .where(
       and(
@@ -429,6 +526,10 @@ async function assertSubtaskNesting(
 
   const reason = checkSubtaskNesting({ child, parent: parentRow ?? null });
   if (reason) throw new Error(reason);
+
+  // `checkSubtaskNesting` returns the missing-parent reason when `parentRow` is
+  // undefined, so reaching here means it is present.
+  return parentRow!;
 }
 
 /**
@@ -532,9 +633,13 @@ export async function createTask(
 
   // One level only, and the parent has to be ours. Checked before the insert
   // so an illegal parent is a refusal, not an orphan row (T-016).
-  if (parentTaskId) {
-    await assertSubtaskNesting(churchId, parentTaskId);
-  }
+  const parent = parentTaskId
+    ? await assertSubtaskNesting(churchId, parentTaskId)
+    : null;
+
+  const assignedToId = parent
+    ? resolveSubtaskAssignee(data.assignedToId, parent.assignedToId)
+    : data.assignedToId || null;
 
   const values: NewTask = applyRecurrence(
     {
@@ -546,7 +651,7 @@ export async function createTask(
       priority: data.priority,
       dueDate: data.dueDate ?? null,
       dueTime: data.dueTime ?? null,
-      assignedToId: data.assignedToId || null,
+      assignedToId,
       category: data.category ?? null,
       relatedType: data.relatedType ?? null,
       relatedId: data.relatedId || null,
@@ -651,6 +756,135 @@ export interface TaskCompletionResult {
   nextInstance: Task | null;
 }
 
+/** What the successor's checklist needs to know about each original item. */
+export type RecurrenceChild = Pick<
+  Task,
+  | "title"
+  | "description"
+  | "priority"
+  | "dueTime"
+  | "assignedToId"
+  | "category"
+  | "relatedType"
+  | "relatedId"
+>;
+
+/**
+ * Pure: the checklist the successor starts life with (ruling on #370).
+ *
+ * The checklist is part of the task's template, not a record of one cycle, so
+ * EVERY item comes across — the ticked ones and the ones nobody got to alike —
+ * and all of them arrive unticked. That is deliberately one rule rather than
+ * two: carrying open items forward as open and ticked items forward as fresh
+ * would need a per-item "was this ever done" state, and would make a weekly
+ * list that was half-finished once behave differently from an identical list
+ * that was finished. A repeating task repeats whole.
+ */
+export function planRecurrenceChildren(
+  children: RecurrenceChild[],
+  successor: Pick<Task, "id" | "churchId" | "createdById">,
+  createdAtBase: Date
+): NewTask[] {
+  return children.map((child, index) => ({
+    churchId: successor.churchId,
+    createdById: successor.createdById,
+    title: child.title,
+    description: child.description,
+    // Every box unticked, whatever it was on the instance just completed.
+    status: "not_started",
+    completedAt: null,
+    completedById: null,
+    priority: child.priority,
+    // The item's own due date is NOT carried: it belonged to the cycle that
+    // just closed, and re-dating it would either invent a date or hand the new
+    // checklist a set of already-overdue items. The parent carries the schedule.
+    dueDate: null,
+    dueTime: child.dueTime,
+    assignedToId: child.assignedToId,
+    category: child.category,
+    relatedType: child.relatedType,
+    relatedId: child.relatedId,
+    parentTaskId: successor.id,
+    // A checklist item never repeats on its own — the parent is the series.
+    isRecurring: false,
+    recurrenceRule: null,
+    // `created_at` IS the checklist order (`listSubtasks` sorts by it), and one
+    // multi-row INSERT stamps every default with the same transaction
+    // timestamp, which would leave the order to a random-UUID tiebreak. A
+    // millisecond per item keeps the list in the order it was written.
+    createdAt: new Date(createdAtBase.getTime() + index),
+  }));
+}
+
+/**
+ * The database surface `createNextRecurrence` needs. Injectable so the
+ * successor's shape — and its checklist — can be unit-tested without a DB.
+ */
+export interface RecurrenceDeps {
+  /** Ids of open instances already in this series. */
+  findOpenInSeries(churchId: string, seriesId: string): Promise<string[]>;
+  insertSuccessor(values: NewTask): Promise<Task | null>;
+  /** The completed instance's checklist, in checklist order. */
+  listChildren(
+    churchId: string,
+    parentTaskId: string
+  ): Promise<RecurrenceChild[]>;
+  insertChildren(values: NewTask[]): Promise<void>;
+}
+
+export const defaultRecurrenceDeps: RecurrenceDeps = {
+  async findOpenInSeries(churchId, seriesId) {
+    const open = await db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(
+        and(
+          eq(tasks.churchId, churchId),
+          ne(tasks.status, "complete"),
+          isNull(tasks.deletedAt),
+          eq(tasks.isRecurring, true),
+          sql`${tasks.recurrenceRule} ->> 'seriesId' = ${seriesId}`
+        )
+      )
+      .limit(1);
+
+    return open.map((row) => row.id);
+  },
+
+  async insertSuccessor(values) {
+    const [next] = await db.insert(tasks).values(values).returning();
+    return next ?? null;
+  },
+
+  async listChildren(churchId, parentTaskId) {
+    return db
+      .select({
+        title: tasks.title,
+        description: tasks.description,
+        priority: tasks.priority,
+        dueTime: tasks.dueTime,
+        assignedToId: tasks.assignedToId,
+        category: tasks.category,
+        relatedType: tasks.relatedType,
+        relatedId: tasks.relatedId,
+      })
+      .from(tasks)
+      .where(
+        and(
+          eq(tasks.churchId, churchId),
+          eq(tasks.parentTaskId, parentTaskId),
+          isNull(tasks.deletedAt)
+        )
+      )
+      .orderBy(asc(tasks.createdAt), asc(tasks.id));
+  },
+
+  async insertChildren(values) {
+    if (values.length === 0) return;
+    await db.insert(tasks).values(values);
+  },
+};
+
 /**
  * Mint the next instance of a recurring series (T-017).
  *
@@ -662,15 +896,19 @@ export interface TaskCompletionResult {
  * its rule is unreadable, the series has passed its end date, or an instance
  * of the same series is somehow already open.
  *
+ * COPIED to the successor: the task's own fields, and its whole checklist —
+ * unticked (see `planRecurrenceChildren`).
+ *
  * NOT copied to the successor: `completionEvent`. An auto-completion hook is
  * installed by whatever generated the task (a meeting finalize, say), and one
  * of them — `meeting.evaluation.completed` — is backed by a partial unique
  * index on (church_id, related_id). Copying it would abort the insert on the
  * second instance. Recurrence mints plain work; hooks stay with the generator.
  */
-async function createNextRecurrence(
+export async function createNextRecurrence(
   completed: Task,
-  completedOn: string
+  completedOn: string,
+  deps: RecurrenceDeps = defaultRecurrenceDeps
 ): Promise<Task | null> {
   if (!completed.isRecurring) return null;
 
@@ -692,47 +930,51 @@ async function createNextRecurrence(
   // instance is minted only by completing its predecessor), so this is the
   // belt to that braces: it catches a series that was resurrected by reopening
   // and re-completing an older instance.
-  const open = await db
-    .select({ id: tasks.id })
-    .from(tasks)
-    .where(
-      and(
-        eq(tasks.churchId, completed.churchId),
-        ne(tasks.status, "complete"),
-        isNull(tasks.deletedAt),
-        eq(tasks.isRecurring, true),
-        sql`${tasks.recurrenceRule} ->> 'seriesId' = ${seriesId}`
-      )
-    )
-    .limit(1);
-
+  const open = await deps.findOpenInSeries(completed.churchId, seriesId);
   if (open.length > 0) return null;
 
-  const [next] = await db
-    .insert(tasks)
-    .values({
-      churchId: completed.churchId,
-      title: completed.title,
-      description: completed.description,
-      status: "not_started",
-      // Carried forward so the next occurrence is the same piece of work:
-      // whoever owns it, how urgent it is, what it is about, and what it hangs
-      // off. Only the schedule moves.
-      priority: completed.priority,
-      dueDate: nextDueDate,
-      dueTime: completed.dueTime,
-      assignedToId: completed.assignedToId,
-      category: completed.category,
-      relatedType: completed.relatedType,
-      relatedId: completed.relatedId,
-      parentTaskId: completed.parentTaskId,
-      isRecurring: true,
-      recurrenceRule: { ...rule, seriesId },
-      createdById: completed.createdById,
-    })
-    .returning();
+  const next = await deps.insertSuccessor({
+    churchId: completed.churchId,
+    title: completed.title,
+    description: completed.description,
+    status: "not_started",
+    // Carried forward so the next occurrence is the same piece of work:
+    // whoever owns it, how urgent it is, what it is about, and what it hangs
+    // off. Only the schedule moves.
+    priority: completed.priority,
+    dueDate: nextDueDate,
+    dueTime: completed.dueTime,
+    assignedToId: completed.assignedToId,
+    category: completed.category,
+    relatedType: completed.relatedType,
+    relatedId: completed.relatedId,
+    parentTaskId: completed.parentTaskId,
+    isRecurring: true,
+    recurrenceRule: { ...rule, seriesId },
+    createdById: completed.createdById,
+  });
 
-  return next ?? null;
+  if (!next) return null;
+
+  // The checklist comes across with the task (ruling on #370). Failing here
+  // must not report the successor as missing — it exists, and a checklist that
+  // has to be retyped is a smaller loss than a completion that looks like it
+  // did not happen.
+  try {
+    const children = await deps.listChildren(completed.churchId, completed.id);
+    if (children.length > 0) {
+      await deps.insertChildren(
+        planRecurrenceChildren(children, next, new Date())
+      );
+    }
+  } catch (error) {
+    console.error(
+      `createNextRecurrence copied no checklist onto ${next.id}:`,
+      error
+    );
+  }
+
+  return next;
 }
 
 /**
