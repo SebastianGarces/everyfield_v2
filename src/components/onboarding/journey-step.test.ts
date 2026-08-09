@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
+import { getTemplateById } from "@/lib/documents";
+import { resolveMergeValues } from "@/lib/documents/merge";
 import {
   isSkippableOnboardingStep,
   onboardingStep,
@@ -260,6 +262,50 @@ test("both document call sites source the launch date from the entity", () => {
       `${name} must no longer hardcode a null launch date`
     );
   }
+});
+
+test("a declared date reaches {{launch_date}}, and 'no date yet' leaves it empty", () => {
+  // The scan above proves both call sites READ the entity; this proves what a
+  // planter then sees in the file, which is the AC's own wording ("a populated
+  // {{launch_date}} merge field"). Both step-3 answers are asserted because the
+  // claim is that they DIFFER — a resolver returning "" for everything would
+  // pass a one-sided test, and "" is exactly what the stub used to produce.
+  const template = getTemplateById("launch-sunday-checklists");
+  assert.ok(
+    template,
+    "the one template whose merge fields name the launch day"
+  );
+
+  const withDate = resolveMergeValues(
+    template,
+    {
+      churchName: "Grace City Church",
+      userName: "Sebastian",
+      // What `getLaunchForChurch(...)?.targetDate` hands the call sites after
+      // step 3 wrote it: the stored `yyyy-mm-dd` wall clock, never a `Date`.
+      launchDate: "2026-09-20",
+    },
+    {}
+  );
+
+  // Formatted in APP_TIME_ZONE, so the day does not drift by runtime zone
+  // (memory/invariants.md → Date & Time Rendering).
+  assert.equal(withDate.launch_date, "September 20, 2026");
+
+  const withoutDate = resolveMergeValues(
+    template,
+    {
+      churchName: "Grace City Church",
+      userName: "Sebastian",
+      // "No date yet" writes no launch row, so the call sites resolve null.
+      launchDate: null,
+    },
+    {}
+  );
+
+  assert.equal(withoutDate.launch_date, "");
+  // An empty day must not cost the planter the fields that ARE known.
+  assert.equal(withoutDate.church_name, "Grace City Church");
 });
 
 // ----------------------------------------------------------------------------
