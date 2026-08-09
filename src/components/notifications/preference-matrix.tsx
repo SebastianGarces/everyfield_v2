@@ -40,6 +40,12 @@ import type {
 // bring none of the Drizzle table graph into the client bundle — the same
 // division `notification-feed.tsx` keeps for Screen 1.
 //
+// That includes the cadence area: for an oversight recipient the server sends a
+// `fixed` variant — an explanation instead of a selector — because the only
+// digest they receive is fixed daily by N-025 and a control that cannot change
+// what they receive is not a control (#254). Which variant arrives is the
+// server's decision; this component just renders the one it was given.
+//
 // State: `useOptimistic` over the props, per memory/contracts/data-patterns.md.
 // The switch moves the instant it is pressed, the action reconciles, and its
 // `refresh()` re-renders this tree — including the layout's unread bell, which
@@ -47,9 +53,16 @@ import type {
 // never copied into `useState`; the optimistic baseline is recomputed from
 // `view` on every render.
 //
-// A failed write surfaces as a toast and the optimistic value falls back to
-// server truth on its own — the control visibly returns to where it was, so a
-// save that did not happen never looks like one that did.
+// A failed write surfaces as a toast — and that works only because the actions
+// RETURN their failures. A server action that throws rejects the promise awaited
+// below, and the rejection unwinds the transition without ever reaching
+// `toast.error`; before #236 the user saw the control snap back and nothing
+// else. Both action bodies are now wrapped, so an expired session on a tab left
+// open reads as a sentence rather than as a mis-click.
+//
+// The snap-back itself needs no undo here: `useOptimistic` drops back to the
+// props when the transition ends, so a save that did not happen never leaves the
+// control looking like one that did.
 // ============================================================================
 
 export interface PreferenceMatrixProps {
@@ -59,7 +72,8 @@ export interface PreferenceMatrixProps {
 interface MatrixState {
   /** Keyed by `"category:channel"`. */
   cells: Record<string, boolean>;
-  cadence: DigestCadence;
+  /** `null` when this reader has no cadence to choose — see the header. */
+  cadence: DigestCadence | null;
 }
 
 type MatrixAction =
@@ -83,6 +97,9 @@ function applyMatrixAction(
 export function PreferenceMatrix({ view }: PreferenceMatrixProps) {
   const [, startTransition] = useTransition();
 
+  // Hoisted so TypeScript narrows the union once, rather than at each use.
+  const digest = view.digest;
+
   const serverState = useMemo<MatrixState>(
     () => ({
       cells: Object.fromEntries(
@@ -90,7 +107,7 @@ export function PreferenceMatrix({ view }: PreferenceMatrixProps) {
           row.cells.map((cell) => [cell.key, cell.enabled] as const)
         )
       ),
-      cadence: view.digest.cadence,
+      cadence: view.digest.kind === "choice" ? view.digest.cadence : null,
     }),
     [view]
   );
@@ -128,7 +145,7 @@ export function PreferenceMatrix({ view }: PreferenceMatrixProps) {
   // Read off the OPTIMISTIC state so the hint appears and disappears with the
   // switch that causes it, rather than a round trip later.
   const digestRow = view.categories.find(
-    (row) => row.category === view.digest.category
+    (row) => row.category === digest.category
   );
   const digestIsOff =
     digestRow?.cells.every((cell) => state.cells[cell.key] === false) ?? false;
@@ -175,48 +192,61 @@ export function PreferenceMatrix({ view }: PreferenceMatrixProps) {
                 {row.description}
               </p>
 
-              {row.category === view.digest.category && (
+              {row.category === digest.category && (
                 <div className="pt-3">
-                  <Label
-                    htmlFor="digest-cadence"
-                    className="text-muted-foreground text-xs font-medium"
-                  >
-                    {view.digest.label}
-                  </Label>
-                  <Select
-                    value={state.cadence}
-                    onValueChange={(value) =>
-                      chooseCadence(value as DigestCadence)
-                    }
-                  >
-                    <SelectTrigger
-                      id="digest-cadence"
-                      size="sm"
-                      data-testid="digest-cadence"
-                      className="mt-1.5 cursor-pointer"
-                      aria-describedby="digest-cadence-description"
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {view.digest.options.map((option) => (
-                        <SelectItem
-                          key={option.value}
-                          value={option.value}
-                          data-testid={`digest-cadence-${option.value}`}
-                          className="cursor-pointer"
+                  {digest.kind === "choice" ? (
+                    <>
+                      <Label
+                        htmlFor="digest-cadence"
+                        className="text-muted-foreground text-xs font-medium"
+                      >
+                        {digest.label}
+                      </Label>
+                      <Select
+                        value={state.cadence ?? digest.cadence}
+                        onValueChange={(value) =>
+                          chooseCadence(value as DigestCadence)
+                        }
+                      >
+                        <SelectTrigger
+                          id="digest-cadence"
+                          size="sm"
+                          data-testid="digest-cadence"
+                          className="mt-1.5 cursor-pointer"
+                          aria-describedby="digest-cadence-description"
                         >
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {digest.options.map((option) => (
+                            <SelectItem
+                              key={option.value}
+                              value={option.value}
+                              data-testid={`digest-cadence-${option.value}`}
+                              className="cursor-pointer"
+                            >
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </>
+                  ) : null}
+
+                  {/* The description is the same slot in both variants: for a
+                      reader who chooses, it describes the choice; for a reader
+                      who does not, it IS the answer — what decides the timing
+                      instead of them (#254). */}
                   <p
                     id="digest-cadence-description"
-                    data-testid="digest-cadence-description"
+                    data-testid={
+                      digest.kind === "choice"
+                        ? "digest-cadence-description"
+                        : "digest-cadence-fixed"
+                    }
                     className="text-muted-foreground mt-1.5 text-xs text-pretty"
                   >
-                    {view.digest.description}
+                    {digest.description}
                   </p>
                   {digestIsOff && (
                     <p

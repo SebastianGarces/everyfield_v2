@@ -20,17 +20,26 @@ import {
   DIGEST_CADENCE_CHANNEL,
   digestCadenceWriteIsNoop,
   isChannelEnabled,
+  isUnauthenticatedPreferenceError,
+  OVERSIGHT_DIGEST_CADENCE_NOTE,
+  PREFERENCE_SAVE_FAILED_MESSAGE,
+  PREFERENCE_SESSION_EXPIRED_MESSAGE,
   preferenceKey,
   preferenceOwnerFromSession,
+  preferenceSaveFailure,
+  preferenceValueIsInheritable,
   preferenceWriteIsNoop,
   resolveDigestCadence,
   resolveInAppCategories,
   resolvePreference,
   resolvePreferenceMatrix,
+  SESSION_EXPIRED_ERROR_MESSAGE,
   setDigestCadenceQuery,
   setPreferenceQuery,
   setPreferenceSchema,
   UnauthenticatedPreferenceAccessError,
+  type DigestCadenceChoiceView,
+  type PreferenceMatrixView,
   type PreferenceOwner,
 } from "./preferences";
 
@@ -64,14 +73,19 @@ function makeRow(
 // present-enabled / present-disabled / absent
 // ----------------------------------------------------------------------------
 
-test("a present enabled row resolves to enabled, attributed explicit", () => {
+test("a present row that AGREES with the coded default stays inheritable", () => {
+  // #237. `tasks`/`email` defaults to on, so a stored `true` says nothing the
+  // default did not — and reading it as a CHOICE is what pinned users to
+  // today's defaults, keeping N-019's role-aware defaults from ever reaching
+  // them. The value is the same either way; the attribution is the fix.
   const rows = [
     makeRow({ category: "tasks", channel: "email", enabled: true }),
   ];
   const resolved = resolvePreference(rows, "tasks", "email");
 
   assert.equal(resolved.enabled, true);
-  assert.equal(resolved.source, "explicit");
+  assert.equal(resolved.enabled, defaultChannelEnabled("tasks", "email"));
+  assert.equal(resolved.source, "default");
 });
 
 test("a present disabled row resolves to disabled, attributed explicit", () => {
@@ -612,21 +626,32 @@ test("every category states its purpose in plain language", () => {
 // Digest cadence — the user's OWN open-items digest (N-013), and only that
 // ----------------------------------------------------------------------------
 
+/**
+ * The cadence area as a SELECTOR, refusing anything else.
+ *
+ * `assert.ok` narrows the union, so a test that expects a control cannot
+ * quietly pass against the oversight variant that has none (#254).
+ */
+function cadenceChoice(view: PreferenceMatrixView): DigestCadenceChoiceView {
+  const { digest } = view;
+  assert.ok(digest.kind === "choice", "expected a cadence selector");
+  return digest;
+}
+
 test("the cadence selector offers every coded cadence, within the digest category", () => {
   const view = buildPreferenceMatrixView([]);
+  const digest = cadenceChoice(view);
 
-  assert.equal(view.digest.category, "digest");
+  assert.equal(digest.category, "digest");
   assert.deepEqual(
-    view.digest.options.map((option) => option.value),
+    digest.options.map((option) => option.value),
     [...digestCadences]
   );
-  assert.ok(view.digest.options.every((option) => option.label.length > 0));
+  assert.ok(digest.options.every((option) => option.label.length > 0));
 
   // It is attached to a category the matrix actually renders, so "within the
   // digest category" is structural rather than a layout accident.
-  assert.ok(
-    view.categories.some((row) => row.category === view.digest.category)
-  );
+  assert.ok(view.categories.some((row) => row.category === digest.category));
 });
 
 test("cadence copy is scoped to the reader's own digest, never the oversight one", () => {
@@ -637,8 +662,9 @@ test("cadence copy is scoped to the reader's own digest, never the oversight one
   // churches or networks would tell a planter that this control decides what
   // leaves their plant — which is a different toggle, owned elsewhere.
   const view = buildPreferenceMatrixView([]);
+  const digest = cadenceChoice(view);
   const copy =
-    `${view.digest.label} ${view.digest.description} ` +
+    `${digest.label} ${digest.description} ` +
     (view.categories.find((row) => row.category === "digest")?.description ??
       "");
 
@@ -931,4 +957,319 @@ test("an oversight admin switching their in-app digest OFF is not a no-op", () =
   // And the church audience keeps exactly today's answers.
   assert.equal(preferenceWriteIsNoop([], "digest", "in_app", false), true);
   assert.equal(preferenceWriteIsNoop([], "digest", "in_app", true), false);
+});
+
+// ----------------------------------------------------------------------------
+// Changing only the cadence must not pin the user to today's defaults (#237)
+// ----------------------------------------------------------------------------
+
+/**
+ * The row a cadence-only save actually creates.
+ *
+ * Built from `setDigestCadenceQuery`'s own inputs rather than hand-written, so
+ * it cannot drift from what the write path inserts: the channel it writes to,
+ * and the coded default it has to supply for the NOT NULL `enabled` column.
+ */
+function cadenceOnlyRow(cadence: (typeof digestCadences)[number]) {
+  return makeRow({
+    category: "digest",
+    channel: DIGEST_CADENCE_CHANNEL,
+    enabled: defaultChannelEnabled("digest", DIGEST_CADENCE_CHANNEL),
+    digestCadence: cadence,
+  });
+}
+
+test("a cadence-only save leaves the (digest, email) cell attributed default", () => {
+  // The defect: the row the cadence write has to create was read back as an
+  // EXPLICIT preference, so a user who touched nothing but the dropdown left
+  // with a recorded choice about whether their digest email is on at all.
+  const rows = [cadenceOnlyRow("daily")];
+
+  const resolved = resolvePreference(rows, "digest", DIGEST_CADENCE_CHANNEL);
+
+  assert.equal(resolved.source, "default");
+  assert.equal(
+    resolved.enabled,
+    defaultChannelEnabled("digest", DIGEST_CADENCE_CHANNEL)
+  );
+
+  // And the screen agrees — `data-source` is read straight off this cell.
+  const cell = buildPreferenceMatrixView(rows)
+    .categories.find((row) => row.category === "digest")!
+    .cells.find((c) => c.channel === DIGEST_CADENCE_CHANNEL)!;
+
+  assert.equal(cell.source, "default");
+});
+
+test("the cadence itself still persists and is still honoured", () => {
+  // The other half: inheritable is about `enabled`, never about the cadence.
+  // A fix that dropped the cadence with the choice would be no fix at all.
+  const rows = [cadenceOnlyRow("daily")];
+
+  assert.notEqual("daily", DEFAULT_DIGEST_CADENCE);
+  assert.equal(resolveDigestCadence(rows), "daily");
+  assert.equal(
+    resolvePreference(rows, "digest", DIGEST_CADENCE_CHANNEL).digestCadence,
+    "daily"
+  );
+  assert.equal(cadenceChoice(buildPreferenceMatrixView(rows)).cadence, "daily");
+
+  // Re-selecting it is then a no-op, so a reload followed by a re-save writes
+  // nothing further.
+  assert.equal(digestCadenceWriteIsNoop(rows, "daily"), true);
+});
+
+test("a cadence-only row does not pin EITHER audience's defaults", () => {
+  // The N-019 guarantee stated as the property it protects: whichever coded
+  // default a user's role turns out to select, the row a cadence save left
+  // behind is still inheritable, so the new default reaches them.
+  const rows = [cadenceOnlyRow("daily")];
+
+  for (const audience of ["church", "oversight"] as const) {
+    const resolved = resolvePreference(
+      rows,
+      "digest",
+      DIGEST_CADENCE_CHANNEL,
+      audience
+    );
+
+    assert.equal(resolved.source, "default", audience);
+    assert.equal(
+      resolved.enabled,
+      defaultChannelEnabled("digest", DIGEST_CADENCE_CHANNEL, audience),
+      audience
+    );
+  }
+});
+
+test("no write materialises a row that only restates a default", () => {
+  // The `preferenceWriteIsNoop` guarantee, over every pair and both audiences:
+  // asking for the value you already have — by default or by an inheritable row
+  // that agrees with it — writes nothing.
+  for (const audience of ["church", "oversight"] as const) {
+    for (const { category, channel } of notificationPreferenceMatrixKeys()) {
+      const coded = defaultChannelEnabled(category, channel, audience);
+      const label = `${audience} ${preferenceKey(category, channel)}`;
+
+      assert.equal(
+        preferenceWriteIsNoop([], category, channel, coded, audience),
+        true,
+        label
+      );
+
+      // Same answer once a row restating that default exists — so a
+      // double-submit, or a cadence save that created one, cannot turn into a
+      // second write that pins the value.
+      const restating = [makeRow({ category, channel, enabled: coded })];
+      assert.equal(
+        preferenceWriteIsNoop(restating, category, channel, coded, audience),
+        true,
+        label
+      );
+
+      // And a real change is still a real change.
+      assert.equal(
+        preferenceWriteIsNoop(restating, category, channel, !coded, audience),
+        false,
+        label
+      );
+    }
+  }
+});
+
+test("inheritable is decided against the CURRENT default, per audience", () => {
+  // `digest`/`in_app` is the one pair whose coded default differs by audience
+  // (N-027), which makes it the one place the rule is observable: the same
+  // stored `true` says nothing to an oversight reader and is a deliberate
+  // opt-in for the plant's team.
+  assert.equal(
+    preferenceValueIsInheritable("digest", "in_app", true, "oversight"),
+    true
+  );
+  assert.equal(
+    preferenceValueIsInheritable("digest", "in_app", true, "church"),
+    false
+  );
+
+  const optIn = [
+    makeRow({ category: "digest", channel: "in_app", enabled: true }),
+  ];
+
+  assert.equal(resolvePreference(optIn, "digest", "in_app").source, "explicit");
+  assert.equal(
+    resolvePreference(optIn, "digest", "in_app", "oversight").source,
+    "default"
+  );
+});
+
+test("a stored value that DIFFERS from the default is still a choice", () => {
+  // The rule may not be allowed to swallow an opt-out. Asserted over every pair
+  // rather than a sample, so no future default change can make one of them
+  // inheritable by accident.
+  for (const audience of ["church", "oversight"] as const) {
+    for (const { category, channel } of notificationPreferenceMatrixKeys()) {
+      const coded = defaultChannelEnabled(category, channel, audience);
+      const rows = [makeRow({ category, channel, enabled: !coded })];
+      const resolved = resolvePreference(rows, category, channel, audience);
+
+      assert.equal(
+        resolved.source,
+        "explicit",
+        `${audience} ${preferenceKey(category, channel)}`
+      );
+      assert.equal(resolved.enabled, !coded);
+    }
+  }
+});
+
+// ----------------------------------------------------------------------------
+// The cadence control an oversight recipient cannot use is not offered (#254)
+// ----------------------------------------------------------------------------
+
+test("oversight roles are given an explanation, not a cadence selector", () => {
+  // Both oversight role classes, and driven through `audienceForRole` rather
+  // than a hardcoded audience, so the divergence is asserted at the same seam
+  // `/settings` builds the view through.
+  for (const role of ["sending_church_admin", "network_admin"] as const) {
+    const view = buildPreferenceMatrixView([], audienceForRole(role));
+
+    assert.equal(view.digest.kind, "fixed", role);
+    assert.equal(view.digest.category, "digest", role);
+    assert.ok(!("options" in view.digest), role);
+    assert.ok(!("cadence" in view.digest), role);
+  }
+});
+
+test("the church roles' cadence selector is unchanged", () => {
+  // The planter's control is the one this must not touch. Coach and team member
+  // ride the same audience and are asserted with it.
+  for (const role of ["planter", "coach", "team_member"] as const) {
+    const digest = cadenceChoice(
+      buildPreferenceMatrixView([], audienceForRole(role))
+    );
+
+    assert.equal(digest.kind, "choice", role);
+    assert.equal(digest.cadence, DEFAULT_DIGEST_CADENCE, role);
+    assert.deepEqual(
+      digest.options.map((option) => option.value),
+      [...digestCadences],
+      role
+    );
+  }
+});
+
+test("the oversight note says what decides the timing, and offers nothing", () => {
+  // better-writing: removing a control with no explanation reads as a missing
+  // feature. The note has to answer the question the selector used to answer.
+  const view = buildPreferenceMatrixView([], "oversight");
+  assert.ok(view.digest.kind === "fixed");
+
+  assert.equal(view.digest.description, OVERSIGHT_DIGEST_CADENCE_NOTE);
+  assert.ok(OVERSIGHT_DIGEST_CADENCE_NOTE.endsWith("."));
+  assert.match(OVERSIGHT_DIGEST_CADENCE_NOTE, /once a day/i);
+  assert.match(OVERSIGHT_DIGEST_CADENCE_NOTE, /fixed/i);
+
+  // It must not imply a choice that does not exist, and must not leak internal
+  // vocabulary the way a requirement id or a category slug would.
+  for (const forbidden of [
+    /\bchoose\b/i,
+    /how often would/i,
+    /\bN-\d{3}\b/,
+    /in_app/,
+    /\bcadence\b/i,
+  ]) {
+    assert.doesNotMatch(
+      OVERSIGHT_DIGEST_CADENCE_NOTE,
+      forbidden,
+      OVERSIGHT_DIGEST_CADENCE_NOTE
+    );
+  }
+});
+
+// ----------------------------------------------------------------------------
+// A save that fails has to say so (#236)
+// ----------------------------------------------------------------------------
+
+test("an expired session becomes a message, not a throw", () => {
+  // The realistic case the AC names: a settings tab left open long enough for
+  // the session to go. `preferenceOwnerFromSession` throws, and before this the
+  // throw rejected the action's promise — the client's `toast.error` was never
+  // reached and the switch just snapped back.
+  let thrown: unknown;
+  try {
+    preferenceOwnerFromSession(null);
+  } catch (error) {
+    thrown = error;
+  }
+
+  assert.ok(thrown instanceof UnauthenticatedPreferenceAccessError);
+  assert.equal(isUnauthenticatedPreferenceError(thrown), true);
+
+  const result = preferenceSaveFailure(thrown);
+  assert.equal(result.success, false);
+  assert.equal(result.error, PREFERENCE_SESSION_EXPIRED_MESSAGE);
+});
+
+test("verifySession's own Unauthorized is the same case to the user", () => {
+  assert.equal(
+    isUnauthenticatedPreferenceError(new Error(SESSION_EXPIRED_ERROR_MESSAGE)),
+    true
+  );
+  assert.equal(
+    preferenceSaveFailure(new Error(SESSION_EXPIRED_ERROR_MESSAGE)).error,
+    PREFERENCE_SESSION_EXPIRED_MESSAGE
+  );
+});
+
+test("the message verifySession throws with is pinned to its source", () => {
+  // Matching on an error message is fragile, so the two are held together: if
+  // `verifySession` ever throws something else, this fails loudly rather than
+  // the expired session silently degrading to the generic sentence.
+  const source = readFileSync(
+    path.join(process.cwd(), "src/lib/auth/session.ts"),
+    "utf8"
+  );
+
+  assert.ok(
+    source.includes(`throw new Error("${SESSION_EXPIRED_ERROR_MESSAGE}")`),
+    "verifySession no longer throws the message preferences.ts matches on"
+  );
+});
+
+test("any other failure still surfaces something, and leaks nothing", () => {
+  // A database that is down is the other half of the AC. The user gets a
+  // sentence they can act on; the driver's text stays in the server log, where
+  // it cannot put a table name in a toast.
+  const dbError = new Error(
+    'relation "notification_preferences" does not exist'
+  );
+
+  assert.equal(isUnauthenticatedPreferenceError(dbError), false);
+
+  const result = preferenceSaveFailure(dbError);
+  assert.equal(result.success, false);
+  assert.equal(result.error, PREFERENCE_SAVE_FAILED_MESSAGE);
+  assert.doesNotMatch(result.error, /notification_preferences/);
+
+  // Non-Error throws resolve too — a rejected promise carrying a string would
+  // otherwise reach the `instanceof` checks and fall through to nothing.
+  assert.equal(
+    preferenceSaveFailure("boom").error,
+    PREFERENCE_SAVE_FAILED_MESSAGE
+  );
+  assert.equal(
+    preferenceSaveFailure(undefined).error,
+    PREFERENCE_SAVE_FAILED_MESSAGE
+  );
+});
+
+test("both failure messages tell the user what to do next", () => {
+  for (const message of [
+    PREFERENCE_SESSION_EXPIRED_MESSAGE,
+    PREFERENCE_SAVE_FAILED_MESSAGE,
+  ]) {
+    assert.ok(message.length > 0);
+    assert.ok(message.endsWith("."), message);
+    assert.doesNotMatch(message, /\bError\b|\bnull\b|undefined/, message);
+  }
 });

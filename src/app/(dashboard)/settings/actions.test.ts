@@ -70,10 +70,57 @@ test("every exported settings action mints its owner from the session", () => {
 
   assert.ok(exported.length > 0, "no exported actions found — check the path");
   assert.equal(minted.length, exported.length);
+
+  // The owner comes from a VERIFIED session and from nothing else. Two call
+  // shapes are legitimate — the mint inlined on `verifySession()`, and the mint
+  // taking a `session` const the line above assigned from it, which an action
+  // that also has to read the role needs. Anything else is refused by the
+  // lookahead, so a mint fed from some third value fails here.
+  assert.match(ACTIONS_CODE, /const session = await verifySession\(\)/);
+  assert.doesNotMatch(
+    ACTIONS_CODE,
+    /preferenceOwnerFromSession\((?!session\)|await verifySession\(\)\))/
+  );
+});
+
+test("every exported action returns its failures instead of throwing", () => {
+  // #236. A server action that throws rejects the promise the client awaits,
+  // and the rejection unwinds the transition without reaching `toast.error` —
+  // the user sees the control snap back and is told nothing. So every body is
+  // wrapped, and every catch hands the failure back.
+  const exported = ACTIONS_CODE.match(/export async function /g) ?? [];
+  const wrapped = ACTIONS_CODE.match(/\btry \{/g) ?? [];
+  const reported =
+    ACTIONS_CODE.match(/return preferenceSaveFailure\(error\)/g) ?? [];
+
+  assert.equal(wrapped.length, exported.length);
+  assert.equal(reported.length, exported.length);
+
+  // Next.js control-flow errors (`redirect()`, `notFound()`, prerender
+  // interrupts) are thrown as errors but MEAN something to the framework, so
+  // they get first refusal in every catch. Swallowing one would turn a working
+  // redirect into a false "we could not save that".
+  const rethrown = ACTIONS_CODE.match(/unstable_rethrow\(error\)/g) ?? [];
+  assert.equal(rethrown.length, exported.length);
+
+  for (const block of ACTIONS_CODE.split("} catch (error) {").slice(1)) {
+    const rethrowAt = block.indexOf("unstable_rethrow(error)");
+    const returnAt = block.indexOf("return preferenceSaveFailure(error)");
+
+    assert.ok(rethrowAt >= 0 && returnAt >= 0);
+    assert.ok(rethrowAt < returnAt, "unstable_rethrow must come first");
+  }
+});
+
+test("the cadence action refuses the roles the screen no longer offers it to", () => {
+  // #254. The screen stops rendering the selector for an oversight recipient,
+  // but every export of a `"use server"` module is a POSTable endpoint — so the
+  // refusal lives here too, and says the same sentence the screen does.
   assert.match(
     ACTIONS_CODE,
-    /preferenceOwnerFromSession\(await verifySession\(\)\)/
+    /audienceForRole\(session\.user\.role\) === "oversight"/
   );
+  assert.match(ACTIONS_CODE, /error: OVERSIGHT_DIGEST_CADENCE_NOTE/);
 });
 
 test("no settings action names a user, anywhere", () => {
