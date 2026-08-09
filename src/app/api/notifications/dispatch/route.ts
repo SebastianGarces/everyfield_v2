@@ -21,7 +21,8 @@
 // exactly one digest per plant per day. See `sweepOversightDigests` below.
 //
 // Schedule: every 15 minutes, from `.github/workflows/notifications-dispatch.yml`
-// — NOT from vercel.json, which carries only the daily phase-engine cron. The
+// — NOT from vercel.json, which since #36 carries no crons at all (the phase
+// engine moved to its own Actions schedule for the same reason). The
 // Hobby plan caps Vercel crons at one invocation per day and rejects the
 // deployment outright rather than throttling, and a daily tick would make a
 // meeting reminder arrive a day late. GitHub's scheduler has no such cap, at
@@ -88,8 +89,9 @@ export interface DispatchResponseBody extends DispatchRunSummary {
  * The daily oversight digest, hung off this tick (ruled 2026-08-01).
  *
  * WHY HERE. The digest is a daily job and this app has no daily scheduler to
- * give it: `vercel.json` holds the single cron the Hobby plan permits (the
- * phase engine), and adding a second GitHub workflow to run one query a day is
+ * give it: the Hobby plan's one-a-day Vercel cron is not usable by anything
+ * here (which is why `vercel.json` schedules nothing), and adding a third
+ * GitHub workflow to run one query a day is
  * a scheduler to maintain for no benefit. The tick that already runs every 15
  * minutes can carry it, provided the digest happens once — and it does, because
  * the sweep derives "already done today" from the rows it wrote rather than

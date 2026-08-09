@@ -521,8 +521,9 @@ export function runDailyOversightDigest(
 // ----------------------------------------------------------------------------
 //
 // The digest is a DAILY job, but this app has no daily scheduler it can use:
-// `vercel.json` carries the one cron the Hobby plan allows (the phase engine),
-// and the notifications dispatcher already ticks every 15 minutes from
+// `vercel.json` carries no crons at all (the Hobby plan's one-a-day limit is
+// too coarse for every job this repo has), and the dispatcher already ticks
+// every 15 minutes from
 // `.github/workflows/notifications-dispatch.yml`. Rather than add a second
 // scheduler, the ruling hangs the digest off the tick that already exists —
 // which means the tick fires ~96 times a day and the digest must happen once.
