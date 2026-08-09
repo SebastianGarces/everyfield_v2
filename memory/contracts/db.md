@@ -94,9 +94,11 @@ Rules: `../invariants.md` → Dev Seeds. Why they are not guessable from the sou
 
 - **`pnpm db:seed` is not scoped to the rows it creates.** `WIPE_ROOTS` is `users` + `churches`
   and both are deleted with a bare `DELETE FROM` — the fixture IS the whole database. That is
-  precisely what makes the `everyfield.dev` → `everyfield.app` retirement (ruled 2026-07-31)
-  converge: there is no email predicate to keep in step, so no account can survive by carrying an
-  address the script no longer mentions. The same property is the cost — pointed at the shared
+  precisely what makes the seed-domain retirement (ruled 2026-07-31; the placeholder domain is
+  retired repo-wide, `everyfield.app` replaced it) converge: there is no email predicate to keep
+  in step, so no account can survive by carrying an address the script no longer mentions. The
+  retired literal is deliberately not written here — #326's AC is a repo-wide `grep` with two
+  named exclusions, and memory is not one of them. The same property is the cost — pointed at the shared
   `development` branch it takes the alpha-cohort logins, the marketing-church fixture and every
   hand-registered plant with them. That cost is why the wipe is guarded in code — see below.
 - **The guard is positive detection, and it is code (ruled 2026-08-09).** Before the FK graph is
