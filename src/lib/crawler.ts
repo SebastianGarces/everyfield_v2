@@ -84,29 +84,35 @@ export function isCrawlerUserAgent(
  * admits it to, listed once so the proxy and the `(dashboard)` layout cannot
  * disagree about them (ruled 2026-08-04).
  *
- * Being on this list is a claim about the PAGE: that it renders without a
- * session, because that is what a link previewer needs and all it may have.
- * Every other route under `(dashboard)` calls `verifySession()` (or equivalent)
- * and would throw with no session — a 500 where a human gets a clean redirect
- * to /login. So a route that is not listed here bounces crawlers exactly like
- * it bounces anyone else, and adding one is a deliberate act that says "this
- * page is safe and sane to render with no user".
+ * Being on this list means: **this route produces a session-less render worth
+ * previewing** (ruled 2026-08-09 on PR #354). That is two claims at once, and a
+ * prefix earns its place only by making both. The page must render with no
+ * session — a link previewer has nothing else to offer it — and that render must
+ * be the page, not a redirect: admitting a crawler to a route that bounces it
+ * anyway buys nothing, so listing such a route only widens the unauthenticated
+ * surface for a card that never gets produced.
  *
- * `/dashboard` was listed here and should not have been (#297, ruled
- * 2026-08-04): the page itself calls `verifySession()`, so listing it made the
- * exact promise it could not keep and every crawler-UA request to it 500'd.
- * It is still PROTECTED by the proxy — off this list it simply gets the same
- * 307 to /login a session-less browser gets.
+ * Two prefixes have been removed for failing one claim each, and the pair is the
+ * whole contract in worked form:
  *
- * Keep this a SUBSET of the proxy's `PROTECTED_ROUTE_PREFIXES` — a strict one
- * now: the proxy's crawler branch is the only door into these routes without a
+ * - `/dashboard` failed the first (#297, ruled 2026-08-04). The page calls
+ *   `verifySession()`, which THROWS with no session, so the listing made the
+ *   exact promise the page could not keep and every crawler-UA request 500'd.
+ * - `/oversight` failed the second (ruled 2026-08-09, PR #354). Every page under
+ *   it reads the session and `redirect("/login")`s without one — graceful, not a
+ *   500, but the crawler still ends at the login page. The allowance produced no
+ *   card, so the prefix bought only exposure.
+ *
+ * Both remain PROTECTED by the proxy, named explicitly there rather than through
+ * the spread of this list. Off this list they get the same 307 to /login a
+ * session-less browser gets.
+ *
+ * Keep this a SUBSET of the proxy's `PROTECTED_ROUTE_PREFIXES` — a strict one:
+ * the proxy's crawler branch is the only door into these routes without a
  * session, and `proxy.test.ts` pins that both halves — pass a crawler, bounce a
  * browser — still hold for every prefix here.
  */
-export const CRAWLER_PREVIEWABLE_ROUTE_PREFIXES = [
-  "/wiki",
-  "/oversight",
-] as const;
+export const CRAWLER_PREVIEWABLE_ROUTE_PREFIXES = ["/wiki"] as const;
 
 /**
  * The header the proxy stamps on the REQUEST with the pathname it routed, so a

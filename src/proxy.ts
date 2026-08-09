@@ -20,11 +20,16 @@ const AUTH_ROUTES = ["/login", "/register"];
 // A protected route that is not crawler-previewable is fine — append it here and
 // crawlers get bounced to /login on it like everybody else.
 //
-// `/dashboard` is exactly that case (#297): the page calls `verifySession()`, so
-// it is protected here but NOT previewable, and a crawler gets the same 307 to
-// /login a session-less browser gets instead of the 500 the preview used to cause.
+// `/dashboard` and `/oversight` are exactly that case, and both are named here
+// EXPLICITLY so that leaving the previewable list never means leaving the
+// protected one. `/dashboard` calls `verifySession()`, which throws with no
+// session (#297); every `/oversight` page reads the session and redirects to
+// /login without one (ruled 2026-08-09, PR #354). Neither produces a preview, so
+// neither is previewable — but both are still protected, and a crawler on them
+// gets the same 307 to /login a session-less browser gets.
 const PROTECTED_ROUTE_PREFIXES: string[] = [
   "/dashboard",
+  "/oversight",
   ...CRAWLER_PREVIEWABLE_ROUTE_PREFIXES,
 ];
 

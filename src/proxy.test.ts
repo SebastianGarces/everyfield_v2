@@ -113,7 +113,7 @@ function loginRedirect(response: Response): string | null {
 }
 
 test("an unauthenticated crawler is let through to a protected route", () => {
-  for (const path of ["/wiki/getting-started", "/oversight"]) {
+  for (const path of ["/wiki", "/wiki/getting-started"]) {
     const response = proxy(get(path, { "user-agent": GOOGLEBOT }));
     assert.equal(
       loginRedirect(response),
@@ -158,6 +158,29 @@ test("/dashboard bounces a crawler exactly like a browser (#297)", () => {
     ),
     `${BASE}/login?redirect=%2Fdashboard%2Foverview`
   );
+});
+
+test("/oversight bounces a crawler exactly like a browser (ruled 2026-08-09)", () => {
+  // The second prefix to leave the previewable list, for the second half of what
+  // that list means: `/oversight` DID render session-less, but every page under
+  // it reads the session and redirects to /login, so an admitted crawler reached
+  // the login page and no card was ever produced. Unlike `/dashboard` this never
+  // 500'd — which is why it is a narrowing, not a bug fix. What must hold now is
+  // that the proxy bounces it at the edge, indistinguishably from a browser.
+  const WHATSAPP_FETCHER = "WhatsApp/2.24.15.78 A";
+
+  for (const path of ["/oversight", "/oversight/health", "/oversight/plants"]) {
+    const browser = proxy(get(path, { "user-agent": CHROME }));
+    for (const ua of [GOOGLEBOT, WHATSAPP_FETCHER]) {
+      const crawler = proxy(get(path, { "user-agent": ua }));
+      assert.equal(crawler.status, browser.status, `${path} / ${ua}`);
+      assert.equal(
+        loginRedirect(crawler),
+        `${BASE}/login?redirect=${encodeURIComponent(path)}`,
+        `${ua} was let through to ${path}, which redirects to /login anyway`
+      );
+    }
+  }
 });
 
 test("forging x-is-crawler buys nothing — with it or without it, same result", () => {
@@ -231,6 +254,7 @@ test("a forged x-pathname is overwritten with the real path, everywhere", () => 
     ["/settings", { "user-agent": CHROME, ...forged }, false],
     ["/notifications", { "user-agent": GOOGLEBOT, ...forged }, false],
     ["/dashboard", { "user-agent": GOOGLEBOT, ...forged }, false],
+    ["/oversight", { "user-agent": GOOGLEBOT, ...forged }, false],
     // The positive control: a crawler whose real path IS previewable still is.
     ["/wiki/church-planting", { "user-agent": GOOGLEBOT, ...forged }, true],
   ] as Array<[string, Record<string, string>, boolean]>) {
@@ -283,12 +307,19 @@ test("every previewable route is protected — a browser on one still gets /logi
   // The other half of the invariant in `crawler.ts`: the crawler branch is the
   // ONLY door into a previewable route without a session. Derived from the list
   // itself rather than retyped, so a prefix added there without being protected
-  // fails HERE instead of shipping. `/dashboard` is in the second list only: it
-  // is protected but no longer previewable (#297).
+  // fails HERE instead of shipping. `/dashboard` (#297) and `/oversight` (ruled
+  // 2026-08-09) are retyped below because they are protected but NOT previewable
+  // — and because the proxy's protected list was once a bare spread of the
+  // previewable one, where dropping a prefix from that list would have
+  // unprotected the route as a side effect. These two entries are what pins that
+  // it does not.
   for (const path of [
     ...CRAWLER_PREVIEWABLE_ROUTE_PREFIXES,
     ...CRAWLER_PREVIEWABLE_ROUTE_PREFIXES.map((p) => `${p}/deep/child`),
     "/dashboard",
+    "/dashboard/deep/child",
+    "/oversight",
+    "/oversight/deep/child",
   ]) {
     assert.equal(
       loginRedirect(proxy(get(path, { "user-agent": CHROME }))),

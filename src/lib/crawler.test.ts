@@ -128,8 +128,6 @@ const PREVIEWABLE = [
   "/wiki",
   "/wiki/getting-started",
   "/wiki/church-planting/first-steps",
-  "/oversight",
-  "/oversight/health",
 ];
 
 /** Everything else under `(dashboard)` — each one needs a session. */
@@ -140,6 +138,16 @@ const NOT_PREVIEWABLE = [
   // proxy's 307 to /login exactly like a session-less browser.
   "/dashboard",
   "/dashboard/overview",
+  // `/oversight` is the same shape, ruled 2026-08-09 on PR #354: the list means
+  // "produces a session-less render worth previewing", and every page under
+  // `/oversight` reads the session and redirects to /login without one. It never
+  // 500'd like `/dashboard` — it just ended at the login page, so the allowance
+  // produced no card and bought only exposure. Still protected, no longer
+  // previewable.
+  "/oversight",
+  "/oversight/health",
+  "/oversight/plants",
+  "/oversight/plants/abc-123",
   "/people",
   "/people/abc-123",
   "/settings",
@@ -166,11 +174,11 @@ test("the previewable routes are exactly the ones the proxy admits", () => {
 
 test("a prefix match is a path-segment match, not a string match", () => {
   // `/wikileaks` is not `/wiki`. A prefix that matched loosely would hand the
-  // bare shell to any route someone names with the right first few letters.
+  // bare shell to any route someone names with the right first few letters —
+  // and with `/wiki` the only prefix left, that is the one boundary to hold.
   for (const pathname of [
     "/wikileaks",
-    "/dashboards",
-    "/oversight-report",
+    "/wiki-archive",
     "/not/wiki",
     "/people/wiki",
   ]) {
@@ -228,6 +236,7 @@ test("WhatsApp's fetcher previews a wiki article and nothing else", () => {
     true
   );
   assert.equal(isCrawlerPreviewRequest(WHATSAPP_FETCHER, "/dashboard"), false);
+  assert.equal(isCrawlerPreviewRequest(WHATSAPP_FETCHER, "/oversight"), false);
   assert.equal(isCrawlerPreviewRequest(WHATSAPP_FETCHER, "/people"), false);
 });
 
