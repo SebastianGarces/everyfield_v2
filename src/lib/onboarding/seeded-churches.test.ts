@@ -23,11 +23,17 @@ import { shouldShowOnboarding } from "./steps";
 
 const ROOT = process.cwd();
 
-/** Every script that inserts a `churches` row. */
+/**
+ * The two seed scripts that build the fixture somebody then logs into.
+ *
+ * Scratch harnesses that insert a church to assert against rows — the G3
+ * scripts under `scripts/` — are deliberately NOT on this list. They never
+ * render a dashboard, so an unstamped church there costs nothing, and pinning
+ * them here would make this test fail for a file whose behaviour is fine.
+ */
 const SEED_SCRIPTS = [
   "scripts/seed-dev-db.ts",
   "scripts/seed-phase-engine-eval.ts",
-  "scripts/g3-notifications-core.ts",
 ];
 
 function read(relativePath: string): string {

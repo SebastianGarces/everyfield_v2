@@ -51,24 +51,6 @@ function ok(label: string) {
   console.log(`PASS  ${label}`);
 }
 
-/**
- * The `onboarding_completed_at` stamp every scratch church carries (#326, F12 /
- * OB-001).
- *
- * A null stamp means the onboarding flow still owns the planter's dashboard
- * (`shouldShowOnboarding`, `src/lib/onboarding/steps.ts`). This harness asserts
- * against rows rather than screens, so nothing here fails without it today —
- * but the churches it leaves behind in a scratch database are the fixture
- * somebody then logs into, and a planter who lands in the wizard cannot reach
- * the notification surfaces these assertions are about.
- *
- * `now()` is evaluated inside the same INSERT that fills `created_at` from
- * `DEFAULT now()`, so the stamp is exactly the row's creation moment.
- */
-function onboardingCompletedAtSeedStamp() {
-  return sql`now()`;
-}
-
 async function main() {
   // --------------------------------------------------------------------------
   // Seed: one church, two users in it; one church B with its own user.
@@ -82,18 +64,11 @@ async function main() {
 
   const [churchA] = await db
     .insert(churches)
-    .values({
-      name: "Scratch Church A",
-      sendingNetworkId: network.id,
-      onboardingCompletedAt: onboardingCompletedAtSeedStamp(),
-    })
+    .values({ name: "Scratch Church A", sendingNetworkId: network.id })
     .returning();
   const [churchB] = await db
     .insert(churches)
-    .values({
-      name: "Scratch Church B",
-      onboardingCompletedAt: onboardingCompletedAtSeedStamp(),
-    })
+    .values({ name: "Scratch Church B" })
     .returning();
 
   const [userA] = await db
@@ -515,11 +490,7 @@ async function main() {
   // --------------------------------------------------------------------------
   const [shutChurch] = await db
     .insert(churches)
-    .values({
-      name: "Scratch Church C",
-      sendingNetworkId: network.id,
-      onboardingCompletedAt: onboardingCompletedAtSeedStamp(),
-    })
+    .values({ name: "Scratch Church C", sendingNetworkId: network.id })
     .returning();
   const [shutUser] = await db
     .insert(users)

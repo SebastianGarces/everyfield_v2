@@ -80,10 +80,18 @@ form is broken. The addresses come from `scripts/seed-dev-db.ts` and
 `scripts/seed-phase-engine-eval.ts`, not `seed-dev-db.ts`.
 
 **If the eval logins are gone, someone ran `pnpm db:seed`.** That script wipes the whole fixture —
-every user and every church, not just the nine it creates — so it takes the eval corpus with it. Put
-it back with `pnpm exec tsx scripts/seed-phase-engine-eval.ts`; the corpus is deterministic, so it
-comes back identical. (The wiki articles survive both scripts by design — they are migrated content,
-and the wipe refuses to touch them.)
+every user and every church, not just the nine it creates — so it takes the eval corpus with it, and
+with it the marketing-church fixture and any account someone registered by hand. Put the corpus back
+with `pnpm exec tsx scripts/seed-phase-engine-eval.ts` and the marketing church with
+`pnpm exec tsx scripts/seed-marketing-church.ts`; both are deterministic, so they come back
+identical. (The wiki articles survive every seed by design — they are migrated content, and the wipe
+refuses to touch them.) Prefer the scoped eval seed on its own: its cleanup only touches the eval
+network, so it costs nobody else their fixture.
+
+**Landing in the onboarding wizard instead of the dashboard is a seed problem, not a bug.** A
+planter whose church has a null `onboarding_completed_at` gets the four-step wizard — both seeds
+stamp it, so a church that lands you there was created some other way (a registration, a scratch
+harness). Re-run the seed that owns that church rather than filing the dashboard as broken.
 
 Reach for an eval planter whenever the criterion involves data. Checking a list feature against a
 church with nothing in it produces a screenshot of an empty state and proves nothing.
