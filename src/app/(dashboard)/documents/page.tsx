@@ -1,24 +1,14 @@
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 
 import { DocumentsLibrary } from "@/components/documents";
 import { HeaderBreadcrumbs } from "@/components/header";
 import { getCurrentUserChurch, verifySession } from "@/lib/auth/session";
-import {
-  buildAutoFillDefaults,
-  DOCUMENT_TEMPLATES,
-  getTemplateById,
-} from "@/lib/documents";
+import { buildAutoFillDefaults, DOCUMENT_TEMPLATES } from "@/lib/documents";
 
 export const dynamic = "force-dynamic";
 
-interface DocumentsPageProps {
-  /** `?template=<id>` — set by contextual links from other features (DOC-014). */
-  searchParams: Promise<{ template?: string }>;
-}
-
-export default async function DocumentsPage({
-  searchParams,
-}: DocumentsPageProps) {
+export default async function DocumentsPage() {
   const { user } = await verifySession();
 
   if (!user.churchId) {
@@ -49,14 +39,12 @@ export default async function DocumentsPage({
     defaults: buildAutoFillDefaults(template, context),
   }));
 
-  // A contextual link (DOC-014) arrives with ?template=<id> and opens that
-  // template's generate dialog. Unknown ids are ignored — never a dead link.
-  const { template: requestedTemplate } = await searchParams;
-  const initialTemplateId =
-    requestedTemplate && getTemplateById(requestedTemplate)
-      ? requestedTemplate
-      : undefined;
-
+  // A contextual link (DOC-014) arrives with `?template=<id>` and opens that
+  // template's generate dialog. The library reads that parameter itself with
+  // `useSearchParams`, so this page does not thread it through as a prop and
+  // does not remount the library to apply it — remounting discarded the user's
+  // search/category/phase/format filters on every contextual arrival. Unknown
+  // ids still open nothing, which the library enforces against its own catalog.
   return (
     <>
       <HeaderBreadcrumbs items={[{ label: "Documents" }]} />
@@ -71,11 +59,10 @@ export default async function DocumentsPage({
 
         {/* Library */}
         <div className="flex-1 overflow-auto p-6">
-          <DocumentsLibrary
-            key={initialTemplateId ?? "all"}
-            items={items}
-            initialTemplateId={initialTemplateId}
-          />
+          {/* `useSearchParams` inside the library needs a boundary above it. */}
+          <Suspense fallback={null}>
+            <DocumentsLibrary items={items} />
+          </Suspense>
         </div>
       </div>
     </>

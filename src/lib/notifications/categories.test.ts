@@ -2,8 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  audienceMayReceiveCategory,
   DEFAULT_DIGEST_CADENCE,
+  ineligibleCategoriesForAudience,
+  isOversightEligibleCategory,
   OVERSIGHT_CHANNEL_DEFAULT_OVERRIDES,
+  OVERSIGHT_ELIGIBLE_CATEGORIES,
   defaultChannelEnabled,
   isDigestCadence,
   isNotificationCategory,
@@ -183,4 +187,82 @@ test("an unknown category fails closed for BOTH audiences", () => {
   const unknown = "something_new" as NotificationCategory;
   assert.equal(defaultChannelEnabled(unknown, "in_app", "oversight"), false);
   assert.equal(defaultChannelEnabled(unknown, "email", "oversight"), false);
+});
+
+// ----------------------------------------------------------------------------
+// What an oversight reader is never served (ruled 2026-08-09, extending #254)
+//
+// The settings screen has to know which rows it may offer, and it must derive
+// that from `OVERSIGHT_ELIGIBLE_CATEGORIES` rather than carrying its own list.
+// These tests pin the derivation, not a snapshot of today's five names.
+// ----------------------------------------------------------------------------
+
+test("a church reader is served every category, so nothing is ineligible", () => {
+  assert.deepEqual(ineligibleCategoriesForAudience("church"), []);
+
+  for (const category of notificationCategories) {
+    assert.equal(
+      audienceMayReceiveCategory("church", category),
+      true,
+      `church reader refused ${category}`
+    );
+  }
+});
+
+test("an oversight reader is served the allow-list and nothing else", () => {
+  const ineligible = ineligibleCategoriesForAudience("oversight");
+
+  // Stated as the COMPLEMENT of the allow-list, so adding a category to
+  // `OVERSIGHT_ELIGIBLE_CATEGORIES` moves it out of this set with no edit here.
+  assert.deepEqual(
+    ineligible,
+    notificationCategories.filter(
+      (category) =>
+        !(OVERSIGHT_ELIGIBLE_CATEGORIES as readonly string[]).includes(category)
+    )
+  );
+
+  // And it is not empty — the ruling exists because five rows are offered today
+  // that never arrive.
+  assert.equal(ineligible.length, 5);
+  assert.equal(ineligible.includes("milestones"), false);
+  assert.equal(ineligible.includes("digest"), false);
+});
+
+test("the two questions agree, category by category, for both audiences", () => {
+  for (const category of notificationCategories) {
+    assert.equal(
+      audienceMayReceiveCategory("oversight", category),
+      isOversightEligibleCategory(category),
+      `${category}: the audience question disagreed with the allow-list`
+    );
+
+    assert.equal(
+      ineligibleCategoriesForAudience("oversight").includes(category),
+      !audienceMayReceiveCategory("oversight", category),
+      `${category}: the set disagreed with the predicate`
+    );
+  }
+});
+
+test("ineligibility is stated in the matrix's own order", () => {
+  // The screen renders `notificationCategories` in order; a set in a different
+  // order would make a row-by-row comparison in review harder than it needs to
+  // be, and would make "the first ineligible row" mean two different things.
+  const ineligible = ineligibleCategoriesForAudience("oversight");
+  const positions = ineligible.map((category) =>
+    notificationCategories.indexOf(category)
+  );
+  assert.deepEqual(
+    positions,
+    [...positions].sort((a, b) => a - b)
+  );
+});
+
+test("an oversight reader is refused a category the code has never heard of", () => {
+  // Fails CLOSED, like `defaultChannelEnabled` above: the allow-list is an
+  // allow-list, so anything not on it is refused whether or not it is real.
+  const unknown = "something_new" as NotificationCategory;
+  assert.equal(audienceMayReceiveCategory("oversight", unknown), false);
+  assert.equal(audienceMayReceiveCategory("church", unknown), true);
 });

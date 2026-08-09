@@ -96,3 +96,41 @@ export function filterDirtyOrStale(
 ): PlantSelectionInput[] {
   return inputs.filter((p) => isDirtyOrStale(p, now, maxStalenessMs));
 }
+
+/**
+ * Order candidates by how long they have gone unassessed: never-assessed first,
+ * then oldest assessment first (#36).
+ *
+ * This is an ANTI-STARVATION guard, not a preference. The runner assesses at
+ * most `MAX_BATCH` plants per tick and leaves the rest for the next one, so the
+ * order the selection returns decides who gets dropped. Unordered — which in
+ * practice means whatever order the `churches` scan returned, stable across
+ * runs — the same tail is cut every single tick and never assessed at all. With
+ * this order the plant that waited longest is always at the front of the next
+ * batch, so waiting is bounded by cohort size, not by row order.
+ *
+ * Sorting oldest-first is only safe because assessing a plant MOVES it to the
+ * back: `latestAssessmentAt` is the `generatedAt` of the latest complete
+ * assessment, so a plant that just ran sorts last next time. `churchId` breaks
+ * ties, so two plants with identical timestamps still have a stable, total
+ * order rather than one that depends on the scan.
+ *
+ * Pure and non-mutating — callers keep their input array.
+ */
+export function orderByAssessmentAge(
+  inputs: PlantSelectionInput[]
+): PlantSelectionInput[] {
+  return [...inputs].sort((a, b) => {
+    const aMs = a.latestAssessmentAt?.getTime() ?? null;
+    const bMs = b.latestAssessmentAt?.getTime() ?? null;
+
+    // Never assessed is the oldest possible state — it goes first. Not
+    // `-Infinity` as a sentinel: a null is a different fact from a very old
+    // timestamp, and collapsing them would hide that here.
+    if (aMs === null && bMs !== null) return -1;
+    if (aMs !== null && bMs === null) return 1;
+    if (aMs !== null && bMs !== null && aMs !== bMs) return aMs - bMs;
+
+    return a.churchId < b.churchId ? -1 : a.churchId > b.churchId ? 1 : 0;
+  });
+}
