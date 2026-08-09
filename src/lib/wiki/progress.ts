@@ -83,10 +83,17 @@ export async function getRecentlyViewed(limit: number = 5) {
     .orderBy(desc(wikiProgress.lastViewedAt))
     .limit(safeLimit);
 
-  // Fetch article metadata for each
+  // Fetch article metadata for each, scoped to the reader's own church (#317).
+  // Progress rows are stored by slug with no church on them, so an unscoped
+  // lookup resolves a church-scoped article to null and the entry is dropped by
+  // the filter below — it would disappear from "Recently Viewed" rather than
+  // fail loudly.
   const articlesWithProgress = await Promise.all(
     recentProgress.map(async (progress) => {
-      const article = await getArticle(progress.articleSlug);
+      const article = await getArticle(
+        progress.articleSlug,
+        session.user.churchId ?? null
+      );
       if (!article) return null;
       return {
         slug: progress.articleSlug,
@@ -164,7 +171,12 @@ export async function getLastInProgress() {
 
   if (!progress) return null;
 
-  const article = await getArticle(progress.articleSlug);
+  // Same church scope as "Recently Viewed" above (#317) — otherwise a church's
+  // own article, once started, can never be the one "Continue Reading" offers.
+  const article = await getArticle(
+    progress.articleSlug,
+    session.user.churchId ?? null
+  );
   if (!article) return null;
 
   return {

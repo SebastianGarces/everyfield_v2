@@ -64,14 +64,34 @@ local dev, so the seeded accounts work:
 
 | Account | Email | Password | Notes |
 |---|---|---|---|
-| Planter | `planter1@everyfield.dev` | `password123` | **Church has 0 people** — fine for empty states, useless for anything about a list |
-| Network admin | `admin@everyfield.dev` | `password123` | |
-| Coach | `coach1@everyfield.dev` | `password123` | |
-| Eval planter | `planter-dayspring@eval.phase-engine.everyfield.dev` | `eval-password-123` | ~100 people, meetings, assessments |
-| Eval planter | `planter-evergreen@eval.phase-engine.everyfield.dev` | `eval-password-123` | ~89 people, different church |
+| Planter | `planter1@everyfield.app` | `password123` | **Church has 0 people** — fine for empty states, useless for anything about a list |
+| Network admin | `admin@everyfield.app` | `password123` | |
+| Coach | `coach1@everyfield.app` | `password123` | |
+| Eval planter | `planter-dayspring@eval.phase-engine.everyfield.app` | `eval-password-123` | ~100 people, meetings, assessments |
+| Eval planter | `planter-evergreen@eval.phase-engine.everyfield.app` | `eval-password-123` | ~89 people, different church |
+
+These are on `everyfield.app` — the product domain, ruled 2026-07-31. The placeholder domain the
+seeds used before it is retired, and the accounts on it no longer exist: if a login here fails with
+"invalid credentials", check you are not quoting an older copy of this table before you conclude the
+form is broken. The addresses come from `scripts/seed-dev-db.ts` and
+`scripts/seed-phase-engine-eval.ts`; those files are the source of truth and this table follows them.
 
 **Note the different password for eval accounts** — they are seeded by
 `scripts/seed-phase-engine-eval.ts`, not `seed-dev-db.ts`.
+
+**If the eval logins are gone, someone ran `pnpm db:seed`.** That script wipes the whole fixture —
+every user and every church, not just the nine it creates — so it takes the eval corpus with it, and
+with it the marketing-church fixture and any account someone registered by hand. Put the corpus back
+with `pnpm exec tsx scripts/seed-phase-engine-eval.ts` and the marketing church with
+`pnpm exec tsx scripts/seed-marketing-church.ts`; both are deterministic, so they come back
+identical. (The wiki articles survive every seed by design — they are migrated content, and the wipe
+refuses to touch them.) Prefer the scoped eval seed on its own: its cleanup only touches the eval
+network, so it costs nobody else their fixture.
+
+**Landing in the onboarding wizard instead of the dashboard is a seed problem, not a bug.** A
+planter whose church has a null `onboarding_completed_at` gets the four-step wizard — both seeds
+stamp it, so a church that lands you there was created some other way (a registration, a scratch
+harness). Re-run the seed that owns that church rather than filing the dashboard as broken.
 
 Reach for an eval planter whenever the criterion involves data. Checking a list feature against a
 church with nothing in it produces a screenshot of an empty state and proves nothing.

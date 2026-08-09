@@ -7,7 +7,7 @@ import {
 import { ArticleProgressBadge } from "@/components/wiki/article-progress-badge";
 import { BookmarkIndicator } from "@/components/wiki/bookmark-indicator";
 import { PhaseTimeline } from "@/components/wiki/phase-timeline";
-import { getCurrentUserChurch } from "@/lib/auth";
+import { getCurrentSession, getCurrentUserChurch } from "@/lib/auth";
 import {
   getArticles,
   getArticlesProgress,
@@ -31,8 +31,16 @@ const PHASE_NAMES: Record<number, string> = {
 };
 
 export default async function WikiPage() {
+  // The list is tenancy-scoped (#317): this church's own articles belong in it,
+  // another church's never do. Taken from the session rather than from `church`
+  // below so the read does not have to wait on the churches query — the two are
+  // the same id by construction (`getCurrentUserChurch` selects by
+  // `user.churchId`), and `getCurrentSession` is `React.cache`d, so the
+  // dashboard layout has already paid for this one.
+  const { user } = await getCurrentSession();
+
   const [articles, church] = await Promise.all([
-    getArticles(),
+    getArticles(user?.churchId ?? null),
     getCurrentUserChurch(),
   ]);
 

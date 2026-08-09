@@ -72,3 +72,6 @@ working-feature
 .impeccable/live/server.json
 .impeccable/live/inject-journal.json
 .impeccable/live/roots.json
+
+# Local database backups written by scripts/migrate-wiki-related-sections.ts
+/backups

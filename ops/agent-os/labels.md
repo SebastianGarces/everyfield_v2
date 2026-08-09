@@ -22,6 +22,23 @@ GitHub renders the parent's progress bar, which is what the deleted `checklist.m
 Everything a requirement issue needs is in the `spec-intake` template: observable acceptance
 criteria, a declared validation plan, a risk classification, and a `## Likely files` section.
 
+### Reading an issue's parent — GraphQL, never REST
+
+```bash
+gh issue view <n> --json parent --jq .parent        # the working idiom
+```
+
+**The REST `parent` field is a trap.** `gh api repos/{owner}/{repo}/issues/<n> --jq .parent` returns
+`null` on issues that demonstrably have a parent, and it does so *silently* — a read that looks like
+it succeeded. Both live staged-tracks passes hit this: an agent read the REST field, concluded the
+issue was an orphan, and only recovered because it happened to try `gh issue view` afterwards. G0
+treats a missing parent as a finding, so a false `null` there costs a gate.
+
+`gh issue view --json parent` goes through GraphQL, which is where sub-issue relationships actually
+live. Use it in prompts, in docs, and in anything that decides whether work is traceable to a
+requirement. (The REST *list* endpoint is still the right tool for the frontier below — it is the
+`parent` field specifically that lies, not the endpoint family.)
+
 ## Status labels (mutually exclusive — exactly one per active issue)
 
 | Label                   | Meaning                                                              |
