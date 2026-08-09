@@ -134,6 +134,21 @@ test("an ineligible row's switches are genuinely inert, not merely greyed", () =
   );
 });
 
+test("an ineligible row reads OFF, whatever its coded default resolves to", () => {
+  // The switch answers "will this reach me?". For these five the answer is no
+  // however the preference resolves — `enqueue` refuses them before a
+  // preference is consulted — so a switch drawn ON beside "Not sent to you"
+  // would restate the contradiction the ruling closes.
+  assert.match(
+    CODE,
+    /checked=\{ineligible \? false : state\.cells\[cell\.key\]\}/
+  );
+
+  // It is a rendering and nothing more: resolution still reports what it found,
+  // so `data-source` does not start lying to make the switch agree with it.
+  assert.match(CODE, /data-source=\{cell\.source\}/);
+});
+
 test("the reason is on the screen, not only in a tooltip", () => {
   // A `title` is invisible to touch, to keyboard users and to anyone who does
   // not hover. It may REPEAT the reason for a reader who lands on a later row;

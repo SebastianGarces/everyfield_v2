@@ -369,7 +369,19 @@ export function PreferenceMatrix({ view }: PreferenceMatrixProps) {
                         data-source={cell.source}
                         className="cursor-pointer"
                         aria-label={`${row.label} — ${channelLabel}`}
-                        checked={state.cells[cell.key]}
+                        // An ineligible row reads OFF, whatever resolution says
+                        // its coded default is. The switch answers "will this
+                        // reach me?", and for these five categories the answer
+                        // is no however the preference resolves — `enqueue`
+                        // refuses them before a preference is ever consulted.
+                        // Showing the resolved `true` beside "Not sent to you"
+                        // would restate the contradiction this ruling closes:
+                        // a control that looks on for something never sent.
+                        //
+                        // It is a rendering, not a write. No row is created, no
+                        // stored value changes, and `data-source` still carries
+                        // what resolution actually returned.
+                        checked={ineligible ? false : state.cells[cell.key]}
                         onCheckedChange={(checked) => toggle(cell, checked)}
                         // Genuinely inert, not merely greyed: a switch that
                         // still saved would be the defect this ruling closes,
