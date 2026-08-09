@@ -5,12 +5,20 @@ import { APICallError } from "ai";
 
 import type { SelectedPlant } from "@/lib/phase-engine/assessment";
 import {
+  isRateLimitDeferral,
   runPacedCall,
   TokenPacer,
   type PacerClock,
 } from "@/lib/phase-engine/judge";
 
-import { runAssessmentBatch, type RunAssessmentBatchDeps } from "./route";
+import {
+  MAX_ATTEMPTS_PER_PLANT,
+  MAX_BATCH,
+  maxDuration,
+  runAssessmentBatch,
+  RUN_BUDGET_MS,
+  type RunAssessmentBatchDeps,
+} from "./route";
 
 // ============================================================================
 // #36 — the cron batch against a simulated 30k TPM OpenAI key.
@@ -56,6 +64,18 @@ interface FakeOpenAiOptions {
   costForCall?: (index: number) => number;
   /** Simulated round-trip latency of the judge call. */
   latencyMs?: number;
+  /**
+   * A SECOND consumer on the same OPENAI_API_KEY — RAG embeddings, the manual
+   * trigger, or a second cron tick. It shares the TPM window with this run and
+   * is invisible to the pacer until a response says so.
+   */
+  externalDrain?: { tokens: number; everyMs: number; fromMs: number };
+  /**
+   * Answer 429s with `x-ratelimit-reset-tokens` only, no `retry-after-ms`.
+   * That is the header OpenAI always sends; the millisecond one is not
+   * guaranteed, and the hint it yields is a whole window instead of a deficit.
+   */
+  omitRetryAfterMs?: boolean;
 }
 
 /**
@@ -73,6 +93,7 @@ class FakeOpenAi {
   #available: number;
   #lastRefillAt: number;
   #calls = 0;
+  #nextDrainAt: number;
 
   /** How many requests the fake refused. The number #36 needs to be zero-ish. */
   rateLimitedRequests = 0;
@@ -88,15 +109,27 @@ class FakeOpenAi {
     this.latencyMs = options.latencyMs ?? 8_000;
     this.#available = options.startingTokens ?? this.limitTokens;
     this.#lastRefillAt = clock.now();
+    this.#nextDrainAt =
+      options.externalDrain?.fromMs ?? Number.POSITIVE_INFINITY;
+  }
+
+  #refillTo(at: number): void {
+    this.#available = Math.min(
+      this.limitTokens,
+      this.#available + (at - this.#lastRefillAt) * this.refillPerMs
+    );
+    this.#lastRefillAt = at;
   }
 
   #refill(): void {
     const now = this.clock.now();
-    this.#available = Math.min(
-      this.limitTokens,
-      this.#available + (now - this.#lastRefillAt) * this.refillPerMs
-    );
-    this.#lastRefillAt = now;
+    const drain = this.options.externalDrain;
+    while (drain && this.#nextDrainAt <= now) {
+      this.#refillTo(this.#nextDrainAt);
+      this.#available = Math.max(0, this.#available - drain.tokens);
+      this.#nextDrainAt += drain.everyMs;
+    }
+    this.#refillTo(now);
   }
 
   #headers(): Record<string, string> {
@@ -124,10 +157,9 @@ class FakeOpenAi {
         url: "https://api.openai.com/v1/responses",
         requestBodyValues: {},
         statusCode: 429,
-        responseHeaders: {
-          ...this.#headers(),
-          "retry-after-ms": String(deficitMs),
-        },
+        responseHeaders: this.options.omitRetryAfterMs
+          ? this.#headers()
+          : { ...this.#headers(), "retry-after-ms": String(deficitMs) },
         isRetryable: true,
       });
     }
@@ -177,6 +209,9 @@ function depsFor(
           maxAttempts: run?.maxAttempts,
           label: churchId,
           onRateLimit: run?.onRateLimit,
+          // The real `generateAssessment` threads this through to the judge;
+          // the fake must too, or the test would prove a policy nothing runs.
+          deadlineAt: run?.deadlineAt,
         }
       );
       return {} as Awaited<
@@ -416,6 +451,91 @@ test("the run stops starting plants once the time budget is spent", async () => 
   assert.ok(
     clock.now() < 300_000,
     `run reached ${clock.now()}ms against a 300s ceiling`
+  );
+});
+
+test("a second consumer on the same key cannot push the run past 300s", async () => {
+  // The regression this file exists for on the second pass (#36).
+  //
+  // The loop guard only projects the wait for the NEXT plant. Once a plant has
+  // started, the retry ladder can add MAX_ATTEMPTS_PER_PLANT-1 more pacer holds
+  // of up to a whole TPM window each — 180s at 30k — entirely outside a budget
+  // that reserved 30s. Give the window a second consumer (RAG embeddings, the
+  // manual trigger, a second cron tick) and the ladder becomes real: measured
+  // 382s against a 300s ceiling before the deadline was threaded in.
+  const clock = virtualClock();
+  const pacer = new TokenPacer({ clock, limitTokens: 30_000 });
+  const openai = new FakeOpenAi(clock, {
+    limitTokens: 30_000,
+    latencyMs: 8_000,
+    externalDrain: { tokens: 13_500, everyMs: 30_000, fromMs: 200_000 },
+    omitRetryAfterMs: true,
+  });
+
+  const capture = captureConsole();
+  let summary;
+  try {
+    summary = await runAssessmentBatch(
+      depsFor(plants(MAX_BATCH), pacer, openai, {
+        maxBatch: MAX_BATCH,
+        runBudgetMs: RUN_BUDGET_MS, // the production constants, not friendly ones
+        maxAttempts: MAX_ATTEMPTS_PER_PLANT,
+      })
+    );
+  } finally {
+    capture.restore();
+  }
+
+  assert.ok(
+    clock.now() < maxDuration * 1000,
+    `run reached ${clock.now()}ms against the ${maxDuration * 1000}ms platform ceiling`
+  );
+
+  // Nothing is lost: what did not fit is deferred, so it stays dirty and rolls
+  // over. A killed run would instead leave a `pending` row nobody flips.
+  assert.equal(summary.assessed + summary.deferred + summary.failed, MAX_BATCH);
+  assert.equal(summary.failed, 0);
+  assert.ok(summary.deferred > 0, "the tail must stand down, not overrun");
+  const tail = summary.outcomes.at(-1);
+  assert.equal(tail?.status, "deferred");
+  assert.equal(tail?.deferralReason, "time_budget");
+  assert.deepEqual(capture.errors, []);
+});
+
+test("an in-plant retry ladder never sleeps past the run deadline", async () => {
+  // Same defect, isolated to `runPacedCall`: a limiter that never lets up, a
+  // deadline 10s out, and a hint of a whole 60s window. Four attempts would
+  // have slept ~180s; the ladder must stand down at the deadline instead.
+  const clock = virtualClock();
+  const pacer = new TokenPacer({ clock, limitTokens: 30_000 });
+  const deadlineAt = clock.now() + 10_000;
+
+  const rejected = await runPacedCall<never>(
+    async () => {
+      throw new APICallError({
+        message: "Rate limit reached for gpt-4o.",
+        url: "https://api.openai.com/v1/responses",
+        requestBodyValues: {},
+        statusCode: 429,
+        responseHeaders: {
+          "x-ratelimit-limit-tokens": "30000",
+          "x-ratelimit-remaining-tokens": "0",
+          "x-ratelimit-reset-tokens": "60s",
+        },
+        isRetryable: true,
+      });
+    },
+    { pacer, label: "church-x", maxAttempts: 4, deadlineAt }
+  ).then(
+    () => null,
+    (error: unknown) => error
+  );
+
+  assert.ok(isRateLimitDeferral(rejected), "a throttled call is a deferral");
+  assert.equal(rejected.reason, "run_budget");
+  assert.ok(
+    clock.now() < deadlineAt + 1,
+    `the ladder slept to ${clock.now()}ms past a ${deadlineAt}ms deadline`
   );
 });
 

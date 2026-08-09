@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   DEFAULT_TOKENS_PER_ASSESSMENT,
   DEFAULT_TPM_LIMIT,
+  MAX_SINGLE_WAIT_MS,
   resolveTpmLimit,
   TokenPacer,
   type PacerClock,
@@ -205,6 +206,26 @@ test("with no Retry-After the penalty is one call's worth of refill", async () =
 
   // 13500 tokens at 500/s = 27s of hold, then the bucket is full enough.
   assert.equal(await pacer.acquire(), 27_000);
+});
+
+test("no single wait is longer than the cap, on either branch", async () => {
+  const clock = virtualClock();
+  const pacer = new TokenPacer({ clock });
+
+  // 30 minutes is inside what `rate-limit.ts` accepts as a sane hint (an hour),
+  // so ONE Retry-After header can install a hold this long. The wait it yields
+  // must still be capped: a 300s function cannot sleep for 1800s, and the
+  // block-only branch used to return the raw hold, straight past
+  // MAX_SINGLE_WAIT_MS whose own comment calls it an absolute ceiling.
+  pacer.observeRateLimit(1_800_000, { "x-ratelimit-limit-tokens": "30000" });
+
+  assert.equal(pacer.projectedWaitMs(), MAX_SINGLE_WAIT_MS);
+  assert.equal(await pacer.acquire(), MAX_SINGLE_WAIT_MS);
+  assert.equal(clock.now(), MAX_SINGLE_WAIT_MS);
+
+  // The hold itself is NOT shortened — the pressure survives the capped wait,
+  // so the next attempt is still throttled rather than let straight through.
+  assert.equal(pacer.projectedWaitMs(), MAX_SINGLE_WAIT_MS);
 });
 
 test("a 429's headers still recalibrate the ceiling", () => {

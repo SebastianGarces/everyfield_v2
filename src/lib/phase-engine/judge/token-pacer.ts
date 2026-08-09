@@ -169,7 +169,15 @@ export class TokenPacer {
     const price = this.#price(cost);
     const blockWait = Math.max(0, this.#blockedUntilAt - now);
     const availableThen = this.#projectAvailable(now + blockWait);
-    if (availableThen >= price) return blockWait;
+    // The cap applies to BOTH branches. A Retry-After hint is accepted up to an
+    // hour (`MAX_SANE_HINT_MS` in rate-limit.ts), but a single hold longer than
+    // `maxSingleWaitMs` cannot be honoured inside a 300s function — it would
+    // sleep straight through the platform ceiling. Past the cap we go back to
+    // the provider and let the next 429 (and the hold it re-installs) teach us,
+    // which is bounded; `#blockedUntilAt` itself is NOT shortened, so the
+    // pressure survives the capped wait.
+    if (availableThen >= price)
+      return Math.min(blockWait, this.#maxSingleWaitMs);
     const refillWait = Math.ceil((price - availableThen) / this.#refillPerMs);
     return Math.min(blockWait + refillWait, this.#maxSingleWaitMs);
   }

@@ -95,10 +95,31 @@ export const maxDuration = 300;
 export const MAX_BATCH = 10;
 
 /**
- * Soft wall-clock budget for one run — 90% of `maxDuration`. The loop stops
- * starting new plants once the projected pacing wait would cross it, so the
- * run always returns a summary instead of being killed mid-plant by the
- * platform (a killed run leaves a `pending` row nobody flips to `failed`).
+ * Hard-ish wall-clock deadline for one run — 90% of `maxDuration`.
+ *
+ * Two guards share this instant, and BOTH are needed:
+ *
+ *   1. the loop below stops STARTING a plant once the projected pacing wait
+ *      would cross it;
+ *   2. `runPacedCall` stops RETRYING inside a plant on the same test.
+ *
+ * Guard 1 alone is not enough, and that was the #36 rework: once a plant has
+ * started, the retry ladder can add `MAX_ATTEMPTS_PER_PLANT - 1` further pacer
+ * holds, each up to a whole TPM window (60s at 30k), entirely outside a budget
+ * that only reserved 30s. A second consumer on the same OPENAI_API_KEY (RAG
+ * embeddings, the manual trigger, a second cron tick) drains the window mid-run
+ * and makes that ladder real: measured 382s against a 300s ceiling.
+ *
+ * With guard 2 in place the worst case past the deadline is ONE in-flight call
+ * — every sleep in the run is deadline-bounded, so only the latency of the last
+ * request can overshoot. 300 - 270 = 30s of headroom for one judge call, which
+ * is why 270_000 is the right number and not a hopeful one. `MAX_SINGLE_WAIT_MS`
+ * caps any single pacer hold at 120s on BOTH branches so an absurd Retry-After
+ * hint cannot sleep through the ceiling either.
+ *
+ * The run therefore always returns a summary instead of being killed mid-plant
+ * (a killed run leaves a `pending` row nobody flips to `failed`); the plants it
+ * stood down on are `deferred`, stay dirty, and roll over.
  */
 export const RUN_BUDGET_MS = 270_000;
 
@@ -252,6 +273,9 @@ export async function runAssessmentBatch(
         pacer,
         maxAttempts,
         onRateLimit,
+        // The same deadline the loop guard uses, handed to the retry ladder so
+        // an in-plant hold can never outlive the run (see RUN_BUDGET_MS).
+        deadlineAt,
       });
       outcomes.push({
         churchId: plant.churchId,
@@ -262,15 +286,21 @@ export async function runAssessmentBatch(
       const message = error instanceof Error ? error.message : String(error);
 
       if (isRateLimitDeferral(error)) {
+        // A ladder that stopped because the next hold would have crossed the
+        // run deadline is a TIME deferral that happened to be throttled — it
+        // says nothing about how hard the provider is limiting us, so it is
+        // counted apart from `rateLimited`.
+        const deferralReason: DeferralReason =
+          error.reason === "run_budget" ? "time_budget" : "rate_limit";
         console.warn(
-          `[phase-engine/assess] rate-limit deferral for church ${plant.churchId} (${plant.reason}): ` +
+          `[phase-engine/assess] rate-limit deferral for church ${plant.churchId} (${plant.reason}, ${deferralReason}): ` +
             `${message} The plant stays dirty and is retried on the next run.`
         );
         outcomes.push({
           churchId: plant.churchId,
           reason: plant.reason,
           status: "deferred",
-          deferralReason: "rate_limit",
+          deferralReason,
           error: message,
         });
         continue;

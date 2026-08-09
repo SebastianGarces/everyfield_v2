@@ -65,6 +65,12 @@ export interface AssessmentRunOptions {
   maxAttempts?: number;
   /** Called on every 429 — lets the caller log throttling apart from failure. */
   onRateLimit?: (event: RateLimitEvent) => void;
+  /**
+   * Instant (on the pacer's clock) past which the judge's retry ladder must
+   * stand down instead of holding for another TPM window. The cron batch passes
+   * its run deadline; a manual trigger omits it and retries normally (#36).
+   */
+  deadlineAt?: number;
 }
 
 export interface GenerateAssessmentResult {
@@ -119,6 +125,7 @@ export async function generateAssessment(
       pacer: run.pacer,
       maxAttempts: run.maxAttempts,
       onRateLimit: run.onRateLimit,
+      deadlineAt: run.deadlineAt,
     });
 
     // 5. Privacy-filter + rank, then persist insights (PE-012/013). The

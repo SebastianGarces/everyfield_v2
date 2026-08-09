@@ -63,11 +63,29 @@ export interface PacedCallOptions {
   label?: string;
   /** Called on every rate-limit hit — the distinct-logging seam. */
   onRateLimit?: (event: RateLimitEvent) => void;
+  /**
+   * Wall-clock instant (on the pacer's clock) past which this call must stop
+   * retrying, whatever the attempt count says.
+   *
+   * Without it the retry ladder is invisible to the run's time budget: the
+   * batch loop only projects the wait for the NEXT plant, but once a plant has
+   * started, every extra attempt can add another full TPM-window hold INSIDE
+   * that plant. Four attempts at a 30k-TPM window is up to three unguarded
+   * minutes — enough to walk a 270s budget past the 300s platform ceiling and
+   * be killed mid-plant, leaving the `pending` row the guard exists to prevent.
+   *
+   * Stopping early is lossless: a deferral leaves the plant dirty, so it is
+   * re-selected on the next run with its last good snapshot untouched.
+   */
+  deadlineAt?: number;
 }
 
 export const DEFAULT_MAX_ATTEMPTS = 4;
 const DEFAULT_BASE_BACKOFF_MS = 1_000;
 const DEFAULT_MAX_BACKOFF_MS = 60_000;
+
+/** Why a throttled call stood down instead of trying again. */
+export type RateLimitDeferralReason = "attempts_exhausted" | "run_budget";
 
 /**
  * Thrown when a call was throttled for every attempt.
@@ -81,22 +99,32 @@ export class RateLimitDeferralError extends Error {
   readonly attempts: number;
   readonly waitedMs: number;
   readonly retryAfterMs: number | null;
+  /**
+   * Why the ladder stopped. `attempts_exhausted` = every attempt was refused;
+   * `run_budget` = the next attempt's hold would have crossed the run deadline,
+   * so we stood down rather than overrun the function timeout.
+   */
+  readonly reason: RateLimitDeferralReason;
 
   constructor(
     label: string,
     attempts: number,
     waitedMs: number,
     retryAfterMs: number | null,
-    cause: unknown
+    cause: unknown,
+    reason: RateLimitDeferralReason = "attempts_exhausted"
   ) {
     super(
-      `Rate limited by the model provider after ${attempts} attempt(s)` +
+      (reason === "run_budget"
+        ? `Rate limited by the model provider; the next retry would have crossed the run's time budget after ${attempts} attempt(s)`
+        : `Rate limited by the model provider after ${attempts} attempt(s)`) +
         `${label ? ` for ${label}` : ""}; deferred to the next run.`,
       { cause }
     );
     this.attempts = attempts;
     this.waitedMs = waitedMs;
     this.retryAfterMs = retryAfterMs;
+    this.reason = reason;
   }
 
   static isInstance(error: unknown): error is RateLimitDeferralError {
@@ -139,6 +167,7 @@ export async function runPacedCall<T>(
     maxBackoffMs = DEFAULT_MAX_BACKOFF_MS,
     label = "",
     onRateLimit,
+    deadlineAt,
   } = options;
 
   const attempts = Math.max(1, maxAttempts);
@@ -162,14 +191,22 @@ export async function runPacedCall<T>(
       if (rateLimited) {
         const retryAfterMs = retryAfterMsFromError(error, pacer.clock.now());
         pacer.observeRateLimit(retryAfterMs, headersFromError(error));
-        const exhausted = attempt >= attempts;
+
+        const nextWaitMs = pacer.projectedWaitMs();
+        // The retry ladder must answer to the run's clock, not only to the
+        // attempt count: each further attempt can hold for a whole TPM window,
+        // and those holds are invisible to the batch loop's own budget check.
+        const outOfBudget =
+          deadlineAt !== undefined &&
+          pacer.clock.now() + nextWaitMs >= deadlineAt;
+        const exhausted = attempt >= attempts || outOfBudget;
 
         onRateLimit?.({
           label,
           attempt,
           maxAttempts: attempts,
           retryAfterMs,
-          waitMs: exhausted ? 0 : pacer.projectedWaitMs(),
+          waitMs: exhausted ? 0 : nextWaitMs,
           exhausted,
         });
 
@@ -179,7 +216,8 @@ export async function runPacedCall<T>(
             attempt,
             waitedMs,
             retryAfterMs,
-            error
+            error,
+            outOfBudget ? "run_budget" : "attempts_exhausted"
           );
         }
         // No sleep here: `pacer.acquire()` at the top of the next attempt
@@ -188,10 +226,15 @@ export async function runPacedCall<T>(
       }
 
       // Retryable but not throttling (5xx, socket reset): the token budget is
-      // untouched, so this is the one delay the pacer does not own.
+      // untouched, so this is the one delay the pacer does not own. It is still
+      // bounded by the run deadline for the same reason the rate-limit ladder
+      // is — no sleep inside a plant may outlive the function.
       const backoff = Math.min(
         maxBackoffMs,
-        baseBackoffMs * 2 ** (attempt - 1)
+        baseBackoffMs * 2 ** (attempt - 1),
+        deadlineAt === undefined
+          ? Number.POSITIVE_INFINITY
+          : Math.max(0, deadlineAt - pacer.clock.now())
       );
       await pacer.clock.sleep(backoff);
       waitedMs += backoff;

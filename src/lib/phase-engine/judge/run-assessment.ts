@@ -62,6 +62,12 @@ export interface RunAssessmentOptions {
   maxAttempts?: number;
   /** Called on every 429, so throttling can be logged apart from failure. */
   onRateLimit?: (event: RateLimitEvent) => void;
+  /**
+   * Instant (on the pacer's clock) past which the retry ladder must stand down
+   * rather than keep holding for the TPM window. The cron batch passes its run
+   * deadline so an in-plant retry can never outlive the function (#36).
+   */
+  deadlineAt?: number;
 }
 
 const DEFAULT_RETRIEVAL_LIMIT = 8;
@@ -148,6 +154,7 @@ export async function runAssessment(
         maxAttempts: options.maxAttempts,
         label: snapshot.churchId,
         onRateLimit: options.onRateLimit,
+        deadlineAt: options.deadlineAt,
       }
     );
 
