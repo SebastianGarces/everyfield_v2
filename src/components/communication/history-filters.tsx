@@ -18,6 +18,7 @@ import {
   communicationChannels,
   communicationStatuses,
 } from "@/db/schema/communication";
+import { communicationStatusLabel } from "@/lib/communication/status-display";
 
 import { deriveHistoryFilterState } from "./history-filters-presentation";
 
@@ -25,14 +26,6 @@ const CHANNEL_LABELS: Record<string, string> = {
   email: "Email",
   sms: "SMS",
   both: "Email + SMS",
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  draft: "Draft",
-  scheduled: "Scheduled",
-  sending: "Sending",
-  sent: "Sent",
-  failed: "Failed",
 };
 
 /**
@@ -160,7 +153,7 @@ export function HistoryFilters() {
           </SelectItem>
           {communicationStatuses.map((status) => (
             <SelectItem key={status} value={status} className="cursor-pointer">
-              {STATUS_LABELS[status] ?? status}
+              {communicationStatusLabel(status)}
             </SelectItem>
           ))}
         </SelectContent>

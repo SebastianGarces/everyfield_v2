@@ -7,7 +7,7 @@
 // and the merge field engine for personalization.
 // ============================================================================
 
-import { and, desc, eq, inArray, sql, count } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, sql, count } from "drizzle-orm";
 import { db } from "@/db";
 import {
   communications,
@@ -35,7 +35,10 @@ import {
   buildMeetingMergeData,
 } from "./merge";
 import { createConfirmationToken } from "./confirmation";
-import { buildCommunicationsWhere } from "./filters";
+import {
+  buildCommunicationsWhere,
+  type CommunicationQueryFilters,
+} from "./filters";
 import type { ComposeMessageInput } from "@/lib/validations/communication";
 
 // ---------------------------------------------------------------------------
@@ -358,6 +361,45 @@ export async function getCommunications(
   ]);
 
   return { communications: comms, total };
+}
+
+/**
+ * Count communications matching the same filters `getCommunications` honours,
+ * without paying for the rows. Used by the hub's stat cards, which need a
+ * church-wide number and not "however many of the last 10 qualified".
+ */
+export async function countCommunications(
+  churchId: string,
+  filters: CommunicationQueryFilters = {}
+): Promise<number> {
+  const [{ total }] = await db
+    .select({ total: count() })
+    .from(communications)
+    .where(buildCommunicationsWhere(churchId, filters));
+  return total;
+}
+
+/**
+ * How many messages this church actually SENT since `since`.
+ *
+ * `status = 'sent'` is load-bearing, not decoration: a COM-020 logged contact
+ * also carries a `sent_at` (the moment the contact happened), so counting on
+ * `sent_at` alone would report contacts where nothing was sent as sends.
+ */
+export async function countSentSince(
+  churchId: string,
+  since: Date
+): Promise<number> {
+  const [{ total }] = await db
+    .select({ total: count() })
+    .from(communications)
+    .where(
+      and(
+        buildCommunicationsWhere(churchId, { status: "sent" }),
+        gte(communications.sentAt, since)
+      )
+    );
+  return total;
 }
 
 /**

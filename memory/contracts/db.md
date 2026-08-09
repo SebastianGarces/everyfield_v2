@@ -100,7 +100,11 @@ tenant scope; `created_at`/`updated_at` default now.
     replayed `task.completed`. Resend ids are `re_…`, so the two cannot collide, and the webhook
     only ever looks up an exact id it was handed. That pre-read is a REPLAY guard, not a
     concurrency one (`../invariants.md` → Atomicity): there is no unique index behind it, and
-    what stands in for one is that a task only becomes complete once.
+    **nothing stands in for one**. `completeTask` is a read-then-write whose UPDATE does not
+    re-assert `status <> 'complete'`, so two simultaneous completions of one task — a
+    double-clicked Complete button — write two entries. Verified reproducible on #366.
+    Accepted residual: the cost is a duplicate row in one person's log, never a missing or
+    cross-tenant one. The fix is a partial unique index on `(church_id, external_id)`.
   - The handler swallows its own failures. `task.completed` also drives phase-engine
     dirty-marking (PE-010), and a communication log entry is never worth costing a plant its
     dirty mark.

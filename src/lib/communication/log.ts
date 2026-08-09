@@ -32,10 +32,18 @@
 // That read is a guard against REPLAY, not against CONCURRENCY: two emissions
 // in flight at once would both miss it. The real guard would be a partial
 // unique index on (church_id, external_id), which needs a migration and is out
-// of this unit's scope; what stands in for it is that a task only becomes
-// complete once — `completeTask` refuses an already-complete task and
-// `completeMany` filters on `ne(status, 'complete')`, so there is no ordinary
-// path that emits the same completion twice at the same moment.
+// of this unit's scope.
+//
+// ACCEPTED RESIDUAL, and it is REACHABLE. Nothing stands in for that index.
+// `completeTask` (`src/lib/tasks/service.ts`) is a read-then-write, not a
+// compare-and-set — its UPDATE matches on church + id + `deleted_at IS NULL`
+// and does NOT re-assert `status <> 'complete'` — so two simultaneous
+// completions of one task, which is what a double-clicked Complete button
+// sends, both emit `task.completed` and both write an entry. (`completeMany`
+// does carry `ne(status, 'complete')` and is safe; the single-task path is the
+// hole.) The cost is a duplicate row in one person's log, never a missing or
+// cross-tenant one, which is why it is accepted rather than migrated for.
+// `memory/invariants.md` → Transactions / Atomicity records the same.
 //
 // TENANCY
 //
