@@ -27,6 +27,11 @@ export const communicationStatuses = [
   "sending",
   "sent",
   "failed",
+  // COM-020. An entry the app RECORDED rather than sent — today, a person-
+  // related task the planter completed (`src/lib/communication/log.ts`). It is
+  // a terminal state with no delivery behind it, which is what tells a logged
+  // contact apart from a sent email everywhere the log is read.
+  "logged",
 ] as const;
 export type CommunicationStatus = (typeof communicationStatuses)[number];
 

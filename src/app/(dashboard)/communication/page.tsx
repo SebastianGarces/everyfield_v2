@@ -6,33 +6,48 @@ import { HeaderBreadcrumbs } from "@/components/header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { DeliveryOverview } from "@/components/communication/delivery-overview";
 import { verifySession } from "@/lib/auth/session";
 import {
+  countCommunications,
+  countSentSince,
+  getChurchDeliveryTotals,
   getCommunications,
   resolveSubjects,
 } from "@/lib/communication/service";
+import {
+  communicationStatusBadgeClass,
+  communicationStatusLabel,
+} from "@/lib/communication/status-display";
 import { getTemplates } from "@/lib/communication/templates";
 import { formatDistanceToNow } from "date-fns";
 
 export const dynamic = "force-dynamic";
 
-const statusColors: Record<string, string> = {
-  sent: "bg-green-100 text-green-700",
-  sending: "bg-blue-100 text-blue-700",
-  draft: "bg-gray-100 text-gray-700",
-  failed: "bg-red-100 text-red-700",
-  scheduled: "bg-yellow-100 text-yellow-700",
-};
-
 export default async function CommunicationPage() {
   const { user } = await verifySession();
   if (!user.churchId) redirect("/dashboard");
 
-  const [{ communications: recentMessages, total }, templates] =
-    await Promise.all([
-      getCommunications(user.churchId, { limit: 10 }),
-      getTemplates(user.churchId),
-    ]);
+  const weekAgo = new Date();
+  weekAgo.setDate(weekAgo.getDate() - 7);
+
+  // "Sent This Week" and the logged count are COUNTED, not derived from the 10
+  // rows below them: a sample of the most recent messages cannot answer either
+  // question, and a logged contact must never land in a number labelled "Sent"
+  // (COM-020 ruling — the split is shown, not hidden).
+  const [
+    { communications: recentMessages, total },
+    templates,
+    deliveryTotals,
+    sentThisWeek,
+    loggedCount,
+  ] = await Promise.all([
+    getCommunications(user.churchId, { limit: 10 }),
+    getTemplates(user.churchId),
+    getChurchDeliveryTotals(user.churchId),
+    countSentSince(user.churchId, weekAgo),
+    countCommunications(user.churchId, { status: "logged" }),
+  ]);
 
   // Resolve merge field variables in subjects for display
   const resolvedSubjectMap = await resolveSubjects(
@@ -42,13 +57,6 @@ export default async function CommunicationPage() {
 
   // Quick action templates (show first 4 system/popular templates)
   const quickActions = templates.filter((t) => t.isSystem).slice(0, 4);
-
-  const sentThisWeek = recentMessages.filter((m) => {
-    if (!m.sentAt) return false;
-    const weekAgo = new Date();
-    weekAgo.setDate(weekAgo.getDate() - 7);
-    return m.sentAt > weekAgo;
-  }).length;
 
   return (
     <>
@@ -85,6 +93,16 @@ export default async function CommunicationPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{total}</div>
+                {loggedCount > 0 && (
+                  <Link
+                    href="/communication/history?status=logged"
+                    className="text-muted-foreground hover:text-foreground mt-1 inline-block cursor-pointer text-xs underline-offset-4 hover:underline"
+                  >
+                    {loggedCount === 1
+                      ? "Includes 1 logged contact"
+                      : `Includes ${loggedCount} logged contacts`}
+                  </Link>
+                )}
               </CardContent>
             </Card>
 
@@ -97,6 +115,11 @@ export default async function CommunicationPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{sentThisWeek}</div>
+                {loggedCount > 0 && (
+                  <p className="text-muted-foreground mt-1 text-xs">
+                    Logged contacts are not counted here.
+                  </p>
+                )}
               </CardContent>
             </Card>
 
@@ -111,6 +134,11 @@ export default async function CommunicationPage() {
                 <div className="text-2xl font-bold">{templates.length}</div>
               </CardContent>
             </Card>
+          </div>
+
+          {/* Delivery performance (COM-019) */}
+          <div className="mt-6">
+            <DeliveryOverview totals={deliveryTotals} />
           </div>
 
           {/* Quick Actions */}
@@ -192,9 +220,9 @@ export default async function CommunicationPage() {
                         </div>
                         <Badge
                           variant="secondary"
-                          className={statusColors[msg.status] ?? ""}
+                          className={communicationStatusBadgeClass(msg.status)}
                         >
-                          {msg.status}
+                          {communicationStatusLabel(msg.status)}
                         </Badge>
                       </CardContent>
                     </Card>
