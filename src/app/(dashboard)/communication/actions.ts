@@ -5,7 +5,8 @@ import { revalidatePath } from "next/cache";
 import { verifySession } from "@/lib/auth/session";
 import {
   sendCommunication,
-  getRecipientsByGroup,
+  getGroupRecipients,
+  resendToNonOpeners,
 } from "@/lib/communication/service";
 import {
   getTemplates,
@@ -62,15 +63,56 @@ export async function sendMessageAction(formData: FormData) {
 }
 
 // ---------------------------------------------------------------------------
+// Resend to non-openers (COM-018)
+// ---------------------------------------------------------------------------
+
+/**
+ * Send the message again, to the people who recorded no open.
+ *
+ * The new message is its own row in history — the original is never mutated.
+ * The action mints its actor from the session and never takes one as an
+ * argument (`memory/invariants.md` -> Authentication).
+ */
+export async function resendToNonOpenersAction(communicationId: string) {
+  const { user } = await verifySession();
+  if (!user.churchId) redirect("/dashboard");
+
+  try {
+    const resent = await resendToNonOpeners(
+      user.churchId,
+      user.id,
+      communicationId
+    );
+    // The original message is deliberately NOT revalidated: nothing about it
+    // changed. What changed is the list it appears in and the church-wide
+    // delivery figures on the hub.
+    revalidatePath("/communication");
+    revalidatePath("/communication/history");
+    return { success: true as const, communicationId: resent.id };
+  } catch (err) {
+    console.error("[ACTION] resendToNonOpeners failed:", err);
+    return {
+      error: err instanceof Error ? err.message : "Failed to resend message",
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Recipient Groups
 // ---------------------------------------------------------------------------
 
+/**
+ * Resolve a quick-select group into the people it names — status groups and
+ * `team:<teamId>` alike. Returns whole people, not ids: the picker needs names
+ * to render, and a second "look them up" round trip through the people search
+ * silently truncated any group larger than its page size.
+ */
 export async function resolveGroupAction(group: string) {
   const { user } = await verifySession();
-  if (!user.churchId) return { ids: [] };
+  if (!user.churchId) return { people: [] };
 
-  const ids = await getRecipientsByGroup(user.churchId, group);
-  return { ids };
+  const people = await getGroupRecipients(user.churchId, group);
+  return { people };
 }
 
 // ---------------------------------------------------------------------------
