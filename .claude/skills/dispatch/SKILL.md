@@ -57,15 +57,26 @@ left a claim behind. All three mean **do not start**. If the issues look stale (
 comment and `updatedAt`), say so and let a human clear them — never clear a claim automatically, as
 that is exactly how two loops end up on one branch.
 
-### 3. The working tree is clean and `main` is current
+### 3. The working tree is clean and local `main` **is** `origin/main`
 
 ```bash
-git status --porcelain && git fetch -q origin && git status -sb | head -1
+git status --porcelain                                  # must be empty
+git fetch -q origin
+[ "$(git rev-parse main)" = "$(git rev-parse origin/main)" ] && echo IN-SYNC || echo STALE
 ```
 
-Dirty tree or behind `main` → stop. Track branches are cut from `main` (workstream worktrees are cut
-from the track branch's HEAD, never from `main`), and building on a stale base produces conflicts a
-human then has to untangle.
+Dirty tree → stop. `STALE` → stop, and say which sha each side is on. This is an **equality
+assertion, not a `git status` glance**: the maiden run passed a "behind main" eyeball, cut its track
+from local `14c5d33` while `origin/main` was at `700c333`, and the consequences were not conflicts.
+The verifiers read a two-commit-old `ops/agent-os/dod.md` out of their worktrees and graded against
+it, and PR #333 landed on `mergeStateStatus: BEHIND` — the ruleset requires up-to-date branches — so
+auto-merge could not fire without a manual `gh pr update-branch`.
+
+Belt and braces: the loop's stage-prep now fetches and cuts the track branch from **`origin/main`**
+itself, and asserts the new branch's HEAD sha equals the base sha before any workstream runs
+(a bare `base: "main"` is normalised to `origin/main`). This gate stays because a stale local `main`
+is also a stale *reading* environment for everything the pass does outside a worktree. Workstream
+worktrees are still cut from the track branch's HEAD, never from any `main`.
 
 ### 4. The frontier is not empty
 
@@ -133,21 +144,44 @@ not tokens, so measure PRs-merged-per-day before raising either number.
 Call the `build-until-done` workflow with the selected tracks:
 
 ```
-Workflow({ name: "build-until-done", args: { units: [...], base: "main", maxAttempts: 3, autoMerge: true } })
+Workflow({ name: "build-until-done", args: { units: [...], base: "origin/main", maxAttempts: 3, autoMerge: true } })
 ```
+
+`base` is a **remote** ref. A bare `"main"` is normalised to `origin/main` rather than trusted, for
+the reason gate 3 exists; pass a sha or an explicit `origin/<branch>` when you mean something else.
 
 `maxAttempts` is **per workstream**, not per track. A workstream that passed is never re-implemented,
 so one failing AC no longer burns an attempt for every healthy unit beside it.
 
 **`autoMerge: true` is what dispatch adds.** It is off by default so a direct `/deliver` call cannot
 merge to `main` by surprise; a dispatch pass opts in. Under it the loop merges a track only when all
-three hold: the DoD passed **and** the required check is green, the track is not `risk:high`, and no
-warning was classified `spec-question`. Code-quality warnings are appended as unchecked ACs to the
-feature parent's `Follow-ups — <parent title>` rollup **before** the merge — they do not stall a good
-branch, and they no longer spawn an issue apiece. See §12 and §13 of
+four hold: the DoD passed **and** the required check is green, the track is not `risk:high`, no unit
+in it carries `hold: true`, and no warning was classified `spec-question`. Code-quality warnings are
+appended as unchecked ACs to the feature parent's `Follow-ups — <parent title>` rollup **before** the
+merge — they do not stall a good branch, and they no longer spawn an issue apiece. See §12 and §13 of
 `product-docs/board-design-2026-07.md`, `ops/agent-os/labels.md`, and `DOD_SCHEMA.warnings`.
 
-Each unit is `{id, title, lane, files, summary, acceptanceCriteria, issue, risk, dependsOn}`. The
+### When to set `hold: true` on a unit
+
+`hold` is a per-unit boolean meaning **this never auto-merges**. A track holds if *any* of its units
+does, and a held track is treated exactly like `risk:high`: the PR opens, the issues flip to
+`agent:in-review`, the hold agent comments why, and the loop never merges it.
+
+Set it in the units array — the loop cannot infer it — in **two** cases:
+
+1. **The issue body declares it.** Anything that says never-auto-merge, hold for review, or names a
+   human as the merge decision.
+2. **ALWAYS when the unit's files touch the factory** — `.claude/workflows/`, the delivery-OS entries
+   under `.claude/skills/` (`dispatch`, `build-until-done`, `definition-of-done`, `open-pr`,
+   `frd-plan`, `frd-implement`), or `ops/agent-os/`. A change to the machine that decides what merges
+   keeps a human, because the thing being changed is the thing that would otherwise have caught the
+   mistake. This is a standing policy, not a judgement call per pass.
+
+Set the flag rather than dropping the whole pass to `autoMerge: false`. Turning auto-merge off
+globally to hold one factory track also stalls every clean track beside it in a mixed wave, and those
+are exactly the PRs the queue can absorb.
+
+Each unit is `{id, title, lane, files, summary, acceptanceCriteria, issue, risk, dependsOn, hold}`. The
 loop cuts the units into **tracks** (connected components over shared-file ∪ `dependsOn`), then into
 **stages** (topological levels by `dependsOn`), then into **workstreams** (units in one stage sharing
 a file — one agent, sequential). `files` comes from the issue's **Likely files** section and the
@@ -167,6 +201,11 @@ Report, in this order:
 2. **Blocked** — issue, the gate that failed, and the one thing needed to unblock it.
 3. **Left on the frontier** — what was ready but not taken, and why (cap, budget).
 4. **Still blocked by dependencies** — with what each waits on.
+5. **Surviving worktrees** — every path in the loop's `survivingWorktrees`, with the branch it holds.
+   A merged track removed its own; a held or blocked one kept its trees on purpose, because they are
+   the only re-runnable copy of the work. Repeat them here even though the exit comment names them:
+   the trees from the first two passes were cleaned up by hand only because someone remembered they
+   existed. Do not remove them yourself — they belong to whoever takes the issue next.
 
 Then stop. **Never merge**, never close an issue, never clear another run's claim, and never widen
 scope because the frontier looked thin.
@@ -178,6 +217,8 @@ scope because the frontier looked thin.
   a PR it is looking at. If a PR is held, it is held — reaching past the gate to merge it is the same
   class of error as clearing another run's claim.
 - **Never merge a `risk:high` PR, auto or otherwise.** Schema, auth and tenancy keep a human.
+- **Never merge a factory change, auto or otherwise.** Mark its units `hold: true` on the way in;
+  do not reach past the gate on the way out.
 - **Never clear an `agent:in-progress` claim** that this pass did not set.
 - **Never dispatch `risk:high` unattended** without an explicit opt-in.
 - **One pass, then stop.** Do not loop waiting for PRs to be merged so more work unblocks — that is
