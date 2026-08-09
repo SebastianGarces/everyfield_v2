@@ -230,6 +230,59 @@ export function isOversightEligibleCategory(
 }
 
 /**
+ * May this AUDIENCE ever be served this category at all?
+ *
+ * The same question `isOversightEligibleCategory` answers, asked the way the
+ * settings screen has to ask it: it knows the reader's audience, not whether the
+ * reader happens to be an oversight one. A church reader is served every
+ * category, so the answer is unconditionally true for them and the caller needs
+ * no role branch of its own.
+ *
+ * This is NOT the delivery gate. `recipientMayBeNotified` is, and it is
+ * stricter — it also asks about the plant's sharing toggle and about tenancy.
+ * This is the WEAKER, category-only question, which is the one a screen can
+ * answer without knowing which plant a hypothetical notification would be about.
+ */
+export function audienceMayReceiveCategory(
+  audience: NotificationAudience,
+  category: NotificationCategory
+): boolean {
+  if (audience !== "oversight") return true;
+  return isOversightEligibleCategory(category);
+}
+
+/**
+ * The categories this audience is NEVER served, in the matrix's own order.
+ *
+ * Derived from `OVERSIGHT_ELIGIBLE_CATEGORIES`, never listed — that is the
+ * point. A screen that hides, disables or labels these rows must not carry its
+ * own copy of the five granular category names: a category added to the enum
+ * tomorrow is ineligible for oversight until someone deliberately adds it to the
+ * allow-list, and this function has to say so on the day it is added, with no
+ * second edit.
+ *
+ * Empty for a church reader, which is the whole answer for four of the five
+ * roles (ruled 2026-08-09, extending #254's principle from the cadence control
+ * to the category rows: a user is not offered a control that cannot change what
+ * they receive).
+ */
+export function ineligibleCategoriesForAudience(
+  audience: NotificationAudience
+): NotificationCategory[] {
+  return notificationCategories.filter(
+    (category) => !audienceMayReceiveCategory(audience, category)
+  );
+}
+
+// ----------------------------------------------------------------------------
+// TYPE-keyed lists start here. Everything above is keyed on CATEGORY and answers
+// "may this audience ever be served this kind of message"; everything below is
+// keyed on the `type` discriminator of one specific message and relaxes a gate
+// for it. The boundary is worth keeping — a rule filed on the wrong side of it
+// either exempts a whole category or fails to exempt anything at all.
+// ----------------------------------------------------------------------------
+
+/**
  * The two events that END an org's relationship with a plant (#304, OV-006 /
  * OV-007) — and the ONLY types for which `enqueue`'s tenancy gate accepts a
  * RECORDED RELATIONSHIP instead of current access.
@@ -285,51 +338,6 @@ export const OVERSIGHT_OWN_RELATIONSHIP_TYPES = [
  */
 export function isOwnRelationshipType(type: string): boolean {
   return (OVERSIGHT_OWN_RELATIONSHIP_TYPES as readonly string[]).includes(type);
-}
-
-/**
- * May this AUDIENCE ever be served this category at all?
- *
- * The same question `isOversightEligibleCategory` answers, asked the way the
- * settings screen has to ask it: it knows the reader's audience, not whether the
- * reader happens to be an oversight one. A church reader is served every
- * category, so the answer is unconditionally true for them and the caller needs
- * no role branch of its own.
- *
- * This is NOT the delivery gate. `recipientMayBeNotified` is, and it is
- * stricter — it also asks about the plant's sharing toggle and about tenancy.
- * This is the WEAKER, category-only question, which is the one a screen can
- * answer without knowing which plant a hypothetical notification would be about.
- */
-export function audienceMayReceiveCategory(
-  audience: NotificationAudience,
-  category: NotificationCategory
-): boolean {
-  if (audience !== "oversight") return true;
-  return isOversightEligibleCategory(category);
-}
-
-/**
- * The categories this audience is NEVER served, in the matrix's own order.
- *
- * Derived from `OVERSIGHT_ELIGIBLE_CATEGORIES`, never listed — that is the
- * point. A screen that hides, disables or labels these rows must not carry its
- * own copy of the five granular category names: a category added to the enum
- * tomorrow is ineligible for oversight until someone deliberately adds it to the
- * allow-list, and this function has to say so on the day it is added, with no
- * second edit.
- *
- * Empty for a church reader, which is the whole answer for four of the five
- * roles (ruled 2026-08-09, extending #254's principle from the cadence control
- * to the category rows: a user is not offered a control that cannot change what
- * they receive).
- */
-export function ineligibleCategoriesForAudience(
-  audience: NotificationAudience
-): NotificationCategory[] {
-  return notificationCategories.filter(
-    (category) => !audienceMayReceiveCategory(audience, category)
-  );
 }
 
 /**
