@@ -58,7 +58,10 @@ Each section links `invariants/<domain>.md` for the why, the pattern and the wor
 - A state-changing action never takes its actor as an argument — it mints one from `verifySession()`. An entity implied by the actor (their own plant, their own org) is not an argument either.
 - A shared secret is never compared with `===`: use `matchesBearerSecret`/`constantTimeEquals` from `src/lib/security/constant-time.ts`, which hashes both sides to a fixed length first. Covers `CRON_SECRET` and `REVALIDATION_SECRET`.
 - A request header the app does not write UNCONDITIONALLY is client input and nothing may branch on it. `x-pathname` (`PATHNAME_HEADER`) is the one trusted header, and its absence must fail closed.
-- The crawler allowance is ONE predicate, `isCrawlerPreviewRequest(userAgent, pathname)`, over a fixed route list that is a subset of the protected list. It buys the unauthenticated shell, never a session and never per-user data.
+- The crawler allowance is ONE predicate, `isCrawlerPreviewRequest(userAgent, pathname)`, over a fixed route list that is a STRICT subset of the protected list — `/wiki` only. It buys the unauthenticated shell, never a session and never per-user data.
+- Listing a route there means "this route produces a session-less render worth previewing" (ruled 2026-08-09): it must render with no session AND that render must be the page, not a redirect. `/dashboard` failed the first (it calls `verifySession()`, so crawlers 500'd); `/oversight` failed the second (its pages redirect to /login, so no card was ever produced).
+- Both stay in the proxy's `PROTECTED_ROUTE_PREFIXES`, named EXPLICITLY and not through the spread of the previewable list — dropping a prefix from that list must never unprotect the route as a side effect.
+- The `whatsapp` crawler token is anchored — `^whatsapp/<digit>`, which is WhatsApp's link-preview FETCHER, whose UA is only the token. Its in-app browser is a human behind a `Mozilla/5.0 …` UA that also says WhatsApp; a bare substring called that person a bot.
 
 ## Password Security
 
@@ -92,6 +95,20 @@ Applies to `src/lib/communication/**` and the `/communication` surfaces. Ruled 2
 - `UNREACHABLE_STATUSES` = `bounced` AND `failed`, and `nonOpenerScope` excludes both. A `failed` row is an address the provider refused — retrying it cannot succeed and spends sender reputation. Never re-split the two.
 - "Delivery rate" names exactly ONE figure: `delivered / attempted`, on the church-wide overview only. A single message's tiles report COUNTS with the denominator in the caption ("Delivered · 6 · of 10 recipients") and claim no rate — the tile once divided by all recipient rows and called that the delivery rate too, which is a different number under the same name.
 - A rate with a zero denominator is UNKNOWN (`toPercent` → `null`, rendered as `—`), never `0%`. "0% open rate" is a claim about a send that never arrived.
+
+## Tasks, Subtasks & Recurrence
+
+→ [tasks](invariants/tasks.md) — `src/lib/tasks/**`, `src/app/(dashboard)/tasks/**`.
+
+- Nesting is ONE level, enforced in both directions: a subtask may not take children, and a task that already has children may not be demoted into one. Half the rule is no rule — refusing only the first is bypassed by parenting the other way round.
+- Completing every subtask does NOT complete the parent. There is deliberately no code that does it (#90); the absence is the ruling, not an oversight, and the UI says so out loud.
+- A subtask is a checklist item, not a task. Anything reporting a NUMBER of tasks applies `topLevelTasksOnly()` — `listTasks` and `getTaskCounts` share it, because the badges and the list under them must count one population (ruled on #370). Checklist progress is reported separately, never folded into `complete`.
+- A new subtask inherits its parent's assignee (#370). A default, not a lock — an explicit assignee wins and the subtask is reassignable. An unowned checklist item reaches no "My tasks" view and nobody is accountable for it.
+- The checklist is part of a recurring task's TEMPLATE: completing one mints the successor with EVERY item copied across, unticked — the ticked ones and the never-started ones under one rule (#370). Per-item carry-over state was rejected; a repeating task repeats whole.
+- Copied children get explicit `created_at` stamps one millisecond apart. `listSubtasks` sorts by `created_at`, and one multi-row INSERT stamps every default with the same transaction timestamp, leaving checklist order to a random-UUID tiebreak.
+- Exactly ONE instance of a recurring series is open at a time, minted on completion — never by a cron. The guard runs BEFORE the successor insert, so a resurrected series gains neither a second open task nor a duplicate checklist.
+- `completionEvent` is never copied to a successor: `meeting.evaluation.completed` is backed by a partial unique index, so copying it aborts the second instance's insert. Recurrence mints plain work; hooks stay with the generator.
+- A completion is written FIRST and its successor second — the reverse of the usual durable-marker-last rule, deliberately. A successor with no completion leaves two open instances; a completion with no successor is repaired by reopening and re-completing.
 
 ## Dev Seeds
 
