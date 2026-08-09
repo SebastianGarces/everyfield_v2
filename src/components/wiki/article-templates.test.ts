@@ -175,6 +175,31 @@ test("every template link carries cursor-pointer (project hard rule)", () => {
   assert.match(linkClassName[1], /\bcursor-pointer\b/);
 });
 
+test("template links open in a new tab, safely and audibly", () => {
+  // A template is fetched WHILE reading, so following it in place would cost
+  // the reader their place in the article (#317 ruling).
+  const link = relatedTemplatesSource.match(
+    /<Link[\s\S]*?data-testid="wiki-related-template"[\s\S]*?>/
+  );
+
+  assert.ok(link, "the template link was not found");
+  assert.match(
+    link[0],
+    /target="_blank"/,
+    "template links must open in a new tab"
+  );
+  assert.match(
+    link[0],
+    /rel="noopener noreferrer"/,
+    "a _blank link without noopener hands the opened page a reference back to this one"
+  );
+  assert.match(
+    relatedTemplatesSource,
+    /className="sr-only">\{"\(opens in new tab\)"\}/,
+    "the new tab must be announced — the ExternalLink icon is aria-hidden and says nothing"
+  );
+});
+
 test("the section renders nothing rather than an empty heading", () => {
   assert.match(
     relatedTemplatesSource,
