@@ -1,7 +1,8 @@
 "use client";
 
 import { Search } from "lucide-react";
-import { useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { startTransition, useMemo, useOptimistic, useState } from "react";
 
 import { Input } from "@/components/ui/input";
 import {
@@ -31,24 +32,67 @@ export interface DocumentLibraryItem {
 
 const ALL = "all";
 
-export function DocumentsLibrary({
-  items,
-  initialTemplateId,
-}: {
-  items: DocumentLibraryItem[];
-  /** Template to open on arrival — a contextual link from another feature. */
-  initialTemplateId?: string;
-}) {
+/**
+ * The contextual deep-link parameter (DOC-014): `/documents?template=<id>`.
+ * Written by `contextualTemplateHref()`; read here.
+ */
+export const TEMPLATE_SEARCH_PARAM = "template";
+
+/**
+ * The same URL with the deep link removed — every other parameter survives, so
+ * clearing the dialog never clears whatever else the URL is carrying.
+ */
+export function urlWithoutTemplateParam(
+  pathname: string,
+  searchParams: URLSearchParams | { toString(): string }
+): string {
+  const params = new URLSearchParams(searchParams.toString());
+  params.delete(TEMPLATE_SEARCH_PARAM);
+  const query = params.toString();
+  return query ? `${pathname}?${query}` : pathname;
+}
+
+export function DocumentsLibrary({ items }: { items: DocumentLibraryItem[] }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState<string>(ALL);
   const [phase, setPhase] = useState<string>(ALL);
   const [format, setFormat] = useState<string>(ALL);
-  const [deepLinkedId, setDeepLinkedId] = useState<string | null>(
-    initialTemplateId ?? null
+
+  // The URL is the only source of truth for "which template is open". Reading
+  // it every render — instead of seeding `useState` once — is what makes a
+  // second contextual arrival at the same `?template=` URL re-open the dialog,
+  // and is what lets the filter state above survive a contextual arrival: the
+  // page no longer has to remount this component to change which dialog opens.
+  const requestedTemplateId = searchParams.get(TEMPLATE_SEARCH_PARAM);
+
+  // Dismissing the dialog means navigating the deep link away, and that
+  // navigation is a server round trip on this force-dynamic route. Optimistic
+  // state closes the dialog on the click instead of on the round trip, and
+  // unwinds by itself when the navigation commits — no second copy of "open"
+  // to fall out of step with the URL.
+  const [openTemplateId, dismissDeepLink] = useOptimistic<string | null, null>(
+    requestedTemplateId,
+    () => null
   );
 
-  const deepLinked =
-    items.find(({ template }) => template.id === deepLinkedId) ?? null;
+  // An unknown id opens nothing rather than erroring — a contextual link to a
+  // retired template must degrade to the plain library, never a dead end.
+  const deepLinked = openTemplateId
+    ? (items.find(({ template }) => template.id === openTemplateId) ?? null)
+    : null;
+
+  function closeDeepLink() {
+    startTransition(() => {
+      dismissDeepLink(null);
+      router.replace(urlWithoutTemplateParam(pathname, searchParams), {
+        scroll: false,
+      });
+    });
+  }
 
   // Distinct filter options derived from the catalog.
   const { categories, phases, formats } = useMemo(() => {
@@ -98,11 +142,14 @@ export function DocumentsLibrary({
       {/* Contextual arrival (DOC-014): open the requested template straight away */}
       {deepLinked && (
         <GenerateDialog
+          // Keyed by template so arriving at a second deep link starts from
+          // that template's own auto-filled values, not the previous one's.
+          key={deepLinked.template.id}
           template={deepLinked.template}
           defaults={deepLinked.defaults}
           open
           onOpenChange={(next) => {
-            if (!next) setDeepLinkedId(null);
+            if (!next) closeDeepLink();
           }}
         />
       )}
