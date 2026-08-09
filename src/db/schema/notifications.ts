@@ -119,6 +119,44 @@ export type DigestCadence = (typeof digestCadences)[number];
  * Values are the singular of the owning table, so a reviewer can map a
  * notification back to what it speaks for.
  */
+/**
+ * WHAT A NOTIFICATION IS ANCHORED TO — the tenancy discriminator (#304 WS3,
+ * ruling #351, migration 0033).
+ *
+ * Until 0033 there was one answer, `church_id`, NOT NULL: every notification in
+ * the product was about a plant, filed under that plant, and read back through
+ * `NotificationScope`. #304 WS3 produced the first events that name NO plant —
+ * a sending church accepting, declining or leaving a NETWORK's invitation — and
+ * the two ways to file them were a parallel org-notifications table or a
+ * generalized anchor on this one. #351 ruled for the anchor: two tables would
+ * mean two queues, two dispatchers, two feeds and two places for the
+ * at-most-once delivery guarantee to be re-implemented.
+ *
+ *   `church`         `church_id` carries it. EVERY notification that existed
+ *                    before 0033 is one of these, and every church-scoped read
+ *                    in the product is unchanged — `scopedWhere` still names
+ *                    `church_id`, so an org-anchored row can never appear in a
+ *                    plant's feed by omission.
+ *   `sending_church` `anchor_org_id` is a `sending_churches.id`.
+ *   `network`        `anchor_org_id` is a `sending_networks.id`.
+ *
+ * ONE ORG COLUMN, NOT TWO, and it is the dedupe index that decides it. A
+ * notification's idempotency (N-001) is a UNIQUE index over the anchor, the
+ * recipient and the key; with a nullable column per org kind, every org-anchored
+ * row would carry a NULL in the index and NULLs never collide in a btree unique
+ * index — so `dedupeKey` would silently stop being idempotent for exactly the
+ * rows this change adds. A single non-null `anchor_org_id` keeps the guarantee.
+ * It carries no FK for the same reason `association_events.org_id` does not:
+ * Postgres has no polymorphic foreign key, and the discriminator plus the CHECK
+ * is the integrity available.
+ */
+export const notificationAnchorTypes = [
+  "church",
+  "sending_church",
+  "network",
+] as const;
+export type NotificationAnchorType = (typeof notificationAnchorTypes)[number];
+
 export const notificationEntityTypes = [
   "task",
   "meeting",
@@ -172,10 +210,35 @@ export const notifications = pgTable(
   "notifications",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    /** Tenancy boundary. EVERY read filters on it (N-010). */
-    churchId: uuid("church_id")
-      .references(() => churches.id, { onDelete: "cascade" })
-      .notNull(),
+    /**
+     * WHICH KIND of thing this notification is filed under (N-010, migration
+     * 0033). Defaults to `'church'` in the database as well as here: that is
+     * what every pre-0033 row is, and it makes the CHECK below the thing that
+     * catches a writer who names an org anchor and forgets the discriminator.
+     */
+    anchorType: varchar("anchor_type", { length: 20 })
+      .$type<NotificationAnchorType>()
+      .notNull()
+      .default("church"),
+    /**
+     * The CHURCH anchor, and the tenancy boundary EVERY church-scoped read
+     * still filters on (N-010). Nullable only because it is one of two anchor
+     * columns; the CHECK below permits the null exclusively when
+     * `anchor_org_id` carries the anchor instead.
+     */
+    churchId: uuid("church_id").references(() => churches.id, {
+      onDelete: "cascade",
+    }),
+    /**
+     * The ORG anchor — a `sending_churches.id` or a `sending_networks.id`,
+     * discriminated by `anchor_type`. No FK: see `notificationAnchorTypes`.
+     *
+     * Losing the church anchor's ON DELETE CASCADE with it is deliberate and
+     * bounded — neither org table has a delete path in the product, and an
+     * org-anchored row is only ever one of the three own-relationship
+     * milestones, which are the org's own record of what it did.
+     */
+    anchorOrgId: uuid("anchor_org_id"),
     /** Addressed to a user, never a bare email address. */
     recipientUserId: uuid("recipient_user_id")
       .references(() => users.id, { onDelete: "cascade" })
@@ -252,6 +315,28 @@ export const notifications = pgTable(
       .where(
         sql`${table.dedupeKey} is not null and ${table.status} <> 'cancelled'`
       ),
+    // The SAME guarantee for an ORG-ANCHORED row (migration 0033).
+    //
+    // A second index rather than a widened first one, and the reason is that a
+    // widened one would have had to change: the index above is arbitrated by an
+    // ON CONFLICT clause that mirrors its predicate byte for byte
+    // (`dbEnqueueDeps.insertIfAbsent`), and every keyed enqueue in the product
+    // rides it. Leaving it untouched means the church path cannot regress on a
+    // change that is not about it. Org-anchored rows carry a NULL `church_id`
+    // and so never collide there at all — this index is the only thing that
+    // makes their `dedupeKey` idempotent, which is why `anchor_org_id` is one
+    // non-null column and not two nullable ones.
+    uniqueIndex("notifications_org_dedupe_key_unique_idx")
+      .on(table.anchorOrgId, table.recipientUserId, table.dedupeKey)
+      .where(
+        sql`${table.anchorOrgId} is not null and ${table.dedupeKey} is not null and ${table.status} <> 'cancelled'`
+      ),
+    // The org-anchored feed read: newest-first for one recipient within one org.
+    index("notifications_org_feed_idx").on(
+      table.anchorOrgId,
+      table.recipientUserId,
+      table.createdAt
+    ),
     // Feed read path: newest-first for one recipient within one church.
     index("notifications_feed_idx").on(
       table.churchId,
@@ -277,6 +362,25 @@ export const notifications = pgTable(
     check(
       "notifications_status_check",
       sql`${table.status} in (${inList(notificationStatuses)})`
+    ),
+    check(
+      "notifications_anchor_type_check",
+      sql`${table.anchorType} in (${inList(notificationAnchorTypes)})`
+    ),
+    // EXACTLY ONE ANCHOR, in the data (#351). A row with neither would be a
+    // notification no read path can reach; a row with both would be reachable
+    // from two tenants at once, which is the one thing N-010 exists to prevent.
+    check(
+      "notifications_anchor_check",
+      sql`(
+        (${table.anchorType} = 'church'
+          and ${table.churchId} is not null
+          and ${table.anchorOrgId} is null)
+        or
+        (${table.anchorType} in ('sending_church', 'network')
+          and ${table.anchorOrgId} is not null
+          and ${table.churchId} is null)
+      )`
     ),
   ]
 );

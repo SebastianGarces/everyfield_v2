@@ -112,6 +112,17 @@ const ANSWER_CONTRACT: Record<
     surfaceRead: string;
     /** The `/settings` gate that makes the surface reachable. */
     settingsGate: string;
+    /**
+     * The type-to-confirm LEAVE control this role gets on the same screen, and
+     * the action behind it (#304, OV-007a / OV-013).
+     *
+     * Part of this contract rather than a test of its own, because it is the
+     * same claim one step on: a role that can be ASSOCIATED by an invitation
+     * must be able to END that association from the surface it answered on.
+     * The planter's two types share one control — a plant has two associations
+     * and the dialog names which — so the entry repeats.
+     */
+    leave: { component: string; action: string };
   }
 > = {
   church_to_sending_church: {
@@ -140,6 +151,7 @@ const ANSWER_CONTRACT: Record<
     ],
     surfaceRead: "getPendingInvitationsForPlant",
     settingsGate: "isPlanterWithPlant",
+    leave: { component: "LeaveOrgDialog", action: "leaveOversightOrg" },
   },
   church_to_network: {
     answeredBy: "planter",
@@ -160,6 +172,7 @@ const ANSWER_CONTRACT: Record<
     ],
     surfaceRead: "getPendingInvitationsForPlant",
     settingsGate: "isPlanterWithPlant",
+    leave: { component: "LeaveOrgDialog", action: "leaveOversightOrg" },
   },
   sending_church_to_network: {
     answeredBy: "sending_church_admin",
@@ -205,6 +218,7 @@ const ANSWER_CONTRACT: Record<
     ],
     surfaceRead: "getPendingInvitationsForSendingChurch",
     settingsGate: "isSendingChurchAdminWithOrg",
+    leave: { component: "LeaveNetworkDialog", action: "leaveNetwork" },
   },
 };
 
@@ -341,4 +355,77 @@ test("the dashboard reminder stays the planter's, and says so", () => {
     /role === "planter"\s*\?\s*getPendingInvitationsForPlant\(churchId\)/
   );
   assert.ok(!DASHBOARD_PAGE.includes("getPendingInvitationsForSendingChurch"));
+});
+
+// ----------------------------------------------------------------------------
+// 3. …and they can LEAVE from the same surface (#304, OV-007a / OV-013)
+// ----------------------------------------------------------------------------
+
+const ASSOCIATION_ACTIONS = read("settings", "association", "actions.ts");
+
+for (const [type, contract] of Object.entries(ANSWER_CONTRACT) as [
+  OrganizationInvitationType,
+  (typeof ANSWER_CONTRACT)[OrganizationInvitationType],
+][]) {
+  test(`${type}: the role that answers it can also leave, behind a type-to-confirm`, () => {
+    // The answering surface renders the control…
+    assert.ok(
+      ASSOCIATION_PAGE.includes(`<${contract.leave.component}`),
+      `/settings/association renders no ${contract.leave.component}`
+    );
+
+    // …the control types the org's name before it will submit. This is a
+    // deliberateness control and never an authorization one, which is why the
+    // NEXT assertion matters more than this one.
+    const dialog = readFileSync(
+      path.join(
+        APP,
+        "settings",
+        "association",
+        `${contract.leave.component === "LeaveNetworkDialog" ? "leave-network-dialog" : "leave-org-dialog"}.tsx`
+      ),
+      "utf8"
+    );
+    assert.match(dialog, /toLowerCase\(\) ===/, "no type-to-confirm match");
+    assert.match(dialog, /disabled=\{!confirmed \|\| pending\}/);
+    // Every clickable carries `cursor-pointer` (repo rule), including the
+    // trigger, the cancel and the destructive confirm.
+    assert.equal(
+      (dialog.match(/cursor-pointer/g) ?? []).length,
+      3,
+      "trigger, cancel and confirm each need cursor-pointer"
+    );
+
+    // …and the action behind it exists, takes no entity id, and is the one the
+    // logic layer guards. A LEAVE that took an org id would be aimable at
+    // somebody else's association; both of these derive it from the session.
+    assert.ok(
+      ASSOCIATION_ACTIONS.includes(
+        `export async function ${contract.leave.action}(`
+      ),
+      `no ${contract.leave.action} action`
+    );
+    assert.ok(
+      dialog.includes(`${contract.leave.action}(`),
+      `${contract.leave.component} does not call ${contract.leave.action}`
+    );
+  });
+}
+
+test("neither leave action accepts an id — the entity is the session's", () => {
+  // The `memory/invariants.md` → Authentication rule, asserted on the two
+  // signatures rather than trusted: an entity implied by the actor is never an
+  // argument. The planter's takes a two-valued KIND (a plant genuinely has two
+  // associations to choose between); the sending church's takes NOTHING, because
+  // a sending church has exactly one.
+  assert.match(
+    ASSOCIATION_ACTIONS,
+    /export async function leaveOversightOrg\(\s*orgType: string\s*\)/
+  );
+  assert.match(
+    ASSOCIATION_ACTIONS,
+    /export async function leaveNetwork\(\): Promise<AssociationActionResult>/
+  );
+  // No uuid parameter anywhere in the module's leave surface.
+  assert.doesNotMatch(ASSOCIATION_ACTIONS, /leaveNetwork\([^)]+\)/);
 });

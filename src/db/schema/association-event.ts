@@ -9,11 +9,12 @@ import {
 } from "drizzle-orm/pg-core";
 import { churches } from "./church";
 import { organizationInvitations } from "./organization-invitation";
+import { sendingChurches } from "./sending-church";
 import { users } from "./user";
 
 // ============================================================================
-// association_events — the append-only audit of a plant's oversight
-// association (OV-008; FRD `product-docs/features/oversight/frd.md`).
+// association_events — the append-only audit of an oversight association
+// (OV-008; FRD `product-docs/features/oversight/frd.md`).
 //
 // WHY IT EXISTS. Until #274 there was exactly one way a plant became associated
 // with an oversight org (accepting an invitation) and NO way to leave one, so
@@ -31,23 +32,55 @@ import { users } from "./user";
 // database — a rule/trigger blocking UPDATE/DELETE would make it structural and
 // is deliberately NOT in this expand-only migration, since it has to be reasoned
 // about alongside an eventual retention story rather than smuggled in here.
+//
+// THE SUBJECT IS NO LONGER ALWAYS A PLANT (#304 WS3, ruling #351, migration
+// 0033). Until 0033 the subject was `church_id`, NOT NULL, and the third
+// invitation type — a sending church joining a network — therefore had nowhere
+// to be filed: it wrote no audit row at all, which is the debt `#351` was raised
+// to settle. #351 ruled for the shape this table's own header had asked for: a
+// SUBJECT DISCRIMINATOR plus one nullable FK per subject kind, and a CHECK that
+// exactly one of them is set. `church_id` is now nullable because it is one of
+// two subject columns, NOT because a null there means "global" — that reading
+// belongs to feature tables (`memory/contracts/db.md`), and the CHECK is what
+// keeps it from ever meaning it here: a row with no subject at all cannot be
+// written.
 // ============================================================================
 
 /**
  * WHICH KIND of oversight org the event is about. There are two, and they are
- * the two nullable oversight FKs on `churches`: a plant belongs to a sending
- * church, to a network directly, or to neither.
+ * the two nullable oversight FKs a subject can carry: a plant belongs to a
+ * sending church, to a network directly, or to neither; a sending church belongs
+ * to a network or to nothing.
  *
  * Note this is NOT `organizationInvitationTypes` narrowed. That enum describes
- * an INVITATION (`church_to_network`), and it has a third arm — a sending church
- * joining a network — which this table does not record, because its subject is a
- * CHURCH (`church_id` below is not nullable). If a sending church's own network
- * membership ever needs auditing it gets a subject column and a ruling, not a
- * nullable `church_id` here: a null `church_id` already means "global content"
- * everywhere else in this schema (`memory/contracts/db.md`).
+ * an INVITATION (`church_to_network`); this one describes the ORG on the other
+ * side of an association, and `subjectType` below says which kind of thing is on
+ * this side.
  */
 export const associationOrgTypes = ["sending_church", "network"] as const;
 export type AssociationOrgType = (typeof associationOrgTypes)[number];
+
+/**
+ * WHOSE association it is — the discriminator #351 ruled for (2026-08-09).
+ *
+ * Two values, and they are the two things in this product that can hold an
+ * oversight association of their own:
+ *
+ *   * `church`         a church plant, filed under `church_id`. Its org is a
+ *                      sending church OR a network (both FKs on `churches` are
+ *                      independent — `memory/invariants.md` → Multi-Tenancy);
+ *   * `sending_church` a sending church, filed under `subject_sending_church_id`.
+ *                      Its org is always a network.
+ *
+ * A DISCRIMINATOR PLUS PER-SUBJECT FKs, not a second polymorphic pair. `org_id`
+ * below is deliberately FK-less because an audit row must outlive the org it
+ * names; the SUBJECT is the row's tenancy anchor, which every reader scopes on,
+ * so it keeps referential integrity and gets a column of its own per kind. The
+ * CHECK that exactly one is set is what makes "every row has exactly one
+ * subject" a property of the data rather than of the writer.
+ */
+export const associationSubjectTypes = ["church", "sending_church"] as const;
+export type AssociationSubjectType = (typeof associationSubjectTypes)[number];
 
 /**
  * WHAT happened. Both directions are recorded, not just severs: an audit that
@@ -66,13 +99,41 @@ export const associationEvents = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     /**
-     * The tenant scope, and the subject of the event: WHICH PLANT joined or
-     * left. Not nullable — see `associationOrgTypes` for why a sending church's
-     * own network membership is not squeezed in here.
+     * WHICH KIND of thing joined or left — the discriminator, and the column
+     * every reader branches on before it trusts either subject FK.
+     *
+     * Defaulted to `'church'` in the DATABASE as well as here, because that is
+     * what every row written before migration 0033 is, and because a raw INSERT
+     * that names a subject FK but forgets this column must fail the CHECK rather
+     * than silently file itself under the wrong kind — which is exactly what the
+     * default plus the CHECK together produce.
      */
-    churchId: uuid("church_id")
-      .references(() => churches.id)
-      .notNull(),
+    subjectType: varchar("subject_type", { length: 20 })
+      .$type<AssociationSubjectType>()
+      .notNull()
+      .default("church"),
+    /**
+     * The CHURCH subject: WHICH PLANT joined or left.
+     *
+     * Nullable since 0033 — not because a null means "global content" (the
+     * repo-wide reading of a null `church_id` on a FEATURE table), but because
+     * this is one of two subject columns and the CHECK below permits a null here
+     * only when `subject_sending_church_id` carries the subject instead. There
+     * is no row in this table without a subject.
+     */
+    churchId: uuid("church_id").references(() => churches.id),
+    /**
+     * The SENDING CHURCH subject: which sending church joined or left a network
+     * (#304 WS3 / OV-013).
+     *
+     * The counterpart to `church_id`, under the same CHECK. A real FK, unlike
+     * `org_id`: the subject is the row's tenancy anchor and the thing its one
+     * reader scopes on, so it is worth referential integrity — whereas the ORG
+     * side must survive its referent.
+     */
+    subjectSendingChurchId: uuid("subject_sending_church_id").references(
+      () => sendingChurches.id
+    ),
     /**
      * The other side of the association, as a discriminated pair.
      *
@@ -135,6 +196,12 @@ export const associationEvents = pgTable(
       table.churchId,
       table.createdAt
     ),
+    // The same read for a SENDING CHURCH subject: its own association history
+    // with a network (#304 WS3 / OV-013), newest first.
+    index("association_events_subject_sending_church_idx").on(
+      table.subjectSendingChurchId,
+      table.createdAt
+    ),
     // The org-side read: everything that happened to one oversight org's
     // portfolio — who joined, who left.
     index("association_events_org_idx").on(table.orgType, table.orgId),
@@ -149,6 +216,27 @@ export const associationEvents = pgTable(
     check(
       "association_events_event_check",
       sql`${table.event} in (${inList(associationEventTypes)})`
+    ),
+    check(
+      "association_events_subject_type_check",
+      sql`${table.subjectType} in (${inList(associationSubjectTypes)})`
+    ),
+    // EXACTLY ONE SUBJECT, in the data (#351). Both halves are load-bearing:
+    // the discriminator has to agree with which column is populated, and the
+    // OTHER column has to be null — a row carrying both would be two audits
+    // wearing one id, and its one reader (`associationHistoryQuery`) would
+    // return it to both tenants.
+    check(
+      "association_events_subject_check",
+      sql`(
+        (${table.subjectType} = 'church'
+          and ${table.churchId} is not null
+          and ${table.subjectSendingChurchId} is null)
+        or
+        (${table.subjectType} = 'sending_church'
+          and ${table.subjectSendingChurchId} is not null
+          and ${table.churchId} is null)
+      )`
     ),
   ]
 );

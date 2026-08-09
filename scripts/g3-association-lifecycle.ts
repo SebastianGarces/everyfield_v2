@@ -57,7 +57,10 @@ import {
   acceptInvitationAs,
   declineInvitationAs,
   insertInvitation,
+  NOT_IN_A_NETWORK_MESSAGE,
+  SENDING_CHURCH_ADMIN_ONLY_SEVER_MESSAGE,
   invitationActorFromSession,
+  leaveNetworkAsSendingChurchAdmin,
   leaveOversightOrgAs,
   removePlantFromOrgAs,
   type InvitationActor,
@@ -414,61 +417,61 @@ async function main() {
     ok("accept associated the sending church with the network");
 
     // ------------------------------------------------------------------------
-    // THE UNMET ACCEPTANCE CRITERION, PRINTED IN FULL — OPEN RULING #351.
+    // THE ACCEPTANCE CRITERION, NOW REQUIRED — #351 LANDED (migration 0033).
     //
-    // #304's WS3 AC has three clauses on the accept and two on the decline:
+    // #304's WS3 AC has three clauses across the two answers:
     //
     //   "Accept associates the sending church with the network via the existing
     //    service contract, WRITES AN `association_events` ROW, and NOTIFIES THE
     //    NETWORK on the milestone rail; decline updates status and NOTIFIES,
     //    mirroring the planter flow."
     //
-    // The association and the status hold. THE AUDIT ROW AND BOTH NOTIFICATIONS
-    // DO NOT, and this block prints that in the run's own output rather than
-    // leaving it to a commit message — a green assertion that a row is absent
-    // is not evidence that an AC passes, and reading it as one is how a
-    // documented miss gets mistaken for a pass.
-    //
-    // The three code sites are one-liners (`auditableAssociationOrg`'s
-    // `sending_church_to_network` arm, and the `if (updated.targetChurchId)`
-    // gates on the accept and decline paths in `src/lib/invitations/core.ts`),
-    // and NONE of them may be changed on its own: both target tables make a
-    // CHURCH the mandatory tenant of the row. `association_events.church_id` is
-    // NOT NULL because its subject is a plant (that table's own header asks for
-    // a subject column AND A RULING before this changes), and
-    // `notifications.church_id` is NOT NULL because it is the tenancy boundary
-    // every read filters on (N-010) — 121 references across
-    // `src/lib/notifications/` depend on it, and `memory/invariants.md:27` gives
-    // a null `church_id` the repo-wide meaning "global content". A sending
-    // church joining a network names no church, so neither row has anywhere
-    // honest to be filed. Nulling either tenant column is the one move that is
-    // not available here.
-    //
-    // #351 carries the ruling: which subject column `association_events` gets,
-    // and what a notification about a plantless event is anchored to (one of
-    // the answers on the table is "org-only milestones stay off the rail", which
-    // would strike the notification clauses instead of implementing them).
-    //
-    // The assertions below PIN THE ABSENCE so that the day #351 lands, all three
-    // fail and have to be flipped to require the rows deliberately. They are a
-    // tripwire on a known debt, not a statement of intended behaviour.
+    // Until 0033 this block PRINTED the miss and asserted the ABSENCE of all
+    // three rows, because both target tables made a CHURCH their mandatory
+    // tenant and a sending church joining a network names none. Ruling #351
+    // settled the shape — a subject discriminator on `association_events`, a
+    // recipient anchor on `notifications` — and the three assertions are
+    // therefore flipped to REQUIRE the rows, exactly as the tripwire said they
+    // would have to be. A green run of this section is now evidence FOR the AC
+    // rather than a documented miss.
     // ------------------------------------------------------------------------
-    const unmet = (clause: string, found: number, want: string) =>
-      console.log(
-        `UNMET #351  ${clause.padEnd(46)} found ${found}, want ${want}`
-      );
-
     const scAudit = await db
-      .select({ id: associationEvents.id })
+      .select({
+        subjectType: associationEvents.subjectType,
+        churchId: associationEvents.churchId,
+        subjectSendingChurchId: associationEvents.subjectSendingChurchId,
+        orgType: associationEvents.orgType,
+        orgId: associationEvents.orgId,
+        event: associationEvents.event,
+        actorUserId: associationEvents.actorUserId,
+      })
       .from(associationEvents)
       .where(eq(associationEvents.sourceInvitationId, acceptInvite.id));
-    unmet("accept writes an association_events row", scAudit.length, "1");
 
-    // `composeMilestone` keys every milestone `<type>:<churchId>:<occurrence>`
-    // with the invitation id as the occurrence, so this matches the rows THIS
-    // answer would have written and nothing the earlier steps enqueued.
+    assert.equal(scAudit.length, 1, "the accept wrote exactly one audit row");
+    assert.equal(scAudit[0].subjectType, "sending_church");
+    assert.equal(scAudit[0].subjectSendingChurchId, sendingChurch.id);
+    // The CHURCH column is null and the CHECK is what guarantees it: exactly one
+    // subject, never two, never none.
+    assert.equal(scAudit[0].churchId, null);
+    assert.equal(scAudit[0].orgType, "network");
+    assert.equal(scAudit[0].orgId, network.id);
+    assert.equal(scAudit[0].event, "associated");
+    assert.equal(scAudit[0].actorUserId, scAdmin.id);
+    ok(
+      "the accept wrote an association_events row with a sending-church subject"
+    );
+
+    // `composeMilestone` keys every milestone `<type>:<anchorId>:<occurrence>`
+    // with the invitation id as the occurrence, so these match the rows THIS
+    // answer wrote and nothing the earlier steps enqueued.
     const acceptNotices = await db
-      .select({ id: notifications.id })
+      .select({
+        anchorType: notifications.anchorType,
+        anchorOrgId: notifications.anchorOrgId,
+        churchId: notifications.churchId,
+        type: notifications.type,
+      })
       .from(notifications)
       .where(
         and(
@@ -476,10 +479,24 @@ async function main() {
           like(notifications.dedupeKey, `%:${acceptInvite.id}`)
         )
       );
-    unmet("accept notifies the network", acceptNotices.length, ">= 1");
+
+    assert.equal(acceptNotices.length, 1, "the network was notified once");
+    assert.equal(acceptNotices[0].anchorType, "network");
+    assert.equal(acceptNotices[0].anchorOrgId, network.id);
+    assert.equal(acceptNotices[0].churchId, null);
+    assert.equal(
+      acceptNotices[0].type,
+      "oversight.milestone.invitation_accepted"
+    );
+    ok("the accept notified the network on the milestone rail, anchored to it");
 
     const declineNotices = await db
-      .select({ id: notifications.id })
+      .select({
+        anchorType: notifications.anchorType,
+        anchorOrgId: notifications.anchorOrgId,
+        type: notifications.type,
+        title: notifications.title,
+      })
       .from(notifications)
       .where(
         and(
@@ -487,29 +504,112 @@ async function main() {
           like(notifications.dedupeKey, `%:${invitation.id}`)
         )
       );
-    unmet("decline notifies the network", declineNotices.length, ">= 1");
+
+    assert.equal(declineNotices.length, 1, "the decline notified the network");
+    assert.equal(declineNotices[0].anchorType, "network");
+    assert.equal(declineNotices[0].anchorOrgId, network.id);
+    assert.equal(
+      declineNotices[0].type,
+      "oversight.milestone.invitation_declined"
+    );
+    // A decline names the ADDRESS THE ORG TYPED and nothing else (ruled
+    // 2026-08-09): the refused network never associated, so the sending
+    // church's name is not theirs to learn.
+    assert.match(declineNotices[0].title, new RegExp(scAdmin.email));
+    assert.doesNotMatch(declineNotices[0].title, /G3 Sending Church/);
+    ok("the decline notified the network, naming the address and not the org");
+
+    // ------------------------------------------------------------------------
+    console.log("\n--- 8. OV-013: the sending church leaves its network ---");
+    // ------------------------------------------------------------------------
+
+    // A member of the sending church who is not its admin is refused
+    // SERVER-SIDE. The dialog is a deliberateness control; this is the rule.
+    assert.equal(
+      await refusal(leaveNetworkAsSendingChurchAdmin(actorFor(scTeammate))),
+      SENDING_CHURCH_ADMIN_ONLY_SEVER_MESSAGE
+    );
+    // …and so is the admin of a DIFFERENT sending church, structurally: the
+    // action takes NO argument, so `otherScAdmin` can only ever sever their own
+    // sending church's association — which does not exist.
+    assert.equal(
+      await refusal(leaveNetworkAsSendingChurchAdmin(actorFor(otherScAdmin))),
+      NOT_IN_A_NETWORK_MESSAGE
+    );
+    ok("only the sending church's own ADMIN may sever, server-side");
+
+    const left = await leaveNetworkAsSendingChurchAdmin(actorFor(scAdmin));
+    assert.deepEqual(left, { orgType: "network", orgId: network.id });
+
+    const [orgAfterSever] = await db
+      .select({ sendingNetworkId: sendingChurches.sendingNetworkId })
+      .from(sendingChurches)
+      .where(eq(sendingChurches.id, sendingChurch.id))
+      .limit(1);
+    assert.equal(orgAfterSever.sendingNetworkId, null);
+
+    const severEvents = await db
+      .select({
+        id: associationEvents.id,
+        subjectType: associationEvents.subjectType,
+        subjectSendingChurchId: associationEvents.subjectSendingChurchId,
+        churchId: associationEvents.churchId,
+        event: associationEvents.event,
+        actorUserId: associationEvents.actorUserId,
+        sourceInvitationId: associationEvents.sourceInvitationId,
+      })
+      .from(associationEvents)
+      .where(
+        and(
+          eq(associationEvents.subjectSendingChurchId, sendingChurch.id),
+          eq(associationEvents.event, "disassociated")
+        )
+      );
 
     assert.equal(
-      scAudit.length,
-      0,
-      "an association_events row appeared for a sending church — #351 has landed, so require the row here instead of forbidding it"
+      severEvents.length,
+      1,
+      "the sever wrote exactly one audit row"
     );
+    assert.equal(severEvents[0].subjectType, "sending_church");
+    assert.equal(severEvents[0].churchId, null);
+    assert.equal(severEvents[0].actorUserId, scAdmin.id);
+    // A sever answers no invitation, so the column says so rather than guessing.
+    assert.equal(severEvents[0].sourceInvitationId, null);
+    id("sever audit row", severEvents[0].id);
+    ok("the sever nulled the FK and wrote its audit row together");
+
+    const severNotices = await db
+      .select({
+        anchorType: notifications.anchorType,
+        anchorOrgId: notifications.anchorOrgId,
+        type: notifications.type,
+      })
+      .from(notifications)
+      .where(
+        and(
+          eq(notifications.recipientUserId, netAdmin.id),
+          like(notifications.dedupeKey, `%:${severEvents[0].id}`)
+        )
+      );
+    assert.equal(severNotices.length, 1, "the network was told they left");
+    assert.equal(severNotices[0].anchorType, "network");
+    assert.equal(severNotices[0].anchorOrgId, network.id);
+    assert.equal(severNotices[0].type, "oversight.milestone.association_ended");
+    ok("the network was notified of the sever, anchored to itself");
+
+    // A second sever writes nothing: the read refuses, and the statement's own
+    // WHERE would refuse too.
     assert.equal(
-      acceptNotices.length,
-      0,
-      "the network was notified of an accept — #351 has landed, so require the milestone here instead of forbidding it"
+      await refusal(leaveNetworkAsSendingChurchAdmin(actorFor(scAdmin))),
+      NOT_IN_A_NETWORK_MESSAGE
     );
-    assert.equal(
-      declineNotices.length,
-      0,
-      "the network was notified of a decline — #351 has landed, so require the milestone here instead of forbidding it"
-    );
-    ok("sc→network is recorded by the invitation row only (OPEN GAP — #351)");
+    ok("a repeated sever is refused and writes no second audit row");
 
     console.log(
-      "\nALL ASSERTIONS PASSED — but see the UNMET #351 lines above: #304 WS3's" +
-        "\naudit-row and milestone clauses are NOT implemented and cannot be" +
-        "\nimplemented inside the current schema. This run is not a pass of that AC."
+      "\nALL ASSERTIONS PASSED — #304 WS3's audit-row and milestone clauses are" +
+        "\nnow REQUIRED by this harness (ruling #351, migration 0033), and OV-013's" +
+        "\naudited sever is exercised end to end."
     );
   } finally {
     if (KEEP) {
@@ -519,9 +619,18 @@ async function main() {
 
     console.log("\n--- cleanup (deletes ONLY the rows above) ---");
     await db.delete(notifications).where(eq(notifications.churchId, plant.id));
+    // The ORG-ANCHORED rows this run wrote (#304 WS3): they carry no
+    // `church_id`, so the delete above cannot reach them. Scoped to the network
+    // THIS run created, so it still touches nothing it did not make.
+    await db
+      .delete(notifications)
+      .where(eq(notifications.anchorOrgId, network.id));
     await db
       .delete(associationEvents)
       .where(eq(associationEvents.churchId, plant.id));
+    await db
+      .delete(associationEvents)
+      .where(eq(associationEvents.subjectSendingChurchId, sendingChurch.id));
     await db
       .delete(organizationInvitations)
       .where(inArray(organizationInvitations.inviterUserId, createdUserIds));

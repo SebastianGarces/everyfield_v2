@@ -8,7 +8,10 @@ import { associationEvents } from "@/db/schema";
 import {
   associationEventStatement,
   associationOrg,
+  churchSubject,
   recordAssociationEvent,
+  sendingChurchSubject,
+  toSubjectColumns,
 } from "./audit";
 import { invitationActorFromSession, type InvitationActor } from "./core";
 
@@ -101,7 +104,7 @@ test("the audit row is attributed to the session's user", () => {
   // caller could name records nothing — it is a forgery surface with a
   // timestamp.
   const { sql, params } = associationEventStatement(ACTOR, {
-    churchId: CHURCH,
+    subject: churchSubject(CHURCH),
     orgType: "sending_church",
     orgId: SENDING_CHURCH,
     event: "disassociated",
@@ -122,7 +125,7 @@ test("no caller can name the actor", () => {
   // cannot be written; an unused `@ts-expect-error` is itself an error, so this
   // cannot rot into a comment.
   associationEventStatement(ACTOR, {
-    churchId: CHURCH,
+    subject: churchSubject(CHURCH),
     orgType: "network",
     orgId: NETWORK,
     event: "associated",
@@ -145,7 +148,7 @@ test("no caller can name the actor", () => {
       // @ts-expect-error a bare user shape is not an actor
       forged,
       {
-        churchId: CHURCH,
+        subject: churchSubject(CHURCH),
         orgType: "network",
         orgId: NETWORK,
         event: "associated",
@@ -164,7 +167,7 @@ test("a missing source invitation is written as null, not omitted", () => {
   // has to say "no invitation is responsible", which is a fact — so the writer
   // binds null rather than leaving the key out and letting a default decide.
   const withInvitation = associationEventStatement(ACTOR, {
-    churchId: CHURCH,
+    subject: churchSubject(CHURCH),
     orgType: "sending_church",
     orgId: SENDING_CHURCH,
     event: "associated",
@@ -173,7 +176,7 @@ test("a missing source invitation is written as null, not omitted", () => {
   assert.ok(withInvitation.params.includes(INVITATION_ID));
 
   const without = associationEventStatement(ACTOR, {
-    churchId: CHURCH,
+    subject: churchSubject(CHURCH),
     orgType: "sending_church",
     orgId: SENDING_CHURCH,
     event: "disassociated",
@@ -270,10 +273,33 @@ test("the table gives the code nothing to mutate", () => {
   assert.ok(!columns.includes("deletedAt"), columns.join(", "));
   assert.doesNotMatch(SCHEMA_CODE, /updated_at|deleted_at/);
 
-  // The tenancy column is present and NOT NULL: a null `church_id` means
-  // "global content" everywhere else in this schema, which an audit row must
-  // never be.
-  assert.match(SCHEMA_CODE, /uuid\("church_id"\)[\s\S]{0,120}?\.notNull\(\)/);
+  // EVERY ROW HAS EXACTLY ONE SUBJECT, and since migration 0033 that is the
+  // CHECK's job rather than a NOT NULL's. `church_id` became nullable when the
+  // table gained a second subject kind (a sending church, #351), so the property
+  // that matters — an audit row is never subject-less, which is the shape a null
+  // `church_id` would otherwise have meant — is asserted on the constraint.
+  assert.match(SCHEMA_CODE, /"association_events_subject_check"/);
+  assert.match(
+    SCHEMA_CODE,
+    /table\.subjectType\} = 'church'[\s\S]*?churchId\} is not null[\s\S]*?subjectSendingChurchId\} is null/
+  );
+  assert.match(
+    SCHEMA_CODE,
+    /table\.subjectType\} = 'sending_church'[\s\S]*?subjectSendingChurchId\} is not null[\s\S]*?churchId\} is null/
+  );
+
+  // …and the union in the writer is what makes it unwritable from application
+  // code: neither arm can produce both ids or neither.
+  assert.deepEqual(toSubjectColumns(churchSubject(CHURCH)), {
+    subjectType: "church",
+    churchId: CHURCH,
+    subjectSendingChurchId: null,
+  });
+  assert.deepEqual(toSubjectColumns(sendingChurchSubject(SENDING_CHURCH)), {
+    subjectType: "sending_church",
+    churchId: null,
+    subjectSendingChurchId: SENDING_CHURCH,
+  });
 });
 
 // ----------------------------------------------------------------------------

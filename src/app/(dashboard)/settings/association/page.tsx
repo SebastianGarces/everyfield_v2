@@ -7,6 +7,7 @@ import { verifySession } from "@/lib/auth/session";
 import { formatDate } from "@/lib/datetime";
 
 import { InvitationAnswer } from "./invitation-answer";
+import { LeaveNetworkDialog } from "./leave-network-dialog";
 import { LeaveOrgDialog } from "./leave-org-dialog";
 import {
   getCurrentAssociations,
@@ -38,7 +39,7 @@ import {
 //   * a PLANTER answers `church_to_sending_church` / `church_to_network` for
 //     their plant, and may also leave an org they are in;
 //   * a SENDING CHURCH ADMIN answers `sending_church_to_network` for their
-//     sending church.
+//     sending church, and may also leave the network it is in (OV-013).
 //
 // #304's first build served only the planter, which left a
 // `sending_church_admin` targetable with nowhere in the product to answer — the
@@ -285,17 +286,18 @@ async function SendingChurchAssociation({
 }
 
 /**
- * The sending church's own network, READ-ONLY.
+ * The sending church's own network, with the Leave control (OV-013).
  *
- * No Leave control, and the absence is deliberate rather than unfinished: the
- * audited sever (`severAssociationWithAuditStatement`) writes an
- * `association_events` row whose subject column is a CHURCH and is NOT NULL, so
- * a sending church leaving a network has nowhere to be recorded. Shipping the
- * button without the audit would be the one thing #274's ruling forbids — a
- * sever with no record of who ended it — so the button waits on the schema
- * ruling the audit table's own header asks for. Accepting is unaffected: it
- * writes `sending_churches.sending_network_id` and the invitation row carries
- * who answered and when.
+ * THE BUTTON WAITED ON THE SCHEMA, NOT ON A DESIGN QUESTION. #274 requires
+ * three things of any sever — type-to-confirm, a notification, an
+ * `association_events` row — and until migration 0033 the audit table made a
+ * CHURCH its mandatory subject, so a sending church leaving a network had
+ * nowhere to be recorded. Shipping the button then would have been a sever with
+ * no record of who ended it, the one thing that ruling forbids. Ruling #351 gave
+ * the table a subject discriminator, and all three obligations are met here:
+ * the dialog types the network's name, `leaveNetworkAsSendingChurchAdmin` writes
+ * the FK null and the audit row as ONE statement, and the network is told on the
+ * milestone rail it now has an anchor for.
  */
 function NetworkAssociation({
   network,
@@ -321,9 +323,12 @@ function NetworkAssociation({
           Your sending church is independent — it belongs to no network.
         </p>
       ) : (
-        <div className="space-y-0.5 rounded-lg border p-4">
-          <p className="font-medium">{network.orgName}</p>
-          <p className="text-muted-foreground text-sm">Your network</p>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4">
+          <div className="space-y-0.5">
+            <p className="font-medium">{network.orgName}</p>
+            <p className="text-muted-foreground text-sm">Your network</p>
+          </div>
+          <LeaveNetworkDialog networkName={network.orgName} />
         </div>
       )}
     </section>

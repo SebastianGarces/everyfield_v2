@@ -60,12 +60,18 @@ import {
   announceAssociationEnded,
   announceInvitationAccepted,
   announceInvitationDeclined,
+  announceSendingChurchDeclinedNetwork,
+  announceSendingChurchJoinedNetwork,
+  announceSendingChurchLeftNetwork,
 } from "@/lib/notifications/oversight";
 import { announceRemovedFromOversightOrg } from "@/lib/notifications/plant-association";
 
 import {
   acceptedAssociationEventStatement,
+  churchSubject,
+  sendingChurchSubject,
   severAssociationWithAuditStatement,
+  type AssociationSubject,
 } from "./audit";
 
 // ============================================================================
@@ -1004,8 +1010,12 @@ export async function acceptInvitationAs(
   // OV-008 — the audit row travels IN the batch, so an association cannot commit
   // without the record of who made it. It re-asserts the association's own
   // outcome rather than trusting the batch (see
-  // `acceptedAssociationEventStatement`); `null` for a sending church joining a
-  // network, which this table does not record.
+  // `acceptedAssociationEventStatement`).
+  //
+  // ALL THREE INVITATION TYPES audit since #304 WS3 / migration 0033, the
+  // sending-church subject included. `null` now means only "this row's
+  // type-implied ids are missing", which the statements above would already have
+  // thrown on — not "this kind of association goes unrecorded".
   const auditedOrg = auditableAssociationOrg(invitation);
   const audit = auditedOrg
     ? acceptedAssociationEventStatement(actor, {
@@ -1050,24 +1060,55 @@ export async function acceptInvitationAs(
   // Last, and after the committed batch, so it fires only on a genuine FIRST
   // acceptance (`updated` is the claim's own returned row) and a notification
   // failure cannot leave an invitation half-accepted (memory/invariants.md →
-  // Atomicity). `announceInvitationAccepted` never throws and never decides
-  // whether the plant is sharing — `enqueue` does, per recipient, and writes
-  // nothing when it is not.
+  // Atomicity). Neither emitter throws, and neither decides whether the plant is
+  // sharing — `enqueue` does, per recipient, and writes nothing when it is not.
   //
-  // Only a PLANT-side acceptance reaches this rail: `target_church_id` is set
-  // when a sending church or a network invited a church plant, which is the
-  // "planter accepted invitation" the ruling names. A sending church joining a
-  // network has no plant, so `composeMilestone`'s NOT NULL `church_id` has no
-  // honest value.
-  //
-  // #304's WS3 AC asks for that notification anyway, and OPEN RULING #351
-  // carries the tenant-anchor question that blocks it. Do not read this gate as
-  // the settled shape.
+  // BOTH SIDES OF THE HANDSHAKE NOW HAVE A RAIL (#304 WS3, ruling #351). This
+  // used to be `if (updated.targetChurchId)` and nothing else: a sending church
+  // joining a network names no plant, `notifications.church_id` was NOT NULL,
+  // and the milestone was composed and dropped. Migration 0033 anchored a
+  // notification to a church OR an org, so the plantless answer is announced to
+  // the NETWORK that asked — the same consent-exempt own-relationship rail,
+  // filed under the tenant that reads it.
   if (updated.targetChurchId) {
     await announceInvitationAcceptedForChurch(updated);
+  } else if (updated.targetSendingChurchId) {
+    await announceSendingChurchAcceptedFor(updated);
   }
 
   return updated;
+}
+
+/**
+ * Announce a SENDING CHURCH's acceptance to the network that invited it (#304
+ * WS3). Best-effort by construction, exactly like the plant-side twin, and the
+ * network id comes from the invitation's own `sending_network_id` — the row that
+ * names who asked — never from the sending church's FK, which by now points at
+ * it and would be the same value for a second, uninvolved network tomorrow.
+ */
+async function announceSendingChurchAcceptedFor(
+  invitation: OrganizationInvitation
+): Promise<void> {
+  const sendingChurchId = invitation.targetSendingChurchId;
+  const sendingNetworkId = invitation.sendingNetworkId;
+  if (!sendingChurchId || !sendingNetworkId) return;
+
+  try {
+    const name = await sendingChurchNameOf(sendingChurchId);
+    if (!name) return;
+
+    await announceSendingChurchJoinedNetwork({
+      sendingNetworkId,
+      sendingChurchName: name,
+      invitationId: invitation.id,
+    });
+  } catch (error) {
+    console.error("sending church acceptance milestone failed", {
+      sendingChurchId,
+      invitationId: invitation.id,
+      error,
+    });
+  }
 }
 
 /**
@@ -1174,20 +1215,50 @@ export async function declineInvitationAs(
     throw new InvitationError("This invitation is no longer pending");
   }
 
-  // Only a PLANT-side decline reaches the milestone rail, for the same reason
-  // the accept's does: a sending church declining a network names no plant, and
-  // every milestone is about a plant — `notifications.church_id` is NOT NULL
-  // and is the boundary every read filters on (N-010).
+  // BOTH SIDES, since #304 WS3 / ruling #351 — the mirror of the accept path
+  // above. A sending church declining a network names no plant; the milestone is
+  // anchored to the NETWORK instead of being dropped for want of a `church_id`.
   //
-  // #304's WS3 AC asks for this notification and OPEN RULING #351 is what
-  // unblocks it. This gate is not a design decision defended on its merits; it
-  // is where the missing tenant anchor surfaces. When #351 lands, this line and
-  // its twin on the accept path (above) are two of the three edits.
+  // Both arms obey the same disclosure rule: a decline names the ADDRESS THE ORG
+  // TYPED and nothing else (ruled 2026-08-09). The refused org never associated,
+  // so neither the plant's name nor the sending church's is theirs to learn.
   if (updated.targetChurchId) {
     await announceInvitationDeclinedForChurch(updated);
+  } else if (updated.targetSendingChurchId) {
+    await announceSendingChurchDeclinedFor(updated);
   }
 
   return updated;
+}
+
+/**
+ * Announce a SENDING CHURCH's decline to the network that invited it (#304 WS3).
+ *
+ * Names `invitee_email` and never looks the sending church up — the same rule,
+ * and the same reason, as `announceInvitationDeclinedForChurch`: naming the
+ * organization behind an address the network may simply have guessed is the
+ * disclosure `ACCOUNT_NOT_INVITABLE_MESSAGE` exists to prevent, arriving two
+ * steps later by another route.
+ */
+async function announceSendingChurchDeclinedFor(
+  invitation: OrganizationInvitation
+): Promise<void> {
+  const sendingNetworkId = invitation.sendingNetworkId;
+  const inviteeEmail = invitation.inviteeEmail;
+  if (!sendingNetworkId || !inviteeEmail) return;
+
+  try {
+    await announceSendingChurchDeclinedNetwork({
+      sendingNetworkId,
+      inviteeEmail,
+      invitationId: invitation.id,
+    });
+  } catch (error) {
+    console.error("sending church decline milestone failed", {
+      invitationId: invitation.id,
+      error,
+    });
+  }
 }
 
 /**
@@ -1238,6 +1309,19 @@ async function announceInvitationDeclinedForChurch(
       error,
     });
   }
+}
+
+/** The sending church's display name, or null when there is no such row. */
+async function sendingChurchNameOf(
+  sendingChurchId: string
+): Promise<string | null> {
+  const [org] = await db
+    .select({ name: sendingChurches.name })
+    .from(sendingChurches)
+    .where(eq(sendingChurches.id, sendingChurchId))
+    .limit(1);
+
+  return org?.name ?? null;
 }
 
 /** The plant's display name, or null when there is no such row. */
@@ -1600,40 +1684,47 @@ export async function disassociateSendingChurchFromNetwork(
  * none, so a `church_to_sending_church` row carrying a stray network id would
  * otherwise get an audit row naming a network that associated nobody.
  *
- * `null` for `sending_church_to_network` — NOT because that association is
- * unworthy of an audit, but because `association_events.church_id` is NOT NULL
- * with a CHURCH as its subject, and a sending church joining a network names no
- * church. #304's WS3 acceptance criterion asks for the row; OPEN RULING #351
- * carries the subject column that `src/db/schema/association-event.ts`'s own
- * header says this case needs. When #351 lands, this arm is the first of the
- * three edits that close it.
+ * ALL THREE TYPES NOW RETURN A SUBJECT (#304 WS3, ruling #351, migration 0033).
+ * The `sending_church_to_network` arm used to return `null` — not because that
+ * association was unworthy of an audit, but because `association_events` made a
+ * CHURCH its mandatory subject, and a sending church joining a network names no
+ * church. 0033 gave the table the subject discriminator its own header had asked
+ * for, so the arm returns the real thing: the target SENDING CHURCH as subject,
+ * the network as org.
+ *
+ * `null` still means "there is nothing honest to audit" — a row whose type-implied
+ * ids are missing. It never means "this kind of association is not recorded".
  */
 export function auditableAssociationOrg(invitation: AssociationFacts): {
-  churchId: string;
+  subject: AssociationSubject;
   orgType: AssociationOrgType;
   orgId: string;
 } | null {
-  if (!invitation.targetChurchId) return null;
-
   switch (invitation.type) {
     case "church_to_sending_church":
-      return invitation.sendingChurchId
+      return invitation.targetChurchId && invitation.sendingChurchId
         ? {
-            churchId: invitation.targetChurchId,
+            subject: churchSubject(invitation.targetChurchId),
             orgType: "sending_church",
             orgId: invitation.sendingChurchId,
           }
         : null;
     case "church_to_network":
-      return invitation.sendingNetworkId
+      return invitation.targetChurchId && invitation.sendingNetworkId
         ? {
-            churchId: invitation.targetChurchId,
+            subject: churchSubject(invitation.targetChurchId),
             orgType: "network",
             orgId: invitation.sendingNetworkId,
           }
         : null;
     case "sending_church_to_network":
-      return null;
+      return invitation.targetSendingChurchId && invitation.sendingNetworkId
+        ? {
+            subject: sendingChurchSubject(invitation.targetSendingChurchId),
+            orgType: "network",
+            orgId: invitation.sendingNetworkId,
+          }
+        : null;
   }
 }
 
@@ -1722,7 +1813,7 @@ export async function leaveOversightOrgAs(
   }
 
   const severed = await severAssociationWithAuditStatement(actor, {
-    churchId: actor.churchId,
+    subject: churchSubject(actor.churchId),
     orgType,
     orgId,
   });
@@ -1893,7 +1984,7 @@ export async function removePlantFromOrgAs(
   }
 
   const severed = await severAssociationWithAuditStatement(actor, {
-    churchId,
+    subject: churchSubject(churchId),
     orgType: org.orgType,
     orgId: org.orgId,
   });
@@ -1959,6 +2050,108 @@ async function announceAssociationEndedFor(input: {
     console.error("association ended announcement failed", {
       churchId: input.churchId,
       orgType: input.orgType,
+      error,
+    });
+  }
+}
+
+// ----------------------------------------------------------------------------
+// The sending church's sever (#304 WS3 / OV-013)
+// ----------------------------------------------------------------------------
+
+export const SENDING_CHURCH_ADMIN_ONLY_SEVER_MESSAGE =
+  "Only a sending church admin can leave their network";
+
+export const NOT_IN_A_NETWORK_MESSAGE =
+  "Your sending church is not part of a network";
+
+/**
+ * LEAVE THE NETWORK — the sending church's own sever (OV-013), and the third
+ * member of the #274 family alongside `leaveOversightOrgAs` (the planter) and
+ * `removePlantFromOrgAs` (the org's admin).
+ *
+ * IT SHIPPED WITH #304 WS3 AND NOT BEFORE, and the reason is worth keeping. A
+ * sever has to be audited (#274 / OV-007: type-to-confirm, a notification, an
+ * `association_events` row) and until migration 0033 the audit table's subject
+ * was a CHURCH, NOT NULL — so this button could only have been a sever with no
+ * record of who ended it, which is the one thing that ruling forbids. #351 gave
+ * the table a subject discriminator; this is what it unblocked.
+ *
+ * NOTHING IS AN ARGUMENT. Not the sending church (it is the actor's own,
+ * `actor.sendingChurchId`), not the network (it is whatever that sending church
+ * currently points at), and not the org kind (a sending church has exactly one
+ * association, and it is always with a network). So there is no parameter a
+ * forged POST could aim at another org — the "only the sending church's admin
+ * may sever" rule is structural before it is a check.
+ *
+ * ADMIN ONLY, SERVER-SIDE. A `team_member` who happens to carry a
+ * `sending_church_id` is refused here, in the logic layer, so a request that
+ * never loaded the dialog meets the same refusal the button does. The statement
+ * repeats it by construction — its WHERE names `actor.sendingChurchId`, which a
+ * user without one does not have — but the explicit check is what makes the
+ * refusal legible rather than a silent no-op.
+ *
+ * ONE STATEMENT for the FK null and the audit row, and the NETWORK IS TOLD LAST:
+ * the same two rules, for the same two reasons, as the planter's sever above.
+ */
+export async function leaveNetworkAsSendingChurchAdmin(
+  actor: InvitationActor
+): Promise<{ orgType: AssociationOrgType; orgId: string }> {
+  if (actor.role !== "sending_church_admin") {
+    throw new InvitationError(SENDING_CHURCH_ADMIN_ONLY_SEVER_MESSAGE);
+  }
+  if (!actor.sendingChurchId) {
+    throw new InvitationError("Set up your sending church first");
+  }
+
+  const [org] = await db
+    .select({
+      name: sendingChurches.name,
+      sendingNetworkId: sendingChurches.sendingNetworkId,
+    })
+    .from(sendingChurches)
+    .where(eq(sendingChurches.id, actor.sendingChurchId))
+    .limit(1);
+
+  // A read, so not the guard — the statement below carries the same rule and is
+  // what actually decides. This only turns "nothing to leave" into a message.
+  if (!org?.sendingNetworkId) {
+    throw new InvitationError(NOT_IN_A_NETWORK_MESSAGE);
+  }
+
+  const severed = await severAssociationWithAuditStatement(actor, {
+    subject: sendingChurchSubject(actor.sendingChurchId),
+    orgType: "network",
+    orgId: org.sendingNetworkId,
+  });
+
+  // No audit row means the UPDATE matched nothing: the association moved between
+  // the read and the write. Nothing was written — not the null, not the row — so
+  // the refusal is honest and the network is told nothing.
+  if (!severed) {
+    throw new InvitationError(NOT_IN_A_NETWORK_MESSAGE);
+  }
+
+  await announceSendingChurchLeftNetworkFor({
+    sendingNetworkId: org.sendingNetworkId,
+    sendingChurchName: org.name,
+    occurrence: severed.id,
+  });
+
+  return { orgType: "network", orgId: org.sendingNetworkId };
+}
+
+/** Tell the network that was left. Best-effort; never throws into a committed sever. */
+async function announceSendingChurchLeftNetworkFor(input: {
+  sendingNetworkId: string;
+  sendingChurchName: string;
+  occurrence: string;
+}): Promise<void> {
+  try {
+    await announceSendingChurchLeftNetwork(input);
+  } catch (error) {
+    console.error("sending church association ended announcement failed", {
+      sendingNetworkId: input.sendingNetworkId,
       error,
     });
   }

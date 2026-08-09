@@ -55,17 +55,74 @@ import {
   type AssociationEvent,
   type AssociationEventType,
   type AssociationOrgType,
+  type NewAssociationEvent,
 } from "@/db/schema";
 
 import type { InvitationActor } from "./core";
+
+/**
+ * WHOSE association the event is about — the subject discriminator #351 ruled
+ * for, as a union rather than three loose fields.
+ *
+ * A plant (`church`) or a sending church (`sending_church`). The union is what
+ * makes "exactly one subject" — the table's own CHECK — impossible to violate
+ * from application code: there is no value of this type carrying both ids, and
+ * none carrying neither.
+ */
+export type AssociationSubject =
+  | { subjectType: "church"; churchId: string }
+  | { subjectType: "sending_church"; sendingChurchId: string };
+
+/** The plant subject, named so a call site reads. */
+export function churchSubject(churchId: string): AssociationSubject {
+  return { subjectType: "church", churchId };
+}
+
+/** The sending-church subject (#304 WS3 / OV-013). */
+export function sendingChurchSubject(
+  sendingChurchId: string
+): AssociationSubject {
+  return { subjectType: "sending_church", sendingChurchId };
+}
+
+/** The subject's own id, whichever kind it is. Logging and keys only. */
+export function subjectId(subject: AssociationSubject): string {
+  return subject.subjectType === "church"
+    ? subject.churchId
+    : subject.sendingChurchId;
+}
+
+/**
+ * The union as the three columns the table stores it in — the ONE place that
+ * mapping happens, so the CHECK is satisfied by construction and no writer has
+ * to remember to null the other column.
+ */
+export function toSubjectColumns(
+  subject: AssociationSubject
+): Pick<
+  NewAssociationEvent,
+  "subjectType" | "churchId" | "subjectSendingChurchId"
+> {
+  return subject.subjectType === "church"
+    ? {
+        subjectType: "church",
+        churchId: subject.churchId,
+        subjectSendingChurchId: null,
+      }
+    : {
+        subjectType: "sending_church",
+        churchId: null,
+        subjectSendingChurchId: subject.sendingChurchId,
+      };
+}
 
 /**
  * WHAT is being recorded. Everything except the actor, which never comes from a
  * caller's data — see `recordAssociationEvent`.
  */
 export interface AssociationEventFacts {
-  /** The plant the event is about; also the tenant scope of the row. */
-  churchId: string;
+  /** WHO joined or left — the plant, or the sending church. */
+  subject: AssociationSubject;
   /** The oversight org on the other side of the association. */
   orgType: AssociationOrgType;
   orgId: string;
@@ -99,7 +156,7 @@ export function associationEventStatement(
   return db
     .insert(associationEvents)
     .values({
-      churchId: facts.churchId,
+      ...toSubjectColumns(facts.subject),
       orgType: facts.orgType,
       orgId: facts.orgId,
       event: facts.event,
@@ -135,12 +192,53 @@ export async function recordAssociationEvent(
 /**
  * Which column on `churches` holds an association with this KIND of org. The
  * two identifiers are derived from a closed union, never from input — the only
- * callers are the two statement builders below.
+ * callers are the statement builders below.
  */
 const OVERSIGHT_FK_COLUMN: Record<AssociationOrgType, string> = {
   sending_church: "sending_church_id",
   network: "sending_network_id",
 };
+
+/**
+ * WHERE THE SUBJECT'S ASSOCIATION ACTUALLY LIVES — the table, its subject
+ * column on `association_events`, and the FK the association is written to.
+ *
+ * Both statements below re-assert an association against the subject's OWN row,
+ * so both need this triple. It is derived from closed unions (`subjectType`,
+ * `orgType`) and every identifier it yields is a compile-time literal: nothing a
+ * request carried is ever spliced into the SQL text, and every VALUE remains a
+ * bound parameter with an explicit cast.
+ *
+ * A sending church has exactly one association FK (`sending_network_id`), so the
+ * org kind is not consulted on that arm — a sending-church subject with an
+ * `orgType` of `sending_church` is a caller bug and throws rather than silently
+ * auditing the wrong association.
+ */
+function subjectSql(subject: AssociationSubject, orgType: AssociationOrgType) {
+  if (subject.subjectType === "church") {
+    return {
+      table: sql.raw('"churches"'),
+      subjectColumn: sql.raw('"church_id"'),
+      subjectTypeLiteral: "church" as const,
+      fk: sql.raw(OVERSIGHT_FK_COLUMN[orgType]),
+      id: subject.churchId,
+    };
+  }
+
+  if (orgType !== "network") {
+    throw new Error(
+      `a sending church can only be associated with a network, not with a ${orgType}`
+    );
+  }
+
+  return {
+    table: sql.raw('"sending_churches"'),
+    subjectColumn: sql.raw('"subject_sending_church_id"'),
+    subjectTypeLiteral: "sending_church" as const,
+    fk: sql.raw("sending_network_id"),
+    id: subject.sendingChurchId,
+  };
+}
 
 /**
  * THE ACCEPT'S AUDIT ROW (#304, OV-008) — the fourth statement of the accept
@@ -170,34 +268,39 @@ const OVERSIGHT_FK_COLUMN: Record<AssociationOrgType, string> = {
  *     predicates above are both still true). This is what makes the whole
  *     statement idempotent per invitation.
  *
- * `null` for `sending_church_to_network`: `association_events.church_id` is not
- * nullable and its subject is a CHURCH, so a sending church joining a network is
- * deliberately not recorded here (see the table's own header). The caller simply
- * batches one statement fewer.
+ * WORKS FOR BOTH SUBJECTS since migration 0033 (#304 WS3, ruling #351). The
+ * three predicates are the same three; only WHICH ROW holds the association
+ * changes — `churches.<sending_church_id|sending_network_id>` for a plant,
+ * `sending_churches.sending_network_id` for a sending church. `subjectSql` is
+ * the one place that difference is expressed, so the accept path cannot come to
+ * guard one subject and not the other. Before 0033 the sending-church arm had
+ * no row to write and the caller batched one statement fewer, which is the gap
+ * #351 closed.
  */
 export function acceptedAssociationEventStatement(
   actor: InvitationActor,
   facts: {
-    churchId: string;
+    subject: AssociationSubject;
     orgType: AssociationOrgType;
     orgId: string;
     invitationId: string;
   }
 ) {
-  const fk = sql.raw(OVERSIGHT_FK_COLUMN[facts.orgType]);
+  const target = subjectSql(facts.subject, facts.orgType);
 
   return db.execute<{ id: string }>(sql`
     insert into "association_events"
-      ("church_id", "org_type", "org_id", "event", "actor_user_id", "source_invitation_id")
-    select "churches"."id",
+      ("subject_type", ${target.subjectColumn}, "org_type", "org_id", "event", "actor_user_id", "source_invitation_id")
+    select ${target.subjectTypeLiteral}::varchar,
+           ${target.table}."id",
            ${facts.orgType}::varchar,
            ${facts.orgId}::uuid,
            'associated'::varchar,
            ${actor.id}::uuid,
            ${facts.invitationId}::uuid
-      from "churches"
-     where "churches"."id" = ${facts.churchId}::uuid
-       and "churches".${fk} = ${facts.orgId}::uuid
+      from ${target.table}
+     where ${target.table}."id" = ${target.id}::uuid
+       and ${target.table}.${target.fk} = ${facts.orgId}::uuid
        and exists (
          select 1 from "organization_invitations" oi
           where oi."id" = ${facts.invitationId}::uuid
@@ -252,32 +355,45 @@ export function acceptedAssociationEventStatement(
  *     one is severed, and the other FK is not mentioned in the statement at
  *     all.
  *
- * The identifiers interpolated with `sql.raw` come from `OVERSIGHT_FK_COLUMN`,
- * keyed by a closed union; every VALUE is a bound parameter with an explicit
- * cast, so nothing a request carried is ever spliced into the text.
+ * The identifiers interpolated with `sql.raw` come from `subjectSql`, keyed by
+ * two closed unions; every VALUE is a bound parameter with an explicit cast, so
+ * nothing a request carried is ever spliced into the text.
+ *
+ * ----------------------------------------------------------------------------
+ * BOTH SUBJECTS, one statement (#304 WS3 / OV-013, ruling #351)
+ * ----------------------------------------------------------------------------
+ *
+ * A sending church leaving a network is the same shape as a plant leaving an
+ * oversight org: null one FK on the subject's own row, if and only if it still
+ * points at the org being left, and write the audit row FROM that UPDATE. Only
+ * the table and the column differ, and `subjectSql` is where they differ — so
+ * OV-013's sever cannot ship without the tenancy assertion or without the audit
+ * row, which is precisely what kept the button off the sending-church view
+ * until this landed.
  */
 export async function severAssociationWithAuditStatement(
   actor: InvitationActor,
   facts: {
-    churchId: string;
+    subject: AssociationSubject;
     orgType: AssociationOrgType;
     orgId: string;
   }
 ): Promise<{ id: string } | null> {
-  const fk = sql.raw(OVERSIGHT_FK_COLUMN[facts.orgType]);
+  const target = subjectSql(facts.subject, facts.orgType);
 
   const result = await db.execute<{ id: string }>(sql`
     with severed as (
-      update "churches"
-         set ${fk} = null,
+      update ${target.table}
+         set ${target.fk} = null,
              "updated_at" = now()
-       where "id" = ${facts.churchId}::uuid
-         and ${fk} = ${facts.orgId}::uuid
+       where "id" = ${target.id}::uuid
+         and ${target.fk} = ${facts.orgId}::uuid
       returning "id"
     )
     insert into "association_events"
-      ("church_id", "org_type", "org_id", "event", "actor_user_id")
-    select severed."id",
+      ("subject_type", ${target.subjectColumn}, "org_type", "org_id", "event", "actor_user_id")
+    select ${target.subjectTypeLiteral}::varchar,
+           severed."id",
            ${facts.orgType}::varchar,
            ${facts.orgId}::uuid,
            'disassociated'::varchar,

@@ -5,6 +5,12 @@ import { churches, users, type OrganizationInvitationType } from "@/db/schema";
 import { OVERSIGHT_ROLES } from "@/lib/auth/access";
 
 import {
+  anchorId,
+  churchAnchor,
+  orgAnchor,
+  type NotificationAnchor,
+} from "./anchor";
+import {
   enqueue,
   type EnqueueNotificationInput,
   type EnqueueResult,
@@ -26,6 +32,10 @@ import {
 //               The first three are the ORG'S OWN relationship changing and go
 //               to that one org, consent-exempt; the last two are facts about
 //               the plant and go to the plant's whole oversight union, gated.
+//               The first three repeat ONE LEVEL UP for a sending church's own
+//               membership of a network (#304 WS3 / OV-013): same kinds, same
+//               types, same exempt rail, but ANCHORED TO THE NETWORK because
+//               they name no plant at all (`announceSendingChurch*`).
 //   DIGEST      one daily activity SUMMARY, and only on a day that had
 //               activity (`./oversight-digest.ts`).
 //
@@ -133,9 +143,11 @@ export interface InvitingInvitation {
  * the other column is ignored rather than trusted, and the ignored org stays
  * where it was: behind the sharing toggle, hearing nothing.
  *
- * `sending_church_to_network` names no plant (`target_church_id` is null), so
- * it never reaches this milestone; it maps to no org here and the caller sends
- * to nobody rather than guessing.
+ * `sending_church_to_network` names no plant, so it never reaches THESE
+ * plant-anchored milestones; it maps to no org here and the caller sends to
+ * nobody rather than guessing. Its own three milestones are org-anchored and
+ * name their network explicitly (`announceSendingChurch*`, #304 WS3) — they do
+ * not come through this function, which reads a PLANT's invitation.
  */
 export function invitingOrgForInvitation(
   invitation: InvitingInvitation
@@ -284,7 +296,15 @@ export async function fanOutToOversightOrg(
 // ----------------------------------------------------------------------------
 
 export interface MilestoneFacts {
-  churchId: string;
+  /**
+   * WHICH TENANT the row is filed under (#304 WS3, ruling #351).
+   *
+   * A plant for the five milestones that are about a plant; the NETWORK for the
+   * three that are about a sending church's own membership of it. It is the
+   * anchor rather than a church id because those three name no plant at all —
+   * which is exactly why they were unsendable before 0033.
+   */
+  anchor: NotificationAnchor;
   /**
    * WHAT THE TITLE NAMES THE COUNTERPARTY BY, and it is not always the plant.
    *
@@ -318,16 +338,22 @@ export function composeMilestone(
   recipientUserId: string
 ): EnqueueNotificationInput {
   return {
-    churchId: facts.churchId,
+    // Exactly one of the two anchors, never both — `enqueue`'s own refinement
+    // and the table's CHECK both say so.
+    ...(facts.anchor.type === "church"
+      ? { churchId: facts.anchor.churchId }
+      : { anchorOrg: { type: facts.anchor.type, orgId: facts.anchor.orgId } }),
     recipientUserId,
     category: "milestones",
     type: oversightMilestoneType(facts.kind),
     title: milestoneTitle(facts),
     body: facts.detail,
     // One key per EVENT, shared across recipients: the partial unique index is
-    // on (church_id, recipient_user_id, dedupe_key), so each admin still gets
-    // their own row while a replay of the emitter writes nothing.
-    dedupeKey: `${oversightMilestoneType(facts.kind)}:${facts.churchId}:${facts.occurrence}`,
+    // on (anchor, recipient_user_id, dedupe_key), so each admin still gets their
+    // own row while a replay of the emitter writes nothing. The ANCHOR's id is
+    // in the key — the plant's, or the org's — so the two anchor spaces cannot
+    // collide on a shared occurrence id.
+    dedupeKey: `${oversightMilestoneType(facts.kind)}:${anchorId(facts.anchor)}:${facts.occurrence}`,
   };
 }
 
@@ -360,13 +386,27 @@ export async function announceMilestone(
   facts: MilestoneFacts,
   deps: OversightFanOutDeps = dbOversightFanOutDeps
 ): Promise<OversightFanOutReport> {
+  // The PLANT-WIDE fan-out asks "who oversees this plant", so it needs one.
+  // Typed out rather than assumed: the two gated milestones are the only
+  // callers and both compose a church anchor, and an org-anchored fact reaching
+  // here would otherwise fan out to whoever oversees a church id that is null.
+  if (facts.anchor.type !== "church") {
+    console.error("a plant-wide milestone was composed with no plant", {
+      kind: facts.kind,
+      anchor: facts.anchor,
+    });
+    return emptyReport();
+  }
+
+  const churchId = facts.anchor.churchId;
+
   try {
-    return await fanOutToOversight(deps, facts.churchId, (recipientId) =>
+    return await fanOutToOversight(deps, churchId, (recipientId) =>
       composeMilestone(facts, recipientId)
     );
   } catch (error) {
     console.error("oversight milestone announcement failed", {
-      churchId: facts.churchId,
+      churchId,
       kind: facts.kind,
       error,
     });
@@ -407,7 +447,7 @@ export async function announceInvitationAccepted(
   deps: OversightOrgFanOutDeps = dbOversightFanOutDeps
 ): Promise<OversightFanOutReport> {
   const facts: MilestoneFacts = {
-    churchId: input.churchId,
+    anchor: churchAnchor(input.churchId),
     subject: input.plantName,
     kind: "invitation_accepted",
     occurrence: input.invitationId,
@@ -482,7 +522,7 @@ export async function announceInvitationDeclined(
     deps,
     invitingOrgForInvitation(input.invitation),
     {
-      churchId: input.churchId,
+      anchor: churchAnchor(input.churchId),
       subject: input.inviteeEmail,
       kind: "invitation_declined",
       occurrence: input.invitationId,
@@ -527,7 +567,7 @@ export async function announceAssociationEnded(
     deps,
     input.org,
     {
-      churchId: input.churchId,
+      anchor: churchAnchor(input.churchId),
       subject: input.plantName,
       kind: "association_ended",
       occurrence: input.occurrence,
@@ -538,8 +578,132 @@ export async function announceAssociationEnded(
   );
 }
 
+// ----------------------------------------------------------------------------
+// The SENDING CHURCH's own membership of a network (#304 WS3 / OV-013)
+// ----------------------------------------------------------------------------
+//
+// The same three own-relationship milestones, one level up the hierarchy: a
+// sending church accepted a network's invitation, declined it, or left the
+// network. Same `kind`s, same `type` strings and therefore the same
+// consent-exempt rail — the exemption's justification transfers exactly, because
+// these are the NETWORK's own events about a handshake the network started.
+//
+// WHAT IS DIFFERENT IS THE ANCHOR, AND IT IS THE WHOLE OF #351. There is no
+// plant, so there is no `church_id` these can be filed under; before migration
+// 0033 that meant they were composed and then dropped by a `if
+// (updated.targetChurchId)` gate. They are now anchored to the NETWORK
+// (`orgAnchor`) — the tenant whose admins read them, and the only tenant party
+// to the event.
+//
+// THE AUDIENCE IS STILL THE ONE ORG, resolved by `listOversightAdminsOfOrg` from
+// the network id spelled out by the caller. `enqueue`'s org arm then re-asks the
+// same question per recipient (`recipientAdministersOrg`), so a widened audience
+// here would still write nothing for a stranger.
+
+/** The `OversightOrg` shape for one network — spelled out, never re-derived. */
+function networkAudience(sendingNetworkId: string): OversightOrg {
+  return { sendingChurchId: null, sendingNetworkId };
+}
+
 /**
- * The one-org fan-out with the never-throws posture, shared by the three
+ * Source: `acceptInvitationAs()` on a `sending_church_to_network` invitation —
+ * the sending church joined the network (#304 WS3).
+ *
+ * Mirrors `announceInvitationAccepted` including its body's promise: the network
+ * hears the handshake completed, and nothing about the sending church's plants,
+ * which are a separate tenancy the network reaches (or does not) through its own
+ * hierarchy.
+ */
+export async function announceSendingChurchJoinedNetwork(
+  input: {
+    sendingNetworkId: string;
+    sendingChurchName: string;
+    invitationId: string;
+  },
+  deps: OversightOrgFanOutDeps = dbOversightFanOutDeps
+): Promise<OversightFanOutReport> {
+  return announceToOrg(
+    deps,
+    networkAudience(input.sendingNetworkId),
+    {
+      anchor: orgAnchor("network", input.sendingNetworkId),
+      subject: input.sendingChurchName,
+      kind: "invitation_accepted",
+      occurrence: input.invitationId,
+      detail:
+        "They accepted your invitation. Their sending church now sits inside your network; what their church plants share stays each plant's own decision.",
+    },
+    input.invitationId
+  );
+}
+
+/**
+ * Source: `declineInvitationAs()` on a `sending_church_to_network` invitation
+ * (#304 WS3).
+ *
+ * IT NAMES THE ADDRESS, NOT THE SENDING CHURCH — the same rule as the planter's
+ * decline, ruled 2026-08-09, and for the same reason: an org that was refused
+ * never associated, so the only identifier that goes back is the one it typed
+ * itself. `MilestoneFacts.subject` is the field for exactly this.
+ */
+export async function announceSendingChurchDeclinedNetwork(
+  input: {
+    sendingNetworkId: string;
+    /** `organization_invitations.invitee_email` — what this network typed. */
+    inviteeEmail: string;
+    invitationId: string;
+  },
+  deps: OversightOrgFanOutDeps = dbOversightFanOutDeps
+): Promise<OversightFanOutReport> {
+  return announceToOrg(
+    deps,
+    networkAudience(input.sendingNetworkId),
+    {
+      anchor: orgAnchor("network", input.sendingNetworkId),
+      subject: input.inviteeEmail,
+      kind: "invitation_declined",
+      occurrence: input.invitationId,
+      detail:
+        "They declined your invitation. Nothing is associated, and they keep no link to your network — you can invite them again whenever it makes sense.",
+    },
+    input.invitationId
+  );
+}
+
+/**
+ * Source: `leaveNetworkAsSendingChurchAdmin()` — the sending church severed its
+ * network association (#304 WS3 / OV-013).
+ *
+ * `occurrence` is the `association_events` row's id, exactly as the planter's
+ * sever uses: one sever, one announcement, and a sending church that leaves,
+ * rejoins and leaves again is three events rather than one swallowed by a
+ * permanent key.
+ */
+export async function announceSendingChurchLeftNetwork(
+  input: {
+    sendingNetworkId: string;
+    sendingChurchName: string;
+    occurrence: string;
+  },
+  deps: OversightOrgFanOutDeps = dbOversightFanOutDeps
+): Promise<OversightFanOutReport> {
+  return announceToOrg(
+    deps,
+    networkAudience(input.sendingNetworkId),
+    {
+      anchor: orgAnchor("network", input.sendingNetworkId),
+      subject: input.sendingChurchName,
+      kind: "association_ended",
+      occurrence: input.occurrence,
+      detail:
+        "They have left your network. Their sending church no longer appears in your roster, and you will receive no further updates about them.",
+    },
+    input.occurrence
+  );
+}
+
+/**
+ * The one-org fan-out with the never-throws posture, shared by the six
  * own-relationship milestones so none of them can be the one that lets an
  * infrastructure error escape into the action that caused it.
  */
@@ -555,7 +719,7 @@ async function announceToOrg(
     );
   } catch (error) {
     console.error("oversight milestone announcement failed", {
-      churchId: facts.churchId,
+      anchor: facts.anchor,
       kind: facts.kind,
       context,
       error,
@@ -575,7 +739,7 @@ export function announcePhaseAdvanced(
 ): Promise<OversightFanOutReport> {
   return announceMilestone(
     {
-      churchId: input.churchId,
+      anchor: churchAnchor(input.churchId),
       subject: input.plantName,
       kind: "phase_advanced",
       // The phase REACHED, not the transition id: advancing to stage 3 twice
@@ -605,7 +769,7 @@ export function announceLaunchDateChanged(
 ): Promise<OversightFanOutReport> {
   return announceMilestone(
     {
-      churchId: input.churchId,
+      anchor: churchAnchor(input.churchId),
       subject: input.plantName,
       kind: "launch_date_changed",
       // Keyed by the CHANGE, not by the value.

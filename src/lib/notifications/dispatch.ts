@@ -355,18 +355,19 @@ export interface DispatchRecipient {
 }
 
 /**
- * One provider call per (church, recipient, category, run). Stable across a
- * retry of the SAME attempt set, which is what the provider needs to dedupe a
+ * One provider call per (anchor, recipient, category, run) — the anchor being
+ * the plant or the org the rows are filed under (migration 0033). Stable across
+ * a retry of the SAME attempt set, which is what the provider needs to dedupe a
  * send we were killed before recording.
  */
 export function groupIdempotencyKey(
-  churchId: string,
+  anchorId: string,
   recipientUserId: string,
   category: NotificationCategory,
   notificationIds: readonly string[]
 ): string {
   const fingerprint = [...notificationIds].sort().join(",");
-  return `notif:${churchId}:${recipientUserId}:${category}:${hash(fingerprint)}`;
+  return `notif:${anchorId}:${recipientUserId}:${category}:${hash(fingerprint)}`;
 }
 
 /** Small stable digest — this only has to be collision-resistant per group. */
@@ -484,16 +485,28 @@ export interface DispatchRunSummary {
 
 export interface DispatchGroup {
   key: string;
-  churchId: string;
+  /**
+   * The TENANT the group's rows are filed under — a plant's id, or an org's
+   * (migration 0033). Named for what it is rather than `churchId`, because
+   * since #304 WS3 a claimed row may be anchored to a sending church or a
+   * network and have no `church_id` at all.
+   */
+  anchorId: string;
   recipientUserId: string;
   category: NotificationCategory;
   notifications: Notification[];
 }
 
 /**
- * Group the claimed batch by (church, recipient, category). Insertion order is
+ * Group the claimed batch by (anchor, recipient, category). Insertion order is
  * preserved — the claim already ordered by `scheduled_for, id`, so the oldest
  * notification decides where its group sits in the run.
+ *
+ * The ANCHOR is what N-012 always meant by "church": one provider call per
+ * tenant per recipient per category. Grouping on a null `church_id` would have
+ * put every org-anchored row in the product into ONE group keyed `null|…`, so a
+ * network admin's milestone and a sending-church admin's could have shared an
+ * idempotency key.
  */
 export function groupForDispatch(
   claimed: readonly Notification[]
@@ -501,7 +514,19 @@ export function groupForDispatch(
   const groups = new Map<string, DispatchGroup>();
 
   for (const notification of claimed) {
-    const key = `${notification.churchId}|${notification.recipientUserId}|${notification.category}`;
+    const anchor = notification.churchId ?? notification.anchorOrgId;
+    if (!anchor) {
+      // Unreachable while `notifications_anchor_check` holds — a row satisfies
+      // it only by carrying exactly one of the two. Skipped rather than grouped
+      // under a guessed tenant: the row stays claimed and is reported, which is
+      // loud, whereas a `null` key is silent and cross-tenant.
+      console.error(
+        `[notifications/dispatch] notification ${notification.id} has no anchor; skipping it`
+      );
+      continue;
+    }
+
+    const key = `${anchor}|${notification.recipientUserId}|${notification.category}`;
     const existing = groups.get(key);
     if (existing) {
       existing.notifications.push(notification);
@@ -509,7 +534,7 @@ export function groupForDispatch(
     }
     groups.set(key, {
       key,
-      churchId: notification.churchId,
+      anchorId: anchor,
       recipientUserId: notification.recipientUserId,
       category: notification.category,
       notifications: [notification],
@@ -916,7 +941,7 @@ async function deliverEmailGroup(
       group.category,
       items,
       groupIdempotencyKey(
-        group.churchId,
+        group.anchorId,
         group.recipientUserId,
         group.category,
         items.map((item) => item.id)

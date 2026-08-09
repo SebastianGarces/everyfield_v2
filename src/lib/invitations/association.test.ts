@@ -178,7 +178,8 @@ test("the action takes a KIND, never a church or an org id", () => {
   // parameter, and it is the two-valued enum above — so there is no field a
   // forged POST could put another plant's id into.
   const leave = ACTIONS_CODE.slice(
-    ACTIONS_CODE.indexOf("export async function leaveOversightOrg(")
+    ACTIONS_CODE.indexOf("export async function leaveOversightOrg("),
+    ACTIONS_CODE.indexOf("export async function leaveNetwork(")
   );
 
   assert.match(leave, /leaveOversightOrg\(\s*orgType: string\s*\)/);
@@ -193,8 +194,8 @@ test("the action takes a KIND, never a church or an org id", () => {
   );
   assert.equal(
     mints?.length,
-    3,
-    "each of the three writes mints its own actor"
+    4,
+    "each of the four writes mints its own actor — accept, decline, and the two leaves"
   );
   assert.doesNotMatch(ACTIONS_CODE, /actor: InvitationActor/);
 });
@@ -211,23 +212,38 @@ test("the sever nulls the FK only while it still points at the org being left", 
     AUDIT_CODE.indexOf("export function associationOrg")
   );
 
-  // The whole tenancy assertion: BOTH the plant and the org are in the WHERE.
+  // The whole tenancy assertion: BOTH the subject and the org are in the WHERE.
   // Without the second predicate this is the old `disassociate*` primitive —
   // "null whatever is there" — which severs the wrong org for a plant that
   // belongs to two, and severs anything at all for a caller aiming wrongly.
-  assert.match(sever, /where "id" = \$\{facts\.churchId\}::uuid/);
-  assert.match(sever, /and \$\{fk\} = \$\{facts\.orgId\}::uuid/);
+  //
+  // The subject is `target.id` since migration 0033 (#304 WS3): the statement
+  // serves a PLANT leaving an oversight org and a SENDING CHURCH leaving a
+  // network, and `subjectSql` is the single place the two differ.
+  assert.match(sever, /where "id" = \$\{target\.id\}::uuid/);
+  assert.match(sever, /and \$\{target\.fk\} = \$\{facts\.orgId\}::uuid/);
 
   // The OTHER FK is never mentioned, so a plant that belongs to a sending church
   // AND a network keeps the one it is not leaving.
   assert.equal(
-    (sever.match(/\$\{fk\}/g) ?? []).length,
+    (sever.match(/\$\{target\.fk\}/g) ?? []).length,
     2,
     "exactly one column is touched, in the SET and in the WHERE"
   );
 
-  // The identifier is chosen from a closed map, never interpolated from input.
-  assert.match(sever, /sql\.raw\(OVERSIGHT_FK_COLUMN\[facts\.orgType\]\)/);
+  // The identifiers are chosen from closed maps, never interpolated from input:
+  // `subjectSql` derives the table, the subject column and the FK from the two
+  // closed unions, and the church arm still reads `OVERSIGHT_FK_COLUMN`.
+  assert.match(
+    AUDIT_CODE,
+    /function subjectSql\(subject: AssociationSubject, orgType: AssociationOrgType\)/
+  );
+  assert.match(AUDIT_CODE, /sql\.raw\(OVERSIGHT_FK_COLUMN\[orgType\]\)/);
+  // Nothing a request carried is ever spliced into the text — every `sql.raw`
+  // argument in the module is a literal or a closed-union lookup.
+  for (const raw of AUDIT_CODE.match(/sql\.raw\(([^)]*)\)/g) ?? []) {
+    assert.doesNotMatch(raw, /facts\.|subject\.|input\./, raw);
+  }
 });
 
 test("the audit row is written FROM the sever, not beside it", () => {
@@ -264,7 +280,10 @@ test("the accept's audit row re-asserts the association it claims to record", ()
 
   // Batched with the claim and the association, so it must not trust either: an
   // empty `returning()` is not an error and does not roll a batch back.
-  assert.match(accept, /"churches"\.\$\{fk\} = \$\{facts\.orgId\}::uuid/);
+  assert.match(
+    accept,
+    /\$\{target\.table\}\.\$\{target\.fk\} = \$\{facts\.orgId\}::uuid/
+  );
   assert.match(accept, /oi\."status" = 'accepted'/);
   // …and it must not write a SECOND row when an already-accepted invitation is
   // retried: the claim loses, but both predicates above are still true.
@@ -280,8 +299,9 @@ test("the accept batches the audit rather than following it with a second call",
   );
 
   assert.match(accept, /db\.batch\(\[lock, claim, association, audit\]\)/);
-  // A sending church joining a network has no church subject, so it batches one
-  // statement fewer rather than writing a row with a made-up `church_id`.
+  // The audit-less batch survives only for a row whose type-implied ids are
+  // missing (`auditableAssociationOrg` → null). Since migration 0033 all THREE
+  // invitation types audit, the sending-church subject included.
   assert.match(accept, /db\.batch\(\[lock, claim, association\]\)/);
   assert.doesNotMatch(accept, /recordAssociationEvent/);
 });
@@ -360,7 +380,11 @@ test("the audited org comes from the invitation's type", () => {
       sendingChurchId: SENDING_CHURCH,
       sendingNetworkId: NETWORK,
     }),
-    { churchId: PLANT, orgType: "sending_church", orgId: SENDING_CHURCH }
+    {
+      subject: { subjectType: "church", churchId: PLANT },
+      orgType: "sending_church",
+      orgId: SENDING_CHURCH,
+    }
   );
 
   assert.deepEqual(
@@ -371,20 +395,47 @@ test("the audited org comes from the invitation's type", () => {
       sendingChurchId: SENDING_CHURCH,
       sendingNetworkId: NETWORK,
     }),
-    { churchId: PLANT, orgType: "network", orgId: NETWORK }
+    {
+      subject: { subjectType: "church", churchId: PLANT },
+      orgType: "network",
+      orgId: NETWORK,
+    }
   );
 });
 
-test("nothing is audited for an invitation with no church subject", () => {
-  // `association_events.church_id` is NOT NULL and its subject is a CHURCH, so a
-  // sending church joining a network is deliberately not recorded here.
-  assert.equal(
+test("a sending church joining a network audits with a SENDING CHURCH subject", () => {
+  // #304 WS3 / ruling #351, migration 0033. This arm used to return `null` —
+  // not on its merits, but because `association_events.church_id` was NOT NULL
+  // and the third invitation type names no church. The table now carries a
+  // subject discriminator, so the arm returns the real subject and the accept
+  // batch audits all three types.
+  assert.deepEqual(
     auditableAssociationOrg({
       type: "sending_church_to_network",
       targetChurchId: null,
       targetSendingChurchId: SENDING_CHURCH,
       sendingChurchId: null,
       sendingNetworkId: NETWORK,
+    }),
+    {
+      subject: {
+        subjectType: "sending_church",
+        sendingChurchId: SENDING_CHURCH,
+      },
+      orgType: "network",
+      orgId: NETWORK,
+    }
+  );
+
+  // `null` now means only "this row's type-implied ids are missing" — never
+  // "this kind of association goes unrecorded".
+  assert.equal(
+    auditableAssociationOrg({
+      type: "sending_church_to_network",
+      targetChurchId: null,
+      targetSendingChurchId: SENDING_CHURCH,
+      sendingChurchId: null,
+      sendingNetworkId: null,
     }),
     null
   );

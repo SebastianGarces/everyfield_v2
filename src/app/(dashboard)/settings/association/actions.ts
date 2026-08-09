@@ -10,12 +10,13 @@ import {
   declineInvitationAs,
   invitationActorFromSession,
   isUuid,
+  leaveNetworkAsSendingChurchAdmin,
   leaveOversightOrgAs,
   oversightOrgTypes,
 } from "@/lib/invitations/core";
 
 // ============================================================================
-// The association area — its three writes (#304, OV-004/006/007a; WS3).
+// The association area — its four writes (#304, OV-004/006/007a/013; WS3).
 //
 // ----------------------------------------------------------------------------
 // ACCEPT and DECLINE serve BOTH answering roles; LEAVE is the planter's alone
@@ -32,10 +33,20 @@ import {
 // church is refused by that same rule, server-side, exactly as a team member of
 // a plant is.
 //
-// LEAVE is not shared. `leaveOversightOrgAs` is planter-only (OV-010) and takes
-// the plant from the session; a sending church leaving a network has no audited
-// sever yet, so this module deliberately exposes no endpoint for one — see
-// `page.tsx` → `NetworkAssociation`.
+// LEAVE IS PER ROLE, and there are two of them — one endpoint each, never one
+// endpoint with a role branch. `leaveOversightOrg` is planter-only (OV-010) and
+// takes WHICH of the plant's two associations to end; `leaveNetwork` is
+// sending-church-admin-only (OV-013) and takes nothing at all, because a sending
+// church has exactly one association and it is always with a network. Each
+// derives its entity from the session, so neither has a parameter the other's
+// role could aim.
+//
+// OV-013 shipped with WS3 and could not have shipped before it: a sever has to
+// be audited (#274/OV-007) and until migration 0033 `association_events` made a
+// CHURCH its mandatory subject, so a sending church leaving a network had
+// nowhere to be recorded. Ruling #351 gave the table a subject discriminator;
+// `leaveNetworkAsSendingChurchAdmin` writes the row in the same statement as the
+// FK null.
 //
 // ----------------------------------------------------------------------------
 // Why this module reaches `@/lib/invitations/core` at all
@@ -147,11 +158,11 @@ export async function acceptAssociationInvitation(
  * Sets the status, which is what removes the dashboard reminder and what the
  * inviting org's invitations list renders as "Declined"; the notification to
  * that org rides the consent-exempt own-relationship rail and is
- * `declineInvitationAs`'s to send. That milestone is filed under the PLANT, so
- * a sending church's decline sends none — the notifications table is
- * church-scoped and a `sending_church_to_network` row names no church. The
- * network reads the answer in its own invitations list, which is where its own
- * outstanding invitations already live.
+ * `declineInvitationAs`'s to send. Both answers reach their org since migration
+ * 0033: a plant's decline is filed under the plant, a sending church's under the
+ * NETWORK that asked (ruling #351). Either way it names the ADDRESS THE ORG
+ * TYPED and nothing else — the refused org never associated, so neither the
+ * plant's name nor the sending church's is theirs to learn.
  */
 export async function declineAssociationInvitation(
   invitationId: string
@@ -191,4 +202,25 @@ export async function leaveOversightOrg(
   return run("leaveOversightOrg", () =>
     leaveOversightOrgAs(actor, parsed.data)
   );
+}
+
+/**
+ * Leave the network your sending church belongs to (OV-013).
+ *
+ * NO ARGUMENT AT ALL, and that is the shape of the authority rule rather than a
+ * convenience: the sending church is the actor's own (`actor.sendingChurchId`),
+ * the network is whatever that sending church currently points at, and the org
+ * kind is fixed — a sending church associates with networks and nothing else. So
+ * there is no parameter a forged POST could aim at another organization.
+ *
+ * The type-to-confirm dialog in front of this is a deliberateness control, not
+ * an authorization one. The admin-only check, the tenancy assertion (the FK is
+ * nulled only while it still points at the network being left) and the
+ * `association_events` row all sit in `leaveNetworkAsSendingChurchAdmin`, where
+ * a request that never opened the dialog meets them too. A non-admin member of
+ * the sending church is refused there, server-side.
+ */
+export async function leaveNetwork(): Promise<AssociationActionResult> {
+  const actor = invitationActorFromSession(await verifySession());
+  return run("leaveNetwork", () => leaveNetworkAsSendingChurchAdmin(actor));
 }

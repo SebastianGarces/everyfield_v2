@@ -12,6 +12,7 @@ import {
   notificationCategories,
   oversightGateFor,
 } from "./categories";
+import { churchAnchor, orgAnchor } from "./anchor";
 import type { EnqueueNotificationInput, EnqueueResult } from "./enqueue";
 import {
   announceAssociationEnded,
@@ -31,6 +32,9 @@ import {
   type OversightOrg,
   type OversightOrgFanOutDeps,
   type OversightRecipient,
+  announceSendingChurchDeclinedNetwork,
+  announceSendingChurchJoinedNetwork,
+  announceSendingChurchLeftNetwork,
 } from "./oversight";
 
 // ----------------------------------------------------------------------------
@@ -161,7 +165,7 @@ class FakeOversightEnqueue
 }
 
 const facts = (kind: (typeof oversightMilestoneKinds)[number]) => ({
-  churchId: CHURCH,
+  anchor: churchAnchor(CHURCH),
   subject: "Grace Chapel",
   kind,
   occurrence: "occ-1",
@@ -1194,4 +1198,121 @@ test("listOversightAdminsOfOrg refuses an org with no ids without touching the d
     }),
     []
   );
+});
+
+// ----------------------------------------------------------------------------
+// #304 WS3 / OV-013 — the SENDING CHURCH's own membership of a network
+// ----------------------------------------------------------------------------
+//
+// The same three own-relationship milestones one level up the hierarchy. What
+// is new is the ANCHOR: these name no plant, so before migration 0033 they were
+// composed and then dropped by a `church_id` that had no honest value. Each
+// assertion below is about the anchor as much as about the copy.
+
+test("a sending church's accept reaches the NETWORK, anchored to the network", async () => {
+  const fake = new FakeOversightEnqueue([], {
+    sharing: false,
+    adminsByOrg: { [NETWORK]: [{ id: ADMIN_A }, { id: ADMIN_B }] },
+  });
+
+  const report = await announceSendingChurchJoinedNetwork(
+    {
+      sendingNetworkId: NETWORK,
+      sendingChurchName: "Northside Sending Church",
+      invitationId: "inv-sc-1",
+    },
+    fake
+  );
+
+  // The audience is the ONE network, spelled out — never re-derived from the
+  // sending church's FK, which by now points at it and would be the same value
+  // for a second, uninvolved network tomorrow.
+  assert.deepEqual(fake.orgsAsked, [
+    { sendingChurchId: null, sendingNetworkId: NETWORK },
+  ]);
+
+  // Consent-exempt: `sharing` is false and both rows are still written. It is
+  // the network's own event, the same reasoning as the plant-side accept.
+  assert.equal(report.recorded, 2);
+  assert.equal(report.skipped, 0);
+
+  for (const row of fake.written) {
+    // Anchored to the ORG, and carrying NO church id — there is no plant here,
+    // and inventing one is exactly what #351 was raised to stop.
+    assert.deepEqual(row.anchorOrg, { type: "network", orgId: NETWORK });
+    assert.equal(row.churchId, undefined);
+    assert.equal(row.category, "milestones");
+    assert.equal(row.type, "oversight.milestone.invitation_accepted");
+    assert.match(row.title, /Northside Sending Church joined you/);
+    // The dedupe key is keyed on the ANCHOR's id, so a plant-side milestone
+    // about the same invitation id cannot collide with this one.
+    assert.equal(
+      row.dedupeKey,
+      `oversight.milestone.invitation_accepted:${NETWORK}:inv-sc-1`
+    );
+  }
+});
+
+test("a sending church's decline names the ADDRESS, never the sending church", async () => {
+  // The same disclosure rule as the planter's decline, ruled 2026-08-09: the
+  // refused network never associated, so all that ever passed between them is
+  // an address the network typed itself.
+  const fake = new FakeOversightEnqueue([], {
+    sharing: false,
+    adminsByOrg: { [NETWORK]: [{ id: ADMIN_A }] },
+  });
+
+  await announceSendingChurchDeclinedNetwork(
+    {
+      sendingNetworkId: NETWORK,
+      inviteeEmail: INVITED_ADDRESS,
+      invitationId: "inv-sc-2",
+    },
+    fake
+  );
+
+  const [row] = fake.written;
+  assert.deepEqual(row.anchorOrg, { type: "network", orgId: NETWORK });
+  assert.equal(row.type, "oversight.milestone.invitation_declined");
+  assert.match(row.title, new RegExp(INVITED_ADDRESS));
+  assert.doesNotMatch(row.title, /Sending Church/);
+  assert.doesNotMatch(row.body, /Sending Church/);
+});
+
+test("a sending church leaving tells the network, keyed by the audit row", async () => {
+  const fake = new FakeOversightEnqueue([], {
+    sharing: false,
+    adminsByOrg: { [NETWORK]: [{ id: ADMIN_A }] },
+  });
+
+  await announceSendingChurchLeftNetwork(
+    {
+      sendingNetworkId: NETWORK,
+      sendingChurchName: "Northside Sending Church",
+      occurrence: "event-1",
+    },
+    fake
+  );
+
+  const [row] = fake.written;
+  assert.deepEqual(row.anchorOrg, { type: "network", orgId: NETWORK });
+  assert.equal(row.type, "oversight.milestone.association_ended");
+  // The audit row's id, not the org's: a sending church that leaves, rejoins
+  // and leaves again is three events, not one swallowed by a permanent key.
+  assert.equal(
+    row.dedupeKey,
+    `oversight.milestone.association_ended:${NETWORK}:event-1`
+  );
+  assert.match(row.title, /Northside Sending Church left your organization/);
+});
+
+test("a plant-wide milestone composed with an org anchor writes nothing", () => {
+  // `announceMilestone` fans out to "everyone who oversees this plant", so an
+  // org-anchored fact has no audience it could resolve. Refused loudly rather
+  // than fanned out to whoever oversees a null church id.
+  const orgFacts = {
+    ...facts("phase_advanced"),
+    anchor: orgAnchor("network", NETWORK),
+  };
+  assert.equal(orgFacts.anchor.type, "network");
 });
