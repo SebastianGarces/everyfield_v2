@@ -1,6 +1,6 @@
 # Ticks the notification dispatcher (#131, N-003/N-004/N-017).
 #
-# WHY THIS IS NOT A VERCEL CRON. Every other scheduled job in this repo lives in vercel.json, and
+# WHY THIS IS NOT A VERCEL CRON. Every scheduled job in this repo used to live in vercel.json, and
 # this one did too until it could not deploy: the project is on the Hobby plan, which accepts at
 # most ONE cron invocation per day per job. A `*/15 * * * *` entry is not throttled there — it is
 # rejected, and the whole deployment fails with it. The two ways out were a daily Vercel cron (a
