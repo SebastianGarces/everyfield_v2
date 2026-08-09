@@ -98,7 +98,22 @@ const db = drizzle(sql);
 
 const EVAL_NETWORK_NAME = "EVAL — Phase Engine";
 const EVAL_SENDING_CHURCH_NAME = "EVAL — Sending Church";
-const EVAL_EMAIL_DOMAIN = "eval.phase-engine.everyfield.dev";
+/**
+ * Domain every eval account is CREATED on. `everyfield.app` is the product
+ * domain (ruled 2026-07-31), replacing the retired placeholder.
+ */
+const EVAL_EMAIL_DOMAIN = "eval.phase-engine.everyfield.app";
+/**
+ * ...and the marker cleanup MATCHES on, which is deliberately the subdomain and
+ * not the full domain. An eval address is `<who>@eval.phase-engine.<domain>`,
+ * so matching the subdomain alone identifies every eval account this script has
+ * ever created — including ones seeded before the domain retirement. Match on
+ * `EVAL_EMAIL_DOMAIN` instead and a database seeded on the old domain keeps its
+ * eval network admin forever: that user has no `church_id`, so the church-scoped
+ * sweep below cannot see it either, and the `sending_networks` delete then fails
+ * on `users_sending_network_id_sending_networks_id_fk`.
+ */
+const EVAL_EMAIL_MARKER = "@eval.phase-engine.";
 const EVAL_PASSWORD = "eval-password-123";
 
 // ----------------------------------------------------------------------------
@@ -574,12 +589,30 @@ async function cleanEvalData(): Promise<void> {
     await db.delete(persons).where(inArray(persons.churchId, churchIds));
   }
 
-  // Eval users (planter per church + network admin) — matched by email domain.
-  const evalUsers = await db
-    .select({ id: users.id, email: users.email })
+  // Eval users (planter per church + network admin) — matched by the eval
+  // SUBDOMAIN, not the full domain, so accounts seeded before the everyfield.app
+  // retirement are swept by the same pass that sweeps today's. See
+  // `EVAL_EMAIL_MARKER`.
+  const allUsers = await db
+    .select({
+      id: users.id,
+      email: users.email,
+      sendingNetworkId: users.sendingNetworkId,
+      sendingChurchId: users.sendingChurchId,
+    })
     .from(users);
-  const evalUserIds = evalUsers
-    .filter((u) => u.email.endsWith(`@${EVAL_EMAIL_DOMAIN}`))
+  const evalUserIds = allUsers
+    .filter(
+      (u) =>
+        u.email.includes(EVAL_EMAIL_MARKER) ||
+        // Belt-and-braces for a user that points INTO the eval org but carries
+        // an ordinary address (someone who registered against the corpus): the
+        // network/sending-church deletes at the end would otherwise fail on
+        // their FK, and neither cascades.
+        u.sendingNetworkId === networkId ||
+        (u.sendingChurchId !== null &&
+          sendingChurchIds.includes(u.sendingChurchId))
+    )
     .map((u) => u.id);
   // Oversight associations and the invitations behind them (#23/#303). Not
   // seeded here — they are created by USING the product against the eval

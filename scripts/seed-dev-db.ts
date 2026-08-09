@@ -14,9 +14,12 @@ import { neon } from "@neondatabase/serverless";
 import { config } from "dotenv";
 import { drizzle } from "drizzle-orm/neon-http";
 import {
+  associationEvents,
   churches,
+  coachAssignments,
   launchEvents,
   launches,
+  organizationInvitations,
   tasks,
   users,
   sessions,
@@ -49,6 +52,27 @@ const db = drizzle(sql);
 // Cleanup Procedure
 // ============================================================================
 
+/**
+ * Wipe the fixture. `users` and `churches` are deleted UNSCOPED — every row,
+ * not only the ones seeded below.
+ *
+ * That is what makes the everyfield.app retirement (ruled 2026-07-31) converge
+ * on a database seeded before it: there is no email predicate to keep in step,
+ * so no account can survive by carrying an address this file no longer mentions.
+ * Both the old and the new domain go, because everything goes.
+ *
+ * ⚠️ It also means this is not a scalpel. Point it at a database that other
+ * work has been sharing — the deployed development branch, say, which
+ * accumulates plants from onboarding runs and accounts from real registrations
+ * — and it removes those too. Check what is in there before running it against
+ * anything but your own database.
+ *
+ * What it must NOT touch: `wiki_articles`. The corpus and its
+ * `related_article_slugs` cross-links (#317) live only in the database — they
+ * are migrated in, never seeded — so a reseed that deleted them would destroy
+ * content no script can rebuild. Nothing below names that table, and nothing
+ * below may.
+ */
 async function cleanDatabase(): Promise<void> {
   console.log("🧹 Cleaning database...");
 
@@ -72,6 +96,32 @@ async function cleanDatabase(): Promise<void> {
   // task system and nothing deletes them for us.
   const deletedTasks = await db.delete(tasks).returning();
   console.log(`   Deleted ${deletedTasks.length} tasks`);
+
+  // Oversight association rows. Nothing here seeds them — they are produced by
+  // USING the product against the fixture (accepting an invitation binds a
+  // plant to an org and writes an audit row) — but `organization_invitations`
+  // FKs into both `users` (inviter, responder) and `churches` (target), and
+  // `association_events` into both as well, with no cascade on any of them. So
+  // one verification run that answered an invitation is enough to make the
+  // `users` delete below fail on
+  // `organization_invitations_inviter_user_id_users_id_fk`. Audit rows first:
+  // `association_events.source_invitation_id` points at an invitation.
+  const deletedAssociationEvents = await db
+    .delete(associationEvents)
+    .returning();
+  console.log(
+    `   Deleted ${deletedAssociationEvents.length} association events`
+  );
+
+  const deletedInvitations = await db
+    .delete(organizationInvitations)
+    .returning();
+  console.log(`   Deleted ${deletedInvitations.length} invitations`);
+
+  // Same shape: a coach assignment names a coach user and a church, neither FK
+  // cascading.
+  const deletedCoachAssignments = await db.delete(coachAssignments).returning();
+  console.log(`   Deleted ${deletedCoachAssignments.length} coach assignments`);
 
   const deletedUsers = await db.delete(users).returning();
   console.log(`   Deleted ${deletedUsers.length} users`);
@@ -124,6 +174,16 @@ function launchInDays(days: number): string {
 // Password for all dev users: "password123"
 const DEV_PASSWORD = "password123";
 
+/**
+ * Email domain for every seeded dev account. `everyfield.app` is the product
+ * domain (ruled 2026-07-31); the placeholder domain it replaced is retired
+ * repo-wide, and this constant is why there is one place to change rather than
+ * nine literals to keep in step. Docs that hand an agent a login —
+ * `.claude/skills/browser-validation/SKILL.md` above all — quote these
+ * addresses, so a change here is a change there.
+ */
+const DEV_EMAIL_DOMAIN = "everyfield.app";
+
 interface SeedUser extends Omit<NewUser, "passwordHash" | "churchId"> {
   churchIndex: number | null; // Index into SEED_CHURCHES, null for network admin
 }
@@ -131,58 +191,58 @@ interface SeedUser extends Omit<NewUser, "passwordHash" | "churchId"> {
 const SEED_USERS: SeedUser[] = [
   // Network admin (no church)
   {
-    email: "admin@everyfield.dev",
+    email: `admin@${DEV_EMAIL_DOMAIN}`,
     name: "Network Admin",
     role: "network_admin",
     churchIndex: null,
   },
   // Planters (one per church)
   {
-    email: "planter1@everyfield.dev",
+    email: `planter1@${DEV_EMAIL_DOMAIN}`,
     name: "John Planter",
     role: "planter",
     churchIndex: 0,
   },
   {
-    email: "planter2@everyfield.dev",
+    email: `planter2@${DEV_EMAIL_DOMAIN}`,
     name: "Sarah Planter",
     role: "planter",
     churchIndex: 1,
   },
   {
-    email: "planter3@everyfield.dev",
+    email: `planter3@${DEV_EMAIL_DOMAIN}`,
     name: "Mike Planter",
     role: "planter",
     churchIndex: 2,
   },
   // Coaches
   {
-    email: "coach1@everyfield.dev",
+    email: `coach1@${DEV_EMAIL_DOMAIN}`,
     name: "David Coach",
     role: "coach",
     churchIndex: 0,
   },
   {
-    email: "coach2@everyfield.dev",
+    email: `coach2@${DEV_EMAIL_DOMAIN}`,
     name: "Emily Coach",
     role: "coach",
     churchIndex: 1,
   },
   // Team members
   {
-    email: "team1@everyfield.dev",
+    email: `team1@${DEV_EMAIL_DOMAIN}`,
     name: "Alex Team",
     role: "team_member",
     churchIndex: 0,
   },
   {
-    email: "team2@everyfield.dev",
+    email: `team2@${DEV_EMAIL_DOMAIN}`,
     name: "Jordan Team",
     role: "team_member",
     churchIndex: 0,
   },
   {
-    email: "team3@everyfield.dev",
+    email: `team3@${DEV_EMAIL_DOMAIN}`,
     name: "Casey Team",
     role: "team_member",
     churchIndex: 1,
@@ -279,10 +339,10 @@ async function seedDatabase(): Promise<void> {
   );
   console.log(`   Password for all users: ${DEV_PASSWORD}`);
   console.log();
-  console.log("   Network Admin:  admin@everyfield.dev");
-  console.log("   Planter:        planter1@everyfield.dev");
-  console.log("   Coach:          coach1@everyfield.dev");
-  console.log("   Team Member:    team1@everyfield.dev");
+  console.log(`   Network Admin:  admin@${DEV_EMAIL_DOMAIN}`);
+  console.log(`   Planter:        planter1@${DEV_EMAIL_DOMAIN}`);
+  console.log(`   Coach:          coach1@${DEV_EMAIL_DOMAIN}`);
+  console.log(`   Team Member:    team1@${DEV_EMAIL_DOMAIN}`);
   console.log(
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
   );

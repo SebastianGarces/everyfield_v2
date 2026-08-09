@@ -26,7 +26,7 @@ Proves a UI change **works against the running app**. Compiling is not done; thi
 
   Read `.claude/skills/browser-validation/SKILL.md` before the first run. Two traps live there:
   the dev account switcher does **not** exist on previews (log in with a seeded account, and note
-  eval planters use a different password), and `planter1@everyfield.dev`'s church has **zero
+  eval planters use a different password), and `planter1@everyfield.app`'s church has **zero
   people** — useless for validating anything list-shaped.
 
 - **Sequencing:** the preview is created by the push, so the PR opens with G3 at ⏳, gets validated,

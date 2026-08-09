@@ -64,11 +64,17 @@ local dev, so the seeded accounts work:
 
 | Account | Email | Password | Notes |
 |---|---|---|---|
-| Planter | `planter1@everyfield.dev` | `password123` | **Church has 0 people** — fine for empty states, useless for anything about a list |
-| Network admin | `admin@everyfield.dev` | `password123` | |
-| Coach | `coach1@everyfield.dev` | `password123` | |
-| Eval planter | `planter-dayspring@eval.phase-engine.everyfield.dev` | `eval-password-123` | ~100 people, meetings, assessments |
-| Eval planter | `planter-evergreen@eval.phase-engine.everyfield.dev` | `eval-password-123` | ~89 people, different church |
+| Planter | `planter1@everyfield.app` | `password123` | **Church has 0 people** — fine for empty states, useless for anything about a list |
+| Network admin | `admin@everyfield.app` | `password123` | |
+| Coach | `coach1@everyfield.app` | `password123` | |
+| Eval planter | `planter-dayspring@eval.phase-engine.everyfield.app` | `eval-password-123` | ~100 people, meetings, assessments |
+| Eval planter | `planter-evergreen@eval.phase-engine.everyfield.app` | `eval-password-123` | ~89 people, different church |
+
+These are on `everyfield.app` — the product domain, ruled 2026-07-31. The placeholder domain the
+seeds used before it is retired, and the accounts on it no longer exist: if a login here fails with
+"invalid credentials", check you are not quoting an older copy of this table before you conclude the
+form is broken. The addresses come from `scripts/seed-dev-db.ts` and
+`scripts/seed-phase-engine-eval.ts`; those files are the source of truth and this table follows them.
 
 **Note the different password for eval accounts** — they are seeded by
 `scripts/seed-phase-engine-eval.ts`, not `seed-dev-db.ts`.
