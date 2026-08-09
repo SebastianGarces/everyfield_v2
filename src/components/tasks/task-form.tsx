@@ -19,11 +19,17 @@ import {
 } from "@/db/schema";
 import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import {
   createTaskAction,
   updateTaskAction,
 } from "@/app/(dashboard)/tasks/actions";
+import {
+  NO_RECURRENCE,
+  parseRecurrenceRule,
+  recurrenceIntervals,
+  RECURRENCE_INTERVAL_LABELS,
+} from "@/lib/tasks/recurrence";
 import { toast } from "sonner";
 
 // ============================================================================
@@ -71,6 +77,16 @@ export function TaskForm({ task, users = [] }: TaskFormProps) {
   const [isPending, startTransition] = useTransition();
 
   const isEditing = !!task;
+
+  // The stored rule, read once for the defaults below.
+  const savedRule = parseRecurrenceRule(task?.recurrenceRule);
+
+  // UI state, not server data: it only decides whether the end-date field is
+  // on screen. The values themselves are uncontrolled and travel in FormData.
+  const [interval, setInterval] = useState<string>(
+    task?.isRecurring && savedRule ? savedRule.interval : NO_RECURRENCE
+  );
+  const repeats = interval !== NO_RECURRENCE;
 
   function handleSubmit(formData: FormData) {
     startTransition(async () => {
@@ -200,6 +216,58 @@ export function TaskForm({ task, users = [] }: TaskFormProps) {
           </Select>
         </div>
       )}
+
+      {/* Repeat (T-017) */}
+      <div className="space-y-4 rounded-md border p-4">
+        <div className="space-y-2">
+          <Label htmlFor="recurrenceInterval">Repeat</Label>
+          <Select
+            name="recurrenceInterval"
+            value={interval}
+            onValueChange={setInterval}
+          >
+            <SelectTrigger id="recurrenceInterval" className="cursor-pointer">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NO_RECURRENCE} className="cursor-pointer">
+                Does not repeat
+              </SelectItem>
+              {recurrenceIntervals.map((value) => (
+                <SelectItem
+                  key={value}
+                  value={value}
+                  className="cursor-pointer"
+                >
+                  {RECURRENCE_INTERVAL_LABELS[value]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-muted-foreground text-sm">
+            The next one is created when you complete this task, so a repeating
+            task never piles up while you are away.
+          </p>
+        </div>
+
+        {repeats && (
+          <div className="space-y-2">
+            <Label htmlFor="recurrenceEndDate">Repeat until</Label>
+            <Input
+              id="recurrenceEndDate"
+              name="recurrenceEndDate"
+              type="date"
+              defaultValue={savedRule?.endDate ?? ""}
+              disabled={isPending}
+            />
+            <p className="text-muted-foreground text-sm">
+              Leave this empty to repeat indefinitely. Past the end date the
+              task stops repeating; everything already completed stays on the
+              record.
+            </p>
+          </div>
+        )}
+      </div>
 
       {/* Actions */}
       <div className="flex items-center gap-3 pt-4">

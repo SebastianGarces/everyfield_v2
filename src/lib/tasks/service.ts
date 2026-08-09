@@ -20,11 +20,19 @@ import {
   isNull,
   lte,
   ne,
+  or,
   sql,
 } from "drizzle-orm";
 import type { ListTasksResult, TaskCounts, TaskWithAssignee } from "./types";
 import { MAX_BULK_TASKS } from "./types";
 import { emitTaskCompleted } from "./events";
+import {
+  nextRecurrenceDueDate,
+  parseRecurrenceRule,
+  seriesIdOf,
+  toCalendarDate,
+  type TaskRecurrenceInput,
+} from "./recurrence";
 
 // ============================================================================
 // Types
@@ -41,6 +49,16 @@ export interface ListTasksOptions {
   dueDateTo?: string; // ISO date
   search?: string;
   includeCompleted?: boolean; // default false
+  /**
+   * Let subtasks into the result as rows of their own. Default false.
+   *
+   * A subtask belongs to its parent's detail view, not to the task list: a
+   * checklist item ("book the room", "print the flyers") is meaningless torn
+   * out of the task it itemises, and letting the items in would make one piece
+   * of work look like six. `total` respects this too, so the "showing N of M"
+   * footer counts the same things the list shows.
+   */
+  includeSubtasks?: boolean; // default false
   sortBy?: "due_date" | "priority" | "status" | "created_at" | "title";
   sortDir?: "asc" | "desc";
 }
@@ -116,6 +134,7 @@ export async function listTasks(
     dueDateTo,
     search,
     includeCompleted = false,
+    includeSubtasks = false,
     sortBy = "due_date",
     sortDir = "asc",
   } = options;
@@ -131,6 +150,12 @@ export async function listTasks(
   // Exclude completed unless requested
   if (!includeCompleted) {
     baseConditions.push(ne(tasks.status, "complete"));
+  }
+
+  // Top-level rows only unless requested (T-016). Applied to the count query
+  // as well as the page query — both are built from `baseConditions`.
+  if (!includeSubtasks) {
+    baseConditions.push(isNull(tasks.parentTaskId));
   }
 
   // Filter by status
@@ -310,8 +335,189 @@ export async function getTaskCounts(
 }
 
 // ============================================================================
+// Subtasks (T-016)
+// ============================================================================
+//
+// Three rules define subtasks, and all three are enforced here rather than in
+// the UI:
+//
+// 1. NESTING IS ONE LEVEL. `parent_task_id` is a self-FK, so the database
+//    would happily accept a chain of any depth. It is refused below, in both
+//    directions: a subtask cannot be given children, and a task that already
+//    has children cannot be demoted into a subtask. Without the second half
+//    the first is trivially bypassed.
+//
+// 2. SUBTASKS ARE NOT TOP-LEVEL WORK. `listTasks` filters them out (see
+//    `includeSubtasks`); they surface only under their parent.
+//
+// 3. COMPLETING EVERY SUBTASK DOES NOT COMPLETE THE PARENT. There is
+//    deliberately no code below that does it — the ruling on #90 is that the
+//    planter decides when the parent is done. "All the checklist items are
+//    ticked" and "this piece of work is finished" are different claims, and
+//    only a person can make the second one. The UI says so out loud; this
+//    comment is here so nobody later reads the absence as an oversight and
+//    "fixes" it.
+// ============================================================================
+
+export const SUBTASK_PARENT_MISSING_ERROR = "Parent task not found";
+export const SUBTASK_SELF_ERROR = "A task cannot be its own subtask";
+export const SUBTASK_DEPTH_ERROR = "Subtasks cannot have their own subtasks";
+export const SUBTASK_HAS_CHILDREN_ERROR =
+  "A task with subtasks cannot become a subtask";
+
+/** What the nesting check needs to know about the two tasks involved. */
+export interface SubtaskNestingCheck {
+  /** The task being parented. `null` when it does not exist yet (create). */
+  child: { id: string; hasSubtasks: boolean } | null;
+  /** The proposed parent, or `null` when no such task is in scope. */
+  parent: { id: string; parentTaskId: string | null } | null;
+}
+
+/**
+ * Pure: may `child` be filed under `parent`?
+ *
+ * Returns the reason it may not, or `null` when the parenting is legal.
+ */
+export function checkSubtaskNesting({
+  child,
+  parent,
+}: SubtaskNestingCheck): string | null {
+  if (!parent) return SUBTASK_PARENT_MISSING_ERROR;
+  if (child && child.id === parent.id) return SUBTASK_SELF_ERROR;
+  if (parent.parentTaskId !== null) return SUBTASK_DEPTH_ERROR;
+  if (child?.hasSubtasks) return SUBTASK_HAS_CHILDREN_ERROR;
+
+  return null;
+}
+
+/**
+ * Load the two rows `checkSubtaskNesting` needs and throw if the parenting is
+ * illegal. Church-scoped, so a parent id from another tenant reads as missing.
+ */
+async function assertSubtaskNesting(
+  churchId: string,
+  parentTaskId: string,
+  childId?: string
+): Promise<void> {
+  const [parentRow] = await db
+    .select({ id: tasks.id, parentTaskId: tasks.parentTaskId })
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.churchId, churchId),
+        eq(tasks.id, parentTaskId),
+        isNull(tasks.deletedAt)
+      )
+    )
+    .limit(1);
+
+  let child: SubtaskNestingCheck["child"] = null;
+  if (childId) {
+    const [existingChild] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(tasks)
+      .where(
+        and(
+          eq(tasks.churchId, churchId),
+          eq(tasks.parentTaskId, childId),
+          isNull(tasks.deletedAt)
+        )
+      );
+
+    child = { id: childId, hasSubtasks: (existingChild?.count ?? 0) > 0 };
+  }
+
+  const reason = checkSubtaskNesting({ child, parent: parentRow ?? null });
+  if (reason) throw new Error(reason);
+}
+
+/**
+ * Every live subtask of a task, oldest first — checklist order, not due-date
+ * order, because a checklist is read top to bottom.
+ *
+ * Completed subtasks are included: the parent's progress is completed-of-TOTAL,
+ * so hiding the done ones would make the denominator shrink as work finishes.
+ */
+export async function listSubtasks(
+  churchId: string,
+  parentTaskId: string
+): Promise<TaskWithAssignee[]> {
+  const result = await db
+    .select({
+      id: tasks.id,
+      churchId: tasks.churchId,
+      title: tasks.title,
+      description: tasks.description,
+      status: tasks.status,
+      priority: tasks.priority,
+      dueDate: tasks.dueDate,
+      dueTime: tasks.dueTime,
+      assignedToId: tasks.assignedToId,
+      category: tasks.category,
+      relatedType: tasks.relatedType,
+      relatedId: tasks.relatedId,
+      parentTaskId: tasks.parentTaskId,
+      isRecurring: tasks.isRecurring,
+      recurrenceRule: tasks.recurrenceRule,
+      completionEvent: tasks.completionEvent,
+      completedAt: tasks.completedAt,
+      completedById: tasks.completedById,
+      createdById: tasks.createdById,
+      createdAt: tasks.createdAt,
+      updatedAt: tasks.updatedAt,
+      deletedAt: tasks.deletedAt,
+      assigneeName: users.name,
+      assigneeEmail: users.email,
+    })
+    .from(tasks)
+    .leftJoin(users, eq(tasks.assignedToId, users.id))
+    .where(
+      and(
+        eq(tasks.churchId, churchId),
+        eq(tasks.parentTaskId, parentTaskId),
+        isNull(tasks.deletedAt)
+      )
+    )
+    .orderBy(asc(tasks.createdAt), asc(tasks.id));
+
+  return result as TaskWithAssignee[];
+}
+
+// ============================================================================
 // Mutations
 // ============================================================================
+
+/**
+ * The recurrence half of a create or update.
+ *
+ * Optional and separate from `TaskCreateInput`/`TaskUpdateInput` on purpose:
+ * `undefined` means "this caller said nothing about recurrence", which must
+ * leave an existing schedule alone rather than clearing it. Quick-add and the
+ * meeting follow-up generator both fall into that case.
+ */
+export type TaskRecurrencePatch = Partial<TaskRecurrenceInput>;
+
+/**
+ * Fold a recurrence patch into the values of a write.
+ *
+ * Both columns move together or neither does — `is_recurring: true` with a
+ * null rule is a task that claims to repeat and cannot say how, which would
+ * silently end the chain at the next completion.
+ */
+function applyRecurrence<T extends Partial<NewTask>>(
+  values: T,
+  patch: TaskRecurrencePatch | undefined
+): T {
+  if (!patch || patch.isRecurring === undefined) return values;
+
+  const isRecurring = patch.isRecurring && patch.recurrenceRule != null;
+
+  return {
+    ...values,
+    isRecurring,
+    recurrenceRule: isRecurring ? patch.recurrenceRule : null,
+  };
+}
 
 /**
  * Create a new task.
@@ -319,23 +525,35 @@ export async function getTaskCounts(
 export async function createTask(
   churchId: string,
   userId: string,
-  data: TaskCreateInput
+  data: TaskCreateInput,
+  recurrence?: TaskRecurrencePatch
 ): Promise<Task> {
-  const values: NewTask = {
-    churchId,
-    createdById: userId,
-    title: data.title,
-    description: data.description,
-    status: data.status,
-    priority: data.priority,
-    dueDate: data.dueDate ?? null,
-    dueTime: data.dueTime ?? null,
-    assignedToId: data.assignedToId || null,
-    category: data.category ?? null,
-    relatedType: data.relatedType ?? null,
-    relatedId: data.relatedId || null,
-    parentTaskId: data.parentTaskId || null,
-  };
+  const parentTaskId = data.parentTaskId || null;
+
+  // One level only, and the parent has to be ours. Checked before the insert
+  // so an illegal parent is a refusal, not an orphan row (T-016).
+  if (parentTaskId) {
+    await assertSubtaskNesting(churchId, parentTaskId);
+  }
+
+  const values: NewTask = applyRecurrence(
+    {
+      churchId,
+      createdById: userId,
+      title: data.title,
+      description: data.description,
+      status: data.status,
+      priority: data.priority,
+      dueDate: data.dueDate ?? null,
+      dueTime: data.dueTime ?? null,
+      assignedToId: data.assignedToId || null,
+      category: data.category ?? null,
+      relatedType: data.relatedType ?? null,
+      relatedId: data.relatedId || null,
+      parentTaskId,
+    } satisfies NewTask,
+    recurrence
+  );
 
   const [task] = await db.insert(tasks).values(values).returning();
 
@@ -349,16 +567,43 @@ export async function createTask(
 export async function updateTask(
   churchId: string,
   taskId: string,
-  data: TaskUpdateInput
+  data: TaskUpdateInput,
+  recurrence?: TaskRecurrencePatch
 ): Promise<Task> {
   const existing = await getTask(churchId, taskId);
   if (!existing) {
     throw new Error("Task not found");
   }
 
-  const updateData: Partial<NewTask> & { updatedAt: Date } = {
-    updatedAt: new Date(),
-  };
+  // Re-parenting is the other way a second level of nesting could appear, so
+  // it runs the same check as create — plus the "already has subtasks" arm,
+  // which only an update can trip.
+  if (data.parentTaskId) {
+    await assertSubtaskNesting(churchId, data.parentTaskId, taskId);
+  }
+
+  // Editing the schedule of an instance that is already mid-chain must not
+  // orphan it from its series: a rule posted by the form carries no
+  // `seriesId`, so the stored one is carried across. (A head instance has
+  // none, and `seriesIdOf` reads that as "my own id" — still correct.)
+  const carriedSeriesId = parseRecurrenceRule(
+    existing.recurrenceRule
+  )?.seriesId;
+  const recurrencePatch: TaskRecurrencePatch | undefined =
+    recurrence?.recurrenceRule
+      ? {
+          ...recurrence,
+          recurrenceRule: {
+            ...recurrence.recurrenceRule,
+            seriesId: recurrence.recurrenceRule.seriesId ?? carriedSeriesId,
+          },
+        }
+      : recurrence;
+
+  const updateData: Partial<NewTask> & { updatedAt: Date } = applyRecurrence(
+    { updatedAt: new Date() },
+    recurrencePatch
+  );
 
   if (data.title !== undefined) updateData.title = data.title;
   if (data.description !== undefined)
@@ -396,15 +641,120 @@ export async function updateTask(
   return updated;
 }
 
+/** What a completion produced: the finished task, and its successor if any. */
+export interface TaskCompletionResult {
+  task: Task;
+  /**
+   * The next instance of a recurring series, when this completion minted one.
+   * `null` for a one-off task, and for a series that has reached its end date.
+   */
+  nextInstance: Task | null;
+}
+
+/**
+ * Mint the next instance of a recurring series (T-017).
+ *
+ * Called only after a completion has actually landed, so it is downstream of a
+ * won compare-and-set — two concurrent completes cannot both get here for the
+ * same task, and therefore cannot both insert.
+ *
+ * Returns `null` when nothing should be created: the task is not recurring,
+ * its rule is unreadable, the series has passed its end date, or an instance
+ * of the same series is somehow already open.
+ *
+ * NOT copied to the successor: `completionEvent`. An auto-completion hook is
+ * installed by whatever generated the task (a meeting finalize, say), and one
+ * of them — `meeting.evaluation.completed` — is backed by a partial unique
+ * index on (church_id, related_id). Copying it would abort the insert on the
+ * second instance. Recurrence mints plain work; hooks stay with the generator.
+ */
+async function createNextRecurrence(
+  completed: Task,
+  completedOn: string
+): Promise<Task | null> {
+  if (!completed.isRecurring) return null;
+
+  const rule = parseRecurrenceRule(completed.recurrenceRule);
+  if (!rule) return null;
+
+  const nextDueDate = nextRecurrenceDueDate(
+    rule,
+    completed.dueDate,
+    completedOn
+  );
+  // Past the end date: the series stops here. Every completed instance stays
+  // in place — ending recurrence is not deleting history.
+  if (!nextDueDate) return null;
+
+  const seriesId = seriesIdOf(completed);
+
+  // ONE open instance at a time. The chain shape already guarantees this (an
+  // instance is minted only by completing its predecessor), so this is the
+  // belt to that braces: it catches a series that was resurrected by reopening
+  // and re-completing an older instance.
+  const open = await db
+    .select({ id: tasks.id })
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.churchId, completed.churchId),
+        ne(tasks.status, "complete"),
+        isNull(tasks.deletedAt),
+        eq(tasks.isRecurring, true),
+        sql`${tasks.recurrenceRule} ->> 'seriesId' = ${seriesId}`
+      )
+    )
+    .limit(1);
+
+  if (open.length > 0) return null;
+
+  const [next] = await db
+    .insert(tasks)
+    .values({
+      churchId: completed.churchId,
+      title: completed.title,
+      description: completed.description,
+      status: "not_started",
+      // Carried forward so the next occurrence is the same piece of work:
+      // whoever owns it, how urgent it is, what it is about, and what it hangs
+      // off. Only the schedule moves.
+      priority: completed.priority,
+      dueDate: nextDueDate,
+      dueTime: completed.dueTime,
+      assignedToId: completed.assignedToId,
+      category: completed.category,
+      relatedType: completed.relatedType,
+      relatedId: completed.relatedId,
+      parentTaskId: completed.parentTaskId,
+      isRecurring: true,
+      recurrenceRule: { ...rule, seriesId },
+      createdById: completed.createdById,
+    })
+    .returning();
+
+  return next ?? null;
+}
+
 /**
  * Mark a task as complete with timestamp and user.
- * Emits task.completed event.
+ *
+ * Emits `task.completed`, and — for a recurring task — mints the next instance
+ * of the series.
+ *
+ * ## Ordering
+ *
+ * The completion is written FIRST and the successor second, which is the
+ * opposite of the usual "durable marker last" rule and is deliberate. The two
+ * failure modes are not symmetric: a successor with no completion would leave
+ * TWO open instances of the same series, breaking the one-at-a-time guarantee
+ * a planter relies on; a completion with no successor leaves a gap that
+ * reopening and re-completing the task repairs. We take the recoverable one.
  */
 export async function completeTask(
   churchId: string,
   taskId: string,
   userId: string
-): Promise<Task> {
+): Promise<TaskCompletionResult> {
   const existing = await getTask(churchId, taskId);
   if (!existing) {
     throw new Error("Task not found");
@@ -414,25 +764,34 @@ export async function completeTask(
     throw new Error("Task is already complete");
   }
 
+  const completedAt = new Date();
+
+  // `ne(status, 'complete')` makes this a compare-and-set rather than a blind
+  // write: the read above is a snapshot and two concurrent callers both pass
+  // it, but only one gets a row back here. Everything downstream — the event,
+  // and the next recurrence instance — happens exactly once because it hangs
+  // off this rowcount.
   const [completed] = await db
     .update(tasks)
     .set({
       status: "complete",
-      completedAt: new Date(),
+      completedAt,
       completedById: userId,
-      updatedAt: new Date(),
+      updatedAt: completedAt,
     })
     .where(
       and(
         eq(tasks.churchId, churchId),
         eq(tasks.id, taskId),
-        isNull(tasks.deletedAt)
+        isNull(tasks.deletedAt),
+        ne(tasks.status, "complete")
       )
     )
     .returning();
 
   if (!completed) {
-    throw new Error("Failed to complete task");
+    // The CAS lost: somebody else completed it between the read and the write.
+    throw new Error("Task is already complete");
   }
 
   // Emit task.completed event
@@ -445,7 +804,23 @@ export async function completeTask(
     userId
   );
 
-  return completed;
+  let nextInstance: Task | null = null;
+  try {
+    nextInstance = await createNextRecurrence(
+      completed,
+      toCalendarDate(completedAt)
+    );
+  } catch (error) {
+    // The completion already landed and is correct on its own. A missing
+    // successor is repairable (reopen, re-complete); throwing here would tell
+    // the planter their completed task failed to complete.
+    console.error(
+      `completeTask failed to create the next recurrence of ${completed.id}:`,
+      error
+    );
+  }
+
+  return { task: completed, nextInstance };
 }
 
 /**
@@ -489,7 +864,15 @@ export async function reopenTask(
 }
 
 /**
- * Soft delete a task.
+ * Soft delete a task, and with it any subtasks it owns.
+ *
+ * The cascade is not a convenience. A subtask is invisible outside its
+ * parent's detail view — `listTasks` filters it out of the list on purpose —
+ * so deleting the parent alone would leave live rows that nothing renders and
+ * nobody can reach: work that still counts in `getTaskCounts` and can never be
+ * closed. One statement, so parent and children go together or not at all
+ * (there are no interactive transactions here — `invariants/transactions-
+ * atomicity.md`).
  */
 export async function deleteTask(
   churchId: string,
@@ -500,13 +883,15 @@ export async function deleteTask(
     throw new Error("Task not found");
   }
 
+  const now = new Date();
+
   await db
     .update(tasks)
-    .set({ deletedAt: new Date(), updatedAt: new Date() })
+    .set({ deletedAt: now, updatedAt: now })
     .where(
       and(
         eq(tasks.churchId, churchId),
-        eq(tasks.id, taskId),
+        or(eq(tasks.id, taskId), eq(tasks.parentTaskId, taskId)),
         isNull(tasks.deletedAt)
       )
     );
@@ -675,6 +1060,17 @@ export interface BulkTaskDeps {
     dueDate: string
   ): Promise<string[]>;
   emitCompleted(task: BulkTaskCandidate, userId: string): Promise<void>;
+  /**
+   * Mint the successor of every recurring task among `taskIds` (T-017).
+   *
+   * Optional so a test can drive the bulk write without one — the interesting
+   * behaviour there is partial failure and event fan-out, not recurrence.
+   */
+  mintRecurrences?(
+    churchId: string,
+    taskIds: string[],
+    completedOn: string
+  ): Promise<void>;
 }
 
 export const defaultBulkTaskDeps: BulkTaskDeps = {
@@ -755,6 +1151,31 @@ export const defaultBulkTaskDeps: BulkTaskDeps = {
       userId
     );
   },
+
+  async mintRecurrences(churchId, taskIds, completedOn) {
+    if (taskIds.length === 0) return;
+
+    // Reloaded rather than carried through the plan: the successor is a copy
+    // of the whole task, and `BulkTaskCandidate` is deliberately the minimum
+    // the write needs.
+    const recurring = await db
+      .select()
+      .from(tasks)
+      .where(
+        and(
+          eq(tasks.churchId, churchId),
+          inArray(tasks.id, taskIds),
+          eq(tasks.isRecurring, true),
+          isNull(tasks.deletedAt)
+        )
+      );
+
+    // Sequentially, for the same reason the events are: a 100-task bulk must
+    // not fan 100 concurrent insert chains at the database.
+    for (const task of recurring) {
+      await createNextRecurrence(task, completedOn);
+    }
+  },
 };
 
 function emptyBulkResult(): BulkTaskResult {
@@ -812,6 +1233,21 @@ export async function bulkCompleteTasks(
     writtenIds,
     missedReason
   );
+
+  // A bulk complete has to advance recurring chains too, or a planter who
+  // clears their week with one click quietly loses every repeat.
+  if (written.length > 0 && deps.mintRecurrences) {
+    try {
+      await deps.mintRecurrences(
+        churchId,
+        written.map((row) => row.id),
+        toCalendarDate(new Date())
+      );
+    } catch (error) {
+      // Same trade as `completeTask`: the completions landed and stand.
+      console.error("bulkCompleteTasks failed to mint recurrences:", error);
+    }
+  }
 
   // One event per completed task, emitted one at a time (see header note).
   for (const task of written) {
