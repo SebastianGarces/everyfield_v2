@@ -70,10 +70,17 @@ export async function getBookmarks(limit: number = 10) {
     .orderBy(desc(wikiBookmarks.createdAt))
     .limit(safeLimit);
 
-  // Fetch article metadata for each bookmark
+  // Fetch article metadata for each bookmark, scoped to the bookmarker's own
+  // church (#317). Bookmarks are stored by slug with no church on them, so an
+  // unscoped lookup resolves a church-scoped article to null and the row is
+  // dropped by the filter below — the bookmark would silently vanish from the
+  // sidebar rather than fail loudly.
   const bookmarksWithArticles = await Promise.all(
     bookmarks.map(async (bookmark) => {
-      const article = await getArticle(bookmark.articleSlug);
+      const article = await getArticle(
+        bookmark.articleSlug,
+        session.user.churchId ?? null
+      );
       if (!article) return null;
       return {
         slug: bookmark.articleSlug,

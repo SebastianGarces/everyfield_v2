@@ -1,3 +1,7 @@
+import { and, asc, eq, isNull, or, type SQL } from "drizzle-orm";
+import { cache } from "react";
+import { db } from "@/db";
+import { wikiArticles, type WikiArticle } from "@/db/schema";
 import type {
   ArticleMeta,
   ArticleCategory,
@@ -5,14 +9,126 @@ import type {
   NavGroup,
 } from "./types";
 import { toArticleMeta } from "./types";
-import { getAllPublishedArticles } from "./service";
 import { wikiHref } from "./href";
 
+// ============================================================================
+// Tenancy — every wiki read starts here (#317, from #16)
+//
+// `wiki_articles.church_id` is nullable and means two different things:
+// NULL = global content every plant sees, a uuid = content belonging to that
+// one church (FRD `product-docs/features/wiki/frd.md`, data model). The read
+// the FRD specifies is therefore
+//
+//     WHERE church_id IS NULL OR church_id = :current_church_id
+//
+// and NOT "church_id = :id" — a church sees the global corpus PLUS its own,
+// never only its own. Isolation here is application-layer; there is no RLS
+// behind these queries (`memory/invariants.md` → Multi-Tenancy), so this
+// predicate IS the boundary and it is asserted at the SQL level in
+// `tenancy.test.ts` rather than trusted.
+//
+// The reads default to `churchId = null` (global only) so that a call site
+// which forgets to thread a church fails CLOSED — it under-fetches its own
+// content instead of leaking somebody else's.
+// ============================================================================
+
 /**
- * Get all wiki articles with metadata
+ * The visibility predicate: global articles, plus this church's own.
+ *
+ * `null` narrows to the global corpus alone — never "everything".
  */
-export async function getArticles(): Promise<ArticleMeta[]> {
-  const dbArticles = await getAllPublishedArticles();
+export function visibleToChurch(churchId: string | null): SQL {
+  if (!churchId) {
+    return isNull(wikiArticles.churchId);
+  }
+
+  return or(
+    isNull(wikiArticles.churchId),
+    eq(wikiArticles.churchId, churchId)
+  ) as SQL;
+}
+
+/**
+ * Every published article visible to `churchId`, in navigation order.
+ *
+ * Exported as a builder (not a result) so the tenancy predicate can be
+ * rendered with `.toSQL()` and asserted without a database — the same shape
+ * `src/lib/notifications/queries.ts` uses for its church boundary.
+ */
+export function visibleArticlesQuery(churchId: string | null) {
+  return db
+    .select()
+    .from(wikiArticles)
+    .where(and(visibleToChurch(churchId), eq(wikiArticles.status, "published")))
+    .orderBy(asc(wikiArticles.sortOrder));
+}
+
+/**
+ * One slug, resolved against what `churchId` may see.
+ *
+ * At most two rows can match: `wiki_articles_slug_church_idx` is unique on
+ * (slug, church_id), and the predicate admits exactly two church scopes — the
+ * global one and the caller's.
+ *
+ * This builder backs `getArticle` but lives here, next to the predicate it
+ * shares, because `get-article.ts` imports the MDX compiler and so cannot be
+ * loaded by the test runner — the tenancy assertions in `tenancy.test.ts`
+ * would have nothing to inspect.
+ */
+export function articleBySlugQuery(slug: string, churchId: string | null) {
+  return db
+    .select()
+    .from(wikiArticles)
+    .where(
+      and(
+        eq(wikiArticles.slug, slug),
+        visibleToChurch(churchId),
+        eq(wikiArticles.status, "published")
+      )
+    )
+    .limit(2);
+}
+
+/**
+ * Collapse a global article and a church's article of the SAME slug to one.
+ *
+ * `wiki_articles_slug_church_idx` is unique on (slug, church_id), so a church
+ * may hold its own version of a global slug; the church's copy wins (it is an
+ * override, and two rows with one slug would otherwise duplicate the article
+ * in lists, navigation and React keys). Insertion order — sort order — is
+ * preserved.
+ */
+export function preferChurchOverride(articles: WikiArticle[]): WikiArticle[] {
+  const bySlug = new Map<string, WikiArticle>();
+
+  for (const article of articles) {
+    const held = bySlug.get(article.slug);
+    if (!held || (held.churchId === null && article.churchId !== null)) {
+      bySlug.set(article.slug, article);
+    }
+  }
+
+  return Array.from(bySlug.values());
+}
+
+/**
+ * Get all wiki articles with metadata, scoped to a church.
+ *
+ * Deduped per request with `React.cache`, keyed on `churchId` — the same
+ * pattern `getPublishedArticleRefs` in `service.ts` uses. Rendering one article
+ * reads the whole visible corpus at least twice (the sidebar's
+ * `getWikiNavigation` in the wiki layout, and `getArticleNavigation` in the
+ * page), and every read is the identical ~90-row query; without this each
+ * derived affordance costs its own round trip. Outside a React request scope —
+ * the test runner — `cache` calls straight through, so nothing is memoised
+ * across the fixtures a live test sets up between reads.
+ *
+ * @param churchId - the reader's church; omit (or pass null) for global only.
+ */
+export const getArticles = cache(async function getArticles(
+  churchId: string | null = null
+): Promise<ArticleMeta[]> {
+  const dbArticles = preferChurchOverride(await visibleArticlesQuery(churchId));
 
   return dbArticles.map((article) => {
     // Extract section from slug:
@@ -22,25 +138,32 @@ export async function getArticles(): Promise<ArticleMeta[]> {
     const sectionSlug = slugParts.length > 2 ? slugParts[1] : "_root";
     return toArticleMeta(article, sectionSlug ?? "_root");
   });
-}
+});
 
 /**
  * Get articles that match a path prefix
  * e.g., "phase-1" returns all articles in phase 1
  * e.g., "phase-1/introduction" returns all articles in that section
+ *
+ * @param churchId - the reader's church; omit (or pass null) for global only.
  */
 export async function getArticlesByPrefix(
-  prefix: string
+  prefix: string,
+  churchId: string | null = null
 ): Promise<ArticleMeta[]> {
-  const articles = await getArticles();
+  const articles = await getArticles(churchId);
   return articles.filter((article) => article.slug.startsWith(prefix + "/"));
 }
 
 /**
  * Build navigation structure from articles, grouped by category
+ *
+ * @param churchId - the reader's church; omit (or pass null) for global only.
  */
-export async function getWikiNavigation(): Promise<NavGroup[]> {
-  const articles = await getArticles();
+export async function getWikiNavigation(
+  churchId: string | null = null
+): Promise<NavGroup[]> {
+  const articles = await getArticles(churchId);
 
   // Group articles by category, then phase/section
   const categoryMap = new Map<
@@ -273,6 +396,142 @@ export async function getWikiNavigation(): Promise<NavGroup[]> {
   }
 
   return groups;
+}
+
+// ============================================================================
+// Article navigation — related articles and prev/next (W-009, #317)
+//
+// Both affordances are derived, not stored: `related_article_slugs` is an
+// authored list of slugs (it carries no titles, and nothing enforces that a
+// slug still resolves), and "previous/next" is simply where an article sits
+// among its siblings. So both resolve against the SAME visible corpus the rest
+// of the wiki reads — `getArticles(churchId)` — which is what makes them obey
+// tenancy, publication status and the church-override rule for free.
+//
+// The resolution steps are pure functions over `ArticleMeta[]` so they can be
+// asserted without a database; `getArticleNavigation` is the one call site
+// that touches Postgres, and it does so ONCE for both.
+// ============================================================================
+
+/**
+ * The path an article hangs off — `""` for a top-level slug.
+ *
+ * This, not `ArticleMeta.section`, is what "the same section" means for
+ * prev/next: `section` is a display grouping that collapses to `"_root"` for
+ * two-segment slugs, so every phase-level article in the wiki would count as
+ * one another's siblings. The parent path is the navigation tree the reader
+ * actually sees in the sidebar.
+ */
+export function articleParentPath(slug: string): string {
+  return slug.split("/").slice(0, -1).join("/");
+}
+
+/**
+ * Navigation order: `sortOrder` first, title as the stable tie-break.
+ *
+ * The tie-break is not the load-bearing part, and an earlier version of this
+ * comment overstated it: `sort_order` DEFAULTS to 999, but every row in the
+ * corpus carries an explicit 1–11 authored per section, so ties are the
+ * exception rather than the rule. The tie-break is here for the rows that
+ * arrive without one — an article inserted straight into the table, or a
+ * church's own copy — where the alternative is whatever order Postgres
+ * happened to return, which would make "next" non-deterministic.
+ */
+export function byNavigationOrder(a: ArticleMeta, b: ArticleMeta): number {
+  if (a.order !== b.order) return a.order - b.order;
+  return a.title.localeCompare(b.title);
+}
+
+export type ArticleNavigation = {
+  /** Authored cross-links, in the order they were authored. */
+  related: ArticleMeta[];
+  /** The sibling before this one, or null when this is the first. */
+  previous: ArticleMeta | null;
+  /** The sibling after this one, or null when this is the last. */
+  next: ArticleMeta | null;
+};
+
+/**
+ * Resolve `related_article_slugs` against the corpus the reader can see.
+ *
+ * A slug that resolves to nothing is DROPPED rather than rendered dead: the
+ * column is authored content with no foreign key behind it, so it accumulates
+ * slugs that were renamed, unpublished, or belong to another church. Dropping
+ * is also the tenancy behaviour — an article may not advertise a title the
+ * reader is not allowed to open.
+ *
+ * The article's own slug is excluded, and repeats collapse, so a hand-edited
+ * list cannot produce a self-link or duplicate React keys.
+ */
+export function resolveRelatedArticles(
+  articles: ArticleMeta[],
+  relatedSlugs: readonly string[] | null | undefined,
+  currentSlug: string
+): ArticleMeta[] {
+  if (!relatedSlugs || relatedSlugs.length === 0) {
+    return [];
+  }
+
+  const bySlug = new Map(articles.map((article) => [article.slug, article]));
+  const taken = new Set<string>([currentSlug]);
+  const related: ArticleMeta[] = [];
+
+  for (const slug of relatedSlugs) {
+    if (taken.has(slug)) continue;
+
+    const article = bySlug.get(slug);
+    if (!article) continue;
+
+    taken.add(slug);
+    related.push(article);
+  }
+
+  return related;
+}
+
+/**
+ * Where `slug` sits among its siblings — the previous and next article.
+ *
+ * A slug that is not in `articles` (a section index, an unpublished article)
+ * has no position, and therefore no neighbours, rather than borrowing the
+ * first pair.
+ */
+export function resolveSiblingNavigation(
+  articles: ArticleMeta[],
+  slug: string
+): Pick<ArticleNavigation, "previous" | "next"> {
+  const parent = articleParentPath(slug);
+  const siblings = articles
+    .filter((article) => articleParentPath(article.slug) === parent)
+    .sort(byNavigationOrder);
+
+  const index = siblings.findIndex((article) => article.slug === slug);
+  if (index === -1) {
+    return { previous: null, next: null };
+  }
+
+  return {
+    previous: siblings[index - 1] ?? null,
+    next: siblings[index + 1] ?? null,
+  };
+}
+
+/**
+ * Everything the article footer needs, from one read of the visible corpus.
+ *
+ * @param churchId - the reader's church; omit (or pass null) for global only.
+ */
+export async function getArticleNavigation(
+  slug: string,
+  relatedSlugs: readonly string[] | null | undefined,
+  churchId: string | null = null
+): Promise<ArticleNavigation> {
+  const articles = await getArticles(churchId);
+
+  return {
+    related: resolveRelatedArticles(articles, relatedSlugs, slug),
+    ...resolveSiblingNavigation(articles, slug),
+  };
 }
 
 function formatSectionTitle(section: string): string {
