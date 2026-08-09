@@ -88,7 +88,8 @@ Each section links `invariants/<domain>.md` for the why, the pattern and the wor
 Why and how: [`contracts/db.md`](contracts/db.md) → The dev-seed wipe. Applies to
 `scripts/seed-dev-db.ts` and anything that inserts a `churches` row.
 
-- `pnpm db:seed` deletes ALL users and ALL churches unscoped — the fixture is the whole database, not the rows the script created. Run it against your own or a throwaway database ONLY; on the shared `development` branch it takes the alpha-cohort logins, the marketing fixture and every hand-registered plant. Nothing in code stops you.
+- `pnpm db:seed` deletes ALL users and ALL churches unscoped — the fixture is the whole database, not the rows the script created. Run it against your own or a throwaway database ONLY; on the shared `development` branch it takes the alpha-cohort logins, the marketing fixture and every hand-registered plant.
+- The wipe REFUSES to run on a database holding an alpha-cohort sentinel account unless `--allow-protected-db` is passed (`src/lib/dev-seed/protected-database.ts`, ruled 2026-08-09). Detection is POSITIVE — sentinel rows, never "does this connection string look like development", which fails open. Passing the override on the shared database is a deliberate, destructive act, not a way past a nagging prompt.
 - The wipe ORDER is derived at runtime from `pg_constraint` by `planWipe()`. Never re-introduce a hand-kept table list — the derivation is what makes a new table join the wipe on its own.
 - `wiki_articles` and `wiki_sections` are `PROTECTED_TABLES`: never deleted AND never walked through, so nothing downstream of them is dragged in either. The corpus is migrated content no script rebuilds (#317).
 - A protected row pointing at a table the wipe deletes (a church-scoped wiki article) ABORTS the whole seed before its first DELETE — `assertProtectedTablesAreSafe()`. Stop and re-point by hand; never widen the wipe to cover it.

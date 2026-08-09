@@ -8,6 +8,10 @@
  * Usage:
  *   bun run scripts/seed-dev-db.ts
  *   bun run scripts/seed-dev-db.ts --clean-only  # Only clean, don't seed
+ *
+ * The wipe below is not scoped to the rows this file creates — see
+ * `cleanDatabase()`. It refuses to run against a database holding the alpha
+ * cohort's accounts unless `--allow-protected-db` is passed.
  */
 
 import { neon } from "@neondatabase/serverless";
@@ -25,12 +29,18 @@ import {
   type NewUser,
 } from "../src/db/schema";
 import { hashPassword } from "../src/lib/auth/password";
+import {
+  ALLOW_PROTECTED_DB_FLAG,
+  decideWipe,
+  matchProtectedAccounts,
+} from "../src/lib/dev-seed/protected-database";
 
 // Load environment variables for scripts
 config({ path: ".env.local" });
 
 // Parse command line args
 const cleanOnly = process.argv.includes("--clean-only");
+const allowProtectedDb = process.argv.includes(ALLOW_PROTECTED_DB_FLAG);
 
 // Database connection
 const connectionString = process.env.DATABASE_URL;
@@ -238,16 +248,53 @@ async function assertProtectedTablesAreSafe(
 }
 
 /**
- * Wipe the fixture.
+ * Refuse to wipe a database that people share (#326, ruled 2026-08-09).
  *
- * ⚠️ This is not a scalpel. Point it at a database that other work has been
- * sharing — the deployed development branch, say, which accumulates plants from
- * onboarding runs and accounts from real registrations — and it removes those
- * too. Check what is in there before running it against anything but your own
- * database.
+ * This is not a scalpel: point it at the deployed development branch — which
+ * accumulates plants from onboarding runs and accounts from real registrations
+ * — and it removes those too. Until this guard existed the only thing stopping
+ * that was a comment, plus the accident that the wipe used to CRASH partway
+ * through on a database with launch history. `planWipe()` fixed the crash,
+ * which means it also removed the protection.
+ *
+ * The decision lives in `src/lib/dev-seed/protected-database.ts` as a pure
+ * function so it has tests; all this does is answer its one question — which
+ * protected accounts are in this database. Every user's address is read rather
+ * than filtered in SQL, because the matching rules (whole-address equality,
+ * case, whitespace) are the part worth testing, and a dev database is small.
+ *
+ * A query that throws — no `users` table yet, bad credentials — propagates and
+ * aborts the run. An unanswered question about a destructive operation is a no.
+ */
+async function assertDatabaseIsWipeable(): Promise<void> {
+  const rows = await db.select({ email: users.email }).from(users);
+  const decision = decideWipe({
+    accountsFound: matchProtectedAccounts(rows.map((row) => row.email)),
+    overrideRequested: allowProtectedDb,
+  });
+
+  switch (decision.verdict) {
+    case "proceed":
+      return;
+    case "proceed-with-override":
+      console.warn(`⚠️  ${decision.warning}\n`);
+      return;
+    case "refuse":
+      throw new Error(decision.message);
+  }
+}
+
+/**
+ * Wipe the fixture — every user and every church, not only the seeded ones.
+ *
+ * The guard above runs first, before the FK graph is even read: nothing here is
+ * recoverable, so the check that can say no has to happen before the work that
+ * cannot be undone.
  */
 async function cleanDatabase(): Promise<void> {
   console.log("🧹 Cleaning database...");
+
+  await assertDatabaseIsWipeable();
 
   const keys = await foreignKeys();
   const order = planWipe(keys);

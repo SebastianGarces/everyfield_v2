@@ -98,8 +98,20 @@ Rules: `../invariants.md` → Dev Seeds. Why they are not guessable from the sou
   converge: there is no email predicate to keep in step, so no account can survive by carrying an
   address the script no longer mentions. The same property is the cost — pointed at the shared
   `development` branch it takes the alpha-cohort logins, the marketing-church fixture and every
-  hand-registered plant with them. **The guard is this paragraph and the comment on
-  `cleanDatabase()`, not code.**
+  hand-registered plant with them. That cost is why the wipe is guarded in code — see below.
+- **The guard is positive detection, and it is code (ruled 2026-08-09).** Before the FK graph is
+  even read, `assertDatabaseIsWipeable()` reads every user's address and refuses if any
+  alpha-cohort sentinel is present (`PROTECTED_ACCOUNTS` in
+  `src/lib/dev-seed/protected-database.ts`); `--allow-protected-db` is the only way past. It looks
+  for accounts that only exist on a database worth protecting rather than trying to recognise a
+  database that is safe — the negative version fails OPEN, since an unfamiliar connection string,
+  a renamed Neon branch or a pooled host all read as "not development". The sentinels are a
+  sample, not an inventory: one match stops a wipe that would also take ~67 hand-registered plants
+  no sentinel names. Until #326 this was a comment, and the thing actually protecting that
+  database was the accident that the wipe used to CRASH partway through on launch history —
+  which `planWipe()` fixed, removing the protection with the bug. The decision is a pure function
+  over query results because the only way to test the wired-up version end to end is to run the
+  wipe it exists to prevent (`src/lib/dev-seed/protected-database.test.ts`).
 - **The order is derived, not enumerated.** `planWipe()` reads every `public` foreign key from
   `pg_constraint`, walks out from the roots taking anything that (transitively) points into the
   set, and emits children before parents. A table unreachable from a user or a church is not
