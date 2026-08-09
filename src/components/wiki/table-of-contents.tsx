@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useMemo, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useSyncExternalStore,
+} from "react";
 import { List } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -30,14 +36,17 @@ type TableOfContentsProps = {
  * Renders nothing below `TOC_MIN_HEADINGS` headings. Once the wiki layout's
  * content column can afford it — a container query, mirroring the card
  * widening in `wiki/layout.tsx`, so the prose keeps its 704px measure — it
- * is a sticky right rail beside the prose; in narrower columns it collapses
- * into a closed disclosure above the article so it never squeezes the text.
+ * is a sticky right rail beside the prose, capped to the viewport and scrolling
+ * inside itself so a long TOC never has to be chased down the article; in
+ * narrower columns it collapses into a closed disclosure above the article so it
+ * never squeezes the text.
  *
  * Scroll position is *not* persisted here — reading progress is W-012's job
  * (`ProgressTracker`), and this component deliberately only reads scroll state.
  */
 export function TableOfContents({ headings }: TableOfContentsProps) {
   const activeId = useActiveHeadingId(headings);
+  const listRef = useFollowActiveEntry(activeId);
 
   if (headings.length < TOC_MIN_HEADINGS) {
     return null;
@@ -63,20 +72,40 @@ export function TableOfContents({ headings }: TableOfContentsProps) {
         </nav>
       </details>
 
-      {/* Wide column: sticky right rail. */}
+      {/* Wide column: sticky right rail, scrolling inside itself.
+
+          The height cap is what makes the rail a scroll container rather than a
+          sticky column that simply runs off the bottom of the screen: without
+          it, a TOC taller than the viewport could only be read by scrolling the
+          ARTICLE, which moves the prose the reader was orienting in. The 8rem
+          is everything above the rail — topbar `h-16` + the content column's
+          `p-6` + the card's `py-10` — which is also the rail's unstuck offset,
+          so at the top of an article it ends flush with the viewport bottom and
+          once it sticks at `top-6` the difference becomes breathing room.
+
+          Only the link list scrolls; "On this page" stays put, so a reader
+          halfway down a long TOC still knows what they are looking at. */}
       <nav
         data-testid="wiki-toc"
         aria-label="Table of contents"
-        className="sticky top-6 hidden w-48 shrink-0 self-start @min-[65rem]/wiki-content:block @min-[67rem]/wiki-content:w-56"
+        className="sticky top-6 hidden max-h-[calc(100vh-8rem)] w-48 shrink-0 flex-col self-start @min-[65rem]/wiki-content:flex @min-[67rem]/wiki-content:w-56"
       >
-        <p className="text-muted-foreground mb-3 text-xs font-semibold tracking-wide uppercase">
+        <p className="text-muted-foreground mb-3 shrink-0 text-xs font-semibold tracking-wide uppercase">
           On this page
         </p>
-        <TocLinks
-          headings={headings}
-          activeId={activeId}
-          entryTestId="wiki-toc-entry"
-        />
+        <div
+          ref={listRef}
+          // `min-h-0` is the whole trick: a flex item refuses to shrink below
+          // its content by default, which would push the list past the cap
+          // instead of scrolling it. It stays content-sized until the cap bites.
+          className="min-h-0 overflow-y-auto overscroll-contain pr-2"
+        >
+          <TocLinks
+            headings={headings}
+            activeId={activeId}
+            entryTestId="wiki-toc-entry"
+          />
+        </div>
       </nav>
     </>
   );
@@ -124,6 +153,36 @@ function TocLinks({
       })}
     </ul>
   );
+}
+
+/**
+ * Keep the highlighted entry inside the rail's own scroll box.
+ *
+ * Once the rail scrolls independently of the article, reading far enough moves
+ * the active entry out of the rail's visible area and the highlight simply
+ * disappears. This nudges it back — and only it: the effect reacts to `activeId`
+ * changing, so no scroll state is mirrored into React state, and the DOM read is
+ * scoped to the desktop list (`ref`) so the mobile `<details>` copy, which is
+ * display:none whenever it is closed, is never touched.
+ *
+ * `block: "nearest"` is load-bearing. It scrolls the minimum needed, so an entry
+ * already visible causes no scroll at all, and the article column above — where
+ * the sticky rail is always fully in view — never moves. Anything else here
+ * would scroll-jack the reader mid-paragraph.
+ */
+function useFollowActiveEntry(activeId: string | null) {
+  const listRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!activeId) return;
+
+    const active = listRef.current?.querySelector<HTMLElement>(
+      '[data-active="true"]'
+    );
+    active?.scrollIntoView({ block: "nearest" });
+  }, [activeId]);
+
+  return listRef;
 }
 
 /**
