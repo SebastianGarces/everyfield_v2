@@ -18,6 +18,7 @@ Each section links `invariants/<domain>.md` for the why, the pattern and the wor
 - A church and its `church_privacy_settings` row are created by ONE batch; the loser's orphan church is swept afterwards under a `NOT EXISTS` guard.
 - Both answers to an empty planter seat — the No as well as the Yes — open with `SELECT … FROM churches … FOR UPDATE` and are gated on their own rowcount.
 - `finalizeAttendance()` emits downstream first, then compare-and-sets `actual_attendance` (non-null = finalized = its idempotency key); `meeting.attendance.finalized` is emitted STRICTLY.
+- Accepted residual: the COM-020 task→communication log entry has only a SELECT-then-INSERT on `communication_recipients.external_id = 'task:<id>'`; `completeTask` is a read-then-write, so a double-clicked Complete writes two entries until a partial unique index exists.
 - Accepted residual: `meeting.attendance.recorded` is non-strict — a failed prospect → attendee advance is swallowed rather than blocking finalization.
 
 ## Multi-Tenancy

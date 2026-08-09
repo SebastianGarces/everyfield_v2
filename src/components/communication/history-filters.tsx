@@ -14,14 +14,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type {
-  CommunicationChannel,
-  CommunicationStatus,
-} from "@/db/schema/communication";
+import type { CommunicationChannel } from "@/db/schema/communication";
 import {
   communicationChannels,
   communicationStatuses,
 } from "@/db/schema/communication";
+import { COMMUNICATION_STATUS_LABELS } from "@/lib/communication/status-display";
 
 import type { HistoryFilterSelection } from "./history-filters-presentation";
 import {
@@ -40,13 +38,11 @@ const CHANNEL_LABELS: Record<CommunicationChannel, string> = {
   both: "Email + SMS",
 };
 
-const STATUS_LABELS: Record<CommunicationStatus, string> = {
-  draft: "Draft",
-  scheduled: "Scheduled",
-  sending: "Sending",
-  sent: "Sent",
-  failed: "Failed",
-};
+// Status labels are keyed by the union for the same reason, but they live in
+// `@/lib/communication/status-display` because this dropdown is not the only
+// place they are read: the hub and the history table label the same statuses on
+// their badges, and four private copies are how `logged` (COM-020) reached the
+// UI as a raw lowercase token.
 
 /**
  * Message history filters. All state lives in the URL so the server component
@@ -175,7 +171,7 @@ export function HistoryFilters() {
           </SelectItem>
           {communicationStatuses.map((status) => (
             <SelectItem key={status} value={status} className="cursor-pointer">
-              {STATUS_LABELS[status]}
+              {COMMUNICATION_STATUS_LABELS[status]}
             </SelectItem>
           ))}
         </SelectContent>
