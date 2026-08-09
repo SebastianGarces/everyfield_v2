@@ -2,11 +2,12 @@ import { notFound, redirect } from "next/navigation";
 
 import { HeaderBreadcrumbs } from "@/components/header";
 import { TaskForm } from "@/components/tasks";
+import { SubtaskList } from "@/components/tasks/subtask-list";
 import { TaskDetailActions } from "./task-detail-actions";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { verifySession } from "@/lib/auth/session";
-import { getTask } from "@/lib/tasks/service";
+import { getTask, listSubtasks } from "@/lib/tasks/service";
 import { eq } from "drizzle-orm";
 import {
   Calendar,
@@ -109,15 +110,18 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
     notFound();
   }
 
-  // Fetch church users for editing
-  const churchUsers = await db
-    .select({
-      id: users.id,
-      name: users.name,
-      email: users.email,
-    })
-    .from(users)
-    .where(eq(users.churchId, user.churchId));
+  // Fetch church users for editing, plus this task's checklist (T-016).
+  const [churchUsers, subtasks] = await Promise.all([
+    db
+      .select({
+        id: users.id,
+        name: users.name,
+        email: users.email,
+      })
+      .from(users)
+      .where(eq(users.churchId, user.churchId)),
+    listSubtasks(user.churchId, id),
+  ]);
 
   const statusConfig = STATUS_CONFIG[task.status] ?? STATUS_CONFIG.not_started;
   const priorityConfig =
@@ -280,6 +284,17 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
             </CardContent>
           </Card>
         )}
+
+        {/* Subtasks */}
+        <Card>
+          <CardContent>
+            <SubtaskList
+              parentTaskId={task.id}
+              subtasks={subtasks}
+              parentIsSubtask={task.parentTaskId !== null}
+            />
+          </CardContent>
+        </Card>
 
         {/* Edit form */}
         <Card>

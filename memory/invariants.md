@@ -96,6 +96,20 @@ Applies to `src/lib/communication/**` and the `/communication` surfaces. Ruled 2
 - "Delivery rate" names exactly ONE figure: `delivered / attempted`, on the church-wide overview only. A single message's tiles report COUNTS with the denominator in the caption ("Delivered · 6 · of 10 recipients") and claim no rate — the tile once divided by all recipient rows and called that the delivery rate too, which is a different number under the same name.
 - A rate with a zero denominator is UNKNOWN (`toPercent` → `null`, rendered as `—`), never `0%`. "0% open rate" is a claim about a send that never arrived.
 
+## Tasks, Subtasks & Recurrence
+
+→ [tasks](invariants/tasks.md) — `src/lib/tasks/**`, `src/app/(dashboard)/tasks/**`.
+
+- Nesting is ONE level, enforced in both directions: a subtask may not take children, and a task that already has children may not be demoted into one. Half the rule is no rule — refusing only the first is bypassed by parenting the other way round.
+- Completing every subtask does NOT complete the parent. There is deliberately no code that does it (#90); the absence is the ruling, not an oversight, and the UI says so out loud.
+- A subtask is a checklist item, not a task. Anything reporting a NUMBER of tasks applies `topLevelTasksOnly()` — `listTasks` and `getTaskCounts` share it, because the badges and the list under them must count one population (ruled on #370). Checklist progress is reported separately, never folded into `complete`.
+- A new subtask inherits its parent's assignee (#370). A default, not a lock — an explicit assignee wins and the subtask is reassignable. An unowned checklist item reaches no "My tasks" view and nobody is accountable for it.
+- The checklist is part of a recurring task's TEMPLATE: completing one mints the successor with EVERY item copied across, unticked — the ticked ones and the never-started ones under one rule (#370). Per-item carry-over state was rejected; a repeating task repeats whole.
+- Copied children get explicit `created_at` stamps one millisecond apart. `listSubtasks` sorts by `created_at`, and one multi-row INSERT stamps every default with the same transaction timestamp, leaving checklist order to a random-UUID tiebreak.
+- Exactly ONE instance of a recurring series is open at a time, minted on completion — never by a cron. The guard runs BEFORE the successor insert, so a resurrected series gains neither a second open task nor a duplicate checklist.
+- `completionEvent` is never copied to a successor: `meeting.evaluation.completed` is backed by a partial unique index, so copying it aborts the second instance's insert. Recurrence mints plain work; hooks stay with the generator.
+- A completion is written FIRST and its successor second — the reverse of the usual durable-marker-last rule, deliberately. A successor with no completion leaves two open instances; a completion with no successor is repaired by reopening and re-completing.
+
 ## Dev Seeds
 
 Why and how: [`contracts/db.md`](contracts/db.md) → The dev-seed wipe. Applies to
