@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { eq, inArray } from "drizzle-orm";
 import { verifySession } from "@/lib/auth/session";
 import { getTemplates, getTemplate } from "@/lib/communication/templates";
+import { listRecipientTeams } from "@/lib/communication/service";
 import { listMeetings } from "@/lib/meetings/service";
 import { db } from "@/db";
 import { persons } from "@/db/schema/people";
@@ -38,6 +39,7 @@ export default async function ComposePage({ searchParams }: ComposePageProps) {
     meetingsResult,
     preloadedRecipients,
     churchRows,
+    teams,
   ] = await Promise.all([
     getTemplates(user.churchId),
     templateId ? getTemplate(templateId) : Promise.resolve(undefined),
@@ -54,6 +56,7 @@ export default async function ComposePage({ searchParams }: ComposePageProps) {
           .where(inArray(persons.id, recipientIds))
       : Promise.resolve([]),
     db.select().from(churches).where(eq(churches.id, user.churchId)).limit(1),
+    listRecipientTeams(user.churchId),
   ]);
 
   // Serialize meetings for the client component
@@ -83,6 +86,7 @@ export default async function ComposePage({ searchParams }: ComposePageProps) {
         meetings={meetings}
         initialRecipients={preloadedRecipients}
         churchName={churchName}
+        teams={teams}
       />
     </>
   );

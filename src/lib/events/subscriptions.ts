@@ -25,6 +25,9 @@ import {
   autoCompleteTasksByEvent,
 } from "@/lib/tasks/events";
 
+// Handlers owned by F7 (Communication Hub)
+import { handleTaskCompletedForCommunicationLog } from "@/lib/communication/log";
+
 // Handlers owned by PE (Phase Engine / Plant Intelligence)
 import { handleMaterialEvent } from "@/lib/phase-engine/dirty-handler";
 
@@ -177,6 +180,26 @@ export function registerSubscriptions(bus: EventBusLike): void {
   // is the gate, per recipient, and writes no row for a plant that is not
   // sharing.
   bus.on<PhaseChangedEvent>("phase.changed", handlePhaseChangedForOversight);
+
+  // --------------------------------------------------------------------------
+  // F5 (Task Management) -> F7 (Communication Hub) — the task-driven log entry
+  // --------------------------------------------------------------------------
+
+  // COM-020: completing a task attached to a PERSON is a record that the
+  // planter made contact, so it lands in that person's communication log as an
+  // entry with `status = 'logged'` — never as a sent message. The handler
+  // decides for itself whether the event is about a person; every other
+  // `task.completed` writes nothing.
+  //
+  // This is the SECOND handler on `task.completed` — `handleMaterialEvent`
+  // above marks the plant dirty (PE-010). The bus runs handlers through
+  // `Promise.allSettled`, and this one additionally swallows its own failures,
+  // so a communication log that cannot be written can never cost the phase
+  // engine its dirty mark.
+  bus.on<TaskCompletedEvent>(
+    "task.completed",
+    handleTaskCompletedForCommunicationLog
+  );
 
   // --------------------------------------------------------------------------
   // Future subscriptions (no handlers yet)

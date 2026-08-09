@@ -12,6 +12,10 @@ import {
   getCommunications,
   resolveSubjects,
 } from "@/lib/communication/service";
+import {
+  communicationStatusBadgeClass,
+  communicationStatusLabel,
+} from "@/lib/communication/status-display";
 import { parseCommunicationFilters } from "@/lib/validations/communication";
 import { formatDistanceToNow } from "date-fns";
 
@@ -20,14 +24,6 @@ export const dynamic = "force-dynamic";
 interface HistoryPageProps {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }
-
-const statusColors: Record<string, string> = {
-  sent: "bg-green-100 text-green-700",
-  sending: "bg-blue-100 text-blue-700",
-  draft: "bg-gray-100 text-gray-700",
-  failed: "bg-red-100 text-red-700",
-  scheduled: "bg-yellow-100 text-yellow-700",
-};
 
 const channelLabels: Record<string, string> = {
   email: "Email",
@@ -189,9 +185,11 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
                         <td className="px-4 py-3 text-center">
                           <Badge
                             variant="secondary"
-                            className={statusColors[msg.status] ?? ""}
+                            className={communicationStatusBadgeClass(
+                              msg.status
+                            )}
                           >
-                            {msg.status}
+                            {communicationStatusLabel(msg.status)}
                           </Badge>
                         </td>
                       </tr>

@@ -94,6 +94,111 @@ export const wikiGuideConfig: Record<string, WikiGuideEntry> = {
     ],
   },
 
+  // ── Meetings ─────────────────────────────────────────────────────────
+  // Two entries, because the two pages ask different questions: the list is
+  // "what are these meetings for", the detail page is "how do I run this one".
+  //
+  // The list covers each member of the `meetingTypes` enum
+  // (`src/db/schema/meetings.ts` — vision_meeting, orientation, team_meeting)
+  // plus the framework that spans all three, so no type on the page is
+  // unrepresented in its guide.
+  //
+  // Slugs verified published against the wiki read layer on 2026-08-09 and
+  // pinned in `guide-config.test.ts`; re-verify before changing either list.
+  "/meetings": {
+    label: "Meetings Guide",
+    slugs: [
+      "core-group/vision-meetings/what-is-a-vision-meeting",
+      "frameworks/meeting-objectives",
+      "core-group/building-your-core-group/core-group-meeting-format",
+      "training/launch-team-meeting-objectives",
+    ],
+  },
+  // Ordered to follow the meeting's own life: plan it, build the agenda, pack
+  // the kit, invite, run it, then score it. The last slug is the evaluation
+  // tab's rubric — `meeting_evaluations` stores exactly eight scores
+  // (`src/db/schema/meetings.ts`), which ARE the 8 critical success factors.
+  //
+  // A single wildcard segment, so this also claims `/meetings/new`. That is
+  // deliberate rather than tolerated: `slugs[0]` is the planning article, which
+  // is what somebody scheduling a meeting wants, and a new meeting is created
+  // in `planning` status onto this same page. The deeper tabs
+  // (`/meetings/*/attendance`, `…/evaluation`, …) have one more segment and are
+  // NOT claimed — `matchPattern` compares segment counts — so they can take
+  // their own entries later without fighting this one.
+  "/meetings/*": {
+    label: "Meeting Guide",
+    slugs: [
+      "core-group/vision-meetings/planning-your-vision-meeting",
+      "core-group/vision-meetings/vision-meeting-agenda-deep-dive",
+      "core-group/vision-meetings/the-vision-meeting-kit",
+      "core-group/vision-meetings/invitation-strategies",
+      "core-group/vision-meetings/running-the-meeting",
+      "core-group/vision-meetings/8-critical-success-factors-for-vision-meetings",
+    ],
+  },
+
+  // ── Ministry teams ───────────────────────────────────────────────────
+  // The dashboard is "which teams does a plant need, and who staffs them" —
+  // it renders the team list beside a staffing summary of open roles.
+  "/teams": {
+    label: "Ministry Teams Guide",
+    slugs: [
+      "launch-team/leadership/key-leadership-roles-overview",
+      "launch-team/launch-date/transitioning-to-launch-team",
+      "training/training-programs-overview",
+    ],
+  },
+  // One entry per tab of a single team (`components/ministry-teams/team-tabs.tsx`
+  // — Members & Roles, Responsibilities, Training, Meetings), opening on the
+  // roles overview because that is the tab the route lands on.
+  //
+  // The wildcard also claims the two sibling pages, `/teams/health` and
+  // `/teams/org-chart`. Both ask the same question this list answers — who
+  // fills which role — so they inherit it rather than showing nothing.
+  "/teams/*": {
+    label: "Team Guide",
+    slugs: [
+      "launch-team/leadership/key-leadership-roles-overview",
+      "training/ministry-specific-training",
+      "training/launch-team-meeting-objectives",
+    ],
+  },
+
+  // ── Onboarding: the journey step (OB-014) ────────────────────────────
+  // DORMANT UNTIL THE STEP IS IN THE URL. This entry matches nothing today, and
+  // that is deliberate.
+  //
+  // The onboarding flow has no route of its own — it renders AS the dashboard
+  // for a planter who has not finished it (`app/(dashboard)/dashboard/page.tsx`
+  // → `shouldShowOnboarding`), and which step is showing is client state, not a
+  // URL (`components/onboarding/onboarding-flow.tsx`). So the only pattern that
+  // could reach the journey step today is the bare dashboard path — and that
+  // path is also every other onboarding step and the finished dashboard.
+  //
+  // Ruled on PR #367 (2026-08-09), option C: the guide is scoped to the one
+  // step that raises the question. No guide on the finished dashboard, and none
+  // on steps 1/2/4. A bare `/dashboard` entry cannot express that, so there is
+  // none; this entry waits for the flow to sync its step into the URL (#373),
+  // after which `/dashboard?step=journey` starts matching with no change here —
+  // `patternSpecificity` already scores a query pattern above a bare path.
+  //
+  // The journey step asks two things — "which stage of the journey are you in"
+  // and "your target launch date, or no date yet"
+  // (`components/onboarding/upcoming-step.tsx`) — and the list answers them in
+  // that order. `slugs[0]` is the phase overview, the one article that lays out
+  // phases 0-6 and tells a planter to find their own; the launch-date pair
+  // answers the second question honestly, by readiness rather than by calendar.
+  "/dashboard?step=journey": {
+    label: "Your Journey Guide",
+    slugs: [
+      "getting-started/welcome-to-the-launch-playbook",
+      "getting-started/launch-process-goals",
+      "launch-team/launch-date/setting-your-launch-date",
+      "launch-team/launch-date/variables-that-drive-your-launch-date",
+    ],
+  },
+
   // ── Extend: add more routes below ────────────────────────────────────
   // "/vision-meetings/*": {
   //   label: "Vision Meetings Guide",
