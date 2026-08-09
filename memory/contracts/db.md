@@ -85,6 +85,25 @@ tenant scope; `created_at`/`updated_at` default now.
   - Batch the audit row with the write it audits (`associationEventStatement` builds the INSERT
     without running it). A second round trip is the half-applied shape the atomicity invariant
     warns about.
+- **`communications.status = 'logged'` is an entry the app RECORDED, not a message it sent**
+  (COM-020, #83). A sent message walks `sending → sent | failed`; a `logged` entry is born
+  terminal, has no delivery behind it, and is the FRD's "[Log Only]" branch of the follow-up
+  workflow. Today the only writer is `src/lib/communication/log.ts`, from the `task.completed`
+  event: completing a task whose `related_type = 'person'` writes one into that person's
+  communication log (COM-007's join of `communications` × `communication_recipients`). Its
+  `sent_at` is **when the contact happened** — the task's `completed_at` — because that is what
+  the person log and the history table already render.
+  - The status list is a TS union over a plain `varchar(20)` with no CHECK, so adding a value
+    took no migration. Anything rendering a status must therefore keep its `?? status` fallback.
+  - **`communication_recipients.external_id` is the Resend message id EXCEPT when it is
+    `task:<taskId>`** — the namespaced back-reference that makes the log entry idempotent under a
+    replayed `task.completed`. Resend ids are `re_…`, so the two cannot collide, and the webhook
+    only ever looks up an exact id it was handed. That pre-read is a REPLAY guard, not a
+    concurrency one (`../invariants.md` → Atomicity): there is no unique index behind it, and
+    what stands in for one is that a task only becomes complete once.
+  - The handler swallows its own failures. `task.completed` also drives phase-engine
+    dirty-marking (PE-010), and a communication log entry is never worth costing a plant its
+    dirty mark.
 - **Transactions:** `db.transaction()` throws on neon-http — see `../invariants.md` →
   Transactions/Atomicity before writing any multi-statement mutation.
 
