@@ -3,7 +3,11 @@ import { test } from "node:test";
 
 import { NextRequest } from "next/server";
 
-import { isCrawlerPreviewRequest, PATHNAME_HEADER } from "./lib/crawler";
+import {
+  CRAWLER_PREVIEWABLE_ROUTE_PREFIXES,
+  isCrawlerPreviewRequest,
+  PATHNAME_HEADER,
+} from "./lib/crawler";
 import { proxy } from "./proxy";
 
 // ============================================================================
@@ -109,7 +113,7 @@ function loginRedirect(response: Response): string | null {
 }
 
 test("an unauthenticated crawler is let through to a protected route", () => {
-  for (const path of ["/dashboard", "/wiki/getting-started", "/oversight"]) {
+  for (const path of ["/wiki", "/wiki/getting-started"]) {
     const response = proxy(get(path, { "user-agent": GOOGLEBOT }));
     assert.equal(
       loginRedirect(response),
@@ -126,6 +130,57 @@ test("an unauthenticated browser is still sent to /login", () => {
     `${BASE}/login?redirect=%2Fdashboard`,
     "a session-less browser reached the dashboard"
   );
+});
+
+test("/dashboard bounces a crawler exactly like a browser (#297)", () => {
+  // The whole point of dropping it from the previewable list. `/dashboard` calls
+  // `verifySession()`, so letting a crawler past the redirect handed it a shell
+  // around a page that then threw — a 500 for anything with a crawler token in
+  // its UA. Now both get the same clean 307, and the two must be INDISTINGUISHABLE:
+  // asserting the redirect alone would still pass if one of them changed shape.
+  const WHATSAPP_FETCHER = "WhatsApp/2.24.15.78 A";
+
+  const browser = proxy(get("/dashboard", { "user-agent": CHROME }));
+  for (const ua of [GOOGLEBOT, WHATSAPP_FETCHER]) {
+    const crawler = proxy(get("/dashboard", { "user-agent": ua }));
+    assert.equal(crawler.status, browser.status, ua);
+    assert.equal(
+      loginRedirect(crawler),
+      `${BASE}/login?redirect=%2Fdashboard`,
+      `${ua} was let through to /dashboard, where the page 500s with no session`
+    );
+  }
+
+  // And the sub-routes under it, which are no more session-less than the index.
+  assert.equal(
+    loginRedirect(
+      proxy(get("/dashboard/overview", { "user-agent": GOOGLEBOT }))
+    ),
+    `${BASE}/login?redirect=%2Fdashboard%2Foverview`
+  );
+});
+
+test("/oversight bounces a crawler exactly like a browser (ruled 2026-08-09)", () => {
+  // The second prefix to leave the previewable list, for the second half of what
+  // that list means: `/oversight` DID render session-less, but every page under
+  // it reads the session and redirects to /login, so an admitted crawler reached
+  // the login page and no card was ever produced. Unlike `/dashboard` this never
+  // 500'd — which is why it is a narrowing, not a bug fix. What must hold now is
+  // that the proxy bounces it at the edge, indistinguishably from a browser.
+  const WHATSAPP_FETCHER = "WhatsApp/2.24.15.78 A";
+
+  for (const path of ["/oversight", "/oversight/health", "/oversight/plants"]) {
+    const browser = proxy(get(path, { "user-agent": CHROME }));
+    for (const ua of [GOOGLEBOT, WHATSAPP_FETCHER]) {
+      const crawler = proxy(get(path, { "user-agent": ua }));
+      assert.equal(crawler.status, browser.status, `${path} / ${ua}`);
+      assert.equal(
+        loginRedirect(crawler),
+        `${BASE}/login?redirect=${encodeURIComponent(path)}`,
+        `${ua} was let through to ${path}, which redirects to /login anyway`
+      );
+    }
+  }
 });
 
 test("forging x-is-crawler buys nothing — with it or without it, same result", () => {
@@ -189,17 +244,36 @@ test("a forged x-pathname is overwritten with the real path, everywhere", () => 
   // shell on a route whose page then throws.
   const forged = { [PATHNAME_HEADER]: "/wiki/getting-started" };
 
-  for (const [path, headers] of [
-    ["/people", { "user-agent": GOOGLEBOT, ...forged }],
-    ["/settings", { "user-agent": CHROME, ...forged }],
-    ["/notifications", { "user-agent": GOOGLEBOT, ...forged }],
-    ["/dashboard", { "user-agent": GOOGLEBOT, ...forged }],
-  ] as Array<[string, Record<string, string>]>) {
-    const stamped = stampedPathname(proxy(get(path, headers)));
+  // `previewable` is the verdict the REAL path earns on its own merit — never
+  // the one the forged header claims. `/dashboard` is the case #297 changed: the
+  // forged claim used to be superfluous there because the real path was
+  // previewable too; now it is the exact lie that would buy a shell around a
+  // page that throws.
+  for (const [path, headers, previewable] of [
+    ["/people", { "user-agent": GOOGLEBOT, ...forged }, false],
+    ["/settings", { "user-agent": CHROME, ...forged }, false],
+    ["/notifications", { "user-agent": GOOGLEBOT, ...forged }, false],
+    ["/dashboard", { "user-agent": GOOGLEBOT, ...forged }, false],
+    ["/oversight", { "user-agent": GOOGLEBOT, ...forged }, false],
+    // The positive control: a crawler whose real path IS previewable still is.
+    ["/wiki/church-planting", { "user-agent": GOOGLEBOT, ...forged }, true],
+  ] as Array<[string, Record<string, string>, boolean]>) {
+    const response = proxy(get(path, headers));
+    const stamped = stampedPathname(response);
+
+    if (loginRedirect(response)) {
+      // `/dashboard` since #297: the proxy bounces on the REAL path, so the
+      // forged claim never reaches a layout to be believed. Nothing is stamped
+      // because nothing continues into the app.
+      assert.equal(stamped, null, `${path} stamped a pathname on a redirect`);
+      assert.equal(previewable, false, path);
+      continue;
+    }
+
     assert.equal(stamped, path, `a forged x-pathname survived on ${path}`);
     assert.equal(
       isCrawlerPreviewRequest(headers["user-agent"], stamped),
-      path === "/dashboard",
+      previewable,
       `the forged x-pathname changed the layout's verdict for ${path}`
     );
   }
@@ -231,9 +305,22 @@ test("a crawler on a route the proxy does not admit gets no preview downstream",
 
 test("every previewable route is protected — a browser on one still gets /login", () => {
   // The other half of the invariant in `crawler.ts`: the crawler branch is the
-  // ONLY door into a previewable route without a session. If a prefix ever
-  // dropped out of the proxy's protected list, this is what would catch it.
-  for (const path of ["/dashboard", "/wiki/getting-started", "/oversight"]) {
+  // ONLY door into a previewable route without a session. Derived from the list
+  // itself rather than retyped, so a prefix added there without being protected
+  // fails HERE instead of shipping. `/dashboard` (#297) and `/oversight` (ruled
+  // 2026-08-09) are retyped below because they are protected but NOT previewable
+  // — and because the proxy's protected list was once a bare spread of the
+  // previewable one, where dropping a prefix from that list would have
+  // unprotected the route as a side effect. These two entries are what pins that
+  // it does not.
+  for (const path of [
+    ...CRAWLER_PREVIEWABLE_ROUTE_PREFIXES,
+    ...CRAWLER_PREVIEWABLE_ROUTE_PREFIXES.map((p) => `${p}/deep/child`),
+    "/dashboard",
+    "/dashboard/deep/child",
+    "/oversight",
+    "/oversight/deep/child",
+  ]) {
     assert.equal(
       loginRedirect(proxy(get(path, { "user-agent": CHROME }))),
       `${BASE}/login?redirect=${encodeURIComponent(path)}`,
