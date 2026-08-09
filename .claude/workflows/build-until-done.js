@@ -940,29 +940,56 @@ Do NOT remove any worktree or branch yourself; a blocked track's tree is the evi
 }
 
 /**
- * Cut the track's branch and worktree before any workstream runs.
+ * Cut — or resume — the track's branch and worktree before any workstream runs.
  *
  * Deterministic on purpose. Every workstream in every stage branches from the
  * TRACK branch — that is what makes stage N+1 start from stage N's commits
  * instead of from `main` — so the track branch has to exist before stage 0, not
  * as a side effect of whichever agent happened to go first.
+ *
+ * Two paths, because a held or blocked track KEEPS its branch and worktree (see
+ * the exit hygiene in dod.md) and re-running it is the whole point of keeping
+ * them:
+ *
+ *   FRESH  — no such branch. Cut from `BASE` and assert head === base, because
+ *            a newly cut branch IS its base commit and anything else means it
+ *            came from something older.
+ *   RESUME — the branch exists and carries prior work, so head can NEVER equal
+ *            base once main has moved. Merging `BASE` in and asserting that
+ *            `BASE` is an ANCESTOR of HEAD is the same guarantee restated for a
+ *            branch with commits on it: nothing is ever built or validated on a
+ *            base behind origin/main. Asserting equality here instead would make
+ *            preserved work permanently unresumable — the guard would reject
+ *            exactly the artifact the hand-over exists to preserve.
+ *
+ * A conflicting update stops the track cleanly with the conflicted paths named.
+ * It is never auto-resolved and the preserved work is never discarded: a
+ * conflict is two intents disagreeing, and picking one is a human's call.
  */
 async function prepareTrack(track, branch, wt) {
   const ready = await agent(
-    `Prepare an isolated build tree. Run exactly this, in this order, and nothing that writes code:
+    `Prepare an isolated build tree. This is either a FRESH cut or a RESUME of preserved work — establish which FIRST. Run exactly this, in this order, and nothing that writes code:
 
 1. \`git fetch origin --prune\` — FIRST, always. \`${BASE}\` is a remote-tracking ref, and an unfetched one is whatever this checkout last saw.
-2. \`git worktree add -b ${branch} ${wt} ${BASE}\`
-   Cut from \`${BASE}\`, never from the local branch of the same name. The local ref is whatever the human's checkout last pulled; the remote tip is what this track's PR will merge into. A track cut from a stale local \`main\` builds against files that have already changed and lands on \`mergeStateStatus: BEHIND\`.
-   If ${wt} already exists, skip the add — but still report the shas below.
+2. \`git rev-parse --verify --quiet refs/heads/${branch}\` — does this track's branch already exist?
+
+   **It does NOT → FRESH.** \`git worktree add -b ${branch} ${wt} ${BASE}\`
+   Cut from \`${BASE}\`, never from the local branch of the same name. The local ref is whatever the human's checkout last pulled; the remote tip is what this track's PR will merge into. A track cut from a stale local \`main\` builds against files that have already changed and lands on \`mergeStateStatus: BEHIND\`. Report \`resumed: false\`.
+
+   **It DOES → RESUME.** A held or blocked track kept this branch and worktree on purpose — they hold the only copy of that work. Do NOT re-cut it, do NOT reset it, do NOT delete anything.
+     a. If ${wt} is gone but the branch is not, re-attach it: \`git worktree add ${wt} ${branch}\` (no \`-b\`).
+     b. Bring it up to date instead of re-cutting it: \`git -C ${wt} merge --no-edit ${BASE}\`. This fast-forwards when the branch has no commits of its own.
+     c. If that merge stops on conflicts, do NOT resolve them. Capture \`git -C ${wt} diff --name-only --diff-filter=U\` FIRST, then \`git -C ${wt} merge --abort\`, and return \`ready: false\`, \`conflicted: true\` and every captured path in \`conflictedFiles\`. The abort leaves the preserved work exactly as it was, which is the point.
+   Report \`resumed: true\`.
 3. \`scripts/worktree-env.sh ${wt}\` — give it a test env. It is idempotent; read its header for what it does and why. A fresh worktree has no \`.env.local\`, so \`pnpm test\` fails every DB suite until you run it — do not improvise your own env file.
 
 Then report, VERBATIM, what each of these printed:
   - \`git -C ${wt} rev-parse --abbrev-ref HEAD\` → \`branch\`
   - \`git -C ${wt} rev-parse HEAD\` → \`headSha\`
   - \`git rev-parse ${BASE}\` → \`baseSha\`
+  - \`git -C ${wt} merge-base --is-ancestor ${BASE} HEAD && echo yes || echo no\` → \`baseIsAncestor\` (\`yes\` ⇒ true)
 
-The loop compares headSha against baseSha and refuses the track if they differ, so transcribe what you saw rather than what you expect. (An existing ${wt} that has already been committed to is the one legitimate way they differ — say so in \`note\` and the loop will tell you.) Return strictly the schema.`,
+The loop checks these rather than trusting you: a FRESH cut must have headSha == baseSha, and a RESUME must have baseIsAncestor true — \`${BASE}\` contained in this branch's history is what "not building on a stale base" means once the branch carries commits of its own. Transcribe what you saw rather than what you expect. Return strictly the schema.`,
     {
       label: `prep:${track.id}`,
       phase: "Build",
@@ -977,6 +1004,11 @@ The loop compares headSha against baseSha and refuses the track if they differ, 
         properties: {
           ready: { type: "boolean" },
           branch: { type: "string" },
+          resumed: {
+            type: "boolean",
+            description:
+              "true if the branch already existed and was updated rather than cut",
+          },
           headSha: {
             type: "string",
             description: "`git -C <wt> rev-parse HEAD`, verbatim",
@@ -985,27 +1017,73 @@ The loop compares headSha against baseSha and refuses the track if they differ, 
             type: "string",
             description: "`git rev-parse <base>`, verbatim",
           },
+          baseIsAncestor: {
+            type: "boolean",
+            description:
+              "`git -C <wt> merge-base --is-ancestor <base> HEAD` succeeded",
+          },
+          conflicted: {
+            type: "boolean",
+            description:
+              "the update merge stopped on conflicts and was aborted",
+          },
+          conflictedFiles: {
+            type: "array",
+            items: { type: "string" },
+            description: "`git diff --name-only --diff-filter=U`, verbatim",
+          },
           note: { type: "string" },
         },
       },
     }
   );
-  if (ready?.ready !== true || ready.branch !== branch)
-    return { ok: false, reason: `the worktree ${wt} is not on ${branch}` };
 
-  // The anchor for "cut from the remote tip": two shas the agent transcribed,
-  // compared here rather than trusted there. A fresh track branch IS the base
-  // commit, so anything else means it was cut from something older.
-  const head = String(ready.headSha || "").trim();
-  const base = String(ready.baseSha || "").trim();
-  if (!head || !base || head !== base)
+  // Checked before `ready`, because a conflicted resume reports ready:false and
+  // "the worktree is not on the branch" would describe it wrongly — and would
+  // send the human looking for a broken tree instead of a decision.
+  if (ready?.conflicted === true)
     return {
       ok: false,
       reason:
-        `${branch} was cut from ${head || "(no sha reported)"} but ${BASE} is at ${base || "(no sha reported)"} — ` +
+        `${branch} carries preserved work and ${BASE} does not merge into it cleanly — conflicts in ` +
+        `${(ready.conflictedFiles || []).join(", ") || "(no files reported)"}. The merge was ABORTED, so the branch and ${wt} ` +
+        `still hold that work untouched; nothing was discarded and nothing was auto-resolved. ` +
+        `Resolve it by hand with \`.claude/skills/resolving-merge-conflicts/SKILL.md\` in ${wt}, then re-run this track.`,
+    };
+
+  if (ready?.ready !== true || ready.branch !== branch)
+    return { ok: false, reason: `the worktree ${wt} is not on ${branch}` };
+
+  // Both anchors are the same invariant — never build on a base behind
+  // origin/main — measured the only way each path allows.
+  const head = String(ready.headSha || "").trim();
+  const base = String(ready.baseSha || "").trim();
+  if (!head || !base)
+    return {
+      ok: false,
+      reason:
+        `prep did not report both shas (${branch} at ${head || "(none)"}, ${BASE} at ${base || "(none)"}) — ` +
+        `an unverifiable base is treated as a stale one.`,
+    };
+
+  if (ready.resumed === true) {
+    if (ready.baseIsAncestor !== true)
+      return {
+        ok: false,
+        reason:
+          `${branch} was resumed at ${head} but ${BASE} (${base}) is NOT an ancestor of it — the update did not take, ` +
+          `so this branch is missing commits that are already on main and would be built and validated against files that have changed. ` +
+          `Merge ${BASE} into ${branch} in ${wt}, then re-run this track. Do NOT delete the branch or the worktree: they hold the preserved work.`,
+      };
+  } else if (head !== base)
+    return {
+      ok: false,
+      reason:
+        `${branch} was cut from ${head} but ${BASE} is at ${base} — ` +
         `a stale base builds against files that have already changed and lands the PR BEHIND main. ` +
         `Fetch and re-cut the branch, or rebase it onto ${BASE}.`,
     };
+
   return { ok: true };
 }
 

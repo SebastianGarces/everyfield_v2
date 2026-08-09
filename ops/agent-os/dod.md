@@ -320,3 +320,15 @@ human knew to look).
 - **Held / blocked / delivery-failed** — the trees stay, and the exit comment **names every one**:
   path, branch, and what it holds. Those trees are the only re-runnable copy of the work, so they are
   handed over explicitly rather than left for someone to discover.
+
+**"Re-runnable" is a guarantee, not a hope.** Track prep takes one of two paths. A branch that does
+not exist yet is **cut** from `origin/main` and must equal it — a fresh branch *is* its base commit.
+A branch that already exists is **resumed**: prep fetches, merges `origin/main` into it
+(fast-forwarding when it can), and asserts `origin/main` is an **ancestor** of the branch HEAD. That
+is the same invariant as the fresh-cut check — never build or validate on a base behind
+`origin/main` — stated the only way it can be for a branch that carries prior commits. Asserting
+equality on the resume path would reject every preserved tree the moment main moved, which is to say
+it would reject exactly the artifact this section exists to preserve. If the update **conflicts**, the
+merge is aborted and the track stops cleanly with the conflicted paths named: nothing is
+auto-resolved, nothing is deleted, and the resolution is a human's with
+`.claude/skills/resolving-merge-conflicts/SKILL.md`.

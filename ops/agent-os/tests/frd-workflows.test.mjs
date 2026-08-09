@@ -1455,6 +1455,128 @@ test("a track cut from a stale base is blocked before a workstream runs", async 
 });
 
 // ---------------------------------------------------------------------------
+// build-until-done: resuming a preserved branch
+//
+// The fresh-cut assertion above and the held/blocked worktree hand-over pull in
+// opposite directions: a preserved branch carries prior commits, so its HEAD can
+// never equal `origin/main` once main moves, and re-running it would be refused
+// forever — the guard rejecting the exact artifact the hand-over preserves. So
+// an existing branch is UPDATED rather than re-cut, and the assertion becomes
+// ancestry, which is the same "never build on a stale base" invariant stated for
+// a branch that has commits of its own.
+// ---------------------------------------------------------------------------
+
+/** A prep reply for a branch that already existed and was brought up to date. */
+const resumed = (prompt, over = {}) => ({
+  ready: true,
+  branch: prompt.match(/refs\/heads\/([^`\s]+)/)?.[1] || "feature/x",
+  resumed: true,
+  // Carries the blocked attempt's commits, so it is NOT the base sha — the
+  // whole reason equality cannot be the test here.
+  headSha: "abc1234000000000000000000000000000000dad",
+  baseSha: BASE_SHA,
+  baseIsAncestor: true,
+  ...over,
+});
+
+test("a preserved branch is updated from origin/main, not re-cut", async () => {
+  const { calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    replyShip(passing([]))
+  );
+  const prompt = prepPrompt(calls);
+  assert.match(
+    prompt,
+    /git rev-parse --verify --quiet refs\/heads\//,
+    "prep must decide fresh-vs-resume before it touches anything"
+  );
+  assert.match(
+    prompt,
+    /git -C \S+ merge --no-edit origin\/main/,
+    "a branch holding preserved work is brought up to date, never re-cut"
+  );
+  assert.match(
+    prompt,
+    /merge-base --is-ancestor origin\/main HEAD/,
+    "ancestry is the invariant a branch with its own commits can satisfy"
+  );
+});
+
+test("a resumed branch behind main passes on ancestry, not on equality", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    (prompt, opts) =>
+      opts.label?.startsWith("prep:")
+        ? resumed(prompt)
+        : replyShip(passing([]))(prompt, opts)
+  );
+  assert.ok(
+    calls.some((c) => c.label?.startsWith("impl:")),
+    "preserved work that has taken main's commits is resumable — that is what keeping the tree was for"
+  );
+  assert.equal(result.blocked.length, 0);
+  assert.equal(result.shipped.length, 1);
+});
+
+test("a resumed branch that did not take main's commits is still refused", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    (prompt, opts) =>
+      opts.label?.startsWith("prep:")
+        ? resumed(prompt, { baseIsAncestor: false })
+        : replyShip(passing([]))(prompt, opts)
+  );
+  assert.ok(
+    !calls.some((c) => c.label?.startsWith("impl:")),
+    "loosening the check for resumes must not loosen the invariant"
+  );
+  assert.equal(result.blocked.length, 1);
+  assert.match(result.blocked[0].reason, /is NOT an ancestor of it/);
+  assert.match(
+    result.blocked[0].reason,
+    /Do NOT delete the branch or the worktree/,
+    "a refusal must not cost the human the preserved work"
+  );
+});
+
+test("a conflicting update stops the track without destroying the branch", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    (prompt, opts) =>
+      opts.label?.startsWith("prep:")
+        ? {
+            ...resumed(prompt),
+            ready: false,
+            conflicted: true,
+            conflictedFiles: ["src/alpha.ts", "src/db/schema.ts"],
+          }
+        : replyShip(passing([]))(prompt, opts)
+  );
+  assert.ok(
+    !calls.some((c) => c.label?.startsWith("impl:")),
+    "never proceed on the stale base"
+  );
+  assert.equal(result.blocked.length, 1);
+  const { reason } = result.blocked[0];
+  assert.match(reason, /src\/alpha\.ts, src\/db\/schema\.ts/, "name the files");
+  assert.match(
+    reason,
+    /ABORTED/,
+    "the preserved work is left exactly as it was"
+  );
+  assert.match(
+    reason,
+    /resolving-merge-conflicts\/SKILL\.md/,
+    "a conflict is two intents disagreeing — a human picks, and gets told where the help is"
+  );
+  assert.doesNotMatch(
+    reason,
+    /is not on feature\/alpha/,
+    "a conflict is a decision to make, not a broken worktree to go hunt"
+  );
+});
+
+// ---------------------------------------------------------------------------
 // build-until-done: push BEFORE the integration verifier
 //
 // G3 drives the branch's preview deployment, and the preview is built from
