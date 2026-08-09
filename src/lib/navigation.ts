@@ -62,6 +62,20 @@ export function resolveActiveNavHref(
   return active;
 }
 
+/**
+ * Navigation items shown to church roles (planter, coach, team member).
+ *
+ * Every LINKED item here needs a page under `src/app/(dashboard)/` —
+ * `navigation.test.ts` reads the App Router tree and fails when an href arrives
+ * before its `page.tsx` (#272), the same guard #260 wrote for the oversight
+ * lists.
+ *
+ * This list is the ONE place the guard bends: an unbuilt feature may stay
+ * visible as an `isDisabled: true` row, which `nav-main.tsx` renders inert with
+ * a COMING SOON label, and the guard passes over it. The oversight lists get no
+ * such row — the item is removed until its page lands, because an oversight
+ * admin has no other navigation to fall back on.
+ */
 export const mainNavItems: NavItem[] = [
   {
     title: "Dashboard",
