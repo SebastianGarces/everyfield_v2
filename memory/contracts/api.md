@@ -7,9 +7,20 @@ from a quick read:
 
 ## Non-obvious route behaviors
 
-- **`POST /api/phase-engine/assess`** (Bearer `CRON_SECRET`): assessments run ONLY here or via
-  the manual trigger — never as a side effect of feature code. Batched (`MAX_BATCH=25`), the
-  rest rolls over. Fails closed with no secret.
+- **`GET /api/phase-engine/assess`** (Bearer `CRON_SECRET`, twice daily at 07:00/19:00 UTC via
+  GitHub Actions — Hobby caps Vercel crons at daily, and `vercel.json` now declares NO crons at
+  all, so re-adding one gives this route two drivers racing the same TPM window): assessments
+  run ONLY here or via
+  the manual trigger — never as a side effect of feature code. Batched (`MAX_BATCH=10`, cut from
+  25 in #36 because 25 plants cannot be paced inside the 300s function), the rest rolls over.
+  Selection is **oldest-assessed-first, never-assessed ahead of everything** — the cap drops the
+  tail, so without that order the same tail is dropped every tick and starves (#36).
+  Fails closed with no secret. A plant can come back **`deferred`** (`rate_limit` |
+  `time_budget`) — that is NOT a failure and NOT a broken judge: the provider throttled us, or
+  the run's 270s deadline arrived, so the plant keeps its last good snapshot, stays dirty and is
+  re-selected next run. `deferred` is logged on `console.warn`, `failed` on `console.error`, and
+  the two are counted separately in the summary (`deferred`/`rateLimited` vs `failed`). Pacing is
+  header-derived (`x-ratelimit-*`), not a sleep; `PHASE_ENGINE_TPM_LIMIT` only bootstraps it.
 - **`GET /api/notifications/dispatch`** (Bearer `CRON_SECRET`, every 15 min via GitHub Actions —
   Hobby caps Vercel crons at daily): claims due rows atomically; at-most-once per
   `(notification_id, channel)` unique index. Also carries the DAILY oversight digest sweep
