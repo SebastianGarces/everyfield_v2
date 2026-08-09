@@ -91,14 +91,19 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
       <div className="flex h-full flex-col">
         {/* Header */}
         <div className="bg-card space-y-4 p-6 pb-4 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
+          {/*
+            The title and the two actions sit on one line once there is room
+            for them. Below `sm` they stack instead of competing: side by side
+            at that width the heading wraps mid-phrase and the buttons crush.
+          */}
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
               <h1 className="text-3xl font-bold tracking-tight">Tasks</h1>
-              <p className="text-muted-foreground">
+              <p className="text-muted-foreground text-pretty">
                 Manage your tasks and follow-ups
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
               <TaskQuickAdd />
               <Button asChild className="cursor-pointer">
                 <Link href="/tasks/new">
@@ -109,24 +114,45 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
             </div>
           </div>
 
-          {/* Summary badges */}
-          <div className="flex items-center gap-2">
-            {counts.overdue > 0 && (
-              <Badge variant="destructive" className="text-xs">
-                {counts.overdue} overdue
+          {/*
+            Summary badges.
+
+            These count TASKS only — `getTaskCounts` excludes subtasks, so the
+            badges and the "Showing N of M" footer under the list describe the
+            same population. Checklist progress is real work, so it is still
+            reported, but on its own quiet line where two adjacent numbers
+            cannot be misread as one.
+          */}
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              {counts.overdue > 0 && (
+                <Badge variant="destructive" className="text-xs">
+                  {counts.overdue} overdue
+                </Badge>
+              )}
+              <Badge variant="outline" className="text-xs">
+                {counts.notStarted + counts.inProgress + counts.blocked} active
               </Badge>
-            )}
-            <Badge variant="outline" className="text-xs">
-              {counts.notStarted + counts.inProgress + counts.blocked} active
-            </Badge>
-            {counts.blocked > 0 && (
-              <Badge variant="outline" className="text-xs text-red-600">
-                {counts.blocked} blocked
+              {counts.blocked > 0 && (
+                <Badge variant="outline" className="text-xs text-red-600">
+                  {counts.blocked} blocked
+                </Badge>
+              )}
+              <Badge variant="outline" className="text-xs text-green-600">
+                {counts.complete} completed
               </Badge>
+            </div>
+
+            {counts.checklistTotal > 0 && (
+              <p
+                className="text-muted-foreground text-xs"
+                data-testid="checklist-summary"
+              >
+                Checklists: {counts.checklistComplete} of{" "}
+                {counts.checklistTotal}{" "}
+                {counts.checklistTotal === 1 ? "item" : "items"} done
+              </p>
             )}
-            <Badge variant="outline" className="text-xs text-green-600">
-              {counts.complete} completed
-            </Badge>
           </div>
 
           {/* Filters */}
