@@ -5,13 +5,13 @@ import { test } from "node:test";
 
 import {
   ACCOUNT_NOT_INVITABLE_MESSAGE,
-  ALREADY_OURS_MESSAGE,
-  SLOT_TAKEN_MESSAGE,
   bindOpenInvitationTargetQuery,
   inviteeAccountTarget,
   isInvitationTargetKind,
   normalizeInviteeEmail,
+  resolveInvitationForResolvedTarget,
   resolveInvitationRequest,
+  slotRefusalMessage,
   type InvitationActor,
 } from "./core";
 import {
@@ -121,6 +121,11 @@ const SC_ADMIN = actor({
 });
 const NET_ADMIN = actor({ role: "network_admin", sendingNetworkId: NETWORK });
 
+/** A sending church that is NOT the one `SC_ADMIN` speaks for. */
+const OTHER_SENDING_CHURCH = "66666666-6666-4666-8666-666666666666";
+/** The stand-in for "the invitation was created" in the refusal enumeration. */
+const SUCCESS = "created";
+
 // ----------------------------------------------------------------------------
 // 1. Ruling: no expiry field
 // ----------------------------------------------------------------------------
@@ -188,16 +193,142 @@ test("the occupied-slot refusal is inside createInvitationAs, not the form", () 
   assert.match(CREATE_FORM, /state\.error/);
 });
 
-test("the two refusals say different things", () => {
-  // "already yours" and "belongs to somebody else" are different facts and lead
-  // to different next actions (nothing to do vs. ask them to leave that org
-  // first, #277/#278). They must not read alike — the same rule
-  // `lostClaimReason` follows for accept-time refusals.
-  assert.notEqual(SLOT_TAKEN_MESSAGE, ALREADY_OURS_MESSAGE);
-  for (const message of [SLOT_TAKEN_MESSAGE, ALREADY_OURS_MESSAGE]) {
-    assert.ok(message.length > 20, message);
-    assert.doesNotMatch(message, /error|failed|invalid/i);
+test("every slot refusal is the SAME sentence — ruled 2026-08-09", () => {
+  // RULING 2 on #304. Until this ruling the slot check answered "that plant
+  // belongs to another org" and "that plant is already yours" separately, and
+  // `resolveInvitationTarget` answered "we cannot invite that account". An
+  // authenticated admin could therefore type any address and read back which of
+  // those was true of the stranger behind it — an account/association
+  // enumeration oracle costing one form submission per probe.
+  //
+  // The domain of the verdict is three values and this enumerates all of them,
+  // so the collapse is proven rather than asserted about one branch.
+  assert.equal(slotRefusalMessage(null), null, "a free slot is not a refusal");
+  for (const held of ["ours", "other"] as const) {
+    assert.equal(slotRefusalMessage(held), ACCOUNT_NOT_INVITABLE_MESSAGE, held);
   }
+
+  // …and it is the very message the ACCOUNT lookup already refused with, so
+  // "we cannot invite that account" and "that plant's slot is taken" are one
+  // outcome from outside: the two checks are the two halves of the oracle, and
+  // collapsing only one of them would have collapsed nothing.
+  assert.deepEqual(
+    inviteeAccountTarget({
+      role: "coach",
+      churchId: null,
+      sendingChurchId: null,
+    }),
+    { ok: false, error: slotRefusalMessage("other") }
+  );
+});
+
+test("no second refusal message survives anywhere in the invitation logic", () => {
+  // The constants the ruling retired. Kept as a source assertion because the
+  // failure mode is a well-meaning re-introduction ("the admin can't tell
+  // what's wrong"), and a deleted export is invisible to a behavioural test.
+  assert.doesNotMatch(CORE_CODE, /SLOT_TAKEN_MESSAGE|ALREADY_OURS_MESSAGE/);
+  assert.doesNotMatch(CORE_CODE, /already belongs to a sending church/);
+  assert.doesNotMatch(CORE_CODE, /already part of your organization/);
+
+  // `assertTargetSlotFree` has no message of its own: it asks
+  // `slotRefusalMessage` and throws whatever it gets.
+  const guard = CORE_CODE.slice(
+    CORE_CODE.indexOf("export async function assertTargetSlotFree"),
+    CORE_CODE.indexOf("export function slotRefusalMessage")
+  );
+  assert.match(guard, /const refusal = slotRefusalMessage\(held\)/);
+  assert.match(guard, /throw new InvitationError\(refusal\)/);
+  assert.doesNotMatch(guard, /"/, "no string literal is composed in the guard");
+});
+
+test("EVERY post-resolution refusal is the one message, for every account", () => {
+  // The regression this file did not have. `assertTargetSlotFree` was collapsed
+  // (above), but `createInvitationAs` re-runs the pure authority rules on the
+  // RESOLVED target, and that second call had a sentence of its own: a
+  // `sending_church_admin` who probed an address belonging to another
+  // sending-church admin read back "A sending church can only invite church
+  // plants" — a THIRD outcome, which is the oracle wearing a different hat.
+  //
+  // So the property is asserted over the whole email→verdict pipeline and over
+  // the whole account domain, not over one branch: whatever the address turns
+  // out to be, an admin may learn only "this worked" or "not this address".
+  const accounts = [
+    ["no account at all", undefined],
+    ["planter with a plant", { role: "planter", churchId: PLANT }],
+    ["planter with no plant yet", { role: "planter" }],
+    ["team member", { role: "team_member", churchId: PLANT }],
+    ["coach", { role: "coach", churchId: PLANT }],
+    ["network admin", { role: "network_admin", sendingNetworkId: NETWORK }],
+    [
+      "sending church admin WITH a sending church",
+      { role: "sending_church_admin", sendingChurchId: OTHER_SENDING_CHURCH },
+    ],
+    ["sending church admin with none yet", { role: "sending_church_admin" }],
+  ] as const;
+
+  for (const [who, actingFor] of [
+    ["a sending church admin", SC_ADMIN],
+    ["a network admin", NET_ADMIN],
+  ] as const) {
+    const outcomes = new Set<string>();
+
+    for (const [label, account] of accounts) {
+      const lookup = inviteeAccountTarget(
+        account && {
+          role: account.role,
+          churchId: ("churchId" in account && account.churchId) || null,
+          sendingChurchId:
+            ("sendingChurchId" in account && account.sendingChurchId) || null,
+        }
+      );
+
+      const verdict = !lookup.ok
+        ? lookup.error
+        : // Exactly what `createInvitationAs` does with the resolved target.
+          (() => {
+            const resolved = resolveInvitationForResolvedTarget(
+              actingFor,
+              { inviteeEmail: "probe@example.com" },
+              lookup.target
+            );
+            return resolved.ok ? SUCCESS : resolved.error;
+          })();
+
+      assert.ok(
+        verdict === SUCCESS || verdict === ACCOUNT_NOT_INVITABLE_MESSAGE,
+        `${who} probing ${label} learned: ${verdict}`
+      );
+      outcomes.add(verdict);
+    }
+
+    // …and the set is exactly two values, so no branch smuggles a third.
+    assert.deepEqual(
+      [...outcomes].sort(),
+      [ACCOUNT_NOT_INVITABLE_MESSAGE, SUCCESS].sort(),
+      who
+    );
+  }
+});
+
+test("the post-resolution pass is the collapsed one, at the call site", () => {
+  // The behavioural property above holds only while `createInvitationAs` routes
+  // the second pass through the collapsing wrapper. Reverting it to a bare
+  // `resolveInvitationRequest(actor, {...resolvedTarget.target})` re-opens the
+  // oracle without failing anything else, so the wiring is pinned here.
+  const body = CORE_CODE.slice(
+    CORE_CODE.indexOf("export async function createInvitationAs"),
+    CORE_CODE.indexOf("// Respond")
+  );
+  const calls = code(body).match(/resolveInvitation\w*\(/g) ?? [];
+
+  assert.deepEqual(calls, [
+    // 1. AUTHORITY, before any lookup — legible, and about the ACTOR.
+    "resolveInvitationRequest(",
+    // 2. the address → target lookup.
+    "resolveInvitationTarget(",
+    // 3. the second pass, collapsed, because it speaks about the ADDRESS.
+    "resolveInvitationForResolvedTarget(",
+  ]);
 });
 
 // ----------------------------------------------------------------------------
@@ -452,10 +583,25 @@ test("the account refusal reads as a next action, not as a failure", () => {
   // Surfaced as a FORM ERROR — the action returns `result.error` verbatim
   // (asserted in §2) and the create form renders it — so the wording is the
   // whole of what the admin gets. It has to say what happened and what to do.
-  assert.match(ACCOUNT_NOT_INVITABLE_MESSAGE, /account/i);
   assert.doesNotMatch(ACCOUNT_NOT_INVITABLE_MESSAGE, /error|failed|invalid/i);
-  assert.notEqual(ACCOUNT_NOT_INVITABLE_MESSAGE, SLOT_TAKEN_MESSAGE);
-  assert.notEqual(ACCOUNT_NOT_INVITABLE_MESSAGE, ALREADY_OURS_MESSAGE);
+
+  // It is now the ONLY thing an admin reads about an address, so it has to be
+  // true of all four situations behind it at once — which means naming none of
+  // them. No role, no organization, no relationship: a message that said "that
+  // plant already belongs to somebody" would be the oracle wearing softer
+  // words.
+  for (const leak of [
+    /already (belongs|part of|yours)/i,
+    /sending church|network/i,
+    /coach|team member/i,
+  ]) {
+    assert.doesNotMatch(ACCOUNT_NOT_INVITABLE_MESSAGE, leak);
+  }
+
+  // What it must still do is point at the two lists that answer "is this
+  // already handled?" from inside the admin's own tenancy.
+  assert.match(ACCOUNT_NOT_INVITABLE_MESSAGE, /pending invitations/i);
+  assert.match(ACCOUNT_NOT_INVITABLE_MESSAGE, /plants/i);
 
   // The form's own copy has to describe TODAY's rule, not the one #304
   // replaced: an existing planter can now be invited and answers from

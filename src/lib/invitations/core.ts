@@ -257,29 +257,11 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 export const INVALID_EMAIL_MESSAGE = "Enter a valid email address";
 
 /**
- * Already-taken slot, refused at CREATE time.
- *
- * RULED 2026-08-03 (#23): `createInvitation` refuses up front when the target
- * plant's oversight slot is already held, rather than letting the admin send an
- * invitation that `acceptInvitationAs` is guaranteed to refuse days later with
- * nobody watching. Defense in depth — the accept-time guard
- * (`unboundTargetSlot`) is the one that has to hold under concurrency and is
- * NOT replaced by this; this one exists so the admin is told immediately, in
- * the form. Once severing ships (#277/#278) the slot frees and the org
- * re-invites.
- */
-export const SLOT_TAKEN_MESSAGE =
-  "That organization already belongs to a sending church or network — it has to leave that one first";
-
-export const ALREADY_OURS_MESSAGE =
-  "That organization is already part of your organization";
-
-/**
- * An address whose account maps to NO organization we can invite — refused at
- * CREATE time.
+ * The ONE refusal an admin ever reads about an address they typed — whatever
+ * the actual reason was.
  *
  * ----------------------------------------------------------------------------
- * The history, because the rule inverted twice
+ * The history, because the rule inverted twice, and then collapsed
  * ----------------------------------------------------------------------------
  *
  * RULED 2026-08-04 (#23): an invitation nobody can answer is not sent. At that
@@ -292,23 +274,39 @@ export const ALREADY_OURS_MESSAGE =
  * #304 REMOVES THAT PREMISE, which is the condition the ruling itself named: the
  * planter's association area (`/settings/association`) and the dashboard
  * reminder are now the in-product place an existing account answers from. So the
- * targeted path is restored exactly as `ACCOUNT_EXISTS_MESSAGE` (this constant's
- * previous name) described it should be — the address is looked up, the account
- * is mapped to its organization, and the id becomes the invitation's target.
+ * targeted path is restored — the address is looked up, the account is mapped to
+ * its organization, and the id becomes the invitation's target.
  *
- * What survives is the shape of the refusal: an account that maps to NO
- * invitable organization is still refused where the admin is watching, rather
- * than days later inside somebody else's dead end.
+ * ----------------------------------------------------------------------------
+ * ONE MESSAGE FOR EVERY REFUSAL — RULED 2026-08-09 (#304, ruling 2)
+ * ----------------------------------------------------------------------------
  *
- * ONE MESSAGE FOR EVERY REFUSAL, deliberately — and this matters more now, not
- * less. The cases behind it are "a team member", "a coach", "another org's
- * admin" and "a planter who has not created their plant yet"; distinguishing
- * them would tell an inviter what KIND of account sits behind an address they do
- * not otherwise know anything about. One message says only "not this address",
- * which is the single bit they need in order to pick another.
+ * Restoring the targeted path re-opened an enumeration oracle: an authenticated
+ * admin could type any address and read back which of four things was true of
+ * the person behind it — no account (an open invitation is created), an account
+ * we cannot invite, a plant whose oversight slot ANOTHER org holds, or one that
+ * is already ours. Three of those are facts about somebody else's tenancy, and
+ * the probe costs nothing but a form submission.
+ *
+ * So every refusal on an EMAIL-RESOLVED target — which is every target in the
+ * product, because the admin only ever types an address and the server resolves
+ * it (`resolveInvitationTarget`, "WHY THERE IS NO PICKER") — is this constant
+ * and nothing else. `assertTargetSlotFree` no longer has a message of its own;
+ * `slotRefusalMessage` below is the whole of its vocabulary.
+ *
+ * WHAT AN ADMIN LOSES, and why it is acceptable: they are no longer told that
+ * the plant they aimed at already belongs to somebody, or to them. Their OWN
+ * org's state is still legible in the two places that hold it — the pending
+ * invitations list on `/oversight/invitations` and the plants directory — and
+ * neither of those names anything outside their own tenancy.
+ *
+ * The wording therefore has to be true of all of them at once: it names no
+ * role, no organization and no relationship, and it points at the two lists
+ * that answer "is this already handled?" without asking the server about a
+ * stranger.
  */
 export const ACCOUNT_NOT_INVITABLE_MESSAGE =
-  "That email belongs to an account we cannot invite — invite the planter's own address, or an address that has not signed up yet";
+  "We cannot invite that email address — check your plants and pending invitations, or invite the planter's own address, or one that has not signed up yet";
 
 /**
  * The fields that decide WHAT association an accept makes: the target entity and
@@ -451,6 +449,46 @@ export function resolveInvitationRequest(
 }
 
 /**
+ * The SECOND pass of `resolveInvitationRequest` — the one that runs after the
+ * typed address has been resolved to a target — with its refusals collapsed.
+ * Pure, so the property the ruling demands is executable without a database.
+ *
+ * WHY THIS EXISTS — RULED 2026-08-09 (#304, ruling 2). A refusal produced on a
+ * SERVER-RESOLVED target is a statement about the stranger behind the probed
+ * address, not about the actor, and so it must speak with the one voice
+ * (`ACCOUNT_NOT_INVITABLE_MESSAGE`). Left legible, this call reopened the exact
+ * oracle the ruling closed: a `sending_church_admin` who typed an address
+ * belonging to ANOTHER sending church admin read back "A sending church can
+ * only invite church plants" — a third outcome, distinguishable from both
+ * success and the one message, that says "that address is a sending-church
+ * admin who has an organization".
+ *
+ * The collapse is HERE and not inside `resolveInvitationRequest`, because that
+ * function is also run on the target-less AUTHORITY pass in
+ * `createInvitationAs` — which happens BEFORE any address is looked up, whose
+ * messages describe the actor's own role and org ("Set up your sending church
+ * first"), and which therefore leaks nothing and must stay legible.
+ *
+ * The condition is on whether a target was actually resolved, not on which
+ * branch refused: it is the *reachability after resolution* that makes a
+ * message an oracle, so a rule added to `resolveInvitationRequest` later is
+ * collapsed by construction rather than needing to be found.
+ */
+export function resolveInvitationForResolvedTarget(
+  actor: InvitationActor,
+  request: InvitationRequest,
+  target: InviteeTarget
+): ResolveResult {
+  const targeted =
+    target.targetChurchId != null || target.targetSendingChurchId != null;
+
+  const resolved = resolveInvitationRequest(actor, { ...request, ...target });
+  if (resolved.ok || !targeted) return resolved;
+
+  return { ok: false, error: ACCOUNT_NOT_INVITABLE_MESSAGE };
+}
+
+/**
  * Insert a resolved invitation. No authority check of its own — it writes
  * exactly what it is given, so every caller must have gone through
  * `resolveInvitationRequest` (the action layer) or be deliberately building an
@@ -585,7 +623,8 @@ export async function resolveInvitationTarget(
 }
 
 /**
- * The occupied-slot refusal, RULED 2026-08-03 (#23) — see `SLOT_TAKEN_MESSAGE`.
+ * The occupied-slot refusal, RULED 2026-08-03 (#23), with its message collapsed
+ * RULED 2026-08-09 (#304, ruling 2) — see `ACCOUNT_NOT_INVITABLE_MESSAGE`.
  *
  * Reads the target's own oversight FK and refuses when it is held. `null`
  * targets (an open invitation) have nothing to check: the organization does not
@@ -595,17 +634,35 @@ export async function resolveInvitationTarget(
  * SELECT-then-INSERT guard never is (`memory/invariants.md`). Two admins racing
  * still both get an invitation created; what stops BOTH being honoured is
  * `unboundTargetSlot` + `lockTargetRow` at accept time, which is untouched. The
- * value of this check is that the admin is told NOW, in the form, instead of
+ * value of this check is that the admin is stopped NOW, in the form, instead of
  * the invitee discovering it when they try to accept.
+ *
+ * It refuses with the SAME sentence `resolveInvitationTarget` uses, so "the
+ * account cannot be invited", "the slot is another org's" and "the slot is
+ * already ours" are one outcome as far as the client can tell. The verdict
+ * itself stays three-valued — that is what is true of the row, and collapsing
+ * the FACT rather than the MESSAGE would make the next reader think the
+ * distinction was never there — but nothing derived from it reaches the
+ * response.
  */
 export async function assertTargetSlotFree(
   values: ResolvedInvitation
 ): Promise<void> {
   const held = await heldOversightSlot(values);
-  if (held === null) return;
-  throw new InvitationError(
-    held === "ours" ? ALREADY_OURS_MESSAGE : SLOT_TAKEN_MESSAGE
-  );
+  const refusal = slotRefusalMessage(held);
+  if (!refusal) return;
+  throw new InvitationError(refusal);
+}
+
+/**
+ * The verdict → what the admin reads. Pure and total, so the collapse is
+ * executable rather than a claim about a branch: EVERY non-free verdict maps to
+ * the one message, and a test can enumerate the whole domain.
+ */
+export function slotRefusalMessage(
+  held: "ours" | "other" | null
+): string | null {
+  return held === null ? null : ACCOUNT_NOT_INVITABLE_MESSAGE;
 }
 
 /** `"ours"` / `"other"` when the target's slot is taken, `null` when it is free. */
@@ -703,25 +760,31 @@ export async function createInvitationAs(
     throw new InvitationError(authority.error);
   }
 
-  // A client never names a target; it is resolved from the address here — and
-  // an address that already has an account is refused outright (RULED
-  // 2026-08-04, `ACCOUNT_EXISTS_MESSAGE`). This runs inside the logic layer, so
-  // a forged POST straight at `createInvitation` is refused by the same
-  // statement the form is.
+  // A client never names a target; it is resolved from the address here. An
+  // account that speaks for no invitable organization is refused with the one
+  // message (RULED 2026-08-09, `ACCOUNT_NOT_INVITABLE_MESSAGE`). This runs
+  // inside the logic layer, so a forged POST straight at `createInvitation` is
+  // refused by the same statement the form is.
   const resolvedTarget = await resolveInvitationTarget(inviteeEmail);
   if (!resolvedTarget.ok) {
     throw new InvitationError(resolvedTarget.error);
   }
 
-  const resolved = resolveInvitationRequest(actor, {
-    ...request,
-    inviteeEmail,
-    ...resolvedTarget.target,
-  });
+  const resolved = resolveInvitationForResolvedTarget(
+    actor,
+    { ...request, inviteeEmail },
+    resolvedTarget.target
+  );
   if (!resolved.ok) {
     throw new InvitationError(resolved.error);
   }
 
+  // Everything below is also post-resolution, and audited to the same rule:
+  // `assertTargetSlotFree` composes no message of its own (`slotRefusalMessage`
+  // is its whole vocabulary, and it is the one constant), and
+  // `assertNoDuplicatePending` reports the ACTOR's own org state — a pending
+  // invitation their own list already shows them — so it names nothing about
+  // the account behind the address.
   await assertTargetSlotFree(resolved.values);
   await assertNoDuplicatePending(resolved.values);
 
@@ -1004,12 +1067,20 @@ export async function declineInvitationAs(
 }
 
 /**
- * Look the plant's name up and announce the decline to the org that issued the
- * invitation. Best-effort by construction, and a mirror of
- * `announceInvitationAcceptedForChurch` — including the reason the whole
- * invitation is passed rather than a church id: the audience is derived from
- * `invitation.type` by `invitingOrgForInvitation`, never from the plant's FKs,
- * so a plant that already belongs to another org cannot leak this to it.
+ * Announce the decline to the org that issued the invitation. Best-effort by
+ * construction, and a mirror of `announceInvitationAcceptedForChurch` —
+ * including the reason the whole invitation is passed rather than a church id:
+ * the audience is derived from `invitation.type` by `invitingOrgForInvitation`,
+ * never from the plant's FKs, so a plant that already belongs to another org
+ * cannot leak this to it.
+ *
+ * IT DOES NOT LOOK THE PLANT'S NAME UP, and the absent read is the point (#304,
+ * ruled 2026-08-09). The org that was refused never became associated with this
+ * plant, so the notification names the ADDRESS THE ORG ITSELF TYPED — the
+ * invitation's own `invitee_email` — and nothing else. Naming the plant told a
+ * stranger what organization sits behind an address they had guessed at, which
+ * is the disclosure the whole invitation surface is otherwise careful about
+ * (see `ACCOUNT_NOT_INVITABLE_MESSAGE`).
  */
 async function announceInvitationDeclinedForChurch(
   invitation: OrganizationInvitation
@@ -1017,13 +1088,18 @@ async function announceInvitationDeclinedForChurch(
   const churchId = invitation.targetChurchId;
   if (!churchId) return;
 
-  try {
-    const plantName = await plantNameOf(churchId);
-    if (!plantName) return;
+  // `invitee_email` is nullable — rows predating #23 recorded no address at all
+  // — and it is the ONLY identifier this org may be given back. With nothing to
+  // name, the milestone is skipped rather than composed around a blank or, far
+  // worse, quietly re-pointed at the plant's name. The decline itself is
+  // already recorded; this notification is best-effort by construction.
+  const inviteeEmail = invitation.inviteeEmail;
+  if (!inviteeEmail) return;
 
+  try {
     await announceInvitationDeclined({
       churchId,
-      plantName,
+      inviteeEmail,
       invitationId: invitation.id,
       invitation: {
         type: invitation.type,

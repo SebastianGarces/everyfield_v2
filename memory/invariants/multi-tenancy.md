@@ -22,6 +22,11 @@ Registration binds before accepting because binding leaves the row `pending` wit
 
 The rule survives; the blanket refusal it produced does not. In 2026-08-04 the only place an invitation could be answered was `/register` — the link creates the org and redeems in one request — and somebody who already registered cannot register again, so EVERY existing account was refused and `createInvitation` issued only OPEN invitations. #304 built the surface that removes the premise; see "An existing account can be invited again" below. `assertTargetSlotFree`/`heldOversightSlot` are live again as a result, on the path they were written for.
 
+**The rule is per INVITATION TYPE, and it is checked per type.** `inviteeAccountTarget` maps two roles to a target, so two of the three types can name an existing account, and each needs its own in-app answer:
+
+* `church_to_sending_church` / `church_to_network` → the target is a plant, the answerer is its planter, and the surface is `/settings/association` plus the dashboard reminder (#304 WS1);
+* `sending_church_to_network` → the target is a sending church and the answerer is its admin. `verifyInvitationAuthority` has always accepted that answer (`core.ts`, the `sending_church_to_network` arm); the SURFACE that offers it is #304 WS3, and until that lands a `sending_church_admin` can be targeted with nowhere in the product to answer from. That gap is the one HR4 found on 2026-08-09, and Sebastian ruled it closed by BUILDING the surface, not by re-gating the path.
+
 ## A token is bound to the address (ruled 2026-08-04, #23)
 
 An invite link is a uuid in a URL — forwarded, pasted, archived — and it buys two things: the association, and (when `BETA_INVITE_CODE` is set) a bypass of the beta gate, which is why both go through one check (`registrationEmailMatchesInvitation`, `(auth)/register/beta-gate.ts`) before the gate and before any account exists. A row with NO recorded address (pre-#23) matches nobody. The register form pre-fills the address `readOnly` — not `disabled`, which submits nothing — but that is convenience: the action is a POST that never saw the form.
@@ -32,7 +37,7 @@ The create-time refusal is SELECT-then-INSERT, so two racing admins still both g
 
 `revokeInvitationQuery` matches on the session's org FK, not `inviter_user_id`, and the surface dropped its per-row `canRevoke`. List and revoke are both built from `invitingOrgOf(actor)` so they cannot disagree about "ours"; any role that does not invite, and any oversight admin with no org, produces `false` and matches nothing.
 
-## Severing — the planter side exists (#304); the org side does not yet
+## Severing — both sides exist (#304)
 
 Ruled 2026-08-03 (#274, `product-docs/features/oversight/frd.md` OV-007/OV-010) that **both sides may sever** — the plant's planter or the org's admin. #304 shipped both halves, each with the surface that owns its authority rule and each behind a type-to-confirm dialog, notifying the other side and writing an `association_events` row:
 
@@ -49,6 +54,28 @@ It is also ONE statement, not a batch, and [transactions-atomicity.md](transacti
 
 **Telling the org is a tenancy problem, not just a consent one.** `canAccessChurch` resolves an oversight admin's reach from the plant's CURRENT FK, so at the moment of a decline (never associated) or a sever (just nulled) the answer is false — and the notification would be skipped `outside_church`. `enqueue` therefore accepts a second, narrower basis for exactly two server-composed types (`OVERSIGHT_OWN_RELATIONSHIP_TYPES`): this org and this plant have a relationship ON RECORD, an invitation or an `association_events` row. It is asked only after `canAccessChurch` has refused, and it is unreachable for every other notification in the product.
 
-## An existing account can be invited again (#304)
+## An existing account can be invited again — and every refusal is one sentence (#304, ruled 2026-08-09)
 
-The 2026-08-04 blanket refusal of every registered address (`ACCOUNT_EXISTS_MESSAGE`) rested on a premise it named out loud: the only place an invitation could be answered was `/register`. #304 built `/settings/association` and the dashboard reminder, so the targeted path is back — `inviteeAccountTarget` maps a `planter` to their `church_id` and a `sending_church_admin` to their `sending_church_id`, and refuses everything else with ONE message (`ACCOUNT_NOT_INVITABLE_MESSAGE`). The single message is not tidiness: distinguishing "a team member" from "a coach" from "a planter with no plant yet" tells an inviter what kind of account sits behind an address they otherwise know nothing about.
+The 2026-08-04 blanket refusal of every registered address (`ACCOUNT_EXISTS_MESSAGE`) rested on a premise it named out loud: the only place an invitation could be answered was `/register`. #304 built `/settings/association` and the dashboard reminder, so the targeted path is back — `inviteeAccountTarget` maps a `planter` to their `church_id` and a `sending_church_admin` to their `sending_church_id`.
+
+Restoring that path re-opened the oracle the blanket refusal had closed. An oversight admin types an address and reads the outcome; before this ruling the outcomes were four and each was a fact about a stranger: an invitation was created (no account, or an invitable one), the account cannot be invited, the plant's slot is held by ANOTHER org (`SLOT_TAKEN_MESSAGE`), the plant is already ours (`ALREADY_OURS_MESSAGE`). Probing costs one form submission, and the third answer is somebody else's tenancy.
+
+**So every refusal on an email-resolved target is `ACCOUNT_NOT_INVITABLE_MESSAGE`, and the other two constants are gone.** `assertTargetSlotFree` still computes the three-valued verdict — that is what is true of the row, and collapsing the FACT would hide from the next reader that the distinction ever existed — but the message comes from `slotRefusalMessage`, which is pure and total and maps every non-free verdict to the one sentence, so the collapse is a test over the whole domain rather than a claim about a branch. Every target in the product is email-resolved: there is deliberately no picker (`resolveInvitationTarget`), so there is no second path needing a legible message.
+
+**The rule is POSITIONAL, and the first attempt at it was not.** Collapsing the three refusals the ruling happened to name satisfied its letter and left the oracle open one line away. `createInvitationAs` runs the pure authority rules TWICE: once on a target-less request (before any lookup, to keep the `users` read unreachable for a caller who may not invite at all) and once more on the target the server just resolved. The second call had messages of its own, and one of them was reachable: a `sending_church_admin` probing an address that belongs to ANOTHER sending-church admin hit the `kind === "sending_church"` arm and read back "A sending church can only invite church plants" — a third outcome, distinguishable from both success and the one message, which says "that address is a sending-church admin who has an organization". Exactly the fact about a stranger the ruling forbids, arriving through a guard nobody had listed.
+
+So the invariant is stated by POSITION, not by enumeration: **every refusal reachable after `resolveInvitationTarget` is the one message.** `resolveInvitationForResolvedTarget` is where that holds — it wraps the second pass, is pure, and replaces any refusal with `ACCOUNT_NOT_INVITABLE_MESSAGE` whenever a target was actually resolved. It is deliberately NOT a rewording of `resolveInvitationRequest`, because that same function serves the target-less authority pass, whose messages ("Set up your sending church first") describe the actor's own account and must stay legible. The remaining post-resolution refusals are audited to the same rule: the slot guard has no vocabulary but `slotRefusalMessage`, and `assertNoDuplicatePending` reports the actor's OWN org state — a row their own invitations list already shows them. The test is a property over the whole account domain for both actor roles, asserting the outcome set is exactly {created, the one message}; enumerating branches is what missed it the first time.
+
+What an admin loses is a refusal that told them their own org's state. That state is still legible where it belongs — their pending-invitations list and their plants directory — and neither names anything outside their own tenancy. What they keep is the one bit they need: pick another address.
+
+## What a decline may say back (#304, ruled 2026-08-09)
+
+A decline is the one milestone whose recipient never became associated with the plant. So it names the ADDRESS THE ORG TYPED (`organization_invitations.invitee_email`) and nothing else: no plant name, no lookup of who answered. Naming the plant handed a stranger the organization behind an address they may simply have guessed — the same disclosure `ACCOUNT_NOT_INVITABLE_MESSAGE` exists to prevent, arriving by another route two steps later.
+
+`MilestoneFacts.subject` carries it, and the field is named for what it does rather than for the common case: a `plantName` that sometimes holds an email is how the leak came back the first time.
+
+## "Pending" is not "answerable" (#304, HR4 2026-08-09)
+
+Expiry in this product is LAZY. `expireInvitationQuery` runs only when somebody tries to answer a row whose window has closed (`loadRespondableInvitation`), so a 40-day-old invitation still reads `pending` until then. Any list that offers an ANSWER must therefore carry `(expires_at is null or expires_at > now)` beside the status — `bindOpenInvitationTargetQuery` always did; `pendingInvitationsForPlantQuery` did not, and the dashboard reminder rendered expired invitations with live Accept/Decline buttons the server then refused.
+
+That was worse there than anywhere else, because the reminder is dismissible only by answering (OV-005): the planter had a banner they could neither answer nor remove. A declined or revoked invitation disappears from the same predicate on the next render, which is what makes "dismissed only by answering" a property of the data rather than of the component.

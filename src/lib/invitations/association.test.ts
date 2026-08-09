@@ -10,6 +10,7 @@ import {
   isAssociationOrgType,
   leaveOversightOrgAs,
   oversightOrgTypes,
+  verifyInvitationAuthority,
   type InvitationActor,
 } from "./core";
 import { associationOrg } from "./audit";
@@ -114,6 +115,35 @@ test("a team member or coach of the plant cannot sever, whatever the UI shows", 
       role
     );
   }
+});
+
+test("the same two roles are refused ACCEPT and DECLINE, by the same rule", async () => {
+  // OV-010 is one rule over three verbs, and the third is checked somewhere
+  // else (`verifyInvitationAuthority`, exercised in `service.test.ts`). Stated
+  // here as well because the acceptance criterion is about the three TOGETHER:
+  // a team member who cannot leave but can accept has not been refused, they
+  // have been slowed down.
+  const invitation = {
+    type: "church_to_sending_church" as const,
+    targetChurchId: PLANT,
+    targetSendingChurchId: null,
+  };
+
+  for (const role of ["team_member", "coach"] as const) {
+    assert.throws(
+      () => verifyInvitationAuthority(invitation, actor({ role })),
+      /not authorized|permission/i,
+      role
+    );
+  }
+
+  // The planter of that same plant passes all three — so the refusals above are
+  // the ROLE being checked, not the fixture being unanswerable.
+  verifyInvitationAuthority(invitation, actor());
+  assert.equal(
+    await refusal(leaveOversightOrgAs(actor({ role: "coach" }), "network")),
+    PLANTER_ONLY_SEVER_MESSAGE
+  );
 });
 
 test("a planter with no plant has nothing to sever", async () => {
@@ -284,6 +314,33 @@ test("the sever announces AFTER the write, and the decline announces at all", ()
     decline.indexOf("if (!updated)") <
       decline.indexOf("announceInvitationDeclinedForChurch")
   );
+});
+
+test("the decline tells the refused org an address, and never reads the plant's name", () => {
+  // RULED 2026-08-09 (#304, HR4). The org that was refused never associated
+  // with this plant; the only identifier it may be given back is the address it
+  // typed itself. The absent READ is the assertion — `plantNameOf` still exists
+  // for the ACCEPT path, so a later edit could easily "restore symmetry"
+  // between the two announcers and hand the name over again.
+  const announce = CORE_CODE.slice(
+    CORE_CODE.indexOf("async function announceInvitationDeclinedForChurch"),
+    CORE_CODE.indexOf("async function plantNameOf")
+  );
+
+  assert.match(announce, /inviteeEmail,/);
+  assert.doesNotMatch(announce, /plantNameOf|plantName/);
+
+  // A row with no recorded address (pre-#23) names nobody, so nothing is sent —
+  // rather than falling back to the one name it must not use.
+  assert.match(announce, /if \(!inviteeEmail\) return;/);
+
+  // The ACCEPT keeps the plant's name, because by then the org is associated
+  // with it. The two announcers are deliberately asymmetric.
+  const accepted = CORE_CODE.slice(
+    CORE_CODE.indexOf("async function announceInvitationAcceptedForChurch"),
+    CORE_CODE.indexOf("async function lostClaimReason")
+  );
+  assert.match(accepted, /const plantName = await plantNameOf\(churchId\)/);
 });
 
 // ----------------------------------------------------------------------------

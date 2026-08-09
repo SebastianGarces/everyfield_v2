@@ -64,6 +64,12 @@ const INVITER: OversightOrg = {
 };
 /** An admin of the network the plant ALSO belongs to. Invited nobody. */
 const ADMIN_OF_OTHER_ORG = "99999999-9999-4999-8999-999999999999";
+/**
+ * The address the inviting org typed. The ONLY identifier a decline may hand
+ * back to it (#304, ruled 2026-08-09) — the plant's name is deliberately
+ * absent from every decline assertion below.
+ */
+const INVITED_ADDRESS = "planter@example.com";
 
 class FakeOversightEnqueue
   implements OversightFanOutDeps, OversightOrgFanOutDeps
@@ -156,7 +162,7 @@ class FakeOversightEnqueue
 
 const facts = (kind: (typeof oversightMilestoneKinds)[number]) => ({
   churchId: CHURCH,
-  plantName: "Grace Chapel",
+  subject: "Grace Chapel",
   kind,
   occurrence: "occ-1",
   detail: "Something happened.",
@@ -599,7 +605,7 @@ test("a decline reaches the INVITING org only, and reaches it unshared", async (
   const report = await announceInvitationDeclined(
     {
       churchId: CHURCH,
-      plantName: "Grace Chapel",
+      inviteeEmail: INVITED_ADDRESS,
       invitationId: "inv-1",
       invitation: INVITATION,
     },
@@ -624,7 +630,7 @@ test("the decline body says what the org can do next, not just 'no'", async () =
   await announceInvitationDeclined(
     {
       churchId: CHURCH,
-      plantName: "Grace Chapel",
+      inviteeEmail: INVITED_ADDRESS,
       invitationId: "inv-1",
       invitation: INVITATION,
     },
@@ -632,12 +638,63 @@ test("the decline body says what the org can do next, not just 'no'", async () =
   );
 
   const row = fake.written[0];
-  assert.match(row.title, /Grace Chapel/);
+  assert.match(row.title, /planter@example\.com/);
   assert.match(row.body, /declined your invitation/i);
   // "Nothing happened" is the reading that sends an admin hunting for a bug,
   // so the body has to state the outcome AND the next move.
   assert.match(row.body, /invite them again/i);
   assert.doesNotMatch(row.body, /error|failed/i);
+});
+
+test("a decline tells the refused org the address it typed — never the plant's name", async () => {
+  // RULED 2026-08-09 (#304, HR4). Every other milestone names the plant because
+  // its recipient is associated with it. A refused org is not, and never was:
+  // it typed an address, and the answer is "no". Naming the plant would hand it
+  // the organization behind an address it may simply have guessed — the exact
+  // disclosure `ACCOUNT_NOT_INVITABLE_MESSAGE` exists to prevent, arriving by
+  // another route two steps later.
+  //
+  // The emitter's signature is half the guarantee (there is no `plantName`
+  // parameter to pass), and this is the other half: nothing composed downstream
+  // reintroduces it.
+  const fake = new FakeOversightEnqueue([{ id: ADMIN_A }], { sharing: false });
+
+  await announceInvitationDeclined(
+    {
+      churchId: CHURCH,
+      inviteeEmail: INVITED_ADDRESS,
+      invitationId: "inv-1",
+      invitation: INVITATION,
+    },
+    fake
+  );
+
+  const row = fake.written[0];
+  for (const text of [row.title, row.body]) {
+    assert.doesNotMatch(text, /Grace Chapel/i, text);
+  }
+  assert.match(row.title, new RegExp(INVITED_ADDRESS.replace(".", "\\.")));
+});
+
+test("the decline is the ONLY milestone that names an address", () => {
+  // Stated as a property of the composed titles so that a later kind cannot
+  // quietly join the exemption: the other four are about a plant the recipient
+  // is already associated with, and naming it is the point of them.
+  for (const kind of oversightMilestoneKinds) {
+    const title = composeMilestone(facts(kind), ADMIN_A).title;
+    assert.match(title, /Grace Chapel/, kind);
+  }
+
+  // …and the decline's own subject is whatever its emitter passed, which is the
+  // address. `subject`, not `plantName`, is why that reads as intended rather
+  // than as a bug.
+  assert.match(
+    composeMilestone(
+      { ...facts("invitation_declined"), subject: INVITED_ADDRESS },
+      ADMIN_A
+    ).title,
+    /planter@example\.com declined your invitation/
+  );
 });
 
 test("leaving names ONLY the org that was left", async () => {
@@ -709,7 +766,7 @@ test("an announcement whose org resolves to nobody reaches nobody", async () => 
   await announceInvitationDeclined(
     {
       churchId: CHURCH,
-      plantName: "Grace Chapel",
+      inviteeEmail: INVITED_ADDRESS,
       invitationId: "inv-1",
       invitation: {
         type: "sending_church_to_network",
@@ -738,7 +795,7 @@ test("an emitter never throws into the action that caused it", async () => {
   const declined = await announceInvitationDeclined(
     {
       churchId: CHURCH,
-      plantName: "Grace Chapel",
+      inviteeEmail: INVITED_ADDRESS,
       invitationId: "inv-1",
       invitation: INVITATION,
     },

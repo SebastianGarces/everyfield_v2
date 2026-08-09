@@ -285,8 +285,22 @@ export async function fanOutToOversightOrg(
 
 export interface MilestoneFacts {
   churchId: string;
-  /** The plant's name, so the subject line is useful to an admin over twenty. */
-  plantName: string;
+  /**
+   * WHAT THE TITLE NAMES THE COUNTERPARTY BY, and it is not always the plant.
+   *
+   * For the four milestones whose recipient is already associated with the
+   * plant it is the plant's NAME, so the subject line is useful to an admin
+   * over twenty. For `invitation_declined` it is the ADDRESS THE ORG ITSELF
+   * TYPED (#304, ruled 2026-08-09): an org that was refused never became
+   * associated, so the plant's name is not theirs to learn — the invitation is
+   * the only thing that ever passed between them, and an email address is the
+   * only identifier they supplied.
+   *
+   * The field is named for what it does rather than for the common case,
+   * because a `plantName` that sometimes holds an email is exactly how the
+   * decline leak came back.
+   */
+  subject: string;
   kind: OversightMilestoneKind;
   /**
    * The stable part of the dedupe key: the id of the thing that happened
@@ -320,15 +334,15 @@ export function composeMilestone(
 function milestoneTitle(facts: MilestoneFacts): string {
   switch (facts.kind) {
     case "invitation_accepted":
-      return `${facts.plantName} joined you`;
+      return `${facts.subject} joined you`;
     case "invitation_declined":
-      return `${facts.plantName} declined your invitation`;
+      return `${facts.subject} declined your invitation`;
     case "association_ended":
-      return `${facts.plantName} left your organization`;
+      return `${facts.subject} left your organization`;
     case "phase_advanced":
-      return `${facts.plantName} reached a new stage`;
+      return `${facts.subject} reached a new stage`;
     case "launch_date_changed":
-      return `${facts.plantName} has a launch date`;
+      return `${facts.subject} has a launch date`;
   }
 }
 
@@ -394,7 +408,7 @@ export async function announceInvitationAccepted(
 ): Promise<OversightFanOutReport> {
   const facts: MilestoneFacts = {
     churchId: input.churchId,
-    plantName: input.plantName,
+    subject: input.plantName,
     kind: "invitation_accepted",
     occurrence: input.invitationId,
     // This is the one milestone that arrives with the plant's sharing toggle
@@ -440,14 +454,25 @@ export async function announceInvitationAccepted(
  *
  * The body says what the org can DO about it, because the alternative reading
  * of a bare "declined" — that the address was wrong, or that the product ate
- * the invitation — is the one an admin will act on. The plant is named for the
- * same reason every milestone names it: an admin over twenty needs to know
- * which.
+ * the invitation — is the one an admin will act on.
+ *
+ * IT NAMES THE ADDRESS, NOT THE PLANT (#304, ruled 2026-08-09). Every other
+ * milestone names the plant because its recipient is associated with it; a
+ * refused org is not, and never was. All that ever passed between them is an
+ * email address the org typed itself, so that is the only identifier it gets
+ * back — the plant's name, its existence and the fact that the address belongs
+ * to a planter with a plant at all are things the refusal must not hand over.
+ * It is also the identifier the admin actually needs: the queue they are
+ * reading is a list of addresses they invited.
  */
 export async function announceInvitationDeclined(
   input: {
     churchId: string;
-    plantName: string;
+    /**
+     * The address on the invitation — `organization_invitations.invitee_email`,
+     * which is what this org typed. Never a lookup of who answered.
+     */
+    inviteeEmail: string;
     invitationId: string;
     invitation: InvitingInvitation;
   },
@@ -458,7 +483,7 @@ export async function announceInvitationDeclined(
     invitingOrgForInvitation(input.invitation),
     {
       churchId: input.churchId,
-      plantName: input.plantName,
+      subject: input.inviteeEmail,
       kind: "invitation_declined",
       occurrence: input.invitationId,
       detail:
@@ -503,7 +528,7 @@ export async function announceAssociationEnded(
     input.org,
     {
       churchId: input.churchId,
-      plantName: input.plantName,
+      subject: input.plantName,
       kind: "association_ended",
       occurrence: input.occurrence,
       detail:
@@ -551,7 +576,7 @@ export function announcePhaseAdvanced(
   return announceMilestone(
     {
       churchId: input.churchId,
-      plantName: input.plantName,
+      subject: input.plantName,
       kind: "phase_advanced",
       // The phase REACHED, not the transition id: advancing to stage 3 twice
       // (after a correction back to 2) is one milestone, and a replayed event is
@@ -581,7 +606,7 @@ export function announceLaunchDateChanged(
   return announceMilestone(
     {
       churchId: input.churchId,
-      plantName: input.plantName,
+      subject: input.plantName,
       kind: "launch_date_changed",
       // Keyed by the CHANGE, not by the value.
       //

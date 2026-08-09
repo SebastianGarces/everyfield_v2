@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
@@ -52,21 +52,12 @@ export interface CurrentAssociationView {
 }
 
 /**
- * Every unanswered invitation addressed to this plant, newest first, with the
- * inviting org's NAME resolved.
- *
- * Two left joins rather than two queries: an invitation carries a sending church
- * id or a network id (never both, for a row `resolveInvitationRequest` built),
- * and which one is set is what says who is asking.
- *
- * `sending_church_to_network` rows cannot appear — their target is a sending
- * church, not a church — so the `target_church_id` predicate is also what keeps
- * this list to the two types a planter can answer.
+ * The statement behind the read below. Exported so a test can read its bound
+ * parameters — the ANSWERABLE predicate is three clauses and losing any one of
+ * them is invisible in behaviour until a real row hits it.
  */
-export async function getPendingInvitationsForPlant(
-  churchId: string
-): Promise<PendingInvitationView[]> {
-  const rows = await db
+export function pendingInvitationsForPlantQuery(churchId: string, now: Date) {
+  return db
     .select({
       id: organizationInvitations.id,
       createdAt: organizationInvitations.createdAt,
@@ -87,10 +78,45 @@ export async function getPendingInvitationsForPlant(
     .where(
       and(
         eq(organizationInvitations.targetChurchId, churchId),
-        eq(organizationInvitations.status, "pending")
+        eq(organizationInvitations.status, "pending"),
+        // UNEXPIRED, the same predicate `bindOpenInvitationTargetQuery` and
+        // `loadRespondableInvitation` carry (#304, HR4 2026-08-09).
+        //
+        // `status` alone is not "answerable": expiry is LAZY in this product —
+        // a row is stamped `expired` only when somebody tries to answer it
+        // (`expireInvitationQuery`), so an invitation whose window closed on
+        // day 30 still reads `pending` on day 40. Without this clause the
+        // dashboard rendered it with live Accept/Decline buttons that the
+        // server then refused with "Invitation has expired" — and because the
+        // reminder is dismissible only by ANSWERING, a planter had a banner
+        // they could neither answer nor remove.
+        sql`(${organizationInvitations.expiresAt} is null or ${organizationInvitations.expiresAt} > ${now})`
       )
     )
     .orderBy(desc(organizationInvitations.createdAt));
+}
+
+/**
+ * Every ANSWERABLE invitation addressed to this plant, newest first, with the
+ * inviting org's NAME resolved.
+ *
+ * Two left joins rather than two queries: an invitation carries a sending church
+ * id or a network id (never both, for a row `resolveInvitationRequest` built),
+ * and which one is set is what says who is asking.
+ *
+ * `sending_church_to_network` rows cannot appear — their target is a sending
+ * church, not a church — so the `target_church_id` predicate is also what keeps
+ * this list to the two types a planter can answer.
+ *
+ * `now` is injectable for the same reason it is on the invitation writes: the
+ * instant is the server's, never a client's, and a test needs to stand on both
+ * sides of an expiry without waiting 30 days.
+ */
+export async function getPendingInvitationsForPlant(
+  churchId: string,
+  now = new Date()
+): Promise<PendingInvitationView[]> {
+  const rows = await pendingInvitationsForPlantQuery(churchId, now);
 
   return rows.flatMap((row) => {
     // Derived from `type`, never from whichever FK happens to be populated —
