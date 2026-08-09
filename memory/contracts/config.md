@@ -43,4 +43,12 @@
 
 ## Navigation Config
 
-Main nav and wiki nav defined in `src/lib/navigation.ts`. Features marked `isDisabled: true` are planned but not implemented. No feature flags exist.
+All four nav lists live in `src/lib/navigation.ts`. There are no feature flags — an unbuilt feature is handled by the nav list itself, and the two nav families handle it by DIFFERENT rules. `src/lib/navigation.test.ts` pins both.
+
+| List | Unbuilt feature | Page-exists guard |
+|------|-----------------|-------------------|
+| `mainNavItems` (church roles) | MAY stay visible as `isDisabled: true` — `nav-main.tsx` renders it inert (`pointer-events-none`) with a COMING SOON label | Every item WITHOUT that flag must have a `page.tsx` behind its href (#272) |
+| `sendingChurchNavItems`, `networkAdminNavItems` (oversight) | The exception: a disabled row is FORBIDDEN — the item is deleted from the list until its `page.tsx` lands, and comes back in the same change that adds the page (#260). The test asserts zero `isDisabled` entries in these two lists | Every item, no exemptions |
+| `wikiNavSections` | `isDisabled: true` marks unwritten articles | Not guarded — these hrefs are served by the catch-all `/wiki/[...slug]`, and the App Router walker skips dynamic segments by design |
+
+Why oversight is stricter: an oversight admin sees ONLY that sidebar, so a greyed or dead row leaves them no way back. A planter has the rest of the app.
