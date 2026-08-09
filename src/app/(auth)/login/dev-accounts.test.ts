@@ -108,32 +108,88 @@ test("eval cleanup matches accounts by subdomain, so old-domain rows are swept t
   );
 });
 
-test("the dev seed cleans the whole fixture, so it needs no email predicate", () => {
+// ----------------------------------------------------------------------------
+// The dev seed's wipe
+//
+// Verified for real, since none of it can be proven from source: against a Neon
+// branch taken from `development` (79 users, 67 churches, 807 people, a full
+// eval corpus), `pnpm db:seed` swept 4451 rows across 50 tables, reseeded, and
+// ran again cleanly — with the 96-article wiki corpus and all 96
+// `related_article_slugs` untouched. The assertions below pin the properties
+// that made that possible.
+// ----------------------------------------------------------------------------
+
+test("the dev seed wipes from users and churches, so it needs no email predicate", () => {
   const source = read("scripts/seed-dev-db.ts");
-  const clean = source.slice(
-    source.indexOf("async function cleanDatabase"),
-    source.indexOf("// Seed Data")
+
+  // Unscoped is the point: whatever domain the existing rows carry, they go. A
+  // predicate on either root would reintroduce exactly the drift this unit
+  // removed — an account survives by carrying an address the file stopped
+  // mentioning.
+  assert.match(
+    source,
+    /const WIPE_ROOTS = \["users", "churches"\] as const;/,
+    "the wipe must start at users and churches"
   );
+  assert.match(
+    source,
+    /DELETE FROM \$\{quoteIdentifier\(table\)\}/,
+    "the wipe deletes whole tables — no WHERE clause, no email predicate"
+  );
+});
 
-  // Unscoped deletes are the point: whatever domain the existing rows carry,
-  // they go. A `where` clause on either table would reintroduce exactly the
-  // drift this unit removed.
-  assert.match(clean, /await db\.delete\(users\)\.returning\(\)/);
-  assert.match(clean, /await db\.delete\(churches\)\.returning\(\)/);
+test("the wipe derives its tables from the live FK graph, not a hand-kept list", () => {
+  const source = read("scripts/seed-dev-db.ts");
 
-  // The FK holders a verification run leaves behind (#304): without these the
-  // `users` delete fails and the fixture never converges.
-  for (const table of [
-    "associationEvents",
-    "organizationInvitations",
-    "coachAssignments",
-  ]) {
-    assert.match(
-      clean,
-      new RegExp(`delete\\(${table}\\)`),
-      `cleanDatabase must sweep ${table} before users — its FK into users does not cascade`
-    );
-  }
+  // A hand-maintained list is what kept failing: launch journals (#305),
+  // launch-prep tasks (#305/LS-003) and answered invitations (#304) each landed
+  // a table in the graph that the list did not know about, and each time
+  // `pnpm db:seed` died halfway through a partly wiped database. Reading
+  // `pg_constraint` is what makes a table added next month arrive on its own.
+  assert.match(
+    source,
+    /FROM pg_constraint con/,
+    "cleanDatabase must read the foreign keys from the catalog"
+  );
+  assert.match(
+    source,
+    /function planWipe\(keys: ForeignKey\[\]\): string\[\]/,
+    "the delete order must be computed from those keys"
+  );
+  // Reachability from the roots, so nothing outside the fixture is touched.
+  assert.match(source, /const covered = new Set<string>\(\);/);
+  // A cycle of non-cascading keys must stop the run rather than half-wipe.
+  assert.match(source, /Cannot order the wipe/);
+});
+
+test("the wipe protects the wiki corpus even though the graph reaches it", () => {
+  const source = read("scripts/seed-dev-db.ts");
+
+  // `wiki_articles.church_id` makes the corpus a dependent of `churches`, so
+  // reachability alone would delete it. It is content — migrated in (#317),
+  // rebuilt by no script — so it is excluded from the walk AND the run aborts
+  // before the first DELETE if any article is church-scoped.
+  assert.match(
+    source,
+    /const PROTECTED_TABLES = new Set\(\["wiki_articles", "wiki_sections"\]\);/,
+    "the wiki corpus and its sections must be protected by name"
+  );
+  assert.match(
+    source,
+    /if \(covered\.has\(child\) \|\| PROTECTED_TABLES\.has\(child\)\) continue;/,
+    "protected tables must not be walked through either"
+  );
+  assert.match(
+    source,
+    /await assertProtectedTablesAreSafe\(keys, new Set\(order\)\);/,
+    "the preflight must run before any DELETE"
+  );
+  const clean = source.slice(source.indexOf("async function cleanDatabase"));
+  assert.ok(
+    clean.indexOf("assertProtectedTablesAreSafe") <
+      clean.indexOf("DELETE FROM"),
+    "the preflight must come before the deletes, not after"
+  );
 });
 
 test("no seed script touches wiki articles", () => {

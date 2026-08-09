@@ -79,6 +79,12 @@ form is broken. The addresses come from `scripts/seed-dev-db.ts` and
 **Note the different password for eval accounts** — they are seeded by
 `scripts/seed-phase-engine-eval.ts`, not `seed-dev-db.ts`.
 
+**If the eval logins are gone, someone ran `pnpm db:seed`.** That script wipes the whole fixture —
+every user and every church, not just the nine it creates — so it takes the eval corpus with it. Put
+it back with `pnpm exec tsx scripts/seed-phase-engine-eval.ts`; the corpus is deterministic, so it
+comes back identical. (The wiki articles survive both scripts by design — they are migrated content,
+and the wipe refuses to touch them.)
+
 Reach for an eval planter whenever the criterion involves data. Checking a list feature against a
 church with nothing in it produces a screenshot of an empty state and proves nothing.
 

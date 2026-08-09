@@ -17,15 +17,10 @@ import { config } from "dotenv";
 import { sql as rawSql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-http";
 import {
-  associationEvents,
   churches,
-  coachAssignments,
   launchEvents,
   launches,
-  organizationInvitations,
-  tasks,
   users,
-  sessions,
   type NewChurch,
   type NewUser,
 } from "../src/db/schema";
@@ -56,83 +51,222 @@ const db = drizzle(sql);
 // ============================================================================
 
 /**
- * Wipe the fixture. `users` and `churches` are deleted UNSCOPED — every row,
- * not only the ones seeded below.
+ * Where the wipe starts. The fixture IS "every user and every church", so both
+ * are deleted unscoped — every row, not only the ones seeded below.
  *
  * That is what makes the everyfield.app retirement (ruled 2026-07-31) converge
  * on a database seeded before it: there is no email predicate to keep in step,
  * so no account can survive by carrying an address this file no longer mentions.
  * Both the old and the new domain go, because everything goes.
+ */
+const WIPE_ROOTS = ["users", "churches"] as const;
+
+/**
+ * Tables the wipe refuses to enter, whatever the foreign-key graph says.
  *
- * ⚠️ It also means this is not a scalpel. Point it at a database that other
- * work has been sharing — the deployed development branch, say, which
- * accumulates plants from onboarding runs and accounts from real registrations
- * — and it removes those too. Check what is in there before running it against
- * anything but your own database.
+ * The wiki corpus is church-scoped (`church_id`, null = global), so the graph
+ * walk below reaches it from `churches` like any other dependent — and deleting
+ * it would destroy the articles and their `related_article_slugs` cross-links
+ * (#317), which are migrated into the database and rebuilt by no script.
+ * `wiki_sections` is the corpus's own parent and is not seeded either.
  *
- * What it must NOT touch: `wiki_articles`. The corpus and its
- * `related_article_slugs` cross-links (#317) live only in the database — they
- * are migrated in, never seeded — so a reseed that deleted them would destroy
- * content no script can rebuild. Nothing below names that table, and nothing
- * below may.
+ * Protection means two things: never deleted, and never walked THROUGH, so
+ * nothing downstream of them is dragged in either.
+ */
+const PROTECTED_TABLES = new Set(["wiki_articles", "wiki_sections"]);
+
+interface ForeignKey {
+  child: string;
+  parent: string;
+  /** The child column, for single-column keys — used by the preflight below. */
+  column: string | null;
+}
+
+/** Postgres identifiers this script is willing to interpolate into SQL. */
+const SAFE_IDENTIFIER = /^[a-z_][a-z0-9_]*$/;
+
+function quoteIdentifier(name: string): string {
+  if (!SAFE_IDENTIFIER.test(name)) {
+    throw new Error(`Refusing to interpolate unexpected identifier: ${name}`);
+  }
+  return `"${name}"`;
+}
+
+/**
+ * Every foreign key in `public`, read from the catalog rather than from the
+ * Drizzle schema.
+ *
+ * The catalog is what the DELETEs will actually be checked against, and it does
+ * not go stale: a table added next month arrives here without anyone
+ * remembering to add it to a list in this file. That is the whole point — the
+ * hand-maintained list this replaced fell behind three times (launch journals
+ * in #305, launch-prep tasks in #305/LS-003, answered invitations in #304), and
+ * each time the symptom was the same: `pnpm db:seed` dies halfway through a
+ * partially wiped database.
+ */
+async function foreignKeys(): Promise<ForeignKey[]> {
+  const rows = (await sql`
+    SELECT
+      child.relname::text  AS child,
+      parent.relname::text AS parent,
+      CASE
+        WHEN array_length(con.conkey, 1) = 1
+        THEN (
+          SELECT att.attname::text
+          FROM pg_attribute att
+          WHERE att.attrelid = con.conrelid AND att.attnum = con.conkey[1]
+        )
+        ELSE NULL
+      END AS column
+    FROM pg_constraint con
+    JOIN pg_class child ON child.oid = con.conrelid
+    JOIN pg_class parent ON parent.oid = con.confrelid
+    JOIN pg_namespace nsp ON nsp.oid = child.relnamespace
+    WHERE con.contype = 'f' AND nsp.nspname = 'public'
+  `) as { child: string; parent: string; column: string | null }[];
+
+  return rows.map((row) => ({
+    child: row.child,
+    parent: row.parent,
+    column: row.column,
+  }));
+}
+
+/**
+ * The tables the wipe covers, in an order every FK survives: a table is always
+ * listed before the tables it points at.
+ *
+ * Reachability, not enumeration: start at the roots and take everything that
+ * points at something already in the set, transitively. A row that cannot be
+ * reached from a user or a church is not part of the fixture and is left alone
+ * — `sending_networks`, `sending_churches` and `wiki_sections` are parents of
+ * the fixture, not dependents of it, and this script never created them.
+ *
+ * Self-referencing keys (`ministry_teams.reports_to_team_id` and friends) are
+ * dropped from the ordering: `DELETE FROM t` removes the referencing rows in
+ * the same statement, so they cannot block themselves.
+ */
+function planWipe(keys: ForeignKey[]): string[] {
+  const dependents = new Map<string, Set<string>>();
+  for (const { child, parent } of keys) {
+    if (child === parent) continue;
+    if (!dependents.has(parent)) dependents.set(parent, new Set());
+    dependents.get(parent)!.add(child);
+  }
+
+  const covered = new Set<string>();
+  const queue: string[] = [];
+  for (const root of WIPE_ROOTS) {
+    if (PROTECTED_TABLES.has(root)) continue;
+    covered.add(root);
+    queue.push(root);
+  }
+  while (queue.length > 0) {
+    const table = queue.shift()!;
+    for (const child of dependents.get(table) ?? []) {
+      if (covered.has(child) || PROTECTED_TABLES.has(child)) continue;
+      covered.add(child);
+      queue.push(child);
+    }
+  }
+
+  // Children first. A table is emitted once every covered table pointing at it
+  // has been emitted.
+  const order: string[] = [];
+  const emitted = new Set<string>();
+  while (emitted.size < covered.size) {
+    const ready = [...covered]
+      .filter((table) => !emitted.has(table))
+      .filter((table) =>
+        [...(dependents.get(table) ?? [])]
+          .filter((child) => covered.has(child))
+          .every((child) => emitted.has(child))
+      )
+      .sort();
+
+    if (ready.length === 0) {
+      // A cycle of non-cascading keys. Nothing here can be deleted safely one
+      // statement at a time, and guessing would leave a half-wiped database, so
+      // say which tables are involved and stop.
+      const stuck = [...covered].filter((table) => !emitted.has(table)).sort();
+      throw new Error(
+        `Cannot order the wipe — these tables reference each other in a cycle: ${stuck.join(", ")}`
+      );
+    }
+
+    for (const table of ready) {
+      emitted.add(table);
+      order.push(table);
+    }
+  }
+
+  return order;
+}
+
+/**
+ * Refuse to start if a protected table holds a row that the wipe would orphan.
+ *
+ * `wiki_articles.church_id` is the live case: a church-scoped article makes the
+ * `churches` delete fail on its FK, and the honest answer is NOT to delete the
+ * article — it is content, not fixture. Better to stop before the first DELETE
+ * than to discover it after the users are gone.
+ */
+async function assertProtectedTablesAreSafe(
+  keys: ForeignKey[],
+  wiped: Set<string>
+): Promise<void> {
+  for (const key of keys) {
+    if (!PROTECTED_TABLES.has(key.child)) continue;
+    if (!wiped.has(key.parent) || key.column === null) continue;
+
+    const result = await db.execute(
+      rawSql.raw(
+        `SELECT count(*)::int AS n FROM ${quoteIdentifier(key.child)} WHERE ${quoteIdentifier(key.column)} IS NOT NULL`
+      )
+    );
+    const orphaned =
+      (result as unknown as { rows: { n: number }[] }).rows[0]?.n ?? 0;
+
+    if (orphaned > 0) {
+      throw new Error(
+        `Refusing to clean: ${key.child} has ${orphaned} row(s) whose ${key.column} points at ${key.parent}, ` +
+          `which this wipe deletes. ${key.child} is content, not fixture — it is migrated in and no script can rebuild it (#317). ` +
+          `Re-point or remove those rows by hand first.`
+      );
+    }
+  }
+}
+
+/**
+ * Wipe the fixture.
+ *
+ * ⚠️ This is not a scalpel. Point it at a database that other work has been
+ * sharing — the deployed development branch, say, which accumulates plants from
+ * onboarding runs and accounts from real registrations — and it removes those
+ * too. Check what is in there before running it against anything but your own
+ * database.
  */
 async function cleanDatabase(): Promise<void> {
   console.log("🧹 Cleaning database...");
 
-  // Delete in order respecting foreign key constraints
-  const deletedSessions = await db.delete(sessions).returning();
-  console.log(`   Deleted ${deletedSessions.length} sessions`);
+  const keys = await foreignKeys();
+  const order = planWipe(keys);
+  await assertProtectedTablesAreSafe(keys, new Set(order));
 
-  // Launches (#305/LS-001) go BEFORE users and churches: their journal names an
-  // actor (`launch_events.actor_user_id`) and the launch names a church, and
-  // neither FK cascades. Milestones, milestone/task links and the journal all
-  // cascade from the launch itself.
-  const deletedLaunches = await db.delete(launches).returning();
-  console.log(`   Deleted ${deletedLaunches.length} launches`);
+  let total = 0;
+  for (const table of order) {
+    const result = await db.execute(
+      rawSql.raw(`DELETE FROM ${quoteIdentifier(table)}`)
+    );
+    const deleted =
+      (result as unknown as { rowCount: number | null }).rowCount ?? 0;
+    total += deleted;
+    if (deleted > 0) console.log(`   Deleted ${deleted} ${table}`);
+  }
 
-  // Tasks go BEFORE users, and this is not theoretical: scheduling one launch
-  // seeds 23 `launch_prep` tasks (#305/LS-003), and `tasks.created_by_id` →
-  // `users.id` does not cascade, so a single use of /launch on a dev database
-  // was enough to make `pnpm db:seed` fail on
-  // `tasks_created_by_id_users_id_fk`. The launch/milestone JOIN rows cascade
-  // from the launch above; the tasks themselves are ordinary tasks owned by the
-  // task system and nothing deletes them for us.
-  const deletedTasks = await db.delete(tasks).returning();
-  console.log(`   Deleted ${deletedTasks.length} tasks`);
-
-  // Oversight association rows. Nothing here seeds them — they are produced by
-  // USING the product against the fixture (accepting an invitation binds a
-  // plant to an org and writes an audit row) — but `organization_invitations`
-  // FKs into both `users` (inviter, responder) and `churches` (target), and
-  // `association_events` into both as well, with no cascade on any of them. So
-  // one verification run that answered an invitation is enough to make the
-  // `users` delete below fail on
-  // `organization_invitations_inviter_user_id_users_id_fk`. Audit rows first:
-  // `association_events.source_invitation_id` points at an invitation.
-  const deletedAssociationEvents = await db
-    .delete(associationEvents)
-    .returning();
   console.log(
-    `   Deleted ${deletedAssociationEvents.length} association events`
+    `✅ Database cleaned — ${total} row(s) across ${order.length} tables\n`
   );
-
-  const deletedInvitations = await db
-    .delete(organizationInvitations)
-    .returning();
-  console.log(`   Deleted ${deletedInvitations.length} invitations`);
-
-  // Same shape: a coach assignment names a coach user and a church, neither FK
-  // cascading.
-  const deletedCoachAssignments = await db.delete(coachAssignments).returning();
-  console.log(`   Deleted ${deletedCoachAssignments.length} coach assignments`);
-
-  const deletedUsers = await db.delete(users).returning();
-  console.log(`   Deleted ${deletedUsers.length} users`);
-
-  const deletedChurches = await db.delete(churches).returning();
-  console.log(`   Deleted ${deletedChurches.length} churches`);
-
-  console.log("✅ Database cleaned\n");
 }
 
 // ============================================================================
