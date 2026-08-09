@@ -10,10 +10,6 @@ import {
   loadUserPreferences,
   preferenceOwnerFromSession,
 } from "@/lib/notifications/preferences";
-// ⚠️ PROTOTYPE — DISPOSABLE. Four presentations of the ineligible category rows
-// (#369 decision 2), to be ruled by operating them on the preview. Delete this
-// import, the constant and both blocks in the JSX with the ruling.
-import { OversightEligibilityPrototypeSwitcher } from "@/components/notifications/oversight-eligibility-prototype";
 
 // ============================================================================
 // Screen 2 — notification preferences (N-006).
@@ -32,12 +28,6 @@ import { OversightEligibilityPrototypeSwitcher } from "@/components/notification
 // scope it by either. The owner is minted from the session and is the only
 // thing the reads and writes will accept; see `actions.ts`.
 // ============================================================================
-
-// ⚠️ PROTOTYPE — DISPOSABLE (#369). Inlined rather than imported:
-// `prototypeInitScript` is exported from a "use client" module, so a Server
-// Component cannot call it. It re-applies the stored choice before first paint,
-// so a reload does not flash the as-built rows over the variant being judged.
-const ELIGIBILITY_PROTO_INIT = `try{var p=localStorage.getItem("oversight-elig-proto");document.documentElement.setAttribute("data-oversight-elig-proto",["now","a","b","c"].includes(p)?p:"now")}catch(e){document.documentElement.setAttribute("data-oversight-elig-proto","now")}`;
 
 export const dynamic = "force-dynamic";
 
@@ -59,20 +49,9 @@ export default async function SettingsPage() {
   const isPlanterWithPlant =
     session.user.role === "planter" && Boolean(session.user.churchId);
 
-  // ⚠️ PROTOTYPE — DISPOSABLE (#369). The four candidates differ only for a
-  // reader who has ineligible rows, so the switcher is offered only to one —
-  // a planter would otherwise get a floating pill with nothing behind it.
-  const hasPrototypeToOperate = view.ineligibleNote !== null;
-
   return (
     <>
       <HeaderBreadcrumbs items={[{ label: "Settings" }]} />
-
-      {/* ⚠️ PROTOTYPE — DISPOSABLE (#369) — start. */}
-      {hasPrototypeToOperate && (
-        <script dangerouslySetInnerHTML={{ __html: ELIGIBILITY_PROTO_INIT }} />
-      )}
-      {/* ⚠️ PROTOTYPE — DISPOSABLE (#369) — end. */}
 
       <div className="mx-auto w-full max-w-3xl space-y-8 p-4 md:p-6">
         <div className="space-y-1">
@@ -141,12 +120,6 @@ export default async function SettingsPage() {
             </p>
           </section>
         )}
-
-        {/* ⚠️ PROTOTYPE — DISPOSABLE (#369) — start. The floating pill that
-            switches the four presentations of the ineligible rows. It is
-            evaluation scaffolding and never ships as live UI. */}
-        {hasPrototypeToOperate && <OversightEligibilityPrototypeSwitcher />}
-        {/* ⚠️ PROTOTYPE — DISPOSABLE (#369) — end. */}
       </div>
     </>
   );

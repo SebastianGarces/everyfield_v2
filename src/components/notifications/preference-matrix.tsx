@@ -23,12 +23,6 @@ import type {
   PreferenceMatrixView,
 } from "@/lib/notifications/preferences";
 import { cn } from "@/lib/utils";
-// ⚠️ PROTOTYPE — DISPOSABLE. Delete with the ruling on PR #369; see the module
-// header of the file below for what to strip.
-import {
-  INELIGIBLE_ROLE_LABEL,
-  useOversightEligibilityVariant,
-} from "./oversight-eligibility-prototype";
 
 // ============================================================================
 // Screen 2 — the category × channel matrix (N-006).
@@ -74,12 +68,18 @@ import {
 //
 // The same #254 principle reaches the ROWS as well as the cadence area: a row
 // the reader is never served (`row.eligible`, decided on the server against the
-// delivery allow-list) is not a control they can usefully be offered. WHAT is
-// ruled; HOW it is presented is not, so four presentations ship together behind
-// the prototype switcher and every block that does it is marked
-// `⚠️ PROTOTYPE — DISPOSABLE`. `row.eligible` and `view.ineligibleNote` are NOT
-// prototype scaffolding and survive the ruling — only the branch on the variant
-// goes.
+// delivery allow-list) is not a control they can usefully be offered.
+//
+// Ruled 2026-08-09, after three presentations were built and operated on the
+// preview: the rows STAY, each carrying a token and an inert pair of switches.
+// Hiding them was refused — a screen that silently differs by role tells the
+// reader nothing and cannot be supported — and so was greying them, which
+// answers "why can't I click this?" without answering "then what do I get?".
+// So the row keeps its full weight, says it is not sent, and the group says
+// once what arrives instead.
+//
+// The token is short and the reason is a sentence, because they answer
+// different questions and only one of them bears repeating five times.
 // ============================================================================
 
 export interface PreferenceMatrixProps {
@@ -114,16 +114,15 @@ function applyMatrixAction(
 export function PreferenceMatrix({ view }: PreferenceMatrixProps) {
   const [, startTransition] = useTransition();
 
-  // ⚠️ PROTOTYPE — DISPOSABLE (#369 presentation ruling) —— start.
-  // `"now"` is as built. `firstIneligible` is B's: the reason is the same for
-  // all five rows, so B says it ONCE, on the first of them, and the remaining
-  // four point their switches at that one sentence. Repeating it five times
-  // would judge B on repetition rather than on the approach.
-  const variant = useOversightEligibilityVariant();
+  // The reason is a property of the GROUP, not of each row: it is the same
+  // sentence for all five, so it is said ONCE — on the first row that carries
+  // it — and every inert switch points its `aria-describedby` at that one
+  // sentence. Five copies of it would read as a refusal notice rather than as a
+  // settings screen. Which row is first is derived, never assumed: nothing here
+  // depends on the ineligible rows being contiguous or on which ones they are.
   const firstIneligible =
     view.categories.find((row) => !row.eligible)?.category ?? null;
   const ineligibleNoteId = "preference-ineligible-note";
-  // ⚠️ PROTOTYPE — DISPOSABLE —— end.
 
   // Hoisted so TypeScript narrows the union once, rather than at each use.
   const digest = view.digest;
@@ -142,7 +141,25 @@ export function PreferenceMatrix({ view }: PreferenceMatrixProps) {
 
   const [state, apply] = useOptimistic(serverState, applyMatrixAction);
 
+  const ineligibleCategories = useMemo(
+    () =>
+      new Set(
+        view.categories
+          .filter((row) => !row.eligible)
+          .map((row) => row.category)
+      ),
+    [view]
+  );
+
   const toggle = (cell: PreferenceCellView, enabled: boolean) => {
+    // The switch is already `disabled`, so this is the second of two locks —
+    // and the third is `setNotificationPreferenceAction`, which refuses the
+    // same category server-side. The one that matters is the server's; this one
+    // exists so that a control the user cannot reach also cannot be reached by
+    // a stray programmatic `onCheckedChange`, and so the optimistic value never
+    // moves for a save that is going to be refused.
+    if (ineligibleCategories.has(cell.category)) return;
+
     startTransition(async () => {
       apply({ type: "cell", key: cell.key, enabled });
 
@@ -204,41 +221,41 @@ export function PreferenceMatrix({ view }: PreferenceMatrixProps) {
 
       <ul className="divide-y">
         {view.categories.map((row) => {
-          // ⚠️ PROTOTYPE — DISPOSABLE (#369 presentation ruling) —— start.
-          // The ROW-LEVEL fact is `row.eligible` and it is permanent; the three
-          // branches on `variant` below are what the ruling replaces with one.
           const ineligible = !row.eligible;
-          if (ineligible && variant === "a") return null;
-          const inert = ineligible && variant !== "now";
-          // ⚠️ PROTOTYPE — DISPOSABLE —— end.
 
           return (
             <li
               key={row.category}
               data-testid={`preference-row-${row.category}`}
               data-eligible={row.eligible}
-              className={cn(
-                "flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-start sm:gap-6",
-                // ⚠️ PROTOTYPE — DISPOSABLE: B greys the row it has made inert.
-                inert && variant === "b" && "opacity-60"
-              )}
+              className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-start sm:gap-6"
             >
               <div className="min-w-0 flex-1 space-y-1">
                 <p
                   id={`preference-category-${row.category}`}
-                  className="flex items-center gap-2 text-sm font-medium"
+                  className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium"
                 >
                   {row.label}
-                  {/* ⚠️ PROTOTYPE — DISPOSABLE: C's token, and the whole of
-                      what C says. It sits with the category name because that
-                      is the thing it qualifies. */}
-                  {inert && variant === "c" && (
+                  {/* The token states the FACT and nothing else, in four short
+                      words the eye takes in beside the category name. The
+                      reason is a sentence and lives below, once; a token
+                      carrying both would be a paragraph in a badge, five times
+                      over. `title` repeats the reason for a reader who lands on
+                      a later row — never as the ONLY place it is said, which is
+                      why the sentence is on the screen as well.
+
+                      This element is inside the `<p>` the switch group is
+                      labelled by, so the group's accessible name is "Tasks Not
+                      sent to you" — the token is announced with the row rather
+                      than being a visual-only fact. */}
+                  {ineligible && (
                     <Badge
                       variant="secondary"
                       data-testid={`preference-ineligible-badge-${row.category}`}
+                      title={view.ineligibleNote ?? undefined}
                       className="font-normal"
                     >
-                      {INELIGIBLE_ROLE_LABEL}
+                      Not sent to you
                     </Badge>
                   )}
                 </p>
@@ -246,12 +263,11 @@ export function PreferenceMatrix({ view }: PreferenceMatrixProps) {
                   {row.description}
                 </p>
 
-                {/* ⚠️ PROTOTYPE — DISPOSABLE: B's one line, on the first of the
-                    five rows it covers. It is the server's sentence
-                    (`view.ineligibleNote`), not the component's, so the screen
-                    and the refused write say the same thing. */}
-                {inert &&
-                  variant === "b" &&
+                {/* The reason, said once for the group it covers. It is the
+                    SERVER's sentence (`view.ineligibleNote`), which is also the
+                    sentence `setNotificationPreferenceAction` refuses with, so
+                    the screen and the endpoint cannot drift apart. */}
+                {ineligible &&
                   row.category === firstIneligible &&
                   view.ineligibleNote && (
                     <p
@@ -355,24 +371,25 @@ export function PreferenceMatrix({ view }: PreferenceMatrixProps) {
                         aria-label={`${row.label} — ${channelLabel}`}
                         checked={state.cells[cell.key]}
                         onCheckedChange={(checked) => toggle(cell, checked)}
-                        // ⚠️ PROTOTYPE — DISPOSABLE: B and C both make the
-                        // switch genuinely inert rather than only looking it.
-                        // An offer that still saves is the defect being ruled
-                        // on, so a variant that merely greyed it would not be a
-                        // candidate. B points the switch at its own reason; C
-                        // carries the token in the row's accessible name.
-                        disabled={inert}
+                        // Genuinely inert, not merely greyed: a switch that
+                        // still saved would be the defect this ruling closes,
+                        // one row up from the cadence control #254 retired.
+                        // `disabled` also swaps the cursor to `not-allowed`
+                        // through the Switch's own base classes, which is the
+                        // one place `cursor-pointer` should NOT win.
+                        disabled={ineligible}
+                        // Points at the group's one sentence, so a screen
+                        // reader on any of the ten inert switches is told what
+                        // arrives instead — not just that this one is off.
                         aria-describedby={
-                          inert && variant === "b"
-                            ? ineligibleNoteId
-                            : undefined
+                          ineligible ? ineligibleNoteId : undefined
                         }
                       />
                       <Label
                         htmlFor={controlId}
                         className={cn(
                           "text-muted-foreground text-sm sm:hidden",
-                          inert ? "cursor-default" : "cursor-pointer"
+                          ineligible ? "cursor-default" : "cursor-pointer"
                         )}
                       >
                         {channelLabel}

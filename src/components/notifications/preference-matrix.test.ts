@@ -109,3 +109,86 @@ test("the header comment claims only what the file does", () => {
   // And it does not claim the component decides anything the server decides.
   assert.doesNotMatch(header, /this component (decides|chooses) what/i);
 });
+
+// ----------------------------------------------------------------------------
+// Rows the reader is never served (ruled 2026-08-09, extending #254)
+//
+// The row stays, carries a token, and its switches are inert. What belongs here
+// is the set of claims a future edit could break silently: that "inert" is real
+// rather than cosmetic, that the reason is on the SCREEN and not only in a
+// tooltip, and that none of it is driven by a list of category names.
+// ----------------------------------------------------------------------------
+
+test("an ineligible row's switches are genuinely inert, not merely greyed", () => {
+  // The whole point of the ruling. A switch that still saved would be the
+  // defect it closes — the cadence control #254 retired, one row up.
+  assert.match(CODE, /disabled=\{ineligible\}/);
+
+  // And the handler refuses too, so a programmatic `onCheckedChange` cannot do
+  // what the pointer cannot. The server action is the lock that matters; this
+  // is the one that keeps the optimistic value from moving for a save that is
+  // going to be refused.
+  assert.match(
+    CODE,
+    /if \(ineligibleCategories\.has\(cell\.category\)\) return;/
+  );
+});
+
+test("the reason is on the screen, not only in a tooltip", () => {
+  // A `title` is invisible to touch, to keyboard users and to anyone who does
+  // not hover. It may REPEAT the reason for a reader who lands on a later row;
+  // it may not be the only place the reason exists.
+  assert.match(CODE, /\{view\.ineligibleNote\}/);
+  assert.match(CODE, /data-testid="preference-ineligible-note"/);
+
+  // Said once for the group, and pointed at by every inert switch — so a screen
+  // reader on any of them hears what arrives instead.
+  assert.match(CODE, /row\.category === firstIneligible/);
+  assert.match(
+    CODE,
+    /aria-describedby=\{\s*ineligible \? ineligibleNoteId : undefined\s*\}/
+  );
+});
+
+test("nothing in the matrix names a category, a role or an audience", () => {
+  // Eligibility arrives as `row.eligible`, resolved on the server from
+  // `OVERSIGHT_ELIGIBLE_CATEGORIES`. A component that knew the five granular
+  // names — or knew what a `network_admin` is — would be a second copy of the
+  // allow-list, and the copy is always the one that misses the next change.
+  for (const forbidden of [
+    /"tasks"/,
+    /"meetings"/,
+    /"communication"/,
+    /"teams"/,
+    /"phase"/,
+    /"milestones"/,
+    /network_admin/,
+    /sending_church_admin/,
+    /oversight/i,
+  ]) {
+    assert.doesNotMatch(CODE, forbidden, String(forbidden));
+  }
+});
+
+test("the token is short, and the reason it abbreviates is not written here", () => {
+  // The token answers "can I use this?" in four words beside the category name.
+  // The reason answers "then what do I get?" and is a sentence, which is why it
+  // is said once rather than five times — and why it lives in the view model
+  // with the refusal the write path returns, not in this file.
+  const token = CODE.match(/<Badge[\s\S]*?>\s*([^<]+?)\s*<\/Badge>/)?.[1] ?? "";
+
+  assert.equal(token, "Not sent to you");
+  assert.ok(token.split(/\s+/).length <= 4, "the token must stay glanceable");
+  assert.doesNotMatch(CODE, /milestones and the daily summary/i);
+});
+
+test("no prototype scaffolding survives the ruling", () => {
+  // Three presentations shipped together to be operated on the preview. The
+  // switcher never ships as live UI, and the losing two are gone rather than
+  // parked behind a flag.
+  assert.doesNotMatch(SOURCE, /PROTOTYPE/);
+  assert.doesNotMatch(
+    SOURCE,
+    /prototype-switcher|oversight-eligibility-prototype/
+  );
+});
