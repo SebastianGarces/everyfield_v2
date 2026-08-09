@@ -40,6 +40,70 @@ function buildUrl(
   return `/api/documents/${templateId}?${params.toString()}`;
 }
 
+/**
+ * The output-format control.
+ *
+ * ~8 of the catalog's templates render in exactly one format. A radio group
+ * with a single option is a control that cannot be operated: it reads as a
+ * decision the user has to make, costs a tab stop, and answers itself. Those
+ * templates get a plain statement of fact ("Format: PDF") and the radio group
+ * is kept for templates that genuinely offer a choice.
+ *
+ * Exported for `generate-dialog.test.ts` — the dialog itself renders through a
+ * Radix portal, which produces no server markup to assert on.
+ */
+export function FormatPicker({
+  templateId,
+  formats,
+  value,
+  onValueChange,
+}: {
+  templateId: string;
+  formats: DocumentFormat[];
+  value: DocumentFormat;
+  onValueChange: (format: DocumentFormat) => void;
+}) {
+  if (formats.length <= 1) {
+    const only = formats[0] ?? value;
+    return (
+      <p className="text-sm" data-testid="format-picker">
+        <span className="text-muted-foreground">Format:</span>{" "}
+        <span className="font-medium">{FORMAT_LABELS[only]}</span>
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-2" data-testid="format-picker">
+      <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+        Format
+      </p>
+      <RadioGroup
+        value={value}
+        onValueChange={(v) => onValueChange(v as DocumentFormat)}
+        className="flex gap-6"
+        aria-label="Output format"
+      >
+        {formats.map((f) => (
+          <div key={f} className="flex items-center gap-2">
+            <RadioGroupItem
+              value={f}
+              id={`fmt-${templateId}-${f}`}
+              className="cursor-pointer"
+            />
+            <Label
+              htmlFor={`fmt-${templateId}-${f}`}
+              className="cursor-pointer font-normal"
+            >
+              {FORMAT_LABELS[f]}
+            </Label>
+          </div>
+        ))}
+      </RadioGroup>
+    </div>
+  );
+}
+
 interface GenerateDialogProps {
   template: DocumentTemplate;
   /** Auto-fill defaults resolved server-side (keyed by merge-field key). */
@@ -133,37 +197,17 @@ export function GenerateDialog({
             </div>
           ))}
 
-          {/* Always shown, even for single-format templates: arriving here from
-              a contextual link (DOC-014) must land on a format choice, never a
-              blind download. */}
+          {/* The format section is always shown — arriving from a contextual
+              link (DOC-014) must never end in a blind download — but a choice
+              of one is not a choice: single-format templates state the format
+              instead of offering a radio group with nothing to pick. */}
           <Separator />
-          <div className="space-y-2" data-testid="format-picker">
-            <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-              Format
-            </p>
-            <RadioGroup
-              value={format}
-              onValueChange={(v) => setFormat(v as DocumentFormat)}
-              className="flex gap-6"
-              aria-label="Output format"
-            >
-              {template.formats.map((f) => (
-                <div key={f} className="flex items-center gap-2">
-                  <RadioGroupItem
-                    value={f}
-                    id={`fmt-${template.id}-${f}`}
-                    className="cursor-pointer"
-                  />
-                  <Label
-                    htmlFor={`fmt-${template.id}-${f}`}
-                    className="cursor-pointer font-normal"
-                  >
-                    {FORMAT_LABELS[f]}
-                  </Label>
-                </div>
-              ))}
-            </RadioGroup>
-          </div>
+          <FormatPicker
+            templateId={template.id}
+            formats={template.formats}
+            value={format}
+            onValueChange={setFormat}
+          />
 
           {template.relatedWikiSlug && (
             <>
