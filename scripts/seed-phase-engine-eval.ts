@@ -34,7 +34,9 @@
 
 import { neon } from "@neondatabase/serverless";
 import { config } from "dotenv";
-import { and, eq, inArray } from "drizzle-orm";
+// `sql` is aliased: the neon client below already owns that name here, and
+// drizzle's tagged template is a different thing entirely.
+import { and, eq, inArray, sql as rawSql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-http";
 
 import {
@@ -138,6 +140,27 @@ function dateOnlyAgo(days: number): string {
 /** A launch `date` value `days` after NOW (negative → already launched). */
 function launchInDays(days: number): string {
   return new Date(NOW.getTime() + days * MS_PER_DAY).toISOString().slice(0, 10);
+}
+
+/**
+ * The `onboarding_completed_at` stamp every eval church carries (#326, F12 /
+ * OB-001).
+ *
+ * A null stamp means the onboarding flow owns the planter's dashboard
+ * (`shouldShowOnboarding`, `src/lib/onboarding/steps.ts`). An eval planter who
+ * lands in the wizard is looking at a DIFFERENT SCREEN from the one this corpus
+ * was built to grade, and nothing about that is loud — the eval simply starts
+ * scoring a different product. Every profile here is a plant with history, so
+ * "onboarding is finished" is what the corpus has always meant.
+ *
+ * Not `daysAgo(...)`, and deliberately not derived from NOW: `now()` is
+ * evaluated inside the same INSERT that fills `created_at` from `DEFAULT now()`,
+ * so the stamp is exactly the row's creation moment. It is also not a Signal
+ * layer input — nothing in `src/lib/phase-engine/signals` reads this column — so
+ * a wall-clock value cannot move the corpus's deterministic facts.
+ */
+function onboardingCompletedAtSeedStamp() {
+  return rawSql`now()`;
 }
 
 // ============================================================================
@@ -689,6 +712,7 @@ async function seedChurch(
       currentPhase: profile.currentPhase,
       sendingNetworkId: EVAL_IDS.networkId,
       sendingChurchId: EVAL_IDS.sendingChurchId,
+      onboardingCompletedAt: onboardingCompletedAtSeedStamp(),
       lastMaterialEventAt:
         profile.lastMaterialEventDaysAgo === null
           ? null

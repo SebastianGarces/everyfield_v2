@@ -12,6 +12,9 @@
 
 import { neon } from "@neondatabase/serverless";
 import { config } from "dotenv";
+// Aliased: `sql` is already the neon client below, and drizzle's tagged
+// template is a different thing entirely.
+import { sql as rawSql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-http";
 import {
   associationEvents,
@@ -135,6 +138,30 @@ async function cleanDatabase(): Promise<void> {
 // ============================================================================
 // Seed Data
 // ============================================================================
+
+/**
+ * The `onboarding_completed_at` stamp every seeded church carries (#326, F12 /
+ * OB-001).
+ *
+ * A church row whose `onboarding_completed_at` is null means "the onboarding
+ * flow still owns this planter's dashboard" (`shouldShowOnboarding`,
+ * `src/lib/onboarding/steps.ts`), so an unstamped fixture puts every seeded
+ * planter into the wizard instead of the dashboard the fixture exists to show.
+ * These plants are fixtures of FINISHED onboarding — they arrive with a phase,
+ * a launch and a team — so the stamp is not a convenience, it is the truth
+ * about them.
+ *
+ * `now()` rather than a JS `Date`: Postgres evaluates it inside the same INSERT
+ * that fills `created_at` from `DEFAULT now()`, so the two are the SAME instant
+ * rather than milliseconds apart. Seeded onboarding finished when the row was
+ * created; that is the only honest value a fixture has.
+ *
+ * To see the onboarding flow itself, register a new planter — registration
+ * creates a church with a null stamp, which is what the flow is for.
+ */
+function onboardingCompletedAtSeedStamp() {
+  return rawSql`now()`;
+}
 
 const SEED_CHURCHES: NewChurch[] = [
   { name: "Grace Community Church", currentPhase: 0 },
@@ -260,7 +287,12 @@ async function seedDatabase(): Promise<void> {
   console.log("📍 Creating churches...");
   const createdChurches = await db
     .insert(churches)
-    .values(SEED_CHURCHES)
+    .values(
+      SEED_CHURCHES.map((church) => ({
+        ...church,
+        onboardingCompletedAt: onboardingCompletedAtSeedStamp(),
+      }))
+    )
     .returning();
 
   for (const church of createdChurches) {
