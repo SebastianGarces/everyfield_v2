@@ -1,7 +1,9 @@
 // ============================================================================
-// Vercel Cron: dirty-or-stale assessment runner (NFR-PE-2 / AC-PE-8 / PE-010).
+// Scheduled: dirty-or-stale assessment runner (NFR-PE-2 / AC-PE-8 / PE-010).
 //
-// Invoked ~daily by Vercel Cron (see vercel.json). Selects the plants that are
+// Ticked twice daily (07:00 and 19:00 UTC) by
+// `.github/workflows/phase-engine-assess.yml` — NOT by a Vercel cron; see the
+// cadence note below. Selects the plants that are
 // dirty-or-stale via the orchestrator's selection query and runs
 // `generateAssessment` for each, bounded, sequential and PACED so:
 //   - quiet plants are skipped (no material event since last assessment),
@@ -56,10 +58,24 @@
 // lets all 10 through in ~60s). MAX_BATCH is the hard ceiling for the tier we
 // are actually on.
 //
-// Cohort note: at ~10-15 alpha plants a daily cron with MAX_BATCH=10 can leave
-// the tail a day stale. The fix is frequency, not a bigger batch — drive this
-// route twice daily from the GitHub Actions tick that already exists for
-// `/api/notifications/dispatch` (Hobby caps Vercel crons at daily).
+// ---------------------------------------------------------------------------
+// Cadence (#36, ruled 2026-08-09) — why the schedule moved out of vercel.json
+// ---------------------------------------------------------------------------
+// MAX_BATCH=10 against a ~10-15 plant alpha cohort means one tick a day cannot
+// clear the cohort, and the fix is frequency, not a bigger batch: the batch
+// size is pinned by the arithmetic above and raising it just gets the tail
+// killed by the function timeout instead of the cap.
+//
+// The Hobby plan accepts at most ONE cron invocation per day per job and
+// REJECTS anything more frequent — the deployment fails with it, it is not
+// throttled. So a twice-daily schedule cannot live in vercel.json at all. It is
+// a GitHub Actions schedule instead, exactly like `/api/notifications/dispatch`
+// (ruled 2026-07-27). vercel.json now declares no crons: two schedulers for one
+// route would double the token spend and race each other's pacer windows, so
+// the Actions tick is the SINGLE driver.
+//
+// Two ticks × 10 plants covers 15 plants a day with headroom, and the
+// oldest-assessed-first ordering below decides who rides in which tick.
 // ============================================================================
 
 import { NextRequest, NextResponse } from "next/server";
@@ -219,6 +235,12 @@ export async function runAssessmentBatch(
 
   const selected = await deps.selectPlantsForAssessment();
 
+  // The selection already arrives oldest-assessed-first (never-assessed ahead
+  // of everything) — `orderByAssessmentAge` in assessment/dirty.ts. That is
+  // load-bearing for the slice on the next line: the cap drops the tail, so an
+  // unordered selection would drop the SAME tail every tick and starve it
+  // outright (#36). The order is asserted in dirty.test.ts and end-to-end here
+  // in route.test.ts.
   const batch = selected.slice(0, deps.maxBatch);
   const skipped = selected.length - batch.length;
 
