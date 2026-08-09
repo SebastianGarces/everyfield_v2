@@ -105,6 +105,34 @@ export function formatDateTime(
   return `${shortDateWithoutWeekday.format(date)} at ${formatTime(date)}`;
 }
 
+// Month and day on their own, for the two-line calendar tile below. A separate
+// formatter rather than a substring of `formatDate(date, "short")`: pulling
+// "Jul 30" back out of "Thu, Jul 30, 2026" means splitting on the punctuation
+// `Intl` chose, which is a locale detail, not a contract.
+const tileFormatter = new Intl.DateTimeFormat(LOCALE, {
+  timeZone: APP_TIME_ZONE,
+  month: "short",
+  day: "numeric",
+});
+
+/**
+ * The two lines of a calendar tile — `["Jul", "30"]`.
+ *
+ * Lives here, beside the other formatters, for two reasons. It is zone-pinned
+ * like everything else in this file, so a tile cannot roll onto the next day in
+ * a browser east of UTC while the detail page it links to keeps the right one
+ * (React #418 — memory/invariants.md → Date & Time Rendering). And this module
+ * imports nothing, so a test can import the real helper instead of mirroring it;
+ * the component that renders the tile pulls in server actions that open a
+ * database connection at import time, and cannot be imported from a unit test.
+ */
+export function calendarTileParts(date: Date): [month: string, day: string] {
+  const parts = tileFormatter.formatToParts(date);
+  const valueOf = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? "";
+  return [valueOf("month"), valueOf("day")];
+}
+
 /**
  * The value for an `<input type="datetime-local">`: `"2026-07-30T19:00"`.
  *
