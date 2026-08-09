@@ -34,7 +34,9 @@
 
 import { neon } from "@neondatabase/serverless";
 import { config } from "dotenv";
-import { and, eq, inArray } from "drizzle-orm";
+// `sql` is aliased: the neon client below already owns that name here, and
+// drizzle's tagged template is a different thing entirely.
+import { and, eq, inArray, sql as rawSql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-http";
 
 import {
@@ -98,7 +100,22 @@ const db = drizzle(sql);
 
 const EVAL_NETWORK_NAME = "EVAL — Phase Engine";
 const EVAL_SENDING_CHURCH_NAME = "EVAL — Sending Church";
-const EVAL_EMAIL_DOMAIN = "eval.phase-engine.everyfield.dev";
+/**
+ * Domain every eval account is CREATED on. `everyfield.app` is the product
+ * domain (ruled 2026-07-31), replacing the retired placeholder.
+ */
+const EVAL_EMAIL_DOMAIN = "eval.phase-engine.everyfield.app";
+/**
+ * ...and the marker cleanup MATCHES on, which is deliberately the subdomain and
+ * not the full domain. An eval address is `<who>@eval.phase-engine.<domain>`,
+ * so matching the subdomain alone identifies every eval account this script has
+ * ever created — including ones seeded before the domain retirement. Match on
+ * `EVAL_EMAIL_DOMAIN` instead and a database seeded on the old domain keeps its
+ * eval network admin forever: that user has no `church_id`, so the church-scoped
+ * sweep below cannot see it either, and the `sending_networks` delete then fails
+ * on `users_sending_network_id_sending_networks_id_fk`.
+ */
+const EVAL_EMAIL_MARKER = "@eval.phase-engine.";
 const EVAL_PASSWORD = "eval-password-123";
 
 // ----------------------------------------------------------------------------
@@ -123,6 +140,27 @@ function dateOnlyAgo(days: number): string {
 /** A launch `date` value `days` after NOW (negative → already launched). */
 function launchInDays(days: number): string {
   return new Date(NOW.getTime() + days * MS_PER_DAY).toISOString().slice(0, 10);
+}
+
+/**
+ * The `onboarding_completed_at` stamp every eval church carries (#326, F12 /
+ * OB-001).
+ *
+ * A null stamp means the onboarding flow owns the planter's dashboard
+ * (`shouldShowOnboarding`, `src/lib/onboarding/steps.ts`). An eval planter who
+ * lands in the wizard is looking at a DIFFERENT SCREEN from the one this corpus
+ * was built to grade, and nothing about that is loud — the eval simply starts
+ * scoring a different product. Every profile here is a plant with history, so
+ * "onboarding is finished" is what the corpus has always meant.
+ *
+ * Not `daysAgo(...)`, and deliberately not derived from NOW: `now()` is
+ * evaluated inside the same INSERT that fills `created_at` from `DEFAULT now()`,
+ * so the stamp is exactly the row's creation moment. It is also not a Signal
+ * layer input — nothing in `src/lib/phase-engine/signals` reads this column — so
+ * a wall-clock value cannot move the corpus's deterministic facts.
+ */
+function onboardingCompletedAtSeedStamp() {
+  return rawSql`now()`;
 }
 
 // ============================================================================
@@ -574,12 +612,30 @@ async function cleanEvalData(): Promise<void> {
     await db.delete(persons).where(inArray(persons.churchId, churchIds));
   }
 
-  // Eval users (planter per church + network admin) — matched by email domain.
-  const evalUsers = await db
-    .select({ id: users.id, email: users.email })
+  // Eval users (planter per church + network admin) — matched by the eval
+  // SUBDOMAIN, not the full domain, so accounts seeded before the everyfield.app
+  // retirement are swept by the same pass that sweeps today's. See
+  // `EVAL_EMAIL_MARKER`.
+  const allUsers = await db
+    .select({
+      id: users.id,
+      email: users.email,
+      sendingNetworkId: users.sendingNetworkId,
+      sendingChurchId: users.sendingChurchId,
+    })
     .from(users);
-  const evalUserIds = evalUsers
-    .filter((u) => u.email.endsWith(`@${EVAL_EMAIL_DOMAIN}`))
+  const evalUserIds = allUsers
+    .filter(
+      (u) =>
+        u.email.includes(EVAL_EMAIL_MARKER) ||
+        // Belt-and-braces for a user that points INTO the eval org but carries
+        // an ordinary address (someone who registered against the corpus): the
+        // network/sending-church deletes at the end would otherwise fail on
+        // their FK, and neither cascades.
+        u.sendingNetworkId === networkId ||
+        (u.sendingChurchId !== null &&
+          sendingChurchIds.includes(u.sendingChurchId))
+    )
     .map((u) => u.id);
   // Oversight associations and the invitations behind them (#23/#303). Not
   // seeded here — they are created by USING the product against the eval
@@ -656,6 +712,7 @@ async function seedChurch(
       currentPhase: profile.currentPhase,
       sendingNetworkId: EVAL_IDS.networkId,
       sendingChurchId: EVAL_IDS.sendingChurchId,
+      onboardingCompletedAt: onboardingCompletedAtSeedStamp(),
       lastMaterialEventAt:
         profile.lastMaterialEventDaysAgo === null
           ? null

@@ -8,28 +8,39 @@
  * Usage:
  *   bun run scripts/seed-dev-db.ts
  *   bun run scripts/seed-dev-db.ts --clean-only  # Only clean, don't seed
+ *
+ * The wipe below is not scoped to the rows this file creates — see
+ * `cleanDatabase()`. It refuses to run against a database holding the alpha
+ * cohort's accounts unless `--allow-protected-db` is passed.
  */
 
 import { neon } from "@neondatabase/serverless";
 import { config } from "dotenv";
+// Aliased: `sql` is already the neon client below, and drizzle's tagged
+// template is a different thing entirely.
+import { sql as rawSql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-http";
 import {
   churches,
   launchEvents,
   launches,
-  tasks,
   users,
-  sessions,
   type NewChurch,
   type NewUser,
 } from "../src/db/schema";
 import { hashPassword } from "../src/lib/auth/password";
+import {
+  ALLOW_PROTECTED_DB_FLAG,
+  decideWipe,
+  matchProtectedAccounts,
+} from "../src/lib/dev-seed/protected-database";
 
 // Load environment variables for scripts
 config({ path: ".env.local" });
 
 // Parse command line args
 const cleanOnly = process.argv.includes("--clean-only");
+const allowProtectedDb = process.argv.includes(ALLOW_PROTECTED_DB_FLAG);
 
 // Database connection
 const connectionString = process.env.DATABASE_URL;
@@ -49,42 +60,289 @@ const db = drizzle(sql);
 // Cleanup Procedure
 // ============================================================================
 
+/**
+ * Where the wipe starts. The fixture IS "every user and every church", so both
+ * are deleted unscoped — every row, not only the ones seeded below.
+ *
+ * That is what makes the everyfield.app retirement (ruled 2026-07-31) converge
+ * on a database seeded before it: there is no email predicate to keep in step,
+ * so no account can survive by carrying an address this file no longer mentions.
+ * Both the old and the new domain go, because everything goes.
+ */
+const WIPE_ROOTS = ["users", "churches"] as const;
+
+/**
+ * Tables the wipe refuses to enter, whatever the foreign-key graph says.
+ *
+ * The wiki corpus is church-scoped (`church_id`, null = global), so the graph
+ * walk below reaches it from `churches` like any other dependent — and deleting
+ * it would destroy the articles and their `related_article_slugs` cross-links
+ * (#317), which are migrated into the database and rebuilt by no script.
+ * `wiki_sections` is the corpus's own parent and is not seeded either.
+ *
+ * Protection means two things: never deleted, and never walked THROUGH, so
+ * nothing downstream of them is dragged in either.
+ */
+const PROTECTED_TABLES = new Set(["wiki_articles", "wiki_sections"]);
+
+interface ForeignKey {
+  child: string;
+  parent: string;
+  /** The child column, for single-column keys — used by the preflight below. */
+  column: string | null;
+}
+
+/** Postgres identifiers this script is willing to interpolate into SQL. */
+const SAFE_IDENTIFIER = /^[a-z_][a-z0-9_]*$/;
+
+function quoteIdentifier(name: string): string {
+  if (!SAFE_IDENTIFIER.test(name)) {
+    throw new Error(`Refusing to interpolate unexpected identifier: ${name}`);
+  }
+  return `"${name}"`;
+}
+
+/**
+ * Every foreign key in `public`, read from the catalog rather than from the
+ * Drizzle schema.
+ *
+ * The catalog is what the DELETEs will actually be checked against, and it does
+ * not go stale: a table added next month arrives here without anyone
+ * remembering to add it to a list in this file. That is the whole point — the
+ * hand-maintained list this replaced fell behind three times (launch journals
+ * in #305, launch-prep tasks in #305/LS-003, answered invitations in #304), and
+ * each time the symptom was the same: `pnpm db:seed` dies halfway through a
+ * partially wiped database.
+ */
+async function foreignKeys(): Promise<ForeignKey[]> {
+  const rows = (await sql`
+    SELECT
+      child.relname::text  AS child,
+      parent.relname::text AS parent,
+      CASE
+        WHEN array_length(con.conkey, 1) = 1
+        THEN (
+          SELECT att.attname::text
+          FROM pg_attribute att
+          WHERE att.attrelid = con.conrelid AND att.attnum = con.conkey[1]
+        )
+        ELSE NULL
+      END AS column
+    FROM pg_constraint con
+    JOIN pg_class child ON child.oid = con.conrelid
+    JOIN pg_class parent ON parent.oid = con.confrelid
+    JOIN pg_namespace nsp ON nsp.oid = child.relnamespace
+    WHERE con.contype = 'f' AND nsp.nspname = 'public'
+  `) as { child: string; parent: string; column: string | null }[];
+
+  return rows.map((row) => ({
+    child: row.child,
+    parent: row.parent,
+    column: row.column,
+  }));
+}
+
+/**
+ * The tables the wipe covers, in an order every FK survives: a table is always
+ * listed before the tables it points at.
+ *
+ * Reachability, not enumeration: start at the roots and take everything that
+ * points at something already in the set, transitively. A row that cannot be
+ * reached from a user or a church is not part of the fixture and is left alone
+ * — `sending_networks`, `sending_churches` and `wiki_sections` are parents of
+ * the fixture, not dependents of it, and this script never created them.
+ *
+ * Self-referencing keys (`ministry_teams.reports_to_team_id` and friends) are
+ * dropped from the ordering: `DELETE FROM t` removes the referencing rows in
+ * the same statement, so they cannot block themselves.
+ */
+function planWipe(keys: ForeignKey[]): string[] {
+  const dependents = new Map<string, Set<string>>();
+  for (const { child, parent } of keys) {
+    if (child === parent) continue;
+    if (!dependents.has(parent)) dependents.set(parent, new Set());
+    dependents.get(parent)!.add(child);
+  }
+
+  const covered = new Set<string>();
+  const queue: string[] = [];
+  for (const root of WIPE_ROOTS) {
+    if (PROTECTED_TABLES.has(root)) continue;
+    covered.add(root);
+    queue.push(root);
+  }
+  while (queue.length > 0) {
+    const table = queue.shift()!;
+    for (const child of dependents.get(table) ?? []) {
+      if (covered.has(child) || PROTECTED_TABLES.has(child)) continue;
+      covered.add(child);
+      queue.push(child);
+    }
+  }
+
+  // Children first. A table is emitted once every covered table pointing at it
+  // has been emitted.
+  const order: string[] = [];
+  const emitted = new Set<string>();
+  while (emitted.size < covered.size) {
+    const ready = [...covered]
+      .filter((table) => !emitted.has(table))
+      .filter((table) =>
+        [...(dependents.get(table) ?? [])]
+          .filter((child) => covered.has(child))
+          .every((child) => emitted.has(child))
+      )
+      .sort();
+
+    if (ready.length === 0) {
+      // A cycle of non-cascading keys. Nothing here can be deleted safely one
+      // statement at a time, and guessing would leave a half-wiped database, so
+      // say which tables are involved and stop.
+      const stuck = [...covered].filter((table) => !emitted.has(table)).sort();
+      throw new Error(
+        `Cannot order the wipe — these tables reference each other in a cycle: ${stuck.join(", ")}`
+      );
+    }
+
+    for (const table of ready) {
+      emitted.add(table);
+      order.push(table);
+    }
+  }
+
+  return order;
+}
+
+/**
+ * Refuse to start if a protected table holds a row that the wipe would orphan.
+ *
+ * `wiki_articles.church_id` is the live case: a church-scoped article makes the
+ * `churches` delete fail on its FK, and the honest answer is NOT to delete the
+ * article — it is content, not fixture. Better to stop before the first DELETE
+ * than to discover it after the users are gone.
+ */
+async function assertProtectedTablesAreSafe(
+  keys: ForeignKey[],
+  wiped: Set<string>
+): Promise<void> {
+  for (const key of keys) {
+    if (!PROTECTED_TABLES.has(key.child)) continue;
+    if (!wiped.has(key.parent) || key.column === null) continue;
+
+    const result = await db.execute(
+      rawSql.raw(
+        `SELECT count(*)::int AS n FROM ${quoteIdentifier(key.child)} WHERE ${quoteIdentifier(key.column)} IS NOT NULL`
+      )
+    );
+    const orphaned =
+      (result as unknown as { rows: { n: number }[] }).rows[0]?.n ?? 0;
+
+    if (orphaned > 0) {
+      throw new Error(
+        `Refusing to clean: ${key.child} has ${orphaned} row(s) whose ${key.column} points at ${key.parent}, ` +
+          `which this wipe deletes. ${key.child} is content, not fixture — it is migrated in and no script can rebuild it (#317). ` +
+          `Re-point or remove those rows by hand first.`
+      );
+    }
+  }
+}
+
+/**
+ * Refuse to wipe a database that people share (#326, ruled 2026-08-09).
+ *
+ * This is not a scalpel: point it at the deployed development branch — which
+ * accumulates plants from onboarding runs and accounts from real registrations
+ * — and it removes those too. Until this guard existed the only thing stopping
+ * that was a comment, plus the accident that the wipe used to CRASH partway
+ * through on a database with launch history. `planWipe()` fixed the crash,
+ * which means it also removed the protection.
+ *
+ * The decision lives in `src/lib/dev-seed/protected-database.ts` as a pure
+ * function so it has tests; all this does is answer its one question — which
+ * protected accounts are in this database. Every user's address is read rather
+ * than filtered in SQL, because the matching rules (whole-address equality,
+ * case, whitespace) are the part worth testing, and a dev database is small.
+ *
+ * A query that throws — no `users` table yet, bad credentials — propagates and
+ * aborts the run. An unanswered question about a destructive operation is a no.
+ */
+async function assertDatabaseIsWipeable(): Promise<void> {
+  const rows = await db.select({ email: users.email }).from(users);
+  const decision = decideWipe({
+    accountsFound: matchProtectedAccounts(rows.map((row) => row.email)),
+    overrideRequested: allowProtectedDb,
+  });
+
+  switch (decision.verdict) {
+    case "proceed":
+      return;
+    case "proceed-with-override":
+      console.warn(`⚠️  ${decision.warning}\n`);
+      return;
+    case "refuse":
+      throw new Error(decision.message);
+  }
+}
+
+/**
+ * Wipe the fixture — every user and every church, not only the seeded ones.
+ *
+ * The guard above runs first, before the FK graph is even read: nothing here is
+ * recoverable, so the check that can say no has to happen before the work that
+ * cannot be undone.
+ */
 async function cleanDatabase(): Promise<void> {
   console.log("🧹 Cleaning database...");
 
-  // Delete in order respecting foreign key constraints
-  const deletedSessions = await db.delete(sessions).returning();
-  console.log(`   Deleted ${deletedSessions.length} sessions`);
+  await assertDatabaseIsWipeable();
 
-  // Launches (#305/LS-001) go BEFORE users and churches: their journal names an
-  // actor (`launch_events.actor_user_id`) and the launch names a church, and
-  // neither FK cascades. Milestones, milestone/task links and the journal all
-  // cascade from the launch itself.
-  const deletedLaunches = await db.delete(launches).returning();
-  console.log(`   Deleted ${deletedLaunches.length} launches`);
+  const keys = await foreignKeys();
+  const order = planWipe(keys);
+  await assertProtectedTablesAreSafe(keys, new Set(order));
 
-  // Tasks go BEFORE users, and this is not theoretical: scheduling one launch
-  // seeds 23 `launch_prep` tasks (#305/LS-003), and `tasks.created_by_id` →
-  // `users.id` does not cascade, so a single use of /launch on a dev database
-  // was enough to make `pnpm db:seed` fail on
-  // `tasks_created_by_id_users_id_fk`. The launch/milestone JOIN rows cascade
-  // from the launch above; the tasks themselves are ordinary tasks owned by the
-  // task system and nothing deletes them for us.
-  const deletedTasks = await db.delete(tasks).returning();
-  console.log(`   Deleted ${deletedTasks.length} tasks`);
+  let total = 0;
+  for (const table of order) {
+    const result = await db.execute(
+      rawSql.raw(`DELETE FROM ${quoteIdentifier(table)}`)
+    );
+    const deleted =
+      (result as unknown as { rowCount: number | null }).rowCount ?? 0;
+    total += deleted;
+    if (deleted > 0) console.log(`   Deleted ${deleted} ${table}`);
+  }
 
-  const deletedUsers = await db.delete(users).returning();
-  console.log(`   Deleted ${deletedUsers.length} users`);
-
-  const deletedChurches = await db.delete(churches).returning();
-  console.log(`   Deleted ${deletedChurches.length} churches`);
-
-  console.log("✅ Database cleaned\n");
+  console.log(
+    `✅ Database cleaned — ${total} row(s) across ${order.length} tables\n`
+  );
 }
 
 // ============================================================================
 // Seed Data
 // ============================================================================
+
+/**
+ * The `onboarding_completed_at` stamp every seeded church carries (#326, F12 /
+ * OB-001).
+ *
+ * A church row whose `onboarding_completed_at` is null means "the onboarding
+ * flow still owns this planter's dashboard" (`shouldShowOnboarding`,
+ * `src/lib/onboarding/steps.ts`), so an unstamped fixture puts every seeded
+ * planter into the wizard instead of the dashboard the fixture exists to show.
+ * These plants are fixtures of FINISHED onboarding — they arrive with a phase,
+ * a launch and a team — so the stamp is not a convenience, it is the truth
+ * about them.
+ *
+ * `now()` rather than a JS `Date`: Postgres evaluates it inside the same INSERT
+ * that fills `created_at` from `DEFAULT now()`, so the two are the SAME instant
+ * rather than milliseconds apart. Seeded onboarding finished when the row was
+ * created; that is the only honest value a fixture has.
+ *
+ * To see the onboarding flow itself, register a new planter — registration
+ * creates a church with a null stamp, which is what the flow is for.
+ */
+function onboardingCompletedAtSeedStamp() {
+  return rawSql`now()`;
+}
 
 const SEED_CHURCHES: NewChurch[] = [
   { name: "Grace Community Church", currentPhase: 0 },
@@ -124,6 +382,16 @@ function launchInDays(days: number): string {
 // Password for all dev users: "password123"
 const DEV_PASSWORD = "password123";
 
+/**
+ * Email domain for every seeded dev account. `everyfield.app` is the product
+ * domain (ruled 2026-07-31); the placeholder domain it replaced is retired
+ * repo-wide, and this constant is why there is one place to change rather than
+ * nine literals to keep in step. Docs that hand an agent a login —
+ * `.claude/skills/browser-validation/SKILL.md` above all — quote these
+ * addresses, so a change here is a change there.
+ */
+const DEV_EMAIL_DOMAIN = "everyfield.app";
+
 interface SeedUser extends Omit<NewUser, "passwordHash" | "churchId"> {
   churchIndex: number | null; // Index into SEED_CHURCHES, null for network admin
 }
@@ -131,58 +399,58 @@ interface SeedUser extends Omit<NewUser, "passwordHash" | "churchId"> {
 const SEED_USERS: SeedUser[] = [
   // Network admin (no church)
   {
-    email: "admin@everyfield.dev",
+    email: `admin@${DEV_EMAIL_DOMAIN}`,
     name: "Network Admin",
     role: "network_admin",
     churchIndex: null,
   },
   // Planters (one per church)
   {
-    email: "planter1@everyfield.dev",
+    email: `planter1@${DEV_EMAIL_DOMAIN}`,
     name: "John Planter",
     role: "planter",
     churchIndex: 0,
   },
   {
-    email: "planter2@everyfield.dev",
+    email: `planter2@${DEV_EMAIL_DOMAIN}`,
     name: "Sarah Planter",
     role: "planter",
     churchIndex: 1,
   },
   {
-    email: "planter3@everyfield.dev",
+    email: `planter3@${DEV_EMAIL_DOMAIN}`,
     name: "Mike Planter",
     role: "planter",
     churchIndex: 2,
   },
   // Coaches
   {
-    email: "coach1@everyfield.dev",
+    email: `coach1@${DEV_EMAIL_DOMAIN}`,
     name: "David Coach",
     role: "coach",
     churchIndex: 0,
   },
   {
-    email: "coach2@everyfield.dev",
+    email: `coach2@${DEV_EMAIL_DOMAIN}`,
     name: "Emily Coach",
     role: "coach",
     churchIndex: 1,
   },
   // Team members
   {
-    email: "team1@everyfield.dev",
+    email: `team1@${DEV_EMAIL_DOMAIN}`,
     name: "Alex Team",
     role: "team_member",
     churchIndex: 0,
   },
   {
-    email: "team2@everyfield.dev",
+    email: `team2@${DEV_EMAIL_DOMAIN}`,
     name: "Jordan Team",
     role: "team_member",
     churchIndex: 0,
   },
   {
-    email: "team3@everyfield.dev",
+    email: `team3@${DEV_EMAIL_DOMAIN}`,
     name: "Casey Team",
     role: "team_member",
     churchIndex: 1,
@@ -200,7 +468,12 @@ async function seedDatabase(): Promise<void> {
   console.log("📍 Creating churches...");
   const createdChurches = await db
     .insert(churches)
-    .values(SEED_CHURCHES)
+    .values(
+      SEED_CHURCHES.map((church) => ({
+        ...church,
+        onboardingCompletedAt: onboardingCompletedAtSeedStamp(),
+      }))
+    )
     .returning();
 
   for (const church of createdChurches) {
@@ -263,6 +536,11 @@ async function seedDatabase(): Promise<void> {
   }
   console.log();
 
+  // Wiki cross-links are NOT seeded here (#317). `related_article_slugs` now
+  // holds links derived from each article's own prose by
+  // `scripts/migrate-wiki-related-sections.ts`, so the corpus carries them and
+  // a fixture would only overwrite real data with invented data.
+
   // Summary
   console.log("✅ Database seeded successfully!\n");
   console.log(
@@ -274,10 +552,10 @@ async function seedDatabase(): Promise<void> {
   );
   console.log(`   Password for all users: ${DEV_PASSWORD}`);
   console.log();
-  console.log("   Network Admin:  admin@everyfield.dev");
-  console.log("   Planter:        planter1@everyfield.dev");
-  console.log("   Coach:          coach1@everyfield.dev");
-  console.log("   Team Member:    team1@everyfield.dev");
+  console.log(`   Network Admin:  admin@${DEV_EMAIL_DOMAIN}`);
+  console.log(`   Planter:        planter1@${DEV_EMAIL_DOMAIN}`);
+  console.log(`   Coach:          coach1@${DEV_EMAIL_DOMAIN}`);
+  console.log(`   Team Member:    team1@${DEV_EMAIL_DOMAIN}`);
   console.log(
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
   );

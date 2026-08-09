@@ -78,6 +78,22 @@ Each section links `invariants/<domain>.md` for the why, the pattern and the wor
 - **Never interpolate a slug into a wiki path.** Build every one — `href`/`router.push`, OpenGraph `url`, and the `pathname === wikiHref(slug)` active-item test — with `wikiHref()`, which encodes per segment so `/` stays a separator for the catch-all.
 - `revalidatePath()` is the one wiki path `wikiHref` must NOT build — use `wikiRevalidationPath()`. The tag is derived from the DECODED pathname, so the href form matches no tag, revalidates nothing, and still returns 200.
 - MDX is compiled at request time via `next-mdx-remote/rsc`; search is a weighted tsvector (title A > excerpt B > content C); revalidation requires `REVALIDATION_SECRET`.
+- Every wiki article read is `church_id IS NULL OR church_id = :current_church_id` — global PLUS the reader's own, never "mine" alone. Isolation is application-layer; this predicate IS the boundary (asserted at SQL level in `tenancy.test.ts`).
+- A church's own row for a slug OVERRIDES the global article of that name (`preferChurchOverride`); `wiki_articles_slug_church_idx` is unique on (slug, church_id), so at most two rows can match and the church's wins.
+- Every `churchId` parameter on the wiki reads defaults to `null`, so a call site that forgets to thread the session fails CLOSED — it under-fetches the church's own content rather than leaking another church's.
+- Cross-links live ONLY in `related_article_slugs`, never in an article's prose — the authored `## Related Articles` section was migrated out of all 96 articles (#317). Writing one back into `content` renders the list twice, and no test catches it.
+
+## Dev Seeds
+
+Why and how: [`contracts/db.md`](contracts/db.md) → The dev-seed wipe. Applies to
+`scripts/seed-dev-db.ts` and anything that inserts a `churches` row.
+
+- `pnpm db:seed` deletes ALL users and ALL churches unscoped — the fixture is the whole database, not the rows the script created. Run it against your own or a throwaway database ONLY; on the shared `development` branch it takes the alpha-cohort logins, the marketing fixture and every hand-registered plant.
+- The wipe REFUSES to run on a database holding an alpha-cohort sentinel account unless `--allow-protected-db` is passed (`src/lib/dev-seed/protected-database.ts`, ruled 2026-08-09). Detection is POSITIVE — sentinel rows, never "does this connection string look like development", which fails open. Passing the override on the shared database is a deliberate, destructive act, not a way past a nagging prompt.
+- The wipe ORDER is derived at runtime from `pg_constraint` by `planWipe()`. Never re-introduce a hand-kept table list — the derivation is what makes a new table join the wipe on its own.
+- `wiki_articles` and `wiki_sections` are `PROTECTED_TABLES`: never deleted AND never walked through, so nothing downstream of them is dragged in either. The corpus is migrated content no script rebuilds (#317).
+- A protected row pointing at a table the wipe deletes (a church-scoped wiki article) ABORTS the whole seed before its first DELETE — `assertProtectedTablesAreSafe()`. Stop and re-point by hand; never widen the wipe to cover it.
+- Every script that inserts a `churches` row stamps `onboarding_completed_at` with `now()` in that same INSERT — an unstamped seeded church puts its planter in the onboarding wizard instead of the dashboard. Pinned by `src/lib/onboarding/seeded-churches.test.ts`.
 
 ## Request Deduplication
 

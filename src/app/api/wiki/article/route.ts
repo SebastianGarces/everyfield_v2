@@ -24,7 +24,10 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const article = await getArticle(slug);
+    // Scoped to the caller's church (#317): the panel reads the same corpus
+    // the wiki pages do — global articles plus this church's own, never
+    // another church's.
+    const article = await getArticle(slug, user.churchId ?? null);
     if (!article) {
       return NextResponse.json({ error: "Article not found" }, { status: 404 });
     }

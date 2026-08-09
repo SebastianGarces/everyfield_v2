@@ -1,4 +1,5 @@
 import { WikiSidebar } from "@/components/wiki/wiki-sidebar";
+import { getCurrentSession } from "@/lib/auth";
 import { getBookmarks, getRecentlyViewed, getWikiNavigation } from "@/lib/wiki";
 
 // Force dynamic rendering for recently viewed data
@@ -9,8 +10,15 @@ export default async function WikiLayout({
 }: {
   children: React.ReactNode;
 }) {
+  // The navigation is a tenancy-scoped read (#317): a church's own articles
+  // belong in its sidebar, another church's never do. `getCurrentSession` is
+  // `React.cache`d and the dashboard layout above has already called it, so
+  // reading it here costs no extra query — and awaiting it before the
+  // `Promise.all` costs no round trip either.
+  const { user } = await getCurrentSession();
+
   const [groups, recentlyViewed, bookmarks] = await Promise.all([
-    getWikiNavigation(),
+    getWikiNavigation(user?.churchId ?? null),
     getRecentlyViewed(5),
     getBookmarks(10),
   ]);

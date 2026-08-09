@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Clock, FileText, ChevronRight } from "lucide-react";
 import {
   getArticle,
+  getArticleNavigation,
   compileArticle,
   getBreadcrumbs,
   getArticlesByPrefix,
@@ -12,12 +13,17 @@ import {
   wikiHref,
 } from "@/lib/wiki";
 import { extractHeadings } from "@/lib/wiki/toc";
+import { getCurrentSession } from "@/lib/auth";
 import { WikiBreadcrumb } from "@/components/wiki/wiki-breadcrumb";
 import { ProgressTracker } from "@/components/wiki/progress-tracker";
 import { TableOfContents } from "@/components/wiki/table-of-contents";
 import { ArticleProgressBadge } from "@/components/wiki/article-progress-badge";
 import { BookmarkButton } from "@/components/wiki/bookmark-button";
 import { BookmarkIndicator } from "@/components/wiki/bookmark-indicator";
+import { RelatedArticles } from "@/components/wiki/related-articles";
+import { RelatedTemplates } from "@/components/wiki/related-templates";
+import { ArticlePager } from "@/components/wiki/article-pager";
+import type { ArticleWithRelated } from "@/lib/wiki/get-article";
 import type { ArticleMeta } from "@/lib/wiki/types";
 import type { WikiProgressStatus } from "@/db/schema";
 
@@ -41,13 +47,30 @@ type Props = {
   params: Promise<{ slug: string[] }>;
 };
 
+/**
+ * The church whose wiki this request is reading (#317).
+ *
+ * Read off the session rather than passed in: an entity implied by the actor
+ * is never an argument (`memory/invariants.md` → Authentication).
+ * `getCurrentSession` is `React.cache`d and the dashboard layout has already
+ * called it, so this costs no extra query — and `generateMetadata` and the
+ * page below share the one result, which is why they can never disagree about
+ * whose article this is.
+ *
+ * No session (or a user with no church) reads the global corpus only.
+ */
+async function readerChurchId(): Promise<string | null> {
+  const { user } = await getCurrentSession();
+  return user?.churchId ?? null;
+}
+
 export async function generateMetadata({ params }: Props) {
   const { slug } = await params;
   const slugPath = slug.join("/");
   const appDescription = "Navigate your church plant from calling to launch";
 
   // Try to get article first
-  const article = await getArticle(slugPath);
+  const article = await getArticle(slugPath, await readerChurchId());
   if (article) {
     const title = `EveryField | ${article.title}`;
     const description = article.description || appDescription;
@@ -95,16 +118,17 @@ export async function generateMetadata({ params }: Props) {
 export default async function WikiPage({ params }: Props) {
   const { slug } = await params;
   const slugPath = slug.join("/");
+  const churchId = await readerChurchId();
 
   // Try to get article first
-  const article = await getArticle(slugPath);
+  const article = await getArticle(slugPath, churchId);
 
   if (article) {
-    return <ArticleView article={article} />;
+    return <ArticleView article={article} churchId={churchId} />;
   }
 
   // Otherwise, try to render section index
-  const articles = await getArticlesByPrefix(slugPath);
+  const articles = await getArticlesByPrefix(slugPath, churchId);
 
   if (articles.length === 0) {
     notFound();
@@ -116,12 +140,18 @@ export default async function WikiPage({ params }: Props) {
 // Article view component
 async function ArticleView({
   article,
+  churchId,
 }: {
-  article: ArticleMeta & { content: string };
+  article: ArticleWithRelated;
+  churchId: string | null;
 }) {
-  const [content, bookmarked] = await Promise.all([
+  // The navigation read is scoped to the same church as the article itself, so
+  // the footer can never advertise a title this reader is not allowed to open
+  // (`memory/invariants.md` → Multi-Tenancy).
+  const [content, bookmarked, navigation] = await Promise.all([
     compileArticle(article),
     isBookmarked(article.slug),
+    getArticleNavigation(article.slug, article.relatedArticleSlugs, churchId),
   ]);
   const breadcrumbs = getBreadcrumbs(article.slug, article.title);
 
@@ -169,6 +199,17 @@ async function ArticleView({
           <div className="prose prose-neutral dark:prose-invert max-w-none">
             {content}
           </div>
+
+          <RelatedArticles articles={navigation.related} />
+
+          {/*
+            The documents this article hands out (W-010). Resolved from the
+            code-defined F6 catalog, not the database, so it needs nothing from
+            the reads above and renders nothing when the article offers none.
+          */}
+          <RelatedTemplates articleSlug={article.slug} />
+
+          <ArticlePager previous={navigation.previous} next={navigation.next} />
         </article>
 
         <TableOfContents headings={headings} />

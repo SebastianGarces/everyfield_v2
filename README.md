@@ -74,6 +74,10 @@ pnpm db:migrate
 pnpm db:seed
 ```
 
+The seed is not additive: it deletes **every** user and church first, so point
+`DATABASE_URL` at your own branch. It refuses outright on a database holding the
+alpha cohort's accounts (`src/lib/dev-seed/protected-database.ts`).
+
 ### 6. Start the dev server
 
 ```bash

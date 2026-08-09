@@ -267,9 +267,12 @@ test("the loop's worktree-creation step and the G2 gate point at the script", ()
     path.join(ROOT, ".claude/workflows/build-until-done.js"),
     "utf8"
   );
+  // From the creation line to the end of that prompt, rather than a fixed
+  // character window: the step legitimately grew a second (resume) path, which
+  // pushed the env line past 600 chars without weakening anything.
   const creation = loop.slice(
     loop.indexOf("git worktree add -b"),
-    loop.indexOf("git worktree add -b") + 600
+    loop.indexOf("label: `prep:")
   );
   assert.match(
     creation,
