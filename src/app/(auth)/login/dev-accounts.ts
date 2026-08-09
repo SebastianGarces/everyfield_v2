@@ -29,8 +29,19 @@ import { churches, users } from "@/db/schema";
 
 import type { DevAccount, DevAccountGroup } from "./dev-account-types";
 
-/** Email domain used by the phase-engine eval corpus. */
-const EVAL_EMAIL_DOMAIN = "eval.phase-engine.everyfield.dev";
+/**
+ * Marker shared by every phase-engine eval address
+ * (`<who>@eval.phase-engine.<domain>`, seeded by
+ * `scripts/seed-phase-engine-eval.ts`).
+ *
+ * The SUBDOMAIN, not the full domain, on purpose: the product domain changed
+ * once already (everyfield.app, ruled 2026-07-31) and this picker groups
+ * whatever rows the database happens to hold — including a corpus seeded before
+ * a retirement. Pinning the full domain here would silently drop those accounts
+ * into "Other" rather than the eval group, which is a wrong label with no error
+ * behind it.
+ */
+const EVAL_EMAIL_MARKER = "@eval.phase-engine.";
 
 /**
  * The ONE gate for the dev account switcher. Everything else defers to this.
@@ -41,8 +52,9 @@ export function isDevLoginEnabled(): boolean {
   return process.env.NODE_ENV === "development" && !process.env.VERCEL;
 }
 
-function groupFor(email: string, role: string): DevAccountGroup {
-  if (email.endsWith(`@${EVAL_EMAIL_DOMAIN}`)) return "Phase Engine eval";
+/** Exported for its test — the grouping rule is the only logic in this module. */
+export function groupFor(email: string, role: string): DevAccountGroup {
+  if (email.includes(EVAL_EMAIL_MARKER)) return "Phase Engine eval";
   if (role === "network_admin" || role === "sending_church_admin") {
     return "Oversight";
   }
