@@ -36,7 +36,10 @@ import {
   buildMeetingMergeData,
 } from "./merge";
 import { createConfirmationToken } from "./confirmation";
-import { buildCommunicationsWhere } from "./filters";
+import {
+  buildCommunicationsWhere,
+  type CommunicationQueryFilters,
+} from "./filters";
 import {
   DELIVERED_STATUSES,
   OPENED_STATUSES,
@@ -52,6 +55,7 @@ import {
   selectableTeamsOrder,
   selectableTeamsScope,
   sentMessagesScope,
+  sentSinceScope,
   teamGroup,
   teamMemberScope,
 } from "./queries";
@@ -381,6 +385,41 @@ export async function getCommunications(
   ]);
 
   return { communications: comms, total };
+}
+
+/**
+ * Count communications matching the same filters `getCommunications` honours,
+ * without paying for the rows. Used by the hub's stat cards, which need a
+ * church-wide number and not "however many of the last 10 qualified".
+ */
+export async function countCommunications(
+  churchId: string,
+  filters: CommunicationQueryFilters = {}
+): Promise<number> {
+  const [{ total }] = await db
+    .select({ total: count() })
+    .from(communications)
+    .where(buildCommunicationsWhere(churchId, filters));
+  return total;
+}
+
+/**
+ * How many messages this church actually SENT since `since`.
+ *
+ * The predicate lives in `queries.ts` (`sentSinceScope`) with the rest of the
+ * aggregation scopes, where `queries.test.ts` compiles it and pins the church
+ * bound parameter — the boundary is application-layer, so the clause IS the
+ * boundary.
+ */
+export async function countSentSince(
+  churchId: string,
+  since: Date
+): Promise<number> {
+  const [{ total }] = await db
+    .select({ total: count() })
+    .from(communications)
+    .where(sentSinceScope(churchId, since));
+  return total;
 }
 
 /**

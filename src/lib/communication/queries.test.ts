@@ -19,6 +19,7 @@ import {
   parseTeamGroup,
   selectableTeamsScope,
   sentMessagesScope,
+  sentSinceScope,
   teamGroup,
   teamMemberScope,
 } from "./queries";
@@ -84,6 +85,24 @@ test("the sent-message count is church-scoped and status-filtered", () => {
   assert.match(text, /"communications"\."church_id" = \$1/);
   assert.match(text, /"communications"\."status" = \$2/);
   assert.deepEqual(params, [CHURCH_ID, "sent"]);
+});
+
+test("'sent this week' keeps the status filter, so a logged contact cannot count", () => {
+  const since = new Date("2026-08-02T00:00:00.000Z");
+  const { text, params } = compile(sentSinceScope(CHURCH_ID, since));
+
+  assert.match(text, /"communications"\."church_id" = \$1/);
+  // The status predicate is the whole point: a COM-020 `logged` entry carries a
+  // `sent_at` too, so a window over the date alone would count it as a send.
+  assert.match(text, /"communications"\."status" = \$2/);
+  assert.match(text, /"communications"\."sent_at" >= \$3/);
+  assert.deepEqual(params.slice(0, 2), [CHURCH_ID, "sent"]);
+  // Drizzle maps the Date to the column's own timestamp encoding before it
+  // becomes a bound parameter, so compare the instant, not the representation.
+  assert.equal(
+    new Date(params[2] as string | number | Date).getTime(),
+    since.getTime()
+  );
 });
 
 // --- aggregate expressions --------------------------------------------------

@@ -18,6 +18,7 @@ import {
   and,
   asc,
   eq,
+  gte,
   inArray,
   isNotNull,
   isNull,
@@ -94,8 +95,9 @@ export interface DeliveryTotals {
  * overview reports is derived from recipient telemetry, so a message that
  * carries no recipient rows — a draft, or the `[Log Only]` entries COM-020
  * (PR #366) records with status `logged` — contributes nothing either way.
- * The logged-vs-sent question is under a pending ruling; this aggregation does
- * not answer it, it just reports what the recipient rows record.
+ * That is still true after the logged-vs-sent ruling (2026-08-09, PR #366):
+ * the ruling governs the message-count cards, which read `communications`;
+ * this aggregation just reports what the recipient rows record.
  */
 export function churchDeliveryScope(churchId: string): SQL {
   return and(
@@ -109,6 +111,21 @@ export function sentMessagesScope(churchId: string): SQL {
   return and(
     eq(communications.churchId, churchId),
     eq(communications.status, "sent")
+  ) as SQL;
+}
+
+/**
+ * Messages the church sent on or after `since` — the hub's "Sent This Week".
+ *
+ * `status = 'sent'` comes from `sentMessagesScope` and is what makes the number
+ * honest, not decoration: a COM-020 `logged` entry also carries a `sent_at`
+ * (the moment the contact happened), so a window over `sent_at` alone would
+ * count contacts where nothing was sent. Ruled 2026-08-09 on PR #366.
+ */
+export function sentSinceScope(churchId: string, since: Date): SQL {
+  return and(
+    sentMessagesScope(churchId),
+    gte(communications.sentAt, since)
   ) as SQL;
 }
 
