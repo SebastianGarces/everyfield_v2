@@ -413,7 +413,7 @@ const SEED_USERS: SeedUser[] = [
   },
   {
     email: `planter2@${DEV_EMAIL_DOMAIN}`,
-    name: "Sarah Planter",
+    name: "Samuel Planter",
     role: "planter",
     churchIndex: 1,
   },
