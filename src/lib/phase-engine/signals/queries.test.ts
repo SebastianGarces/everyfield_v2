@@ -312,6 +312,64 @@ test("no open follow-ups is unknown, never 100%", () => {
   assert.deepEqual(followUp.points, []);
 });
 
+test("a reading the newest snapshot could not answer is dated as older", () => {
+  // The trap this pins: `value` is the newest AVAILABLE reading, not the newest
+  // reading. A plant that clears its follow-up queue makes the newer snapshot
+  // unable to answer the rate at all (zero denominator is unknown, never 100%),
+  // so the rate falls back to the earlier snapshot's 80%. The card carries ONE
+  // "as of" date — the newest snapshot's — so a stale number under it reads as
+  // current unless the metric says which day it was measured on.
+  const trends = buildPlantTrends(
+    [
+      historyRow("2026-05-01T00:00:00.000Z", {
+        followUpOpenCount: 10,
+        followUpStaleCount: 2,
+      }),
+      historyRow("2026-06-01T00:00:00.000Z", {
+        followUpOpenCount: 0,
+        followUpStaleCount: 0,
+      }),
+    ],
+    null
+  );
+  assert.ok(trends);
+
+  const followUp = metric(trends.metrics, "follow_up_completion");
+  assert.equal(followUp.value, 0.8, "the older reading is the one shown");
+  assert.deepEqual(followUp.valueAt, new Date("2026-05-01T00:00:00.000Z"));
+  assert.equal(followUp.valueIsStale, true);
+  assert.deepEqual(trends.asOf, new Date("2026-06-01T00:00:00.000Z"));
+  // The newest snapshot answered nothing here, so there is no sentence about it.
+  assert.equal(followUp.reading, null);
+
+  // A metric the newest snapshot DID answer is not stale, on the same window.
+  const coreGroup = metric(trends.metrics, "core_group_growth");
+  assert.equal(coreGroup.valueIsStale, false);
+  assert.deepEqual(coreGroup.valueAt, new Date("2026-06-01T00:00:00.000Z"));
+});
+
+test("a metric no snapshot answered is stale-free, not stale", () => {
+  const trends = buildPlantTrends(
+    [
+      historyRow("2026-05-01T00:00:00.000Z", {
+        visionMeetingLatestAttendance: null,
+      }),
+      historyRow("2026-06-01T00:00:00.000Z", {
+        visionMeetingLatestAttendance: null,
+      }),
+    ],
+    null
+  );
+  assert.ok(trends);
+
+  const attendance = metric(trends.metrics, "meeting_attendance");
+  assert.equal(attendance.value, null);
+  assert.equal(attendance.valueAt, null);
+  // "No reading at all" is its own state; calling it stale would claim there is
+  // an older number behind the em dash.
+  assert.equal(attendance.valueIsStale, false);
+});
+
 test("team readiness is filled roles over the roles the snapshot counted", () => {
   const trends = buildPlantTrends(
     [

@@ -1,15 +1,17 @@
 // ============================================================================
 // /phase — the planter's Plant Intelligence surface
-// (PE-001/005/007/011/014/015/016/022/023/025).
+// (PE-001/005/007/011/014/015/016/022/023/025/026/027).
 //
 // Server component. Reads the LATEST CACHED assessment with ZERO LLM calls on
 // load (getLatestAssessment, PE-011), renders the planter-audience Focus panel
 // (insights ordered by rank, with severity, body, cited facts, wiki links, and
 // the as-of date + what-changed delta from PE-016), the CSF scorecard projected
 // from that same snapshot (PE-023), the current phase's exit criteria with
-// their fact drill-down projected from that snapshot too (PE-022/025), the
-// soft-gated phase control + advisory readiness (PE-001/015), and the
-// self-attestation toggles (PE-005).
+// their fact drill-down projected from that snapshot too (PE-022/025), the four
+// deterministic trends read out of the PERSISTED snapshot series (PE-026), the
+// milestone timeline including Launch Sunday (PE-027), the soft-gated phase
+// control + advisory readiness (PE-001/015), and the self-attestation toggles
+// (PE-005).
 //
 // Auth: this is the planter-facing surface — only planters with a church see it.
 // Oversight users are sent to their aggregate plant-health surface instead.
@@ -26,8 +28,10 @@ import {
   readDelta,
 } from "@/components/phase-engine/focus-presentation";
 import type { InsightFeedbackState } from "@/components/phase-engine/insight-card";
+import { MilestoneTimeline } from "@/components/phase-engine/milestone-timeline";
 import { PhaseControl } from "@/components/phase-engine/phase-control";
 import { SignalToggles } from "@/components/phase-engine/signal-toggles";
+import { Trends } from "@/components/phase-engine/trends";
 import {
   Card,
   CardDescription,
@@ -45,6 +49,10 @@ import {
 } from "@/lib/phase-engine/assessment";
 import { assessmentColdStart } from "@/lib/phase-engine/cold-start";
 import { listManualSignals } from "@/lib/phase-engine/signals/attestation-service";
+import {
+  getMilestoneTimeline,
+  getPlantTrends,
+} from "@/lib/phase-engine/signals/queries";
 import { getPhaseReadiness } from "@/lib/phase-engine/transitions";
 
 export const metadata = {
@@ -87,6 +95,16 @@ export default async function PhasePage() {
     getLatestAssessment(churchId),
     getPhaseReadiness(churchId),
     listManualSignals(churchId),
+  ]);
+
+  // The trends (PE-026) and the milestone timeline (PE-027). Both take the
+  // `latest` above rather than re-reading it, so the alert badges they carry are
+  // the SAME assessment's severities the Focus panel and the scorecard render —
+  // one assessment read for the whole page. Run together, after `latest`
+  // resolves, because both need it as an argument.
+  const [trends, timeline] = await Promise.all([
+    getPlantTrends(churchId, latest, "planter"),
+    getMilestoneTimeline(churchId, latest, "planter"),
   ]);
 
   // Planter-audience insights only, already ordered by rank (PE-011).
@@ -174,11 +192,15 @@ export default async function PhasePage() {
       )}
 
       <div className="grid gap-6 lg:grid-cols-3">
-        {/* Scorecard, then exit criteria, then the focus list: where the plant
-            stands → what is left before it moves on → what to do about it. */}
+        {/* Scorecard, then exit criteria, then the trends, then the focus list:
+            where the plant stands → what is left before it moves on → which way
+            it is moving → what to do about it. The trends sit above the focus
+            list because they are evidence for it, and below the exit criteria
+            because a direction only means something once the target is known. */}
         <div className="space-y-6 lg:col-span-2">
           <CsfScorecard scorecard={scorecard} />
           <ExitCriteria progress={exitCriteria} />
+          <Trends trends={trends} />
           <FocusPanel
             assessment={latest?.assessment ?? null}
             insights={planterInsights}
@@ -193,6 +215,13 @@ export default async function PhasePage() {
             currentPhase={church.currentPhase}
             readiness={readiness}
           />
+          {/* The timeline sits under the phase control, not in the main column:
+              it is the dated record of the moves that control makes plus the day
+              the plant is heading for, so the two read as one column about
+              where the plant is in time. Keeping it out of the main column also
+              leaves the focus list — the only part of the page a planter acts
+              on — directly under the evidence for it. */}
+          <MilestoneTimeline timeline={timeline} />
           <SignalToggles initialValues={booleanSignals} />
         </div>
       </div>

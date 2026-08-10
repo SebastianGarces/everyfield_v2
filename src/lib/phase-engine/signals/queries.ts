@@ -814,6 +814,23 @@ export interface TrendMetric {
   higherIsBetter: boolean;
   /** The newest reading, or null when no snapshot in the window carries it. */
   value: number | null;
+  /**
+   * When `value` was taken. Null when nothing in the window answered the metric.
+   *
+   * NOT always `asOf`: `value` is the newest AVAILABLE reading, and a metric the
+   * newest snapshot could not answer (`followUp.openCount` at zero makes the
+   * follow-up rate unknown, not 100%) falls back to an earlier one. Carrying the
+   * reading's own date is what keeps the card from showing that older number
+   * under the header's single "As of <newest snapshot>".
+   */
+  valueAt: Date | null;
+  /**
+   * True when `valueAt` is older than the window's `asOf` — the latest
+   * assessment did not record this metric and what is shown is an earlier
+   * reading. The surface must SAY so; it must never silently pass a stale
+   * reading off as current.
+   */
+  valueIsStale: boolean;
   /** The counts behind a ratio, spelled out. Null when there is nothing to add. */
   reading: string | null;
   /** Chronological readings, oldest first. Fewer than 2 = no trend to draw. */
@@ -904,6 +921,12 @@ export function buildPlantTrends(
       unit: definition.unit,
       higherIsBetter: definition.higherIsBetter,
       value: last?.value ?? null,
+      valueAt: last?.at ?? null,
+      // The newest snapshot could not answer this metric, so `value` is an
+      // earlier reading. Stated here rather than left for the card to work out,
+      // because the card carries ONE "as of" date and it is the window's.
+      valueIsStale:
+        last !== null && last.at.getTime() < newest.generatedAt.getTime(),
       reading: definition.reading(newest),
       points,
       delta,

@@ -29,6 +29,12 @@
 //    answer renders an em dash and says so. Rendering `0` would be the card
 //    inventing a measurement.
 //
+// 3b. AN OLDER READING IS DATED WHERE IT SITS. The card carries one "as of"
+//    date — the newest snapshot's — but a metric the newest snapshot could not
+//    answer falls back to an earlier reading (`valueIsStale` from the read
+//    layer). That tile says which day its number was measured on, so the header
+//    date never speaks for a number it did not produce.
+//
 // 4. THE CHART IS ONE SERIES OF ONE INK. Each sparkline plots one measure, so
 //    there is no identity to encode and no categorical palette to reach for:
 //    the line is the foreground ink faded back, the current reading is the same
@@ -311,6 +317,7 @@ export function TrendTile({ metric }: { metric: TrendMetric }) {
       data-metric={metric.key}
       data-standing={metric.alert.standing}
       data-has-trend={String(hasTrend)}
+      data-stale={String(metric.valueIsStale)}
       data-points={metric.points.length}
       className="rounded-lg border p-3.5"
     >
@@ -333,6 +340,20 @@ export function TrendTile({ metric }: { metric: TrendMetric }) {
       <p className="text-muted-foreground mt-1.5 max-w-[42ch] text-sm leading-relaxed text-pretty">
         {metric.reading ?? metric.description}
       </p>
+
+      {/* Constraint 3b: the card's header date is the newest snapshot's, and
+          this number is older than it. Say when it was measured, right where the
+          number is, rather than let the header date speak for it. */}
+      {metric.valueIsStale && metric.valueAt && (
+        <p
+          data-testid="trend-stale-reading"
+          data-measured-at={metric.valueAt.toISOString()}
+          className="text-muted-foreground mt-1.5 max-w-[42ch] text-xs text-pretty"
+        >
+          Measured {shortDay(metric.valueAt)}. Your latest assessment had no
+          reading for this one.
+        </p>
+      )}
 
       {metric.value === null ? (
         <p

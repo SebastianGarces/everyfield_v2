@@ -98,6 +98,8 @@ function trendMetric(overrides: Partial<TrendMetric> = {}): TrendMetric {
     unit: "count",
     higherIsBetter: true,
     value: 17,
+    valueAt: new Date("2026-05-15T00:00:00.000Z"),
+    valueIsStale: false,
     reading: null,
     points: points([8, 12, 17]),
     delta: 9,
@@ -260,6 +262,40 @@ test("an unanswered metric reads as no reading, never as zero", () => {
   assert.equal(text(rendered[0]).includes(" 0 "), false);
   assert.ok(rendered[0].includes('data-testid="trend-no-reading"'));
   assert.equal(rendered[0].includes('data-testid="trend-sparkline"'), false);
+});
+
+test("a reading older than the card's as-of date says which day it is from", () => {
+  // The read layer sets `valueIsStale` when the newest snapshot could not answer
+  // the metric — a plant that clears its follow-up queue keeps an earlier rate.
+  // The card's header carries ONE date (the newest snapshot's), so the tile has
+  // to date its own number or the header speaks for a reading it did not make.
+  const stale = trendMetric({
+    key: "follow_up_completion",
+    label: "Follow-up completion",
+    unit: "rate",
+    value: 0.8,
+    valueAt: new Date("2026-05-15T00:00:00.000Z"),
+    valueIsStale: true,
+    reading: null,
+    points: points([0.6, 0.8]),
+    delta: 0.2,
+    direction: "up",
+  });
+  const rendered = tiles(render(plantTrends([stale])));
+
+  assert.equal(attr(rendered[0], "data-stale"), "true");
+  assert.ok(rendered[0].includes('data-testid="trend-stale-reading"'));
+  assert.match(text(rendered[0]), /Measured May 15/);
+  assert.match(text(rendered[0]), /no reading for this one/);
+});
+
+test("a current reading is not dated twice", () => {
+  const rendered = tiles(render(plantTrends(fourMetrics())));
+
+  for (const tile of rendered) {
+    assert.equal(attr(tile, "data-stale"), "false");
+    assert.equal(tile.includes('data-testid="trend-stale-reading"'), false);
+  }
 });
 
 // ----------------------------------------------------------------------------
