@@ -10,8 +10,14 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default: "bg-primary text-primary-foreground hover:bg-primary/90",
+        // The danger ring is painted at FULL strength in both themes: the
+        // shadcn defaults (/20 light, /40 dark) composited to 1.43:1 and
+        // 1.95:1, so a focused Delete button had no visible focus indicator at
+        // all — the same SC 1.4.11 failure #385 fixes in --ring, one variant
+        // deeper. Full strength measures 4.41:1 light and 6.84:1 dark
+        // (src/app/text-contrast.test.ts).
         destructive:
-          "bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/60",
+          "bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive dark:bg-destructive/60",
         outline:
           "border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50",
         secondary:
