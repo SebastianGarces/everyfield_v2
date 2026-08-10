@@ -67,6 +67,10 @@ Task & Project Management tracks all tasks required for successful launch with t
 | T-026 | Mobile optimization | Touch-friendly task management |
 | T-027 | Drag-and-drop timeline | Adjust task dates by dragging on GANTT |
 
+### Out of Scope
+
+- Facility-related tasks (site search, site visits, venue management). They left with the cut Facility feature and return only if that feature is reinstated.
+
 ---
 
 ## Screens
@@ -487,7 +491,7 @@ Tasks created with default dates based on:
 | related_type | Enum | No | `person` / `meeting` / `team` / `facility` |
 | related_id | UUID | No | Reference to related entity |
 | parent_task_id | UUID (FK) | No | Reference to parent task (for subtasks) |
-| checklist_id | UUID (FK) | No | Reference to Checklist (if from template) — future, added with checklist templates (T-011) |
+| checklist_id | UUID (FK) | No | Reference to Checklist (if from template) |
 | is_recurring | Boolean | No | Default: false |
 | recurrence_rule | JSON | No | RRULE-style recurrence definition |
 | completion_event | String | No | Event name that auto-completes this task (e.g., `meeting.evaluation.completed`), matched with `related_id` |
@@ -579,7 +583,6 @@ Key dates and achievements.
 | Vision Meeting | VM planning and preparation | F3 |
 | Follow-up | Post-meeting follow-up | F3 |
 | Training | Training scheduling and completion | F8 |
-| Facilities | Site search and management | F10 |
 | Promotion | Marketing and outreach | Phase 4 templates |
 | Administrative | Legal, financial, operational | Phase templates |
 | Ministry Team | Team-specific tasks | F8 |
@@ -600,7 +603,6 @@ This feature integrates with cross-cutting services defined in [System Architect
 | **`phase.changed`** | Subscribe to prompt phase-specific task template import | Phase Engine |
 | **`meeting.attendance.finalized`** | Subscribe to auto-create follow-up tasks for all attendees (48h due) plus a meeting evaluation task (24h due) | Vision Meeting events |
 | **`meeting.evaluation.completed`** | Subscribe to auto-complete the matching evaluation task (matched by `completion_event` + `related_id`) | Vision Meeting events |
-| **`facility.visit.scheduled`** | Subscribe to create site visit tasks — future, added with the Facility feature | Facility events |
 | **Person reference** | Store `person_id` (FK) for task-to-person linking; read name via [Core Data Contracts](../../core-data-contracts.md) | People/CRM |
 
 ### Outbound (This Feature Provides)

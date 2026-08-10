@@ -7,14 +7,11 @@
 
 ---
 
-> ## ⏸ DEFERRED — decided 2026-07-26
+> **Scope: this feature is deferred** ([`decisions.md`](../../decisions.md), decision #2). Financial
+> readiness is captured by attestation through the phase engine; this feature would replace that
+> attestation with real tracking.
 >
-> F7 is deferred, not cut. Zero code exists; nav is commented out in `src/lib/navigation.ts`.
-> Financial **readiness** is currently satisfied attestation-only through the phase engine, and that
-> is the shipped answer until this feature is picked up.
->
-> Audits and gap reports should treat every requirement below as **intentionally unbuilt** rather
-> than as a gap. Decision #2 in [`docs-audit-2026-07.md`](../../docs-audit-2026-07.md).
+> Treat every requirement below as intentionally unbuilt, not as a gap.
 
 ---
 
@@ -356,7 +353,7 @@ Select budget type:
     ↓
 [If template]:
     ↓
-    Import First Year Budget template from F6
+    Import the First Year Budget template from the document-templates catalog
     ↓
     Pre-populated with standard categories
     ↓
@@ -499,7 +496,7 @@ Aggregate giving entry (not individual contributions).
 | amount | Decimal | Yes | Expense amount |
 | category | Enum | Yes | Same as BudgetLineItem categories |
 | vendor | String | No | Vendor name |
-| receipt_document_id | UUID (FK) | No | Reference to Document (receipt) |
+| receipt_document_id | UUID (FK) | No | Reference to the stored receipt document |
 | payment_method | Enum | No | `check` / `card` / `cash` / `transfer` |
 | recorded_by_id | UUID (FK) | Yes | Reference to User |
 | created_at | Timestamp | Yes | Creation timestamp |
@@ -508,7 +505,7 @@ Aggregate giving entry (not individual contributions).
 
 ## Financial Accountability Principles
 
-The wiki should document these principles (content reference):
+The principles this feature embodies. Its procedures, roles, and approval rules follow from them.
 
 ### Core Principles
 - Senior Pastor should NOT handle money or write checks
@@ -541,7 +538,7 @@ This feature integrates with cross-cutting services defined in [System Architect
 | Data | Contract | Source |
 |------|----------|--------|
 | **Core Group count** | Read count of `Person` records with `status = 'core_group'` for giving participation rate | People/CRM (via [Core Data Contracts](../../core-data-contracts.md)) |
-| **Budget templates** | Access template list by category `budget` for First Year Budget import | Document Templates API |
+| **Budget templates** | Read the template catalog filtered to category `budget`, for First Year Budget import | Document template catalog |
 
 ### Outbound (This Feature Provides)
 

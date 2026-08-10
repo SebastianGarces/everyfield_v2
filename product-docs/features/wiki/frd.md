@@ -93,17 +93,12 @@ Inspired by software documentation best practices (Divio framework), the wiki or
 │   ├── Facilities
 │   └── Technology
 │
-├── 📄 Templates & Downloads
-│   ├── Commitment Documents
-│   ├── Vision Meeting Materials
-│   ├── Budget Worksheets
-│   ├── Checklists by Team
-│   └── Letter Templates
-│
-└── 🎓 Training Library
-    ├── Video Content
-    ├── Case Studies
-    └── Network Resources
+└── 📄 Templates & Downloads
+    ├── Commitment Documents
+    ├── Vision Meeting Materials
+    ├── Budget Worksheets
+    ├── Checklists by Team
+    └── Letter Templates
 ```
 
 ---
@@ -137,7 +132,6 @@ Inspired by software documentation best practices (Divio framework), the wiki or
 | W-016 | Article feedback | Thumbs up/down helpfulness rating |
 | W-017 | Contextual surfacing | Show relevant wiki content within other features |
 | W-018 | Download as PDF | Export individual articles as PDF |
-| ~~W-019~~ | ~~Video content embedding~~ | **CUT 2026-07-26** (decision #6) — own-content production is far enough out that this isn't worth carrying. Drop the `WikiVideo` table with it. |
 | W-020 | Print-friendly styling | Articles render well for printing |
 
 ### Nice to Have (Future)
@@ -152,6 +146,10 @@ Inspired by software documentation best practices (Divio framework), the wiki or
 | W-026 | Interactive quizzes | Self-assessment within tutorials |
 | W-027 | Personalized paths | AI-driven reading recommendations |
 | W-028 | Multi-language support | Localized content (Spanish, etc.) |
+
+### Out of Scope
+
+- **Video content embedding** — video is far-future own-content territory.
 
 ---
 
@@ -456,7 +454,6 @@ Persistent left navigation panel.
 │                                │
 │  RESOURCES                     │
 │  ▶ Templates & Downloads       │
-│  ▶ Training Library            │
 │                                │
 │  ─────────────────────────────  │
 │                                │
@@ -653,15 +650,11 @@ Full-text search across all wiki content.
 - Contextual snippets showing match
 - Keyboard navigation (arrow keys, enter)
 
-*Implementation note: search shipped as a global Cmd/Ctrl+K command palette (top 10 results, no filters or sort) rather than this dedicated results page. Whether the palette is the canonical search UX or this screen is still required is an open decision.*
-
 ---
 
 ### 6. Templates & Downloads
 
 Downloadable resources organized by category.
-
-*Status: not built — pending product decision on templates (see WikiTemplate data model).*
 
 **Layout:**
 
@@ -710,61 +703,6 @@ Downloadable resources organized by category.
 │  │                          │  │                          │                 │
 │  │  [Preview] [Download]    │  │  [Preview] [Download]    │                 │
 │  └──────────────────────────┘  └──────────────────────────┘                 │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-### 7. Training Library (Video Content)
-
-Video resources organized by topic.
-
-*Status: not built — pending product decision on the video library (see WikiVideo data model).*
-
-**Layout:**
-
-```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│  🎓 Training Library                                                         │
-│                                                                              │
-│  Filter by: [All Topics ▼]  [All Phases ▼]                                  │
-│                                                                              │
-│  ─────────────────────────────────────────────────────────────────────────   │
-│                                                                              │
-│  VISION MEETING TRAINING                                                     │
-│                                                                              │
-│  ┌─────────────────────────────────────────────────────────────────────────┐ │
-│  │  ▶ [Video Thumbnail]                                                    │ │
-│  │                                                                         │ │
-│  │  Casting Compelling Vision                                              │ │
-│  │  Learn how to present your church vision in a way that                 │ │
-│  │  transforms interested attendees into committed members.               │ │
-│  │                                                                         │ │
-│  │  23 min • Phase 1 • 847 views                        [Watch Now]       │ │
-│  └─────────────────────────────────────────────────────────────────────────┘ │
-│                                                                              │
-│  ┌─────────────────────────────────────────────────────────────────────────┐ │
-│  │  ▶ [Video Thumbnail]                                                    │ │
-│  │                                                                         │ │
-│  │  Follow-Up That Converts                                               │ │
-│  │  Best practices for turning Vision Meeting attendees into              │ │
-│  │  committed Core Group members.                                         │ │
-│  │                                                                         │ │
-│  │  18 min • Phase 1 • 623 views                        [Watch Now]       │ │
-│  └─────────────────────────────────────────────────────────────────────────┘ │
-│                                                                              │
-│  CASE STUDIES                                                                │
-│                                                                              │
-│  ┌─────────────────────────────────────────────────────────────────────────┐ │
-│  │  ▶ [Video Thumbnail]                                                    │ │
-│  │                                                                         │ │
-│  │  Case Study: Grace Community Church Launch                              │ │
-│  │  Pastor Mike shares lessons learned from his church plant              │ │
-│  │  journey from discovery to 200+ members post-launch.                   │ │
-│  │                                                                         │ │
-│  │  34 min • All Phases • 1.2k views                    [Watch Now]       │ │
-│  └─────────────────────────────────────────────────────────────────────────┘ │
 │                                                                              │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -826,26 +764,26 @@ User can still access all phases (no content locked)
 
 ### Workflow 3: Contextual Wiki Surfacing
 
-**Trigger:** User is working in another feature and needs guidance
+**Trigger:** Planter is working anywhere in the dashboard and needs guidance
+
+A floating guide panel is available on every dashboard screen. It offers the wiki articles that match the work in front of the planter, so guidance arrives without a search and without leaving the screen.
 
 **Steps:**
 
 ```
-[User is in Meetings (F3)]
+[Planter is working on a screen — for example, a vision meeting]
     ↓
-[Contextual help icon appears]
+[Guide panel is available on the screen]
     ↓
-Click icon → Sidebar panel opens with relevant wiki articles:
+Open the panel → it lists the articles relevant to this screen:
 ├── "8 Critical Success Factors for Vision Meetings"
 ├── "Planning Your Vision Meeting"
 └── "Vision Meeting Kit Checklist"
     ↓
-Click article → Opens in sidebar (doesn't leave current screen)
+Read an article in the panel — the planter stays on the screen
     ↓
-"Open in full view" option to navigate to wiki
+"Open in full view" navigates to the article in the wiki
 ```
-
-*Implementation note: shipped as the WikiGuide floating panel mounted across dashboard routes, driven by a route-pattern → article-slug mapping, rather than per-feature sidebar embeds.*
 
 ---
 
@@ -919,7 +857,7 @@ System logs download for analytics
 | read_time_minutes | Integer | No | Estimated read time |
 | sort_order | Integer | No | Display order within section |
 | related_article_slugs | String[] | No | Slugs of related articles (slugs are how WikiProgress and WikiBookmark key articles too) |
-| related_template_ids | UUID[] | No | Array of related WikiTemplate IDs. **Planned, not yet shipped** — added by W-010 template linking |
+| related_template_ids | UUID[] | No | Array of related WikiTemplate IDs (W-010 template linking) |
 | status | Enum | Yes | `draft` / `published` / `archived` |
 | published_at | Timestamp | No | Publication date |
 | created_at | Timestamp | Yes | Creation timestamp |
@@ -931,7 +869,9 @@ System logs download for analytics
 
 **Query pattern:** `WHERE church_id IS NULL OR church_id = :current_church_id`
 
-*Ruled 2026-07-27 (issue #112): the shipped `wiki_articles` schema is canon and this model matches it. There is no article hierarchy beyond sections (`parent_article_id` was dropped). `related_template_ids` is the one field the schema does not have yet; it lands with W-010 template linking. Rulings recorded in `docs-audit-2026-07.md` §4.*
+**Authoring:** articles are authored as MDX and seeded into `wiki_articles`; there is no CMS.
+
+There is no article hierarchy beyond sections.
 
 ---
 
@@ -969,8 +909,6 @@ System logs download for analytics
 **Constraints:**
 - Unique constraint on (user_id, article_slug)
 
-*Note: `time_spent_seconds` from the original spec was not implemented.*
-
 ---
 
 ### WikiBookmark
@@ -984,8 +922,6 @@ System logs download for analytics
 
 **Constraints:**
 - Unique constraint on (user_id, article_slug)
-
-*Note: the `notes` field from the original spec was not implemented.*
 
 ---
 
@@ -1005,28 +941,6 @@ System logs download for analytics
 | created_at | Timestamp | Yes | Creation timestamp |
 | updated_at | Timestamp | Yes | Last update timestamp |
 
-*Status: not built — whether template downloads remain on the roadmap is an open decision.*
-
----
-
-### WikiVideo
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| id | UUID | Yes | Primary key |
-| title | String | Yes | Video title |
-| description | Text | No | Video description |
-| video_url | String | Yes | URL to video (YouTube, Vimeo, etc.) |
-| thumbnail_url | String | No | Thumbnail image URL |
-| duration_minutes | Integer | No | Video duration |
-| category | String | Yes | Category (e.g., "training", "case_study") |
-| phase | Enum | No | Relevant phase |
-| view_count | Integer | No | View counter |
-| created_at | Timestamp | Yes | Creation timestamp |
-| updated_at | Timestamp | Yes | Last update timestamp |
-
-*Status: not built — whether the video library remains on the roadmap is an open decision.*
-
 ---
 
 ### WikiSearch
@@ -1041,8 +955,6 @@ System logs download for analytics
 | created_at | Timestamp | Yes | Timestamp of search |
 
 *Note: Used for analytics and search improvement.*
-
-*Status: not built — whether search analytics remain on the roadmap is an open decision.*
 
 ---
 
@@ -1116,7 +1028,7 @@ The wiki should appear contextually throughout the platform:
 ### Performance
 - Articles load in < 1 second
 - Search results in < 500ms
-- Lazy load images and videos
+- Lazy load images
 - Offline reading support (future enhancement)
 
 ---
@@ -1158,7 +1070,6 @@ The wiki should appear contextually throughout the platform:
 - Phase 2-6 complete content
 - Full administrative section
 - All templates and checklists
-- Video content integration
 - Advanced search with filters
 
 ### Phase 3: Enrichment
@@ -1176,8 +1087,6 @@ The wiki should appear contextually throughout the platform:
 ---
 
 ## Oversight Access Patterns
-
-*Status: not built — no oversight surface currently reads wiki progress. Whether coach/sending-church/network visibility into wiki progress remains a requirement is an open decision.*
 
 ### Coach Access
 Coaches can view wiki progress and bookmarks for their assigned churches. This includes per-article completion status, overall phase completion percentages, and bookmark lists. Access is read-only.
@@ -1197,19 +1106,25 @@ Network admins can see aggregate wiki completion rates across all plants in thei
 
 ## Open Questions
 
-1. **Content authoring:** ~~Will wiki content be authored directly in the codebase (MDX files) or through an admin CMS interface?~~ **Resolved:** Content is authored as MDX and seeded into the `wiki_articles` table via `scripts/migrate-wiki-to-db.ts`; no CMS. The former in-repo `wiki/` content directory was removed after migration.
+1. **Multi-language support:** Is localization needed for Spanish or other languages?
 
-2. **Multi-language support:** Is localization needed for Spanish or other languages?
+2. **Coach overlay:** Should coaches be able to add notes/annotations to articles visible only to their planters?
 
-3. **Coach overlay:** Should coaches be able to add notes/annotations to articles visible only to their planters?
+3. **Network customization:** Sending networks and sending churches will be able to modify the wiki their planters see — this is future scope, and the discovery session is still pending. Article scoping by `church_id` (null = global, value = church-specific) is the hook it builds on; network-level and sending-church-level scoping, plus the authoring path, are undecided.
 
-4. **Network customization:** Can networks customize certain articles or add network-specific content? **Reopened 2026-07-27 (with #112):** the end goal is that sending networks and sending churches can modify the wiki their planters see. `church_id` scoping (null = global, value = church-specific) is the only hook shipped; network/sending-church scoping and an authoring path need a discovery session — tracked as issue #178 (`needs-spec`).
+4. **Print/Export:** Should users be able to export entire sections as PDF for offline reference?
 
-5. **Print/Export:** Should users be able to export entire sections as PDF for offline reference?
+5. **Versioning:** How do we handle content updates? Show changelog? Notify users of significant changes?
 
-6. **Versioning:** How do we handle content updates? Show changelog? Notify users of significant changes?
+6. **Interactive elements:** Should tutorials include interactive elements (quizzes, progress checks)?
 
-7. **Interactive elements:** Should tutorials include interactive elements (quizzes, progress checks)?
+7. **Search surface:** Is a global command palette the canonical search UX, or is a dedicated search results screen also required?
+
+8. **Template downloads:** Do template downloads remain in scope?
+
+9. **Search analytics:** Does the wiki keep a record of searches for content-gap analysis?
+
+10. **Oversight visibility:** Does coach, sending-church, and network visibility into wiki progress remain a requirement?
 
 ---
 

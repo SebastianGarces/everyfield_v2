@@ -41,17 +41,17 @@ The Communication Hub also serves as a **delivery service** for other features. 
 | COM-006 | Message history | View all sent messages |
 | COM-007 | Person communication log | View all messages sent to a specific person |
 | COM-008 | Basic delivery tracking | Track sent/delivered status |
-| COM-009 | Quick select groups | Select Core Group, pipeline status groups, **and ministry-team rosters** as recipients. Team rosters confirmed in scope 2026-07-26 (decision #17). Status groups already ship in `src/components/communication/recipient-picker.tsx`; the remaining work is resolving `team:<id>` in `getRecipientsByGroup` — tracked in issue #18. |
+| COM-009 | Quick select groups | Select Core Group, pipeline status groups, and ministry-team rosters as recipients |
 | COM-010 | Template categorization | Organize templates by purpose |
 
 ### Should Have
 
 | ID | Requirement | Description |
 |----|-------------|-------------|
-| COM-011 | SMS delivery | Send text messages via integrated service (Twilio). **POST-BETA** (decision #7) — kept, not cut; a second provider plus number compliance is out of beta scope. |
+| COM-011 | SMS delivery | Send text messages via integrated service (Twilio). **Post-beta scope** — a second delivery provider plus phone-number compliance sits outside beta. |
 | COM-012 | Open tracking | Track email opens |
 | COM-013 | Click tracking | Track link clicks in emails |
-| COM-014 | Scheduled sending | Schedule messages for future delivery. **POST-BETA** (decision #7) — kept; a send queue on top of Resend, useful for batching, but not beta scope. |
+| COM-014 | Scheduled sending | Schedule messages for future delivery. **Post-beta scope** — a send queue on top of Resend serves batching, which beta does not require. |
 | COM-015 | Message preview | Preview message with sample merge data |
 | COM-016 | Custom templates | Create church-specific message templates |
 | COM-017 | Rich text editor | Format messages with bold, italic, links |
@@ -415,7 +415,7 @@ Template content loaded into editor
     ↓
 Message queued for delivery
     ↓
-Integration service delivers (Resend for email; SMS not yet integrated)
+Integration service delivers (Resend for email, Twilio for SMS)
     ↓
 Delivery status tracked and updated
 ```
@@ -669,8 +669,6 @@ General notes attached to any entity.
 | `{{pastor_name}}` | Senior Pastor name | Church profile |
 | `{{launch_date}}` | Launch Sunday date | Church.launch_date |
 
-> **Note:** `{{pastor_name}}` and `{{launch_date}}` are registered in the merge engine but currently render empty — the backing church profile fields are not yet sourced.
-
 ### Meeting Fields (available when triggered from Meetings feature)
 
 | Field | Description | Source |
@@ -706,8 +704,8 @@ General notes attached to any entity.
 
 | Function | Purpose | Integration |
 |----------|---------|-------------|
-| **Email** | Bulk/transactional delivery | API (Resend — single + batch send, webhook delivery tracking) |
-| **SMS** | Text messaging | Not yet integrated (Twilio planned, pending COM-011 decision) |
+| **Email** | Transactional and bulk sends | API (Resend — single + batch send, webhook delivery tracking) |
+| **SMS** | Text delivery (post-beta scope) | API (Twilio) |
 
 ---
 

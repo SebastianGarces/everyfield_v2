@@ -7,33 +7,12 @@
 
 ---
 
-> ## ⤳ RETIRED — folded into the Phase Engine, 2026-07-26
+> ## Archived — historical record
 >
-> **This FRD is no longer the source of truth for progress display.** Its intent migrated to the
-> `/phase` Plant Intelligence surface, which judges progress against real signals rather than
-> rendering static counters.
->
-> This was a **merge, not a deletion**. The Plant Intelligence engine is the stronger half on
-> *judgement* and the weaker half on *presentation*, so the display ideas below were carried across
-> into [`../phase-engine/frd.md`](../phase-engine/frd.md) as presentation requirements:
->
-> | Carried across | Was |
-> |---|---|
-> | Exit-criteria progress | D-002 |
-> | 8 Critical Success Factors scorecard | D-005 |
-> | "How to improve" wiki links | D-016 |
-> | Phase detail drill-down | D-017 |
-> | Growth velocity, meeting trends, follow-up rate, team readiness, milestone timeline, alert badges | D-010–D-015 |
->
-> Already delivered elsewhere, and **not** to be reported as gaps:
->
-> - **D-018 coach dashboard** → `/oversight` ships plant health, insight urgency and multi-plant
->   comparison. Note the FRD's "coach" means *whoever oversees a plant*; the shipped roles are
->   `coach`, `sending_church_admin` and `network_admin`, which are three different things.
-> - **D-001, D-003, D-004, D-006, D-007, D-009** → shipped on the dashboard and `/phase`.
->
-> Read this document as history. New work goes in the phase-engine FRD. Decision #4 in
-> [`docs-audit-2026-07.md`](../../docs-audit-2026-07.md).
+> This document is a historical record, kept for reference and not maintained. The Progress
+> Dashboard was retired as a feature; its surviving presentation requirements live in
+> [`../phase-engine/frd.md`](../phase-engine/frd.md) as PE-022…PE-027, where the D-ID → PE-ID
+> mapping is recorded. New work goes there. See `product-docs/decisions.md` decision #4.
 
 ---
 
@@ -505,7 +484,3 @@ Network admins see a network-wide dashboard with plants by phase, aggregate heal
 4. **Historical:** How far back should trend data be available?
 
 5. **Alerts:** Should dashboard alerts trigger push notifications or just show on-screen?
-
-6. **Plant Intelligence reconciliation:** Phase readiness is currently surfaced by the LLM-judge Plant Intelligence Engine on `/phase` (advisory readiness, ranked insight cards with wiki links) rather than deterministic exit-criteria checklists and a CSF scorecard on the dashboard. Are D-002, D-005, D-016, and D-017 superseded by that surface, or do they remain as deterministic complements?
-
-7. **Coach dashboard vs oversight surfaces:** Admin-facing oversight dashboards exist (`/oversight`, `/oversight/health`) for sending church and network admins. Does the coach role get its own multi-planter dashboard (D-018), or is it folded into those surfaces?

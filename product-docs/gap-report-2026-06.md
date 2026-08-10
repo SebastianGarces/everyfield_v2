@@ -9,7 +9,9 @@
 > as `ab89201` (see `sprints/sprint-a-results.md`; P0-1 was resolved by deleting the Hono `/api/v1`
 > layer entirely, deps dropped in PR #44); the Phase Engine shipped as the Plant Intelligence Engine
 > (PR #37) with LLM judge, RAG, events, and a daily assessment cron; People CSV export shipped
-> (PR #41). Live outstanding work is tracked in `product-docs/work-queue.md` and GitHub issues #14–#36.
+> (PR #41). **Live outstanding work is on the GitHub board — `gh issue list --label feature`** (pointer
+> corrected 2026-08-10; the former `product-docs/work-queue.md` was deleted when the board became the
+> system of record).
 
 **How to use this document (for an LLM planning next deliverables):** Section 1 is the verified current baseline. Section 2 lists what shipped since gap.md. Section 3 is the prioritized gap backlog (P0–P3) with reasoning. Section 4 is net-new feature opportunities not in any FRD. Section 5 explains the prioritization framework. Section 6 is a suggested delivery sequence. Effort estimates: small (≤2 days), medium (3–7 days), large (1–3 weeks). All file references are real paths in the repo.
 

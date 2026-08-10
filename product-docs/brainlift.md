@@ -1,5 +1,9 @@
 # BrainLift: Structured Support, Knowledge Codification, and Data-Driven Improvement in Church Planting
 
+> **ARCHIVAL — point-in-time research (April 2026), kept as strategy input and not maintained.**
+> Statistics are cited as of writing; `church-planting-landscape-research.md` is the source of record
+> for figures.
+
 ## Owners
 
 Sebastian Garces

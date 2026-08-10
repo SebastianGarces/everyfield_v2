@@ -7,14 +7,10 @@
 
 ---
 
-> ## ✖ CUT — decided 2026-07-26
+> **Scope: this feature is cut** — off the roadmap, not deferred ([`decisions.md`](../../decisions.md), decision #3).
 >
-> **F10 is off the roadmap.** Not deferred — cut. Zero code exists and nav has been commented out
-> since Sprint A. This document is retained as a record of what was once scoped, not as a plan.
->
-> Its 26 requirements must **not** be reported as gaps. Do not build against this FRD without an
-> explicit decision to reinstate the feature. Decision #3 in
-> [`docs-audit-2026-07.md`](../../docs-audit-2026-07.md).
+> Its requirements are kept as a record of the design. Do not build them, and do not report them as
+> gaps, without an explicit decision to reinstate the feature.
 
 ---
 

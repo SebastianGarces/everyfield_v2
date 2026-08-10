@@ -5,6 +5,10 @@
 **Purpose:** Comprehensive landscape analysis to inform product strategy for a church planting software platform  
 **Research Method:** Web research across academic sources, industry publications, network websites, practitioner blogs, and organizational documentation
 
+> **ARCHIVAL — point-in-time research (April 2026), kept as strategy input and not maintained.**
+> Statistics are cited as of writing; `church-planting-landscape-research.md` is the source of record
+> for figures.
+
 ---
 
 ## 1. Current Tooling Landscape for Church Planters

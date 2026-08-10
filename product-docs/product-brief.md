@@ -1,7 +1,7 @@
 # EveryField - Product Brief
 
-**Version:** 1.2  
-**Date:** February 7, 2026  
+**Version:** 1.3  
+**Date:** August 10, 2026  
 **Source Document:** Launch Playbook v1.2 (Harvest Bible Fellowship)
 
 ---
@@ -163,20 +163,19 @@ The phase is **advisory context**, not a gate. Rather than forcing planters thro
 
 ## Features
 
-The platform consists of the following features, each documented in a separate Feature Requirements Document (FRD):
+The platform consists of the following features, each documented in a separate Feature Requirements Document (FRD). The complete FRD index — including shared infrastructure, onboarding, oversight, and launch — is [prd.md](./prd.md):
 
 | Code | Feature | Description |
 |------|---------|-------------|
+| PE | Phase Engine (Plant Intelligence) | Reads each plant's real activity, judges it against the methodology, and surfaces prioritized insights to the planter and health signals to overseers. This is also the platform's progress surface: phase goals and their exit criteria, the 8 Critical Success Factors scorecard, and drill-down from a health signal into the activity behind it |
 | F1 | Wiki / Knowledge Base | Educational resource with structured guidance and best practices |
 | F2 | People / CRM Management | Track individuals from initial contact through committed team member |
 | F3 | Meetings | Plan, execute, and track all meeting types (Vision Meetings, Orientations, Team Meetings) |
-| F4 | Progress Dashboard | Visual representation of launch progress and health indicators |
 | F5 | Task & Project Management | Track all tasks with templates and timeline visualization |
 | F6 | Document Templates & Generation | Ready-to-use templates for critical documents |
 | F7 | Financial Tracking | Monitor giving and budget progress |
 | F8 | Ministry Team Management | Organize, staff, and track ministry teams |
 | F9 | Communication Hub | Centralized communication with team members and prospects |
-| F10 | Facility Management | Track facility search, evaluation, and venue relationship |
 
 ---
 
@@ -237,6 +236,8 @@ The following are explicitly out of scope for EveryField:
 
 ## Resolved Decisions
 
+This table holds **product-canon decisions only** — the ones that change what the product *is*. The full dated ledger, with the consequence of each ruling, is [`decisions.md`](./decisions.md). A new row here cites the issue number recorded there, so the two reconcile mechanically.
+
 | Decision | Resolution | Date |
 |----------|------------|------|
 | Multi-tenancy model | Hierarchical: Networks → Sending Churches → Church Plants. Support both large networks (1000+ plants) and small sending churches (1-5 plants) | Feb 3, 2026 |
@@ -256,14 +257,16 @@ The following are explicitly out of scope for EveryField:
 | SendingChurch as separate entity | SendingChurch is a separate table from Church (church plants). Sending churches don't go through the 6-phase journey and have fundamentally different needs. | Feb 7, 2026 |
 | Oversight metrics scope | Network/sending church admins see aggregate metrics only. No individual person records or drill-down. Consent-gated drill-down deferred to future iteration. | Feb 7, 2026 |
 | Full hierarchy ships together | The full Network -> Sending Church -> Church Plant model ships together. Networks and sending churches are the GTM channel for acquiring planters. | Feb 7, 2026 |
-| Paying customer | The sending org pays, per plant. Entitlements attach to the sending church/network; seats flow to their plants. Price point decided before beta, not before alpha. | Jul 27, 2026 |
-| Alpha access terms | No payments in alpha. The alpha cohort is free while the early-access (alpha/beta) period lasts; terms at general launch TBD. | Jul 27, 2026 |
-| Alpha cohort | Selected by the SEND champions (Brett & Bryan), ~10-15 planters, no hard cap — the invite gate is the control. Alpha and Beta remain separate milestones. | Jul 27, 2026 |
+| Paying customer (#192) | The sending org pays, per plant. Entitlements attach to the sending church/network; seats flow to their plants. Price point decided before beta, not before alpha. | Jul 27, 2026 |
+| Alpha access terms (#192) | No payments in alpha. The alpha cohort is free while the early-access (alpha/beta) period lasts; terms at general launch TBD. | Jul 27, 2026 |
+| Alpha cohort (#193) | Selected by the SEND champions (Brett & Bryan), ~10-15 planters, no hard cap — the invite gate is the control. Alpha and Beta remain separate milestones. | Jul 27, 2026 |
 
 ---
 
 ## Reference Documents
 
 - **Domain Reference:** [Launch Playbook](./launch-playbook.md) - Authoritative source material the product implements
+- **Product Values:** [product-values.md](./product-values.md) - How tradeoffs are decided when two options both look reasonable
+- **Decision Ledger:** [decisions.md](./decisions.md) - Every dated ruling, with its consequence
 - **System Architecture:** [system-architecture.md](./system-architecture.md) - System-wide constraints and data model
-- **Feature Requirements:** Located in `./features/<feature-name>/frd.md`
+- **Feature Requirements:** Located in `./features/<feature-name>/frd.md`; the index is [prd.md](./prd.md)

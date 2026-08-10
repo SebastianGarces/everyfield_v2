@@ -4,9 +4,11 @@
 **Meeting Participants:** Sebastian Garces, Brett Stiles, Bryan Nass
 **Purpose:** Compare meeting discussion against product documentation (PRD + 10 FRDs) and actual codebase implementation to identify gaps, new decisions, and priorities.
 
-> **Status update (2026-07-25):** All implementation-status claims in this document are superseded by
-> `gap-report-2026-06.md` (itself now partially executed — live work is tracked in
-> `product-docs/work-queue.md`). Since this was written, tasks (F5), in-app feedback with admin triage,
+> **Status update (2026-07-25, pointer corrected 2026-08-10):** All implementation-status claims in
+> this document are superseded by `gap-report-2026-06.md` (itself now partially executed). **Live
+> work and current status are on the GitHub board — `gh issue list --label feature`.** The former
+> `product-docs/work-queue.md` was deleted when the board became the system of record.
+> Since this was written, tasks (F5), in-app feedback with admin triage,
 > the Phase Engine (Plant Intelligence Engine, PR #37), and People CSV export (PR #41) have all shipped.
 > This document is retained as the record of the February 2026 meeting with Brett Stiles and Bryan Nass.
 

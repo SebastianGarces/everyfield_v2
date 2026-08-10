@@ -207,6 +207,11 @@ Report, in this order:
    the trees from the first two passes were cleaned up by hand only because someone remembered they
    existed. Do not remove them yourself — they belong to whoever takes the issue next.
 
+6. **Browser sweep** — run `scripts/cleanup-mcp-browsers.sh` and report its output line. Verifiers
+   close their own browsers (validate-frontend teardown rule); the sweep catches the ones whose
+   agent died first. It only ever matches MCP-owned browser processes, and a pass boundary is the
+   one safe moment to run it — never run it while a verifier is in flight.
+
 Then stop. **Never merge**, never close an issue, never clear another run's claim, and never widen
 scope because the frontier looked thin.
 
