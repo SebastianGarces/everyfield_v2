@@ -195,3 +195,144 @@ body {
     cursor: pointer;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Print (W-020)
+
+   A printed article is the prose and nothing else. The whole block is INERT
+   unless the page marks a print root (`[data-print-root]`, set on the wiki
+   article's `<article>`), so printing any other screen is unchanged — every
+   selector below is gated on that marker being present.
+
+   Two rules carry it:
+
+   1. KEEP THE PATH. Everything in the body that is neither the print root, nor
+      inside it, nor an ancestor of it, is chrome and goes. Saying "keep the
+      article" instead of listing the chrome is what makes it hold: a header, a
+      floating guide button or a toast added tomorrow leaves the printed page
+      on the day it ships, with nobody remembering this file.
+   2. UNWIND THE ANCESTORS. The dashboard shell nests the article inside
+      fixed-height `overflow-*` scroll containers. On paper those clip it to a
+      single screenful, so every ancestor is flattened to a plain, auto-height,
+      visible-overflow block.
+
+   Colour is forced to ink on white rather than left to the theme: the printer
+   drops backgrounds, so a dark-theme reader would otherwise print near-white
+   text onto white paper and get an empty sheet.
+   --------------------------------------------------------------------------- */
+@media print {
+  @page {
+    margin: 18mm 16mm;
+  }
+
+  /* 1. Keep the path to the article; everything else is chrome. */
+  body:has([data-print-root])
+    :not(:has([data-print-root])):not([data-print-root]):not(
+      [data-print-root] *
+    ) {
+    display: none !important;
+  }
+
+  /* 2. Unwind the shell so nothing clips the article. */
+  html:has([data-print-root]),
+  body:has([data-print-root]),
+  body:has([data-print-root]) :has([data-print-root]),
+  [data-print-root] {
+    display: block !important;
+    position: static !important;
+    overflow: visible !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    background: #fff !important;
+  }
+
+  /* 3. Ink, hairlines, and no scroll containers inside the article. */
+  [data-print-root],
+  [data-print-root] * {
+    color: #000 !important;
+    background: transparent !important;
+    border-color: #999 !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+    max-height: none !important;
+  }
+  [data-print-root] .text-muted-foreground {
+    color: #3f3f3f !important;
+  }
+
+  /* 4. Furniture inside the article that is not prose: the breadcrumb, these
+        controls, the related lists and the pager are all navigation. */
+  [data-print-hide] {
+    display: none !important;
+  }
+
+  /* 5. Set the prose for paper. */
+  [data-print-root] {
+    font-size: 11pt;
+    line-height: 1.55;
+  }
+  [data-print-root] h1 {
+    font-size: 20pt;
+  }
+  [data-print-root] h2 {
+    font-size: 15pt;
+  }
+  [data-print-root] h3 {
+    font-size: 13pt;
+  }
+  [data-print-root] h4 {
+    font-size: 12pt;
+  }
+  [data-print-root] :is(h1, h2, h3, h4, h5, h6) {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+  [data-print-root] :is(p, li, blockquote) {
+    orphans: 3;
+    widows: 3;
+  }
+  [data-print-root] :is(pre, blockquote, table, img, figure) {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  /* A code block scrolls sideways on screen. On paper there is nowhere to
+     scroll, so it wraps instead of losing the end of every long line. */
+  [data-print-root] pre {
+    white-space: pre-wrap !important;
+    word-break: break-word;
+    border: 1pt solid #999 !important;
+    padding: 8pt !important;
+  }
+  [data-print-root] img {
+    max-width: 100% !important;
+    height: auto !important;
+  }
+  [data-print-root] table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+  [data-print-root] :is(th, td) {
+    border: 0.5pt solid #999 !important;
+    padding: 4pt 6pt !important;
+  }
+
+  /* 6. A link's destination survives the paper — colour and an underline carry
+        no URL. Same-page anchors name nothing off the page and stay bare. */
+  [data-print-root] a[href]::after {
+    content: " (" attr(href) ")";
+    font-size: 0.85em;
+    word-break: break-all;
+  }
+  [data-print-root] a[href^="#"]::after,
+  [data-print-root] a[href=""]::after {
+    content: "";
+  }
+}
