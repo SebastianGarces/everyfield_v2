@@ -3,32 +3,39 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, test } from "node:test";
 
+import { PRINT_BODY_SELECTOR, pdfFileName } from "./article-actions";
 import {
   columnWidths,
   extractPrintBlocks,
-  pdfFileName,
-  PRINT_BODY_SELECTOR,
-  renderBlock,
-  runFontFamily,
   runsText,
   type PrintRun,
   type PrintTableRow,
-} from "./article-actions";
+} from "./article-pdf/extract";
+import { renderBlock, runFontFamily } from "./article-pdf/render";
 
 // ----------------------------------------------------------------------------
 // Print and PDF (W-018, W-020).
 //
-// The feature is one contract spread over three files, so it is asserted as
+// The feature is one contract spread over several files, so it is asserted as
 // one: `globals.css` says what survives printing, the article page marks WHICH
-// element that is, and this component turns the same element into a PDF. Any
-// one of the three renamed on its own silently produces a blank sheet or an
-// empty file, which is exactly the failure a browser test notices last.
+// element that is, and the `article-pdf/` pair turns the same element into a
+// PDF behind the toolbar. Any one of them renamed on its own silently produces
+// a blank sheet or an empty file, which is exactly the failure a browser test
+// notices last.
 //
 // The browser half of the acceptance criteria (print-media emulation, the
 // download event) is proved on the branch's Vercel preview by
 // `.claude/skills/validate-frontend`. What is asserted here is everything that
-// does not need a browser: the extraction, the file name, and the fact that the
-// three files still agree about the marker attributes.
+// does not need a browser: the extraction, the rendered tree, the file name,
+// and the fact that the files still agree about the marker attributes.
+//
+// PREFER A BEHAVIOURAL ASSERTION TO A SOURCE GREP. Reading a file and matching
+// its prose pins the CODE'S COMMENTS, not the code, so it breaks on a rename or
+// a file split for reasons that have nothing to do with the reader's PDF. The
+// source is read below for three things only: the marker attributes and the
+// print stylesheet (which have no runtime surface here), the shape a bundle
+// must not have (a static import), and the one place where a stale COMMENT is
+// itself the defect — the divergence count.
 // ----------------------------------------------------------------------------
 
 const SRC = path.join(process.cwd(), "src");
@@ -41,6 +48,17 @@ const ARTICLE_ACTIONS = readFileSync(
   path.join(SRC, "components", "wiki", "article-actions.tsx"),
   "utf-8"
 );
+const PDF_EXTRACT = readFileSync(
+  path.join(SRC, "components", "wiki", "article-pdf", "extract.ts"),
+  "utf-8"
+);
+const PDF_RENDER = readFileSync(
+  path.join(SRC, "components", "wiki", "article-pdf", "render.tsx"),
+  "utf-8"
+);
+
+/** Every file the download path is spread over, for "this shape is absent". */
+const PDF_SOURCE = [ARTICLE_ACTIONS, PDF_EXTRACT, PDF_RENDER].join("\n");
 
 /** Everything inside the one `@media print` block. */
 const printBlock = (() => {
@@ -333,6 +351,41 @@ describe("inline emphasis becomes runs", () => {
     assert.equal(runsText(runs), "See the launch guide.");
   });
 
+  test("collapses a double space where two runs meet", () => {
+    // `<strong> launch </strong>` written with the spaces INSIDE the tag: each
+    // run is already single-spaced, so a per-run squeeze leaves two spaces at
+    // the seam. The browser collapses them on the printed page, so the
+    // downloaded file has to as well or the two paths differ by a space.
+    const runs = runsOf(
+      el("p", [
+        textNode("See the "),
+        el("strong", [textNode(" launch ")]),
+        textNode("guide."),
+      ])
+    );
+
+    assert.equal(runsText(runs), "See the launch guide.");
+    assert.deepEqual(runs, [
+      { text: "See the " },
+      { text: "launch ", bold: true },
+      { text: "guide." },
+    ]);
+  });
+
+  test("keeps the single space that separates two emphasized words", () => {
+    // The seam squeeze must not eat a space that is doing work: one space
+    // between two bold words is the only thing holding them apart.
+    const runs = runsOf(
+      el("p", [
+        el("strong", [textNode("Set up")]),
+        textNode(" "),
+        el("em", [textNode("early")]),
+      ])
+    );
+
+    assert.equal(runsText(runs), "Set up early");
+  });
+
   test("accumulates nesting, so bold italic is both", () => {
     assert.deepEqual(
       runsOf(el("p", [el("strong", [el("em", [textNode("Do not skip")])])])),
@@ -572,7 +625,7 @@ describe("renderBlock — the table grid in the downloaded PDF", () => {
   test("no longer flattens a row into pipe-joined text", () => {
     // The ruling on PR #391: the download renders the grid the print path does.
     assert.ok(
-      !ARTICLE_ACTIONS.includes('cells.join("  |  ")'),
+      !PDF_SOURCE.includes('cells.join("  |  ")'),
       "a pipe-joined row is the flattened rendering that was ruled out"
     );
   });
@@ -684,15 +737,29 @@ describe("renderBlock — styled emphasis in the downloaded PDF", () => {
     }
   });
 
-  test("expresses emphasis as a face, never as fontWeight or fontStyle", () => {
-    // The guard behind the two tests above: a `fontWeight`/`fontStyle` pair on
-    // a nested Text is the shape that throws under a single-source family.
-    // The property form, so the header comment may still name the two axes it
-    // explains staying away from.
-    assert.ok(
-      !/font(Weight|Style):/.test(ARTICLE_ACTIONS),
-      "emphasis must be a font NAME here — see the header comment"
-    );
+  test("styles an emphasized run with a face and nothing else", () => {
+    // The guard behind the two tests above, asserted on what is RENDERED rather
+    // than on the source text: a `fontWeight`/`fontStyle` pair on a nested Text
+    // is the shape that throws under a single-source family. Every emphasis
+    // combination is walked, so no one corner can reintroduce an axis.
+    for (const bold of [undefined, true] as const) {
+      for (const italic of [undefined, true] as const) {
+        for (const mono of [undefined, true] as const) {
+          if (!bold && !italic && !mono) continue;
+
+          const run = { text: "x", bold, italic, mono } as PrintRun;
+          const [emphasized] = childrenOf(
+            paragraph([run]) as Rendered
+          ) as unknown as Rendered[];
+
+          assert.deepEqual(
+            Object.keys(emphasized.props.style ?? {}),
+            ["fontFamily"],
+            `emphasis must be a face alone, got ${JSON.stringify(emphasized.props.style)}`
+          );
+        }
+      }
+    }
   });
 });
 
@@ -765,52 +832,78 @@ describe("the print contract across the three files", () => {
     assert.match(printBlock, /color:\s*#000\s*!important/);
   });
 
-  test("both paths draw the table as a bordered grid", () => {
+  test("both paths draw the table as a bordered grid, at the same weight", () => {
     // The ruling on PR #391: the downloaded file has to match the printed page
-    // here, so the header comment's "same article" claim is true of tables too.
-    assert.match(printBlock, /:is\(th, td\)\s*\{\s*border:\s*0\.5pt solid/);
-    assert.ok(
-      ARTICLE_ACTIONS.includes("const TABLE_BORDER = 0.5"),
-      "the PDF's hairline is the print stylesheet's 0.5pt"
+    // here. Both halves are read out as NUMBERS and compared — the stylesheet's
+    // pt value against the width the renderer actually puts on the tree — so
+    // changing one alone fails here rather than shipping two different grids.
+    const printed = printBlock.match(
+      /:is\(th, td\)\s*\{\s*border:\s*([\d.]+)pt solid/
     );
-    assert.ok(
-      ARTICLE_ACTIONS.includes("bordered grid on both paths"),
-      "the header comment has to state the parity it now keeps"
-    );
+    assert.ok(printed, "the print stylesheet draws no cell border");
+
+    const drawn = renderBlock(
+      {
+        kind: "table",
+        rows: [{ cells: [plain("Week")], isHeader: true }],
+      },
+      0,
+      primitives
+    ) as unknown as Rendered;
+    const [cell] = childrenOf(childrenOf(drawn)[0]);
+
+    assert.equal(drawn.props.style?.borderTopWidth, Number(printed[1]));
+    assert.equal(cell.props.style?.borderBottomWidth, Number(printed[1]));
   });
 
   test("both paths keep bold, italic and inline code emphasized", () => {
     // The round-2 ruling on PR #391. Print keeps emphasis by doing nothing —
     // the browser sets `<strong>` bold on its own — so the parity claim breaks
-    // only if the print block starts flattening it, or if the PDF stops naming
-    // the emphasized faces. Both halves are asserted, because either one alone
-    // would let the two renderers drift apart again.
+    // only if the print block starts flattening it, or if the PDF stops
+    // resolving an emphasized run to a face of its own. Both halves are
+    // asserted, because either one alone would let the two renderers drift
+    // apart again.
     assert.ok(
       !/font-(weight|style):\s*normal\s*!important/.test(printBlock),
       "the print path must not flatten emphasis"
     );
-    for (const face of [
-      "Helvetica-Bold",
-      "Helvetica-Oblique",
+
+    // Each of the three distinctions this corpus makes resolves to its own
+    // face, and a plain run to none — which is what "emphasized" can mean in a
+    // document that carries no font asset.
+    assert.deepEqual(
+      {
+        bold: runFontFamily({ text: "x", bold: true }),
+        italic: runFontFamily({ text: "x", italic: true }),
+        mono: runFontFamily({ text: "x", mono: true }),
+        plain: runFontFamily({ text: "x" }),
+      },
+      {
+        bold: "Helvetica-Bold",
+        italic: "Helvetica-Oblique",
+        mono: "Courier",
+        plain: undefined,
+      }
+    );
+    assert.equal(
+      runFontFamily({ text: "x", italic: true }, true),
       "Helvetica-BoldOblique",
-      "Courier",
-    ]) {
-      assert.ok(
-        ARTICLE_ACTIONS.includes(`"${face}"`),
-        `the PDF path has no ${face} face to set an emphasized run in`
-      );
-    }
-    assert.ok(
-      ARTICLE_ACTIONS.includes("INLINE EMPHASIS"),
-      "the header comment has to state the parity it now keeps"
+      "an italic word in a bold heading keeps both"
     );
   });
 
   test("the header comment counts the divergences it actually has", () => {
-    // The comment claims "the same article" on both paths, so every place the
-    // two renderers disagree has to be named next to that claim. It said "ONE
-    // KNOWN DIVERGENCE" while images were a second one, which is the same shape
-    // of untrue claim the table fix corrected.
+    // The one place a prose assertion is the point: the comment claims "the
+    // same article" on both paths, so every place the two renderers disagree
+    // has to be named next to that claim. It said "ONE KNOWN DIVERGENCE" while
+    // images were a second one, which is the same shape of untrue claim the
+    // table fix corrected.
+    //
+    // Note what this can and cannot do: it catches a STALE count — a divergence
+    // that got fixed or renamed while the header kept claiming it — and never a
+    // NEW one, because nothing here knows about a gap nobody has written down.
+    // A new divergence is caught by the behavioural test that pins it (images,
+    // below) or not at all.
     assert.ok(
       ARTICLE_ACTIONS.includes("TWO KNOWN DIVERGENCES"),
       "the divergence count must match the list below it"
@@ -867,10 +960,7 @@ describe("the PDF palette", () => {
   for (const name of ["ink", "muted", "line"]) {
     test(`${name} is the value the templates use`, () => {
       assert.equal(
-        colorOf(
-          ARTICLE_ACTIONS,
-          new RegExp(`const ${name} = "(#[0-9a-f]{6})"`)
-        ),
+        colorOf(PDF_RENDER, new RegExp(`const ${name} = "(#[0-9a-f]{6})"`)),
         colorOf(SHARED_STYLES, new RegExp(`${name}: "(#[0-9a-f]{6})"`))
       );
     });
