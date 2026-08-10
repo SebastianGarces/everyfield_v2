@@ -9,6 +9,9 @@ import {
   pdfFileName,
   PRINT_BODY_SELECTOR,
   renderBlock,
+  runFontFamily,
+  runsText,
+  type PrintRun,
   type PrintTableRow,
 } from "./article-actions";
 
@@ -95,6 +98,9 @@ function descendants(node: { children: StubChild[] }, tagName: string) {
   return found;
 }
 
+/** One unemphasized run — what most prose reduces to. */
+const plain = (text: string): PrintRun[] => [{ text }];
+
 describe("extractPrintBlocks", () => {
   test("keeps headings, prose, lists and code in reading order", () => {
     const blocks = extractPrintBlocks(
@@ -114,11 +120,18 @@ describe("extractPrintBlocks", () => {
     );
 
     assert.deepEqual(blocks, [
-      { kind: "heading", level: 2, text: "Counting the cost" },
-      { kind: "paragraph", text: "A plant is a people project." },
-      { kind: "listItem", depth: 0, marker: "•", text: "Pray" },
-      { kind: "listItem", depth: 0, marker: "•", text: "Recruit" },
-      { kind: "listItem", depth: 1, marker: "•", text: "Then follow up" },
+      { kind: "heading", level: 2, runs: plain("Counting the cost") },
+      { kind: "paragraph", runs: plain("A plant is a people project.") },
+      { kind: "listItem", depth: 0, marker: "•", runs: plain("Pray") },
+      { kind: "listItem", depth: 0, marker: "•", runs: plain("Recruit") },
+      {
+        kind: "listItem",
+        depth: 1,
+        marker: "•",
+        runs: plain("Then follow up"),
+      },
+      // A fenced block is mono in its entirety, so it stays one string and
+      // keeps its own line breaks — the run model is for INLINE emphasis.
       { kind: "code", text: "pnpm db:migrate" },
       { kind: "divider" },
     ]);
@@ -151,7 +164,7 @@ describe("extractPrintBlocks", () => {
     assert.deepEqual(blocks, [
       {
         kind: "paragraph",
-        text: "See the launch guide (/wiki/phase-4/launch) first.",
+        runs: plain("See the launch guide (/wiki/phase-4/launch) first."),
       },
     ]);
   });
@@ -163,7 +176,9 @@ describe("extractPrintBlocks", () => {
       ])
     );
 
-    assert.deepEqual(blocks, [{ kind: "paragraph", text: "Back to top" }]);
+    assert.deepEqual(blocks, [
+      { kind: "paragraph", runs: plain("Back to top") },
+    ]);
   });
 
   test("recurses into an unknown wrapper, so an MDX callout still prints", () => {
@@ -179,7 +194,7 @@ describe("extractPrintBlocks", () => {
     );
 
     assert.deepEqual(blocks, [
-      { kind: "paragraph", text: "Do not skip the vision meeting." },
+      { kind: "paragraph", runs: plain("Do not skip the vision meeting.") },
     ]);
   });
 
@@ -191,7 +206,7 @@ describe("extractPrintBlocks", () => {
       ])
     );
 
-    assert.deepEqual(blocks, [{ kind: "paragraph", text: "Kept" }]);
+    assert.deepEqual(blocks, [{ kind: "paragraph", runs: plain("Kept") }]);
   });
 
   test("keeps a table whole, and marks the header row", () => {
@@ -220,8 +235,8 @@ describe("extractPrintBlocks", () => {
       {
         kind: "table",
         rows: [
-          { cells: ["Week", "Focus"], isHeader: true },
-          { cells: ["1", "Prayer"], isHeader: false },
+          { cells: [plain("Week"), plain("Focus")], isHeader: true },
+          { cells: [plain("1"), plain("Prayer")], isHeader: false },
         ],
       },
     ]);
@@ -249,8 +264,10 @@ describe("extractPrintBlocks", () => {
       {
         kind: "table",
         rows: [
-          { cells: ["a", "b", "c"], isHeader: false },
-          { cells: ["only", "", ""], isHeader: false },
+          { cells: [plain("a"), plain("b"), plain("c")], isHeader: false },
+          // A padded cell holds no runs at all, not an empty one: nothing was
+          // written there.
+          { cells: [plain("only"), [], []], isHeader: false },
         ],
       },
     ]);
@@ -265,9 +282,152 @@ describe("extractPrintBlocks", () => {
   });
 });
 
+describe("inline emphasis becomes runs", () => {
+  // The round-2 ruling on PR #391: a bold word is bold in the downloaded file
+  // too. Emphasis is the corpus's way of marking the step that must not be
+  // skipped, so flattening it changes what a checklist SAYS, not just how it
+  // looks.
+
+  const runsOf = (element: Element): PrintRun[] => {
+    const [block] = extractPrintBlocks(el("div", [element]));
+    assert.ok(block && "runs" in block, "expected a block carrying runs");
+    return block.runs;
+  };
+
+  test("marks strong, em and inline code, and leaves the rest plain", () => {
+    assert.deepEqual(
+      runsOf(
+        el("p", [
+          textNode("Run "),
+          el("code", [textNode("pnpm db:migrate")]),
+          textNode(" before the "),
+          el("strong", [textNode("vision meeting")]),
+          textNode(", "),
+          el("em", [textNode("always")]),
+          textNode("."),
+        ])
+      ),
+      [
+        { text: "Run " },
+        { text: "pnpm db:migrate", mono: true },
+        { text: " before the " },
+        { text: "vision meeting", bold: true },
+        { text: ", " },
+        { text: "always", italic: true },
+        { text: "." },
+      ]
+    );
+  });
+
+  test("keeps the spaces around an emphasized word", () => {
+    // Trimming each run in turn — the obvious reading of the old one-string
+    // flattening — welds "See the" to "launch".
+    const runs = runsOf(
+      el("p", [
+        textNode("  See the "),
+        el("strong", [textNode("launch")]),
+        textNode(" guide.  "),
+      ])
+    );
+
+    assert.equal(runsText(runs), "See the launch guide.");
+  });
+
+  test("accumulates nesting, so bold italic is both", () => {
+    assert.deepEqual(
+      runsOf(el("p", [el("strong", [el("em", [textNode("Do not skip")])])])),
+      [{ text: "Do not skip", bold: true, italic: true }]
+    );
+  });
+
+  test("treats raw <b> and <i> as their semantic twins", () => {
+    // MDX lets an author write HTML directly, and some of this corpus does.
+    assert.deepEqual(
+      runsOf(
+        el("p", [el("b", [textNode("Bold")]), el("i", [textNode("Italic")])])
+      ),
+      [
+        { text: "Bold", bold: true },
+        { text: "Italic", italic: true },
+      ]
+    );
+  });
+
+  test("merges neighbours that read alike into one run", () => {
+    // Two text nodes, or a link's label beside the words around it, are one
+    // run — otherwise every wrap point becomes a seam.
+    assert.deepEqual(
+      runsOf(
+        el("p", [
+          textNode("See the "),
+          el("a", [textNode("launch guide")], { href: "/wiki/launch" }),
+          textNode(" first."),
+        ])
+      ),
+      [{ text: "See the launch guide (/wiki/launch) first." }]
+    );
+  });
+
+  test("emphasizes a link's label without emphasizing its URL", () => {
+    // The destination is an aside this renderer adds; the author emphasized
+    // the words, not the address.
+    assert.deepEqual(
+      runsOf(
+        el("p", [
+          el("a", [el("strong", [textNode("Read this")])], {
+            href: "/wiki/launch",
+          }),
+        ])
+      ),
+      [{ text: "Read this", bold: true }, { text: " (/wiki/launch)" }]
+    );
+  });
+
+  test("carries emphasis into a table cell", () => {
+    const [block] = extractPrintBlocks(
+      el("div", [
+        el("table", [
+          el("tbody", [
+            el("tr", [
+              el("td", [
+                textNode("Set up "),
+                el("strong", [textNode("before")]),
+                textNode(" 8am"),
+              ]),
+            ]),
+          ]),
+        ]),
+      ])
+    );
+
+    assert.ok(block && block.kind === "table");
+    assert.deepEqual(block.rows[0].cells[0], [
+      { text: "Set up " },
+      { text: "before", bold: true },
+      { text: " 8am" },
+    ]);
+  });
+
+  test("measures a column by its words, not its markup", () => {
+    // Column widths are driven by the longest cell, and a run list has no
+    // single `.length` — reading it plainly is what keeps the grid honest.
+    const widths = columnWidths([
+      {
+        cells: [
+          [{ text: "Yes" }],
+          [{ text: "A much longer ", bold: true }, { text: "explanation" }],
+        ],
+        isHeader: false,
+      },
+    ]);
+
+    assert.ok(widths[1] > widths[0], `${widths[1]} should exceed ${widths[0]}`);
+  });
+});
+
 describe("columnWidths", () => {
   const row = (...cells: string[]): PrintTableRow => ({
-    cells,
+    cells: cells.map(plain),
     isHeader: false,
   });
 
@@ -313,36 +473,42 @@ describe("columnWidths", () => {
   });
 });
 
-describe("renderBlock — the table grid in the downloaded PDF", () => {
-  // `renderBlock` takes its `Text`/`View` from the caller, so the tree can be
-  // built with plain host tags and inspected here. That seam is why proving the
-  // PDF draws borders does not need `@react-pdf/renderer`, a browser, or a
-  // rendered file.
-  type Rendered = {
-    type: unknown;
-    props: {
-      style?: Record<string, unknown>;
-      wrap?: boolean;
-      children?: unknown;
-    };
+// `renderBlock` takes its `Text`/`View` from the caller, so the tree can be
+// built with plain host tags and inspected here. That seam is why proving the
+// PDF draws borders — or sets a word in the bold face — does not need
+// `@react-pdf/renderer`, a browser, or a rendered file.
+type Rendered = {
+  type: unknown;
+  props: {
+    style?: Record<string, unknown>;
+    wrap?: boolean;
+    children?: unknown;
   };
+};
 
-  const primitives = { Text: "Text", View: "View" } as unknown as Parameters<
-    typeof renderBlock
-  >[2];
+const primitives = { Text: "Text", View: "View" } as unknown as Parameters<
+  typeof renderBlock
+>[2];
 
-  const childrenOf = (node: Rendered): Rendered[] =>
-    (Array.isArray(node.props.children)
-      ? node.props.children
-      : [node.props.children]) as Rendered[];
+const childrenOf = (node: Rendered): Rendered[] =>
+  (Array.isArray(node.props.children)
+    ? node.props.children
+    : [node.props.children]) as Rendered[];
 
+describe("renderBlock — the table grid in the downloaded PDF", () => {
   const table = renderBlock(
     {
       kind: "table",
       rows: [
-        { cells: ["Ministry Area", "Key Checklist Items"], isHeader: true },
         {
-          cells: ["Set-up/Tear-down", "Equipment staging, room configuration"],
+          cells: [plain("Ministry Area"), plain("Key Checklist Items")],
+          isHeader: true,
+        },
+        {
+          cells: [
+            plain("Set-up/Tear-down"),
+            plain("Equipment staging, room configuration"),
+          ],
           isHeader: false,
         },
       ],
@@ -408,6 +574,124 @@ describe("renderBlock — the table grid in the downloaded PDF", () => {
     assert.ok(
       !ARTICLE_ACTIONS.includes('cells.join("  |  ")'),
       "a pipe-joined row is the flattened rendering that was ruled out"
+    );
+  });
+});
+
+describe("renderBlock — styled emphasis in the downloaded PDF", () => {
+  const paragraph = (runs: PrintRun[]) =>
+    renderBlock({ kind: "paragraph", runs }, 0, primitives) as unknown as
+      | Rendered
+      | undefined;
+
+  test("gives every emphasized span its own Text, and leaves plain text bare", () => {
+    const children = childrenOf(
+      paragraph([
+        { text: "Confirm the " },
+        { text: "room", bold: true },
+        { text: " with " },
+        { text: "pnpm db:seed", mono: true },
+      ]) as Rendered
+    ) as unknown as (string | Rendered)[];
+
+    assert.equal(children.length, 4);
+    // A run with no emphasis stays the string it was — no wrapper, so an
+    // unemphasized paragraph renders exactly as it did before.
+    assert.equal(children[0], "Confirm the ");
+    assert.equal(children[2], " with ");
+
+    const bold = children[1] as Rendered;
+    const mono = children[3] as Rendered;
+    assert.equal(bold.type, "Text");
+    assert.equal(bold.props.style?.fontFamily, "Helvetica-Bold");
+    assert.equal(mono.props.style?.fontFamily, "Courier");
+  });
+
+  test("names the combined face inside a bold block, never a second axis", () => {
+    // A heading is already set in `Helvetica-Bold`, a single-source family:
+    // asking it for an italic CHILD resolves nothing and throws in
+    // `@react-pdf/font`, so the italic word has to name `Helvetica-BoldOblique`
+    // outright.
+    const heading = renderBlock(
+      {
+        kind: "heading",
+        level: 2,
+        runs: [{ text: "Counting " }, { text: "the cost", italic: true }],
+      },
+      0,
+      primitives
+    ) as unknown as Rendered;
+
+    const [, emphasized] = childrenOf(heading);
+    assert.equal(emphasized.props.style?.fontFamily, "Helvetica-BoldOblique");
+  });
+
+  test("keeps a header cell bold when a word inside it is emphasized", () => {
+    const table = renderBlock(
+      {
+        kind: "table",
+        rows: [
+          {
+            cells: [[{ text: "Week", italic: true }]],
+            isHeader: true,
+          },
+          { cells: [[{ text: "one", italic: true }]], isHeader: false },
+        ],
+      },
+      0,
+      primitives
+    ) as unknown as Rendered;
+
+    // table → row → cell → the cell's Text → the run's own Text.
+    const faceOf = (rowIndex: number) => {
+      const cell = childrenOf(childrenOf(table)[rowIndex])[0];
+      const [run] = childrenOf(childrenOf(cell)[0]);
+      return run.props.style?.fontFamily;
+    };
+
+    assert.equal(faceOf(0), "Helvetica-BoldOblique");
+    assert.equal(faceOf(1), "Helvetica-Oblique");
+  });
+
+  test("resolves every combination to a standard-14 face", () => {
+    // Standard-14 only: the fix carries no font asset, which is what kept it
+    // inside the ruling. Anything outside this set would need one.
+    const standard14 = new Set([
+      "Helvetica",
+      "Helvetica-Bold",
+      "Helvetica-Oblique",
+      "Helvetica-BoldOblique",
+      "Courier",
+      "Courier-Bold",
+      "Courier-Oblique",
+      "Courier-BoldOblique",
+    ]);
+
+    for (const bold of [undefined, true] as const) {
+      for (const italic of [undefined, true] as const) {
+        for (const mono of [undefined, true] as const) {
+          for (const inheritedBold of [false, true]) {
+            const run = { text: "x", bold, italic, mono } as PrintRun;
+            const face = runFontFamily(run, inheritedBold);
+            if (!bold && !italic && !mono) {
+              assert.equal(face, undefined, "a plain run inherits its block");
+              continue;
+            }
+            assert.ok(face && standard14.has(face), `unknown face ${face}`);
+          }
+        }
+      }
+    }
+  });
+
+  test("expresses emphasis as a face, never as fontWeight or fontStyle", () => {
+    // The guard behind the two tests above: a `fontWeight`/`fontStyle` pair on
+    // a nested Text is the shape that throws under a single-source family.
+    // The property form, so the header comment may still name the two axes it
+    // explains staying away from.
+    assert.ok(
+      !/font(Weight|Style):/.test(ARTICLE_ACTIONS),
+      "emphasis must be a font NAME here — see the header comment"
     );
   });
 });
@@ -495,6 +779,33 @@ describe("the print contract across the three files", () => {
     );
   });
 
+  test("both paths keep bold, italic and inline code emphasized", () => {
+    // The round-2 ruling on PR #391. Print keeps emphasis by doing nothing —
+    // the browser sets `<strong>` bold on its own — so the parity claim breaks
+    // only if the print block starts flattening it, or if the PDF stops naming
+    // the emphasized faces. Both halves are asserted, because either one alone
+    // would let the two renderers drift apart again.
+    assert.ok(
+      !/font-(weight|style):\s*normal\s*!important/.test(printBlock),
+      "the print path must not flatten emphasis"
+    );
+    for (const face of [
+      "Helvetica-Bold",
+      "Helvetica-Oblique",
+      "Helvetica-BoldOblique",
+      "Courier",
+    ]) {
+      assert.ok(
+        ARTICLE_ACTIONS.includes(`"${face}"`),
+        `the PDF path has no ${face} face to set an emphasized run in`
+      );
+    }
+    assert.ok(
+      ARTICLE_ACTIONS.includes("INLINE EMPHASIS"),
+      "the header comment has to state the parity it now keeps"
+    );
+  });
+
   test("the header comment counts the divergences it actually has", () => {
     // The comment claims "the same article" on both paths, so every place the
     // two renderers disagree has to be named next to that claim. It said "ONE
@@ -526,8 +837,8 @@ describe("the print contract across the three files", () => {
     );
 
     assert.deepEqual(blocks, [
-      { kind: "paragraph", text: "before" },
-      { kind: "paragraph", text: "after" },
+      { kind: "paragraph", runs: plain("before") },
+      { kind: "paragraph", runs: plain("after") },
     ]);
   });
 
