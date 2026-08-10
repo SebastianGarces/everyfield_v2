@@ -5,12 +5,26 @@
 // ============================================================================
 //
 // Two controls on one pipeline: what the reader sees on paper and what they get
-// in the file are the same article, taken from the same place.
+// in the file are the same article, taken from the same place. Prose, lists,
+// callouts, code, link destinations and TABLES all carry across — a table is a
+// bordered grid on both paths, because a flattened one (cells joined with a
+// pipe) loses the column a fragment belongs to, and tables are a staple of this
+// corpus rather than an edge case (ruling on PR #391, 2026-08-10).
 //
 //   Print     hands the page to the browser. The print stylesheet in
 //             `globals.css` drops the shell, the wiki sidebar, the table of
 //             contents and this toolbar, and sets the prose as ink on paper.
 //   Download  builds a PDF in the browser from the rendered prose and saves it.
+//
+// The two renderers are independent, so "the same article" is a claim that has
+// to be maintained: `article-actions.test.ts` reads this file and `globals.css`
+// and fails when only one of them draws the grid.
+//
+// ONE KNOWN DIVERGENCE, tracked rather than hidden: characters outside WinAnsi
+// (`→`, `↓`, box drawing) print correctly and corrupt in the downloaded file,
+// because the standard-14 fonts this document pins cannot encode them. The fix
+// is a registered Unicode TTF, which means shipping a font asset — deferred by
+// the same ruling and tracked as #398.
 //
 // WHY THE PDF IS BUILT CLIENT-SIDE, FROM THE DOM
 //
@@ -62,24 +76,45 @@ const TEXT_NODE = 3;
 
 // --- the shape the article is reduced to ------------------------------------
 
+/**
+ * One row of a table, kept with its siblings rather than emitted alone.
+ *
+ * A row cannot be laid out on its own: its column widths are a property of the
+ * whole table, and whether it is bold is a property of where it sat in it.
+ */
+export type PrintTableRow = { cells: string[]; isHeader: boolean };
+
 type PrintBlock =
   | { kind: "heading"; level: 1 | 2 | 3 | 4; text: string }
   | { kind: "paragraph"; text: string }
   | { kind: "listItem"; depth: number; marker: string; text: string }
   | { kind: "code"; text: string }
   | { kind: "quote"; text: string }
-  | { kind: "tableRow"; cells: string[] }
+  | { kind: "table"; rows: PrintTableRow[] }
   | { kind: "divider" };
 
 // --- PDF styling ------------------------------------------------------------
 //
-// Point sizes, not the app's tokens: this is paper. The palette matches
-// `src/lib/documents/pdf/styles.ts` so a downloaded article and a downloaded
-// template look like the same product.
+// Point sizes, not the app's tokens: this is paper. `ink`, `muted` and `line`
+// are the values in `src/lib/documents/pdf/styles.ts`, so a downloaded article
+// and a downloaded template look like the same product; `grid` below is the one
+// value this file adds, and it answers to the print stylesheet instead.
 
 const ink = "#111827";
-const muted = "#4b5563";
+const muted = "#6b7280";
 const line = "#d1d5db";
+
+/**
+ * The table grid, and only the table grid.
+ *
+ * Darker than `line`, because it is the same hairline the print stylesheet
+ * draws (`0.5pt solid #999` on every `th`/`td`) and a rule that has to read as
+ * a cell boundary at 0.5pt cannot be as faint as a section divider.
+ */
+const grid = "#9ca3af";
+
+/** Hairline weight, in points — `globals.css` prints cell borders at 0.5pt. */
+const TABLE_BORDER = 0.5;
 
 const pdfStyles = {
   page: {
@@ -139,7 +174,32 @@ const pdfStyles = {
     borderLeftColor: line,
     color: muted,
   },
-  tableRow: { marginBottom: 4, fontSize: 10 },
+  // A table is drawn as a collapsed grid: the container owns the top and left
+  // hairlines, every cell owns its right and bottom one. Giving each cell all
+  // four would double every interior rule to 1pt while the outer edge stayed
+  // 0.5pt — visibly heavier inside than out.
+  table: {
+    marginBottom: 10,
+    borderTopWidth: TABLE_BORDER,
+    borderTopColor: grid,
+    borderLeftWidth: TABLE_BORDER,
+    borderLeftColor: grid,
+  },
+  tableRow: { flexDirection: "row" as const },
+  tableCell: {
+    paddingVertical: 4,
+    paddingHorizontal: 6,
+    borderRightWidth: TABLE_BORDER,
+    borderRightColor: grid,
+    borderBottomWidth: TABLE_BORDER,
+    borderBottomColor: grid,
+  },
+  tableCellText: { fontSize: 10, lineHeight: 1.35 },
+  tableHeaderText: {
+    fontFamily: "Helvetica-Bold",
+    fontSize: 10,
+    lineHeight: 1.35,
+  },
   divider: {
     borderBottomWidth: 1,
     borderBottomColor: line,
@@ -243,13 +303,80 @@ function collectList(list: Element, out: PrintBlock[], depth: number): void {
   }
 }
 
+/**
+ * Collect a table as ONE block, with its rows intact.
+ *
+ * A header row is one whose cells are all `th` — which is how the MDX table
+ * renders its `thead` (`mdx-components.tsx`) — and it is the only thing that
+ * decides boldness here, so a `thead`-less markdown table simply has none.
+ *
+ * Rows are padded to the widest one. A ragged row would otherwise stretch its
+ * last cell across the missing columns and break the grid the eye follows down
+ * the page; an empty cell is the honest rendering of a missing one.
+ */
 function collectTable(table: Element, out: PrintBlock[]): void {
+  const rows: PrintTableRow[] = [];
+
   for (const row of Array.from(table.querySelectorAll("tr"))) {
-    const cells = Array.from(row.children).map((cell) => inlineText(cell));
-    if (cells.some((cell) => cell.length > 0)) {
-      out.push({ kind: "tableRow", cells });
-    }
+    const cellElements = Array.from(row.children);
+    const cells = cellElements.map((cell) => inlineText(cell));
+    if (!cells.some((cell) => cell.length > 0)) continue;
+
+    rows.push({
+      cells,
+      isHeader: cellElements.every((cell) => cell.tagName === "TH"),
+    });
   }
+
+  if (rows.length === 0) return;
+
+  const columns = Math.max(...rows.map((row) => row.cells.length));
+  for (const row of rows) {
+    while (row.cells.length < columns) row.cells.push("");
+  }
+
+  out.push({ kind: "table", rows });
+}
+
+// --- the column model -------------------------------------------------------
+
+/** Narrowest and widest a column may be asked for, in "characters". */
+const MIN_COLUMN_WEIGHT = 8;
+const MAX_COLUMN_WEIGHT = 44;
+
+/**
+ * Column widths as percentages of the table, summing to 100.
+ *
+ * `@react-pdf/renderer` has no table primitive and no content-driven sizing, so
+ * the widths have to be decided before layout. The longest cell in a column is
+ * the only signal available without measuring glyphs, and it is clamped at both
+ * ends: without a floor a one-word column ("1", "Yes") collapses to a hairline
+ * and wraps every character; without a ceiling one long paragraph cell starves
+ * every other column. The clamp bounds the widest-to-narrowest ratio at 5.5:1.
+ */
+export function columnWidths(rows: PrintTableRow[]): number[] {
+  const columns = Math.max(0, ...rows.map((row) => row.cells.length));
+  if (columns === 0) return [];
+
+  const weights = Array.from({ length: columns }, (_, column) => {
+    const longest = Math.max(
+      0,
+      ...rows.map((row) => (row.cells[column] ?? "").length)
+    );
+    return Math.min(Math.max(longest, MIN_COLUMN_WEIGHT), MAX_COLUMN_WEIGHT);
+  });
+
+  const total = weights.reduce((sum, weight) => sum + weight, 0);
+  const widths = weights.map(
+    (weight) => Math.round((weight / total) * 10_000) / 100
+  );
+
+  // Rounding leaves a few hundredths on the table; the last column absorbs
+  // them, so the row is exactly full and never overflows into a wrap.
+  const used = widths.slice(0, -1).reduce((sum, width) => sum + width, 0);
+  widths[widths.length - 1] = Math.round((100 - used) * 100) / 100;
+
+  return widths;
 }
 
 /**
@@ -312,7 +439,7 @@ export function pdfFileName(slug: string): string {
 
 // --- rendering --------------------------------------------------------------
 
-function renderBlock(
+export function renderBlock(
   block: PrintBlock,
   key: number,
   { Text, View }: Primitives
@@ -352,12 +479,39 @@ function renderBlock(
           {block.text}
         </Text>
       );
-    case "tableRow":
+    case "table": {
+      const widths = columnWidths(block.rows);
       return (
-        <Text key={key} style={pdfStyles.tableRow}>
-          {block.cells.join("  |  ")}
-        </Text>
+        <View key={key} style={pdfStyles.table}>
+          {block.rows.map((row, rowIndex) => (
+            // A row never splits across a page: half a row on each sheet reads
+            // as two wrong rows. The table itself still wraps, so a long one
+            // continues on the next page.
+            <View key={rowIndex} style={pdfStyles.tableRow} wrap={false}>
+              {row.cells.map((cell, cellIndex) => (
+                <View
+                  key={cellIndex}
+                  style={{
+                    ...pdfStyles.tableCell,
+                    width: `${widths[cellIndex]}%`,
+                  }}
+                >
+                  <Text
+                    style={
+                      row.isHeader
+                        ? pdfStyles.tableHeaderText
+                        : pdfStyles.tableCellText
+                    }
+                  >
+                    {cell}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ))}
+        </View>
       );
+    }
     case "divider":
       return <View key={key} style={pdfStyles.divider} />;
   }

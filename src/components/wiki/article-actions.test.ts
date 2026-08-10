@@ -4,9 +4,12 @@ import path from "node:path";
 import { describe, test } from "node:test";
 
 import {
+  columnWidths,
   extractPrintBlocks,
   pdfFileName,
   PRINT_BODY_SELECTOR,
+  renderBlock,
+  type PrintTableRow,
 } from "./article-actions";
 
 // ----------------------------------------------------------------------------
@@ -191,15 +194,19 @@ describe("extractPrintBlocks", () => {
     assert.deepEqual(blocks, [{ kind: "paragraph", text: "Kept" }]);
   });
 
-  test("flattens a table to rows", () => {
+  test("keeps a table whole, and marks the header row", () => {
+    // One block, not one per row: the column widths belong to the table, so a
+    // row that arrived on its own could not be laid out against its siblings.
     const blocks = extractPrintBlocks(
       el("div", [
         el("table", [
-          el("tbody", [
+          el("thead", [
             el("tr", [
               el("th", [textNode("Week")]),
               el("th", [textNode("Focus")]),
             ]),
+          ]),
+          el("tbody", [
             el("tr", [
               el("td", [textNode("1")]),
               el("td", [textNode("Prayer")]),
@@ -210,9 +217,198 @@ describe("extractPrintBlocks", () => {
     );
 
     assert.deepEqual(blocks, [
-      { kind: "tableRow", cells: ["Week", "Focus"] },
-      { kind: "tableRow", cells: ["1", "Prayer"] },
+      {
+        kind: "table",
+        rows: [
+          { cells: ["Week", "Focus"], isHeader: true },
+          { cells: ["1", "Prayer"], isHeader: false },
+        ],
+      },
     ]);
+  });
+
+  test("pads a ragged row so the grid stays rectangular", () => {
+    // A short row would otherwise stretch its last cell across the missing
+    // columns, and the vertical rules the eye follows would jog mid-table.
+    const blocks = extractPrintBlocks(
+      el("div", [
+        el("table", [
+          el("tbody", [
+            el("tr", [
+              el("td", [textNode("a")]),
+              el("td", [textNode("b")]),
+              el("td", [textNode("c")]),
+            ]),
+            el("tr", [el("td", [textNode("only")])]),
+          ]),
+        ]),
+      ])
+    );
+
+    assert.deepEqual(blocks, [
+      {
+        kind: "table",
+        rows: [
+          { cells: ["a", "b", "c"], isHeader: false },
+          { cells: ["only", "", ""], isHeader: false },
+        ],
+      },
+    ]);
+  });
+
+  test("drops a table with nothing in it", () => {
+    const blocks = extractPrintBlocks(
+      el("div", [el("table", [el("tbody", [el("tr", [el("td", [])])])])])
+    );
+
+    assert.deepEqual(blocks, []);
+  });
+});
+
+describe("columnWidths", () => {
+  const row = (...cells: string[]): PrintTableRow => ({
+    cells,
+    isHeader: false,
+  });
+
+  test("always fills the table exactly", () => {
+    for (const rows of [
+      [row("Week", "Focus")],
+      [row("a", "b", "c"), row("longer content here", "b", "c")],
+      [row("one")],
+      [row("a", "b", "c", "d", "e", "f")],
+    ]) {
+      const widths = columnWidths(rows);
+      const total = widths.reduce((sum, width) => sum + width, 0);
+      assert.ok(
+        Math.abs(total - 100) < 0.001,
+        `widths ${widths.join()} sum to ${total}`
+      );
+    }
+  });
+
+  test("gives the wordier column more room", () => {
+    const [narrow, wide] = columnWidths([
+      row("Yes", "A much longer explanation of the same thing"),
+    ]);
+    assert.ok(wide > narrow, `${wide} should exceed ${narrow}`);
+  });
+
+  test("never starves a column below a readable floor", () => {
+    // Without a floor, "1" against a paragraph collapses to a hairline and
+    // wraps one character per line.
+    const [narrow, wide] = columnWidths([
+      row(
+        "1",
+        "A cell holding a whole sentence of guidance for the reader to follow"
+      ),
+    ]);
+    assert.ok(narrow > 15, `a one-character column got ${narrow}%`);
+    // The clamp holds the widest-to-narrowest ratio at ~5.5:1.
+    assert.ok(wide / narrow < 5.6, `ratio ${wide / narrow} is unbounded`);
+  });
+
+  test("has no columns when there are no rows", () => {
+    assert.deepEqual(columnWidths([]), []);
+  });
+});
+
+describe("renderBlock — the table grid in the downloaded PDF", () => {
+  // `renderBlock` takes its `Text`/`View` from the caller, so the tree can be
+  // built with plain host tags and inspected here. That seam is why proving the
+  // PDF draws borders does not need `@react-pdf/renderer`, a browser, or a
+  // rendered file.
+  type Rendered = {
+    type: unknown;
+    props: {
+      style?: Record<string, unknown>;
+      wrap?: boolean;
+      children?: unknown;
+    };
+  };
+
+  const primitives = { Text: "Text", View: "View" } as unknown as Parameters<
+    typeof renderBlock
+  >[2];
+
+  const childrenOf = (node: Rendered): Rendered[] =>
+    (Array.isArray(node.props.children)
+      ? node.props.children
+      : [node.props.children]) as Rendered[];
+
+  const table = renderBlock(
+    {
+      kind: "table",
+      rows: [
+        { cells: ["Ministry Area", "Key Checklist Items"], isHeader: true },
+        {
+          cells: ["Set-up/Tear-down", "Equipment staging, room configuration"],
+          isHeader: false,
+        },
+      ],
+    },
+    0,
+    primitives
+  ) as unknown as Rendered;
+
+  const rows = childrenOf(table);
+
+  test("draws a collapsed grid: the table owns two edges, each cell the other two", () => {
+    // Four borders per cell would double every interior rule to 1pt while the
+    // outer edge stayed 0.5pt.
+    assert.equal(table.props.style?.borderTopWidth, 0.5);
+    assert.equal(table.props.style?.borderLeftWidth, 0.5);
+
+    for (const cell of rows.flatMap(childrenOf)) {
+      assert.equal(cell.type, "View");
+      assert.equal(cell.props.style?.borderRightWidth, 0.5);
+      assert.equal(cell.props.style?.borderBottomWidth, 0.5);
+      assert.equal(cell.props.style?.borderTopWidth, undefined);
+      assert.equal(cell.props.style?.borderLeftWidth, undefined);
+    }
+  });
+
+  test("lays cells out as a row of fixed columns, aligned down the table", () => {
+    const widths = rows.map((tableRow) =>
+      childrenOf(tableRow).map((cell) => cell.props.style?.width)
+    );
+
+    assert.equal(rows.length, 2);
+    for (const tableRow of rows) {
+      assert.equal(tableRow.props.style?.flexDirection, "row");
+    }
+    // Every column is the same width in every row — that is what makes the
+    // reader able to follow a column down the page.
+    assert.deepEqual(widths[0], widths[1]);
+    assert.equal(widths[0]?.length, 2);
+    for (const width of widths[0] ?? []) {
+      assert.match(String(width), /^\d+(\.\d+)?%$/);
+    }
+  });
+
+  test("keeps a row on one sheet", () => {
+    // Half a row on each page reads as two wrong rows.
+    for (const tableRow of rows) assert.equal(tableRow.props.wrap, false);
+  });
+
+  test("sets the header row bold and the body row plain", () => {
+    const textOf = (tableRow: Rendered) =>
+      childrenOf(tableRow).flatMap(childrenOf);
+
+    for (const cell of textOf(rows[0])) {
+      assert.equal(cell.props.style?.fontFamily, "Helvetica-Bold");
+    }
+    for (const cell of textOf(rows[1])) {
+      assert.equal(cell.props.style?.fontFamily, undefined);
+    }
+  });
+
+  test("no longer flattens a row into pipe-joined text", () => {
+    // The ruling on PR #391: the download renders the grid the print path does.
+    assert.ok(
+      !ARTICLE_ACTIONS.includes('cells.join("  |  ")'),
+      "a pipe-joined row is the flattened rendering that was ruled out"
+    );
   });
 });
 
@@ -285,11 +481,53 @@ describe("the print contract across the three files", () => {
     assert.match(printBlock, /color:\s*#000\s*!important/);
   });
 
+  test("both paths draw the table as a bordered grid", () => {
+    // The ruling on PR #391: the downloaded file has to match the printed page
+    // here, so the header comment's "same article" claim is true of tables too.
+    assert.match(printBlock, /:is\(th, td\)\s*\{\s*border:\s*0\.5pt solid/);
+    assert.ok(
+      ARTICLE_ACTIONS.includes("const TABLE_BORDER = 0.5"),
+      "the PDF's hairline is the print stylesheet's 0.5pt"
+    );
+    assert.ok(
+      ARTICLE_ACTIONS.includes("bordered grid on both paths"),
+      "the header comment has to state the parity it now keeps"
+    );
+  });
+
   test("a link's URL survives into print", () => {
     assert.match(printBlock, /a\[href\]::after/);
     assert.match(printBlock, /content:\s*" \("\s*attr\(href\)\s*"\)"/);
     assert.match(printBlock, /a\[href\^="#"\]::after/);
   });
+});
+
+describe("the PDF palette", () => {
+  // The file says it matches the F6 template palette. It said so once while
+  // `muted` had drifted two shades darker than the templates, which is a claim
+  // nothing could catch — the two files never meet at runtime.
+  const SHARED_STYLES = readFileSync(
+    path.join(SRC, "lib", "documents", "pdf", "styles.ts"),
+    "utf-8"
+  );
+
+  const colorOf = (source: string, pattern: RegExp) => {
+    const found = source.match(pattern);
+    assert.ok(found, `no colour matched ${pattern}`);
+    return found[1];
+  };
+
+  for (const name of ["ink", "muted", "line"]) {
+    test(`${name} is the value the templates use`, () => {
+      assert.equal(
+        colorOf(
+          ARTICLE_ACTIONS,
+          new RegExp(`const ${name} = "(#[0-9a-f]{6})"`)
+        ),
+        colorOf(SHARED_STYLES, new RegExp(`${name}: "(#[0-9a-f]{6})"`))
+      );
+    });
+  }
 });
 
 describe("the download control", () => {
