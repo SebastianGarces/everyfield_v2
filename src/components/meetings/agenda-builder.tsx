@@ -21,6 +21,13 @@
 //     rename. Rows are keyed by section id, so a reorder moves each field's
 //     DOM node — and the text inside it — along with its row.
 //
+//  3. A section row is one line only from `sm` up. The minutes field and the
+//     three icon buttons are already at their floor and cannot shrink, so on a
+//     phone-width single line the name — the only flexible child — collapses to
+//     a couple of dozen pixels and becomes unreadable. Below `sm` the row
+//     stacks: the name takes the full row, the timing and the controls sit
+//     under it.
+//
 // It imports nothing at runtime from `lib/meetings/service.ts`: that module
 // pulls in the database client, and this is a client component. The section
 // type comes across as a type-only import (erased at compile time) and the
@@ -284,110 +291,117 @@ export function AgendaBuilder({
             {optimisticSections.map((section, index) => (
               <li
                 key={section.id}
-                className="bg-muted/40 flex items-center gap-3 rounded-md border p-3"
+                className="bg-muted/40 flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-center sm:gap-3"
                 data-testid="agenda-section"
               >
-                <span className="text-muted-foreground w-5 shrink-0 text-center text-sm tabular-nums">
-                  {index + 1}
-                </span>
+                {/* Below `sm` this pair stacks — see note 3 at the top. */}
+                <div className="flex min-w-0 flex-1 items-center gap-3">
+                  <span className="text-muted-foreground w-5 shrink-0 text-center text-sm tabular-nums">
+                    {index + 1}
+                  </span>
 
-                <div className="min-w-0 flex-1">
-                  <Label
-                    htmlFor={`agenda-title-${section.id}`}
-                    className="sr-only"
-                  >
-                    Section {index + 1} name
-                  </Label>
-                  <Input
-                    id={`agenda-title-${section.id}`}
-                    defaultValue={section.title}
-                    disabled={isPending}
-                    maxLength={120}
-                    data-testid="agenda-section-title"
-                    onBlur={(event) =>
-                      handleRename(section, event.target.value)
-                    }
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        event.currentTarget.blur();
+                  <div className="min-w-0 flex-1">
+                    <Label
+                      htmlFor={`agenda-title-${section.id}`}
+                      className="sr-only"
+                    >
+                      Section {index + 1} name
+                    </Label>
+                    <Input
+                      id={`agenda-title-${section.id}`}
+                      defaultValue={section.title}
+                      disabled={isPending}
+                      maxLength={120}
+                      data-testid="agenda-section-title"
+                      onBlur={(event) =>
+                        handleRename(section, event.target.value)
                       }
-                    }}
-                  />
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          event.currentTarget.blur();
+                        }
+                      }}
+                    />
+                  </div>
                 </div>
 
-                <div className="flex shrink-0 items-center gap-1.5">
-                  <Label
-                    htmlFor={`agenda-minutes-${section.id}`}
-                    className="sr-only"
-                  >
-                    Section {index + 1} length in minutes
-                  </Label>
-                  <Input
-                    id={`agenda-minutes-${section.id}`}
-                    type="number"
-                    inputMode="numeric"
-                    min={0}
-                    max={MAX_SECTION_MINUTES}
-                    defaultValue={section.minutes}
-                    disabled={isPending}
-                    className="w-20 tabular-nums"
-                    data-testid="agenda-section-minutes"
-                    onBlur={(event) => {
-                      const clamped = clampMinutes(Number(event.target.value));
-                      // Show what was actually stored, not what was typed.
-                      event.target.value = String(clamped);
-                      handleRetime(section, event.target.value);
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        event.currentTarget.blur();
-                      }
-                    }}
-                  />
-                  <span className="text-muted-foreground text-sm">min</span>
-                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2 sm:justify-end sm:gap-3">
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <Label
+                      htmlFor={`agenda-minutes-${section.id}`}
+                      className="sr-only"
+                    >
+                      Section {index + 1} length in minutes
+                    </Label>
+                    <Input
+                      id={`agenda-minutes-${section.id}`}
+                      type="number"
+                      inputMode="numeric"
+                      min={0}
+                      max={MAX_SECTION_MINUTES}
+                      defaultValue={section.minutes}
+                      disabled={isPending}
+                      className="w-20 tabular-nums"
+                      data-testid="agenda-section-minutes"
+                      onBlur={(event) => {
+                        const clamped = clampMinutes(
+                          Number(event.target.value)
+                        );
+                        // Show what was actually stored, not what was typed.
+                        event.target.value = String(clamped);
+                        handleRetime(section, event.target.value);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          event.currentTarget.blur();
+                        }
+                      }}
+                    />
+                    <span className="text-muted-foreground text-sm">min</span>
+                  </div>
 
-                <div className="flex shrink-0 items-center gap-1">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    disabled={isPending || index === 0}
-                    onClick={() => handleMove(index, -1)}
-                    aria-label={`Move ${section.title} up`}
-                    className="cursor-pointer"
-                    data-testid="agenda-move-up"
-                  >
-                    <ArrowUp className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    disabled={
-                      isPending || index === optimisticSections.length - 1
-                    }
-                    onClick={() => handleMove(index, 1)}
-                    aria-label={`Move ${section.title} down`}
-                    className="cursor-pointer"
-                    data-testid="agenda-move-down"
-                  >
-                    <ArrowDown className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    disabled={isPending}
-                    onClick={() => handleRemove(section)}
-                    aria-label={`Remove ${section.title}`}
-                    className="text-muted-foreground hover:text-destructive cursor-pointer"
-                    data-testid="agenda-remove"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      disabled={isPending || index === 0}
+                      onClick={() => handleMove(index, -1)}
+                      aria-label={`Move ${section.title} up`}
+                      className="cursor-pointer"
+                      data-testid="agenda-move-up"
+                    >
+                      <ArrowUp className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      disabled={
+                        isPending || index === optimisticSections.length - 1
+                      }
+                      onClick={() => handleMove(index, 1)}
+                      aria-label={`Move ${section.title} down`}
+                      className="cursor-pointer"
+                      data-testid="agenda-move-down"
+                    >
+                      <ArrowDown className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      disabled={isPending}
+                      onClick={() => handleRemove(section)}
+                      aria-label={`Remove ${section.title}`}
+                      className="text-muted-foreground hover:text-destructive cursor-pointer"
+                      data-testid="agenda-remove"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
               </li>
             ))}
