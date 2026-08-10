@@ -140,6 +140,11 @@ Applies to `src/lib/communication/**` and the `/communication` surfaces. Ruled 2
 - `completionEvent` is never copied to a successor: `meeting.evaluation.completed` is backed by a partial unique index, so copying it aborts the second instance's insert. Recurrence mints plain work; hooks stay with the generator.
 - A completion is written FIRST and its successor second — the reverse of the usual durable-marker-last rule, deliberately. A successor with no completion leaves two open instances; a completion with no successor is repaired by reopening and re-completing.
 
+## Meetings — Evaluation Comparison
+
+- ⚖ `compareEvaluationToHistory` returning `null` is NEVER rendered as "this is your first evaluated meeting" (ruled 2026-08-10, #312). `null` has two causes the card cannot tell apart — nothing was evaluated earlier, or everything earlier fell outside `EVALUATION_COMPARISON_WINDOW` — so the one sentence it shows has to be true of both.
+- ⚖ That sentence names no window and carries no number: the window is a mechanism the planter did not ask about and stays in code only (round 2 of the same ruling). It lives in `EVALUATION_COMPARISON_EMPTY_COPY` (`src/lib/meetings/service.ts`) so a test can pin it by import, and is pinned by `src/lib/meetings/ruled-copy.test.ts`.
+
 ## Dev Seeds
 
 Why and how: [`contracts/db.md`](contracts/db.md) → The dev-seed wipe. Applies to
