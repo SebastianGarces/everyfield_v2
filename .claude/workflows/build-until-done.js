@@ -33,6 +33,12 @@ if (!Array.isArray(units) || units.length === 0)
   throw new Error(
     "Pass the wave's units array as args, e.g. [{id,title,lane,files,summary,acceptanceCriteria,issue,risk}, ...]"
   );
+// Child scriptPaths resolve against the SESSION CWD, not this file's directory
+// (probed 2026-08-10: a worktree-located parent loaded the main checkout's
+// child). Default assumes the parent runs from the main checkout; a canary run
+// of an unmerged factory branch MUST pass factoryRoot as the worktree's
+// .claude/workflows, or its children silently load main's (or fail to load).
+const FACTORY_ROOT = parsed?.factoryRoot || ".claude/workflows";
 // ---------------------------------------------------------------------------
 // Recipes — the strategy layer (#399). A recipe is a child workflow at
 // .claude/workflows/recipes/<id>.js that implements ONE WORKSTREAM ATTEMPT and
@@ -1356,7 +1362,7 @@ async function runWorkstream(
     );
 
     const impl = await workflow(
-      { scriptPath: `.claude/workflows/recipes/${ws.recipe}.js` },
+      { scriptPath: `${FACTORY_ROOT}/recipes/${ws.recipe}.js` },
       {
         track: { id: track.id, issues: track.issues, branch: trackBranch },
         workstream: {
@@ -1744,7 +1750,7 @@ Return {"claimed": [the numbers you edited], "inProgressNow": [every number that
     // priorReport.
     // -----------------------------------------------------------------------
     const ship = await workflow(
-      { scriptPath: ".claude/workflows/verify-and-ship.js" },
+      { scriptPath: `${FACTORY_ROOT}/verify-and-ship.js` },
       {
         track: {
           id: track.id,
