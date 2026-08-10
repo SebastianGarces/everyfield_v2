@@ -7,6 +7,7 @@ import {
   sanitizeRichText,
   sanitizeUrl,
 } from "./sanitize";
+import { richTextToPlainText } from "./format";
 
 // ----------------------------------------------------------------------------
 // This is the security gate for COM-017 / T-021, so the tests are written as an
@@ -215,6 +216,74 @@ test("sanitising twice changes nothing", () => {
     `<p>Hi <b>{{first_name}}</b> <a href="https://x.example">link</a></p><script>alert(1)</script>`
   );
   assert.equal(sanitizeRichText(once), once);
+});
+
+// --- idempotence over ENTITIES ---------------------------------------------
+//
+// The test above passes on a sanitiser that double-escapes, because its fixture
+// contains no entity. That is exactly how the bug shipped: the input to this
+// function is HTML, in which `&`, `<`, `>` and U+00A0 are ALREADY encoded by the
+// browser's innerHTML serialisation, and the body is sanitised 2-4 times on its
+// way to a recipient. Every fixture below therefore starts as an innerHTML
+// string, not as a typed string.
+
+/** What a contentEditable serialises for: Bob & Sue <3  today, O'Brien > all */
+const BROWSER_SERIALISED = `<p>Bob &amp; Sue &lt;3&nbsp; today, O&#39;Brien &gt; all</p>`;
+
+/** What a reader must see, whatever number of passes ran. */
+const READS_AS = "Bob & Sue <3  today, O'Brien > all";
+
+test("entities survive a second pass unchanged", () => {
+  const once = sanitizeRichText(BROWSER_SERIALISED);
+  assert.equal(sanitizeRichText(once), once, once);
+  assert.equal(sanitizeRichText(sanitizeRichText(once)), once, once);
+});
+
+test("an already-encoded entity is not re-encoded", () => {
+  // The verbatim root cause of the COM-017 rejection.
+  const once = sanitizeRichText("<p>a &amp; b &lt;tag&gt;</p>");
+  assert.equal(once, "<p>a &amp; b &lt;tag&gt;</p>");
+  assert.ok(!once.includes("&amp;amp;"), once);
+  assert.ok(!once.includes("&amp;lt;"), once);
+});
+
+test("the text a planter typed reads back after any number of passes", () => {
+  let html = BROWSER_SERIALISED;
+  for (let pass = 0; pass < 4; pass += 1) {
+    html = sanitizeRichText(html);
+    assert.equal(richTextToPlainText(html), READS_AS, `pass ${pass + 1}`);
+  }
+});
+
+test("a non-breaking space stays non-breaking, and stays one character", () => {
+  const html = sanitizeRichText("<p>two&nbsp; spaces</p>");
+  // Kept as the character, not re-encoded — `&nbsp;` in the output would carry
+  // an `&` that the next pass would escape again.
+  assert.ok(html.includes("\u00a0"), JSON.stringify(html));
+  assert.ok(!html.includes("&nbsp;"), html);
+  assert.equal(sanitizeRichText(html), html);
+});
+
+test("decoding text nodes does not let markup back in", () => {
+  // The one risk of decode-then-escape: an entity-spelled tag reviving. It does
+  // not, because the decode runs on text the parser already classified as text.
+  for (const [hostile, expected] of [
+    [
+      "<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>",
+      "<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>",
+    ],
+    ["<p>&amp;lt;script&amp;gt;</p>", "<p>&amp;lt;script&amp;gt;</p>"],
+    [
+      "<p>&#60;b&#62;not bold&#60;/b&#62;</p>",
+      "<p>&lt;b&gt;not bold&lt;/b&gt;</p>",
+    ],
+  ]) {
+    const once = sanitizeRichText(hostile);
+    assertInert(once);
+    // Still text, still the SAME text, and still text on the next pass.
+    assert.equal(once, expected, hostile);
+    assert.equal(sanitizeRichText(once), once, once);
+  }
 });
 
 test("deeply nested markup is bounded, not stack-overflowing", () => {

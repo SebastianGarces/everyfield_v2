@@ -34,7 +34,6 @@ import {
   buildMeetingMergeData,
   buildPersonMergeData,
 } from "@/lib/communication/merge";
-import { escapeMergeValues, toRichTextHtml } from "@/lib/rich-text/format";
 import { db } from "@/db";
 import { churches } from "@/db/schema/church";
 import { churchMeetings } from "@/db/schema/meetings";
@@ -148,13 +147,11 @@ export default async function MessageDetailPage({
   const resolvedSubject = comm.subject
     ? renderTemplate(comm.subject, mergeData)
     : "(No subject)";
-  // Same two steps, in the same order, as the send path and the compose
-  // preview: sanitise the body first, then substitute merge values with those
-  // values escaped, so a person's name can never be markup here either.
-  const resolvedBody = renderTemplate(
-    toRichTextHtml(comm.body),
-    escapeMergeValues(mergeData)
-  );
+  // The body is NOT resolved here. `MessageBody` runs the same two steps, in
+  // the same order, as the send path and the compose preview — sanitise, then
+  // substitute merge values with those values escaped — and it runs them ONCE.
+  // Sanitising here as well was two passes over one body, which is how this
+  // page turned `Bob & Sue` into `Bob &amp;amp; Sue`.
 
   const tiles = summarizeMessageDelivery(comm.stats);
 
@@ -316,9 +313,9 @@ export default async function MessageDetailPage({
             <CardContent>
               <div className="rounded-lg bg-gray-50 p-4">
                 {/* The body a planter composed is rich text (COM-017), so it
-                    is rendered, not printed — `MessageBody` re-sanitises and
-                    carries the plain-text bodies sent before it shipped. */}
-                <MessageBody body={resolvedBody} />
+                    is rendered, not printed — `MessageBody` sanitises, merges,
+                    and carries the plain-text bodies sent before it shipped. */}
+                <MessageBody body={comm.body} mergeData={mergeData} />
               </div>
             </CardContent>
           </Card>

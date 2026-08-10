@@ -124,6 +124,13 @@ const NAMED_ENTITIES: Record<string, string> = {
  *
  * Both quote forms are escaped, so the same function is safe for text nodes and
  * for attribute values.
+ *
+ * U+00A0 is deliberately NOT escaped. A contentEditable emits `&nbsp;` on its
+ * own for a repeated or trailing space, and `sanitizeRichText` decodes that back
+ * to the character before escaping — leaving it as a literal U+00A0 is what
+ * makes the round trip stable AND keeps the non-breaking space the author's
+ * spacing depended on. Emitting `&nbsp;` here instead would re-encode a `&` on
+ * every pass, which is exactly the bug this file was rejected for.
  */
 export function escapeHtml(value: string): string {
   return value
@@ -143,14 +150,16 @@ function safeFromCodePoint(code: number, fallback: string): string {
   }
 }
 
+/** U+00A0, written as an escape so it is visible in the source. */
+const NON_BREAKING_SPACE = "\u00a0";
+
 /**
- * Decode the entity forms a browser would decode inside an attribute value.
+ * The one entity decoder. `nbsp` is a parameter because its two callers need
+ * opposite answers — see `decodeHtmlEntities` and `decodeTextEntities` below.
  *
- * This exists for ONE reason: `&#106;avascript:alert(1)` and `javascript:` are
- * the same URL to a browser, so the scheme check has to run on the decoded
- * form. The trailing semicolon is optional because browsers accept it missing.
+ * The trailing semicolon is optional because browsers accept it missing.
  */
-export function decodeHtmlEntities(value: string): string {
+function decodeEntities(value: string, nbsp: string): string {
   return value.replace(
     /&(#x[0-9a-f]+|#\d+|[a-z][a-z0-9]*);?/gi,
     (match, body: string) => {
@@ -161,9 +170,36 @@ export function decodeHtmlEntities(value: string): string {
       if (lower.startsWith("#")) {
         return safeFromCodePoint(Number.parseInt(lower.slice(1), 10), match);
       }
+      if (lower === "nbsp") return nbsp;
       return NAMED_ENTITIES[lower] ?? match;
     }
   );
+}
+
+/**
+ * Decode the entity forms a browser would decode inside an ATTRIBUTE value.
+ *
+ * This exists for ONE reason: `&#106;avascript:alert(1)` and `javascript:` are
+ * the same URL to a browser, so the scheme check has to run on the decoded
+ * form. `&nbsp;` flattens to an ordinary space here on purpose, so `URL_NOISE`
+ * strips it and `java&nbsp;script:` is caught too.
+ */
+export function decodeHtmlEntities(value: string): string {
+  return decodeEntities(value, NAMED_ENTITIES.nbsp);
+}
+
+/**
+ * Decode the entity forms found in a TEXT node, keeping `&nbsp;` a real
+ * non-breaking space.
+ *
+ * The URL decoder above flattens `&nbsp;` to an ordinary space on purpose —
+ * that is what lets `URL_NOISE` strip it and catch `java&nbsp;script:`. In body
+ * text the opposite is true: a contentEditable writes `&nbsp;` for the second of
+ * two spaces and for a trailing one, so flattening it would silently delete
+ * spacing the author typed. Two callers, two rules, one decoder.
+ */
+export function decodeTextEntities(value: string): string {
+  return decodeEntities(value, NON_BREAKING_SPACE);
 }
 
 /**
@@ -270,7 +306,20 @@ function mapTagName(rawName: string): AllowedTag | null {
  *    handler can, whatever its casing or spacing;
  *  - `<script>`/`<style>`/`<svg>` and friends lose their CONTENT too;
  *  - every remaining tag is balanced and closed, in the order it was opened;
- *  - text is escaped, so a `<` an author typed stays a `<` they typed.
+ *  - text is escaped, so a `<` an author typed stays a `<` they typed;
+ *  - it is IDEMPOTENT — `sanitizeRichText(sanitizeRichText(x))` equals
+ *    `sanitizeRichText(x)` for every input, entities included.
+ *
+ * That last one is load-bearing, not a nicety. The input is HTML, in which `&`,
+ * `<`, `>` and U+00A0 are ALREADY entity-encoded by the browser's innerHTML
+ * serialisation, and the body is sanitised more than once on the way to a
+ * recipient (the editor on paste, then the server before storing, then the
+ * renderer). Escaping raw source text would therefore escape the escapes, and
+ * `Bob & Sue <3` would land in an inbox reading `Bob &amp; Sue &lt;3`. So text
+ * nodes are DECODED and then re-escaped: `&lt;script&gt;` decodes to
+ * `<script>` and re-escapes to `&lt;script&gt;`, unchanged and still inert,
+ * because the decode only ever runs on text the parser already classified as
+ * text — a decoded `<` is never re-read as the start of a tag.
  */
 export function sanitizeRichText(input: string): string {
   if (!input) return "";
@@ -287,13 +336,18 @@ export function sanitizeRichText(input: string): string {
     }
   };
 
+  /** A text node: decode what the serialiser encoded, then encode it once. */
+  const pushText = (text: string) => {
+    out.push(escapeHtml(decodeTextEntities(text)));
+  };
+
   while (i < input.length) {
     const lt = input.indexOf("<", i);
     if (lt === -1) {
-      out.push(escapeHtml(input.slice(i)));
+      pushText(input.slice(i));
       break;
     }
-    if (lt > i) out.push(escapeHtml(input.slice(i, lt)));
+    if (lt > i) pushText(input.slice(i, lt));
 
     if (input.startsWith("<!--", lt)) {
       const end = input.indexOf("-->", lt + 4);

@@ -163,3 +163,58 @@ test("a body composed before COM-017 still renders as paragraphs", async () => {
   assert.ok(html.includes("Hi Sarah,"), html);
   assert.ok(html.includes("See you Sunday."), html);
 });
+
+// ----------------------------------------------------------------------------
+// AC1 is about the body SURVIVING, not only its tags. A contentEditable hands
+// the send path an innerHTML string in which `&`, `<`, `>` and the non-breaking
+// space it inserts for a repeated space are ALREADY encoded, and the body is
+// sanitised more than once on the way out. A sanitiser that re-escapes what is
+// already escaped ships `Bob &amp; Sue &lt;3` to a recipient's inbox — the
+// tags survive and the words do not. These fixtures start where the browser
+// leaves off.
+// ----------------------------------------------------------------------------
+
+/** What a contentEditable serialises for: Bob & Sue <3  today */
+const BROWSER_SERIALISED = `<p>Bob &amp; Sue &lt;3&nbsp; today</p>`;
+
+test("an entity-bearing body reaches the inbox as the words that were typed", async () => {
+  const body = renderedBody(BROWSER_SERIALISED);
+
+  const html = await render(
+    CommunicationEmail({ bodyHtml: body.html, churchName: "New Life" })
+  );
+
+  // react-email escapes for the DOM, so read the text the recipient sees.
+  const rendered = await render(
+    CommunicationEmail({ bodyHtml: body.html, churchName: "New Life" }),
+    { plainText: true }
+  );
+  assert.ok(rendered.includes("Bob & Sue <3"), rendered);
+  // The failure this pins: the escapes escaped again.
+  assert.ok(!html.includes("&amp;amp;"), html);
+  assert.ok(!html.includes("&amp;lt;"), html);
+  assert.ok(!html.includes("&amp;nbsp;"), html);
+});
+
+test("the text/plain half says the same words as the HTML half", async () => {
+  const body = renderedBody(BROWSER_SERIALISED);
+
+  const text = await render(
+    CommunicationEmail({ body: body.text, churchName: "New Life" }),
+    { plainText: true }
+  );
+
+  assert.ok(text.includes("Bob & Sue <3"), text);
+  assert.ok(!text.includes("&amp;"), text);
+  assert.ok(!text.includes("&lt;"), text);
+});
+
+test("sanitising the stored body again does not change the delivered body", async () => {
+  // The stored row is already sanitised; every reader sanitises again. Both
+  // halves must be byte-identical after the extra pass.
+  const once = renderedBody(BROWSER_SERIALISED);
+  const twice = renderedBody(toRichTextHtml(BROWSER_SERIALISED));
+
+  assert.equal(twice.html, once.html);
+  assert.equal(twice.text, once.text);
+});

@@ -5,6 +5,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { getSampleData } from "@/lib/communication/merge";
+import { toRichTextHtml } from "@/lib/rich-text/format";
 
 import { EmailPreview } from "./email-preview";
 
@@ -104,4 +105,48 @@ test("the RSVP tokens preview as buttons, not as raw tokens", () => {
     html
   );
   assert.ok(!html.includes("__EF_CONFIRM__"), html);
+});
+
+// ----------------------------------------------------------------------------
+// AC3 says the preview shows the formatted body, "not markup". Escaped entity
+// text IS markup shown to the user: a planter who typed `Bob & Sue <3` and read
+// `Bob &amp; Sue &lt;3` back is looking at a different message from the one in
+// the editor directly above, and from the one that will be sent. The fixtures
+// below are innerHTML strings, because that is what the editor hands this
+// component — contentEditable encodes `&`, `<`, `>` and inserts `&nbsp;` for a
+// repeated or trailing space on its own.
+// ----------------------------------------------------------------------------
+
+/** What a contentEditable serialises for: Bob & Sue <3  today */
+const BROWSER_SERIALISED = `<p>Bob &amp; Sue &lt;3&nbsp; today</p>`;
+
+test("the preview shows the characters the planter typed, not their entities", () => {
+  const html = preview({ body: BROWSER_SERIALISED });
+
+  assert.ok(html.includes("Bob &amp; Sue &lt;3"), html);
+  // Double-escaped forms are the failure: the reader would see `&amp;` itself.
+  assert.ok(!html.includes("&amp;amp;"), html);
+  assert.ok(!html.includes("&amp;lt;"), html);
+  assert.ok(!html.includes("&amp;nbsp;"), html);
+});
+
+test("the preview does not drift when the body has already been sanitised", () => {
+  // The compose surface may hand this an editor value that was sanitised on
+  // paste. Preview of the sanitised body must equal preview of the raw one —
+  // otherwise the planter sees a third variant of their own message.
+  assert.equal(
+    preview({ body: toRichTextHtml(BROWSER_SERIALISED) }),
+    preview({ body: BROWSER_SERIALISED })
+  );
+});
+
+test("an apostrophe in a merge value previews as an apostrophe", () => {
+  const html = preview({
+    body: "<p>Hi <strong>{{first_name}}</strong></p>",
+    mergeData: { first_name: "O'Brien" },
+  });
+
+  // One level of escaping — the browser renders that as an apostrophe.
+  assert.ok(html.includes("<strong>O&#39;Brien</strong>"), html);
+  assert.ok(!html.includes("&amp;#39;"), html);
 });

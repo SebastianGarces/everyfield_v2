@@ -122,3 +122,39 @@ test("escapeMergeValues escapes values and leaves RSVP placeholders alone", () =
   // downstream still finds it.
   assert.equal(escaped.confirm_link, "__EF_CONFIRM__");
 });
+
+// ----------------------------------------------------------------------------
+// `toRichTextHtml` is called more than once on the way to a recipient — the
+// editor on paste, `sendCommunication` before storing, the renderer on the way
+// out. Its doc comment claims it is safe to call twice; these tests are what
+// makes that claim true. The fixture is an innerHTML string, because that is
+// what a contentEditable actually produces: `&`, `<` and `>` already encoded,
+// and `&nbsp;` inserted on its own for a repeated or trailing space.
+// ----------------------------------------------------------------------------
+
+/** What a contentEditable serialises for: Bob & Sue <3  today */
+const BROWSER_SERIALISED = `<p>Bob &amp; Sue &lt;3&nbsp; today</p>`;
+
+test("toRichTextHtml is idempotent over an innerHTML round trip", () => {
+  const once = toRichTextHtml(BROWSER_SERIALISED);
+  assert.equal(toRichTextHtml(once), once, once);
+  assert.equal(toRichTextHtml(toRichTextHtml(once)), once, once);
+});
+
+test("the rendered text is the text that was typed, after any pass count", () => {
+  let html = BROWSER_SERIALISED;
+  for (let pass = 0; pass < 4; pass += 1) {
+    html = toRichTextHtml(html);
+    assert.equal(
+      richTextToPlainText(html),
+      "Bob & Sue <3  today",
+      `pass ${pass + 1}`
+    );
+  }
+});
+
+test("a legacy plain-text body converts once and then holds still", () => {
+  const once = toRichTextHtml("Bob & Sue <3\n\nSee you Sunday.");
+  assert.equal(toRichTextHtml(once), once, once);
+  assert.equal(richTextToPlainText(once), "Bob & Sue <3\n\nSee you Sunday.");
+});
