@@ -646,6 +646,70 @@ test("the Resend control is a button with cursor-pointer and an accessible name"
   assert.match(button, /Sending…/);
 });
 
+test("the row's action cluster wraps, so a third control cannot push a second one off a phone", () => {
+  // The regression this pins, measured at 390x844 with a real pending row: the
+  // cluster was `flex items-center gap-2` with no wrap, adding "Resend email"
+  // made it 362px wide inside a 292px row, and the PRE-EXISTING Revoke button
+  // landed at right=411 against a 390px viewport. The page's own scrollWidth
+  // stayed 390 — the overflow is CLIPPED, not scrolled — so the button was not
+  // awkward, it was unreachable. With the longest refusal rendered the cluster
+  // measured 437px and Resend went off-screen too (right=406), taking away both
+  // controls the failure message tells the admin to use.
+  //
+  // Asserted on the source because the property is a class, and because a
+  // fourth control is exactly the kind of change that would re-break it: an
+  // author who deletes `flex-wrap` here fails this test rather than shipping an
+  // invisible button.
+  const row = LIST_CODE.slice(
+    LIST_CODE.indexOf("function InvitationRow"),
+    LIST_CODE.indexOf("function CopyInviteLinkButton")
+  );
+
+  assert.ok(row.length > 0, "InvitationRow is missing");
+
+  const cluster = row.slice(row.indexOf("<Badge") - 400, row.indexOf("<Badge"));
+  const clusterClass = /<div className="([^"]*)">\s*$/.exec(cluster)?.[1] ?? "";
+
+  assert.ok(
+    clusterClass.includes("flex-wrap"),
+    `the control cluster must wrap; its className was "${clusterClass}"`
+  );
+  // Wrapped rows read right-aligned under the row's own `justify-between`,
+  // rather than the controls drifting left as they fall onto a second line.
+  assert.ok(
+    clusterClass.includes("justify-end"),
+    `wrapped controls stay right-aligned; its className was "${clusterClass}"`
+  );
+});
+
+test("a refusal survives long enough to be read — the refresh is on the success path only", () => {
+  // Every refusal this action returns is one that MOVES the row out of the
+  // pending list: revoked out of band (`not_pending`), or a closed window,
+  // which is auto-expired before it is refused. The pending and answered lists
+  // are different parents, so a refreshed tree unmounts the row — and the
+  // refusal lives in that row's `useActionState`. Refreshing before the branch
+  // therefore destroyed the message before it could paint, which made
+  // `resendRefusalMessage("not_pending")` and `INVITATION_EXPIRED_MESSAGE`
+  // dead on screen: the admin saw nothing at all.
+  const action = ACTIONS_CODE.slice(
+    ACTIONS_CODE.indexOf("export async function resendInvitationEmailAction"),
+    ACTIONS_CODE.indexOf("export async function revokeInvitationAction")
+  );
+  const body = code(action);
+
+  const refusal = body.indexOf("if (!result.success)");
+  const refreshed = body.indexOf("refresh()");
+
+  assert.ok(refusal >= 0, "the refusal branch is missing");
+  assert.ok(refreshed >= 0, "the success path must still refresh the list");
+  assert.ok(
+    refusal < refreshed,
+    "refresh() must come AFTER the refusal returns, or the message never renders"
+  );
+  // Exactly one, so a re-added call on the failure path fails here too.
+  assert.equal(body.match(/refresh\(\)/g)?.length, 1);
+});
+
 test("the action refuses a malformed id before anything is sent", () => {
   const action = ACTIONS_CODE.slice(
     ACTIONS_CODE.indexOf("export async function resendInvitationEmailAction"),

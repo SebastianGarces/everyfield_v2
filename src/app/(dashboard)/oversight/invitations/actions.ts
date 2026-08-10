@@ -175,16 +175,29 @@ export async function resendInvitationEmailAction(
 
   const result = await resendInvitationEmail(parsed.data.invitationId);
 
-  // Before the branch, and on the failure path too — deliberately. A resend
-  // writes nothing on the way to succeeding, but one refusal DOES write: an
-  // invitation whose window has closed is auto-expired before it is refused, and
-  // without this the list would keep showing "Pending" next to a row the server
-  // has just marked expired.
-  refresh();
-
+  // ONLY on success — and the failure path's silence is the point.
+  //
+  // This used to refresh before the branch, so that an invitation auto-expired
+  // by the refusal stopped showing "Pending". It cost the admin the message.
+  // Every refusal this action can return is a refusal that MOVES the row out of
+  // the pending list (revoked out of band → `not_pending`; window closed →
+  // auto-expired first), the two lists are different parents, so the refreshed
+  // tree unmounts the row — and the refusal lives in that row's
+  // `useActionState`. Measured on the preview: a stale Resend press correctly
+  // sent nothing, correctly refused, and the admin saw NOTHING AT ALL. That
+  // made `resendRefusalMessage("not_pending")` and `INVITATION_EXPIRED_MESSAGE`
+  // dead on screen — the two refusals this feature exists to explain.
+  //
+  // So the row stays mounted and says why. The badge next to it can be one
+  // render stale, which the refusal itself corrects in words ("no longer
+  // pending", "has expired"); the next navigation or any other action
+  // reconciles it. A stale badge under a true sentence beats a correct badge
+  // under no sentence.
   if (!result.success) {
     return { error: result.error };
   }
+
+  refresh();
 
   return { sent: true };
 }

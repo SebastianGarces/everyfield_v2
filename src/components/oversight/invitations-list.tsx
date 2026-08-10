@@ -141,7 +141,15 @@ function InvitationRow({ row }: { row: InvitationListRow }) {
           {row.expiresLabel ? ` · Expires ${row.expiresLabel}` : ""}
         </p>
       </div>
-      <div className="flex items-center gap-2">
+      {/* WRAPS, and that is load-bearing rather than cosmetic. The cluster holds
+          up to four controls plus an inline refusal, and the row is 292px wide
+          on a 390px phone: without `flex-wrap` the overflow is CLIPPED, not
+          scrolled (the page's own scrollWidth stays 390), so a control pushed
+          past the edge is not merely awkward — it is unreachable. Measured
+          before this class existed: Revoke sat at right=411, and with the
+          longest refusal rendered Resend went with it at right=406, which took
+          away both buttons the failure message tells the admin to press. */}
+      <div className="flex flex-wrap items-center justify-end gap-2">
         <Badge variant={status.variant}>{status.label}</Badge>
         {row.status === "pending" && row.isOpen && (
           <CopyInviteLinkButton invitationId={row.id} />
