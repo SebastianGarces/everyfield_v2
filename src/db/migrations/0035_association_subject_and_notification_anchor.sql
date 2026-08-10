@@ -53,37 +53,7 @@
 --   ALTER TABLE "association_events" DROP COLUMN IF EXISTS "subject_sending_church_id";
 --   ALTER TABLE "association_events" DROP COLUMN IF EXISTS "subject_type";
 --   ALTER TABLE "notifications" ALTER COLUMN "church_id" SET NOT NULL;
---   ALTER TABLE "association_events" ALTER COLUMN "church_id" SET NOT NULL;
---   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1786312591041;
---
--- ONE TRAP, the same one 0031 recorded, and it bit again here. The FK name
--- drizzle generates below,
--- `association_events_subject_sending_church_id_sending_churches_id_fk`, is 67
--- characters, so Postgres TRUNCATED it to 63 while this migration applied and
--- said so as a NOTICE. The name IN THE DATABASE is therefore
---
---   association_events_subject_sending_church_id_sending_churches_i
---
--- and that is the name the rollback's DROP CONSTRAINT must use. Drizzle's own
--- diff never looks, which is why `db:generate` reports no drift either way.
---
---   *** DO NOT EDIT src/db/migrations/meta/_journal.json. ***
---
--- Same reasoning as 0023/0024/0031: the journal is the repository's list of
--- migrations, `drizzle.__drizzle_migrations` is the database's record of what
--- ran, and only the ledger row is deleted.
---
--- THE LEDGER ROW IS IDENTIFIED BY `created_at`, NOT BY A FILE HASH. This block
--- used to say `WHERE hash = '<0033 hash>'` and call that hash the sha256 of
--- this file; it is not. `drizzle.__drizzle_migrations.hash` is drizzle's own
--- digest of the statements it executed, so the shasum of the file on disk
--- matches nothing and the DELETE reports `DELETE 0` — after which
--- `pnpm db:migrate` prints success and applies nothing, leaving the database
--- silently pre-0033 with the ledger still claiming otherwise. The value below
--- is this migration's `"when"` in `_journal.json`, which IS the ledger's
--- `created_at`; it is the same form 0031 and 0023 settled on.
-
-ALTER TABLE "association_events" ALTER COLUMN "church_id" DROP NOT NULL;--> statement-breakpoint
+--   ALTER TABLE "association_events" ALTER COLUMN "church_id" DROP NOT NULL;--> statement-breakpoint
 ALTER TABLE "notifications" ALTER COLUMN "church_id" DROP NOT NULL;--> statement-breakpoint
 ALTER TABLE "association_events" ADD COLUMN "subject_type" varchar(20) DEFAULT 'church' NOT NULL;--> statement-breakpoint
 ALTER TABLE "association_events" ADD COLUMN "subject_sending_church_id" uuid;--> statement-breakpoint

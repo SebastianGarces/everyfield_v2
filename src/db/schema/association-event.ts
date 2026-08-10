@@ -34,7 +34,7 @@ import { users } from "./user";
 // about alongside an eventual retention story rather than smuggled in here.
 //
 // THE SUBJECT IS NO LONGER ALWAYS A PLANT (#304 WS3, ruling #351, migration
-// 0033). Until 0033 the subject was `church_id`, NOT NULL, and the third
+// 0035). Until 0035 the subject was `church_id`, NOT NULL, and the third
 // invitation type — a sending church joining a network — therefore had nowhere
 // to be filed: it wrote no audit row at all, which is the debt `#351` was raised
 // to settle. #351 ruled for the shape this table's own header had asked for: a
@@ -103,7 +103,7 @@ export const associationEvents = pgTable(
      * every reader branches on before it trusts either subject FK.
      *
      * Defaulted to `'church'` in the DATABASE as well as here, because that is
-     * what every row written before migration 0033 is, and because a raw INSERT
+     * what every row written before migration 0035 is, and because a raw INSERT
      * that names a subject FK but forgets this column must fail the CHECK rather
      * than silently file itself under the wrong kind — which is exactly what the
      * default plus the CHECK together produce.
@@ -115,7 +115,7 @@ export const associationEvents = pgTable(
     /**
      * The CHURCH subject: WHICH PLANT joined or left.
      *
-     * Nullable since 0033 — not because a null means "global content" (the
+     * Nullable since 0035 — not because a null means "global content" (the
      * repo-wide reading of a null `church_id` on a FEATURE table), but because
      * this is one of two subject columns and the CHECK below permits a null here
      * only when `subject_sending_church_id` carries the subject instead. There

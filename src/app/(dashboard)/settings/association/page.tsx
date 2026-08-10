@@ -400,7 +400,7 @@ async function SendingChurchAssociation({
  *
  * THE BUTTON WAITED ON THE SCHEMA, NOT ON A DESIGN QUESTION. #274 requires
  * three things of any sever — type-to-confirm, a notification, an
- * `association_events` row — and until migration 0033 the audit table made a
+ * `association_events` row — and until migration 0035 the audit table made a
  * CHURCH its mandatory subject, so a sending church leaving a network had
  * nowhere to be recorded. Shipping the button then would have been a sever with
  * no record of who ended it, the one thing that ruling forbids. Ruling #351 gave

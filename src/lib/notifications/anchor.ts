@@ -7,7 +7,7 @@ import type { AssociationOrgType, NotificationAnchorType } from "@/db/schema";
 // row's?" is asked in one vocabulary by the enqueue gate, the writer, the
 // dedupe key and the reads.
 //
-// It exists because the answer stopped being one column. Until migration 0033
+// It exists because the answer stopped being one column. Until migration 0035
 // every notification was about a plant and `church_id` was NOT NULL; #304 WS3
 // produced the first events that name no plant at all — a sending church
 // accepting, declining or leaving a network's invitation — and #351 ruled for a
@@ -24,7 +24,7 @@ import type { AssociationOrgType, NotificationAnchorType } from "@/db/schema";
 /**
  * The tenant a notification row belongs to.
  *
- * `church` is every notification the product had before 0033 and almost every
+ * `church` is every notification the product had before 0035 and almost every
  * one it writes now. The two org arms are reachable only from the three
  * own-relationship milestones about a SENDING CHURCH's own network membership.
  */
@@ -110,7 +110,7 @@ export function toAnchorColumns(anchor: NotificationAnchor): {
  * total: a row that satisfies the CHECK always produces one.
  *
  * `null` only for a row that does not, which the database will not accept and
- * which therefore means the row was written before 0033 by something that
+ * which therefore means the row was written before 0035 by something that
  * bypassed both. Callers treat that as "cannot be re-anchored" rather than
  * guessing a tenant.
  */

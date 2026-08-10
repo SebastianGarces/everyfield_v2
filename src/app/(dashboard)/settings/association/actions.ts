@@ -42,7 +42,7 @@ import {
 // role could aim.
 //
 // OV-013 shipped with WS3 and could not have shipped before it: a sever has to
-// be audited (#274/OV-007) and until migration 0033 `association_events` made a
+// be audited (#274/OV-007) and until migration 0035 `association_events` made a
 // CHURCH its mandatory subject, so a sending church leaving a network had
 // nowhere to be recorded. Ruling #351 gave the table a subject discriminator;
 // `leaveNetworkAsSendingChurchAdmin` writes the row in the same statement as the
@@ -159,7 +159,7 @@ export async function acceptAssociationInvitation(
  * inviting org's invitations list renders as "Declined"; the notification to
  * that org rides the consent-exempt own-relationship rail and is
  * `declineInvitationAs`'s to send. Both answers reach their org since migration
- * 0033: a plant's decline is filed under the plant, a sending church's under the
+ * 0035: a plant's decline is filed under the plant, a sending church's under the
  * NETWORK that asked (ruling #351). Either way it names the ADDRESS THE ORG
  * TYPED and nothing else — the refused org never associated, so neither the
  * plant's name nor the sending church's is theirs to learn.

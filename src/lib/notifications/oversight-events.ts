@@ -1,8 +1,9 @@
-import { eq, gt, type SQL } from "drizzle-orm";
+import { and, eq, gt, type SQL } from "drizzle-orm";
 
 import { db } from "@/db";
 import { churches, phaseTransitions } from "@/db/schema";
 import type { PhaseChangedEvent } from "@/lib/phase-engine/events";
+import { TRANSITION_KIND } from "@/lib/phase-engine/transitions";
 
 import { announcePhaseAdvanced } from "./oversight";
 
@@ -44,9 +45,24 @@ export function isPhaseAdvance(fromPhase: number, toPhase: number): boolean {
  * Two expressions of one rule is the most that can be shared — drizzle cannot
  * run a TypeScript predicate inside Postgres — so they are kept adjacent, and
  * `oversight-events.test.ts` asserts they agree on the same table of pairs.
+ *
+ * `kind = 'transition'` IS PART OF THE RULE, not a refinement of it (#306).
+ * `phase_transitions` stopped being one population when OB-005 added the
+ * initial declaration: a planter saying "we are already at stage 3" during
+ * onboarding writes a 0 → 3 row that satisfies `to_phase > from_phase` and
+ * reached no stage at all. Without this clause the same bug the paragraph above
+ * records as fixed comes back through a new row TYPE instead of a new
+ * direction: `stagesReached` counts 1, and — worse — `hasActivityCondition`
+ * treats a brand-new plant that has only declared where it stood as a day on
+ * which something happened, which sends a digest the digest's own contract says
+ * must not be sent. Declarations are history the plant arrived with; the digest
+ * reports what MOVED.
  */
 export function phaseAdvanceCondition(): SQL {
-  return gt(phaseTransitions.toPhase, phaseTransitions.fromPhase);
+  return and(
+    gt(phaseTransitions.toPhase, phaseTransitions.fromPhase),
+    eq(phaseTransitions.kind, TRANSITION_KIND)
+  ) as SQL;
 }
 
 /**

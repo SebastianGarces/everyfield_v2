@@ -1012,7 +1012,7 @@ export async function acceptInvitationAs(
   // outcome rather than trusting the batch (see
   // `acceptedAssociationEventStatement`).
   //
-  // ALL THREE INVITATION TYPES audit since #304 WS3 / migration 0033, the
+  // ALL THREE INVITATION TYPES audit since #304 WS3 / migration 0035, the
   // sending-church subject included. `null` now means only "this row's
   // type-implied ids are missing", which the statements above would already have
   // thrown on — not "this kind of association goes unrecorded".
@@ -1066,7 +1066,7 @@ export async function acceptInvitationAs(
   // BOTH SIDES OF THE HANDSHAKE NOW HAVE A RAIL (#304 WS3, ruling #351). This
   // used to be `if (updated.targetChurchId)` and nothing else: a sending church
   // joining a network names no plant, `notifications.church_id` was NOT NULL,
-  // and the milestone was composed and dropped. Migration 0033 anchored a
+  // and the milestone was composed and dropped. Migration 0035 anchored a
   // notification to a church OR an org, so the plantless answer is announced to
   // the NETWORK that asked — the same consent-exempt own-relationship rail,
   // filed under the tenant that reads it.
@@ -1684,11 +1684,11 @@ export async function disassociateSendingChurchFromNetwork(
  * none, so a `church_to_sending_church` row carrying a stray network id would
  * otherwise get an audit row naming a network that associated nobody.
  *
- * ALL THREE TYPES NOW RETURN A SUBJECT (#304 WS3, ruling #351, migration 0033).
+ * ALL THREE TYPES NOW RETURN A SUBJECT (#304 WS3, ruling #351, migration 0035).
  * The `sending_church_to_network` arm used to return `null` — not because that
  * association was unworthy of an audit, but because `association_events` made a
  * CHURCH its mandatory subject, and a sending church joining a network names no
- * church. 0033 gave the table the subject discriminator its own header had asked
+ * church. 0035 gave the table the subject discriminator its own header had asked
  * for, so the arm returns the real thing: the target SENDING CHURCH as subject,
  * the network as org.
  *
@@ -2072,7 +2072,7 @@ export const NOT_IN_A_NETWORK_MESSAGE =
  *
  * IT SHIPPED WITH #304 WS3 AND NOT BEFORE, and the reason is worth keeping. A
  * sever has to be audited (#274 / OV-007: type-to-confirm, a notification, an
- * `association_events` row) and until migration 0033 the audit table's subject
+ * `association_events` row) and until migration 0035 the audit table's subject
  * was a CHURCH, NOT NULL — so this button could only have been a sever with no
  * record of who ended it, which is the one thing that ruling forbids. #351 gave
  * the table a subject discriminator; this is what it unblocked.

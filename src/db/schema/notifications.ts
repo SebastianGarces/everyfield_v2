@@ -121,9 +121,9 @@ export type DigestCadence = (typeof digestCadences)[number];
  */
 /**
  * WHAT A NOTIFICATION IS ANCHORED TO — the tenancy discriminator (#304 WS3,
- * ruling #351, migration 0033).
+ * ruling #351, migration 0035).
  *
- * Until 0033 there was one answer, `church_id`, NOT NULL: every notification in
+ * Until 0035 there was one answer, `church_id`, NOT NULL: every notification in
  * the product was about a plant, filed under that plant, and read back through
  * `NotificationScope`. #304 WS3 produced the first events that name NO plant —
  * a sending church accepting, declining or leaving a NETWORK's invitation — and
@@ -133,7 +133,7 @@ export type DigestCadence = (typeof digestCadences)[number];
  * at-most-once delivery guarantee to be re-implemented.
  *
  *   `church`         `church_id` carries it. EVERY notification that existed
- *                    before 0033 is one of these, and every church-scoped read
+ *                    before 0035 is one of these, and every church-scoped read
  *                    in the product is unchanged — `scopedWhere` still names
  *                    `church_id`, so an org-anchored row can never appear in a
  *                    plant's feed by omission.
@@ -212,8 +212,8 @@ export const notifications = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     /**
      * WHICH KIND of thing this notification is filed under (N-010, migration
-     * 0033). Defaults to `'church'` in the database as well as here: that is
-     * what every pre-0033 row is, and it makes the CHECK below the thing that
+     * 0035). Defaults to `'church'` in the database as well as here: that is
+     * what every pre-0035 row is, and it makes the CHECK below the thing that
      * catches a writer who names an org anchor and forgets the discriminator.
      */
     anchorType: varchar("anchor_type", { length: 20 })
@@ -315,7 +315,7 @@ export const notifications = pgTable(
       .where(
         sql`${table.dedupeKey} is not null and ${table.status} <> 'cancelled'`
       ),
-    // The SAME guarantee for an ORG-ANCHORED row (migration 0033).
+    // The SAME guarantee for an ORG-ANCHORED row (migration 0035).
     //
     // A second index rather than a widened first one, and the reason is that a
     // widened one would have had to change: the index above is arbitrated by an

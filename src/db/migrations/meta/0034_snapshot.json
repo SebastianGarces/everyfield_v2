@@ -1,6 +1,6 @@
 {
-  "id": "9d186c24-bd6a-4f27-8276-0de0c059ece8",
-  "prevId": "8c1a8fe7-4dbf-40a5-82cf-a46e891e29cf",
+  "id": "67ee4528-cf9c-4c06-a8cf-e340f976d1d2",
+  "prevId": "9d186c24-bd6a-4f27-8276-0de0c059ece8",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2914,6 +2914,28 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ministry_teams_predefined_name_unique_idx": {
+          "name": "ministry_teams_predefined_name_unique_idx",
+          "columns": [
+            {
+              "expression": "church_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"ministry_teams\".\"type\" = 'predefined'",
           "concurrently": false,
           "method": "btree",
           "with": {}

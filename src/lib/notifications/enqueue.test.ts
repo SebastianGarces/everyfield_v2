@@ -137,7 +137,7 @@ class FakeNotificationStore implements EnqueueDeps, CancelByEntityDeps {
     // WHERE dedupe_key IS NOT NULL AND status <> 'cancelled': NULL keys never
     // collide, the same key for a different recipient is a different row, and a
     // CANCELLED row is not in the index at all — so it cannot arbitrate.
-    // TWO indexes since migration 0033, one per anchor, and neither arbitrates
+    // TWO indexes since migration 0035, one per anchor, and neither arbitrates
     // the other's rows — a NULL column never collides in a btree unique index.
     // The fake compares the anchor pair rather than `church_id` alone so it
     // cannot claim an idempotency the database would not give.
@@ -463,14 +463,14 @@ test("the ON CONFLICT predicate is byte-identical to the index predicate", () =>
     "utf8"
   );
 
-  // TWO indexes since migration 0033, one per anchor, and each has its OWN ON
+  // TWO indexes since migration 0035, one per anchor, and each has its OWN ON
   // CONFLICT clause in `insertIfAbsent`. Both pairs are checked: a test that
   // read only the first `where: sql\`…\`` in the file would have passed while
   // the church path pointed at the org index.
   const orgMigration = readFileSync(
     path.join(
       process.cwd(),
-      "src/db/migrations/0033_association_subject_and_notification_anchor.sql"
+      "src/db/migrations/0035_association_subject_and_notification_anchor.sql"
     ),
     "utf8"
   )
