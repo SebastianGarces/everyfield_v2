@@ -102,7 +102,7 @@ test("where the planter lands is the server's decision, and the URL's fallback",
   // abandoning the flow safe without anything being persisted per step.
   assert.match(
     FLOW_CODE,
-    /isOnboardingStepId\(stepParam\)\s*\?\s*stepParam\s*:\s*initialStep/,
+    /const step: OnboardingStepId = urlStep \?\? finishScreenStep \?\? initialStep;/,
     "the step showing is read from the URL, falling back to the server's answer"
   );
 

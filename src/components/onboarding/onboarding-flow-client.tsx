@@ -14,7 +14,8 @@ import { completeOnboarding } from "@/app/(dashboard)/dashboard/actions";
 import {
   ONBOARDING_STEP_IDS,
   ONBOARDING_STEP_PARAM,
-  isOnboardingStepId,
+  addressableOnboardingStep,
+  isFirstOnboardingStep,
   isSkippableOnboardingStep,
   nextOnboardingStep,
   onboardingStep,
@@ -90,11 +91,20 @@ const FINISH_SCREEN_DESCRIPTION =
  * so it always reflects the address bar AT THE MOMENT of the write, including a
  * param some other client wrote since this render began. Only ever called from
  * an event handler or an effect, so `window` is defined.
+ *
+ * `null` REMOVES the param, which is how the finish screen is addressed without
+ * being given a step id of its own (ruling 2026-08-10) — see the effect below.
+ * `params.set` is also what collapses a repeated `?step=a&step=a` back to one
+ * value, so a URL the server declined heals on the next stamp.
  */
-function stepUrl(step: OnboardingStepId): string {
+function stepUrl(step: OnboardingStepId | null): string {
   const params = new URLSearchParams(window.location.search);
-  params.set(ONBOARDING_STEP_PARAM, step);
-  return `${window.location.pathname}?${params.toString()}`;
+  if (step === null) params.delete(ONBOARDING_STEP_PARAM);
+  else params.set(ONBOARDING_STEP_PARAM, step);
+  const query = params.toString();
+  return query
+    ? `${window.location.pathname}?${query}`
+    : window.location.pathname;
 }
 
 export function OnboardingFlowClient({
@@ -134,11 +144,16 @@ export function OnboardingFlowClient({
    * Deriving instead of mirroring is the whole point. There is no `setStep` to
    * fall out of sync with the address bar, so Back, Forward, a deep link and a
    * reload all land on the same step as the URL they came from.
+   *
+   * `addressableOnboardingStep` is the client's half of the page's guard: a
+   * value the server would not resolve must not be honoured here either, or the
+   * flow renders the step the page declined. Today that is step 1 once the
+   * church exists (ruling 2026-08-10) — the URL still reaches it through
+   * Forward or a stale bookmark, and its form is a required field for a thing
+   * already done whose second submit is discarded.
    */
   const stepParam = searchParams.get(ONBOARDING_STEP_PARAM);
-  const step: OnboardingStepId = isOnboardingStepId(stepParam)
-    ? stepParam
-    : initialStep;
+  const urlStep = addressableOnboardingStep(stepParam, initialStep);
 
   // The answer step 3 just gave, which is UI state and not a copy of anything:
   // it is what the action REPORTED BACK about the declaration made moments ago,
@@ -153,13 +168,25 @@ export function OnboardingFlowClient({
   // told apart from "not showing" now that the step behind it can change under
   // it (#373). The screen has no `?step=` of its own: it is not one of the four
   // steps, and inventing a fifth value would put a URL in a planter's hands
-  // that reopens an offer whose gate they already answered. So it is held as
-  // the step it belongs to, and a Back out of it — which moves the URL to the
-  // previous step — closes it, instead of leaving the offer painted over a step
-  // the planter has already returned to.
+  // that reopens an offer whose gate they already answered (ruled 2026-08-10,
+  // option B). So it is held as the step it belongs to, and a Back out of it —
+  // which moves the URL to a step id again — closes it, instead of leaving the
+  // offer painted over a step the planter has already returned to.
   const [finishScreenStep, setFinishScreenStep] =
     useState<OnboardingStepId | null>(null);
-  const atFinishScreen = finishScreenStep === step;
+
+  // Showing while the URL still names the step it was opened from (the frame
+  // before the effect below strips it) and while it names no step at all (every
+  // frame after). What closes it is the URL naming a DIFFERENT step, which is
+  // what browser Back off the screen does.
+  const atFinishScreen =
+    finishScreenStep !== null &&
+    (urlStep === null || urlStep === finishScreenStep);
+
+  // The step behind the finish screen keeps answering while it is up — the
+  // param is gone from the URL, and "which step would I return to" must not
+  // silently become the server's resume answer underneath it.
+  const step: OnboardingStepId = urlStep ?? finishScreenStep ?? initialStep;
 
   // OB-015, ruling 2026-08-09 — the offer follows the PLANT'S STATE, not the
   // path taken to the finish screen. `declaredPhase` is what the church row says
@@ -192,20 +219,35 @@ export function OnboardingFlowClient({
    * never match for exactly the planters it is for. So the step the flow is
    * showing is written even when nobody navigated to it.
    *
+   * It is also what TAKES the step out of the URL for the OB-015 finish screen
+   * (ruled 2026-08-10): the guide resolves from pathname + search params alone
+   * (`wiki-guide-provider.tsx`), so `/dashboard?step=journey` painted the
+   * journey Guide pill over the ministry-teams offer — a screen that does not
+   * raise the question the guide answers, which the PR #367 option-C ruling
+   * scoped it to. Removing the param is how the button goes without the screen
+   * gaining a URL of its own: `/dashboard` matches no guide entry, and reloading
+   * it resumes the flow rather than reopening the offer.
+   *
+   * ONE rule, one writer: "the URL says what is showing, and the finish screen
+   * is not a step". Everything else — the arrival stamp, the heal after a
+   * declined value — falls out of the same comparison.
+   *
    * `replaceState`, never `pushState`: arriving is not navigating, and a
    * history entry here would make Back a no-op that appears to do nothing. It
    * is also self-healing rather than mount-only — the condition is "the URL
-   * disagrees with the step showing", which a `goTo` push has already satisfied
+   * disagrees with what is showing", which a `goTo` push has already satisfied
    * by the time this runs, so it writes once and then stays quiet.
    *
    * A history write is a side effect on an external system, which is what
    * `useEffect` is for. Nothing here copies server data into state
    * (`memory/contracts/data-patterns.md`) — the flow reads FROM the URL.
    */
+  const urlStepParam: OnboardingStepId | null = atFinishScreen ? null : step;
+
   useEffect(() => {
-    if (stepParam === step) return;
-    window.history.replaceState(null, "", stepUrl(step));
-  }, [stepParam, step]);
+    if (stepParam === urlStepParam) return;
+    window.history.replaceState(null, "", stepUrl(urlStepParam));
+  }, [stepParam, urlStepParam]);
 
   function goTo(next: OnboardingStepId) {
     hasNavigated.current = true;
@@ -213,8 +255,26 @@ export function OnboardingFlowClient({
     // Leaving the finish screen behind explicitly, so a later Forward back onto
     // this step does not re-open an offer the planter has moved past.
     setFinishScreenStep(null);
-    // Shallow: the URL and the router's view of it change, the server render
-    // does not re-run, and the entry Back returns to is the step just left.
+
+    // Ruled 2026-08-10: STEP 1 IS NOT IN THE HISTORY. The only way off it is
+    // creating the church, so by the time this runs the church exists and step
+    // 1 is not re-enterable — the in-app Back control has always said so
+    // (`backTarget` below), and browser Back said otherwise, landing a planter
+    // on an empty required "Create church plant" form whose second submit is
+    // discarded (`runCreateChurch`'s already-have-church branch). Replacing
+    // rather than pushing takes the entry out of the history instead of asking
+    // step 1 to render a state it has no answer for. The cost is named and
+    // accepted: Back from step 2 now leaves the flow, because behind step 2
+    // there is nothing left to go back to.
+    //
+    // Shallow either way: the URL and the router's view of it change, the
+    // server render does not re-run.
+    if (isFirstOnboardingStep(step)) {
+      window.history.replaceState(null, "", stepUrl(next));
+      return;
+    }
+
+    // The push is what gives Back the step just left.
     window.history.pushState(null, "", stepUrl(next));
   }
 

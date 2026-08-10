@@ -3,8 +3,7 @@ import { redirect } from "next/navigation";
 import { ChurchCreatedConfetti } from "./church-created-confetti";
 import { OnboardingFlow } from "@/components/onboarding/onboarding-flow";
 import {
-  FIRST_ONBOARDING_STEP,
-  isOnboardingStepId,
+  resolveOnboardingStepRequest,
   resolveResumeStep,
   shouldShowOnboarding,
   type OnboardingFacts,
@@ -41,7 +40,14 @@ export const dynamic = "force-dynamic";
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ churchCreated?: string; step?: string }>;
+  // Next hands a REPEATED query param back as an array (`?step=a&step=b`), so
+  // this is the honest type rather than the convenient one. Narrowing is the
+  // guard's job — `resolveOnboardingStepRequest` — and typing it as a plain
+  // string is what let a repeated param slip past that guard entirely.
+  searchParams: Promise<{
+    churchCreated?: string | string[];
+    step?: string | string[];
+  }>;
 }) {
   const [{ user }, resolvedSearchParams] = await Promise.all([
     getCurrentSession(),
@@ -52,13 +58,10 @@ export default async function DashboardPage({
   // OB-004: the one step a FINISHED dashboard answers to. Re-entry is a single
   // question, not the whole wizard (ruling 2026-07-31), so this stays a check
   // for one literal value rather than becoming "any step" alongside #373 below.
+  // A repeated `?step=leadership&step=journey` is an array, which equals no
+  // literal — so it falls to the redirect below rather than re-entering here
+  // with the guide's own reader (`forEach`, last value wins) pointed elsewhere.
   const wantsLeadershipStep = step === "leadership";
-
-  // #373: while the flow is still running the URL names the step it is showing,
-  // so `?step=` addresses any of the four — read here and written by the flow
-  // itself (`onboarding-flow-client.tsx`). An unrecognised value names no step
-  // and is left to the resume rule.
-  const requestedStep = isOnboardingStepId(step) ? step : null;
 
   // Redirect oversight users to their dedicated dashboard
   if (user?.role === "sending_church_admin" || user?.role === "network_admin") {
@@ -86,25 +89,24 @@ export default async function DashboardPage({
       ? await hasInitialPhaseDeclaration(user.churchId)
       : false;
 
-    // The guard OB-004 already carried, widened from one step to four: a URL
-    // may name a step only once step 1's church EXISTS. Deep-linking past step
-    // 1 without one lands on a form that would update a church the planter has
-    // not created — so step 1 is the only step a churchless planter may be
-    // addressed to, and it is also the only step they resume to.
-    const honouredStep =
-      requestedStep &&
-      (user?.churchId || requestedStep === FIRST_ONBOARDING_STEP)
-        ? requestedStep
-        : null;
+    // The guard OB-004 carried, widened from one step to four and moved into a
+    // pure function so it can be exercised by CALLING it (#373 fix pass): a URL
+    // may name a later step only once step 1's church exists, and may name step
+    // 1 only while it does not. Every rule, and why each answer is the one it
+    // is, lives on `resolveOnboardingStepRequest`.
+    const stepRequest = resolveOnboardingStepRequest({
+      step,
+      churchId: user?.churchId,
+    });
 
     // Refusing is a REDIRECT, not a shrug (#373). The flow now reads its step
     // from the URL, so a refused value left sitting in the address bar would be
     // read by the client on the very next render and honoured there instead —
     // the server's answer has to be the one in the URL, and this is what makes
-    // it so. Only reached when a step was asked for and declined, so a plain
-    // `/dashboard` never redirects and neither does the `?step=basics` the flow
-    // stamps for a planter who has no church yet.
-    if (requestedStep && !honouredStep) {
+    // it so. Only `refuse` comes here: a plain `/dashboard`, an unrecognised
+    // value and a closed `?step=basics` all resolve to `none` and are answered
+    // by the resume rule below without a navigation.
+    if (stepRequest.outcome === "refuse") {
       redirect("/dashboard");
     }
 
@@ -112,12 +114,13 @@ export default async function DashboardPage({
       <div className="p-6">
         <OnboardingFlow
           initialStep={
-            honouredStep ??
-            resolveResumeStep({
-              churchId: user?.churchId,
-              leadershipStatus: churchDuringOnboarding?.leadershipStatus,
-              journeyDeclared,
-            })
+            stepRequest.outcome === "honour"
+              ? stepRequest.step
+              : resolveResumeStep({
+                  churchId: user?.churchId,
+                  leadershipStatus: churchDuringOnboarding?.leadershipStatus,
+                  journeyDeclared,
+                })
           }
           leadershipStatus={churchDuringOnboarding?.leadershipStatus}
         />

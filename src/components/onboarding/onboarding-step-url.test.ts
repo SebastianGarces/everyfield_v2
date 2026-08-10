@@ -6,7 +6,9 @@ import { test } from "node:test";
 import {
   ONBOARDING_STEP_IDS,
   ONBOARDING_STEP_PARAM,
+  addressableOnboardingStep,
   isOnboardingStepId,
+  resolveOnboardingStepRequest,
 } from "@/lib/onboarding/steps";
 import { resolveGuideEntry, wikiGuideConfig } from "@/lib/wiki/guide-config";
 
@@ -151,7 +153,13 @@ test("the step showing is read from the URL, not mirrored into state", () => {
   );
   assert.match(
     FLOW_CODE,
-    /isOnboardingStepId\(stepParam\)\s*\?\s*stepParam\s*:\s*initialStep/
+    /addressableOnboardingStep\(stepParam, initialStep\)/,
+    "the URL's step goes through the client's half of the page's guard"
+  );
+  assert.match(
+    FLOW_CODE,
+    /const step: OnboardingStepId = urlStep \?\? finishScreenStep \?\? initialStep;/,
+    "the URL wins, the finish screen holds the step behind it, the server is last"
   );
 
   // The anti-assertion is the important one. A `useState` copy of the step
@@ -187,11 +195,11 @@ test("arriving stamps the step without adding a history entry", () => {
   // not navigating — a pushed entry here makes the first Back look broken.
   assert.match(
     FLOW_CODE,
-    /window\.history\.replaceState\(null, "", stepUrl\(step\)\)/
+    /window\.history\.replaceState\(null, "", stepUrl\(urlStepParam\)\)/
   );
   assert.match(
     FLOW_CODE,
-    /if \(stepParam === step\) return;/,
+    /if \(stepParam === urlStepParam\) return;/,
     "the stamp must be conditional, or it fights every push"
   );
 });
@@ -211,21 +219,72 @@ test("every other query param survives a step change", () => {
 // ----------------------------------------------------------------------------
 
 test("the page resolves `?step=` through the shared guard", () => {
-  assert.match(PAGE_CODE, /isOnboardingStepId\(step\) \? step : null/);
-});
-
-test("a step the server declines is redirected out of the URL, not ignored", () => {
-  // OB-004's rule survives: a URL may name a step only once step 1's church
-  // exists. What changed is the ENFORCEMENT — the flow now reads the URL, so an
-  // ignored value would still be obeyed by the client on the next render. The
-  // refusal has to leave the address bar.
   assert.match(
     PAGE_CODE,
-    /requestedStep &&\s*\(user\?\.churchId \|\| requestedStep === FIRST_ONBOARDING_STEP\)/
+    /const stepRequest = resolveOnboardingStepRequest\(\{\s*step,\s*churchId: user\?\.churchId,\s*\}\);/,
+    "the decision is CALLED, not restated inline where only a regex can see it"
   );
   assert.match(
     PAGE_CODE,
-    /if \(requestedStep && !honouredStep\) \{\s*redirect\("\/dashboard"\);/
+    /stepRequest\.outcome === "honour"\s*\?\s*stepRequest\.step\s*:\s*resolveResumeStep\(/,
+    "an honoured step wins; anything else falls to the resume rule"
+  );
+});
+
+test("a step the server declines is redirected out of the URL, not ignored", () => {
+  // OB-004's rule survives: a URL may name a LATER step only once step 1's
+  // church exists. What changed is the ENFORCEMENT — the flow now reads the
+  // URL, so an ignored value would still be obeyed by the client on the next
+  // render. The refusal has to leave the address bar.
+  assert.match(
+    PAGE_CODE,
+    /if \(stepRequest\.outcome === "refuse"\) \{\s*redirect\("\/dashboard"\);/
+  );
+
+  // And the rule itself, exercised by calling it rather than by reading the
+  // page's source — which is the point of the extraction (PR #390 warning 2).
+  for (const id of ONBOARDING_STEP_IDS.filter((s) => s !== "basics")) {
+    assert.deepEqual(
+      resolveOnboardingStepRequest({ step: id, churchId: undefined }),
+      { outcome: "refuse" },
+      `${id} may not be addressed before the church exists`
+    );
+    assert.deepEqual(
+      resolveOnboardingStepRequest({ step: id, churchId: "church-1" }),
+      { outcome: "honour", step: id }
+    );
+  }
+});
+
+// ----------------------------------------------------------------------------
+// PR #390 warning 1 — a REPEATED `?step=` bypassed the guard entirely
+// ----------------------------------------------------------------------------
+
+test("a repeated `?step=` is refused, not resolved to one of its values", () => {
+  // Next hands `?step=journey&step=journey` back as an array. Typed as a plain
+  // string it satisfied neither the honour path nor the refusal, so a planter
+  // with NO CHURCH landed on step 3 — while `useSearchParams().get()` on the
+  // client happily took the first value. Refusing is what settles it, and it
+  // has to be refusal rather than "take the first": the wiki guide's provider
+  // builds its params object with `forEach`, so it takes the LAST value, and
+  // `?step=leadership&step=journey` would otherwise show one screen with
+  // another screen's guide.
+  assert.deepEqual(
+    resolveOnboardingStepRequest({
+      step: ["journey", "journey"],
+      churchId: undefined,
+    }),
+    { outcome: "refuse" }
+  );
+
+  // Refused even when every value is legal and the church exists — the point is
+  // that it names no ONE step, not that its values are bad.
+  assert.deepEqual(
+    resolveOnboardingStepRequest({
+      step: ["leadership", "journey"],
+      churchId: "church-1",
+    }),
+    { outcome: "refuse" }
   );
 });
 
@@ -263,4 +322,86 @@ test("a FINISHED dashboard refuses a stray `?step=` too, not only the flow", () 
     resolveGuideEntry("/dashboard", { [ONBOARDING_STEP_PARAM]: "journey" }),
     "the journey guide entry is what makes the stray param dangerous"
   );
+});
+
+// ----------------------------------------------------------------------------
+// Ruling 2026-08-10 (1) — no Guide on the OB-015 finish screen, and no URL
+// for it either
+// ----------------------------------------------------------------------------
+
+test("the finish screen takes the step OUT of the URL rather than inventing one", () => {
+  // Ruled option B: suppress the guide there, without giving the screen a
+  // `?step=` of its own — a fifth value would be a shareable URL that reopens
+  // an offer whose gate the planter already answered.
+  //
+  // So the mechanism is subtraction, and it is the SAME writer that stamps the
+  // step, not a second way to answer "is the guide on?".
+  assert.match(
+    FLOW_CODE,
+    /const urlStepParam: OnboardingStepId \| null = atFinishScreen \? null : step;/,
+    "the finish screen's URL carries no step"
+  );
+  assert.match(
+    FLOW_CODE,
+    /if \(step === null\) params\.delete\(ONBOARDING_STEP_PARAM\);/,
+    "`stepUrl(null)` has to REMOVE the param, not write an empty one"
+  );
+
+  // And no fifth step id was smuggled in to carry it.
+  assert.equal(ONBOARDING_STEP_IDS.length, 4);
+  assert.equal(isOnboardingStepId("finish"), false);
+
+  // The behaviour that buys: the URL the finish screen leaves behind resolves
+  // no guide entry, so there is no Guide button to paint over the offer. An
+  // empty `?step=` would NOT have done this — it is a present param, and the
+  // finished-dashboard redirect above would fire on it after onboarding ends.
+  assert.equal(resolveGuideEntry("/dashboard", {}), null);
+});
+
+// ----------------------------------------------------------------------------
+// Ruling 2026-08-10 (2) — step 1 is not in the browser's step history
+// ----------------------------------------------------------------------------
+
+test("leaving step 1 replaces its history entry instead of pushing", () => {
+  // The only way off step 1 is creating the church, so by then step 1 is not
+  // re-enterable — and browser Back was landing planters on its empty, required
+  // form whose second submit `runCreateChurch` discards. Replacing takes the
+  // entry out of the history; every other step still pushes, so Back inside the
+  // flow keeps working from step 2 onward.
+  assert.match(
+    FLOW_CODE,
+    /if \(isFirstOnboardingStep\(step\)\) \{\s*window\.history\.replaceState\(null, "", stepUrl\(next\)\);\s*return;\s*\}/
+  );
+  assert.match(
+    FLOW_CODE,
+    /window\.history\.pushState\(null, "", stepUrl\(next\)\)/,
+    "the other three steps still push, or Back leaves the flow from anywhere"
+  );
+});
+
+test("the deep link `?step=basics` is refused by BOTH halves once the church exists", () => {
+  // The ruling covers the second door into the same room. The server declines
+  // to honour it...
+  assert.deepEqual(
+    resolveOnboardingStepRequest({ step: "basics", churchId: "church-1" }),
+    { outcome: "none" },
+    "a closed step 1 falls to the resume rule"
+  );
+
+  // ...and deliberately does NOT redirect, because this exact URL is the one
+  // showing while step 1's own create action revalidates. A refusal there would
+  // fire during the planter's own submit and throw them out of the flow.
+  assert.deepEqual(
+    resolveOnboardingStepRequest({ step: "basics", churchId: undefined }),
+    { outcome: "honour", step: "basics" },
+    "step 1 stays addressable while there is no church to have created"
+  );
+
+  // The client is the other half: it reads the step from the URL, so the page
+  // declining a value only matters if the flow declines it too. `initialStep`
+  // is the church's proxy — the server lands a planter on step 1 exactly while
+  // there is none.
+  assert.equal(addressableOnboardingStep("basics", "leadership"), null);
+  assert.equal(addressableOnboardingStep("basics", "basics"), "basics");
+  assert.equal(addressableOnboardingStep("journey", "leadership"), "journey");
 });
