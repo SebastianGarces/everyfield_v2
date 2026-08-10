@@ -610,6 +610,148 @@ test("a ladder that stops on the run deadline is a time_budget deferral that sti
 });
 
 // ----------------------------------------------------------------------------
+// AC (ruled 2026-08-10, PR #389): a 5xx ladder the run's clock cut short stays
+// `failed`, but says so in different words.
+//
+// Since #375 bounded the 5xx branch by the run deadline, a truncated ladder can
+// report a failure after ONE attempt. On main, `failed` only ever meant "the
+// provider is broken", so a run truncated by its own budget could print ERROR
+// lines that page someone for a clock problem. The status is unchanged — the
+// provider answered and the answer was broken — and the flag plus the warn
+// channel carry the difference.
+// ----------------------------------------------------------------------------
+
+/** One plant whose judge answers `502` on every attempt. */
+function alwaysBadGatewayDeps(
+  pacer: TokenPacer,
+  runBudgetMs: number,
+  maxAttempts: number,
+  providerCalls: { count: number }
+): RunAssessmentBatchDeps {
+  return {
+    maxBatch: 1,
+    pacer,
+    now: () => pacer.clock.now(),
+    runBudgetMs,
+    maxAttempts,
+    async selectPlantsForAssessment() {
+      return plants(1);
+    },
+    async generateAssessment(churchId, _deps, run) {
+      await runPacedCall(
+        async () => {
+          providerCalls.count++;
+          throw new APICallError({
+            message: "bad gateway",
+            url: "https://api.openai.com/v1/responses",
+            requestBodyValues: {},
+            statusCode: 502,
+            responseHeaders: {},
+            isRetryable: true,
+          });
+        },
+        {
+          pacer: run?.pacer ?? pacer,
+          maxAttempts: run?.maxAttempts,
+          label: churchId,
+          onRateLimit: run?.onRateLimit,
+          deadlineAt: run?.deadlineAt,
+        }
+      );
+      return {} as Awaited<
+        ReturnType<
+          typeof import("@/lib/phase-engine/assessment").generateAssessment
+        >
+      >;
+    },
+  };
+}
+
+test("a 5xx ladder cut short by the run budget is a marked failure, on the warn channel", async () => {
+  const clock = virtualClock();
+  // A ceiling far above the run's needs: the only thing that can stop this
+  // ladder is the run's own clock.
+  const pacer = new TokenPacer({ clock, limitTokens: 1_000_000 });
+  const providerCalls = { count: 0 };
+
+  const capture = captureConsole();
+  let summary;
+  try {
+    // Spent before the first plant starts; the loop runs it anyway, and the
+    // first 1s backoff already lands past the deadline.
+    summary = await runAssessmentBatch(
+      alwaysBadGatewayDeps(pacer, 500, MAX_ATTEMPTS_PER_PLANT, providerCalls)
+    );
+  } finally {
+    capture.restore();
+  }
+
+  // One attempt, out of four — the clock stopped this, not the provider.
+  assert.equal(providerCalls.count, 1);
+  assert.equal(summary.failed, 1);
+  assert.equal(summary.deferred, 0);
+
+  const truncated = summary.outcomes[0];
+  assert.equal(truncated?.status, "failed");
+  assert.equal(truncated?.attempted, true);
+  assert.equal(truncated?.truncatedByDeadline, true);
+  // Still not a deferral, so the run's arithmetic is untouched.
+  assert.equal(truncated?.deferralReason, undefined);
+  assert.equal(
+    summary.selected,
+    summary.skipped + summary.attempted + summary.deferredUnattempted
+  );
+
+  // The whole point of the ruling: a run truncated by its own budget prints no
+  // ERROR line, and the warn line says which of the two things happened.
+  assert.deepEqual(capture.errors, []);
+  assert.ok(
+    capture.warns.some((line) =>
+      /assessment truncated by the run budget for church church-0/.test(line)
+    ),
+    `warns were: ${JSON.stringify(capture.warns)}`
+  );
+});
+
+test("a judge that is genuinely broken stays unmarked and stays loud", async () => {
+  // The property no direction was allowed to lose. Same 502, same code path —
+  // but with the clock out of the way the ladder spends every attempt, so this
+  // is a broken judge and reads like one: no flag, no warn, an ERROR line.
+  const clock = virtualClock();
+  const pacer = new TokenPacer({ clock, limitTokens: 1_000_000 });
+  const providerCalls = { count: 0 };
+
+  const capture = captureConsole();
+  let summary;
+  try {
+    summary = await runAssessmentBatch(
+      alwaysBadGatewayDeps(pacer, RUN_BUDGET_MS, 3, providerCalls)
+    );
+  } finally {
+    capture.restore();
+  }
+
+  assert.equal(providerCalls.count, 3);
+  assert.equal(summary.failed, 1);
+
+  const broken = summary.outcomes[0];
+  assert.equal(broken?.status, "failed");
+  assert.equal(broken?.attempted, true);
+  assert.equal(broken?.truncatedByDeadline, undefined);
+
+  assert.ok(
+    capture.errors.some((line) =>
+      /assessment failed for church church-0/.test(line)
+    ),
+    `errors were: ${JSON.stringify(capture.errors)}`
+  );
+  assert.ok(
+    !capture.warns.some((line) => /truncated by the run budget/.test(line)),
+    "a broken judge must never read as a clock problem"
+  );
+});
+
+// ----------------------------------------------------------------------------
 // AC: the run stays inside the Vercel function timeout.
 // ----------------------------------------------------------------------------
 

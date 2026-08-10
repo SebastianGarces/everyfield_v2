@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { APICallError } from "ai";
 
 import {
+  isDeadlineTruncatedFailure,
   isRateLimitDeferral,
   RateLimitDeferralError,
   runPacedCall,
@@ -289,6 +290,9 @@ test("a 5xx ladder stops AT an already-passed deadline, not a pacer hold past it
     (error: unknown) => {
       assert.equal(isRateLimitDeferral(error), false);
       assert.match((error as Error).message, /bad gateway/);
+      // ...and it is marked as clock-truncated, so the runner can say "we ran
+      // out of clock" without softening the failure (ruled 2026-08-10).
+      assert.equal(isDeadlineTruncatedFailure(error), true);
       return true;
     }
   );
@@ -368,11 +372,85 @@ test("a retryable error that never clears is rethrown as itself", async () => {
     (error: unknown) => {
       assert.equal(isRateLimitDeferral(error), false);
       assert.match((error as Error).message, /still down/);
+      // Nor is it truncated: no deadline was in play, so this is the plain
+      // "the judge is broken" failure the marker must never soften.
+      assert.equal(isDeadlineTruncatedFailure(error), false);
       return true;
     }
   );
 
   assert.equal(attempts, 2);
+});
+
+// --- Truncated by the clock vs. genuinely broken (ruled 2026-08-10) ----------
+
+test("a 5xx ladder that spends its last attempt is NOT called truncated", async () => {
+  // The case that decides whether the marker can hide a real outage: the last
+  // attempt fails AND the deadline is spent. The ladder would have stopped on
+  // the attempt count regardless, so the clock gets no credit for it and the
+  // run stays loud.
+  const { clock, pacer } = setup(1_000_000);
+  // 1s of backoff fits before it; the 2s backoff after attempt 2 does not.
+  const deadlineAt = clock.now() + 1_500;
+  let attempts = 0;
+
+  await assert.rejects(
+    () =>
+      runPacedCall(
+        async () => {
+          attempts++;
+          throw apiError(500, {}, "upstream is down");
+        },
+        { pacer, maxAttempts: 2, deadlineAt }
+      ),
+    (error: unknown) => {
+      assert.equal(isDeadlineTruncatedFailure(error), false);
+      assert.match((error as Error).message, /upstream is down/);
+      return true;
+    }
+  );
+
+  assert.equal(attempts, 2, "both attempts were spent against the provider");
+  assert.deepEqual(clock.sleeps, [1_000]);
+});
+
+test("a one-attempt ladder is never called truncated", async () => {
+  // `maxAttempts: 1` never had a retry to lose, so a passed deadline did not
+  // take anything away from it.
+  const { clock, pacer } = setup(1_000_000);
+  let attempts = 0;
+
+  await assert.rejects(
+    () =>
+      runPacedCall(
+        async () => {
+          attempts++;
+          throw apiError(502, {}, "bad gateway");
+        },
+        { pacer, maxAttempts: 1, deadlineAt: clock.now() }
+      ),
+    (error: unknown) => {
+      assert.equal(isDeadlineTruncatedFailure(error), false);
+      return true;
+    }
+  );
+
+  assert.equal(attempts, 1);
+});
+
+test("truncation is reported for a real error only, never for a deferral", () => {
+  // The marker is out-of-band, so it must answer sanely for anything a catch
+  // block can be handed — and the throttled path keeps its own vocabulary.
+  assert.equal(isDeadlineTruncatedFailure(new Error("openai exploded")), false);
+  assert.equal(isDeadlineTruncatedFailure(null), false);
+  assert.equal(isDeadlineTruncatedFailure(undefined), false);
+  assert.equal(isDeadlineTruncatedFailure("bad gateway"), false);
+  assert.equal(
+    isDeadlineTruncatedFailure(
+      new RateLimitDeferralError("c", 1, 0, null, undefined, "run_budget")
+    ),
+    false
+  );
 });
 
 // --- The shared budget ------------------------------------------------------

@@ -90,6 +90,10 @@ import {
   TokenPacer,
   type RateLimitEvent,
 } from "@/lib/phase-engine/judge";
+// Imported from the module rather than the judge barrel: this predicate is
+// paired with `deadlineAt`, which only this runner passes. It joins the barrel
+// when a second consumer needs it.
+import { isDeadlineTruncatedFailure } from "@/lib/phase-engine/judge/paced-call";
 import { matchesBearerSecret } from "@/lib/security/constant-time";
 
 // This runner orchestrates real LLM calls and DB writes — never cache it.
@@ -184,6 +188,18 @@ export interface AssessOutcome {
    */
   attempted: boolean;
   deferralReason?: DeferralReason;
+  /**
+   * Set on a `failed` outcome whose retry ladder was cut short by the run's
+   * wall-clock deadline instead of by a provider that stayed broken.
+   *
+   * The status stays `failed` — the provider answered and the answer was broken
+   * (ruled 2026-08-10) — but since #375 bounded the 5xx branch by the run
+   * deadline, a truncated run can report a failure after a SINGLE attempt. Read
+   * `failed` without this flag as "the judge is broken" and `failed` with it as
+   * "we ran out of clock mid-ladder"; the log channel splits the same way
+   * (warn, not error). It is the 5xx counterpart of `time_budget` on a deferral.
+   */
+  truncatedByDeadline?: boolean;
   error?: string;
 }
 
@@ -253,7 +269,10 @@ const DEFAULT_DEPS: RunAssessmentBatchDeps = {
  *   - `assessed` — the judge ran and persisted.
  *   - `failed`   — the judge or persistence broke. `generateAssessment` already
  *                  marked the row `failed` without touching the last good
- *                  snapshot; the run continues to the next plant.
+ *                  snapshot; the run continues to the next plant. A failure
+ *                  whose retry ladder the RUN DEADLINE cut short carries
+ *                  `truncatedByDeadline` and is logged on the warn channel —
+ *                  same status, different sentence (ruled 2026-08-10).
  *   - `deferred` — the provider throttled us past our retries, or the run's
  *                  wall-clock budget ran out. Nothing is broken. The plant is
  *                  still dirty and comes back next run.
@@ -376,6 +395,30 @@ export async function runAssessmentBatch(
           status: "deferred",
           attempted: true,
           deferralReason,
+          error: message,
+        });
+        continue;
+      }
+
+      // Still a failure — the provider answered and the answer was broken — but
+      // a ladder the RUN's clock cut short says nothing about the judge's
+      // health, and after #375 it can end after a single attempt. It gets the
+      // warn channel and its own words, so a run truncated by its own budget
+      // never prints ERROR lines that page someone for a clock problem
+      // (ruled 2026-08-10). A judge that is really down is untouched by this:
+      // it exhausts its attempts, so it is not marked, and stays loud.
+      if (isDeadlineTruncatedFailure(error)) {
+        console.warn(
+          `[phase-engine/assess] assessment truncated by the run budget for church ${plant.churchId} (${plant.reason}): ` +
+            `the provider was still erroring when the run ran out of clock: ${message} ` +
+            `The plant stays dirty and is retried on the next run.`
+        );
+        outcomes.push({
+          churchId: plant.churchId,
+          reason: plant.reason,
+          status: "failed",
+          attempted: true,
+          truncatedByDeadline: true,
           error: message,
         });
         continue;
