@@ -977,8 +977,12 @@ describe("the download control", () => {
   });
 
   test("the renderer is loaded on click, not on every wiki page view", () => {
+    // Every file on the download path, not just this one: `render.tsx` is
+    // imported statically FROM here, so a static import of the renderer over
+    // there would reach the bundle just the same. It may name the module in a
+    // type position (`typeof import(...)`), which ships nothing.
     assert.ok(
-      !/^import .* from "@react-pdf\/renderer";$/m.test(ARTICLE_ACTIONS),
+      !/^import .* from "@react-pdf\/renderer";$/m.test(PDF_SOURCE),
       "a static import puts the whole PDF renderer in every reader's bundle"
     );
     assert.match(
