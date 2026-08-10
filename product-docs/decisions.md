@@ -173,3 +173,18 @@ surfaces what to do; the agent does it). It is captured in
 `product-docs/features/church-plant-agent/vision.md`, which is where the agent-framework decision
 (AI SDK agent primitives vs. LangGraph vs. Vercel Workflow DevKit) is framed. The Plant Intelligence
 judge itself needs none of those.
+
+### Ruled 2026-08-10 — the onboarding flow's `?step=` URL (#373, PR 390)
+
+Two spec-questions raised on PR 390 and ruled by Sebastian on the thread the same day. The comment,
+verbatim:
+
+> **RULINGS (2026-08-10, Sebastian):** (1) **Suppress the Guide button on the OB-015 finish screen**
+> without giving it its own ?step= value — honors the #367 option-C intent; no reopenable URL.
+> (2) **replaceState off step 1** once the church exists, so browser Back skips the non-re-enterable
+> step; the same ruling covers the deep-link /dashboard?step=basics. Both fixes in this PR before merge.
+
+| # | Decision | Consequence |
+|---|----------|-------------|
+| PR&nbsp;390 (a) | **The contextual wiki guide is suppressed on the OB-015 finish screen by REMOVING `?step=`, not by giving the screen a URL of its own.** Chosen over accepting the guide there (PR #367 scoped it to *the one step that raises the question*, and the finish screen does not raise it) and over inventing a fifth `?step=` value — which was rejected because it would hand a planter a shareable, bookmarkable URL that reopens an offer whose gate they already answered. | The finish screen is `/dashboard` with the param removed, so it matches no guide entry and no second "is the guide on?" mechanism is added. Reloading it resumes the flow rather than reopening the offer. Enforcement line in `memory/invariants.md` (Onboarding). |
+| PR&nbsp;390 (b) | **Step 1 is not in the browser history.** Once the church exists the 1→2 transition `replaceState`s instead of pushing, and the same rule declines the deep link `/dashboard?step=basics` — "step 1 is not re-enterable" becomes true everywhere instead of only in-app, where `backTarget` already said so. Option C (a read-only done state for step 1) was rejected as the largest change for a state only ever seen travelling backwards. | **Accepted cost, in the ruling's own terms: browser Back from step 2 now leaves the flow** — the behaviour issue #373's AC 5 was originally written to stop. AC 5 is amended on the issue so the next reader does not file it as a regression. The rule lives in `resolveOnboardingStepRequest` (server) and `addressableOnboardingStep` (client mirror); enforcement line in `memory/invariants.md` (Onboarding). |
