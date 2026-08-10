@@ -22,7 +22,10 @@
 //    after a revoke goes through `createInvitationAs` again, which inserts a NEW
 //    row with a NEW id, so the fresh email necessarily carries the fresh token:
 //    there is no code path that can re-send a dead one, because the URL is a
-//    function of the id it is handed.
+//    function of the id it is handed. The "retry written later" arrived on
+//    2026-08-10 — `resendInvitationEmailAs` (`./core`) — and it adds no status
+//    check of its own: it calls this path and turns THIS guard's `not_pending`
+//    refusal into the words the admin reads, so there is still one decision.
 //
 // 3. IT IS NOT A NOTIFICATION. The invitee has no account, so there is no
 //    preference row to consult, no category, and nothing to unsubscribe from —
@@ -119,7 +122,71 @@ export type InvitationEmailRefusal =
   | "no_inviting_org"
   | "unknown_type"
   | "provider_refused"
-  | "transport_threw";
+  | "transport_threw"
+  /**
+   * Something before the send threw — today that is the inviting-org name
+   * lookup in `core.ts`, which is a database read. It lives in this union so
+   * the caller of `emailInviteeOutcome` has ONE exhaustive set of reasons to
+   * turn into words, rather than a boolean plus a special case.
+   */
+  | "preparation_threw";
+
+// ----------------------------------------------------------------------------
+// Which send this is
+// ----------------------------------------------------------------------------
+
+/**
+ * WHY this message is going out. It changes exactly one thing — the provider
+ * dedupe key — and nothing about the copy.
+ *
+ *   * `create` — the automatic send `createInvitationAs` performs. One key per
+ *     invitation, so a retried create cannot put two copies in an inbox.
+ *   * `resend` — the admin pressed "Resend email" (RULED 2026-08-10 on #293
+ *     PR #392). A DELIBERATE act, so it must reach the invitee even though the
+ *     invitation is the same row that was already keyed at create time.
+ */
+export type InvitationSendOccasion =
+  | { kind: "create" }
+  | { kind: "resend"; at: Date };
+
+/**
+ * How long two resends of one invitation share a dedupe key.
+ *
+ * This is the answer to "what stops an admin re-sending ten times?" for the
+ * only thing that matters — the invitee's inbox. It is NOT a rate limit on the
+ * action (nothing is persisted, by the ruling), it is the window in which a
+ * double-clicked button, or a page kept open by two admins, presents the SAME
+ * `Idempotency-Key` and the provider delivers once. One minute is long enough
+ * to cover a human double-press and short enough that a deliberate second
+ * attempt — the admin fixed a misconfigured sender and tried again — is a
+ * genuinely new send.
+ */
+export const RESEND_DEDUPE_WINDOW_MS = 60_000;
+
+/**
+ * The provider-side dedupe key. Always INVITATION-SCOPED, whatever the
+ * occasion: the id is in every key, so a re-invitation after a revoke is a
+ * different row, a different id and a different key — deliverable rather than
+ * swallowed as a duplicate. Keying on `to + subject` would have deduped exactly
+ * that case, since the subject is the same org name both times.
+ *
+ * A resend adds a window suffix, and that suffix is the whole of the ruling's
+ * "a deliberate resend must not be deduped away": the create key
+ * `org-invitation-<id>` has already been presented to the provider for this
+ * invitation, so reusing it verbatim would mean the recovery action reported
+ * success while the provider dropped the message — the precise failure the
+ * resend exists to repair.
+ */
+export function invitationEmailIdempotencyKey(
+  invitationId: string,
+  occasion: InvitationSendOccasion = { kind: "create" }
+): string {
+  const base = `org-invitation-${invitationId}`;
+  if (occasion.kind === "create") return base;
+
+  const window = Math.floor(occasion.at.getTime() / RESEND_DEDUPE_WINDOW_MS);
+  return `${base}-resend-${window}`;
+}
 
 export type InvitationEmailOutcome =
   | { sent: true }
@@ -132,16 +199,7 @@ export interface InvitationEmailMessage {
   html: string;
   text: string;
   replyTo: string;
-  /**
-   * Provider-side dedupe, keyed on the INVITATION and not on the address.
-   *
-   * A retried create cannot put two copies of one invitation in an inbox, and —
-   * the half that matters for the revoke rule — a re-invitation after a revoke
-   * is a different row with a different id, so it presents a different key and
-   * is delivered rather than swallowed as a duplicate. Keying on
-   * `to + subject` would have deduped exactly the case the AC names, since the
-   * subject is the same org name both times.
-   */
+  /** Provider-side dedupe. Built by `invitationEmailIdempotencyKey`, which owns the rules. */
   idempotencyKey: string;
 }
 
@@ -152,6 +210,8 @@ export interface InvitationEmailDeps {
   ) => Promise<{ success: boolean; error?: string }>;
   /** Absolute base override. Tests pass one; production reads the env. */
   baseUrl?: string;
+  /** Which send this is. Defaults to the automatic one at create time. */
+  occasion?: InvitationSendOccasion;
 }
 
 /**
@@ -188,7 +248,8 @@ export function invitationOrgKinds(
  */
 export async function buildInvitationEmail(
   facts: InvitationEmailFacts,
-  baseUrl?: string
+  baseUrl?: string,
+  occasion?: InvitationSendOccasion
 ): Promise<
   | { ok: true; message: InvitationEmailMessage }
   | { ok: false; reason: InvitationEmailRefusal }
@@ -227,7 +288,10 @@ export async function buildInvitationEmail(
       html,
       text,
       replyTo: EMAIL_REPLY_TO,
-      idempotencyKey: `org-invitation-${facts.invitationId}`,
+      idempotencyKey: invitationEmailIdempotencyKey(
+        facts.invitationId,
+        occasion
+      ),
     },
   };
 }
@@ -242,7 +306,11 @@ export async function sendInvitationEmail(
   const send = deps.send ?? defaultTransport;
 
   try {
-    const built = await buildInvitationEmail(facts, deps.baseUrl);
+    const built = await buildInvitationEmail(
+      facts,
+      deps.baseUrl,
+      deps.occasion
+    );
     if (!built.ok) return refused(facts, built.reason);
 
     const result = await send(built.message);

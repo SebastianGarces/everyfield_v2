@@ -1,9 +1,10 @@
 "use server";
 
 // ============================================================================
-// The invitations surface's two writes (#23 / OV-003).
+// The invitations surface's three writes (#23 / OV-003, plus the 2026-08-10
+// resend).
 //
-// Both are thin: they parse a form, hand off to `@/lib/invitations/service`,
+// All three are thin: they parse a form, hand off to `@/lib/invitations/service`,
 // and turn the result into something `useActionState` can render. Every
 // authority decision — who may invite, which org they invite on behalf of,
 // whether the target's oversight slot is free, who may revoke — lives in the
@@ -30,7 +31,11 @@ import { refresh } from "next/cache";
 import { z } from "zod";
 
 import { invitationRegisterPath } from "@/lib/invitations/register-path";
-import { createInvitation, revokeInvitation } from "@/lib/invitations/service";
+import {
+  createInvitation,
+  resendInvitationEmail,
+  revokeInvitation,
+} from "@/lib/invitations/service";
 
 /** What the create form asks for. Note what is NOT here. */
 const createSchema = z.object({
@@ -52,6 +57,10 @@ const createSchema = z.object({
 
 const revokeSchema = z.object({
   invitationId: z.uuid("That is not an invitation we can revoke"),
+});
+
+const resendSchema = z.object({
+  invitationId: z.uuid("That is not an invitation we can email"),
 });
 
 export type CreateInvitationState = {
@@ -86,6 +95,13 @@ export type CreateInvitationState = {
 };
 
 export type RevokeInvitationState = { error?: string };
+
+/**
+ * A resend says one of two things and never both: it went out, or here is why
+ * it did not. There is no third "created but…" state to carry — the invitation
+ * already exists, so the send is the whole of what this action does.
+ */
+export type ResendInvitationEmailState = { error?: string; sent?: boolean };
 
 export async function createInvitationAction(
   _prevState: CreateInvitationState,
@@ -133,6 +149,44 @@ export async function createInvitationAction(
       emailSent: result.emailSent,
     },
   };
+}
+
+/**
+ * Send a pending invitation's email again — RULED 2026-08-10 (#392 / #293).
+ *
+ * Recovery, not bookkeeping: nothing is persisted by this path, so what it
+ * fixes is the invitee's empty inbox rather than the product's memory of it.
+ * Every rule it depends on is one layer down — the org scope, the pending guard
+ * inside `sendInvitationEmail`, and the resend-specific idempotency key that
+ * stops the provider deduping this against the message the create already sent
+ * for the same invitation.
+ */
+export async function resendInvitationEmailAction(
+  _prevState: ResendInvitationEmailState,
+  formData: FormData
+): Promise<ResendInvitationEmailState> {
+  const parsed = resendSchema.safeParse({
+    invitationId: formData.get("invitationId") ?? "",
+  });
+
+  if (!parsed.success) {
+    return { error: "That is not an invitation we can email" };
+  }
+
+  const result = await resendInvitationEmail(parsed.data.invitationId);
+
+  // Before the branch, and on the failure path too — deliberately. A resend
+  // writes nothing on the way to succeeding, but one refusal DOES write: an
+  // invitation whose window has closed is auto-expired before it is refused, and
+  // without this the list would keep showing "Pending" next to a row the server
+  // has just marked expired.
+  refresh();
+
+  if (!result.success) {
+    return { error: result.error };
+  }
+
+  return { sent: true };
 }
 
 export async function revokeInvitationAction(

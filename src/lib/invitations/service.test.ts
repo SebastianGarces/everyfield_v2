@@ -291,11 +291,21 @@ for (const statement of EXPORT_STATEMENTS) {
   UNCLASSIFIED.push(statement);
 }
 
-/** The four endpoints this module is allowed to have. */
+/**
+ * The five endpoints this module is allowed to have.
+ *
+ * The fifth arrived on 2026-08-10 (ruling on PR #392 / #293): `resendInvitationEmail`
+ * sends a pending invitation's email again, so a failed or missed send is
+ * recoverable. It writes no row of its own, but it IS a state change — mail
+ * leaves the building — so it goes through the same rules as the other four:
+ * the actor is minted from the session, and which invitations it may be aimed at
+ * is decided by `invitingOrgOf(actor)` inside `./core`, never by an argument.
+ */
 const LIFECYCLE_ACTIONS = [
   "acceptInvitation",
   "createInvitation",
   "declineInvitation",
+  "resendInvitationEmail",
   "revokeInvitation",
 ];
 
@@ -546,7 +556,7 @@ function importChainToCore(entry: string): string[] | null {
 const CORE_REACHING_ACTION_MODULES: ReadonlyArray<readonly [string, string]> = [
   [
     "src/lib/invitations/service.ts",
-    "the four session-minted lifecycle actions — this module is core's front door, and every other assertion in this file pins its shape",
+    "the five session-minted lifecycle actions — this module is core's front door, and every other assertion in this file pins its shape",
   ],
   [
     "src/app/(auth)/register/actions.ts",
@@ -554,7 +564,7 @@ const CORE_REACHING_ACTION_MODULES: ReadonlyArray<readonly [string, string]> = [
   ],
 ];
 
-// The surface that consumes the four actions is deliberately NOT on that list:
+// The surface that consumes the five actions is deliberately NOT on that list:
 // `(dash)/oversight/invitations/actions.ts` imports `service.ts` only, so the
 // walk stops at that `"use server"` boundary and #23 added no new reach.
 
@@ -562,14 +572,14 @@ const CORE_REACHING_ACTION_MODULES: ReadonlyArray<readonly [string, string]> = [
 // 1a. Structural — the endpoint surface, read off the real module
 // ----------------------------------------------------------------------------
 
-test("the runtime export surface is exactly the four lifecycle mutations", async () => {
+test("the runtime export surface is exactly the five lifecycle mutations", async () => {
   // THE assertion of this file. Next.js publishes one POST endpoint per export
   // of a `"use server"` module, so the module namespace IS the auth surface —
   // and unlike a regex it cannot be out-thought. `export default` shows up here
   // as the key `default`; `export { x } from "./core"` shows up as `x`; a second
   // declarator smuggled onto an `export const` line shows up as itself.
   //
-  // The four are the invitation-lifecycle mutations a user performs on their own
+  // The five are the invitation-lifecycle mutations a user performs on their own
   // behalf. The eleven exports this module used to have were the finding: reads
   // exported from a `"use server"` module are an unauthenticated data leak, and
   // `disassociateChurchFromSendingChurch(churchId)` was a state change any
@@ -695,7 +705,7 @@ test("the invitation actions do not reach the database directly", () => {
   assert.match(SERVICE_CODE, /from "\.\/core"/);
 });
 
-test("nothing but the four lifecycle mutations is an endpoint", () => {
+test("nothing but the five lifecycle mutations is an endpoint", () => {
   // The eleven exports are the finding. Reads, the association primitives and
   // the row builders are not endpoints and must not reappear here: a read
   // exported from a `"use server"` module is an unauthenticated data leak, and
@@ -1840,7 +1850,7 @@ test("an action result carries no internal user ids", () => {
   );
 });
 
-test("only the create reports an email outcome", () => {
+test("only the two sending paths report an email outcome", () => {
   // OV-003b (#293). `emailSent` is three-valued and the third value is the
   // point: `undefined` means "this action does not send email", which is a
   // different fact from `false` ("it tried and failed"). A surface that folded
@@ -1849,11 +1859,15 @@ test("only the create reports an email outcome", () => {
   //
   // Structural, because the alternative is a database: the three responses go
   // through `answered`, which builds a mutation carrying the row and nothing
-  // else, and only `createInvitationAs` — whose return type is
-  // `CreatedInvitation` — is passed to `run` unwrapped.
+  // else, and only the two SENDING paths — `createInvitationAs` and the
+  // 2026-08-10 `resendInvitationEmailAs` — are passed to `run` unwrapped.
   assert.match(
     SERVICE_CODE,
     /run\("createInvitation", \(\) => createInvitationAs\(actor, request\)\)/
+  );
+  assert.match(
+    SERVICE_CODE,
+    /run\("resendInvitationEmail", \(\) =>\s*resendInvitationEmailAs\(actor, invitationId\)\s*\)/
   );
 
   for (const action of ["accept", "decline", "revoke"]) {

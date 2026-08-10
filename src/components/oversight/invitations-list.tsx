@@ -20,7 +20,9 @@
 import { useActionState, useState } from "react";
 
 import {
+  resendInvitationEmailAction,
   revokeInvitationAction,
+  type ResendInvitationEmailState,
   type RevokeInvitationState,
 } from "@/app/(dashboard)/oversight/invitations/actions";
 import { Badge } from "@/components/ui/badge";
@@ -83,8 +85,8 @@ export function InvitationsList({ rows }: { rows: InvitationListRow[] }) {
           <CardTitle>Pending invitations</CardTitle>
           <CardDescription>
             Waiting on an answer. Anyone who can invite for your organization
-            can revoke one, which closes it immediately — the link stops
-            working.
+            can resend the email or revoke the invitation — revoking closes it
+            immediately, and the link stops working.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -144,6 +146,12 @@ function InvitationRow({ row }: { row: InvitationListRow }) {
         {row.status === "pending" && row.isOpen && (
           <CopyInviteLinkButton invitationId={row.id} />
         )}
+        {/* Pending only, and the same rule as Revoke: a resend of an answered
+            invitation is refused by the guard inside `sendInvitationEmail`
+            anyway, but offering it would be a lie. */}
+        {row.status === "pending" && (
+          <ResendEmailButton invitationId={row.id} email={row.inviteeEmail} />
+        )}
         {row.status === "pending" && (
           <RevokeButton invitationId={row.id} email={row.inviteeEmail} />
         )}
@@ -170,6 +178,60 @@ function CopyInviteLinkButton({ invitationId }: { invitationId: string }) {
     >
       {copied ? "Copied" : "Copy link"}
     </Button>
+  );
+}
+
+const initialResendState: ResendInvitationEmailState = {};
+
+/**
+ * "Resend email" — RULED 2026-08-10 (#392 / #293).
+ *
+ * The invitation email is best-effort at create time, and until this button
+ * existed a failed send was recoverable only for the seconds the create notice
+ * was on screen. Nothing is persisted by the ruling, so this row still cannot
+ * TELL you a send failed; it lets you fix it once you know, and it is equally
+ * the answer to "they say it never arrived".
+ *
+ * The outcome is transient by design — the send either happened or it did not,
+ * and the next render of this page starts from no claim at all rather than from
+ * a remembered one the product cannot actually stand behind.
+ */
+function ResendEmailButton({
+  invitationId,
+  email,
+}: {
+  invitationId: string;
+  email: string;
+}) {
+  const [state, formAction, pending] = useActionState(
+    resendInvitationEmailAction,
+    initialResendState
+  );
+
+  return (
+    <form action={formAction} className="flex items-center gap-2">
+      <input type="hidden" name="invitationId" value={invitationId} />
+      {state.error && (
+        <span role="alert" className="text-destructive text-xs">
+          {state.error}
+        </span>
+      )}
+      {state.sent && !pending && (
+        <span role="status" className="text-muted-foreground text-xs">
+          Email sent
+        </span>
+      )}
+      <Button
+        type="submit"
+        variant="outline"
+        size="sm"
+        className="cursor-pointer"
+        disabled={pending}
+      >
+        {pending ? "Sending…" : "Resend email"}
+        <span className="sr-only"> to {email}</span>
+      </Button>
+    </form>
   );
 }
 

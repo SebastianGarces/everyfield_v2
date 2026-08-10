@@ -21,8 +21,10 @@
 //      `hasValidInvitationBypass` (register) and the G3 harness import it
 //      directly; the client cannot.
 //
-// The exports here are exactly the four invitation-lifecycle mutations a user
-// performs on their own behalf. Disassociation is NOT one of them and does not
+// The exports here are exactly the five invitation-lifecycle mutations a user
+// performs on their own behalf — the four responses plus the 2026-08-10 resend,
+// which sends mail rather than writing a row and is scoped to the inviting org
+// by the same predicate the list and the revoke share. Disassociation is NOT one of them and does not
 // belong here: #274 ruled that both sides may sever, and each side's
 // authenticated wrapper ships with the surface that owns it (#277 planter,
 // #278 org admin) — see `./core` → Disassociation.
@@ -50,6 +52,7 @@ import {
   declineInvitationAs,
   invitationActorFromSession,
   invitationView,
+  resendInvitationEmailAs,
   revokeInvitationAs,
   type InvitationRequest,
   type InvitationView,
@@ -60,7 +63,8 @@ export type InvitationActionResult =
       success: true;
       invitation: InvitationView;
       /**
-       * CREATE ONLY, and three-valued on purpose (OV-003b / #293):
+       * THE TWO SENDING PATHS ONLY, and three-valued on purpose (OV-003b /
+       * #293):
        *
        *   * `true`      — the provider accepted the invitation email;
        *   * `false`     — it did not, so the invitation exists and the invitee
@@ -70,6 +74,11 @@ export type InvitationActionResult =
        *                   decline, revoke). Not the same fact as `false`, and a
        *                   surface that treated them alike would tell a planter
        *                   who just declined that an email had failed.
+       *
+       * `resendInvitationEmail` only ever reports `true` here, and that is not
+       * an oversight: a resend has no durable artefact to protect, so a refused
+       * send is a failed ACTION and comes back as `{ success: false, error }`
+       * with the reason in words (`./core` → `resendInvitationEmailAs`).
        */
       emailSent?: boolean;
     }
@@ -137,6 +146,24 @@ export async function createInvitation(
 ): Promise<InvitationActionResult> {
   const actor = invitationActorFromSession(await verifySession());
   return run("createInvitation", () => createInvitationAs(actor, request));
+}
+
+/**
+ * Send a pending invitation's email again — the recovery path for a send that
+ * failed, or never arrived (RULED 2026-08-10 on #392 / #293).
+ *
+ * Scoped to the actor's ORG by the same predicate as the list and the revoke,
+ * and it re-decides nothing about status: a revoked, accepted, declined or
+ * expired row is refused by the guard inside `sendInvitationEmail` and the
+ * refusal comes back as a message (`./core` → `resendInvitationEmailAs`).
+ */
+export async function resendInvitationEmail(
+  invitationId: string
+): Promise<InvitationActionResult> {
+  const actor = invitationActorFromSession(await verifySession());
+  return run("resendInvitationEmail", () =>
+    resendInvitationEmailAs(actor, invitationId)
+  );
 }
 
 /**
