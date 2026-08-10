@@ -73,10 +73,14 @@ export interface TaskTemplate {
 //
 // The launch-Sunday lists (phase 5) are the one place the day-offsets read
 // oddly on their own — they describe a single weekend, so they are written to
-// be imported IN launch week and land across the following days. Anchoring
-// them to the stored launch date instead is `relative_to: launch_date` in the
-// FRD, which arrives with T-020; until then a planter who imports early moves
-// them with the bulk reschedule (T-019) rather than editing nineteen rows.
+// be imported IN launch week and land across the following days.
+//
+// ANCHORING TO THE LAUNCH DATE IS NOT BUILT. The FRD's `relative_to:
+// launch_date` would date these from the stored launch day instead of the
+// import day, and NOTHING here or in T-020 does that — T-020 dates an accepted
+// checklist from the phase-transition instant, which is still an import date,
+// just an earlier one. A planter who imports early moves the set with the bulk
+// reschedule (T-019) rather than editing nineteen rows.
 // ----------------------------------------------------------------------------
 
 export const TASK_TEMPLATES: readonly TaskTemplate[] = [

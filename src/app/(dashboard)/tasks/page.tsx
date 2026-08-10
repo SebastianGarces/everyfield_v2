@@ -1,4 +1,4 @@
-import { Plus } from "lucide-react";
+import { ListChecks, Plus } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -106,6 +106,19 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
             </div>
             <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
               <TaskQuickAdd />
+              {/*
+                T-011/T-012. The catalog's standing entrance. The phase prompt
+                below offers one stage's checklists at the moment the stage
+                changes and is then gone, so without this link a planter who
+                declined it — or who wants an earlier stage's list — has no way
+                back to the catalog at all.
+              */}
+              <Button asChild variant="outline" className="cursor-pointer">
+                <Link href="/tasks/templates">
+                  <ListChecks className="mr-2 h-4 w-4" />
+                  Checklist templates
+                </Link>
+              </Button>
               <Button asChild className="cursor-pointer">
                 <Link href="/tasks/new">
                   <Plus className="mr-2 h-4 w-4" />

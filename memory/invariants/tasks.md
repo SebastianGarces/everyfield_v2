@@ -72,6 +72,16 @@ Not carried: `completionEvent`. An auto-completion hook is installed by whatever
 
 The reverse of the usual "durable marker last" rule, and deliberate, because the two failure modes are not symmetric. A successor with no completion leaves **two** open instances of one series, breaking the guarantee a planter relies on. A completion with no successor leaves a gap that reopening and re-completing repairs. We take the recoverable one, and `completeTask` swallows a recurrence failure rather than telling the planter their completed task failed to complete.
 
+## The catalog has two entrances, and the standing one is a route (T-011/T-012)
+
+**Source:** `src/app/(dashboard)/tasks/templates/page.tsx`, `src/app/(dashboard)/tasks/page.tsx`, `src/components/tasks/template-picker.tsx`, `src/app/(dashboard)/tasks/actions.ts`
+
+The phase prompt is the *timely* entrance — one stage's checklists, offered at the moment the stage changes, gone once answered. `/tasks/templates` is the *standing* one: every phase, always reachable, linked from the `/tasks` header. A planter who declined the prompt, or who wants an earlier stage's list, has no other way in, so the prompt may never be the only door.
+
+That route is also what makes `importTaskTemplateAction` legal where it lives. [`../invariants.md`](../invariants.md) → Authentication says a not-yet-wired write belongs in a sibling module with no `"use server"` directive; the action's auth shape was always right, but with the picker mounted nowhere it was still a POSTable endpoint no UI reached, and the first attempt at this track was rejected for exactly that. Unmounting the picker re-opens the finding — it does not merely lose a screen.
+
+`/tasks/templates` is a **static segment beside `/tasks/[id]`**. Delete the directory and the URL does not 404; it resolves to a task whose id is the word "templates" and answers 500, which is why `template-picker.test.ts` asserts the route file renders the picker and the `/tasks` header links to it. Rendering the component in a test proves the markup, never that a browser can ask for it.
+
 ## A phase change prompts; it never creates (T-020)
 
 **Source:** `src/lib/tasks/phase-prompt.ts`, `src/components/tasks/phase-template-prompt.tsx`, `src/lib/events/subscriptions.ts`, `src/lib/tasks/templates.ts`, `src/lib/tasks/import.ts`

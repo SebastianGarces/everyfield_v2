@@ -57,9 +57,19 @@ function spanLabel(template: TaskTemplate): string {
 
 export function TaskTemplatePicker({
   currentPhase,
+  headingLevel = "h2",
 }: {
   /** The plant's phase, used to mark the group at its stage. */
   currentPhase?: number | null;
+  /**
+   * What the catalog's own title is, in the document outline.
+   *
+   * `h2` is the embeddable default — under a page that already has a title.
+   * The standalone route at `/tasks/templates` has no other title, so it
+   * passes `h1`: a page whose only heading is an `h2` skips a level, and a
+   * page with two "Checklist templates" titles says the same thing twice.
+   */
+  headingLevel?: "h1" | "h2";
 }) {
   const [pending, startTransition] = useTransition();
   const [pressedKey, setPressedKey] = useState<string | null>(null);
@@ -83,6 +93,12 @@ export function TaskTemplatePicker({
           return;
         }
 
+        // NO ROUTER HOOK HERE, deliberately. The tasks land on /tasks and this
+        // toast could carry a link to them — but `useRouter()` throws outside a
+        // mounted app router, which costs this component the seam that renders
+        // it with `renderToStaticMarkup` and asserts `cursor-pointer` on the
+        // real markup. The breadcrumb above already goes back to Tasks; the
+        // route back is not worth the assertion.
         toast.success(
           `Added ${taskCountLabel(result.data.created)} from ${result.data.templateName}`
         );
@@ -104,12 +120,26 @@ export function TaskTemplatePicker({
     (group) => group.templates.length > 0
   );
 
+  const Heading = headingLevel;
+  // The phase headings sit one level under the catalog's own title, whatever
+  // that title is. Hard-coding `h3` skipped a level on the standalone route,
+  // where the title is the page's `h1` — a heading-level jump a screen reader
+  // reports as a missing section.
+  const GroupHeading = headingLevel === "h1" ? "h2" : "h3";
+
   return (
     <section aria-labelledby={headingId} className="space-y-8">
       <div className="space-y-2">
-        <h2 id={headingId} className="text-lg font-medium">
+        <Heading
+          id={headingId}
+          className={
+            headingLevel === "h1"
+              ? "text-3xl font-bold tracking-tight"
+              : "text-lg font-medium"
+          }
+        >
           Checklist templates
-        </h2>
+        </Heading>
         <p className="text-muted-foreground text-sm">
           Import a ready-made checklist and its tasks are created for your
           plant, with due dates counted from today.
@@ -127,7 +157,9 @@ export function TaskTemplatePicker({
         return (
           <div key={group.phase} className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-sm font-medium">{group.phaseName}</h3>
+              <GroupHeading className="text-sm font-medium">
+                {group.phaseName}
+              </GroupHeading>
               {isCurrentPhase && (
                 <Badge variant="secondary">Your stage now</Badge>
               )}

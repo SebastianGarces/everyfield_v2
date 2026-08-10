@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { createElement } from "react";
@@ -15,10 +16,18 @@ import { TaskTemplatePicker } from "./template-picker";
 // markup a browser would receive.
 // ----------------------------------------------------------------------------
 
-function render(currentPhase?: number | null): string {
+function render(
+  currentPhase?: number | null,
+  headingLevel?: "h1" | "h2"
+): string {
   return renderToStaticMarkup(
-    createElement(TaskTemplatePicker, { currentPhase })
+    createElement(TaskTemplatePicker, { currentPhase, headingLevel })
   );
+}
+
+/** Read a file of the app, by path from the repository root. */
+function sourceOf(repoPath: string): string {
+  return readFileSync(new URL(`../../../${repoPath}`, import.meta.url), "utf8");
 }
 
 /**
@@ -154,4 +163,64 @@ test("no failure region renders until something fails", () => {
   // The error belongs to the row that produced it, so nothing is announced on
   // first paint.
   assert.ok(!render(2).includes('role="alert"'));
+});
+
+test("the catalog's title is the page title on its own route", () => {
+  // The standalone route has no other heading, so an `h2` there would open the
+  // document outline at level two. Embedded, the default stays `h2`.
+  assert.match(render(2, "h1"), /<h1[^>]*>Checklist templates<\/h1>/);
+  assert.match(render(2), /<h2[^>]*>Checklist templates<\/h2>/);
+  assert.doesNotMatch(render(2), /<h1/);
+});
+
+test("the phase headings never skip a level under the title", () => {
+  // A heading jump (h1 straight to h3) is read as a missing section, and it
+  // was the defect a hard-coded `h3` produced the moment the title became h1.
+  const standalone = decode(render(2, "h1"));
+  const embedded = decode(render(2, "h2"));
+
+  for (const group of taskTemplatesByPhase()) {
+    if (group.templates.length === 0) continue;
+    assert.ok(
+      standalone.includes(`<h2 class="text-sm font-medium">${group.phaseName}`),
+      `${group.phaseName} is not an h2 under the page title`
+    );
+    assert.ok(
+      embedded.includes(`<h3 class="text-sm font-medium">${group.phaseName}`),
+      `${group.phaseName} is not an h3 under an embedded h2`
+    );
+  }
+});
+
+// ----------------------------------------------------------------------------
+// The catalog is REACHABLE. These are source assertions on purpose: whether a
+// component is served by a route is a fact about the router's file tree, and
+// no amount of rendering the component can prove it. A previous attempt shipped
+// this picker correct, tested and mounted nowhere — every browser-level
+// assertion below it passed against markup no browser could ever request.
+// ----------------------------------------------------------------------------
+
+const TEMPLATES_ROUTE = "src/app/(dashboard)/tasks/templates/page.tsx";
+
+test("a route renders the picker", () => {
+  const page = sourceOf(TEMPLATES_ROUTE);
+
+  assert.match(
+    page,
+    /<TaskTemplatePicker/,
+    `${TEMPLATES_ROUTE} must render the picker`
+  );
+  // Static segment beside `[id]`: without this file `/tasks/templates` resolves
+  // to a task whose id is the word "templates" and answers 500.
+  assert.match(page, /export default async function/);
+});
+
+test("the picker's route is linked from the task list", () => {
+  const tasksPage = sourceOf("src/app/(dashboard)/tasks/page.tsx");
+
+  assert.match(
+    tasksPage,
+    /href="\/tasks\/templates"/,
+    "the /tasks header must link to the checklist catalog"
+  );
 });

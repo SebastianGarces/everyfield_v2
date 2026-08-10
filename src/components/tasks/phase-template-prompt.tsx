@@ -47,9 +47,10 @@ const PROMPT_NOTE =
 /**
  * What "Not now" costs, stated before it is pressed.
  *
- * It promises no other route to the catalog, because the standalone picker is
- * not mounted on a route yet — copy that names a screen a planter cannot reach
- * is worse than copy that says less.
+ * It names no second route to the catalog because it does not have to: this
+ * prompt only ever renders on `/tasks`, whose header carries the "Checklist
+ * templates" link to `/tasks/templates` a few pixels above it. Repeating the
+ * destination here would be the same door labelled twice on one screen.
  */
 const DISMISS_NOTE =
   "Not now creates nothing and hides this until your next stage change.";
