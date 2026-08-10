@@ -420,6 +420,196 @@ test("a throttled plant is a deferral, a broken judge is a failure", async () =>
 });
 
 // ----------------------------------------------------------------------------
+// AC (#374): the summary says which deferral cost tokens.
+//
+// `attempted` used to be `status !== "deferred"`, which filed a plant the
+// provider refused four times and a plant the run never started under the same
+// zero. The token bill of those two is not the same number, and the Actions log
+// is the only place anyone reads it.
+// ----------------------------------------------------------------------------
+
+test("a throttled deferral counts as attempted; a stood-down one does not", async () => {
+  const clock = virtualClock();
+  // A ceiling far above what this run spends, so the only holds here are the
+  // ones the 429s install. The arithmetic below is about the retry ladder and
+  // the run budget, not about pacing.
+  const pacer = new TokenPacer({ clock, limitTokens: 1_000_000 });
+  const runBudgetMs = 60_000;
+  /** Every call that actually left for the provider, in order. */
+  const providerCalls: string[] = [];
+
+  const deps: RunAssessmentBatchDeps = {
+    maxBatch: 4,
+    pacer,
+    now: () => clock.now(),
+    runBudgetMs,
+    maxAttempts: MAX_ATTEMPTS_PER_PLANT,
+    async selectPlantsForAssessment() {
+      return plants(4);
+    },
+    async generateAssessment(churchId, _deps, run) {
+      const paced = {
+        pacer: run?.pacer ?? pacer,
+        maxAttempts: run?.maxAttempts,
+        label: churchId,
+        onRateLimit: run?.onRateLimit,
+        deadlineAt: run?.deadlineAt,
+      };
+
+      if (churchId === "church-1") {
+        // A limiter that never lets up, with a small enough hint that all four
+        // attempts fit inside the run budget: this deferral is
+        // `attempts_exhausted`, and it spent four real provider calls.
+        await runPacedCall(async () => {
+          providerCalls.push(churchId);
+          throw new APICallError({
+            message: "Rate limit reached for gpt-4o.",
+            url: "https://api.openai.com/v1/responses",
+            requestBodyValues: {},
+            statusCode: 429,
+            responseHeaders: { "retry-after-ms": "1000" },
+            isRetryable: true,
+          });
+        }, paced);
+      }
+
+      await runPacedCall(async () => {
+        providerCalls.push(churchId);
+        // church-2 is the slow judge that spends what is left of the budget,
+        // so the run stands church-3 down before starting it.
+        await clock.sleep(churchId === "church-2" ? 60_000 : 5_000);
+        return { value: churchId };
+      }, paced);
+
+      return {} as Awaited<
+        ReturnType<
+          typeof import("@/lib/phase-engine/assessment").generateAssessment
+        >
+      >;
+    },
+  };
+
+  const capture = captureConsole();
+  let summary;
+  try {
+    summary = await runAssessmentBatch(deps);
+  } finally {
+    capture.restore();
+  }
+
+  assert.equal(summary.selected, 4);
+  assert.equal(summary.assessed, 2);
+  assert.equal(summary.failed, 0);
+  assert.equal(summary.deferred, 2);
+
+  // The headline: two deferrals, and the counts tell them apart. Three plants
+  // reached the provider — the throttled one among them — and exactly one
+  // deferral cost nothing at all.
+  assert.equal(summary.attempted, 3);
+  assert.equal(summary.deferredUnattempted, 1);
+  assert.equal(summary.rateLimited, 1);
+  assert.equal(
+    summary.selected,
+    summary.skipped + summary.attempted + summary.deferredUnattempted
+  );
+
+  const throttled = summary.outcomes.find((o) => o.churchId === "church-1");
+  assert.equal(throttled?.status, "deferred");
+  assert.equal(throttled?.deferralReason, "rate_limit");
+  assert.equal(throttled?.attempted, true);
+
+  const stoodDown = summary.outcomes.find((o) => o.churchId === "church-3");
+  assert.equal(stoodDown?.status, "deferred");
+  assert.equal(stoodDown?.deferralReason, "time_budget");
+  assert.equal(stoodDown?.attempted, false);
+
+  // The provider's own view corroborates the counts rather than restating them.
+  assert.equal(
+    providerCalls.filter((id) => id === "church-1").length,
+    MAX_ATTEMPTS_PER_PLANT
+  );
+  assert.ok(
+    !providerCalls.includes("church-3"),
+    "the stood-down plant must never reach the provider"
+  );
+  assert.deepEqual(capture.errors, []);
+});
+
+test("a ladder that stops on the run deadline is a time_budget deferral that still cost a call", async () => {
+  // The case that makes `attempted` a stored flag instead of a derivation:
+  // `runPacedCall` reports `run_budget`, the run labels it `time_budget`, and
+  // `rateLimited` stays 0 — yet the provider was called. Only `attempted` says
+  // so.
+  const clock = virtualClock();
+  const pacer = new TokenPacer({ clock, limitTokens: 1_000_000 });
+  let providerCalls = 0;
+
+  const deps: RunAssessmentBatchDeps = {
+    maxBatch: 1,
+    pacer,
+    now: () => clock.now(),
+    // Spent before the first plant even starts; the loop runs it anyway,
+    // because a run that assesses nothing is worse than one that overshoots.
+    runBudgetMs: 500,
+    maxAttempts: MAX_ATTEMPTS_PER_PLANT,
+    async selectPlantsForAssessment() {
+      return plants(1);
+    },
+    async generateAssessment(churchId, _deps, run) {
+      await runPacedCall(
+        async () => {
+          providerCalls++;
+          throw new APICallError({
+            message: "Rate limit reached for gpt-4o.",
+            url: "https://api.openai.com/v1/responses",
+            requestBodyValues: {},
+            statusCode: 429,
+            responseHeaders: { "retry-after-ms": "1000" },
+            isRetryable: true,
+          });
+        },
+        {
+          pacer: run?.pacer ?? pacer,
+          maxAttempts: run?.maxAttempts,
+          label: churchId,
+          onRateLimit: run?.onRateLimit,
+          deadlineAt: run?.deadlineAt,
+        }
+      );
+      return {} as Awaited<
+        ReturnType<
+          typeof import("@/lib/phase-engine/assessment").generateAssessment
+        >
+      >;
+    },
+  };
+
+  const capture = captureConsole();
+  let summary;
+  try {
+    summary = await runAssessmentBatch(deps);
+  } finally {
+    capture.restore();
+  }
+
+  assert.equal(providerCalls, 1);
+  assert.equal(summary.deferred, 1);
+  assert.equal(summary.rateLimited, 0);
+  assert.equal(summary.outcomes[0]?.deferralReason, "time_budget");
+  // Deferred, labelled by time, and still a token cost.
+  assert.equal(summary.attempted, 1);
+  assert.equal(summary.deferredUnattempted, 0);
+  // The log says how many calls it took, so the count is checkable by hand.
+  assert.ok(
+    capture.warns.some((line) =>
+      /rate-limit deferral for church church-0 .*after 1 provider call\(s\)/.test(
+        line
+      )
+    )
+  );
+});
+
+// ----------------------------------------------------------------------------
 // AC: the run stays inside the Vercel function timeout.
 // ----------------------------------------------------------------------------
 

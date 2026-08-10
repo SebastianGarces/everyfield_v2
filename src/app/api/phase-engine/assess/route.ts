@@ -127,11 +127,19 @@ export const MAX_BATCH = 10;
  * and makes that ladder real: measured 382s against a 300s ceiling.
  *
  * With guard 2 in place the worst case past the deadline is ONE in-flight call
- * — every sleep in the run is deadline-bounded, so only the latency of the last
- * request can overshoot. 300 - 270 = 30s of headroom for one judge call, which
- * is why 270_000 is the right number and not a hopeful one. `MAX_SINGLE_WAIT_MS`
- * caps any single pacer hold at 120s on BOTH branches so an absurd Retry-After
- * hint cannot sleep through the ceiling either.
+ * — only the latency of the last request can overshoot. That holds because
+ * `runPacedCall` tests this deadline on BOTH of its retry branches, which it
+ * did not always do: until #375 the 5xx/socket-reset branch clamped only its
+ * own backoff, then looped into a `pacer.acquire()` bounded by
+ * `MAX_SINGLE_WAIT_MS` alone and finished 47s past the deadline. Read "every
+ * sleep in the run is deadline-bounded" as a property of that shared test, not
+ * as a claim about the code around it — a third retry branch that skips it
+ * breaks this comment, not just itself.
+ *
+ * 300 - 270 = 30s of headroom for one judge call, which is why 270_000 is the
+ * right number and not a hopeful one. `MAX_SINGLE_WAIT_MS` caps any single
+ * pacer hold at 120s on BOTH branches so an absurd Retry-After hint cannot
+ * sleep through the ceiling either.
  *
  * The run therefore always returns a summary instead of being killed mid-plant
  * (a killed run leaves a `pending` row nobody flips to `failed`); the plants it
@@ -142,7 +150,15 @@ export const RUN_BUDGET_MS = 270_000;
 /** Attempts per plant, including the first, before a 429 becomes a deferral. */
 export const MAX_ATTEMPTS_PER_PLANT = 4;
 
-/** Why a selected plant was not attempted in this run. */
+/**
+ * Why a selected plant produced no new assessment.
+ *
+ * NOT a statement about cost: a `time_budget` deferral is usually a plant the
+ * run never started, but `runPacedCall` also reports one when a THROTTLED
+ * plant's next retry would have crossed the deadline (`run_budget`) — and that
+ * plant already spent provider calls. `AssessOutcome.attempted` is the field
+ * that answers the cost question; this one only says what stopped us (#374).
+ */
 export type DeferralReason = "rate_limit" | "time_budget";
 
 /** Per-plant outcome, surfaced in the response body for observability. */
@@ -156,6 +172,17 @@ export interface AssessOutcome {
    * throttled run must not read as a broken judge (#36).
    */
   status: "assessed" | "failed" | "deferred";
+  /**
+   * True when the run handed this plant to the judge, so it may have spent
+   * provider calls and tokens. False ONLY for a plant the loop stood down on
+   * before starting it.
+   *
+   * Stored rather than derived because neither `status` nor `deferralReason`
+   * can answer it: a throttled plant is `deferred` after up to
+   * `MAX_ATTEMPTS_PER_PLANT` real calls, and a ladder that stopped on the run
+   * deadline is `deferred`/`time_budget` after at least one (#374).
+   */
+  attempted: boolean;
   deferralReason?: DeferralReason;
   error?: string;
 }
@@ -163,13 +190,25 @@ export interface AssessOutcome {
 /** Summary of a single cron run. */
 export interface AssessRunSummary {
   selected: number;
+  /**
+   * Plants handed to the judge — the ones that could have cost tokens. It
+   * counts throttled deferrals, because being refused four times by the
+   * provider is not the same as never having called it (#374).
+   */
   attempted: number;
   assessed: number;
   failed: number;
   /** Selected, over the cap, never attempted. */
   skipped: number;
-  /** Attempted-or-reached but stood down: throttled or out of time. */
+  /** Stood down with no new assessment: throttled or out of time. */
   deferred: number;
+  /**
+   * Subset of `deferred` that never reached the judge: the run's wall-clock
+   * budget was spent before the plant started. These cost nothing, and they are
+   * the ONLY deferrals missing from `attempted`, which makes the run's arithmetic
+   * `selected = skipped + attempted + deferredUnattempted`.
+   */
+  deferredUnattempted: number;
   /** Subset of `deferred` caused by provider throttling. */
   rateLimited: number;
   /** Milliseconds this run spent waiting on the token bucket. */
@@ -221,6 +260,13 @@ const DEFAULT_DEPS: RunAssessmentBatchDeps = {
  *
  * Rollover is identical in all three non-assessed cases (selection joins on the
  * latest COMPLETE assessment), so a deferral costs staleness, never data.
+ *
+ * The two deferrals cost very different amounts, though, and the summary says
+ * which is which: a throttled plant called the provider up to `maxAttempts`
+ * times, a stood-down plant never called it at all. `attempted` counts the
+ * first and not the second (#374) — a run reporting `attempted: 1, deferred: 9`
+ * spent nothing on those nine, and one reporting `attempted: 10` spent on all
+ * ten however few of them came back assessed.
  */
 export async function runAssessmentBatch(
   deps: RunAssessmentBatchDeps = DEFAULT_DEPS
@@ -273,6 +319,9 @@ export async function runAssessmentBatch(
           churchId: deferredPlant.churchId,
           reason: deferredPlant.reason,
           status: "deferred",
+          // The only stand-down that never reaches the provider: these plants
+          // cost nothing at all, and they are what `attempted` must exclude.
+          attempted: false,
           deferralReason: "time_budget",
         });
       }
@@ -303,6 +352,7 @@ export async function runAssessmentBatch(
         churchId: plant.churchId,
         reason: plant.reason,
         status: "assessed",
+        attempted: true,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -311,17 +361,20 @@ export async function runAssessmentBatch(
         // A ladder that stopped because the next hold would have crossed the
         // run deadline is a TIME deferral that happened to be throttled — it
         // says nothing about how hard the provider is limiting us, so it is
-        // counted apart from `rateLimited`.
+        // counted apart from `rateLimited`. It is still an ATTEMPT, though:
+        // both flavours got here from inside a real provider call.
         const deferralReason: DeferralReason =
           error.reason === "run_budget" ? "time_budget" : "rate_limit";
         console.warn(
-          `[phase-engine/assess] rate-limit deferral for church ${plant.churchId} (${plant.reason}, ${deferralReason}): ` +
+          `[phase-engine/assess] rate-limit deferral for church ${plant.churchId} (${plant.reason}, ${deferralReason}) ` +
+            `after ${error.attempts} provider call(s): ` +
             `${message} The plant stays dirty and is retried on the next run.`
         );
         outcomes.push({
           churchId: plant.churchId,
           reason: plant.reason,
           status: "deferred",
+          attempted: true,
           deferralReason,
           error: message,
         });
@@ -336,6 +389,7 @@ export async function runAssessmentBatch(
         churchId: plant.churchId,
         reason: plant.reason,
         status: "failed",
+        attempted: true,
         error: message,
       });
     }
@@ -345,11 +399,17 @@ export async function runAssessmentBatch(
 
   return {
     selected: selected.length,
-    attempted: outcomes.filter((o) => o.status !== "deferred").length,
+    // Read off the per-plant flag, never off `status`: `status !== "deferred"`
+    // once counted a throttled plant — four refused provider calls — as never
+    // attempted, alongside a plant the run never started (#374).
+    attempted: outcomes.filter((o) => o.attempted).length,
     assessed: outcomes.filter((o) => o.status === "assessed").length,
     failed: outcomes.filter((o) => o.status === "failed").length,
     skipped,
     deferred: outcomes.filter((o) => o.status === "deferred").length,
+    deferredUnattempted: outcomes.filter(
+      (o) => o.status === "deferred" && !o.attempted
+    ).length,
     rateLimited: outcomes.filter((o) => o.deferralReason === "rate_limit")
       .length,
     pacedWaitMs: stats.totalWaitMs,
