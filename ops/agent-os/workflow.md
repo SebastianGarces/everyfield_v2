@@ -42,13 +42,11 @@ flowchart TD
   end
 
   subgraph gate ["4 · The auto-merge gate"]
-    N -->|"green"| O{"risk:high?<br/>hold: true on any unit?<br/>any spec-question warning?"}
-    O -->|"clean pass"| Q["merge agent:<br/>1. append code-quality warnings as ACs to the<br/>   follow-ups rollup FIRST, then read the body back —<br/>   unconfirmed ⇒ ERRORED, never reported as shipped<br/>2. squash-merge with --auto<br/>3. ⚓ report GitHub's answer, not its own"]
+    N -->|"green"| O{"risk:high?<br/>hold: true on any unit?<br/>any spec-question warning?<br/>any unresolved review finding?"}
+    O -->|"clean pass"| Q["merge agent:<br/>1. squash-merge with --auto<br/>2. ⚓ report GitHub's answer, not its own"]
     O -->|"HOLD"| P["hold agent posts a DECISION —<br/>options to rule on, not a defect report;<br/>direction questions arrive as live prototypes"]
     Q --> R["every issue the track closes → board shows Done"]
   end
-
-  Q -.->|"the rollup takes agent:queued at ≥3 ACs —<br/>or rides the next track for its parent"| C
 
   subgraph human ["5 · The human queue — rulings, not code reviews"]
     P --> S["Sebastian rules"]
@@ -80,15 +78,18 @@ eight workstreams instead of eight times is the whole change (`product-docs/boar
 
 A **spec-question** warning means the verifier found a question about *what should have been
 built* — only a human can answer that, so the PR holds and the comment presents options to
-rule on. A **code-quality** warning is a known, tracked defect — it is appended as an unchecked AC to
-the feature parent's one **`Follow-ups — <parent title>`** rollup issue, still *before* the merge, so
-a merge cannot lose it. Only the destination changed: filing one issue per warning put 12 one-file
-fixes on the board, each demanding its own branch, build, suite, preview, CI wait and human-facing
-PR. The append is then **read back** and every appended line asserted present; if that cannot be
-confirmed the track is **ERRORED**, not reported as shipped — the same discipline as `open-pr`'s label
-read-back, and for the same reason, which is that on 2026-07-26 the narrative landed while the record
-silently did not on 2 of 8 tracks. The rollup takes `agent:queued` once it holds **3 or more**
-follow-up ACs, and joins the next track dispatched for its parent regardless of count.
+rule on. Everything decidable from the codebase alone is a review **finding** (Critical /
+structural / suggestion, per `.claude/agents/code-reviewer.md`), and findings are **fixed in the
+same pass, never filed as debt** (RULED 2026-08-10, #399). At both review sites — scoped, per
+workstream, and integration G6 — Critical and structural findings route to a fix agent and a
+re-review, capped at **2 quality rounds**; every integration round that commits re-runs
+push+assert so the preview and PR hold the fixed sha. A fix that cannot say what it did about
+each finding (`perFinding.addressed`, the per-finding analogue of `rootCauseAddressed`) is
+refused without a re-review. On exhaust the track **HOLDs with a DECISION comment** — merge as-is
+(rule the finding accepted), direct a named fix (the branch and worktree survive to apply it), or
+take it manually — never `agent:blocked`, never merge-with-findings. Suggestions never gate and
+never trigger a round. The follow-ups rollup this replaced is gone; `ops/agent-os/labels.md`
+records the removal.
 `risk:high` (schema/auth/tenancy) never auto-merges, because that is where a bad merge is
 unrecoverable.
 

@@ -187,6 +187,35 @@ const SCOPED_DOD_SCHEMA = {
         },
       },
     },
+    // The reviewer's actionable output (#399), mapped from the code-reviewer
+    // brief: Critical → "critical", structural Warnings → "structural",
+    // Suggestions → "suggestion". Critical ∪ structural are fixed IN THIS PASS
+    // by the quality rounds; suggestions never gate and never trigger a round.
+    findings: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["severity", "summary", "remedy"],
+        properties: {
+          severity: {
+            type: "string",
+            enum: ["critical", "structural", "suggestion"],
+          },
+          summary: { type: "string" },
+          detail: {
+            type: "string",
+            description:
+              "exact lines and the defect, stated so an implementer can act on it directly",
+          },
+          files: { type: "array", items: { type: "string" } },
+          remedy: {
+            type: "string",
+            description:
+              'what "fixed" looks like, concretely — the re-review verifies against this',
+          },
+        },
+      },
+    },
     failingGate: { type: "string" },
     fixInstructions: { type: "string" },
     summary: { type: "string" },
@@ -216,56 +245,47 @@ const INTEGRATE_SCHEMA = {
 };
 
 // ---------------------------------------------------------------------------
-// Folding code-quality warnings into a per-parent rollup (RULED 2026-08-05).
+// The review-fix loop (#399, RULED 2026-08-10): reviewer findings are fixed
+// IN-PASS, never filed as debt. The follow-ups rollup machinery that used to
+// live here is DELETED — existing open rollup issues belong to the separate
+// codebase-wide debt pass (`ops/agent-os/labels.md` records the removal).
 //
-// The old path filed one `agent:queued` issue per warning, and 12 of an 86-issue
-// backlog arrived that way: a contrast ratio, a docblock, a stale line in a
-// memory contract — each then demanding a branch, a hermetic build, a full test
-// suite, a preview deploy, a CI wait and a human-facing PR. One of them (#231)
-// was the loop filing an issue about its own G0 violation.
-//
-// What must NOT be lost in the change: the warnings still land BEFORE the merge,
-// so a merge cannot swallow them. An append mutates an existing body, which is
-// precisely the operation that failed silently on 2026-07-26 — so, exactly like
-// settleLabels, the agent reports what `gh issue view --json body` PRINTED and
-// the loop asserts it.
+// The cap. TWIN: verify-and-ship.js declares the same constant for the
+// integration-site loop — change one, change both.
 // ---------------------------------------------------------------------------
-const FOLLOWUP_SCHEMA = {
+const QUALITY_ROUNDS = 2;
+
+// The per-finding analogue of `rootCauseAddressed` (the #307 discipline): a
+// fix that cannot say what it did about each finding is refused before a
+// re-review is spent on it. TWIN: verify-and-ship.js — change one, change both.
+const FIX_SCHEMA = {
   type: "object",
-  additionalProperties: false,
-  required: ["followUps"],
+  required: ["committed", "filesChanged", "summary", "perFinding"],
   properties: {
-    followUps: {
+    committed: {
+      type: "boolean",
+      description: "the fix is committed on the branch",
+    },
+    filesChanged: { type: "array", items: { type: "string" } },
+    summary: { type: "string" },
+    perFinding: {
       type: "array",
       items: {
         type: "object",
-        additionalProperties: false,
-        required: ["issue", "kind", "anchor", "confirmed"],
+        required: ["finding", "addressed"],
         properties: {
-          issue: {
-            type: "integer",
-            description: "the rollup issue the AC was appended to",
+          finding: {
+            type: "string",
+            description: "the finding, restated in your own words",
           },
-          kind: { type: "string", enum: ["appended", "created"] },
-          anchor: {
+          addressed: {
             type: "string",
             description:
-              "the exact AC line written, so the loop can find it in the read-back",
-          },
-          confirmed: {
-            type: "boolean",
-            description:
-              "true ONLY if you saw this line in the body `gh issue view` printed AFTER the write",
+              "what you changed so this finding is gone, and how you proved it — or a plain 'not addressed, here is why'. Empty means the round is refused.",
           },
         },
       },
     },
-    rollupLabels: {
-      type: "array",
-      items: { type: "string" },
-      description: "labels the rollup carries after the write",
-    },
-    note: { type: "string" },
   },
 };
 const CLAIM_SCHEMA = {
@@ -936,6 +956,119 @@ The loop checks these rather than trusting you: a FRESH cut must have headSha ==
 }
 
 /**
+ * The reviewer's findings, VERBATIM — the fix agent quotes these rather than
+ * paraphrasing them, for the same reason evidenceBlock exists: a paraphrase is
+ * where a named defect becomes a vague hunch.
+ * (DUPLICATED in .claude/workflows/verify-and-ship.js — change one, change both.)
+ */
+function findingsBlock(findings) {
+  return (
+    (findings || [])
+      .map(
+        (f, i) =>
+          `--- finding ${i + 1} [${f.severity}]${f.workstream ? ` (from ${f.workstream})` : ""} ---\n` +
+          `${f.summary}\n` +
+          `${f.detail || "(no further detail given)"}\n` +
+          `Files: ${(f.files || []).join(", ") || "(none named)"}\n` +
+          `What "fixed" looks like: ${f.remedy || "(not stated)"}`
+      )
+      .join("\n\n") || "(no findings)"
+  );
+}
+
+const actionableFindings = (findings) =>
+  (findings || []).filter(
+    (f) => f?.severity === "critical" || f?.severity === "structural"
+  );
+
+/**
+ * The scoped-site review-fix loop (#399): runs only on a PASS whose actionable
+ * findings (critical ∪ structural) are non-empty — gate/AC FAILs take the
+ * existing attempt machinery untouched. One round = fix agent, then re-review.
+ * A round whose fix answers no finding COUNTS and skips the re-review (the
+ * #307 refuse-before-reviewer discipline). A re-review FAIL is a real gate
+ * failure and re-enters the attempt loop. Returns {journal, leftovers} or
+ * {gateFail}.
+ */
+async function runQualityRounds(holder, branch, wt, review, fixAgentType) {
+  const journal = [];
+  let current = actionableFindings(review.findings);
+  for (let round = 1; round <= QUALITY_ROUNDS && current.length; round++) {
+    log(
+      `🔧 ${holder.id} quality round ${round}/${QUALITY_ROUNDS}: ${current.length} actionable finding(s)`
+    );
+    const fix = await agent(
+      `You are fixing review findings on branch ${branch} in worktree ${wt} (issue(s) ${hashes(holder.issues)}). ${CONVENTIONS}
+
+The scoped verifier PASSED the gates but returned findings that are fixed IN THIS PASS — quality round ${round} of ${QUALITY_ROUNDS}. They are quoted below VERBATIM; address each one.
+
+${findingsBlock(current)}
+
+Work in ${wt} on ${branch}. Fix the findings and nothing else — stay inside this workstream's declared files. Run \`pnpm typecheck\` and the tests covering the files you touch, and commit (conventional commits). Do NOT push, do NOT open a PR, do NOT edit labels or issues, and do NOT merge — the loop integrates and ships.
+
+For EVERY finding above, fill \`perFinding\`: restate the finding and say exactly what you changed so it is addressed, with the command output proving it — or say plainly that you did not address it and why. A report whose \`perFinding\` answers nothing is refused without spending a re-review on it, exactly like an unanswered root cause. Return strictly the schema.`,
+      {
+        label: `fix:${holder.id}#r${round}`,
+        phase: "Build",
+        agentType: fixAgentType,
+        schema: FIX_SCHEMA,
+      }
+    );
+    const answered = (fix?.perFinding || []).filter((p) =>
+      String(p?.addressed || "").trim()
+    );
+    journal.push({
+      round,
+      fix: fix
+        ? {
+            summary: fix.summary,
+            filesChanged: fix.filesChanged || [],
+            perFinding: fix.perFinding || [],
+          }
+        : null,
+    });
+    if (!fix || !answered.length) {
+      log(
+        `↩️  ${holder.id} quality round ${round}: the fix answered no finding — round counts, re-review skipped, findings stand`
+      );
+      continue;
+    }
+
+    const rereview = await agent(
+      `You are the code-reviewer, re-reviewing quality round ${round}/${QUALITY_ROUNDS} on branch ${branch} in worktree ${wt} (issue(s) ${hashes(holder.issues)}). A fix agent just addressed the findings below. Re-verify ONLY those findings and the new diff — do not re-run the whole scoped DoD.
+
+The findings that were to be fixed, verbatim:
+
+${findingsBlock(current)}
+
+The fix agent's report:
+${JSON.stringify({ summary: fix.summary, filesChanged: fix.filesChanged, perFinding: fix.perFinding })}
+
+Run \`pnpm typecheck\` in ${wt} and the tests covering the changed files yourself — a fix that breaks the build or the tests is a FAIL, not a smaller finding, and a FAIL from you re-enters the attempt machinery as a real gate failure. Otherwise: re-examine each finding against the code as it now stands. A finding that is genuinely fixed disappears; one that is not comes back in \`findings\` at the same severity; a new problem the fix INTRODUCED is a finding too. Return strictly the schema, verdict PASS or PASS_WITH_WARNINGS unless a gate actually broke.`,
+      {
+        label: `re-review:${holder.id}#r${round}`,
+        phase: "Verify",
+        agentType: "code-reviewer",
+        schema: SCOPED_DOD_SCHEMA,
+      }
+    );
+    journal[journal.length - 1].reReview = rereview
+      ? { verdict: rereview.verdict, findings: rereview.findings || [] }
+      : null;
+    if (!rereview) {
+      log(
+        `↩️  ${holder.id} quality round ${round}: the re-reviewer died — missing evidence is not a fix, findings stand`
+      );
+      continue;
+    }
+    if (rereview.verdict === "FAIL")
+      return { gateFail: rereview, journal, leftovers: current };
+    current = actionableFindings(rereview.findings);
+  }
+  return { journal, leftovers: current };
+}
+
+/**
  * The #307 root-cause preamble, rendered by the PARENT and prepended verbatim
  * by every recipe (ruling mod 2: the lesson never moves into recipe files).
  * The evidence is quoted VERBATIM via evidenceBlock — a paraphrase is where a
@@ -1245,6 +1378,8 @@ Run ONLY these gates. The others (G1 hermetic build, G3 functional/preview, G4, 
 Acceptance criteria to prove:
 ${allCriteria(ws)}
 
+FINALLY — report everything else you saw in \`findings\`, because it is FIXED IN THIS PASS (#399), never filed as debt. Map your review output onto \`severity\`: Critical → \`critical\`, structural Warnings → \`structural\`, Suggestions → \`suggestion\`. Critical and structural findings go to a fix agent and a re-review in this same pass; suggestions never gate and never trigger a round. State each finding so an implementer can act on it directly: exact files and lines, the defect, and \`remedy\` — what "fixed" looks like. Anything decidable from the codebase alone is a finding — do not soften it, and do not invent findings to seem thorough; an empty list is a real answer.
+
 Default to FAIL when evidence is missing or unconvincing. Do NOT fix the code — report, and the implementer fixes. Return strictly the schema.`,
       {
         label: `verify:${ws.id}#${attempt}`,
@@ -1261,6 +1396,33 @@ Default to FAIL when evidence is missing or unconvincing. Do NOT fix the code �
       );
       continue;
     }
+
+    // -----------------------------------------------------------------------
+    // Scoped review-fix loop (#399): the verdict passed, so any actionable
+    // findings are fixed HERE, in this workstream's worktree, before the
+    // stage integrates. On exhaust with leftovers: do NOT block and do NOT
+    // keep looping — the leftovers ride into verify-and-ship as
+    // carriedFindings and force the HOLD at the auto-merge gate, where they
+    // arrive as a DECISION (the held-PR pattern), not as filed debt.
+    // -----------------------------------------------------------------------
+    const quality = await runQualityRounds(ws, branch, wt, scoped, implAgent);
+    if (quality.gateFail) {
+      report = quality.gateFail;
+      log(
+        `❌ ${ws.id} attempt ${attempt}: a quality-round re-review FAILed (${quality.gateFail.failingGate || "gate"}) — retrying`
+      );
+      continue;
+    }
+    scoped.fixRounds = quality.journal;
+    ws.unresolvedFindings = quality.leftovers.map((f) => ({
+      workstream: ws.id,
+      ...f,
+      rounds: quality.journal,
+    }));
+    if (ws.unresolvedFindings.length)
+      log(
+        `⚠️  ${ws.id}: ${ws.unresolvedFindings.length} review finding(s) unresolved after ${QUALITY_ROUNDS} quality round(s) — they will HOLD the track at the gate`
+      );
     return { ok: true, ws, branch, wt, report: scoped, attempts: attempt };
   }
 
@@ -1368,91 +1530,10 @@ Report which branches merged and which did not. A branch you could not merge cle
   return { ok: true, results: settled };
 }
 
-/**
- * Fold code-quality warnings into the parent feature's follow-up rollup, then
- * READ THE BODY BACK and assert every line landed.
- *
- * Same shape as settleLabels, for the same reason: the agent reports what
- * `gh issue view --json body` printed, the loop compares that against what it
- * asked for, and an unconfirmed write is an error rather than a footnote. The
- * pre-merge ordering guarantee is unchanged — only the destination moved from
- * one-issue-per-warning to one rollup per parent.
- */
-async function foldFollowUps(track, warnings, pr) {
-  const wanted = warnings.map(
-    (w) =>
-      `- [ ] ${w.summary}${w.files?.length ? ` (${w.files.join(", ")})` : ""}`
-  );
-  let followUps = [];
-
-  for (let attempt = 1; attempt <= LABEL_ATTEMPTS; attempt++) {
-    const reply = await agent(
-      `Record ${warnings.length} code-quality finding(s) from PR ${pr.url} on the parent feature's follow-up rollup. They must be recorded BEFORE the merge, so a merge cannot lose them.
-${
-  attempt > 1
-    ? `\nATTEMPT ${attempt}: a previous attempt did not land. These lines were NOT found in the body afterwards:\n${
-        followUps
-          .filter((f) => !f.confirmed)
-          .map((f) => `  ${f.anchor}`)
-          .join("\n") || "  (nothing was reported at all)"
-      }\nRe-apply those and read the body back again.\n`
-    : ""
-}
-1. **Find the parent.** \`gh issue view ${track.issues[0]} --json parent --jq .parent\` — the GraphQL-backed read, which is the ONLY one that works. Do NOT read the REST field (\`gh api repos/{owner}/{repo}/issues/<n> --jq .parent\`): it returns \`null\` on issues that demonstrably have a parent, and an agent that trusts it concludes the issue is an orphan. Platform work with no FRD may genuinely have none — in that case use the track's own issue as the anchor and say so in \`note\`.
-
-2. **Find or create the rollup.** One open issue per parent, titled exactly \`Follow-ups — <parent title>\`, labelled \`follow-ups\`. Search before creating: \`gh issue list --state open --label follow-ups --limit 200 --search "<parent title> in:title"\`. If it does not exist, create it with \`--label follow-ups --parent <parent>\` and a body that opens with a \`## Follow-up acceptance criteria\` heading. Do NOT give a new rollup any \`agent:*\` label yet — step 4 decides that.
-
-3. **Append**, under \`## Follow-up acceptance criteria\`, exactly these lines — verbatim, one per line, preserving the leading \`- [ ] \`:
-${wanted.map((l) => `   ${l}`).join("\n")}
-   Then, beneath each, an indented detail line naming ${pr.url} and:
-${warnings.map((w) => `   - ${w.summary} → ${w.detail || "(no detail given)"}`).join("\n")}
-   Append — never replace the body. Read the current body, add to it, write it back with \`gh issue edit <n> --body-file\`. Clobbering someone else's follow-ups to add yours is worse than failing.
-
-4. **Takeability.** Count the \`- [ ]\` items under that heading AFTER your append. If there are **3 or more**, the rollup becomes takeable: \`gh issue edit <n> --add-label agent:queued\`. Below 3 it carries NO \`agent:*\` label and waits — dispatch picks it up with the parent's next track regardless of count.
-
-5. **READ IT BACK.** \`gh issue view <n> --json body --jq .body\` and \`gh issue view <n> --json labels --jq '[.labels[].name]'\`. For each line you appended, set \`confirmed\` true ONLY if you can see that exact line in what the command printed. Report what you saw, not what you intended — the loop compares your report against what it asked for, and a false confirmation is worse than a failed write because it makes lost findings look recorded.
-
-Return strictly the schema.`,
-      {
-        label: `follow-ups:${track.id}#${attempt}`,
-        phase: "Ship",
-        // Same tier as the merge node: this writes durable state that a merge
-        // then makes permanent, and it is the last chance to not lose a finding.
-        model: "opus",
-        effort: "low",
-        schema: FOLLOWUP_SCHEMA,
-      }
-    );
-
-    followUps = reply?.followUps || [];
-    const missing = wanted.filter(
-      (line) =>
-        !followUps.some(
-          (f) => f.confirmed && f.anchor && line.includes(f.anchor.trim())
-        ) && !followUps.some((f) => f.confirmed && f.anchor === line)
-    );
-    if (!missing.length)
-      return { settled: true, followUps, attempts: attempt, missing: [] };
-
-    log(
-      `📝 ${track.id} follow-up fold did not stick on attempt ${attempt}/${LABEL_ATTEMPTS} — ${missing.length} finding(s) unconfirmed`
-    );
-    if (attempt === LABEL_ATTEMPTS)
-      return { settled: false, followUps, attempts: attempt, missing };
-  }
-  return {
-    settled: false,
-    followUps,
-    attempts: LABEL_ATTEMPTS,
-    missing: wanted,
-  };
-}
-
 async function buildTrack(track) {
   const branch = `feature/${track.id}`;
   const wt = `.claude/worktrees/bud-${track.id}`;
   let lastReport = null;
-  let followUps = [];
   // True when the last assembly repair changed things without answering the
   // root cause it was handed. The next repair prompt is told.
   let repairDodged = false;
@@ -1812,12 +1893,9 @@ return {
     merge: r.merge?.state || (AUTO_MERGE ? "held-for-review" : "not-attempted"),
     // Not decoration: "shipped" is only true of the board if this is true.
     labelsConfirmed: r.labelState?.settled === true,
-    // Where the code-quality warnings went, and whether the write was seen.
-    followUps: (r.followUps || []).map((f) => ({
-      issue: f.issue,
-      kind: f.kind,
-      anchor: f.anchor,
-    })),
+    // Findings that survived the quality rounds — each one is a DECISION
+    // waiting on the held PR, never silently merged and never filed as debt.
+    unresolvedFindings: (r.unresolvedFindings || []).map((f) => f.summary),
     heldBy: (r.warnings || [])
       .filter((w) => w.kind === "spec-question")
       .map((w) => w.summary),
@@ -1860,7 +1938,7 @@ return {
       ? `🚨 FIRST: ${errored.length} track(s) errored because their label could not be confirmed. Their PRs may be open and green while their issues still read agent:in-progress — set the labels by hand before reading anything else on the board, because until then the board is lying about them. `
       : "") +
     (AUTO_MERGE
-      ? "Your queue is ONLY the held PRs — each is held because a warning raises a question about what should have been built, so it needs a ruling rather than a code review. Auto-merged PRs need no action; their code-quality warnings were folded into their parent's follow-up rollup, which becomes takeable at 3 items or with that parent's next track."
+      ? "Your queue is ONLY the held PRs — each is held because a spec-question or an unresolved review finding needs a ruling rather than a code review; findings arrive on the PR as a DECISION menu (accept as-is, direct a named fix, or take it manually). Auto-merged PRs need no action; reviewer findings were already fixed in-pass by the quality rounds."
       : "Review the opened PRs (your queue).") +
     " For blocked issues, read the issue comment for the failing gate + evidence and decide: tighten the spec, raise budget (+Nk), or take it manually." +
     " Blocked and held tracks deliberately KEEP their worktrees — each exit comment names the path, the branch and what it holds, and `survivingWorktrees` repeats them here; merged tracks removed their own." +

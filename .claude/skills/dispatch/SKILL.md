@@ -155,10 +155,11 @@ so one failing AC no longer burns an attempt for every healthy unit beside it.
 
 **`autoMerge: true` is what dispatch adds.** It is off by default so a direct `/deliver` call cannot
 merge to `main` by surprise; a dispatch pass opts in. Under it the loop merges a track only when all
-four hold: the DoD passed **and** the required check is green, the track is not `risk:high`, no unit
-in it carries `hold: true`, and no warning was classified `spec-question`. Code-quality warnings are
-appended as unchecked ACs to the feature parent's `Follow-ups — <parent title>` rollup **before** the
-merge — they do not stall a good branch, and they no longer spawn an issue apiece. See §12 and §13 of
+five hold: the DoD passed **and** the required check is green, the track is not `risk:high`, no unit
+in it carries `hold: true`, no warning was classified `spec-question`, and no review finding survived
+the quality rounds unresolved. Reviewer findings (Critical + structural) are **fixed in the same
+pass** — fix agent, then re-review, capped at 2 rounds — and on exhaust the track HOLDs with a
+DECISION comment; the follow-ups rollup is gone (#399, RULED 2026-08-10). See §12 and §13 of
 `product-docs/board-design-2026-07.md`, `ops/agent-os/labels.md`, and `DOD_SCHEMA.warnings`.
 
 ### When to set `hold: true` on a unit

@@ -2112,6 +2112,232 @@ test("a blocked track hands its worktrees over in the exit comment", async () =>
 });
 
 // ---------------------------------------------------------------------------
+// The review-fix loop (#399) — findings are fixed IN-PASS, never filed as debt
+//
+// The reviewer's Critical and structural findings route to a fix agent and a
+// re-review, capped at QUALITY_ROUNDS = 2, at both the scoped and integration
+// sites. Exhaust → the track HOLDs with a DECISION comment (the held-PR
+// pattern) — never agent:blocked, never merge-with-findings. A fix that
+// answers no finding is refused before a re-review (the #307 discipline), and
+// a re-review FAIL re-enters the real attempt machinery.
+// ---------------------------------------------------------------------------
+
+const finding = (severity, summary) => ({
+  severity,
+  summary,
+  detail: `${summary} — exact lines`,
+  files: ["src/alpha.ts"],
+  remedy: `${summary} gone`,
+});
+
+const isScopedVerifyLabel = (l) => /^verify:\S+-s\d+w\d+#/.test(l || "");
+
+test("integration findings trigger a fix round + re-review, then the track merges", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    (prompt, opts) => {
+      const l = opts.label || "";
+      if (l.startsWith("verify:alpha#"))
+        return {
+          ...passing([]),
+          findings: [finding("critical", "tenant scope missing")],
+        };
+      return replyShip(passing([]))(prompt, opts);
+    },
+    { autoMerge: true }
+  );
+  const fix = calls.find((c) => c.label === "fix:alpha#r1");
+  const rr = calls.find((c) => c.label === "re-review:alpha#r1");
+  assert.ok(fix, "critical findings on a PASS go to a fix agent in the same pass");
+  assert.ok(
+    fix.prompt.includes("tenant scope missing"),
+    "the finding is quoted verbatim, not paraphrased"
+  );
+  assert.ok(rr, "the fix is re-reviewed, never trusted");
+  assert.ok(calls.indexOf(fix) < calls.indexOf(rr));
+  assert.equal(
+    calls.filter((c) => c.label?.startsWith("push:alpha")).length,
+    2,
+    "a committing fix round re-runs push+assert — the preview-sha discipline extends to fix commits"
+  );
+  assert.ok(
+    calls.some((c) => c.label === "merge:alpha"),
+    "resolved findings do not hold the merge"
+  );
+  assert.equal(result.shipped.length, 1);
+});
+
+test("findings that survive 2 quality rounds HOLD with a DECISION — never merge, never block", async () => {
+  const stubborn = finding("structural", "spaghetti mode bolted into checkout");
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    (prompt, opts) => {
+      const l = opts.label || "";
+      if (l.startsWith("verify:alpha#"))
+        return { ...passing([]), findings: [stubborn] };
+      if (l.startsWith("re-review:alpha#"))
+        return { ...passing([]), findings: [stubborn] };
+      return replyShip(passing([]))(prompt, opts);
+    },
+    { autoMerge: true }
+  );
+  assert.equal(
+    calls.filter((c) => c.label?.startsWith("fix:alpha#")).length,
+    2,
+    "the cap is 2 quality rounds — on exhaust the loop stops, it does not keep looping"
+  );
+  assert.ok(
+    !calls.some((c) => c.label === "merge:alpha"),
+    "never merge-with-findings: unresolved findings make holds non-empty, so the merge agent is unreachable"
+  );
+  assert.equal(
+    labelCalls(calls, "blocked").length,
+    0,
+    "never agent:blocked — the track exits through the normal held path"
+  );
+  const hold = calls.find((c) => c.label === "hold:alpha");
+  assert.ok(hold, "the hold materializes at the auto-merge gate");
+  assert.match(hold.prompt, /unresolved review finding/);
+  assert.match(hold.prompt, /merge as-is — rule the finding accepted/);
+  assert.match(hold.prompt, /direct a named fix/);
+  assert.ok(
+    hold.prompt.includes("spaghetti mode bolted into checkout"),
+    "the finding reaches the DECISION verbatim"
+  );
+  assert.equal(result.shipped[0].merge, "held-for-review");
+});
+
+test("a fix that answers no finding is refused before a re-review is spent", async () => {
+  const { calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    (prompt, opts) => {
+      const l = opts.label || "";
+      if (l.startsWith("verify:alpha#"))
+        return { ...passing([]), findings: [finding("critical", "x")] };
+      if (l.startsWith("fix:"))
+        return {
+          committed: false,
+          filesChanged: [],
+          summary: "did some things",
+          perFinding: [],
+        };
+      return replyShip(passing([]))(prompt, opts);
+    },
+    { autoMerge: true }
+  );
+  assert.equal(
+    calls.filter((c) => c.label?.startsWith("fix:alpha#")).length,
+    2,
+    "the answerless round still counts against the cap"
+  );
+  assert.equal(
+    calls.filter((c) => c.label?.startsWith("re-review:")).length,
+    0,
+    "refuse-before-reviewer — the #307 discipline, per finding"
+  );
+  assert.ok(
+    calls.some((c) => c.label === "hold:alpha"),
+    "the findings stand and hold the gate"
+  );
+});
+
+test("suggestions never gate and never trigger a fix round", async () => {
+  const { calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    (prompt, opts) =>
+      (opts.label || "").startsWith("verify:alpha#")
+        ? {
+            ...passing([]),
+            findings: [finding("suggestion", "could rename this")],
+          }
+        : replyShip(passing([]))(prompt, opts),
+    { autoMerge: true }
+  );
+  assert.equal(calls.filter((c) => c.label?.startsWith("fix:")).length, 0);
+  assert.ok(calls.some((c) => c.label === "merge:alpha"));
+});
+
+test("scoped findings run the loop in the workstream, and leftovers force the hold at the gate", async () => {
+  const stubborn = finding("critical", "db.transaction on neon-http");
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    (prompt, opts) => {
+      const l = opts.label || "";
+      if (isScopedVerifyLabel(l))
+        return { ...passing([]), findings: [stubborn] };
+      if (l.startsWith("re-review:alpha-"))
+        return { ...passing([]), findings: [stubborn] };
+      return replyShip(passing([]))(prompt, opts);
+    },
+    { autoMerge: true }
+  );
+  assert.ok(
+    calls.some((c) => c.label === "fix:alpha-s0w1#r1"),
+    "the scoped loop runs in the workstream's own worktree"
+  );
+  assert.equal(
+    labelCalls(calls, "blocked").length,
+    0,
+    "scoped exhaust does NOT block — ok:true with unresolvedFindings"
+  );
+  const shipCall = calls.find(
+    (c) => c.kind === "workflow" && c.scriptPath.endsWith("verify-and-ship.js")
+  );
+  assert.equal(
+    shipCall.args.carriedFindings.length,
+    1,
+    "leftovers ride into verify-and-ship as carriedFindings"
+  );
+  assert.equal(shipCall.args.carriedFindings[0].workstream, "alpha-s0w1");
+  assert.ok(
+    calls.some((c) => c.label === "hold:alpha"),
+    "carried findings force the HOLD at the auto-merge gate"
+  );
+  assert.equal(result.shipped[0].merge, "held-for-review");
+  assert.deepEqual(result.shipped[0].unresolvedFindings, [
+    "db.transaction on neon-http",
+  ]);
+});
+
+test("a re-review FAIL routes into the attempt machinery, not the quality counter", async () => {
+  let rr = 0;
+  const { calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    (prompt, opts) => {
+      const l = opts.label || "";
+      if (isScopedVerifyLabel(l))
+        return {
+          ...passing([]),
+          findings: rr === 0 ? [finding("critical", "broken import")] : [],
+        };
+      if (l.startsWith("re-review:alpha-") && ++rr === 1)
+        return {
+          verdict: "FAIL",
+          gates: [
+            {
+              id: "G2-subset",
+              status: "FAIL",
+              evidence: "the fix broke the suite",
+            },
+          ],
+          acceptanceCriteria: [],
+          failingGate: "G2-subset",
+          fixInstructions: "un-break it",
+          summary: "the fix broke the tests",
+        };
+      return replyShip(passing([]))(prompt, opts);
+    },
+    { autoMerge: true, maxAttempts: 2 }
+  );
+  const impls = calls.filter((c) => c.label?.startsWith("impl:"));
+  assert.equal(impls.length, 2, "the FAIL spends a real workstream attempt");
+  assert.ok(
+    impls[1].prompt.includes("the fix broke the suite"),
+    "the retry sees the re-review's evidence verbatim, through the normal retryBlock path"
+  );
+});
+
+// ---------------------------------------------------------------------------
 // The two file-level mechanisms: the parent idiom and the format hook.
 //
 // Neither is exercised by a stubbed run — one is a doctrine about which command
