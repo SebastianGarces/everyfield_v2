@@ -63,6 +63,7 @@ One flow, four steps. Step 1 creates the church; steps 2–4 update it.
 - Journey stage: a picker of the seven phases described in plain language (from the Product Brief's phase table — "Discovery: discerning the calling…" through "Post-Launch"), not raw phase numbers. Includes "not sure — start me at the beginning" (→ phase 0).
 - The floating wiki Guide is wired for this step via the existing contextual guide config, surfacing phase-discernment articles so a planter unsure of their stage can read before picking.
 - Selecting a stage sets the church's current phase **as an initial declaration**: recorded in phase history as a declaration, distinguishable from a real transition, with no intermediate transitions synthesized.
+- **The declaration is one-shot** (ruled 2026-08-09, #306): if a stage is already recorded, a second submit is refused with a message naming the recorded stage and where to change it — and confirming that the launch date (the durable half of the form) did save. A declaration is never silently overwritten and never half-applies.
 
 ### Step 4 — Bring your people
 
