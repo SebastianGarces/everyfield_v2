@@ -309,6 +309,33 @@ test("the analytics page passes the parsed filter to BOTH figure queries", () =>
   assert.match(source, /getMeetingSummaryStats\(user\.churchId, typeArg\)/);
 });
 
+test("the analytics chart never wraps a design token in hsl()", () => {
+  // AC17, and the reason this track was rejected once. This project's tokens
+  // are OKLCH values, NOT the bare "H S% L%" triples the shadcn docs assume:
+  // `--primary: oklch(0.224 0.011 151.267)`. Substituting that into
+  // `hsl(var(--primary))` produces `hsl(oklch(...))`, which is invalid AT
+  // COMPUTED-VALUE TIME — so it does not fall back, it drops the declaration.
+  // Measured on the preview, the trend line's computed `stroke` was literally
+  // "none" (no line drawn, in EITHER theme) and its dots fell back to
+  // rgb(0, 0, 0) on a near-black dark background.
+  //
+  // The token must therefore be used directly: `var(--primary)`. It carries a
+  // full color function, and it is theme-aware in the right direction — ink on
+  // light, near-white on dark — so one declaration reads in both themes.
+  const source = readFileSync(
+    path.join(process.cwd(), "src/components/meetings/analytics-charts.tsx"),
+    "utf8"
+  );
+
+  assert.doesNotMatch(
+    source,
+    /hsl\(\s*var\(--/,
+    "a token wrapped in hsl() computes to an invalid color and the mark disappears"
+  );
+  assert.match(source, /stroke="var\(--primary\)"/);
+  assert.match(source, /dot=\{\{ fill: "var\(--primary\)" \}\}/);
+});
+
 test("every filter control carries cursor-pointer", () => {
   // Project hard rule (AGENTS.md): every clickable element.
   const source = readFileSync(
