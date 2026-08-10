@@ -7,7 +7,6 @@ import { personActivities } from "@/db/schema/people";
 import { deriveAttendanceType } from "@/lib/meetings/attendance-type";
 import type {
   ChurchMeeting,
-  Invitation,
   Location,
   MeetingAttendanceRecord,
   MeetingChecklistItem,
@@ -22,18 +21,12 @@ import {
   attendeeQuickAddSchema,
   checklistItemUpdateSchema,
   evaluationCreateSchema,
-  invitationCreateSchema,
-  invitationStatusUpdateSchema,
   locationCreateSchema,
   locationUpdateSchema,
   meetingCreateSchema,
   meetingStatusSchema,
   meetingUpdateSchema,
 } from "@/lib/validations/meetings";
-import {
-  createInvitation,
-  updateInvitationStatus,
-} from "@/lib/meetings/invitations";
 import { createLocation, updateLocation } from "@/lib/meetings/locations";
 import {
   addAttendee,
@@ -580,98 +573,6 @@ export async function recordAttendanceBatchAction(
     return {
       success: false,
       error: "An unexpected error occurred while recording attendance",
-    };
-  }
-}
-
-// ============================================================================
-// Invitation Actions
-// ============================================================================
-
-export async function createInvitationAction(
-  meetingId: string,
-  formData: FormData
-): Promise<ActionResult<Invitation>> {
-  try {
-    const { user } = await verifySession();
-    if (!user.churchId)
-      return {
-        success: false,
-        error: "You must be associated with a church to create invitations",
-      };
-
-    const rawData = formDataToObject(formData);
-    const parsed = invitationCreateSchema.safeParse(rawData);
-    if (!parsed.success) {
-      return {
-        success: false,
-        error: "Validation failed",
-        fieldErrors: parsed.error.flatten().fieldErrors as Record<
-          string,
-          string[]
-        >,
-      };
-    }
-
-    const invitation = await createInvitation(
-      user.churchId,
-      meetingId,
-      parsed.data
-    );
-    revalidatePath("/meetings");
-    revalidatePath(`/meetings/${meetingId}`);
-    revalidatePath(`/meetings/${meetingId}/invitations`);
-    return { success: true, data: invitation };
-  } catch (error) {
-    console.error("createInvitationAction error:", error);
-    if (error instanceof Error && error.message === "Unauthorized")
-      return { success: false, error: "You must be logged in" };
-    return {
-      success: false,
-      error: "An unexpected error occurred while creating the invitation",
-    };
-  }
-}
-
-export async function updateInvitationStatusAction(
-  invitationId: string,
-  formData: FormData
-): Promise<ActionResult<Invitation>> {
-  try {
-    const { user } = await verifySession();
-    if (!user.churchId)
-      return {
-        success: false,
-        error:
-          "You must be associated with a church to update invitation status",
-      };
-
-    const rawData = formDataToObject(formData);
-    const parsed = invitationStatusUpdateSchema.safeParse(rawData);
-    if (!parsed.success)
-      return { success: false, error: "Invalid invitation status" };
-
-    const invitation = await updateInvitationStatus(
-      user.churchId,
-      invitationId,
-      parsed.data.status
-    );
-    revalidatePath("/meetings");
-    return { success: true, data: invitation };
-  } catch (error) {
-    console.error("updateInvitationStatusAction error:", error);
-    if (error instanceof Error) {
-      if (error.message === "Unauthorized")
-        return { success: false, error: "You must be logged in" };
-      if (error.message === "Invitation not found")
-        return {
-          success: false,
-          error: "Invitation not found or has been deleted",
-        };
-    }
-    return {
-      success: false,
-      error: "An unexpected error occurred while updating invitation status",
     };
   }
 }
