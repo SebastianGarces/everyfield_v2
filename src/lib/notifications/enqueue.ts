@@ -509,6 +509,18 @@ const accessColumns = {
  * notification is filed under the SENDING CHURCH and the network is a different
  * tenant (the same rule that keeps a plant's rows out of its network's feed).
  *
+ * THE ROLE IS PAIRED WITH THE ANCHOR KIND — #304 ruling 4, item 6 (HR4
+ * 2026-08-09). "An oversight role" was too coarse for this question. Both org
+ * FKs live on the same `users` row, so a `network_admin` who also carries a
+ * `sending_church_id` — a founder who administers both, or any row where the
+ * second FK was set once and never cleared — passed the sending-church arm and
+ * received that sending church's own notifications. That is the hierarchy walk
+ * the paragraph above says this is not, arriving through the role instead of
+ * through the FK. So each anchor kind now names EXACTLY the role that
+ * administers it: `sending_church` → `sending_church_admin`, `network` →
+ * `network_admin`. `listOversightAdminsOfOrg` pairs them the same way, so the
+ * fan-out and the per-recipient gate answer one question rather than two.
+ *
  * Pure, and exported so it can be tested over the whole role × org domain.
  */
 export function recipientAdministersOrg(
@@ -518,8 +530,10 @@ export function recipientAdministersOrg(
   if (!isOversightUser(recipient)) return false;
 
   return anchor.type === "sending_church"
-    ? recipient.sendingChurchId === anchor.orgId
-    : recipient.sendingNetworkId === anchor.orgId;
+    ? recipient.role === "sending_church_admin" &&
+        recipient.sendingChurchId === anchor.orgId
+    : recipient.role === "network_admin" &&
+        recipient.sendingNetworkId === anchor.orgId;
 }
 
 export const dbEnqueueDeps: EnqueueDeps = {

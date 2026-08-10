@@ -862,22 +862,41 @@ export async function listOversightRecipientsForChurch(
  * A projection, not `select()`, for the same reason as
  * `listOversightRecipientsForChurch`: this answers "who", so `password_hash`
  * must not enter application memory.
+ *
+ * EACH ARM PAIRS THE FK WITH ITS OWN ROLE — #304 ruling 4, item 6 (HR4
+ * 2026-08-09). A single `inArray(role, OVERSIGHT_ROLES)` outside the `or` meant
+ * "any oversight role reachable by either FK", which is not the audience: a
+ * `network_admin` row that also carries a `sending_church_id` came back as a
+ * recipient of that SENDING CHURCH's own milestone. The role now sits inside
+ * the arm that names the FK, so the sending-church arm returns sending-church
+ * admins and the network arm returns network admins — the same predicate
+ * `recipientAdministersOrg` applies per recipient at enqueue time. Two places
+ * ask the question; they must not answer it differently.
  */
 export async function listOversightAdminsOfOrg(
   org: OversightOrg
 ): Promise<OversightRecipient[]> {
   const reaches = [
     org.sendingChurchId
-      ? eq(users.sendingChurchId, org.sendingChurchId)
+      ? and(
+          eq(users.sendingChurchId, org.sendingChurchId),
+          eq(users.role, "sending_church_admin")
+        )
       : undefined,
     org.sendingNetworkId
-      ? eq(users.sendingNetworkId, org.sendingNetworkId)
+      ? and(
+          eq(users.sendingNetworkId, org.sendingNetworkId),
+          eq(users.role, "network_admin")
+        )
       : undefined,
   ].filter((clause) => clause !== undefined);
 
   // No org named — no recipients. Never "everyone".
   if (reaches.length === 0) return [];
 
+  // `OVERSIGHT_ROLES` stays as a floor even though each arm already names its
+  // role: it is the statement that this query never returns a church-level
+  // account, and it survives an arm being edited.
   return db
     .select({ id: users.id })
     .from(users)

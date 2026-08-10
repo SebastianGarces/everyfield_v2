@@ -502,6 +502,33 @@ export function resolveInvitationRequest(
  * branch refused: it is the *reachability after resolution* that makes a
  * message an oracle, so a rule added to `resolveInvitationRequest` later is
  * collapsed by construction rather than needing to be found.
+ *
+ * ----------------------------------------------------------------------------
+ * THE REQUEST IS BUILT FROM SCRATCH — #304 ruling 4, fix 1 (HR4 2026-08-09)
+ * ----------------------------------------------------------------------------
+ *
+ * This used to compose `{ ...request, ...target }`, and a spread is not a
+ * filter. `target` is `{}` for an address nobody has registered, and an object
+ * spread contributes no keys at all in that case — so a caller-supplied
+ * `targetChurchId` survived untouched and became the invitation's target. That
+ * is a FORGED TARGET: `createInvitation` is a `"use server"` endpoint whose
+ * parameter is a typed object, `InvitationRequest` declares both target keys
+ * (they are the channel `resolveInvitationTarget` writes on), and TypeScript
+ * erases at runtime. A POST naming any plant's uuid with an unregistered
+ * address enrolled that plant into the caller's org the moment its planter
+ * pressed Accept. `target.targetChurchId ?? request.targetChurchId` would not
+ * have closed it either, and neither does a partial spread — the only shape
+ * with no hole is naming every key from the SERVER-RESOLVED value.
+ *
+ * So the object below is constructed key by key: the two target keys come from
+ * `target` and from nowhere else, and the two request keys are the only things
+ * a client is ever allowed to say (`InvitationRequest`). A key added to that
+ * type later is not silently forwarded — it has to be written in here, which is
+ * the point.
+ *
+ * `createInvitationAs` ALSO strips them at its call site, so the hole is closed
+ * twice: defence in depth, because this function is exported and a future
+ * caller may not read this comment.
  */
 export function resolveInvitationForResolvedTarget(
   actor: InvitationActor,
@@ -511,7 +538,12 @@ export function resolveInvitationForResolvedTarget(
   const targeted =
     target.targetChurchId != null || target.targetSendingChurchId != null;
 
-  const resolved = resolveInvitationRequest(actor, { ...request, ...target });
+  const resolved = resolveInvitationRequest(actor, {
+    inviteeEmail: request.inviteeEmail,
+    inviteAs: request.inviteAs,
+    targetChurchId: target.targetChurchId,
+    targetSendingChurchId: target.targetSendingChurchId,
+  });
   if (resolved.ok || !targeted) return resolved;
 
   return { ok: false, error: ACCOUNT_NOT_INVITABLE_MESSAGE };
@@ -740,30 +772,88 @@ async function heldOversightSlot(
 }
 
 /**
- * Refuse a second pending invitation from the SAME org to the same address.
+ * "Aimed at THIS organization", whatever address named it — `null` when the
+ * invitation has no target at all (the open path).
+ *
+ * WHY IT EXISTS — #304 ruling 4, fix 4 (HR4 2026-08-09). Both create-time caps
+ * counted rows by `invitee_email`, and an ADDRESS is not the thing being
+ * protected. The banner OV-005 puts on a screen belongs to an ORGANIZATION, and
+ * an organization can have several accounts that resolve to it — every
+ * `sending_church_admin` of one sending church maps to that sending church, and
+ * a plant may carry more than one `planter`. So an org that had exhausted its
+ * three attempts at `admin1@…` simply typed `admin2@…` and had a fresh
+ * allowance against the same target, and `assertNoDuplicatePending` never saw
+ * the standing invitation either. Counting the resolved TARGET as well as the
+ * address is what makes both caps count the thing they defend.
+ */
+export function targetReachFilter(
+  values: Pick<ResolvedInvitation, "targetChurchId" | "targetSendingChurchId">
+): SQL | null {
+  if (values.targetChurchId) {
+    return eq(organizationInvitations.targetChurchId, values.targetChurchId);
+  }
+  if (values.targetSendingChurchId) {
+    return eq(
+      organizationInvitations.targetSendingChurchId,
+      values.targetSendingChurchId
+    );
+  }
+  return null;
+}
+
+/**
+ * Refuse a second pending invitation from the SAME org to the same address, or
+ * — since #304 ruling 4 — to the same resolved TARGET under any address.
+ *
  * Not a concurrency guard (invariants.md) — a duplicate is a nuisance, not a
  * correctness problem, and both would still be refused at accept time by the
  * slot rule. It exists so the list stays readable.
+ *
+ * TWO SCOPES, TWO MESSAGES, and the split is the oracle rule rather than a
+ * style choice. The ADDRESS scope describes the actor's own org state about an
+ * address the actor itself typed — a pending invitation their own list already
+ * shows them — so it stays legible. The TARGET scope can only fire on a
+ * DIFFERENT address that resolved to the same organization, and saying so would
+ * tell the admin that two addresses they typed belong to one org: a fact about
+ * somebody else's tenancy, which is exactly what ruling 2 collapsed. It refuses
+ * with the one message (`ACCOUNT_NOT_INVITABLE_MESSAGE`).
  */
 async function assertNoDuplicatePending(
   values: ResolvedInvitation
 ): Promise<void> {
-  const [duplicate] = await db
+  const ourPending = and(
+    eq(organizationInvitations.status, "pending"),
+    invitingOrgFilter(values.sendingChurchId, values.sendingNetworkId)
+  );
+
+  const [duplicateAddress] = await db
     .select({ id: organizationInvitations.id })
     .from(organizationInvitations)
     .where(
       and(
-        eq(organizationInvitations.status, "pending"),
-        eq(organizationInvitations.inviteeEmail, values.inviteeEmail),
-        invitingOrgFilter(values.sendingChurchId, values.sendingNetworkId)
+        ourPending,
+        eq(organizationInvitations.inviteeEmail, values.inviteeEmail)
       )
     )
     .limit(1);
 
-  if (duplicate) {
+  if (duplicateAddress) {
     throw new InvitationError(
       "There is already a pending invitation to that address — revoke it first"
     );
+  }
+
+  const reach = targetReachFilter(values);
+  if (!reach) return;
+
+  const [duplicateTarget] = await db
+    .select({ id: organizationInvitations.id })
+    .from(organizationInvitations)
+    .where(and(ourPending, reach))
+    .limit(1);
+
+  if (duplicateTarget) {
+    throw new InvitationError(ACCOUNT_NOT_INVITABLE_MESSAGE);
   }
 }
 
@@ -810,6 +900,33 @@ export function invitesFromOrgToAddressQuery(
 }
 
 /**
+ * The same cap, counted against the resolved TARGET instead of the address
+ * (#304 ruling 4, fix 4). Exported for the same reason as the address query:
+ * a test reads its bound parameters rather than trusting the prose.
+ *
+ * `reach` is the caller's, not this function's, so there is exactly one place
+ * that decides what "aimed at this org" means (`targetReachFilter`) and no way
+ * for the cap and the duplicate check to drift into two definitions of it.
+ */
+export function invitesFromOrgToTargetQuery(
+  values: Pick<ResolvedInvitation, "sendingChurchId" | "sendingNetworkId">,
+  reach: SQL,
+  since: Date
+) {
+  return db
+    .select({ id: organizationInvitations.id })
+    .from(organizationInvitations)
+    .where(
+      and(
+        reach,
+        invitingOrgFilter(values.sendingChurchId, values.sendingNetworkId),
+        gte(organizationInvitations.createdAt, since)
+      )
+    )
+    .limit(INVITES_PER_INVITEE_PER_WINDOW);
+}
+
+/**
  * Refuse an org that has already addressed this person
  * `INVITES_PER_INVITEE_PER_WINDOW` times inside the window (#304, HR4).
  *
@@ -844,6 +961,34 @@ export async function assertInviteRateLimit(
 
   if (recent.length >= INVITES_PER_INVITEE_PER_WINDOW) {
     throw new InvitationError(INVITE_RATE_LIMITED_MESSAGE);
+  }
+
+  // ------------------------------------------------------------------------
+  // THE SECOND SCOPE — the resolved TARGET (#304 ruling 4, fix 4).
+  //
+  // Skipped entirely on the pre-resolution call, where `values` carries no
+  // target: that call runs BEFORE the address is looked up and must stay
+  // incapable of describing a stranger (see the note above), and a filter over
+  // two null keys has nothing to count.
+  //
+  // On the post-resolution call it is the cap that actually holds, because an
+  // organization is what the banner lands on and one organization can be
+  // reached through several addresses. It refuses with the ONE message rather
+  // than the legible one — a target-scoped refusal fires on an address the org
+  // has NOT exhausted, so naming the cap would say "this address and one you
+  // already used belong to the same organization" (ruling 2).
+  // ------------------------------------------------------------------------
+  const reach = targetReachFilter(values);
+  if (!reach) return;
+
+  const recentToTarget = await invitesFromOrgToTargetQuery(
+    values,
+    reach,
+    since
+  );
+
+  if (recentToTarget.length >= INVITES_PER_INVITEE_PER_WINDOW) {
+    throw new InvitationError(ACCOUNT_NOT_INVITABLE_MESSAGE);
   }
 }
 
@@ -889,21 +1034,36 @@ export async function createInvitationAs(
     throw new InvitationError(resolvedTarget.error);
   }
 
+  // THE CALLER'S TARGET KEYS DO NOT TRAVEL (#304 ruling 4, fix 1 — defence in
+  // depth). `request` is a typed object that arrived at a `"use server"`
+  // endpoint, so at runtime it may carry anything, `targetChurchId` included —
+  // and `InvitationRequest` declares that key because the SERVER writes on it.
+  // The two fields below are the whole of what a client may say; the target
+  // comes from `resolvedTarget`, which was derived from the address alone.
+  // `resolveInvitationForResolvedTarget` rebuilds its request from scratch as
+  // well, so a forged key is dropped twice on this path.
   const resolved = resolveInvitationForResolvedTarget(
     actor,
-    { ...request, inviteeEmail },
+    { inviteeEmail, inviteAs },
     resolvedTarget.target
   );
   if (!resolved.ok) {
     throw new InvitationError(resolved.error);
   }
 
+  // THE CAP AGAIN, now that there is a target to count (#304 ruling 4, fix 4).
+  // The pass above ran on the address alone and is what keeps the legible
+  // rate-limit message off the post-resolution path; this pass adds the scope
+  // that actually matters — an ORG cannot be re-addressed through a second one
+  // of its admins' accounts — and refuses with the one message.
+  await assertInviteRateLimit(resolved.values);
+
   // Everything below is also post-resolution, and audited to the same rule:
   // `assertTargetSlotFree` composes no message of its own (`slotRefusalMessage`
   // is its whole vocabulary, and it is the one constant), and
-  // `assertNoDuplicatePending` reports the ACTOR's own org state — a pending
-  // invitation their own list already shows them — so it names nothing about
-  // the account behind the address.
+  // `assertNoDuplicatePending` reports the ACTOR's own org state under the
+  // address it typed — a pending invitation their own list already shows them —
+  // while its TARGET scope speaks with the one message.
   await assertTargetSlotFree(resolved.values);
   await assertNoDuplicatePending(resolved.values);
 

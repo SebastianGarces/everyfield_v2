@@ -52,9 +52,11 @@ import {
 } from "@/db/schema";
 import { getAccessibleChurchIds } from "@/lib/auth/access";
 import {
+  ACCOUNT_NOT_INVITABLE_MESSAGE,
   NOT_AUTHORIZED_MESSAGE,
   PLANT_NOT_IN_ORG_MESSAGE,
   acceptInvitationAs,
+  createInvitationAs,
   declineInvitationAs,
   insertInvitation,
   NOT_IN_A_NETWORK_MESSAGE,
@@ -64,8 +66,10 @@ import {
   leaveOversightOrgAs,
   removePlantFromOrgAs,
   type InvitationActor,
+  type InvitationRequest,
 } from "@/lib/invitations/core";
 import { getAssociationHistoryForOrg } from "@/lib/invitations/history";
+import { listOversightAdminsOfOrg } from "@/lib/notifications/oversight";
 import { listOversightPlants } from "@/lib/oversight/read";
 
 const KEEP = process.argv.includes("--keep");
@@ -200,6 +204,26 @@ async function main() {
         role: "team_member" as const,
         sendingChurchId: sendingChurch.id,
       },
+      // A SECOND admin of the SAME sending church. §9's bypass needs two
+      // addresses that resolve to one organization — which is the whole reason
+      // an address-scoped cap was not the cap (#304 ruling 4, fix 4).
+      {
+        email: address("sc-admin-2"),
+        passwordHash: "x",
+        role: "sending_church_admin" as const,
+        sendingChurchId: sendingChurch.id,
+      },
+      // A NETWORK admin carrying a stray `sending_church_id`. Both org FKs live
+      // on one `users` row, and this row is the one item 6 exists for: under
+      // "any oversight role" it qualified as an admin of the SENDING CHURCH and
+      // received that org's own notifications.
+      {
+        email: address("dual-fk-net-admin"),
+        passwordHash: "x",
+        role: "network_admin" as const,
+        sendingNetworkId: otherNetwork.id,
+        sendingChurchId: sendingChurch.id,
+      },
     ])
     .returning();
 
@@ -211,6 +235,8 @@ async function main() {
     otherScAdmin,
     otherNetAdmin,
     scTeammate,
+    scAdmin2,
+    dualFkNetAdmin,
   ] = seeded;
 
   id("planter", planter.id);
@@ -220,6 +246,8 @@ async function main() {
   id("other sending church admin", otherScAdmin.id);
   id("other network admin", otherNetAdmin.id);
   id("team member (sending ch.)", scTeammate.id);
+  id("sending church admin #2", scAdmin2.id);
+  id("network admin w/ stray SC fk", dualFkNetAdmin.id);
 
   await db
     .insert(churchPrivacySettings)
@@ -606,10 +634,141 @@ async function main() {
     );
     ok("a repeated sever is refused and writes no second audit row");
 
+    // ------------------------------------------------------------------------
+    console.log("\n--- 9. ruling 4: the HR4 security fixes, on real rows ---");
+    // ------------------------------------------------------------------------
+    //
+    // Every assertion below goes through `createInvitationAs` — the same
+    // function `createInvitation` calls once it has minted an actor — so these
+    // are the forged requests themselves, not a description of them.
+    //
+    // By this point in the run the plant holds NEITHER oversight FK and the
+    // sending church has left its network, so every slot the section aims at is
+    // free. A refusal here is therefore the fix and never a slot collision.
+    // ------------------------------------------------------------------------
+
+    // FIX 1 — the forged target. `otherNetAdmin` invites an address nobody has
+    // registered, and names this run's plant in the request. Before the fix the
+    // spread let that key through: the invitation was written with
+    // `target_church_id = plant.id`, the planter saw a real invitation from an
+    // org they never heard of, and Accept enrolled the plant.
+    const forgedAddress = address("forged-open");
+    const forged = await createInvitationAs(actorFor(otherNetAdmin), {
+      inviteeEmail: forgedAddress,
+      inviteAs: "church",
+      targetChurchId: plant.id,
+      targetSendingChurchId: sendingChurch.id,
+    } as InvitationRequest);
+    createdInvitationIds.push(forged.id);
+    id("forged-target invitation", forged.id);
+
+    assert.equal(forged.targetChurchId, null);
+    assert.equal(forged.targetSendingChurchId, null);
+    assert.equal(forged.type, "church_to_network");
+    assert.equal(forged.sendingNetworkId, otherNetwork.id);
+    ok("a caller-supplied target is dropped: the row is an OPEN invitation");
+
+    // …and the plant is untouched by it. The FK is what an accept would have
+    // written, so its being null is the property that matters.
+    const afterForgery = await plantRow(plant.id);
+    assert.equal(afterForgery.sendingNetworkId, null);
+    assert.equal(afterForgery.sendingChurchId, null);
+    ok("the named plant gained no association from the forged request");
+
+    // FIX 4 — the cap counts the TARGET, not the address. Two addresses, one
+    // organization: `scAdmin` and `scAdmin2` both resolve to this run's sending
+    // church, which is how an org used to buy a fresh allowance by typing a
+    // colleague's email.
+    //
+    // First, the duplicate check. One pending invitation aimed at the sending
+    // church makes a second one — under the OTHER address — a duplicate.
+    const firstTargeted = await createInvitationAs(actorFor(otherNetAdmin), {
+      inviteeEmail: scAdmin.email,
+      inviteAs: "sending_church",
+    });
+    createdInvitationIds.push(firstTargeted.id);
+    id("targeted invitation #1", firstTargeted.id);
+    assert.equal(firstTargeted.targetSendingChurchId, sendingChurch.id);
+
+    assert.equal(
+      await refusal(
+        createInvitationAs(actorFor(otherNetAdmin), {
+          inviteeEmail: scAdmin2.email,
+          inviteAs: "sending_church",
+        })
+      ),
+      ACCOUNT_NOT_INVITABLE_MESSAGE
+    );
+    ok("a second address for the SAME org is a duplicate, in the one message");
+
+    // Now the rate cap. Answering clears the duplicate but must NOT refund the
+    // allowance — the abuse is a decline–reinvite loop, so a declined row still
+    // counts. Three rows aimed at this sending church, spread over the two
+    // addresses, and the fourth attempt is refused even though its own address
+    // has been used only once.
+    await declineInvitationAs(actorFor(scAdmin), firstTargeted.id);
+
+    const secondTargeted = await createInvitationAs(actorFor(otherNetAdmin), {
+      inviteeEmail: scAdmin2.email,
+      inviteAs: "sending_church",
+    });
+    createdInvitationIds.push(secondTargeted.id);
+    id("targeted invitation #2", secondTargeted.id);
+    await declineInvitationAs(actorFor(scAdmin2), secondTargeted.id);
+
+    const thirdTargeted = await createInvitationAs(actorFor(otherNetAdmin), {
+      inviteeEmail: scAdmin.email,
+      inviteAs: "sending_church",
+    });
+    createdInvitationIds.push(thirdTargeted.id);
+    id("targeted invitation #3", thirdTargeted.id);
+    await declineInvitationAs(actorFor(scAdmin), thirdTargeted.id);
+
+    assert.equal(
+      await refusal(
+        createInvitationAs(actorFor(otherNetAdmin), {
+          inviteeEmail: scAdmin2.email,
+          inviteAs: "sending_church",
+        })
+      ),
+      ACCOUNT_NOT_INVITABLE_MESSAGE
+    );
+    ok("the 4th invitation to one ORG is capped, across two addresses");
+
+    // ITEM 6 — the audience of an org's own milestone is the role that
+    // administers THAT KIND of org. `dualFkNetAdmin` is a network admin of
+    // `otherNetwork` carrying a stray `sending_church_id` for this run's
+    // sending church.
+    const scAudience = await listOversightAdminsOfOrg({
+      sendingChurchId: sendingChurch.id,
+      sendingNetworkId: null,
+    });
+    const scAudienceIds = scAudience.map((row) => row.id);
+
+    assert.ok(scAudienceIds.includes(scAdmin.id));
+    assert.ok(scAudienceIds.includes(scAdmin2.id));
+    assert.ok(
+      !scAudienceIds.includes(dualFkNetAdmin.id),
+      "a network admin with a stray sending_church_id is not this org's admin"
+    );
+    // …and the church-level member of the sending church never was.
+    assert.ok(!scAudienceIds.includes(scTeammate.id));
+    ok("a sending church's audience is its OWN admins, by role and by FK");
+
+    const netAudience = await listOversightAdminsOfOrg({
+      sendingChurchId: null,
+      sendingNetworkId: otherNetwork.id,
+    });
+    const netAudienceIds = netAudience.map((row) => row.id);
+    assert.ok(netAudienceIds.includes(dualFkNetAdmin.id));
+    assert.ok(netAudienceIds.includes(otherNetAdmin.id));
+    ok("…and the same row IS an admin of the network it actually administers");
+
     console.log(
       "\nALL ASSERTIONS PASSED — #304 WS3's audit-row and milestone clauses are" +
-        "\nnow REQUIRED by this harness (ruling #351, migration 0035), and OV-013's" +
-        "\naudited sever is exercised end to end."
+        "\nnow REQUIRED by this harness (ruling #351, migration 0035), OV-013's" +
+        "\naudited sever is exercised end to end, and ruling 4's HR4 fixes are" +
+        "\nexercised as real forged requests (§9)."
     );
   } finally {
     if (KEEP) {
@@ -620,11 +779,18 @@ async function main() {
     console.log("\n--- cleanup (deletes ONLY the rows above) ---");
     await db.delete(notifications).where(eq(notifications.churchId, plant.id));
     // The ORG-ANCHORED rows this run wrote (#304 WS3): they carry no
-    // `church_id`, so the delete above cannot reach them. Scoped to the network
-    // THIS run created, so it still touches nothing it did not make.
+    // `church_id`, so the delete above cannot reach them. Scoped to the two
+    // networks and the sending church THIS run created, so it still touches
+    // nothing it did not make. §9's declines are anchored to `otherNetwork`.
     await db
       .delete(notifications)
-      .where(eq(notifications.anchorOrgId, network.id));
+      .where(
+        inArray(notifications.anchorOrgId, [
+          network.id,
+          otherNetwork.id,
+          sendingChurch.id,
+        ])
+      );
     await db
       .delete(associationEvents)
       .where(eq(associationEvents.churchId, plant.id));

@@ -21,9 +21,9 @@ import {
 } from "./queries";
 
 // ============================================================================
-// THE NOTIFICATION ANCHOR (#304 WS3, ruling #351, migration 0033).
+// THE NOTIFICATION ANCHOR (#304 WS3, ruling #351, migration 0035).
 //
-// Until 0033 every notification was about a plant and `church_id` was NOT NULL.
+// Until 0035 every notification was about a plant and `church_id` was NOT NULL.
 // The events WS3 adds — a sending church accepting, declining or leaving a
 // NETWORK's invitation — name no plant, so they were composed and then dropped.
 // #351 ruled for a generalized anchor on the ONE table rather than a parallel
@@ -56,7 +56,7 @@ const SCHEMA_CODE = readFileSync(
 const MIGRATION = readFileSync(
   path.join(
     process.cwd(),
-    "src/db/migrations/0033_association_subject_and_notification_anchor.sql"
+    "src/db/migrations/0035_association_subject_and_notification_anchor.sql"
   ),
   "utf8"
 );
@@ -359,6 +359,111 @@ test("only an oversight admin OF the anchored org may be notified", () => {
       orgAnchor("network", NETWORK)
     ),
     false
+  );
+});
+
+test("each anchor kind admits exactly the role that administers it", () => {
+  // #304 ruling 4, item 6. "An oversight role" was too coarse. Both org FKs
+  // live on the SAME `users` row, so a `network_admin` who also carries a
+  // `sending_church_id` — a founder who administers both, or a row where the
+  // second FK was set once and never cleared — passed the sending-church arm
+  // and received that sending church's own notifications. That is the
+  // hierarchy walk the invariant forbids, arriving through the role rather
+  // than through the FK.
+  const dualFk = user({
+    role: "network_admin",
+    sendingNetworkId: NETWORK,
+    sendingChurchId: SENDING_CHURCH,
+  });
+
+  assert.equal(
+    recipientAdministersOrg(dualFk, orgAnchor("network", NETWORK)),
+    true
+  );
+  assert.equal(
+    recipientAdministersOrg(
+      dualFk,
+      orgAnchor("sending_church", SENDING_CHURCH)
+    ),
+    false
+  );
+
+  // The mirror image: a sending-church admin carrying a network FK.
+  const dualFkOther = user({
+    role: "sending_church_admin",
+    sendingChurchId: SENDING_CHURCH,
+    sendingNetworkId: NETWORK,
+  });
+
+  assert.equal(
+    recipientAdministersOrg(
+      dualFkOther,
+      orgAnchor("sending_church", SENDING_CHURCH)
+    ),
+    true
+  );
+  assert.equal(
+    recipientAdministersOrg(dualFkOther, orgAnchor("network", NETWORK)),
+    false
+  );
+
+  // The whole role × anchor domain, enumerated: for each anchor kind exactly
+  // ONE role qualifies, whatever FKs the row carries. A role added to the
+  // product later fails this rather than defaulting into an audience.
+  const everyRole = [
+    "planter",
+    "team_member",
+    "coach",
+    "sending_church_admin",
+    "network_admin",
+  ] as const;
+
+  for (const role of everyRole) {
+    const carriesBoth = user({
+      role,
+      churchId: CHURCH,
+      sendingChurchId: SENDING_CHURCH,
+      sendingNetworkId: NETWORK,
+    });
+
+    assert.equal(
+      recipientAdministersOrg(
+        carriesBoth,
+        orgAnchor("sending_church", SENDING_CHURCH)
+      ),
+      role === "sending_church_admin",
+      `sending_church anchor / ${role}`
+    );
+    assert.equal(
+      recipientAdministersOrg(carriesBoth, orgAnchor("network", NETWORK)),
+      role === "network_admin",
+      `network anchor / ${role}`
+    );
+  }
+});
+
+test("the fan-out asks the same question the per-recipient gate does", () => {
+  // Two places decide who administers an org — `listOversightAdminsOfOrg`
+  // (which composes the audience) and `recipientAdministersOrg` (which vets
+  // each one). They must not answer differently: an audience that is wider
+  // than the gate produces silent drops, and one that is narrower produces
+  // notifications nobody was told about. The role now sits INSIDE each arm.
+  const oversightCode = readFileSync(
+    path.join(process.cwd(), "src/lib/notifications/oversight.ts"),
+    "utf8"
+  );
+  const fn = oversightCode.slice(
+    oversightCode.indexOf("export async function listOversightAdminsOfOrg")
+  );
+  const reaches = fn.slice(0, fn.indexOf("if (reaches.length === 0)"));
+
+  assert.match(
+    reaches,
+    /eq\(users\.sendingChurchId, org\.sendingChurchId\),\s*eq\(users\.role, "sending_church_admin"\)/
+  );
+  assert.match(
+    reaches,
+    /eq\(users\.sendingNetworkId, org\.sendingNetworkId\),\s*eq\(users\.role, "network_admin"\)/
   );
 });
 

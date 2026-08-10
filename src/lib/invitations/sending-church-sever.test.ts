@@ -17,8 +17,8 @@ import {
 // OV-013 — A SENDING CHURCH LEAVES ITS NETWORK (#304 WS3, ruling #351).
 //
 // The third member of the #274 sever family, and the one that could not ship
-// until migration 0033. #274 requires three things of any sever — a
-// type-to-confirm, a notification, an `association_events` row — and until 0033
+// until migration 0035. #274 requires three things of any sever — a
+// type-to-confirm, a notification, an `association_events` row — and until 0035
 // that table made a CHURCH its mandatory subject, so this sever had nowhere to
 // be recorded. Shipping the button then would have been "a sever with no record
 // of who ended it", which is the one thing the ruling forbids.

@@ -53,22 +53,32 @@ const revokeSchema = z.object({
 export type CreateInvitationState = {
   error?: string;
   /**
-   * Set on success. `inviteePath` is the `/register?invitation=…` link, and it
-   * is NULL for a TARGETED invitation (#304, HR4 2026-08-09).
+   * Set on success, and it carries the ADDRESS THE ADMIN TYPED and nothing
+   * else.
    *
-   * The 2026-08-04 ruling that refused every address with an account was
-   * repealed by #304, so this action now creates two shapes. An OPEN
-   * invitation's link IS the delivery mechanism: it carries the token to
-   * `/register`, where the invitee's organization is created and bound in one
-   * request. A TARGETED one goes to somebody who already has an account and
-   * therefore cannot register again — handing their admin that link has them
-   * send a dead end, and the invitee answers from `/settings/association`
-   * instead.
+   * ----------------------------------------------------------------------
+   * WHY THERE IS NO `inviteePath` — #304 ruling 4, item 5 (RULED 2026-08-09)
+   * ----------------------------------------------------------------------
    *
-   * Null rather than absent, so the two cases are one exhaustive check at the
-   * single place that renders them.
+   * This used to return `/register?invitation=…` for an OPEN invitation and
+   * `null` for a TARGETED one, and the notice branched on it: one branch said
+   * "they already have an EveryField account", the other handed over a
+   * registration link. Both halves are the same disclosure. Ruling 2 collapsed
+   * every REFUSAL on an email-resolved target to one message precisely so an
+   * authenticated admin could not probe addresses for account existence — and
+   * the SUCCESS path answered the identical question, in plainer words, for
+   * every address that was not refused. Two shapes in this payload is an
+   * oracle whether or not any component renders the difference, because the
+   * payload itself crosses the wire.
+   *
+   * So there is one shape and one message. The success notice never asserts
+   * whether an account exists, and this surface renders no `/register` link at
+   * all. An open invitation's token still works — `/register?invitation=<id>`
+   * is unchanged, and it is what an invitation EMAIL will carry — it is simply
+   * not something this screen tells an admin, because telling them is the
+   * disclosure.
    */
-  created?: { inviteePath: string | null; inviteeEmail: string };
+  created?: { inviteeEmail: string };
 };
 
 export type RevokeInvitationState = { error?: string };
@@ -103,20 +113,14 @@ export async function createInvitationAction(
 
   refresh();
 
-  // TARGETED or OPEN, read off the row the server just wrote rather than
-  // guessed from the address: `resolveInvitationTarget` is the only thing that
-  // knows, and it answered inside the service. A row with either target set
-  // names an organization that already exists, whose admin/planter answers it
-  // in-app — so there is no registration for a link to carry.
-  const targeted =
-    result.invitation.targetChurchId !== null ||
-    result.invitation.targetSendingChurchId !== null;
-
+  // ONE SHAPE, WHATEVER WAS CREATED (#304 ruling 4, item 5). Nothing derived
+  // from `result.invitation.targetChurchId` / `targetSendingChurchId` may reach
+  // the client: those two columns are the server's answer to "does this address
+  // already have an account", and an admin who can tell the two success
+  // responses apart has the enumeration oracle back. The row's own address is
+  // echoed — the admin typed it — with the parsed value as the fallback.
   return {
     created: {
-      inviteePath: targeted
-        ? null
-        : `/register?invitation=${result.invitation.id}`,
       inviteeEmail: result.invitation.inviteeEmail ?? parsed.data.inviteeEmail,
     },
   };

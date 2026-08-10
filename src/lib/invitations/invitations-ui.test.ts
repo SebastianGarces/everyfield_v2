@@ -775,61 +775,74 @@ test("the mismatch message says which address the invitation is for", () => {
 });
 
 // ----------------------------------------------------------------------------
-// 9. The success notice may only offer a link that works (#304, HR4 2026-08-09)
+// 9. The success notice NEVER asserts whether an account exists
+//    (#304 ruling 4 item 5, RULED 2026-08-09 — supersedes the HR4 fix that
+//    branched the notice)
 // ----------------------------------------------------------------------------
+//
+// The earlier revision returned `/register?invitation=…` for an OPEN invitation
+// and `null` for a TARGETED one, and rendered a different notice for each. That
+// is the enumeration oracle ruling 2 closed on the REFUSAL path, reopened on the
+// success path where it costs an attacker no error at all. The ruling: one
+// neutral message for both, and no register link on this surface.
 
-test("a targeted invitation is created with no register link at all", () => {
+test("the create action returns one success shape, carrying no target signal", () => {
   const action = code(INVITATIONS_ACTIONS);
 
-  // The distinction is read off the ROW the server just wrote, never guessed
-  // from the address: `resolveInvitationTarget` is the only thing that knows
-  // whether an account was found, and it answered inside the service.
-  assert.match(action, /result\.invitation\.targetChurchId !== null/);
-  assert.match(action, /result\.invitation\.targetSendingChurchId !== null/);
-  assert.match(action, /inviteePath: targeted\s*\?\s*null/);
+  // The two columns that answer "does this address already have an account" are
+  // the server's alone. Nothing derived from either may be composed into the
+  // response — not a boolean, not a nullable path.
+  assert.doesNotMatch(action, /result\.invitation\.targetChurchId/);
+  assert.doesNotMatch(action, /result\.invitation\.targetSendingChurchId/);
+  assert.doesNotMatch(action, /inviteePath/);
 
-  // …and the type says null is possible, so the surface cannot forget the case.
-  assert.match(
-    action,
-    /created\?: \{ inviteePath: string \| null; inviteeEmail: string \}/
-  );
+  // …and the state type has no key for one to come back in, so a future edit
+  // has to change the contract rather than slip a field through it.
+  assert.match(action, /created\?: \{ inviteeEmail: string \}/);
 });
 
-test("the notice branches on the null path rather than rendering a dead link", () => {
+test("the create surface renders no register link and no branch", () => {
   const form = code(CREATE_FORM);
 
-  // `/register` is the ONE place that link goes, and somebody who already has
-  // an account cannot register again — so a targeted invitation's admin was
-  // previously handed a dead end to forward, with a Copy button on it.
-  assert.match(form, /created\.inviteePath === null/);
+  // No branch on the created shape: one message for both kinds of invitation.
+  assert.doesNotMatch(form, /inviteePath/);
+  assert.doesNotMatch(form, /InviteLink/);
 
-  // The link, the URL and the clipboard all live in the branch that has a path.
-  const link = form.slice(form.indexOf("function InviteLink"));
-  assert.match(link, /navigator\.clipboard\.writeText/);
-  assert.match(link, /window\.location\.origin/);
+  // The link, its URL composition and the clipboard control are all gone from
+  // this surface — `/register` is the invitee's own path, not something an
+  // admin is handed to forward.
+  assert.doesNotMatch(form, /register\?invitation=/);
+  assert.doesNotMatch(form, /clipboard/);
+  assert.doesNotMatch(form, /location\.origin/);
 
-  // Nothing outside that component composes the register URL, so the null case
-  // cannot reach one by another route.
-  const outsideLink = form.slice(0, form.indexOf("function InviteLink"));
-  assert.doesNotMatch(outsideLink, /clipboard/);
-  assert.doesNotMatch(outsideLink, /location\.origin/);
-
-  // The copy for a targeted invitation says where the answer will happen. An
-  // admin who is told "created" and given nothing to do is the failure this
-  // branch exists to prevent.
-  assert.match(form, /waiting for them in their own settings/);
+  // The one message. It is true whether or not the address has an account, and
+  // it names neither.
+  assert.match(form, /This invitation is answered inside EveryField\./);
+  assert.doesNotMatch(form, /already have an EveryField account/);
 });
 
-test("the register path is still handed over for an OPEN invitation", () => {
-  // The other half of the branch, and the one that must not regress: with no
-  // account behind the address the link IS the delivery mechanism — email
-  // delivery is not part of this surface yet.
-  assert.match(
-    code(INVITATIONS_ACTIONS),
-    /\/register\?invitation=\$\{result\.invitation\.id\}/
-  );
-  assert.match(
-    code(CREATE_FORM),
-    /<InviteLink path=\{created\.inviteePath\} \/>/
-  );
+test("no copy on the create surface claims an account does or does not exist", () => {
+  // Comments stripped, JSX text kept: the disclosure would be in a rendered
+  // sentence, and the comment RECORDING the removed sentence must not be what
+  // fails the test (the same reason `code()` exists).
+  const rendered = code(CREATE_FORM).split(
+    "export function InvitationCreateForm"
+  )[1];
+
+  for (const tell of [
+    /they already have/i,
+    /has not signed up/i,
+    /creates their account/i,
+    /no link to send/i,
+  ]) {
+    assert.doesNotMatch(rendered, tell, String(tell));
+  }
+});
+
+test("the register token wire is untouched by the notice ruling", () => {
+  // What item 5 removed is the ADMIN-FACING link, not the token. `/register`
+  // still redeems an open invitation — it is what an invitation email will
+  // carry — so the register surface's own binding must not have moved.
+  assert.match(code(REGISTER_ACTIONS), /invitation/i);
+  assert.match(code(REGISTER_FORM), /invitation/i);
 });
