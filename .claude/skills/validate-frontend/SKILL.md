@@ -73,6 +73,7 @@ Feed these back into the `definition-of-done` report:
   "acResults": [{ "ac": "...", "status": "PASS|FAIL", "assertion": "evaluate() === expected", "screenshot": "<ref>" }],
   "consoleErrors": [],
   "lighthouse": { "accessibility": 96, "performance": 82, "bestPractices": 100 },
+  "browserClosed": true,
   "notes": "..."
 }
 ```
@@ -84,7 +85,15 @@ Feed these back into the `definition-of-done` report:
 - **Real flow, real data.** Use the seeded DB and real navigation; don't stub the thing you're validating.
 - **Never localhost.** It serves `main`. A pass obtained there is a pass for someone else's code.
 - **Leave it clean.** The preview writes to the shared development database — prefer reading, and
-  clean up what you create. `browser_close` the page when done so the next track starts fresh.
+  clean up what you create.
+- **Teardown is part of the gate — on PASS and on FAIL alike.** The LAST browser action of this
+  skill, before writing the report: Playwright → `browser_close`; chrome-devtools → `list_pages`,
+  then `close_page` every page you opened. The report's `"browserClosed": true` asserts you did it;
+  a report without that field is incomplete and the gate is not passed. Why this is a hard rule: a
+  leaked browser outlives the agent, and across a looped dispatch pass the leaks accumulate until
+  the machine is out of RAM (this froze the host on 2026-08-09). The pass-boundary sweep
+  (`scripts/cleanup-mcp-browsers.sh`) is the backstop for agents that die mid-run — it is not a
+  substitute for closing your own browser.
 - **No screenshot litter.** Evidence screenshots live in the scratchpad and the PR body only. If
   any `.png` landed in the working tree during validation, delete it before the track ends —
   `git status` must show no stray images.

@@ -159,6 +159,15 @@ the gate open — that is the entire point of the loop.
 - Each push builds a new deployment with a new hash. Re-run `preview-url.sh` after every push — an
   old URL keeps serving the old code and will happily "prove" a fix that is not there.
 
+## Teardown (mandatory, PASS or FAIL)
+
+The last browser action of a validation run is closing what it opened: Playwright →
+`browser_close`; chrome-devtools → `list_pages`, then `close_page` for every page you created.
+This is not tidiness — the browser outlives the agent, and a long dispatch pass that leaks one
+browser per verification exhausts the machine's RAM (it froze the host on 2026-08-09). The
+pass-boundary sweep (`scripts/cleanup-mcp-browsers.sh`) only catches agents that died before
+teardown; a live agent closes its own browser.
+
 ## When you cannot validate
 
 Say so explicitly, in the PR, with the reason. An honest ⏳ is worth more than a ✅ that means
