@@ -414,6 +414,15 @@ export async function declinePhaseTemplatePrompt(input: {
  * of the import would not do it: both racers pass it, which is the shape
  * `memory/invariants.md` → Transactions names as *not* a concurrency guard.
  *
+ * THE ANSWER IS PER TRANSITION, NOT PER CHECKLIST. A planter who ticks two of
+ * three checklists answers the whole transition: the claim is keyed by
+ * `transition_id` alone, so the third is not offered here again, and the only
+ * way back to it is `/tasks/templates`. Per-checklist answers were not chosen —
+ * they would need a row per offer and would leave a prompt half-alive, still on
+ * screen after it had been answered. Because the cost of unticking is therefore
+ * real and invisible from the button, the prompt copy states it out loud
+ * (`phase-template-prompt.tsx` → `UNTICK_NOTE`, ruled 2026-08-10 round 2).
+ *
  * Returns `null` when there is nothing to accept — no live prompt, or no
  * requested key survived the filter. The caller treats `null` as "leave the
  * prompt up": nothing was created and nothing has been answered.

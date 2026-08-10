@@ -198,6 +198,88 @@ test("a phase whose catalog is empty renders nothing at all", () => {
   );
 });
 
+test("the prompt states what unticking costs, and where the checklist stays", () => {
+  // Round 2 of the PR #393 review. The answer is one row per TRANSITION, so
+  // unticking is not "later" — it is "not here again". The planter cannot infer
+  // that from a checkbox, so the copy says it, and points at the one route that
+  // still has the checklist.
+  const html = render();
+  const text = textOf(html);
+
+  assert.ok(
+    text.includes(
+      "Unticked checklists are not offered again for this stage change"
+    ),
+    "the prompt does not say that unticking is final for this transition"
+  );
+  assert.ok(
+    text.includes("You can still import them at any time from"),
+    "the prompt does not say the unticked checklists remain available"
+  );
+  assert.ok(
+    html.includes('href="/tasks/templates"'),
+    "the untick note does not link to the standing catalog route"
+  );
+});
+
+test("the untick consequence is read before the checklist it applies to", () => {
+  // Said after the boxes, it is a correction rather than a warning.
+  const html = render();
+  const notePosition = html.indexOf(
+    "Unticked checklists are not offered again"
+  );
+  const firstCheckbox = html.indexOf('type="checkbox"');
+
+  assert.ok(notePosition >= 0 && firstCheckbox >= 0);
+  assert.ok(
+    notePosition < firstCheckbox,
+    "the untick note renders below the boxes it is about"
+  );
+});
+
+test("the fine print is not a fourth lead paragraph", () => {
+  // Verifier warning 5: three muted `text-sm` paragraphs were already a wall,
+  // and round 2 added a sentence. The standing policy therefore drops to `xs`
+  // fine print, so the lead keeps exactly two muted `text-sm` paragraphs.
+  const html = render();
+  // The preamble only — the checklist rows below carry `text-sm` descriptions
+  // of their own, and those are content, not notes.
+  const preamble = html.slice(0, html.indexOf("<form"));
+  const leadParagraphs =
+    preamble.match(/<p class="text-muted-foreground text-sm">/g) ?? [];
+
+  assert.equal(
+    leadParagraphs.length,
+    2,
+    "the prompt's lead should be two muted paragraphs, not a stack of them"
+  );
+
+  // Both standing notes live in the one fine-print block, which opens after
+  // the last lead paragraph and is the only `text-xs` container in the form.
+  const finePrint = html.indexOf(
+    '<div class="text-muted-foreground space-y-1 text-xs">'
+  );
+  assert.ok(finePrint >= 0, "the fine-print block is missing");
+
+  for (const note of [
+    "Imported tasks are added as new tasks",
+    "Not now creates nothing",
+  ]) {
+    const index = html.indexOf(note);
+    assert.ok(index >= 0, `${note} is missing`);
+    assert.ok(index > finePrint, `${note} is not inside the fine print`);
+  }
+});
+
+test("the fine print is stated above the buttons it describes", () => {
+  const html = render();
+
+  assert.ok(
+    html.indexOf("Not now creates nothing") < html.indexOf("<button"),
+    "the fine print renders after the press it is meant to inform"
+  );
+});
+
 test("the prompt states the import policy before the press", () => {
   // AC5 allows either behaviour so long as the surface says which. The catalog
   // has said it since T-011; the prompt did not, and a repeat here is 22–26

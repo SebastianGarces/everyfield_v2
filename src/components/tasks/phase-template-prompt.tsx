@@ -1,5 +1,6 @@
 import { refresh, revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
+import Link from "next/link";
 
 import { PhaseTemplatePromptControls } from "@/components/tasks/phase-template-prompt-controls";
 import { getCurrentSession } from "@/lib/auth/session";
@@ -41,13 +42,44 @@ import {
 // keyed by the transition id, so a decline follows the planter to their phone
 // and a second accept — another device, cleared cookies, a double press — adds
 // nothing. The cookie below is kept as a fast path and nothing more.
+//
+// THE COPY IS IN TWO REGISTERS, NOT ONE STACK OF NOTES (ruled 2026-08-10 round
+// 2, PR #393). Round 2 required the prompt to say what unticking COSTS — the
+// answer covers the whole transition, so an unticked checklist is not offered
+// again for this stage change — and to name where it stays reachable. Said as a
+// fourth muted paragraph on top of three others, that sentence would have
+// landed in a wall nobody reads. So the card says the two things that change
+// what the planter TICKS in the lead paragraphs, at `text-sm`, and drops the
+// standing policy (what an import does, what "Not now" does) to `text-xs` fine
+// print directly above the buttons. Two sizes, four sentences, one wall fewer.
 // ============================================================================
 
 const PROMPT_HEADING_ID = "phase-template-prompt-heading";
 
+/** The standing route to the catalog, and the words the `/tasks` header uses
+ *  for it — the same door should not have two names on one screen. */
+const TEMPLATES_ROUTE = "/tasks/templates";
+const TEMPLATES_LINK_LABEL = "Checklist templates";
+
 /** Said where the press happens: this creates work, and only what is ticked. */
 const PROMPT_NOTE =
   "Nothing is created until you press Import. Untick anything you do not want.";
+
+/**
+ * What unticking COSTS, said next to the ticks (ruled 2026-08-10, round 2).
+ *
+ * The answer is one row per transition, not one per checklist: accepting two of
+ * three checklists answers the transition, and the third is never offered here
+ * again. Before this, "Untick anything you do not want" read as a pause — take
+ * these now, that one later — and the prompt was gone by later. So the
+ * consequence is stated in the same breath as the instruction, and the sentence
+ * ends at the catalog link rather than at a dead end: nothing is lost, it just
+ * moves to a route the planter has to walk to.
+ *
+ * Ends mid-sentence on purpose — the link completes it in the markup below.
+ */
+const UNTICK_NOTE =
+  "Unticked checklists are not offered again for this stage change. You can still import them at any time from";
 
 /**
  * The import policy, stated on the surface where the press happens.
@@ -58,6 +90,10 @@ const PROMPT_NOTE =
  * longer behave the same: importing from the catalog again really does add a
  * second copy, while this prompt can be answered exactly once per stage change.
  * Both halves are said, because both are surprising on their own.
+ *
+ * Fine print, and BELOW the checklist rather than above it: it describes what
+ * the buttons do, not what to tick, and it is the sentence a planter re-reads
+ * with a finger already on Import.
  */
 const IMPORT_POLICY_NOTE =
   "Imported tasks are added as new tasks. Nothing is merged, replaced or skipped. You can answer this once per stage change: importing again adds nothing, on any device.";
@@ -65,10 +101,10 @@ const IMPORT_POLICY_NOTE =
 /**
  * What "Not now" costs, stated before it is pressed.
  *
- * It names no second route to the catalog because it does not have to: this
- * prompt only ever renders on `/tasks`, whose header carries the "Checklist
- * templates" link to `/tasks/templates` a few pixels above it. Repeating the
- * destination here would be the same door labelled twice on one screen.
+ * It names no second route to the catalog because `UNTICK_NOTE` already has,
+ * two paragraphs up — and this prompt only ever renders on `/tasks`, whose
+ * header carries the same "Checklist templates" link. A third label on one
+ * screen is the same door signposted three times.
  */
 const DISMISS_NOTE =
   "Not now creates nothing and hides this until your next stage change.";
@@ -246,8 +282,16 @@ export function PhaseTemplatePromptView({
           {taskCountLabel(prompt.totalTaskCount)} in all, dated from the day you
           moved ({formatDate(prompt.transitionedAt, "short")}).
         </p>
-        <p className="text-muted-foreground text-sm">{PROMPT_NOTE}</p>
-        <p className="text-muted-foreground text-sm">{IMPORT_POLICY_NOTE}</p>
+        <p className="text-muted-foreground text-sm">
+          {PROMPT_NOTE} {UNTICK_NOTE}{" "}
+          <Link
+            href={TEMPLATES_ROUTE}
+            className="text-primary cursor-pointer font-medium underline underline-offset-4"
+          >
+            {TEMPLATES_LINK_LABEL}
+          </Link>
+          .
+        </p>
       </div>
 
       <form action={importAction} className="space-y-4">
@@ -287,13 +331,23 @@ export function PhaseTemplatePromptView({
         </ul>
 
         {/*
+          The fine print, in one block at a size the lead paragraphs do not use.
+          It sits between the checklist and the buttons because both sentences
+          are about what a press does — and because the alternative, stacking
+          them above as a fourth and fifth muted `text-sm` line, is the wall
+          round 2 of the review objected to.
+        */}
+        <div className="text-muted-foreground space-y-1 text-xs">
+          <p>{IMPORT_POLICY_NOTE}</p>
+          <p>{DISMISS_NOTE}</p>
+        </div>
+
+        {/*
           The one client island in the prompt. It renders INSIDE the form
           because `useFormStatus` reports on the form above it — which is what
           lets both buttons go inert for the length of the request.
         */}
         <PhaseTemplatePromptControls dismissAction={dismissAction} />
-
-        <p className="text-muted-foreground text-xs">{DISMISS_NOTE}</p>
       </form>
     </section>
   );
