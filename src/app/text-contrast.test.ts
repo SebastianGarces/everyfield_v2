@@ -404,6 +404,174 @@ test("inline links in prose carry a permanent underline in the base layer", () =
   );
 });
 
+// --- the cascade hole the base-layer rule cannot see -------------------------
+//
+// `@layer base` is the weakest place a rule can live: an UNLAYERED normal
+// declaration beats every layered one no matter the specificity. So any
+// stylesheet under src/app/ that is not itself wrapped in `@layer` can strip
+// the prose underline with a selector as weak as `.marketing a`, and neither
+// the globals.css grep above nor the `no-underline` grep below can tell.
+// That is exactly what happened: `src/app/(marketing)/marketing.css` set
+// `text-decoration: none` on `.marketing a`, and /terms and /privacy shipped
+// four colour-only links at 1.36:1 while /login passed. The fingerprint was
+// `text-underline-offset: 4px` computing on a link whose `text-decoration-line`
+// was `none` — the base rule landing on one property and losing the other.
+
+type CssRule = { selectors: string[]; body: string };
+
+function stripCssComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "");
+}
+
+/** Index of the `}` closing the `{` at `open`. */
+function matchingBrace(css: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < css.length; i++) {
+    if (css[i] === "{") depth++;
+    else if (css[i] === "}" && --depth === 0) return i;
+  }
+  return css.length;
+}
+
+/**
+ * The part of a stylesheet that sits OUTSIDE every `@layer` block — the
+ * declarations that outrank all layered CSS regardless of specificity.
+ */
+function unlayeredPart(source: string): string {
+  const css = stripCssComments(source);
+  let out = "";
+  let i = 0;
+  while (i < css.length) {
+    const at = css.indexOf("@layer", i);
+    if (at === -1) return out + css.slice(i);
+    out += css.slice(i, at);
+
+    const open = css.indexOf("{", at);
+    const semi = css.indexOf(";", at);
+    // `@layer theme, base, utilities;` is a statement, not a block.
+    if (open === -1 || (semi !== -1 && semi < open)) {
+      i = semi === -1 ? css.length : semi + 1;
+      continue;
+    }
+    i = matchingBrace(css, open) + 1;
+  }
+  return out;
+}
+
+/** Flatten a CSS fragment to style rules, descending through `@media` etc. */
+function cssRules(css: string): CssRule[] {
+  const out: CssRule[] = [];
+  let i = 0;
+  while (i < css.length) {
+    const open = css.indexOf("{", i);
+    if (open === -1) break;
+    const prelude = css
+      .slice(i, open)
+      .trim()
+      .replace(/^[;}]+/, "")
+      .trim();
+    const close = matchingBrace(css, open);
+    const body = css.slice(open + 1, close);
+    if (prelude.startsWith("@")) out.push(...cssRules(body));
+    else
+      out.push({
+        selectors: prelude
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+        body,
+      });
+    i = close + 1;
+  }
+  return out;
+}
+
+function cssFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) return cssFiles(full);
+    return entry.isFile() && entry.name.endsWith(".css") ? [full] : [];
+  });
+}
+
+/** A selector whose subject is a bare `a` — `a`, `.marketing a`, `main > a`. */
+const BARE_ANCHOR_SUBJECT = /(?:^|[\s>+~])a$/;
+
+/** A selector that re-establishes the prose link — `.x p a[href]`, `p a[href]`. */
+const PROSE_LINK_SUBJECT = /(?:^|[\s>+~])p\s+a\[href\]$/;
+
+/** The last `text-decoration` / `text-decoration-line` value a rule declares. */
+function declaredDecoration(body: string): string | null {
+  const matches = [
+    ...body.matchAll(/text-decoration(?:-line)?\s*:\s*([^;}]+)/g),
+  ];
+  return matches.length ? matches[matches.length - 1][1].trim() : null;
+}
+
+test("no unlayered stylesheet strips the prose underline it cannot restore", () => {
+  const sheets = cssFiles(path.join(SRC, "app")).filter(
+    (file) => file !== GLOBALS_CSS
+  );
+  assert.ok(
+    sheets.length > 0,
+    "no stylesheets found under src/app — this guard has gone vacuous, fix the walk before trusting a pass"
+  );
+
+  const offenders = sheets.flatMap((file) => {
+    const rules = cssRules(unlayeredPart(readFileSync(file, "utf8")));
+
+    const strips = rules.some(({ selectors, body }) => {
+      const decoration = declaredDecoration(body);
+      return (
+        decoration !== null &&
+        !decoration.includes("underline") &&
+        selectors.some((s) => BARE_ANCHOR_SUBJECT.test(s))
+      );
+    });
+    if (!strips) return [];
+
+    const restores = rules.some(
+      ({ selectors, body }) =>
+        selectors.some((s) => PROSE_LINK_SUBJECT.test(s)) &&
+        /text-decoration-line\s*:\s*underline/.test(body)
+    );
+    return restores ? [] : [path.relative(process.cwd(), file)];
+  });
+
+  assert.deepEqual(
+    offenders,
+    [],
+    "an unlayered stylesheet sets text-decoration on a bare `a` selector and never restores it for prose. Unlayered normal declarations beat `@layer base` at ANY specificity, so this silently deletes the SC 1.4.1 underline across that whole surface (it did: /terms and /privacy shipped four links at 1.36:1). Add `<scope> p a[href] { text-decoration-line: underline; text-underline-offset: 4px }` to the SAME sheet — not `!important` in globals.css"
+  );
+});
+
+test("the marketing surface is inside the guard, not merely quiet", () => {
+  // The guard above passes for a sheet that strips nothing. This pins the one
+  // sheet that DOES strip, so deleting its restore can never read as "clean".
+  const marketing = path.join(SRC, "app", "(marketing)", "marketing.css");
+  const rules = cssRules(unlayeredPart(readFileSync(marketing, "utf8")));
+
+  assert.ok(
+    rules.some(({ selectors, body }) => {
+      const decoration = declaredDecoration(body);
+      return (
+        decoration === "none" &&
+        selectors.some((s) => BARE_ANCHOR_SUBJECT.test(s))
+      );
+    }),
+    "marketing.css no longer strips text-decoration on a bare `a` — if that reset is genuinely gone, delete this canary and the `.marketing p a[href]` restore together"
+  );
+
+  assert.ok(
+    rules.some(
+      ({ selectors, body }) =>
+        selectors.some((s) => PROSE_LINK_SUBJECT.test(s)) &&
+        /text-decoration-line\s*:\s*underline/.test(body)
+    ),
+    "marketing.css strips the underline without restoring it for `p a[href]` — /terms and /privacy go back to colour-only links at 1.36:1 (WCAG SC 1.4.1)"
+  );
+});
+
 /** Every `<p>…</p>` in shipped markup that contains a link, with its file. */
 function proseBlocksContainingLinks(): { file: string; block: string }[] {
   return tsxFiles(SRC).flatMap((file) => {

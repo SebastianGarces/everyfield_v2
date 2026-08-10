@@ -107,10 +107,13 @@ body {
      as this token darkens it converges on --primary, so an inline link inside
      muted prose loses its colour separation — 3.61:1 at the old L 0.556,
      2.85:1 here, under the 3:1 WCAG SC 1.4.1 asks when colour is the ONLY
-     distinguisher. That cost is paid ONCE, in the base layer at the bottom of
-     this file (inline links carry a permanent underline), not by capping L —
-     so this token stays free to move for AA. Ruled 2026-08-10 (#386): WCAG AA
-     is the standard that binds here; APCA is advisory.
+     distinguisher. That cost is paid in CSS — inline links carry a permanent
+     underline — not by capping L, so this token stays free to move for AA.
+     The rule lives in the base layer at the bottom of this file, and once more
+     in `src/app/(marketing)/marketing.css`, because that sheet is unlayered
+     and unlayered declarations outrank `@layer base` at any specificity. Ruled
+     2026-08-10 (#386): WCAG AA is the standard that binds here; APCA is
+     advisory.
      Pinned by src/app/text-contrast.test.ts, which re-derives the 0.526 limit
      instead of trusting this comment; raising L again breaks that test before
      it reaches a screen. */
@@ -220,7 +223,15 @@ body {
      Scoped to `p` deliberately. A paragraph IS a block of text; `li` is not —
      it would underline every sidebar nav item, which is a list OF links rather
      than prose containing one. Utilities outrank base, so a `no-underline`
-     class still wins where a link genuinely is not inline prose. */
+     class still wins where a link genuinely is not inline prose.
+     `@layer base` is the WEAKEST place this can live, and that is a real hole,
+     not a nuance: an UNLAYERED normal declaration beats it at any specificity.
+     `src/app/(marketing)/marketing.css` is such a sheet, and its
+     `.marketing a { text-decoration: none }` defeated this rule across the
+     whole marketing route group until the same underline was repeated there.
+     Any future unlayered stylesheet under src/app/ owes the same repeat —
+     src/app/text-contrast.test.ts fails the build if one strips and does not
+     restore. Do not "fix" that class of conflict with `!important` here. */
   p a[href] {
     text-decoration-line: underline;
     text-underline-offset: 4px;
