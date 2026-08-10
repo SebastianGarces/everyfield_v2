@@ -1,12 +1,23 @@
 import { redirect } from "next/navigation";
+import { refresh } from "next/cache";
 import { verifySession } from "@/lib/auth/session";
-import { getMeeting } from "@/lib/meetings/service";
+import {
+  getMeeting,
+  parseAgenda,
+  setMeetingAgenda,
+  VISION_MEETING_DEFAULT_AGENDA,
+  type AgendaSection,
+} from "@/lib/meetings/service";
 import { listLocations } from "@/lib/meetings/locations";
 import { getMeetingCommunications } from "@/lib/communication/service";
 import { notFound } from "next/navigation";
 import { MeetingDetails } from "./meeting-details-client";
 import { ContextualTemplates } from "@/components/documents/contextual-templates";
 import { MeetingCommunicationStatus } from "@/components/meetings/meeting-communication-status";
+import {
+  AgendaBuilder,
+  type AgendaSaveResult,
+} from "@/components/meetings/agenda-builder";
 import { getMeetingContextualTemplates } from "@/lib/documents/contextual";
 import { db } from "@/db";
 import { churches } from "@/db/schema/church";
@@ -16,6 +27,44 @@ export const dynamic = "force-dynamic";
 
 interface MeetingPageProps {
   params: Promise<{ id: string }>;
+}
+
+/**
+ * Save this meeting's running order (VM-013).
+ *
+ * Inline rather than in `meetings/actions.ts` because it is the agenda card's
+ * only write and nothing else calls it. Like every action it takes no actor:
+ * the church comes from `verifySession()`, and the meeting id is only ever
+ * matched inside that church's rows (`setMeetingAgenda` puts the church in the
+ * `WHERE`), so a meeting id from another tenant matches nothing and is refused.
+ *
+ * `refresh()` rather than `revalidatePath` — the house rule for a mutation
+ * whose only reader is the page the planter is already on
+ * (memory/contracts/data-patterns.md).
+ */
+async function saveAgendaAction(
+  meetingId: string,
+  sections: AgendaSection[]
+): Promise<AgendaSaveResult> {
+  "use server";
+
+  const { user } = await verifySession();
+
+  if (!user.churchId) {
+    return { success: false, error: "This account has no church yet." };
+  }
+
+  try {
+    await setMeetingAgenda(user.churchId, meetingId, sections);
+  } catch {
+    return {
+      success: false,
+      error: "The agenda could not be saved. Try again.",
+    };
+  }
+
+  refresh();
+  return { success: true };
 }
 
 export default async function MeetingPage({ params }: MeetingPageProps) {
@@ -55,6 +104,19 @@ export default async function MeetingPage({ params }: MeetingPageProps) {
   return (
     <div className="space-y-6">
       <MeetingDetails meeting={meeting} locations={locations} />
+
+      <div className="mx-auto max-w-3xl">
+        <AgendaBuilder
+          meetingId={meeting.id}
+          sections={parseAgenda(meeting.agenda)}
+          defaultSections={
+            meeting.type === "vision_meeting"
+              ? VISION_MEETING_DEFAULT_AGENDA
+              : undefined
+          }
+          saveAction={saveAgendaAction}
+        />
+      </div>
 
       {documentSection && (
         <div className="mx-auto max-w-3xl">
