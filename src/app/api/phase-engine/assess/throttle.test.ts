@@ -420,6 +420,338 @@ test("a throttled plant is a deferral, a broken judge is a failure", async () =>
 });
 
 // ----------------------------------------------------------------------------
+// AC (#374): the summary says which deferral cost tokens.
+//
+// `attempted` used to be `status !== "deferred"`, which filed a plant the
+// provider refused four times and a plant the run never started under the same
+// zero. The token bill of those two is not the same number, and the Actions log
+// is the only place anyone reads it.
+// ----------------------------------------------------------------------------
+
+test("a throttled deferral counts as attempted; a stood-down one does not", async () => {
+  const clock = virtualClock();
+  // A ceiling far above what this run spends, so the only holds here are the
+  // ones the 429s install. The arithmetic below is about the retry ladder and
+  // the run budget, not about pacing.
+  const pacer = new TokenPacer({ clock, limitTokens: 1_000_000 });
+  const runBudgetMs = 60_000;
+  /** Every call that actually left for the provider, in order. */
+  const providerCalls: string[] = [];
+
+  const deps: RunAssessmentBatchDeps = {
+    maxBatch: 4,
+    pacer,
+    now: () => clock.now(),
+    runBudgetMs,
+    maxAttempts: MAX_ATTEMPTS_PER_PLANT,
+    async selectPlantsForAssessment() {
+      return plants(4);
+    },
+    async generateAssessment(churchId, _deps, run) {
+      const paced = {
+        pacer: run?.pacer ?? pacer,
+        maxAttempts: run?.maxAttempts,
+        label: churchId,
+        onRateLimit: run?.onRateLimit,
+        deadlineAt: run?.deadlineAt,
+      };
+
+      if (churchId === "church-1") {
+        // A limiter that never lets up, with a small enough hint that all four
+        // attempts fit inside the run budget: this deferral is
+        // `attempts_exhausted`, and it spent four real provider calls.
+        await runPacedCall(async () => {
+          providerCalls.push(churchId);
+          throw new APICallError({
+            message: "Rate limit reached for gpt-4o.",
+            url: "https://api.openai.com/v1/responses",
+            requestBodyValues: {},
+            statusCode: 429,
+            responseHeaders: { "retry-after-ms": "1000" },
+            isRetryable: true,
+          });
+        }, paced);
+      }
+
+      await runPacedCall(async () => {
+        providerCalls.push(churchId);
+        // church-2 is the slow judge that spends what is left of the budget,
+        // so the run stands church-3 down before starting it.
+        await clock.sleep(churchId === "church-2" ? 60_000 : 5_000);
+        return { value: churchId };
+      }, paced);
+
+      return {} as Awaited<
+        ReturnType<
+          typeof import("@/lib/phase-engine/assessment").generateAssessment
+        >
+      >;
+    },
+  };
+
+  const capture = captureConsole();
+  let summary;
+  try {
+    summary = await runAssessmentBatch(deps);
+  } finally {
+    capture.restore();
+  }
+
+  assert.equal(summary.selected, 4);
+  assert.equal(summary.assessed, 2);
+  assert.equal(summary.failed, 0);
+  assert.equal(summary.deferred, 2);
+
+  // The headline: two deferrals, and the counts tell them apart. Three plants
+  // reached the provider — the throttled one among them — and exactly one
+  // deferral cost nothing at all.
+  assert.equal(summary.attempted, 3);
+  assert.equal(summary.deferredUnattempted, 1);
+  assert.equal(summary.rateLimited, 1);
+  assert.equal(
+    summary.selected,
+    summary.skipped + summary.attempted + summary.deferredUnattempted
+  );
+
+  const throttled = summary.outcomes.find((o) => o.churchId === "church-1");
+  assert.equal(throttled?.status, "deferred");
+  assert.equal(throttled?.deferralReason, "rate_limit");
+  assert.equal(throttled?.attempted, true);
+
+  const stoodDown = summary.outcomes.find((o) => o.churchId === "church-3");
+  assert.equal(stoodDown?.status, "deferred");
+  assert.equal(stoodDown?.deferralReason, "time_budget");
+  assert.equal(stoodDown?.attempted, false);
+
+  // The provider's own view corroborates the counts rather than restating them.
+  assert.equal(
+    providerCalls.filter((id) => id === "church-1").length,
+    MAX_ATTEMPTS_PER_PLANT
+  );
+  assert.ok(
+    !providerCalls.includes("church-3"),
+    "the stood-down plant must never reach the provider"
+  );
+  assert.deepEqual(capture.errors, []);
+});
+
+test("a ladder that stops on the run deadline is a time_budget deferral that still cost a call", async () => {
+  // The case that makes `attempted` a stored flag instead of a derivation:
+  // `runPacedCall` reports `run_budget`, the run labels it `time_budget`, and
+  // `rateLimited` stays 0 — yet the provider was called. Only `attempted` says
+  // so.
+  const clock = virtualClock();
+  const pacer = new TokenPacer({ clock, limitTokens: 1_000_000 });
+  let providerCalls = 0;
+
+  const deps: RunAssessmentBatchDeps = {
+    maxBatch: 1,
+    pacer,
+    now: () => clock.now(),
+    // Spent before the first plant even starts; the loop runs it anyway,
+    // because a run that assesses nothing is worse than one that overshoots.
+    runBudgetMs: 500,
+    maxAttempts: MAX_ATTEMPTS_PER_PLANT,
+    async selectPlantsForAssessment() {
+      return plants(1);
+    },
+    async generateAssessment(churchId, _deps, run) {
+      await runPacedCall(
+        async () => {
+          providerCalls++;
+          throw new APICallError({
+            message: "Rate limit reached for gpt-4o.",
+            url: "https://api.openai.com/v1/responses",
+            requestBodyValues: {},
+            statusCode: 429,
+            responseHeaders: { "retry-after-ms": "1000" },
+            isRetryable: true,
+          });
+        },
+        {
+          pacer: run?.pacer ?? pacer,
+          maxAttempts: run?.maxAttempts,
+          label: churchId,
+          onRateLimit: run?.onRateLimit,
+          deadlineAt: run?.deadlineAt,
+        }
+      );
+      return {} as Awaited<
+        ReturnType<
+          typeof import("@/lib/phase-engine/assessment").generateAssessment
+        >
+      >;
+    },
+  };
+
+  const capture = captureConsole();
+  let summary;
+  try {
+    summary = await runAssessmentBatch(deps);
+  } finally {
+    capture.restore();
+  }
+
+  assert.equal(providerCalls, 1);
+  assert.equal(summary.deferred, 1);
+  assert.equal(summary.rateLimited, 0);
+  assert.equal(summary.outcomes[0]?.deferralReason, "time_budget");
+  // Deferred, labelled by time, and still a token cost.
+  assert.equal(summary.attempted, 1);
+  assert.equal(summary.deferredUnattempted, 0);
+  // The log says how many calls it took, so the count is checkable by hand.
+  assert.ok(
+    capture.warns.some((line) =>
+      /rate-limit deferral for church church-0 .*after 1 provider call\(s\)/.test(
+        line
+      )
+    )
+  );
+});
+
+// ----------------------------------------------------------------------------
+// AC (ruled 2026-08-10, PR #389): a 5xx ladder the run's clock cut short stays
+// `failed`, but says so in different words.
+//
+// Since #375 bounded the 5xx branch by the run deadline, a truncated ladder can
+// report a failure after ONE attempt. On main, `failed` only ever meant "the
+// provider is broken", so a run truncated by its own budget could print ERROR
+// lines that page someone for a clock problem. The status is unchanged — the
+// provider answered and the answer was broken — and the flag plus the warn
+// channel carry the difference.
+// ----------------------------------------------------------------------------
+
+/** One plant whose judge answers `502` on every attempt. */
+function alwaysBadGatewayDeps(
+  pacer: TokenPacer,
+  runBudgetMs: number,
+  maxAttempts: number,
+  providerCalls: { count: number }
+): RunAssessmentBatchDeps {
+  return {
+    maxBatch: 1,
+    pacer,
+    now: () => pacer.clock.now(),
+    runBudgetMs,
+    maxAttempts,
+    async selectPlantsForAssessment() {
+      return plants(1);
+    },
+    async generateAssessment(churchId, _deps, run) {
+      await runPacedCall(
+        async () => {
+          providerCalls.count++;
+          throw new APICallError({
+            message: "bad gateway",
+            url: "https://api.openai.com/v1/responses",
+            requestBodyValues: {},
+            statusCode: 502,
+            responseHeaders: {},
+            isRetryable: true,
+          });
+        },
+        {
+          pacer: run?.pacer ?? pacer,
+          maxAttempts: run?.maxAttempts,
+          label: churchId,
+          onRateLimit: run?.onRateLimit,
+          deadlineAt: run?.deadlineAt,
+        }
+      );
+      return {} as Awaited<
+        ReturnType<
+          typeof import("@/lib/phase-engine/assessment").generateAssessment
+        >
+      >;
+    },
+  };
+}
+
+test("a 5xx ladder cut short by the run budget is a marked failure, on the warn channel", async () => {
+  const clock = virtualClock();
+  // A ceiling far above the run's needs: the only thing that can stop this
+  // ladder is the run's own clock.
+  const pacer = new TokenPacer({ clock, limitTokens: 1_000_000 });
+  const providerCalls = { count: 0 };
+
+  const capture = captureConsole();
+  let summary;
+  try {
+    // Spent before the first plant starts; the loop runs it anyway, and the
+    // first 1s backoff already lands past the deadline.
+    summary = await runAssessmentBatch(
+      alwaysBadGatewayDeps(pacer, 500, MAX_ATTEMPTS_PER_PLANT, providerCalls)
+    );
+  } finally {
+    capture.restore();
+  }
+
+  // One attempt, out of four — the clock stopped this, not the provider.
+  assert.equal(providerCalls.count, 1);
+  assert.equal(summary.failed, 1);
+  assert.equal(summary.deferred, 0);
+
+  const truncated = summary.outcomes[0];
+  assert.equal(truncated?.status, "failed");
+  assert.equal(truncated?.attempted, true);
+  assert.equal(truncated?.truncatedByDeadline, true);
+  // Still not a deferral, so the run's arithmetic is untouched.
+  assert.equal(truncated?.deferralReason, undefined);
+  assert.equal(
+    summary.selected,
+    summary.skipped + summary.attempted + summary.deferredUnattempted
+  );
+
+  // The whole point of the ruling: a run truncated by its own budget prints no
+  // ERROR line, and the warn line says which of the two things happened.
+  assert.deepEqual(capture.errors, []);
+  assert.ok(
+    capture.warns.some((line) =>
+      /assessment truncated by the run budget for church church-0/.test(line)
+    ),
+    `warns were: ${JSON.stringify(capture.warns)}`
+  );
+});
+
+test("a judge that is genuinely broken stays unmarked and stays loud", async () => {
+  // The property no direction was allowed to lose. Same 502, same code path —
+  // but with the clock out of the way the ladder spends every attempt, so this
+  // is a broken judge and reads like one: no flag, no warn, an ERROR line.
+  const clock = virtualClock();
+  const pacer = new TokenPacer({ clock, limitTokens: 1_000_000 });
+  const providerCalls = { count: 0 };
+
+  const capture = captureConsole();
+  let summary;
+  try {
+    summary = await runAssessmentBatch(
+      alwaysBadGatewayDeps(pacer, RUN_BUDGET_MS, 3, providerCalls)
+    );
+  } finally {
+    capture.restore();
+  }
+
+  assert.equal(providerCalls.count, 3);
+  assert.equal(summary.failed, 1);
+
+  const broken = summary.outcomes[0];
+  assert.equal(broken?.status, "failed");
+  assert.equal(broken?.attempted, true);
+  assert.equal(broken?.truncatedByDeadline, undefined);
+
+  assert.ok(
+    capture.errors.some((line) =>
+      /assessment failed for church church-0/.test(line)
+    ),
+    `errors were: ${JSON.stringify(capture.errors)}`
+  );
+  assert.ok(
+    !capture.warns.some((line) => /truncated by the run budget/.test(line)),
+    "a broken judge must never read as a clock problem"
+  );
+});
+
+// ----------------------------------------------------------------------------
 // AC: the run stays inside the Vercel function timeout.
 // ----------------------------------------------------------------------------
 
