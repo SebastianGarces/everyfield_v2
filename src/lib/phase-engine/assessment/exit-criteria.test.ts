@@ -209,6 +209,42 @@ test("PE-022: the phase read is the ASSESSMENT's, so standings match the gates t
   );
 });
 
+test("PE-022: a launch day reads as the stored DAY, pinned to APP_TIME_ZONE", () => {
+  // `launches.target_date` is a yyyy-mm-dd DAY, not an instant, and
+  // memory/invariants/dates-times.md forbids round-tripping it through a bare
+  // `Date`. The reading is pinned here so the single owner of that parse
+  // (`parseTargetDate`) cannot be quietly replaced by a hand-rolled second one
+  // without a test going red — the duplication this criterion once carried.
+  const progress = buildExitCriteriaProgress(
+    makeLatest([], {
+      phase: 2,
+      factSnapshot: makeSnapshot({
+        launch: { launchDate: "2026-11-01", isEmpty: false },
+      }),
+    })
+  )!;
+
+  const launch = criterion(progress, "launch_date_set");
+  assert.equal(launch.measurement, "met");
+  assert.equal(launch.reading, "a launch date of Sunday, November 1, 2026");
+});
+
+test("PE-022: an unparseable launch day falls back to the stored value, never Invalid Date", () => {
+  const progress = buildExitCriteriaProgress(
+    makeLatest([], {
+      phase: 2,
+      factSnapshot: makeSnapshot({
+        launch: { launchDate: "not-a-day", isEmpty: false },
+      }),
+    })
+  )!;
+
+  assert.equal(
+    criterion(progress, "launch_date_set").reading,
+    "a launch date of not-a-day"
+  );
+});
+
 test("PE-022: the terminal phase reports itself, it does not invent gates", () => {
   const progress = buildExitCriteriaProgress(makeLatest([], { phase: 6 }))!;
 

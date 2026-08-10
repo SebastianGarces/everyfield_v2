@@ -35,6 +35,12 @@ import {
   type PlantInsight,
 } from "@/db/schema";
 import { formatDate } from "@/lib/datetime";
+// The one parser for `launches.target_date`. That column is a DAY, not an
+// instant, and memory/invariants/dates-times.md forbids round-tripping it
+// through a bare `Date` — countdown.ts's header records the two releases that
+// duplication already cost (#303, #338). This module reads the same day out of
+// the fact snapshot, so it reads it through the same owner.
+import { parseTargetDate } from "@/lib/launch/countdown";
 // The citation parser, shared with the humanising formatter the UI renders
 // through. One reader of `plant_insights.cited_facts` syntax, so the read layer
 // and the surfaces above it can never disagree about where a path ends and a
@@ -910,7 +916,10 @@ export const PHASE_EXIT_CRITERIA: Record<
         if (fact.value === null) {
           return { status: "not_met", reading: "no launch date set yet" };
         }
-        const parsed = new Date(fact.value);
+        // A stored day, parsed at UTC midnight by its single owner; the guard
+        // keeps a snapshot holding something that is not a day readable rather
+        // than printing "Invalid Date".
+        const parsed = parseTargetDate(fact.value);
         const readable = Number.isNaN(parsed.getTime())
           ? fact.value
           : formatDate(parsed, "long");

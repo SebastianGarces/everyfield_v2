@@ -273,6 +273,33 @@ test("PE-025: a cited path that is not in the snapshot is not shown as a fact", 
   assert.doesNotMatch(cited[0], /40/);
 });
 
+test("PE-025: a citation whose snapshot value is null says 'not recorded', not a bare label", () => {
+  // `inSnapshot: true, snapshotValue: null` is the citation-side twin of a
+  // present-but-null fact: the path resolved, the plant has nothing there. It
+  // must read as the empty reading it is, not as a label with its value lost.
+  const empty = makeCriterion({
+    evidence: [
+      {
+        insightId: "insight-1",
+        path: "launch.launchDate",
+        citedValue: null,
+        snapshotValue: null,
+        inSnapshot: true,
+        agrees: true,
+      },
+    ],
+  });
+
+  const cited = items(
+    rows(render(makeProgress([empty])))[0],
+    "exit-criterion-cited-fact"
+  );
+
+  assert.equal(cited.length, 1);
+  assert.match(cited[0], /not recorded/);
+  assert.doesNotMatch(cited[0], /not in this snapshot/);
+});
+
 test("PE-022: a lens read the snapshot did not answer is labelled, not asserted", () => {
   // `present: false` means the path did not resolve — the phrase has no value
   // behind it, so the row must say that rather than print a bare label that
@@ -292,6 +319,34 @@ test("PE-022: a lens read the snapshot did not answer is labelled, not asserted"
   assert.equal(facts.length, 2);
   assert.match(facts[0], /22/);
   assert.match(facts[1], /not in this snapshot yet/);
+});
+
+test("PE-022: a fact that IS in the snapshot but holds no value says 'not recorded'", () => {
+  // `present: true, value: null` is a real reading — the path resolved and the
+  // plant has nothing there (every pre-launch plant's `launch.launchDate`). It
+  // must keep the ordinary phrasing and say the value is absent; the bare label
+  // "launch date (launch)" reads as a fact with its value lost.
+  const stored = makeCriterion({
+    key: "launch_date_set",
+    label: "Launch date set",
+    factPaths: ["launch.launchDate"],
+    measurement: "not_met",
+    reading: "No launch date set yet.",
+    facts: [{ path: "launch.launchDate", present: true, value: null }],
+    standing: "not_addressed",
+    insights: [],
+    evidence: [],
+  });
+
+  const facts = items(
+    rows(render(makeProgress([stored])))[0],
+    "exit-criterion-fact"
+  );
+
+  assert.equal(facts.length, 1);
+  assert.match(facts[0], /not recorded/);
+  // …and NOT the `present: false` sentence, which would be a different claim.
+  assert.doesNotMatch(facts[0], /not in this snapshot yet/);
 });
 
 // ----------------------------------------------------------------------------

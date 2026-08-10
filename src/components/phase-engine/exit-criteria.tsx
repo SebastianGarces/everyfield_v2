@@ -178,30 +178,45 @@ function Mark({
 // ----------------------------------------------------------------------------
 
 /**
- * Rebuild the ledger citation the humaniser expects, from the SNAPSHOT's value.
- * A path with no stored value degrades to the bare label rather than to a
- * fabricated one.
+ * The two ways a fact can be empty are two different claims, and the drill-down
+ * must never collapse them into one. Which of these two helpers a call site
+ * reaches for IS that distinction, so it is made once, by name, here.
+ *
+ * A path that did NOT resolve has no value behind it: the de-camelised label
+ * alone, asserting nothing.
  */
-function humanise(path: string, value: string | null): string {
-  const phrase = formatCitedFact(value === null ? path : `${path}=${value}`);
+function humaniseBarePath(path: string): string {
+  const phrase = formatCitedFact(path);
+  return phrase === "" ? path : phrase;
+}
+
+/**
+ * A path that DID resolve, rendered with its value — a stored `null` included.
+ * Stringifying the value instead of dropping the `=` is the whole point: it
+ * reaches the formatter's "…: not recorded" wording, where the bare path would
+ * degrade to a label that reads like a fact with its value lost.
+ */
+function humaniseReading(path: string, value: string | null): string {
+  const phrase = formatCitedFact(`${path}=${String(value)}`);
   return phrase === "" ? path : phrase;
 }
 
 /**
  * One deterministic reading, as a sentence fragment.
  *
- * A read whose path is NOT in the snapshot (`present: false` — this snapshot
- * predates the field, or the path is not a fact) has no value to humanise, and
- * the bare de-camelised label on its own asserts nothing: "core group committed
- * count" reads as a fact with the number lost. It gets said out loud instead,
- * so the row still explains why it is empty. `present: true, value: null` is a
- * real reading and keeps the ordinary phrasing.
+ *   - `present: false` — the path did NOT resolve (this snapshot predates the
+ *     field, or the path is not a fact). "core group committed count" on its
+ *     own reads as a fact with the number lost, so the row says out loud why it
+ *     is empty instead.
+ *   - `present: true, value: null` — the path resolved and the plant has
+ *     nothing there (every pre-launch plant's `launch.launchDate`). That IS a
+ *     reading, and it keeps the ordinary phrasing.
  */
 function factPhrase(fact: SnapshotFact): string {
   if (!fact.present) {
-    return `${humanise(fact.path, null)} — not in this snapshot yet`;
+    return `${humaniseBarePath(fact.path)} — not in this snapshot yet`;
   }
-  return humanise(fact.path, fact.value);
+  return humaniseReading(fact.path, fact.value);
 }
 
 // ----------------------------------------------------------------------------
@@ -355,7 +370,7 @@ function CitedFact({ item }: { item: CitedFactEvidence }) {
   if (!item.inSnapshot) {
     return (
       <>
-        {humanise(item.path, null)}{" "}
+        {humaniseBarePath(item.path)}{" "}
         <span className="text-muted-foreground">
           — cited, but not in this snapshot, so it is not shown as a fact.
         </span>
@@ -365,7 +380,7 @@ function CitedFact({ item }: { item: CitedFactEvidence }) {
 
   return (
     <>
-      {humanise(item.path, item.snapshotValue)}
+      {humaniseReading(item.path, item.snapshotValue)}
       {!item.agrees && item.citedValue !== null && (
         <span className="text-muted-foreground">
           {" "}
