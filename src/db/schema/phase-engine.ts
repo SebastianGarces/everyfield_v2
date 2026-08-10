@@ -1,4 +1,6 @@
+import { sql, type SQL } from "drizzle-orm";
 import {
+  check,
   index,
   integer,
   jsonb,
@@ -11,6 +13,11 @@ import {
 } from "drizzle-orm/pg-core";
 import { churches } from "./church";
 import { users } from "./user";
+
+/** `'a', 'b'` — the CHECK's value list, built from the tuples below so the two cannot drift. */
+function inList(values: readonly string[]): SQL {
+  return sql.raw(values.map((value) => `'${value}'`).join(", "));
+}
 
 // ============================================================================
 // Phase Engine (Plant Intelligence) — feature-owned schema
@@ -60,6 +67,28 @@ export type InsightSeverity = (typeof insightSeverities)[number];
 export const insightFeedbackRatings = ["useful", "not_useful"] as const;
 export type InsightFeedbackRating = (typeof insightFeedbackRatings)[number];
 
+/**
+ * What a phase-history row RECORDS (OB-005).
+ *
+ *   `transition`          — a move the planter made inside this product.
+ *   `initial_declaration` — the planter's own read of where the plant ALREADY
+ *                           was when it joined. Exactly one per church, ever,
+ *                           enforced by `phase_transitions_initial_declaration_unique_idx`.
+ *
+ * A STORED DISCRIMINATOR, not a reason string. The first cut of OB-005 marked
+ * the declaration by writing a reserved sentence into `reason` and read it back
+ * with `reason = '<that sentence>'`. That works right up to the moment the TS
+ * constant and a SQL literal drift, and it cannot be indexed safely for the
+ * same reason. `kind` is a closed set, defaulted to `transition` so every row
+ * that existed before this column says what it always meant, and the partial
+ * unique index below is written against it.
+ */
+export const phaseTransitionKinds = [
+  "transition",
+  "initial_declaration",
+] as const;
+export type PhaseTransitionKind = (typeof phaseTransitionKinds)[number];
+
 // ============================================================================
 // Tables
 // ============================================================================
@@ -84,6 +113,15 @@ export const phaseTransitions = pgTable(
       .references(() => users.id)
       .notNull(),
     reason: text("reason").notNull(),
+    /**
+     * `transition` (the default) or `initial_declaration` — see
+     * `phaseTransitionKinds`. This is the discriminator every reader asks; the
+     * `reason` text beside it is display copy.
+     */
+    kind: varchar("kind", { length: 32 })
+      .$type<PhaseTransitionKind>()
+      .default("transition")
+      .notNull(),
     // Deterministic fact snapshot at the moment of transition (Signal layer).
     factSnapshot: jsonb("fact_snapshot"),
     rubricVersion: varchar("rubric_version", { length: 50 }).notNull(),
@@ -96,6 +134,24 @@ export const phaseTransitions = pgTable(
       table.createdAt
     ),
     index("phase_transitions_initiated_by_idx").on(table.initiatedById),
+    // OB-005: at most ONE initial declaration per plant, ever. This index IS
+    // the rule. The statement that writes the row locks the church row first
+    // and used to gate the insert on `WHERE NOT EXISTS (… phase_transitions …)`
+    // — but that predicate is a SNAPSHOT read of a DIFFERENT table than the one
+    // the lock protects, so under READ COMMITTED EvalPlanQual re-checks only
+    // `churches` when the waiter unblocks and both submitters pass the check
+    // (`memory/invariants/transactions-atomicity.md` → the subquery trap; raced
+    // live on #306, 2 of 3 runs wrote a second row claiming a 5 → 3 move the
+    // planter never made). The application-side guard is now `ON CONFLICT DO
+    // NOTHING` inferred against THIS index, so the loser writes nothing at all
+    // — including no phase change.
+    uniqueIndex("phase_transitions_initial_declaration_unique_idx")
+      .on(table.churchId)
+      .where(sql`${table.kind} = 'initial_declaration'`),
+    check(
+      "phase_transitions_kind_check",
+      sql`${table.kind} in (${inList(phaseTransitionKinds)})`
+    ),
   ]
 );
 

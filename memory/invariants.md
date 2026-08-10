@@ -15,6 +15,7 @@ Each section links `invariants/<domain>.md` for the why, the pattern and the wor
 - In a batch the compare-and-set goes FIRST and the dependent write's `WHERE` re-asserts what the claim set — an empty `returning()` is not an error and rolls nothing back.
 - A compare-and-set serialises only same-row writers; a predicate about another table is a snapshot read. To compete for a row elsewhere, `SELECT … FOR UPDATE` it as statement ONE and gate on the dependent write's own rowcount.
 - In a `WITH` chain a `FOR UPDATE` snapshot CTE must be a DEPENDENCY of the write (`update … from current c`), never a sibling only the journal joins — pulled lazily after the UPDATE it reads nothing, and the history row is silently lost.
+- A plant declares its starting phase ONCE, and the DATABASE is what says so: `phase_transitions_initial_declaration_unique_idx` (partial, on `church_id where kind = 'initial_declaration'`) plus `ON CONFLICT … DO NOTHING` — never a `NOT EXISTS` over `phase_transitions`, which is the same-lock-different-table trap and was raced into fabricating history.
 - A church and its `church_privacy_settings` row are created by ONE batch; the loser's orphan church is swept afterwards under a `NOT EXISTS` guard.
 - Both answers to an empty planter seat — the No as well as the Yes — open with `SELECT … FROM churches … FOR UPDATE` and are gated on their own rowcount.
 - `finalizeAttendance()` emits downstream first, then compare-and-sets `actual_attendance` (non-null = finalized = its idempotency key); `meeting.attendance.finalized` is emitted STRICTLY.
@@ -75,6 +76,17 @@ Each section links `invariants/<domain>.md` for the why, the pattern and the wor
 - The roles are `planter`, `coach`, `team_member`, `sending_church_admin`, `network_admin`.
 - Planter: full CRUD on their own church. Team member: feature-limited within it. Coach: read on assigned planters via `coach_assignments`. Both oversight admins: aggregates for churches matching their org FK, subject to the privacy toggles.
 - Outside registration a role is granted in exactly ONE place — the OB-010 planter claim on a planterless plant, promoting `team_member` → `planter`. Eligibility is `canAnswerLeadershipQuestion` (`src/lib/onboarding/leadership.ts`), and the SQL repeats the role check so it never rests on a JS check alone. It is a raced write; see [transactions-atomicity](invariants/transactions-atomicity.md).
+
+## Phase History — Declarations vs Transitions
+
+Applies to `phase_transitions` and every reader of it. Ruled on #306 (2026-08-09).
+
+- `phase_transitions` is TWO populations, told apart by the stored `kind` discriminator and never by the reason text: `transition` (a move the planter made inside EveryField) and `initial_declaration` (where the plant already stood when it arrived, OB-005).
+- A declaration is NOT an advance. Anything counting, gating on or announcing "reached a new stage" filters `kind = 'transition'` — one predicate, `phaseAdvanceCondition()` (`src/lib/notifications/oversight-events.ts`), which `stageReachedCondition` and `hasActivityCondition` both call so the count and the "was there activity at all?" gate cannot drift apart.
+- `declareInitialPhase` emits NO `phase.changed`. `PhaseChangedEvent` carries no `kind`, so its subscriber cannot tell a declaration from a move; adding a subscriber that needs to see declarations means adding `kind` to the payload FIRST, never re-adding the emit.
+- A second declaration is REFUSED, never overwritten and never half-applied (ruled: refuse with a message). `declareJourney` branches on `already_declared`, reports the STORED phase, and says both what is on record and that the launch date on the same form did save.
+- The launch date is never written to a column on `churches` — `churches.launch_date` was dropped by migration 0032 and the launch entity owns it (LS-001). Onboarding sets it through `scheduleLaunchAction`, the same rail as `/launch`, so the row lock, the `launch_events` journal, the oversight announcement and the Playbook seed all come for free.
+- "No date yet" writes nothing on a first pass and is REFUSED on re-entry over a stored date: there is no unschedule write path (`launch_events` has no event type for a cleared date, and a scheduled launch has already seeded milestones), so the step names the stored day and points at `/launch` rather than silently leaving a countdown the radio hint promised would be empty.
 
 ## Wiki Articles
 

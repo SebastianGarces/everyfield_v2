@@ -390,6 +390,36 @@ export async function assignTeamLeader(
  * Initialize predefined teams for a new church.
  * When teamKeys is provided, only the matching templates are created.
  * When omitted, all 10 predefined teams are created.
+ *
+ * Returns the teams THIS call created — never the ones that were already there.
+ * A caller that needs the plant's full roster reads it back with `listTeams`;
+ * the return value answers "what did I just make?", which is what the role
+ * import downstream of it needs.
+ *
+ * THE GUARD LIVES HERE, NOT IN A CALLER (#306, HR4 exit comment 2026-08-09).
+ * Two surfaces reach this function — the /teams "Set Up Ministry Teams" dialog
+ * and the onboarding finish screen's OB-015 offer — and both used to protect a
+ * loop of unconditional inserts with a read ("does this church have teams
+ * yet?"). `memory/invariants.md` → Transactions names that shape: SELECT-then-
+ * INSERT is not a concurrency guard, and two accepts a few milliseconds apart
+ * left a plant with 20 teams and 96 roles. A guard in one caller would not have
+ * covered the other either.
+ *
+ * ONE STATEMENT, NOT TEN. Every row is known up front, so all of them go in a
+ * single INSERT: it is atomic without an interactive transaction (which
+ * neon-http cannot give us anyway), and — the point of the exercise — the
+ * uniqueness claim travels in the SAME statement as the rows it speaks for,
+ * exactly as the invariant requires. `ON CONFLICT … DO NOTHING` makes the loser
+ * of a race a no-op instead of a duplicate, and makes a re-run against an
+ * already-initialized plant a no-op too.
+ *
+ * *** The `where` predicate and `ministry_teams_predefined_name_unique_idx`
+ * change TOGETHER. *** It renders as the ON CONFLICT index_predicate, not as a
+ * row filter, and Postgres matches it against the stored predicate literally —
+ * a mismatch is not subtle drift, it is "there is no unique or exclusion
+ * constraint matching the ON CONFLICT specification" on every initialization.
+ * The literal `'predefined'` is inlined rather than parameterised for the same
+ * reason: inference matches constants, not bind parameters.
  */
 export async function initializePredefinedTeams(
   churchId: string,
@@ -402,12 +432,13 @@ export async function initializePredefinedTeams(
       )
     : TEAM_TEMPLATES;
 
-  const teams: MinistryTeam[] = [];
+  // An empty selection is a legitimate answer (`teamKeys: []`), and an INSERT
+  // with no rows is a runtime error rather than a no-op. Say nothing happened.
+  if (templates.length === 0) return [];
 
-  for (const template of templates) {
-    const [team] = await db
-      .insert(ministryTeams)
-      .values({
+  const rows = templates.map(
+    (template) =>
+      ({
         churchId,
         name: template.teamName,
         type: "predefined" as TeamType,
@@ -417,13 +448,17 @@ export async function initializePredefinedTeams(
         status: "forming" as TeamStatus,
         sortOrder: template.sortOrder,
         createdBy: userId,
-      } satisfies NewMinistryTeam)
-      .returning();
+      }) satisfies NewMinistryTeam
+  );
 
-    teams.push(team);
-  }
-
-  return teams;
+  return db
+    .insert(ministryTeams)
+    .values(rows)
+    .onConflictDoNothing({
+      target: [ministryTeams.churchId, ministryTeams.name],
+      where: sql`${ministryTeams.type} = 'predefined'`,
+    })
+    .returning();
 }
 
 // ============================================================================

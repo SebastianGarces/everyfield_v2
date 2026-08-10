@@ -341,7 +341,7 @@ test("completeOnboarding declares that it may not return", () => {
 });
 
 test("the flow reads the completion result optionally", () => {
-  const flow = source("components", "onboarding", "onboarding-flow.tsx");
+  const flow = source("components", "onboarding", "onboarding-flow-client.tsx");
 
   assert.match(flow, /await completeOnboarding\(\)/);
   assert.match(flow, /result\?\.error/);
@@ -353,7 +353,7 @@ test("a finish that never returns a state is still reported to the planter", () 
   // REJECTED. An async transition callback that lets that escape renders
   // nothing and leaves the button pending — the worst version of the FRD's NFR,
   // because every earlier step IS saved and the planter cannot tell.
-  const flow = source("components", "onboarding", "onboarding-flow.tsx");
+  const flow = source("components", "onboarding", "onboarding-flow-client.tsx");
 
   const finishBody = flow.slice(flow.indexOf("function finish()"));
   assert.match(
@@ -399,7 +399,7 @@ test("moving forward past the last step is what finishes", () => {
   // through to `finish()` when there is no next step — a skip on the final step
   // is a finish. If forward ever stops short of `finish()`, the last step
   // becomes a dead end with a Continue button that does nothing.
-  const flow = source("components", "onboarding", "onboarding-flow.tsx");
+  const flow = source("components", "onboarding", "onboarding-flow-client.tsx");
 
   const forward = flow.slice(flow.indexOf("function goForward()"));
   const body = forward.slice(0, forward.indexOf("\n  }"));
@@ -419,7 +419,7 @@ test("every step after step 1 is wired to a control that advances without writin
   // the two components rendering steps 3 and 4. A skip is `goForward` and
   // nothing else, which is what makes it unable to lose an answer: it never had
   // one to commit.
-  const flow = source("components", "onboarding", "onboarding-flow.tsx");
+  const flow = source("components", "onboarding", "onboarding-flow-client.tsx");
 
   const skippableSteps = ONBOARDING_STEP_IDS.filter((id) =>
     isSkippableOnboardingStep(id)
@@ -445,7 +445,9 @@ test("the action module publishes only actions", () => {
 
   assert.deepEqual(
     exported.map((match) => match[1]),
-    ["async", "async", "async"],
+    // createChurchBasics, confirmLeadership, declareJourney (#306),
+    // completeOnboarding.
+    ["async", "async", "async", "async"],
     "only `export async function` may appear in a 'use server' module"
   );
 });

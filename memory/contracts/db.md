@@ -50,6 +50,15 @@ tenant scope; `created_at`/`updated_at` default now.
     `pg_constraint`, so a table added next month joins the wipe on its own and nothing has to be
     kept in step. The FK facts above are still why the derivation matters — they are exactly the
     edges a hand-kept list kept missing. See "The dev-seed wipe" below.
+- **`phase_transitions.kind`** (`phase-engine.ts`, migration 0033): `transition` (the default) |
+  `initial_declaration`, closed by `phase_transitions_kind_check`. The second is OB-005's "where
+  this plant already was when it joined" — history the planter DECLARED, not a move they made
+  here, so no rows exist for the phases behind it (declaring 3 writes nothing for 1–2). At most
+  one per church, ever, by `phase_transitions_initial_declaration_unique_idx`; see
+  `../invariants.md` → Atomicity for why that index and not a predicate. Ask
+  `isInitialDeclaration` / `hasInitialPhaseDeclaration`, never the `reason` text — the reserved
+  sentence there is display copy that `transitionPhaseSchema` merely refuses to let a planter
+  retype.
 - **`church_id = null` means global content** (e.g. wiki articles visible to all tenants).
 - **`sessions.id`** is the SHA-256 of the token, not the token.
 - **Soft deletes:** `persons.deleted_at` — feature queries must filter it.
