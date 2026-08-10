@@ -21,7 +21,7 @@
 
 The Communication Hub provides centralized communication capabilities with team members and prospects. It combines message templates, communication history tracking, and delivery through integrated services (email, SMS).
 
-The Communication Hub also serves as a **delivery service** for other features. Features like Meetings (F3) can request email delivery through the Communication Hub using templates and merge fields, rather than implementing their own email infrastructure. This keeps all communication centralized with unified delivery tracking and per-person communication history.
+The Communication Hub also serves as a **delivery service** for other features. Features like Meetings can request email delivery through the Communication Hub using templates and merge fields, rather than implementing their own email infrastructure. This keeps all communication centralized with unified delivery tracking and per-person communication history.
 
 **Important:** The platform provides the workflow and templates; actual message delivery leverages integrated external services.
 
@@ -688,10 +688,10 @@ General notes attached to any entity.
 
 | Data | Contract | Source |
 |------|----------|--------|
-| **Person records** | Read `Person.id`, `first_name`, `last_name`, email, phone for recipient selection and merge fields | People/CRM (F2) |
-| **Team membership** | Read team roster by `team_id` -> list of `person_id` for group messaging | Ministry Teams (F8) |
-| **Task completion events** | Receive `task.completed` event with `person_id` to prompt follow-up communication | Task Management (F5) |
-| **Meeting invitation requests** | Receive meeting details (title, datetime, location, type) and guest list (person IDs) to compose and send invitation emails using meeting templates | Meetings (F3) |
+| **Person records** | Read `Person.id`, `first_name`, `last_name`, email, phone for recipient selection and merge fields | People/CRM |
+| **Team membership** | Read team roster by `team_id` -> list of `person_id` for group messaging | Ministry Teams |
+| **Task completion events** | Receive `task.completed` event with `person_id` to prompt follow-up communication | Task Management |
+| **Meeting invitation requests** | Receive meeting details (title, datetime, location, type) and guest list (person IDs) to compose and send invitation emails using meeting templates | Meetings |
 
 ### Outbound (this feature provides)
 
