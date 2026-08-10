@@ -68,6 +68,7 @@ Available components: https://ui.shadcn.com/docs/components
 | A merge/rebase conflict (esp. wave branches) | `.claude/skills/resolving-merge-conflicts/SKILL.md` |
 | Adding a skill — who may invoke it | `ops/agent-os/invocation.md` |
 | The delivery workflow end-to-end (diagram) | `ops/agent-os/workflow.md` |
+| What makes work delegable — design-first, modularity, test seams, rule strengths | `ops/agent-os/delegation-rules.md` |
 | React performance patterns | `.agents/skills/vercel-react-best-practices/` |
 | Feature requirements | `product-docs/features/{feature-name}/frd.md` |
 | What is built vs. still open | The board — `gh issue list --label feature`. **Not a file**; the checklists were deleted 2026-07-26 (`ops/agent-os/labels.md`) |
