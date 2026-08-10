@@ -531,11 +531,73 @@ function manualByKeyPhrase(
   const signalKey = normalized.slice(prefix.length);
   if (!signalKey) return null;
 
+  return signalPhrase(signalKey, value);
+}
+
+/** What a citation of one manual signal reads as, keyed or not. */
+function signalPhrase(signalKey: string, value: string | null): string {
   const clause = manualSignalClause(signalKey);
   const flag = toBoolean(value);
   if (flag === true) return `you confirmed ${clause}`;
   if (flag === false) return `you have not confirmed ${clause}`;
   return value ? `${clause}, reported as ${toWords(value)}` : clause;
+}
+
+/** The array spelling of the same attestation, with indices collapsed. */
+const MANUAL_ATTESTATION_PREFIX = "manual.attestations.#.";
+
+/**
+ * The SAME attestation, cited the other legal way.
+ *
+ * The fact snapshot writes every manual attestation twice —
+ * `manual.byKey.<signal>` and `manual.attestations[]` — and the judge's citable
+ * ledger is the whole flattened snapshot, so both spellings are legal citations
+ * of one fact (assessment/queries.ts, `normalizeManualCitation`). Attribution
+ * already resolves the row to its signal so the two spellings land on the same
+ * exit criterion; this is the wording half of that ruling (2026-08-10, #319):
+ * having landed on the same gate, they must also READ the same. "something you
+ * confirmed" beside "you confirmed your financial base is in place" is the same
+ * evidence told twice, once vaguely, and the vague one is the one that makes a
+ * planter doubt the specific one.
+ *
+ * `signalKey` is resolved by the caller against the assessment's own snapshot,
+ * because which signal row N holds is a READ of that snapshot, not a syntax
+ * rule this pure module could work out. Without it — an unresolvable row, or a
+ * surface that has no snapshot to hand — the citation keeps the generic
+ * self-report phrasing from `FACT_PHRASES` rather than guessing a signal.
+ *
+ * The citation itself is untouched: only the words change, never the path a
+ * surface shows or the value it reads back (see `CitedFactEvidence.path`).
+ */
+function manualAttestationPhrase(
+  normalized: string,
+  value: string | null,
+  signalKey: string | null | undefined
+): string | null {
+  if (!normalized.startsWith(MANUAL_ATTESTATION_PREFIX)) return null;
+
+  const key = signalKey?.trim();
+  if (!key) return null;
+
+  switch (normalized.slice(MANUAL_ATTESTATION_PREFIX.length)) {
+    // `…value` asserts the attestation — exactly what the keyed spelling
+    // asserts, so it is exactly the sentence the keyed spelling reads as.
+    case "value":
+      return signalPhrase(key, value);
+    // `…signalKey` names the fact and asserts nothing about it, which is what a
+    // bare `manual.byKey.<signal>` citation does.
+    case "signalKey":
+      return signalPhrase(key, null);
+    // `…attestedAt` carries WHEN, which the keyed spelling has no path for. Name
+    // the signal in the same words and keep the date — dropping it would lose
+    // evidence (rule 1) to buy a uniformity nothing asked for.
+    case "attestedAt":
+      return value && ISO_DATE_PATTERN.test(value)
+        ? `${manualSignalClause(key)}, self-reported on ${toReadableDate(value)}`
+        : null;
+    default:
+      return null;
+  }
 }
 
 // ----------------------------------------------------------------------------
@@ -586,15 +648,36 @@ function fallbackLabel(normalized: string): string {
 // Public API.
 // ----------------------------------------------------------------------------
 
+/**
+ * What the caller knows about a citation that this module cannot work out for
+ * itself, because knowing it means reading the snapshot the citation was made
+ * against.
+ */
+export interface CitedFactContext {
+  /**
+   * The manual signal an `manual.attestations.N.…` citation names, resolved out
+   * of that snapshot (assessment/queries.ts). Supplying it makes the array
+   * spelling read as the SAME sentence as `manual.byKey.<signal>`; omitting it
+   * (or passing null, for a row that does not resolve) keeps the generic
+   * self-report phrasing. Ignored for every other path.
+   */
+  signalKey?: string | null;
+}
+
 /** Resolve one citation to its phrase, or `null` when there is nothing to say. */
-function buildPhrase(fact: unknown): Phrase | null {
+function buildPhrase(fact: unknown, context?: CitedFactContext): Phrase | null {
   if (typeof fact !== "string" || fact.trim() === "") return null;
 
   const { path, value } = parseCitedFact(fact);
   const normalized = normalizePath(path);
 
+  // The resolved attestation wins over the anonymous row template above: it is
+  // the same fact said precisely, and it is only reachable when the caller has
+  // resolved the row against the snapshot.
   const known =
-    FACT_PHRASES[normalized]?.(value) ?? manualByKeyPhrase(normalized, value);
+    manualAttestationPhrase(normalized, value, context?.signalKey) ??
+    FACT_PHRASES[normalized]?.(value) ??
+    manualByKeyPhrase(normalized, value);
   if (known) return known;
 
   const label = fallbackLabel(normalized);
@@ -610,9 +693,15 @@ function buildPhrase(fact: unknown): Phrase | null {
  * empty input, which `formatCitedFacts` drops. A row fact renders as its
  * singular here — one citation is one row; counting is `formatCitedFacts`'
  * job, because only the whole column knows how many rows agreed.
+ *
+ * `context` carries what only the caller can know (see `CitedFactContext`); a
+ * caller with no snapshot to hand omits it and every path still renders.
  */
-export function formatCitedFact(fact: string): string {
-  const phrase = buildPhrase(fact);
+export function formatCitedFact(
+  fact: string,
+  context?: CitedFactContext
+): string {
+  const phrase = buildPhrase(fact, context);
   return phrase === null ? "" : renderPhrase(phrase, 1);
 }
 

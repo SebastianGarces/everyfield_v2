@@ -395,6 +395,12 @@ test("PE-022: a byKey citation attributes to the attested gate it names", () => 
     criterion(progress, "financial_base").evidence.map((e) => e.path),
     ["manual.byKey.financial_base_established"]
   );
+  // The keyed spelling already names its signal in the path, so there is
+  // nothing to resolve and nothing for a surface to override.
+  assert.equal(
+    criterion(progress, "financial_base").evidence[0].signalKey,
+    null
+  );
   // …and it stays on that gate.
   assert.equal(
     criterion(progress, "committed_adults").standing,
@@ -427,6 +433,74 @@ test("PE-022: an attestations-array citation reaches the gate that measures entr
   assert.equal(evidence.snapshotValue, "false");
   assert.equal(evidence.inSnapshot, true);
   assert.equal(evidence.agrees, true);
+
+  // …but the signal the row resolved to rides ALONGSIDE the untouched path, so
+  // the drill-down can read this citation in the same words as the keyed
+  // spelling of it without either being rewritten.
+  assert.equal(evidence.signalKey, "financial_base_established");
+});
+
+test("PE-025: every attestation-row citation carries the signal it resolved to", () => {
+  // All three leaves of a row are legal citations, and each of them needs the
+  // resolution: none of the three says which signal it is about on its face.
+  const progress = buildExitCriteriaProgress(
+    makeLatest(
+      [
+        makeInsight({
+          category: "generosity",
+          title: "Your financial base is not confirmed",
+          citedFacts: [
+            "manual.attestations.1.value=false",
+            "manual.attestations.1.signalKey=financial_base_established",
+            "manual.attestations[1].attestedAt=2026-07-20",
+            "coreGroup.committedCount=22",
+          ],
+        }),
+      ],
+      { factSnapshot: makeSnapshot({ manual: MANUAL_TWO_SIGNALS }) }
+    )
+  )!;
+
+  const { evidence } = criterion(progress, "financial_base");
+  assert.deepEqual(
+    evidence.map((e) => [e.path, e.signalKey]),
+    [
+      ["manual.attestations.1.value", "financial_base_established"],
+      ["manual.attestations.1.signalKey", "financial_base_established"],
+      ["manual.attestations.1.attestedAt", "financial_base_established"],
+      // A fact that is not an attestation row resolves to no signal at all.
+      ["coreGroup.committedCount", null],
+    ]
+  );
+});
+
+test("PE-025: an attestation row the snapshot cannot resolve carries no signal", () => {
+  // The insight reaches the gate through its OTHER citation; the unresolvable
+  // one still rides in the drill-down, and must not borrow a signal from it.
+  const progress = buildExitCriteriaProgress(
+    makeLatest(
+      [
+        makeInsight({
+          category: "generosity",
+          title: "Your financial base is not confirmed",
+          citedFacts: [
+            "manual.byKey.financial_base_established=false",
+            "manual.attestations.9.value=false",
+          ],
+        }),
+      ],
+      { factSnapshot: makeSnapshot({ manual: MANUAL_TWO_SIGNALS }) }
+    )
+  )!;
+
+  const { evidence } = criterion(progress, "financial_base");
+  assert.deepEqual(
+    evidence.map((e) => [e.path, e.signalKey]),
+    [
+      ["manual.byKey.financial_base_established", null],
+      ["manual.attestations.9.value", null],
+    ]
+  );
 });
 
 test("PE-022: the array form resolves per signal, so it cannot spill onto a gate it does not name", () => {

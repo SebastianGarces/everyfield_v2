@@ -406,3 +406,129 @@ test("formatCitedFacts degrades a malformed jsonb column to nothing", () => {
   assert.deepEqual(formatCitedFacts({ a: 1 }), []);
   assert.deepEqual(formatCitedFacts([null, 4, "", "   "]), []);
 });
+
+// ----------------------------------------------------------------------------
+// One attestation, two legal spellings, one sentence (#319, 2026-08-10).
+//
+// The snapshot writes every manual attestation to BOTH `manual.byKey.<signal>`
+// and `manual.attestations[]`, so a citation of either names the same fact. The
+// caller resolves row N to its signal against the snapshot and passes it here;
+// with it, the two spellings must read identically.
+// ----------------------------------------------------------------------------
+
+test("a resolved attestation reads exactly as its keyed spelling", () => {
+  for (const [signalKey, expected] of [
+    [
+      "financial_base_established",
+      "you confirmed your financial base is in place",
+    ],
+    ["values_documented", "you confirmed your core values are documented"],
+    ["prayer_leader_assigned", "you confirmed a prayer leader is assigned"],
+    ["systems_tested", "you confirmed your launch systems have been tested"],
+  ] as const) {
+    const keyed = formatCitedFact(`manual.byKey.${signalKey}=true`);
+    const arrayForm = formatCitedFact("manual.attestations.1.value=true", {
+      signalKey,
+    });
+
+    assert.equal(keyed, expected);
+    assert.equal(arrayForm, keyed, `${signalKey} read two ways`);
+  }
+});
+
+test("a resolved attestation carries the negative the same way", () => {
+  assert.equal(
+    formatCitedFact("manual.attestations.0.value=false", {
+      signalKey: "systems_tested",
+    }),
+    formatCitedFact("manual.byKey.systems_tested=false")
+  );
+  assert.equal(
+    formatCitedFact("manual.attestations.0.value=false", {
+      signalKey: "systems_tested",
+    }),
+    "you have not confirmed your launch systems have been tested"
+  );
+});
+
+test("the bracketed index spelling resolves the same as the dotted one", () => {
+  assert.equal(
+    formatCitedFact("manual.attestations[2].value=true", {
+      signalKey: "values_documented",
+    }),
+    "you confirmed your core values are documented"
+  );
+});
+
+test("citing the signal key itself names the fact without asserting it", () => {
+  // The array-form twin of a BARE `manual.byKey.<signal>` citation: it says
+  // which signal, and nothing about its answer.
+  assert.equal(
+    formatCitedFact("manual.attestations.0.signalKey=values_documented", {
+      signalKey: "values_documented",
+    }),
+    formatCitedFact("manual.byKey.values_documented")
+  );
+  assert.equal(
+    formatCitedFact("manual.attestations.0.signalKey=values_documented", {
+      signalKey: "values_documented",
+    }),
+    "your core values are documented"
+  );
+});
+
+test("a resolved attestation date names its signal and keeps the date", () => {
+  const phrase = formatCitedFact(
+    "manual.attestations.0.attestedAt=2026-07-19T09:30:00.000Z",
+    { signalKey: "prayer_leader_assigned" }
+  );
+
+  assert.match(phrase, /a prayer leader is assigned/);
+  // The date is evidence; humanising must not spend it to buy uniformity.
+  assert.match(phrase, /2026/);
+  assert.doesNotMatch(phrase, CAMEL_CASE);
+  assert.ok(!phrase.includes("_"));
+});
+
+test("an unresolved attestation keeps the generic phrasing, never a guess", () => {
+  // No context at all, an explicitly unresolved row, and a blank key are the
+  // same case: the module knows only what the citation says on its face.
+  for (const context of [
+    undefined,
+    { signalKey: null },
+    { signalKey: "   " },
+  ]) {
+    assert.equal(
+      formatCitedFact("manual.attestations.4.value=true", context),
+      "something you confirmed"
+    );
+  }
+});
+
+test("a signal key is ignored on paths that are not attestation rows", () => {
+  const context = { signalKey: "financial_base_established" };
+
+  assert.equal(
+    formatCitedFact("coreGroup.committedCount=22", context),
+    formatCitedFact("coreGroup.committedCount=22")
+  );
+  assert.equal(
+    formatCitedFact("manual.byKey.values_documented=true", context),
+    "you confirmed your core values are documented"
+  );
+  assert.equal(
+    formatCitedFact("manual.isEmpty=false", context),
+    "self-reports on record"
+  );
+});
+
+test("an unknown signal still degrades to words, never to ledger syntax", () => {
+  const phrase = formatCitedFact("manual.attestations.0.value=true", {
+    signalKey: "future_signal_nobody_wrote_a_clause_for",
+  });
+
+  assert.doesNotMatch(phrase, LEDGER_SYNTAX);
+  assert.doesNotMatch(phrase, CAMEL_CASE);
+  assert.ok(!phrase.includes("_"), phrase);
+  assert.match(phrase, /you confirmed/);
+});

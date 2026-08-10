@@ -184,9 +184,15 @@ function Mark({
  *
  * A path that did NOT resolve has no value behind it: the de-camelised label
  * alone, asserting nothing.
+ *
+ * `signalKey` is the read layer's resolution of an `manual.attestations.N.…`
+ * citation (`CitedFactEvidence.signalKey`). Passing it is what makes the two
+ * legal spellings of one attestation read as one sentence instead of a specific
+ * claim beside a vague one (ruled 2026-08-10 on #319). It changes the WORDS
+ * only — `data-path` below is still the citation as the judge wrote it.
  */
-function humaniseBarePath(path: string): string {
-  const phrase = formatCitedFact(path);
+function humaniseBarePath(path: string, signalKey?: string | null): string {
+  const phrase = formatCitedFact(path, { signalKey });
   return phrase === "" ? path : phrase;
 }
 
@@ -196,8 +202,12 @@ function humaniseBarePath(path: string): string {
  * reaches the formatter's "…: not recorded" wording, where the bare path would
  * degrade to a label that reads like a fact with its value lost.
  */
-function humaniseReading(path: string, value: string | null): string {
-  const phrase = formatCitedFact(`${path}=${String(value)}`);
+function humaniseReading(
+  path: string,
+  value: string | null,
+  signalKey?: string | null
+): string {
+  const phrase = formatCitedFact(`${path}=${String(value)}`, { signalKey });
   return phrase === "" ? path : phrase;
 }
 
@@ -370,7 +380,7 @@ function CitedFact({ item }: { item: CitedFactEvidence }) {
   if (!item.inSnapshot) {
     return (
       <>
-        {humaniseBarePath(item.path)}{" "}
+        {humaniseBarePath(item.path, item.signalKey)}{" "}
         <span className="text-muted-foreground">
           — cited, but not in this snapshot, so it is not shown as a fact.
         </span>
@@ -380,7 +390,7 @@ function CitedFact({ item }: { item: CitedFactEvidence }) {
 
   return (
     <>
-      {humaniseReading(item.path, item.snapshotValue)}
+      {humaniseReading(item.path, item.snapshotValue, item.signalKey)}
       {!item.agrees && item.citedValue !== null && (
         <span className="text-muted-foreground">
           {" "}

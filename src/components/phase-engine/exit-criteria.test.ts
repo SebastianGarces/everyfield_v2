@@ -112,6 +112,7 @@ function makeCriterion(
       {
         insightId: "insight-1",
         path: "coreGroup.committedCount",
+        signalKey: null,
         citedValue: "22",
         snapshotValue: "22",
         inSnapshot: true,
@@ -229,6 +230,7 @@ test("PE-025: a citation renders the snapshot's value, with the quoted one only 
       {
         insightId: "insight-1",
         path: "coreGroup.committedCount",
+        signalKey: null,
         citedValue: "40",
         snapshotValue: "22",
         inSnapshot: true,
@@ -255,6 +257,7 @@ test("PE-025: a cited path that is not in the snapshot is not shown as a fact", 
       {
         insightId: "insight-1",
         path: "coreGroup.committedCount",
+        signalKey: null,
         citedValue: "40",
         snapshotValue: null,
         inSnapshot: false,
@@ -282,6 +285,7 @@ test("PE-025: a citation whose snapshot value is null says 'not recorded', not a
       {
         insightId: "insight-1",
         path: "launch.launchDate",
+        signalKey: null,
         citedValue: null,
         snapshotValue: null,
         inSnapshot: true,
@@ -298,6 +302,98 @@ test("PE-025: a citation whose snapshot value is null says 'not recorded', not a
   assert.equal(cited.length, 1);
   assert.match(cited[0], /not recorded/);
   assert.doesNotMatch(cited[0], /not in this snapshot/);
+});
+
+// ----------------------------------------------------------------------------
+// AC (#319, ruled 2026-08-10): one attestation, two legal spellings, one
+// sentence. The snapshot writes every manual attestation to both
+// `manual.byKey.<signal>` and `manual.attestations[]`, so the judge may cite
+// either — and having made both land on this gate, the drill-down must not then
+// read one of them as "something you confirmed".
+// ----------------------------------------------------------------------------
+
+test("PE-025: both spellings of one attestation read the same specific sentence", () => {
+  const attested = makeCriterion({
+    key: "financial_base",
+    label: "A financial base in place",
+    factPaths: ["manual.byKey.financial_base_established"],
+    measurement: "met",
+    reading: "You have confirmed your financial base is in place.",
+    facts: [
+      {
+        path: "manual.byKey.financial_base_established",
+        present: true,
+        value: "true",
+      },
+    ],
+    evidence: [
+      {
+        insightId: "insight-1",
+        path: "manual.byKey.financial_base_established",
+        signalKey: null,
+        citedValue: "true",
+        snapshotValue: "true",
+        inSnapshot: true,
+        agrees: true,
+      },
+      {
+        insightId: "insight-1",
+        path: "manual.attestations.1.value",
+        // What the read layer resolved row 1 to, out of the same snapshot.
+        signalKey: "financial_base_established",
+        citedValue: "true",
+        snapshotValue: "true",
+        inSnapshot: true,
+        agrees: true,
+      },
+    ],
+  });
+
+  const row = rows(render(makeProgress([attested])))[0];
+  const cited = items(row, "exit-criterion-cited-fact");
+
+  assert.equal(cited.length, 2);
+  assert.equal(cited[0], "you confirmed your financial base is in place");
+  // The whole point: identical wording, not merely both non-empty.
+  assert.equal(cited[1], cited[0]);
+  // …and none of the old anonymous phrasing survives on either row.
+  assert.doesNotMatch(row, /something you confirmed/);
+
+  // The citation itself is untouched — `data-path` is what the judge wrote, so
+  // a reader checking the assessment against the snapshot still can.
+  assert.ok(
+    row.includes('data-path="manual.byKey.financial_base_established"')
+  );
+  assert.ok(row.includes('data-path="manual.attestations.1.value"'));
+});
+
+test("PE-025: an attestation row that did not resolve keeps the generic phrasing", () => {
+  // `signalKey: null` is the read layer saying it could not resolve the row —
+  // an out-of-range index, or a snapshot whose row carries no signal. The
+  // drill-down must degrade to what the citation says on its face, never guess
+  // a signal, and never leak ledger syntax while doing it.
+  const unresolved = makeCriterion({
+    evidence: [
+      {
+        insightId: "insight-1",
+        path: "manual.attestations.7.value",
+        signalKey: null,
+        citedValue: "true",
+        snapshotValue: "true",
+        inSnapshot: true,
+        agrees: true,
+      },
+    ],
+  });
+
+  const cited = items(
+    rows(render(makeProgress([unresolved])))[0],
+    "exit-criterion-cited-fact"
+  );
+
+  assert.equal(cited.length, 1);
+  assert.equal(cited[0], "something you confirmed");
+  assert.doesNotMatch(cited[0], /manual\.|=/);
 });
 
 test("PE-022: a lens read the snapshot did not answer is labelled, not asserted", () => {

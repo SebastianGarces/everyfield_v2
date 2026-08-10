@@ -546,7 +546,9 @@ export async function getCsfScorecard(
 // either. Citations are therefore normalised onto ONE spelling before they are
 // matched (`normalizeManualCitation`), so the gate a planter sees a standing on
 // does not depend on which of two equally legal forms the model happened to
-// emit. Ruled 2026-08-10 on #319.
+// emit. The drill-down's WORDS are unified from the same reading — each
+// citation carries the signal it resolved to (`CitedFactEvidence.signalKey`) —
+// while the citation itself is still shown verbatim. Ruled 2026-08-10 on #319.
 //
 // A criterion can therefore read "met" with no standing at all (the snapshot
 // clears the gate and the judge had nothing to add), or "not tracked" with a
@@ -1167,6 +1169,18 @@ export interface CitedFactEvidence {
   insightId: string;
   /** The cited path, indices normalised to dots. */
   path: string;
+  /**
+   * The manual signal an `manual.attestations.N.…` citation names, resolved out
+   * of this snapshot; `null` for every other citation and for a row that does
+   * not resolve.
+   *
+   * It is carried so a surface can read the array spelling of an attestation in
+   * the SAME words as the `manual.byKey.<signal>` spelling of it (ruled
+   * 2026-08-10 on #319) — `formatCitedFact`'s `signalKey` context. It never
+   * replaces `path`, which stays exactly as the judge wrote it: attribution and
+   * wording are unified, the citation itself is still shown verbatim.
+   */
+  signalKey: string | null;
   /** What the assessment quoted, verbatim. `null` when it cited a bare key. */
   citedValue: string | null;
   /** What the persisted fact snapshot holds at that path. THE value to show. */
@@ -1236,32 +1250,19 @@ function citationMatchesPath(citedPath: string, factPath: string): boolean {
 const MANUAL_ATTESTATIONS_PREFIX = "manual.attestations.";
 
 /**
- * Rewrite an `manual.attestations.N.…` citation onto the `manual.byKey.<signal>`
- * form the attested criteria declare, by resolving entry N's `signalKey` in the
- * snapshot the insight was made against (ruled 2026-08-10 on #319).
+ * Which manual signal an `manual.attestations.N.…` citation names, read out of
+ * the snapshot the insight was made against.
  *
- * ATTRIBUTION ONLY. This normalisation exists so the standing column names the
- * criterion the judge actually spoke to; it never touches the drill-down, where
- * `buildEvidence` still resolves the citation EXACTLY as the judge wrote it. The
- * planter therefore reads the real citation and its real snapshot value, while
- * the row it lands on is decided by which signal it names.
- *
- * Why by signal and not by widening the criteria to the `manual` prefix: the
- * three attested gates each measure ONE signal, so a prefix rule would light all
- * three up for a citation of any manual signal at all — telling a planter the
- * engine addressed their financial base because it mentioned something else.
- * Resolving the row gives full recall with no precision lost.
- *
- * Returns `null` when the citation names no resolvable entry — an out-of-range
- * index, a non-numeric one, or a snapshot whose row carries no `signalKey`. An
- * unresolvable citation attributes to NOTHING rather than guessing a gate; the
- * criterion then reads `not_addressed`, which is the honest answer.
+ * `null` for every citation that is not one of those, and for one that names no
+ * resolvable entry — an out-of-range index, a non-numeric one, or a row that
+ * carries no `signalKey`. Both callers below treat that null the same way: they
+ * fall back to what the citation says on its face rather than guessing a signal.
  */
-function normalizeManualCitation(
+function attestationSignalKey(
   citedPath: string,
   snapshot: unknown
 ): string | null {
-  if (!citedPath.startsWith(MANUAL_ATTESTATIONS_PREFIX)) return citedPath;
+  if (!citedPath.startsWith(MANUAL_ATTESTATIONS_PREFIX)) return null;
 
   const [index] = citedPath.slice(MANUAL_ATTESTATIONS_PREFIX.length).split(".");
   if (!/^\d+$/.test(index)) return null;
@@ -1273,7 +1274,41 @@ function normalizeManualCitation(
   if (!signalKey.present || signalKey.value === null) return null;
 
   const key = signalKey.value.trim();
-  return key.length > 0 ? `manual.byKey.${key}` : null;
+  return key.length > 0 ? key : null;
+}
+
+/**
+ * Rewrite an `manual.attestations.N.…` citation onto the `manual.byKey.<signal>`
+ * form the attested criteria declare, by resolving entry N's `signalKey` in the
+ * snapshot the insight was made against (ruled 2026-08-10 on #319).
+ *
+ * ATTRIBUTION ONLY. This normalisation exists so the standing column names the
+ * criterion the judge actually spoke to; it never touches the drill-down, where
+ * `buildEvidence` still resolves the citation EXACTLY as the judge wrote it. The
+ * planter therefore reads the real citation and its real snapshot value, while
+ * the row it lands on is decided by which signal it names. The WORDS that
+ * citation is read in are unified separately, and non-destructively: the
+ * resolved signal rides along on `CitedFactEvidence.signalKey` so the drill-down
+ * can phrase both spellings alike without either path being rewritten.
+ *
+ * Why by signal and not by widening the criteria to the `manual` prefix: the
+ * three attested gates each measure ONE signal, so a prefix rule would light all
+ * three up for a citation of any manual signal at all — telling a planter the
+ * engine addressed their financial base because it mentioned something else.
+ * Resolving the row gives full recall with no precision lost.
+ *
+ * Returns `null` when the citation names no resolvable entry. An unresolvable
+ * citation attributes to NOTHING rather than guessing a gate; the criterion then
+ * reads `not_addressed`, which is the honest answer.
+ */
+function normalizeManualCitation(
+  citedPath: string,
+  snapshot: unknown
+): string | null {
+  if (!citedPath.startsWith(MANUAL_ATTESTATIONS_PREFIX)) return citedPath;
+
+  const key = attestationSignalKey(citedPath, snapshot);
+  return key === null ? null : `manual.byKey.${key}`;
 }
 
 /**
@@ -1344,6 +1379,7 @@ function buildEvidence(
     evidence.push({
       insightId: insight.id,
       path: normalized,
+      signalKey: attestationSignalKey(normalized, snapshot),
       citedValue: value,
       snapshotValue: stored.value,
       inSnapshot: stored.present,
