@@ -1116,6 +1116,10 @@ export interface EvaluationTrendPoint {
  * meeting hands `compareEvaluationToHistory` a window of only LATER meetings,
  * so it returns `null`. The card must therefore never read that `null` as
  * "this is your first evaluated meeting" — see `evaluation-comparison.tsx`.
+ *
+ * This number is never rendered. Round 2 of the same ruling took the window
+ * out of the empty-state sentence, so changing it here changes behaviour only
+ * — no copy follows it.
  */
 export const EVALUATION_COMPARISON_WINDOW = 50;
 

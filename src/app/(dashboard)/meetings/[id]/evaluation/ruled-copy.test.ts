@@ -21,7 +21,9 @@ import {
 // 2. The evaluation comparison's empty state must never claim "first". The
 //    50-meeting window is deliberately KEPT, which means `null` has two causes
 //    — nothing earlier exists, or everything earlier fell outside the window —
-//    and the card cannot tell them apart. Only the sentence changed.
+//    and the card cannot tell them apart. Only the sentence changed. Round 2
+//    of the ruling shortened it to one line and dropped the window number from
+//    the copy entirely; the window stays in code and is never rendered.
 //
 // Both are claims about rendered TEXT, and neither component can be imported
 // here (they pull in server actions and a database client at module load), so
@@ -149,6 +151,47 @@ function point(index: number, score: number): EvaluationTrendPoint {
   };
 }
 
+/**
+ * The ruled sentence, exactly (round 2, 2026-08-10). Compared against the JSX
+ * with its line breaks collapsed, because Prettier decides where the source
+ * wraps and a planter reads none of that.
+ */
+const RULED_EMPTY_STATE =
+  "No comparison available — no earlier evaluated meeting to compare against.";
+
+/**
+ * The sentence itself — the one `<p>` in the empty card's body, with markup
+ * and source wrapping removed. The card's title is excluded on purpose: it is
+ * pinned nowhere and it is not the sentence that was ruled.
+ */
+function emptyStateText(): string {
+  const paragraph = emptyStateCopy().match(
+    /<CardContent>[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/
+  );
+  assert.ok(paragraph, "expected one <p> inside the empty state's CardContent");
+
+  return paragraph[1]!
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+test("a meeting that is genuinely the church's first gets no comparison", () => {
+  // Cause one of `null`: nothing was evaluated before this meeting at all.
+  // The window is irrelevant here — the history is empty.
+  const current = point(0, 4.0);
+
+  assert.equal(
+    compareEvaluationToHistory([current], {
+      meetingId: current.meetingId,
+      datetime: current.datetime,
+      totalScore: current.totalScore,
+    }),
+    null,
+    "null — nothing came before the first evaluated meeting"
+  );
+});
+
 test("a meeting older than the whole window gets no comparison", () => {
   // The state the ruling exists for. This church evaluated WINDOW + 2 meetings.
   // The planter opens the SECOND one — one meeting is genuinely earlier than
@@ -176,6 +219,14 @@ test("a meeting older than the whole window gets no comparison", () => {
   );
 });
 
+test("the empty state reads exactly the ruled sentence", () => {
+  assert.equal(
+    emptyStateText(),
+    RULED_EMPTY_STATE,
+    "the sentence ruled on #312 round 2 — one line, nothing added"
+  );
+});
+
 test("the empty state never says this is the planter's first meeting", () => {
   const copy = emptyStateCopy();
 
@@ -187,6 +238,24 @@ test("the empty state never says this is the planter's first meeting", () => {
   assert.match(copy, /No comparison available/);
 });
 
+test("one unconditional sentence covers both causes of an empty comparison", () => {
+  // The sentence is true whether nothing was evaluated earlier or the window
+  // hid it, so the card needs no discriminator. A conditional here would mean
+  // a caller has to know which cause it is — which the page cannot know.
+  const copy = emptyStateCopy();
+
+  assert.doesNotMatch(
+    copy,
+    /\?|&&/,
+    "the empty state renders one sentence, with no branch on the cause"
+  );
+  assert.equal(
+    (copy.match(/No comparison available/g) ?? []).length,
+    1,
+    "exactly one empty-state sentence lives in the card"
+  );
+});
+
 test("the empty state promises nothing evaluating another meeting cannot keep", () => {
   // "Evaluate another and this card fills in" is true for a genuinely first
   // meeting and false for an out-of-window one: a NEW evaluation is more
@@ -194,17 +263,24 @@ test("the empty state promises nothing evaluating another meeting cannot keep", 
   assert.doesNotMatch(emptyStateCopy(), /Evaluate another/i);
 });
 
-test("the empty state names the window from the constant, not a literal", () => {
+test("the empty state names no window — neither the number nor the constant", () => {
+  // Ruled round 2: the window is a mechanism, not news a planter asked for.
+  // Both forms are pinned, because the constant renders AS the number.
   const copy = emptyStateCopy();
 
-  assert.match(
-    copy,
-    /\{EVALUATION_COMPARISON_WINDOW\}/,
-    "a hand-typed 50 is the copy that goes wrong the day the window changes"
-  );
   assert.doesNotMatch(
     copy,
     new RegExp(`\\b${EVALUATION_COMPARISON_WINDOW}\\b`),
-    "the number itself is never typed into the sentence"
+    "the window number never appears in user-facing copy"
+  );
+  assert.doesNotMatch(
+    copy,
+    /EVALUATION_COMPARISON_WINDOW/,
+    "and it is not interpolated from the constant either — that renders the number"
+  );
+  assert.doesNotMatch(
+    emptyStateText(),
+    /\d/,
+    "no number at all belongs in this sentence"
   );
 });

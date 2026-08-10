@@ -1,22 +1,11 @@
 import { Minus, TrendingDown, TrendingUp } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  EVALUATION_COMPARISON_WINDOW,
-  type EvaluationComparison,
-} from "@/lib/meetings/service";
+import { type EvaluationComparison } from "@/lib/meetings/service";
 
 interface EvaluationComparisonCardProps {
   /** `null` when nothing in the fetched window is earlier than this meeting. */
   comparison: EvaluationComparison | null;
-  /**
-   * PROTOTYPE ONLY (variant C) — whether the fetched window came back full.
-   * A window that is not full holds the church's whole evaluated history, so
-   * `null` then means nothing earlier exists. A full window cannot tell the
-   * two causes apart. This is the discriminator option C costs; it is deleted
-   * with the losing variants once the sentence is ruled.
-   */
-  windowFull?: boolean;
 }
 
 /** Signed to one decimal, so "+0.0" and "-0.0" never appear. */
@@ -40,12 +29,16 @@ function formatDelta(delta: number): string {
  * window is deliberately unchanged; only this sentence is, and it must stay
  * true of both causes.
  *
+ * Round 2 of the same ruling (2026-08-10) shortened the sentence and took the
+ * window number out of it: the window is a mechanism the planter did not ask
+ * about, and a card that has nothing to show should say so in one line. The
+ * window stays in code, named only by the constant in `service.ts`.
+ *
  * Direction is never carried by colour alone — the arrow and the sentence both
  * say which way it went, so the card survives greyscale and colour blindness.
  */
 export function EvaluationComparisonCard({
   comparison,
-  windowFull = false,
 }: EvaluationComparisonCardProps) {
   if (!comparison) {
     return (
@@ -57,60 +50,14 @@ export function EvaluationComparisonCard({
         </CardHeader>
         <CardContent>
           {/*
-            PROTOTYPE (2026-08-10, #312) — four competing sentences for this
-            empty state, all in the DOM, selected by `data-cmp-proto` on
-            <html> from the floating switcher. Only the winner survives; the
-            losers, the `windowFull` prop and the switcher mount are deleted
-            when the ruling is applied.
-
-            The window is named from the constant, never typed as a literal —
-            a hand-written number here is the copy that goes quietly wrong the
-            day the window changes.
+            The ruled sentence (round 2, 2026-08-10, #312). One line, no
+            window number, and true of BOTH causes of `null` — so it is
+            rendered unconditionally, with nothing for a caller to get wrong.
           */}
-          <p
-            data-variant="a"
-            className="text-muted-foreground hidden text-sm [[data-cmp-proto=a]_&]:block"
-          >
-            No comparison available. This card measures a meeting against the
-            evaluated meetings before it, and none of your{" "}
-            {EVALUATION_COMPARISON_WINDOW} most recent evaluations came before
-            this one.
+          <p className="text-muted-foreground text-sm">
+            No comparison available — no earlier evaluated meeting to compare
+            against.
           </p>
-
-          <p
-            data-variant="b"
-            className="text-muted-foreground hidden text-sm [[data-cmp-proto=b]_&]:block"
-          >
-            No comparison available — nothing you evaluated earlier is in range
-            for this meeting.
-          </p>
-
-          <p
-            data-variant="c"
-            className="text-muted-foreground hidden text-sm [[data-cmp-proto=c]_&]:block"
-          >
-            {windowFull ? (
-              <>
-                No comparison available. None of your{" "}
-                {EVALUATION_COMPARISON_WINDOW} most recent evaluations came
-                before this meeting.
-              </>
-            ) : (
-              <>
-                No comparison available. Nothing you evaluated came before this
-                meeting.
-              </>
-            )}
-          </p>
-
-          <div data-variant="d" className="hidden [[data-cmp-proto=d]_&]:block">
-            <p className="text-sm">No comparison available.</p>
-            <p className="text-muted-foreground mt-1 text-xs">
-              This card compares a meeting with the evaluated meetings before
-              it, drawn from your {EVALUATION_COMPARISON_WINDOW} most recent
-              evaluations.
-            </p>
-          </div>
         </CardContent>
       </Card>
     );
