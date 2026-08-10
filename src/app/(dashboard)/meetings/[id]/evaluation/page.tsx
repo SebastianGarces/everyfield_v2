@@ -1,17 +1,22 @@
-import { redirect } from "next/navigation";
-import { verifySession } from "@/lib/auth/session";
-import {
-  getMeeting,
-  getEvaluation,
-  listAttendees,
-} from "@/lib/meetings/service";
-import { notFound } from "next/navigation";
-import { EvaluationForm } from "@/components/meetings/evaluation-form";
-import { EvaluationSummary } from "@/components/meetings/evaluation-summary";
+import { notFound, redirect } from "next/navigation";
+
 import {
   AttendeeNotes,
   type AttendeeForNotes,
 } from "@/components/meetings/attendee-notes";
+import { EvaluationForm } from "@/components/meetings/evaluation-form";
+import { EvaluationSummary } from "@/components/meetings/evaluation-summary";
+import { verifySession } from "@/lib/auth/session";
+import {
+  compareEvaluationToHistory,
+  getEvaluation,
+  getEvaluationTrend,
+  getMeeting,
+  listAttendees,
+  EVALUATION_COMPARISON_WINDOW,
+} from "@/lib/meetings/service";
+
+import { EvaluationComparisonCard } from "./evaluation-comparison";
 
 export const dynamic = "force-dynamic";
 
@@ -24,10 +29,13 @@ export default async function EvaluationPage({ params }: EvaluationPageProps) {
   if (!user.churchId) redirect("/dashboard");
 
   const { id } = await params;
-  const [meeting, evaluation, allAttendees] = await Promise.all([
+  const [meeting, evaluation, allAttendees, trend] = await Promise.all([
     getMeeting(user.churchId, id),
     getEvaluation(user.churchId, id),
     listAttendees(user.churchId, id),
+    // VM-016c: the history the comparison is drawn from. Church-scoped inside
+    // the query, so this can never reach another church's scores.
+    getEvaluationTrend(user.churchId, EVALUATION_COMPARISON_WINDOW),
   ]);
 
   if (!meeting) notFound();
@@ -41,6 +49,16 @@ export default async function EvaluationPage({ params }: EvaluationPageProps) {
       lastName: a.person.lastName,
     }));
 
+  // `null` when this is the first evaluated meeting — the card renders its
+  // empty state rather than a delta against a history that does not exist.
+  const comparison = evaluation
+    ? compareEvaluationToHistory(trend, {
+        meetingId: meeting.id,
+        datetime: meeting.datetime,
+        totalScore: parseFloat(evaluation.totalScore),
+      })
+    : null;
+
   return (
     <div className="mx-auto max-w-3xl space-y-8">
       {evaluation ? (
@@ -49,6 +67,7 @@ export default async function EvaluationPage({ params }: EvaluationPageProps) {
             evaluation={evaluation}
             meetingNumber={meeting.meetingNumber ?? 0}
           />
+          <EvaluationComparisonCard comparison={comparison} />
           {/* Show attendee notes after evaluation is saved */}
           <AttendeeNotes
             meetingId={meeting.id}

@@ -7,6 +7,7 @@ import {
   meetingEvaluations,
   ministryTeams,
   persons,
+  tasks,
   teamMemberships,
   type AttendanceType,
   type ChurchMeeting,
@@ -39,6 +40,7 @@ import type {
   MeetingWithCounts,
 } from "./types";
 import { emitTrainingScheduled } from "@/lib/ministry-teams/events";
+import { topLevelTasksOnly } from "@/lib/tasks/service";
 import { deriveAttendanceType } from "./attendance-type";
 
 // ============================================================================
@@ -1081,17 +1083,41 @@ export async function getEvaluation(
   return rows[0] ?? null;
 }
 
+/** One evaluated meeting on the score trend. */
+export interface EvaluationTrendPoint {
+  /** Present so a reader can tell WHICH meeting a point is — see below. */
+  meetingId: string;
+  meetingNumber: number | null;
+  totalScore: number;
+  datetime: Date;
+}
+
+/**
+ * How far back the evaluation comparison looks (VM-016c).
+ *
+ * The comparison is against the trend window, not against all history: a
+ * planter with more evaluated meetings than this would be compared to the most
+ * recent `EVALUATION_COMPARISON_WINDOW` of them. That is deliberate — the
+ * number a planter cares about is "how did this one go against how things have
+ * been going" — and the rendered copy always says how many meetings the
+ * average covers, so the figure never claims more than it counted.
+ */
+export const EVALUATION_COMPARISON_WINDOW = 50;
+
 /**
  * Get evaluation score trend across meetings (most recent first, returned chronologically).
+ *
+ * `meetingId` is on every point because `meetingNumber` cannot identify one:
+ * it is null for every non-vision meeting and is only unique among vision
+ * meetings, so a comparison keyed on it would silently pair up the wrong rows.
  */
 export async function getEvaluationTrend(
   churchId: string,
   limit = 10
-): Promise<
-  { meetingNumber: number | null; totalScore: number; datetime: Date }[]
-> {
+): Promise<EvaluationTrendPoint[]> {
   const rows = await db
     .select({
+      meetingId: churchMeetings.id,
       meetingNumber: churchMeetings.meetingNumber,
       totalScore: meetingEvaluations.totalScore,
       datetime: churchMeetings.datetime,
@@ -1107,10 +1133,76 @@ export async function getEvaluationTrend(
 
   // Return in chronological order (oldest first)
   return rows.reverse().map((r) => ({
+    meetingId: r.meetingId,
     meetingNumber: r.meetingNumber,
     totalScore: parseFloat(r.totalScore),
     datetime: r.datetime,
   }));
+}
+
+/** How one evaluated meeting sits against the ones before it (VM-016c). */
+export interface EvaluationComparison {
+  /** This meeting's own total score. */
+  currentScore: number;
+  /** How many earlier evaluated meetings the average covers. Always ≥ 1. */
+  previousCount: number;
+  /** Mean of those earlier scores, to one decimal. */
+  previousAverage: number;
+  /** The score of the evaluated meeting immediately before this one. */
+  previousScore: number;
+  /** `currentScore - previousAverage`, to one decimal. Signed. */
+  delta: number;
+}
+
+/** One decimal, the precision `createEvaluation` stores scores at. */
+function toOneDecimal(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+/**
+ * Compare one meeting's evaluation against the meetings evaluated before it.
+ *
+ * Returns `null` when there is nothing earlier to compare against — a first
+ * evaluated meeting has NO comparison, which is a different statement from
+ * "compared to 0.0" or "0% change". Rendering a delta against an absent
+ * history would tell the planter their first meeting was a catastrophic drop.
+ *
+ * "Before" is decided by `datetime`, not by position in the array, and the
+ * current meeting is excluded by id — a meeting evaluated on the same day as
+ * another must not end up inside its own baseline.
+ *
+ * `currentScore` is passed in rather than looked up in `trend` so the
+ * comparison still works for a meeting that has fallen outside the trend
+ * window: the baseline shrinks, the figure never becomes wrong.
+ */
+export function compareEvaluationToHistory(
+  trend: readonly EvaluationTrendPoint[],
+  current: { meetingId: string; datetime: Date; totalScore: number }
+): EvaluationComparison | null {
+  const currentTime = current.datetime.getTime();
+
+  const earlier = trend
+    .filter(
+      (point) =>
+        point.meetingId !== current.meetingId &&
+        point.datetime.getTime() < currentTime
+    )
+    .sort((a, b) => a.datetime.getTime() - b.datetime.getTime());
+
+  if (earlier.length === 0) return null;
+
+  const sum = earlier.reduce((total, point) => total + point.totalScore, 0);
+  const previousAverage = toOneDecimal(sum / earlier.length);
+
+  return {
+    currentScore: toOneDecimal(current.totalScore),
+    previousCount: earlier.length,
+    previousAverage,
+    previousScore: earlier[earlier.length - 1]!.totalScore,
+    // Against the ROUNDED average, so the delta on screen is exactly the
+    // subtraction of the two numbers next to it.
+    delta: toOneDecimal(toOneDecimal(current.totalScore) - previousAverage),
+  };
 }
 
 // ============================================================================
@@ -1389,4 +1481,192 @@ export async function setMeetingAgenda(
   }
 
   return normalized;
+}
+
+// ============================================================================
+// Follow-up completion (VM-020)
+// ============================================================================
+
+/** How much of a meeting's follow-up work is done. */
+export interface MeetingFollowUpCompletion {
+  /** Tasks linked to this meeting. */
+  total: number;
+  /** How many of them are `complete`. */
+  completed: number;
+  /**
+   * 0–100, whole numbers. `null` when `total` is 0 — a percentage with a zero
+   * denominator is UNKNOWN, never 0%, the same rule the delivery figures follow
+   * (memory/invariants.md → Communication). "0% of follow-ups done" is a claim
+   * about work that does not exist.
+   */
+  percent: number | null;
+}
+
+/**
+ * "A task linked to THIS meeting", as a list of conditions.
+ *
+ * The link is `related_type = 'meeting' AND related_id = <this meeting>`, and
+ * deliberately nothing looser. Finalization also mints one follow-up per
+ * attendee, but F5 links those to the PERSON (`related_type = 'person'`,
+ * `related_id = <person id>` — `src/lib/tasks/events.ts`), so they carry no
+ * meeting id at all. Counting them would mean joining back through attendance
+ * on the person, and a person who attends two meetings would then have their
+ * single follow-up counted against both. A figure that double-counts is worse
+ * than a narrow one; widening this means giving those tasks a meeting link
+ * first, in the generator, not guessing at one here.
+ *
+ * `church_id` is in the WHERE rather than inferred from the meeting id:
+ * isolation is application-layer, so every read states its own tenant boundary
+ * (memory/invariants.md → Multi-Tenancy).
+ *
+ * `topLevelTasksOnly()` is imported rather than re-spelled because a subtask is
+ * a checklist item, not a task (#370) — anything reporting a NUMBER of tasks
+ * has to count the population `listTasks` and `getTaskCounts` count.
+ */
+export function meetingLinkedTaskConditions(
+  churchId: string,
+  meetingId: string
+) {
+  return [
+    eq(tasks.churchId, churchId),
+    eq(tasks.relatedType, "meeting"),
+    eq(tasks.relatedId, meetingId),
+    isNull(tasks.deletedAt),
+    topLevelTasksOnly(),
+  ];
+}
+
+/**
+ * The completed-of-total count, as a query.
+ *
+ * Exported un-awaited so a test can render it with `.toSQL()` and assert the
+ * tenant and meeting scoping without a database — the technique
+ * `src/lib/wiki/tenancy.test.ts` uses.
+ */
+export function meetingFollowUpCountQuery(churchId: string, meetingId: string) {
+  return db
+    .select({
+      total: sql<number>`count(*)::int`,
+      completed: sql<number>`count(*) filter (where ${tasks.status} = 'complete')::int`,
+    })
+    .from(tasks)
+    .where(and(...meetingLinkedTaskConditions(churchId, meetingId)));
+}
+
+/**
+ * Follow-up completion for one meeting (VM-020).
+ *
+ * `null` means "there is no figure to show", for two reasons that both render
+ * as nothing rather than as a number:
+ *
+ *  1. The meeting is not this church's. Scoping is asserted here, not assumed
+ *     from the caller having a meeting id.
+ *  2. Attendance was never finalized. `actual_attendance` non-null IS the
+ *     finalized marker (see the block comment above `runFinalizeAttendance`),
+ *     and follow-ups only exist once finalization has run. Before that "0%"
+ *     would read as "you have done none of your follow-ups" when the truthful
+ *     statement is "there are none yet".
+ */
+export async function getFollowUpCompletion(
+  churchId: string,
+  meetingId: string
+): Promise<MeetingFollowUpCompletion | null> {
+  const [meeting] = await db
+    .select({ actualAttendance: churchMeetings.actualAttendance })
+    .from(churchMeetings)
+    .where(
+      and(
+        eq(churchMeetings.churchId, churchId),
+        eq(churchMeetings.id, meetingId)
+      )
+    )
+    .limit(1);
+
+  if (!meeting || meeting.actualAttendance === null) return null;
+
+  const [row] = await meetingFollowUpCountQuery(churchId, meetingId);
+
+  const total = row?.total ?? 0;
+  const completed = row?.completed ?? 0;
+
+  return {
+    total,
+    completed,
+    percent: total === 0 ? null : Math.round((completed / total) * 100),
+  };
+}
+
+// ============================================================================
+// Analytics meeting-type filter (VM-010k)
+// ============================================================================
+
+/**
+ * What the analytics view can be filtered to: one meeting type, or `"all"`.
+ *
+ * `"all"` is a filter VALUE and not the absence of one, so the active control
+ * is always exactly one of these and the URL always says which.
+ */
+export type AnalyticsMeetingTypeFilter = MeetingType | "all";
+
+/**
+ * The filter the analytics view starts on when the URL says nothing.
+ *
+ * Vision meetings, because that is what the view showed before it was
+ * filterable — every existing bookmark and every existing planter lands on the
+ * same figures they landed on yesterday.
+ */
+export const DEFAULT_ANALYTICS_MEETING_TYPE: AnalyticsMeetingTypeFilter =
+  "vision_meeting";
+
+/** The offered filters, in the order the meetings list offers them. */
+export const ANALYTICS_MEETING_TYPE_FILTERS: readonly {
+  value: AnalyticsMeetingTypeFilter;
+  label: string;
+}[] = [
+  { value: "vision_meeting", label: "Vision Meetings" },
+  { value: "orientation", label: "Orientations" },
+  { value: "team_meeting", label: "Team Meetings" },
+  { value: "all", label: "All Types" },
+];
+
+/**
+ * Read the filter out of a `?type=` search param.
+ *
+ * Total over any input: a missing, repeated or unrecognised value falls back to
+ * the default rather than reaching the query builders, so a hand-edited URL
+ * narrows the figures to nothing instead of widening them.
+ */
+export function parseAnalyticsMeetingTypeFilter(
+  value: string | string[] | undefined
+): AnalyticsMeetingTypeFilter {
+  if (typeof value !== "string") return DEFAULT_ANALYTICS_MEETING_TYPE;
+
+  const match = ANALYTICS_MEETING_TYPE_FILTERS.find(
+    (option) => option.value === value
+  );
+
+  return match?.value ?? DEFAULT_ANALYTICS_MEETING_TYPE;
+}
+
+/**
+ * The argument the analytics queries take for a filter.
+ *
+ * `undefined` is how `getAttendanceTrend`/`getMeetingSummaryStats` spell "no
+ * type restriction", so `"all"` maps to it. Kept as one named translation so a
+ * call site cannot express "all" as an empty string or a null by accident.
+ */
+export function analyticsMeetingTypeArg(
+  filter: AnalyticsMeetingTypeFilter
+): MeetingType | undefined {
+  return filter === "all" ? undefined : filter;
+}
+
+/** The label for a filter — for captions that must say what is being counted. */
+export function analyticsMeetingTypeLabel(
+  filter: AnalyticsMeetingTypeFilter
+): string {
+  return (
+    ANALYTICS_MEETING_TYPE_FILTERS.find((option) => option.value === filter)
+      ?.label ?? "All Types"
+  );
 }

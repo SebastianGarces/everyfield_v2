@@ -2,12 +2,15 @@ import { redirect } from "next/navigation";
 import { refresh } from "next/cache";
 import { verifySession } from "@/lib/auth/session";
 import {
+  getFollowUpCompletion,
   getMeeting,
   parseAgenda,
   setMeetingAgenda,
   VISION_MEETING_DEFAULT_AGENDA,
   type AgendaSection,
 } from "@/lib/meetings/service";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
 import { listLocations } from "@/lib/meetings/locations";
 import { getMeetingCommunications } from "@/lib/communication/service";
 import { notFound } from "next/navigation";
@@ -75,11 +78,13 @@ export default async function MeetingPage({ params }: MeetingPageProps) {
   }
 
   const { id } = await params;
-  const [meeting, locations, comms, churchRows] = await Promise.all([
+  const [meeting, locations, comms, churchRows, followUp] = await Promise.all([
     getMeeting(user.churchId, id),
     listLocations(user.churchId),
     getMeetingCommunications(user.churchId, id),
     db.select().from(churches).where(eq(churches.id, user.churchId)).limit(1),
+    // VM-020. `null` until attendance is finalized — see `getFollowUpCompletion`.
+    getFollowUpCompletion(user.churchId, id),
   ]);
 
   if (!meeting) {
@@ -104,6 +109,48 @@ export default async function MeetingPage({ params }: MeetingPageProps) {
   return (
     <div className="space-y-6">
       <MeetingDetails meeting={meeting} locations={locations} />
+
+      {/*
+        VM-020 — follow-up completion.
+
+        Rendered only when there is a figure. A meeting whose attendance was
+        never finalized has no follow-up work yet, and showing it "0%" would
+        report a failure that has not happened; the card is simply absent
+        instead. Once finalized with no linked tasks, the card appears and says
+        so in words rather than dividing by zero.
+      */}
+      {followUp && (
+        <div className="mx-auto max-w-3xl">
+          <Card data-testid="follow-up-completion">
+            <CardHeader>
+              <CardTitle className="text-base">Follow-up completion</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {followUp.percent === null ? (
+                <p className="text-muted-foreground text-sm">
+                  No follow-up tasks are linked to this meeting.
+                </p>
+              ) : (
+                <>
+                  <div className="flex items-baseline justify-between gap-4">
+                    <p className="text-sm font-medium">
+                      {followUp.completed} of {followUp.total}{" "}
+                      {followUp.total === 1 ? "task" : "tasks"} complete
+                    </p>
+                    <p className="text-2xl font-bold tabular-nums">
+                      {followUp.percent}%
+                    </p>
+                  </div>
+                  <Progress
+                    value={followUp.percent}
+                    aria-label={`Follow-up completion: ${followUp.completed} of ${followUp.total} tasks complete`}
+                  />
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       <div className="mx-auto max-w-3xl">
         <AgendaBuilder
