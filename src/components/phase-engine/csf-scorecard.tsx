@@ -73,9 +73,20 @@ import { cn } from "@/lib/utils";
 //
 // A reserved status scale: these tokens mean good/attention here and nowhere
 // else in the app mean "series 3". `attention-*` and its `-ink` pairs come from
-// the app's attention scale; the strength step uses the same emerald the Focus
-// panel already uses for a positive delta, so "good" looks the same on both
+// the app's attention scale; the strength step reuses the emerald HUE the Focus
+// panel already uses for a positive delta, so "good" reads the same on both
 // halves of this page.
+//
+// The same hue, deliberately NOT the same class. The Focus panel's delta chip
+// sits on a neutral `bg-muted/50` surface and uses `text-emerald-600` in light
+// mode (focus-panel.tsx). The strength tile's ink sits on its own emerald tint
+// (`bg-emerald-500/10`), which lifts the surface under it, so it steps one
+// shade darker — `text-emerald-700` — to hold the ink/tint pair above AA.
+// That is the same correction constraint 2 forced on the `meta` inks, and the
+// measured table on `StandingStyle.meta` below shows why it is a light-mode-only
+// problem: the identical 10% emerald tint costs contrast in light mode and
+// barely moves it in dark. So the dark-mode value is shared verbatim —
+// `dark:text-emerald-400` on both — and only the light-mode step differs.
 // ----------------------------------------------------------------------------
 
 interface StandingStyle {

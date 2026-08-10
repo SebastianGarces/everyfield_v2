@@ -23,6 +23,16 @@ export {
 
 // The 8-factor CSF scorecard (PE-023) — a pure projection of the persisted
 // snapshot plus its DB-backed convenience read.
+//
+// `getCsfScorecard` has no caller anywhere in `src/`, and that is correct — do
+// NOT prune it as dead code. It is the regeneration step for the landing
+// page's frozen scorecard fixture,
+// `src/app/(marketing)/_components/vignettes/csf-fixture.ts`, whose header
+// tells the next person to re-run it against the source church and paste the
+// result back over the constant. That fixture already imports `CsfScorecard`
+// from this barrel, so this is the surface its note points at. The full
+// rationale — including why the function takes no `audience` argument — lives
+// on the definition in `./queries.ts`.
 export {
   buildCsfScorecard,
   getCsfScorecard,

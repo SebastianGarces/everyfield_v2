@@ -12,7 +12,10 @@
 //   - `buildCsfScorecard` / `getCsfScorecard` — the 8-factor CSF scorecard
 //     (PE-023), a pure PROJECTION of a snapshot that has already been read. It
 //     computes nothing of its own: every standing is the severity the judge
-//     assigned to an insight in that persisted assessment.
+//     assigned to an insight in that persisted assessment. `getCsfScorecard` is
+//     the DB-backed convenience wrapper and has no runtime caller by design —
+//     it is the landing-page fixture's regeneration step. Read its docblock
+//     before deleting it.
 // ============================================================================
 
 import { and, desc, eq } from "drizzle-orm";
@@ -439,6 +442,23 @@ export function buildCsfScorecard(
  * The PLANTER's CSF scorecard for a church, read from its latest COMPLETE
  * assessment (PE-023). Zero LLM calls — one snapshot read plus a pure
  * projection.
+ *
+ * WHY IT HAS NO CALLER IN `src/`, AND WHY IT MUST STAY EXPORTED. Grepping for
+ * call sites finds none, because this is a DEVELOPER entry point rather than a
+ * runtime one. It is the documented regeneration step for the landing page's
+ * frozen scorecard fixture,
+ * `src/app/(marketing)/_components/vignettes/csf-fixture.ts`: that file's
+ * header instructs whoever refreshes the marketing embed to re-run
+ * `getCsfScorecard(churchId)` against the source church, then paste the result
+ * back over the exported constant. The marketing page renders the constant, so
+ * it issues no assessment read of its own and never calls this — which is
+ * exactly why the symbol looks dead and has already been proposed for deletion
+ * once (#155, resolved: keep and document).
+ *
+ * Deleting it therefore does not remove dead code; it breaks a documented
+ * procedure and leaves the fixture unreproducible. Keep it exported from
+ * `./index.ts` as well — the fixture imports its types from that barrel, so the
+ * barrel is where the note's reader will look for the function too.
  *
  * Deliberately has no `audience` parameter. This is the only function in this
  * section that touches the DB, and `getLatestAssessment` returns every insight
