@@ -30,6 +30,14 @@ import { redirect } from "next/navigation";
 
 import { HeaderBreadcrumbs } from "@/components/header";
 import { InvitationCreateForm } from "@/components/oversight/invitation-create-form";
+// PROTOTYPE ONLY — the #392 resend-window ruling. Both imports and their two
+// mounts below come out with the losing variants once Sebastian rules
+// (.claude/skills/prototype/SKILL.md → "Applying the ruling").
+import { ResendPrototypeBench } from "@/components/oversight/resend-prototypes";
+import {
+  PrototypeSwitcher,
+  prototypeInitScript,
+} from "@/components/prototype-switcher";
 import {
   InvitationsList,
   type InvitationListRow,
@@ -99,7 +107,47 @@ export default async function OversightInvitationsPage() {
         expiryDays={INVITATION_EXPIRY_DAYS}
       />
 
+      <ResendPrototypeBench />
+
       <InvitationsList rows={rows} />
+
+      <script
+        dangerouslySetInnerHTML={{
+          __html: prototypeInitScript("data-resend-proto", "resend-proto", [
+            "a",
+            "b",
+            "c",
+            "d",
+          ]),
+        }}
+      />
+      <PrototypeSwitcher
+        attribute="data-resend-proto"
+        storageKey="resend-proto"
+        label="Resend"
+        options={[
+          {
+            id: "a",
+            label: "A · As built",
+            hint: "Always says “Email sent”, including for the dropped duplicate",
+          },
+          {
+            id: "b",
+            label: "B · Name the minute",
+            hint: "Copy only: a repeat inside the window says it repeated",
+          },
+          {
+            id: "c",
+            label: "C · No window",
+            hint: "Every press is a new key, so every press really delivers",
+          },
+          {
+            id: "d",
+            label: "D · Countdown",
+            hint: "Button holds until a new send would actually be delivered",
+          },
+        ]}
+      />
     </div>
   );
 }
