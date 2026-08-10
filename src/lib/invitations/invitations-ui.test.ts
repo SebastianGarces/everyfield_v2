@@ -846,3 +846,86 @@ test("the register token wire is untouched by the notice ruling", () => {
   assert.match(code(REGISTER_ACTIONS), /invitation/i);
   assert.match(code(REGISTER_FORM), /invitation/i);
 });
+
+// ----------------------------------------------------------------------------
+// 9b. …and neither does the PENDING LIST, on the same page
+//     (#304 ruling 4 item 5, extended 2026-08-09 on the integration verdict)
+// ----------------------------------------------------------------------------
+//
+// The first pass at item 5 fixed the notice and left the oracle standing one
+// section below it. `/oversight/invitations` mounts the create form and the
+// list together; each row arrived with `isOpen` (both target columns null) and
+// the list rendered a `/register?invitation=` Copy-link button on exactly those
+// rows. Type an address, read the neutral notice, look at the row that just
+// appeared: Copy link present means no EveryField account, absent means there
+// is one. Same probe, in a control instead of a sentence, and cheaper — the row
+// is already on screen.
+//
+// It was DEAD CODE before this track: `resolveInvitationTarget` refused every
+// address that already had an account, so `isOpen` was always true. #304 revives
+// targeting and makes the conditional live. Hence the behavioural test below:
+// the two target shapes an admin can now produce must both render one surface.
+
+test("the two target shapes an admin can produce are distinguishable — server-side only", () => {
+  // The PREMISE, executed, so this section cannot rot into a tautology: with
+  // targeting revived, one admin typing two addresses gets two different rows.
+  // Everything after this test is about that difference never being rendered.
+  const accountless = resolveInvitationForResolvedTarget(
+    NET_ADMIN,
+    { inviteeEmail: "nobody@example.com" },
+    {}
+  );
+  const hasAccount = resolveInvitationForResolvedTarget(
+    NET_ADMIN,
+    { inviteeEmail: "planter@example.com" },
+    { targetChurchId: PLANT }
+  );
+
+  assert.ok(accountless.ok && hasAccount.ok);
+  assert.equal(accountless.values.targetChurchId, null);
+  assert.equal(hasAccount.values.targetChurchId, PLANT);
+});
+
+test("no row field on the invitations page is derived from a target column", () => {
+  const page = code(INVITATIONS_PAGE);
+
+  // The mapping that builds `InvitationListRow[]`. Neither target column may be
+  // read in it — not as a boolean, not as a nullable id, not as a label.
+  assert.doesNotMatch(page, /targetChurchId/);
+  assert.doesNotMatch(page, /targetSendingChurchId/);
+  assert.doesNotMatch(page, /isOpen/);
+
+  // The row type is the contract, so a future edit has to change the type
+  // rather than slip a field through it.
+  assert.doesNotMatch(code(INVITATIONS_LIST), /isOpen/);
+});
+
+test("the pending list renders no register link and no per-row variation", () => {
+  const list = code(INVITATIONS_LIST);
+
+  // The control, its URL composition and the clipboard call are all gone.
+  assert.doesNotMatch(list, /register\?invitation=/);
+  assert.doesNotMatch(list, /clipboard/);
+  assert.doesNotMatch(list, /location\.origin/);
+  assert.doesNotMatch(list, /Copy link/);
+
+  // Every pending row renders the SAME controls. The only row fields this
+  // component may read are the six the page is allowed to send — `status` is
+  // the invitee's own answer and may branch; a seventh field is how the oracle
+  // came back last time, so it has to be added here deliberately.
+  const allowed = new Set([
+    "id",
+    "inviteeEmail",
+    "kindLabel",
+    "status",
+    "sentLabel",
+    "expiresLabel",
+  ]);
+  const readFields = new Set(
+    [...list.matchAll(/\brow\.(\w+)/g)].map((match) => match[1])
+  );
+  assert.ok(readFields.size > 0, "the component reads no row fields at all");
+  for (const field of readFields) {
+    assert.ok(allowed.has(field), `row.${field} is not an allowed row field`);
+  }
+});

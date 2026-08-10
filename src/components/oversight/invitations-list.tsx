@@ -15,9 +15,40 @@
 // to the inviting ORG, exactly like the list this page reads, so any admin who
 // can see a pending row may close it and there is nothing left for the client
 // to compare. The authority check itself is in the UPDATE, never here.
+//
+// ----------------------------------------------------------------------------
+// AND IT CARRIES NO `isOpen` — #304 ruling 4 item 5, extended to THIS LIST
+// (2026-08-09, on the integration verdict that rejected the first attempt)
+// ----------------------------------------------------------------------------
+//
+// A row used to arrive with `isOpen` — `targetChurchId === null &&
+// targetSendingChurchId === null` — and rendered a "Copy link"
+// (`/register?invitation=<id>`) button if and only if it was true. Those two
+// columns ARE the server's answer to "does this address already have an
+// EveryField account", so the button's presence answered it in the UI.
+//
+// That was dead code until this track: `resolveInvitationTarget` used to refuse
+// every address that already had an account, so every creatable invitation was
+// open and every pending row showed the button. #304 revives the targeted path,
+// which makes the conditional live — and puts the probe one section BELOW the
+// create form on the same page. Type an address, read the deliberately neutral
+// success notice, then look at the row that just appeared: Copy link means no
+// account, no Copy link means there is one. No error, no second request.
+//
+// So the flag does not cross the wire and the control is gone. Item 5 collapsed
+// the notice for exactly this reason and the same sentence applies here: two
+// shapes crossing the wire is an oracle whether or not a component renders the
+// difference, and this component did render it.
+//
+// WHY NOT "show the link on every pending row" (the variant that keeps
+// delivery): it does not close the oracle, it relocates it. `/register` renders
+// an invitation-specific banner only when `describeInvitationForRegistration`
+// says `redeemable` — itself target-derived — so an admin who copies the link
+// and opens it reads the same fact one click later, and a targeted invitee is
+// handed a URL that redeems nothing. See memory/invariants/multi-tenancy.md.
 // ============================================================================
 
-import { useActionState, useState } from "react";
+import { useActionState } from "react";
 
 import {
   revokeInvitationAction,
@@ -45,8 +76,6 @@ export type InvitationListRow = {
   inviteeEmail: string;
   kindLabel: string;
   status: InvitationStatus;
-  /** No target row yet — the invitee redeems this one by registering. */
-  isOpen: boolean;
   sentLabel: string;
   expiresLabel: string | null;
 };
@@ -78,7 +107,7 @@ export function InvitationsList({ rows }: { rows: InvitationListRow[] }) {
           <CardTitle>Pending invitations</CardTitle>
           <CardDescription>
             Waiting on an answer. Anyone who can invite for your organization
-            can revoke one, which closes it immediately — the link stops
+            can revoke one, which closes it immediately — the invitation stops
             working.
           </CardDescription>
         </CardHeader>
@@ -136,35 +165,11 @@ function InvitationRow({ row }: { row: InvitationListRow }) {
       </div>
       <div className="flex items-center gap-2">
         <Badge variant={status.variant}>{status.label}</Badge>
-        {row.status === "pending" && row.isOpen && (
-          <CopyInviteLinkButton invitationId={row.id} />
-        )}
         {row.status === "pending" && (
           <RevokeButton invitationId={row.id} email={row.inviteeEmail} />
         )}
       </div>
     </li>
-  );
-}
-
-function CopyInviteLinkButton({ invitationId }: { invitationId: string }) {
-  const [copied, setCopied] = useState(false);
-
-  return (
-    <Button
-      type="button"
-      variant="outline"
-      size="sm"
-      className="cursor-pointer"
-      onClick={async () => {
-        await navigator.clipboard.writeText(
-          `${window.location.origin}/register?invitation=${invitationId}`
-        );
-        setCopied(true);
-      }}
-    >
-      {copied ? "Copied" : "Copy link"}
-    </Button>
   );
 }
 

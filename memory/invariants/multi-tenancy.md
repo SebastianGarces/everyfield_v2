@@ -89,13 +89,23 @@ Three closures, and the order matters:
 
 The rule generalizes: **every `"use server"` export whose parameter is a typed object parses a strict runtime schema.** The other invitation actions take a bare `invitationId: string` and are covered by the id checks in the logic layer; the object-taking actions in this track (`settings/association/actions.ts`, `oversight/plants/[id]/actions.ts`) parse their own.
 
-## The success notice never says whether an account exists (#304 ruling 4, item 5 — RULED 2026-08-09)
+## The invitations SURFACE never says whether an account exists (#304 ruling 4, item 5 — RULED 2026-08-09)
 
 This supersedes the earlier HR4 fix, which branched the notice: `/register?invitation=…` for an OPEN invitation, and "they already have an EveryField account" for a targeted one. Both halves are the same disclosure. Ruling 2 collapsed every refusal on an email-resolved target precisely so an authenticated admin could not probe addresses for account existence — and the SUCCESS path answered the identical question, in plainer words, for every address that was not refused. It is the cheaper probe, because it needs no error at all.
 
 So: **one neutral message for both branches** ("This invitation is answered inside EveryField."), and this surface renders **no `/register?invitation=` link**. The collapse is in the PAYLOAD, not only in the component — `CreateInvitationState.created` is `{ inviteeEmail }` and carries nothing derived from the row's two target columns, because two shapes crossing the wire is an oracle whether or not a component renders the difference.
 
-What is lost is the admin hand-forwarding the register URL out of band — a stopgap for the email delivery that has not shipped, priced at an account-existence disclosure on every successful invite. The token itself is untouched: `/register?invitation=<id>` still redeems an open invitation, and it is what the invitation email will carry. Do not reintroduce a link on this surface without a ruling that supersedes item 5.
+### The rule is the PAGE, not the notice (extended 2026-08-09 on the integration verdict)
+
+The first attempt at item 5 fixed the notice and left the oracle standing one section below it, on a component the track never opened. `/oversight/invitations` renders the create form and the pending list together (`page.tsx`). The page mapped each row to `isOpen: targetChurchId === null && targetSendingChurchId === null` and `invitations-list.tsx` rendered a `/register?invitation=<id>` **Copy link** button on exactly the rows where it was true. So: type an address, read the carefully neutral notice, look at the row that just appeared. Copy link present → that address has no EveryField account. Absent → it has one. One submission per address, no error at all — the identical probe, in a control instead of a sentence.
+
+**It was NEW, not pre-existing.** On `main` `resolveInvitationTarget` refused every address that already had an account, so every creatable invitation was open, `isOpen` was always true and the branch was dead. #304 revives targeting and makes it live. Reviving a refused path re-arms every conditional that was only safe because the path was dead — look for them by hand; a diff of the track's own files will not show them.
+
+**The fix (RULED — Option A, no copy control at all).** `isOpen` is gone from `InvitationListRow`, the page's mapping names five fields and none is target-derived, and `CopyInviteLinkButton` is deleted. The rule now reads: nothing derived from the two target columns reaches this page's client, and no admin-facing surface renders a register link.
+
+**Why not "render the control on every pending row"**, which would have kept the stopgap and removed the variation: it relocates the oracle rather than closing it. `describeInvitationForRegistration` sets `redeemable` from those same two columns, and `register-form.tsx` renders an invitation banner only when it is true — so an admin who copies the link and opens it reads the same fact one click later. It also hands a targeted invitee a URL that redeems nothing, which needs copy explaining a distinction we are trying not to draw.
+
+What is lost, in both halves, is the admin hand-forwarding the register URL out of band — a stopgap for the email delivery that has not shipped, priced at an account-existence disclosure on every successful invite. The token itself is untouched: `/register?invitation=<id>` still redeems an open invitation, and it is what the invitation email will carry. Do not reintroduce a link or a target-derived row field on this page without a ruling that supersedes item 5. Pinned by `invitations-ui.test.ts` §9, which asserts the property behaviourally (two addresses, two target shapes, one rendered surface).
 
 ## A token is bound to the address (ruled 2026-08-04, #23)
 

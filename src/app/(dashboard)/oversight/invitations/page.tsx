@@ -20,7 +20,18 @@
 // handed to the browser. It used to decide a per-row `canRevoke` — RULED
 // 2026-08-04 that revoke is ORG-scoped like the list, so every pending row this
 // page can see is one this admin may close, and the authority check stays in
-// the UPDATE (`revokeInvitationQuery`) rather than in a prop. Dates are
+// the UPDATE (`revokeInvitationQuery`) rather than in a prop.
+//
+// THE NARROWING IS ALSO WHAT KEEPS THE ACCOUNT-EXISTENCE ORACLE CLOSED — #304
+// ruling 4 item 5, extended to the LIST (2026-08-09). `target_church_id` and
+// `target_sending_church_id` are the server's answer to "does this address
+// already have an EveryField account", so NOTHING derived from them may enter
+// an `InvitationListRow`. A row used to carry `isOpen` (both targets null) and
+// the list rendered a `/register?invitation=` Copy-link button on exactly those
+// rows — which put a per-address probe one section below the create form on
+// this very page, undoing the collapse item 5 made to the success notice. The
+// mapping below names five fields and none of them is target-derived; the
+// invitation email is what will carry the token when delivery ships. Dates are
 // formatted here too, against `APP_TIME_ZONE` — a `Date` formatted in the
 // visitor's zone and again on the server is a hydration mismatch
 // (memory/invariants.md → Date & Time Rendering).
@@ -73,9 +84,6 @@ export default async function OversightInvitationsPage() {
         ? "Sending church"
         : "Church plant",
     status: invitation.status,
-    isOpen:
-      invitation.targetChurchId === null &&
-      invitation.targetSendingChurchId === null,
     sentLabel: formatDate(invitation.createdAt, "short"),
     expiresLabel: invitation.expiresAt
       ? formatDate(invitation.expiresAt, "short")
