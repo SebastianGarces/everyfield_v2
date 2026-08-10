@@ -48,34 +48,77 @@ function renderedSource(file: string): string {
     .replace(/\/\/.*$/gm, "");
 }
 
+/**
+ * Every assertion below is scoped to the exact element whose text a planter
+ * reads — never to the whole file. A file-wide `doesNotMatch` for a word like
+ * "agenda" or a number like 50 is a booby trap: the next legitimate use of the
+ * word, or a Tailwind class such as `w-50`, fails the test with a message
+ * about a ruling it did not break.
+ */
+function element(file: string, pattern: RegExp, what: string): string {
+  const match = renderedSource(file).match(pattern);
+  assert.ok(match, `expected to find ${what} in ${path.basename(file)}`);
+  // Group 1 when the pattern captures the part that is read, else the whole
+  // match — so an assertion about text is never satisfied by markup.
+  return match[1] ?? match[0];
+}
+
+/** The text a planter reads on the notes field's label — markup excluded. */
+function notesLabelText(): string {
+  return element(
+    MEETINGS_TAB,
+    /<Label htmlFor="notes">([\s\S]*?)<\/Label>/,
+    'a <Label htmlFor="notes">'
+  );
+}
+
+/** The `<Textarea id="notes" ... />` element, placeholder included. */
+function notesTextarea(): string {
+  return element(
+    MEETINGS_TAB,
+    /<Textarea\b[^>]*\bid="notes"[^>]*\/>/,
+    'a <Textarea id="notes" />'
+  );
+}
+
+/**
+ * The empty-state card's JSX, with `className` attributes dropped — styling is
+ * not copy, and a utility class must never decide whether a copy ruling holds.
+ */
+function emptyStateCopy(): string {
+  return element(
+    EVALUATION_COMPARISON,
+    /<Card data-testid="evaluation-comparison-empty">[\s\S]*?<\/Card>/,
+    "the empty-state card"
+  ).replace(/className="[^"]*"/g, "");
+}
+
 // ============================================================================
 // Ruling 1 — the creation form field is "Notes"
 // ============================================================================
 
 test("the team-meeting creation form labels its free text 'Notes'", () => {
-  const source = renderedSource(MEETINGS_TAB);
-
-  assert.match(
-    source,
-    /<Label htmlFor="notes">Notes<\/Label>/,
-    "the field that posts to church_meetings.notes is labelled Notes"
-  );
-  assert.doesNotMatch(
-    source,
-    /Agenda \/ Notes/,
-    "the two concepts are not one field with a slash in its name"
+  assert.equal(
+    notesLabelText().trim(),
+    "Notes",
+    "the field that posts to church_meetings.notes is labelled exactly Notes — not 'Agenda / Notes', not one field with a slash in its name"
   );
 });
 
-test("nothing on the creation form calls that field an agenda", () => {
+test("neither the label nor the placeholder calls that field an agenda", () => {
   // The placeholder is half the label. "Meeting agenda..." under a box called
-  // Notes re-creates exactly the confusion the ruling settled.
-  const source = renderedSource(MEETINGS_TAB);
-
+  // Notes re-creates exactly the confusion the ruling settled. Only these two
+  // strings are pinned — the word may appear elsewhere in the file for the
+  // structured agenda, which is the one thing that IS an agenda.
   assert.doesNotMatch(
-    source,
+    notesLabelText(),
     /agenda/i,
-    "the structured agenda is the only thing called an agenda"
+    "the label for the notes field does not say agenda"
+  );
+  assert.doesNotMatch(
+    notesTextarea(),
+    /agenda/i,
+    "the placeholder for the notes field does not say agenda"
   );
 });
 
@@ -134,35 +177,33 @@ test("a meeting older than the whole window gets no comparison", () => {
 });
 
 test("the empty state never says this is the planter's first meeting", () => {
-  const source = renderedSource(EVALUATION_COMPARISON);
+  const copy = emptyStateCopy();
 
   assert.doesNotMatch(
-    source,
+    copy,
     /\bfirst\b/i,
     "null does not mean first — the window may have hidden every earlier meeting"
   );
-  assert.match(source, /No comparison available/);
+  assert.match(copy, /No comparison available/);
 });
 
 test("the empty state promises nothing evaluating another meeting cannot keep", () => {
   // "Evaluate another and this card fills in" is true for a genuinely first
   // meeting and false for an out-of-window one: a NEW evaluation is more
   // recent still, so it never enters this meeting's baseline.
-  const source = renderedSource(EVALUATION_COMPARISON);
-
-  assert.doesNotMatch(source, /Evaluate another/i);
+  assert.doesNotMatch(emptyStateCopy(), /Evaluate another/i);
 });
 
 test("the empty state names the window from the constant, not a literal", () => {
-  const source = renderedSource(EVALUATION_COMPARISON);
+  const copy = emptyStateCopy();
 
   assert.match(
-    source,
+    copy,
     /\{EVALUATION_COMPARISON_WINDOW\}/,
     "a hand-typed 50 is the copy that goes wrong the day the window changes"
   );
   assert.doesNotMatch(
-    source,
+    copy,
     new RegExp(`\\b${EVALUATION_COMPARISON_WINDOW}\\b`),
     "the number itself is never typed into the sentence"
   );
