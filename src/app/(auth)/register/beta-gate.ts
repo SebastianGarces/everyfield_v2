@@ -1,8 +1,4 @@
-import { eq } from "drizzle-orm";
-
-import { db } from "@/db";
-import { sendingChurches, sendingNetworks } from "@/db/schema";
-import { getInvitation } from "@/lib/invitations/core";
+import { getInvitation, lookupInvitingOrgName } from "@/lib/invitations/core";
 
 /**
  * Private-beta gate helpers (server-side only).
@@ -162,6 +158,12 @@ export async function describeInvitationForRegistration(
     // here to bind it to. Falls back to an ordinary sign-up, beta gate included.
     if (!invitation.inviteeEmail) return null;
 
+    // ONE implementation, in the invitations domain — this file used to run its
+    // own SQL against `sendingChurches` / `sendingNetworks`, which was both a
+    // duplicated decision and an app route reaching past another domain's
+    // exports. The copy took `type: string` and fell through to `null`, so it
+    // would have gone on returning `null` for a fourth invitation type while
+    // the original refused to compile. See `lookupInvitingOrgName`.
     const invitingOrgName = await lookupInvitingOrgName(invitation);
     if (!invitingOrgName) return null;
 
@@ -180,42 +182,4 @@ export async function describeInvitationForRegistration(
   } catch {
     return null;
   }
-}
-
-/**
- * The inviting org's name, derived from `type` rather than from whichever FK
- * column happens to be set — the same rule `announceInvitationAcceptedForChurch`
- * follows, and for the same reason: `insertInvitation` performs no type↔id
- * consistency check, so a row can carry a stray id and naming the wrong org
- * would tell the invitee they were invited by somebody who never invited them.
- */
-async function lookupInvitingOrgName(invitation: {
-  type: string;
-  sendingChurchId: string | null;
-  sendingNetworkId: string | null;
-}): Promise<string | null> {
-  if (invitation.type === "church_to_sending_church") {
-    if (!invitation.sendingChurchId) return null;
-    const [org] = await db
-      .select({ name: sendingChurches.name })
-      .from(sendingChurches)
-      .where(eq(sendingChurches.id, invitation.sendingChurchId))
-      .limit(1);
-    return org?.name ?? null;
-  }
-
-  if (
-    invitation.type === "church_to_network" ||
-    invitation.type === "sending_church_to_network"
-  ) {
-    if (!invitation.sendingNetworkId) return null;
-    const [org] = await db
-      .select({ name: sendingNetworks.name })
-      .from(sendingNetworks)
-      .where(eq(sendingNetworks.id, invitation.sendingNetworkId))
-      .limit(1);
-    return org?.name ?? null;
-  }
-
-  return null;
 }

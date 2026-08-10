@@ -709,8 +709,8 @@ export async function createInvitationAs(
  * and this wrapper swallows the one thing it cannot — a failed org-name lookup,
  * which is a database read and can throw like any other.
  *
- * The name is derived from `type` (`invitingOrgName` below), not from whichever
- * FK column happens to be populated, for the same reason
+ * The name is derived from `type` (`lookupInvitingOrgName` below), not from
+ * whichever FK column happens to be populated, for the same reason
  * `announceInvitationAcceptedForChurch` derives its audience that way: nothing
  * constrains a row to one FK, and an email that misnames who invited you is
  * indistinguishable from a phishing attempt.
@@ -733,7 +733,7 @@ export async function emailInvitee(
     send?: InvitationEmailDeps["send"];
   } = {}
 ): Promise<boolean> {
-  const lookupOrgName = deps.lookupOrgName ?? invitingOrgName;
+  const lookupOrgName = deps.lookupOrgName ?? lookupInvitingOrgName;
 
   try {
     const outcome = await sendInvitationEmail(
@@ -761,16 +761,37 @@ export async function emailInvitee(
 }
 
 /**
- * The inviting organization's name, chosen by `type`.
+ * The inviting organization's name, chosen by `type`. THE one implementation —
+ * never a second copy under any name, the same rule `daysUntilTarget` carries
+ * (memory/invariants.md → Hierarchical Access Control), because the copy is
+ * always the one that misses the fix.
  *
- * The twin of `lookupInvitingOrgName` in `(auth)/register/beta-gate.ts`, which
- * answers the same question for the register screen. Both are deliberately
- * `type`-driven; if a third caller appears, collapse them rather than adding a
- * third reading of the FK columns.
+ * It had one, briefly: `(auth)/register/beta-gate.ts` answered the same
+ * question for the register screen with its own SQL against `sendingChurches`
+ * / `sendingNetworks`, which was both an R2 duplicated decision and an app
+ * route reaching into another domain's tables instead of through its exports.
+ * The two had already diverged — that copy took `type: string` and fell
+ * through to `null`, so a fourth `OrganizationInvitationType` would break the
+ * build HERE (the `never` guard below) and silently return `null` THERE,
+ * blanking the inviting org on the invitee's register screen. Both callers now
+ * come through this function; `./org-name.test.ts` fails if the copy returns.
+ *
+ * Deriving the name from `type` rather than from whichever FK is populated is
+ * the security-relevant half: `insertInvitation` performs no type↔id
+ * consistency check, so a row can carry a stray id, and an email or a register
+ * screen that misnames who invited you is indistinguishable from a phishing
+ * attempt.
+ *
+ * The parameter is structural so the register path can pass the row it already
+ * holds, but `type` is narrowed to `OrganizationInvitationType` — a widened
+ * `type: string` is exactly what let the copy fall through, and the `never`
+ * guard is the property that makes ONE implementation safe.
  */
-async function invitingOrgName(
-  invitation: OrganizationInvitation
-): Promise<string | null> {
+export async function lookupInvitingOrgName(invitation: {
+  type: OrganizationInvitationType;
+  sendingChurchId: string | null;
+  sendingNetworkId: string | null;
+}): Promise<string | null> {
   switch (invitation.type) {
     case "church_to_sending_church": {
       if (!invitation.sendingChurchId) return null;
