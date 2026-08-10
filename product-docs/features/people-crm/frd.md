@@ -468,15 +468,15 @@ Redirect to Person Detail View
 
 ```
 [Triggering action occurs]
-├── F3: Person marked as attended Vision Meeting
-├── F2: Interview form saved
-├── F2: Commitment recorded
-├── F8: Person assigned to ministry team
+├── Meetings: Person marked as attended Vision Meeting
+├── People/CRM: Interview form saved
+├── People/CRM: Commitment recorded
+├── Ministry Teams: Person assigned to ministry team
 └── etc.
     ↓
 [Event emitted by source feature]
     ↓
-[F2 receives event and evaluates status]
+[People/CRM receives event and evaluates status]
     ↓
 If action implies status advancement:
     ↓
@@ -601,7 +601,7 @@ Activity logged in timeline
 
 ### Workflow 6: Bulk Import
 
-**Trigger:** User has existing contacts to import
+**Trigger:** The planter has contacts to import
 
 **Steps:**
 
@@ -610,7 +610,7 @@ Activity logged in timeline
     ↓
 Download template CSV
     ↓
-User fills template with existing data
+User fills template with their contact data
     ↓
 Upload completed CSV
     ↓
@@ -663,24 +663,24 @@ This feature owns the `Person` entity. The stable contract fields (`id`, `church
 | first_name | String | Yes | Core | First name |
 | last_name | String | Yes | Core | Last name |
 | status | Enum | Yes | Core | Pipeline position (see enum above) |
-| email | Email | No | F2-owned | Email address |
-| phone | String | No | F2-owned | Phone number |
-| address_line1 | String | No | F2-owned | Street address |
-| address_line2 | String | No | F2-owned | Apt/Suite |
-| city | String | No | F2-owned | City |
-| state | String | No | F2-owned | State/Province |
-| postal_code | String | No | F2-owned | ZIP/Postal code |
-| country | String | No | F2-owned | Country (default: "US") |
-| source | Enum | No | F2-owned | How they were reached |
-| source_details | String | No | F2-owned | Referrer name or specifics |
-| notes | Text | No | F2-owned | General notes |
-| photo_url | String | No | F2-owned | URL to profile photo |
-| household_id | UUID (FK) | No | F2-owned | Reference to Household |
-| household_role | Enum | No | F2-owned | Role in household |
-| created_at | Timestamp | Yes | F2-owned | Creation timestamp |
-| updated_at | Timestamp | Yes | F2-owned | Last update timestamp |
-| created_by | UUID (FK) | Yes | F2-owned | Reference to User |
-| deleted_at | Timestamp | No | F2-owned | Soft delete timestamp |
+| email | Email | No | Feature-owned | Email address |
+| phone | String | No | Feature-owned | Phone number |
+| address_line1 | String | No | Feature-owned | Street address |
+| address_line2 | String | No | Feature-owned | Apt/Suite |
+| city | String | No | Feature-owned | City |
+| state | String | No | Feature-owned | State/Province |
+| postal_code | String | No | Feature-owned | ZIP/Postal code |
+| country | String | No | Feature-owned | Country (default: "US") |
+| source | Enum | No | Feature-owned | How they were reached |
+| source_details | String | No | Feature-owned | Referrer name or specifics |
+| notes | Text | No | Feature-owned | General notes |
+| photo_url | String | No | Feature-owned | URL to profile photo |
+| household_id | UUID (FK) | No | Feature-owned | Reference to Household |
+| household_role | Enum | No | Feature-owned | Role in household |
+| created_at | Timestamp | Yes | Feature-owned | Creation timestamp |
+| updated_at | Timestamp | Yes | Feature-owned | Last update timestamp |
+| created_by | UUID (FK) | Yes | Feature-owned | Reference to User |
+| deleted_at | Timestamp | No | Feature-owned | Soft delete timestamp |
 
 **Source Enum Values:** `personal_referral`, `social_media`, `vision_meeting`, `website`, `event`, `partner_church`, `other`
 
@@ -836,9 +836,9 @@ This feature integrates with cross-cutting services defined in [System Architect
 | Event/Data | Contract | Source | Action |
 |------------|----------|--------|--------|
 | **User identity** | Read `user.id` for audit trails | Auth Service | Populate `created_by`, `assessed_by`, etc. |
-| **`meeting.attendance.recorded`** | `{ person_id, meeting_id, meeting_type, church_id }` — F2 acts only when `meeting_type` = `vision_meeting` | F3 (Meetings) | Auto-advance `prospect` → `attendee` |
-| **`team.member.assigned`** | `{ person_id, team_id, role, church_id }` | F8 (Ministry Teams) | Auto-advance `core_group` → `launch_team` |
-| **`team.leader.assigned`** | `{ person_id, team_id, role, church_id }` | F8 (Ministry Teams) | Auto-advance to `leader` |
+| **`meeting.attendance.recorded`** | `{ person_id, meeting_id, meeting_type, church_id }` — People/CRM acts only when `meeting_type` = `vision_meeting` | Meetings | Auto-advance `prospect` → `attendee` |
+| **`team.member.assigned`** | `{ person_id, team_id, role, church_id }` | Ministry Teams | Auto-advance `core_group` → `launch_team` |
+| **`team.leader.assigned`** | `{ person_id, team_id, role, church_id }` | Ministry Teams | Auto-advance to `leader` |
 
 ### Outbound (This Feature Provides)
 
@@ -881,12 +881,12 @@ stateDiagram-v2
 | Transition | Trigger Event | Trigger Action | Auto/Manual |
 |------------|---------------|----------------|-------------|
 | → `prospect` | `person.created` | Person added to system | Auto |
-| `prospect` → `attendee` | `meeting.attendance.recorded` (`meeting_type` = `vision_meeting`) | Person marked as attended in F3 | **Auto** |
+| `prospect` → `attendee` | `meeting.attendance.recorded` (`meeting_type` = `vision_meeting`) | Person marked as attended in Meetings | **Auto** |
 | `attendee` → `following_up` | `follow_up.initiated` | Note/task created with follow-up tag | Auto |
 | `following_up` → `interviewed` | `interview.completed` | Interview form saved (any result) | **Auto** |
 | `interviewed` → `core_group` | `commitment.recorded` | Commitment card recorded (= Core Group entry) | **Auto** |
-| `core_group` → `launch_team` | `team.member.assigned` | Person assigned to ministry team in F8 | **Auto** |
-| `launch_team` → `leader` | `team.leader.assigned` | Person given leadership role in F8 | **Auto** |
+| `core_group` → `launch_team` | `team.member.assigned` | Person assigned to a ministry team | **Auto** |
+| `launch_team` → `leader` | `team.leader.assigned` | Person given a team leadership role | **Auto** |
 
 ### Design Philosophy
 

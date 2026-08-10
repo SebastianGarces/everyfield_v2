@@ -36,7 +36,7 @@ The primary knowledge foundation is the **Launch Playbook** methodology (Harvest
 - Administrative setup (legal, financial, technology)
 
 Secondary sources include:
-- Network coaches' experiential knowledge
+- Experiential knowledge from coaches and oversight admins
 - Successful planters' retrospectives and case studies
 - Templates and documents from actual church plants
 - Video content from training events
@@ -118,7 +118,7 @@ Inspired by software documentation best practices (Divio framework), the wiki or
 | W-007 | Article progress tracking | Track which articles a user has read (not started/in progress/completed) |
 | W-008 | Breadcrumb navigation | Clear navigation path showing article location |
 | W-009 | Related articles | Cross-linking between related wiki content |
-| W-010 | Template linking | Articles can link to downloadable templates (F6 integration) |
+| W-010 | Template linking | Articles can link to downloadable templates (document-templates integration) |
 
 ### Should Have
 
@@ -246,7 +246,7 @@ Inspired by software documentation best practices (Divio framework), the wiki or
 | Small Group 101 | Reference | Small group leader training |
 | Boot Camp | Reference | Intensive leadership discipleship |
 | Ministry-Specific Training | Reference | Training by team |
-| Church Visit Best Practices | How-to | Learning from existing churches |
+| Church Visit Best Practices | How-to | Learning from established churches |
 | Training Completion Tracking | How-to | Ensuring readiness |
 
 ---
@@ -549,7 +549,7 @@ The main reading interface for wiki content.
 - Bookmark, share, download actions
 - Right-side table of contents (sticky, highlights current section)
 - Callout boxes for tips, warnings, important notes
-- Related templates section (linked to F6)
+- Related templates section (linked to the document-templates catalog)
 - Related articles cross-linking
 - Previous/Next navigation within section
 - Feedback mechanism
@@ -973,7 +973,7 @@ This feature integrates with cross-cutting services defined in [System Architect
 
 | Data | Contract | Consumers |
 |------|----------|-----------|
-| **Article completion** | Exposes `WikiProgress` by `user_id` for coaching metrics | Dashboard aggregation |
+| **Article completion** | Exposes `WikiProgress` by `user_id` for oversight progress metrics | Dashboard aggregation |
 | **Template links** | Exposes `WikiTemplate.id` for document generation context | Document generation flow |
 | **Contextual help** | Exposes article lookup by `slug` and `phase` for in-app help | Platform-wide contextual help system |
 
