@@ -14,6 +14,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 
 // Resolved from this file, not the cwd — the test must not depend on where it is run from.
 const ROOT = path.resolve(import.meta.dirname, "../../..");
@@ -387,12 +388,18 @@ test("the run settles the board rather than leaving issues in-progress", async (
 // here, but "does the guard fire, and does it abort before building" can.
 // ---------------------------------------------------------------------------
 
-/** Run build-until-done with stubbed globals. `reply(prompt, opts)` answers each agent. */
+/**
+ * Run build-until-done with stubbed globals. `reply(prompt, opts)` answers each
+ * agent — in the parent AND in any child workflow it launches, because the
+ * `workflow` stub evaluates the real child script with these same globals.
+ * `over.workflowImpl` overrides that, for tests about a child that died.
+ */
 async function runBuild(units, reply, over = {}) {
+  const { workflowImpl, ...argOver } = over;
   const source = load("build-until-done.js");
   const calls = [];
   const globals = {
-    args: { units, maxAttempts: 1, base: "main", ...over },
+    args: { units, maxAttempts: 1, base: "main", ...argOver },
     log: (m) => calls.push({ kind: "log", value: m }),
     phase: (p) => calls.push({ kind: "phase", value: p }),
     budget: { total: null, spent: () => 0, remaining: () => Infinity },
@@ -414,6 +421,29 @@ async function runBuild(units, reply, over = {}) {
             .catch(() => null)
         )
       ),
+  };
+  // workflow() runs a child script with the same injected globals. Nesting is
+  // ONE level, so the child's own `workflow` throws — the same guarantee the
+  // runtime gives, pinned here so a recipe or verify-and-ship that tries to
+  // nest fails the test suite loudly.
+  globals.workflow = async (spec, wfArgs) => {
+    calls.push({ kind: "workflow", scriptPath: spec.scriptPath, args: wfArgs });
+    if (workflowImpl) return workflowImpl(spec, wfArgs);
+    const childSource = load(spec.scriptPath.replace(".claude/workflows/", ""));
+    const childGlobals = {
+      ...globals,
+      args: wfArgs,
+      workflow: () => {
+        throw new Error(
+          "workflow() nesting is one level deep — a child must never call workflow()"
+        );
+      },
+    };
+    const childFn = new Function(
+      ...Object.keys(childGlobals),
+      `return (async () => { ${childSource} })()`
+    );
+    return childFn(...Object.values(childGlobals));
   };
   const fn = new Function(
     ...Object.keys(globals),
@@ -551,13 +581,14 @@ test("a claim that swept issues the pass does not own aborts before building", a
 });
 
 // ---------------------------------------------------------------------------
-// build-until-done: the auto-merge gate
+// build-until-done → verify-and-ship: the auto-merge gate
 //
 // The DoD proves the code does what the spec SAID. It cannot prove the spec was
 // right. So the gate is not severity — it is whether a warning raises a question
-// about WHAT was built. A spec-question holds the track for a human; a
-// code-quality warning is filed as a follow-up issue and the track merges.
-// These tests pin that distinction, plus the two unconditional refusals.
+// about WHAT was built. A spec-question holds the track for a human. Everything
+// decidable from the codebase alone is a review FINDING and is fixed in the
+// same pass by the quality rounds (#399) — the follow-ups rollup is gone.
+// These tests pin that split, plus the two unconditional refusals.
 // ---------------------------------------------------------------------------
 
 const warn = (kind, summary) => ({
@@ -573,7 +604,7 @@ const warn = (kind, summary) => ({
  * delivery step, for the case where the DoD passes and the push does not.
  */
 const replyShip =
-  (verifyReport, labelImpl, prImpl, foldImpl) => (prompt, opts) => {
+  (verifyReport, labelImpl, prImpl) => (prompt, opts) => {
     const l = opts.label || "";
     if (l.startsWith("label:"))
       return (labelImpl || labelledOk)(prompt, opts, verifyReport);
@@ -595,8 +626,14 @@ const replyShip =
       };
     if (l.startsWith("integrate:"))
       return { merged: branchesInIntegratePrompt(prompt), conflicts: [] };
-    if (l.startsWith("follow-ups:"))
-      return (foldImpl || foldedOk)(prompt, opts);
+    if (l.startsWith("fix:"))
+      return {
+        committed: true,
+        filesChanged: [],
+        summary: "fixed the findings",
+        perFinding: [{ finding: "the finding", addressed: "fixed and proven" }],
+      };
+    if (l.startsWith("re-review:")) return passing([]);
     if (l.startsWith("verify:")) return verifyReport;
     if (l.startsWith("lens:"))
       return { verdict: "PASS", lens: "x", findings: [], summary: "ok" };
@@ -614,21 +651,6 @@ const replyShip =
 /** The workstream branches an integrate step was told to merge. */
 const branchesInIntegratePrompt = (prompt) =>
   [...prompt.matchAll(/^ {2}- (feature\/\S+)$/gm)].map((m) => m[1]);
-
-/** The `- [ ]` lines a fold step was told to append. */
-const linesInFoldPrompt = (prompt) =>
-  [...prompt.matchAll(/^ {3}(- \[ \] .+)$/gm)].map((m) => m[1]);
-
-/** A fold step that honestly confirms every line it was asked to append. */
-const foldedOk = (prompt) => ({
-  followUps: linesInFoldPrompt(prompt).map((anchor) => ({
-    issue: 901,
-    kind: "appended",
-    anchor,
-    confirmed: true,
-  })),
-  rollupLabels: ["follow-ups"],
-});
 
 const passing = (warnings) => ({
   verdict: warnings?.length ? "PASS_WITH_WARNINGS" : "PASS",
@@ -651,86 +673,70 @@ test("a clean pass auto-merges when autoMerge is on", async () => {
   assert.equal(result.shipped[0].merge, "merged");
 });
 
-test("code-quality warnings do NOT hold the merge — they become follow-up issues", async () => {
-  const { result, calls } = await runBuild(
-    [buildUnit("alpha", 101)],
-    replyShip(passing([warn("code-quality", "date formatted in UTC")])),
-    { autoMerge: true }
-  );
-  const merge = calls.find((c) => c.label === "merge:alpha");
-  assert.ok(
-    merge,
-    "a known small defect is not a reason to stall a good branch"
-  );
+// ---------------------------------------------------------------------------
+// build-until-done: the verify-and-ship child seam (#399)
+//
+// The guarantee tail runs as ONE child workflow per integration attempt. The
+// parent keeps only what must survive there: attempt accounting, attribution
+// re-entry with priorReport, and the assembly repair agent. These tests pin
+// the args contract and the fail-closed handling of a dead child.
+// ---------------------------------------------------------------------------
 
-  const fold = calls.find((c) => c.label?.startsWith("follow-ups:"));
-  assert.ok(fold, "the warning must be recorded somewhere before the merge");
-  assert.match(
-    fold.prompt,
-    /BEFORE the merge/,
-    "the finding must be recorded before the merge, so merging cannot lose it"
+test("the integration tail runs as the verify-and-ship child with the contract args", async () => {
+  const { calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    replyShip(passing([]))
   );
-  assert.ok(
-    calls.indexOf(fold) < calls.indexOf(merge),
-    "recorded BEFORE means before — ordering is the guarantee, not the wording"
+  const call = calls.find(
+    (c) => c.kind === "workflow" && c.scriptPath.endsWith("verify-and-ship.js")
   );
-  assert.match(
-    fold.prompt,
-    /Follow-ups — <parent title>/,
-    "findings fold into one rollup per parent, not one issue per warning"
-  );
+  assert.ok(call, "the guarantee tail must run as the child workflow");
   assert.deepEqual(
-    result.shipped[0].followUps.map((f) => f.issue),
-    [901]
+    Object.keys(call.args).sort(),
+    [
+      "attempt",
+      "autoMerge",
+      "base",
+      "branch",
+      "carriedFindings",
+      "conventions",
+      "criteria",
+      "labelAttempts",
+      "survivingTrees",
+      "track",
+      "wsIds",
+      "wsSummaries",
+      "wt",
+    ],
+    "the parent→child args shape is a contract — widening or narrowing it is a factory change"
   );
-  assert.match(
-    merge.prompt,
-    /Do NOT file them again as issues/,
-    "the merge step must not re-file what the fold already recorded"
-  );
+  assert.deepEqual(Object.keys(call.args.track).sort(), [
+    "hold",
+    "id",
+    "issues",
+    "lane",
+    "risk",
+  ]);
+  assert.equal(call.args.base, "origin/main");
+  assert.equal(call.args.branch, "feature/alpha");
 });
 
-// The fold replaced `gh issue create` with an append to an existing body, and an
-// append is exactly the operation that failed silently on 2026-07-26. So an
-// unconfirmed fold must stop the merge: merging on top of one discards the
-// findings permanently, which is strictly worse than the issue-per-warning it
-// replaced.
-test("a fold that cannot be confirmed stops the merge instead of losing findings", async () => {
-  const { result, calls } = await runBuild(
+test("a verify-and-ship child that died is a failed attempt, never a silent skip", async () => {
+  const { result } = await runBuild(
     [buildUnit("alpha", 101)],
-    replyShip(
-      passing([warn("code-quality", "contrast ratio 4.38:1")]),
-      undefined,
-      undefined,
-      // The silent no-op: the agent reports the write but confirms nothing.
-      () => ({ followUps: [], rollupLabels: [] })
-    ),
-    { autoMerge: true }
-  );
-  assert.ok(
-    !calls.some((c) => c.label === "merge:alpha"),
-    "an unconfirmed fold must not be merged on top of"
+    replyShip(passing([])),
+    { workflowImpl: async () => null }
   );
   assert.equal(result.shipped.length, 0);
-  assert.equal(result.errored.length, 1);
-  assert.match(result.errored[0].reason, /could not be confirmed/);
-});
-
-test("a fold retried until it lands still merges", async () => {
-  let n = 0;
-  const { result, calls } = await runBuild(
-    [buildUnit("alpha", 101)],
-    replyShip(
-      passing([warn("code-quality", "duplicated constant")]),
-      undefined,
-      undefined,
-      (prompt) => (++n === 1 ? { followUps: [] } : foldedOk(prompt))
-    ),
-    { autoMerge: true }
+  assert.equal(
+    result.blocked.length,
+    1,
+    "a dead child spends the attempt and the exhausted track blocks loudly"
   );
-  assert.equal(n, 2, "a fold that did not stick is retried, not abandoned");
-  assert.ok(calls.some((c) => c.label === "merge:alpha"));
-  assert.equal(result.shipped.length, 1);
+  assert.match(
+    result.blocked[0].reason,
+    /did not reach the integration DoD/
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -958,10 +964,7 @@ test("a single spec-question holds the track for a human", async () => {
   const { result, calls } = await runBuild(
     [buildUnit("alpha", 101)],
     replyShip(
-      passing([
-        warn("code-quality", "duplicated constant"),
-        warn("spec-question", "is a church-wide packet the intended read?"),
-      ])
+      passing([warn("spec-question", "is a church-wide packet the intended read?")])
     ),
     { autoMerge: true }
   );
@@ -1928,11 +1931,23 @@ const PARENT_DOC_FILES = [
   "ops/agent-os/labels.md",
 ];
 
+// Every workflow script must at least parse — AC1 of #399. Extend this list
+// with every new workflow or recipe file.
+const WORKFLOW_FILES = [
+  ".claude/workflows/build-until-done.js",
+  ".claude/workflows/verify-and-ship.js",
+];
+
+test("node --check passes on every workflow script", () => {
+  for (const file of WORKFLOW_FILES)
+    execFileSync(process.execPath, ["--check", path.join(ROOT, file)]);
+});
+
 test("no prompt or doc READS the parent through REST", async () => {
   // `gh api repos/{owner}/{repo}/issues/<n> --jq .parent` returns null even when
   // a parent exists, and G0 treats a missing parent as a finding — so a false
   // null there fails a gate on a lie. The form may only appear as a warning.
-  for (const file of PARENT_DOC_FILES) {
+  for (const file of [...new Set([...PARENT_DOC_FILES, ...WORKFLOW_FILES])]) {
     for (const line of read(file).split("\n")) {
       if (!/gh api[^\n]*issues\/[^\n]*parent/.test(line)) continue;
       assert.match(
