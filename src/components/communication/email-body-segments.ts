@@ -7,11 +7,23 @@
 // The email template has to turn those tokens into real buttons, which means
 // cutting the body at them.
 //
-// Cutting an HTML string at an arbitrary offset is how you ship `<p>` tags that
-// never close. So the cut is made at BLOCK boundaries: a paragraph that holds a
-// placeholder is removed whole and replaced by a button segment, and whatever
-// text shared that paragraph is re-emitted as its own balanced paragraph. Every
-// `html` segment this returns is therefore renderable on its own.
+// Cutting an HTML string at an arbitrary offset is how you ship `<li>` tags
+// that open in one `dangerouslySetInnerHTML` and close in the next. So the cut
+// is NOT made at the token's offset: the splitter walks the markup with a stack
+// of open elements, and at a token it CLOSES every element that is currently
+// open, ends the segment there, and RE-OPENS the same elements at the head of
+// the next segment. A token inside `<ul><li>…</li></ul>` therefore closes the
+// list before the buttons and starts a fresh one after them.
+//
+// Two consequences, both pinned by `email-body-segments.test.ts`:
+//  - every `html` segment is balanced on its own, so each is renderable on its
+//    own, whatever element the token was sitting inside;
+//  - the concatenation of the segments is balanced too, so the assembled email
+//    document has no orphan open or close tag.
+//
+// Blocks left empty by the cut (the `<p></p>` a token that owned its paragraph
+// leaves behind, the `<li></li>` that re-opening a list would otherwise start
+// with) are dropped rather than shipped as a stray bullet.
 // ============================================================================
 
 // Imported from the constants module, NOT from the email template that renders
@@ -31,7 +43,38 @@ const PLACEHOLDER_PATTERN = new RegExp(
   "g"
 );
 
-const PARAGRAPH_PATTERN = /<p>([\s\S]*?)<\/p>/g;
+/** Any tag, open or close. Attribute values never contain `>` after sanitising. */
+const TAG_PATTERN = /<\/?[a-zA-Z][^>]*>/g;
+
+/** Elements that never carry a closing tag, so they never enter the stack. */
+const VOID_TAGS = new Set([
+  "br",
+  "hr",
+  "img",
+  "input",
+  "wbr",
+  "area",
+  "base",
+  "col",
+  "embed",
+  "link",
+  "meta",
+  "param",
+  "source",
+  "track",
+]);
+
+/** A block (or anchor) holding nothing a recipient would see. */
+const EMPTY_BLOCK_PATTERN =
+  /<(p|li|ul|ol)>\s*(?:<br\s*\/?>\s*)*<\/\1>|<a\b[^>]*>\s*(?:<br\s*\/?>\s*)*<\/a>/gi;
+
+interface OpenElement {
+  name: string;
+  /** The tag exactly as it was written, so re-opening keeps `href`/`rel`. */
+  raw: string;
+}
+
+type Piece = { kind: "text" | "tag"; value: string };
 
 function hasPlaceholder(value: string): boolean {
   return (
@@ -39,43 +82,35 @@ function hasPlaceholder(value: string): boolean {
   );
 }
 
-/** Drop the tokens and the line breaks they left stranded. */
-function stripPlaceholders(value: string): string {
-  return value
-    .replace(PLACEHOLDER_PATTERN, "")
-    .replace(/(?:\s*<br\s*\/?>\s*)+/gi, "<br>")
-    .replace(/^(?:\s|<br\s*\/?>)+/i, "")
-    .replace(/(?:\s|<br\s*\/?>)+$/i, "")
-    .trim();
+function readTagName(raw: string): { name: string; closing: boolean } | null {
+  const match = /^<\s*(\/?)\s*([a-zA-Z][a-zA-Z0-9:-]*)/.exec(raw);
+  if (!match) return null;
+  return { name: match[2].toLowerCase(), closing: match[1] === "/" };
 }
 
-/**
- * Split a run of HTML that is not a single paragraph. Used for the leftovers —
- * a placeholder someone typed outside any block. The tokens are removed and a
- * button segment takes their place.
- */
-function splitLooseHtml(html: string): RichEmailSegment[] {
-  if (!hasPlaceholder(html)) {
-    return html.trim() ? [{ type: "html", html }] : [];
+function isBreak(raw: string): boolean {
+  return /^<\s*br\b/i.test(raw);
+}
+
+/** Remove the blocks the cut emptied, until nothing more can be removed. */
+function dropEmptyBlocks(html: string): string {
+  let current = html;
+  for (;;) {
+    EMPTY_BLOCK_PATTERN.lastIndex = 0;
+    const next = current.replace(EMPTY_BLOCK_PATTERN, "");
+    if (next === current) return current;
+    current = next;
   }
+}
 
-  const segments: RichEmailSegment[] = [];
-  PLACEHOLDER_PATTERN.lastIndex = 0;
-  let last = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = PLACEHOLDER_PATTERN.exec(html)) !== null) {
-    const before = html.slice(last, match.index);
-    if (before.trim()) segments.push({ type: "html", html: before });
-    if (segments[segments.length - 1]?.type !== "buttons") {
-      segments.push({ type: "buttons" });
-    }
-    last = match.index + match[0].length;
-  }
-
-  const tail = html.slice(last);
-  if (tail.trim()) segments.push({ type: "html", html: tail });
-  return segments;
+/** Is there anything in here a recipient would see? */
+function hasVisibleContent(html: string): boolean {
+  return (
+    html
+      .replace(/<[^>]*>/g, "")
+      .replace(/&nbsp;/gi, " ")
+      .trim() !== ""
+  );
 }
 
 /**
@@ -92,38 +127,125 @@ export function parseRichEmailBody(html: string): RichEmailSegment[] {
   }
 
   const segments: RichEmailSegment[] = [];
-  const pushHtml = (value: string) => {
-    for (const segment of splitLooseHtml(value)) {
-      if (
-        segment.type === "buttons" &&
-        segments[segments.length - 1]?.type === "buttons"
-      ) {
+  const stack: OpenElement[] = [];
+  let buffer: Piece[] = [];
+  // True right after a cut: leading whitespace and `<br>`s are the line breaks
+  // the token left stranded, not spacing the author asked for.
+  let atSeam = true;
+
+  const pushTag = (value: string) => buffer.push({ kind: "tag", value });
+
+  const pushText = (value: string) => {
+    let text = value;
+    if (atSeam) {
+      text = text.replace(/^\s+/, "");
+      if (!text) return;
+      atSeam = false;
+    }
+    buffer.push({ kind: "text", value: text });
+  };
+
+  /** Drop the whitespace and `<br>`s sitting between the last text and the cut. */
+  const trimBufferTail = () => {
+    while (buffer.length > 0) {
+      const last = buffer[buffer.length - 1];
+      if (last.kind === "text") {
+        const trimmed = last.value.replace(/\s+$/, "");
+        if (trimmed) {
+          last.value = trimmed;
+          return;
+        }
+        buffer.pop();
         continue;
       }
-      segments.push(segment);
+      if (isBreak(last.value)) {
+        buffer.pop();
+        continue;
+      }
+      return;
     }
   };
-  const pushButtons = () => {
-    if (segments[segments.length - 1]?.type === "buttons") return;
-    segments.push({ type: "buttons" });
+
+  const flushHtml = (closers: string[]) => {
+    const assembled = dropEmptyBlocks(
+      buffer.map((piece) => piece.value).join("") + closers.join("")
+    );
+    if (hasVisibleContent(assembled)) {
+      segments.push({ type: "html", html: assembled });
+    }
   };
 
-  PARAGRAPH_PATTERN.lastIndex = 0;
-  let last = 0;
-  let match: RegExpExecArray | null;
+  const cut = () => {
+    trimBufferTail();
+    // Close every element that is open, so this segment stands on its own...
+    const closers = [...stack].reverse().map((el) => `</${el.name}>`);
+    flushHtml(closers);
+    if (segments[segments.length - 1]?.type !== "buttons") {
+      segments.push({ type: "buttons" });
+    }
+    // ...and re-open the same elements, so the next one does too.
+    buffer = stack.map((el) => ({ kind: "tag" as const, value: el.raw }));
+    atSeam = true;
+  };
 
-  while ((match = PARAGRAPH_PATTERN.exec(html)) !== null) {
-    if (!hasPlaceholder(match[1])) continue;
+  const consumeText = (text: string) => {
+    if (!hasPlaceholder(text)) {
+      if (text) pushText(text);
+      return;
+    }
+    PLACEHOLDER_PATTERN.lastIndex = 0;
+    let last = 0;
+    let match: RegExpExecArray | null;
+    while ((match = PLACEHOLDER_PATTERN.exec(text)) !== null) {
+      pushText(text.slice(last, match.index));
+      cut();
+      last = match.index + match[0].length;
+    }
+    pushText(text.slice(last));
+  };
 
-    pushHtml(html.slice(last, match.index));
+  TAG_PATTERN.lastIndex = 0;
+  let index = 0;
+  let tag: RegExpExecArray | null;
 
-    const remainder = stripPlaceholders(match[1]);
-    if (remainder) segments.push({ type: "html", html: `<p>${remainder}</p>` });
-    pushButtons();
+  while ((tag = TAG_PATTERN.exec(html)) !== null) {
+    consumeText(html.slice(index, tag.index));
+    index = tag.index + tag[0].length;
 
-    last = match.index + match[0].length;
+    const parsed = readTagName(tag[0]);
+    if (!parsed) {
+      pushText(tag[0]);
+      continue;
+    }
+
+    if (VOID_TAGS.has(parsed.name)) {
+      // A `<br>` at a seam is the newline the token left behind — drop it.
+      if (!atSeam || !isBreak(tag[0])) pushTag(tag[0]);
+      continue;
+    }
+
+    if (parsed.closing) {
+      const at = stack.map((el) => el.name).lastIndexOf(parsed.name);
+      if (at === -1) continue; // Orphan closer: it would unbalance the segment.
+      while (stack.length > at) {
+        pushTag(`</${stack.pop()!.name}>`);
+      }
+      continue;
+    }
+
+    // `<a ... />` closes itself: emitted, but never left on the stack.
+    if (/\/\s*>$/.test(tag[0])) {
+      pushTag(tag[0].replace(/\/\s*>$/, ">"));
+      pushTag(`</${parsed.name}>`);
+      continue;
+    }
+
+    pushTag(tag[0]);
+    stack.push({ name: parsed.name, raw: tag[0] });
   }
 
-  pushHtml(html.slice(last));
+  consumeText(html.slice(index));
+  flushHtml([...stack].reverse().map((el) => `</${el.name}>`));
+
   return segments;
 }

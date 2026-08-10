@@ -4,9 +4,10 @@ import { test } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { getSampleData } from "@/lib/communication/merge";
-import { toRichTextHtml } from "@/lib/rich-text/format";
+import { getSampleData, renderTemplate } from "@/lib/communication/merge";
+import { escapeMergeValues, toRichTextHtml } from "@/lib/rich-text/format";
 
+import { parseRichEmailBody } from "./email-body-segments";
 import { EmailPreview } from "./email-preview";
 
 // ----------------------------------------------------------------------------
@@ -149,4 +150,50 @@ test("an apostrophe in a merge value previews as an apostrophe", () => {
   // One level of escaping — the browser renders that as an apostrophe.
   assert.ok(html.includes("<strong>O&#39;Brien</strong>"), html);
   assert.ok(!html.includes("&amp;#39;"), html);
+});
+
+// ----------------------------------------------------------------------------
+// One rule for where the RSVP call to action goes. The preview and the
+// delivered email read the SAME sanitised HTML, so a second splitting rule here
+// would show the planter a layout the recipient never gets — the divergence
+// COM-015 exists to prevent. Both now cut with `parseRichEmailBody`.
+// ----------------------------------------------------------------------------
+
+test("an RSVP field inside a bullet previews with the buttons outside the list", () => {
+  const html = preview({
+    body: "<p>Come on Sunday.</p><ul><li>Bring a friend {{confirm_link}}</li><li>Or let us know {{decline_link}}</li></ul>",
+    mergeData: getSampleData(),
+  });
+
+  assert.ok(!html.includes("__EF_CONFIRM__"), html);
+  assert.ok(!html.includes("__EF_DECLINE__"), html);
+  assert.ok(html.includes("Bring a friend"), html);
+  // The button row is its own block, never inside a list item.
+  assert.ok(!/<li>(?:(?!<\/li>)[\s\S])*?be there/.test(html), html);
+  // The list closes before the buttons and re-opens after them.
+  assert.equal((html.match(/<ul>/g) ?? []).length, 2, html);
+  assert.equal((html.match(/<\/ul>/g) ?? []).length, 2, html);
+});
+
+test("the preview cuts the body exactly where the email template does", () => {
+  const body =
+    "<p>Hi</p><ul><li>bullet {{confirm_link}}</li></ul><p>bye {{decline_link}}</p>";
+  const html = preview({ body, mergeData: getSampleData() });
+
+  const segments = parseRichEmailBody(
+    renderTemplate(toRichTextHtml(body), escapeMergeValues(getSampleData()))
+  );
+
+  // Same number of button rows, and the same html between them.
+  assert.equal(
+    (html.match(/text-align:center/g) ?? []).length,
+    segments.filter((segment) => segment.type === "buttons").length
+  );
+  for (const segment of segments) {
+    if (segment.type !== "html") continue;
+    assert.ok(
+      html.includes(segment.html),
+      `${segment.html} missing from ${html}`
+    );
+  }
 });

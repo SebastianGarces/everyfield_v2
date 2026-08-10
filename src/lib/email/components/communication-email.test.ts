@@ -218,3 +218,111 @@ test("sanitising the stored body again does not change the delivered body", asyn
   assert.equal(twice.html, once.html);
   assert.equal(twice.text, once.text);
 });
+
+// ----------------------------------------------------------------------------
+// Lists are a toolbar control, so a planter can drop an RSVP merge field inside
+// a bullet today. That body used to be delivered with `<ul><li>` opened in one
+// `dangerouslySetInnerHTML` block and closed in the next, and with the raw
+// `__EF_CONFIRM__` token printed in the text/plain half. Both halves are
+// asserted here, on the real render.
+// ----------------------------------------------------------------------------
+
+/** The composed body a planter can write today: an RSVP field inside a bullet. */
+const LIST_BODY =
+  "<p>Come on Sunday.</p><ul><li>Bring a friend {{confirm_link}}</li><li>Or let us know {{decline_link}}</li></ul>";
+
+const RSVP_DATA = {
+  confirm_link: CONFIRM_PLACEHOLDER,
+  decline_link: DECLINE_PLACEHOLDER,
+};
+
+const VOID_ELEMENTS = new Set(["br", "hr", "img", "wbr", "meta", "link"]);
+
+/**
+ * Every open tag closed by its own close tag, in order — or the reason it is
+ * not. Counting `<p>` alone is what let the list case through.
+ */
+function imbalance(html: string): string | null {
+  const stack: string[] = [];
+  for (const match of html.matchAll(/<(\/?)([a-zA-Z][a-zA-Z0-9]*)[^>]*>/g)) {
+    const name = match[2].toLowerCase();
+    if (VOID_ELEMENTS.has(name) || /\/>$/.test(match[0])) continue;
+    if (match[1] === "/") {
+      if (stack.pop() !== name) return `</${name}> mismatched in: ${html}`;
+      continue;
+    }
+    stack.push(name);
+  }
+  return stack.length === 0 ? null : `unclosed <${stack.join("><")}>`;
+}
+
+test("an RSVP field inside a list item delivers balanced HTML", async () => {
+  const body = renderedBody(LIST_BODY, RSVP_DATA);
+
+  const html = await render(
+    CommunicationEmail({
+      bodyHtml: body.html,
+      confirmUrl: "https://everyfield.app/rsvp/token",
+      declineUrl: "https://everyfield.app/rsvp/token?action=decline",
+      churchName: "New Life",
+    })
+  );
+
+  // Each rich-text block stands on its own...
+  const blocks = [
+    ...html.matchAll(/<div style="font-size:16px[^"]*">([\s\S]*?)<\/div>/g),
+  ].map((match) => match[1]);
+  assert.ok(blocks.length > 0, html);
+  for (const block of blocks) {
+    assert.equal(imbalance(block), null);
+    assert.ok(!block.includes("</li>") || block.includes("<li>"), block);
+  }
+
+  // ...and so does the assembled document.
+  assert.equal(imbalance(html), null);
+  assert.ok(!html.includes(CONFIRM_PLACEHOLDER), html);
+  assert.ok(!html.includes(DECLINE_PLACEHOLDER), html);
+  assert.match(html, /href="https:\/\/everyfield\.app\/rsvp\/token"/, html);
+  assert.ok(html.includes("Bring a friend"), html);
+  assert.ok(html.includes("Or let us know"), html);
+});
+
+test("an RSVP field inside a list item never leaks the token to text/plain", async () => {
+  const body = renderedBody(LIST_BODY, RSVP_DATA);
+
+  const text = await render(
+    CommunicationEmail({ body: body.text, churchName: "New Life" }),
+    { plainText: true }
+  );
+
+  assert.ok(!text.includes(CONFIRM_PLACEHOLDER), text);
+  assert.ok(!text.includes(DECLINE_PLACEHOLDER), text);
+  assert.ok(text.includes("Come on Sunday."), text);
+  assert.ok(text.includes("Bring a friend"), text);
+  assert.ok(text.includes("Or let us know"), text);
+});
+
+test("a bulleted RSVP still renders the buttons in the text/plain half", async () => {
+  // The token owns the whole bullet, so the flattener writes `- __EF_CONFIRM__`
+  // and an equality test against the bare token misses it.
+  const body = renderedBody(
+    "<p>Coming?</p><ul><li>{{confirm_link}}</li><li>{{decline_link}}</li></ul>",
+    RSVP_DATA
+  );
+
+  const text = await render(
+    CommunicationEmail({
+      body: body.text,
+      confirmUrl: "https://everyfield.app/rsvp/token",
+      declineUrl: "https://everyfield.app/rsvp/token?action=decline",
+      churchName: "New Life",
+    }),
+    { plainText: true }
+  );
+
+  assert.ok(!text.includes(CONFIRM_PLACEHOLDER), text);
+  assert.ok(text.includes("I'll be there"), text);
+  assert.ok(text.includes("https://everyfield.app/rsvp/token"), text);
+  // The bullet the token owned leaves no stray dash behind.
+  assert.ok(!/^\s*[-*]\s*$/m.test(text), text);
+});

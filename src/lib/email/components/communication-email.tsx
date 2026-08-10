@@ -52,11 +52,29 @@ interface CommunicationEmailProps {
  */
 type Segment = { type: "text"; lines: string[] } | { type: "buttons" };
 
+/** Both RSVP tokens, anywhere on a line. */
+const PLACEHOLDER_PATTERN = new RegExp(
+  `${CONFIRM_PLACEHOLDER}|${DECLINE_PLACEHOLDER}`,
+  "g"
+);
+
+/** `- ` / `* ` / `1. ` — what `richTextToPlainText` writes for a list item. */
+const LIST_MARKER_ONLY = /^(?:[-*•]|\d+[.)])$/;
+
 /**
  * Parse the email body into segments: consecutive text lines are grouped
  * together, and RSVP placeholder lines become button segments.
  * Normalizes line endings (\r\n → \n) and collapses blank lines into
  * paragraph breaks within text segments.
+ *
+ * A token is matched ANYWHERE on the line, not only when it is the whole line.
+ * The rich-text body flattens through `richTextToPlainText`, which prefixes
+ * `- ` to a list item, so a token composed inside a bullet arrives as
+ * `- __EF_CONFIRM__`; an equality test against the bare token misses it and
+ * delivers the literal string to the inbox. Whatever else shared the line is
+ * kept as text, which is the same rule `parseRichEmailBody` applies to the HTML
+ * half — the two halves of one email may not disagree about where the call to
+ * action sits.
  */
 function parseBody(body: string): Segment[] {
   const normalized = body.replace(/\r\n/g, "\n");
@@ -72,25 +90,31 @@ function parseBody(body: string): Segment[] {
   };
 
   for (const line of lines) {
-    const trimmed = line.trim();
-
-    // Line is a confirm or decline placeholder → flush text, emit buttons
-    if (trimmed === CONFIRM_PLACEHOLDER || trimmed === DECLINE_PLACEHOLDER) {
-      // Only emit buttons once (when we see the first placeholder)
-      if (
-        segments.length === 0 ||
-        segments[segments.length - 1].type !== "buttons"
-      ) {
-        // If previous text lines ended with blank lines, keep them as spacing
-        // but flush before the button row
-        flushText();
-        segments.push({ type: "buttons" });
-      }
+    if (!PLACEHOLDER_PATTERN.test(line)) {
+      // Regular text line (including blank lines for paragraph spacing)
+      currentTextLines.push(line);
       continue;
     }
+    PLACEHOLDER_PATTERN.lastIndex = 0;
 
-    // Regular text line (including blank lines for paragraph spacing)
-    currentTextLines.push(line);
+    // Keep whatever the author wrote alongside the token; drop the bullet the
+    // flattener added if the token was the entire list item.
+    const remainder = line
+      .replace(PLACEHOLDER_PATTERN, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (remainder && !LIST_MARKER_ONLY.test(remainder)) {
+      currentTextLines.push(remainder);
+    }
+
+    flushText();
+    // Only emit buttons once per run (adjacent placeholders are one CTA)
+    if (
+      segments.length === 0 ||
+      segments[segments.length - 1].type !== "buttons"
+    ) {
+      segments.push({ type: "buttons" });
+    }
   }
 
   flushText();

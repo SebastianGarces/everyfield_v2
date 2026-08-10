@@ -39,6 +39,11 @@ const ALLOWED_TAG_SET = new Set<string>(ALLOWED_TAGS);
  * Presentational synonyms browsers still emit (`document.execCommand` produces
  * `<b>`/`<i>`, and contentEditable wraps blocks in `<div>`). Normalised rather
  * than dropped so the stored markup has one spelling per meaning.
+ *
+ * `div` is the conditional one — see `divHoldsBlock`. A `<div>` around a run of
+ * text IS the paragraph the author meant, but a `<div>` around a list is not:
+ * `<p><ul>…</ul></p>` is invalid, and it is exactly what a contentEditable
+ * hands us for every list it produces.
  */
 const TAG_ALIASES: Record<string, AllowedTag> = {
   b: "strong",
@@ -46,6 +51,15 @@ const TAG_ALIASES: Record<string, AllowedTag> = {
   div: "p",
   ins: "u",
 };
+
+/** Elements that may not sit inside a `<p>`, so a `<div>` holding one unwraps. */
+const BLOCK_CHILD_TAGS = new Set(["p", "div", "ul", "ol", "li", "blockquote"]);
+
+/** The allow-listed elements that are blocks — the ones that end one another. */
+const BLOCK_ELEMENTS = new Set<string>(["p", "ul", "ol", "li"]);
+
+/** What a `<div>` becomes: the paragraph it stands for, or nothing at all. */
+type DivDecision = "paragraph" | "unwrap";
 
 /** Elements whose CONTENT is not author text — dropped whole, not unwrapped. */
 const DROP_WITH_CONTENT = new Set([
@@ -290,6 +304,27 @@ function skipToClosingTag(source: string, from: number, name: string): number {
   return match ? from + match.index + match[0].length : source.length;
 }
 
+/**
+ * Does the `<div>` whose content starts at `from` hold a block-level child?
+ *
+ * The scan stops at that div's own closing tag, so a page of sibling divs costs
+ * one pass over the document, not one per div. A nested `<div>` answers yes
+ * immediately: a div inside a div is a block child whatever it holds.
+ */
+function divHoldsBlock(source: string, from: number): boolean {
+  const pattern = /<(\/?)([a-zA-Z][a-zA-Z0-9:-]*)/g;
+  pattern.lastIndex = from;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(source)) !== null) {
+    const closing = match[1] === "/";
+    const name = match[2].toLowerCase();
+    if (name === "div") return !closing;
+    if (!closing && BLOCK_CHILD_TAGS.has(name)) return true;
+  }
+  return false;
+}
+
 /** The allow-listed element this raw tag name becomes, or `null` to unwrap. */
 function mapTagName(rawName: string): AllowedTag | null {
   const alias = TAG_ALIASES[rawName];
@@ -306,6 +341,10 @@ function mapTagName(rawName: string): AllowedTag | null {
  *    handler can, whatever its casing or spacing;
  *  - `<script>`/`<style>`/`<svg>` and friends lose their CONTENT too;
  *  - every remaining tag is balanced and closed, in the order it was opened;
+ *  - no block ends up inside a `<p>`: a `<div>` holding one is unwrapped, and
+ *    an opening `<p>`/`<ul>`/`<ol>` closes an open paragraph the way a parser
+ *    does. `<p><ul>…</ul></p>` is invalid, and it is what a contentEditable
+ *    hands us for every list a planter makes;
  *  - text is escaped, so a `<` an author typed stays a `<` they typed;
  *  - it is IDEMPOTENT — `sanitizeRichText(sanitizeRichText(x))` equals
  *    `sanitizeRichText(x)` for every input, entities included.
@@ -326,6 +365,10 @@ export function sanitizeRichText(input: string): string {
 
   const out: string[] = [];
   const stack: AllowedTag[] = [];
+  // One entry per open `<div>`, so its `</div>` gets the same answer its `<div>`
+  // did. Without this, an unwrapped div's closing tag would close an ancestor
+  // paragraph that it never opened.
+  const divDecisions: DivDecision[] = [];
   let i = 0;
 
   const closeThrough = (tag: AllowedTag) => {
@@ -339,6 +382,28 @@ export function sanitizeRichText(input: string): string {
   /** A text node: decode what the serialiser encoded, then encode it once. */
   const pushText = (text: string) => {
     out.push(escapeHtml(decodeTextEntities(text)));
+  };
+
+  /**
+   * Close the block an opening block tag implicitly ends, the way an HTML
+   * parser does: a `<p>` ends at the next `<p>`, `<ul>` or `<ol>`, and an
+   * `<li>` ends at the next `<li>`. Without this, an author's stray markup
+   * stores `<p>…<ul>…</ul></p>` — a list inside a paragraph, which is the same
+   * malformed shape the `<div>` alias used to produce, and which no two email
+   * clients render alike.
+   */
+  const closeImpliedBlock = (opening: AllowedTag) => {
+    if (!BLOCK_ELEMENTS.has(opening)) return;
+    for (let at = stack.length - 1; at >= 0; at -= 1) {
+      const open = stack[at];
+      if (!BLOCK_ELEMENTS.has(open)) continue; // Inline wrappers close with it.
+      if (open === "p" || (open === "li" && opening === "li")) {
+        while (stack.length > at) {
+          out.push(`</${stack.pop()}>`);
+        }
+      }
+      return; // Only the INNERMOST open block can be implied closed.
+    }
   };
 
   while (i < input.length) {
@@ -382,6 +447,27 @@ export function sanitizeRichText(input: string): string {
       continue;
     }
 
+    if (rawName === "div") {
+      if (isClosing) {
+        // An orphan `</div>` closes nothing: it never opened a paragraph.
+        if (divDecisions.pop() === "paragraph") closeThrough("p");
+        continue;
+      }
+      const decision: DivDecision =
+        divHoldsBlock(input, i) || stack.length >= MAX_DEPTH
+          ? "unwrap"
+          : "paragraph";
+      if (!tag.selfClosing) divDecisions.push(decision);
+      // An unwrapped div still ends the paragraph its block children may not
+      // sit inside — the `<p>` closes here, not after the list.
+      closeImpliedBlock(decision === "unwrap" ? "ul" : "p");
+      if (decision === "unwrap") continue;
+      out.push("<p>");
+      stack.push("p");
+      if (tag.selfClosing) closeThrough("p");
+      continue;
+    }
+
     const mapped = mapTagName(rawName);
     if (!mapped) continue; // Unknown element: unwrapped, its children kept.
 
@@ -410,6 +496,7 @@ export function sanitizeRichText(input: string): string {
       continue;
     }
 
+    closeImpliedBlock(mapped);
     out.push(`<${mapped}>`);
     stack.push(mapped);
     if (tag.selfClosing) closeThrough(mapped);

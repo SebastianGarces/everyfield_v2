@@ -67,6 +67,70 @@ test("lists survive with their items", () => {
   );
 });
 
+test("a div holding a list is unwrapped, never aliased to <p>", () => {
+  // This is what the real editor hands us for EVERY list it produces, and
+  // `<p><ul>…</ul></p>` is invalid markup that no email client agrees about.
+  assert.equal(
+    sanitizeRichText("<div><ul><li>one</li><li>two</li></ul></div>"),
+    "<ul><li>one</li><li>two</li></ul>"
+  );
+  assert.equal(
+    sanitizeRichText("<div><ol><li>one</li></ol></div>"),
+    "<ol><li>one</li></ol>"
+  );
+});
+
+test("a div holding another block is unwrapped, and its closer closes nothing", () => {
+  assert.equal(
+    sanitizeRichText("<div><p>one</p><p>two</p></div>"),
+    "<p>one</p><p>two</p>"
+  );
+  // The outer div unwraps; the inner ones are still the paragraphs they stand
+  // for. An unwrapped `</div>` that closed an ancestor `<p>` would truncate the
+  // rest of the body into it.
+  assert.equal(
+    sanitizeRichText("<div><div>one</div><div>two</div></div>"),
+    "<p>one</p><p>two</p>"
+  );
+  // The paragraph the list may not sit inside ends where the list starts.
+  assert.equal(
+    sanitizeRichText("<p>kept<div><ul><li>a</li></ul></div>still kept</p>"),
+    "<p>kept</p><ul><li>a</li></ul>still kept"
+  );
+});
+
+test("a div holding only text is still the paragraph the author meant", () => {
+  assert.equal(sanitizeRichText("<div>hello</div>"), "<p>hello</p>");
+  assert.equal(
+    sanitizeRichText("<div>hi <strong>there</strong></div>"),
+    "<p>hi <strong>there</strong></p>"
+  );
+});
+
+/** Does any `<p>` in this HTML contain a list before it closes? */
+function nestsListInParagraph(html: string): boolean {
+  return /<p>(?:(?!<\/p>)[\s\S])*?<(?:ul|ol)>/.test(html);
+}
+
+test("a sanitised body never nests a list inside a paragraph", () => {
+  for (const composed of [
+    "<div>Come on Sunday.</div><div><ul><li>Bring a friend</li></ul></div>",
+    "<p>kept<ul><li>a</li></ul>",
+    "<p>kept<div><ul><li>a</li></ul></div>",
+    "<div><p>a</p><ul><li>b</li></ul></div>",
+  ]) {
+    const html = sanitizeRichText(composed);
+    assert.ok(!nestsListInParagraph(html), `${composed} -> ${html}`);
+  }
+
+  assert.equal(
+    sanitizeRichText(
+      "<div>Come on Sunday.</div><div><ul><li>Bring a friend</li></ul></div>"
+    ),
+    "<p>Come on Sunday.</p><ul><li>Bring a friend</li></ul>"
+  );
+});
+
 test("a link keeps its href and gains safe link relations", () => {
   const html = sanitizeRichText('<a href="https://example.com">visit</a>');
   assert.equal(
@@ -198,8 +262,10 @@ test("a `<` the author typed stays text", () => {
 
 test("unbalanced markup comes out balanced", () => {
   assert.equal(
+    // The second `<p>` ends the first, the way an HTML parser reads it —
+    // paragraphs never nest, so the inline `<strong>` closes with its own.
     sanitizeRichText("<p><strong>bold<p>next"),
-    "<p><strong>bold<p>next</p></strong></p>"
+    "<p><strong>bold</strong></p><p>next</p>"
   );
   // A stray close tag for something never opened is ignored, not emitted.
   assert.equal(sanitizeRichText("bold</strong>"), "bold");
