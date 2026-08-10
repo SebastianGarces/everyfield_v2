@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
+import { RichTextEditor } from "@/components/shared/rich-text-editor";
 import {
   taskCategories,
   taskPriorities,
@@ -30,6 +30,10 @@ import {
   recurrenceIntervals,
   RECURRENCE_INTERVAL_LABELS,
 } from "@/lib/tasks/recurrence";
+// Descriptions written before T-021 are plain text with newlines. There is no
+// migration — `toRichTextHtml` is the one door, and it converts them on the way
+// into the editor exactly as it does for message templates.
+import { toRichTextHtml } from "@/lib/rich-text/format";
 import { toast } from "sonner";
 
 // ============================================================================
@@ -64,6 +68,57 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 // ============================================================================
+// Description field (T-021)
+// ============================================================================
+
+const DESCRIPTION_ID = "description";
+const DESCRIPTION_LABEL_ID = "description-label";
+
+interface TaskDescriptionFieldProps {
+  /** HTML, or a legacy plain-text description, already converted by the caller. */
+  value: string;
+  onChange: (html: string) => void;
+  disabled?: boolean;
+}
+
+/**
+ * The task description, on the product's ONE rich-text editor (COM-017).
+ *
+ * Exported so its markup can be asserted without a router: the form around it
+ * calls `useRouter`, which cannot be rendered outside the app router, and the
+ * things worth pinning here — `cursor-pointer` on every control, a labelled
+ * textbox, the HTML actually reaching the request — all live in this subtree.
+ *
+ * The editor is a `contentEditable` div, so it carries no form value of its
+ * own. The hidden input beside it is what puts the description into the
+ * `FormData` the submit handler reads, which keeps the rest of this form
+ * uncontrolled and the server contract (`description`) unchanged.
+ *
+ * `<Label htmlFor>` does not associate with a div — only labelable elements —
+ * so the accessible name is wired the other way, through `aria-labelledby`.
+ */
+export function TaskDescriptionField({
+  value,
+  onChange,
+  disabled = false,
+}: TaskDescriptionFieldProps) {
+  return (
+    <>
+      <RichTextEditor
+        id={DESCRIPTION_ID}
+        value={value}
+        onChange={onChange}
+        aria-labelledby={DESCRIPTION_LABEL_ID}
+        placeholder="Add details about this task..."
+        disabled={disabled}
+        editorClassName="min-h-[140px]"
+      />
+      <input type="hidden" name="description" value={value} />
+    </>
+  );
+}
+
+// ============================================================================
 // Component
 // ============================================================================
 
@@ -87,6 +142,13 @@ export function TaskForm({ task, users = [] }: TaskFormProps) {
     task?.isRecurring && savedRule ? savedRule.interval : NO_RECURRENCE
   );
   const repeats = interval !== NO_RECURRENCE;
+
+  // Form input state, the same thing `defaultValue` holds for every other field
+  // here — the editor is a contentEditable surface, so its value has to be held
+  // somewhere it can be read from at submit time.
+  const [description, setDescription] = useState(() =>
+    toRichTextHtml(task?.description)
+  );
 
   function handleSubmit(formData: FormData) {
     startTransition(async () => {
@@ -120,15 +182,14 @@ export function TaskForm({ task, users = [] }: TaskFormProps) {
         />
       </div>
 
-      {/* Description */}
+      {/* Description (T-021) */}
       <div className="space-y-2">
-        <Label htmlFor="description">Description</Label>
-        <Textarea
-          id="description"
-          name="description"
-          defaultValue={task?.description ?? ""}
-          placeholder="Add details about this task..."
-          rows={4}
+        <Label id={DESCRIPTION_LABEL_ID} htmlFor={DESCRIPTION_ID}>
+          Description
+        </Label>
+        <TaskDescriptionField
+          value={description}
+          onChange={setDescription}
           disabled={isPending}
         />
       </div>

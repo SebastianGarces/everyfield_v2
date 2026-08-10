@@ -26,6 +26,15 @@ import {
   type SQL,
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+// Task descriptions are rich text (T-021), sharing COM-017's editor and its
+// sanitiser. `toRichTextHtml` is the one door in — it sanitises markup and
+// converts the plain-text descriptions written before this shipped, which is
+// what makes "no migration" true.
+import {
+  isRichTextEmpty,
+  richTextToPlainText,
+  toRichTextHtml,
+} from "@/lib/rich-text/format";
 import type { ListTasksResult, TaskCounts, TaskWithAssignee } from "./types";
 import { MAX_BULK_TASKS } from "./types";
 import { emitTaskCompleted } from "./events";
@@ -67,12 +76,79 @@ export interface ListTasksOptions {
 }
 
 // ============================================================================
+// Descriptions (T-021)
+// ============================================================================
+//
+// A task description is stored as HTML, in exactly the shape COM-017's editor
+// produces, and it is sanitised by the same allow-list sanitiser. Two rules
+// hold this together, and they are the reason both functions below exist rather
+// than a `toRichTextHtml()` sprinkled at call sites:
+//
+//   1. The WRITE paths sanitise. `createTask` and `updateTask` are reached from
+//      `"use server"` actions — POSTable endpoints that never saw the toolbar —
+//      and from the meeting follow-up generator, which writes plain text. Every
+//      one of them goes through `normalizeTaskDescription`.
+//   2. The LIST surfaces carry plain text. `listTasks`/`listSubtasks` feed the
+//      task cards, which render their fields as text; handing them markup would
+//      print `<strong>` at the planter. The detail page and the edit form read
+//      through `getTask`, which keeps the HTML.
+//
+// So: `getTask` → markup (it is being edited or rendered as rich text),
+// `listTasks`/`listSubtasks` → readable text (it is being summarised).
+
+/**
+ * The one door a description takes into storage.
+ *
+ * Markup is sanitised; a legacy plain-text description is converted to the same
+ * shape, which is what lets a row written before T-021 render and edit without
+ * a migration. An editor emptied by hand leaves `<p><br></p>` behind — truthy,
+ * and a `!value.trim()` guard waves it through — so emptiness is decided by
+ * `isRichTextEmpty` and stored as NULL, keeping "has a description" a single
+ * question everywhere downstream.
+ */
+export function normalizeTaskDescription(
+  value: string | null | undefined
+): string | null {
+  const html = toRichTextHtml(value);
+  return isRichTextEmpty(html) ? null : html;
+}
+
+/**
+ * The readable text of a description, for a surface that summarises rather than
+ * renders — the task list above all.
+ *
+ * Not truncated here: how much fits is the card's question, and a service that
+ * guesses at it hands the UI a string it cannot lengthen.
+ */
+export function taskDescriptionPreview(
+  value: string | null | undefined
+): string | null {
+  if (!value) return null;
+  const text = richTextToPlainText(toRichTextHtml(value));
+  return text === "" ? null : text;
+}
+
+/** Swap each row's description for its readable preview, in place of the HTML. */
+function withDescriptionPreviews<T extends { description: string | null }>(
+  rows: T[]
+): T[] {
+  return rows.map((row) => ({
+    ...row,
+    description: taskDescriptionPreview(row.description),
+  }));
+}
+
+// ============================================================================
 // Queries
 // ============================================================================
 
 /**
  * Get a single task by ID with assignee info.
  * Returns null if not found or soft-deleted.
+ *
+ * `description` comes back as the stored rich text (T-021) — this is what the
+ * detail page renders and what the edit form loads. The list readers below hand
+ * back the plain-text preview instead; see the Descriptions section.
  */
 export async function getTask(
   churchId: string,
@@ -313,7 +389,9 @@ export async function listTasks(
     : null;
 
   return {
-    tasks: resultTasks as TaskWithAssignee[],
+    // Readable text, never markup (T-021): the card renders every field it is
+    // given as text, so an un-flattened description would print its own tags.
+    tasks: withDescriptionPreviews(resultTasks) as TaskWithAssignee[],
     total,
     nextCursor,
   };
@@ -581,7 +659,8 @@ export async function listSubtasks(
     )
     .orderBy(asc(tasks.createdAt), asc(tasks.id));
 
-  return result as TaskWithAssignee[];
+  // A checklist is a list surface too — plain text, same rule as `listTasks`.
+  return withDescriptionPreviews(result) as TaskWithAssignee[];
 }
 
 // ============================================================================
@@ -646,7 +725,10 @@ export async function createTask(
       churchId,
       createdById: userId,
       title: data.title,
-      description: data.description,
+      // Sanitised HERE, not in the form (T-021). The action that calls this is
+      // a POSTable endpoint the editor never touched, and the meeting follow-up
+      // generator calls it with plain text — one door covers both.
+      description: normalizeTaskDescription(data.description),
       status: data.status,
       priority: data.priority,
       dueDate: data.dueDate ?? null,
@@ -711,8 +793,10 @@ export async function updateTask(
   );
 
   if (data.title !== undefined) updateData.title = data.title;
+  // Same gate as create — an edit is the second write path, and it is reachable
+  // with no session and no UI just like the first (T-021).
   if (data.description !== undefined)
-    updateData.description = data.description ?? null;
+    updateData.description = normalizeTaskDescription(data.description);
   if (data.status !== undefined) updateData.status = data.status;
   if (data.priority !== undefined) updateData.priority = data.priority;
   if (data.dueDate !== undefined) updateData.dueDate = data.dueDate ?? null;

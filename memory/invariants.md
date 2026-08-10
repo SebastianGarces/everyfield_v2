@@ -147,6 +147,8 @@ Applies to `src/lib/rich-text/**`, `src/components/shared/rich-text-editor.tsx` 
 - ⚖ Exactly ONE instance of a recurring series is open at a time, minted on completion — never by a cron. The guard runs BEFORE the successor insert, so a resurrected series gains neither a second open task nor a duplicate checklist.
 - `completionEvent` is never copied to a successor: `meeting.evaluation.completed` is backed by a partial unique index, so copying it aborts the second instance's insert. Recurrence mints plain work; hooks stay with the generator.
 - A completion is written FIRST and its successor second — the reverse of the usual durable-marker-last rule, deliberately. A successor with no completion leaves two open instances; a completion with no successor is repaired by reopening and re-completing.
+- A task description is rich text on the SAME editor and sanitiser as a message body (T-021, see Rich Text above) — never a second editor. `normalizeTaskDescription` (`src/lib/tasks/service.ts`) is the one write gate, applied by BOTH `createTask` and `updateTask`, because the meeting follow-up generator writes plain text and the task actions are POSTable endpoints that never saw the toolbar. An emptied editor stores NULL, so "has a description" stays one question.
+- `description` has a different shape per reader, on purpose: `getTask` returns the stored HTML (the detail page renders it, the edit form loads it), while `listTasks` and `listSubtasks` return `taskDescriptionPreview` — plain text. The task card renders every field it is given as text, so handing it markup prints `<strong>` at the planter.
 
 ## Dev Seeds
 

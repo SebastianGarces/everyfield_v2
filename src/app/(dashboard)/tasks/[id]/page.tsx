@@ -8,6 +8,7 @@ import { db } from "@/db";
 import { users } from "@/db/schema";
 import { verifySession } from "@/lib/auth/session";
 import { getTask, listSubtasks } from "@/lib/tasks/service";
+import { toRichTextHtml } from "@/lib/rich-text/format";
 import { eq } from "drizzle-orm";
 import {
   Calendar,
@@ -280,7 +281,20 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
               <CardTitle className="text-sm font-medium">Description</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-sm whitespace-pre-wrap">{task.description}</p>
+              {/*
+                Rendered as rich text, not printed as markup (T-021).
+                `toRichTextHtml` sanitises on the way out — the write path
+                already sanitised, but a row can predate that, and a renderer
+                that trusts its input is one migration away from being wrong.
+                It also carries the plain-text descriptions written before this
+                shipped, which is what makes "no migration" true.
+              */}
+              <div
+                className="[&_a]:text-primary text-sm break-words [&_a]:underline [&_a]:underline-offset-2 [&_ol]:mb-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:mb-2 [&_p:last-child]:mb-0 [&_ul]:mb-2 [&_ul]:list-disc [&_ul]:pl-6"
+                dangerouslySetInnerHTML={{
+                  __html: toRichTextHtml(task.description),
+                }}
+              />
             </CardContent>
           </Card>
         )}
