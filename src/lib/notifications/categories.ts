@@ -87,8 +87,9 @@ export type NotificationAudience = "church" | "oversight";
  * `share_activity_with_oversight`, which defaults to off. So an oversight
  * user's effective default is "nothing" whatever this table says, and FIVE of
  * these SEVEN rows — every granular category — are unreachable for them
- * however the plant decides. (Only the invitation-accepted milestone is exempt
- * from the second question; see `oversightGateFor`.)
+ * however the plant decides. (Three milestone types are exempt from the second
+ * question — the invitation accepted, the invitation declined, the association
+ * ended; see `OVERSIGHT_SHARING_EXEMPT_TYPES` and `oversightGateFor`.)
  *
  * The one CHANNEL default that differs by audience is `digest`/`in_app`, and it
  * is overridden below rather than restated — see
@@ -125,8 +126,16 @@ export const NOTIFICATION_CATEGORIES: Record<
   },
   milestones: {
     label: "Milestones",
+    // Both directions of the association live in this category and the
+    // description has to admit it (#304). An oversight admin's five kinds are
+    // `oversightMilestoneKinds` — an invitation accepted, an invitation
+    // declined, an association ended, a new stage, a launch date — and the
+    // planter's own `association.removed_by_org` (`./plant-association.ts`)
+    // rides the same category from the other side. An earlier version listed
+    // only "an invitation accepted, a new stage, a launch date", which named
+    // three of six and read as though ending a relationship were silent.
     description:
-      "The few moments worth an interruption: an invitation accepted, a new stage, a launch date.",
+      "The few moments worth an interruption: an invitation answered either way, an association starting or ending, a new stage, a launch date.",
     defaults: { email: true, in_app: true },
   },
   digest: {
@@ -449,14 +458,24 @@ export const OVERSIGHT_SHARING_FEATURE: PrivacyFeatureKey =
  * The copy may only claim what this toggle actually governs
  * ----------------------------------------------------------------------------
  *
- * This toggle gates what is PUSHED: the digest and TWO of the three milestones,
- * via `enqueue`. The invitation-accepted milestone is exempt
- * (`OVERSIGHT_SHARING_EXEMPT_TYPES`) because it is the sending church's own
- * event, so the second and fifth bullets below say two milestones and name the
- * third as an exception rather than listing all three as governed. That is a
- * deliberate amendment of copy that was previously frozen: the ruling changed
- * the facts, and copy whose only virtue is that it has not changed is not
- * truthful copy.
+ * This toggle gates what is PUSHED: the digest and TWO of the five milestones,
+ * via `enqueue`. THREE are exempt (`OVERSIGHT_SHARING_EXEMPT_TYPES`) because
+ * each one is the org's OWN relationship changing — an invitation accepted, an
+ * invitation declined, an association ended — so the "two milestones" bullet
+ * below counts only the gated pair and the LAST bullet names all three
+ * exemptions as exceptions rather than listing them as governed (ruled
+ * 2026-08-10, round 5 of #304).
+ * That is a deliberate amendment of copy that was previously frozen: the ruling
+ * changed the facts, and copy whose only virtue is that it has not changed is
+ * not truthful copy.
+ *
+ * The exempt sentence is the LAST bullet and the reversibility sentence sits
+ * ABOVE it, deliberately. "Turn it off whenever you like. Sharing stops at the
+ * next update" is true of everything this toggle governs and false of the three
+ * exemptions, so a reader who meets it after them reads a promise the code does
+ * not keep. `oversight.test.ts` pins that order, and it pins the exempt phrases
+ * against `OVERSIGHT_SHARING_EXEMPT_TYPES` itself rather than a hand-written
+ * list, so a fourth exemption fails the suite until this copy names it.
  *
  * It does not gate what oversight may PULL either. `getOversightPlantHealth`
  * (`src/lib/phase-engine/oversight/read.ts`) already returns each accessible
@@ -468,12 +487,15 @@ export const OVERSIGHT_SHARING_FEATURE: PrivacyFeatureKey =
  * So an earlier draft of this screen ("they see nothing about this plant unless
  * you turn sharing on") was false the moment it shipped, and false about
  * precisely the two facts — current stage, launch date — the milestones below
- * mention. The fourth bullet exists to say that out loud. A consent control
- * whose promise overstates its own reach is worse than no promise: the planter
- * makes a decision about a guarantee the system does not offer.
+ * mention. The "Two things this setting does not cover" bullet exists to say
+ * that out loud. A consent control whose promise overstates its own reach is
+ * worse than no promise: the planter makes a decision about a guarantee the
+ * system does not offer.
  *
  * If a future ruling brings the portfolio's phase/launch exposure under this
- * toggle, that bullet comes out — and not before.
+ * toggle, that bullet comes out — and not before. (Bullets are named here, not
+ * numbered: round 5 reordered them and every ordinal in this comment went stale
+ * at once.)
  */
 export const OVERSIGHT_SHARING_TOGGLE = {
   label: "Share activity with your sending church or network",
@@ -488,9 +510,9 @@ export const OVERSIGHT_SHARING_TOGGLE = {
     "Once a day, on days something happened, they get counts: meetings held, people added, tasks finished, stages reached.",
     "They also hear about two milestones — you move to a new stage, you set or change a launch date.",
     "They never see names, notes, messages, giving, or a list of what you did. This is a summary, not an activity feed.",
-    "Two things this setting does not cover. Your plant is already listed on their dashboard with its name, current stage and launch date — this is about the updates they receive, not that listing.",
-    "And if they invited you, they were told the moment you accepted. That is their own invitation being answered, so it reaches them either way.",
     "Turn it off whenever you like. Sharing stops at the next update — nothing already sent is recalled.",
+    "Two things this setting does not cover. Your plant is already listed on their dashboard with its name, current stage and launch date — this is about the updates they receive, not that listing.",
+    "Three things reach them either way, because the relationship itself is theirs too: when you accept their invitation, when you decline one, and when your association with them ends.",
   ],
 } as const;
 

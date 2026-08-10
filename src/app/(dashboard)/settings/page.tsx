@@ -131,9 +131,16 @@ export default async function SettingsPage() {
               Association
             </h2>
             <p className="text-muted-foreground text-sm text-pretty">
+              {/* BOTH branches name the LEAVE control, because both roles have
+                  one (OV-013 gave the sending church admin `LeaveNetworkDialog`
+                  on the same route's second view). The admin's sentence used to
+                  stop at "see which network your sending church belongs to",
+                  which described the screen as read-only and was the copy half
+                  of the dead end HR4 found on the planter's side: a control
+                  nobody is told about is a control nobody uses. */}
               {isPlanterWithPlant
                 ? "Answer an invitation from a sending church or network, see who your plant belongs to, and leave an organization. "
-                : "Answer an invitation from a church planting network, and see which network your sending church belongs to. "}
+                : "Answer an invitation from a church planting network, see which network your sending church belongs to, and leave it. "}
               <Link
                 href="/settings/association"
                 className="cursor-pointer font-medium underline underline-offset-4"

@@ -312,10 +312,22 @@ export async function getPendingInvitationsForSendingChurch(
 /**
  * The sending church's CURRENT network, or null.
  *
- * One association, not two: `sending_churches` has a single oversight FK. The
- * screen shows it read-only — there is no sever for this side of the hierarchy
- * (`leaveOversightOrgAs` is the PLANT's, and takes no sending-church shape), so
- * offering a Leave button here would be a control with nothing behind it.
+ * One association, not two: `sending_churches` has a single oversight FK, so
+ * this returns at most one row where the plant's side returns up to two.
+ *
+ * IT IS SEVERABLE, and the endpoint behind it is the sending church's own:
+ * `leaveNetworkAsSendingChurchAdmin` (OV-013, shipped with #304 WS3), which
+ * takes NO argument at all — the sending church is the actor's own, the network
+ * is whatever it currently points at, and the org kind is fixed. The plant's
+ * `leaveOversightOrgAs` is a different endpoint with a different authority rule
+ * and takes no sending-church shape; a single endpoint with a role branch was
+ * rejected (`memory/invariants.md` → Multi-Tenancy).
+ *
+ * (This comment used to say the view was read-only "because there is no sever
+ * for this side of the hierarchy". That was true only until migration 0035 gave
+ * `association_events` a subject discriminator, which is what a sending church's
+ * sever needed in order to be audited at all — #274 requires an audit row of
+ * every sever, so OV-013 could not ship before it.)
  */
 export async function getCurrentNetworkAssociation(
   sendingChurchId: string

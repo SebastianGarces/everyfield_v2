@@ -63,6 +63,15 @@ import {
 //    The compile-time half is the `@ts-expect-error`s below: a bare user object
 //    is not an `InvitationActor`, and `pnpm typecheck` enforces that.
 //
+//    §1b′ extends the same treatment to the two OTHER `"use server"` modules in
+//    this domain — the association surface and the org admin's sever, both added
+//    by #304 and both on the allowlist in part 4. Being allowed to reach `./core`
+//    is not the same claim as checking somebody first, and until round 5 nothing
+//    made the second one about those five endpoints. It also pins the SESSION-
+//    FIRST order ruled 2026-08-10: each export is called sessionless with a
+//    well-formed argument AND a malformed one, and both must throw, so no
+//    argument shape can be told from another with no session.
+//
 // 3. AUTHORITY — the check that stood between an anonymous request and a
 //    stranger's association, now unit-tested per invitation type. §5 adds the
 //    WRITES that authority guards: a response is a compare-and-set on `pending`,
@@ -626,6 +635,175 @@ test("every action refuses a call with no session, whatever else it is sent", as
         /Unauthorized|outside a request scope/.test(error.message),
       name
     );
+  }
+});
+
+// ----------------------------------------------------------------------------
+// 1b′. Forgery — the two association action modules #304 added (OV-007a/b, WS3)
+//
+// `service.ts` is not the only `"use server"` module in the invitation domain
+// any more. #304 added the planter's association surface and the org admin's
+// sever, both on `CORE_REACHING_ACTION_MODULES` above, and each publishes its
+// own POST endpoints. §1b proves the four lifecycle actions refuse a sessionless
+// call; without this the five newest endpoints had no equivalent, and the walk
+// above only proves they are ALLOWED to reach `./core`, never that they check
+// anybody first.
+//
+// It also pins the SESSION-FIRST order ruled 2026-08-10 (round 5 of #304). Each
+// export is called twice with no session — once with a WELL-FORMED argument and
+// once with a malformed one — and both must throw. That is the assertion the
+// order exists for: while `safeParse` ran first, the malformed call returned
+// `{ success: false, error: "Unknown invitation" }` to an anonymous caller and
+// the well-formed one threw, so the pair of answers distinguished a valid uuid
+// from an invalid one with no session at all. Two identical throws is what
+// "nothing is examined before the session" looks like from outside.
+// ----------------------------------------------------------------------------
+
+/**
+ * The association endpoint surface, DECLARED — module by module, export by
+ * export. Asserted exhaustive against the real module namespace below, so a
+ * sixth endpoint added to either file fails here until it is written down and
+ * put through the sessionless call.
+ */
+const ASSOCIATION_ACTION_MODULES: ReadonlyArray<{
+  readonly label: string;
+  readonly load: () => Promise<Record<string, unknown>>;
+  readonly exports: readonly string[];
+}> = [
+  {
+    label: "src/app/(dashboard)/settings/association/actions.ts",
+    load: async () =>
+      (await import("@/app/(dashboard)/settings/association/actions")) as unknown as Record<
+        string,
+        unknown
+      >,
+    exports: [
+      "acceptAssociationInvitation",
+      "declineAssociationInvitation",
+      "leaveNetwork",
+      "leaveOversightOrg",
+    ],
+  },
+  {
+    label: "src/app/(dashboard)/oversight/plants/[id]/actions.ts",
+    load: async () =>
+      (await import("@/app/(dashboard)/oversight/plants/[id]/actions")) as unknown as Record<
+        string,
+        unknown
+      >,
+    exports: ["removePlantFromOrg"],
+  },
+];
+
+test("the association modules publish exactly the endpoints they declare", async () => {
+  // The same assertion §1a makes about `service.ts`, made about the two modules
+  // #304 added: the module namespace IS the auth surface, so it is read off the
+  // real import rather than grepped. `leaveNetwork` taking no argument at all is
+  // part of the shape being pinned — a later "convenience" parameter on it would
+  // be a network id a forged POST could aim (OV-013).
+  for (const target of ASSOCIATION_ACTION_MODULES) {
+    const mod = await target.load();
+    assert.deepEqual(
+      Object.keys(mod).sort(),
+      [...target.exports].sort(),
+      target.label
+    );
+  }
+});
+
+test("every association action refuses a call with no session, well-formed argument or not", async () => {
+  // The forged POST, executed against the newest endpoints. The forged actor is
+  // the same one §1b uses — the `respondingUser` shape that was once trusted —
+  // and it lands in no parameter, because none of these five declares one.
+  //
+  // Both spellings of the refusal are the same refusal: in a real request with
+  // no session cookie `verifySession()` throws `Unauthorized`; in this bare
+  // process `cookies()` itself refuses, there being no request to read one from.
+  // Either way it is a throw and not a `{ success: false }`, so nothing
+  // downstream can mistake it for a handled outcome — and, crucially, the
+  // malformed argument produces the SAME throw rather than a parse result.
+  const forged = {
+    id: "55555555-5555-4555-8555-555555555555",
+    role: "planter" as const,
+    churchId: "11111111-1111-4111-8111-111111111111",
+  };
+
+  // A syntactically valid uuid (`safeParse` would have accepted it) and a
+  // string that is not one (`safeParse` would have rejected it). The endpoints
+  // taking a two-valued org KIND read the same pair the same way: "network" is
+  // well-formed, "" is not.
+  const wellFormed = ["77777777-7777-4777-8777-777777777777", "network"];
+  const malformed = ["not-a-uuid", ""];
+
+  for (const target of ASSOCIATION_ACTION_MODULES) {
+    const mod = await target.load();
+
+    for (const name of target.exports) {
+      const action = mod[name];
+      assert.equal(typeof action, "function", `${target.label} → ${name}`);
+
+      for (const argument of [...wellFormed, ...malformed]) {
+        await assert.rejects(
+          async () =>
+            (action as (...args: unknown[]) => Promise<unknown>)(
+              argument,
+              forged
+            ),
+          (error: unknown) =>
+            error instanceof Error &&
+            /Unauthorized|outside a request scope/.test(error.message),
+          `${target.label} → ${name}(${JSON.stringify(argument)})`
+        );
+      }
+
+      // And with no argument at all — the shape `leaveNetwork` actually has.
+      await assert.rejects(
+        async () => (action as (...args: unknown[]) => Promise<unknown>)(),
+        (error: unknown) =>
+          error instanceof Error &&
+          /Unauthorized|outside a request scope/.test(error.message),
+        `${target.label} → ${name}()`
+      );
+    }
+  }
+});
+
+test("the session mint is the FIRST statement of every association action", () => {
+  // The structural half, read off the source. §1b′ above proves the endpoints
+  // refuse; this proves WHERE they refuse, which is what stops the parse from
+  // creeping back above the mint in a later edit that still passes a sessionless
+  // call (it would — a malformed id would return `{ success: false }`, and
+  // `assert.rejects` on the well-formed one alone would not notice).
+  //
+  // Read from the function body's first line: `verifySession()` must appear
+  // before the first `safeParse` in each exported function.
+  for (const file of [
+    path.join(SRC, "app/(dashboard)/settings/association/actions.ts"),
+    path.join(SRC, "app/(dashboard)/oversight/plants/[id]/actions.ts"),
+  ]) {
+    const code = codeOf(file);
+    const bodies = [
+      ...code.matchAll(/export\s+async\s+function\s+(\w+)\s*\([^)]*\)[^{]*\{/g),
+    ];
+
+    assert.ok(bodies.length > 0, `no exported actions found in ${rel(file)}`);
+
+    for (const match of bodies) {
+      const body = code.slice(match.index + match[0].length);
+      const end = body.search(/\n\}/);
+      const scoped = end === -1 ? body : body.slice(0, end);
+
+      const mint = scoped.indexOf("verifySession()");
+      const parse = scoped.indexOf(".safeParse(");
+
+      assert.ok(mint >= 0, `${rel(file)} → ${match[1]} never mints an actor`);
+      if (parse >= 0) {
+        assert.ok(
+          mint < parse,
+          `${rel(file)} → ${match[1]} parses its argument before checking the session`
+        );
+      }
+    }
   }
 });
 

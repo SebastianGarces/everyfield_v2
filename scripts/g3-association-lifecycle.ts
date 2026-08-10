@@ -30,10 +30,27 @@
  *     against the shared development branch — unlike
  *     `scripts/g3-oversight-model.ts`, which is scratch-database only.
  *
- *   pnpm exec tsx scripts/g3-association-lifecycle.ts
+ *   pnpm g3:association
+ *   pnpm g3:association --keep
  *
  * Pass `--keep` to skip the cleanup when a verifier wants to inspect the rows
  * afterwards; the ids are printed either way.
+ *
+ * ----------------------------------------------------------------------------
+ * Why a package script and not `pnpm exec tsx scripts/…`
+ * ----------------------------------------------------------------------------
+ *
+ * It used to document the bare `pnpm exec tsx` form, which does not work: `tsx`
+ * loads no env file on its own, so `src/db/index.ts` reached `neon()` with an
+ * undefined `DATABASE_URL` and the script died at import time, before printing a
+ * single id. A G3 harness whose documented invocation cannot run is worse than
+ * no harness — the evidence line cites a command nobody executed, which is the
+ * exact failure #304's first attempt was blocked on.
+ *
+ * `pnpm g3:association` carries `--env-file-if-exists=.env.local`, the same flag
+ * `pnpm test` uses, so one recorded command works from a clean checkout with a
+ * populated `.env.local` and does nothing surprising without one. Extra
+ * arguments pass through, so `--keep` still reaches `process.argv`.
  */
 import assert from "node:assert/strict";
 

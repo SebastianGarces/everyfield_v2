@@ -120,11 +120,21 @@ export async function canAccessChurch(
  *
  * The first six gate what an oversight user may PULL — a dashboard read.
  * `oversight_activity` gates what is PUSHED to them (F11 N-026): the daily
- * activity summary and two of the three milestones — the invitation-accepted
- * milestone is exempt, being the sending church's own event (ruled 2026-08-01,
- * `OVERSIGHT_SHARING_EXEMPT_TYPES`). It supersedes the per-category `phase` and
- * `digest` keys: under the 2026-07-27 ruling oversight has no per-category
- * notification eligibility left to gate.
+ * activity summary and two of the FIVE milestones (`oversightMilestoneKinds`) —
+ * a phase advance and a launch date, the two that are facts about the plant's
+ * own progress. The other THREE are exempt, each being the org's own
+ * relationship changing: an invitation accepted, an invitation declined, an
+ * association ended (`OVERSIGHT_SHARING_EXEMPT_TYPES` — ruled 2026-08-01 for
+ * the accept, extended to the other two by #304 / OV-006 + OV-007).
+ *
+ * It gates nothing at all in the other direction. `association.removed_by_org`
+ * (`src/lib/notifications/plant-association.ts`) tells a PLANTER that their
+ * oversight org removed them; it is addressed to a church-level role, so
+ * neither this key nor the oversight category allow-list is consulted for it.
+ *
+ * It supersedes the per-category `phase` and `digest` keys: under the
+ * 2026-07-27 ruling oversight has no per-category notification eligibility left
+ * to gate.
  *
  * Those two columns are still IN the database. Migration 0029 is expand-only —
  * it adds `share_activity_with_oversight` and drops nothing, because the Neon

@@ -79,6 +79,21 @@ import {
 // WHICH of the plant's two oversight associations to end — and not an id, so
 // there is no parameter a forged POST could aim at somebody else's church.
 //
+// SESSION FIRST, THEN THE PARSE (ruled 2026-08-10, round 5 of #304). The mint is
+// the FIRST statement of every export here — ahead of `safeParse`, not after it
+// — so an anonymous POST is refused before its argument is examined at all.
+// Parsing first was not exploitable (these schemas touch no database and the
+// authority checks all sit downstream), but it published a shape-oracle for
+// free: a sessionless caller got `{ success: false, error: "Unknown
+// invitation" }` for a malformed id and a throw for a well-formed one, which
+// distinguishes the two without a session. It also meant the order differed
+// from one entry point to the next, and "does this endpoint check the session
+// before it does anything" stopped being answerable by looking at line one.
+// `service.test.ts` §1b′ now enumerates the exports of this module and calls
+// every one of them with no session at all — a well-formed argument AND a
+// malformed one, both of which must throw — so the order is pinned rather than
+// remembered.
+//
 // OV-010, ruled #274: accept, decline and leave are the PLANTER'S. A
 // `team_member` or `coach` of the same plant is refused server-side —
 // `verifyInvitationAuthority` for the two answers, `leaveOversightOrgAs` for the
@@ -140,12 +155,13 @@ async function run(
 export async function acceptAssociationInvitation(
   invitationId: string
 ): Promise<AssociationActionResult> {
+  const actor = invitationActorFromSession(await verifySession());
+
   const parsed = invitationIdSchema.safeParse(invitationId);
   if (!parsed.success) {
     return { success: false, error: "Unknown invitation" };
   }
 
-  const actor = invitationActorFromSession(await verifySession());
   return run("acceptAssociationInvitation", () =>
     acceptInvitationAs(actor, parsed.data)
   );
@@ -167,12 +183,13 @@ export async function acceptAssociationInvitation(
 export async function declineAssociationInvitation(
   invitationId: string
 ): Promise<AssociationActionResult> {
+  const actor = invitationActorFromSession(await verifySession());
+
   const parsed = invitationIdSchema.safeParse(invitationId);
   if (!parsed.success) {
     return { success: false, error: "Unknown invitation" };
   }
 
-  const actor = invitationActorFromSession(await verifySession());
   return run("declineAssociationInvitation", () =>
     declineInvitationAs(actor, parsed.data)
   );
@@ -190,6 +207,8 @@ export async function declineAssociationInvitation(
 export async function leaveOversightOrg(
   orgType: string
 ): Promise<AssociationActionResult> {
+  const actor = invitationActorFromSession(await verifySession());
+
   const parsed = orgTypeSchema.safeParse(orgType);
   if (!parsed.success) {
     return {
@@ -198,7 +217,6 @@ export async function leaveOversightOrg(
     };
   }
 
-  const actor = invitationActorFromSession(await verifySession());
   return run("leaveOversightOrg", () =>
     leaveOversightOrgAs(actor, parsed.data)
   );

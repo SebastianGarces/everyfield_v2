@@ -66,7 +66,17 @@ function reach(values: {
   return filter;
 }
 
-/** The guard's own source, minus everything after it. */
+/**
+ * BOTH guards' own source — `assertInviteRateLimit` (address scope, pre-
+ * resolution), the shared `rateLimitWindowStart`, and
+ * `assertTargetInviteRateLimit` (target scope, post-resolution) — minus
+ * everything after them.
+ *
+ * They were one function until ruling 5 (2026-08-10) split them, so that the
+ * legible message lives somewhere the post-resolution path does not call. The
+ * span still covers both because the properties below ("no `users` read", "the
+ * window is derived, not a second constant") are true of the pair.
+ */
 const RATE_LIMIT_GUARD = CORE.slice(
   CORE.indexOf("export async function assertInviteRateLimit"),
   CORE.indexOf("/** Resolve + guard + insert.")
@@ -304,13 +314,51 @@ test("createInvitationAs runs the cap again once a target exists", () => {
   );
 
   const resolve = create.indexOf("await resolveInvitationTarget");
-  const second = create.indexOf("assertInviteRateLimit(resolved.values)");
+  const second = create.indexOf("assertTargetInviteRateLimit(resolved.values)");
 
   assert.ok(second > 0, "the post-resolution pass is missing");
   assert.ok(
     second > resolve,
     "the target-scoped pass must run AFTER the address is resolved"
   );
+});
+
+test("the post-resolution pass cannot compose the legible cap message", () => {
+  // RULED 2026-08-10 (round 5 of #304). The two passes were one function, so the
+  // post-resolution call re-ran the ADDRESS count first and could throw
+  // `INVITE_RATE_LIMITED_MESSAGE` from a position where every refusal has to be
+  // the one collapsed message — reachable whenever a row landed between the two
+  // calls, and reachable by construction rather than by race in any future edit
+  // that moved the first call.
+  //
+  // The fix is structural: the legible message lives in a function the
+  // post-resolution path does not call. So this asserts the CALL GRAPH, not an
+  // ordering comment — `assertTargetInviteRateLimit` must not name the legible
+  // constant anywhere in its body, and `createInvitationAs` must not call the
+  // address-scoped guard a second time.
+  const targetGuard = CORE.slice(
+    CORE.indexOf("export async function assertTargetInviteRateLimit"),
+    CORE.indexOf("/** Resolve + guard + insert.")
+  );
+
+  assert.ok(targetGuard.length > 0, "assertTargetInviteRateLimit is missing");
+  assert.doesNotMatch(targetGuard, /INVITE_RATE_LIMITED_MESSAGE/);
+  assert.match(
+    targetGuard,
+    /throw new InvitationError\(ACCOUNT_NOT_INVITABLE_MESSAGE\)/
+  );
+
+  // Exactly ONE call to the address-scoped guard in the whole create path, and
+  // it is the pre-resolution one. A second call is the bug this test exists for.
+  const create = CORE.slice(
+    CORE.indexOf("export async function createInvitationAs")
+  );
+  // `assertTargetInviteRateLimit` does not contain this substring — "assert" is
+  // followed by "Target", not by "Invite" — so the count is unambiguous.
+  const addressCalls = create.match(/assertInviteRateLimit\(/g) ?? [];
+
+  assert.equal(addressCalls.length, 1, create);
+  assert.match(create, /assertInviteRateLimit\(authority\.values\)/);
 });
 
 test("the duplicate check counts the target as well as the address", () => {

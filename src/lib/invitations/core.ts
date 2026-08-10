@@ -927,8 +927,16 @@ export function invitesFromOrgToTargetQuery(
 }
 
 /**
- * Refuse an org that has already addressed this person
+ * Refuse an org that has already addressed this ADDRESS
  * `INVITES_PER_INVITEE_PER_WINDOW` times inside the window (#304, HR4).
+ *
+ * PRE-RESOLUTION ONLY. Its target-scoped twin is `assertTargetInviteRateLimit`
+ * below, and they are two functions rather than one on purpose (ruling 5,
+ * 2026-08-10): this is the only one that can compose the legible message, so
+ * keeping it out of the post-resolution call is a fact about the call graph
+ * instead of a comment asking the next reader to preserve an ordering. Its
+ * parameter is narrowed to the three fields it reads for the same reason — a
+ * `ResolvedInvitation` here would invite somebody to pass the resolved values.
  *
  * WHERE IT RUNS IS THE SECURITY PROPERTY, not the wording. Every refusal
  * reachable AFTER `resolveInvitationTarget` has to be the one message
@@ -950,41 +958,64 @@ export function invitesFromOrgToTargetQuery(
  * threaten, and the alternative is a counter table for a nuisance control.
  */
 export async function assertInviteRateLimit(
-  values: ResolvedInvitation,
+  values: Pick<
+    ResolvedInvitation,
+    "inviteeEmail" | "sendingChurchId" | "sendingNetworkId"
+  >,
   now = new Date()
 ): Promise<void> {
-  const since = new Date(
-    now.getTime() - INVITATION_EXPIRY_DAYS * 24 * 60 * 60 * 1000
+  const recent = await invitesFromOrgToAddressQuery(
+    values,
+    rateLimitWindowStart(now)
   );
-
-  const recent = await invitesFromOrgToAddressQuery(values, since);
 
   if (recent.length >= INVITES_PER_INVITEE_PER_WINDOW) {
     throw new InvitationError(INVITE_RATE_LIMITED_MESSAGE);
   }
+}
 
-  // ------------------------------------------------------------------------
-  // THE SECOND SCOPE — the resolved TARGET (#304 ruling 4, fix 4).
-  //
-  // Skipped entirely on the pre-resolution call, where `values` carries no
-  // target: that call runs BEFORE the address is looked up and must stay
-  // incapable of describing a stranger (see the note above), and a filter over
-  // two null keys has nothing to count.
-  //
-  // On the post-resolution call it is the cap that actually holds, because an
-  // organization is what the banner lands on and one organization can be
-  // reached through several addresses. It refuses with the ONE message rather
-  // than the legible one — a target-scoped refusal fires on an address the org
-  // has NOT exhausted, so naming the cap would say "this address and one you
-  // already used belong to the same organization" (ruling 2).
-  // ------------------------------------------------------------------------
+/** The window both passes count inside — the SERVER's instant, never a request's. */
+function rateLimitWindowStart(now: Date): Date {
+  return new Date(now.getTime() - INVITATION_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
+}
+
+/**
+ * THE SECOND SCOPE — the same cap, counted against the resolved TARGET (#304
+ * ruling 4 fix 4; split out of `assertInviteRateLimit` by ruling 5,
+ * 2026-08-10).
+ *
+ * IT IS A SEPARATE FUNCTION BECAUSE THE TWO PASSES SPEAK DIFFERENTLY, and the
+ * difference is positional. `assertInviteRateLimit` runs BEFORE
+ * `resolveInvitationTarget` and may therefore be legible: it reads only rows the
+ * caller's own org wrote, to an address the caller itself typed. This one runs
+ * AFTER, where every refusal has to be the ONE message
+ * (`ACCOUNT_NOT_INVITABLE_MESSAGE`) — a target-scoped refusal fires on an
+ * address the org has NOT exhausted, so naming the cap would say "this address
+ * and one you already used belong to the same organization" (ruling 2,
+ * `memory/invariants.md` → Multi-Tenancy).
+ *
+ * While they were one function the post-resolution call re-ran the ADDRESS pass
+ * first, which could throw `INVITE_RATE_LIMITED_MESSAGE` from a post-resolution
+ * position — the legible message on the collapsed path, reachable whenever a row
+ * landed between the two calls. Nothing about the wording changed to fix that;
+ * the pass that composes the legible message simply no longer runs down there,
+ * which is a property of the CALL GRAPH and not of anybody remembering an
+ * ordering rule.
+ *
+ * An org with no reach filter — a target that resolved to nothing addressable —
+ * is not capped here at all. It was already capped by address, above.
+ */
+export async function assertTargetInviteRateLimit(
+  values: ResolvedInvitation,
+  now = new Date()
+): Promise<void> {
   const reach = targetReachFilter(values);
   if (!reach) return;
 
   const recentToTarget = await invitesFromOrgToTargetQuery(
     values,
     reach,
-    since
+    rateLimitWindowStart(now)
   );
 
   if (recentToTarget.length >= INVITES_PER_INVITEE_PER_WINDOW) {
@@ -1051,12 +1082,15 @@ export async function createInvitationAs(
     throw new InvitationError(resolved.error);
   }
 
-  // THE CAP AGAIN, now that there is a target to count (#304 ruling 4, fix 4).
-  // The pass above ran on the address alone and is what keeps the legible
-  // rate-limit message off the post-resolution path; this pass adds the scope
-  // that actually matters — an ORG cannot be re-addressed through a second one
-  // of its admins' accounts — and refuses with the one message.
-  await assertInviteRateLimit(resolved.values);
+  // THE CAP AGAIN, now that there is a target to count (#304 ruling 4, fix 4) —
+  // and it is a DIFFERENT function, which is the point (ruling 5, 2026-08-10).
+  // The pass above ran on the address alone and owns the legible message; this
+  // one adds the scope that actually matters — an ORG cannot be re-addressed
+  // through a second one of its admins' accounts — and can only refuse with
+  // `ACCOUNT_NOT_INVITABLE_MESSAGE`, because it contains no other. Calling the
+  // combined function here re-ran the address pass from a post-resolution
+  // position, where the legible message must not be reachable at all.
+  await assertTargetInviteRateLimit(resolved.values);
 
   // Everything below is also post-resolution, and audited to the same rule:
   // `assertTargetSlotFree` composes no message of its own (`slotRefusalMessage`

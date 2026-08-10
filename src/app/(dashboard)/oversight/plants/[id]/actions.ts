@@ -45,6 +45,18 @@ import {
 // org's plant id therefore matches nothing and is refused with the same message a
 // nonexistent id gets.
 //
+// SESSION FIRST, THEN THE PARSE (ruled 2026-08-10, round 5 of #304). The mint is
+// the FIRST statement of the export — ahead of `safeParse` — so an anonymous
+// POST is refused before its argument is examined at all. Parsing first was not
+// exploitable here, but it answered a sessionless caller differently for a
+// malformed church id (`{ success: false }`) than for a well-formed one (a
+// throw), and it made "is the session checked first?" a question about reading
+// order rather than about line one. `service.test.ts` §1b′ calls this export
+// with no session — a well-formed church id AND a malformed one, both of which
+// must throw — and pins the order from source as well; the planter's side
+// (`settings/association/actions.ts`) is ordered identically for the same
+// reason.
+//
 // `revalidatePath('/oversight/plants')` rather than `refresh()`
 // (`memory/contracts/data-patterns.md`): the mutation's visible effect is on
 // ANOTHER route — the plant drops out of the directory — and the current route
@@ -78,12 +90,12 @@ const churchIdSchema = z.string().refine(isUuid, "Unknown church plant");
 export async function removePlantFromOrg(
   churchId: string
 ): Promise<RemovePlantResult> {
+  const actor = invitationActorFromSession(await verifySession());
+
   const parsed = churchIdSchema.safeParse(churchId);
   if (!parsed.success) {
     return { success: false, error: "Unknown church plant" };
   }
-
-  const actor = invitationActorFromSession(await verifySession());
 
   try {
     await removePlantFromOrgAs(actor, parsed.data);

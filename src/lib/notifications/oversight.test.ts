@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  NOTIFICATION_CATEGORIES,
   OVERSIGHT_ELIGIBLE_CATEGORIES,
   OVERSIGHT_OWN_RELATIONSHIP_TYPES,
   OVERSIGHT_SHARING_EXEMPT_TYPES,
@@ -306,6 +307,107 @@ test("the copy admits what this toggle does NOT cover", () => {
   for (const fact of ["current stage", "launch date"]) {
     assert.ok(prose.includes(fact), `the copy never names "${fact}"`);
   }
+});
+
+/**
+ * ONE PHRASE PER CONSENT-EXEMPT TYPE, keyed by the type itself.
+ *
+ * The point of keying it is the assertion below it: the key set is compared
+ * against `OVERSIGHT_SHARING_EXEMPT_TYPES`, so a FOURTH exemption cannot be
+ * added without either naming it in the planter's copy or deliberately deleting
+ * a line of this test. A hand-written list of three phrases would have passed
+ * unchanged — which is exactly what happened between the 2026-08-01 ruling and
+ * #304: the exempt list grew from one type to three and the sentence on the
+ * screen still said "if they invited you, they were told the moment you
+ * accepted", so a planter reading it believed a decline and a departure were
+ * covered by the toggle. Ruled 2026-08-10 (round 5 of #304).
+ */
+const EXEMPT_TYPE_COPY: Readonly<Record<string, RegExp>> = {
+  "oversight.milestone.invitation_accepted": /when you accept their invitation/,
+  "oversight.milestone.invitation_declined": /when you decline one/,
+  "oversight.milestone.association_ended":
+    /when your association with them ends/,
+};
+
+test("the copy names every consent-exempt event, one phrase per exempt type", () => {
+  // Half one: the map covers the exempt list EXACTLY. A new exemption with no
+  // phrase fails here; a phrase for a type that is no longer exempt fails here
+  // too, so the copy cannot over-claim in the other direction either.
+  assert.deepEqual(
+    Object.keys(EXEMPT_TYPE_COPY).sort(),
+    [...OVERSIGHT_SHARING_EXEMPT_TYPES].sort()
+  );
+
+  // Half two: every phrase is actually on the screen. `detail` is handed whole
+  // to `/settings/sharing` (`detail={OVERSIGHT_SHARING_TOGGLE.detail}`), so a
+  // sentence in this array is a sentence the planter reads.
+  const prose = OVERSIGHT_SHARING_TOGGLE.detail.join(" ");
+  for (const [type, phrase] of Object.entries(EXEMPT_TYPE_COPY)) {
+    assert.match(prose, phrase, type);
+  }
+
+  // And the ruled sentence, verbatim — it is one bullet, not three scattered
+  // clauses, because the REASON ("the relationship itself is theirs too") is
+  // what makes the exemption legible rather than arbitrary.
+  assert.ok(
+    OVERSIGHT_SHARING_TOGGLE.detail.includes(
+      "Three things reach them either way, because the relationship itself is theirs too: when you accept their invitation, when you decline one, and when your association with them ends."
+    ),
+    "the ruled exemption sentence is not in the copy verbatim"
+  );
+
+  // The acceptance-only sentence it replaced must be gone, not merely joined.
+  assert.doesNotMatch(prose, /they were told the moment you accepted/i);
+});
+
+test("the reversibility bullet cannot read as covering the exempt events", () => {
+  // "Turn it off whenever you like. Sharing stops at the next update" is true
+  // of everything the toggle governs and FALSE of the three exemptions, which
+  // keep arriving after it is off. Put it last and it reads as the closing
+  // promise over the sentence above it. So the order is load-bearing: the
+  // reversibility bullet comes first, the exemptions have the final word.
+  const reversibility = OVERSIGHT_SHARING_TOGGLE.detail.findIndex((line) =>
+    /turn it off/i.test(line)
+  );
+  const exemptions = OVERSIGHT_SHARING_TOGGLE.detail.findIndex((line) =>
+    /reach them either way/i.test(line)
+  );
+
+  assert.ok(reversibility >= 0, "the copy never says it is reversible");
+  assert.ok(exemptions >= 0, "the copy never names the exempt events");
+  assert.ok(
+    reversibility < exemptions,
+    `the turn-it-off bullet (${reversibility}) must precede the exemptions bullet (${exemptions})`
+  );
+
+  // And nothing after the exemptions re-opens the promise.
+  const trailing = OVERSIGHT_SHARING_TOGGLE.detail.slice(exemptions + 1);
+  assert.deepEqual(trailing, []);
+});
+
+test("the milestones category description covers both directions of the association", () => {
+  // The category's own description is what a planter reads on the notification
+  // preferences screen, and `milestones` carries SIX distinct events: the five
+  // `oversightMilestoneKinds` addressed to an oversight admin plus
+  // `association.removed_by_org` addressed to the planter. It once named three
+  // of the six ("an invitation accepted, a new stage, a launch date"), which
+  // read as though an association ending were silent.
+  const description = NOTIFICATION_CATEGORIES.milestones.description;
+
+  for (const phrase of [
+    "either way",
+    "association starting or ending",
+    "new stage",
+    "launch date",
+  ]) {
+    assert.ok(
+      description.toLowerCase().includes(phrase),
+      `the milestones description never says "${phrase}": ${description}`
+    );
+  }
+
+  // The accept-only phrasing that under-described it is gone.
+  assert.doesNotMatch(description, /an invitation accepted,/);
 });
 
 test("no copy anywhere promises totality", () => {
