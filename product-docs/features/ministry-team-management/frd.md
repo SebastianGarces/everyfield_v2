@@ -66,7 +66,7 @@ Ministry Team Management enables church planters to organize, staff, and track t
 
 | ID | Requirement | Description |
 |----|-------------|-------------|
-| MT-011 | Training tracking | Track required training completion per team — every member of a team shares the team's required programs (ruled 2026-07-27, decision #85) |
+| MT-011 | Training tracking | Track required training completion per team — training is defined at team level, so every member of a team shares the team's required programs |
 | MT-012 | Training completion matrix | Grid view of team members vs training programs |
 | MT-013 | Team meeting scheduling | Schedule and track team meetings via the Meetings feature (F3) with `type = team_meeting`. Accessible from the team detail Meetings tab. |
 | MT-014 | Meeting attendance | Record attendance at team meetings via the Meetings feature (F3). |
@@ -191,7 +191,6 @@ Accessed when creating or editing a role within a team.
 | Role name | Text | Yes | Name of the role (e.g., "Drummer") |
 | Role description | Rich text | No | Detailed responsibilities |
 | Reports to | Dropdown | No | Other role within team |
-| Required training | Multi-select | No | Training programs from Training Programs entity |
 | Desired skills/gifts | Tags | No | Skills inventory matching |
 | Time commitment | Dropdown | No | Low / Medium / High |
 | Is leadership role | Toggle | No | Marks role as leadership position |
@@ -258,8 +257,6 @@ Aggregate view of all teams' health metrics.
 - Staffing < 40% → Red alert
 - Training < 50% in Phase 3+ → Warning
 - Meeting attendance < 50% → Yellow alert
-
-> **Implementation status:** The shipped alert logic (`getTeamHealth`) derives the alert level from staffing % and meeting attendance only. The training/phase warning threshold is not yet part of the calculation.
 
 ---
 
@@ -508,8 +505,6 @@ Update dashboard health indicators
     Send specific alerts to team leaders
 ```
 
-> **Implementation status:** Not yet implemented. Health metrics are computed on demand when the Team Health Dashboard renders; there is no scheduled weekly process and no alert notifications are sent. Whether the scheduled check + notifications remain in scope is an open decision.
-
 ---
 
 ## Acceptance Criteria
@@ -560,7 +555,6 @@ Update dashboard health indicators
 | reports_to_role_id | UUID (FK) | No | Reference to parent TeamRole |
 | is_leadership_role | Boolean | No | Default: false |
 | time_commitment | Enum | No | `low` / `medium` / `high` |
-| required_training_ids | UUID[] | No | Array of TrainingProgram IDs |
 | desired_skills | Text | No | Skill/gift tags (single text field) |
 | sort_order | Integer | No | Display order |
 | status | Enum | Yes | `open` / `filled` |
@@ -568,7 +562,7 @@ Update dashboard health indicators
 | created_at | Timestamp | Yes | Creation timestamp |
 | updated_at | Timestamp | Yes | Last update timestamp |
 
-> **Ruled 2026-07-27 (decision #85):** team-level training is canon. Requirements are modeled as `TrainingProgram.team_id` + `is_required`, completion per person via `training_completions`; `team_roles` carries no training key. Per-role granularity was judged premature for church-plant-sized teams — revisit only if real usage demands it (that would be a `risk:high` join-table migration plus rewrites of the MT-012/MT-016/MT-017 surfaces). Ruling recorded in `docs-audit-2026-07.md` §4.
+**Training is team-level:** a training program belongs to a team and may be marked required; completion is tracked per person. Roles carry no training requirement of their own — per-role granularity is premature for church-plant-sized teams.
 
 ---
 
@@ -593,10 +587,6 @@ Update dashboard health indicators
 - Unique constraint on (team_id, person_id, role_id, status='active')
 - Person can have multiple memberships (different teams/roles)
 - `church_id` on TeamMembership must match related TeamRole, MinistryTeam, and Person
-
----
-
-> **Note:** Team meetings and attendance are now managed through the unified Meetings feature (F3) using `ChurchMeeting` with `type = team_meeting` and `team_id` linking to the MinistryTeam. The `TeamMeeting` and `TeamMeetingAttendance` entities previously defined here have been superseded by `ChurchMeeting` and `MeetingAttendance` in F3.
 
 ---
 
@@ -648,7 +638,7 @@ This feature integrates with other platform capabilities via events and shared e
 | **Person lookup** | Queries Person by `person_id`; expects `id`, `first_name`, `last_name`, `status` |
 | **Skills/gifts lookup** | Queries `skillsInventory` by `person_id`; expects `skillCategory`, `skillName`, `proficiency` |
 | **Assessment lookup** | Queries Assessment by `person_id`; expects 4 C's scores for Assignment Modal preview |
-| **Background check status** | Reads `Person.background_check_status` (Children's Ministry). Dependency: F2 must add this field. |
+| **Background check status** | Reads each person's background-check status so it is visible on the Children's Ministry roster |
 | **`phase.changed` event** | Subscribes to adjust phase-aware UI and team responsibilities; expects `church_id`, `timestamp`, `triggered_by` |
 
 ### Outbound (This Feature Emits)
@@ -747,17 +737,7 @@ Per [Core Data Contracts](../../core-data-contracts.md):
 - Planters always have full access regardless of team leader assignment.
 - Write operations validate the user's role and team leader status before proceeding.
 
-> **⛔ Implementation status: NOT ENFORCED — this is a live authorization hole.** Shipped server
-> actions validate the session and `church_id` tenancy only; there is no role or team-leader scoping
-> check. **Any authenticated user in a church can mutate any team in that church.**
->
-> **Decided 2026-07-26 (#12a): the table above is canon — team-leader scoping.** This was never a
-> product decision to make; the only question was which model to enforce, and it is the one already
-> written here. Tracked as a `risk:high` issue. The `is_leadership_role` flag already in the schema
-> is the hook to build on.
->
-> Until it lands, treat every write path in this feature as unauthorized-by-default when reasoning
-> about tenancy.
+Leadership derives from the team's designated leader, not from a separate role or permission grant.
 
 ---
 
@@ -808,11 +788,11 @@ Per [Core Data Contracts](../../core-data-contracts.md):
 
 3. **Bench concept:** Should there be a "bench" or "interested" status for people considering a team but not yet assigned to a role?
 
-4. ~~**Permission model:** Can team leaders edit roles and make assignments, or is this Senior Pastor only?~~ **Resolved:** Team leaders can manage their own team (assign members, edit roles). Planters have full access to all teams. See Authorization section.
+4. **Historical tracking:** How long should we retain team membership history after someone leaves a role?
 
-5. **Historical tracking:** How long should we retain team membership history after someone leaves a role?
+5. **Reporting structure:** Should teams have formal reporting hierarchies, or is the flat list sufficient?
 
-6. **Reporting structure:** Should teams have formal reporting hierarchies, or is the flat list sufficient?
+6. **Scheduled staffing check:** Does the scheduled staffing check + notification remain in scope?
 
 ---
 

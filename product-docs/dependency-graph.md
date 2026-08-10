@@ -5,6 +5,18 @@
 
 ---
 
+> ## ARCHIVAL — superseded, not maintained
+>
+> Feature sequencing moved onto the GitHub board as **native dependency edges** between issues on
+> 2026-07-26 (`blocked_by` / `blocking`; see [board-design-2026-07.md](./board-design-2026-07.md)).
+> The board holds the live order; this document does not.
+>
+> It is kept as the historical record of the F1–F10 planning model — the wave structure, the hard
+> vs. soft classification, and the reasoning that made F2 the critical path. Do not plan work from
+> it, and do not update it.
+
+---
+
 ## Purpose
 
 This document maps the dependencies between all 10 EveryField features (F1–F10) to determine which can be built in parallel and which must be sequenced. It serves as the implementation ordering guide.
@@ -134,22 +146,3 @@ F2 is the single most important feature to complete because:
 3. It emits `person.created` and `person.status.changed` events consumed across the platform
 
 Prioritizing F2 completion maximizes parallelism for subsequent waves.
-
----
-
-## Current Status
-
-| Feature | Status |
-|---------|--------|
-| Core Infrastructure (Auth, Multi-tenancy) | Implemented |
-| Phase Engine (Plant Intelligence) | Implemented |
-| F1: Wiki | Implemented |
-| F2: People/CRM | Implemented |
-| F3: Meetings | Implemented |
-| F4: Progress Dashboard | Implemented (basic aggregation + activity feed) |
-| F5: Task Management | Implemented |
-| F6: Document Templates | Not Started |
-| F7: Financial Tracking | Not Started |
-| F8: Ministry Teams | Implemented |
-| F9: Communication Hub | Implemented |
-| F10: Facility Management | Not Started |

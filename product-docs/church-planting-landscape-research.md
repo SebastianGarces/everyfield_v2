@@ -3,6 +3,9 @@
 **Compiled:** April 2026
 **Purpose:** Market intelligence to support EveryField's product strategy as a church planting software platform.
 
+> **ARCHIVAL — point-in-time research (April 2026), kept as strategy input and not maintained.**
+> It remains the source of record for the figures the two brainlifts cite, as of the date above.
+
 ---
 
 ## Table of Contents

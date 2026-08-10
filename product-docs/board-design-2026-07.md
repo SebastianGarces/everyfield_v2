@@ -1,7 +1,11 @@
 # The board: moving requirements out of markdown and into GitHub
 
-**Status:** proposal — nothing built. Written 2026-07-26 against `main` @ `6b2b6f7`.
-**Question it answers:** we have 11 FRDs and 11 checklists holding requirements. How does an FRD
+**Status:** the design log of the delivery OS. Written 2026-07-26 as a proposal against `main` @
+`6b2b6f7` — **that proposal shipped.** §1–§9 are the original design and the evidence behind it;
+§10 onward record what actually landed. The **executable** rules live in `ops/agent-os/` and in the
+skills; read those to know how the system behaves today, and read this to know why it is shaped
+that way.
+**Question it answers:** we had 11 FRDs and 11 checklists holding requirements. How does an FRD
 *transfer* to GitHub — milestones? epics? issues with sub-issues? And what does that cost?
 
 ---

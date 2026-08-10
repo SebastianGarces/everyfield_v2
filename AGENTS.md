@@ -71,6 +71,8 @@ Available components: https://ui.shadcn.com/docs/components
 | What makes work delegable — design-first, modularity, test seams, rule strengths | `ops/agent-os/delegation-rules.md` |
 | React performance patterns | `.agents/skills/vercel-react-best-practices/` |
 | Feature requirements | `product-docs/features/{feature-name}/frd.md` |
+| Dated product decisions (the ledger) | `product-docs/decisions.md` |
+| Product values — how tradeoffs are decided | `product-docs/product-values.md` |
 | What is built vs. still open | The board — `gh issue list --label feature`. **Not a file**; the checklists were deleted 2026-07-26 (`ops/agent-os/labels.md`) |
 
 <!-- EVERYFIELD-MEMORY-START -->[Memory Index]|root:./memory|Holds what the code cannot tell you: invariants, rulings, non-obvious semantics, flow diagrams. Read invariants.md before any mutation; for everything else the source is the source of truth. TOC: memory/index.md.<!-- EVERYFIELD-MEMORY-END -->

@@ -1,5 +1,10 @@
 # Docs-vs-Code Audit — 2026-07-25
 
+> **Historical record.** Point-in-time audit of 2026-07-25; §2's status tables describe that
+> moment, not the present — the board is the only source of implementation status. The §4
+> decision ledger moved to [`decisions.md`](decisions.md) on 2026-08-10 and continues there;
+> §5 is frozen evidence for rows now in that file.
+
 Method: every repo-specific `.md`/`.mmd` file (89 files; vendored reference skills swept per-directory) was read in full by an audit agent and checked claim-by-claim against the code on `main`. Every stale claim cited below was verified against a concrete `file:line`. Delete/merge recommendations were adversarially re-verified (repo-wide reference grep, git history, unique-content check). Code is treated as ground truth; FRD requirement gaps are reported, not resolved — open decisions are in §4.
 
 ## 1. Actions taken in this branch
@@ -58,121 +63,12 @@ Cross-cutting findings worth naming:
 - `.claude/skills/work-in-progress/SKILL.md` — pre-factory interactive flow; its Risk Gate halts high-risk work while the delivery OS ships high-risk to PR. **Resolved (#19): extract the memory-maintenance section, retire the rest**, and re-point `.agents/memory-first.md`.
 - `product-docs/features/document-templates/checklist.md` — blind to the 16/25 items done on `feat/document-templates`. **Resolved (#1): PR the branch through CI + the DoD**, after which the checklist is re-trued against merged code.
 
-## 4. Decision ledger — RESOLVED 2026-07-26
+## 4. Decision ledger — MOVED
 
-All 19 queue items were worked through with the planter. **These are settled — do not re-litigate
-them in a future audit.** Three were converted into action items (§5) because they needed evidence
-before they could be ruled on.
-
-### Direction / roadmap
-
-| # | Decision | Consequence |
-|---|----------|-------------|
-| 1 | **F6 — PR the branch through CI + the DoD.** Not a raw merge. | `feat/document-templates` merges clean (6 commits, 30 files, all-new paths, 0 conflict hunks). It predates every gate, so it goes through them rather than around them. |
-| 2 | **F7 financial — deferred.** | Dated deferred banner on the FRD. Readiness stays attestation-only via the phase engine, as shipped. |
-| 3 | **F10 facility — cut entirely.** | Off the roadmap, not deferred. FRD marked cut; its 26 requirements stop appearing as gaps. |
-| 4 | **F4 — fold surviving requirements into the phase-engine FRD.** Retire F4 as a separate feature doc. | Not a deletion: the progress-dashboard *presentation* ideas (D-002 exit criteria, D-005 CSF scorecard, D-016 wiki links, D-017 drill-down) are judged useful and move across as display requirements on the phase engine, whose current presentation is the weaker half. |
-| 6 | **Wiki — cut the video library (W-019). Keep templates/downloads. Keep the search-results page.** | Video is far-future own-content territory. Templates/downloads is wanted and pairs with F6: the catalog ships the documents, wiki articles explain which to use when. The Cmd+K palette does find-and-jump; a results page supports browsing a growing logistics section. |
-| 7 | **SMS (COM-011) + scheduled send (COM-014) — keep, post-beta.** | Deferred banner, not a cut. |
-| 9 | **T-020 phase-triggered task templates — keep.** | Rationale: *insights advise, tasks commit.* An insight is a suggestion; a task is tracked work. The two are complementary, not competing. |
-| 13 | **People CRM P-021/P-022 — un-defer and build.** | The "blocked by F8" rationale is stale; F8 shipped and `getPersonTeams` + `getPersonTeamsAction` already exist. Frontend-only unit. |
-
-### Canon
-
-| # | Decision | Consequence |
-|---|----------|-------------|
-| 5 | **Add a `wiki` privacy toggle. Communication stays private.** | The shipped role model already answers most of this — see the note below. Needs a new `church_privacy_settings` column → migration → `risk:high`. |
-| 8 | **Polymorphic Note stays the target.** | Per-entity `notes` columns (5 meeting tables, people, the four 4C fields) are interim, not canon. FRD keeps the unified Note entity. |
-| 11 | **Delete the dead invitation subtree.** | Verified dead transitively: `invitation-tracker.tsx` has zero importers, and `invitation-leaderboard` + `createInvitationAction` are imported only by it. Remove the components and actions. **The `invitations` table is left in place** — dropping it is a migration for no user-visible benefit; fold it into a future high-risk unit if one comes along. |
-| 12a | **Team-leader scoping.** | Planter + the team's designated leader may mutate; other members read-only. Builds on the `isLeadershipRole` flag already in the schema. See the security note below. |
-| 15 | **F6 code-defined catalog is canon.** | Answered by the branch itself: `DOCUMENT_TEMPLATES` + `getTemplateById`, **zero schema changes**. DB-backed template tables are off the table. Also means F6 is not `risk:high`. |
-| 16 | **NFR-PE-4 disclosure ships with the beta toggle flip.** | Keeps NFR-PE-4b (flip OpenAI sharing off) and 4c (write the disclosure) together, since the text changes when the posture does. `/phase` is the permanent home — settled by #4 folding F4 into the phase engine. |
-| 17 | **Add ministry-team rosters to the recipient quick-select (COM-009).** | F8 shipped with rosters, so "message this team" is a natural ask. The picker already exists with status groups (`src/components/communication/recipient-picker.tsx:25`); the work is resolving `team:<id>` in `getRecipientsByGroup`. Tracked in issue #18. |
-
-### Doc mechanics
-
-| # | Decision |
-|---|----------|
-| 18 | **Archive the `wiki-articles` skill** until an authoring path exists. |
-| 19 | **Extract memory maintenance from `work-in-progress`, retire the rest**, and re-point `.agents/memory-first.md`. |
-
-### Where these land on the board
-
-Most of the buildable outcomes were **already queued** before this audit — the decisions settle the
-spec they build to, they don't create new work. Check the board before filing.
-
-| Decision | Issue |
-|----------|-------|
-| #12a team-leader scoping | **#22** (`risk:high`) — derives leadership from `MinistryTeam.leader_id`; note there is no `team_leader` user role |
-| #13 Teams tab | **#14** — replaces the placeholder at `people/[id]/teams/page.tsx:28-56` |
-| #17 team rosters in quick-select | **#18** — resolves `team:<id>` in `getRecipientsByGroup` |
-| #5 wiki privacy toggle | **#62** (`risk:high`) — new, no prior issue |
-| #11 dead invitation subtree | **#63** — new, no prior issue |
-| #10 divergence 4 (VM-006 roster auto-population) | **#19** — already queued as a build, so that divergence is a known gap rather than an open canon question |
-
-### Two notes worth keeping
-
-**"Coach" is a ubiquitous-language failure, not a missing feature.** The FRDs use "coach" loosely to
-mean *whoever oversees a plant*. The shipped model is more precise, and already complete:
-
-| Role | Sees |
-|------|------|
-| `planter` / `team_member` | own church |
-| `coach` | plants via `coach_assignments` |
-| `sending_church_admin` | plants where `sending_church_id` matches |
-| `network_admin` | plants where `sending_network_id` matches |
-
-`church_privacy_settings` then gates *what* they see, per feature: `sharePeople`, `shareMeetings`,
-`shareTasks`, `shareFinancials`, `shareMinistryTeams`, `shareFacilities`. Wiki and communication have
-no column, which is why #5 was a real decision rather than a doc fix. `/oversight` already ships plant
-health, insight urgency and multi-plant comparison, so D-018's "coach dashboard" is substantially
-delivered under a different name. **FRD wording should use the real role names.** This is the clearest
-argument yet for a root `CONTEXT.md` glossary.
-
-**#12a was never a decision.** Ministry-team server actions check only session + `churchId`, so any
-authenticated user in a church can mutate any team. That is a live multi-tenant authorization hole,
-filed as `risk:high` independently of what the FRD says.
-
-### Resolved 2026-07-27 — the three §5 holdouts
-
-| # | Decision | Consequence |
-|---|----------|-------------|
-| 10.2 | **Follow-up tasks for first-time attendees only** (issue #96). Returning attendees are already in the pipeline; committed core group needs no 48-hour touch. | Matches the methodology's first-48-hours emphasis and the FRD's original wording. Changes shipped behaviour (today: every attendee, due finalization + 2 days) → build issue filed; the follow-up completion signal in the fact snapshot becomes *first-time follow-up rate* and its interpretation note must say so. The planter evaluation task is unchanged. |
-| 12b | **Team-level training is canon** (issue #85). MT-011 reworded from per-role to per-team; no migration. | Already shipped and working across MT-012/MT-016/MT-017. A church plant's teams are small — per-role granularity is premature. Revisit only if real usage demands it (that would be the `risk:high` join-table migration). |
-| 14 | **Shipped `wiki_articles` model is canon** (issue #112). FK section, slug relations, and the `overview`/`guide` content types all stand; `parent_article_id` is dropped from the FRD. **`related_template_ids` stays a build target** for W-010 (#73). | FRD data model rewritten to match the schema. Longer-term: sending networks and sending churches should be able to modify the wiki their planters see — that is a discovery session, filed as a `needs-spec` issue, not a schema tweak now. |
-
-### Resolved 2026-07-27 — the alpha release decisions (#192, #193)
-
-| # | Decision | Consequence |
-|---|----------|-------------|
-| 192 | **No payments in alpha.** The alpha cohort is **free while the early-access (alpha/beta) period lasts**; terms at general launch TBD. **The sending org pays, per plant** — entitlements attach to the org, seats flow to plants. Price point deferred to beta (comps logged in the issue). | ToS states free access "during the early access period" (#189 unblocked). Landing page (#188) makes no price claim. Billing/entitlements FRD is post-alpha work — filed as `needs-spec` **#213** on the Beta milestone. The Feb 3 model shape (Free = Wiki + Phase 0; Paid = create a church) stands. |
-| 193 | **Alpha cohort: Brett & Bryan pick, ~10–15 planters, no hard cap** — the invite gate is control enough. **The end-to-end demo story is THE alpha exit condition, as written** in the plan of record. **Success criteria:** 3+ planters active weekly after 4 weeks; 1+ network admin checking `/oversight` unprompted; qualitative "would you tell another planter" yes. **Alpha and Beta stay separate milestones** — Beta is the parking lot for deferred scope. | The milestone has a concrete exit condition, not a vibe. The proposed out-of-alpha list in `alpha-release-2026-07.md` §4 stands as ruled. Feedback flows through the #190 bridge; Sebastian talks to the humans. |
-
-### Resolved 2026-08-03 — oversight discovery (#186) and the association permission rulings (#274)
-
-| # | Decision | Consequence |
-|---|----------|-------------|
-| 186 | **The oversight build-out is ruled and specced** (full discovery session): `/oversight/plants` = directory + per-plant detail with privacy-gated aggregate sections and explain-why empty states; planter gets a settings association area (accept/decline/leave) + a persistent dashboard reminder while an invitation is unanswered; decline notifies the inviting org; **disassociation works from both sides** (planter from settings, admin from plant detail), type-to-confirm, other side notified; a minimal expand-only `association_events` audit table records accept + both severing paths (risk:high); `/oversight/sending-churches` ships as a network-admin roster; **`/oversight/settings` is dropped from alpha** (org/admin management waits for #185). The broken register `invitationId` path was folded into #23, and #23 gained a blocked-by edge on #265 (the lockdown reshapes `service.ts` before UI builds on it). | FRD written: `product-docs/features/oversight/frd.md` (OV-001…OV-011). #186 converts from `needs-spec` to the feature parent; requirement sub-issues OV-001…OV-009 filed as queued units with dependency edges (severing + accept surfaces wait on #265 and on the audit table). |
-| 274 | **(a) Planter only** may accept an invitation and bind the plant to an oversight org — ratifies #265's narrowing; same plant-level rule as the sharing toggle. **(b) Severing: both sides** — the plant's planter or the org's admin, each from their own surface, type-to-confirm, other side notified. An association created in error now has a repair path. | #274 closed with the ruling; behavior canon lives in the oversight FRD (OV-007, OV-010). #265's re-spec keeps the disassociate primitives out of the `"use server"` surface but must NOT treat them as dead — authenticated wrappers arrive with the OV units. |
-
-### Resolved 2026-08-04 — Launch Sunday entity (#271)
-
-| # | Decision | Consequence |
-|---|----------|-------------|
-| 271 | **Launch becomes a first-class entity** (full discovery): one live `launches` row per church (target date, status `planning/scheduled/completed/postponed`, outcome fields) + a date-change journal; **`churches.launch_date` is DROPPED, not mirrored** — the entity is the only owner and every reader (PE countdown, oversight health, launch-date milestone event, settings edits) migrates in one slice, with a dev-DB wipe/reseed accepted (no users yet); readiness = **hybrid**: fixed Playbook-derived milestone rows (operations / launch-team prep / promotion) each linking `launch_prep` tasks; **outcome lives on the launch row** (attendance, decisions, notes, capture-the-day) — no meeting row, the vision-meeting stand-in ends; surface = dedicated `/launch` page + dashboard countdown card; planter-only schedule/postpone/outcome; launch facts join the PE snapshot but completing a launch does NOT auto-advance phase. | FRD written: `product-docs/features/launch/frd.md` (LS-001…LS-009). #271 converts to feature parent with three units (schema+reader-migration risk:high → page → outcome/PE). Post-launch **Services** direction (Service meeting type vs light Services entity, the not-a-ChMS boundary, oversight-data-without-enforcement thesis) deliberately parked as its own `needs-spec` discovery issue. #187 notified: launch-date edits go through the launch entity. |
-
-### Resolved 2026-08-04 — crawler preview polish (#292)
-
-| # | Decision | Consequence |
-|---|----------|-------------|
-| 292 | **(a) `/dashboard` comes OFF `CRAWLER_PREVIEWABLE_ROUTE_PREFIXES`.** The list's contract is "listed ⇒ renders session-free"; `/dashboard` needs a session and 500s for crawlers, so shared dashboard links will preview as the login page instead — honest and clean. No session-free metadata shell is built. **(b) The `whatsapp` UA token is TIGHTENED** to match only WhatsApp's preview-fetcher (UA `WhatsApp/2.x`), not its in-app browser, so a human tapping a shared `/wiki` link inside WhatsApp gets the real page instead of the bare metadata shell. | One build unit against `src/lib/crawler.ts` + `proxy.test.ts` (both halves touch the same files): #297. #292 closed with the ruling. |
-
-### Resolved 2026-08-09 — the #304/#306 retry blocks: audit subject shape (#351), re-declaration semantics
-
-| # | Decision | Consequence |
-|---|----------|-------------|
-| 351 | **(a) `association_events` gets a discriminated subject**: `subject_type` (`church` \| `sending_church`) with per-subject nullable FKs and a CHECK that exactly one subject is set — `church_id` stops being NOT NULL, disambiguated by the discriminator, so "null church_id = global content" is never ambiguous here. **(b) The notifications rail is generalized the same way**: the recipient anchor becomes exactly-one-of church / sending church / network under a discriminator + CHECK, on the one existing table. Chosen for the long term (criterion set by Sebastian) over a parallel org-notifications table (duplicates dispatch/preference/read-state machinery) and over leaving org-only milestones off the rail; "a sending church joined your network" rides the same rail as every other milestone. **(c) Sever symmetry ships now**: a sending-church admin gets a Leave-network control (type-to-confirm, audited, network notified) in the same change. **(d) Scope: in-track on #304** — migrations land in the track worktree with HR1–HR3 evidence, and `scripts/g3-association-lifecycle.ts` §7 flips from asserting absence to asserting presence. | #351 closed with the ruling. #304's WS3 AC stands as written and becomes buildable; FRD gains OV-012/OV-013 and the generalized shapes; the `memory/invariants` multi-tenancy lines are updated by the implementing track. |
-| 306 | **A second initial-stage declaration is REFUSED with a message** (not overwritten). The UI names the already-recorded stage, points at where to change it, and confirms the launch date DID save — the silent half-applied success is the defect. Matches the partial unique index migration 0033 already shipped on the branch. | #306 retry unblocked; the remaining HR4 fix set (kind-aware digest/milestone filtering, teams-init unique index, "No date yet" re-entry, distinct resume-path screenshot, report corrections) is mechanical per the exit comment. |
+The ledger this section held (the 2026-07-26 audit decisions plus every ruling appended
+through 2026-08-09) moved to **[`product-docs/decisions.md`](decisions.md)** on 2026-08-10
+and continues there. New rulings land there, not here. The §5 evidence below supports rows
+now in that file.
 
 ## 5. Pending — evidence gathered, decision outstanding
 

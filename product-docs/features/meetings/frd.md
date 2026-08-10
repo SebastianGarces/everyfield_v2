@@ -5,15 +5,6 @@
 **Date:** February 9, 2026  
 **Feature Code:** F3
 
-> **⚠ Divergences from shipped code.** The evidence lives in §5 of
-> [`docs-audit-2026-07.md`](../../docs-audit-2026-07.md). Current state:
-> **VM-007 follow-up generation — ruled 2026-07-27 (decision #96): this document is canon** (first-time
-> attendees only, due meeting date + 48h); code diverges until build #179 lands. For the other four —
-> `attendance_type` derivation (AC 3), the RSVP mechanism (VM-028), roster auto-population (VM-006,
-> build #19) and reminders (VM-018, build #101) — **trust the code over this document**; they are
-> doc-fixes not yet applied. VM-017 invite tracking is separately confirmed dead code and queued for
-> removal (decision #11).
-
 ---
 
 > **Tracked on the board:** [F3 #95](https://github.com/SebastianGarces/everyfield_v2/issues/95) — open requirements are its sub-issues. Implementation status is not tracked in this file.
@@ -89,15 +80,15 @@ Every Vision Meeting should aim to achieve these 8 meeting-level quality factors
 | VM-001 | Meeting scheduling | Create meetings with date, time, location, and type |
 | VM-002 | Meeting list view | View all upcoming and past meetings with type filter tabs |
 | VM-003 | Attendance capture | Record who attended each meeting |
-| VM-004 | New vs returning tracking | Distinguish first-time from returning attendees |
+| VM-004 | New vs returning tracking | Distinguish first-time, returning, and core-group attendees. The distinction is derived from person status and prior attendance, not entered by the user |
 | VM-005 | Attendee-to-person linking | Create Person records for new attendees (F2 integration) |
 | VM-006 | Guest list management | Add people from CRM to a meeting's guest list; auto-populate from team roster for team meetings |
-| VM-007 | Follow-up task generation | Emit event that triggers follow-up task creation for **first-time** vision meeting attendees only (`attendance_type = first_time`); returning and core-group attendees get none. Due date anchors to meeting date + 48 hours. Ruled 2026-07-27, decision #96 (F5 integration) |
+| VM-007 | Follow-up task generation | Emit event that triggers follow-up task creation for **first-time** vision meeting attendees only (`attendance_type = first_time`); returning and core-group attendees get none — returning attendees are already in the pipeline, and the committed core group needs no 48-hour touch. Due date anchors to meeting date + 48 hours. (F5 integration) |
 | VM-008 | Meeting detail view | Full view of meeting details, attendance, and outcomes |
 | VM-009 | Location management | Save and reuse venue information across meeting types |
 | VM-010 | Basic analytics | Track attendance counts and trends, filterable by meeting type |
 | VM-026 | Meeting types | Support vision_meeting, orientation, and team_meeting types with type-specific behavior |
-| VM-028 | RSVP tracking | Track invited / confirmed / declined / no_response status per guest list member |
+| VM-028 | RSVP tracking | Track invited / confirmed / declined / no_response status per guest list member. Each invitation carries a personal confirmation link; the recipient answers yes or no from that link without an account or a sign-in, and the answer sets that member's status |
 
 ### Should Have
 
@@ -131,7 +122,7 @@ Every Vision Meeting should aim to achieve these 8 meeting-level quality factors
 
 1. User can create a meeting with date/time, type, and either a saved venue or ad-hoc location details, and the record appears in the list view.
 2. List view supports upcoming and past meetings with type filter tabs (All, Vision Meetings, Orientations, Team Meetings), and each row links to a meeting detail page.
-3. User can record attendance for a meeting and mark each attendee as `first_time`, `returning`, or `core_group`.
+3. Recording attendance derives each attendee's `attendance_type` rather than asking the user for it: a person whose status is core group, launch team, or leader is `core_group`; otherwise a person with any prior attended meeting is `returning`; otherwise `first_time`.
 4. For first-time attendees, user can create or link a Person record from the attendance workflow.
 5. User can add people from the CRM to a meeting's guest list and track RSVP status per invitee.
 6. For team meetings, guest list auto-populates from the ministry team roster.
@@ -491,7 +482,7 @@ Send reminder to guest list via Communication Hub (F9)
     |
 For each attendee:
 +-- Search existing contacts OR quick add new
-+-- Mark attendance type (First-time, Returning, Core Group)
++-- Attendance type derived on marking attended (First-time, Returning, Core Group)
 +-- Capture response card data (optional, vision meetings)
     |
 [Finalize Attendance]
@@ -518,7 +509,7 @@ F3 emits `meeting.attendance.finalized` event:
     |
 F5 subscribes and creates follow-up tasks:
 +-- One task per FIRST-TIME attendee only: "Follow up with [Name]"
-+-- (returning and core-group attendees get no follow-up task — decision #96)
++-- (returning and core-group attendees get no follow-up task)
 +-- Assigned to: Senior Pastor (default) or customize
 +-- Due date: Meeting date + 48 hours
 +-- Priority: High
@@ -599,7 +590,7 @@ Emails delivered, delivery status tracked in F9
     |
 Guest list updated:
 +-- Delivery status tracked per guest via F9
-+-- RSVP responses update response_status as they come in (via public /rsvp/[token] confirmation links)
++-- RSVP responses update response_status as recipients answer from their confirmation links
     |
 [Resend to Pending] action available for follow-up
 ```
@@ -681,7 +672,7 @@ Public token-based RSVP for guest list members (table `meeting_confirmation_toke
 | expires_at | Timestamp | Yes | Token expiry (7 days after issue) |
 | created_at | Timestamp | Yes | Creation timestamp |
 
-> **Note:** There is no dedicated `MeetingInvitee` table — the guest list and RSVP state live on `MeetingAttendance` plus the confirmation tokens above. See Open Questions for whether a dedicated invitee table is still planned.
+The guest list and RSVP state live on `MeetingAttendance` plus the confirmation tokens above; there is no separate invitee entity.
 
 ---
 
@@ -795,7 +786,7 @@ This feature integrates with cross-cutting services and shared canonical models 
 | Event/Data | Contract | Consumers May |
 |------------|----------|---------------|
 | **`meeting.attendance.recorded`** | Emits `{ meetingId, meetingType, personId, churchId, attendanceType }` per attended person | F2 subscribes to auto-advance person status (Prospect to Attendee) for vision meetings |
-| **`meeting.attendance.finalized`** | Emits `{ meetingId, meetingType, churchId, attendeeIds[], totalAttendance }` when attendance is finalized (`attendeeIds` covers all attended people) | F5 subscribes to create 48-hour follow-up tasks (first-time attendees only — F5 filters by `attendance_type`, decision #96) and a 24-hour evaluation task for vision meetings |
+| **`meeting.attendance.finalized`** | Emits `{ meetingId, meetingType, churchId, attendeeIds[], totalAttendance }` when attendance is finalized (`attendeeIds` covers all attended people) | F5 subscribes to create 48-hour follow-up tasks (first-time attendees only — F5 filters by `attendance_type`) and a 24-hour evaluation task for vision meetings |
 | **`meeting.evaluation.completed`** | Emits `{ meetingId, churchId, evaluatedById }` when an evaluation is submitted | F5 subscribes to auto-complete the meeting's evaluation task |
 | **`meeting.completed`** | Emits `{ meetingId, meetingType, churchId, attendanceCount, newAttendeeCount }` | Update dashboard metrics |
 | **Meeting invitation requests** | Expose meeting details (title, datetime, location, type) and guest list (person IDs) to Communication Hub for email delivery | F9 sends invitation emails using meeting templates |
@@ -807,8 +798,8 @@ This feature integrates with cross-cutting services and shared canonical models 
 
 - **Tenant isolation:** All feature entities and emitted events must carry `church_id` and enforce church-scoped access.
 - **Performance:** Meeting list and detail pages should load in under 2 seconds for typical church datasets.
-- **Reliability:** Attendance finalization and follow-up task generation must be atomic to avoid partial post-meeting state. *(Known gap: the current implementation runs sequential queries and event emissions without a database transaction.)*
-- **Auditability:** Meeting creation, attendance finalization, status changes, and evaluation saves must be audit logged with `user_id` and timestamp. *(Known gap: no audit logging is implemented yet.)*
+- **Reliability:** Attendance finalization and follow-up task generation must be atomic to avoid partial post-meeting state.
+- **Auditability:** Meeting creation, attendance finalization, status changes, and evaluation saves must be audit logged with `user_id` and timestamp.
 - **Security:** Only authorized users for the active church can create, update, or view meeting data.
 
 ---
@@ -868,5 +859,3 @@ Network admins can see aggregate meeting metrics across all plants in their netw
 5. **Response card digitization:** Should response cards be captured digitally during meeting or paper then entered?
 
 6. **Orientation completion tracking:** Should completing an orientation trigger any pipeline advancement or is it purely informational?
-
-7. **Dedicated invitee table:** The guest list currently lives on `MeetingAttendance` (with confirmation tokens for public RSVP). Is a dedicated `MeetingInvitee` table with explicit `pending`/`no_response` statuses still planned, or is the current design canon?

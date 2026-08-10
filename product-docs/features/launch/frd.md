@@ -1,25 +1,25 @@
 # FRD — Launch (Launch Sunday)
 
-> Origin: #271, discovery ruled 2026-08-04. Launch Sunday was previously represented by a bare
-> `churches.launch_date` column, loosely tagged `launch_prep` tasks, and a vision-meeting stand-in
-> for the day itself. This FRD makes the launch a first-class entity — the thing the whole
-> methodology counts down to, tracks readiness for, and records the outcome of. Status lives on
-> the board (parent issue #271), never in this file.
+> A launch is a first-class entity: one live launch per church, carrying a target date, a status, a
+> readiness structure of milestones, and an outcome record. It is the thing the whole methodology
+> counts down to, tracks readiness for, and records the outcome of.
+
+> **Tracked on the board:** [Launch #271](https://github.com/SebastianGarces/everyfield_v2/issues/271) — open requirements are its sub-issues. Implementation status is not tracked in this file.
 
 ## Feature overview
 
 Every church plant works toward one culminating event: Launch Sunday. The Launch feature gives
 that event a home — a single live launch per church with a target date, a status lifecycle, a
 readiness structure derived from the Launch Playbook, and an outcome record. It is the canonical
-owner of the launch date (the church row's copy is removed), the anchor of the pre-launch
-experience, and the source of the outcome data the platform's intelligence layer needs for
-eventual launch-outcome linkage.
+owner of the launch date — no other row holds a copy — the anchor of the pre-launch experience, and
+the source of the outcome data the platform's intelligence layer needs for eventual launch-outcome
+linkage.
 
 ## User-visible behavior
 
 - The planter schedules the launch (sets the target date), postpones or moves it, and — when the
   day comes — records what happened. Every date change is journaled (who, when, old → new), and
-  setting or changing the date continues to emit the existing oversight milestone notification.
+  setting or changing the date emits the oversight milestone notification.
 - Scheduling seeds a fixed set of readiness **milestones** from the Launch Playbook's priority
   areas (operations / set-up & tear-down; launch-team preparation; promotion). Each milestone
   expands into linked tasks (`launch_prep` category); milestone progress reflects its tasks.
@@ -27,8 +27,7 @@ eventual launch-outcome linkage.
   tasks, and outcome capture. The **dashboard** shows a compact countdown/status card linking to it.
 - The outcome record: happened / postponed, attendance count, decisions/responses, notes, and a
   "capture the day" record — the Playbook's own charge that the day be recorded and remembered.
-- Launch Sunday is **not** a meeting: no meeting row is created for the service, and the previous
-  practice of cataloging it as a vision meeting ends.
+- Launch Sunday is **not** a meeting: no meeting row is created for the service.
 
 ## Screens and workflows
 
@@ -44,8 +43,8 @@ complete) → the day (record outcome: completed, or postponed → new target da
 
 | ID | Level | Requirement |
 |---|---|---|
-| LS-001 | Must | One live launch per church: target date, status (`planning` / `scheduled` / `completed` / `postponed`), outcome fields. The launch entity is the **only** owner of the launch date — the church row's `launch_date` is removed and every consumer (phase-engine countdown, oversight health read, launch-date milestone notification, settings edit paths) reads from or writes through the launch. |
-| LS-002 | Must | Date-change journal: every set/postpone/move records actor, timestamp, old → new. Setting or changing the date emits the existing oversight milestone event. |
+| LS-001 | Must | One live launch per church: target date, status (`planning` / `scheduled` / `completed` / `postponed`), outcome fields. The launch entity is the **only** owner of the launch date — the church row carries no `launch_date` column, and every consumer (phase-engine countdown, oversight health read, launch-date milestone notification, settings edit paths) reads from or writes through the launch. |
+| LS-002 | Must | Date-change journal: every set/postpone/move records actor, timestamp, old → new. Setting or changing the date emits the oversight milestone event. |
 | LS-003 | Must | Milestones: scheduling seeds the fixed Playbook-derived set (operations / launch-team prep / promotion); each milestone links tasks (`launch_prep`); milestone progress derives from its tasks. Custom planter-defined milestones are out of scope for alpha. |
 | LS-004 | Must | `/launch` page: countdown, status, milestone + task progress, schedule/postpone actions, outcome capture. Nav-level entry. |
 | LS-005 | Must | Dashboard countdown/status card linking to `/launch`. |
@@ -58,8 +57,8 @@ complete) → the day (record outcome: completed, or postponed → new target da
 
 - A planter can schedule a launch; the launch row is created/updated, milestones are seeded, the
   dashboard card and `/launch` countdown reflect the date, and the oversight milestone
-  notification fires. No code path reads a `launch_date` column on the church row (it no longer
-  exists).
+  notification fires. No code path reads a `launch_date` column on the church row; no such column
+  exists.
 - Changing the date journals the change and re-fires the milestone event; the countdown updates
   everywhere it is displayed.
 - Milestone progress moves when its linked tasks complete; a milestone with no open tasks can be
@@ -78,21 +77,19 @@ complete) → the day (record outcome: completed, or postponed → new target da
 - **launch date journal** — append-only history of date/status changes (actor, timestamp,
   old → new). May be its own table or a typed event stream; the implementing unit decides.
 
-Schema detail belongs to the implementing unit (risk:high — includes dropping
-`churches.launch_date` and migrating its readers; the dev database is wiped and reseeded as part
-of the slice, per the 2026-08-04 ruling that pre-user data needs no preservation).
+Schema detail belongs to the implementing unit.
 
 ## Integration points
 
 - **Phase engine**: the countdown signal reads the launch entity; launch facts join the fact
   snapshot; completed launches are the substrate for eventual outcome linkage (PE-021).
 - **Tasks**: milestones link `launch_prep` tasks; completion semantics are the task system's.
-- **Notifications**: the existing launch-date milestone event now fires from the launch entity's
-  write path; no new notification categories.
+- **Notifications**: the launch-date milestone event fires from the launch entity's write path; no
+  new notification categories.
 - **Oversight**: the portfolio/health surfaces read the launch date from the entity. Richer launch
-  progress for oversight is future scope (board: #186 arc).
-- **Church settings** (board: #187): any settings-screen edit of the launch date goes through the
-  launch entity's action, never a bare column write.
+  progress for oversight is future scope.
+- **Church settings**: any settings-screen edit of the launch date goes through the launch entity's
+  action, never a bare column write.
 - **Domain source**: milestone content derives from the Launch Playbook (`launch-playbook.md`) —
   referenced, not duplicated.
 
@@ -113,12 +110,11 @@ of the slice, per the 2026-08-04 ruling that pre-user data needs no preservation
 
 - Custom planter-defined milestones.
 - Post-launch recurring services (Sunday service tracking, worship/volunteer scheduling) — parked
-  to its own discovery: the Services question, the ChMS boundary, and the oversight-value thesis
-  (board: see the needs-spec issue filed from #271's discovery).
+  to its own discovery: the Services question, the ChMS boundary, and the oversight-value thesis.
 - Oversight-facing launch-progress surfaces beyond the existing date/countdown reads.
 - Multi-launch history/attempt analytics (one live launch; the journal preserves the story).
 
 ## Open questions
 
-None — discovery (2026-08-04) closed them. The post-launch Services direction is deliberately
-parked as its own discovery issue, not an open question of this FRD.
+None. The post-launch Services direction is deliberately parked as its own discovery, not an open
+question of this FRD.

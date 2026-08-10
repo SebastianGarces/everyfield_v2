@@ -54,8 +54,8 @@ People / CRM Management tracks all individuals from initial contact through comm
 | P-018 | Duplicate detection | Identify and merge duplicate records |
 | P-019 | Quick add | Simplified form for rapid contact entry |
 | P-020 | Conversion metrics | Display conversion rates between pipeline stages |
-| P-021 | Team assignment visibility | Show ministry team assignments on person profile. **UN-DEFERRED 2026-07-26** (decision #13) — the "blocked by F8" rationale is stale; F8 shipped, and `getPersonTeams` + `getPersonTeamsAction` already exist. Frontend-only work: replace the placeholder Teams tab. |
-| P-022 | Training status display | Show training completion on person profile. **UN-DEFERRED 2026-07-26** (decision #13) — same unit as P-021. |
+| P-021 | Team assignment visibility | Show ministry team assignments on the person profile |
+| P-022 | Training status display | Show training completion on the person profile |
 
 ### Should Have (continued)
 
@@ -648,6 +648,8 @@ Canonical status values for pipeline progression:
 | `launch_team` | Core Group member assigned to ministry team | Core Group (with badge) |
 | `leader` | Has leadership role on ministry team | Core Group (with badge) |
 
+There is no `committed` status: per the Launch Playbook, signing the commitment IS joining the Core Group, so recording a commitment advances a person straight to `core_group`.
+
 ---
 
 ### Person (Feature-Owned Fields)
@@ -943,8 +945,6 @@ Example: Commitment recorded for a Prospect
 
 ## Oversight Access Patterns
 
-> **Status:** Not yet implemented. The oversight section currently shows plant-level aggregates only (no people list, pipeline, or people counts). The `share_people` privacy toggle exists in schema and access mapping, but no oversight view consumes people data yet.
-
 ### Coach Access
 Coaches have read-only access to the full people list, pipeline view, assessments, interviews, and commitment records for their assigned churches. Coaches see the same data as planters but cannot create, edit, or delete records.
 
@@ -964,7 +964,7 @@ Network admins can see aggregate people/pipeline counts across all plants in the
 
 ## Open Questions
 
-*No open questions at this time. All major decisions resolved.*
+None.
 
 ---
 
@@ -973,20 +973,4 @@ Network admins can see aggregate people/pipeline counts across all plants in the
 | Topic | Status | Notes |
 |-------|--------|-------|
 | External ChMS integration | Deferred to user feedback | Planning Center Online (PCO) likely first target. Scope TBD - likely auto-migration of People to PCO, etc. |
-| P-020: Conversion metrics | Deferred - needs redesign | All-time conversion rates become misleading as the pipeline grows (denominator inflates while current counts stay small). Need to determine the right metric: time-windowed rates (last 30/60/90 days), cohort-based tracking (people who entered a stage in a period), or a different approach entirely. Service layer (`src/lib/people/metrics.ts`) and component (`src/components/people/pipeline-metrics.tsx`) exist but are not wired up. |
-
----
-
-## Resolved Decisions
-
-| Decision | Resolution | Date |
-|----------|------------|------|
-| Automatic vs. manual status progression | Event-driven automatic progression with manual override available | Feb 3, 2026 |
-| Pipeline view columns vs. all statuses | 5 kanban columns; `launch_team` and `leader` shown as badges on Core Group cards | Feb 3, 2026 |
-| Quick Add behavior | Minimal fields (name required, email/phone/source optional), defaults to Prospect status | Feb 3, 2026 |
-| Phase restrictions on features | Phases guide but don't restrict; soft warnings for out-of-order actions | Feb 3, 2026 |
-| Duplicate handling | Email match = immediate flag; fuzzy match on name + phone = potential duplicate. Dedicated "Potential Duplicates" section for user review with merge/delete/keep actions | Feb 3, 2026 |
-| Data retention | Soft delete only; retain until deletion requested. Permanent deletion deferred to first user request | Feb 3, 2026 |
-| Household grouping | Yes, include in MVP. Link family members together (see Household entity below) | Feb 3, 2026 |
-| Photo storage | Yes, support profile photos. Small avatars (48-64px) in lists, larger (128-256px) on profile. Keep file sizes small | Feb 3, 2026 |
-| Committed status removed | Commitment card recording directly advances to `core_group`. The `committed` status was redundant — per the Launch Playbook, signing the commitment IS joining the Core Group. Orientations are a meeting type with no pipeline effect. | Feb 8, 2026 |
+| P-020: Conversion metrics | Deferred - needs redesign | All-time conversion rates mislead as the pipeline grows: the denominator inflates while current counts stay small. This is why P-020 sits below Must. The right metric is undecided — time-windowed rates (last 30/60/90 days), cohort-based tracking (people who entered a stage in a period), or a different approach entirely. |
