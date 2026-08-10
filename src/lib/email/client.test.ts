@@ -39,23 +39,38 @@ interface SendPayload {
   headers?: Record<string, string>;
 }
 
-/** Replace the transport and record what it was handed. */
+/**
+ * The SECOND argument, and it is a different thing from `SendPayload.headers`.
+ * `headers` is the message's own RFC header block, copied onto the mail; this
+ * is the HTTP request, which is the only place the provider looks for dedupe.
+ */
+interface SendOptions {
+  idempotencyKey?: string;
+}
+
+/** Replace the transport and record BOTH arguments it was handed. */
 function recordSends(t: {
   mock: { method: typeof import("node:test").mock.method };
-}): SendPayload[] {
-  const calls: SendPayload[] = [];
-  t.mock.method(resend.emails, "send", async (payload: SendPayload) => {
-    calls.push(payload);
-    return { data: { id: "provider-message-id" }, error: null };
-  });
-  return calls;
+}): { payloads: SendPayload[]; options: (SendOptions | undefined)[] } {
+  const payloads: SendPayload[] = [];
+  const options: (SendOptions | undefined)[] = [];
+  t.mock.method(
+    resend.emails,
+    "send",
+    async (payload: SendPayload, opts?: SendOptions) => {
+      payloads.push(payload);
+      options.push(opts);
+      return { data: { id: "provider-message-id" }, error: null };
+    }
+  );
+  return { payloads, options };
 }
 
 const UNSUBSCRIBE_LINK =
   "https://app.everyfield.test/api/notifications/unsubscribe?token=sealed-token";
 
 test("the RFC 8058 header pair reaches the provider payload intact", async (t) => {
-  const calls = recordSends(t);
+  const { payloads: calls } = recordSends(t);
 
   const result = await sendEmail({
     to: "planter@example.test",
@@ -83,11 +98,18 @@ test("the RFC 8058 header pair reaches the provider payload intact", async (t) =
   );
 });
 
-test("the idempotency key travels alongside the list headers, not instead of them", async (t) => {
-  // The regression this pins: the header map used to be built fresh for the
-  // idempotency key, so spreading the caller's headers in the wrong order —
-  // or not at all — silently dropped the opt-out control.
-  const calls = recordSends(t);
+test("the idempotency key is HONOURED, not mailed — it goes to the request, the list headers to the message", async (t) => {
+  // The bug this pins, found on the #293 resend and true of every send in the
+  // product: the key was written into `payload.headers`, which resend@6 treats
+  // as custom RFC headers ON THE MESSAGE. It type-checked, it delivered mail,
+  // and it deduped nothing — two sends presenting one key came back with two
+  // different message ids. Request idempotency is the SECOND argument, and the
+  // SDK builds the HTTP header from that and only that.
+  //
+  // Both halves are asserted together because the earlier regression here was
+  // the mirror image: a header map rebuilt for the key dropped the opt-out
+  // control. Neither may be fixed by breaking the other.
+  const { payloads, options } = recordSends(t);
 
   await sendEmail({
     to: "planter@example.test",
@@ -100,19 +122,23 @@ test("the idempotency key travels alongside the list headers, not instead of the
     },
   });
 
-  const headers = calls[0].headers ?? {};
+  assert.equal(options[0]?.idempotencyKey, "notif-batch-1");
+
+  const headers = payloads[0].headers ?? {};
   assert.deepEqual(Object.keys(headers).sort(), [
-    "Idempotency-Key",
     "List-Unsubscribe",
     "List-Unsubscribe-Post",
   ]);
-  assert.equal(headers["Idempotency-Key"], "notif-batch-1");
+  // Not on the message. A mailed `Idempotency-Key` is a header the invitee's
+  // client renders nothing for and the provider acts on not at all.
+  assert.ok(!("Idempotency-Key" in headers));
 });
 
-test("a caller cannot overwrite the idempotency key through the header map", async (t) => {
-  // Provider-side dedupe is the dispatcher's braces against a double send. A
-  // caller-supplied header must not be able to unpick it.
-  const calls = recordSends(t);
+test("a caller cannot reach the request's idempotency key through the header map", async (t) => {
+  // Provider-side dedupe is the braces against a double send. A caller-supplied
+  // header must not be able to unpick it — and now it structurally cannot,
+  // because the map it writes into is no longer where the key is read from.
+  const { payloads, options } = recordSends(t);
 
   await sendEmail({
     to: "planter@example.test",
@@ -122,12 +148,42 @@ test("a caller cannot overwrite the idempotency key through the header map", asy
     headers: { "Idempotency-Key": "an-attackers-key" },
   });
 
-  assert.equal(calls[0].headers?.["Idempotency-Key"], "the-real-key");
+  assert.equal(options[0]?.idempotencyKey, "the-real-key");
+  // Dropped rather than forwarded: it can no longer do anything, so mailing it
+  // to the reader would be a confusing way to say so.
+  assert.ok(!("Idempotency-Key" in (payloads[0].headers ?? {})));
+});
+
+test("one key presented twice is one request-level key, and a new key is a new one", async (t) => {
+  // The property `RESEND_DEDUPE_WINDOW_MS` depends on (`@/lib/invitations/email`
+  // → `invitationEmailIdempotencyKey`): a double-pressed button presents the
+  // SAME key, which the provider collapses, while a deliberate resend a window
+  // later presents a different one and genuinely reaches the invitee.
+  //
+  // Asserted at the boundary this module owns — WHAT IS SENT. Whether the
+  // provider then collapses the pair is the provider's contract, and it can
+  // only honour a key it is actually given, which is the half that was broken.
+  const { options } = recordSends(t);
+
+  const send = (key: string) =>
+    sendEmail({
+      to: "planter@example.test",
+      subject: "s",
+      html: "<p>x</p>",
+      idempotencyKey: key,
+    });
+
+  await send("org-invitation-abc-resend-1");
+  await send("org-invitation-abc-resend-1");
+  await send("org-invitation-abc-resend-2");
+
+  assert.equal(options[0]?.idempotencyKey, options[1]?.idempotencyKey);
+  assert.notEqual(options[1]?.idempotencyKey, options[2]?.idempotencyKey);
 });
 
 test("an email with no extra headers still sends, carrying only what it has", async (t) => {
   // Non-notification mail (invites, RSVPs) passes no header map at all.
-  const calls = recordSends(t);
+  const { payloads: calls, options } = recordSends(t);
 
   await sendEmail({
     to: "planter@example.test",
@@ -138,6 +194,9 @@ test("an email with no extra headers still sends, carrying only what it has", as
   assert.deepEqual(calls[0].headers, {});
   assert.equal(calls[0].from, EMAIL_FROM);
   assert.deepEqual(calls[0].to, ["planter@example.test"]);
+  // No key, no options object — `{ idempotencyKey: undefined }` is not the same
+  // request as one with no second argument at all.
+  assert.equal(options[0], undefined);
 });
 
 test("the sending identity is the domain we actually own", async () => {
@@ -161,7 +220,7 @@ test("the sending identity is the domain we actually own", async () => {
 });
 
 test("reply-to reaches the provider when one is given, and is absent when not", async (t) => {
-  const calls = recordSends(t);
+  const { payloads: calls } = recordSends(t);
 
   await sendEmail({
     to: "planter@example.test",

@@ -60,6 +60,10 @@ export async function sendEmail({
    * same mailbox; pass `EMAIL_REPLY_TO` to say so explicitly.
    */
   replyTo?: string;
+  /**
+   * Provider-side dedupe. Goes to the REQUEST, never into `headers` below —
+   * see the call site for why those are two different things.
+   */
   idempotencyKey?: string;
   /**
    * Extra RFC headers. `List-Unsubscribe` is the one that matters today: mail
@@ -69,20 +73,41 @@ export async function sendEmail({
   headers?: Record<string, string>;
 }): Promise<{ success: boolean; id?: string; error?: string }> {
   try {
-    const headers: Record<string, string> = { ...extraHeaders };
-    if (idempotencyKey) {
-      headers["Idempotency-Key"] = idempotencyKey;
-    }
+    // Two DIFFERENT places, and the difference is the whole of whether dedupe
+    // happens. `payload.headers` is the message's own RFC header block — the
+    // provider copies it onto the mail and hands it to the invitee's client,
+    // which is exactly right for `List-Unsubscribe` and useless for anything
+    // else. Idempotency is an HTTP header on the REQUEST, and resend@6 builds
+    // it from the second argument only (`headers.set("Idempotency-Key",
+    // options.idempotencyKey)` in the SDK).
+    //
+    // This used to write the key into the map below. It type-checked, it
+    // delivered mail, and it deduped NOTHING: two sends presenting one key
+    // returned two different message ids, so a double-clicked button sent
+    // twice while `RESEND_DEDUPE_WINDOW_MS` looked like it was doing work
+    // (memory/invariants.md → "a double-clicked button sends once", which is
+    // this line and no other).
+    //
+    // A caller's own `Idempotency-Key` is dropped rather than mailed: it can no
+    // longer reach the request, so passing one is a mistake, and forwarding it
+    // to the invitee's mail client would be a confusing way to say so.
+    const { "Idempotency-Key": _ignored, ...headers } = extraHeaders ?? {};
 
-    const { data, error } = await resend.emails.send({
-      from: EMAIL_FROM,
-      to: Array.isArray(to) ? to : [to],
-      subject,
-      html,
-      text,
-      ...(replyTo ? { replyTo } : {}),
-      headers,
-    });
+    const { data, error } = await resend.emails.send(
+      {
+        from: EMAIL_FROM,
+        to: Array.isArray(to) ? to : [to],
+        subject,
+        html,
+        text,
+        ...(replyTo ? { replyTo } : {}),
+        headers,
+      },
+      // Omitted entirely when there is no key — an `{ idempotencyKey:
+      // undefined }` would still be an options object, and the SDK's `if`
+      // is the only thing between that and a malformed header.
+      ...(idempotencyKey ? ([{ idempotencyKey }] as const) : [])
+    );
 
     if (error) {
       // Name and REDACTED message, for the same reason as the catch below: the
