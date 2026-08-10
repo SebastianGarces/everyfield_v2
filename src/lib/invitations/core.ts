@@ -45,6 +45,7 @@ import {
   churches,
   organizationInvitations,
   sendingChurches,
+  sendingNetworks,
   users,
   type NewOrganizationInvitation,
   type OrganizationInvitation,
@@ -56,6 +57,8 @@ import type {
   OrganizationInvitationType,
 } from "@/db/schema/organization-invitation";
 import { announceInvitationAccepted } from "@/lib/notifications/oversight";
+
+import { sendInvitationEmail } from "./email";
 
 // ============================================================================
 // Constants
@@ -632,11 +635,26 @@ async function assertNoDuplicatePending(
   }
 }
 
-/** Resolve + guard + insert. The path the action layer takes. */
+/**
+ * What a create produces: the row, and whether the invitee was actually told.
+ *
+ * The two are reported separately because they FAIL separately (OV-003b / #293).
+ * The row is durable and the email is best-effort, so `emailSent: false` is not
+ * an error — it is the case where the admin has to send the link themselves, and
+ * the surface says exactly that instead of claiming an invitation was "sent"
+ * when nothing left the building.
+ */
+export interface CreatedInvitation {
+  invitation: OrganizationInvitation;
+  /** Did the provider accept the invitation email? See `./email`. */
+  emailSent: boolean;
+}
+
+/** Resolve + guard + insert + send. The path the action layer takes. */
 export async function createInvitationAs(
   actor: InvitationActor,
   request: InvitationRequest
-): Promise<OrganizationInvitation> {
+): Promise<CreatedInvitation> {
   const inviteeEmail = normalizeInviteeEmail(request.inviteeEmail);
   const inviteAs = request.inviteAs ?? "church";
 
@@ -676,7 +694,95 @@ export async function createInvitationAs(
   await assertTargetSlotFree(resolved.values);
   await assertNoDuplicatePending(resolved.values);
 
-  return insertInvitation(resolved.values);
+  const invitation = await insertInvitation(resolved.values);
+
+  // LAST, and deliberately after the committed row — an invitation that exists
+  // but was not emailed is repaired by copying the link; an email sent for a row
+  // that failed to insert is a link to nothing. `emailInvitee` never throws.
+  return { invitation, emailSent: await emailInvitee(invitation) };
+}
+
+/**
+ * Tell the invitee. Best-effort by construction, and the boundary that keeps it
+ * that way is HERE: `sendInvitationEmail` swallows its own transport failures,
+ * and this wrapper swallows the one thing it cannot — a failed org-name lookup,
+ * which is a database read and can throw like any other.
+ *
+ * The name is derived from `type` (`invitingOrgName` below), not from whichever
+ * FK column happens to be populated, for the same reason
+ * `announceInvitationAcceptedForChurch` derives its audience that way: nothing
+ * constrains a row to one FK, and an email that misnames who invited you is
+ * indistinguishable from a phishing attempt.
+ */
+async function emailInvitee(
+  invitation: OrganizationInvitation
+): Promise<boolean> {
+  try {
+    const outcome = await sendInvitationEmail({
+      invitationId: invitation.id,
+      inviteeEmail: invitation.inviteeEmail,
+      status: invitation.status,
+      type: invitation.type,
+      invitingOrgName: await invitingOrgName(invitation),
+      expiresAt: invitation.expiresAt,
+    });
+    return outcome.sent;
+  } catch (error) {
+    // No id, no address, no link: the invitation id is the register bearer
+    // token (see `hasValidInvitationBypass`) and a log drain is not where it
+    // belongs.
+    console.error("invitation email could not be prepared", {
+      type: invitation.type,
+      message: error instanceof Error ? error.message : "unknown error",
+    });
+    return false;
+  }
+}
+
+/**
+ * The inviting organization's name, chosen by `type`.
+ *
+ * The twin of `lookupInvitingOrgName` in `(auth)/register/beta-gate.ts`, which
+ * answers the same question for the register screen. Both are deliberately
+ * `type`-driven; if a third caller appears, collapse them rather than adding a
+ * third reading of the FK columns.
+ */
+async function invitingOrgName(
+  invitation: OrganizationInvitation
+): Promise<string | null> {
+  switch (invitation.type) {
+    case "church_to_sending_church": {
+      if (!invitation.sendingChurchId) return null;
+      const [org] = await db
+        .select({ name: sendingChurches.name })
+        .from(sendingChurches)
+        .where(eq(sendingChurches.id, invitation.sendingChurchId))
+        .limit(1);
+      return org?.name ?? null;
+    }
+
+    case "church_to_network":
+    case "sending_church_to_network": {
+      if (!invitation.sendingNetworkId) return null;
+      const [org] = await db
+        .select({ name: sendingNetworks.name })
+        .from(sendingNetworks)
+        .where(eq(sendingNetworks.id, invitation.sendingNetworkId))
+        .limit(1);
+      return org?.name ?? null;
+    }
+
+    default: {
+      // Fail CLOSED, like every other switch on `type` in this file: with no
+      // name there is nothing honest to put in the email, and `./email` refuses
+      // to render one.
+      const unknownType: never = invitation.type;
+      console.error("invitation type has no inviting org to name", {
+        type: unknownType,
+      });
+      return null;
+    }
+  }
 }
 
 // ============================================================================

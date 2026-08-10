@@ -1828,7 +1828,51 @@ test("an action result carries no internal user ids", () => {
   assert.ok(!serialized.includes(PLANTER_ID), "the responder's user id leaked");
 
   // ...and the action layer returns THAT, not what the mutation handed it.
-  assert.match(SERVICE_CODE, /invitationView\(await mutate\(\)\)/);
+  // One narrowing point, in `run`, so all four actions inherit it — #293 gave
+  // `run` a richer input (the create now reports whether the invitation email
+  // went out), and the property that matters is unchanged: what reaches the
+  // client is `invitationView(...)` of the row and never the row.
+  assert.match(SERVICE_CODE, /invitationView\(mutated\.invitation\)/);
+  assert.doesNotMatch(
+    SERVICE_CODE,
+    /invitation: mutated\.invitation\b/,
+    "the raw row reached the result"
+  );
+});
+
+test("only the create reports an email outcome", () => {
+  // OV-003b (#293). `emailSent` is three-valued and the third value is the
+  // point: `undefined` means "this action does not send email", which is a
+  // different fact from `false` ("it tried and failed"). A surface that folded
+  // them together would tell a planter who declined an invitation that an email
+  // could not be sent.
+  //
+  // Structural, because the alternative is a database: the three responses go
+  // through `answered`, which builds a mutation carrying the row and nothing
+  // else, and only `createInvitationAs` — whose return type is
+  // `CreatedInvitation` — is passed to `run` unwrapped.
+  assert.match(
+    SERVICE_CODE,
+    /run\("createInvitation", \(\) => createInvitationAs\(actor, request\)\)/
+  );
+
+  for (const action of ["accept", "decline", "revoke"]) {
+    assert.match(
+      SERVICE_CODE,
+      new RegExp(
+        `run\\("${action}Invitation", \\(\\) =>\\s*answered\\(${action}InvitationAs\\(actor, invitationId\\)\\)`
+      ),
+      action
+    );
+  }
+
+  // `answered` sets no email field at all, so the three responses cannot report
+  // one however `run` changes.
+  const adapter = SERVICE_CODE.slice(
+    SERVICE_CODE.indexOf("async function answered"),
+    SERVICE_CODE.indexOf("export async function createInvitation")
+  );
+  assert.doesNotMatch(adapter, /emailSent/, adapter);
 });
 
 test("isUuid accepts a uuid and nothing else", () => {

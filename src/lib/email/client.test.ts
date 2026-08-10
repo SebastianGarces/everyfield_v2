@@ -7,7 +7,13 @@ process.env.RESEND_API_KEY = "re_test_key_not_a_real_credential";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { EMAIL_FROM, resend, sendEmail } from "./client";
+import {
+  DEFAULT_EMAIL_FROM,
+  EMAIL_FROM,
+  EMAIL_REPLY_TO,
+  resend,
+  sendEmail,
+} from "./client";
 
 // ============================================================================
 // What actually reaches the provider (N-007, RFC 8058 ruling 2026-08-01).
@@ -29,6 +35,7 @@ interface SendPayload {
   subject: string;
   html: string;
   text?: string;
+  replyTo?: string;
   headers?: Record<string, string>;
 }
 
@@ -131,6 +138,48 @@ test("an email with no extra headers still sends, carrying only what it has", as
   assert.deepEqual(calls[0].headers, {});
   assert.equal(calls[0].from, EMAIL_FROM);
   assert.deepEqual(calls[0].to, ["planter@example.test"]);
+});
+
+test("the sending identity is the domain we actually own", async () => {
+  // RULED 2026-07-31 (#245): the product's domain is `everyfield.app`. This
+  // default used to name `everyfield.com`, which we do not send from — a `from`
+  // on an unverified domain fails DKIM/SPF alignment, so the mail bounces or
+  // lands in spam and nothing in the app can tell the two apart.
+  //
+  // Asserted on the DEFAULT, not on the resolved value: any machine running the
+  // suite may set `EMAIL_FROM`, and asserting the resolved one would be a test
+  // of that machine's `.env.local`.
+  assert.match(DEFAULT_EMAIL_FROM, /@everyfield\.app>$/);
+  assert.doesNotMatch(DEFAULT_EMAIL_FROM, /everyfield\.(dev|com)/);
+
+  // Whatever the environment sets, a reply has somewhere to land and it is
+  // never a `noreply@` — people reply to transactional mail, and an invited
+  // planter asking "is this really from you?" is the expected case.
+  assert.ok(EMAIL_FROM.length > 0);
+  assert.ok(EMAIL_REPLY_TO.length > 0);
+  assert.doesNotMatch(EMAIL_REPLY_TO, /noreply|no-reply/i);
+});
+
+test("reply-to reaches the provider when one is given, and is absent when not", async (t) => {
+  const calls = recordSends(t);
+
+  await sendEmail({
+    to: "planter@example.test",
+    subject: "s",
+    html: "<p>x</p>",
+    replyTo: EMAIL_REPLY_TO,
+  });
+  assert.equal(calls[0].replyTo, EMAIL_REPLY_TO);
+
+  // Omitted rather than sent as `undefined`: a provider that validates its
+  // payload shape rejects the key with no value, and the client's own default
+  // (reply to `from`) is the behaviour we want when nobody asked.
+  await sendEmail({
+    to: "planter@example.test",
+    subject: "s",
+    html: "<p>x</p>",
+  });
+  assert.ok(!("replyTo" in calls[1]), JSON.stringify(Object.keys(calls[1])));
 });
 
 test("a provider refusal is reported, not thrown, so a delivery row can record it", async (t) => {

@@ -6,9 +6,35 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 
 export { resend };
 
+// ---------------------------------------------------------------------------
+// Sender identity
+// ---------------------------------------------------------------------------
+
+/**
+ * The product's sending domain is `everyfield.app` (ruled 2026-07-31, #245).
+ * Not `everyfield.dev`, which was only ever dev/eval tooling, and not
+ * `everyfield.com`, which this default used to name and which we do not own —
+ * a `from` on an unverified domain fails DKIM/SPF alignment, so the mail either
+ * bounces or lands in spam, and nothing in the app can tell the difference.
+ *
+ * Exported separately from `EMAIL_FROM` so a test can assert the DEFAULT: any
+ * environment that runs the suite may set `EMAIL_FROM`, which would make an
+ * assertion on the resolved value a test of that machine's `.env.local`.
+ */
+export const DEFAULT_EMAIL_FROM = "EveryField <notifications@everyfield.app>";
+
 // Default sender configuration
-export const EMAIL_FROM =
-  process.env.EMAIL_FROM ?? "EveryField <notifications@everyfield.com>";
+export const EMAIL_FROM = process.env.EMAIL_FROM ?? DEFAULT_EMAIL_FROM;
+
+/**
+ * Where a reply goes. Defaults to the sending identity itself rather than to a
+ * `noreply@` — people DO reply to transactional mail (an invited planter asking
+ * "is this really you?" is the expected case), and a reply that bounces is a
+ * worse answer than one that reaches the same monitored mailbox the message
+ * came from. Never an address on a domain we do not send from: that is the
+ * alignment failure above, one field over.
+ */
+export const EMAIL_REPLY_TO = process.env.EMAIL_REPLY_TO ?? EMAIL_FROM;
 
 /**
  * Send a single email via Resend
@@ -19,6 +45,7 @@ export async function sendEmail({
   subject,
   html,
   text,
+  replyTo,
   idempotencyKey,
   headers: extraHeaders,
 }: {
@@ -26,6 +53,11 @@ export async function sendEmail({
   subject: string;
   html: string;
   text?: string;
+  /**
+   * Where a reply lands. Omitted → the client replies to `from`, which is the
+   * same mailbox; pass `EMAIL_REPLY_TO` to say so explicitly.
+   */
+  replyTo?: string;
   idempotencyKey?: string;
   /**
    * Extra RFC headers. `List-Unsubscribe` is the one that matters today: mail
@@ -46,6 +78,7 @@ export async function sendEmail({
       subject,
       html,
       text,
+      ...(replyTo ? { replyTo } : {}),
       headers,
     });
 

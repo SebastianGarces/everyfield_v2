@@ -56,10 +56,32 @@ import {
 } from "./core";
 
 export type InvitationActionResult =
-  | { success: true; invitation: InvitationView }
+  | {
+      success: true;
+      invitation: InvitationView;
+      /**
+       * CREATE ONLY, and three-valued on purpose (OV-003b / #293):
+       *
+       *   * `true`      — the provider accepted the invitation email;
+       *   * `false`     — it did not, so the invitation exists and the invitee
+       *                   has NOT been told. The surface says "created — email
+       *                   could not be sent" and hands the admin the link;
+       *   * `undefined` — this action does not send email at all (accept,
+       *                   decline, revoke). Not the same fact as `false`, and a
+       *                   surface that treated them alike would tell a planter
+       *                   who just declined that an email had failed.
+       */
+      emailSent?: boolean;
+    }
   | { success: false; error: string };
 
 const GENERIC_ERROR = "Something went wrong — try that again";
+
+/** What a mutation hands back: always the row, plus whatever else it settled. */
+type InvitationMutation = {
+  invitation: OrganizationInvitation;
+  emailSent?: boolean;
+};
 
 /**
  * One place where a mutation becomes a result: the row is narrowed to
@@ -69,10 +91,15 @@ const GENERIC_ERROR = "Something went wrong — try that again";
  */
 async function run(
   label: string,
-  mutate: () => Promise<OrganizationInvitation>
+  mutate: () => Promise<InvitationMutation>
 ): Promise<InvitationActionResult> {
   try {
-    return { success: true, invitation: invitationView(await mutate()) };
+    const mutated = await mutate();
+    return {
+      success: true,
+      invitation: invitationView(mutated.invitation),
+      emailSent: mutated.emailSent,
+    };
   } catch (error) {
     if (error instanceof InvitationError) {
       return { success: false, error: error.message };
@@ -83,9 +110,27 @@ async function run(
 }
 
 /**
+ * A response settles a row and nothing else — no email leaves on an accept, a
+ * decline or a revoke. Written as one adapter rather than three, so "answering
+ * an invitation sends nothing" is a single line somebody has to delete on
+ * purpose.
+ */
+async function answered(
+  respond: Promise<OrganizationInvitation>
+): Promise<InvitationMutation> {
+  return { invitation: await respond };
+}
+
+/**
  * Issue an invitation. The inviting org and the invitation `type` are derived
  * from the session — a client says only who is being invited — so an oversight
  * admin can never enrol a plant into an org that is not theirs.
+ *
+ * The invitation email goes out on this path too (OV-003b / #293) and its
+ * outcome comes back as `emailSent`. A failed send does NOT fail the create:
+ * the row is the durable artefact, the email is best-effort delivery of a link
+ * the admin can also copy, and rolling the invitation back would leave the
+ * retry refused by the duplicate-pending guard.
  */
 export async function createInvitation(
   request: InvitationRequest
@@ -107,7 +152,9 @@ export async function acceptInvitation(
   invitationId: string
 ): Promise<InvitationActionResult> {
   const actor = invitationActorFromSession(await verifySession());
-  return run("acceptInvitation", () => acceptInvitationAs(actor, invitationId));
+  return run("acceptInvitation", () =>
+    answered(acceptInvitationAs(actor, invitationId))
+  );
 }
 
 /**
@@ -118,7 +165,7 @@ export async function declineInvitation(
 ): Promise<InvitationActionResult> {
   const actor = invitationActorFromSession(await verifySession());
   return run("declineInvitation", () =>
-    declineInvitationAs(actor, invitationId)
+    answered(declineInvitationAs(actor, invitationId))
   );
 }
 
@@ -130,5 +177,7 @@ export async function revokeInvitation(
   invitationId: string
 ): Promise<InvitationActionResult> {
   const actor = invitationActorFromSession(await verifySession());
-  return run("revokeInvitation", () => revokeInvitationAs(actor, invitationId));
+  return run("revokeInvitation", () =>
+    answered(revokeInvitationAs(actor, invitationId))
+  );
 }
