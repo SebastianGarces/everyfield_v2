@@ -8,7 +8,6 @@ import {
   ministryTeams,
   persons,
   tasks,
-  teamMemberships,
   type AttendanceType,
   type ChurchMeeting,
   type MeetingChecklistItem,
@@ -40,6 +39,11 @@ import type {
   MeetingWithCounts,
 } from "./types";
 import { emitTrainingScheduled } from "@/lib/ministry-teams/events";
+import {
+  addTeamMembersToGuestList,
+  listActiveTeamMemberIds,
+  shouldPopulateGuestListFromTeam,
+} from "./guest-list";
 import { topLevelTasksOnly } from "@/lib/tasks/service";
 import { deriveAttendanceType } from "./attendance-type";
 
@@ -341,26 +345,31 @@ export async function createMeeting(
     await populateChecklist(churchId, meeting.id);
   }
 
+  // VM-006 (#312): a team meeting starts with its team's roster on the guest
+  // list — a meeting of a team already knows who is invited, so the planter
+  // edits a list instead of retyping one. Every other meeting type is
+  // untouched and keeps its empty-then-invited guest list.
+  //
+  // ONE read serves both this and the training announcement below, so the
+  // people invited and the people announced to can never be different sets.
+  const teamMemberIds = shouldPopulateGuestListFromTeam(
+    values.type,
+    values.teamId
+  )
+    ? await listActiveTeamMemberIds(churchId, values.teamId)
+    : [];
+
+  await addTeamMembersToGuestList(churchId, meeting.id, teamMemberIds, userId);
+
   // If it's a training team meeting, emit training scheduled event
   if (
     data.type === "team_meeting" &&
     data.meetingSubtype === "training" &&
     data.teamId
   ) {
-    const members = await db
-      .select({ personId: teamMemberships.personId })
-      .from(teamMemberships)
-      .where(
-        and(
-          eq(teamMemberships.churchId, churchId),
-          eq(teamMemberships.teamId, data.teamId),
-          eq(teamMemberships.status, "active")
-        )
-      );
-
     await emitTrainingScheduled(
       data.teamId,
-      members.map((m) => m.personId),
+      teamMemberIds,
       "training",
       data.datetime,
       churchId,
