@@ -20,11 +20,18 @@
 // to be maintained: `article-actions.test.ts` reads this file and `globals.css`
 // and fails when only one of them draws the grid.
 //
-// ONE KNOWN DIVERGENCE, tracked rather than hidden: characters outside WinAnsi
-// (`→`, `↓`, box drawing) print correctly and corrupt in the downloaded file,
-// because the standard-14 fonts this document pins cannot encode them. The fix
-// is a registered Unicode TTF, which means shipping a font asset — deferred by
-// the same ruling and tracked as #398.
+// TWO KNOWN DIVERGENCES, tracked rather than hidden:
+//
+//   1. Characters outside WinAnsi (`→`, `↓`, box drawing) print correctly and
+//      corrupt in the downloaded file, because the standard-14 fonts this
+//      document pins cannot encode them. The fix is a registered Unicode TTF,
+//      which means shipping a font asset — deferred by the same ruling and
+//      tracked as #398.
+//   2. Images print and do not download. `globals.css` keeps `img` on the
+//      printed page, but `collectBlocks` below has no `IMG` case, so an image
+//      falls to the recursive default, has no children, and drops silently.
+//      Carrying it across means fetching and embedding the bytes, so it is out
+//      of scope for the table ruling; the PR body lists it as a limitation.
 //
 // WHY THE PDF IS BUILT CLIENT-SIDE, FROM THE DOM
 //

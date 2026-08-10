@@ -495,6 +495,42 @@ describe("the print contract across the three files", () => {
     );
   });
 
+  test("the header comment counts the divergences it actually has", () => {
+    // The comment claims "the same article" on both paths, so every place the
+    // two renderers disagree has to be named next to that claim. It said "ONE
+    // KNOWN DIVERGENCE" while images were a second one, which is the same shape
+    // of untrue claim the table fix corrected.
+    assert.ok(
+      ARTICLE_ACTIONS.includes("TWO KNOWN DIVERGENCES"),
+      "the divergence count must match the list below it"
+    );
+    assert.ok(ARTICLE_ACTIONS.includes("#398"), "the arrow gap is named");
+    assert.ok(
+      /Images print and do not download/.test(ARTICLE_ACTIONS),
+      "the image gap is named"
+    );
+  });
+
+  test("an image is dropped from the PDF, as the comment now says", () => {
+    // The print stylesheet keeps `img`; the extractor has no IMG case, so the
+    // image falls to the recursive default and contributes nothing. This test
+    // is what makes divergence 2 a documented fact rather than a surprise.
+    assert.match(printBlock, /\[data-print-root\] img \{/);
+
+    const blocks = extractPrintBlocks(
+      el("div", [
+        el("p", [textNode("before")]),
+        el("img", [], { src: "/diagram.png", alt: "a diagram" }),
+        el("p", [textNode("after")]),
+      ])
+    );
+
+    assert.deepEqual(blocks, [
+      { kind: "paragraph", text: "before" },
+      { kind: "paragraph", text: "after" },
+    ]);
+  });
+
   test("a link's URL survives into print", () => {
     assert.match(printBlock, /a\[href\]::after/);
     assert.match(printBlock, /content:\s*" \("\s*attr\(href\)\s*"\)"/);
