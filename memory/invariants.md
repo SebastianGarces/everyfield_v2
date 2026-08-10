@@ -163,3 +163,10 @@ Conventions and examples: [`contracts/data-patterns.md`](contracts/data-patterns
 - NEVER store server data in `useState` (it goes stale the moment the server revalidates) and NEVER sync data with `useEffect` — server data flows through props from server components.
 - Use `useOptimistic` for instant feedback; the server action calls `refresh()` from `next/cache` to reconcile, not the client calling `router.refresh()`. Example: `ActivityTimelineClient`. Props-only is the other shape — no local state at all (`TagPicker`).
 - Legitimate client state is UI state only — pagination cursors, drag-and-drop, open/closed (`PipelineView`).
+
+## Design Tokens — Contrast
+
+Applies to `src/app/globals.css`; pinned by `src/app/text-contrast.test.ts`.
+
+- Text contrast is a property of the TOKEN, not of a screen: `--muted-foreground` must clear WCAG AA 4.5:1 on ALL EIGHT surfaces it lands on (`--background`, `--card`, `--popover`, `--muted`, `--secondary`, `--accent`, `--sidebar`, `--sidebar-accent`) in both themes, and a failure is remedied by darkening the token in `src/app/globals.css` — NEVER with a per-component color override, which is the workaround #341 was filed to replace.
+- Accepted residual: `--ring` is 2.4:1 on `--background` in the light theme and ~1.5:1 once `focus-visible:ring-ring/50` composites, so focus indicators fail WCAG 2.2 SC 1.4.11 (3:1); Lighthouse cannot see it and scores 100 anyway. Retired by #385.

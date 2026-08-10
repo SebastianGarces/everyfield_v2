@@ -90,7 +90,10 @@ const css = readFileSync(GLOBALS_CSS, "utf8");
  * custom properties, so the last declaration inside the requested block wins —
  * the same rule the cascade applies.
  */
-function readToken(theme: "light" | "dark", name: string): Rgb {
+function readTokenOklch(
+  theme: "light" | "dark",
+  name: string
+): [number, number, number] {
   const selector = theme === "light" ? ":root" : ".dark";
   const blockStart = css.indexOf(`${selector} {`);
   assert.notEqual(blockStart, -1, `${selector} block not found in globals.css`);
@@ -106,7 +109,11 @@ function readToken(theme: "light" | "dark", name: string): Rgb {
 
   const rawL = match[1];
   const L = rawL.endsWith("%") ? Number(rawL.slice(0, -1)) / 100 : Number(rawL);
-  return oklchToSrgb(L, Number(match[2]), Number(match[3]));
+  return [L, Number(match[2]), Number(match[3])];
+}
+
+function readToken(theme: "light" | "dark", name: string): Rgb {
+  return oklchToSrgb(...readTokenOklch(theme, name));
 }
 
 const themes = ["light", "dark"] as const;
@@ -178,6 +185,65 @@ for (const theme of themes) {
     });
   }
 }
+
+// --- the AA limit the globals.css comment names (#357) ----------------------
+//
+// That comment exists to stop a future agent from lightening the token, and it
+// argues from a single number: the lightest L that still clears 4.5:1 on
+// --muted, the darkest surface --muted-foreground lands on. #341 published that
+// number wrong (L 0.5055, which actually measures 4.91:1 there — it understated
+// the headroom rather than overstating the margin, so nothing unsafe shipped,
+// but it was a wrong measurement in the one comment whose job is to be right).
+// So the limit is DERIVED here and the comment is required to agree with it.
+const DOCUMENTED_MUTED_AA_LIMIT = 0.526;
+
+/**
+ * Contrast against a light surface falls monotonically as L rises, so bisection
+ * finds the boundary: `pass` stays the lightest neutral L known to clear AA.
+ */
+function lightestPassingL(surface: Rgb): number {
+  let pass = 0;
+  let fail = 1;
+  for (let i = 0; i < 60; i += 1) {
+    const mid = (pass + fail) / 2;
+    if (contrastRatio(oklchToSrgb(mid, 0, 0), surface) >= AA_BODY_TEXT) {
+      pass = mid;
+    } else {
+      fail = mid;
+    }
+  }
+  return pass;
+}
+
+test("the AA limit documented in globals.css is the one the math actually gives", () => {
+  const limit = lightestPassingL(readToken("light", "muted"));
+
+  assert.ok(
+    Math.abs(limit - DOCUMENTED_MUTED_AA_LIMIT) < 0.001,
+    `the AA limit on --muted is L ${limit.toFixed(4)}, not ${DOCUMENTED_MUTED_AA_LIMIT} — update the comment in globals.css and this constant together`
+  );
+
+  const comment = css.slice(0, css.indexOf("--muted-foreground:"));
+  assert.match(
+    comment,
+    /L ≈ 0\.526/,
+    "the --muted-foreground comment no longer names the L 0.526 AA limit it argues from"
+  );
+  assert.doesNotMatch(
+    comment,
+    /0\.5055/,
+    "0.5055 is the wrong AA limit (#357) — it measures 4.91:1 on --muted, not 4.5:1"
+  );
+});
+
+test("the shipped --muted-foreground sits under that limit rather than on it", () => {
+  const [L] = readTokenOklch("light", "muted-foreground");
+
+  assert.ok(
+    L < DOCUMENTED_MUTED_AA_LIMIT,
+    `--muted-foreground is L ${L} — at or above the L ${DOCUMENTED_MUTED_AA_LIMIT} AA limit on --muted. Darken the token in globals.css; never paper over it with a per-component color override`
+  );
+});
 
 test("the avatar fallback reads at AA because of the token, not an override", () => {
   // #238's sidebar finding measured 3.97:1. That is not a sidebar bug: the
