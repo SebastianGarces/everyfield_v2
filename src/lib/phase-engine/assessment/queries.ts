@@ -1133,7 +1133,15 @@ export type ExitCriterionStanding = (typeof EXIT_CRITERION_STANDINGS)[number];
  * kept only so a disagreement can be shown as one.
  */
 export interface CitedFactEvidence {
-  /** The insight that cited it — the trace back to the judgement. */
+  /**
+   * The MOST URGENT insight that cited this `path=value`, not the only one.
+   * A criterion's evidence list is deduped by the citation itself (see
+   * `buildExitCriteriaProgress` step 3), because two insights quoting the same
+   * fact are one piece of evidence to a reader, not two. When several cited it,
+   * the surviving row carries whichever insight sorted first under
+   * `compareInsightUrgency` — so treat this as "one insight that cited it",
+   * never as an exhaustive trace back to a single judgement.
+   */
   insightId: string;
   /** The cited path, indices normalised to dots. */
   path: string;
@@ -1331,6 +1339,12 @@ export function buildExitCriteriaProgress(
       .sort(compareInsightUrgency);
 
     // 3. The drill-down: every citation, verified against the same snapshot.
+    //    Deduped on the CITATION (`path=value`) and deliberately not on the
+    //    insight: the same fact quoted by two insights is one piece of evidence
+    //    to the planter reading the row. `insights` above already runs most
+    //    urgent first, so the row that survives carries the most urgent citer —
+    //    see `CitedFactEvidence.insightId` for what that field does and does
+    //    not promise.
     const evidence: CitedFactEvidence[] = [];
     const seen = new Set<string>();
     for (const insight of insights) {

@@ -187,8 +187,20 @@ function humanise(path: string, value: string | null): string {
   return phrase === "" ? path : phrase;
 }
 
-/** One deterministic reading, as a sentence fragment. */
+/**
+ * One deterministic reading, as a sentence fragment.
+ *
+ * A read whose path is NOT in the snapshot (`present: false` — this snapshot
+ * predates the field, or the path is not a fact) has no value to humanise, and
+ * the bare de-camelised label on its own asserts nothing: "core group committed
+ * count" reads as a fact with the number lost. It gets said out loud instead,
+ * so the row still explains why it is empty. `present: true, value: null` is a
+ * real reading and keeps the ordinary phrasing.
+ */
 function factPhrase(fact: SnapshotFact): string {
+  if (!fact.present) {
+    return `${humanise(fact.path, null)} — not in this snapshot yet`;
+  }
   return humanise(fact.path, fact.value);
 }
 
@@ -265,6 +277,7 @@ export function ExitCriterionRow({
                     key={fact.path}
                     data-testid="exit-criterion-fact"
                     data-path={fact.path}
+                    data-present={String(fact.present)}
                     className="text-sm leading-relaxed text-pretty"
                   >
                     {factPhrase(fact)}

@@ -345,6 +345,32 @@ test("PE-025: the same citation twice is one row of evidence", () => {
   );
 });
 
+test("PE-025: the surviving row of a shared citation names the most urgent citer", () => {
+  // The dedup above collapses two insights quoting the same fact into one row,
+  // so `insightId` cannot be an exhaustive trace. It is not arbitrary either:
+  // the insights are already ordered most urgent first, so the row carries the
+  // insight a reader would be sent to. `CitedFactEvidence.insightId` documents
+  // exactly this; the test is what keeps the documentation true.
+  const milder = makeInsight({
+    severity: "low",
+    rank: 4,
+    title: "Keep inviting",
+    citedFacts: ["coreGroup.committedCount=22"],
+  });
+  const urgent = makeInsight({
+    severity: "high",
+    rank: 0,
+    citedFacts: ["coreGroup.committedCount=22"],
+  });
+
+  // Handed in mildest-first, so a pass cannot come from input order.
+  const progress = buildExitCriteriaProgress(makeLatest([milder, urgent]))!;
+  const { evidence } = criterion(progress, "committed_adults");
+
+  assert.equal(evidence.length, 1);
+  assert.equal(evidence[0].insightId, urgent.id);
+});
+
 test("PE-025: a bracketed index in a citation reaches the same gate as a dotted one", () => {
   const progress = buildExitCriteriaProgress(
     makeLatest([
