@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 // `@/db` and would put `neon()` in this client chunk. See the bundle-graph
 // test beside this file.
 import {
+  TEMPLATES_LINK_LABEL,
   TEMPLATE_REIMPORT_NOTE,
   taskTemplateSize,
   taskTemplatesByPhase,
@@ -141,7 +142,7 @@ export function TaskTemplatePicker({
               : "text-lg font-medium"
           }
         >
-          Checklist templates
+          {TEMPLATES_LINK_LABEL}
         </Heading>
         <p className="text-muted-foreground text-sm">
           Import a ready-made checklist and its tasks are created for your

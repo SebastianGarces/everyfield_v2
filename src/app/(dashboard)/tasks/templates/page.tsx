@@ -5,6 +5,7 @@ import { TaskTemplatePicker } from "@/components/tasks/template-picker";
 import { getCurrentUserChurch, verifySession } from "@/lib/auth";
 import type { PhaseNumber } from "@/lib/constants";
 import { PHASES } from "@/lib/constants";
+import { TEMPLATES_LINK_LABEL } from "@/lib/tasks/templates";
 
 // ============================================================================
 // T-011 / T-012 — where a planter reaches the checklist catalog.
@@ -28,7 +29,7 @@ import { PHASES } from "@/lib/constants";
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Checklist templates",
+  title: TEMPLATES_LINK_LABEL,
 };
 
 /**
@@ -61,7 +62,7 @@ export default async function TaskTemplatesPage() {
       <HeaderBreadcrumbs
         items={[
           { label: "Tasks", href: "/tasks" },
-          { label: "Checklist templates" },
+          { label: TEMPLATES_LINK_LABEL },
         ]}
       />
       <div className="mx-auto max-w-3xl p-6">

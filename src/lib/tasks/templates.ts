@@ -87,6 +87,19 @@ export interface TaskTemplate {
 export const UNKNOWN_TEMPLATE_ERROR = "That checklist template does not exist";
 
 /**
+ * The catalog's standing URL, and the words every surface uses for it.
+ *
+ * Three surfaces point at the same door — the `/tasks` header button, the
+ * catalog page's own title and breadcrumb, and the phase prompt's untick note.
+ * Held as three loose literals they drifted apart silently: the same door with
+ * two names on one screen reads as two doors. This module already owns the
+ * catalog concept and is db-free (see the note above), so both the client
+ * picker and the server pages can reach these without dragging in `@/db`.
+ */
+export const TEMPLATES_ROUTE = "/tasks/templates";
+export const TEMPLATES_LINK_LABEL = "Checklist templates";
+
+/**
  * Said out loud wherever the import is offered.
  *
  * The AC allows either policy — repeat, or dedupe — as long as the product

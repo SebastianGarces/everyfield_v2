@@ -7,6 +7,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   TASK_TEMPLATES,
+  TEMPLATES_ROUTE,
   TEMPLATE_REIMPORT_NOTE,
   taskTemplatesByPhase,
 } from "@/lib/tasks/templates";
@@ -203,15 +204,15 @@ test("the phase headings never skip a level under the title", () => {
 // assertion below it passed against markup no browser could ever request.
 // ----------------------------------------------------------------------------
 
-const TEMPLATES_ROUTE = "src/app/(dashboard)/tasks/templates/page.tsx";
+const TEMPLATES_PAGE_FILE = "src/app/(dashboard)/tasks/templates/page.tsx";
 
 test("a route renders the picker", () => {
-  const page = sourceOf(TEMPLATES_ROUTE);
+  const page = sourceOf(TEMPLATES_PAGE_FILE);
 
   assert.match(
     page,
     /<TaskTemplatePicker/,
-    `${TEMPLATES_ROUTE} must render the picker`
+    `${TEMPLATES_PAGE_FILE} must render the picker`
   );
   // Static segment beside `[id]`: without this file `/tasks/templates` resolves
   // to a task whose id is the word "templates" and answers 500.
@@ -221,9 +222,48 @@ test("a route renders the picker", () => {
 test("the picker's route is linked from the task list", () => {
   const tasksPage = sourceOf("src/app/(dashboard)/tasks/page.tsx");
 
+  // The URL is one exported constant now, so the header links it by name and
+  // this takes two assertions: either half alone can hold while the link is
+  // broken. The page must reach for the constant, AND the constant must still
+  // be the URL the static route segment answers on.
   assert.match(
     tasksPage,
-    /href="\/tasks\/templates"/,
+    /import \{[^}]*TEMPLATES_ROUTE[^}]*\} from "@\/lib\/tasks\/templates"/,
+    "the /tasks header must take the catalog's URL from the catalog module"
+  );
+  assert.match(
+    tasksPage,
+    /href=\{TEMPLATES_ROUTE\}/,
     "the /tasks header must link to the checklist catalog"
   );
+  assert.equal(
+    TEMPLATES_ROUTE,
+    "/tasks/templates",
+    "the catalog's URL must match the static segment under src/app"
+  );
+});
+
+test("every surface names the catalog with the same words", () => {
+  // A door with two names on one screen reads as two doors: `/tasks` links it,
+  // the catalog page titles itself and breadcrumbs it, and the phase prompt
+  // ends its untick note on it. All four take the label from one export.
+  for (const file of [
+    "src/app/(dashboard)/tasks/page.tsx",
+    TEMPLATES_PAGE_FILE,
+    "src/components/tasks/phase-template-prompt.tsx",
+    "src/components/tasks/template-picker.tsx",
+  ]) {
+    const source = sourceOf(file);
+
+    assert.match(
+      source,
+      /import \{[^}]*TEMPLATES_LINK_LABEL[^}]*\} from "@\/lib\/tasks\/templates"/,
+      `${file} must take the catalog's label from the catalog module`
+    );
+    assert.doesNotMatch(
+      source.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, ""),
+      /"Checklist templates"/,
+      `${file} still hard-codes the catalog's label`
+    );
+  }
 });

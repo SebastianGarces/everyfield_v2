@@ -14,6 +14,7 @@ import {
   type PhaseTemplateOffer,
   type PhaseTemplatePrompt as PhaseTemplatePromptData,
 } from "@/lib/tasks/phase-prompt";
+import { TEMPLATES_LINK_LABEL, TEMPLATES_ROUTE } from "@/lib/tasks/templates";
 
 // ============================================================================
 // T-020 — the prompt itself.
@@ -55,11 +56,6 @@ import {
 // ============================================================================
 
 const PROMPT_HEADING_ID = "phase-template-prompt-heading";
-
-/** The standing route to the catalog, and the words the `/tasks` header uses
- *  for it — the same door should not have two names on one screen. */
-const TEMPLATES_ROUTE = "/tasks/templates";
-const TEMPLATES_LINK_LABEL = "Checklist templates";
 
 /** Said where the press happens: this creates work, and only what is ticked. */
 const PROMPT_NOTE =
@@ -270,7 +266,14 @@ export function PhaseTemplatePromptView({
       data-testid="phase-template-prompt"
       className="border-border bg-card space-y-4 rounded-md border p-4 shadow-sm"
     >
-      <div className="space-y-1">
+      {/*
+        `data-testid` is a TEST SEAM, not styling. The structural tests assert
+        that the lead stays two paragraphs and that both standing notes sit in
+        the fine print — a rule about WHICH BLOCK a sentence lives in. Anchored
+        to the serialized class string, those tests broke on a prettier class
+        reorder; anchored here, they break only when a note actually moves.
+      */}
+      <div data-testid="prompt-lead" className="space-y-1">
         <h2 id={PROMPT_HEADING_ID} className="text-base font-medium">
           You moved to {prompt.phaseName}
         </h2>
@@ -337,7 +340,10 @@ export function PhaseTemplatePromptView({
           them above as a fourth and fifth muted `text-sm` line, is the wall
           round 2 of the review objected to.
         */}
-        <div className="text-muted-foreground space-y-1 text-xs">
+        <div
+          data-testid="prompt-fine-print"
+          className="text-muted-foreground space-y-1 text-xs"
+        >
           <p>{IMPORT_POLICY_NOTE}</p>
           <p>{DISMISS_NOTE}</p>
         </div>

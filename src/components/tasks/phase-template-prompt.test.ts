@@ -65,6 +65,37 @@ function textOf(html: string): string {
   return decode(html.replace(/<[^>]*>/g, " ")).replace(/\s+/g, " ");
 }
 
+/**
+ * One `data-testid` block of the prompt, split into its tag and its contents.
+ *
+ * The structural rules below are about WHICH BLOCK a sentence lives in — the
+ * lead or the fine print — not about how a block is styled. Anchored to the
+ * serialized `class` attribute they broke whenever prettier reordered a
+ * utility class; anchored to the seam they break only when a sentence actually
+ * moves. The size token is still checked, but loosely, because "the fine print
+ * is smaller than the lead" IS part of the rule.
+ *
+ * Neither seam nests a `<div>`, so "up to the next `</div>`" delimits it
+ * exactly — and that is asserted, so the day one grows a wrapper this fails
+ * loudly instead of silently measuring half a block.
+ */
+function seam(html: string, testId: string): { tag: string; inner: string } {
+  const open = new RegExp(`<div[^>]*data-testid="${testId}"[^>]*>`).exec(html);
+  assert.ok(open, `the ${testId} seam is missing`);
+
+  const start = open.index + open[0].length;
+  const end = html.indexOf("</div>", start);
+  assert.ok(end > start, `the ${testId} seam is never closed`);
+
+  const inner = html.slice(start, end);
+  assert.ok(
+    !inner.includes("<div"),
+    `the ${testId} seam grew a nested <div>, so this helper no longer delimits it`
+  );
+
+  return { tag: open[0], inner };
+}
+
 function clickables(html: string): string[] {
   return [
     ...(html.match(/<button[^>]*>/g) ?? []),
@@ -242,32 +273,41 @@ test("the fine print is not a fourth lead paragraph", () => {
   // and round 2 added a sentence. The standing policy therefore drops to `xs`
   // fine print, so the lead keeps exactly two muted `text-sm` paragraphs.
   const html = render();
-  // The preamble only — the checklist rows below carry `text-sm` descriptions
+
+  // The lead seam only — the checklist rows below carry `text-sm` descriptions
   // of their own, and those are content, not notes.
-  const preamble = html.slice(0, html.indexOf("<form"));
-  const leadParagraphs =
-    preamble.match(/<p class="text-muted-foreground text-sm">/g) ?? [];
+  const lead = seam(html, "prompt-lead");
 
   assert.equal(
-    leadParagraphs.length,
+    (lead.inner.match(/<p[\s>]/g) ?? []).length,
     2,
-    "the prompt's lead should be two muted paragraphs, not a stack of them"
+    "the prompt's lead should be two paragraphs, not a stack of them"
+  );
+  assert.equal(
+    (lead.inner.match(/<p[^>]*class="[^"]*text-sm[^"]*"[^>]*>/g) ?? []).length,
+    2,
+    "the prompt's lead no longer reads at the lead size"
   );
 
-  // Both standing notes live in the one fine-print block, which opens after
-  // the last lead paragraph and is the only `text-xs` container in the form.
-  const finePrint = html.indexOf(
-    '<div class="text-muted-foreground space-y-1 text-xs">'
+  // Both standing notes live in the one fine-print block, and it is smaller
+  // than the lead — that size step is what stops it reading as a fourth line.
+  const finePrint = seam(html, "prompt-fine-print");
+
+  assert.match(
+    finePrint.tag,
+    /class="[^"]*text-xs[^"]*"/,
+    "the fine print is no longer set smaller than the lead"
   );
-  assert.ok(finePrint >= 0, "the fine-print block is missing");
 
   for (const note of [
     "Imported tasks are added as new tasks",
     "Not now creates nothing",
   ]) {
-    const index = html.indexOf(note);
-    assert.ok(index >= 0, `${note} is missing`);
-    assert.ok(index > finePrint, `${note} is not inside the fine print`);
+    assert.ok(html.includes(note), `${note} is missing`);
+    assert.ok(
+      finePrint.inner.includes(note),
+      `${note} is not inside the fine print`
+    );
   }
 });
 

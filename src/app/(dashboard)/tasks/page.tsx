@@ -11,6 +11,7 @@ import type { TaskCategory, TaskPriority, TaskStatus } from "@/db/schema";
 import { verifySession } from "@/lib/auth/session";
 import { getLatestPersonNote } from "@/lib/people/service";
 import { getTaskCounts, listTasks } from "@/lib/tasks/service";
+import { TEMPLATES_LINK_LABEL, TEMPLATES_ROUTE } from "@/lib/tasks/templates";
 
 export const dynamic = "force-dynamic";
 
@@ -114,9 +115,9 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
                 back to the catalog at all.
               */}
               <Button asChild variant="outline" className="cursor-pointer">
-                <Link href="/tasks/templates">
+                <Link href={TEMPLATES_ROUTE}>
                   <ListChecks className="mr-2 h-4 w-4" />
-                  Checklist templates
+                  {TEMPLATES_LINK_LABEL}
                 </Link>
               </Button>
               <Button asChild className="cursor-pointer">
