@@ -51,6 +51,27 @@ export {
   type RaisedCsfStanding,
 } from "./queries";
 
+// The current phase's exit criteria with their fact drill-down (PE-022 +
+// PE-025) — a second pure projection of the same persisted snapshot the CSF
+// scorecard reads. `readSnapshotFact` is exported alongside the projection
+// because it is the one path-reader the criteria are defined against; a caller
+// wanting a raw fact out of a stored snapshot must use it rather than reaching
+// into the JSON, or "every value is SQL-derived" stops being checkable.
+export {
+  buildExitCriteriaProgress,
+  readSnapshotFact,
+  EXIT_CRITERION_MEASURE_STATUSES,
+  EXIT_CRITERION_STANDINGS,
+  PHASE_EXIT_CRITERIA,
+  type CitedFactEvidence,
+  type ExitCriteriaProgress,
+  type ExitCriterionDefinition,
+  type ExitCriterionMeasureStatus,
+  type ExitCriterionProgress,
+  type ExitCriterionStanding,
+  type SnapshotFact,
+} from "./queries";
+
 export {
   MAX_STALENESS_MS,
   isDirtyOrStale,
