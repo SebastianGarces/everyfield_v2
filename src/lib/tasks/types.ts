@@ -30,6 +30,16 @@ export interface TaskCounts {
   complete: number;
   overdue: number;
   total: number;
+  /**
+   * Checklist items belonging to the tasks in scope, counted separately from
+   * the task numbers above (T-016).
+   *
+   * Kept apart on purpose: a ticked checklist item is not a completed task, so
+   * folding it into `complete` would make one task look like six. The UI
+   * reports these on their own quiet line, and only when `checklistTotal > 0`.
+   */
+  checklistComplete: number;
+  checklistTotal: number;
 }
 
 /**

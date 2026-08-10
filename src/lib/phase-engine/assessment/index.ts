@@ -45,6 +45,7 @@ export {
   MAX_STALENESS_MS,
   isDirtyOrStale,
   filterDirtyOrStale,
+  orderByAssessmentAge,
   selectionReasonFor,
   type PlantSelectionInput,
   type SelectionReason,

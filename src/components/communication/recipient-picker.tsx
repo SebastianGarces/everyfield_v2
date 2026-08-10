@@ -9,6 +9,7 @@ import {
   searchPeopleAction,
   resolveGroupAction,
 } from "@/app/(dashboard)/communication/actions";
+import type { RecipientTeamOption } from "@/lib/communication/service";
 
 interface Recipient {
   id: string;
@@ -20,6 +21,8 @@ interface Recipient {
 interface RecipientPickerProps {
   selected: Recipient[];
   onChange: (recipients: Recipient[]) => void;
+  /** Ministry teams offered alongside the status groups (MT-015). */
+  teams?: RecipientTeamOption[];
 }
 
 const quickGroups = [
@@ -29,11 +32,18 @@ const quickGroups = [
   { id: "leaders", label: "Leaders" },
 ];
 
-export function RecipientPicker({ selected, onChange }: RecipientPickerProps) {
+export function RecipientPicker({
+  selected,
+  onChange,
+  teams = [],
+}: RecipientPickerProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Recipient[]>([]);
   const [searching, setSearching] = useState(false);
   const [loadingGroup, setLoadingGroup] = useState<string | null>(null);
+  // UI state only: what the last quick-select resolved to, so a group that
+  // resolves to nobody says so instead of appearing to do nothing.
+  const [notice, setNotice] = useState<string | null>(null);
 
   const handleSearch = useCallback(
     async (value: string) => {
@@ -69,24 +79,32 @@ export function RecipientPicker({ selected, onChange }: RecipientPickerProps) {
     onChange(selected.filter((r) => r.id !== id));
   };
 
-  const handleQuickGroup = async (groupId: string) => {
+  /**
+   * Add everyone a group resolves to. The server returns the whole people, so
+   * the selection is the resolved membership itself — not a page of a search.
+   */
+  const handleQuickGroup = async (groupId: string, label: string) => {
     setLoadingGroup(groupId);
+    setNotice(null);
     try {
-      const { ids } = await resolveGroupAction(groupId);
-      if (ids.length === 0) return;
+      const { people } = await resolveGroupAction(groupId);
 
-      // Fetch person details for these IDs
-      const people = await searchPeopleAction("");
+      if (people.length === 0) {
+        setNotice(`${label} has no active members to add.`);
+        return;
+      }
+
       const selectedIds = new Set(selected.map((r) => r.id));
-      const groupIds = new Set(ids);
-
-      const newPeople = people.filter(
-        (p) => groupIds.has(p.id) && !selectedIds.has(p.id)
-      );
+      const newPeople = people.filter((p) => !selectedIds.has(p.id));
 
       if (newPeople.length > 0) {
         onChange([...selected, ...newPeople]);
       }
+      setNotice(
+        newPeople.length === 0
+          ? `${label} was already selected — ${people.length} recipient${people.length === 1 ? "" : "s"}.`
+          : `Added ${newPeople.length} recipient${newPeople.length === 1 ? "" : "s"} from ${label}.`
+      );
     } finally {
       setLoadingGroup(null);
     }
@@ -101,10 +119,11 @@ export function RecipientPicker({ selected, onChange }: RecipientPickerProps) {
         {quickGroups.map((group) => (
           <Button
             key={group.id}
+            type="button"
             variant="outline"
             size="sm"
             className="cursor-pointer"
-            onClick={() => handleQuickGroup(group.id)}
+            onClick={() => handleQuickGroup(group.id, group.label)}
             disabled={loadingGroup === group.id}
           >
             <Users className="mr-1 h-3 w-3" />
@@ -112,6 +131,41 @@ export function RecipientPicker({ selected, onChange }: RecipientPickerProps) {
           </Button>
         ))}
       </div>
+
+      {/* Ministry teams (MT-015) */}
+      {teams.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-muted-foreground text-xs font-medium">
+            Ministry teams
+          </p>
+          <div
+            className="flex flex-wrap gap-2"
+            data-testid="team-quick-selects"
+          >
+            {teams.map((team) => {
+              const selector = team.selector;
+              return (
+                <Button
+                  key={team.id}
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="cursor-pointer"
+                  data-testid={`team-quick-select-${team.id}`}
+                  onClick={() => handleQuickGroup(selector, team.name)}
+                  disabled={loadingGroup === selector}
+                >
+                  <Users className="mr-1 h-3 w-3" />
+                  {loadingGroup === selector ? "Loading..." : team.name}
+                  <span className="text-muted-foreground ml-1 tabular-nums">
+                    {team.memberCount}
+                  </span>
+                </Button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Search input */}
       <div className="relative">
@@ -126,11 +180,12 @@ export function RecipientPicker({ selected, onChange }: RecipientPickerProps) {
 
       {/* Search results dropdown */}
       {results.length > 0 && (
-        <div className="max-h-48 overflow-auto rounded-md border bg-white shadow-sm">
+        <div className="bg-popover max-h-48 overflow-auto rounded-md border shadow-sm">
           {results.map((person) => (
             <button
               key={person.id}
-              className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50"
+              type="button"
+              className="hover:bg-accent flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-sm"
               onClick={() => addRecipient(person)}
             >
               <span className="font-medium">
@@ -148,19 +203,31 @@ export function RecipientPicker({ selected, onChange }: RecipientPickerProps) {
         <p className="text-muted-foreground text-sm">Searching...</p>
       )}
 
+      <p aria-live="polite" className="text-muted-foreground min-h-5 text-sm">
+        {notice}
+      </p>
+
       {/* Selected recipients */}
       {selected.length > 0 && (
         <div className="space-y-2">
-          <p className="text-muted-foreground text-sm">
+          <p
+            className="text-muted-foreground text-sm"
+            data-testid="selected-count"
+          >
             {selected.length} recipient{selected.length !== 1 ? "s" : ""}{" "}
             selected
           </p>
-          <div className="flex flex-wrap gap-1.5">
+          <div
+            className="flex flex-wrap gap-1.5"
+            data-testid="selected-recipients"
+          >
             {selected.slice(0, 20).map((person) => (
               <Badge key={person.id} variant="secondary" className="gap-1 py-1">
                 {person.firstName} {person.lastName}
                 <button
-                  className="cursor-pointer rounded-full p-0.5 hover:bg-gray-300"
+                  type="button"
+                  aria-label={`Remove ${person.firstName} ${person.lastName}`}
+                  className="hover:bg-muted-foreground/25 cursor-pointer rounded-full p-0.5"
                   onClick={() => removeRecipient(person.id)}
                 >
                   <X className="h-3 w-3" />

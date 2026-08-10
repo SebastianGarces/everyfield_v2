@@ -15,9 +15,11 @@ Each section links `invariants/<domain>.md` for the why, the pattern and the wor
 - In a batch the compare-and-set goes FIRST and the dependent write's `WHERE` re-asserts what the claim set — an empty `returning()` is not an error and rolls nothing back.
 - A compare-and-set serialises only same-row writers; a predicate about another table is a snapshot read. To compete for a row elsewhere, `SELECT … FOR UPDATE` it as statement ONE and gate on the dependent write's own rowcount.
 - In a `WITH` chain a `FOR UPDATE` snapshot CTE must be a DEPENDENCY of the write (`update … from current c`), never a sibling only the journal joins — pulled lazily after the UPDATE it reads nothing, and the history row is silently lost.
+- A plant declares its starting phase ONCE, and the DATABASE is what says so: `phase_transitions_initial_declaration_unique_idx` (partial, on `church_id where kind = 'initial_declaration'`) plus `ON CONFLICT … DO NOTHING` — never a `NOT EXISTS` over `phase_transitions`, which is the same-lock-different-table trap and was raced into fabricating history.
 - A church and its `church_privacy_settings` row are created by ONE batch; the loser's orphan church is swept afterwards under a `NOT EXISTS` guard.
 - Both answers to an empty planter seat — the No as well as the Yes — open with `SELECT … FROM churches … FOR UPDATE` and are gated on their own rowcount.
 - `finalizeAttendance()` emits downstream first, then compare-and-sets `actual_attendance` (non-null = finalized = its idempotency key); `meeting.attendance.finalized` is emitted STRICTLY.
+- Accepted residual: the COM-020 task→communication log entry has only a SELECT-then-INSERT on `communication_recipients.external_id = 'task:<id>'`; `completeTask` is a read-then-write, so a double-clicked Complete writes two entries until a partial unique index exists.
 - Accepted residual: `meeting.attendance.recorded` is non-strict — a failed prospect → attendee advance is swallowed rather than blocking finalization.
 
 ## Multi-Tenancy
@@ -45,6 +47,8 @@ Each section links `invariants/<domain>.md` for the why, the pattern and the wor
 - Call `canAccessFeatureData(user, churchId, feature)` before returning feature data; the six `share_*` toggles default false and gate what oversight may PULL.
 - PUSH is far narrower: an oversight recipient gets ONLY the daily digest and three milestone events; `enqueue` refuses every granular category for them unconditionally, gated by `share_activity_with_oversight` read at enqueue time.
 - That toggle gates PUSH only and the consent copy may not claim more — `getOversightPlantHealth()` returns name, phase, launch countdown and health with NO privacy gate.
+- A refused category is never OFFERED either (ruled 2026-08-09, extending #254): the settings screen and `setNotificationPreferenceAction` both derive from `OVERSIGHT_ELIGIBLE_CATEGORIES` via `audienceMayReceiveCategory` — never a second list of the five granular names.
+- Its ruled presentation is SHOWN-AND-LABELLED, not hidden: the five rows stay visible with a "Not sent to you" token and inert switches, and the reason (`OVERSIGHT_INELIGIBLE_CATEGORY_NOTE`) is said once, visibly — never tooltip-only.
 - Reaching a plant is not permission to name the orgs BEHIND it: every org name on an oversight surface must be the caller's own or inside it, scoped in the `WHERE` clause.
 - A launch countdown compares two DAYS — floor `asOf` to its UTC day BEFORE subtracting a `yyyy-mm-dd` target date. ONE implementation: `daysUntilTarget` (`src/lib/launch/countdown.ts`); never a second copy under any name — the copy is always the one that misses the fix.
 
@@ -58,7 +62,10 @@ Each section links `invariants/<domain>.md` for the why, the pattern and the wor
 - A state-changing action never takes its actor as an argument — it mints one from `verifySession()`. An entity implied by the actor (their own plant, their own org) is not an argument either.
 - A shared secret is never compared with `===`: use `matchesBearerSecret`/`constantTimeEquals` from `src/lib/security/constant-time.ts`, which hashes both sides to a fixed length first. Covers `CRON_SECRET` and `REVALIDATION_SECRET`.
 - A request header the app does not write UNCONDITIONALLY is client input and nothing may branch on it. `x-pathname` (`PATHNAME_HEADER`) is the one trusted header, and its absence must fail closed.
-- The crawler allowance is ONE predicate, `isCrawlerPreviewRequest(userAgent, pathname)`, over a fixed route list that is a subset of the protected list. It buys the unauthenticated shell, never a session and never per-user data.
+- The crawler allowance is ONE predicate, `isCrawlerPreviewRequest(userAgent, pathname)`, over a fixed route list that is a STRICT subset of the protected list — `/wiki` only. It buys the unauthenticated shell, never a session and never per-user data.
+- Listing a route there means "this route produces a session-less render worth previewing" (ruled 2026-08-09): it must render with no session AND that render must be the page, not a redirect. `/dashboard` failed the first (it calls `verifySession()`, so crawlers 500'd); `/oversight` failed the second (its pages redirect to /login, so no card was ever produced).
+- Both stay in the proxy's `PROTECTED_ROUTE_PREFIXES`, named EXPLICITLY and not through the spread of the previewable list — dropping a prefix from that list must never unprotect the route as a side effect.
+- The `whatsapp` crawler token is anchored — `^whatsapp/<digit>`, which is WhatsApp's link-preview FETCHER, whose UA is only the token. Its in-app browser is a human behind a `Mozilla/5.0 …` UA that also says WhatsApp; a bare substring called that person a bot.
 
 ## Password Security
 
@@ -69,6 +76,17 @@ Each section links `invariants/<domain>.md` for the why, the pattern and the wor
 - The roles are `planter`, `coach`, `team_member`, `sending_church_admin`, `network_admin`.
 - Planter: full CRUD on their own church. Team member: feature-limited within it. Coach: read on assigned planters via `coach_assignments`. Both oversight admins: aggregates for churches matching their org FK, subject to the privacy toggles.
 - Outside registration a role is granted in exactly ONE place — the OB-010 planter claim on a planterless plant, promoting `team_member` → `planter`. Eligibility is `canAnswerLeadershipQuestion` (`src/lib/onboarding/leadership.ts`), and the SQL repeats the role check so it never rests on a JS check alone. It is a raced write; see [transactions-atomicity](invariants/transactions-atomicity.md).
+
+## Phase History — Declarations vs Transitions
+
+Applies to `phase_transitions` and every reader of it. Ruled on #306 (2026-08-09).
+
+- `phase_transitions` is TWO populations, told apart by the stored `kind` discriminator and never by the reason text: `transition` (a move the planter made inside EveryField) and `initial_declaration` (where the plant already stood when it arrived, OB-005).
+- A declaration is NOT an advance. Anything counting, gating on or announcing "reached a new stage" filters `kind = 'transition'` — one predicate, `phaseAdvanceCondition()` (`src/lib/notifications/oversight-events.ts`), which `stageReachedCondition` and `hasActivityCondition` both call so the count and the "was there activity at all?" gate cannot drift apart.
+- `declareInitialPhase` emits NO `phase.changed`. `PhaseChangedEvent` carries no `kind`, so its subscriber cannot tell a declaration from a move; adding a subscriber that needs to see declarations means adding `kind` to the payload FIRST, never re-adding the emit.
+- A second declaration is REFUSED, never overwritten and never half-applied (ruled: refuse with a message). `declareJourney` branches on `already_declared`, reports the STORED phase, and says both what is on record and that the launch date on the same form did save.
+- The launch date is never written to a column on `churches` — `churches.launch_date` was dropped by migration 0032 and the launch entity owns it (LS-001). Onboarding sets it through `scheduleLaunchAction`, the same rail as `/launch`, so the row lock, the `launch_events` journal, the oversight announcement and the Playbook seed all come for free.
+- "No date yet" writes nothing on a first pass and is REFUSED on re-entry over a stored date: there is no unschedule write path (`launch_events` has no event type for a cleared date, and a scheduled launch has already seeded milestones), so the step names the stored day and points at `/launch` rather than silently leaving a countdown the radio hint promised would be empty.
 
 ## Wiki Articles
 
@@ -82,6 +100,30 @@ Each section links `invariants/<domain>.md` for the why, the pattern and the wor
 - A church's own row for a slug OVERRIDES the global article of that name (`preferChurchOverride`); `wiki_articles_slug_church_idx` is unique on (slug, church_id), so at most two rows can match and the church's wins.
 - Every `churchId` parameter on the wiki reads defaults to `null`, so a call site that forgets to thread the session fails CLOSED — it under-fetches the church's own content rather than leaking another church's.
 - Cross-links live ONLY in `related_article_slugs`, never in an article's prose — the authored `## Related Articles` section was migrated out of all 96 articles (#317). Writing one back into `content` renders the list twice, and no test catches it.
+
+## Communication — Resend & Delivery Figures
+
+Applies to `src/lib/communication/**` and the `/communication` surfaces. Ruled 2026-08-09 on PR #371.
+
+- A resend to non-openers is offered ONLY when both hold: at least `RESEND_COOLDOWN_HOURS` (24) since `sent_at`, AND at least one recipient row confirmed delivered. One decision — `evaluateResendEligibility` (`src/lib/communication/resend-policy.ts`) — drives the button and is re-checked inside `resendToNonOpeners`; the UI gate is never the only gate.
+- A `sent` message with a null `sent_at` is `tooSoon`, not eligible. The cooldown that cannot be proven elapsed has not elapsed.
+- `UNREACHABLE_STATUSES` = `bounced` AND `failed`, and `nonOpenerScope` excludes both. A `failed` row is an address the provider refused — retrying it cannot succeed and spends sender reputation. Never re-split the two.
+- "Delivery rate" names exactly ONE figure: `delivered / attempted`, on the church-wide overview only. A single message's tiles report COUNTS with the denominator in the caption ("Delivered · 6 · of 10 recipients") and claim no rate — the tile once divided by all recipient rows and called that the delivery rate too, which is a different number under the same name.
+- A rate with a zero denominator is UNKNOWN (`toPercent` → `null`, rendered as `—`), never `0%`. "0% open rate" is a claim about a send that never arrived.
+
+## Tasks, Subtasks & Recurrence
+
+→ [tasks](invariants/tasks.md) — `src/lib/tasks/**`, `src/app/(dashboard)/tasks/**`.
+
+- Nesting is ONE level, enforced in both directions: a subtask may not take children, and a task that already has children may not be demoted into one. Half the rule is no rule — refusing only the first is bypassed by parenting the other way round.
+- Completing every subtask does NOT complete the parent. There is deliberately no code that does it (#90); the absence is the ruling, not an oversight, and the UI says so out loud.
+- A subtask is a checklist item, not a task. Anything reporting a NUMBER of tasks applies `topLevelTasksOnly()` — `listTasks` and `getTaskCounts` share it, because the badges and the list under them must count one population (ruled on #370). Checklist progress is reported separately, never folded into `complete`.
+- A new subtask inherits its parent's assignee (#370). A default, not a lock — an explicit assignee wins and the subtask is reassignable. An unowned checklist item reaches no "My tasks" view and nobody is accountable for it.
+- The checklist is part of a recurring task's TEMPLATE: completing one mints the successor with EVERY item copied across, unticked — the ticked ones and the never-started ones under one rule (#370). Per-item carry-over state was rejected; a repeating task repeats whole.
+- Copied children get explicit `created_at` stamps one millisecond apart. `listSubtasks` sorts by `created_at`, and one multi-row INSERT stamps every default with the same transaction timestamp, leaving checklist order to a random-UUID tiebreak.
+- Exactly ONE instance of a recurring series is open at a time, minted on completion — never by a cron. The guard runs BEFORE the successor insert, so a resurrected series gains neither a second open task nor a duplicate checklist.
+- `completionEvent` is never copied to a successor: `meeting.evaluation.completed` is backed by a partial unique index, so copying it aborts the second instance's insert. Recurrence mints plain work; hooks stay with the generator.
+- A completion is written FIRST and its successor second — the reverse of the usual durable-marker-last rule, deliberately. A successor with no completion leaves two open instances; a completion with no successor is repaired by reopening and re-completing.
 
 ## Dev Seeds
 

@@ -5,6 +5,7 @@ import {
   filterDirtyOrStale,
   isDirtyOrStale,
   MAX_STALENESS_MS,
+  orderByAssessmentAge,
   selectionReasonFor,
   type PlantSelectionInput,
 } from "./dirty";
@@ -99,6 +100,92 @@ test("filterDirtyOrStale keeps only selectable plants, preserving order", () => 
   assert.deepEqual(
     out.map((p) => p.churchId),
     ["dirty", "fresh"]
+  );
+});
+
+// ----------------------------------------------------------------------------
+// orderByAssessmentAge (#36): the runner caps the batch and drops the tail, so
+// this order is the only thing standing between a fixed set of plants and never
+// being assessed at all.
+// ----------------------------------------------------------------------------
+
+test("orderByAssessmentAge puts the longest-waiting plant first", () => {
+  const out = orderByAssessmentAge([
+    input({
+      churchId: "yesterday",
+      latestAssessmentAt: new Date(NOW.getTime() - ONE_DAY),
+    }),
+    input({
+      churchId: "last-week",
+      latestAssessmentAt: new Date(NOW.getTime() - 7 * ONE_DAY),
+    }),
+    input({
+      churchId: "an-hour-ago",
+      latestAssessmentAt: new Date(NOW.getTime() - 60 * 60 * 1000),
+    }),
+  ]);
+
+  assert.deepEqual(
+    out.map((p) => p.churchId),
+    ["last-week", "yesterday", "an-hour-ago"]
+  );
+});
+
+test("never-assessed plants sort ahead of every assessed one", () => {
+  // Waiting forever beats waiting a long time. A plant with no assessment has
+  // nothing to show a planter at all, so it outranks any stale snapshot.
+  const out = orderByAssessmentAge([
+    input({
+      churchId: "ancient",
+      latestAssessmentAt: new Date(NOW.getTime() - 400 * ONE_DAY),
+    }),
+    input({ churchId: "never-b", latestAssessmentAt: null }),
+    input({
+      churchId: "recent",
+      latestAssessmentAt: new Date(NOW.getTime() - ONE_DAY),
+    }),
+    input({ churchId: "never-a", latestAssessmentAt: null }),
+  ]);
+
+  assert.deepEqual(
+    out.map((p) => p.churchId),
+    ["never-a", "never-b", "ancient", "recent"]
+  );
+});
+
+test("ties break on churchId, so the order is total and repeatable", () => {
+  // Two plants assessed in the same run share a timestamp. Without the
+  // tiebreak the cap would drop whichever the DB scan happened to return last,
+  // which is stable across runs — i.e. the same plant, every run.
+  const sameInstant = new Date(NOW.getTime() - 2 * ONE_DAY);
+  const plants = [
+    input({ churchId: "c", latestAssessmentAt: sameInstant }),
+    input({ churchId: "a", latestAssessmentAt: sameInstant }),
+    input({ churchId: "b", latestAssessmentAt: sameInstant }),
+  ];
+
+  assert.deepEqual(
+    orderByAssessmentAge(plants).map((p) => p.churchId),
+    ["a", "b", "c"]
+  );
+  // Same input in a different scan order gives the same answer.
+  assert.deepEqual(
+    orderByAssessmentAge([...plants].reverse()).map((p) => p.churchId),
+    ["a", "b", "c"]
+  );
+});
+
+test("orderByAssessmentAge does not mutate its input", () => {
+  const plants = [
+    input({ churchId: "z", latestAssessmentAt: new Date(NOW.getTime() - 1) }),
+    input({ churchId: "a", latestAssessmentAt: null }),
+  ];
+
+  orderByAssessmentAge(plants);
+
+  assert.deepEqual(
+    plants.map((p) => p.churchId),
+    ["z", "a"]
   );
 });
 
