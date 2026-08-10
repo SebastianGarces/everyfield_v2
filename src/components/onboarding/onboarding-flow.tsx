@@ -49,7 +49,8 @@ export async function OnboardingFlow({
       declaredPhase={church?.currentPhase ?? null}
       // ANY team means the initialization would do nothing —
       // `initializeTeamsWithRolesAction` refuses a church that already has
-      // teams, because `initializePredefinedTeams` inserts unconditionally. The
+      // teams, and `initializePredefinedTeams` would skip every template it
+      // already holds anyway (`ON CONFLICT … DO NOTHING`, migration 0034). The
       // card and the action therefore ask the same question.
       teamsInitialized={teams.length > 0}
     />

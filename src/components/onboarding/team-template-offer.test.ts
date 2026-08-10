@@ -370,9 +370,12 @@ test("the offer's action is a caller of the shipped initialization", () => {
     );
   }
 
-  // Running it against a church that already has teams would duplicate them,
-  // because the initialization inserts unconditionally. The card asks the same
-  // question before it appears at all (`shouldOfferTeamTemplates`).
+  // A church that already has teams is skipped without a write. The read is a
+  // convenience, not the concurrency guard — that lives in
+  // `initializePredefinedTeams` as one insert with `ON CONFLICT DO NOTHING`
+  // against `ministry_teams_predefined_name_unique_idx` (migration 0034), and
+  // `predefined-teams-guard.test.ts` pins it. The card asks the same question
+  // before it appears at all (`shouldOfferTeamTemplates`).
   assert.match(OFFER_ACTION, /await listTeamsAction\(\)/);
   assert.match(OFFER_ACTION, /existing\.data\.length > 0/);
 });

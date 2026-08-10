@@ -59,11 +59,13 @@ export function meetsTeamTemplateOfferPhase(
  * at phase 2 or later AND does not have teams yet.
  *
  * `teamsInitialized` is "does this plant have ANY ministry team", which is the
- * same question `initializeTeamsWithRolesAction` asks before it writes: the
- * initialization inserts unconditionally, so it refuses a church that already
- * has teams. Offering something that would do nothing is a worse first
- * impression than not offering it, so the two answers are kept identical on
- * purpose — the card appears exactly when pressing it would create something.
+ * same question `initializeTeamsWithRolesAction` asks before it writes, so a
+ * plant that already has teams is skipped there too — and would in any case
+ * gain nothing, since `initializePredefinedTeams` skips every template it
+ * already holds (`ON CONFLICT … DO NOTHING`, migration 0034). Offering
+ * something that would do nothing is a worse first impression than not
+ * offering it, so the two answers are kept identical on purpose — the card
+ * appears exactly when pressing it would create something.
  */
 export function shouldOfferTeamTemplates({
   declaredPhase,

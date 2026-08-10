@@ -243,15 +243,19 @@ const TEAM_ROLES_PARTIAL_MESSAGE =
  * argument names a user, a church or a team, so a forged POST can only
  * initialize the caller's own plant (`memory/invariants.md` → Authentication).
  *
- * ALREADY-INITIALIZED CHURCHES ARE A NO-OP. `initializePredefinedTeams` inserts
- * unconditionally, so running the offer against a church that already has teams
- * would give it a second Worship team rather than nothing. The guard is a read,
- * so it settles the case it is written for — an accept by a planter who already
- * pressed "Set Up Ministry Teams" on /teams — and NOT two simultaneous accepts
- * (`memory/invariants.md` → Transactions: SELECT-then-INSERT is not a
- * concurrency guard). Closing that would need a uniqueness constraint the
- * schema does not have; the offer is a single disabled-while-pending button on
- * a screen that navigates away on success, so the race needs two tabs to reach.
+ * ALREADY-INITIALIZED CHURCHES ARE A NO-OP, TWICE OVER. The read below skips
+ * the whole call for a plant that already has teams — including teams the
+ * planter made themselves, which is the same question the finish screen asks
+ * before offering at all. It is a convenience, NOT the concurrency guard
+ * (`memory/invariants.md` → Transactions: SELECT-then-INSERT is not one). The
+ * real guard is inside `initializePredefinedTeams`: one INSERT carrying
+ * `ON CONFLICT … DO NOTHING` against `ministry_teams_predefined_name_unique_idx`
+ * (migration 0034), so two simultaneous accepts produce one set of teams and the
+ * loser creates nothing. Both callers of that function are covered, which a
+ * guard living here could never manage.
+ *
+ * The loser's role import is a no-op for free: it iterates the rows this call
+ * created, and the loser created none.
  *
  * PARTIAL IS REPORTED, NOT ROLLED BACK. If a role import fails the teams are
  * already real and useful; deleting them to make the call atomic would throw

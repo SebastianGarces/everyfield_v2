@@ -53,6 +53,30 @@ export type PhaseIntroduced = (typeof phaseIntroduced)[number];
 // ----------------------------------------------------------------------------
 // Ministry Teams - Core team entity
 // ----------------------------------------------------------------------------
+/**
+ * OB-015 / #306 — a plant has at most ONE predefined team of each name, and the
+ * DATABASE is what says so (`ministry_teams_predefined_name_unique_idx`).
+ *
+ * WHY. `initializePredefinedTeams` is reachable from two places — the /teams
+ * "Set Up Ministry Teams" button and the onboarding finish screen's offer — and
+ * both used to be guarded by a read ("does this church have teams yet?") before
+ * a loop of unconditional inserts. `memory/invariants.md` → Transactions names
+ * that shape exactly: SELECT-then-INSERT is not a concurrency guard. Two accepts
+ * a few milliseconds apart both passed the read and the plant woke up with 20
+ * teams and 96 roles.
+ *
+ * WHY PARTIAL, ON `type = 'predefined'`. The templates are a closed, named set,
+ * so "one Worship team per plant" is a truth about them. A planter's OWN teams
+ * are not: two custom teams may legitimately share a name while the planter
+ * settles on one, and a unique index over the whole table would refuse that
+ * with a database error in the middle of a form. The predicate keeps the
+ * constraint where the invariant actually holds.
+ *
+ * The insert that speaks for this index carries `ON CONFLICT … DO NOTHING` with
+ * the SAME predicate — see `initializePredefinedTeams`. The two change together:
+ * a mismatch is not subtle, it is "there is no unique or exclusion constraint
+ * matching the ON CONFLICT specification" on every initialization.
+ */
 export const ministryTeams = pgTable(
   "ministry_teams",
   {
@@ -87,6 +111,9 @@ export const ministryTeams = pgTable(
   (table) => [
     index("ministry_teams_church_id_idx").on(table.churchId),
     index("ministry_teams_leader_id_idx").on(table.leaderId),
+    uniqueIndex("ministry_teams_predefined_name_unique_idx")
+      .on(table.churchId, table.name)
+      .where(sql`${table.type} = 'predefined'`),
   ]
 );
 
