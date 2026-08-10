@@ -100,8 +100,39 @@ export type RevokeInvitationState = { error?: string };
  * A resend says one of two things and never both: it went out, or here is why
  * it did not. There is no third "created but…" state to carry — the invitation
  * already exists, so the send is the whole of what this action does.
+ *
+ * A success carries `cooldown` as well (RULED 2026-08-10 round 2). It is the
+ * dedupe bucket the provider was keyed with, and the surface refuses the next
+ * press for the rest of it: inside that span a second attempt at this invitation
+ * is collapsed onto the message already accepted, so a live button would report
+ * "Email sent" over a send the provider dropped.
+ *
+ * SPELLED OUT HERE rather than imported, because this type is the wire: every
+ * field crosses to the browser inside `useActionState`, so the shape the client
+ * may rely on is declared at the boundary that serializes it. Two numbers, both
+ * plain arithmetic on the clock — the invitation id is NOT among them, and the
+ * provider key it is part of never leaves the server.
  */
-export type ResendInvitationEmailState = { error?: string; sent?: boolean };
+export type ResendInvitationEmailState = {
+  error?: string;
+  sent?: boolean;
+  cooldown?: {
+    /**
+     * The bucket number. Its only job on the client is IDENTITY: two successes
+     * reporting one index are one deadline, so a second admin's send does not
+     * restart a countdown that is already running, and a genuinely later send is
+     * a different index and a fresh one.
+     */
+    window: number;
+    /**
+     * How much of that bucket was left when the server answered. A DURATION, not
+     * an instant, and the surface counts it down by measuring its OWN elapsed
+     * time: no clock reading crosses this boundary, so a workstation minutes out
+     * of step still waits the right length of time.
+     */
+    remainingMs: number;
+  };
+};
 
 export async function createInvitationAction(
   _prevState: CreateInvitationState,
@@ -199,7 +230,21 @@ export async function resendInvitationEmailAction(
 
   refresh();
 
-  return { sent: true };
+  // The window the send was keyed with, carried through verbatim. It is only
+  // absent if the service ever stopped reporting one, and the surface treats
+  // that as "no cooldown" rather than inventing a duration — a made-up wait is
+  // a claim about the provider too.
+  return {
+    sent: true,
+    ...(result.resendWindow
+      ? {
+          cooldown: {
+            window: result.resendWindow.index,
+            remainingMs: result.resendWindow.remainingMs,
+          },
+        }
+      : {}),
+  };
 }
 
 export async function revokeInvitationAction(

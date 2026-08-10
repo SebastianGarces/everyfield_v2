@@ -70,6 +70,14 @@ import {
   INVITATION_REGISTER_PATH,
   invitationRegisterPath,
 } from "./register-path";
+// The dedupe bucket, from the other import-free leaf on this path. ONE piece of
+// arithmetic serves the provider key below and the button's countdown; see
+// `./resend-window` for why it is not written twice.
+import {
+  RESEND_DEDUPE_WINDOW_MS,
+  resendDedupeWindowAt,
+  type ResendDedupeWindow,
+} from "./resend-window";
 
 // ----------------------------------------------------------------------------
 // The link
@@ -150,18 +158,18 @@ export type InvitationSendOccasion =
   | { kind: "resend"; at: Date };
 
 /**
- * How long two resends of one invitation share a dedupe key.
- *
- * This is the answer to "what stops an admin re-sending ten times?" for the
- * only thing that matters — the invitee's inbox. It is NOT a rate limit on the
- * action (nothing is persisted, by the ruling), it is the window in which a
- * double-clicked button, or a page kept open by two admins, presents the SAME
- * `Idempotency-Key` and the provider delivers once. One minute is long enough
- * to cover a human double-press and short enough that a deliberate second
- * attempt — the admin fixed a misconfigured sender and tried again — is a
- * genuinely new send.
+ * The window itself lives in `./resend-window`, an import-free leaf, because the
+ * PENDING LIST needs the same arithmetic: round 2 of the ruling (2026-08-10)
+ * disables the button for the remainder of the bucket this key is built from and
+ * counts it down, and this module cannot be imported by a client component
+ * without shipping the Resend SDK to the browser. Re-exported so a reader — and
+ * every existing importer — still finds the window where the key is.
  */
-export const RESEND_DEDUPE_WINDOW_MS = 60_000;
+export {
+  RESEND_DEDUPE_WINDOW_MS,
+  resendDedupeWindowAt,
+  type ResendDedupeWindow,
+};
 
 /**
  * The provider-side dedupe key. Always INVITATION-SCOPED, whatever the
@@ -184,8 +192,10 @@ export function invitationEmailIdempotencyKey(
   const base = `org-invitation-${invitationId}`;
   if (occasion.kind === "create") return base;
 
-  const window = Math.floor(occasion.at.getTime() / RESEND_DEDUPE_WINDOW_MS);
-  return `${base}-resend-${window}`;
+  // The bucket, never re-derived here: the surface disables the button for the
+  // rest of THIS index, so a second copy of the arithmetic would let the two
+  // disagree about when the provider starts accepting a new key.
+  return `${base}-resend-${resendDedupeWindowAt(occasion.at).index}`;
 }
 
 export type InvitationEmailOutcome =

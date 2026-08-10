@@ -17,7 +17,7 @@
 // to compare. The authority check itself is in the UPDATE, never here.
 // ============================================================================
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 
 import {
   resendInvitationEmailAction,
@@ -39,6 +39,14 @@ import {
 // this chunk (`@/lib/invitations/register-path` explains why it is its own
 // file). Never re-spell the query string here.
 import { invitationRegisterPath } from "@/lib/invitations/register-path";
+// The other import-free leaf on this path, and imported for the same reason:
+// the cooldown arithmetic is shared with the provider dedupe key, and the module
+// that builds that key reaches the Resend SDK. `@/lib/invitations/resend-window`
+// imports nothing at all, so the browser gets the two functions and no client.
+import {
+  resendCooldownLabel,
+  resendCooldownSecondsLeft,
+} from "@/lib/invitations/resend-window";
 
 export type InvitationStatus =
   | "pending"
@@ -191,8 +199,76 @@ function CopyInviteLinkButton({ invitationId }: { invitationId: string }) {
 
 const initialResendState: ResendInvitationEmailState = {};
 
+type ResendCooldown = NonNullable<ResendInvitationEmailState["cooldown"]>;
+
 /**
- * "Resend email" — RULED 2026-08-10 (#392 / #293).
+ * Seconds left before the Resend button means anything again — RULED 2026-08-10
+ * round 2 (#392 / #293).
+ *
+ * DURATIONS, NEVER INSTANTS. The action reports how much of the provider's
+ * dedupe bucket was left when it answered; this hook subtracts how long it has
+ * been counting since. No epoch instant crosses to the browser and none is
+ * compared here, so a workstation clock minutes out of step is not a factor —
+ * the wait is the right LENGTH whatever the machine believes the time is.
+ *
+ * THE FIRST RENDER ALREADY REFUSES. `elapsed` belongs to the window it was
+ * measured against, so a window it has not started counting yet is used at full
+ * length, straight from the server's number — the button is disabled in the same
+ * commit that reports the send, with no frame in between where a second press
+ * would land. That is why the reset is a comparison during render rather than an
+ * effect that sets state after paint.
+ *
+ * `windowIndex` is IDENTITY, not arithmetic: two successes inside one bucket
+ * report one index, so a second admin's send lands on the countdown already
+ * running rather than restarting it, and a genuinely later send is a different
+ * index and a fresh one. Keying on "did the action state change" would restart
+ * it on every submit, including the refusals.
+ *
+ * The `useEffect` here is a TIMER, not data synchronization
+ * (memory/contracts/data-patterns.md): it subscribes to the clock, an external
+ * system, and touches nothing the server owns. Nothing about the invitation is
+ * in local state — the row is still props, and the outcome is still the
+ * transient action result.
+ */
+function useResendCooldown(cooldown: ResendCooldown | undefined): number {
+  const windowIndex = cooldown?.window;
+  const remainingMs = cooldown?.remainingMs ?? 0;
+
+  const [elapsed, setElapsed] = useState<{
+    window: number | undefined;
+    ms: number;
+  }>({ window: undefined, ms: 0 });
+
+  useEffect(() => {
+    if (remainingMs <= 0) return;
+
+    // The one reading of the clock, and it starts here rather than at render:
+    // an effect may be impure, a render may not
+    // (react.dev → components-and-hooks-must-be-pure).
+    const startedAtMs = Date.now();
+
+    // Nothing is reset here, and nothing needs to be: `elapsed` carries the
+    // window it was measured against, so until the first tick lands the render
+    // below already reads a new window as "none of it spent".
+    //
+    // Twice a second, so the label is never more than half a second stale, and
+    // the timer stops itself the moment the window is spent rather than ticking
+    // for the life of the page.
+    const timer = setInterval(() => {
+      const ms = Date.now() - startedAtMs;
+      setElapsed({ window: windowIndex, ms });
+      if (ms >= remainingMs) clearInterval(timer);
+    }, 500);
+
+    return () => clearInterval(timer);
+  }, [windowIndex, remainingMs]);
+
+  const countedMs = elapsed.window === windowIndex ? elapsed.ms : 0;
+  return resendCooldownSecondsLeft(remainingMs - countedMs);
+}
+
+/**
+ * "Resend email" — RULED 2026-08-10 (#392 / #293), amended the same day.
  *
  * The invitation email is best-effort at create time, and until this button
  * existed a failed send was recoverable only for the seconds the create notice
@@ -203,6 +279,23 @@ const initialResendState: ResendInvitationEmailState = {};
  * The outcome is transient by design — the send either happened or it did not,
  * and the next render of this page starts from no claim at all rather than from
  * a remembered one the product cannot actually stand behind.
+ *
+ * ROUND 2: AFTER A SEND THE BUTTON REFUSES FOR THE REST OF THE DEDUPE WINDOW,
+ * and says how long that is. The window is kept — it is the double-click guard,
+ * and the two-admins-on-one-page guard — but round 1 left the button live inside
+ * it, so a second press returned "Email sent" while the provider collapsed the
+ * message onto the one it had already accepted. The product must never claim a
+ * send the provider will drop, so the control is unavailable for exactly as long
+ * as that claim would be false, and the label counts the wait down instead of
+ * leaving the admin to guess.
+ *
+ * NATIVE `disabled`, not `aria-disabled`: the send genuinely cannot happen, so
+ * the platform behaviour — out of the tab order, unclickable, dimmed, no
+ * submission — is the honest one, and it is the only guard that no submission
+ * path (click, Enter, implicit) can get around. The countdown lives in the
+ * button's own label rather than in the `role="status"` region next to it: that
+ * region says "Email sent" ONCE, and a live region re-announcing a number every
+ * second would make this row unusable with a screen reader.
  */
 function ResendEmailButton({
   invitationId,
@@ -215,6 +308,8 @@ function ResendEmailButton({
     resendInvitationEmailAction,
     initialResendState
   );
+  const secondsLeft = useResendCooldown(state.cooldown);
+  const cooling = secondsLeft > 0;
 
   return (
     <form action={formAction} className="flex items-center gap-2">
@@ -233,10 +328,18 @@ function ResendEmailButton({
         type="submit"
         variant="outline"
         size="sm"
-        className="cursor-pointer"
-        disabled={pending}
+        // `cursor-pointer` per the repo rule; `disabled:pointer-events-none` on
+        // the Button itself is what keeps it off a control that cannot be
+        // pressed. `tabular-nums` so a shrinking countdown does not jog the
+        // row's other controls sideways every second.
+        className="cursor-pointer tabular-nums"
+        disabled={pending || cooling}
       >
-        {pending ? "Sending…" : "Resend email"}
+        {pending
+          ? "Sending…"
+          : cooling
+            ? resendCooldownLabel(secondsLeft)
+            : "Resend email"}
         <span className="sr-only"> to {email}</span>
       </Button>
     </form>

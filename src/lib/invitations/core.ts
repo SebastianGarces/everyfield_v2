@@ -66,6 +66,11 @@ import {
   type InvitationEmailRefusal,
   type InvitationSendOccasion,
 } from "./email";
+// The dedupe bucket, from the import-free leaf that owns it. A successful resend
+// reports its window to the surface, which refuses a second press until the next
+// one opens (RULED 2026-08-10 round 2) — the same arithmetic the provider key
+// above is built from, never a second copy of it.
+import { resendDedupeWindowAt, type ResendDedupeWindow } from "./resend-window";
 
 // ============================================================================
 // Constants
@@ -946,12 +951,24 @@ export interface ResendInvitationDeps extends EmailInviteeDeps {
  * a database. `loadInvitation` in particular is the org scope: a test may hand
  * in a row, and nothing else can — this module has no `"use server"` directive,
  * so no browser reaches it, and `service.ts` calls the two-argument form.
+ *
+ * IT REPORTS ITS DEDUPE WINDOW (RULED 2026-08-10 round 2). The send that just
+ * succeeded presented a key the provider will now collapse every duplicate onto
+ * until the next bucket opens, so a second press inside that span produces
+ * nothing while the surface says "Email sent" — the product claiming a send the
+ * provider dropped. The window travels back with the success so the button can
+ * refuse for exactly as long as that is true, and it is `resendDedupeWindowAt`
+ * of the SAME instant the key was built from: one bucket, two consumers.
  */
 export async function resendInvitationEmailAs(
   actor: InvitationActor,
   invitationId: string,
   deps: ResendInvitationDeps = {}
-): Promise<{ invitation: OrganizationInvitation; emailSent: boolean }> {
+): Promise<{
+  invitation: OrganizationInvitation;
+  emailSent: boolean;
+  dedupeWindow: ResendDedupeWindow;
+}> {
   if (!isUuid(invitationId)) {
     throw new InvitationError(INVITATION_NOT_OURS_MESSAGE);
   }
@@ -988,7 +1005,15 @@ export async function resendInvitationEmailAs(
     throw new InvitationError(resendRefusalMessage(outcome.reason));
   }
 
-  return { invitation, emailSent: true };
+  // `now` — the instant the occasion above was keyed with, not a second reading
+  // of the clock. A fresh `new Date()` here would report a window one bucket
+  // later for a send keyed a millisecond before the boundary, and the button
+  // would re-enable while the provider was still deduping.
+  return {
+    invitation,
+    emailSent: true,
+    dedupeWindow: resendDedupeWindowAt(now),
+  };
 }
 
 /**

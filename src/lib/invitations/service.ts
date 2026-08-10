@@ -57,6 +57,9 @@ import {
   type InvitationRequest,
   type InvitationView,
 } from "./core";
+// Type only, from the import-free leaf that owns the bucket — nothing at runtime
+// crosses this boundary that did not already.
+import type { ResendDedupeWindow } from "./resend-window";
 
 export type InvitationActionResult =
   | {
@@ -81,6 +84,15 @@ export type InvitationActionResult =
        * with the reason in words (`./core` → `resendInvitationEmailAs`).
        */
       emailSent?: boolean;
+      /**
+       * THE RESEND PATH ONLY (RULED 2026-08-10 round 2). The provider dedupe
+       * bucket the send that just succeeded was keyed with: for the rest of it
+       * every further attempt at this invitation is collapsed onto the message
+       * already accepted, so the surface refuses one rather than reporting a
+       * send that will not happen. `undefined` on every other action — none of
+       * them presents a resend key, and there is nothing to wait for.
+       */
+      resendWindow?: ResendDedupeWindow;
     }
   | { success: false; error: string };
 
@@ -90,6 +102,8 @@ const GENERIC_ERROR = "Something went wrong — try that again";
 type InvitationMutation = {
   invitation: OrganizationInvitation;
   emailSent?: boolean;
+  /** Set by the resend only — the bucket its key fell in. */
+  dedupeWindow?: ResendDedupeWindow;
 };
 
 /**
@@ -108,6 +122,7 @@ async function run(
       success: true,
       invitation: invitationView(mutated.invitation),
       emailSent: mutated.emailSent,
+      resendWindow: mutated.dedupeWindow,
     };
   } catch (error) {
     if (error instanceof InvitationError) {
@@ -156,6 +171,10 @@ export async function createInvitation(
  * and it re-decides nothing about status: a revoked, accepted, declined or
  * expired row is refused by the guard inside `sendInvitationEmail` and the
  * refusal comes back as a message (`./core` → `resendInvitationEmailAs`).
+ *
+ * A success also carries `resendWindow` — the dedupe bucket the provider was
+ * keyed with, which is how long the surface must refuse the next press (RULED
+ * 2026-08-10 round 2).
  */
 export async function resendInvitationEmail(
   invitationId: string

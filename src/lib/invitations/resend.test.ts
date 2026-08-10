@@ -32,6 +32,11 @@ import {
   type InvitationEmailFacts,
   type InvitationEmailMessage,
 } from "./email";
+import {
+  resendCooldownLabel,
+  resendCooldownSecondsLeft,
+  resendDedupeWindowAt,
+} from "./resend-window";
 
 // ============================================================================
 // "Resend email" on a pending invitation — RULED 2026-08-10 (Sebastian, on
@@ -56,6 +61,14 @@ import {
 //      clause — the same predicate the list and the revoke share. §4.
 //   4. NOTHING IS LOGGED that a log drain should not hold, and nothing is
 //      persisted. §5.
+//   5. THE PRODUCT NEVER CLAIMS A SEND THE PROVIDER WILL DROP. Round 2 of the
+//      ruling (2026-08-10) kept the window — it is the double-click guard and
+//      the two-admins guard — and closed the hole round 1 left: the button was
+//      live INSIDE the window, so a second press said "Email sent" over a
+//      message the provider collapsed onto the first. The button now refuses
+//      for the remainder of the bucket its key was built from, and counts it
+//      down. That only holds if ONE piece of arithmetic feeds both, which is
+//      what §7 pins. §7 and §8.
 //
 // The database is not needed for any of it: the row read, the org-name read, the
 // transport and the auto-expire write are all seams on `resendInvitationEmailAs`,
@@ -632,7 +645,9 @@ test("the Resend control is a button with cursor-pointer and an accessible name"
   );
 
   assert.ok(button.length > 0, "ResendEmailButton is missing");
-  assert.match(button, /className="cursor-pointer"/);
+  // Whatever else the className carries (`tabular-nums`, so a shrinking
+  // countdown does not jog the row), the repo's cursor rule is not negotiable.
+  assert.match(button, /className="[^"]*\bcursor-pointer\b[^"]*"/);
   assert.match(button, /type="submit"/);
   // The visible label repeats on every pending row, so the address is what
   // makes each one distinguishable to a screen reader.
@@ -641,8 +656,9 @@ test("the Resend control is a button with cursor-pointer and an accessible name"
   assert.match(button, /role="alert"/);
   assert.match(button, /role="status"/);
   // The button reports its own in-flight state rather than leaving the admin
-  // wondering whether the click landed.
-  assert.match(button, /disabled=\{pending\}/);
+  // wondering whether the click landed — and, since round 2, stays unavailable
+  // for the rest of the dedupe window (§8 pins that half).
+  assert.match(button, /disabled=\{pending \|\| cooling\}/);
   assert.match(button, /Sending…/);
 });
 
@@ -721,4 +737,230 @@ test("the action refuses a malformed id before anything is sent", () => {
   assert.match(action, /if \(!parsed\.success\)/);
   // No actor argument: the service mints one from `verifySession()`.
   assert.doesNotMatch(action, /userId|actor/);
+});
+
+// ----------------------------------------------------------------------------
+// 7. The window, and the countdown over it — RULED 2026-08-10 round 2
+// ----------------------------------------------------------------------------
+//
+// One bucket, two consumers: the provider's `Idempotency-Key` suffix and the
+// span the button refuses for. Everything below is about them agreeing, because
+// disagreement in either direction is a lie the product tells. Early, and the
+// admin presses a live button whose send the provider drops while the screen
+// says "Email sent". Late, and a genuinely new send is refused by our own UI.
+// ----------------------------------------------------------------------------
+
+test("the window a send reports is the bucket its key was built from", () => {
+  const at = new Date(NOW.getTime() + 12_345);
+  const window = resendDedupeWindowAt(at);
+
+  assert.equal(
+    invitationEmailIdempotencyKey(INVITATION_ID, { kind: "resend", at }),
+    `org-invitation-${INVITATION_ID}-resend-${window.index}`
+  );
+});
+
+test("remainingMs is the rest of that bucket — never zero, never more than the window", () => {
+  const opened =
+    Math.floor(NOW.getTime() / RESEND_DEDUPE_WINDOW_MS) *
+    RESEND_DEDUPE_WINDOW_MS;
+
+  for (const offset of [0, 1, 30_000, RESEND_DEDUPE_WINDOW_MS - 1]) {
+    const at = new Date(opened + offset);
+    const window = resendDedupeWindowAt(at);
+
+    assert.equal(
+      window.remainingMs,
+      RESEND_DEDUPE_WINDOW_MS - offset,
+      `${offset}`
+    );
+    // Never zero: a send landing exactly on a boundary owns the whole window it
+    // opens, rather than a countdown that is over before it renders.
+    assert.ok(window.remainingMs > 0, `${offset}`);
+    assert.ok(window.remainingMs <= RESEND_DEDUPE_WINDOW_MS, `${offset}`);
+
+    // THE deadline property: `remainingMs` later is the first instant of the
+    // NEXT bucket, and a millisecond earlier is still this one. That is what
+    // makes "the button re-enables exactly when the provider accepts a new key"
+    // a fact rather than a hope.
+    assert.equal(
+      resendDedupeWindowAt(new Date(at.getTime() + window.remainingMs)).index,
+      window.index + 1,
+      `${offset}`
+    );
+    assert.equal(
+      resendDedupeWindowAt(new Date(at.getTime() + window.remainingMs - 1))
+        .index,
+      window.index,
+      `${offset}`
+    );
+  }
+});
+
+test("the countdown rounds up, so it never reads 0s while the button still refuses", () => {
+  // A DURATION, which is the whole argument list: nothing on the client compares
+  // an instant, so nothing on the client can be wrong about what time it is on
+  // the server.
+  assert.equal(resendCooldownSecondsLeft(RESEND_DEDUPE_WINDOW_MS), 60);
+  // A fraction of a second left is still a second on the label — the button is
+  // disabled for it, and a label reading "0s" over a refusing control is the
+  // same class of lie in miniature.
+  assert.equal(resendCooldownSecondsLeft(59_001), 60);
+  assert.equal(resendCooldownSecondsLeft(1), 1);
+  // And it reaches zero exactly when the window is spent, which is what
+  // re-enables the button; a late tick past it does not resurrect the countdown.
+  assert.equal(resendCooldownSecondsLeft(0), 0);
+  assert.equal(resendCooldownSecondsLeft(-5_000), 0);
+
+  assert.equal(resendCooldownLabel(42), "Resend in 42s");
+});
+
+test("a successful resend reports the window it was keyed in", async () => {
+  const transport = recorder();
+
+  const result = await resendInvitationEmailAs(
+    SC_ADMIN,
+    INVITATION_ID,
+    deps({ send: transport.send })
+  );
+
+  assert.equal(result.emailSent, true);
+  assert.deepEqual(result.dedupeWindow, resendDedupeWindowAt(NOW));
+  assert.equal(
+    transport.sent[0].idempotencyKey,
+    `org-invitation-${INVITATION_ID}-resend-${result.dedupeWindow.index}`
+  );
+});
+
+test("the countdown ends exactly when the provider will accept a new key", async () => {
+  // AC, executed end to end: a press inside the window is still deduped (so the
+  // button must still be refusing), and a press once it has elapsed is a NEW
+  // idempotency bucket that reaches the invitee for real.
+  const transport = recorder();
+
+  const first = await resendInvitationEmailAs(
+    SC_ADMIN,
+    INVITATION_ID,
+    deps({ send: transport.send })
+  );
+  const { remainingMs } = first.dedupeWindow;
+
+  for (const now of [
+    new Date(NOW.getTime() + remainingMs - 1), // the last instant inside
+    new Date(NOW.getTime() + remainingMs), // the first instant outside
+  ]) {
+    await resendInvitationEmailAs(
+      SC_ADMIN,
+      INVITATION_ID,
+      deps({ send: transport.send, now })
+    );
+  }
+
+  const [opened, insideWindow, afterWindow] = transport.sent.map(
+    (message) => message.idempotencyKey
+  );
+
+  assert.equal(insideWindow, opened, "still inside the window, still deduped");
+  assert.notEqual(afterWindow, opened, "the window elapsed — a real send");
+});
+
+test("resend-window.ts imports nothing", () => {
+  // The same rail as `register-path.ts`, for the same reason: the pending list
+  // is a `"use client"` module and holds this arithmetic, and one import here
+  // would drag `@/lib/email/client` — and the Resend SDK with it — into the
+  // browser bundle.
+  const source = code(
+    readFileSync(
+      path.join(process.cwd(), "src", "lib", "invitations", "resend-window.ts"),
+      "utf8"
+    )
+  );
+
+  assert.doesNotMatch(source, /^\s*import[\s{*]/m, "no static import");
+  assert.doesNotMatch(source, /\bimport\s*\(/, "no dynamic import either");
+  assert.doesNotMatch(source, /\brequire\s*\(/, "no require either");
+  assert.doesNotMatch(source, /"use server"|"server-only"/);
+});
+
+// ----------------------------------------------------------------------------
+// 8. The surface refuses for the window, and says how long
+// ----------------------------------------------------------------------------
+
+/**
+ * `ResendEmailButton` and its cooldown hook, comments stripped and bounded at
+ * the next declaration. Stripped because both explain this ruling at length, and
+ * an assertion about what the component RENDERS must not be satisfiable by a
+ * sentence about what it used to render.
+ */
+function resendButtonSource(): string {
+  const start = LIST_CODE.indexOf("type ResendCooldown");
+  const end = LIST_CODE.indexOf("const initialRevokeState");
+
+  assert.ok(start >= 0 && end > start, "ResendEmailButton moved");
+  return code(LIST_CODE.slice(start, end));
+}
+
+test("the action hands the surface the server's window and invents nothing", () => {
+  const action = code(
+    ACTIONS_CODE.slice(
+      ACTIONS_CODE.indexOf("export async function resendInvitationEmailAction"),
+      ACTIONS_CODE.indexOf("export async function revokeInvitationAction")
+    )
+  );
+
+  assert.match(action, /window: result\.resendWindow\.index/);
+  assert.match(action, /remainingMs: result\.resendWindow\.remainingMs/);
+  // No fallback duration. A made-up wait is a claim about the provider too, so
+  // a missing window means no cooldown rather than a guessed one.
+  assert.doesNotMatch(action, /RESEND_DEDUPE_WINDOW_MS|60_000|60000/);
+});
+
+test("the button is disabled for the cooldown and counts it down in its own label", () => {
+  const button = resendButtonSource();
+
+  assert.match(button, /const cooling = secondsLeft > 0/);
+  assert.match(button, /disabled=\{pending \|\| cooling\}/);
+  assert.match(button, /resendCooldownLabel\(secondsLeft\)/);
+  // Native `disabled`, and never both attributes on one element: the send truly
+  // cannot happen, so the platform's own unavailable state is the honest one and
+  // it is the guard no submission path can get around.
+  assert.doesNotMatch(button, /aria-disabled/);
+});
+
+test("the countdown is never announced — the live region says 'Email sent' once", () => {
+  // A `role="status"` whose text changed every second would announce a number
+  // to a screen reader on every tick, which is the row unusable. So the claim
+  // and the countdown are different elements: the region holds a fixed sentence,
+  // and the ticking value lives in the button's label, which is not live.
+  const button = resendButtonSource();
+  const region = button.slice(
+    button.indexOf('role="status"'),
+    button.indexOf("</span>", button.indexOf('role="status"'))
+  );
+
+  assert.ok(region.length > 0, "the success region is missing");
+  assert.doesNotMatch(region, /secondsLeft|cooling|cooldown/);
+  assert.match(region, /Email sent/);
+  // One claim per window, and it is the only one: with the button disabled for
+  // the remainder there is no second submission to produce a second "Email
+  // sent" — the disabled assertion above is what makes that true.
+  assert.equal(button.match(/Email sent/g)?.length, 1);
+});
+
+test("the client counts the server's number down — it never re-derives the window", () => {
+  const list = code(LIST_CODE);
+
+  // What it counts down is the DURATION the server measured, and what it counts
+  // with is elapsed time it measured itself. Neither is an instant: comparing a
+  // server instant against a workstation clock is the bug this shape cannot have.
+  assert.match(list, /cooldown\?\.remainingMs/);
+  assert.match(list, /Date\.now\(\) - startedAtMs/);
+  // And no second copy of the bucket arithmetic — the label and the provider key
+  // must not be able to disagree about when the window ends.
+  assert.doesNotMatch(list, /RESEND_DEDUPE_WINDOW_MS|60_000|60000/);
+  assert.match(list, /from "@\/lib\/invitations\/resend-window"/);
+  // …and it reaches the leaf, never the module that builds the key: that one
+  // imports `@/lib/email/client`, so this import would ship the Resend SDK to
+  // the browser.
+  assert.doesNotMatch(list, /from "@\/lib\/invitations\/(email|core|service)"/);
 });
