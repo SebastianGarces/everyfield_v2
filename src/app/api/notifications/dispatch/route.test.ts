@@ -205,10 +205,17 @@ test("every vercel.json cron is daily or less frequent (Hobby limit)", () => {
   }
 });
 
-test("the phase-engine cron survives in vercel.json", () => {
-  assert.ok(
-    readVercelCrons().some((cron) => cron.path === "/api/phase-engine/assess"),
-    "the phase-engine cron was dropped"
+test("vercel.json schedules nothing at all", () => {
+  // It used to carry the one cron Hobby allows (the daily phase engine). #36
+  // moved that route to a twice-daily Actions tick as well, so BOTH schedules
+  // now live in .github/workflows and vercel.json declares none. Re-adding one
+  // does not just duplicate a schedule — two drivers on one route double the
+  // OpenAI spend and race each other's TPM window. The schedule each route
+  // actually has is asserted next to that route.
+  assert.deepEqual(
+    readVercelCrons(),
+    [],
+    "a cron is back in vercel.json — both scheduled routes are driven by GitHub Actions"
   );
 });
 

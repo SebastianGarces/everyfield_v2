@@ -1,24 +1,15 @@
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 
 import { DocumentsLibrary } from "@/components/documents";
 import { HeaderBreadcrumbs } from "@/components/header";
 import { getCurrentUserChurch, verifySession } from "@/lib/auth/session";
-import {
-  buildAutoFillDefaults,
-  DOCUMENT_TEMPLATES,
-  getTemplateById,
-} from "@/lib/documents";
+import { buildAutoFillDefaults, DOCUMENT_TEMPLATES } from "@/lib/documents";
+import { getLaunchForChurch } from "@/lib/launch/queries";
 
 export const dynamic = "force-dynamic";
 
-interface DocumentsPageProps {
-  /** `?template=<id>` — set by contextual links from other features (DOC-014). */
-  searchParams: Promise<{ template?: string }>;
-}
-
-export default async function DocumentsPage({
-  searchParams,
-}: DocumentsPageProps) {
+export default async function DocumentsPage() {
   const { user } = await verifySession();
 
   if (!user.churchId) {
@@ -30,17 +21,17 @@ export default async function DocumentsPage({
     redirect("/dashboard");
   }
 
+  // The launch date is read from the LAUNCH ENTITY (`launches.target_date`,
+  // LS-001) and never from the church row, whose `launch_date` column migration
+  // 0032 dropped. `null` here now means what it says — this plant has no launch
+  // row, or one still `planning` with no day named — rather than "nobody has
+  // wired this up yet" (#306).
+  const launch = await getLaunchForChurch(church.id);
+
   const context = {
     churchName: church.name,
     userName: user.name ?? null,
-    // The launch date is a real, readable value now — it lives on the launch
-    // entity (`launches.target_date`, LS-001) and NOT on the church row, whose
-    // `launch_date` column migration 0032 dropped. It is still passed as null
-    // here because sourcing merge-field values is #203's job, not this slice's:
-    // the only template that names `launch_date` is the Phase-4 Launch Sunday
-    // checklist, whose field is optional and planter-editable. Wiring it is one
-    // `getLaunchForChurch(church.id)` away — see `src/lib/launch/queries.ts`.
-    launchDate: null,
+    launchDate: launch?.targetDate ?? null,
   };
 
   // Resolve auto-fill defaults server-side; the client library filters/renders.
@@ -49,14 +40,12 @@ export default async function DocumentsPage({
     defaults: buildAutoFillDefaults(template, context),
   }));
 
-  // A contextual link (DOC-014) arrives with ?template=<id> and opens that
-  // template's generate dialog. Unknown ids are ignored — never a dead link.
-  const { template: requestedTemplate } = await searchParams;
-  const initialTemplateId =
-    requestedTemplate && getTemplateById(requestedTemplate)
-      ? requestedTemplate
-      : undefined;
-
+  // A contextual link (DOC-014) arrives with `?template=<id>` and opens that
+  // template's generate dialog. The library reads that parameter itself with
+  // `useSearchParams`, so this page does not thread it through as a prop and
+  // does not remount the library to apply it — remounting discarded the user's
+  // search/category/phase/format filters on every contextual arrival. Unknown
+  // ids still open nothing, which the library enforces against its own catalog.
   return (
     <>
       <HeaderBreadcrumbs items={[{ label: "Documents" }]} />
@@ -71,11 +60,10 @@ export default async function DocumentsPage({
 
         {/* Library */}
         <div className="flex-1 overflow-auto p-6">
-          <DocumentsLibrary
-            key={initialTemplateId ?? "all"}
-            items={items}
-            initialTemplateId={initialTemplateId}
-          />
+          {/* `useSearchParams` inside the library needs a boundary above it. */}
+          <Suspense fallback={null}>
+            <DocumentsLibrary items={items} />
+          </Suspense>
         </div>
       </div>
     </>

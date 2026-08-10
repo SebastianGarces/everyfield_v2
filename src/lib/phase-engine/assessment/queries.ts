@@ -31,6 +31,7 @@ import type { PlantFactSnapshot } from "@/lib/phase-engine/signals";
 import {
   filterDirtyOrStale,
   MAX_STALENESS_MS,
+  orderByAssessmentAge,
   type PlantSelectionInput,
   type SelectionReason,
   selectionReasonFor,
@@ -149,7 +150,14 @@ export async function selectPlantsForAssessment(
     latestAssessmentAt: latestByChurch.get(c.id) ?? null,
   }));
 
-  return filterDirtyOrStale(inputs, now, maxStalenessMs).map((p) => ({
+  // Oldest-assessed-first, never-assessed ahead of everything. The runner caps
+  // the batch at MAX_BATCH and drops the tail, so this order is what stops the
+  // same plants being dropped every tick (#36) — it must be applied HERE, on
+  // the full candidate set, because the caller slices what it is handed and
+  // `SelectedPlant` no longer carries the timestamp to re-derive it.
+  return orderByAssessmentAge(
+    filterDirtyOrStale(inputs, now, maxStalenessMs)
+  ).map((p) => ({
     churchId: p.churchId,
     reason: selectionReasonFor(p, now, maxStalenessMs)!,
   }));

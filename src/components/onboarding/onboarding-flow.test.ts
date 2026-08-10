@@ -50,8 +50,14 @@ function stripComments(source: string): string {
     .join("\n");
 }
 
-const FLOW = read("components", "onboarding", "onboarding-flow.tsx");
+// The flow is two files: a server component that resolves the facts OB-015's
+// offer is gated on, and the client component that runs the steps. Everything
+// below is about the interactive half.
+const FLOW = read("components", "onboarding", "onboarding-flow-client.tsx");
 const FLOW_CODE = stripComments(FLOW);
+const FLOW_SERVER_CODE = stripComments(
+  read("components", "onboarding", "onboarding-flow.tsx")
+);
 const ACTIONS = read("app", "(dashboard)", "dashboard", "actions.ts");
 
 // ----------------------------------------------------------------------------
@@ -104,6 +110,22 @@ test("where the planter lands is the server's decision, seeded once", () => {
     }),
     ONBOARDING_STEP_IDS[2]
   );
+});
+
+test("the call site still imports one component, and it is the server half", () => {
+  // Splitting the flow in two must not move work onto the pages that render it:
+  // `OnboardingFlow` keeps the same name and the same two props, and resolves
+  // OB-015's facts itself. A page that had to pass them would be a page that
+  // could forget to.
+  assert.match(
+    FLOW_SERVER_CODE,
+    /export async function OnboardingFlow\(\{\s*initialStep,\s*leadershipStatus,\s*\}/
+  );
+  assert.match(
+    read("app", "(dashboard)", "dashboard", "page.tsx"),
+    /import \{ OnboardingFlow \} from "@\/components\/onboarding\/onboarding-flow"/
+  );
+  assert.match(FLOW, /^"use client";/);
 });
 
 test("the recorded leadership answer comes back down into step 2", () => {

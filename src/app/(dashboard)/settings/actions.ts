@@ -1,10 +1,12 @@
 "use server";
 
 import { refresh } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { z } from "zod";
 
 import { verifySession } from "@/lib/auth/session";
 import {
+  audienceMayReceiveCategory,
   digestCadences,
   notificationCategories,
   notificationChannels,
@@ -13,7 +15,10 @@ import {
   audienceForRole,
   digestCadenceWriteIsNoop,
   loadUserPreferences,
+  OVERSIGHT_DIGEST_CADENCE_NOTE,
+  OVERSIGHT_INELIGIBLE_CATEGORY_NOTE,
   preferenceOwnerFromSession,
+  preferenceSaveFailure,
   preferenceWriteIsNoop,
   setDigestCadence,
   setPreference,
@@ -57,6 +62,22 @@ import {
 // read time), and the bell lives in the dashboard layout, not on this page.
 // `refresh()` re-renders the current tree including its layouts, so the badge
 // reconciles with the same server state this write just produced.
+//
+// ----------------------------------------------------------------------------
+// Why every body is wrapped (#236)
+// ----------------------------------------------------------------------------
+//
+// A thrown server action rejects the promise the component awaits, and the
+// rejection unwinds the transition without reaching its `toast.error`. The user
+// sees the switch snap back and nothing else — the same thing a mis-click looks
+// like. Only the Zod rejections, which already RETURNED a result, ever spoke.
+//
+// So both bodies return their failures instead. `unstable_rethrow` gets first
+// refusal on every caught value, because `redirect()`, `notFound()` and the
+// framework's dynamic-usage bailouts are thrown as errors but MEAN something —
+// swallowing one would turn a working redirect into a false "we could not save
+// that". The sentence the user reads is chosen by `preferenceSaveFailure`, which
+// is unit-tested where it lives.
 // ============================================================================
 
 /** What a preference write tells the caller. */
@@ -83,6 +104,15 @@ const setDigestCadenceInputSchema = z.enum(digestCadences);
  * default, and seeding a row that merely restates today's default pins the user
  * to it forever (see `preferenceWriteIsNoop`). A no-op save is a success with
  * nothing to save, so the UI has nothing to undo and nothing to report.
+ *
+ * A category this caller is never served is REFUSED, for the reason the cadence
+ * action refuses an oversight caller (#254, extended by the ruling of
+ * 2026-08-09): the screen no longer offers those five rows, and an endpoint that
+ * still accepted them would store a choice about a notification the user cannot
+ * receive — a row nothing will ever read, on a decision they were never really
+ * offered. The refusal is derived from `OVERSIGHT_ELIGIBLE_CATEGORIES` through
+ * `audienceMayReceiveCategory`, so it cannot fall out of step with the delivery
+ * gate that makes it true.
  */
 export async function setNotificationPreferenceAction(
   input: SetPreferenceActionInput
@@ -92,32 +122,39 @@ export async function setNotificationPreferenceAction(
     return { success: false, error: "That is not a setting we can save" };
   }
 
-  const session = await verifySession();
-  const owner = preferenceOwnerFromSession(session);
-  const rows = await loadUserPreferences(owner);
+  try {
+    const session = await verifySession();
+    const owner = preferenceOwnerFromSession(session);
 
-  const { category, channel, enabled } = parsed.data;
+    const { category, channel, enabled } = parsed.data;
 
-  // Same audience the page rendered the matrix with — see `preferenceWriteIsNoop`.
-  // Asking the no-op question with the other audience's defaults would discard
-  // a real change as "already that value".
-  if (
-    preferenceWriteIsNoop(
-      rows,
-      category,
-      channel,
-      enabled,
-      audienceForRole(session.user.role)
-    )
-  ) {
-    return { success: true, changed: false };
+    // Same audience the page rendered the matrix with — see
+    // `preferenceWriteIsNoop`. Asking the no-op question with the other
+    // audience's defaults would discard a real change as "already that value".
+    const audience = audienceForRole(session.user.role);
+
+    // Asked BEFORE the rows are loaded: a refused category has nothing to
+    // compare against, and a write that will not happen should not cost a query.
+    if (!audienceMayReceiveCategory(audience, category)) {
+      return { success: false, error: OVERSIGHT_INELIGIBLE_CATEGORY_NOTE };
+    }
+
+    const rows = await loadUserPreferences(owner);
+
+    if (preferenceWriteIsNoop(rows, category, channel, enabled, audience)) {
+      return { success: true, changed: false };
+    }
+
+    await setPreference(owner, { category, channel, enabled });
+
+    refresh();
+
+    return { success: true, changed: true };
+  } catch (error) {
+    unstable_rethrow(error);
+    console.error("[SETTINGS] saving a notification preference failed:", error);
+    return preferenceSaveFailure(error);
   }
-
-  await setPreference(owner, { category, channel, enabled });
-
-  refresh();
-
-  return { success: true, changed: true };
 }
 
 /**
@@ -126,6 +163,12 @@ export async function setNotificationPreferenceAction(
  * This is the ONLY digest cadence a user chooses. The oversight activity digest
  * (N-025) is fixed daily and is governed by a plant-side sharing toggle
  * (N-026) on another screen — nothing here decides what leaves the plant.
+ *
+ * An oversight recipient is REFUSED rather than served (#254). The screen no
+ * longer offers them the control, but every export of a `"use server"` module
+ * is a POSTable endpoint, and a cadence they can never observe is a stored
+ * choice they never made — exactly the thing this track exists to stop. The
+ * refusal says the same sentence the screen does.
  */
 export async function setDigestCadenceAction(
   cadence: string
@@ -135,16 +178,28 @@ export async function setDigestCadenceAction(
     return { success: false, error: "That is not a cadence we can save" };
   }
 
-  const owner = preferenceOwnerFromSession(await verifySession());
-  const rows = await loadUserPreferences(owner);
+  try {
+    const session = await verifySession();
+    const owner = preferenceOwnerFromSession(session);
 
-  if (digestCadenceWriteIsNoop(rows, parsed.data)) {
-    return { success: true, changed: false };
+    if (audienceForRole(session.user.role) === "oversight") {
+      return { success: false, error: OVERSIGHT_DIGEST_CADENCE_NOTE };
+    }
+
+    const rows = await loadUserPreferences(owner);
+
+    if (digestCadenceWriteIsNoop(rows, parsed.data)) {
+      return { success: true, changed: false };
+    }
+
+    await setDigestCadence(owner, parsed.data);
+
+    refresh();
+
+    return { success: true, changed: true };
+  } catch (error) {
+    unstable_rethrow(error);
+    console.error("[SETTINGS] saving the digest cadence failed:", error);
+    return preferenceSaveFailure(error);
   }
-
-  await setDigestCadence(owner, parsed.data);
-
-  refresh();
-
-  return { success: true, changed: true };
 }
