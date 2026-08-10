@@ -62,10 +62,12 @@ sharing is the plant's opt-in.
 | OV-005 | Must | Persistent dashboard reminder for the planter while an association invitation is unanswered; dismissed only by answering. |
 | OV-006 | Must | Decline notifies the inviting org (own-org event, consent-exempt rail) and appears as declined status on their invitations list. |
 | OV-007 | Must | Disassociation from both sides: planter leaves from the settings area; admin removes a plant from the plant detail page. Both behind type-to-confirm; both notify the other side. |
-| OV-008 | Must | Association audit: an `association_events` record is written on every accept and on every disassociation (either side). Expand-only; no read UI required for alpha beyond OV-011. |
+| OV-008 | Must | Association audit: an `association_events` record is written on every accept and on every disassociation (either side), **for every invitation type — including `sending_church_to_network`** (ruled #351, 2026-08-09). Expand-only; no read UI required for alpha beyond OV-011. |
 | OV-009 | Must | Sending-churches roster at `/oversight/sending-churches` for network admins: member sending church, plant count, pending invitations. |
 | OV-010 | Must | Permissions (ruled #274): only the plant's **planter** may accept an invitation or sever the plant's association; only the **org's admin** may sever from the org side. Non-planter members of the target church can do neither. |
 | OV-011 | Should | Association history section on the plant detail page, read from `association_events`. |
+| OV-012 | Must | Sending-church answering surface (ruled #304, 2026-08-09): a sending-church **admin** whose church has a pending `sending_church_to_network` invitation can accept or decline it in-app from their association/settings area; non-admin members are rejected server-side. Every invitation type that can name an existing account has an in-app answering surface. |
+| OV-013 | Must | Sending-church sever (ruled #351, 2026-08-09): a sending-church admin can leave their network behind a type-to-confirm dialog; the sever is audited and the network is notified — OV-007 symmetry for the org tier. |
 
 ## Acceptance criteria
 
@@ -85,10 +87,12 @@ sharing is the plant's opt-in.
 
 ## Data entities (feature-owned)
 
-**association_events** — append-only audit of the association lifecycle: church, org (type + id),
-event (`associated` / `disassociated`), acting user, source invitation (nullable — associations
-can predate invitations), timestamp. Written by accept and by both severing paths. Schema detail
-belongs to the implementing unit (risk:high — migration).
+**association_events** — append-only audit of the association lifecycle: a **discriminated
+subject** (`subject_type` = `church` | `sending_church`, per-subject nullable FKs, CHECK exactly
+one set — ruled #351), org (type + id), event (`associated` / `disassociated`), acting user,
+source invitation (nullable — associations can predate invitations), timestamp. Written by accept
+and by every severing path, for every invitation type. Schema detail belongs to the implementing
+unit (risk:high — migration).
 
 Shared entities (Church, organization_invitations, church_privacy_settings) are owned elsewhere;
 this FRD only consumes them.
@@ -98,7 +102,10 @@ this FRD only consumes them.
 - **Notifications**: decline and disassociation ride the existing oversight milestone rail;
   own-relationship events to the org follow the established consent-exempt pattern (like
   invitation-accepted). Notifications to the planter are church-role notifications, not subject
-  to oversight gating.
+  to oversight gating. The rail's recipient anchor is **generalized** (ruled #351): exactly one
+  of church / sending church / network, under a discriminator + CHECK on the one notifications
+  table — org-only milestones ("a sending church joined your network") ride the same rail, not a
+  parallel table.
 - **Auth/access**: all oversight reads go through the existing access-control layer
   (`canAccessFeatureData`); OV-010's permission rules extend the invitation service's authority
   checks.
