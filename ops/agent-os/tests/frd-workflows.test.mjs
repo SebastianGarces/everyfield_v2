@@ -2349,10 +2349,17 @@ test("a re-review FAIL routes into the attempt machinery, not the quality counte
 // ---------------------------------------------------------------------------
 
 test("a committed fix round forces a G3 re-run at the new sha before the PR", async () => {
+  // The fix-round re-push lands on a DIFFERENT sha than the first push, so a
+  // regression that re-pins the G3 prompt to the stale pre-fix sha is
+  // detectable: the prompt must carry the round-push sha, never f604b2b.
+  const roundPushSha = "beefbeef0000000000000000000000000000f1x0";
   const { result, calls } = await runBuild(
     [buildUnit("alpha", 101)],
     (prompt, opts) => {
       const l = opts.label || "";
+      // A round push is labelled push:<id>#<attempt>r<round>.
+      if (/^push:.+r\d+$/.test(l))
+        return { pushed: true, headSha: roundPushSha, remoteSha: roundPushSha };
       if (l.startsWith("verify:alpha#"))
         return {
           ...passing([]),
@@ -2371,8 +2378,12 @@ test("a committed fix round forces a G3 re-run at the new sha before the PR", as
   );
   assert.match(
     g3.prompt,
-    /f604b2b/,
-    "the re-run is pinned to the re-pushed finalSha, not to the pre-fix one"
+    /beefbeef/,
+    "the re-run is pinned to the re-pushed finalSha"
+  );
+  assert.ok(
+    !/f604b2b/.test(g3.prompt),
+    "the re-run must NOT be pinned to the stale pre-fix (first-push) sha"
   );
   assert.ok(
     calls.some((c) => c.label === "merge:alpha"),
