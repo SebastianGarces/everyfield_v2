@@ -18,8 +18,17 @@ from a quick read:
   Fails closed with no secret. A plant can come back **`deferred`** (`rate_limit` |
   `time_budget`) — that is NOT a failure and NOT a broken judge: the provider throttled us, or
   the run's 270s deadline arrived, so the plant keeps its last good snapshot, stays dirty and is
-  re-selected next run. `deferred` is logged on `console.warn`, `failed` on `console.error`, and
-  the two are counted separately in the summary (`deferred`/`rateLimited` vs `failed`). Pacing is
+  re-selected next run. The log channel splits on "is the judge broken?", NOT on status (ruled
+  2026-08-10): a `failed` whose 5xx retry ladder the 270s deadline cut short carries
+  `truncatedByDeadline` and is logged on `console.warn` — it is the 5xx counterpart of a
+  `time_budget` deferral. A ladder that spent its last attempt is deliberately NOT marked, so a
+  `console.error` still means a genuinely down provider and still pages someone. Counting is
+  unaffected: the summary counts by status (`deferred`/`rateLimited` vs `failed`), not by channel.
+  `attempted` means "handed to the judge, so it may have cost tokens" — NOT "assessed": it
+  deliberately INCLUDES a throttled plant, which is `attempted: true` after up to
+  `MAX_ATTEMPTS_PER_PLANT` real provider calls. `deferredUnattempted` is the subset of `deferred`
+  that never reached the provider, which is what makes the run's arithmetic
+  `selected = skipped + attempted + deferredUnattempted` hold. Pacing is
   header-derived (`x-ratelimit-*`), not a sleep; `PHASE_ENGINE_TPM_LIMIT` only bootstraps it.
 - **`GET /api/notifications/dispatch`** (Bearer `CRON_SECRET`, every 15 min via GitHub Actions —
   Hobby caps Vercel crons at daily): claims due rows atomically; at-most-once per
