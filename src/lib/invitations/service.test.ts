@@ -72,6 +72,16 @@ import {
 //    well-formed argument AND a malformed one, and both must throw, so no
 //    argument shape can be told from another with no session.
 //
+//    §1b″ closes the last gap in that claim (round 6). The invitations surface,
+//    `oversight/invitations/actions.ts`, is the domain's third `"use server"`
+//    module and its two `useActionState` endpoints parsed their FormData before
+//    checking anybody — so the universal invariant round 5 wrote into
+//    `memory/invariants.md` was false at the module the reader is most likely to
+//    open. It is enumerated separately because its arguments are `FormData`, not
+//    strings, and the well-formed/malformed pair has to be built with the field
+//    names the schemas read. The source-order assertion below now covers all
+//    three files, so the invariant is true domain-wide or the suite is red.
+//
 // 3. AUTHORITY — the check that stood between an anonymous request and a
 //    stranger's association, now unit-tested per invitation type. §5 adds the
 //    WRITES that authority guards: a response is a compare-and-set on `pending`,
@@ -768,18 +778,134 @@ test("every association action refuses a call with no session, well-formed argum
   }
 });
 
-test("the session mint is the FIRST statement of every association action", () => {
-  // The structural half, read off the source. §1b′ above proves the endpoints
-  // refuse; this proves WHERE they refuse, which is what stops the parse from
-  // creeping back above the mint in a later edit that still passes a sessionless
-  // call (it would — a malformed id would return `{ success: false }`, and
-  // `assert.rejects` on the well-formed one alone would not notice).
+// ----------------------------------------------------------------------------
+// 1b″. Forgery — the FormData actions on the invitations surface (#23 / OV-003)
+//
+// The third `"use server"` module in this domain, and the one round 6 caught:
+// `oversight/invitations/actions.ts` publishes two `useActionState` endpoints,
+// and until this round both of them ran `safeParse` before any session check.
+// They are enumerated apart from `ASSOCIATION_ACTION_MODULES` because their
+// arguments are not strings — a `useActionState` action is called
+// `(prevState, formData)`, so the well-formed/malformed pair has to be built as
+// real `FormData` with the field names the schemas read.
+//
+// The same claim is being made about them: a sessionless call throws for BOTH
+// argument shapes. While the parse ran first, a malformed `inviteeEmail`
+// returned `{ error: "Enter a valid email address" }` to an anonymous caller
+// and a well-formed one threw — the pair of answers told a valid address shape
+// from an invalid one with no session at all. Two identical throws is what
+// "nothing is examined before the session" looks like from outside.
+//
+// The mint here is deliberately a DUPLICATE: the service mints its own actor
+// and this module passes nothing down. That is why the runtime assertion alone
+// would not have caught the fault — the endpoints already refused a sessionless
+// WELL-FORMED call, from inside the service. The malformed half is the half
+// that fails when the guard is missing.
+// ----------------------------------------------------------------------------
+
+/**
+ * The FormData endpoint surface, DECLARED — export by export, each with the
+ * form the real client submits and a malformed twin of it. Asserted exhaustive
+ * against the real module namespace below, so a third endpoint on this surface
+ * fails here until it is written down and put through the sessionless call.
+ */
+const FORM_ACTION_MODULE = {
+  label: "src/app/(dashboard)/oversight/invitations/actions.ts",
+  load: async () =>
+    (await import("@/app/(dashboard)/oversight/invitations/actions")) as unknown as Record<
+      string,
+      unknown
+    >,
+  exports: [
+    {
+      name: "createInvitationAction",
+      // `safeParse` would accept the first and reject the second.
+      wellFormed: { inviteeEmail: "a@b.co", inviteAs: "church" },
+      malformed: { inviteeEmail: "nope", inviteAs: "church" },
+    },
+    {
+      name: "revokeInvitationAction",
+      wellFormed: { invitationId: "77777777-7777-4777-8777-777777777777" },
+      malformed: { invitationId: "not-a-uuid" },
+    },
+  ],
+} as const;
+
+function formDataOf(fields: Readonly<Record<string, string>>): FormData {
+  const form = new FormData();
+  for (const [key, value] of Object.entries(fields)) form.append(key, value);
+  return form;
+}
+
+test("the invitations action module publishes exactly the endpoints it declares", async () => {
+  const mod = await FORM_ACTION_MODULE.load();
+
+  assert.deepEqual(
+    Object.keys(mod).sort(),
+    FORM_ACTION_MODULE.exports.map((e) => e.name).toSorted(),
+    FORM_ACTION_MODULE.label
+  );
+});
+
+test("every invitations FormData action refuses a call with no session, well-formed form or not", async () => {
+  const mod = await FORM_ACTION_MODULE.load();
+
+  for (const { name, wellFormed, malformed } of FORM_ACTION_MODULE.exports) {
+    const action = mod[name];
+    assert.equal(
+      typeof action,
+      "function",
+      `${FORM_ACTION_MODULE.label} → ${name}`
+    );
+
+    for (const [shape, fields] of [
+      ["well-formed", wellFormed],
+      ["malformed", malformed],
+    ] as const) {
+      // Called the way React calls it — previous state, then the form — and
+      // also with the form alone, which is what a hand-rolled POST produces.
+      for (const args of [[{}, formDataOf(fields)], [formDataOf(fields)]]) {
+        await assert.rejects(
+          async () =>
+            (action as (...a: unknown[]) => Promise<unknown>)(...args),
+          (error: unknown) =>
+            error instanceof Error &&
+            /Unauthorized|outside a request scope/.test(error.message),
+          `${FORM_ACTION_MODULE.label} → ${name} (${shape}, ${args.length} args)`
+        );
+      }
+    }
+
+    // And with no argument at all.
+    await assert.rejects(
+      async () => (action as (...a: unknown[]) => Promise<unknown>)(),
+      (error: unknown) =>
+        error instanceof Error &&
+        /Unauthorized|outside a request scope/.test(error.message),
+      `${FORM_ACTION_MODULE.label} → ${name}()`
+    );
+  }
+});
+
+test("the session mint is the FIRST statement of every invitation-domain action", () => {
+  // The structural half, read off the source. §1b′/§1b″ above prove the
+  // endpoints refuse; this proves WHERE they refuse, which is what stops the
+  // parse from creeping back above the mint in a later edit that still passes a
+  // sessionless call (it would — a malformed id would return
+  // `{ success: false }`, and `assert.rejects` on the well-formed one alone
+  // would not notice).
+  //
+  // The list is every `"use server"` module in this domain that parses an
+  // argument, and it is what round 6 grew: the invitations surface was the one
+  // module the round-5 pass wrote the universal invariant about without ever
+  // asserting it, and both of its exports parsed first.
   //
   // Read from the function body's first line: `verifySession()` must appear
   // before the first `safeParse` in each exported function.
   for (const file of [
     path.join(SRC, "app/(dashboard)/settings/association/actions.ts"),
     path.join(SRC, "app/(dashboard)/oversight/plants/[id]/actions.ts"),
+    path.join(SRC, "app/(dashboard)/oversight/invitations/actions.ts"),
   ]) {
     const code = codeOf(file);
     const bodies = [
