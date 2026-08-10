@@ -113,6 +113,9 @@ build loop's subagent usage read as "token-preflight" in /usage. The skill remai
 *(This table is deliberately identical to the one in `token-preflight/SKILL.md`. If you change one,
 change both — two tables that disagree are worse than one table in the wrong place.)*
 
+A `generate-and-filter` workstream sizes at **~3× its row** — three candidate implementers per
+attempt, not one.
+
 `waveEstimate = Σ trackEstimate`; `reserve` = the **largest single workstream's** estimate, not the
 largest track's. A track is no longer one indivisible spend: it runs stage by stage, and the thing
 that must never be stranded mid-flight is a workstream. **A stage does not start unless the remaining
@@ -139,6 +142,25 @@ re-expressed as an agent cap on 2026-08-05 when a track stopped being one agent
 (`product-docs/board-design-2026-07.md` §13). The binding constraint is still the human review queue,
 not tokens, so measure PRs-merged-per-day before raising either number.
 
+### Recipe selection
+
+Every unit carries a **build recipe** — the strategy the loop uses for that unit's workstream
+attempts. The guarantee layer (claiming, stages, scoped verify, attempts, the verify-and-ship tail)
+is fixed; the recipe is the only swappable part. Contract: `ops/agent-os/recipes.md`.
+
+| Recipe | Task shape |
+|--------|------------|
+| `implement-straight` | Any shape; the default, and the answer whenever in doubt. |
+| `generate-and-filter` | A small, sharply specified, quality-sensitive unit (≤ ~2 files, low risk, no migration) where independent attempts plausibly diverge — UI polish, a tricky pure function. Costs ~3× (3 candidates) and counts as 3 agents against the 6-agent cap. |
+
+- `recipe: "<id>"` is set **per unit** in the units array; omitted means `implement-straight`.
+- Units that will share a workstream (same stage + shared files) must carry the **same** recipe —
+  the loop throws at plan time on a mixed set.
+- An unknown id throws **at parse** — before any claim exists, before any worktree is cut. That is
+  AC7's dry-run: a bogus id aborts with nothing claimed and nothing to clean up.
+- Dispatch RECORDS the choice for audit, one comment per claimed issue:
+  `Dispatch: recipe = <id> — <one-line reason>`.
+
 ## The pass
 
 Call the `build-until-done` workflow with the selected tracks:
@@ -158,8 +180,9 @@ merge to `main` by surprise; a dispatch pass opts in. Under it the loop merges a
 five hold: the DoD passed **and** the required check is green, the track is not `risk:high`, no unit
 in it carries `hold: true`, no warning was classified `spec-question`, and no review finding survived
 the quality rounds unresolved. Reviewer findings (Critical + structural) are **fixed in the same
-pass** — fix agent, then re-review, capped at 2 rounds — and on exhaust the track HOLDs with a
-DECISION comment; the follow-ups rollup is gone (#399, RULED 2026-08-10). See §12 and §13 of
+pass** by the review-fix loop, ≤2 rounds per site (scoped and integration); a track with unresolved
+findings HOLDs with a DECISION comment — never merged with findings, never `agent:blocked` for them
+(#399, RULED 2026-08-10). Spec-question warnings hold exactly as before. See §12 and §13 of
 `product-docs/board-design-2026-07.md`, `ops/agent-os/labels.md`, and `DOD_SCHEMA.warnings`.
 
 ### When to set `hold: true` on a unit
@@ -172,7 +195,8 @@ Set it in the units array — the loop cannot infer it — in **two** cases:
 
 1. **The issue body declares it.** Anything that says never-auto-merge, hold for review, or names a
    human as the merge decision.
-2. **ALWAYS when the unit's files touch the factory** — `.claude/workflows/`, the delivery-OS entries
+2. **ALWAYS when the unit's files touch the factory** — `.claude/workflows/` (including
+   `.claude/workflows/recipes/`), the delivery-OS entries
    under `.claude/skills/` (`dispatch`, `build-until-done`, `definition-of-done`, `open-pr`,
    `frd-plan`, `frd-implement`), or `ops/agent-os/`. A change to the machine that decides what merges
    keeps a human, because the thing being changed is the thing that would otherwise have caught the
@@ -182,7 +206,7 @@ Set the flag rather than dropping the whole pass to `autoMerge: false`. Turning 
 globally to hold one factory track also stalls every clean track beside it in a mixed wave, and those
 are exactly the PRs the queue can absorb.
 
-Each unit is `{id, title, lane, files, summary, acceptanceCriteria, issue, risk, dependsOn, hold}`. The
+Each unit is `{id, title, lane, files, summary, acceptanceCriteria, issue, risk, dependsOn, hold, recipe}`. The
 loop cuts the units into **tracks** (connected components over shared-file ∪ `dependsOn`), then into
 **stages** (topological levels by `dependsOn`), then into **workstreams** (units in one stage sharing
 a file — one agent, sequential). `files` comes from the issue's **Likely files** section and the

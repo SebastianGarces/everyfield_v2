@@ -30,21 +30,29 @@ flowchart TD
   subgraph loop ["3 · build-until-done — one track, staged; ≤3 attempts PER WORKSTREAM"]
     G -->|"yes"| I["claim: agent:in-progress<br/>(blast-radius guard: exactly these issues)"]
     I --> J["stage 0 — the shared prerequisite<br/>(schema · contract · shared types), in the track worktree"]
-    J --> J2["stage n — file-disjoint workstreams IN PARALLEL,<br/>each in a worktree cut from track HEAD,<br/>merged back before stage n+1 starts"]
-    J2 --> K1["SCOPED verify, per workstream, in its own worktree:<br/>G0 its own ACs · G2 subset covering its changed files<br/>G5 diff vs ITS declared files<br/>(FAIL, or a dead verifier, blocks the track)"]
+    J --> J2["stage n — file-disjoint workstreams IN PARALLEL,<br/>each in a worktree cut from track HEAD,<br/>built via the unit's RECIPE (default implement-straight)<br/>— one child workflow per attempt —<br/>merged back before stage n+1 starts"]
+    J2 --> K1["SCOPED verify, per workstream, in its own worktree:<br/>G0 its own ACs · G2 subset covering its changed files<br/>G5 diff vs ITS declared files<br/>(FAIL, or a dead verifier, blocks the track)<br/>then review-fix: critical+structural findings<br/>→ fix agent, ≤2 rounds"]
     K1 -->|"FAIL → fix goes to THAT workstream (its attempt++)"| J2
-    K1 -->|"last stage merged"| K["INTEGRATION verify, ONCE, on the track branch:<br/>G1 hermetic build · G2 full suite · G4 memory<br/>G3 functional (real browser, preview deploy) · G6 sign-off<br/>risk:high adds 3 diverse-lens reviewers"]
+    subgraph vas ["verify-and-ship — child workflow, the fixed tail"]
+      K["INTEGRATION verify, ONCE, on the track branch:<br/>G1 hermetic build · G2 full suite · G4 memory<br/>G3 functional (real browser, preview deploy) · G6 sign-off<br/>risk:high adds 3 diverse-lens reviewers"]
+      K2["G6 review-fix loop ≤2 rounds<br/>(re-push + sha assert before re-review)"]
+      M["open-pr: evidence bundle + Manual QA<br/>one PR, Closes every issue in the track<br/>agent:in-review"]
+      N{"⚓ required CI check green?"}
+    end
+    K1 -->|"last stage merged"| K
     K -->|"FAIL: names a workstream → its attempt;<br/>unattributable → track integration attempt"| J2
     K -->|"attempts exhausted"| L["agent:blocked + evidence comment"]
-    K -->|"PASS"| M["open-pr: evidence bundle + Manual QA<br/>one PR, Closes every issue in the track<br/>agent:in-review"]
-    M --> N{"⚓ required CI check green?"}
+    K -->|"PASS"| K2
+    K2 -->|"re-review FAIL → a real gate failure"| J2
+    K2 --> M
+    M --> N
     N -->|"red → the real failure feeds back"| J2
   end
 
-  subgraph gate ["4 · The auto-merge gate"]
-    N -->|"green"| O{"risk:high?<br/>hold: true on any unit?<br/>any spec-question warning?<br/>any unresolved review finding?"}
-    O -->|"clean pass"| Q["merge agent:<br/>1. squash-merge with --auto<br/>2. ⚓ report GitHub's answer, not its own"]
-    O -->|"HOLD"| P["hold agent posts a DECISION —<br/>options to rule on, not a defect report;<br/>direction questions arrive as live prototypes"]
+  subgraph gate ["4 · The auto-merge gate — still verify-and-ship"]
+    N -->|"green"| O{"risk:high?<br/>hold: true on any unit?<br/>any spec-question warning?<br/>unresolved findings after 2 rounds?"}
+    O -->|"clean pass"| Q["merge agent: squash-merge with --auto<br/>⚓ report GitHub's answer, not its own"]
+    O -->|"HOLD"| P["hold agent posts a DECISION —<br/>options to rule on, not a defect report;<br/>direction questions arrive as live prototypes;<br/>unresolved review findings arrive as decisions:<br/>merge as-is / direct a fix / take manually"]
     Q --> R["every issue the track closes → board shows Done"]
   end
 
@@ -120,7 +128,10 @@ ruling.
 | Status labels + board structure | `ops/agent-os/labels.md` |
 | DoD gates (G0–G6, the scoped/integration split, HR lenses) | `ops/agent-os/dod.md` |
 | What makes work delegable (design-first, modularity, seams, rule strengths) | `ops/agent-os/delegation-rules.md` |
-| The build loop + auto-merge gate | `.claude/workflows/build-until-done.js` |
+| The build loop (guarantee layer: planning, claiming, stages, recipes fan-out, scoped verify, attempt accounting) | `.claude/workflows/build-until-done.js` |
+| The fixed verify→ship tail (child workflow) | `.claude/workflows/verify-and-ship.js` |
+| Build recipes (strategy layer) + their contract | `.claude/workflows/recipes/`, `ops/agent-os/recipes.md` |
+| The reviewer brief (findings bar + fix-in-pass contract) | `.claude/agents/code-reviewer.md` |
 | Board mirror (labels → columns, closed → Done) | `.github/workflows/board-sync.yml` |
 | Intake, dispatch, PR, validation skills | `.claude/skills/{spec-intake,dispatch,open-pr,browser-validation,definition-of-done}/` |
 | Prototyping a direction decision | `.claude/skills/prototype/` (+ `src/components/prototype-switcher.tsx`) |
