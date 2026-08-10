@@ -151,6 +151,13 @@ themselves are older; each row carries its original date.
 | 309 | **Notification cadence is not pinned by defaults** (2026-08-09): stop writing cadence defaults at preference-create; the inert oversight cadence control is retired rather than shipped disabled; failed preference saves surface to the user. | Shipped in PR #369. |
 | seed&nbsp;guard | **The dev-seed wipe refuses to run against a database holding an alpha-cohort sentinel account** unless `--allow-protected-db` is passed (2026-08-09). Detection is positive (sentinel rows), never connection-string heuristics, which fail open. | `src/lib/dev-seed/protected-database.ts`; wipe order derived from `pg_constraint`; wiki corpus protected and never walked through. |
 
+### Resolved 2026-08-10 — which contrast standard binds `--muted-foreground` (#386), and what darkening it costs (PR #387)
+
+| # | Decision | Consequence |
+|---|----------|-------------|
+| 386 | **WCAG AA (4.5:1) binds `--muted-foreground`; APCA is advisory.** The token measures APCA Lc 68.2 on `--muted`, under the Lc 75 body-text guidance, and ships anyway: AA is the conformance target the product commits to, and APCA is still a draft that no obligation points at. Advisory means it may inform a future token move — never justify lightening one that clears AA. | #386 closed. Enforcement line in `memory/invariants.md` (Design Tokens — Contrast), tagged ⚖; `src/app/text-contrast.test.ts` continues to assert AA on all eight surfaces in both themes and nothing asserts an APCA floor. |
+| PR&nbsp;387 | **The SC 1.4.1 cost of darkening is paid in CSS, not by capping the token.** Darkening `--muted-foreground` converges it on `--primary`, so an inline link in muted prose fell to 2.85:1 (light) / 2.06:1 (dark) against its surrounding text — under the 3:1 WCAG SC 1.4.1 asks when colour is the only distinguisher, and `hover:underline` is not a rest state. Ruled: give inline links a **permanent underline** rather than bound how far the token may darken. A non-colour cue holds at any lightness, so the two criteria stop competing. Options (b) "cap the darkening at the 1.4.1 boundary" and (c) "rule 1.4.1 out of scope" were both rejected. | `p a[href]` underlines in the base layer of `src/app/globals.css` (scoped to `p`, since `li` is nav); Lighthouse's `link-in-text-block` finding on `/login` clears. Enforcement lines in `memory/invariants.md` name link separation as the cost darkening carries, and forbid deleting the rule or adding `no-underline` to prose links. |
+
 ### Recorded 2026-08-10 — phase-engine technical decisions (June 2026)
 
 Moved out of the phase-engine FRD §10 when the ledger became the single home for decisions. The

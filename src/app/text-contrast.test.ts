@@ -21,6 +21,14 @@ const GLOBALS_CSS = path.join(SRC, "app", "globals.css");
 
 const AA_BODY_TEXT = 4.5;
 
+/**
+ * WCAG SC 1.4.1 (Use of Color). When colour is the ONLY thing telling a link
+ * apart from the text around it, that colour difference has to reach 3:1 —
+ * the same threshold non-text contrast uses. Below it, the link needs a cue
+ * that is not colour.
+ */
+const SC_1_4_1_NON_COLOUR_THRESHOLD = 3;
+
 // --- color math -------------------------------------------------------------
 
 type Rgb = [number, number, number];
@@ -308,6 +316,135 @@ test("the old token is kept out because it genuinely fails, not by taste", () =>
     `text-foreground/50 measured ${ratio.toFixed(2)}:1 — if this now passes, the tokens moved and this test is stale`
   );
   assert.ok(Math.abs(ratio - 3.3) < 0.1, `expected ~3.30:1, got ${ratio}`);
+});
+
+// --- inline links in prose: SC 1.4.1 (#386 ruling, PR #387) -----------------
+//
+// Darkening --muted-foreground for AA moves it TOWARD --primary, which is the
+// colour an inline link is painted in. So the token's AA headroom against its
+// own surface and its separation from link text move in OPPOSITE directions,
+// and the second one fell through the floor while the first was being fixed:
+// Lighthouse flagged `link-in-text-block` on /login's "Sign up".
+//
+// The 2026-08-10 ruling took that cost out of the token's way rather than
+// capping how far the token may darken — inline links carry a permanent
+// underline, which holds at any lightness. These tests pin BOTH halves: the
+// arithmetic that makes the underline load-bearing, and the underline itself.
+
+test("colour alone cannot separate an inline link from muted prose, in either theme", () => {
+  // The measured pairing behind the finding: `text-primary` link inside a
+  // `text-muted-foreground` paragraph, which is exactly /login's "Sign up".
+  const light = contrastRatio(
+    readToken("light", "primary"),
+    readToken("light", "muted-foreground")
+  );
+  const dark = contrastRatio(
+    readToken("dark", "primary"),
+    readToken("dark", "muted-foreground")
+  );
+
+  // Quoted in memory/invariants.md and in the globals.css comment. If the
+  // tokens move these drift, and the prose that argues from them goes stale.
+  assert.ok(
+    Math.abs(light - 2.85) < 0.02,
+    `expected the recorded ~2.85:1 link/prose separation in light, got ${light.toFixed(2)}:1 — update memory/invariants.md and the globals.css comment with the new figures`
+  );
+  assert.ok(
+    Math.abs(dark - 2.06) < 0.02,
+    `expected the recorded ~2.06:1 link/prose separation in dark, got ${dark.toFixed(2)}:1 — update memory/invariants.md and the globals.css comment with the new figures`
+  );
+
+  for (const [theme, ratio] of [
+    ["light", light],
+    ["dark", dark],
+  ] as const) {
+    assert.ok(
+      ratio < SC_1_4_1_NON_COLOUR_THRESHOLD,
+      `link/prose separation in ${theme} is now ${ratio.toFixed(2)}:1, at or over ${SC_1_4_1_NON_COLOUR_THRESHOLD}:1 — colour alone would satisfy SC 1.4.1 again. The permanent underline is still ruled (PR #387, it must not depend on where the token sits); re-record the numbers rather than dropping it`
+    );
+  }
+});
+
+test("the pre-#341 token is not an escape hatch — it only passes SC 1.4.1 by giving AA back", () => {
+  // Option (b) on the ruling was "cap the darkening at the 1.4.1 boundary".
+  // This records why it was rejected: the lightest L that clears 3:1 against
+  // --primary is lighter than the AA ceiling on --muted, so honouring both
+  // with colour alone leaves the token almost no room at all.
+  const primary = readToken("light", "primary");
+  const aaCeiling = lightestPassingL(readToken("light", "muted"));
+
+  const atAaCeiling = contrastRatio(oklchToSrgb(aaCeiling, 0, 0), primary);
+  assert.ok(
+    atAaCeiling > SC_1_4_1_NON_COLOUR_THRESHOLD,
+    `at the AA ceiling L ${aaCeiling.toFixed(4)} the link separation is ${atAaCeiling.toFixed(2)}:1`
+  );
+
+  // ...but the shipped token is a real step below that ceiling (by design —
+  // see globals.css), and there the colour-only answer fails. The window
+  // where both hold is the sliver between the two, which is why the remedy
+  // is a non-colour cue instead of a lightness cap.
+  const [shipped] = readTokenOklch("light", "muted-foreground");
+  assert.ok(
+    contrastRatio(oklchToSrgb(shipped, 0, 0), primary) <
+      SC_1_4_1_NON_COLOUR_THRESHOLD,
+    "the shipped token now clears 3:1 against --primary — re-read the PR #387 ruling before treating a lightness cap as sufficient"
+  );
+});
+
+test("inline links in prose carry a permanent underline in the base layer", () => {
+  const baseLayer = css.indexOf("@layer base {");
+  assert.notEqual(baseLayer, -1, "@layer base block not found in globals.css");
+
+  const rule = /p\s+a\[href\]\s*\{[^}]*text-decoration(?:-line)?:\s*underline/;
+  const match = css.slice(baseLayer).match(rule);
+
+  assert.ok(
+    match,
+    "globals.css no longer underlines `p a[href]` in @layer base — /login's \"Sign up\" is 2.85:1 against the text around it, so removing the underline puts SC 1.4.1 back in the token's hands (memory/invariants.md → Design Tokens — Contrast)"
+  );
+});
+
+/** Every `<p>…</p>` in shipped markup that contains a link, with its file. */
+function proseBlocksContainingLinks(): { file: string; block: string }[] {
+  return tsxFiles(SRC).flatMap((file) => {
+    const source = readFileSync(file, "utf8");
+    const blocks = source.match(/<p[\s>][\s\S]*?<\/p>/g) ?? [];
+    return blocks
+      .filter((block) => /<Link[\s>]|<a[\s>]/.test(block))
+      .map((block) => ({ file: path.relative(process.cwd(), file), block }));
+  });
+}
+
+test("no link inside prose opts out of the underline", () => {
+  // The base rule is defeated by one utility class, and utilities outrank
+  // base — so `no-underline` on a prose link silently reintroduces the
+  // colour-only link. Legitimate elsewhere (nav is a list OF links, not
+  // prose), which is why the guard is scoped to `<p>` rather than to the
+  // class name.
+  const offenders = proseBlocksContainingLinks()
+    .filter(({ block }) => /\bno-underline\b/.test(block))
+    .map(({ file }) => file);
+
+  assert.deepEqual(
+    offenders,
+    [],
+    "a link inside a paragraph carries `no-underline` — that puts it back at 2.85:1 against its own sentence with no non-colour cue (WCAG SC 1.4.1). Move the link out of the prose block or drop the class"
+  );
+});
+
+test('the /login "Sign up" link is still inside a paragraph, where the rule reaches it', () => {
+  // The proven case for the whole ruling. The base rule keys on `p a[href]`,
+  // so refactoring this paragraph into a <div> would delete the fix without
+  // touching a line of CSS.
+  const loginForm = path.join(SRC, "app", "(auth)", "login", "login-form.tsx");
+  const blocks = proseBlocksContainingLinks().filter(({ file }) =>
+    loginForm.endsWith(file)
+  );
+
+  assert.ok(
+    blocks.some(({ block }) => /href="\/register"/.test(block)),
+    'login-form.tsx no longer wraps its "Sign up" link in a <p> — the `p a[href]` underline in globals.css no longer reaches it, and Lighthouse\'s link-in-text-block finding comes back'
+  );
 });
 
 // --- regression guard -------------------------------------------------------
