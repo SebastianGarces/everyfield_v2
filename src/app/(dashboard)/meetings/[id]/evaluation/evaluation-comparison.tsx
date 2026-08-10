@@ -7,8 +7,16 @@ import {
 } from "@/lib/meetings/service";
 
 interface EvaluationComparisonCardProps {
-  /** `null` when nothing was evaluated before this meeting. */
+  /** `null` when nothing in the fetched window is earlier than this meeting. */
   comparison: EvaluationComparison | null;
+  /**
+   * PROTOTYPE ONLY (variant C) — whether the fetched window came back full.
+   * A window that is not full holds the church's whole evaluated history, so
+   * `null` then means nothing earlier exists. A full window cannot tell the
+   * two causes apart. This is the discriminator option C costs; it is deleted
+   * with the losing variants once the sentence is ruled.
+   */
+  windowFull?: boolean;
 }
 
 /** Signed to one decimal, so "+0.0" and "-0.0" never appear. */
@@ -37,6 +45,7 @@ function formatDelta(delta: number): string {
  */
 export function EvaluationComparisonCard({
   comparison,
+  windowFull = false,
 }: EvaluationComparisonCardProps) {
   if (!comparison) {
     return (
@@ -48,16 +57,60 @@ export function EvaluationComparisonCard({
         </CardHeader>
         <CardContent>
           {/*
+            PROTOTYPE (2026-08-10, #312) — four competing sentences for this
+            empty state, all in the DOM, selected by `data-cmp-proto` on
+            <html> from the floating switcher. Only the winner survives; the
+            losers, the `windowFull` prop and the switcher mount are deleted
+            when the ruling is applied.
+
             The window is named from the constant, never typed as a literal —
-            a hand-written "50" here is the copy that goes quietly wrong the
+            a hand-written number here is the copy that goes quietly wrong the
             day the window changes.
           */}
-          <p className="text-muted-foreground text-sm">
+          <p
+            data-variant="a"
+            className="text-muted-foreground hidden text-sm [[data-cmp-proto=a]_&]:block"
+          >
             No comparison available. This card measures a meeting against the
             evaluated meetings before it, and none of your{" "}
             {EVALUATION_COMPARISON_WINDOW} most recent evaluations came before
             this one.
           </p>
+
+          <p
+            data-variant="b"
+            className="text-muted-foreground hidden text-sm [[data-cmp-proto=b]_&]:block"
+          >
+            No comparison available — nothing you evaluated earlier is in range
+            for this meeting.
+          </p>
+
+          <p
+            data-variant="c"
+            className="text-muted-foreground hidden text-sm [[data-cmp-proto=c]_&]:block"
+          >
+            {windowFull ? (
+              <>
+                No comparison available. None of your{" "}
+                {EVALUATION_COMPARISON_WINDOW} most recent evaluations came
+                before this meeting.
+              </>
+            ) : (
+              <>
+                No comparison available. Nothing you evaluated came before this
+                meeting.
+              </>
+            )}
+          </p>
+
+          <div data-variant="d" className="hidden [[data-cmp-proto=d]_&]:block">
+            <p className="text-sm">No comparison available.</p>
+            <p className="text-muted-foreground mt-1 text-xs">
+              This card compares a meeting with the evaluated meetings before
+              it, drawn from your {EVALUATION_COMPARISON_WINDOW} most recent
+              evaluations.
+            </p>
+          </div>
         </CardContent>
       </Card>
     );
