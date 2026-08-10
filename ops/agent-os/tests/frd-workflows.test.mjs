@@ -14,7 +14,6 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
 
 // Resolved from this file, not the cwd — the test must not depend on where it is run from.
 const ROOT = path.resolve(import.meta.dirname, "../../..");
@@ -395,14 +394,18 @@ test("the run settles the board rather than leaving issues in-progress", async (
  * `over.workflowImpl` overrides that, for tests about a child that died.
  */
 async function runBuild(units, reply, over = {}) {
-  const { workflowImpl, ...argOver } = over;
+  const { workflowImpl, budgetImpl, ...argOver } = over;
   const source = load("build-until-done.js");
   const calls = [];
   const globals = {
     args: { units, maxAttempts: 1, base: "main", ...argOver },
     log: (m) => calls.push({ kind: "log", value: m }),
     phase: (p) => calls.push({ kind: "phase", value: p }),
-    budget: { total: null, spent: () => 0, remaining: () => Infinity },
+    budget: budgetImpl || {
+      total: null,
+      spent: () => 0,
+      remaining: () => Infinity,
+    },
     agent: async (prompt, opts = {}) => {
       calls.push({
         kind: "agent",
@@ -617,53 +620,52 @@ const warn = (kind, summary) => ({
  * label tests is that the loop must not believe it. `prImpl` overrides the
  * delivery step, for the case where the DoD passes and the push does not.
  */
-const replyShip =
-  (verifyReport, labelImpl, prImpl) => (prompt, opts) => {
-    const l = opts.label || "";
-    if (l.startsWith("label:"))
-      return (labelImpl || labelledOk)(prompt, opts, verifyReport);
-    if (prImpl && l.startsWith("pr:")) return prImpl(prompt, opts);
-    if (l.startsWith("start:")) return { claimed: [101], inProgressNow: [101] };
-    if (l.startsWith("prep:")) return prepped(prompt);
-    if (l.startsWith("tree:")) return treeReady(prompt);
-    if (l.startsWith("refs:")) return noRefs();
-    if (l.startsWith("push:")) return pushedOk();
-    if (l.startsWith("cleanup:")) return { removed: ["everything"] };
-    if (l.startsWith("impl:") || l.startsWith("repair:"))
-      return {
-        committed: true,
-        filesChanged: [],
-        summary: "ok",
-        selfCheckPassed: true,
-        commits: ["c0ffee00000000000000000000000000000000aa"],
-        // A retry must answer the named cause; a first attempt has none to
-        // answer. Filling both is what an honest implementer returns.
-        rootCause: "the named ReferenceError",
-        rootCauseAddressed: "moved the import; `pnpm test` is green",
-      };
-    if (l.startsWith("integrate:"))
-      return { merged: branchesInIntegratePrompt(prompt), conflicts: [] };
-    if (l.startsWith("fix:"))
-      return {
-        committed: true,
-        filesChanged: [],
-        summary: "fixed the findings",
-        perFinding: [{ finding: "the finding", addressed: "fixed and proven" }],
-      };
-    if (l.startsWith("re-review:")) return passing([]);
-    if (l.startsWith("verify:")) return verifyReport;
-    if (l.startsWith("lens:"))
-      return { verdict: "PASS", lens: "x", findings: [], summary: "ok" };
-    if (l.startsWith("pr:"))
-      return {
-        opened: true,
-        url: "https://gh/pr/1",
-        checkConclusion: "success",
-      };
-    if (l.startsWith("merge:")) return { merged: true, state: "merged" };
-    if (l.startsWith("hold:")) return { merged: false, state: "refused" };
-    return {};
-  };
+const replyShip = (verifyReport, labelImpl, prImpl) => (prompt, opts) => {
+  const l = opts.label || "";
+  if (l.startsWith("label:"))
+    return (labelImpl || labelledOk)(prompt, opts, verifyReport);
+  if (prImpl && l.startsWith("pr:")) return prImpl(prompt, opts);
+  if (l.startsWith("start:")) return { claimed: [101], inProgressNow: [101] };
+  if (l.startsWith("prep:")) return prepped(prompt);
+  if (l.startsWith("tree:")) return treeReady(prompt);
+  if (l.startsWith("refs:")) return noRefs();
+  if (l.startsWith("push:")) return pushedOk();
+  if (l.startsWith("cleanup:")) return { removed: ["everything"] };
+  if (l.startsWith("impl:") || l.startsWith("repair:"))
+    return {
+      committed: true,
+      filesChanged: [],
+      summary: "ok",
+      selfCheckPassed: true,
+      commits: ["c0ffee00000000000000000000000000000000aa"],
+      // A retry must answer the named cause; a first attempt has none to
+      // answer. Filling both is what an honest implementer returns.
+      rootCause: "the named ReferenceError",
+      rootCauseAddressed: "moved the import; `pnpm test` is green",
+    };
+  if (l.startsWith("integrate:"))
+    return { merged: branchesInIntegratePrompt(prompt), conflicts: [] };
+  if (l.startsWith("fix:"))
+    return {
+      committed: true,
+      filesChanged: [],
+      summary: "fixed the findings",
+      perFinding: [{ finding: "the finding", addressed: "fixed and proven" }],
+    };
+  if (l.startsWith("re-review:")) return passing([]);
+  if (l.startsWith("verify:")) return verifyReport;
+  if (l.startsWith("lens:"))
+    return { verdict: "PASS", lens: "x", findings: [], summary: "ok" };
+  if (l.startsWith("pr:"))
+    return {
+      opened: true,
+      url: "https://gh/pr/1",
+      checkConclusion: "success",
+    };
+  if (l.startsWith("merge:")) return { merged: true, state: "merged" };
+  if (l.startsWith("hold:")) return { merged: false, state: "refused" };
+  return {};
+};
 
 /** The workstream branches an integrate step was told to merge. */
 const branchesInIntegratePrompt = (prompt) =>
@@ -760,10 +762,7 @@ test("a verify-and-ship child that died is a failed attempt, never a silent skip
     1,
     "a dead child spends the attempt and the exhausted track blocks loudly"
   );
-  assert.match(
-    result.blocked[0].reason,
-    /did not reach the integration DoD/
-  );
+  assert.match(result.blocked[0].reason, /did not reach the integration DoD/);
 });
 
 // ---------------------------------------------------------------------------
@@ -1005,7 +1004,9 @@ test("a single spec-question holds the track for a human", async () => {
   const { result, calls } = await runBuild(
     [buildUnit("alpha", 101)],
     replyShip(
-      passing([warn("spec-question", "is a church-wide packet the intended read?")])
+      passing([
+        warn("spec-question", "is a church-wide packet the intended read?"),
+      ])
     ),
     { autoMerge: true }
   );
@@ -1098,7 +1099,6 @@ test("the recipe runs as a child workflow with the contract args", async () => {
       "attempt",
       "branch",
       "conventions",
-      "declaredFiles",
       "implAgentType",
       "priorReport",
       "retryBlock",
@@ -1108,7 +1108,7 @@ test("the recipe runs as a child workflow with the contract args", async () => {
       "workstream",
       "worktree",
     ],
-    "recipeArgs is a contract (ops/agent-os/recipes.md) — widening it is a factory change"
+    "recipeArgs is a contract (ops/agent-os/recipes.md) — widening it is a factory change, and each datum crosses in exactly one form (files = workstream.files)"
   );
   assert.equal(recipeCalls[0].args.priorReport, null);
   assert.equal(recipeCalls[0].args.retryBlock, null);
@@ -2148,7 +2148,10 @@ test("integration findings trigger a fix round + re-review, then the track merge
   );
   const fix = calls.find((c) => c.label === "fix:alpha#r1");
   const rr = calls.find((c) => c.label === "re-review:alpha#r1");
-  assert.ok(fix, "critical findings on a PASS go to a fix agent in the same pass");
+  assert.ok(
+    fix,
+    "critical findings on a PASS go to a fix agent in the same pass"
+  );
   assert.ok(
     fix.prompt.includes("tenant scope missing"),
     "the finding is quoted verbatim, not paraphrased"
@@ -2338,6 +2341,294 @@ test("a re-review FAIL routes into the attempt machinery, not the quality counte
 });
 
 // ---------------------------------------------------------------------------
+// The G3 re-anchor (#399): a quality-round fix commit moves the branch tip,
+// so the functional evidence collected by the first integration verify
+// belongs to a sha that no longer exists at the tip. CI re-anchors G1/G2 at
+// the final sha; the loop must re-anchor G3 there itself — no sha ships whose
+// functional gate never ran at that sha.
+// ---------------------------------------------------------------------------
+
+test("a committed fix round forces a G3 re-run at the new sha before the PR", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    (prompt, opts) => {
+      const l = opts.label || "";
+      if (l.startsWith("verify:alpha#"))
+        return {
+          ...passing([]),
+          findings: [finding("critical", "tenant scope missing")],
+        };
+      return replyShip(passing([]))(prompt, opts);
+    },
+    { autoMerge: true }
+  );
+  const g3 = calls.find((c) => c.label?.startsWith("verify:g3:alpha"));
+  const pr = calls.find((c) => c.label?.startsWith("pr:alpha"));
+  assert.ok(g3, "the functional gate must re-run at the sha that will merge");
+  assert.ok(
+    calls.indexOf(g3) < calls.indexOf(pr),
+    "the re-anchor runs BEFORE anything ships the new sha"
+  );
+  assert.match(
+    g3.prompt,
+    /f604b2b/,
+    "the re-run is pinned to the re-pushed finalSha, not to the pre-fix one"
+  );
+  assert.ok(
+    calls.some((c) => c.label === "merge:alpha"),
+    "a passing re-run still auto-merges cleanly"
+  );
+  assert.equal(result.shipped.length, 1);
+});
+
+test("no fix commits means no G3 re-run — the first evidence still matches the tip", async () => {
+  const { calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    replyShip(passing([])),
+    { autoMerge: true }
+  );
+  assert.ok(
+    !calls.some((c) => c.label?.startsWith("verify:g3:")),
+    "a track with no post-verify commits needs no re-anchor"
+  );
+});
+
+test("a G3 re-run FAIL re-enters the attempt machinery like any gate", async () => {
+  let g3Seen = 0;
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    (prompt, opts) => {
+      const l = opts.label || "";
+      if (l.startsWith("verify:alpha#"))
+        return {
+          ...passing([]),
+          findings: g3Seen ? [] : [finding("critical", "x")],
+        };
+      if (l.startsWith("verify:g3:") && ++g3Seen === 1)
+        return {
+          verdict: "FAIL",
+          gates: [
+            { id: "G3", status: "FAIL", evidence: "the fix broke the flow" },
+          ],
+          acceptanceCriteria: [],
+          failingGate: "G3",
+          failingWorkstream: "",
+          fixInstructions: "unbreak it",
+          summary: "regression introduced by the fix round",
+        };
+      return replyShip(passing([]))(prompt, opts);
+    },
+    { autoMerge: true, maxAttempts: 2 }
+  );
+  assert.ok(
+    calls.some((c) => c.label?.startsWith("repair:")),
+    "the FAIL takes the normal unattributable-failure path, spending a real attempt"
+  );
+  assert.equal(
+    result.shipped.length,
+    1,
+    "the second attempt re-verifies and ships"
+  );
+});
+
+// ---------------------------------------------------------------------------
+// The /deliver path (autoMerge=false) and surviving findings: the ruling's
+// exhaust outcome is "HOLD with a DECISION comment", and the reviewer on this
+// path reads the PR — not the workflow return payload. The menu must reach
+// the PR on both paths.
+// ---------------------------------------------------------------------------
+
+test("on a direct /deliver run, surviving findings still reach the PR as a DECISION", async () => {
+  const stubborn = finding("structural", "spaghetti mode bolted into checkout");
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    (prompt, opts) => {
+      const l = opts.label || "";
+      if (l.startsWith("verify:alpha#"))
+        return { ...passing([]), findings: [stubborn] };
+      if (l.startsWith("re-review:alpha#"))
+        return { ...passing([]), findings: [stubborn] };
+      return replyShip(passing([]))(prompt, opts);
+    }
+    // no autoMerge — the direct /deliver default
+  );
+  const menu = calls.find((c) => c.label === "findings:alpha");
+  assert.ok(
+    menu,
+    "the DECISION comment must not depend on AUTO_MERGE — without it the human reviews the PR blind"
+  );
+  assert.match(menu.prompt, /gh pr comment/);
+  assert.match(menu.prompt, /merge as-is — rule the finding accepted/);
+  assert.match(menu.prompt, /direct a named fix/);
+  assert.ok(
+    menu.prompt.includes("spaghetti mode bolted into checkout"),
+    "the finding reaches the DECISION verbatim"
+  );
+  assert.match(menu.prompt, /Surviving worktrees/);
+  assert.equal(result.shipped[0].merge, "not-attempted");
+});
+
+// ---------------------------------------------------------------------------
+// The generate-and-filter recipe (#399 WS3): 3 candidates, an opus judge,
+// ff-only land. The runBuild harness evaluates the real recipe file, so these
+// cover its control flow: the happy path lands the winner and proceeds to the
+// scoped verifier; a winner of 0 returns commits: [] and the parent's
+// empty-commits gate fails the attempt before a verifier is spent.
+// ---------------------------------------------------------------------------
+
+const candSha = (i) => `aa${i}0000000000000000000000000000000000aa`;
+
+const gafReply =
+  ({ winner = 2 } = {}) =>
+  (prompt, opts) => {
+    const l = opts.label || "";
+    if (/^cand\d+:/.test(l)) {
+      const i = Number(l.match(/^cand(\d+):/)[1]);
+      return {
+        committed: true,
+        filesChanged: [],
+        summary: `candidate ${i}`,
+        approach: `approach ${i}`,
+        selfCheckPassed: true,
+        commits: [candSha(i)],
+      };
+    }
+    if (l.startsWith("judge:"))
+      return {
+        winner,
+        reasons:
+          winner === 0 ? "none acceptable" : `candidate ${winner} is cleanest`,
+        perCandidate: [1, 2, 3].map((c) => ({
+          candidate: c,
+          committed: true,
+          verdict: c === winner ? "winner" : "rejected",
+          notes: c === winner ? "" : "weaker tests",
+        })),
+      };
+    if (l.startsWith("land:"))
+      return {
+        ...(winner !== 0
+          ? { mergeOk: true, landedShas: [candSha(winner)] }
+          : {}),
+        headSha: winner !== 0 ? candSha(winner) : BASE_SHA,
+        worktreeList: "/repo  abcd123 [main]",
+        recipeBranches: "",
+      };
+    return replyShip(passing([]))(prompt, opts);
+  };
+
+test("a generate-and-filter unit runs the recipe child, lands the winner, and ships", async () => {
+  const { result, calls } = await runBuild(
+    [{ ...buildUnit("alpha", 101), recipe: "generate-and-filter" }],
+    gafReply()
+  );
+  const recipeCall = calls.find(
+    (c) =>
+      c.kind === "workflow" &&
+      c.scriptPath.includes("recipes/generate-and-filter.js")
+  );
+  assert.ok(recipeCall, "the recipe named on the unit is the child that runs");
+  assert.equal(
+    calls.filter((c) => /^cand\d+:/.test(c.label || "")).length,
+    3,
+    "three independent candidate implementers fan out"
+  );
+  assert.ok(
+    calls.some((c) => c.label?.startsWith("judge:")),
+    "an opus judge picks the winner"
+  );
+  assert.equal(
+    scopedVerify(calls).length,
+    1,
+    "the landed winner proceeds to the scoped verifier like any attempt"
+  );
+  assert.equal(result.shipped.length, 1);
+});
+
+test("a judge that picks no winner (0) fails the attempt through the empty-commits gate", async () => {
+  const { result, calls } = await runBuild(
+    [{ ...buildUnit("alpha", 101), recipe: "generate-and-filter" }],
+    gafReply({ winner: 0 })
+  );
+  assert.equal(result.blocked.length, 1);
+  assert.equal(
+    result.blocked[0].failingGate,
+    "recipe",
+    "commits: [] comes back and the parent's empty-commits check fails the attempt"
+  );
+  assert.equal(
+    scopedVerify(calls).length,
+    0,
+    "no verifier is spent on an attempt that landed nothing"
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Recipe weighting (#399): recipes.md and dispatch's SKILL.md say a
+// generate-and-filter workstream "counts as 3 agents against the cap" and
+// costs ~3x an attempt. RECIPE_AGENT_COST is where that claim is enforced —
+// these pin the two mechanisms: the weighted reserve refuses an attempt it
+// cannot fund BEFORE the recipe child launches, and the weighted chunking
+// keeps the summed in-flight weight under the agent cap.
+// ---------------------------------------------------------------------------
+
+test("the token reserve is recipe-weighted: generate-and-filter needs 3x before it starts", async () => {
+  const tight = {
+    total: 1_000_000,
+    spent: () => 700_000,
+    remaining: () => 300_000,
+  };
+  const { result, calls } = await runBuild(
+    [{ ...buildUnit("alpha", 101), recipe: "generate-and-filter" }],
+    gafReply(),
+    { budgetImpl: tight }
+  );
+  assert.ok(
+    !calls.some(
+      (c) => c.kind === "workflow" && c.scriptPath.includes("recipes/")
+    ),
+    "the refusal happens BEFORE the recipe child launches — never mid-flight inside it"
+  );
+  assert.equal(result.blocked.length, 1);
+  assert.match(
+    result.blocked[0].reason,
+    /450k/,
+    "the refusal shows the weighted arithmetic (150k reserve x 3)"
+  );
+
+  const plain = await runBuild(
+    [buildUnit("alpha", 101)],
+    replyShip(passing([])),
+    { budgetImpl: tight }
+  );
+  assert.equal(
+    plain.result.shipped.length,
+    1,
+    "the same budget funds an implement-straight attempt — the weight, not the check, is what changed"
+  );
+});
+
+test("the agent cap chunks by recipe weight, not workstream count", async () => {
+  const { calls } = await runBuild(
+    [
+      { ...buildUnit("alpha", 101), recipe: "generate-and-filter" },
+      { ...buildUnit("beta", 102), recipe: "generate-and-filter" },
+    ],
+    gafReply(),
+    { maxConcurrentAgents: 3 }
+  );
+  const alphaDone = calls.findIndex(
+    (c) => c.label === "label:in-review:alpha#1"
+  );
+  const betaStart = calls.findIndex((c) => c.label === "start:beta");
+  assert.ok(alphaDone !== -1 && betaStart !== -1);
+  assert.ok(
+    alphaDone < betaStart,
+    "two weight-3 tracks under a cap of 3 must serialize — six candidate implementers at once is the 2026-08-09 machine-freeze class"
+  );
+});
+
+// ---------------------------------------------------------------------------
 // The two file-level mechanisms: the parent idiom and the format hook.
 //
 // Neither is exercised by a stubbed run — one is a doctrine about which command
@@ -2353,17 +2644,122 @@ const PARENT_DOC_FILES = [
   "ops/agent-os/labels.md",
 ];
 
-// Every workflow script must at least parse — AC1 of #399. Extend this list
-// with every new workflow or recipe file.
+// Every workflow script must parse — AC1 of #399. The set is ENUMERATED from
+// disk rather than maintained by hand, so a new recipe can never be silently
+// unlisted.
+//
+// NOTE: `node --check` is deliberately NOT used here — on Node 24 it exits 0
+// WITHOUT parsing any file it detects as ESM, and `export const meta` makes
+// every workflow script ESM-detected, so that gate could never fail. Instead
+// each file is parsed exactly the way the runtime (and the runBuild harness
+// above) evaluates it: strip the export, wrap the body in the
+// injected-globals function, and let the parser see all of it.
+const listJs = (dir) =>
+  fs
+    .readdirSync(path.join(ROOT, dir))
+    .filter((f) => f.endsWith(".js"))
+    .map((f) => `${dir}/${f}`)
+    .sort();
 const WORKFLOW_FILES = [
-  ".claude/workflows/build-until-done.js",
-  ".claude/workflows/verify-and-ship.js",
-  ".claude/workflows/recipes/implement-straight.js",
+  ...listJs(".claude/workflows"),
+  ...listJs(".claude/workflows/recipes"),
 ];
 
-test("node --check passes on every workflow script", () => {
-  for (const file of WORKFLOW_FILES)
-    execFileSync(process.execPath, ["--check", path.join(ROOT, file)]);
+test("every workflow script parses under the harness wrapper (AC1)", () => {
+  for (const name of [
+    "build-until-done.js",
+    "verify-and-ship.js",
+    "frd-plan.js",
+    "frd-implement.js",
+    "recipes/implement-straight.js",
+    "recipes/generate-and-filter.js",
+  ])
+    assert.ok(
+      WORKFLOW_FILES.includes(`.claude/workflows/${name}`),
+      `${name} must be in the enumerated set`
+    );
+  for (const file of WORKFLOW_FILES) {
+    const source = read(file).replace(/^export const meta/m, "const meta");
+    try {
+      new Function(
+        "args",
+        "budget",
+        "log",
+        "agent",
+        "parallel",
+        "workflow",
+        "phase",
+        "pipeline",
+        `return (async () => { ${source} })()`
+      );
+    } catch (e) {
+      assert.fail(`${file} does not parse: ${e.message}`);
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Twin blocks (#399): build-until-done.js and verify-and-ship.js each carry a
+// copy of the shared guards (the two-table pattern, like dispatch /
+// token-preflight). "Change one, change both" was prose until the review-fix
+// loops quietly diverged — so the twins are machine-enforced now: every
+// declared twin is fenced with `// TWIN:BEGIN <name>` / `// TWIN:END <name>`
+// markers in BOTH files, and this test asserts the fenced copies are
+// text-identical after (a) stripping comment lines, (b) normalizing the two
+// blessed identifier renames the child uses to avoid shadowing its top-level
+// `track`/`attempt` (trk→track, att→attempt), and (c) collapsing whitespace
+// (prettier line-breaks differently around the longer names). Editing one
+// copy without the other fails this test.
+// ---------------------------------------------------------------------------
+const TWIN_NAMES = [
+  "QUALITY_ROUNDS",
+  "FIX_SCHEMA",
+  "BLOCK_SCHEMA",
+  "LABEL_STATE_SCHEMA",
+  "hashes",
+  "treeLines",
+  "findingsBlock",
+  "labelViolations",
+  "settleLabels",
+  "review-fix-loop",
+];
+
+const twinBlock = (source, name, file) => {
+  const begin = source.indexOf(`// TWIN:BEGIN ${name}\n`);
+  const end = source.indexOf(`// TWIN:END ${name}`);
+  assert.ok(
+    begin !== -1 && end > begin,
+    `${file} must fence its "${name}" twin with TWIN:BEGIN/TWIN:END markers`
+  );
+  return (
+    source
+      .slice(begin, end)
+      .split("\n")
+      .filter((l) => {
+        const t = l.trim();
+        return !(t.startsWith("//") || t.startsWith("/*") || t.startsWith("*"));
+      })
+      .join("\n")
+      .replace(/\btrk\b/g, "track")
+      .replace(/\batt\b/g, "attempt")
+      .replace(/\s+/g, " ")
+      // The rename above changes line lengths, so prettier breaks the two copies
+      // differently — which adds/removes trailing commas along with the
+      // whitespace. Both are formatting, not text.
+      .replace(/,\s*([}\])])/g, " $1")
+      .trim()
+  );
+};
+
+test("every declared twin is text-identical across build-until-done and verify-and-ship", () => {
+  const parent = read(".claude/workflows/build-until-done.js");
+  const child = read(".claude/workflows/verify-and-ship.js");
+  for (const name of TWIN_NAMES)
+    assert.equal(
+      twinBlock(parent, name, "build-until-done.js"),
+      twinBlock(child, name, "verify-and-ship.js"),
+      `twin "${name}" has forked between the two files — change one, change both`
+    );
 });
 
 test("no prompt or doc READS the parent through REST", async () => {

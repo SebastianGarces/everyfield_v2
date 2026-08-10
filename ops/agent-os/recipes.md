@@ -41,12 +41,18 @@ runtime throws on all three).
   retryBlock:  <parent-rendered string | null>,       // mod 2 — recipes prepend it verbatim to their prompt
   conventions: <the CONVENTIONS block the parent assembles>,
   implAgentType: "backend" | "frontend",
-  unitBlocksRendered: <the unit blocks, pre-rendered>,
-  declaredFiles: [<the workstream's declared file set>] }
+  unitBlocksRendered: <the unit blocks, pre-rendered> }
 ```
 
 Notes that bind:
 
+- **Each datum crosses the seam in exactly ONE form.** The declared file set is
+  `workstream.files` — there is no separate `declaredFiles` field, and adding a second form of any
+  datum is a contract widening (a factory-held change class per the ruling). Units are the one
+  deliberate exception and cross in BOTH forms: `unitBlocksRendered` for prompt fidelity (ruling
+  mod 2 pins the implementer prompt to the parent's rendering, so no recipe re-renders it), and
+  `workstream.units` raw because judges and internal loops need per-unit acceptance criteria that
+  cannot be parsed back out of rendered prose.
 - **The worktree is a parent-provided input.** The parent's `prepareWorkstreamTree` cuts non-solo
   workstream trees from the track branch and asserts the cut point; solo workstreams get the track
   worktree. A recipe never creates the tree it works in.
@@ -97,6 +103,13 @@ a recipe that fans out (candidates, internal improve loops) logs what it spent t
 (ruling design note 6). `generate-and-filter` costs ~3× `implement-straight` and counts as 3
 agents against the concurrency cap; dispatch sizes its workstreams at ~3× the budget-table row.
 
+This weighting is **enforced in the loop, not just documented**: the `RECIPE_AGENT_COST` literal
+in `build-until-done.js` weights the concurrency chunking (`boundedParallel` closes a chunk when
+the summed recipe weight would exceed the agent cap — at stage level and at track level) and both
+token-reserve checks (a stage needs `RESERVE × Σ weight`, and a workstream attempt needs
+`RESERVE × weight`), so a `generate-and-filter` workstream is refused before its recipe child
+launches when less than 3× `RESERVE` remains, and can never co-schedule past the cap.
+
 ## Selection — how dispatch picks a recipe
 
 The table in `.claude/skills/dispatch/SKILL.md` §"Recipe selection" is **authoritative** for
@@ -127,7 +140,8 @@ cross-workstream tournaments, recipe-driven staging (would need a seam-v2 ruling
 1. Write the child workflow at `.claude/workflows/recipes/<id>.js` against the contracts above
    (pure-literal `meta`; no `workflow()`, no `Date.now()` / `Math.random()` / argless `new Date()`).
 2. Append the id to the `KNOWN_RECIPES` literal in `build-until-done.js` — that is the parse-time
-   gate's whole registry.
+   gate's whole registry — and, if the recipe runs more than one agent at a time, a row to
+   `RECIPE_AGENT_COST` beside it (missing = weight 1, which under-reserves a fan-out recipe).
 3. Add a row to dispatch's Recipe-selection table (`.claude/skills/dispatch/SKILL.md`) saying
    which task shape earns it, and a row + section here.
 4. Every recipe file is a factory path — the track that lands it carries `hold: true` and never

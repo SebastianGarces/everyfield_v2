@@ -51,6 +51,17 @@ for (const u of units)
       `unit "${u.id}" names unknown recipe "${u.recipe}". Known recipes: ${KNOWN_RECIPES.join(", ")}. ` +
         `Recipe validation is a parse-time gate — failing here means nothing was claimed and no worktree was cut.`
     );
+// ---------------------------------------------------------------------------
+// Recipe cost, in concurrent agents — which is also how many attempt-reserves
+// one call needs. generate-and-filter fans out 3 candidate implementers inside
+// its child workflow, where the agent cap cannot see them; recipes.md and
+// dispatch's SKILL.md say it "counts as 3 agents against the cap", and this
+// literal is where that claim is ENFORCED: boundedParallel chunks stages and
+// tracks by summed weight, and both reserve checks multiply by it. A recipe
+// missing here weighs 1.
+// ---------------------------------------------------------------------------
+const RECIPE_AGENT_COST = { "implement-straight": 1, "generate-and-filter": 3 };
+const agentCostOf = (ws) => RECIPE_AGENT_COST[ws.recipe] || 1;
 const MAX_ATTEMPTS = parsed?.maxAttempts || 3;
 // How many times a label write is re-attempted before the track is errored.
 // A label write is idempotent, so retrying is free; NOT retrying is what left
@@ -251,13 +262,17 @@ const INTEGRATE_SCHEMA = {
 // codebase-wide debt pass (`ops/agent-os/labels.md` records the removal).
 //
 // The cap. TWIN: verify-and-ship.js declares the same constant for the
-// integration-site loop — change one, change both.
+// integration-site loop — change one, change both; frd-workflows.test.mjs
+// asserts every TWIN:BEGIN/END block is text-identical across the two files.
 // ---------------------------------------------------------------------------
+// TWIN:BEGIN QUALITY_ROUNDS
 const QUALITY_ROUNDS = 2;
+// TWIN:END QUALITY_ROUNDS
 
 // The per-finding analogue of `rootCauseAddressed` (the #307 discipline): a
 // fix that cannot say what it did about each finding is refused before a
 // re-review is spent on it. TWIN: verify-and-ship.js — change one, change both.
+// TWIN:BEGIN FIX_SCHEMA
 const FIX_SCHEMA = {
   type: "object",
   required: ["committed", "filesChanged", "summary", "perFinding"],
@@ -288,6 +303,7 @@ const FIX_SCHEMA = {
     },
   },
 };
+// TWIN:END FIX_SCHEMA
 const CLAIM_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -309,11 +325,13 @@ const CLAIM_SCHEMA = {
 
 // DUPLICATED in .claude/workflows/verify-and-ship.js (the two-table pattern,
 // like dispatch/token-preflight): change one, change both.
+// TWIN:BEGIN BLOCK_SCHEMA
 const BLOCK_SCHEMA = {
   type: "object",
   required: ["commented"],
   properties: { commented: { type: "boolean" }, note: { type: "string" } },
 };
+// TWIN:END BLOCK_SCHEMA
 
 // ---------------------------------------------------------------------------
 // The label is the outcome — so it is read back, not assumed.
@@ -339,6 +357,7 @@ const BLOCK_SCHEMA = {
 // its copy for blockTrack and the claim path; the child owns the ship-side
 // label writes.
 // ---------------------------------------------------------------------------
+// TWIN:BEGIN LABEL_STATE_SCHEMA
 const LABEL_STATE_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -367,6 +386,7 @@ const LABEL_STATE_SCHEMA = {
     note: { type: "string" },
   },
 };
+// TWIN:END LABEL_STATE_SCHEMA
 // ---------------------------------------------------------------------------
 // Grouping, in two layers that used to be one.
 //
@@ -573,7 +593,9 @@ const allCriteria = (holder) =>
     .join("\n");
 
 // DUPLICATED in .claude/workflows/verify-and-ship.js — change one, change both.
+// TWIN:BEGIN hashes
 const hashes = (issues) => issues.map((n) => `#${n}`).join(", ");
+// TWIN:END hashes
 
 /**
  * The failing gate's evidence, VERBATIM — not a summary of it.
@@ -634,25 +656,51 @@ function survivingTrees(track, branch, wt) {
 }
 
 // DUPLICATED in .claude/workflows/verify-and-ship.js — change one, change both.
+// TWIN:BEGIN treeLines
 const treeLines = (trees) =>
   (trees || [])
     .map(
       (t) => `  - worktree \`${t.path}\` on branch \`${t.branch}\` — ${t.holds}`
     )
     .join("\n") || "  (none — nothing was created)";
+// TWIN:END treeLines
 
 /**
- * `parallel()` with a ceiling. Runs thunks in chunks of `limit` so a track with
- * eight workstreams cannot put eight agents in flight at once.
+ * `parallel()` with a ceiling. Runs thunks in chunks so a track with eight
+ * workstreams cannot put eight agents in flight at once.
+ *
+ * The cap is on AGENTS, and a thunk is not always one agent: a
+ * generate-and-filter workstream runs 3 candidate implementers inside its
+ * recipe child, invisible to this loop. `weights` carries that cost
+ * (RECIPE_AGENT_COST), and a chunk closes when its summed weight would exceed
+ * `limit` — so a stage of six generate-and-filter workstreams runs at most two
+ * recipe children at once under the default cap of 6, instead of putting 18
+ * implementers in flight (the 2026-08-09 machine-freeze class). A single thunk
+ * heavier than the limit still runs, alone.
  *
  * Chunking rather than a rolling window is deliberate: a stage is a barrier
  * anyway (nothing in stage N+1 may start before stage N integrates), so the
  * scheduling this gives up is scheduling the design does not want.
  */
-async function boundedParallel(thunks, limit = MAX_CONCURRENT_AGENTS) {
+async function boundedParallel(
+  thunks,
+  limit = MAX_CONCURRENT_AGENTS,
+  weights = null
+) {
   const out = [];
-  for (let i = 0; i < thunks.length; i += limit)
-    out.push(...(await parallel(thunks.slice(i, i + limit))));
+  let i = 0;
+  while (i < thunks.length) {
+    const chunk = [];
+    let load = 0;
+    while (i < thunks.length) {
+      const w = Math.min(weights ? weights[i] || 1 : 1, limit);
+      if (chunk.length && load + w > limit) break;
+      chunk.push(thunks[i]);
+      load += w;
+      i += 1;
+    }
+    out.push(...(await parallel(chunk)));
+  }
   return out;
 }
 
@@ -666,6 +714,7 @@ async function boundedParallel(thunks, limit = MAX_CONCURRENT_AGENTS) {
  *
  * DUPLICATED in .claude/workflows/verify-and-ship.js — change one, change both.
  */
+// TWIN:BEGIN labelViolations
 function labelViolations(issues, observed, target) {
   return (issues || []).filter((n) => {
     const row = (observed || []).find((o) => Number(o?.issue) === Number(n));
@@ -674,6 +723,7 @@ function labelViolations(issues, observed, target) {
     return !labels.includes(target) || labels.includes("agent:in-progress");
   });
 }
+// TWIN:END labelViolations
 
 /**
  * Write `target` onto the track's issues (and, for the review queue, its PR),
@@ -684,6 +734,7 @@ function labelViolations(issues, observed, target) {
  *
  * Returns { settled, observed, prLabels, attempts, missing }.
  */
+// TWIN:BEGIN settleLabels
 async function settleLabels(track, target, { phase = "Ship", pr = null } = {}) {
   if (!track.issues.length)
     return { settled: true, observed: [], attempts: 0, missing: [] };
@@ -754,6 +805,7 @@ Return {"observed":[{"issue":n,"labels":[...]} for every issue in ${list}]${want
     missing: labelViolations(track.issues, observed, target),
   };
 }
+// TWIN:END settleLabels
 
 async function blockTrack(track, reason, lastReport, trees = []) {
   log(`⛔ ${track.id} blocked: ${reason}`);
@@ -961,6 +1013,7 @@ The loop checks these rather than trusting you: a FRESH cut must have headSha ==
  * where a named defect becomes a vague hunch.
  * (DUPLICATED in .claude/workflows/verify-and-ship.js — change one, change both.)
  */
+// TWIN:BEGIN findingsBlock
 function findingsBlock(findings) {
   return (
     (findings || [])
@@ -975,24 +1028,35 @@ function findingsBlock(findings) {
       .join("\n\n") || "(no findings)"
   );
 }
+// TWIN:END findingsBlock
 
+/**
+ * The review-fix loop (#399): reviewer findings are fixed IN-PASS, never filed
+ * as debt. Runs only on a passing verdict with actionable findings (critical ∪
+ * structural) — gate/AC FAILs take the attempt machinery untouched. One round
+ * = fix agent, then re-review. A round whose fix answers no finding COUNTS and
+ * skips the re-review (the #307 refuse-before-reviewer discipline). A
+ * re-review FAIL is a real gate failure and re-enters the attempt machinery.
+ *
+ * The two sites differ ONLY through `opts`: the fix agent's type, the
+ * re-review schema, the site-specific prompt fragments, and `afterFixCommit` —
+ * the integration site re-publishes after every committed fix (the preview-sha
+ * discipline extends to fix commits) while the scoped site passes null.
+ * Returns {journal, leftovers}, or {gateFail} / {pushFail} with them.
+ *
+ * TWIN: verify-and-ship.js carries the byte-identical function for the
+ * integration site — change one, change both; frd-workflows.test.mjs asserts
+ * the two copies are text-identical.
+ */
+// TWIN:BEGIN review-fix-loop
 const actionableFindings = (findings) =>
   (findings || []).filter(
     (f) => f?.severity === "critical" || f?.severity === "structural"
   );
 
-/**
- * The scoped-site review-fix loop (#399): runs only on a PASS whose actionable
- * findings (critical ∪ structural) are non-empty — gate/AC FAILs take the
- * existing attempt machinery untouched. One round = fix agent, then re-review.
- * A round whose fix answers no finding COUNTS and skips the re-review (the
- * #307 refuse-before-reviewer discipline). A re-review FAIL is a real gate
- * failure and re-enters the attempt loop. Returns {journal, leftovers} or
- * {gateFail}.
- */
-async function runQualityRounds(holder, branch, wt, review, fixAgentType) {
+async function runReviewFixLoop(holder, branch, wt, firstFindings, opts) {
   const journal = [];
-  let current = actionableFindings(review.findings);
+  let current = firstFindings;
   for (let round = 1; round <= QUALITY_ROUNDS && current.length; round++) {
     log(
       `🔧 ${holder.id} quality round ${round}/${QUALITY_ROUNDS}: ${current.length} actionable finding(s)`
@@ -1000,17 +1064,17 @@ async function runQualityRounds(holder, branch, wt, review, fixAgentType) {
     const fix = await agent(
       `You are fixing review findings on branch ${branch} in worktree ${wt} (issue(s) ${hashes(holder.issues)}). ${CONVENTIONS}
 
-The scoped verifier PASSED the gates but returned findings that are fixed IN THIS PASS — quality round ${round} of ${QUALITY_ROUNDS}. They are quoted below VERBATIM; address each one.
+The ${opts.reviewerNoun} PASSED the gates but returned findings that are fixed IN THIS PASS — quality round ${round} of ${QUALITY_ROUNDS}. They are quoted below VERBATIM; address each one.
 
 ${findingsBlock(current)}
 
-Work in ${wt} on ${branch}. Fix the findings and nothing else — stay inside this workstream's declared files. Run \`pnpm typecheck\` and the tests covering the files you touch, and commit (conventional commits). Do NOT push, do NOT open a PR, do NOT edit labels or issues, and do NOT merge — the loop integrates and ships.
+Work in ${wt} on ${branch}. Fix the findings and nothing else${opts.scopeLine}. Run \`pnpm typecheck\` and the tests covering the files you touch, and commit (conventional commits). Do NOT push, do NOT open a PR, do NOT edit labels or issues, and do NOT merge — the loop ${opts.shipVerb} and ships.
 
 For EVERY finding above, fill \`perFinding\`: restate the finding and say exactly what you changed so it is addressed, with the command output proving it — or say plainly that you did not address it and why. A report whose \`perFinding\` answers nothing is refused without spending a re-review on it, exactly like an unanswered root cause. Return strictly the schema.`,
       {
         label: `fix:${holder.id}#r${round}`,
         phase: "Build",
-        agentType: fixAgentType,
+        agentType: opts.fixAgentType,
         schema: FIX_SCHEMA,
       }
     );
@@ -1034,8 +1098,14 @@ For EVERY finding above, fill \`perFinding\`: restate the finding and say exactl
       continue;
     }
 
+    if (fix.committed && opts.afterFixCommit) {
+      const push = await opts.afterFixCommit(round);
+      if (!push.ok)
+        return { pushFail: push.failReport, journal, leftovers: current };
+    }
+
     const rereview = await agent(
-      `You are the code-reviewer, re-reviewing quality round ${round}/${QUALITY_ROUNDS} on branch ${branch} in worktree ${wt} (issue(s) ${hashes(holder.issues)}). A fix agent just addressed the findings below. Re-verify ONLY those findings and the new diff — do not re-run the whole scoped DoD.
+      `You are the code-reviewer, re-reviewing quality round ${round}/${QUALITY_ROUNDS} on branch ${branch} in worktree ${wt} (issue(s) ${hashes(holder.issues)}). A fix agent just addressed the findings below. Re-verify ONLY those findings and the new diff — do not re-run the whole ${opts.dodNoun}.
 
 The findings that were to be fixed, verbatim:
 
@@ -1049,7 +1119,7 @@ Run \`pnpm typecheck\` in ${wt} and the tests covering the changed files yoursel
         label: `re-review:${holder.id}#r${round}`,
         phase: "Verify",
         agentType: "code-reviewer",
-        schema: SCOPED_DOD_SCHEMA,
+        schema: opts.reviewSchema,
       }
     );
     journal[journal.length - 1].reReview = rereview
@@ -1067,6 +1137,7 @@ Run \`pnpm typecheck\` in ${wt} and the tests covering the changed files yoursel
   }
   return { journal, leftovers: current };
 }
+// TWIN:END review-fix-loop
 
 /**
  * The #307 root-cause preamble, rendered by the PARENT and prepended verbatim
@@ -1239,14 +1310,20 @@ async function runWorkstream(
   // first-attempt prompt and never saw the failure it was sent back to fix.
   let report = priorReport;
 
+  // Recipe-weighted, like the stage check: a generate-and-filter attempt funds
+  // 3 candidates + a judge, and starting it with one attempt's reserve is how
+  // the budget throws mid-flight inside the child and the track comes back as
+  // a fan-in-guard LOST hole instead of a clean pre-attempt block.
+  const wsCost = agentCostOf(ws);
+
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    if (budget.total && budget.remaining() < RESERVE)
+    if (budget.total && budget.remaining() < RESERVE * wsCost)
       return {
         ok: false,
         ws,
         branch,
         report,
-        reason: `token reserve hit before ${ws.id} attempt ${attempt} (remaining ${Math.round(budget.remaining() / 1000)}k < ${Math.round(RESERVE / 1000)}k)`,
+        reason: `token reserve hit before ${ws.id} attempt ${attempt} (remaining ${Math.round(budget.remaining() / 1000)}k < ${Math.round((RESERVE * wsCost) / 1000)}k = ${Math.round(RESERVE / 1000)}k reserve × ${wsCost} for recipe "${ws.recipe}")`,
       };
 
     // A retry is defined by having a verdict to answer, not by the counter —
@@ -1299,7 +1376,6 @@ async function runWorkstream(
         conventions: CONVENTIONS,
         implAgentType: implAgent,
         unitBlocksRendered: unitBlocks(ws),
-        declaredFiles: ws.files,
       }
     );
 
@@ -1405,7 +1481,24 @@ Default to FAIL when evidence is missing or unconvincing. Do NOT fix the code �
     // carriedFindings and force the HOLD at the auto-merge gate, where they
     // arrive as a DECISION (the held-PR pattern), not as filed debt.
     // -----------------------------------------------------------------------
-    const quality = await runQualityRounds(ws, branch, wt, scoped, implAgent);
+    const quality = await runReviewFixLoop(
+      ws,
+      branch,
+      wt,
+      actionableFindings(scoped.findings),
+      {
+        // The scoped site: the workstream's own lane fixes, the re-review runs
+        // the SCOPED schema, and nothing is pushed — the track publishes once,
+        // at integration, so there is no afterFixCommit here.
+        fixAgentType: implAgent,
+        reviewSchema: SCOPED_DOD_SCHEMA,
+        reviewerNoun: "scoped verifier",
+        scopeLine: " — stay inside this workstream's declared files",
+        shipVerb: "integrates",
+        dodNoun: "scoped DoD",
+        afterFixCommit: null,
+      }
+    );
     if (quality.gateFail) {
       report = quality.gateFail;
       log(
@@ -1446,15 +1539,19 @@ Default to FAIL when evidence is missing or unconvincing. Do NOT fix the code �
  */
 async function runStage(track, stage, stageIndex, trackBranch, trackWt) {
   const solo = stage.length === 1;
-  const need = RESERVE * stage.length;
+  // Recipe-weighted: a generate-and-filter workstream needs 3 attempt-reserves
+  // and 3 agent slots, and starting a stage on a third of the funding it needs
+  // is exactly the stop-before-you-cannot-finish failure the reserve prevents.
+  const stageCost = stage.reduce((n, ws) => n + agentCostOf(ws), 0);
+  const need = RESERVE * stageCost;
   if (budget.total && budget.remaining() < need)
     return {
       ok: false,
-      reason: `token reserve hit before stage ${stageIndex}: ${stage.length} workstream(s) need ${Math.round(need / 1000)}k, ${Math.round(budget.remaining() / 1000)}k left`,
+      reason: `token reserve hit before stage ${stageIndex}: ${stage.length} workstream(s) weigh ${stageCost} agent-reserve(s) (recipe-weighted) and need ${Math.round(need / 1000)}k, ${Math.round(budget.remaining() / 1000)}k left`,
     };
 
   log(
-    `🔨 ${track.id} stage ${stageIndex}: ${stage.length} workstream(s)${solo ? "" : " in parallel"}`
+    `🔨 ${track.id} stage ${stageIndex}: ${stage.length} workstream(s)${solo ? "" : " in parallel"}${stageCost > stage.length ? ` (agent weight ${stageCost} — recipe-weighted chunking under the cap of ${MAX_CONCURRENT_AGENTS})` : ""}`
   );
   for (const ws of stage) {
     ws.solo = solo;
@@ -1468,7 +1565,9 @@ async function runStage(track, stage, stageIndex, trackBranch, trackWt) {
     stage.map(
       (ws) => () =>
         runWorkstream(track, ws, { stageIndex, trackBranch, trackWt })
-    )
+    ),
+    MAX_CONCURRENT_AGENTS,
+    stage.map(agentCostOf)
   );
   const settled = stage.map(
     (ws, i) =>
@@ -1808,10 +1907,18 @@ Work in ${wt} on ${branch}. Fix ONLY what that requires. You are looking at the 
 
 phase("Build");
 // Bounded here too: a pass of three tracks that each fan out to four workstreams
-// is twelve agents, and the cap is on agents.
+// is twelve agents, and the cap is on agents. A track's weight is its PEAK
+// stage load (recipe-weighted) — stages run sequentially, so the most agents a
+// track can have in flight at once is its heaviest stage's summed cost.
 const results = await boundedParallel(
   tracks.map((t) => () => buildTrack(t)),
-  Math.max(1, Math.min(tracks.length, MAX_CONCURRENT_AGENTS))
+  MAX_CONCURRENT_AGENTS,
+  tracks.map((t) =>
+    Math.max(
+      1,
+      ...t.stages.map((s) => s.reduce((n, ws) => n + agentCostOf(ws), 0))
+    )
+  )
 );
 
 // ---------------------------------------------------------------------------

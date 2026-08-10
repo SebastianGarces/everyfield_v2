@@ -151,7 +151,7 @@ is fixed; the recipe is the only swappable part. Contract: `ops/agent-os/recipes
 | Recipe | Task shape |
 |--------|------------|
 | `implement-straight` | Any shape; the default, and the answer whenever in doubt. |
-| `generate-and-filter` | A small, sharply specified, quality-sensitive unit (≤ ~2 files, low risk, no migration) where independent attempts plausibly diverge — UI polish, a tricky pure function. Costs ~3× (3 candidates) and counts as 3 agents against the 6-agent cap. |
+| `generate-and-filter` | A small, sharply specified, quality-sensitive unit (≤ ~2 files, low risk, no migration) where independent attempts plausibly diverge — UI polish, a tricky pure function. Costs ~3× (3 candidates) and counts as 3 agents against the 6-agent cap — machine-enforced: the loop's `RECIPE_AGENT_COST` weights both the concurrency chunking and the token-reserve checks. |
 
 - `recipe: "<id>"` is set **per unit** in the units array; omitted means `implement-straight`.
 - Units that will share a workstream (same stage + shared files) must carry the **same** recipe —

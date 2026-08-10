@@ -35,8 +35,11 @@ const carriedFindings = A.carriedFindings || [];
 const survivingTrees = A.survivingTrees || [];
 
 // The fix-loop cap. TWIN: build-until-done.js declares the same constant for
-// the scoped-site loop — change one, change both.
+// the scoped-site loop — change one, change both; frd-workflows.test.mjs
+// asserts every TWIN:BEGIN/END block is text-identical across the two files.
+// TWIN:BEGIN QUALITY_ROUNDS
 const QUALITY_ROUNDS = 2;
+// TWIN:END QUALITY_ROUNDS
 
 const DOD_SCHEMA = {
   type: "object",
@@ -230,11 +233,13 @@ const PR_SCHEMA = {
 // path; this child needs the same guards for its own label writes and exit
 // comments. Change one, change both.
 // ---------------------------------------------------------------------------
+// TWIN:BEGIN BLOCK_SCHEMA
 const BLOCK_SCHEMA = {
   type: "object",
   required: ["commented"],
   properties: { commented: { type: "boolean" }, note: { type: "string" } },
 };
+// TWIN:END BLOCK_SCHEMA
 
 // ---------------------------------------------------------------------------
 // The label is the outcome — so it is read back, not assumed.
@@ -252,6 +257,7 @@ const BLOCK_SCHEMA = {
 // final failure the track is ERRORED rather than reported as success.
 // (DUPLICATED from build-until-done.js — change one, change both.)
 // ---------------------------------------------------------------------------
+// TWIN:BEGIN LABEL_STATE_SCHEMA
 const LABEL_STATE_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -280,6 +286,7 @@ const LABEL_STATE_SCHEMA = {
     note: { type: "string" },
   },
 };
+// TWIN:END LABEL_STATE_SCHEMA
 const LENS_SCHEMA = {
   type: "object",
   required: ["verdict", "lens", "findings", "summary"],
@@ -324,21 +331,26 @@ const HIGH_RISK_LENSES = [
 ];
 
 // (DUPLICATED from build-until-done.js — change one, change both.)
+// TWIN:BEGIN hashes
 const hashes = (issues) => issues.map((n) => `#${n}`).join(", ");
+// TWIN:END hashes
 
 // (DUPLICATED from build-until-done.js — change one, change both.)
+// TWIN:BEGIN treeLines
 const treeLines = (trees) =>
   (trees || [])
     .map(
       (t) => `  - worktree \`${t.path}\` on branch \`${t.branch}\` — ${t.holds}`
     )
     .join("\n") || "  (none — nothing was created)";
+// TWIN:END treeLines
 
 /**
  * The reviewer's findings, VERBATIM — the fix agent and the hold comment quote
  * these rather than paraphrasing them, for the same reason evidenceBlock exists
  * in the parent: a paraphrase is where a named defect becomes a vague hunch.
  */
+// TWIN:BEGIN findingsBlock
 function findingsBlock(findings) {
   return (
     (findings || [])
@@ -353,11 +365,13 @@ function findingsBlock(findings) {
       .join("\n\n") || "(no findings)"
   );
 }
+// TWIN:END findingsBlock
 
 // The per-finding analogue of `rootCauseAddressed` (the #307 discipline): a fix
 // that cannot say what it did about each finding is refused before a re-review
 // is spent on it. TWIN: build-until-done.js carries the same schema for the
 // scoped-site loop — change one, change both.
+// TWIN:BEGIN FIX_SCHEMA
 const FIX_SCHEMA = {
   type: "object",
   required: ["committed", "filesChanged", "summary", "perFinding"],
@@ -388,11 +402,13 @@ const FIX_SCHEMA = {
     },
   },
 };
+// TWIN:END FIX_SCHEMA
 
 /**
  * Which of `issues` do NOT demonstrably read `target`.
  * (DUPLICATED from build-until-done.js — change one, change both.)
  */
+// TWIN:BEGIN labelViolations
 function labelViolations(issues, observed, target) {
   return (issues || []).filter((n) => {
     const row = (observed || []).find((o) => Number(o?.issue) === Number(n));
@@ -401,15 +417,19 @@ function labelViolations(issues, observed, target) {
     return !labels.includes(target) || labels.includes("agent:in-progress");
   });
 }
+// TWIN:END labelViolations
 
 /**
  * Write `target` onto the track's issues (and, for the review queue, its PR),
  * then READ THE LABELS BACK and assert them. Retries, and reports failure
  * instead of a cheerful boolean.
- * (DUPLICATED from build-until-done.js — change one, change both.)
+ * (DUPLICATED from build-until-done.js — change one, change both. The child's
+ * copy keeps the `trk`/`att` names to avoid shadowing its top-level `track`
+ * and `attempt`; the twin test normalizes exactly those two renames.)
  *
  * Returns { settled, observed, prLabels, attempts, missing }.
  */
+// TWIN:BEGIN settleLabels
 async function settleLabels(trk, target, { phase = "Ship", pr = null } = {}) {
   if (!trk.issues.length)
     return { settled: true, observed: [], attempts: 0, missing: [] };
@@ -473,6 +493,7 @@ Return {"observed":[{"issue":n,"labels":[...]} for every issue in ${list}]${want
     missing: labelViolations(trk.issues, observed, target),
   };
 }
+// TWIN:END settleLabels
 
 // ---------------------------------------------------------------------------
 // Push FIRST, and prove the remote has what the worktree has.
@@ -570,10 +591,107 @@ Return strictly the DoD report schema.`,
   );
 }
 
-const actionable = (findings) =>
+/**
+ * The review-fix loop (#399): reviewer findings are fixed IN-PASS, never filed
+ * as debt (RULED 2026-08-10). Runs only on a passing verdict with actionable
+ * findings; gate/AC FAILs take the parent's attempt machinery. Runs BEFORE HR4
+ * so every lens examines final code.
+ *
+ * TWIN: build-until-done.js carries the byte-identical function for the
+ * scoped site — change one, change both; frd-workflows.test.mjs asserts the
+ * two copies are text-identical. The sites differ only through `opts` — see
+ * the parent's copy for the full doc.
+ */
+// TWIN:BEGIN review-fix-loop
+const actionableFindings = (findings) =>
   (findings || []).filter(
     (f) => f?.severity === "critical" || f?.severity === "structural"
   );
+
+async function runReviewFixLoop(holder, branch, wt, firstFindings, opts) {
+  const journal = [];
+  let current = firstFindings;
+  for (let round = 1; round <= QUALITY_ROUNDS && current.length; round++) {
+    log(
+      `🔧 ${holder.id} quality round ${round}/${QUALITY_ROUNDS}: ${current.length} actionable finding(s)`
+    );
+    const fix = await agent(
+      `You are fixing review findings on branch ${branch} in worktree ${wt} (issue(s) ${hashes(holder.issues)}). ${CONVENTIONS}
+
+The ${opts.reviewerNoun} PASSED the gates but returned findings that are fixed IN THIS PASS — quality round ${round} of ${QUALITY_ROUNDS}. They are quoted below VERBATIM; address each one.
+
+${findingsBlock(current)}
+
+Work in ${wt} on ${branch}. Fix the findings and nothing else${opts.scopeLine}. Run \`pnpm typecheck\` and the tests covering the files you touch, and commit (conventional commits). Do NOT push, do NOT open a PR, do NOT edit labels or issues, and do NOT merge — the loop ${opts.shipVerb} and ships.
+
+For EVERY finding above, fill \`perFinding\`: restate the finding and say exactly what you changed so it is addressed, with the command output proving it — or say plainly that you did not address it and why. A report whose \`perFinding\` answers nothing is refused without spending a re-review on it, exactly like an unanswered root cause. Return strictly the schema.`,
+      {
+        label: `fix:${holder.id}#r${round}`,
+        phase: "Build",
+        agentType: opts.fixAgentType,
+        schema: FIX_SCHEMA,
+      }
+    );
+    const answered = (fix?.perFinding || []).filter((p) =>
+      String(p?.addressed || "").trim()
+    );
+    journal.push({
+      round,
+      fix: fix
+        ? {
+            summary: fix.summary,
+            filesChanged: fix.filesChanged || [],
+            perFinding: fix.perFinding || [],
+          }
+        : null,
+    });
+    if (!fix || !answered.length) {
+      log(
+        `↩️  ${holder.id} quality round ${round}: the fix answered no finding — round counts, re-review skipped, findings stand`
+      );
+      continue;
+    }
+
+    if (fix.committed && opts.afterFixCommit) {
+      const push = await opts.afterFixCommit(round);
+      if (!push.ok)
+        return { pushFail: push.failReport, journal, leftovers: current };
+    }
+
+    const rereview = await agent(
+      `You are the code-reviewer, re-reviewing quality round ${round}/${QUALITY_ROUNDS} on branch ${branch} in worktree ${wt} (issue(s) ${hashes(holder.issues)}). A fix agent just addressed the findings below. Re-verify ONLY those findings and the new diff — do not re-run the whole ${opts.dodNoun}.
+
+The findings that were to be fixed, verbatim:
+
+${findingsBlock(current)}
+
+The fix agent's report:
+${JSON.stringify({ summary: fix.summary, filesChanged: fix.filesChanged, perFinding: fix.perFinding })}
+
+Run \`pnpm typecheck\` in ${wt} and the tests covering the changed files yourself — a fix that breaks the build or the tests is a FAIL, not a smaller finding, and a FAIL from you re-enters the attempt machinery as a real gate failure. Otherwise: re-examine each finding against the code as it now stands. A finding that is genuinely fixed disappears; one that is not comes back in \`findings\` at the same severity; a new problem the fix INTRODUCED is a finding too. Return strictly the schema, verdict PASS or PASS_WITH_WARNINGS unless a gate actually broke.`,
+      {
+        label: `re-review:${holder.id}#r${round}`,
+        phase: "Verify",
+        agentType: "code-reviewer",
+        schema: opts.reviewSchema,
+      }
+    );
+    journal[journal.length - 1].reReview = rereview
+      ? { verdict: rereview.verdict, findings: rereview.findings || [] }
+      : null;
+    if (!rereview) {
+      log(
+        `↩️  ${holder.id} quality round ${round}: the re-reviewer died — missing evidence is not a fix, findings stand`
+      );
+      continue;
+    }
+    if (rereview.verdict === "FAIL")
+      return { gateFail: rereview, journal, leftovers: current };
+    current = actionableFindings(rereview.findings);
+  }
+  return { journal, leftovers: current };
+}
+// TWIN:END review-fix-loop
 
 // ---------------------------------------------------------------------------
 // The child's return shapes. `"verify-failed"` covers: push/sha mismatch,
@@ -608,115 +726,93 @@ if (!verify) return failResult(null);
 if (!(verify.verdict === "PASS" || verify.verdict === "PASS_WITH_WARNINGS"))
   return failResult(verify);
 
-// ---------------------------------------------------------------------------
-// G6 review-fix loop — findings are fixed IN THIS PASS, never filed as debt
-// (RULED 2026-08-10, #399). Runs only on a passing verdict with actionable
-// findings; gate/AC FAILs take the attempt machinery above. Runs BEFORE HR4 so
-// every lens examines final code. One round = fix agent, then re-review; a
-// round whose fix answers no finding COUNTS and skips the re-review (the #307
-// refuse-before-reviewer discipline); a re-review FAIL is a real gate failure
-// and re-enters the parent's attempt machinery.
-// ---------------------------------------------------------------------------
-async function reviewFixLoop(firstFindings) {
-  const journal = [];
-  let current = firstFindings;
-  for (let round = 1; round <= QUALITY_ROUNDS && current.length; round++) {
-    log(
-      `🔧 ${track.id} quality round ${round}/${QUALITY_ROUNDS}: ${current.length} actionable finding(s)`
-    );
-    const fix = await agent(
-      `You are fixing review findings on branch ${branch} in worktree ${wt} (issue(s) ${hashes(track.issues)}). ${CONVENTIONS}
-
-The independent reviewer PASSED the gates but returned findings that are fixed IN THIS PASS — quality round ${round} of ${QUALITY_ROUNDS}. They are quoted below VERBATIM; address each one.
-
-${findingsBlock(current)}
-
-Work in ${wt} on ${branch}. Fix the findings and nothing else. Run \`pnpm typecheck\` and the tests covering the files you touch, and commit (conventional commits). Do NOT push, do NOT open a PR, do NOT edit labels or issues, and do NOT merge — the loop publishes and ships.
-
-For EVERY finding above, fill \`perFinding\`: restate the finding and say exactly what you changed so it is addressed, with the command output proving it — or say plainly that you did not address it and why. A report whose \`perFinding\` answers nothing is refused without spending a re-review on it, exactly like an unanswered root cause. Return strictly the schema.`,
-      {
-        label: `fix:${track.id}#r${round}`,
-        phase: "Build",
-        agentType: track.lane === "backend" ? "backend" : "frontend",
-        schema: FIX_SCHEMA,
-      }
-    );
-
-    const answered = (fix?.perFinding || []).filter((p) =>
-      String(p?.addressed || "").trim()
-    );
-    journal.push({
-      round,
-      fix: fix
-        ? {
-            summary: fix.summary,
-            filesChanged: fix.filesChanged || [],
-            perFinding: fix.perFinding || [],
-          }
-        : null,
-    });
-
-    if (!fix || !answered.length) {
-      log(
-        `↩️  ${track.id} quality round ${round}: the fix answered no finding — round counts, re-review skipped, findings stand`
-      );
-      continue;
-    }
-
-    // The preview-sha discipline extends to fix commits: the PR and preview
-    // must hold the sha the re-review (and later CI) reports on.
-    if (fix.committed) {
-      const push = await pushAndAssert(round);
-      if (!push.ok)
-        return { pushFail: push.failReport, journal, leftovers: current };
-      finalSha = push.remoteSha;
-    }
-
-    const rereview = await agent(
-      `You are the code-reviewer, re-reviewing quality round ${round}/${QUALITY_ROUNDS} on branch ${branch} in worktree ${wt} (issue(s) ${hashes(track.issues)}). A fix agent just addressed the findings below. Re-verify ONLY those findings and the new diff — do not re-run the whole DoD.
-
-The findings that were to be fixed, verbatim:
-
-${findingsBlock(current)}
-
-The fix agent's report:
-${JSON.stringify({ summary: fix.summary, filesChanged: fix.filesChanged, perFinding: fix.perFinding })}
-
-Run \`pnpm typecheck\` in ${wt} and the tests covering the changed files yourself — a fix that breaks the build or the tests is a FAIL, not a smaller finding, and a FAIL from you re-enters the attempt machinery as a real gate failure. Otherwise: re-examine each finding against the code as it now stands. A finding that is genuinely fixed disappears; one that is not comes back in \`findings\` at the same severity; a new problem the fix INTRODUCED is a finding too. Return strictly the DoD report schema, verdict PASS or PASS_WITH_WARNINGS unless a gate actually broke.`,
-      {
-        label: `re-review:${track.id}#r${round}`,
-        phase: "Verify",
-        agentType: "code-reviewer",
-        schema: DOD_SCHEMA,
-      }
-    );
-    journal[journal.length - 1].reReview = rereview
-      ? { verdict: rereview.verdict, findings: rereview.findings || [] }
-      : null;
-
-    if (!rereview) {
-      log(
-        `↩️  ${track.id} quality round ${round}: the re-reviewer died — missing evidence is not a fix, findings stand`
-      );
-      continue;
-    }
-    if (rereview.verdict === "FAIL")
-      return { failed: rereview, journal, leftovers: current };
-
-    current = actionable(rereview.findings);
-  }
-  return { journal, leftovers: current };
-}
-
 const unresolved = [...carriedFindings];
-const loop = await reviewFixLoop(actionable(verify.findings));
+// Set by the afterFixCommit hook when a fix round actually landed (and
+// re-published) commits — the trigger for the G3 re-anchor below.
+let fixCommitsLanded = false;
+const loop = await runReviewFixLoop(
+  track,
+  branch,
+  wt,
+  actionableFindings(verify.findings),
+  {
+    // The integration site: the track's lane fixes, the re-review runs the
+    // full DoD schema, and every committed fix is re-published + sha-asserted
+    // BEFORE the re-review — the preview-sha discipline extends to fix
+    // commits, so the PR and preview always hold the sha under report.
+    fixAgentType: track.lane === "backend" ? "backend" : "frontend",
+    reviewSchema: DOD_SCHEMA,
+    reviewerNoun: "independent reviewer",
+    scopeLine: "",
+    shipVerb: "publishes",
+    dodNoun: "DoD",
+    afterFixCommit: async (round) => {
+      const push = await pushAndAssert(round);
+      if (push.ok) {
+        finalSha = push.remoteSha;
+        fixCommitsLanded = true;
+      }
+      return push;
+    },
+  }
+);
 verify.fixRounds = loop.journal;
 if (loop.pushFail)
   return failResult({ ...loop.pushFail, fixRounds: loop.journal });
-if (loop.failed) return failResult({ ...loop.failed, fixRounds: loop.journal });
+if (loop.gateFail)
+  return failResult({ ...loop.gateFail, fixRounds: loop.journal });
 unresolved.push(
   ...loop.leftovers.map((f) => ({ ...f, rounds: f.rounds || loop.journal }))
 );
+
+// ---------------------------------------------------------------------------
+// G3 re-anchor: no sha ships whose functional gate never ran at that sha.
+//
+// A quality-round fix that COMMITTED moved the branch tip, so the G3 evidence
+// in `verify` was produced against the pre-fix sha. CI re-anchors G1/G2 at the
+// final sha, but nothing else re-runs G3 there — and verify-follows-last-push
+// is an ORDERING guarantee (ruling designNote 5), not a presence check. So
+// when any fix round landed commits, G3 — and only G3 — re-runs against the
+// re-pushed finalSha BEFORE HR4/PR/merge. A FAIL re-enters the parent's
+// attempt machinery like any gate failure; the passing entry rides into the
+// PR body via `verify.g3Reanchor`, pinned to the sha that will merge.
+// ---------------------------------------------------------------------------
+if (fixCommitsLanded) {
+  log(
+    `🧪 ${track.id} — fix rounds moved the tip; re-running G3 at ${finalSha.slice(0, 7)} before anything ships it`
+  );
+  const g3 = await agent(
+    `You are the INDEPENDENT verifier, re-running ONLY the functional gate (G3) for branch ${branch} in worktree ${wt}, issue(s) ${hashes(track.issues)}. Quality-round fixes committed new code AFTER the first integration verify, so the G3 evidence already collected belongs to an older sha — nothing may ship a sha whose functional gate never ran at that sha, and your job is to re-anchor it.
+
+\`origin/${branch}\` is at \`${finalSha}\`, which equals the worktree HEAD. Use \`${track.lane === "backend" ? "validate-backend" : "validate-frontend"}\` and PROVE each acceptance criterion with an assertion + screenshot/transcript; console must be error-free; lighthouse a11y ≥ 90 for UI. Frontend validates against the branch's VERCEL PREVIEW (scripts/preview-url.sh --wait --bypass), never localhost:3000. Before you trust a preview, confirm the deployment you drive was built from \`${finalSha}\` — if it was built from anything else, FAIL on G3 and say which sha it was built from rather than validating it anyway.
+
+Acceptance criteria to prove — all of them:
+${criteria}
+
+Do NOT re-run G1/G2/G4/G5 — CI re-anchors the build and the full suite at this sha, and the diff-level review already ran; only the functional evidence went stale. Default to FAIL when evidence is missing or unconvincing. If a failure belongs to one workstream, name it in \`failingWorkstream\` — one of: ${wsIds.join(", ")}. Return strictly the DoD report schema.`,
+    {
+      label: `verify:g3:${track.id}#${attempt}`,
+      phase: "Verify",
+      agentType: "code-reviewer",
+      schema: DOD_SCHEMA,
+    }
+  );
+  if (!g3) return failResult(null);
+  if (!(g3.verdict === "PASS" || g3.verdict === "PASS_WITH_WARNINGS"))
+    return failResult({ ...g3, fixRounds: loop.journal });
+  // Spec-questions from the re-run hold exactly like first-pass ones, and any
+  // actionable finding it raises cannot get fix rounds (that would loop) — it
+  // joins `unresolved` and holds the merge for a ruling instead.
+  if ((g3.warnings || []).length)
+    verify.warnings = [...(verify.warnings || []), ...g3.warnings];
+  unresolved.push(...actionableFindings(g3.findings));
+  verify.g3Reanchor = {
+    sha: finalSha,
+    verdict: g3.verdict,
+    gates: g3.gates,
+    acceptanceCriteria: g3.acceptanceCriteria,
+  };
+}
 
 // High-risk → diverse-lens sign-off (HR4). Every lens must clear. Runs AFTER
 // the fix loop settles, so every lens examines final code.
@@ -946,6 +1042,43 @@ if (!labelState.settled) {
 // ---------------------------------------------------------------------------
 let merge = null;
 let cleanup = null;
+
+// The unresolved-findings DECISION menu. Posted on the PR WHEREVER findings
+// survived the quality rounds — on the dispatch path it rides the hold
+// comment; on a direct /deliver run (autoMerge=false) it is posted on its own
+// below, because otherwise the findings surface only in the workflow return
+// payload and the human reviews the PR without ever seeing them.
+const findingsMenu = (list) =>
+  list.length
+    ? `Unresolved review findings — each survived ${QUALITY_ROUNDS} quality round(s). Present EACH as a DECISION with this menu, never as a defect dump:
+  (a) merge as-is — rule the finding accepted;
+  (b) direct a named fix — the branch and worktree survive exactly so it can be applied;
+  (c) take it manually.
+
+For each one, quote the finding VERBATIM (severity and all), then what the fix rounds actually did:
+${list
+  .map(
+    (
+      f,
+      i
+    ) => `${i + 1}. [${f.severity}]${f.workstream ? ` (from ${f.workstream})` : ""} ${f.summary}
+   The finding, verbatim: ${f.detail || f.summary}
+   What "fixed" looks like: ${f.remedy || "(not stated)"}
+   What the fix rounds did: ${
+     (f.rounds || [])
+       .map((r) =>
+         (r.fix?.perFinding || [])
+           .map((p) => p.addressed)
+           .filter((s) => String(s || "").trim())
+           .join("; ")
+       )
+       .filter(Boolean)
+       .join(" | ") || "no round produced an answer for it"
+   }`
+  )
+  .join("\n")}`
+    : "";
+
 if (AUTO_MERGE) {
   const warnings = verify.warnings || [];
   const specQuestions = warnings.filter((w) => w.kind === "spec-question");
@@ -975,33 +1108,7 @@ ${holds.map((h) => `- ${h}`).join("\n")}
 ${specQuestions.length ? `The decisions the human must make:\n${specQuestions.map((w) => `- **${w.summary}** — ${w.detail || "(no detail given)"}`).join("\n")}\n\nPresent each as a decision with its options, not as a defect report. The reviewer's job here is to RULE, not to hunt.\n\nIf a decision is a DIRECTION question — two or more plausible directions where trying them beats reading about them — invoke the prototype skill (.claude/skills/prototype/SKILL.md) BEFORE commenting: build 3-4 candidates into this PR's branch (UI question → variants behind the prototype switcher, then ./scripts/preview-url.sh --wait --bypass for the link; behavior question → a throwaway CLI under prototypes/), verify each one works, and write the DECISION comment in the skill's format so the reviewer can operate the options instead of imagining them.` : ""}
 ${
   unresolved.length
-    ? `Unresolved review findings — each survived ${QUALITY_ROUNDS} quality round(s). Present EACH as a DECISION with this menu, never as a defect dump:
-  (a) merge as-is — rule the finding accepted;
-  (b) direct a named fix — the branch and worktree survive exactly so it can be applied;
-  (c) take it manually.
-
-For each one, quote the finding VERBATIM (severity and all), then what the fix rounds actually did:
-${unresolved
-  .map(
-    (
-      f,
-      i
-    ) => `${i + 1}. [${f.severity}]${f.workstream ? ` (from ${f.workstream})` : ""} ${f.summary}
-   The finding, verbatim: ${f.detail || f.summary}
-   What "fixed" looks like: ${f.remedy || "(not stated)"}
-   What the fix rounds did: ${
-     (f.rounds || [])
-       .map((r) =>
-         (r.fix?.perFinding || [])
-           .map((p) => p.addressed)
-           .filter((s) => String(s || "").trim())
-           .join("; ")
-       )
-       .filter(Boolean)
-       .join(" | ") || "no round produced an answer for it"
-   }`
-  )
-  .join("\n")}
+    ? `${findingsMenu(unresolved)}
 The prototype-skill branch above is for direction-shaped spec-questions only — findings get the (a)/(b)/(c) menu, not prototypes.`
     : ""
 }
@@ -1080,6 +1187,36 @@ Then run \`git worktree list\` and report what it PRINTED: every path from the l
       );
     }
   }
+} else if (unresolved.length) {
+  // autoMerge=false — a direct /deliver run. Nothing merges here, but the
+  // ruling's exhaust path is "HOLD with a DECISION comment": the reviewer on
+  // this path reads the PR, not the workflow return payload, so findings that
+  // survived the quality rounds (including carriedFindings from the scoped
+  // sites, which the PR body's `verify` object never contains) must still
+  // arrive on the PR as the same (a)/(b)/(c) menu.
+  log(
+    `📋 ${track.id}: ${unresolved.length} unresolved review finding(s) — posting the DECISION menu on ${pr.url}`
+  );
+  await agent(
+    `PR ${pr.url} passed the DoD, but review findings survived the quality rounds unresolved. This run does not auto-merge, so a human will review the PR directly — put the findings in front of them with \`gh pr comment\`. Do NOT touch labels — the loop has already written and verified \`agent:in-review\` on this PR and its issue(s).
+
+${findingsMenu(unresolved)}
+
+End the comment with a **Surviving worktrees** section, listing each of these verbatim — path, branch, and what it holds. A track carrying open decisions keeps its trees on purpose: whoever rules on this may want to re-run or extend them.
+${treeLines(survivingTrees)}
+Say plainly that these are the reviewer's to remove (\`git worktree remove <path>\` once the PR merges), and do NOT remove them yourself.
+
+Return strictly {"merged": false, "state": "refused", "detail": "<one line>"}.`,
+    {
+      label: `findings:${track.id}`,
+      phase: "Ship",
+      // Opus, same reasoning as the hold comment: writing a DECISION a human
+      // will rule from is executor work, not quick-command work.
+      model: "opus",
+      effort: "medium",
+      schema: MERGE_SCHEMA,
+    }
+  );
 }
 
 return {

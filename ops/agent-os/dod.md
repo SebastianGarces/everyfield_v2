@@ -244,7 +244,10 @@ individually correct and jointly wrong.*
 **The review-fix loop.** Critical and structural findings return to an implementer agent and are
 fixed **in the same pass**, at BOTH review sites — scoped (per workstream) and integration (G6) —
 with at most **2 quality rounds per site**. Rounds are not attempts, but a re-review verdict of
-FAIL is a real gate failure and spends an attempt. A fix round that cannot say what it did **per
+FAIL is a real gate failure and spends an attempt. When any integration round lands commits, the
+functional gate (**G3) re-runs pinned to the re-pushed sha** before HR4/PR/merge — CI re-anchors
+G1/G2 at the final sha, and this re-anchors the one gate CI cannot: no sha ships whose functional
+gate never ran at that sha. A fix round that cannot say what it did **per
 finding** is refused before a reviewer is spent on it — the #307 discipline, applied per finding.
 On exhaust the track **HOLDs with a DECISION comment** listing each unresolved finding, its fix
 history, and the options — merge as-is, direct a named fix, or take it manually — the same pattern

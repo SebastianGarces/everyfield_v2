@@ -91,7 +91,10 @@ structural / suggestion, per `.claude/agents/code-reviewer.md`), and findings ar
 same pass, never filed as debt** (RULED 2026-08-10, #399). At both review sites — scoped, per
 workstream, and integration G6 — Critical and structural findings route to a fix agent and a
 re-review, capped at **2 quality rounds**; every integration round that commits re-runs
-push+assert so the preview and PR hold the fixed sha. A fix that cannot say what it did about
+push+assert so the preview and PR hold the fixed sha, and once the rounds settle a committed fix
+forces a **G3 re-run pinned to the final sha** before HR4/PR — no sha ships whose functional gate
+never ran at that sha. The DECISION comment reaches the PR on **both** paths: under auto-merge it
+rides the hold comment; on a direct `/deliver` run it is posted on its own. A fix that cannot say what it did about
 each finding (`perFinding.addressed`, the per-finding analogue of `rootCauseAddressed`) is
 refused without a re-review. On exhaust the track **HOLDs with a DECISION comment** — merge as-is
 (rule the finding accepted), direct a named fix (the branch and worktree survive to apply it), or

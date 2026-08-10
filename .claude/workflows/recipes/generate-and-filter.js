@@ -32,7 +32,7 @@ const A = typeof args === "string" ? JSON.parse(args) : args;
 if (!A || !A.workstream || !A.worktree || !A.branch)
   throw new Error(
     "generate-and-filter is a child recipe of build-until-done and takes recipeArgs: " +
-      "{track, workstream, worktree, branch, stageIndex, attempt, priorReport, retryBlock, conventions, implAgentType, unitBlocksRendered, declaredFiles}"
+      "{track, workstream, worktree, branch, stageIndex, attempt, priorReport, retryBlock, conventions, implAgentType, unitBlocksRendered}"
   );
 
 const workstream = A.workstream;
@@ -44,7 +44,9 @@ const retryBlock = A.retryBlock || null;
 const isRetry = priorReport != null;
 const conventions = A.conventions || "";
 const unitBlocksRendered = A.unitBlocksRendered || "";
-const declaredFiles = A.declaredFiles || [];
+// The declared file set crosses the seam in exactly ONE form (recipes.md):
+// as workstream.files, never as a second top-level field.
+const declaredFiles = workstream.files || [];
 
 // A literal, deliberately: 3 candidates is the recipe, not a knob.
 const CANDIDATES = 3;
