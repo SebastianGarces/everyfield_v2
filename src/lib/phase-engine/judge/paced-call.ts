@@ -74,6 +74,12 @@ export interface PacedCallOptions {
    * minutes — enough to walk a 270s budget past the 300s platform ceiling and
    * be killed mid-plant, leaving the `pending` row the guard exists to prevent.
    *
+   * It bounds BOTH retry branches, and that is not decoration (#375): the
+   * 5xx/socket-reset branch clamped only its own backoff, so the
+   * `pacer.acquire()` opening the next attempt — bounded by
+   * `MAX_SINGLE_WAIT_MS` (120s) and by nothing else — kept sleeping after the
+   * deadline had passed. Measured 47s past it.
+   *
    * Stopping early is lossless: a deferral leaves the plant dirty, so it is
    * re-selected on the next run with its last good snapshot untouched.
    */
@@ -155,6 +161,10 @@ export function isRateLimitDeferral(
  * There is deliberately no separate sleep in step 4: the pacer owns all
  * waiting, so a 429 on one plant slows the whole batch instead of only the
  * call that hit it.
+ *
+ * Steps 4 and 5 share ONE budget test (`deadlineAt`), and share it on purpose:
+ * both loop back into step 1, so both can sleep a capped TPM hold the caller's
+ * deadline never sees (#375).
  */
 export async function runPacedCall<T>(
   call: () => Promise<PacedCallResult<T>>,
@@ -186,21 +196,39 @@ export async function runPacedCall<T>(
       const rateLimited = isRateLimitError(error);
 
       if (!rateLimited && !isRetryableError(error)) throw error;
-      if (!rateLimited && attempt >= attempts) throw error;
+
+      // Teach the pacer BEFORE the budget test below reads it: a 429's
+      // Retry-After becomes the hold that `projectedWaitMs()` then reports, so
+      // this line is what makes the test see the real cost of another attempt.
+      const retryAfterMs = rateLimited
+        ? retryAfterMsFromError(error, pacer.clock.now())
+        : null;
+      if (rateLimited) {
+        pacer.observeRateLimit(retryAfterMs, headersFromError(error));
+      }
+
+      // Retryable but not throttling (5xx, socket reset): the token budget is
+      // untouched, so this branch owns a backoff of its own. A 429 adds none —
+      // the pacer owns all of that waiting, so a 429 on one plant slows the
+      // whole batch instead of only the call that hit it.
+      const backoffMs = rateLimited
+        ? 0
+        : Math.min(maxBackoffMs, baseBackoffMs * 2 ** (attempt - 1));
+
+      // What another attempt actually costs in wall clock, for BOTH branches:
+      // this branch's backoff PLUS the `pacer.acquire()` every attempt opens
+      // with. Testing it here rather than inside `if (rateLimited)` is the
+      // #375 fix: that acquire is bounded by `MAX_SINGLE_WAIT_MS` (120s) and by
+      // nothing else, so the 5xx branch used to clamp its own 1s backoff to the
+      // deadline and then sleep a whole capped TPM hold past it — measured 47s
+      // over — which is exactly what the deadline exists to prevent.
+      const nextWaitMs = backoffMs + pacer.projectedWaitMs();
+      const outOfBudget =
+        deadlineAt !== undefined &&
+        pacer.clock.now() + nextWaitMs >= deadlineAt;
+      const exhausted = attempt >= attempts || outOfBudget;
 
       if (rateLimited) {
-        const retryAfterMs = retryAfterMsFromError(error, pacer.clock.now());
-        pacer.observeRateLimit(retryAfterMs, headersFromError(error));
-
-        const nextWaitMs = pacer.projectedWaitMs();
-        // The retry ladder must answer to the run's clock, not only to the
-        // attempt count: each further attempt can hold for a whole TPM window,
-        // and those holds are invisible to the batch loop's own budget check.
-        const outOfBudget =
-          deadlineAt !== undefined &&
-          pacer.clock.now() + nextWaitMs >= deadlineAt;
-        const exhausted = attempt >= attempts || outOfBudget;
-
         onRateLimit?.({
           label,
           attempt,
@@ -225,19 +253,15 @@ export async function runPacedCall<T>(
         continue;
       }
 
-      // Retryable but not throttling (5xx, socket reset): the token budget is
-      // untouched, so this is the one delay the pacer does not own. It is still
-      // bounded by the run deadline for the same reason the rate-limit ladder
-      // is — no sleep inside a plant may outlive the function.
-      const backoff = Math.min(
-        maxBackoffMs,
-        baseBackoffMs * 2 ** (attempt - 1),
-        deadlineAt === undefined
-          ? Number.POSITIVE_INFINITY
-          : Math.max(0, deadlineAt - pacer.clock.now())
-      );
-      await pacer.clock.sleep(backoff);
-      waitedMs += backoff;
+      // Out of attempts OR out of clock. Either way the 5xx is rethrown AS
+      // ITSELF, never as a deferral: the provider answered and the answer was
+      // broken, so the run must report a failed judge rather than a throttled
+      // one. Standing down on the deadline costs nothing extra — the plant is
+      // dirty either way and comes back on the next run.
+      if (exhausted) throw error;
+
+      await pacer.clock.sleep(backoffMs);
+      waitedMs += backoffMs;
     }
   }
 }

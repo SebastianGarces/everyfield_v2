@@ -261,6 +261,96 @@ test("a retryable server error backs off exponentially and then succeeds", async
   assert.deepEqual(clock.sleeps, [1_000, 2_000]);
 });
 
+// --- The 5xx ladder answers to the run deadline too (#375) ------------------
+
+test("a 5xx ladder stops AT an already-passed deadline, not a pacer hold past it", async () => {
+  // The defect: only the rate-limit branch tested the deadline. A 502 clamped
+  // its own backoff to the remaining time — zero, here — and then looped into
+  // `pacer.acquire()`, whose hold is bounded by MAX_SINGLE_WAIT_MS (120s) and
+  // by nothing else. Measured 47s past the deadline, on a budget that reserved
+  // 30s for the whole tail of the run.
+  const { clock, pacer } = setup(30_000);
+  // The batch loop started this plant while the budget was still there; the
+  // judge's own latency spent the rest of it.
+  const deadlineAt = clock.now();
+  let attempts = 0;
+
+  await assert.rejects(
+    () =>
+      runPacedCall(
+        async () => {
+          attempts++;
+          throw apiError(502, {}, "bad gateway");
+        },
+        { pacer, maxAttempts: 4, deadlineAt }
+      ),
+    // Still a failure and not a deferral: the provider answered, and the answer
+    // was broken. Only throttling is a deferral.
+    (error: unknown) => {
+      assert.equal(isRateLimitDeferral(error), false);
+      assert.match((error as Error).message, /bad gateway/);
+      return true;
+    }
+  );
+
+  assert.equal(attempts, 1, "the deadline had passed before the first retry");
+  assert.equal(
+    clock.now(),
+    deadlineAt,
+    `the ladder ran to ${clock.now()}ms against a ${deadlineAt}ms deadline`
+  );
+  assert.deepEqual(clock.sleeps, []);
+});
+
+test("a 5xx retry that would land past the deadline is not taken", async () => {
+  // The backoff alone crosses it: 1s of backoff against 400ms of budget. The
+  // old clamp shortened the sleep to 400ms and retried anyway, buying an
+  // unbounded pacer hold with the deadline already spent.
+  const { clock, pacer } = setup(30_000);
+  const deadlineAt = clock.now() + 400;
+  let attempts = 0;
+
+  await assert.rejects(
+    () =>
+      runPacedCall(
+        async () => {
+          attempts++;
+          throw apiError(503, {}, "still down");
+        },
+        { pacer, maxAttempts: 4, deadlineAt }
+      ),
+    /still down/
+  );
+
+  assert.equal(attempts, 1);
+  assert.ok(
+    clock.now() <= deadlineAt,
+    `the ladder ran to ${clock.now()}ms against a ${deadlineAt}ms deadline`
+  );
+});
+
+test("a 5xx ladder with budget to spare still retries normally", async () => {
+  // The hoisted test must bound the ladder, not disable it: with the deadline
+  // far out, the backoff schedule is the one the no-deadline test asserts.
+  const { clock, pacer } = setup(1_000_000);
+  const deadlineAt = clock.now() + 270_000;
+  let attempts = 0;
+
+  const value = await runPacedCall(
+    async () => {
+      attempts++;
+      if (attempts < 3) throw apiError(500, {}, "upstream hiccup");
+      return { value: "ok" };
+    },
+    { pacer, deadlineAt }
+  );
+
+  assert.equal(value, "ok");
+  assert.equal(attempts, 3);
+  assert.deepEqual(clock.sleeps, [1_000, 2_000]);
+  assert.ok(clock.now() < deadlineAt);
+});
+
 test("a retryable error that never clears is rethrown as itself", async () => {
   const { pacer } = setup();
   let attempts = 0;
