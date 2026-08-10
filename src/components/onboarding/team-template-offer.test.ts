@@ -484,3 +484,40 @@ test("the screen holds no server data in state", () => {
   assert.equal(/useEffect/.test(SCREEN_CODE), false);
   assert.equal(/router\.refresh/.test(SCREEN_CODE), false);
 });
+
+// ----------------------------------------------------------------------------
+// better-interface G3 — the failure sits with the control that failed
+// ----------------------------------------------------------------------------
+
+test("the offer's failure message renders inside the card, beside the button", () => {
+  // It used to sit at the top of the screen, above "Your church plant is
+  // saved" — a message about the offer, rendered over a line saying everything
+  // worked, and on a phone one the planter cannot see from the button that
+  // produced it. Nothing above the card failed.
+  const card = SCREEN_CODE.slice(
+    SCREEN_CODE.indexOf('<div className="border-border'),
+    SCREEN_CODE.lastIndexOf("</Button>")
+  );
+  assert.match(card, /role="alert"/);
+  assert.match(card, /\{error\}/);
+
+  // And the button announces the reason with its own accessible name, so the
+  // sentence is readable again when focus returns rather than announced once.
+  assert.match(
+    SCREEN_CODE,
+    /aria-describedby=\{error \? errorId : undefined\}/
+  );
+
+  // The old top-of-screen slot is gone: exactly one place renders the error.
+  assert.equal((SCREEN_CODE.match(/role="alert"/g) ?? []).length, 1);
+});
+
+test("both exits report their own progress", () => {
+  // `busy` is the FLOW's finish, which either button can start. Reporting it on
+  // the wrong control tells a planter who declined that teams are being set up.
+  assert.match(
+    SCREEN_CODE,
+    /aria-busy=\{pending \|\| \(pressed === "accept" && busy\)\}/
+  );
+  assert.match(SCREEN_CODE, /aria-busy=\{pressed === "decline" && busy\}/);
+});

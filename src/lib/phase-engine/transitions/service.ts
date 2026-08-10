@@ -626,18 +626,28 @@ export async function declareInitialPhase(
   const fromPhase = written.from_phase;
   const toPhase = written.to_phase;
 
-  // PE-003. Emitted only when the phase actually MOVED: "not sure — start me at
-  // the beginning" on a plant already at 0 is a declaration worth recording and
-  // a `phase.changed` that would be false.
-  if (fromPhase !== toPhase) {
-    await emitPhaseChanged({
-      churchId,
-      fromPhase,
-      toPhase,
-      initiatedById,
-      rubricVersion: ACTIVE_RUBRIC.version,
-    });
-  }
+  // NO `phase.changed` IS EMITTED HERE, and the absence is the feature (#306).
+  //
+  // The event exists for PE-003's downstream consumers, and today it has
+  // exactly one subscriber (`src/lib/events/subscriptions.ts` →
+  // `handlePhaseChangedForOversight`), whose whole job is the oversight
+  // "reached a new stage" milestone. A declaration reaches no stage — it
+  // records where the plant already stood before EveryField saw it — so a
+  // planter invited by a sending church who declares phase 4 at onboarding
+  // would have pushed "reached a new stage — Phase 4" to that church for
+  // something they did years ago. `PhaseChangedEvent` carries no `kind`, so no
+  // handler can tell a declaration from a move; the emit is dropped rather than
+  // discriminated, which is the version that cannot be got wrong by the next
+  // subscriber either.
+  //
+  // This is the same rule the digest's `phaseAdvanceCondition()` now states in
+  // SQL (`src/lib/notifications/oversight-events.ts`): a declaration is history
+  // the plant arrived with, and only a TRANSITION is an advance. The two
+  // readers of `phase_transitions` agree because both were fixed together.
+  //
+  // If a future consumer genuinely needs to observe declarations, add `kind` to
+  // `PhaseChangedEvent` FIRST — an event without the discriminator is how this
+  // was got wrong the first time.
 
   return {
     status: "declared",

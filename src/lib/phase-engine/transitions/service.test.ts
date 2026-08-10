@@ -526,6 +526,84 @@ test("a refused declaration still reports the LOCKED church's phase", () => {
 });
 
 // ---------------------------------------------------------------------------
+// A declaration does not announce itself as an advance (#306, HR4)
+//
+// `phase.changed` has exactly one subscriber today
+// (`src/lib/events/subscriptions.ts` → `handlePhaseChangedForOversight`), and
+// its whole job is the oversight "reached a new stage" milestone. A planter
+// invited by a sending church who declares phase 4 at onboarding reached no
+// stage — they told us where they already were — so that push must not fire.
+// `PhaseChangedEvent` carries no `kind`, so the handler cannot tell the two
+// apart; the emit is therefore DROPPED from the declaration path rather than
+// filtered downstream, which is the version a future subscriber cannot undo by
+// accident.
+// ---------------------------------------------------------------------------
+
+/** The service's own source, for the two negatives that have no return value. */
+const SERVICE_CODE = readFileSync(
+  join(process.cwd(), "src/lib/phase-engine/transitions/service.ts"),
+  "utf8"
+);
+
+/** Everything from `export async function declareInitialPhase` to the next export. */
+function declareInitialPhaseBody(): string {
+  const start = SERVICE_CODE.indexOf(
+    "export async function declareInitialPhase"
+  );
+  assert.notEqual(start, -1, "declareInitialPhase must exist");
+  const rest = SERVICE_CODE.slice(start + 1);
+  const end = rest.indexOf("\nexport ");
+  return end === -1 ? rest : rest.slice(0, end);
+}
+
+test("declaring a stage emits no phase.changed", () => {
+  const body = declareInitialPhaseBody();
+
+  assert.equal(
+    /emitPhaseChanged\(/.test(body),
+    false,
+    "a declaration must not emit phase.changed — its only subscriber announces an advance"
+  );
+
+  // The ordinary transition path still emits: this narrowed one write path, it
+  // did not remove the event.
+  assert.match(SERVICE_CODE, /emitPhaseChanged\(/);
+});
+
+test("the handler cannot tell a declaration from a move, which is why nothing is emitted", () => {
+  // The pin on the OTHER side of the bus. `handlePhaseChangedForOversight`
+  // announces on `isPhaseAdvance(from, to)` alone, and the event payload it is
+  // handed carries no discriminator — so a declaration reaching this handler is
+  // announced, unconditionally. If someone adds `kind` to `PhaseChangedEvent`
+  // and starts emitting again, this assertion is the one that must be revisited
+  // in the same change.
+  const events = readFileSync(
+    join(process.cwd(), "src/lib/phase-engine/events.ts"),
+    "utf8"
+  );
+  const handler = readFileSync(
+    join(process.cwd(), "src/lib/notifications/oversight-events.ts"),
+    "utf8"
+  );
+
+  const declaration = events.indexOf("interface PhaseChangedEvent");
+  assert.notEqual(declaration, -1);
+  const payload = events.slice(
+    declaration,
+    events.indexOf("\n}", declaration) + 2
+  );
+  assert.equal(
+    /\bkind\b/.test(payload),
+    false,
+    "PhaseChangedEvent carries no kind, so the handler has nothing to filter on"
+  );
+  assert.match(
+    handler,
+    /if \(!isPhaseAdvance\(event\.fromPhase, event\.toPhase\)\) return;/
+  );
+});
+
+// ---------------------------------------------------------------------------
 // The declaration's own validation surface
 // ---------------------------------------------------------------------------
 

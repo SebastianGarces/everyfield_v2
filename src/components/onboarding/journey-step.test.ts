@@ -204,11 +204,22 @@ test("step 3 is skippable, and skipping writes nothing", () => {
 });
 
 test("the step holds no server data in state", () => {
-  // memory/contracts/data-patterns.md. The only `useState` here is the
-  // planter's own in-progress input; server data never round-trips through it,
-  // and there is no `useEffect` syncing anything.
-  assert.equal(/useEffect/.test(STEP_CODE), false);
+  // memory/contracts/data-patterns.md. Every `useState` here is the planter's
+  // own in-progress input or the outcome the action just reported back; server
+  // data never round-trips through state, and nothing is SYNCED.
   assert.equal(/router\.refresh/.test(STEP_CODE), false);
+
+  // The contract is "no effect syncs data", not "no effect exists" — the flow
+  // itself focuses its heading in one (`onboarding-flow-client.tsx`). So the
+  // effects are counted and read: there is exactly one, and its whole body
+  // moves focus onto the refusal panel. An effect that fetched, or that pushed
+  // a prop into state, would fail both assertions.
+  const effects = STEP_CODE.match(/useEffect\(/g) ?? [];
+  assert.equal(effects.length, 1);
+  assert.match(
+    STEP_CODE,
+    /useEffect\(\(\) => \{\n\s*if \(recorded\) recordedRef\.current\?\.focus\(\);\n\s*\}, \[recorded\]\);/
+  );
 });
 
 // ----------------------------------------------------------------------------
@@ -236,11 +247,13 @@ test("a validation message is attached to the question that failed", () => {
   assert.match(STEP_CODE, /aria-invalid=\{stageError \? true : undefined\}/);
   assert.match(STEP_CODE, /role="alert"/);
 
-  // Field errors are field-scoped, never a single shared string again.
-  assert.match(STEP_CODE, /field: "date"/);
-  assert.match(STEP_CODE, /field: "stage"/);
+  // Field errors are field-scoped, never a single shared string again. Every
+  // one goes through `refuse()`, which renders the message AND moves focus to
+  // the question it belongs to (see section 10).
+  assert.match(STEP_CODE, /refuse\("date",/);
+  assert.match(STEP_CODE, /refuse\("stage",/);
   // A failed SAVE is not a field error — it sits by the button that tried.
-  assert.match(STEP_CODE, /field: "form"/);
+  assert.match(STEP_CODE, /refuse\(\s*"form",/);
 });
 
 test("revealing the date input moves the caret into it", () => {
@@ -474,4 +487,157 @@ test("the declared phase is the snapshot's phase, with no ladder behind it", () 
   );
 
   assert.equal(snap.currentPhase, 3);
+});
+
+// ----------------------------------------------------------------------------
+// 8. A second declaration is REFUSED, and the refusal is said out loud
+//
+// Ruled 2026-08-09: re-declaration is refused, never overwritten and never
+// half-applied. `phase_transitions_initial_declaration_unique_idx` already
+// refused the write; what was missing was the sentence. The action collapsed
+// both outcomes to `status: "declared"`, so the second submit wrote the launch
+// date, discarded the stage, and advanced the flow reporting success — reachable
+// with no race at all by pressing Back from step 4.
+// ----------------------------------------------------------------------------
+
+test("the action reports a refused declaration as a refusal", () => {
+  // The two outcomes of `declareInitialPhase` reach the client as two states.
+  assert.match(ACTIONS_CODE, /status: "already_declared"; phase: number/);
+  assert.match(
+    ACTIONS_CODE,
+    /declared\.status === "already_declared"\s*\?\s*"already_declared"\s*:\s*"declared"/
+  );
+
+  // And the phase reported is the STORED one in both arms — `declared.phase`,
+  // which `declareInitialPhase` reads off the locked church row — never the
+  // number this request submitted.
+  assert.match(ACTIONS_CODE, /phase: declared\.phase/);
+  assert.equal(/phase: phase,/.test(ACTIONS_CODE), false);
+});
+
+test("the refusal names the stage, where to change it, and that the date saved", () => {
+  // All three facts are owed. Without the third, "already recorded" reads as
+  // "nothing went through", and the planter re-enters a date the launch page
+  // will refuse to move.
+  assert.match(STEP_CODE, /result\.status === "already_declared"/);
+  assert.match(
+    STEP_CODE,
+    /setRecorded\(\{ phase: result\.phase, targetDate: result\.targetDate \}\)/
+  );
+  assert.match(STEP_CODE, /journeyStageForPhase\(recorded\.phase\)/);
+  assert.match(STEP_CODE, /Your starting stage is already recorded/);
+  assert.match(STEP_CODE, /from the phase page/);
+  assert.match(STEP_CODE, /Your launch date was saved/);
+
+  // The date is formatted through the zone-pinned helpers, never `toLocale*`
+  // (memory/invariants.md → Date & Time Rendering).
+  assert.match(
+    STEP_CODE,
+    /formatDate\(parseTargetDate\(recorded\.targetDate\)\)/
+  );
+  assert.equal(/toLocaleDateString/.test(STEP_CODE), false);
+});
+
+test("a refused declaration does not advance the flow by itself", () => {
+  // `onDeclared` is what moves the planter on and what the OB-015 team offer is
+  // gated on. On a refusal it is reachable only from the Continue button the
+  // planter presses AFTER reading the panel — never from the submit handler.
+  const submitBranch = STEP_CODE.slice(
+    STEP_CODE.indexOf('if (result.status === "already_declared")'),
+    STEP_CODE.indexOf("onDeclared(result.phase);")
+  );
+  assert.equal(/onDeclared\(/.test(submitBranch), false);
+
+  // And when it is pressed it carries the STORED phase.
+  assert.match(STEP_CODE, /onClick=\{\(\) => onDeclared\(recorded\.phase\)\}/);
+});
+
+// ----------------------------------------------------------------------------
+// 9. "No date yet" on RE-ENTRY is an answer, not silence
+//
+// On a first pass the branch writes nothing and the countdown stays empty,
+// which is the AC. On a re-entry by a planter who already set a date, writing
+// nothing left `launches.target_date` counting while the radio hint promised
+// the opposite. Silence is the one option that hint rules out.
+// ----------------------------------------------------------------------------
+
+test("'no date yet' over an existing date is refused, and refused before any write", () => {
+  const branch = ACTIONS_CODE.slice(
+    ACTIONS_CODE.indexOf("} else {"),
+    ACTIONS_CODE.indexOf("const declared = await declareInitialPhase")
+  );
+
+  // It READS the stored launch through the launch module's own query, and
+  // returns a refusal attached to the date question.
+  assert.match(branch, /await getLaunchForChurch\(user\.churchId\)/);
+  assert.match(branch, /if \(launch\?\.targetDate\)/);
+  assert.match(branch, /status: "error"/);
+  assert.match(branch, /field: "date"/);
+  assert.match(branch, /Your launch date is already set to/);
+
+  // The refusal returns BEFORE the declaration, so nothing is half-applied: no
+  // date write, no stage write.
+  assert.match(branch, /formatDate\(parseTargetDate\(launch\.targetDate\)\)/);
+
+  // And it does not quietly clear the date either — clearing is a launch write
+  // path that does not exist, and inventing one here would be a second rail.
+  assert.equal(/delete\(launches\)/.test(ACTIONS_CODE), false);
+  assert.equal(/targetDate: null/.test(branch), false);
+});
+
+test("the refusal is rendered under the date question that produced it", () => {
+  // The action names the field; the step trusts that name and falls back to the
+  // save-level slot only when there is none.
+  assert.match(ACTIONS_CODE, /field\?: DeclareJourneyErrorField/);
+  assert.match(STEP_CODE, /refuse\(result\.field \?\? "form", result\.error\)/);
+});
+
+// ----------------------------------------------------------------------------
+// 10. better-interface G3 — a refusal is reached, not merely rendered
+// ----------------------------------------------------------------------------
+
+test("a refusal moves focus to the question that failed", () => {
+  // Rendering the message under its own fieldset is half the fix. This is the
+  // tallest step in the flow and its submit sits below both questions, so a
+  // message attached to the first fieldset is off the top of a phone screen —
+  // and a submit that appears to do nothing. Every refusal goes through
+  // `refuse()`, which renders AND goes there.
+  assert.match(
+    STEP_CODE,
+    /function refuse\(field: JourneyErrorField, message: string\)/
+  );
+  assert.match(
+    STEP_CODE,
+    /if \(field === "date"\) dateFieldsetRef\.current\?\.focus\(\)/
+  );
+  assert.match(
+    STEP_CODE,
+    /if \(field === "stage"\) stageFieldsetRef\.current\?\.focus\(\)/
+  );
+
+  // `tabIndex={-1}` on both fieldsets: focusable programmatically, never a stop
+  // in the tab order (the device the flow uses on its step heading).
+  assert.equal((STEP_CODE.match(/tabIndex=\{-1\}/g) ?? []).length, 3);
+
+  // No refusal sets the error directly any more — that is how one grows back
+  // without the focus move.
+  assert.equal(
+    (STEP_CODE.match(/setError\(\{ field:/g) ?? []).length,
+    0,
+    "every refusal must go through refuse()"
+  );
+});
+
+test("the disabled picker shows the RECORDED stage, not the rejected one", () => {
+  // Two claims about one fact in a single glance: the panel naming the stored
+  // stage while the picker above it still shows the answer that was refused.
+  assert.match(
+    STEP_CODE,
+    /const onRecord = journeyStageForPhase\(result\.phase\)/
+  );
+  assert.match(STEP_CODE, /if \(onRecord\) setStage\(onRecord\.value\)/);
+});
+
+test("the submit reports its own progress to assistive technology", () => {
+  assert.match(STEP_CODE, /aria-busy=\{pending\}/);
 });

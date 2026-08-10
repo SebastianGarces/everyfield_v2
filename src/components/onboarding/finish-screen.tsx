@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import { useId, useState, useTransition } from "react";
 import { Users } from "lucide-react";
 
 import { initializeTeamsWithRolesAction } from "@/app/(dashboard)/teams/actions";
@@ -57,6 +57,7 @@ export function FinishScreen({
 }) {
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const errorId = useId();
   // Which control was pressed, so the progress word lands on the button the
   // planter actually pressed. Both are disabled either way; without this, the
   // flow's finish (`busy`) would report itself on the control they declined.
@@ -98,15 +99,6 @@ export function FinishScreen({
 
   return (
     <div className="space-y-6">
-      {error && (
-        <p
-          role="alert"
-          className="bg-destructive/10 text-destructive rounded-md p-3 text-sm"
-        >
-          {error}
-        </p>
-      )}
-
       <p className="text-sm">
         Your church plant is saved and your dashboard is ready.
       </p>
@@ -137,12 +129,30 @@ export function FinishScreen({
           </p>
         </div>
 
+        {/* THE FAILURE BELONGS TO THIS BUTTON, so it lives beside it rather
+            than at the top of the screen. Nothing above the card failed — the
+            plant is saved, which the first line says — and a message pinned up
+            there is, on a phone, a message the planter cannot see from the
+            control that produced it. `aria-describedby` makes the button
+            announce the reason with its own name, so the sentence is readable
+            again when focus returns rather than only announced once. */}
+        {error && (
+          <p
+            id={errorId}
+            role="alert"
+            className="bg-destructive/10 text-destructive rounded-md p-3 text-sm"
+          >
+            {error}
+          </p>
+        )}
+
         <Button
           type="button"
           className="w-full cursor-pointer sm:w-auto"
           onClick={accept}
           disabled={disabled}
-          aria-busy={pending}
+          aria-busy={pending || (pressed === "accept" && busy)}
+          aria-describedby={error ? errorId : undefined}
         >
           {pending
             ? "Setting up teams…"

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { PHASES } from "@/lib/constants";
 import {
   JOURNEY_STAGE_NOT_SURE,
   JOURNEY_STAGE_OPTIONS,
@@ -10,6 +11,7 @@ import {
   ONBOARDING_STEP_IDS,
   incompleteOnboardingSteps,
   isLaunchDateChoice,
+  journeyStageForPhase,
   phaseForJourneyStage,
   isFirstOnboardingStep,
   isLastOnboardingStep,
@@ -299,6 +301,36 @@ test("an unknown stage is refused, never defaulted to Discovery", () => {
   // is append-only, so there is no taking it back.
   for (const bad of ["9", "-1", "", "phase-3", null, undefined, 3]) {
     assert.equal(phaseForJourneyStage(bad), null);
+  }
+});
+
+test("a stored phase reads back as the stage the picker offered", () => {
+  // The inverse of `phaseForJourneyStage`, and the refusal message's whole
+  // vocabulary: "your starting stage is already recorded as 3" names a number
+  // the planter never chose. They chose a sentence.
+  assert.equal(journeyStageForPhase(3)?.label, "We are training the teams");
+  assert.equal(journeyStageForPhase(3)?.phaseName, PHASES[3]);
+  assert.equal(journeyStageForPhase(6)?.label, "We have launched");
+
+  // Phase 0 resolves to the real stage, not to the "not sure" escape hatch that
+  // also writes 0 — only the number survives the write, so the honest reading
+  // back is the stage, not a guess at which door the planter came through.
+  assert.equal(
+    journeyStageForPhase(0)?.value,
+    "0",
+    "phase 0 is Discovery, not the escape hatch"
+  );
+
+  // Nothing is invented for a phase the picker does not offer.
+  assert.equal(journeyStageForPhase(9), null);
+  assert.equal(journeyStageForPhase(-1), null);
+});
+
+test("every offered stage round-trips through both directions", () => {
+  for (const option of JOURNEY_STAGE_OPTIONS) {
+    assert.equal(phaseForJourneyStage(option.value), option.phase);
+    // Not `option.value` — two options share phase 0 on purpose.
+    assert.equal(journeyStageForPhase(option.phase)?.phase, option.phase);
   }
 });
 

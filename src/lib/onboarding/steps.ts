@@ -360,3 +360,22 @@ export function phaseForJourneyStage(value: unknown): PhaseNumber | null {
     null
   );
 }
+
+/**
+ * The inverse: the option that a STORED phase corresponds to, so a surface can
+ * name a recorded stage in the same plain language the picker offered it in.
+ *
+ * Used when a re-declaration is refused (#306, ruled 2026-08-09): telling a
+ * planter "your starting stage is already recorded as 3" names a number they
+ * never chose — they chose "We are training the teams". The refusal has to
+ * speak the picker's language or it does not identify the answer it is
+ * refusing to replace.
+ *
+ * Phase 0 resolves to the FIRST option carrying it — "We are still discerning
+ * the call", not the "not sure" escape hatch below it. Both write phase 0, and
+ * only the stored number survives, so the honest reading back is the stage, not
+ * a guess at which door the planter came through.
+ */
+export function journeyStageForPhase(phase: number): JourneyStageOption | null {
+  return JOURNEY_STAGE_OPTIONS.find((option) => option.phase === phase) ?? null;
+}

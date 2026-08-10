@@ -1,15 +1,18 @@
 "use client";
 
-import { useId, useRef, useState, useTransition } from "react";
+import { useEffect, useId, useRef, useState, useTransition } from "react";
 
 import { declareJourney } from "@/app/(dashboard)/dashboard/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { formatDate } from "@/lib/datetime";
+import { parseTargetDate } from "@/lib/launch/countdown";
 import {
   JOURNEY_STAGE_OPTIONS,
   isLaunchDateChoice,
+  journeyStageForPhase,
   phaseForJourneyStage,
   type LaunchDateChoice,
 } from "@/lib/onboarding/steps";
@@ -44,13 +47,30 @@ import {
  * produced it. Each failure is therefore attached to the question that failed:
  * rendered under that fieldset and named by its `aria-describedby`, so it is
  * both reachable by eye and reported by a screen reader when the group takes
- * focus, not only announced once as it appears.
+ * focus, not only announced once as it appears. And the planter is TAKEN there
+ * — `refuse()` focuses the failing fieldset, because a message rendered above
+ * the fold on a screen whose submit button is below it is a submit that appears
+ * to do nothing at all.
  */
 
 /** Which question a validation message belongs to. */
 type JourneyErrorField = "date" | "stage" | "form";
 
 type JourneyError = { field: JourneyErrorField; message: string };
+
+/**
+ * The refusal state: this plant had already declared its starting stage, so the
+ * stage half of the submit wrote nothing (ruled 2026-08-09 — a re-declaration is
+ * refused, never overwritten). It is the outcome of the planter's own submit,
+ * held exactly like `error` is; it is not a copy of server data kept in sync
+ * (`memory/contracts/data-patterns.md`).
+ */
+type JourneyRecorded = {
+  /** The stage ON RECORD — the first declaration, not the one just submitted. */
+  phase: number;
+  /** The date this submit DID save, or `null` if the planter named no day. */
+  targetDate: string | null;
+};
 export function JourneyStep({
   onDeclared,
   onBack,
@@ -79,13 +99,18 @@ export function JourneyStep({
   const [targetDate, setTargetDate] = useState("");
   const [stage, setStage] = useState<string | null>(null);
   const [error, setError] = useState<JourneyError | null>(null);
+  const [recorded, setRecorded] = useState<JourneyRecorded | null>(null);
   const [pending, startTransition] = useTransition();
 
   const dateInputId = useId();
   const dateErrorId = useId();
   const stageErrorId = useId();
   const formErrorId = useId();
-  const disabled = pending || busy;
+  const recordedId = useId();
+  // Once the stage is on record the questions are answered for good, so the
+  // controls stop pretending otherwise: a second submit would be refused by the
+  // same index, and a live radio group invites exactly that.
+  const disabled = pending || busy || recorded !== null;
 
   /**
    * Set when the planter picks "We have a date in mind", consumed by the date
@@ -95,28 +120,57 @@ export function JourneyStep({
    */
   const focusDateOnMount = useRef(false);
 
+  /**
+   * The refusal takes focus when it appears.
+   *
+   * It is the answer to the button the planter just pressed, and it replaces
+   * that button — leaving focus on a control that has become "Continue" means a
+   * screen-reader user hears a new label with no idea why, and a sighted
+   * keyboard user's next Enter walks straight past the sentence. Focusing the
+   * panel reads it out and puts Continue one Tab away.
+   */
+  const recordedRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (recorded) recordedRef.current?.focus();
+  }, [recorded]);
+
+  /**
+   * The two questions, so a refusal can move focus to the one that failed.
+   *
+   * Rendering the message under its own fieldset is half the fix; the other
+   * half is going there. This is the tallest step in the flow, and the button
+   * that fails sits below both questions — on a phone, a message attached to
+   * the first fieldset is a message off the top of the screen, and a submit
+   * that appears to do nothing. Focusing the fieldset scrolls it into view and
+   * makes a screen reader read the legend, the description and the error it is
+   * now described by.
+   */
+  const dateFieldsetRef = useRef<HTMLFieldSetElement>(null);
+  const stageFieldsetRef = useRef<HTMLFieldSetElement>(null);
+
+  function refuse(field: JourneyErrorField, message: string) {
+    setError({ field, message });
+    if (field === "date") dateFieldsetRef.current?.focus();
+    if (field === "stage") stageFieldsetRef.current?.focus();
+  }
+
   function handleSubmit() {
     if (!dateChoice) {
-      setError({
-        field: "date",
-        message: "Let us know whether you have a launch date in mind.",
-      });
+      refuse("date", "Let us know whether you have a launch date in mind.");
       return;
     }
 
     if (dateChoice === "date" && !targetDate) {
-      setError({
-        field: "date",
-        message: "Pick the Sunday you are aiming at, or choose “no date yet”.",
-      });
+      refuse(
+        "date",
+        "Pick the Sunday you are aiming at, or choose “no date yet”."
+      );
       return;
     }
 
     if (phaseForJourneyStage(stage) === null) {
-      setError({
-        field: "stage",
-        message: "Choose where you are on the journey.",
-      });
+      refuse("stage", "Choose where you are on the journey.");
       return;
     }
 
@@ -130,7 +184,25 @@ export function JourneyStep({
         });
 
         if (result.status === "error") {
-          setError({ field: "form", message: result.error });
+          // The server says which question refused; "form" is the fallback for
+          // a failure that belongs to the save rather than to a field.
+          refuse(result.field ?? "form", result.error);
+          return;
+        }
+
+        if (result.status === "already_declared") {
+          // NOT an advance. The stage was not saved, so the planter is not sent
+          // on as though it had been — they read what is on record, and press
+          // Continue themselves.
+          setRecorded({ phase: result.phase, targetDate: result.targetDate });
+
+          // And the picker is moved onto the RECORDED stage. Left alone it kept
+          // the planter's rejected answer checked while the panel underneath
+          // named a different one — two claims about the same fact, on one
+          // screen, in the same glance. The disabled picker is now a reading of
+          // what is stored, which is what it has become.
+          const onRecord = journeyStageForPhase(result.phase);
+          if (onRecord) setStage(onRecord.value);
           return;
         }
 
@@ -142,11 +214,10 @@ export function JourneyStep({
         // button stuck pending with nothing rendered. Caught, it is a sentence
         // and a button they can press again; re-submitting is safe (the date
         // write is a compare-and-set, the declaration is once-only).
-        setError({
-          field: "form",
-          message:
-            "We could not save that just now. Nothing else you have entered is affected — please try again.",
-        });
+        refuse(
+          "form",
+          "We could not save that just now. Nothing else you have entered is affected — please try again."
+        );
       }
     });
   }
@@ -168,7 +239,14 @@ export function JourneyStep({
       }}
     >
       {/* ---- OB-003: the launch date, or an explicit "no date yet" ---- */}
-      <fieldset className="space-y-3">
+      {/* `tabIndex={-1}` so a refusal can put focus here without adding a stop
+          to the tab order — the same device the flow uses on its step heading
+          (`onboarding-flow-client.tsx`). */}
+      <fieldset
+        ref={dateFieldsetRef}
+        tabIndex={-1}
+        className="space-y-3 outline-none"
+      >
         <legend className="text-sm font-medium">
           When do you hope to launch?
         </legend>
@@ -238,7 +316,11 @@ export function JourneyStep({
       </fieldset>
 
       {/* ---- OB-005: the stage declaration ---- */}
-      <fieldset className="space-y-3">
+      <fieldset
+        ref={stageFieldsetRef}
+        tabIndex={-1}
+        className="space-y-3 outline-none"
+      >
         <legend className="text-sm font-medium">Where are you today?</legend>
         <p className="text-muted-foreground text-sm">
           We will start you here instead of at zero — the dashboard, the wiki
@@ -286,6 +368,10 @@ export function JourneyStep({
         </p>
       )}
 
+      {recorded && (
+        <RecordedNotice ref={recordedRef} id={recordedId} recorded={recorded} />
+      )}
+
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         {onBack ? (
           <Button
@@ -293,7 +379,10 @@ export function JourneyStep({
             variant="outline"
             className="cursor-pointer"
             onClick={onBack}
-            disabled={disabled}
+            // Not gated on `recorded`: going back to a step that is already
+            // answered is always allowed, and a dead Back button on a screen
+            // that just refused something reads as "you are stuck".
+            disabled={pending || busy}
           >
             Back
           </Button>
@@ -302,30 +391,116 @@ export function JourneyStep({
         )}
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <Button
-            type="button"
-            variant="ghost"
-            className="cursor-pointer"
-            onClick={onSkip}
-            disabled={disabled}
-          >
-            Skip for now
-          </Button>
+          {/* Skipping is what "I do not want to answer this" means, and once
+              the stage is on record there is nothing left to skip past — the
+              forward control below is the honest one. */}
+          {!recorded && (
+            <Button
+              type="button"
+              variant="ghost"
+              className="cursor-pointer"
+              onClick={onSkip}
+              disabled={disabled}
+            >
+              Skip for now
+            </Button>
+          )}
           <Button
             type="button"
             variant="ghost"
             className="cursor-pointer"
             onClick={onFinish}
-            disabled={disabled}
+            disabled={pending || busy}
           >
             Finish setup later
           </Button>
-          <Button type="submit" className="cursor-pointer" disabled={disabled}>
-            {pending ? "Saving…" : "Continue"}
-          </Button>
+          {recorded ? (
+            // The refusal's forward control. It carries the STORED phase, which
+            // is what the finish screen's team offer is gated on — handing up
+            // the submitted value would offer a planter the structure for a
+            // stage their dashboard is not about to show them.
+            <Button
+              type="button"
+              className="cursor-pointer"
+              onClick={() => onDeclared(recorded.phase)}
+              disabled={pending || busy}
+            >
+              Continue
+            </Button>
+          ) : (
+            <Button
+              type="submit"
+              className="cursor-pointer"
+              disabled={disabled}
+              aria-busy={pending}
+            >
+              {pending ? "Saving…" : "Continue"}
+            </Button>
+          )}
         </div>
       </div>
     </form>
+  );
+}
+
+/**
+ * "Your starting stage is already recorded" — the refusal, said in full.
+ *
+ * THREE FACTS, AND ALL THREE ARE OWED (ruled 2026-08-09). A planter re-entering
+ * this step and submitting a different stage has had that stage discarded, so
+ * the panel must say: which stage is actually on record, where the plant's phase
+ * can be changed, and — the one a shorter message would drop — that the launch
+ * date on the SAME form did save. Without the third the honest reading of
+ * "already recorded" is "none of that went through", and a planter re-enters
+ * their date on a page that will refuse to move it.
+ *
+ * WHY IT IS NOT AN ERROR STYLE. Nothing went wrong: the plant has a starting
+ * stage, which is what this step exists to establish. Destructive red on a
+ * screen reporting a correct state teaches planters to fear the flow. It is a
+ * status, styled as one, and it takes focus (see `recordedRef`) so it is read
+ * rather than merely present.
+ */
+function RecordedNotice({
+  ref,
+  id,
+  recorded,
+}: {
+  ref: React.Ref<HTMLDivElement>;
+  id: string;
+  recorded: JourneyRecorded;
+}) {
+  const option = journeyStageForPhase(recorded.phase);
+
+  return (
+    <div
+      ref={ref}
+      id={id}
+      tabIndex={-1}
+      role="status"
+      // The ring token the rest of the app focuses with (`ui/button.tsx`),
+      // rather than an ad-hoc ring — this panel takes focus programmatically,
+      // so the indicator has to look like every other one on the screen.
+      className="border-primary/40 bg-primary/5 focus-visible:ring-ring/50 space-y-2 rounded-md border p-4 text-sm outline-none focus-visible:ring-[3px]"
+    >
+      <p className="font-medium">
+        {option
+          ? `Your starting stage is already recorded: ${option.label} (${option.phaseName}).`
+          : `Your starting stage is already recorded as phase ${recorded.phase}.`}
+      </p>
+      <p className="text-muted-foreground">
+        Setup records where you started once, so this answer was kept. You can
+        move the plant to a different phase any time from the phase page.
+      </p>
+      {recorded.targetDate && (
+        <p className="text-muted-foreground">
+          Your launch date was saved:{" "}
+          <span className="text-foreground font-medium">
+            {formatDate(parseTargetDate(recorded.targetDate))}
+          </span>
+          .
+        </p>
+      )}
+    </div>
   );
 }
 

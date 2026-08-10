@@ -12,6 +12,9 @@ import { phaseForJourneyStage } from "@/lib/onboarding/steps";
 import { plantDirtyColumns } from "@/lib/phase-engine/dirty-handler";
 import { declareInitialPhase } from "@/lib/phase-engine/transitions";
 import { launchTargetDateSchema } from "@/lib/launch/validation";
+import { parseTargetDate } from "@/lib/launch/countdown";
+import { getLaunchForChurch } from "@/lib/launch/queries";
+import { formatDate } from "@/lib/datetime";
 import { scheduleLaunchAction } from "@/app/(dashboard)/launch/actions";
 import { and, eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
@@ -112,9 +115,25 @@ export type DeclareJourneyInput = {
   targetDate?: string | null;
 };
 
+/**
+ * Which question a refusal belongs to, so the step can render it under the
+ * fieldset that produced it rather than as one message at the top of the
+ * tallest screen in the flow. Mirrors `JourneyStep`'s own `JourneyErrorField`.
+ */
+export type DeclareJourneyErrorField = "date" | "stage" | "form";
+
 export type DeclareJourneyState =
   | { status: "declared"; phase: number; targetDate: string | null }
-  | { status: "error"; error: string };
+  /**
+   * RULED 2026-08-09: a second declaration is REFUSED, never overwritten and
+   * never half-applied. This arm is what makes the refusal sayable — it carries
+   * the STORED phase (the one that is history) and the date this submit did
+   * write, because the launch half is durable even when the stage half is
+   * refused, and a planter told only "already recorded" would reasonably
+   * conclude nothing at all was saved.
+   */
+  | { status: "already_declared"; phase: number; targetDate: string | null }
+  | { status: "error"; error: string; field?: DeclareJourneyErrorField };
 
 /**
  * F12 / OB-003 + OB-005 — step 3 of onboarding: where are you, and when do you
@@ -142,14 +161,24 @@ export type DeclareJourneyState =
  * snapshot includes the launch countdown — taken the other way round, the
  * plant's own declaration would record it as having no launch date.
  *
- * PARTIALLY APPLIED IS A REAL AND SAFE OUTCOME. If the stage write fails, the
- * date is already saved and journaled, and the planter is told what went wrong
- * rather than being handed a rollback that would also throw away a date they
- * successfully set. Re-submitting is safe: the date write is a compare-and-set
- * (an unchanged date writes nothing) and the declaration is once-only —
- * enforced by `phase_transitions_initial_declaration_unique_idx` (migration
- * 0033), not by a check this action performs, so a double submit cannot land
- * two declarations however the two requests interleave.
+ * PARTIALLY APPLIED IS A REAL OUTCOME, AND IT IS ALWAYS REPORTED AS ONE. If the
+ * stage write fails, the date is already saved and journaled, and the planter is
+ * told what went wrong rather than being handed a rollback that would also throw
+ * away a date they successfully set. Re-submitting is safe: the date write is a
+ * compare-and-set (an unchanged date writes nothing) and the declaration is
+ * once-only — enforced by `phase_transitions_initial_declaration_unique_idx`
+ * (migration 0033), not by a check this action performs, so a double submit
+ * cannot land two declarations however the two requests interleave.
+ *
+ * WHAT THAT ONCE-ONLY-NESS COSTS, AND WHO PAYS IT (ruled 2026-08-09). The index
+ * refuses the second declaration; this action must not then report a save. The
+ * refusal reaches the planter as `already_declared` carrying the STORED stage,
+ * and the step says three things: which stage is on record, where to change the
+ * plant's phase, and that the launch date on this same form DID save. Collapsing
+ * both outcomes to "declared" — the shape this returned before — half-applied
+ * the form and called it success: the date landed, the stage was discarded, and
+ * the planter walked to a dashboard still showing the phase they had just tried
+ * to correct. Reachable with no race at all, by pressing Back from step 4.
  *
  * The actor is minted from `verifySession()` — no parameter names a user or a
  * church, so a forged POST cannot declare somebody else's plant
@@ -186,7 +215,11 @@ export async function declareJourney(
   if (rawDate) {
     const parsedDate = launchTargetDateSchema.safeParse(rawDate);
     if (!parsedDate.success) {
-      return { status: "error", error: parsedDate.error.issues[0].message };
+      return {
+        status: "error",
+        field: "date",
+        error: parsedDate.error.issues[0].message,
+      };
     }
 
     const scheduled = await scheduleLaunchAction({
@@ -194,10 +227,41 @@ export async function declareJourney(
     });
 
     if (!scheduled.success) {
-      return { status: "error", error: scheduled.error };
+      return { status: "error", field: "date", error: scheduled.error };
     }
 
     targetDate = scheduled.data.targetDate;
+  } else {
+    // "NO DATE YET" ON RE-ENTRY IS AN ANSWER, AND IT IS REFUSED (#306, HR4).
+    //
+    // On a first pass this branch is correct as silence: there is no launch
+    // row, nothing is written, and the countdown stays empty, which is the AC.
+    // On a RE-ENTRY it was a lie. `previousOnboardingStep("people")` is
+    // `"journey"`, so Back from step 4 re-enters this step with a cleared form;
+    // a planter who set a date, came back and chose "No date yet" was shown the
+    // hint "the countdown stays empty until you name a day" while the stored
+    // `launches.target_date` kept counting.
+    //
+    // Of the two allowed answers — clear the stored target through the launch
+    // service, or refuse with a message — this is the REFUSAL, and the reason
+    // is that clearing is not a smaller change than it looks. `launches` has no
+    // "unschedule" write path: `setLaunchDate` takes a non-null day, the
+    // append-only `launch_events` journal has no event type for a cleared date
+    // (`launchEventTypes`), and a scheduled launch has already seeded its
+    // Playbook milestones and their tasks, which a silent clear would strand.
+    // Inventing all of that from inside an onboarding step — where the planter
+    // asked to move on, not to unschedule a launch — is the larger surprise.
+    // So the choice is refused, in a sentence that names the stored day and
+    // where it can be moved, and NOTHING is written: no half-applied form.
+    const launch = await getLaunchForChurch(user.churchId);
+
+    if (launch?.targetDate) {
+      return {
+        status: "error",
+        field: "date",
+        error: `Your launch date is already set to ${formatDate(parseTargetDate(launch.targetDate))}. Setup cannot remove it — choose “We have a date in mind” to move it, or leave it and change it later on the launch page.`,
+      };
+    }
   }
 
   try {
@@ -207,12 +271,17 @@ export async function declareJourney(
 
     revalidateDashboard();
 
+    // The STORED phase is the answer in BOTH arms, not the one just submitted —
+    // the first declaration is the one that is history, and reporting the
+    // submitted phase would show the planter a stage the dashboard is not about
+    // to render. What the two arms differ on is whether this submit is what put
+    // it there, and the planter is owed that difference: `already_declared` is
+    // rendered as a refusal (the ruling), `declared` as a save.
     return {
-      status: "declared",
-      // On `already_declared` the STORED phase is the answer, not the one just
-      // submitted — the first declaration is the one that is history, and
-      // reporting the submitted phase would show the planter a stage the
-      // dashboard is not about to render.
+      status:
+        declared.status === "already_declared"
+          ? "already_declared"
+          : "declared",
       phase: declared.phase,
       targetDate,
     };
@@ -220,6 +289,7 @@ export async function declareJourney(
     console.error("journey declaration failed", error);
     return {
       status: "error",
+      field: "form",
       error: "We could not save where you are just now. Please try again.",
     };
   }
