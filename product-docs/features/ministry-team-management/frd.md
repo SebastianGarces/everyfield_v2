@@ -14,7 +14,7 @@
 
 ## Overview
 
-Ministry Team Management enables church planters to organize, staff, and track the ministry teams essential for a successful church launch. This feature manages the 10 core ministry teams (plus custom teams) from formation through launch and beyond, providing visibility into team health, staffing status, and training completion. Team communication is handled via the Communication Hub (F9).
+Ministry Team Management enables church planters to organize, staff, and track the ministry teams essential for a successful church launch. This feature manages the 10 core ministry teams (plus custom teams) from formation through launch and beyond, providing visibility into team health, staffing status, and training completion. Team communication is handled via the Communication Hub.
 
 ## User-Visible Behavior
 
@@ -68,9 +68,9 @@ Ministry Team Management enables church planters to organize, staff, and track t
 |----|-------------|-------------|
 | MT-011 | Training tracking | Track required training completion per team — training is defined at team level, so every member of a team shares the team's required programs |
 | MT-012 | Training completion matrix | Grid view of team members vs training programs |
-| MT-013 | Team meeting scheduling | Schedule and track team meetings via the Meetings feature (F3) with `type = team_meeting`. Accessible from the team detail Meetings tab. |
-| MT-014 | Meeting attendance | Record attendance at team meetings via the Meetings feature (F3). |
-| MT-015 | Team communication | Send messages to team members via Communication Hub (F9). F8 does not own a Communication tab; users navigate to F9 for messaging. |
+| MT-013 | Team meeting scheduling | Schedule and track team meetings via the Meetings feature with `type = team_meeting`. Accessible from the team detail Meetings tab. |
+| MT-014 | Meeting attendance | Record attendance at team meetings via the Meetings feature. |
+| MT-015 | Team communication | Send messages to team members via the Communication Hub. Ministry Teams does not own a Communication tab; users navigate to the Communication Hub for messaging. |
 | MT-016 | Health scoring | Calculate team health from staffing, training, attendance |
 | MT-017 | Alert thresholds | Visual alerts for understaffed teams |
 | MT-018 | Org chart view | Hierarchical visualization of team structure |
@@ -170,13 +170,13 @@ Deep dive into a single ministry team.
 - "Schedule Training" action
 
 #### Tab: Meetings
-- Displays meetings from the Meetings feature (F3) filtered by this team (`type = team_meeting`, `team_id` matching)
+- Displays meetings from the Meetings feature filtered by this team (`type = team_meeting`, `team_id` matching)
 - Upcoming meetings list
 - Past meetings with attendance records
-- Quick add: "Schedule Meeting" (creates a team meeting in F3 with this team pre-selected)
-- Meeting cards link to the unified meeting detail view in F3
+- Quick add: "Schedule Meeting" (creates a team meeting in Meetings with this team pre-selected)
+- Meeting cards link to the unified meeting detail view in Meetings
 
-> **Note:** Team meetings are managed through the Meetings feature (F3) and displayed here as a filtered view. Team communication is handled via the Communication Hub (F9). There is no Communication tab in this feature.
+> **Note:** Team meetings are managed through the Meetings feature and displayed here as a filtered view. Team communication is handled via the Communication Hub. There is no Communication tab in this feature.
 
 ---
 
@@ -203,7 +203,7 @@ Accessed when creating or editing a role within a team.
 Triggered when assigning a person to a role.
 
 **Flow:**
-1. Search existing People/CRM database
+1. Search the People/CRM directory
 2. Filter by: skills, gifts, availability, current team assignments
 3. Preview person's profile:
    - Current team commitments
@@ -441,7 +441,7 @@ As training completes:
 
 **Trigger:** User clicks "Schedule Meeting" on Meetings tab
 
-Team meetings are created through the unified Meetings feature (F3) with `type = team_meeting` and `team_id` linking to this team. The meeting form is pre-populated with the team context.
+Team meetings are created through the unified Meetings feature with `type = team_meeting` and `team_id` linking to this team. The meeting form is pre-populated with the team context.
 
 **Steps:**
 
@@ -450,19 +450,19 @@ Team meetings are created through the unified Meetings feature (F3) with `type =
     ↓
 Click "Schedule Meeting"
     ↓
-[F3 Meeting Form] (pre-filled with type = team_meeting, team_id = this team):
+[Meeting Form] (pre-filled with type = team_meeting, team_id = this team):
 ├── Select meeting subtype (regular, training, planning, special, rehearsal)
 ├── Set date/time
 ├── Set location
 ├── Add notes/description
     ↓
-Save meeting (created in F3 as a ChurchMeeting)
+Save meeting (created in Meetings as a ChurchMeeting)
     ↓
 System actions:
 ├── Guest list auto-populated from team roster (VM-027)
 ├── Meeting appears in both the team's Meetings tab and the main Meetings list
-├── [Should Have] Email invitations sent to guest list via Communication Hub (F9)
-├── [Should Have] Reminder scheduled via Communication Hub (F9)
+├── [Should Have] Email invitations sent to guest list via the Communication Hub
+├── [Should Have] Reminder scheduled via the Communication Hub
 ```
 
 **Meeting Subtype Templates (mapped to `meeting_subtype` enum):**

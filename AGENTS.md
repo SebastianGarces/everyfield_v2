@@ -70,6 +70,7 @@ Available components: https://ui.shadcn.com/docs/components
 | The delivery workflow end-to-end (diagram) | `ops/agent-os/workflow.md` |
 | What makes work delegable — design-first, modularity, test seams, rule strengths | `ops/agent-os/delegation-rules.md` |
 | React performance patterns | `.agents/skills/vercel-react-best-practices/` |
+| The canonical word for a domain term — roles, plant, phase vs. stage, launch, oversight, association | `CONTEXT.md` at the repo root (the ubiquitous-language glossary; it names the deprecated synonyms too) |
 | Feature requirements | `product-docs/features/{feature-name}/frd.md` |
 | Dated product decisions (the ledger) | `product-docs/decisions.md` |
 | Product values — how tradeoffs are decided | `product-docs/product-values.md` |
