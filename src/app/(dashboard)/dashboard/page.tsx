@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { ChurchCreatedConfetti } from "./church-created-confetti";
 import { OnboardingFlow } from "@/components/onboarding/onboarding-flow";
 import {
+  resolveOnboardingStepRequest,
   resolveResumeStep,
   shouldShowOnboarding,
   type OnboardingFacts,
@@ -39,7 +40,14 @@ export const dynamic = "force-dynamic";
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ churchCreated?: string; step?: string }>;
+  // Next hands a REPEATED query param back as an array (`?step=a&step=b`), so
+  // this is the honest type rather than the convenient one. Narrowing is the
+  // guard's job — `resolveOnboardingStepRequest` — and typing it as a plain
+  // string is what let a repeated param slip past that guard entirely.
+  searchParams: Promise<{
+    churchCreated?: string | string[];
+    step?: string | string[];
+  }>;
 }) {
   const [{ user }, resolvedSearchParams] = await Promise.all([
     getCurrentSession(),
@@ -47,10 +55,12 @@ export default async function DashboardPage({
   ]);
   const { churchCreated, step } = resolvedSearchParams;
 
-  // OB-004: `?step=leadership` is the ONLY step a URL may ask for, and only for
-  // somebody whose answer would be accepted (below). Honouring an arbitrary
-  // `?step=` would let someone deep-link past step 1 into a form that updates a
-  // church they have not created yet; anything else here is simply ignored.
+  // OB-004: the one step a FINISHED dashboard answers to. Re-entry is a single
+  // question, not the whole wizard (ruling 2026-07-31), so this stays a check
+  // for one literal value rather than becoming "any step" alongside #373 below.
+  // A repeated `?step=leadership&step=journey` is an array, which equals no
+  // literal — so it falls to the redirect below rather than re-entering here
+  // with the guide's own reader (`forEach`, last value wins) pointed elsewhere.
   const wantsLeadershipStep = step === "leadership";
 
   // Redirect oversight users to their dedicated dashboard
@@ -79,12 +89,33 @@ export default async function DashboardPage({
       ? await hasInitialPhaseDeclaration(user.churchId)
       : false;
 
+    // The guard OB-004 carried, widened from one step to four and moved into a
+    // pure function so it can be exercised by CALLING it (#373 fix pass): a URL
+    // may name a later step only once step 1's church exists, and may name step
+    // 1 only while it does not. Every rule, and why each answer is the one it
+    // is, lives on `resolveOnboardingStepRequest`.
+    const stepRequest = resolveOnboardingStepRequest({
+      step,
+      churchId: user?.churchId,
+    });
+
+    // Refusing is a REDIRECT, not a shrug (#373). The flow now reads its step
+    // from the URL, so a refused value left sitting in the address bar would be
+    // read by the client on the very next render and honoured there instead —
+    // the server's answer has to be the one in the URL, and this is what makes
+    // it so. Only `refuse` comes here: a plain `/dashboard`, an unrecognised
+    // value and a closed `?step=basics` all resolve to `none` and are answered
+    // by the resume rule below without a navigation.
+    if (stepRequest.outcome === "refuse") {
+      redirect("/dashboard");
+    }
+
     return (
       <div className="p-6">
         <OnboardingFlow
           initialStep={
-            wantsLeadershipStep && user?.churchId
-              ? "leadership"
+            stepRequest.outcome === "honour"
+              ? stepRequest.step
               : resolveResumeStep({
                   churchId: user?.churchId,
                   leadershipStatus: churchDuringOnboarding?.leadershipStatus,
@@ -95,6 +126,28 @@ export default async function DashboardPage({
         />
       </div>
     );
+  }
+
+  // Onboarding is OVER from here down, and the refusal above stopped running
+  // with it — so this is its other half (#373, AC 3). The flow owned `?step=`
+  // while it rendered; nothing owns it now, and nothing scrubbed it, so a value
+  // left in the address bar would survive onto a finished dashboard. That is not
+  // cosmetic: the wiki guide resolves from pathname + search params alone
+  // (`wiki-guide-provider.tsx`), so `/dashboard?step=journey` would put the
+  // Guide button on a finished dashboard, which the PR #367 ruling (option C,
+  // step-scoped) forbids.
+  //
+  // Reachable without typing a URL: finishing from step 3 redirects to
+  // `/dashboard?churchCreated=true`, and a Server Action redirect PUSHES, so
+  // Back returns to `/dashboard?step=journey` — now finished.
+  //
+  // `leadership` is the one exception, because it is the one step a finished
+  // dashboard genuinely answers to (OB-004's re-entry, handled below). Every
+  // other value goes, recognised or not: an unrecognised one is refused here
+  // rather than left to a resume rule, since past this point there is no flow
+  // left to resume into. Placed before the queries so a refused URL costs none.
+  if (step !== undefined && !wantsLeadershipStep) {
+    redirect("/dashboard");
   }
 
   // Fetch dashboard data

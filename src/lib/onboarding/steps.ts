@@ -31,6 +31,130 @@ export const ONBOARDING_STEP_IDS = [
 
 export type OnboardingStepId = (typeof ONBOARDING_STEP_IDS)[number];
 
+/**
+ * The query param that carries the flow's current step (#373):
+ * `/dashboard?step=journey`.
+ *
+ * The flow has no route of its own — it renders AS the dashboard while
+ * `onboarding_completed_at` is null — so the step has to live in the URL for
+ * anything outside the flow to be able to see it. The contextual wiki guide is
+ * the first such reader (`src/lib/wiki/guide-config.ts`, ruled on PR #367:
+ * step-scoped, journey only), and OB-004's re-entry link already used this same
+ * param name, so nothing new is being introduced here.
+ */
+export const ONBOARDING_STEP_PARAM = "step";
+
+/**
+ * Is this URL value one of the four steps?
+ *
+ * The ONE place a `?step=` value becomes a step id, so both halves of the flow
+ * — the page that resolves where a planter lands and the client that reads the
+ * URL on every render — refuse the same set of garbage. It returns false rather
+ * than defaulting to a step: an unrecognised value is a caller error, and the
+ * server's resume rule is a better answer than a guess.
+ */
+export function isOnboardingStepId(value: unknown): value is OnboardingStepId {
+  return (
+    typeof value === "string" &&
+    (ONBOARDING_STEP_IDS as readonly string[]).includes(value)
+  );
+}
+
+/**
+ * What the server does with the `?step=` a request arrived carrying.
+ *
+ * Three answers, not two, because "no step named" and "a step named and
+ * declined" cannot share a path: the first is an ordinary `/dashboard` that the
+ * resume rule answers, the second has to leave the address bar or the client
+ * reads it back off the URL on the very next render and honours it there.
+ */
+export type OnboardingStepRequest =
+  | { outcome: "none" }
+  | { outcome: "honour"; step: OnboardingStepId }
+  | { outcome: "refuse" };
+
+/**
+ * The honour/refuse decision that guards the flow (#373), as a pure function.
+ *
+ * It lives here rather than inline in the page for one reason: it is the rule
+ * that decides which step a URL may open, and a rule that can only be exercised
+ * by rendering an async server component is a rule pinned by regex against its
+ * own source — which catches a deletion and cannot catch a wrong answer. That
+ * is exactly how the repeated-`?step=` hole below survived a green suite.
+ *
+ * The rules, in order:
+ *
+ *  - No `?step=` at all → `none`. A plain `/dashboard` never redirects.
+ *  - A REPEATED param (`?step=journey&step=journey`, which Next hands back as an
+ *    array) → `refuse`. It names no single step, and the two client readers
+ *    disagree about which value wins — `useSearchParams().get()` takes the
+ *    first, the wiki guide's provider builds its object with `forEach` and so
+ *    takes the LAST. Resolving it to either one would leave the flow showing one
+ *    step and the guide answering another; refusing it settles both.
+ *  - An unrecognised single value → `none`. A `?step=journey%20` typo is a
+ *    caller error with a better answer available than a redirect: the resume
+ *    rule, after which the flow stamps the real step over it (`params.set`
+ *    collapses the param), so the URL heals with no navigation.
+ *  - Step 1 is addressable EXACTLY WHILE THERE IS NO CHURCH, and every later
+ *    step exactly once there is. The second half is OB-004's original guard —
+ *    deep-linking past step 1 without a church lands on a form that would
+ *    update a church that does not exist. The first half is the ruling of
+ *    2026-08-10: once the church exists step 1 is not re-enterable, so
+ *    `/dashboard?step=basics` must not reopen its empty, required form (a
+ *    second submit is discarded by `runCreateChurch`'s already-have-church
+ *    branch, so the form would be lying about what it does).
+ *
+ * Note which answer step 1 gets when it is closed: `none`, NOT `refuse`. The
+ * refusal is a redirect, and this exact URL is the one showing while step 1's
+ * own create action revalidates — the church exists by then, so a refusal would
+ * fire during the planter's own submit and yank them out of the flow. `none`
+ * hands the decision to the resume rule instead, and the client refuses the
+ * stale value on its side (`addressableOnboardingStep`), so nothing renders
+ * step 1 and nothing navigates.
+ */
+export function resolveOnboardingStepRequest({
+  step,
+  churchId,
+}: {
+  /** The raw `?step=` value. Repeated params arrive as an array. */
+  step: string | string[] | undefined;
+  churchId: string | null | undefined;
+}): OnboardingStepRequest {
+  if (step === undefined) return { outcome: "none" };
+  if (Array.isArray(step)) return { outcome: "refuse" };
+  if (!isOnboardingStepId(step)) return { outcome: "none" };
+
+  if (isFirstOnboardingStep(step)) {
+    return churchId ? { outcome: "none" } : { outcome: "honour", step };
+  }
+
+  return churchId ? { outcome: "honour", step } : { outcome: "refuse" };
+}
+
+/**
+ * The client's half of the same rule: the step a URL names, or null when the
+ * flow will not open it.
+ *
+ * The flow reads its step from the URL, so the server declining a value is only
+ * half a refusal — the client has to decline it too or it renders the very step
+ * the page would not resolve. It cannot ask the database, and it does not need
+ * to: THE STEP THE SERVER LANDED IT ON IS THE ANSWER. `resolveResumeStep`
+ * returns step 1 only while `churchId` is missing, and the resolver above
+ * honours step 1 only then as well, so `initialStep === FIRST_ONBOARDING_STEP`
+ * holds exactly while there is no church. Pinned by `steps.test.ts`, because
+ * that equivalence is what this function rests on.
+ */
+export function addressableOnboardingStep(
+  value: unknown,
+  initialStep: OnboardingStepId
+): OnboardingStepId | null {
+  if (!isOnboardingStepId(value)) return null;
+  if (isFirstOnboardingStep(value) && !isFirstOnboardingStep(initialStep)) {
+    return null;
+  }
+  return value;
+}
+
 export type OnboardingStep = {
   id: OnboardingStepId;
   /** 1-based, for "Step 2 of 4" and the step rail. */
