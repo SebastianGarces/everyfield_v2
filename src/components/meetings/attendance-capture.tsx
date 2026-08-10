@@ -18,6 +18,15 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -72,6 +81,32 @@ interface AttendanceCaptureProps {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * The displayed name of a guest. `lastName` can be blank for a quick-added
+ * walk-in, so the parts are joined and trimmed rather than concatenated with a
+ * hard space — a trailing space is invisible on screen but is read out, and it
+ * would put "Mark Ana  as attended" into the accessible name below.
+ */
+export function guestFullName(guest: {
+  firstName: string;
+  lastName: string;
+}): string {
+  return `${guest.firstName} ${guest.lastName}`.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * The accessible name of an attendance checkbox. The row's only visible label
+ * is the "Here" column header, which does not say WHOSE attendance the control
+ * toggles, so each checkbox names its person (issue #159, Lighthouse
+ * `button-name` — Radix renders the checkbox as a `<button role="checkbox">`).
+ * The label is deliberately state-free: `aria-checked` already announces on/off,
+ * and a name that flipped with the state would be read as a different control.
+ */
+export function attendanceCheckboxLabel(guestName: string): string {
+  const name = guestName.trim();
+  return name ? `Mark ${name} as attended` : "Mark this guest as attended";
+}
 
 const rsvpBadge: Record<
   string,
@@ -392,87 +427,120 @@ export function AttendanceCapture({
               add walk-ins above.
             </p>
           ) : (
-            <div className="divide-y">
-              {/* Table header */}
-              <div className="text-muted-foreground grid grid-cols-12 gap-4 pb-2 text-xs font-medium uppercase">
-                <div className="col-span-1 text-center">Here</div>
-                <div className="col-span-4">Name</div>
-                <div className="col-span-3">Contact</div>
-                <div className="col-span-2">RSVP</div>
-                <div className="col-span-2">Status</div>
-              </div>
-
-              {guests.map((guest) => {
-                const isAttended = guest.attendanceStatus === "attended";
-                const rsvp = guest.responseStatus
-                  ? rsvpBadge[guest.responseStatus]
-                  : null;
-
-                return (
-                  <div
-                    key={guest.id}
-                    className="grid grid-cols-12 items-center gap-4 py-3"
+            /* A real table, not a grid of divs (#361): "Here", "RSVP" and
+               "Status" only say what a cell MEANS if the cell is announced with
+               its column header, and a screen reader can only do that when the
+               headers are `<th scope>` in a `<thead>`. The person's name is the
+               row header, so a cell read on its own still says whose it is. */
+            <Table>
+              <TableCaption className="sr-only">
+                Attendance for this meeting. Each row is one guest; the Here
+                checkbox marks that guest as attended.
+              </TableCaption>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead
+                    scope="col"
+                    className="text-muted-foreground w-16 text-center text-xs uppercase"
                   >
-                    {/* Checkbox */}
-                    <div className="col-span-1 flex justify-center">
-                      <Checkbox
-                        checked={isAttended}
-                        onCheckedChange={() =>
-                          handleToggle(guest.personId, guest.attendanceStatus)
+                    Here
+                  </TableHead>
+                  <TableHead
+                    scope="col"
+                    className="text-muted-foreground text-xs uppercase"
+                  >
+                    Name
+                  </TableHead>
+                  <TableHead
+                    scope="col"
+                    className="text-muted-foreground text-xs uppercase"
+                  >
+                    Contact
+                  </TableHead>
+                  <TableHead
+                    scope="col"
+                    className="text-muted-foreground text-xs uppercase"
+                  >
+                    RSVP
+                  </TableHead>
+                  <TableHead
+                    scope="col"
+                    className="text-muted-foreground text-xs uppercase"
+                  >
+                    Status
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {guests.map((guest) => {
+                  const isAttended = guest.attendanceStatus === "attended";
+                  const rsvp = guest.responseStatus
+                    ? rsvpBadge[guest.responseStatus]
+                    : null;
+                  const guestName = guestFullName(guest);
+
+                  return (
+                    <TableRow key={guest.id}>
+                      <TableCell className="text-center">
+                        <Checkbox
+                          checked={isAttended}
+                          onCheckedChange={() =>
+                            handleToggle(guest.personId, guest.attendanceStatus)
+                          }
+                          disabled={isPending}
+                          aria-label={attendanceCheckboxLabel(guestName)}
+                          className="cursor-pointer"
+                        />
+                      </TableCell>
+
+                      <TableHead
+                        scope="row"
+                        className={
+                          isAttended ? "font-medium" : "text-muted-foreground"
                         }
-                        disabled={isPending}
-                        className="cursor-pointer"
-                      />
-                    </div>
-
-                    {/* Name */}
-                    <div className="col-span-4">
-                      <p
-                        className={`text-sm font-medium ${
-                          isAttended ? "" : "text-muted-foreground"
-                        }`}
                       >
-                        {guest.firstName} {guest.lastName}
-                      </p>
-                    </div>
+                        {guestName}
+                      </TableHead>
 
-                    {/* Contact */}
-                    <div className="text-muted-foreground col-span-3 truncate text-sm">
-                      {guest.email || guest.phone || "—"}
-                    </div>
+                      <TableCell className="text-muted-foreground">
+                        <span className="block max-w-[16rem] truncate">
+                          {guest.email || guest.phone || "—"}
+                        </span>
+                      </TableCell>
 
-                    {/* RSVP */}
-                    <div className="col-span-2">
-                      {rsvp ? (
-                        <Badge className={rsvp.className} variant="secondary">
-                          <rsvp.icon className="mr-1 h-3 w-3" />
-                          {rsvp.label}
-                        </Badge>
-                      ) : (
-                        <Badge
-                          variant="outline"
-                          className="text-muted-foreground"
-                        >
-                          <Clock className="mr-1 h-3 w-3" />
-                          Pending
-                        </Badge>
-                      )}
-                    </div>
+                      <TableCell>
+                        {rsvp ? (
+                          <Badge className={rsvp.className} variant="secondary">
+                            <rsvp.icon className="mr-1 h-3 w-3" />
+                            {rsvp.label}
+                          </Badge>
+                        ) : (
+                          <Badge
+                            variant="outline"
+                            className="text-muted-foreground"
+                          >
+                            <Clock className="mr-1 h-3 w-3" />
+                            Pending
+                          </Badge>
+                        )}
+                      </TableCell>
 
-                    {/* Attendance Status */}
-                    <div className="col-span-2">
-                      {isAttended ? (
-                        <Badge className="bg-green-100 text-green-800">
-                          Attended
-                        </Badge>
-                      ) : (
-                        <span className="text-muted-foreground text-xs">—</span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                      <TableCell>
+                        {isAttended ? (
+                          <Badge className="bg-green-100 text-green-800">
+                            Attended
+                          </Badge>
+                        ) : (
+                          <span className="text-muted-foreground text-xs">
+                            —
+                          </span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
           )}
         </CardContent>
       </Card>
@@ -486,7 +554,19 @@ export function AttendanceCapture({
             </p>
           )}
           <div className="flex items-center justify-between">
-            <p className="text-muted-foreground text-sm">
+            {/* A live region, because this count is the only feedback a
+                toggle produces (#361). The checkbox announces its own state,
+                but the running total — which is what the Finalize button is
+                gated on — changed silently. `role="status"` is polite, so it
+                waits for the reader to finish rather than interrupting a
+                planter ticking down the list. It is mounted for as long as
+                there is anything to toggle, so the first change is announced
+                too. */}
+            <p
+              role="status"
+              aria-live="polite"
+              className="text-muted-foreground text-sm"
+            >
               {attendedCount} of {guests.length} marked as attended
             </p>
             <Button

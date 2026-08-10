@@ -93,7 +93,17 @@ body {
   --secondary: oklch(0.94 0 0);
   --secondary-foreground: oklch(0.224 0.011 151.267);
   --muted: oklch(0.94 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+  /* Darkened from oklch(0.556) for WCAG AA (#341, #238). The shadcn default
+     cleared 4.5:1 on white and nothing else: 4.38:1 on --background and only
+     3.97:1 on --muted, which is the avatar fallback (`bg-muted
+     text-muted-foreground`) and every secondary/accent tile. L 0.5 clears 4.5:1
+     on EVERY surface this token lands on with room to spare — 5.55:1 on
+     --background, 6.00:1 on --card, and 5.03:1 on --muted, the worst case. The
+     floor sits near L 0.5055, so this is one step past it, not a hair over it.
+     C and H are untouched (the token is neutral, so only L had to move).
+     Pinned by src/app/text-contrast.test.ts; raising L again breaks that test
+     before it reaches a screen. */
+  --muted-foreground: oklch(0.5 0 0);
   --accent: oklch(0.94 0 0);
   --accent-foreground: oklch(0.224 0.011 151.267);
   --destructive: oklch(0.577 0.245 27.325);
@@ -136,6 +146,10 @@ body {
   --secondary: oklch(0.269 0 0);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.269 0 0);
+  /* Deliberately NOT moved with its light counterpart (#341): measured against
+     every dark surface it already clears AA — 7.63:1 on --background, 6.91:1 on
+     --card, 5.83:1 on --muted, its worst case. Lightening it to mirror the
+     light-theme step would only cost contrast on the dark ground. */
   --muted-foreground: oklch(0.708 0 0);
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);

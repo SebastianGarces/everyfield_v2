@@ -1,12 +1,13 @@
 # Ticks the notification dispatcher (#131, N-003/N-004/N-017).
 #
-# WHY THIS IS NOT A VERCEL CRON. Every other scheduled job in this repo lives in vercel.json, and
+# WHY THIS IS NOT A VERCEL CRON. Every scheduled job in this repo used to live in vercel.json, and
 # this one did too until it could not deploy: the project is on the Hobby plan, which accepts at
 # most ONE cron invocation per day per job. A `*/15 * * * *` entry is not throttled there — it is
 # rejected, and the whole deployment fails with it. The two ways out were a daily Vercel cron (a
 # meeting reminder that is a day late is not a reminder — the schedule IS the feature here) or an
 # external trigger. Ruled 2026-07-27: trigger it from Actions, which has no sub-daily restriction.
-# vercel.json keeps the daily phase-engine cron, which fits Hobby fine.
+# The phase-engine run followed in #36 (`phase-engine-assess.yml`, twice daily), so vercel.json now
+# schedules nothing at all.
 #
 # This is therefore a SCHEDULE and nothing else. It holds no logic: it makes one authenticated GET
 # and reports whether the run succeeded. Everything real — the atomic claim, batching, the

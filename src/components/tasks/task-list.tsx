@@ -19,6 +19,20 @@ interface TaskGroup {
   variant: "overdue" | "today" | "upcoming" | "later" | "no_date" | "completed";
 }
 
+/**
+ * Subtasks are never rows of their own here (T-016).
+ *
+ * `listTasks` already filters them out, so on the happy path this removes
+ * nothing. It is here because the filter is an OPTION there (`includeSubtasks`)
+ * and this list is the one place where letting them through would actively
+ * mislead: six checklist items rendered beside their own parent read as seven
+ * separate jobs, and the bulk-select checkbox would then hand a planter a
+ * "select all" that spans two levels of the same task.
+ */
+function topLevelOnly(tasks: TaskWithAssignee[]): TaskWithAssignee[] {
+  return tasks.filter((task) => task.parentTaskId === null);
+}
+
 function groupTasksByDueDate(tasks: TaskWithAssignee[]): TaskGroup[] {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -129,11 +143,13 @@ interface TaskListProps {
 }
 
 export function TaskList({
-  tasks,
+  tasks: allTasks,
   total,
   nextCursor,
   personNotes,
 }: TaskListProps) {
+  const tasks = topLevelOnly(allTasks);
+
   if (tasks.length === 0) {
     return (
       <div className="animate-in fade-in-50 flex min-h-[400px] flex-col items-center justify-center rounded-lg border border-dashed p-8 text-center">

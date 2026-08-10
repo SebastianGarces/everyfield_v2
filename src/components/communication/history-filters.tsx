@@ -14,26 +14,35 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import type { CommunicationChannel } from "@/db/schema/communication";
 import {
   communicationChannels,
   communicationStatuses,
 } from "@/db/schema/communication";
+import { COMMUNICATION_STATUS_LABELS } from "@/lib/communication/status-display";
 
-import { deriveHistoryFilterState } from "./history-filters-presentation";
+import type { HistoryFilterSelection } from "./history-filters-presentation";
+import {
+  ALL_FILTER_VALUE,
+  buildHistoryFilterHref,
+  deriveHistoryFilterState,
+  toChannelFilter,
+  toStatusFilter,
+} from "./history-filters-presentation";
 
-const CHANNEL_LABELS: Record<string, string> = {
+// Keyed by the union, not by `string`: a renamed or typo'd option is a compile
+// error here instead of a control that renders its own raw value as a label.
+const CHANNEL_LABELS: Record<CommunicationChannel, string> = {
   email: "Email",
   sms: "SMS",
   both: "Email + SMS",
 };
 
-const STATUS_LABELS: Record<string, string> = {
-  draft: "Draft",
-  scheduled: "Scheduled",
-  sending: "Sending",
-  sent: "Sent",
-  failed: "Failed",
-};
+// Status labels are keyed by the union for the same reason, but they live in
+// `@/lib/communication/status-display` because this dropdown is not the only
+// place they are read: the hub and the history table label the same statuses on
+// their badges, and four private copies are how `logged` (COM-020) reached the
+// UI as a raw lowercase token.
 
 /**
  * Message history filters. All state lives in the URL so the server component
@@ -48,41 +57,6 @@ export function HistoryFilters() {
   // trip), so clearing filters has to reset it by hand.
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  const pushParams = useCallback(
-    (params: URLSearchParams) => {
-      // Any filter change invalidates the current page offset.
-      params.delete("page");
-      const query = params.toString();
-      startTransition(() => {
-        router.push(query ? `${pathname}?${query}` : pathname);
-      });
-    },
-    [pathname, router]
-  );
-
-  const updateParam = useCallback(
-    (key: string, value: string | null) => {
-      const params = new URLSearchParams(searchParams.toString());
-      if (!value || value === "all") {
-        params.delete(key);
-      } else {
-        params.set(key, value);
-      }
-      pushParams(params);
-    },
-    [pushParams, searchParams]
-  );
-
-  const handleSearch = useDebouncedCallback((term: string) => {
-    updateParam("search", term.trim() || null);
-  }, 300);
-
-  const clearFilters = useCallback(() => {
-    handleSearch.cancel();
-    if (searchInputRef.current) searchInputRef.current.value = "";
-    pushParams(new URLSearchParams());
-  }, [handleSearch, pushParams]);
-
   // Narrow the URL through the SAME schema the page's server component uses,
   // so a value the server refused to honour never shows up as a selected
   // filter or as something to clear.
@@ -92,6 +66,39 @@ export function HistoryFilters() {
     search: currentSearch,
     hasFilters,
   } = useMemo(() => deriveHistoryFilterState(searchParams), [searchParams]);
+
+  // The pushed URL is REBUILT from the validated state above, never copied from
+  // the incoming search params — junk the server already dropped must not ride
+  // along into a copied or bookmarked link, so the URL self-heals on the first
+  // interaction. Same fields, same order as the server's own `pageHref`.
+  const pushFilters = useCallback(
+    (patch: Partial<HistoryFilterSelection>) => {
+      const href = buildHistoryFilterHref(pathname, {
+        channel: currentChannel,
+        status: currentStatus,
+        search: currentSearch,
+        ...patch,
+      });
+      startTransition(() => {
+        router.push(href);
+      });
+    },
+    [currentChannel, currentSearch, currentStatus, pathname, router]
+  );
+
+  const handleSearch = useDebouncedCallback((term: string) => {
+    pushFilters({ search: term });
+  }, 300);
+
+  const clearFilters = useCallback(() => {
+    handleSearch.cancel();
+    if (searchInputRef.current) searchInputRef.current.value = "";
+    pushFilters({
+      channel: ALL_FILTER_VALUE,
+      status: ALL_FILTER_VALUE,
+      search: "",
+    });
+  }, [handleSearch, pushFilters]);
 
   return (
     <div
@@ -118,7 +125,9 @@ export function HistoryFilters() {
 
       <Select
         value={currentChannel}
-        onValueChange={(value) => updateParam("channel", value)}
+        onValueChange={(value) =>
+          pushFilters({ channel: toChannelFilter(value) })
+        }
       >
         <SelectTrigger
           aria-label="Filter by channel"
@@ -128,7 +137,7 @@ export function HistoryFilters() {
           <SelectValue placeholder="Channel" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="all" className="cursor-pointer">
+          <SelectItem value={ALL_FILTER_VALUE} className="cursor-pointer">
             All channels
           </SelectItem>
           {communicationChannels.map((channel) => (
@@ -137,7 +146,7 @@ export function HistoryFilters() {
               value={channel}
               className="cursor-pointer"
             >
-              {CHANNEL_LABELS[channel] ?? channel}
+              {CHANNEL_LABELS[channel]}
             </SelectItem>
           ))}
         </SelectContent>
@@ -145,7 +154,9 @@ export function HistoryFilters() {
 
       <Select
         value={currentStatus}
-        onValueChange={(value) => updateParam("status", value)}
+        onValueChange={(value) =>
+          pushFilters({ status: toStatusFilter(value) })
+        }
       >
         <SelectTrigger
           aria-label="Filter by status"
@@ -155,12 +166,12 @@ export function HistoryFilters() {
           <SelectValue placeholder="Status" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="all" className="cursor-pointer">
+          <SelectItem value={ALL_FILTER_VALUE} className="cursor-pointer">
             All statuses
           </SelectItem>
           {communicationStatuses.map((status) => (
             <SelectItem key={status} value={status} className="cursor-pointer">
-              {STATUS_LABELS[status] ?? status}
+              {COMMUNICATION_STATUS_LABELS[status]}
             </SelectItem>
           ))}
         </SelectContent>

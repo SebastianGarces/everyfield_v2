@@ -22,8 +22,13 @@
  * are answered once for whichever surface asks.
  */
 
-/** The cron in `vercel.json`: `0 7 * * *`. Stated once, in the copy's terms. */
-export const ASSESSMENT_CADENCE = "Assessments run once a day.";
+/**
+ * The schedule in `.github/workflows/phase-engine-assess.yml`: `0 7 * * *` and
+ * `0 19 * * *`. Stated once, in the copy's terms — and deliberately vague about
+ * the hours, because a tick can be dropped or run late and a promised time the
+ * product then misses is worse than no time at all.
+ */
+export const ASSESSMENT_CADENCE = "Assessments run twice a day.";
 
 export type ColdStartInput = {
   /** Has this plant ever completed an assessment? */

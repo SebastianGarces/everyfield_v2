@@ -16,8 +16,10 @@ import {
 import { OVERSIGHT_ROLES } from "@/lib/auth/access";
 
 import {
+  audienceMayReceiveCategory,
   DEFAULT_DIGEST_CADENCE,
   defaultChannelEnabled,
+  ineligibleCategoriesForAudience,
   NOTIFICATION_CATEGORIES,
   notificationPreferenceMatrixKeys,
   type NotificationAudience,
@@ -35,6 +37,29 @@ import {
 // coded default, not "off". Nothing is ever seeded, so a category added in a
 // later deploy works for every existing user with no backfill, and a user who
 // has never opened the settings screen has no rows at all.
+//
+// ----------------------------------------------------------------------------
+// Absence is not the only way to have chosen nothing (#237)
+// ----------------------------------------------------------------------------
+//
+// A row can exist without its `enabled` being a CHOICE. The cadence selector is
+// the case that forced this: cadence has nowhere to live but a (digest, email)
+// row (see `DIGEST_CADENCE_CHANNEL`), so changing only the cadence had to
+// INSERT one, and that row's `enabled` was a copy of today's coded default. The
+// resolver then read it back as `explicit`, and the user was pinned to a value
+// they never chose — precisely what `preferenceWriteIsNoop` exists to prevent
+// on the toggle path, arriving through the other door.
+//
+// The fix, of the two the issue named, is the RESOLVER one: a stored `enabled`
+// equal to the coded default is INHERITABLE — resolved as `source: "default"`,
+// carrying the coded default's value, so a later change to that default (N-019,
+// role-aware defaults) still reaches the user. The other option, a
+// category-level store so cadence persists without a channel row, needs a
+// migration; this track ships none.
+//
+// A stored value that DIFFERS from the coded default is still explicit, whoever
+// wrote it and whichever direction it points — an opt-out is never re-defaulted
+// back on, and an opt-IN against a default that is off is never dropped.
 //
 // Resolution is pure (`resolvePreference`, `buildPreferenceMap`) so the
 // dispatcher can load a user's rows once and answer many questions from them
@@ -229,12 +254,47 @@ export function buildPreferenceMap(
 }
 
 /**
+ * Is a stored `enabled` indistinguishable from having chosen nothing? (#237)
+ *
+ * True when it equals the coded default for this audience. Such a value tells
+ * us nothing the default did not already say, so treating it as a CHOICE only
+ * freezes today's default into a user's record — and the user is then the one
+ * person a change to that default cannot reach.
+ *
+ * The comparison is against the CURRENT coded default, deliberately. It is not
+ * asking "was this written deliberately?" — nothing stored can answer that —
+ * but "does this row still say anything?". A row that stops agreeing with the
+ * default starts saying something, and from then on it is honoured as a choice.
+ *
+ * `audience` matters for the same reason it matters everywhere else here: the
+ * coded default for `digest`/`in_app` differs between the plant's team and an
+ * oversight recipient (N-027), so the same stored `false` is inheritable for
+ * one and a deliberate opt-out for the other.
+ */
+export function preferenceValueIsInheritable(
+  category: NotificationCategory,
+  channel: NotificationChannel,
+  enabled: boolean,
+  audience: NotificationAudience = "church"
+): boolean {
+  return enabled === defaultChannelEnabled(category, channel, audience);
+}
+
+/**
  * Resolve one (category, channel) against a user's stored rows.
  *
- * - row present  → its `enabled`, marked `explicit` (true AND false alike; a
- *                  stored `false` is a deliberate opt-out and must not be
- *                  re-defaulted back on).
- * - row absent   → the category's coded default, marked `default`.
+ * - row absent       → the category's coded default, marked `default`.
+ * - row inheritable  → the coded default, marked `default`. The stored value
+ *                      agrees with it and so adds nothing; see
+ *                      `preferenceValueIsInheritable` and the module header.
+ * - row differs      → its `enabled`, marked `explicit` (true AND false alike;
+ *                      a stored `false` is a deliberate opt-out and must not be
+ *                      re-defaulted back on, and a stored `true` against a
+ *                      default that is off is a deliberate opt-in).
+ *
+ * A row's `digestCadence` survives all three branches: the cadence is a
+ * separate answer from "is the digest on at all", and an inheritable `enabled`
+ * says nothing about it.
  *
  * `rows` is whatever `loadUserPreferences` returned, or a pre-built map when
  * resolving many pairs for the same user.
@@ -248,22 +308,31 @@ export function resolvePreference(
   const map = rows instanceof Map ? rows : buildPreferenceMap(rows);
   const row = map.get(preferenceKey(category, channel));
 
-  if (!row) {
+  // The ONLY place the audience is consulted: absence — and now a row that
+  // merely restates the default — means "the coded default", and that default
+  // differs for an oversight recipient on `digest`/`in_app` (N-027 — see
+  // OVERSIGHT_CHANNEL_DEFAULT_OVERRIDES). A row that DIFFERS from the default
+  // is returned unchanged below, whoever wrote it, so this can never override a
+  // choice a user actually made.
+  //
+  // It defaults to "church" so every existing caller keeps today's answer and
+  // only a caller that KNOWS the recipient's role can change it — guessing an
+  // audience would be worse than not asking.
+  const digestCadence =
+    category === "digest"
+      ? (row?.digestCadence ?? DEFAULT_DIGEST_CADENCE)
+      : null;
+
+  if (
+    !row ||
+    preferenceValueIsInheritable(category, channel, row.enabled, audience)
+  ) {
     return {
       category,
       channel,
-      // The ONLY place the audience is consulted: an absent row means "the
-      // coded default", and that default differs for an oversight recipient on
-      // `digest`/`in_app` (N-027 — see OVERSIGHT_CHANNEL_DEFAULT_OVERRIDES).
-      // An EXPLICIT row is returned unchanged below, whoever wrote it, so this
-      // can never override a choice a user actually made.
-      //
-      // It defaults to "church" so every existing caller keeps today's answer
-      // and only a caller that KNOWS the recipient's role can change it —
-      // guessing an audience would be worse than not asking.
       enabled: defaultChannelEnabled(category, channel, audience),
       source: "default",
-      digestCadence: category === "digest" ? DEFAULT_DIGEST_CADENCE : null,
+      digestCadence,
     };
   }
 
@@ -272,10 +341,7 @@ export function resolvePreference(
     channel,
     enabled: row.enabled,
     source: "explicit",
-    digestCadence:
-      category === "digest"
-        ? (row.digestCadence ?? DEFAULT_DIGEST_CADENCE)
-        : null,
+    digestCadence,
   };
 }
 
@@ -311,10 +377,11 @@ export function isChannelEnabled(
  * is actually read: an in-app digest row would duplicate the feed it summarises
  * (which is why `digest`/`in_app` is the one coded default that is off).
  *
- * Writing it to BOTH digest rows was the alternative and is worse: changing a
- * cadence would materialise a `digest`/`in_app` row the user never asked for,
- * freezing today's coded default into an explicit choice they can no longer
- * inherit a change to. See `resolveDigestCadence` for the read side.
+ * Writing it to BOTH digest rows was the alternative and is worse: it would
+ * materialise a second row the user never asked for, doubling the surface the
+ * inheritable rule has to keep harmless for no gain. One row is enough, and
+ * `preferenceValueIsInheritable` is what stops that row reading as a choice
+ * (#237). See `resolveDigestCadence` for the read side.
  */
 export const DIGEST_CADENCE_CHANNEL: NotificationChannel = "email";
 
@@ -443,6 +510,21 @@ export interface PreferenceCategoryView {
   /** What the user is turning off, in their words. */
   description: string;
   cells: PreferenceCellView[];
+  /**
+   * Is this reader EVER served this category? (ruled 2026-08-09)
+   *
+   * True for every row a church reader sees. False for the five granular
+   * categories an oversight reader is refused outright by
+   * `OVERSIGHT_ELIGIBLE_CATEGORIES` — rows whose switches render, accept a
+   * click and save, and change nothing that reaches them. #254 established that
+   * a user is not offered a control that cannot affect what they receive, and
+   * the ruling extends it from the cadence selector to the category rows.
+   *
+   * It is a FACT about the row, not an instruction to the screen: what the
+   * screen does with an ineligible row — hide it, disable it, label it — is a
+   * separate decision, and this field is the same either way.
+   */
+  eligible: boolean;
 }
 
 /** One choice in the cadence selector. */
@@ -462,7 +544,8 @@ export interface DigestCadenceOptionView {
  * only about the reader's own open items — it must never suggest that anything
  * on this screen decides what leaves the plant.
  */
-export interface DigestCadenceView {
+export interface DigestCadenceChoiceView {
+  kind: "choice";
   category: NotificationCategory;
   label: string;
   /** Plain-language scope + effect. */
@@ -471,11 +554,49 @@ export interface DigestCadenceView {
   options: DigestCadenceOptionView[];
 }
 
+/**
+ * What an OVERSIGHT recipient gets in place of the selector (#254).
+ *
+ * The only digest a `sending_church_admin` or `network_admin` receives is the
+ * oversight activity digest, and N-025 fixes it at daily. So the selector was
+ * inert for them: it rendered, it accepted a click, it saved — and nothing they
+ * received ever changed. Worse before #237 was fixed, because that save also
+ * materialised a preference row as a side effect.
+ *
+ * Making it honest, not merely hiding it: they are told what DOES decide the
+ * timing. A control removed with no explanation reads as a missing feature; the
+ * fact here is that the timing is not theirs to choose, and saying so is the
+ * whole point.
+ *
+ * Deliberately NOT done here: making the oversight digest respect a cadence.
+ * That contradicts the N-025/N-026 ruling and is a spec decision, not a bug fix.
+ */
+export interface DigestCadenceFixedView {
+  kind: "fixed";
+  category: NotificationCategory;
+  /** What decides the timing, since the reader does not. */
+  description: string;
+}
+
+/** The `digest` row's cadence area — a control, or an explanation. */
+export type DigestCadenceView =
+  | DigestCadenceChoiceView
+  | DigestCadenceFixedView;
+
 /** The whole screen, ready to render. */
 export interface PreferenceMatrixView {
   channels: PreferenceChannelView[];
   categories: PreferenceCategoryView[];
   digest: DigestCadenceView;
+  /**
+   * Why some rows are not this reader's to choose — `null` when every row is.
+   *
+   * One sentence for the whole screen rather than one per row: the reason is
+   * the same for all five, and repeating it five times would make a settings
+   * screen read like a refusal notice. A screen that hides the rows entirely
+   * may ignore it; a screen that shows them has something true to say.
+   */
+  ineligibleNote: string | null;
 }
 
 /**
@@ -509,6 +630,41 @@ export const DIGEST_CADENCE_DESCRIPTION =
   "How often your roll-up of your own open items arrives.";
 
 /**
+ * The oversight replacement for that control (#254).
+ *
+ * Exported for the same reason: a test holds it to what is true. It states the
+ * cadence (daily), the condition (only on days with something to report) and
+ * that the reader does not set it — and it offers nothing, because there is
+ * nothing here to offer.
+ *
+ * It is also the refusal the cadence action returns to an oversight caller, so
+ * the screen and the endpoint say the same sentence.
+ */
+export const OVERSIGHT_DIGEST_CADENCE_NOTE =
+  "Your summary of plant activity arrives once a day, on the days there is something to report. That timing is fixed.";
+
+/**
+ * Why five of the seven rows are not an oversight reader's to choose (ruled
+ * 2026-08-09).
+ *
+ * It says what they DO receive first, because that is the useful half: a reader
+ * who learns only that something is unavailable has been told about an absence,
+ * while a reader told "milestones and the daily summary" knows what to expect
+ * from the product. The second clause gives the reason — these updates belong to
+ * the plant's own team — so the row reads as a boundary the product keeps rather
+ * than a feature the reader has failed to unlock.
+ *
+ * It does not say "your role", "permissions" or "not eligible". Those are the
+ * system's words for it; the reader's word for it is who the updates are for.
+ *
+ * Exported so a test can hold it to N-025/N-026, and so the refused write says
+ * the same sentence the screen does — the same pairing
+ * `OVERSIGHT_DIGEST_CADENCE_NOTE` has with the cadence action.
+ */
+export const OVERSIGHT_INELIGIBLE_CATEGORY_NOTE =
+  "You receive milestones and the daily summary — the day-to-day updates stay with the plant's own team.";
+
+/**
  * Build the whole screen from a user's stored rows.
  *
  * `audience` is the SAME argument the read and dispatch paths resolve with
@@ -537,6 +693,11 @@ export function buildPreferenceMatrixView(
       category,
       label: NOTIFICATION_CATEGORIES[category].label,
       description: NOTIFICATION_CATEGORIES[category].description,
+      // Derived from the delivery allow-list, never listed here — see
+      // `ineligibleCategoriesForAudience`. A category added to the enum is
+      // ineligible for an oversight reader from its first deploy, with no edit
+      // to this file and none to the component.
+      eligible: audienceMayReceiveCategory(audience, category),
       cells: notificationChannels.map((channel) => {
         const resolved = resolvePreference(map, category, channel, audience);
         return {
@@ -548,16 +709,43 @@ export function buildPreferenceMatrixView(
         };
       }),
     })),
-    digest: {
+    // An oversight recipient is not offered a control that cannot change what
+    // they receive (#254) — see `DigestCadenceFixedView`. The audience decides,
+    // not the role, so this stays the one place the five roles collapse onto
+    // the two behaviours (`audienceForRole`).
+    digest: buildDigestCadenceView(map, audience),
+    // The note is present only when it has something to explain, so a screen
+    // can ask `ineligibleNote` rather than re-deriving the audience.
+    ineligibleNote:
+      ineligibleCategoriesForAudience(audience).length > 0
+        ? OVERSIGHT_INELIGIBLE_CATEGORY_NOTE
+        : null,
+  };
+}
+
+/** The `digest` row's cadence area for this audience. See `DigestCadenceView`. */
+function buildDigestCadenceView(
+  map: Map<string, NotificationPreference>,
+  audience: NotificationAudience
+): DigestCadenceView {
+  if (audience === "oversight") {
+    return {
+      kind: "fixed",
       category: "digest",
-      label: "How often",
-      description: DIGEST_CADENCE_DESCRIPTION,
-      cadence: resolveDigestCadence(map),
-      options: digestCadences.map((value) => ({
-        value,
-        label: DIGEST_CADENCE_LABELS[value],
-      })),
-    },
+      description: OVERSIGHT_DIGEST_CADENCE_NOTE,
+    };
+  }
+
+  return {
+    kind: "choice",
+    category: "digest",
+    label: "How often",
+    description: DIGEST_CADENCE_DESCRIPTION,
+    cadence: resolveDigestCadence(map),
+    options: digestCadences.map((value) => ({
+      value,
+      label: DIGEST_CADENCE_LABELS[value],
+    })),
   };
 }
 
@@ -605,6 +793,87 @@ export function digestCadenceWriteIsNoop(
   cadence: DigestCadence
 ): boolean {
   return resolveDigestCadence(rows) === cadence;
+}
+
+// ----------------------------------------------------------------------------
+// Reporting a save that did not happen (#236)
+// ----------------------------------------------------------------------------
+
+// ============================================================================
+// The settings actions RETURN their failures. They must, or the user is never
+// told.
+//
+// A server action that throws rejects the promise the client component awaits,
+// and that rejection unwinds the transition without ever reaching the
+// `toast.error` line. All the user sees is the switch snapping back — which is
+// indistinguishable from having mis-clicked, and which they will simply try
+// again. Only the Zod rejections, which already returned a result, ever
+// produced a toast; everything real — an expired session, a database that is
+// down — was silent.
+//
+// So the action bodies are wrapped and hand the failure back through these
+// helpers. They live here rather than in the action module because a
+// `"use server"` module may only export async functions, and because the
+// mapping is worth a unit test of its own.
+// ============================================================================
+
+/**
+ * The message `verifySession()` throws with (`src/lib/auth/session.ts`).
+ *
+ * Matching on a message is fragile, so it is not left implicit: it is named
+ * here and `preferences.test.ts` reads `session.ts` to prove the two still
+ * agree. If the throw is ever changed, that test fails rather than this
+ * silently degrading to the generic message.
+ */
+export const SESSION_EXPIRED_ERROR_MESSAGE = "Unauthorized";
+
+/** Shown when the session behind an open settings tab has expired. */
+export const PREFERENCE_SESSION_EXPIRED_MESSAGE =
+  "Your sign-in expired. Sign in again, then change this setting.";
+
+/** Shown when the save failed for any other reason. */
+export const PREFERENCE_SAVE_FAILED_MESSAGE =
+  "We could not save that. Try again.";
+
+/** The failure half of what a settings action returns. */
+export interface PreferenceSaveFailure {
+  success: false;
+  error: string;
+}
+
+/**
+ * Was this failure the session, rather than the write?
+ *
+ * Both doors are covered: `verifySession()` throws first for a session that has
+ * gone, and `preferenceOwnerFromSession` throws for a session object that
+ * arrives empty. They are the same fact to the user and get the same sentence.
+ */
+export function isUnauthenticatedPreferenceError(error: unknown): boolean {
+  if (error instanceof UnauthenticatedPreferenceAccessError) return true;
+  return (
+    error instanceof Error &&
+    error.message.trim() === SESSION_EXPIRED_ERROR_MESSAGE
+  );
+}
+
+/**
+ * Turn a thrown failure into something the screen can say out loud.
+ *
+ * The expired session gets its own sentence because it is the one case the user
+ * can actually resolve, and it is the realistic one: a settings tab left open
+ * past the 30-day cookie. Everything else gets a sentence that is honest about
+ * what happened without inventing a cause.
+ *
+ * It never includes the underlying error text. A database message in a toast
+ * tells the user nothing and can leak a table name.
+ */
+export function preferenceSaveFailure(error: unknown): PreferenceSaveFailure {
+  return {
+    success: false,
+    error: isUnauthenticatedPreferenceError(error)
+      ? PREFERENCE_SESSION_EXPIRED_MESSAGE
+      : PREFERENCE_SAVE_FAILED_MESSAGE,
+  };
 }
 
 // ----------------------------------------------------------------------------
@@ -737,6 +1006,13 @@ export async function setPreference(
  * NULL. It supplies the CODED DEFAULT for (digest, `DIGEST_CADENCE_CHANNEL`),
  * so the row this creates is behaviourally identical to the absence it
  * replaces — the user changed their cadence and nothing else changed with it.
+ *
+ * "Behaviourally identical" is the resolver's doing, not this INSERT's (#237).
+ * The value written here agrees with the coded default, so
+ * `preferenceValueIsInheritable` marks it `default` and it keeps following the
+ * default rather than pinning the user to today's copy of it. Before that rule
+ * existed, this INSERT was how a cadence-only change silently turned into an
+ * explicit (digest, email) preference.
  */
 export function setDigestCadenceQuery(
   owner: PreferenceOwner,

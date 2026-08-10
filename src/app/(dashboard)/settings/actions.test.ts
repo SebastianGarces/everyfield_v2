@@ -70,10 +70,93 @@ test("every exported settings action mints its owner from the session", () => {
 
   assert.ok(exported.length > 0, "no exported actions found — check the path");
   assert.equal(minted.length, exported.length);
+
+  // The owner comes from a VERIFIED session and from nothing else. Two call
+  // shapes are legitimate — the mint inlined on `verifySession()`, and the mint
+  // taking a `session` const the line above assigned from it, which an action
+  // that also has to read the role needs. Anything else is refused by the
+  // lookahead, so a mint fed from some third value fails here.
+  assert.match(ACTIONS_CODE, /const session = await verifySession\(\)/);
+  assert.doesNotMatch(
+    ACTIONS_CODE,
+    /preferenceOwnerFromSession\((?!session\)|await verifySession\(\)\))/
+  );
+});
+
+test("every exported action returns its failures instead of throwing", () => {
+  // #236. A server action that throws rejects the promise the client awaits,
+  // and the rejection unwinds the transition without reaching `toast.error` —
+  // the user sees the control snap back and is told nothing. So every body is
+  // wrapped, and every catch hands the failure back.
+  const exported = ACTIONS_CODE.match(/export async function /g) ?? [];
+  const wrapped = ACTIONS_CODE.match(/\btry \{/g) ?? [];
+  const reported =
+    ACTIONS_CODE.match(/return preferenceSaveFailure\(error\)/g) ?? [];
+
+  assert.equal(wrapped.length, exported.length);
+  assert.equal(reported.length, exported.length);
+
+  // Next.js control-flow errors (`redirect()`, `notFound()`, prerender
+  // interrupts) are thrown as errors but MEAN something to the framework, so
+  // they get first refusal in every catch. Swallowing one would turn a working
+  // redirect into a false "we could not save that".
+  const rethrown = ACTIONS_CODE.match(/unstable_rethrow\(error\)/g) ?? [];
+  assert.equal(rethrown.length, exported.length);
+
+  for (const block of ACTIONS_CODE.split("} catch (error) {").slice(1)) {
+    const rethrowAt = block.indexOf("unstable_rethrow(error)");
+    const returnAt = block.indexOf("return preferenceSaveFailure(error)");
+
+    assert.ok(rethrowAt >= 0 && returnAt >= 0);
+    assert.ok(rethrowAt < returnAt, "unstable_rethrow must come first");
+  }
+});
+
+test("the cadence action refuses the roles the screen no longer offers it to", () => {
+  // #254. The screen stops rendering the selector for an oversight recipient,
+  // but every export of a `"use server"` module is a POSTable endpoint — so the
+  // refusal lives here too, and says the same sentence the screen does.
   assert.match(
     ACTIONS_CODE,
-    /preferenceOwnerFromSession\(await verifySession\(\)\)/
+    /audienceForRole\(session\.user\.role\) === "oversight"/
   );
+  assert.match(ACTIONS_CODE, /error: OVERSIGHT_DIGEST_CADENCE_NOTE/);
+});
+
+test("the toggle action refuses the categories the screen no longer offers", () => {
+  // The same shape as the cadence refusal above, one row up (ruled 2026-08-09).
+  // Two properties matter and both are asserted from the source, because the
+  // module is `"use server"` and cannot be imported into a bare node:test.
+  //
+  // 1. The refusal is DERIVED. `audienceMayReceiveCategory` reads
+  //    `OVERSIGHT_ELIGIBLE_CATEGORIES`, so a category added to the allow-list
+  //    becomes writable here on the same deploy. A literal list of the five
+  //    granular names would be a second copy to keep in step, and this test
+  //    fails if one appears.
+  assert.match(
+    ACTIONS_CODE,
+    /!audienceMayReceiveCategory\(audience, category\)/
+  );
+  assert.match(ACTIONS_CODE, /error: OVERSIGHT_INELIGIBLE_CATEGORY_NOTE/);
+
+  for (const category of ["tasks", "meetings", "communication", "teams"]) {
+    assert.doesNotMatch(
+      ACTIONS_CODE,
+      new RegExp(`"${category}"`),
+      `the refusal must not name ${category} — it is derived from the allow-list`
+    );
+  }
+
+  // 2. It is asked BEFORE the write, and before the no-op question. A refused
+  //    category has nothing to compare against, and a refusal that arrived
+  //    after `setPreference` would not be a refusal.
+  const refusalAt = ACTIONS_CODE.indexOf("audienceMayReceiveCategory");
+  const noopAt = ACTIONS_CODE.indexOf("preferenceWriteIsNoop");
+  const writeAt = ACTIONS_CODE.indexOf("await setPreference(");
+
+  assert.ok(refusalAt >= 0 && noopAt >= 0 && writeAt >= 0);
+  assert.ok(refusalAt < noopAt, "the refusal must precede the no-op question");
+  assert.ok(refusalAt < writeAt, "the refusal must precede the write");
 });
 
 test("no settings action names a user, anywhere", () => {
