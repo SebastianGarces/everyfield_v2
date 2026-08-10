@@ -65,7 +65,7 @@ sharing is the plant's opt-in.
 | OV-009 | Must | Sending-churches roster at `/oversight/sending-churches` for network admins: member sending church, plant count, pending invitations. |
 | OV-010 | Must | Permissions: only the plant's **planter** may accept an invitation or sever the plant's association; only the **org's admin** may sever from the org side. Non-planter members of the target church can do neither. *Why:* binding the plant to an oversight org is a plant-level decision, the same authority rule as the sharing toggles; and severing is deliberately two-sided so an association created in error has a repair path either party can invoke. |
 | OV-011 | Should | Association history section on the plant detail page, read from `association_events`. |
-| OV-012 | Must | Sending-church answering surface: a sending-church **admin** whose church has a pending `sending_church_to_network` invitation can accept or decline it in-app from their association/settings area; non-admin members are rejected server-side. Every invitation type that can name an existing account has an in-app answering surface. |
+| OV-012 | Must | Sending-church answering surface: a sending-church **admin** whose church has a pending `sending_church_to_network` invitation can accept or decline it in-app from their association/settings area; non-admin members are rejected server-side. Every invitation type addressed to a registered account has an in-app answering surface. |
 | OV-013 | Must | Sending-church sever: a sending-church admin can leave their network behind a type-to-confirm dialog; the sever is audited and the network is notified — OV-007 symmetry for the org tier. |
 
 ## Acceptance criteria
