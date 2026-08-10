@@ -315,9 +315,32 @@ function VariantD({ onLog }: { onLog: (entry: LogEntry) => void }) {
   );
 }
 
+const VARIANT_IDS: Variant[] = ["a", "b", "c", "d"];
+
 export function ResendPrototypeBench() {
   const [log, setLog] = useState<LogEntry[]>([]);
   const onLog = (entry: LogEntry) => setLog((prev) => [entry, ...prev]);
+
+  // The page's inline init script only runs on a full document load. A reviewer
+  // who reaches this screen by clicking through the sidebar arrives by soft
+  // navigation, where that script never executes and <html> carries no
+  // attribute — which would hide all four variants and show an empty bench.
+  // This is DOM synchronisation, not derived state, so it belongs in an effect.
+  useEffect(() => {
+    const root = document.documentElement;
+    const current = root.getAttribute("data-resend-proto") as Variant | null;
+    if (current && VARIANT_IDS.includes(current)) return;
+    let stored: string | null = null;
+    try {
+      stored = localStorage.getItem("resend-proto");
+    } catch {
+      stored = null;
+    }
+    root.setAttribute(
+      "data-resend-proto",
+      VARIANT_IDS.includes(stored as Variant) ? (stored as Variant) : "a"
+    );
+  }, []);
 
   return (
     <Card className="border-dashed">
