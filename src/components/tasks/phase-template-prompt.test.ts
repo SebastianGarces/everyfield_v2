@@ -10,6 +10,7 @@ import {
   type PhaseTemplatePrompt as PhaseTemplatePromptData,
 } from "@/lib/tasks/phase-prompt";
 
+import { phaseTemplatePromptControlState } from "./phase-template-prompt-controls";
 import { PhaseTemplatePromptView } from "./phase-template-prompt";
 
 // ----------------------------------------------------------------------------
@@ -195,4 +196,84 @@ test("a phase whose catalog is empty renders nothing at all", () => {
     ),
     null
   );
+});
+
+test("the prompt states the import policy before the press", () => {
+  // AC5 allows either behaviour so long as the surface says which. The catalog
+  // has said it since T-011; the prompt did not, and a repeat here is 22–26
+  // tasks rather than one small checklist (verifier warning 2 on PR #393).
+  const text = textOf(render());
+
+  assert.ok(
+    text.includes("Nothing is merged, replaced or skipped"),
+    "the prompt does not state that imported tasks are never deduped"
+  );
+  assert.ok(
+    text.includes("importing again adds nothing"),
+    "the prompt does not state that it can only be answered once"
+  );
+  assert.ok(
+    text.includes("on any device"),
+    "the prompt does not say the answer follows the planter, not the browser"
+  );
+});
+
+// ----------------------------------------------------------------------------
+// The submit guard (ruled 2026-08-10, PR #393)
+//
+// `useFormStatus` reports `pending: false` under `renderToStaticMarkup` no
+// matter what, so the decision it feeds is a pure function and is asserted at
+// every combination here. The wiring itself is a browser assertion.
+// ----------------------------------------------------------------------------
+
+test("both buttons rest enabled, with the resting label", () => {
+  assert.deepEqual(phaseTemplatePromptControlState(false, null), {
+    disabled: false,
+    importing: false,
+    dismissing: false,
+    importLabel: "Import checklists",
+  });
+});
+
+test("a request in flight disables both buttons", () => {
+  for (const pressed of ["import", "dismiss", null] as const) {
+    assert.equal(
+      phaseTemplatePromptControlState(true, pressed).disabled,
+      true,
+      `pressing ${pressed ?? "nothing"} left a button live during the request`
+    );
+  }
+});
+
+test("only the pressed button reports itself busy", () => {
+  const importing = phaseTemplatePromptControlState(true, "import");
+  assert.equal(importing.importing, true);
+  assert.equal(importing.dismissing, false);
+  assert.equal(importing.importLabel, "Importing…");
+
+  const dismissing = phaseTemplatePromptControlState(true, "dismiss");
+  assert.equal(dismissing.dismissing, true);
+  assert.equal(dismissing.importing, false);
+  assert.equal(
+    dismissing.importLabel,
+    "Import checklists",
+    "declining must not tell the planter something is being imported"
+  );
+});
+
+test("a submit that went through neither handler reads as the import", () => {
+  // The form's default action IS the import, so an unattributed submit — the
+  // Enter key inside the checklist, say — must not report a decline.
+  const state = phaseTemplatePromptControlState(true, null);
+
+  assert.equal(state.importing, true);
+  assert.equal(state.dismissing, false);
+});
+
+test("neither button is busy when nothing is in flight", () => {
+  for (const pressed of ["import", "dismiss", null] as const) {
+    const state = phaseTemplatePromptControlState(false, pressed);
+    assert.equal(state.importing, false);
+    assert.equal(state.dismissing, false);
+  }
 });

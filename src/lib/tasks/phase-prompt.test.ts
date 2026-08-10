@@ -139,6 +139,43 @@ test("an answered transition does not prompt again", () => {
   assert.equal(buildPhaseTemplatePrompt(row, row.id), null);
 });
 
+test("the RECORDED answer silences the prompt with no cookie in sight", () => {
+  // The ruling of 2026-08-10: the answer lives in `phase_prompt_answers`, keyed
+  // by transition id, so a second device — which sends no cookie — is answered
+  // by the row that came back on the transition.
+  const answered = transition({ answeredAt: new Date("2026-03-02T10:00:00Z") });
+
+  assert.equal(buildPhaseTemplatePrompt(answered, null), null);
+});
+
+test("the recorded answer silences only the transition it names", () => {
+  const answered = transition({ answeredAt: new Date("2026-03-02T10:00:00Z") });
+  const next = transition({
+    id: "22222222-2222-4222-8222-222222222222",
+    fromPhase: 2,
+    toPhase: 3,
+    createdAt: SEPTEMBER,
+  });
+
+  assert.equal(buildPhaseTemplatePrompt(answered, null), null);
+  assert.ok(
+    buildPhaseTemplatePrompt(next, null),
+    "the next move must re-arm the prompt"
+  );
+});
+
+test("a cookie can hide a prompt but never restore one", () => {
+  // The asymmetry that makes a forged cookie harmless AND makes the row
+  // authoritative: neither answer can be argued away by the browser.
+  const answered = transition({ answeredAt: new Date("2026-03-02T10:00:00Z") });
+
+  assert.equal(
+    buildPhaseTemplatePrompt(answered, "a-different-transition-id"),
+    null,
+    "a cookie naming another transition must not resurrect an answered prompt"
+  );
+});
+
 test("an answer to an EARLIER transition does not silence the next one", () => {
   // This is what makes the prompt re-arm by itself: the stored answer names a
   // transition, so the next move stops matching it.

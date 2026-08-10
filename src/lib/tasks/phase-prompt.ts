@@ -1,8 +1,9 @@
 import { and, desc, eq } from "drizzle-orm";
 
 import { db } from "@/db";
-import { phaseTransitions } from "@/db/schema";
+import { phasePromptAnswers, phaseTransitions } from "@/db/schema";
 import type { PhaseTransitionKind } from "@/db/schema/phase-engine";
+import type { PhasePromptAnswerKind } from "@/db/schema/tasks";
 import { PHASES, type PhaseNumber } from "@/lib/constants";
 import type { PhaseChangedEvent } from "@/lib/phase-engine/events";
 
@@ -37,18 +38,38 @@ import {
 // they would have got by answering immediately. The alternative (counting from
 // the press) quietly punishes anyone who thought about it first.
 //
-// WHAT AN ANSWER IS RECORDED IN. The one thing that is NOT derivable is "this
-// planter already said no". That is recorded in a cookie holding the answered
-// transition's id (`PHASE_TEMPLATE_PROMPT_COOKIE`), which is why the prompt
-// re-arms by itself: the NEXT transition has a different id, so the stored
-// answer stops matching and the prompt returns. See
-// `src/components/tasks/phase-template-prompt.tsx` for the write, and the
-// residual this carries — a decline is per-browser, so declining on a laptop
-// does not silence the prompt on a phone. A durable, cross-device answer needs
-// a column and a migration; a prompt is not worth one.
+// WHAT AN ANSWER IS RECORDED IN — A ROW, KEYED BY TRANSITION ID (ruled
+// 2026-08-10 on PR #393). The one thing that is NOT derivable is "this planter
+// already answered", and it now lives in `phase_prompt_answers`, one row per
+// transition, unique on `transition_id` (migration 0035). That is what makes
+// the answer follow the PLANTER rather than the browser: declining on a laptop
+// silences the prompt on a phone, and pressing Import a second time — on a
+// second device, after clearing cookies, or by double-clicking — adds nothing.
+// The prompt still re-arms by itself, because the NEXT transition is a
+// different id with no row against it.
+//
+// THE COOKIE SURVIVES AS A FAST PATH ONLY. `PHASE_TEMPLATE_PROMPT_COOKIE` is
+// still written and still read, but it can only ever suppress a prompt the row
+// suppresses too; the row is authoritative, and the accept path does not
+// consult the cookie at all. See
+// `src/components/tasks/phase-template-prompt.tsx` for the writes.
+//
+// THE CLAIM IS THE FIRST WRITE, NOT THE LAST. `memory/invariants.md` →
+// Transactions normally says "write the durable marker LAST, every earlier step
+// idempotent". Importing a checklist is NOT idempotent — T-012 creates a second
+// copy by design — so a marker written afterwards is written after the damage,
+// and a SELECT-then-INSERT read in front of it is not a concurrency guard
+// either. `acceptPhaseTemplatePrompt` therefore claims the answer row with
+// `ON CONFLICT DO NOTHING` and imports only if the claim returned a row.
 // ============================================================================
 
-/** Holds the id of the transition whose prompt has been answered. */
+/**
+ * Fast path for "this browser already answered".
+ *
+ * Kept because it costs nothing and answers before the database does, but it is
+ * no longer the record: `phase_prompt_answers` is, and a browser with no cookie
+ * (or a forged one) is answered by the row.
+ */
 export const PHASE_TEMPLATE_PROMPT_COOKIE = "ef_phase_template_prompt";
 
 /** A year. The prompt only ever asks about the LATEST transition, so a stale
@@ -117,6 +138,16 @@ export interface PhaseTransitionRow {
   fromPhase: number;
   toPhase: number;
   createdAt: Date;
+  /**
+   * When this transition's prompt was answered durably (`phase_prompt_answers`),
+   * or `null` for "never answered".
+   *
+   * Carried on the transition row rather than fetched separately because the
+   * two are read by one LEFT JOIN — the answer is a fact ABOUT this transition,
+   * and a second round trip would open a window where the prompt renders from a
+   * transition the answer no longer belongs to.
+   */
+  answeredAt?: Date | null;
 }
 
 /**
@@ -130,8 +161,15 @@ export interface PhaseTransitionRow {
  *     prompted about;
  *   - the move went nowhere (`toPhase === fromPhase`) — a no-op correction is
  *     not a stage change;
- *   - the planter already answered THIS transition;
+ *   - the planter already answered THIS transition, durably (`answeredAt`) or
+ *     in this browser (the cookie);
  *   - the new phase has no templates.
+ *
+ * THE ROW WINS AND THE COOKIE ONLY ADDS. `answeredAt` comes from
+ * `phase_prompt_answers` and is the answer of record on every device; the
+ * cookie is a second, weaker way to reach the same "already answered" and can
+ * only suppress a prompt, never restore one. That asymmetry is why a forged or
+ * stale cookie is harmless: the worst it costs its owner is their own prompt.
  *
  * A BACKWARD move still prompts. A planter who moves from 3 back to 2 is doing
  * phase-2 work and wants the phase-2 checklist; "advance" is the notification
@@ -143,6 +181,7 @@ export function buildPhaseTemplatePrompt(
 ): PhaseTemplatePrompt | null {
   if (!transition) return null;
   if (transition.toPhase === transition.fromPhase) return null;
+  if (transition.answeredAt) return null;
   if (answeredTransitionId && answeredTransitionId === transition.id) {
     return null;
   }
@@ -184,12 +223,17 @@ export function buildPhaseTemplatePrompt(
 // ----------------------------------------------------------------------------
 
 /**
- * The plant's most recent MOVE, church-scoped.
+ * The plant's most recent MOVE, church-scoped, with its durable answer.
  *
  * `id` breaks the tie on `created_at`, because a plant can be moved twice in
  * one clock tick and "the latest transition" must be one row every time —
  * otherwise the id stored by an answer may not be the id the next render
  * derives, and the prompt would flicker back.
+ *
+ * The answer rides along on a LEFT JOIN rather than a second query. It is a
+ * fact about THIS transition, and reading it separately would let the plant
+ * move in between, so the render could pair a new transition with an old
+ * transition's answer.
  */
 export async function getLatestPhaseTransition(
   churchId: string
@@ -202,8 +246,13 @@ export async function getLatestPhaseTransition(
       fromPhase: phaseTransitions.fromPhase,
       toPhase: phaseTransitions.toPhase,
       createdAt: phaseTransitions.createdAt,
+      answeredAt: phasePromptAnswers.createdAt,
     })
     .from(phaseTransitions)
+    .leftJoin(
+      phasePromptAnswers,
+      eq(phasePromptAnswers.transitionId, phaseTransitions.id)
+    )
     .where(
       and(
         eq(phaseTransitions.churchId, churchId),
@@ -237,12 +286,110 @@ export interface AcceptPhaseTemplatePromptInput {
   templateKeys: readonly string[];
 }
 
-export interface AcceptPhaseTemplatePromptResult {
+/**
+ * The outcome of answering, told apart by `status` because the two are
+ * genuinely different events and the caller reacts differently to each.
+ *
+ * `already_answered` is a SUCCESS: the transition has an answer, so the prompt
+ * is done and must come down — it simply created nothing this time.
+ */
+export type AcceptPhaseTemplatePromptResult =
+  | {
+      status: "imported";
+      transitionId: string;
+      /** The calendar day the offsets were counted from — the TRANSITION's day. */
+      importedOn: string;
+      createdCount: number;
+      templateNames: string[];
+    }
+  | { status: "already_answered"; transitionId: string };
+
+// ----------------------------------------------------------------------------
+// The claim
+// ----------------------------------------------------------------------------
+
+interface ClaimInput {
+  churchId: string;
   transitionId: string;
-  /** The calendar day the offsets were counted from — the TRANSITION's day. */
-  importedOn: string;
-  createdCount: number;
-  templateNames: string[];
+  userId: string;
+  answer: PhasePromptAnswerKind;
+}
+
+/**
+ * Claim the one answer this transition is allowed, or discover it is taken.
+ *
+ * Returns the new row's id, or `null` when a row already existed. This is a
+ * compare-and-set against `phase_prompt_answers_transition_unique_idx` and NOT
+ * a read: `ON CONFLICT DO NOTHING` is decided by the database, so two presses
+ * in the same millisecond — two tabs, two devices, a double-click — cannot both
+ * come back with a row (`memory/invariants.md` → Transactions).
+ *
+ * The conflict target is the transition alone, matching the index, so a request
+ * that supplied a different `churchId` for the same transition still loses.
+ */
+async function claimPhaseTemplatePromptAnswer(
+  input: ClaimInput
+): Promise<string | null> {
+  const [claimed] = await db
+    .insert(phasePromptAnswers)
+    .values({
+      churchId: input.churchId,
+      transitionId: input.transitionId,
+      answeredById: input.userId,
+      answer: input.answer,
+    })
+    .onConflictDoNothing({ target: phasePromptAnswers.transitionId })
+    .returning({ id: phasePromptAnswers.id });
+
+  return claimed?.id ?? null;
+}
+
+/**
+ * Give the claim back, but ONLY when the import it was covering wrote nothing.
+ *
+ * A claim that failed before its first task should not cost the planter their
+ * prompt — the honest state is "unanswered", and the next render asks again. A
+ * claim whose import got part-way is KEPT: releasing it would re-offer
+ * checklists that are already in the list, and the planter would import them
+ * twice. The rest of that partial set stays reachable at `/tasks/templates`.
+ */
+async function releasePhaseTemplatePromptAnswer(
+  answerId: string
+): Promise<void> {
+  await db
+    .delete(phasePromptAnswers)
+    .where(eq(phasePromptAnswers.id, answerId));
+}
+
+// ----------------------------------------------------------------------------
+// Declining
+// ----------------------------------------------------------------------------
+
+/**
+ * Decline the prompt for the plant's current transition, durably.
+ *
+ * Returns the transition id that was answered (whether this call recorded the
+ * answer or found one already there), or `null` when there is no transition to
+ * answer. A decline that loses the race is still a decline — the prompt is down
+ * either way — so the two are not distinguished.
+ */
+export async function declinePhaseTemplatePrompt(input: {
+  churchId: string;
+  userId: string;
+}): Promise<string | null> {
+  const transition = await getLatestPhaseTransition(input.churchId);
+  if (!transition) return null;
+
+  if (!transition.answeredAt) {
+    await claimPhaseTemplatePromptAnswer({
+      churchId: input.churchId,
+      transitionId: transition.id,
+      userId: input.userId,
+      answer: "declined",
+    });
+  }
+
+  return transition.id;
 }
 
 /**
@@ -258,16 +405,33 @@ export interface AcceptPhaseTemplatePromptResult {
  * to the CURRENT transition, dated from it, which is the only answer that is
  * still true.
  *
+ * IDEMPOTENT PER TRANSITION, AND THE DATABASE IS WHAT MAKES IT SO (ruled
+ * 2026-08-10). The answer row is CLAIMED before a single task is written, with
+ * `ON CONFLICT DO NOTHING` against the unique index on `transition_id`; the
+ * import runs only if that claim returned a row. So a second press — a second
+ * device, a cleared cookie, a double-click, or two tabs in the same
+ * millisecond — reports `already_answered` and writes nothing. A read in front
+ * of the import would not do it: both racers pass it, which is the shape
+ * `memory/invariants.md` → Transactions names as *not* a concurrency guard.
+ *
  * Returns `null` when there is nothing to accept — no live prompt, or no
  * requested key survived the filter. The caller treats `null` as "leave the
- * prompt up": nothing was created, so nothing has been answered.
+ * prompt up": nothing was created and nothing has been answered.
  */
 export async function acceptPhaseTemplatePrompt(
   input: AcceptPhaseTemplatePromptInput
 ): Promise<AcceptPhaseTemplatePromptResult | null> {
   const transition = await getLatestPhaseTransition(input.churchId);
+  if (!transition) return null;
+
+  // Answered on some other device, or a moment ago in this one. The prompt is
+  // finished; it just has nothing left to create.
+  if (transition.answeredAt) {
+    return { status: "already_answered", transitionId: transition.id };
+  }
+
   const prompt = buildPhaseTemplatePrompt(transition, null);
-  if (!transition || !prompt) return null;
+  if (!prompt) return null;
 
   const requested = new Set(input.templateKeys);
   // Offer order, not request order: `importTaskTemplate` stamps `created_at`
@@ -276,27 +440,52 @@ export async function acceptPhaseTemplatePrompt(
     .map((offer) => offer.key)
     .filter((key) => requested.has(key));
 
+  // Nothing survived the filter, so nothing is being answered — do NOT claim.
+  // A forged key list must not be able to burn the planter's real prompt.
   if (keys.length === 0) return null;
+
+  const claimId = await claimPhaseTemplatePromptAnswer({
+    churchId: input.churchId,
+    transitionId: transition.id,
+    userId: input.userId,
+    answer: "accepted",
+  });
+
+  // The database refused the second answer. This is the whole ruling.
+  if (!claimId) {
+    return { status: "already_answered", transitionId: transition.id };
+  }
 
   let createdCount = 0;
   const templateNames: string[] = [];
   let importedOn = "";
 
-  for (const templateKey of keys) {
-    const result = await importTaskTemplate({
-      churchId: input.churchId,
-      userId: input.userId,
-      templateKey,
-      // The whole point of T-020: relative to the TRANSITION.
-      importedAt: transition.createdAt,
-    });
+  try {
+    for (const templateKey of keys) {
+      const result = await importTaskTemplate({
+        churchId: input.churchId,
+        userId: input.userId,
+        templateKey,
+        // The whole point of T-020: relative to the TRANSITION.
+        importedAt: transition.createdAt,
+      });
 
-    createdCount += result.created.length;
-    templateNames.push(result.templateName);
-    importedOn = result.importedOn;
+      createdCount += result.created.length;
+      templateNames.push(result.templateName);
+      importedOn = result.importedOn;
+    }
+  } catch (error) {
+    // Claimed but wrote nothing: hand the prompt back rather than leaving the
+    // planter answered with an empty list. Once ANY task exists the claim is
+    // kept — see `releasePhaseTemplatePromptAnswer`.
+    if (createdCount === 0) {
+      await releasePhaseTemplatePromptAnswer(claimId);
+    }
+    throw error;
   }
 
   return {
+    status: "imported",
     transitionId: transition.id,
     importedOn,
     createdCount,

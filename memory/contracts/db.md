@@ -59,6 +59,18 @@ tenant scope; `created_at`/`updated_at` default now.
   `isInitialDeclaration` / `hasInitialPhaseDeclaration`, never the `reason` text — the reserved
   sentence there is display copy that `transitionPhaseSchema` merely refuses to let a planter
   retype.
+- **`phase_prompt_answers` is an idempotency key, not a log** (`tasks.ts`, migration 0035,
+  ruled 2026-08-10 on #393). One row per phase transition, unique on `transition_id` — the row
+  EXISTING is what silences the T-020 checklist prompt and what makes a repeat accept a no-op, on
+  any device. `answer` (`accepted` | `declined`, CHECK-closed) is recorded because "did anyone
+  ever take the phase-2 checklists?" cannot be reconstructed from `tasks` — an imported task is an
+  ordinary task with no template marker — but nothing branches on it. Unique on `transition_id`
+  ALONE, not on the pair with `church_id`: a transition belongs to one church, so the pair would
+  be a wider key for the same rule and would let a forged church id claim a second answer.
+  `acceptPhaseTemplatePrompt` writes it with `ON CONFLICT DO NOTHING` BEFORE the import it guards
+  and gates the import on the claim's rowcount — see `../invariants.md` → Transactions for why
+  claim-first rather than marker-last. The `PHASE_TEMPLATE_PROMPT_COOKIE` beside it is a fast path
+  that can only suppress a prompt, never restore one.
 - **`church_id = null` means global content** (e.g. wiki articles visible to all tenants).
 - **`sessions.id`** is the SHA-256 of the token, not the token.
 - **Soft deletes:** `persons.deleted_at` — feature queries must filter it.

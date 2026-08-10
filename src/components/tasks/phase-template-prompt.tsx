@@ -1,14 +1,14 @@
 import { refresh, revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 
-import { Button } from "@/components/ui/button";
+import { PhaseTemplatePromptControls } from "@/components/tasks/phase-template-prompt-controls";
 import { getCurrentSession } from "@/lib/auth/session";
 import { formatDate } from "@/lib/datetime";
 import {
   PHASE_TEMPLATE_PROMPT_COOKIE,
   PHASE_TEMPLATE_PROMPT_COOKIE_MAX_AGE,
   acceptPhaseTemplatePrompt,
-  getLatestPhaseTransition,
+  declinePhaseTemplatePrompt,
   getPhaseTemplatePrompt,
   type PhaseTemplateOffer,
   type PhaseTemplatePrompt as PhaseTemplatePromptData,
@@ -36,6 +36,11 @@ import {
 // falls on, computed by the same function the import runs, from the transition
 // instant. A planter who moved stages a week ago can see that the checklist
 // arrives already part-spent, and decline for that reason.
+//
+// THE ANSWER IS DURABLE NOW (ruled 2026-08-10, PR #393). Answering writes a row
+// keyed by the transition id, so a decline follows the planter to their phone
+// and a second accept — another device, cleared cookies, a double press — adds
+// nothing. The cookie below is kept as a fast path and nothing more.
 // ============================================================================
 
 const PROMPT_HEADING_ID = "phase-template-prompt-heading";
@@ -43,6 +48,19 @@ const PROMPT_HEADING_ID = "phase-template-prompt-heading";
 /** Said where the press happens: this creates work, and only what is ticked. */
 const PROMPT_NOTE =
   "Nothing is created until you press Import. Untick anything you do not want.";
+
+/**
+ * The import policy, stated on the surface where the press happens.
+ *
+ * The catalog has said this since T-011 (`TEMPLATE_REIMPORT_NOTE`); the prompt
+ * did not, and a repeat here is 22–26 tasks rather than one small checklist.
+ * The wording is deliberately NOT the catalog's, because the two surfaces no
+ * longer behave the same: importing from the catalog again really does add a
+ * second copy, while this prompt can be answered exactly once per stage change.
+ * Both halves are said, because both are surprising on their own.
+ */
+const IMPORT_POLICY_NOTE =
+  "Imported tasks are added as new tasks. Nothing is merged, replaced or skipped. You can answer this once per stage change: importing again adds nothing, on any device.";
 
 /**
  * What "Not now" costs, stated before it is pressed.
@@ -60,11 +78,12 @@ const DISMISS_NOTE =
 // ----------------------------------------------------------------------------
 
 /**
- * Record that THIS transition's prompt has been answered.
+ * Note in THIS browser that the transition has been answered.
  *
- * A cookie, holding the transition id — see `phase-prompt.ts` for why there is
- * no table behind this. It is `httpOnly` because nothing in the browser needs
- * to read it, and forging it costs its owner nothing but their own prompt.
+ * A fast path, not the record: `phase_prompt_answers` is written by the service
+ * first and is what every device reads (`phase-prompt.ts`). The cookie can only
+ * suppress a prompt the row suppresses anyway, which is why it is safe to keep
+ * `httpOnly` and to leave forging it as a way to hide your own prompt.
  */
 async function markPromptAnswered(transitionId: string): Promise<void> {
   const cookieStore = await cookies();
@@ -89,9 +108,11 @@ async function markPromptAnswered(transitionId: string): Promise<void> {
  * which checklists were ticked — and `acceptPhaseTemplatePrompt` filters even
  * that against what is genuinely on offer.
  *
- * A failure leaves the prompt exactly where it was: the answer is only
- * recorded once the tasks exist, so "still there" is the signal that nothing
- * happened, and pressing again is safe.
+ * Pressing again is safe, and the database is what makes it so: the answer row
+ * is claimed before the first task is written, so a repeat — a second device, a
+ * cleared cookie, a double press — imports nothing and reports
+ * `already_answered`. Both outcomes take the prompt down, because both mean the
+ * transition has been answered.
  */
 async function importPhaseTemplatesAction(formData: FormData): Promise<void> {
   "use server";
@@ -112,8 +133,8 @@ async function importPhaseTemplatesAction(formData: FormData): Promise<void> {
       templateKeys,
     });
 
-    // `null` means nothing was created — no live prompt, or every key was
-    // forged. Nothing to answer, so the prompt stays up.
+    // `null` means nothing was answered — no live prompt, or every key was
+    // forged. Nothing happened, so the prompt stays up.
     if (!result) return;
 
     await markPromptAnswered(result.transitionId);
@@ -131,9 +152,14 @@ async function importPhaseTemplatesAction(formData: FormData): Promise<void> {
 /**
  * Decline: record the answer and create nothing.
  *
- * Takes NO input at all. The transition being declined is re-read from the
- * database, so the request cannot aim the dismissal at a transition other than
- * the plant's current one.
+ * Reads NOTHING from the form. The transition being declined is re-read from
+ * the database, so the request cannot aim the dismissal at a transition other
+ * than the plant's current one. React hands a `FormData` to every form action,
+ * including this one; the signature simply does not accept it, which is the
+ * clearest way to say nothing in the form is read.
+ *
+ * The decline is written to `phase_prompt_answers`, so it holds on every
+ * device — the cookie afterwards only saves this browser the join.
  */
 async function dismissPhaseTemplatePromptAction(): Promise<void> {
   "use server";
@@ -142,10 +168,13 @@ async function dismissPhaseTemplatePromptAction(): Promise<void> {
     const { user } = await getCurrentSession();
     if (!user?.churchId) return;
 
-    const transition = await getLatestPhaseTransition(user.churchId);
-    if (!transition) return;
+    const transitionId = await declinePhaseTemplatePrompt({
+      churchId: user.churchId,
+      userId: user.id,
+    });
+    if (!transitionId) return;
 
-    await markPromptAnswered(transition.id);
+    await markPromptAnswered(transitionId);
 
     refresh();
     revalidatePath("/tasks");
@@ -218,6 +247,7 @@ export function PhaseTemplatePromptView({
           moved ({formatDate(prompt.transitionedAt, "short")}).
         </p>
         <p className="text-muted-foreground text-sm">{PROMPT_NOTE}</p>
+        <p className="text-muted-foreground text-sm">{IMPORT_POLICY_NOTE}</p>
       </div>
 
       <form action={importAction} className="space-y-4">
@@ -256,26 +286,12 @@ export function PhaseTemplatePromptView({
           })}
         </ul>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <Button type="submit" size="sm" className="cursor-pointer">
-            Import checklists
-          </Button>
-          {/*
-            A second action on the same form rather than a nested one — a form
-            may not contain a form, and the two answers belong to one control
-            group. `formAction` is how React routes a submit to the other
-            server function.
-          */}
-          <Button
-            type="submit"
-            size="sm"
-            variant="ghost"
-            formAction={dismissAction}
-            className="cursor-pointer"
-          >
-            Not now
-          </Button>
-        </div>
+        {/*
+          The one client island in the prompt. It renders INSIDE the form
+          because `useFormStatus` reports on the form above it — which is what
+          lets both buttons go inert for the length of the request.
+        */}
+        <PhaseTemplatePromptControls dismissAction={dismissAction} />
 
         <p className="text-muted-foreground text-xs">{DISMISS_NOTE}</p>
       </form>

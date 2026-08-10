@@ -90,7 +90,7 @@ That route is also what makes `importTaskTemplateAction` legal where it lives. [
 
 ### The prompt is derived, the answer is stored
 
-There is no `phase_prompts` table and no migration. `phase_transitions` already records durably, append-only, that a plant moved and when, and the catalog is code — so `buildPhaseTemplatePrompt(latestTransition, answeredTransitionId)` is a pure function and the prompt cannot go stale, cannot be half-written by a failed handler, and needed nothing back-filled for plants that moved before it shipped.
+The **prompt** is still derived and always will be. `phase_transitions` already records durably, append-only, that a plant moved and when, and the catalog is code — so `buildPhaseTemplatePrompt(latestTransition, answeredTransitionId)` is a pure function, the prompt cannot go stale, cannot be half-written by a failed handler, and needed nothing back-filled for plants that moved before it shipped. What IS stored is the **answer**, and only the answer.
 
 Four ways to get "prompt nothing", each a real case: no transition at all; a move that went nowhere (`toPhase === fromPhase`); the transition is already answered; the new phase has no templates. The last one is the guard for a phase the catalog has not caught up with — every phase 0–6 carries a template today.
 
@@ -98,7 +98,28 @@ A `kind = 'initial_declaration'` row is filtered out, for the reason [`../invari
 
 A **backward** move still prompts. "Advance" is the oversight milestone's rule, because that one announces progress; a planter who moves 3 → 2 is doing phase-2 work and wants the phase-2 checklist.
 
-The only non-derivable fact is "this planter already said no", and it lives in a cookie holding the **answered transition's id** — which is what makes the prompt re-arm on its own, since the next move has a different id and the stored answer simply stops matching. The residual is honest and named in [`../invariants.md`](../invariants.md): the answer is per-browser.
+The only non-derivable fact is "this planter already answered", and it lives in `phase_prompt_answers` — one row per transition, unique on `transition_id` (migration 0035). That key is what makes the prompt re-arm on its own: the next move is a different id with no row against it.
+
+It shipped as an httpOnly **cookie** holding the answered transition's id, and that was ruled out on 2026-08-10 (PR #393). A cookie answers for a BROWSER: the same planter on a phone, in a private window, or after clearing cookies was prompted about the same transition, and accepting there imported a second full set of 22–26 tasks. The residual was written up around declining, which is the mild half — declining twice costs nothing, accepting twice costs a duplicated task list.
+
+The cookie is still written and still read, as a fast path and nothing more. The asymmetry is what makes keeping it safe: a cookie can only ever *suppress* a prompt, never restore one, so a stale or forged value costs its owner their own prompt and cannot argue away the row. `getLatestPhaseTransition` reads both in one LEFT JOIN — the answer is a fact about that transition, and fetching it separately would let the plant move in between and pair a new transition with an old answer.
+
+### Accepting is idempotent, and the claim goes first
+
+This is the half a durable record does not give you for free. Reading "has this been answered?" and then importing is a SELECT-then-INSERT, which [`../invariants.md`](../invariants.md) → Transactions names as *not* a concurrency guard: two presses in the same millisecond both pass the read, and neon-http has no interactive transaction to hold instead.
+
+So `acceptPhaseTemplatePrompt` **claims** the answer row — `ON CONFLICT (transition_id) DO NOTHING`, `.returning()` — and imports only if the claim came back with a row. The loser reports `already_answered`, which the caller treats as a success that created nothing: the transition IS answered, so the prompt comes down either way. The conflict target is the transition alone, matching the index, so a request supplying a different `churchId` for the same transition still loses.
+
+**The claim is the first write, which inverts the usual marker-last rule on purpose.** Marker-last is for redo-safe steps; importing a checklist is not one — T-012 creates a second copy by design and says so. A marker written afterwards is written after the damage. Claiming first carries the opposite failure, and it is the smaller one: a crash between the claim and the first INSERT leaves a transition answered with no tasks, which is visible, and every checklist stays reachable at `/tasks/templates`. The service narrows it further — a claim whose import wrote **nothing** is released, so the prompt returns; a claim whose import got **part-way** is kept, because re-offering checklists already in the list is how a planter imports them twice.
+
+Two orderings inside the accept matter and are easy to get wrong:
+
+- The claim happens **after** the requested keys are filtered against the live prompt. Claiming first would let a forged POST naming only bogus keys spend the planter's one answer and leave them with no prompt and no tasks.
+- The already-answered check happens **before** the prompt is built, not by reading the built prompt's `null`. `buildPhaseTemplatePrompt` returns `null` for four different reasons and the caller has to tell "answered" (a success, prompt comes down) from "nothing to offer" (leave it up).
+
+The button is disabled while the request runs, which is the belt over these braces — it does not make the repeat harmless, it stops the planter watching a second request they have no reason to think is a no-op. `useFormStatus` needs a client component, so the two buttons live in `phase-template-prompt-controls.tsx` and the rest of the prompt stays a server component; the decision they render is the pure `phaseTemplatePromptControlState`, because `useFormStatus` reports `pending: false` under `renderToStaticMarkup` and could not otherwise be asserted.
+
+The prompt also states the import policy now, in its own words rather than the catalog's: the two surfaces no longer behave the same. Importing from `/tasks/templates` again really does add a second copy; this prompt can be answered exactly once per stage change. Both halves are surprising on their own, so both are said.
 
 ### Dates come from the transition, not from the press
 

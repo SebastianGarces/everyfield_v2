@@ -17,6 +17,7 @@ Each section links `invariants/<domain>.md` for the why, the pattern and the wor
 - `db.transaction()` throws at runtime; neon-http has no interactive transactions. Never call it.
 - All writes known up front → one `db.batch([...])`: a Neon batched transaction, all-or-nothing.
 - Writes interleaved with reads, events or another feature: write the durable "already happened" marker LAST, every earlier step idempotent.
+- Marker-last assumes the earlier steps ARE redo-safe. Where they are not — a template import creates a second copy by design — the marker becomes a CLAIM written FIRST (`ON CONFLICT DO NOTHING` against a unique index) and the non-idempotent work is gated on the claim's own rowcount. `acceptPhaseTemplatePrompt` + `phase_prompt_answers_transition_unique_idx`.
 - SELECT-then-INSERT is not a concurrency guard. Make duplicates impossible with a (partial) unique index, keeping that row in the SAME `INSERT` as the rows it speaks for.
 - In a batch the compare-and-set goes FIRST and the dependent write's `WHERE` re-asserts what the claim set — an empty `returning()` is not an error and rolls nothing back.
 - A compare-and-set serialises only same-row writers; a predicate about another table is a snapshot read. To compete for a row elsewhere, `SELECT … FOR UPDATE` it as statement ONE and gate on the dependent write's own rowcount.
@@ -133,10 +134,12 @@ Applies to `src/lib/communication/**` and the `/communication` surfaces. Ruled 2
 - A completion is written FIRST and its successor second — the reverse of the usual durable-marker-last rule, deliberately. A successor with no completion leaves two open instances; a completion with no successor is repaired by reopening and re-completing.
 - The checklist catalog has TWO entrances and the prompt is never the only one: `/tasks/templates` is the standing route, linked from the `/tasks` header. It is a static segment beside `/tasks/[id]` — remove it and the URL resolves to a task with id `"templates"` and 500s, and `importTaskTemplateAction` becomes the not-yet-wired `"use server"` write Authentication forbids.
 - ⚖ A phase change PROMPTS, it never creates (T-020). `handlePhaseChangedForTemplatePrompt` is registered on `phase.changed` and writes NOTHING; the absence is the ruling. Twenty tasks a planter did not ask for is the surprise the feature exists to avoid.
-- The prompt is DERIVED, never stored: the latest `phase_transitions` row with `kind = 'transition'` plus the code-defined catalog. No table, no migration, nothing to back-fill. A `kind = 'initial_declaration'` row is not a move and prompts nothing.
-- The one stored thing is the ANSWER — `PHASE_TEMPLATE_PROMPT_COOKIE` holding the ANSWERED TRANSITION'S id. That is what re-arms the prompt by itself: the next move has a different id, so the stored answer stops matching.
+- The prompt is DERIVED, never stored: the latest `phase_transitions` row with `kind = 'transition'` plus the code-defined catalog. A `kind = 'initial_declaration'` row is not a move and prompts nothing.
+- ⚖ The one stored thing is the ANSWER, and it is a ROW — `phase_prompt_answers`, one per transition, unique on `transition_id` (migration 0035, ruled 2026-08-10). It re-arms the prompt by itself: the next move is a different id with no row against it. `PHASE_TEMPLATE_PROMPT_COOKIE` survives as a fast path only and may only ever suppress a prompt the row suppresses too — never restore one.
+- ⚖ Accepting is IDEMPOTENT per transition, on any device: `acceptPhaseTemplatePrompt` claims that row with `ON CONFLICT DO NOTHING` BEFORE its first import and runs only if the claim returned a row, so a repeat reports `already_answered` and writes nothing. Claim-first inverts the marker-last rule deliberately — the import it guards is not redo-safe.
+- The claim happens AFTER the requested keys are filtered against the live prompt, never before: a forged key list must buy nothing, and spending the planter's one answer is something.
 - Accepting dates the checklist from the TRANSITION instant, never from the press (`importedAt: transition.createdAt`), and the keys are re-filtered against a freshly derived prompt so a forged key imports nothing.
-- Accepted residual: a decline is per-browser, because the answer is a cookie. Declining on a laptop does not silence the prompt on a phone; a cross-device answer needs a column and a migration.
+- A claim whose import wrote NOTHING is released, so the prompt returns; a claim whose import got part-way is KEPT, because re-offering a checklist already in the list is how a planter imports it twice. The remainder stays reachable at `/tasks/templates`.
 
 ## Dev Seeds
 
