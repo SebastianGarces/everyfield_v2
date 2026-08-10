@@ -31,6 +31,35 @@ export const ONBOARDING_STEP_IDS = [
 
 export type OnboardingStepId = (typeof ONBOARDING_STEP_IDS)[number];
 
+/**
+ * The query param that carries the flow's current step (#373):
+ * `/dashboard?step=journey`.
+ *
+ * The flow has no route of its own — it renders AS the dashboard while
+ * `onboarding_completed_at` is null — so the step has to live in the URL for
+ * anything outside the flow to be able to see it. The contextual wiki guide is
+ * the first such reader (`src/lib/wiki/guide-config.ts`, ruled on PR #367:
+ * step-scoped, journey only), and OB-004's re-entry link already used this same
+ * param name, so nothing new is being introduced here.
+ */
+export const ONBOARDING_STEP_PARAM = "step";
+
+/**
+ * Is this URL value one of the four steps?
+ *
+ * The ONE place a `?step=` value becomes a step id, so both halves of the flow
+ * — the page that resolves where a planter lands and the client that reads the
+ * URL on every render — refuse the same set of garbage. It returns false rather
+ * than defaulting to a step: an unrecognised value is a caller error, and the
+ * server's resume rule is a better answer than a guess.
+ */
+export function isOnboardingStepId(value: unknown): value is OnboardingStepId {
+  return (
+    typeof value === "string" &&
+    (ONBOARDING_STEP_IDS as readonly string[]).includes(value)
+  );
+}
+
 export type OnboardingStep = {
   id: OnboardingStepId;
   /** 1-based, for "Step 2 of 4" and the step rail. */

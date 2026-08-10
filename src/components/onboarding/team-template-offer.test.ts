@@ -252,12 +252,16 @@ test("the finish screen is reached through the gate, on every way out", () => {
   // first thing `finish()` does, and it RETURNS: an offer that fell through
   // would complete onboarding underneath the screen it just opened.
   const finishBody = FLOW_CODE.slice(FLOW_CODE.indexOf("function finish() {"));
+  // `setFinishScreenStep(step)` rather than a bare boolean since #373: the step
+  // behind the screen now lives in the URL and can change under it (Back), so
+  // the screen records WHICH step it was opened from and closes when the
+  // planter returns to another one. The gate above it is unchanged.
   assert.match(
     finishBody,
-    /function finish\(\) \{\s*if \(!atFinishScreen && offerTeamTemplates\) \{[\s\S]*?setAtFinishScreen\(true\);\s*return;\s*\}/
+    /function finish\(\) \{\s*if \(!atFinishScreen && offerTeamTemplates\) \{[\s\S]*?setFinishScreenStep\(step\);\s*return;\s*\}/
   );
   assert.ok(
-    finishBody.indexOf("setAtFinishScreen(true)") <
+    finishBody.indexOf("setFinishScreenStep(step)") <
       finishBody.indexOf("startFinishing(")
   );
 

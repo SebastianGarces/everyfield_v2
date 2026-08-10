@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import { useSearchParams } from "next/navigation";
 import { Church } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,6 +13,8 @@ import {
 import { completeOnboarding } from "@/app/(dashboard)/dashboard/actions";
 import {
   ONBOARDING_STEP_IDS,
+  ONBOARDING_STEP_PARAM,
+  isOnboardingStepId,
   isSkippableOnboardingStep,
   nextOnboardingStep,
   onboardingStep,
@@ -41,6 +44,21 @@ import { shouldOfferTeamTemplates } from "./team-template-offer";
  * the landing step from the database, so an abandoned flow resumes correctly
  * without anything being persisted per step.
  *
+ * #373 — THAT UI STATE LIVES IN THE URL, not in `useState`. The flow has no
+ * route of its own (it renders AS the dashboard while onboarding is unfinished),
+ * so `?step=` is the only place anything outside this component can read which
+ * step is showing — and the contextual wiki guide has to, because the guide is
+ * scoped to step 3 alone (ruled on PR #367, option C: nothing on the finished
+ * dashboard and nothing on steps 1/2/4). Making the URL the single source
+ * rather than a mirror of state is what buys the rest for free: a deep link
+ * opens on its step, and Back walks the steps instead of leaving the flow.
+ *
+ * The writes are `window.history.pushState`/`replaceState`, which Next patches
+ * so `usePathname`/`useSearchParams` — here AND in the guide's provider — hold
+ * the new value without a server render or an RSC fetch (`.next-docs` →
+ * "Shallow routing on the client"). `router.push` would re-run the page for
+ * every step change, which is exactly what this must not do.
+ *
  * OB-007 — STEPS COMMIT INDEPENDENTLY, and this component is what makes that
  * true rather than merely intended. It holds no draft of anybody's answers:
  * each step owns its own form, saves through its own action, and only calls
@@ -65,6 +83,20 @@ const FINISH_SCREEN_TITLE = "You are set up";
 const FINISH_SCREEN_DESCRIPTION =
   "One suggestion for where you said you are, then your dashboard.";
 
+/**
+ * The current URL with `?step=` set to `step`, every other param kept (#373).
+ *
+ * Built from `window.location` rather than from `usePathname`/`useSearchParams`
+ * so it always reflects the address bar AT THE MOMENT of the write, including a
+ * param some other client wrote since this render began. Only ever called from
+ * an event handler or an effect, so `window` is defined.
+ */
+function stepUrl(step: OnboardingStepId): string {
+  const params = new URLSearchParams(window.location.search);
+  params.set(ONBOARDING_STEP_PARAM, step);
+  return `${window.location.pathname}?${params.toString()}`;
+}
+
 export function OnboardingFlowClient({
   initialStep,
   leadershipStatus,
@@ -85,9 +117,28 @@ export function OnboardingFlowClient({
   /** OB-015 — does the plant already have ministry teams? Then there is nothing to offer. */
   teamsInitialized: boolean;
 }) {
-  const [step, setStep] = useState<OnboardingStepId>(initialStep);
+  const searchParams = useSearchParams();
   const [finishing, startFinishing] = useTransition();
   const [finishError, setFinishError] = useState<string | null>(null);
+
+  /**
+   * #373 — the step showing, read from the URL.
+   *
+   * `initialStep` is the FALLBACK, not the seed: it is what the server resolved
+   * for a URL that names no step (a plain `/dashboard`) or names one it does
+   * not recognise. Anything the URL does name has already been through the
+   * page's guard — a step past step 1 without a church is redirected away
+   * rather than ignored — so a value that survives to here is one the server
+   * agreed to.
+   *
+   * Deriving instead of mirroring is the whole point. There is no `setStep` to
+   * fall out of sync with the address bar, so Back, Forward, a deep link and a
+   * reload all land on the same step as the URL they came from.
+   */
+  const stepParam = searchParams.get(ONBOARDING_STEP_PARAM);
+  const step: OnboardingStepId = isOnboardingStepId(stepParam)
+    ? stepParam
+    : initialStep;
 
   // The answer step 3 just gave, which is UI state and not a copy of anything:
   // it is what the action REPORTED BACK about the declaration made moments ago,
@@ -97,7 +148,18 @@ export function OnboardingFlowClient({
   const [declaredThisVisit, setDeclaredThisVisit] = useState<number | null>(
     null
   );
-  const [atFinishScreen, setAtFinishScreen] = useState(false);
+
+  // OB-015 — the step the finish screen was opened FROM, which is how it is
+  // told apart from "not showing" now that the step behind it can change under
+  // it (#373). The screen has no `?step=` of its own: it is not one of the four
+  // steps, and inventing a fifth value would put a URL in a planter's hands
+  // that reopens an offer whose gate they already answered. So it is held as
+  // the step it belongs to, and a Back out of it — which moves the URL to the
+  // previous step — closes it, instead of leaving the offer painted over a step
+  // the planter has already returned to.
+  const [finishScreenStep, setFinishScreenStep] =
+    useState<OnboardingStepId | null>(null);
+  const atFinishScreen = finishScreenStep === step;
 
   // OB-015, ruling 2026-08-09 — the offer follows the PLANT'S STATE, not the
   // path taken to the finish screen. `declaredPhase` is what the church row says
@@ -121,10 +183,39 @@ export function OnboardingFlowClient({
     headingRef.current?.focus();
   }, [step, atFinishScreen]);
 
+  /**
+   * #373 — the other half of "the step lives in the URL": stamping it there
+   * when the URL arrived without one.
+   *
+   * Without this, a planter who RESUMES onto step 3 sits at a bare
+   * `/dashboard`, and the guide entry keyed on `/dashboard?step=journey` would
+   * never match for exactly the planters it is for. So the step the flow is
+   * showing is written even when nobody navigated to it.
+   *
+   * `replaceState`, never `pushState`: arriving is not navigating, and a
+   * history entry here would make Back a no-op that appears to do nothing. It
+   * is also self-healing rather than mount-only — the condition is "the URL
+   * disagrees with the step showing", which a `goTo` push has already satisfied
+   * by the time this runs, so it writes once and then stays quiet.
+   *
+   * A history write is a side effect on an external system, which is what
+   * `useEffect` is for. Nothing here copies server data into state
+   * (`memory/contracts/data-patterns.md`) — the flow reads FROM the URL.
+   */
+  useEffect(() => {
+    if (stepParam === step) return;
+    window.history.replaceState(null, "", stepUrl(step));
+  }, [stepParam, step]);
+
   function goTo(next: OnboardingStepId) {
     hasNavigated.current = true;
     setFinishError(null);
-    setStep(next);
+    // Leaving the finish screen behind explicitly, so a later Forward back onto
+    // this step does not re-open an offer the planter has moved past.
+    setFinishScreenStep(null);
+    // Shallow: the URL and the router's view of it change, the server render
+    // does not re-run, and the entry Back returns to is the step just left.
+    window.history.pushState(null, "", stepUrl(next));
   }
 
   function goForward() {
@@ -182,7 +273,7 @@ export function OnboardingFlowClient({
     if (!atFinishScreen && offerTeamTemplates) {
       hasNavigated.current = true;
       setFinishError(null);
-      setAtFinishScreen(true);
+      setFinishScreenStep(step);
       return;
     }
 

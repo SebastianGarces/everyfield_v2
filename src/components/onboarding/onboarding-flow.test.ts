@@ -94,12 +94,17 @@ test("the flow advances only once a step reports its write committed", () => {
 // Resume (FRD AC 5)
 // ----------------------------------------------------------------------------
 
-test("where the planter lands is the server's decision, seeded once", () => {
-  // `initialStep` is derived from the church row by the page and only SEEDS
-  // this component's state — which step is showing afterwards is the planter's
-  // own navigation. A reload re-derives it, which is what makes abandoning the
-  // flow safe without anything being persisted per step.
-  assert.match(FLOW_CODE, /useState<OnboardingStepId>\(initialStep\)/);
+test("where the planter lands is the server's decision, and the URL's fallback", () => {
+  // `initialStep` is derived from the church row by the page. Since #373 it is
+  // the FALLBACK the flow uses when the URL names no step, not a seed copied
+  // into state — which step is showing afterwards is the URL, and the URL is
+  // the planter's own navigation. A reload re-derives it, which is what makes
+  // abandoning the flow safe without anything being persisted per step.
+  assert.match(
+    FLOW_CODE,
+    /isOnboardingStepId\(stepParam\)\s*\?\s*stepParam\s*:\s*initialStep/,
+    "the step showing is read from the URL, falling back to the server's answer"
+  );
 
   // And the rule it is derived from, stated once here so the binding above has
   // a meaning attached: after step 2 is answered, resumption is step 3.
