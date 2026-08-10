@@ -33,6 +33,24 @@ if (!Array.isArray(units) || units.length === 0)
   throw new Error(
     "Pass the wave's units array as args, e.g. [{id,title,lane,files,summary,acceptanceCriteria,issue,risk}, ...]"
   );
+// ---------------------------------------------------------------------------
+// Recipes — the strategy layer (#399). A recipe is a child workflow at
+// .claude/workflows/recipes/<id>.js that implements ONE WORKSTREAM ATTEMPT and
+// nothing else; the guarantee layer keeps everything around it (claiming,
+// staging, worktrees, scoped verify, attempt accounting, merge-back, and the
+// whole verify-and-ship tail). Contract: ops/agent-os/recipes.md.
+//
+// An unknown id fails HERE, at parse — before any claim, before any worktree,
+// never mid-build.
+// ---------------------------------------------------------------------------
+const KNOWN_RECIPES = ["implement-straight", "generate-and-filter"];
+const recipeOf = (u) => u.recipe || "implement-straight";
+for (const u of units)
+  if (!KNOWN_RECIPES.includes(recipeOf(u)))
+    throw new Error(
+      `unit "${u.id}" names unknown recipe "${u.recipe}". Known recipes: ${KNOWN_RECIPES.join(", ")}. ` +
+        `Recipe validation is a parse-time gate — failing here means nothing was claimed and no worktree was cut.`
+    );
 const MAX_ATTEMPTS = parsed?.maxAttempts || 3;
 // How many times a label write is re-attempted before the track is errored.
 // A label write is idempotent, so retrying is free; NOT retrying is what left
@@ -467,9 +485,22 @@ function planStages(trackUnits, trackId) {
     const inLevel = trackUnits.filter((u) => level.get(u.id) === l);
     if (!inLevel.length) continue;
     stages.push(
-      clusterByFile(inLevel).map((us, i) =>
-        summarise(us, { id: `${trackId}-s${stages.length}w${i + 1}` })
-      )
+      clusterByFile(inLevel).map((us, i) => {
+        // One workstream runs ONE recipe. Units may only share a workstream
+        // (same stage + shared files) when they agree on it — a mixed set is a
+        // plan defect, thrown here at plan time, never mid-build.
+        const recipes = [...new Set(us.map(recipeOf))];
+        if (recipes.length > 1)
+          throw new Error(
+            `units ${us.map((u) => `"${u.id}"`).join(", ")} share a workstream in track "${trackId}" ` +
+              `but name different recipes (${recipes.join(", ")}) — a workstream runs one recipe. ` +
+              `Fix the decomposition or the recipe choices.`
+          );
+        return summarise(us, {
+          id: `${trackId}-s${stages.length}w${i + 1}`,
+          recipe: recipes[0],
+        });
+      })
     );
   }
   return stages;
@@ -905,6 +936,148 @@ The loop checks these rather than trusting you: a FRESH cut must have headSha ==
 }
 
 /**
+ * The #307 root-cause preamble, rendered by the PARENT and prepended verbatim
+ * by every recipe (ruling mod 2: the lesson never moves into recipe files).
+ * The evidence is quoted VERBATIM via evidenceBlock — a paraphrase is where a
+ * named `ReferenceError` becomes "the page does not render".
+ */
+function renderRetryBlock(report, branch, wt) {
+  return `The branch ${branch} and worktree ${wt} already exist with the prior work. A verifier REJECTED it. Fix ONLY what is needed.
+
+**THE ROOT CAUSE IS BELOW, IN THE VERIFIER'S OWN WORDS. Read it before you open a file.**
+
+\`\`\`
+${evidenceBlock(report)}
+\`\`\`
+
+Start from that named cause and reproduce it yourself — run the thing the evidence describes and see the failure before you change anything. Do not start from what looks wrong to you: on #307 three attempts fixed a stuck button and a flaky test while the \`ReferenceError\` the verifier had named crashed the page on every one of them, and the track was blocked with the cause untouched.
+
+Your result MUST answer it:
+- \`rootCause\` — the cause NAMED above, restated in your own words.
+- \`rootCauseAddressed\` — what you changed so that cause is gone, and the command output proving it.
+
+Nothing else you did counts until those two are filled in — the loop rejects the attempt without even calling a verifier if they are empty. If you could NOT fix the named cause, say that in \`rootCauseAddressed\` and why; an honest miss is worth more than a fix report for something else.`;
+}
+
+// The recipe side-effect detector's transcript shape (ruling mod 4).
+const REFS_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["refs"],
+  properties: {
+    refs: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["ref", "sha"],
+        properties: {
+          ref: {
+            type: "string",
+            description: "the full ref path, exactly as printed",
+          },
+          sha: { type: "string", description: "the sha, exactly as printed" },
+        },
+      },
+    },
+    note: { type: "string" },
+  },
+};
+
+/**
+ * Transcribe `git ls-remote --heads origin <branches>` before and after a
+ * recipe runs. Any new, moved or deleted origin ref between the two snapshots
+ * is a recipe-contract violation and a failed attempt (ruling mod 4).
+ * Cheap-model-safe because the parent compares the transcripts — the agent
+ * only copies what the command printed.
+ */
+async function snapshotRefs(label, branches) {
+  const reply = await agent(
+    `Transcribe remote ref state. Run exactly this, and nothing that writes:
+\`git ls-remote --heads origin ${branches.join(" ")}\`
+Report every output line VERBATIM as a {ref, sha} row — the full ref path as printed, the sha as printed. Empty output is a real answer: return an empty refs array. Do NOT push, do NOT fetch --prune, do NOT edit anything. Return strictly the schema.`,
+    {
+      label,
+      phase: "Build",
+      model: "haiku",
+      effort: "low",
+      schema: REFS_SCHEMA,
+    }
+  );
+  return (reply?.refs || []).map((r) => `${r.sha} ${r.ref}`).sort();
+}
+
+/**
+ * Cut a non-solo workstream's worktree from the TRACK branch — a parent-owned
+ * step (#399): under the recipe contract the worktree is a parent-provided
+ * input, never something the recipe creates for itself. Solo workstreams keep
+ * the track worktree and never come here.
+ */
+async function prepareWorkstreamTree(ws, trackBranch) {
+  const ready = await agent(
+    `Prepare the worktree for ONE workstream of a staged track. Run exactly this, in this order, and nothing that writes code:
+
+1. \`git worktree add -b ${ws.branch} ${ws.wt} ${trackBranch}\`
+   Cut from the TRACK branch, never from ${BASE}: the track branch already carries every earlier stage's commits, and cutting anywhere else silently drops the prerequisite this workstream was ordered after. If the branch already exists from an earlier attempt, re-attach instead of re-cutting: \`git worktree add ${ws.wt} ${ws.branch}\` (no \`-b\`), do NOT reset it, and report \`resumed: true\`.
+2. \`scripts/worktree-env.sh ${ws.wt}\` — give it a test env. It is idempotent; a fresh worktree has no \`.env.local\`, so \`pnpm test\` fails every DB suite until you run it.
+
+Then report, VERBATIM, what each of these printed:
+  - \`git -C ${ws.wt} rev-parse --abbrev-ref HEAD\` → \`branch\`
+  - \`git -C ${ws.wt} rev-parse HEAD\` → \`headSha\`
+  - \`git rev-parse ${trackBranch}\` → \`trackSha\`
+
+The loop asserts the branch and the cut point rather than trusting you — a fresh cut IS the track tip, and anything else means it came from somewhere older. Transcribe what you saw. Return strictly the schema.`,
+    {
+      label: `tree:${ws.id}`,
+      phase: "Build",
+      // Two git commands and a script, asserted below — same reasoning as prep.
+      model: "haiku",
+      effort: "low",
+      schema: {
+        type: "object",
+        required: ["ready", "branch", "headSha", "trackSha"],
+        properties: {
+          ready: { type: "boolean" },
+          branch: { type: "string" },
+          resumed: {
+            type: "boolean",
+            description:
+              "true if the branch already existed and was re-attached rather than cut",
+          },
+          headSha: {
+            type: "string",
+            description: "`git -C <wt> rev-parse HEAD`, verbatim",
+          },
+          trackSha: {
+            type: "string",
+            description: "`git rev-parse <trackBranch>`, verbatim",
+          },
+          note: { type: "string" },
+        },
+      },
+    }
+  );
+
+  if (ready?.ready !== true || ready.branch !== ws.branch)
+    return {
+      ok: false,
+      reason: `the worktree ${ws.wt} is not on ${ws.branch}`,
+    };
+  const head = String(ready.headSha || "").trim();
+  const tip = String(ready.trackSha || "").trim();
+  if (!head || !tip)
+    return {
+      ok: false,
+      reason: `tree prep for ${ws.id} did not report both shas (HEAD ${head || "(none)"}, ${trackBranch} ${tip || "(none)"}) — an unverifiable cut point is treated as a wrong one`,
+    };
+  if (ready.resumed !== true && head !== tip)
+    return {
+      ok: false,
+      reason: `${ws.branch} was cut at ${head} but ${trackBranch} is at ${tip} — a workstream cut anywhere but the track tip silently drops the prerequisite stages`,
+    };
+  return { ok: true };
+}
+
+/**
  * One workstream: implement → SCOPED verify → retry, with its own attempt budget.
  *
  * The attempt counter living here rather than on the track is the point. It used
@@ -946,52 +1119,89 @@ async function runWorkstream(
     // A retry is defined by having a verdict to answer, not by the counter —
     // an integration failure sent back to this workstream arrives on attempt 1.
     const isRetry = Boolean(report);
-    const setup = isRetry
-      ? `The branch ${branch} and worktree ${wt} already exist with the prior work. A verifier REJECTED it. Fix ONLY what is needed.
 
-**THE ROOT CAUSE IS BELOW, IN THE VERIFIER'S OWN WORDS. Read it before you open a file.**
+    // The worktree is a parent-provided input, not something a recipe cuts for
+    // itself (#399). A non-solo workstream gets its tree here, once, before
+    // its first attempt; solo workstreams keep the track worktree.
+    if (attempt === 1 && !solo) {
+      const tree = await prepareWorkstreamTree(ws, trackBranch);
+      if (!tree.ok)
+        return { ok: false, ws, branch, report, reason: tree.reason };
+    }
 
-\`\`\`
-${evidenceBlock(report)}
-\`\`\`
+    // -----------------------------------------------------------------------
+    // The recipe seam (#399): one child workflow call = one workstream
+    // attempt. The recipe gets a worktree, the structured priorReport (ruling
+    // mod 1 — never a flattened string), and the parent-rendered retryBlock
+    // (mod 2 — the #307 lesson never moves into recipe files). It must commit
+    // to `branch` and return {summary, commits, warnings} (+rootCause,
+    // rootCauseAddressed on retries, mod 3). It must NOT push, open PRs, edit
+    // labels/issues, merge elsewhere, or call workflow(). The ref snapshots
+    // around it are the side-effect detector (mod 4).
+    // -----------------------------------------------------------------------
+    const watchedRefs = [...new Set([branch, trackBranch])];
+    const before = await snapshotRefs(
+      `refs:${ws.id}#${attempt}:before`,
+      watchedRefs
+    );
 
-Start from that named cause and reproduce it yourself — run the thing the evidence describes and see the failure before you change anything. Do not start from what looks wrong to you: on #307 three attempts fixed a stuck button and a flaky test while the \`ReferenceError\` the verifier had named crashed the page on every one of them, and the track was blocked with the cause untouched.
-
-Your result MUST answer it:
-- \`rootCause\` — the cause NAMED above, restated in your own words.
-- \`rootCauseAddressed\` — what you changed so that cause is gone, and the command output proving it.
-
-Nothing else you did counts until those two are filled in — the loop rejects the attempt without even calling a verifier if they are empty. If you could NOT fix the named cause, say that in \`rootCauseAddressed\` and why; an honest miss is worth more than a fix report for something else.`
-      : solo
-        ? `Work in the existing worktree ${wt}, which is already on branch ${branch} with a test env. Just \`cd\` into it.`
-        : `Create your OWN worktree, branched from the TRACK branch — not from ${BASE}. The track branch already carries every earlier stage's commits, and branching anywhere else silently drops the prerequisite this workstream was ordered after:\n\`git worktree add -b ${branch} ${wt} ${trackBranch}\`\nThen \`scripts/worktree-env.sh ${wt}\` (idempotent; a fresh worktree has no \`.env.local\`, so \`pnpm test\` fails every DB suite until you run it).`;
-
-    const impl = await agent(
-      `You are a ${ws.lane} engineer. ${CONVENTIONS}
-
-${setup}
-
-You own ONE workstream of a larger track. Implement exactly the unit(s) below and NOTHING else — other agents are working other workstreams of this same track in parallel, and every file outside your declared list may be theirs. Touching one is how two worktrees collide at integration.
-
-${unitBlocks(ws)}
-
-Your declared files — stay inside them:
-${ws.files.map((f) => `  - ${f}`).join("\n") || "  (none declared)"}
-
-Write code AND tests. Run \`pnpm typecheck\` and \`pnpm lint\` in ${wt} and fix what you can. Commit to ${branch} (conventional commits). Do NOT push, do NOT open a PR, and do NOT merge anything — the loop integrates the workstreams and ships the track. Return strictly the schema.`,
+    const impl = await workflow(
+      { scriptPath: `.claude/workflows/recipes/${ws.recipe}.js` },
       {
-        label: `impl:${ws.id}#${attempt}`,
-        phase: "Build",
-        agentType: implAgent,
-        schema: isRetry ? RETRY_IMPL_SCHEMA : IMPL_SCHEMA,
+        track: { id: track.id, issues: track.issues, branch: trackBranch },
+        workstream: {
+          id: ws.id,
+          lane: ws.lane,
+          issues: ws.issues,
+          files: ws.files,
+          summary: ws.units.map((u) => u.summary).join("; "),
+          units: ws.units,
+        },
+        worktree: wt,
+        branch,
+        stageIndex,
+        attempt,
+        priorReport: report ?? null,
+        retryBlock: isRetry ? renderRetryBlock(report, branch, wt) : null,
+        conventions: CONVENTIONS,
+        implAgentType: implAgent,
+        unitBlocksRendered: unitBlocks(ws),
+        declaredFiles: ws.files,
       }
     );
-    if (!impl) {
+
+    const after = await snapshotRefs(
+      `refs:${ws.id}#${attempt}:after`,
+      watchedRefs
+    );
+    const drift = [
+      ...after.filter((x) => !before.includes(x)),
+      ...before.filter((x) => !after.includes(x)),
+    ];
+    if (drift.length) {
       report = {
         verdict: "FAIL",
-        failingGate: "implementer",
-        fixInstructions: `the implementer died on attempt ${attempt}`,
-        summary: `${ws.id}: implementer produced no result`,
+        failingGate: "recipe-contract",
+        fixInstructions:
+          `The recipe changed origin refs it must never touch: ${drift.join("; ")}. ` +
+          `Recipes MUST NOT push, open PRs, or move any remote ref — the guarantee layer publishes. ` +
+          `This attempt is refused without a verifier.`,
+        summary: `${ws.id}: recipe "${ws.recipe}" violated the side-effect contract (origin refs changed)`,
+      };
+      log(
+        `⛔ ${ws.id} attempt ${attempt}: recipe-contract violation — origin refs drifted (${drift.join("; ")})`
+      );
+      continue;
+    }
+
+    if (!impl || !(impl.commits || []).length) {
+      report = {
+        verdict: "FAIL",
+        failingGate: "recipe",
+        fixInstructions: !impl
+          ? `the recipe returned nothing on attempt ${attempt}`
+          : `the recipe returned no commits on attempt ${attempt} — an attempt that committed nothing built nothing`,
+        summary: `${ws.id}: recipe "${ws.recipe}" returned ${!impl ? "nothing" : "no commits"}`,
       };
       continue;
     }

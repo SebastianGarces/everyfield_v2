@@ -500,6 +500,17 @@ const prepped = (prompt) => ({
   baseSha: BASE_SHA,
 });
 
+/** The parent's workstream-tree prep: cut from the track tip, shas agree. */
+const treeReady = (prompt) => ({
+  ready: true,
+  branch: prompt.match(/-b (\S+)/)?.[1] || "feature/x",
+  headSha: "feedd0600000000000000000000000000000d06e",
+  trackSha: "feedd0600000000000000000000000000000d06e",
+});
+
+/** The recipe side-effect detector: no origin refs exist, before or after. */
+const noRefs = () => ({ refs: [] });
+
 /** The publish step before integration G3: worktree and remote agree. */
 const pushedOk = () => ({
   pushed: true,
@@ -511,12 +522,15 @@ const pushedOk = () => ({
 const replyWith = (inProgressNow, claimed) => (prompt, opts) => {
   if (opts.label?.startsWith("start:")) return { claimed, inProgressNow };
   if (opts.label?.startsWith("prep:")) return prepped(prompt);
+  if (opts.label?.startsWith("tree:")) return treeReady(prompt);
+  if (opts.label?.startsWith("refs:")) return noRefs();
   if (opts.label?.startsWith("push:")) return pushedOk();
   if (opts.label?.startsWith("impl:"))
     return {
       summary: "did the thing",
       filesTouched: [],
       notes: "",
+      commits: ["c0ffee00000000000000000000000000000000aa"],
       rootCauseAddressed: "answered",
     };
   if (opts.label?.startsWith("verify:"))
@@ -611,6 +625,8 @@ const replyShip =
     if (prImpl && l.startsWith("pr:")) return prImpl(prompt, opts);
     if (l.startsWith("start:")) return { claimed: [101], inProgressNow: [101] };
     if (l.startsWith("prep:")) return prepped(prompt);
+    if (l.startsWith("tree:")) return treeReady(prompt);
+    if (l.startsWith("refs:")) return noRefs();
     if (l.startsWith("push:")) return pushedOk();
     if (l.startsWith("cleanup:")) return { removed: ["everything"] };
     if (l.startsWith("impl:") || l.startsWith("repair:"))
@@ -619,6 +635,7 @@ const replyShip =
         filesChanged: [],
         summary: "ok",
         selfCheckPassed: true,
+        commits: ["c0ffee00000000000000000000000000000000aa"],
         // A retry must answer the named cause; a first attempt has none to
         // answer. Filling both is what an honest implementer returns.
         rootCause: "the named ReferenceError",
@@ -725,7 +742,17 @@ test("a verify-and-ship child that died is a failed attempt, never a silent skip
   const { result } = await runBuild(
     [buildUnit("alpha", 101)],
     replyShip(passing([])),
-    { workflowImpl: async () => null }
+    {
+      // Only the verify-and-ship child dies; the recipe child still builds.
+      workflowImpl: async (spec) =>
+        spec.scriptPath.endsWith("verify-and-ship.js")
+          ? null
+          : {
+              summary: "built",
+              commits: ["c0ffee00000000000000000000000000000000ad"],
+              warnings: [],
+            },
+    }
   );
   assert.equal(result.shipped.length, 0);
   assert.equal(
@@ -783,14 +810,28 @@ test("dependsOn splits one track into a prerequisite stage and a parallel fan-ou
     "its dependents are stage 1"
   );
 
-  const stage1 = calls.filter(
-    (c) => c.label?.startsWith("impl:") && c.label.includes("s1")
+  const stage1Trees = calls.filter(
+    (c) => c.label?.startsWith("tree:") && c.label.includes("s1")
   );
-  for (const c of stage1)
+  assert.equal(
+    stage1Trees.length,
+    2,
+    "the PARENT cuts each fan-out worktree — a recipe never creates its own tree"
+  );
+  for (const c of stage1Trees)
     assert.match(
       c.prompt,
       /git worktree add -b \S+ \S+ feature\/schema\b/,
       "a fan-out workstream branches from the TRACK branch, so it carries the prerequisite's commits"
+    );
+  const stage1Impls = calls.filter(
+    (c) => c.label?.startsWith("impl:") && c.label.includes("s1")
+  );
+  for (const c of stage1Impls)
+    assert.match(
+      c.prompt,
+      /Work in the existing worktree/,
+      "the implementer receives the tree as an input, ready to use"
     );
   assert.ok(
     calls.some((c) => c.label?.startsWith("integrate:")),
@@ -995,6 +1036,159 @@ test("risk:high never auto-merges, even on a spotless pass", async () => {
   );
   const hold = calls.find((c) => c.label === "hold:alpha");
   assert.match(hold.prompt, /risk:high/);
+});
+
+// ---------------------------------------------------------------------------
+// build-until-done: the recipe seam (#399)
+//
+// A recipe is a child workflow that implements ONE workstream attempt in a
+// parent-provided worktree. These tests pin the parse-time id gate, the args
+// contract, and the two enforcement paths: the origin-ref side-effect detector
+// and the empty-commits refusal — both of which fail the attempt BEFORE a
+// verifier is spent on it.
+// ---------------------------------------------------------------------------
+
+test("an unknown recipe id throws at parse time, naming the unit and the id", async () => {
+  await assert.rejects(
+    runBuild(
+      [{ ...buildUnit("alpha", 101), recipe: "tournament" }],
+      replyShip(passing([]))
+    ),
+    /unit "alpha" names unknown recipe "tournament"/,
+    "failing at parse means nothing was claimed and no worktree was cut — never mid-build"
+  );
+});
+
+test("units sharing a workstream with different recipes throw at plan time", async () => {
+  await assert.rejects(
+    runBuild(
+      [
+        {
+          ...buildUnit("a", 101),
+          files: ["src/shared.ts"],
+          recipe: "implement-straight",
+        },
+        {
+          ...buildUnit("b", 102),
+          files: ["src/shared.ts"],
+          recipe: "generate-and-filter",
+        },
+      ],
+      replyShip(passing([]))
+    ),
+    /different recipes/,
+    "one workstream runs one recipe — a mixed set is a plan defect"
+  );
+});
+
+test("the recipe runs as a child workflow with the contract args", async () => {
+  const { calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    replyShip(passing([]))
+  );
+  const recipeCalls = calls.filter(
+    (c) =>
+      c.kind === "workflow" &&
+      c.scriptPath.includes("recipes/implement-straight.js")
+  );
+  assert.equal(recipeCalls.length, 1, "one recipe call = one attempt");
+  assert.deepEqual(
+    Object.keys(recipeCalls[0].args).sort(),
+    [
+      "attempt",
+      "branch",
+      "conventions",
+      "declaredFiles",
+      "implAgentType",
+      "priorReport",
+      "retryBlock",
+      "stageIndex",
+      "track",
+      "unitBlocksRendered",
+      "workstream",
+      "worktree",
+    ],
+    "recipeArgs is a contract (ops/agent-os/recipes.md) — widening it is a factory change"
+  );
+  assert.equal(recipeCalls[0].args.priorReport, null);
+  assert.equal(recipeCalls[0].args.retryBlock, null);
+});
+
+test("a retry hands the recipe the STRUCTURED report and the parent-rendered retryBlock", async () => {
+  const { calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    failsOnceWithEvidence(),
+    { maxAttempts: 2 }
+  );
+  const retryCall = calls.filter(
+    (c) =>
+      c.kind === "workflow" &&
+      c.scriptPath.includes("recipes/implement-straight.js")
+  )[1];
+  assert.ok(retryCall, "the second attempt goes through the recipe too");
+  assert.equal(
+    retryCall.args.priorReport?.failingGate,
+    "G2-subset",
+    "mod 1: the report travels as an object — flattening it is the #307 context-loss shape"
+  );
+  assert.ok(
+    retryCall.args.retryBlock.includes(CRASH),
+    "mod 2: the parent renders the root-cause preamble with the evidence verbatim"
+  );
+  assert.match(retryCall.args.retryBlock, /rootCauseAddressed/);
+});
+
+test("a recipe that moved an origin ref fails the attempt as a contract violation", async () => {
+  let snaps = 0;
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    (prompt, opts) => {
+      if (opts.label?.startsWith("refs:"))
+        return {
+          refs:
+            ++snaps % 2 === 0
+              ? [{ ref: "refs/heads/feature/alpha", sha: "deadbeef" }]
+              : [],
+        };
+      return replyShip(passing([]))(prompt, opts);
+    }
+  );
+  assert.equal(result.blocked.length, 1);
+  assert.equal(
+    result.blocked[0].failingGate,
+    "recipe-contract",
+    "an origin ref a recipe touched is a violation, not a push that happened early"
+  );
+  assert.ok(
+    !calls.some((c) => /^verify:\S+-s\d+w\d+#/.test(c.label || "")),
+    "the violation is refused before a verifier is spent on it"
+  );
+});
+
+test("a recipe that returns no commits fails the attempt", async () => {
+  const { result, calls } = await runBuild(
+    [buildUnit("alpha", 101)],
+    (prompt, opts) =>
+      opts.label?.startsWith("impl:")
+        ? {
+            committed: true,
+            filesChanged: [],
+            summary: "ok",
+            selfCheckPassed: true,
+            commits: [],
+          }
+        : replyShip(passing([]))(prompt, opts)
+  );
+  assert.equal(result.blocked.length, 1);
+  assert.equal(
+    result.blocked[0].failingGate,
+    "recipe",
+    "an attempt that committed nothing built nothing"
+  );
+  assert.ok(
+    !calls.some((c) => /^verify:\S+-s\d+w\d+#/.test(c.label || "")),
+    "no verifier runs on an empty attempt"
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -1710,6 +1904,7 @@ test("a fix that will not say how it addressed the cause is refused before the v
             filesChanged: ["src/alpha.ts"],
             summary: "fixed the stuck button and pinned the test",
             selfCheckPassed: true,
+            commits: ["c0ffee00000000000000000000000000000000ab"],
             rootCause: "",
             rootCauseAddressed: "",
           }
@@ -1718,6 +1913,7 @@ test("a fix that will not say how it addressed the cause is refused before the v
             filesChanged: [],
             summary: "ok",
             selfCheckPassed: true,
+            commits: ["c0ffee00000000000000000000000000000000ac"],
           }
     ),
     { maxAttempts: 2 }
@@ -1936,6 +2132,7 @@ const PARENT_DOC_FILES = [
 const WORKFLOW_FILES = [
   ".claude/workflows/build-until-done.js",
   ".claude/workflows/verify-and-ship.js",
+  ".claude/workflows/recipes/implement-straight.js",
 ];
 
 test("node --check passes on every workflow script", () => {
