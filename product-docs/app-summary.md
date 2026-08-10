@@ -37,7 +37,11 @@ All relationships are optional and mutable. A planter can sign up independently 
 - **Sending Church Admins** see a portfolio view of their church plants, invitations, and settings.
 - **Network Admins** see a network-wide overview of sending churches and church plants with aggregate metrics, plus a plant health view powered by the Phase Engine.
 
-### Core Features (Built)
+> **This document describes the product, not the build state.** Implementation status lives on the
+> GitHub board (`gh issue list --label feature`) — it is the only place that says what is shipped,
+> in flight, or queued. Read the sections below as a description of what EveryField is.
+
+### Core Features
 
 **Phase Engine (Plant Intelligence)** — The platform's primary differentiator. An advisory intelligence engine that reads each plant's real activity (a deterministic Signal layer computes fact snapshots from the database), judges it against the Launch Playbook methodology via an LLM-as-judge grounded in retrieved methodology content (RAG over embedded methodology chunks), and surfaces prioritized insights to the planter on a dedicated Phase page — with useful / not-useful feedback on each insight. Phase transitions are soft-gated and planter-confirmed (forward, back, or skip — never blocked), recorded in an immutable audit trail with the fact snapshot and rubric version. Oversight users get a plant health view with assessment-derived health signals. Runs on OpenAI gpt-4o via the Vercel AI SDK.
 
@@ -49,7 +53,7 @@ All relationships are optional and mutable. A planter can sign up independently 
 
 **Wiki / Knowledge Base** — A curated, structured knowledge base that guides planters through the seven phases (0–6) of the church planting journey: Phase 0 (Discovery), Phase 1 (Core Group Development), Phase 2 (Launch Team Formation), Phase 3 (Training & Preparation), Phase 4 (Pre-Launch), Phase 5 (Launch Sunday), Phase 6 (Post-Launch). Articles cover frameworks like the 4 C's, 8 Critical Success Factors, the Ministry Funnel, the 4 Pillars, Meeting Objectives (Inspire, Instill, Inform), and the 5 Interview Criteria. Includes full-text search, reading progress tracking, bookmarks, and support for network/church-specific content.
 
-**Communication Hub** — Email messaging with reusable templates (meeting invitations, reminders, follow-ups, core group communications, team updates, announcements, launch communications). Per-recipient delivery tracking (sent, delivered, opened, clicked, bounced). Meeting-linked communications with RSVP confirmation tokens. Powered by Resend for email delivery. SMS is planned (the schema supports sms/both channels, but no SMS send path or provider is wired up yet).
+**Communication Hub** — Email messaging with reusable templates (meeting invitations, reminders, follow-ups, core group communications, team updates, announcements, launch communications). Per-recipient delivery tracking (sent, delivered, opened, clicked, bounced). Meeting-linked communications with RSVP confirmation tokens. Powered by Resend for email delivery. SMS is in scope but deferred to post-beta.
 
 **Dashboard** — Aggregated metrics (core group size, total people, overdue tasks, vision meetings held) and a cross-feature activity feed showing recent contact additions, status changes, commitments, completed meetings, and completed tasks.
 
@@ -57,20 +61,24 @@ All relationships are optional and mutable. A planter can sign up independently 
 
 **Feedback** — In-app feedback collection (bugs, suggestions, questions) with status tracking.
 
-### Planned Features (Not Yet Built)
+### Further Features
+
+Also part of the product's scope. Check the board for where each one stands.
 
 - **Documents & Templates** — Ready-to-use templates for commitment documents, vision meeting materials, budget worksheets, team checklists, and letter templates.
 - **Financial Tracking** — Budget monitoring and aggregate giving metrics (no individual contribution tracking — integrates with third-party giving platforms).
-- **Facility Management** — Venue search, evaluation, and relationship tracking for finding a launch location.
-- **Progress Dashboard (Enhanced)** — Visual representation of the 8 Critical Success Factors, phase progression, and health indicators.
+- **Notifications & Digest** — Shared delivery infrastructure: an in-app notification rail, an email digest, and per-category preferences, so features stop inventing their own delivery.
+- **Planter Onboarding** — The first-run journey from account creation to a plant the planter can actually work in.
+- **Oversight** — The overseer's surface: a plant directory and per-plant detail with privacy-gated aggregates, plus association invite, accept, and sever with an audit trail.
+- **Launch (Launch Sunday)** — Launch as a first-class entity: target date, status lifecycle, readiness milestones, and the outcome of the day itself.
 
 ---
 
-## AI: What Has Shipped, and What Comes Next
+## AI: The Two Halves of the Direction
 
 The biggest opportunity with EveryField is reducing the operational burden on the planter. Church planters are typically not administrators — they're pastors, visionaries, and relationship builders. Every minute spent clicking through forms, writing follow-up emails, or hunting for the right wiki article is a minute not spent casting vision or meeting with people.
 
-The AI direction has two halves. The **judgment half has shipped** as the Phase Engine (see Core Features above): a RAG-grounded LLM-as-judge (OpenAI gpt-4o via the Vercel AI SDK, over embedded methodology content) that assesses each plant against the Launch Playbook and surfaces insights to planters and health signals to oversight. The **action half is planned**: a conversational tool-calling agent that executes multi-step operations from natural language (vision captured in [features/church-plant-agent/vision.md](./features/church-plant-agent/vision.md)). The sections below describe that planned agent.
+The AI direction has two halves. The **judgment half** is the Phase Engine (see Core Features above): a RAG-grounded LLM-as-judge (OpenAI gpt-4o via the Vercel AI SDK, over embedded methodology content) that assesses each plant against the Launch Playbook and surfaces insights to planters and health signals to oversight. The **action half** is a conversational tool-calling agent that executes multi-step operations from natural language — still pre-FRD, with the direction captured in [features/church-plant-agent/vision.md](./features/church-plant-agent/vision.md). The sections below describe that agent.
 
 ### Chat-First Interface (Planned)
 
@@ -99,9 +107,9 @@ A conversational AI interface (sidebar or full-screen) could become the primary 
 - *"What do I need to do before the meeting on Thursday?"* → AI shows the meeting's checklist plus any related tasks.
 - *"Create follow-up tasks for everyone who attended last night — due in 48 hours"* → AI batch-creates personalized follow-up tasks linked to each attendee.
 
-### RAG-Powered Wiki & Coaching (Partially Shipped)
+### RAG-Powered Wiki & Coaching
 
-The Phase Engine already does the retrieval-grounded judgment half of this: methodology content is embedded and retrieved to ground phase-aware assessments and insights. What remains is the conversational layer on top:
+The Phase Engine does the retrieval-grounded judgment half of this: methodology content is embedded and retrieved to ground phase-aware assessments and insights. The conversational layer sits on top:
 
 - **Contextual coaching:** When a planter asks *"How do I handle someone who wants to join the core group but fails the chemistry interview?"*, the AI retrieves relevant wiki content about the 5 Interview Criteria and the process for handling a "not qualified" result, then synthesizes a practical, personalized answer.
 - **Phase-aware guidance:** The AI knows what phase the planter is in (stored in the church record) and proactively surfaces relevant articles, frameworks, and checklists. *"You're in Phase 1 with 30 core group members. Here are the 3 things the Launch Playbook says to focus on right now."*
@@ -121,9 +129,9 @@ The overarching goal is to make the planter's most common workflows require **ze
 | Navigate to Tasks → Review each → Check off → Navigate to next                                                           | *"Mark all the prep tasks for last night's meeting as done"*                 |
 
 
-### Network & Sending Church Intelligence (First Version Shipped)
+### Network & Sending Church Intelligence
 
-The oversight health view already surfaces Phase Engine assessment-derived health signals per plant. Beyond that, AI can provide:
+The oversight health view surfaces Phase Engine assessment-derived health signals per plant. Beyond that, AI can provide:
 
 - **Portfolio health summaries:** *"Which of my planters are at risk?"* → AI analyzes activity recency, core group growth velocity, meeting frequency, and task completion rates across all plants.
 - **Comparative analytics:** *"How is Pastor Mike doing compared to other planters at the same phase?"* → AI benchmarks against network-wide averages.

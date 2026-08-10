@@ -5,15 +5,6 @@
 **Date:** January 25, 2026  
 **Feature Code:** F6
 
-> **Data model settled 2026-07-26 (decision #15): a code-defined, generate-on-demand catalog.**
-> Templates live in code as `DOCUMENT_TEMPLATES` with `getTemplateById`, rendered to DOCX/PDF on
-> request. **There are no template tables and none are planned** — disregard any DB-backed template
-> entity described below. This also means F6 carries no migration and is not `risk:high`.
->
-> Phase 1 (16/25 requirements) is built on `feat/document-templates` and merges into `main` cleanly.
-> Per decision #1 it ships through a PR so CI and the Definition of Done run on it, rather than being
-> merged directly. The checklist is re-trued once that lands.
-
 ---
 
 > **Tracked on the board:** [F6 #69](https://github.com/SebastianGarces/everyfield_v2/issues/69) — open requirements are its sub-issues. Implementation status is not tracked in this file.
@@ -378,35 +369,24 @@ Return to originating context
 
 ### Template
 
-System-provided document templates.
+The catalog is a fixed set of templates that ship with the product. Templates are product content,
+not user data, so they version with the product and there are no template tables to migrate.
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| id | UUID | Yes | Primary key |
-| name | String | Yes | Template name |
-| description | Text | No | Template description |
-| category | Enum | Yes | `commitment` / `vision_meeting` / `administrative` / `operational` / `communication` |
-| phase | Enum | No | Relevant phase (0-6) |
-| file_format | Enum | Yes | `pdf` / `docx` / `xlsx` |
-| template_file_url | String | Yes | URL to template file |
-| preview_image_url | String | No | Preview thumbnail URL |
-| merge_fields | JSON | No | Array of merge field definitions |
-| page_count | Integer | No | Number of pages |
-| related_wiki_article_id | UUID (FK) | No | Reference to WikiArticle |
-| is_active | Boolean | Yes | Default: true |
-| created_at | Timestamp | Yes | Creation timestamp |
-| updated_at | Timestamp | Yes | Last update timestamp |
+A template is defined by:
 
-**Merge Field Definition:**
-```json
-{
-  "field_name": "church_name",
-  "display_name": "Church Name",
-  "source": "church.name",
-  "required": true,
-  "default": null
-}
-```
+| Attribute | Description |
+|-----------|-------------|
+| Identifier | A stable id that outlives renames, so saved documents and cross-feature links keep pointing at the same template |
+| Name | The title a planter sees in the library |
+| Description | One line saying what the document is for |
+| Category | `commitment` / `vision_meeting` / `administrative` / `operational` / `communication` |
+| Phase | The phase the template belongs to (0-6), where one applies |
+| Output | What generating produces: the format(s) offered (PDF, DOCX, XLSX) and the page count of the printed result |
+| Merge fields | The values the template asks for — each with the field name in the document, the label shown on the generation form, where it is read from, and whether it is required |
+| Related wiki article | The article that explains when to use the document, where one exists |
+
+Generating a template produces a Document (below): the template is rendered on demand with the
+merge values supplied, and only the resulting document is stored.
 
 ---
 
@@ -418,7 +398,7 @@ Generated and uploaded documents.
 |-------|------|----------|-------------|
 | id | UUID | Yes | Primary key |
 | church_id | UUID (FK) | Yes | Reference to Church |
-| template_id | UUID (FK) | No | Reference to Template (if generated) |
+| template_id | String | No | Catalog template identifier (set when the document was generated from a template) |
 | name | String | Yes | Document name |
 | description | Text | No | Description |
 | file_url | String | Yes | URL to stored file |
@@ -481,7 +461,7 @@ This feature exposes and consumes the following integration points. For system-w
 ### Outbound (This Feature Exposes)
 
 **Template Access API**
-- Exposes `GET /templates?category={category}` for other features to list relevant templates
+- Lists templates filtered by category, so other features can surface the ones relevant to their context
 - Exposes modal-based template generation flow callable from external contexts
 - Returns generated `Document.id` and `Document.file_url` on successful generation
 

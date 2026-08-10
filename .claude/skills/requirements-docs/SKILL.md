@@ -38,7 +38,8 @@ forms; all three are prohibited:
   above"). A ruling is recorded once, in `product-docs/decisions.md`; the FRD absorbs it by
   **the requirement text becoming correct**. At most, a requirement carries one line of
   *why* — the rationale that stops the question being reopened — with no date and no number.
-  (The one allowed ref is the board-parent link in the header.)
+  (Two allowed refs: the board-parent link in the header, and a document-level scope
+  statement — cut/deferred/post-beta — citing its `decisions.md` row.)
 - **No status, in any tense.** Not "not yet built", not "currently", not "already exists",
   not "the shipped code does X instead", and not the future-perfect form either (asserting a
   post-migration world in the present tense). A sentence describing the repo or the running

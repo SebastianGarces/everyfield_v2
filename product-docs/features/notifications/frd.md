@@ -6,10 +6,9 @@
 **Feature Code:** F11
 
 > **This is shared infrastructure, not a user-facing feature in its own right.** Its value is that other
-> features stop inventing their own delivery. Four requirements elsewhere in the product are blocked on it
-> today (task due/overdue alerts, meeting reminders, scheduled sending, team health checks) and each was
-> explicitly held back rather than building a private one-off. Read the Integration Contracts section as the
-> primary deliverable.
+> features stop inventing their own delivery: task due/overdue alerts, meeting reminders, scheduled sending
+> and team health checks all reach the user through this layer rather than through four private one-offs.
+> Read the Integration Contracts section as the primary deliverable.
 
 ---
 
@@ -81,70 +80,39 @@ stored per `(user, category, channel)` and an unknown category falls back to its
 - Notifications are church-scoped. A user never receives a notification about a church they cannot read, and
   oversight-role notifications respect the same privacy gating as the oversight read paths.
 
-> **Ruled 2026-07-27 (PR #199, Open Question #3): oversight eligibility is opt-in per church, and enqueue
-> skips rather than throws.** Two decisions, both settled against the F11 foundation:
->
-> **1. Every category is available to oversight roles, gated by the church's privacy settings, default off.**
-> An oversight recipient may be told about a category only when that plant has turned on the matching toggle
-> in its privacy settings. `phase` and `digest` gained toggles of their own for this; the other four reuse
-> the toggle their content already belongs to (`tasks`, `meetings`, `ministry_teams`, and `people` for
-> `communication`, whose content is about people). All default to **off**, so no existing church changes
-> behaviour and no oversight user starts receiving anything until their plant opts in. This answers the
-> "twenty plants, twenty digests" concern the open question raised: an admin over twenty plants receives
-> only what each plant individually granted, never the union.
->
-> `digest` gets a **separate** toggle rather than being inferred from the others — a digest is its own
-> recurring contact, and a church that shares its task list has not thereby asked for a weekly email about
-> itself to leave the building. That toggle governs eligibility only: whatever assembles a digest's contents
-> (N-013) must still gate each line against that line's own feature toggle.
->
-> **2. A recipient who may not be told is skipped and reported, not thrown over.** Enqueue records nothing
-> for that recipient and returns a per-recipient result saying it was skipped and why. The natural caller is
-> a fan-out ("remind all six attendees"), and a throw there aborts the loop mid-way — rows written for the
-> recipients before the barred one, none for those after, and the exception surfacing in whatever feature
-> action triggered the reminder. A notification permission must not be able to fail a meeting. The refusal
-> stays total for the barred recipient: no row is written, ever.
+### What oversight recipients receive
 
-> **Ruled 2026-07-27 (standup rulings; supersedes decision 1 above): oversight receives a digest and
-> milestones, not categories.** Granular per-event category notifications are for the plant's own team;
-> an oversight recipient is never enqueued one, shared or not. What oversight receives instead:
->
-> - **A daily activity digest**, sent only when there was activity — a quiet plant generates no contact.
-> - **Milestone events**, delivered per event: planter accepted invitation, phase/stage advanced, and
->   launch date set or changed.
->
-> The plant-side control collapses accordingly: **one toggle** ("Share activity with your sending
-> church/network"), default **off**, gating both the digest and the milestone events. Its UI copy must
-> say what is being shared — a summary digest, not a detailed list of everything that occurred. Decision
-> 2 above (skip-and-report) is unchanged and applies to the new gate identically. Oversight users also
-> get the in-app feed in alpha (N-027) — parity means a notification delivered to them always has an
-> in-app row they can see. Until the new model ships, nothing changes in practice: the existing toggles
-> default off and no plant has opted in. Board: #224 (model + toggle), #225 (feed).
+An oversight recipient (`sending_church_admin`, `network_admin`) receives exactly two things about a
+plant, and never the granular per-category notifications that are meant for the plant's own team:
 
-> **Ruled 2026-08-01 (issue #224; amends the two rulings above).** Two questions the build surfaced,
-> both answered:
->
-> **1. The digest is scheduled by the notification dispatcher, not by a cron of its own.** The
-> every-15-minute dispatcher tick gains a once-a-day guard that runs the oversight digest for the last
-> COMPLETE day. The guard is derived from the database — a plant is offered to the digest only while no
-> digest row exists for that plant and that day — so a tick that fires 96 times a day produces exactly one
-> digest per oversight recipient, a dropped tick is a delay rather than a lost digest, and no second
-> scheduler has to be maintained. This is why the toggle's copy may keep saying **"once a day"**: it is
-> now true. A day with no activity still produces no contact at all.
->
-> **2. The invitation-accepted milestone is exempt from the sharing toggle.** "Your invitation was
-> accepted" is the SENDING church's own event — they issued the invitation and the acceptance answers it —
-> so it is emitted whether or not the plant has turned sharing on. The exemption is exactly one
-> notification type and it relaxes **consent only**: the recipient must still be able to access the church,
-> and the category allow-list is still applied first, so nothing granular can reach oversight through it.
-> **Phase/stage and launch-date milestones remain gated**, because those are facts about the plant's own
-> progress. This also un-breaks a milestone that was previously unreachable in practice: the toggle
-> defaults off and a planter decides about sharing only after joining, so the acceptance was refused in
-> essentially every real case and never retried.
->
-> Consequence for the copy, which N-026 makes a requirement: the toggle now describes **two** governed
-> milestones and names the invitation acceptance as something that reaches the sending church either way.
-> The milestone's own body no longer promises a summary that the plant may not have agreed to send.
+- **A daily activity digest**, scheduled by the recurring dispatcher (N-028) and sent only when there
+  was activity — a quiet plant generates no contact.
+- **Three milestone events**, delivered per event: the planter accepted the invitation, the
+  phase/stage advanced, and the launch date was set or changed.
+
+*Why a digest rather than categories:* an admin over twenty plants subscribed by category is twenty
+event streams for one person. A once-a-day roll-up is the shape oversight can actually consume.
+
+One plant-side toggle, `share_activity_with_oversight` (default **off**), gates all of it — with one
+exception: **invitation-accepted is always sent**, because it is the sending organization's own
+event; that organization issued the invitation and the acceptance answers it. The exemption relaxes
+consent only: the recipient must still be able to read the church. Phase/stage and launch-date
+milestones stay gated, because those are facts about the plant's own progress.
+
+*Why this is its own toggle rather than being inferred from the per-feature sharing settings:* a
+church that shares its task list has not thereby asked for a weekly email about itself to leave the
+building. The toggle's copy states what is shared — a summary digest, not a detailed list of
+everything that occurred — and names the invitation-accepted exception.
+
+Oversight roles also have the in-app feed (N-027): a notification delivered to them always has an
+in-app row they can see.
+
+**A recipient who may not be told is skipped and reported, not thrown over.** Enqueue records nothing
+for that recipient — the refusal is total, no row is ever written — and returns a per-recipient result
+saying it was skipped and why. *Why:* the natural caller is a fan-out ("remind all six attendees"),
+and a throw there aborts the loop mid-way, writing rows for the recipients before the barred one and
+none for those after, with the exception surfacing in whatever feature action triggered the reminder.
+A notification permission failure must never be able to fail a meeting.
 
 ---
 
@@ -174,10 +142,10 @@ that no longer exists is worse than no notification, because it teaches the user
 | **N-002** | Enqueue is **never** a synchronous send. A caller returns as soon as the notification is recorded; delivery is the dispatcher's job. |
 | **N-003** | A recurring dispatcher drains notifications whose scheduled time has passed, delivering to each channel the recipient has enabled for that category. |
 | **N-004** | Delivery is **at-most-once per channel**. A dispatcher that runs twice, overlaps itself, or crashes mid-run does not double-send. |
-| **N-005** | Per-category, per-channel preferences: a user can disable `tasks` email while keeping `tasks` in-app, and vice versa. Absent an explicit row, the category's code-defined default applies. A preference is honoured on **read** as well as on send: see the Screen 1 ruling below. |
+| **N-005** | Per-category, per-channel preferences: a user can disable `tasks` email while keeping `tasks` in-app, and vice versa. Absent an explicit row, the category's code-defined default applies. A preference is honoured on **read** as well as on send (see Screen 1). |
 | **N-006** | A preferences screen lets a user see and change every category/channel combination. |
 | **N-007** | Every email carries a working unsubscribe link that disables that category's email channel for that user without requiring a login. |
-| **N-008** | An in-app feed lists a user's notifications newest-first with unread state; the app shell shows an unread count. The list is **paged**, not capped — see the Screen 1 ruling below. |
+| **N-008** | An in-app feed lists a user's notifications newest-first with unread state; the app shell shows an unread count. The list is **paged**, not capped (see Screen 1). |
 | **N-009** | A user can mark one notification read, and mark all read. |
 | **N-010** | Notifications are church-scoped: a query for a user's notifications can never return another church's rows. |
 | **N-011** | A pending notification can be **cancelled by entity reference**, so a caller that deletes or reschedules the underlying thing does not send a stale notification. |
@@ -188,7 +156,7 @@ that no longer exists is worse than no notification, because it teaches the user
 | **N-016** | Delivery outcome per channel is recorded — queued, sent, failed, cancelled, suppressed-by-preference — so "did it send?" is answerable without reading provider logs. |
 | **N-017** | The dispatcher completes within the platform function timeout at expected beta volume, and a run that cannot finish leaves the remainder pending rather than dropping it. |
 | **N-025** | Oversight recipients receive only a daily activity digest (sent only when there was activity) and milestone events — planter accepted invitation, phase/stage advanced, launch date set or changed. They are never enqueued granular per-event category notifications. |
-| **N-026** | A single plant-side toggle ("Share activity with your sending church/network"), default **off**, gates everything oversight receives, with ONE exception: the invitation-accepted milestone is the sending church's own event and is emitted regardless (ruled 2026-08-01). Its copy states that a summary digest is shared, not a detailed activity list, and names that exception. |
+| **N-026** | A single plant-side toggle ("Share activity with your sending church/network"), default **off**, gates everything oversight receives, with ONE exception: the invitation-accepted milestone is the sending church's own event and is emitted regardless. Its copy states that a summary digest is shared, not a detailed activity list, and names that exception. |
 | **N-028** | The oversight digest is scheduled by the recurring notification dispatcher: each tick runs it for the last complete day, guarded so that exactly one digest per oversight recipient is produced per day however many times the tick fires, and none on a day with no activity. |
 | **N-027** | Oversight roles have the in-app feed — bell, unread count, `/notifications`, mark-read. A notification delivered to an oversight user always has an in-app row they can see. |
 
@@ -196,7 +164,7 @@ that no longer exists is worse than no notification, because it teaches the user
 
 | ID | Requirement |
 |----|-------------|
-| **N-018** | Quiet hours: a user-configurable window during which email is held rather than sent. **Depends on storing a per-user timezone, which does not exist today** (see Open Questions). |
+| **N-018** | Quiet hours: a user-configurable window during which email is held rather than sent. **Requires a per-user timezone** (see Open Questions). |
 | **N-019** | Role-aware preference defaults — a coach's sensible defaults differ from a planter's. |
 | **N-020** | An admin-visible delivery log for support ("did this planter get their reminder?"). |
 
@@ -217,54 +185,45 @@ Each criterion below is observable. Requirement issues on the board carry the sa
 
 ### Must Have
 
-1. **Enqueue records without sending** — calling the enqueue contract creates a pending row and triggers no
-   provider call. *Verify:* provider client asserted not-called; DB assertion that a pending row exists.
+1. **Enqueue records without sending** — calling the enqueue contract creates a pending row and makes no
+   provider call.
 2. **Dispatcher delivers due, skips future** — given one notification scheduled in the past and one in the
-   future, a dispatcher run delivers exactly the first. *Verify:* delivery-log assertion on both rows.
+   future, a dispatcher run delivers exactly the first.
 3. **At-most-once** — running the dispatcher twice over the same due notification produces exactly one
-   delivery per channel. *Verify:* delivery-count assertion after two consecutive runs.
+   delivery per channel.
 4. **Preference suppression is per channel** — a user with `tasks` email off and `tasks` in-app on receives
    the in-app row and no email, recorded as suppressed-by-preference rather than as a silent no-op.
-   *Verify:* delivery-log assertion showing both outcomes.
 5. **Unsubscribe works without a session** — following an email's unsubscribe link while logged out disables
-   that category's email channel for that user only. *Verify:* Playwright assertion from a clean context, plus
-   a DB assertion that no other user's preferences changed.
-6. **Cancellation by entity** — cancelling by entity reference leaves a pending notification undelivered.
-   *Verify:* assertion that a dispatcher run after cancellation sends nothing.
+   that category's email channel for that user only, and changes no other user's preferences.
+6. **Cancellation by entity** — cancelling by entity reference leaves a pending notification undelivered; a
+   dispatcher run after the cancellation sends nothing.
 7. **Batching collapses email, not the feed** — twenty pending `tasks` notifications for one recipient in one
-   window produce one email and twenty feed rows. *Verify:* provider call-count assertion plus a feed-count
-   assertion.
+   window produce one email and twenty feed rows.
 8. **Resolved subjects are not announced** — a task completed after enqueue but before dispatch produces no
-   delivery. *Verify:* assertion of absence after completing the task and running the dispatcher.
-9. **Tenancy** — a query for user A's notifications never returns a row belonging to another church, including
-   by direct id. *Verify:* query-level scoping assertion plus a cross-church fetch that is rejected.
+   delivery.
+9. **Tenancy** — a query for user A's notifications never returns a row belonging to another church, and a
+   cross-church fetch by direct id is rejected.
 10. **Unread count and mark-read** — the shell count decrements on mark-read and zeroes on mark-all-read.
-    *Verify:* Playwright assertions on the count across both actions.
 11. **Bounded retry** — a transient failure is retried and eventually succeeds; a hard bounce is recorded
-    failed without retry. *Verify:* attempt-count assertions on both paths.
-12. **Every control carries `cursor-pointer`** — project hard rule. *Verify:* DOM assertion.
+    failed without retry.
+12. **Every control carries `cursor-pointer`** — project hard rule.
 13. **Oversight sharing is the church's to grant, via one toggle** — with the toggle off, an oversight
-    recipient is enqueued nothing; with it on, the digest and the three milestone events are enqueued and
-    granular category notifications never are. *(Amended 2026-07-27: the per-category toggle model this
-    criterion previously described is superseded — see the Access Prerequisites ruling.)* *Verify:*
-    real-DB assertions on both sides of the toggle, plus a row-count assertion that no granular category
-    row is ever written for an oversight recipient.
+    recipient is enqueued nothing except the invitation-accepted milestone; with it on, the digest and the
+    three milestone events are enqueued. No granular category notification is ever written for an oversight
+    recipient, either side of the toggle.
 14. **A barred recipient costs only that recipient** — a fan-out with a non-permitted recipient in the middle
     records rows for every permitted recipient, including those after the barred one, writes none for the
-    barred one, and reports the skip with its reason. *Verify:* real-DB assertion on the written recipients
-    plus an assertion on the collected per-recipient outcomes.
+    barred one, and reports the skip with its reason.
 15. **The feed pages rather than stopping** — with more visible notifications than fit one page, the feed
     shows a page and a "Load more" control; using it appends the next older page, repeating no row and
     skipping none across the boundary, including where several rows share a timestamp. When the last page is
-    reached the control is gone. *Verify:* Playwright assertion on the row count and on row identity across
-    two pages, plus query-level assertions that the cursor keeps both scoping predicates.
+    reached the control is gone.
 16. **The in-app preference governs the feed and the count** — a category disabled for the in-app channel
     contributes no feed rows and nothing to the shell count; re-enabling it restores both with unread state
-    intact, and its delivery records are unchanged throughout. *Verify:* real-DB assertions either side of the
-    toggle, plus a byte-comparison that no delivery row was touched by the read path.
+    intact, and its delivery records are unchanged throughout.
 17. **Oversight in-app parity** — an oversight user whose plant has the sharing toggle on sees their
     delivered notifications in the feed and can mark them read; `/notifications` renders for them rather
-    than redirecting. *Verify:* Playwright assertions per oversight role.
+    than redirecting.
 
 ---
 
@@ -283,27 +242,22 @@ Reachable from the app shell's unread indicator.
 - Empty state distinguishes *no notifications yet* from *all caught up*.
 - Cold-start (a brand-new church with no activity) reads as intentional, not broken.
 
-> **Ruled 2026-07-27 (PR #218, W1 and N-005): the feed pages, and the in-app preference governs what it
-> shows.** Two decisions about the read side of the in-app channel:
->
-> **1. The feed is paged, not capped.** It shows a page of notifications and a "Load more" control that
-> appends the next page of older ones. There is no page count and no page number: the list grows downwards
-> from newest, which is how a feed is read. A user who has been away for a month can reach the whole of it.
-> Truncating at a fixed number instead — which is what an unpaged feed does — leaves the shell count
-> describing rows the list refuses to show, and no click can ever clear them.
->
-> **2. A category switched off for the in-app channel leaves the feed and the count.** N-005 is a live
-> choice, not a filter that only applies to future sends: a user who turns `meetings` off is talking about
-> the meeting rows already in their feed, not only about the ones not yet enqueued. So the preference is
-> applied when the feed is read — its rows, the shell's unread count, and the empty-state probe all honour
-> the same allow-list, and "mark all read" is bounded by it too, so a hidden category keeps its unread state
-> for the day the user turns it back on. Absent a preference row, the category's coded default applies
-> exactly as N-005 already says (which is why `digest` is absent from the feed by default: an in-app digest
-> row would duplicate the feed it summarises).
->
-> Delivery records are untouched by any of this. A preference governs what a user is **shown**; the delivery
-> log is the historical record of what a channel **attempted**, and hiding a row does not retro-edit the fact
-> that an email went out (N-016).
+The feed is paged, never capped: there is no page count and no page number, the list simply grows
+downwards from newest, and a user who has been away for a month can reach all of it. *Why:*
+truncating at a fixed number leaves the shell count describing rows the list refuses to show, and no
+click can ever clear them.
+
+The in-app preference governs the read side as well as the send side. A user who turns `meetings` off
+is talking about the meeting rows already in their feed, not only about the ones not yet enqueued, so
+the rows, the shell's unread count, and the empty-state probe all honour the same allow-list, and
+"mark all read" is bounded by it too — a hidden category keeps its unread state for the day the user
+turns it back on. Absent a preference row, the category's coded default applies (N-005), which is why
+`digest` is absent from the feed by default: an in-app digest row would duplicate the feed it
+summarises.
+
+Delivery records are untouched by any of this. A preference governs what a user is **shown**; the
+delivery log is the record of what a channel **attempted**, and hiding a row does not retro-edit the
+fact that an email went out (N-016).
 
 ### 2. Notification Preferences
 
@@ -333,9 +287,10 @@ A logged-out-safe page reached from an email footer.
 2. It renders the human-readable title and body itself — F11 does not template feature content.
 3. It calls the enqueue contract with the recipient, category, type, rendered content, an entity reference,
    a scheduled time, and a dedupe key.
-4. F11 checks the recipient may be told: they can read the church, and — for an oversight recipient — that
-   church has opted in to sharing this category's data. A recipient who fails either is **skipped**, and the
-   call says so; nothing is recorded for them.
+4. F11 checks the recipient may be told: they can read the church, and — for an oversight recipient — the
+   notification is one oversight may receive and the church has turned sharing on (or the notification is
+   the consent-exempt invitation-accepted milestone). A recipient who fails is **skipped**, and the call
+   says so; nothing is recorded for them.
 5. Otherwise F11 records a pending notification per enabled channel and returns. No provider call happens
    here.
 6. A caller fanning out to several recipients loops this contract and collects the results. One barred
@@ -434,7 +389,7 @@ dispatch works.
 
 | From | Contract |
 |------|----------|
-| Any feature | `enqueue(churchId, recipientUserId, category, type, title, body, { entityType, entityId, scheduledFor, dedupeKey })` → records pending notification(s). Idempotent on `dedupeKey`. Returns a per-recipient outcome: **recorded** (with the row) or **skipped** (with the reason — no church access, or the church has not opted in to this category for an oversight recipient). A refused recipient is never an exception, so a fan-out completes for everyone else. |
+| Any feature | `enqueue(churchId, recipientUserId, category, type, title, body, { entityType, entityId, scheduledFor, dedupeKey })` → records pending notification(s). Idempotent on `dedupeKey`. Returns a per-recipient outcome: **recorded** (with the row) or **skipped** (with the reason — no church access, or an oversight recipient whose plant has not turned sharing on, or a notification oversight never receives). A refused recipient is never an exception, so a fan-out completes for everyone else. |
 | Any feature | `cancelByEntity(churchId, entityType, entityId, { category? })` → moves matching pending rows to cancelled. Safe to call when nothing is pending. |
 | Any feature | An optional **still-live predicate** registered per `type`, which dispatch calls before delivering, satisfying N-014 without F11 knowing any feature's domain rules. |
 | Communication Hub (F9) | The transactional email provider integration. F11 sends *through* it and adds no second provider. Provider delivery webhooks update `NotificationDelivery`. |
@@ -488,20 +443,11 @@ dispatch works.
 
 ## Open Questions
 
-1. **Per-user timezone does not exist.** No timezone column exists on `users` or anywhere in the schema.
-   Quiet hours (N-018) and any "send at 8am local" behaviour require adding one, which is a schema change
-   with a backfill question (infer from church location? ask at signup? default to a single zone?).
-   **N-018 is Should Have and gated on this ruling** — it is called out rather than quietly assumed.
+1. **Where does a per-user timezone come from?** Quiet hours (N-018) and any "send at 8am local" behaviour
+   need one, which raises a backfill question: infer it from the church location, ask at signup, or default
+   to a single zone? **N-018 is Should Have and gated on this ruling** — it is called out rather than
+   quietly assumed.
 2. **Digest cadence default.** Weekly is assumed. Whether the default is weekly-on-Monday, weekly-on-Sunday
    (before a Sunday-heavy week) or user-chosen at first send is unruled. Affects N-013's default only.
-3. ~~**Do oversight roles get church-activity notifications by default?**~~ **RULED 2026-07-27 (PR #199).**
-   No — but they are *eligible*, which the code previously was not. Oversight roles can receive every
-   category, gated per plant by that plant's privacy settings, and **every toggle defaults to off**. So the
-   answer to "by default" is "nothing", and the twenty-plants concern is bounded by construction: an admin
-   over twenty plants receives only what each plant individually granted. `phase` and `digest` gained
-   privacy toggles of their own to make this expressible. Opt-out remains the default for church roles.
-   Interaction with N-019 is unchanged — role-aware *defaults* are still unbuilt, and now sit behind the
-   privacy gate rather than beside it. See the ruling note under **Access Prerequisites** for the full
-   decision, including why enqueue skips a barred recipient rather than throwing.
-4. **In-app retention.** How long a read notification stays in the feed before pruning. Unbounded growth is
+3. **In-app retention.** How long a read notification stays in the feed before pruning. Unbounded growth is
    a real cost at cohort scale; no ruling needed for v1 correctness.

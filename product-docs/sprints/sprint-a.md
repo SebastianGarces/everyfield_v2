@@ -5,6 +5,12 @@
 **Duration target:** ~1 week of agent execution + human review.
 **Execution model:** Multi-agent workflow (see §5). Each task below is specced as an independent agent assignment with explicit file ownership, implementation steps, and machine-verifiable acceptance criteria.
 
+> **ARCHIVAL — point-in-time record of an executed sprint, not maintained.** Sprint A ran
+> 2026-06-10 → 2026-06-12 and merged to `main` as `ab89201`; results are in
+> [`sprint-a-results.md`](./sprint-a-results.md). The baseline facts in §1 describe the repo as of
+> 2026-06-10 and much of it has since moved. The sprint framing itself was replaced by the GitHub
+> board — `gh issue list --label feature` is the only source of what is planned or built.
+
 **Exit criteria for the sprint:**
 1. `pnpm typecheck && pnpm lint && pnpm build` pass.
 2. Every acceptance criterion in §3 verified by an adversarial verification agent (Phase V of the workflow).

@@ -150,3 +150,26 @@ themselves are older; each row carries its original date.
 | PR&nbsp;354 | **What earns a route crawler-previewability** (2026-08-09): it renders with no session AND that render is the page, not a redirect. `/oversight` came off the list (redirects); `/dashboard` came off earlier (#297, 500s). Both stay protected explicitly, never via the spread of the previewable list. | `isCrawlerPreviewRequest` over `/wiki` only; pinned by `proxy.test.ts`. |
 | 309 | **Notification cadence is not pinned by defaults** (2026-08-09): stop writing cadence defaults at preference-create; the inert oversight cadence control is retired rather than shipped disabled; failed preference saves surface to the user. | Shipped in PR #369. |
 | seed&nbsp;guard | **The dev-seed wipe refuses to run against a database holding an alpha-cohort sentinel account** unless `--allow-protected-db` is passed (2026-08-09). Detection is positive (sentinel rows), never connection-string heuristics, which fail open. | `src/lib/dev-seed/protected-database.ts`; wipe order derived from `pg_constraint`; wiki corpus protected and never walked through. |
+
+### Recorded 2026-08-10 — phase-engine technical decisions (June 2026)
+
+Moved out of the phase-engine FRD §10 when the ledger became the single home for decisions. The
+rulings themselves are from June 2026.
+
+| Area | Decision | Notes |
+|------|----------|-------|
+| Judge orchestration | **Vercel AI SDK `generateObject`** (structured output) + plain TypeScript pipeline | The judge is a structured pipeline (facts → retrieve → one validated LLM call → persist), not an agentic graph. **No LangGraph.** Provider stays behind `judge/provider.ts` for one-line swaps. |
+| LLM provider | **OpenAI GPT family** via the AI SDK | Data posture per NFR-PE-4: API data is not trained on by default, abuse-monitoring retention is up to 30 days, and the self-serve retention control is set at the project level. ZDR needs a sales agreement and waits for enterprise eligibility — it does **not** gate go-live. Judge inference ≈ **$0.03–0.05 / assessment** (~$30/mo at beta scale); the only cost that matters. |
+| Observability | **Self-hosted Langfuse** | Trace each judge run tagged with rubric version + model id; correlate traces with insight feedback to evaluate and tune the rubric. |
+| RAG store | **pgvector on Neon** (same DB) | Corpus ≈ **215k tokens** / low-thousands of chunks — Pinecone would be over-engineering. Hybrid retrieval with the existing wiki `tsvector` FTS. |
+| Embeddings | **`text-embedding-3-small`** (1536 dims; reducible to 1024) | **Section/heading chunking** (~300–800 tok, small overlap) with `phase` / `section` / `article_slug` metadata for **phase-filtered retrieval**. One-time corpus embed ≈ **$0.004**. |
+| Cron | **Vercel Cron** → secret-guarded route, ~daily | Selects dirty-or-stale plants only (NFR-PE-2). |
+| Embed scope | **Wiki articles + playbook** | The **rubric is NOT embedded** — it goes into the judge context *whole* every run. Historical assessments are a *future* embed (benchmarking, PE-021). |
+
+**Related future work.** The **Church Plant Agent** — a conversational, tool-calling agent (with
+human confirmation + generative UI) that *executes* multi-step operations — is the action half of
+the app's chat-first AI direction and forms an insight→action loop with the phase engine (the judge
+surfaces what to do; the agent does it). It is captured in
+`product-docs/features/church-plant-agent/vision.md`, which is where the agent-framework decision
+(AI SDK agent primitives vs. LangGraph vs. Vercel Workflow DevKit) is framed. The Plant Intelligence
+judge itself needs none of those.

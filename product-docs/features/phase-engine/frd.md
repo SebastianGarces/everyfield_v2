@@ -2,10 +2,9 @@
 > **Tracked on the board:** [Phase Engine #105](https://github.com/SebastianGarces/everyfield_v2/issues/105) — open requirements are its sub-issues. Implementation status is not tracked in this file.
 
 
-> **Direction change (June 2026):** This feature was previously conceived as a deterministic *phase state machine* — track `current_phase`, validate hard exit criteria, gate transitions. It is being **reframed** as a **Plant Intelligence Engine**: an advisory system that continuously reads the plant's real activity, judges it against the church-planting methodology (the Launch Playbook + wiki) using an LLM-as-judge, and surfaces prioritized **insights and guidance** to planters and to sending networks/churches. The phase becomes *context for judgment*, not a gate. See `system-architecture.md` → Phase Engine, and the PRD changelog. This is the platform's primary differentiator ("the data backbone" thesis).
+> The Phase Engine is a **Plant Intelligence Engine**: an advisory system that reads the plant's real activity, judges it against the church-planting methodology (the Launch Playbook + wiki) with an LLM-as-judge, and surfaces prioritized insights and guidance to planters and to sending networks/churches. The phase is *context for judgment*, not a gate; deterministic phase-advance mechanics are not the product. This is the platform's primary differentiator ("the data backbone" thesis). See `system-architecture.md` → Phase Engine.
 
 **Feature ID prefix:** PE
-**Status:** Implemented (merged to main; per-requirement status tracked in `checklist.md`)
 **References:** `product-brief.md` (Phase Structure, Success Metrics), `system-architecture.md` (Phase Engine cross-cutting service, Core Canonical Models → Phase), `rubric-v0.md` (companion artifact: the evaluation rubric).
 
 ---
@@ -31,9 +30,10 @@ The engine is two layers that must never blur:
 ### Non-Goals
 
 - Not an automatic phase advancer — transitions are always planter-initiated/confirmed.
+- Not an actor: the engine advises, it does not execute multi-step operations on the plant's behalf. The conversational agent that would is separate scope (`features/church-plant-agent/vision.md`).
 - Not a hard gate — it never blocks a planter from advancing or acting.
 - Not a real-time/on-page LLM call — assessments are precomputed and cached; pages read snapshots.
-- Does not own the dashboard or oversight UI surfaces (those are F4 Progress Dashboard); this feature *produces the insights those surfaces render*.
+- Not the owner of the oversight UI surfaces; this feature produces the insights those surfaces render. It does own its own presentation requirements (§4, Presentation).
 
 ---
 
@@ -56,7 +56,7 @@ The engine is two layers that must never blur:
 
 ## 3. Screens & Workflows
 
-> UI rendering lives in **F4 Progress Dashboard** and the **Oversight** surfaces; this FRD defines the *behavior and content* those screens display, not their layout.
+> This FRD owns the presentation of its own planter-facing surfaces (§4, Presentation). Where its content also appears on the **Oversight** surfaces, this FRD defines the *behavior and content*, not their layout.
 
 1. **Planter dashboard — "Focus" panel:** renders the latest assessment's planter-audience insights (prioritized, with severity + wiki links).
 2. **Phase control:** displays current phase + readiness state; "Advance / Change phase" action with a reason field and (if advancing past open gates) a soft confirmation.
@@ -79,7 +79,7 @@ The engine is two layers that must never blur:
 - **PE-001 (Phase tracking & transitions):** Track `current_phase` per church. Support planter-initiated transitions **forward, backward, or skipping**, each requiring a short reason. No transition is ever blocked (soft gating).
 - **PE-002 (Transition audit trail):** Every transition records: from/to phase, initiating user, timestamp, reason, the **fact snapshot at that moment**, and the **rubric version**. Immutable.
 - **PE-003 (`phase.changed` event):** Emit `phase.changed` on every successful transition for downstream consumers (task templates, wiki recommendations, dashboard, notifications). This preserves the existing contract relied on by F5 and F1.
-- **PE-004 (Signal layer / Fact snapshot):** Compute a deterministic fact snapshot per plant from existing feature data — at minimum: committed core-group count + growth delta, vision-meeting cadence & attendance trend, follow-up staleness, ministry-role coverage (which of the 8 filled), per-person engagement/leadership-readiness signals, training progress, `launch_date` countdown. **No fact is ever produced by the LLM.**
+- **PE-004 (Signal layer / Fact snapshot):** Compute a deterministic fact snapshot per plant from existing feature data — at minimum: committed core-group count + growth delta, vision-meeting cadence & attendance trend, follow-up staleness, ministry-role coverage (which of the 8 filled), per-person engagement/leadership-readiness signals, training progress, launch countdown. **No fact is ever produced by the LLM.**
 - **PE-005 (Manual signals / self-attestation):** Allow planters to attest facts the system cannot observe (e.g., values documented, financial base, systems tested). Stored with who/when; included in the fact snapshot.
 - **PE-006 (Rubric artifact):** The judge evaluates against a **versioned rubric** (`rubric-v0.md` is v0). The rubric is editable without code changes to the engine logic, and each assessment records the rubric version used.
 - **PE-007 (LLM-as-judge assessment):** Produce an assessment by running the judge over (fact snapshot + current phase + rubric + retrieved methodology). The judge must reason **only over supplied facts**, must not invent numbers, and must cite which facts drove each insight.
@@ -104,15 +104,12 @@ The engine is two layers that must never blur:
 - **PE-020 (Reactive criteria nudges):** Emit a `phase.criteria.updated`-style signal when a readiness threshold is newly crossed, to drive proactive notifications (depends on the notification layer).
 - **PE-021 (Outcome linkage):** Associate historical assessments with eventual launch outcomes, building the dataset for cross-plant benchmarking and rubric evaluation.
 
-### Presentation — absorbed from F4 Progress Dashboard (2026-07-26)
+### Presentation
 
-F4 was retired and folded in here (decision #4 in [`docs-audit-2026-07.md`](../../docs-audit-2026-07.md)).
-The judgement layer is the engine's strong half; **presentation is its weak half**, and these are the
-progress-dashboard ideas judged worth keeping. They render *what the engine already knows* — none of
-them introduces a second, competing source of truth about a plant's progress.
-
-The facts-vs-judgment principle binds all of them: a deterministic fact renders as a fact, an
-LLM-produced judgement is always labelled as such.
+These presentation requirements originated in the retired progress-dashboard document; original IDs
+are kept for traceability. Each renders *what the engine already knows*, so none introduces a second,
+competing source of truth about a plant's progress. The facts-vs-judgment principle binds all of
+them: a deterministic fact renders as a fact, an LLM-produced judgement is always labelled as such.
 
 | ID | Requirement | Was | Notes |
 |----|-------------|-----|-------|
@@ -120,12 +117,13 @@ LLM-produced judgement is always labelled as such.
 | **PE-023** | **Critical Success Factor scorecard.** Visual scorecard across the 8 CSFs. | D-005 | The highest-value import — it turns one composite verdict into a diagnosable breakdown. |
 | **PE-024** | **"How to improve" wiki links.** Each weak criterion links to the wiki content that addresses it. | D-016 | Depends on the wiki integration contract. Turns an assessment into a next action. |
 | **PE-025** | **Phase detail drill-down.** Expand any criterion to the facts that drove it. | D-017 | Directly serves the anchoring principle — the planter can always trace a judgement to its facts. |
-| **PE-026** | **Trend and velocity display.** Core-group growth rate, meeting attendance trend, 48-hour follow-up completion rate, ministry-team readiness. | D-010–D-013 | All four are deterministic facts already computable from shipped tables. |
+| **PE-026** | **Trend and velocity display.** Core-group growth rate, meeting attendance trend, 48-hour follow-up completion rate, ministry-team readiness. | D-010–D-013 | All four are deterministic facts, computable from feature data without the judge. |
 | **PE-027** | **Milestone timeline and alert badges.** Visual timeline of key milestones; badges for items needing attention. | D-014, D-015 | Badges must reflect engine-derived urgency, not a separate threshold system. |
 
-**Not carried across:** D-018 (coach dashboard) is substantially delivered by `/oversight`;
-D-001/003/004/006/007/009 already ship; D-019–D-024 (customization, network comparison, export,
-weekly email, push, historical trends) stay out of scope.
+**Not carried across:** D-018 (coach dashboard) — multi-plant portfolio views belong to the
+oversight surfaces; D-001/003/004/006/007/009 — ordinary phase and dashboard displays that need no
+separate requirement here; D-019–D-024 (customization, network comparison, export, weekly email,
+push, historical trends) — out of scope.
 
 ---
 
@@ -156,7 +154,7 @@ weekly email, push, historical trends) stay out of scope.
 - **Rubric** (v0: code/markdown artifact `rubric-v0.md`; future: data-backed) — versioned. The active version id is recorded on every assessment.
 - **Plant dirtiness** — a lightweight mechanism to know whether re-assessment is needed (e.g., `churches.last_material_event_at` compared to the latest `PlantAssessment.generated_at`). Exact representation is an implementation choice.
 
-`launch_date` is added to the **Church** core entity (a cross-cutting addition, see System Architecture) and feeds the countdown signal.
+The launch date is owned by the Launch feature's launch entity, not by the Church row; the countdown signal reads it from there.
 
 ---
 
@@ -167,21 +165,20 @@ weekly email, push, historical trends) stay out of scope.
 - **Vision Meetings (F3):** meeting cadence, attendance, new-contact inflow.
 - **Ministry Teams (F8):** the 8 role assignments, training programs & completions, per-person engagement.
 - **Tasks (F5):** task/checklist completion.
-- **Financial (F7, when present):** giving / budget base. Until then, manual signal.
-- **Church:** `launch_date`, `current_phase`, privacy settings.
+- **Financial (F7, when present):** giving / budget base. Otherwise, manual signal.
+- **Launch:** target date, status, readiness progress, and outcome.
+- **Church:** `current_phase`, privacy settings.
 
 **Subscribes to events** (to mark plants dirty): `meeting.attendance.finalized`, `team.member.assigned`, `person.created`, `task.completed`, and similar material events.
 
 **Emits:**
-- `phase.changed` — on transition (consumers: F5 phase task templates, F1 wiki recommendations, F4 dashboard).
-- `plant.assessment.created` — when a new snapshot is ready (consumers: F4 dashboard, the notification/digest layer).
+- `phase.changed` — on transition (consumers: F5 phase task templates, F1 wiki recommendations, the planter dashboard).
+- `plant.assessment.created` — when a new snapshot is ready (consumers: the planter dashboard, the notification/digest layer).
 
 **Provides to:**
-- **F4 Progress Dashboard** — latest planter assessment + phase state.
+- **Planter dashboard** — latest planter assessment + phase state.
 - **Oversight** — latest network assessment (privacy-gated).
 - **Notification/digest layer** — new high-severity insights for outbound surfacing.
-
-> The `phase.changed` contract is **unchanged** by the direction shift; consumers relying on it continue to work. What changes is the *addition* of the intelligence/assessment layer alongside it.
 
 ---
 
@@ -198,7 +195,7 @@ weekly email, push, historical trends) stay out of scope.
 
   No data crosses tenant boundaries.
 
-  > **Why this is not "use a zero-data-retention provider".** ZDR is not self-serve: it requires provider approval through a sales agreement and is aimed at enterprise accounts, so a pre-revenue account cannot obtain it at any price. As originally written, the requirement was permanently unsatisfiable — and an unmeetable requirement is worse than a weaker one that is actually enforced, because it is silently carried as "not done" forever instead of being met. What survives the restatement is the part that protects real people in real churches: know the posture, restrict it as far as the account allows, and tell users.
+  > **Why this is not "use a zero-data-retention provider".** ZDR is not self-serve: it requires provider approval through a sales agreement and is aimed at enterprise accounts, so a pre-revenue account cannot obtain it at any price. A requirement no account can satisfy is worse than a weaker one that is actually enforced, because it is carried as "not done" forever instead of being met. The part that protects real people in real churches is the part stated above: know the posture, restrict it as far as the account allows, and tell users.
 - **NFR-PE-5 (Auditability & reproducibility):** Every assessment and transition records the rubric version, model id, and fact snapshot, so any output can be explained and reproduced.
 - **NFR-PE-6 (Tenant isolation):** All entities are `church_id`-scoped; assessments and signals never leak across tenants.
 
@@ -214,25 +211,10 @@ weekly email, push, historical trends) stay out of scope.
 
 ---
 
-## 10. Resolved Technical Decisions (June 2026)
+## 10. Open Questions
 
-| Area | Decision | Notes |
-|------|----------|-------|
-| Judge orchestration | **Vercel AI SDK `generateObject`** (structured output) + plain TypeScript pipeline | The judge is a structured pipeline (facts → retrieve → one validated LLM call → persist), not an agentic graph. **No LangGraph.** Provider stays behind `judge/provider.ts` for one-line swaps. |
-| LLM provider | **OpenAI GPT family** via the AI SDK | Data posture per NFR-PE-4: API data is not trained on by default, abuse-monitoring retention is up to 30 days, and the self-serve retention control is set at the project level. ZDR needs a sales agreement and waits for enterprise eligibility — it does **not** gate go-live. Judge inference ≈ **$0.03–0.05 / assessment** (~$30/mo at beta scale); the only cost that matters. |
-| Observability | **Self-hosted Langfuse** | Trace each judge run tagged with rubric version + model id; correlate traces with insight feedback to evaluate and tune the rubric. |
-| RAG store | **pgvector on Neon** (same DB) | Corpus ≈ **215k tokens** / low-thousands of chunks — Pinecone would be over-engineering. Hybrid retrieval with the existing wiki `tsvector` FTS. |
-| Embeddings | **`text-embedding-3-small`** (1536 dims; reducible to 1024) | **Section/heading chunking** (~300–800 tok, small overlap) with `phase` / `section` / `article_slug` metadata for **phase-filtered retrieval**. One-time corpus embed ≈ **$0.004**. |
-| Cron | **Vercel Cron** → secret-guarded route, ~daily | Selects dirty-or-stale plants only (NFR-PE-2). |
-| Embed scope | **Wiki articles + playbook** | The **rubric is NOT embedded** — it goes into the judge context *whole* every run. Historical assessments are a *future* embed (benchmarking, PE-021). |
-
-**Related future work (out of scope for this FRD):** the **Church Plant Agent** — a conversational, tool-calling agent (with human confirmation + generative UI) that *executes* multi-step operations — is the action half of the app's chat-first AI direction and forms an insight→action loop with this feature (the judge surfaces what to do; the agent does it). It is captured in `features/church-plant-agent/vision.md`, which is where the agent-framework decision (AI SDK agent primitives vs. LangGraph vs. Vercel Workflow DevKit) is framed. The Plant Intelligence judge itself needs none of those.
-
-## 11. Open Questions
-
-1. **Rubric governance:** who edits the rubric, how is it versioned/reviewed, and when does criteria content get finalized with Brett & Bryan? (External dependency — Bryan back next week.)
+1. **Rubric governance:** who edits the rubric, how is it versioned/reviewed, and when does criteria content get finalized with Brett & Bryan?
 2. **Materiality:** the exact list of events that mark a plant dirty (avoid both over-running and staleness).
 3. **Insight volume:** how many insights per assessment before "judge fatigue" sets in — and how to rank/cap.
 4. **Network conservatism:** auto-generated network health signals are in for beta (decided); revisit thresholds after first-cohort feedback.
-5. **Prayer/Generosity signals (CSF-5/6):** weak system representation today; how much to lean on manual attestation vs. building data capture.
-6. **Phase name canonicalization:** resolved — `src/lib/constants.ts` now matches the product brief (all seven phases, e.g., Phase 1 "Core Group Development").
+5. **Prayer/Generosity signals (CSF-5/6):** these are weakly represented in system data; how much to lean on manual attestation vs. building data capture?

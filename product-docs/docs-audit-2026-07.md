@@ -1,5 +1,10 @@
 # Docs-vs-Code Audit — 2026-07-25
 
+> **Historical record.** Point-in-time audit of 2026-07-25; §2's status tables describe that
+> moment, not the present — the board is the only source of implementation status. The §4
+> decision ledger moved to [`decisions.md`](decisions.md) on 2026-08-10 and continues there;
+> §5 is frozen evidence for rows now in that file.
+
 Method: every repo-specific `.md`/`.mmd` file (89 files; vendored reference skills swept per-directory) was read in full by an audit agent and checked claim-by-claim against the code on `main`. Every stale claim cited below was verified against a concrete `file:line`. Delete/merge recommendations were adversarially re-verified (repo-wide reference grep, git history, unique-content check). Code is treated as ground truth; FRD requirement gaps are reported, not resolved — open decisions are in §4.
 
 ## 1. Actions taken in this branch
