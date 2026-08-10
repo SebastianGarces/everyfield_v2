@@ -401,25 +401,46 @@ for (const theme of themes) {
   });
 }
 
-test("the destructive button's focus ring is visible too", () => {
-  // The danger variant overrides the ring color, so the token fix does not
-  // reach it. shadcn's defaults were /20 light and /40 dark — 1.43:1 and
-  // 1.95:1 composited, i.e. a Delete button that showed no focus at all.
-  const button = readFileSync(
-    path.join(SRC, "components", "ui", "button.tsx"),
-    "utf8"
-  );
-  const matches = [
-    ...button.matchAll(/(dark:)?focus-visible:ring-destructive(?:\/(\d+))?\b/g),
-  ];
-  assert.ok(
-    matches.length > 0,
-    "button.tsx no longer gives the destructive variant its own focus ring — it now inherits --ring, which is measured above; drop this test"
-  );
+/**
+ * Wherever a danger variant overrides the ring COLOR, the --ring fix above does
+ * not reach it, so that override owes SC 1.4.11 on its own. Read out of the
+ * shipped markup for the same reason `paintedRingAlphas()` is — naming one file
+ * (it was button.tsx) let badge.tsx keep shadcn's defaults, /20 light and /40
+ * dark, which composite to 1.44:1 and 1.98:1: a focused Delete control with no
+ * visible focus at all. Scanning the tree is also what catches the next
+ * component that reaches for `ring-destructive/30`.
+ *
+ * Deliberately NOT extended to `aria-invalid:ring-destructive/*`: that state is
+ * carried at full strength by the sibling `aria-invalid:border-destructive`, so
+ * a faint ring there is not the same failure.
+ */
+function paintedDestructiveRings(): {
+  where: string;
+  dark: boolean;
+  alpha: number;
+}[] {
+  return tsxFiles(SRC).flatMap((file) => {
+    const lines = readFileSync(file, "utf8").split("\n");
+    return lines.flatMap((line, i) => {
+      const where = `${path.relative(process.cwd(), file)}:${i + 1}`;
+      return [
+        ...line.matchAll(
+          /(dark:)?focus-visible:ring-destructive(?:\/(\d+))?\b/g
+        ),
+      ].map((match) => ({
+        where,
+        dark: match[1] !== undefined,
+        alpha: match[2] === undefined ? 1 : Number(match[2]) / 100,
+      }));
+    });
+  });
+}
 
-  for (const match of matches) {
-    const themesForRule = match[1] ? (["dark"] as const) : themes;
-    const alpha = match[2] === undefined ? 1 : Number(match[2]) / 100;
+test("every destructive focus-ring override is visible too", () => {
+  // Zero sites is a legitimate state: it means everything inherits --ring,
+  // which the cases above already measure.
+  for (const { where, dark, alpha } of paintedDestructiveRings()) {
+    const themesForRule = dark ? (["dark"] as const) : themes;
 
     for (const theme of themesForRule) {
       for (const surface of ["background", "card"] as const) {
@@ -430,7 +451,7 @@ test("the destructive button's focus ring is visible too", () => {
         );
         assert.ok(
           ratio >= NON_TEXT_CONTRAST,
-          `the destructive focus ring (alpha ${alpha}) on --${surface} in ${theme} is ${ratio.toFixed(2)}:1, below ${NON_TEXT_CONTRAST}:1`
+          `the destructive focus ring (${where}, alpha ${alpha}) on --${surface} in ${theme} is ${ratio.toFixed(2)}:1, below ${NON_TEXT_CONTRAST}:1 — paint the danger hue at full strength, the ring is the only thing carrying focus here`
         );
       }
     }
