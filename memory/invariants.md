@@ -56,6 +56,7 @@ Each section links `invariants/<domain>.md` for the why, the pattern and the wor
 - ⚖ A refused category is never OFFERED either (ruled 2026-08-09, extending #254): the settings screen and `setNotificationPreferenceAction` both derive from `OVERSIGHT_ELIGIBLE_CATEGORIES` via `audienceMayReceiveCategory` — never a second list of the five granular names.
 - ⚖ Its ruled presentation is SHOWN-AND-LABELLED, not hidden: the five rows stay visible with a "Not sent to you" token and inert switches, and the reason (`OVERSIGHT_INELIGIBLE_CATEGORY_NOTE`) is said once, visibly — never tooltip-only.
 - Reaching a plant is not permission to name the orgs BEHIND it: every org name on an oversight surface must be the caller's own or inside it, scoped in the `WHERE` clause.
+- Accepted residual: ministry-team write actions check only session + `church_id` — any authenticated user in a church can mutate any team. Team-leader scoping is ruled canon (#12a, `product-docs/decisions.md`); enforcement ships with #22 (`risk:high`), which retires this line.
 - A launch countdown compares two DAYS — floor `asOf` to its UTC day BEFORE subtracting a `yyyy-mm-dd` target date. ONE implementation: `daysUntilTarget` (`src/lib/launch/countdown.ts`); never a second copy under any name — the copy is always the one that misses the fix.
 
 ## Authentication
