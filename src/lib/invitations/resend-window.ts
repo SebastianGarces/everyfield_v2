@@ -74,6 +74,44 @@ export function resendDedupeWindowAt(at: Date): ResendDedupeWindow {
   };
 }
 
+/** What a surface has counted so far, and WHICH window it counted against. */
+export interface ResendCooldownCount {
+  /**
+   * The window index the count belongs to. `undefined` before anything has been
+   * counted at all — the shape a freshly mounted surface starts in.
+   */
+  window: number | undefined;
+  /** Milliseconds the surface has measured on its own clock since it started counting. */
+  ms: number;
+}
+
+/**
+ * How much of a reported cooldown is LEFT — the whole of AC1, and the reason it
+ * lives here rather than inline in the pending list.
+ *
+ * The subtlety it exists to contain is that a count belongs to ONE window. A
+ * surface that has been counting window N and is then handed window N+1 has
+ * spent none of the new one, so its stale `ms` must not be subtracted from it —
+ * otherwise a send made a minute after the last one starts its countdown already
+ * half spent, and the button re-enables while the provider is still collapsing
+ * onto the message it just accepted. Equally, a window it has not started
+ * counting yet is used at FULL length straight from the server's number, which
+ * is what disables the button in the same commit that reports the send rather
+ * than a frame later.
+ *
+ * Pure and total: no clock is read here, and `undefined` (no send yet, or a send
+ * that reported no window) is zero rather than a guessed duration.
+ */
+export function resendCooldownRemainingMs(
+  cooldown: { window: number; remainingMs: number } | undefined,
+  counted: ResendCooldownCount
+): number {
+  if (!cooldown) return 0;
+
+  const spent = counted.window === cooldown.window ? counted.ms : 0;
+  return Math.max(0, cooldown.remainingMs - spent);
+}
+
 /**
  * Whole seconds left on a cooldown, from a DURATION.
  *

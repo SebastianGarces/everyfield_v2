@@ -107,6 +107,16 @@ export type RevokeInvitationState = { error?: string };
  * is collapsed onto the message already accepted, so a live button would report
  * "Email sent" over a send the provider dropped.
  *
+ * `sent: true` is a claim about THIS REQUEST reaching the provider, and it is
+ * unconditional because the server has nothing to condition it on: the ruling
+ * persists nothing about delivery, and an idempotent replay returns the original
+ * response, so a collapsed second request is indistinguishable here from a first
+ * one. The cooldown below is therefore the guard, and it reaches exactly as far
+ * as the client session holding it — a reload or another admin's browser starts
+ * with none. Named in full at `useResendCooldown` (`invitations-list.tsx`) and
+ * executed in `resend.test.ts` §8; closing it needs a durable last-send record,
+ * which is a migration and a fresh ruling.
+ *
  * SPELLED OUT HERE rather than imported, because this type is the wire: every
  * field crosses to the browser inside `useActionState`, so the shape the client
  * may rely on is declared at the boundary that serializes it. Two numbers, both

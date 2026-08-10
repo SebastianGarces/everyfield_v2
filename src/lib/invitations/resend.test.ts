@@ -7,7 +7,7 @@ process.env.RESEND_API_KEY = "re_test_key_not_a_real_credential";
 process.env.NEXT_PUBLIC_APP_URL = "https://app.everyfield.test";
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
@@ -34,6 +34,7 @@ import {
 } from "./email";
 import {
   resendCooldownLabel,
+  resendCooldownRemainingMs,
   resendCooldownSecondsLeft,
   resendDedupeWindowAt,
 } from "./resend-window";
@@ -815,6 +816,50 @@ test("the countdown rounds up, so it never reads 0s while the button still refus
   assert.equal(resendCooldownLabel(42), "Resend in 42s");
 });
 
+test("a count belongs to ONE window — the four boundaries of the button's refusal", () => {
+  const window = { window: 400, remainingMs: 45_000 };
+
+  // 1. Nothing has been sent, or a send reported no window: no cooldown at all.
+  //    A guessed duration here would be a claim about the provider.
+  assert.equal(resendCooldownRemainingMs(undefined, { window: 400, ms: 9 }), 0);
+
+  // 2. A window this surface has not started counting yet is used at FULL
+  //    length, straight from the server's number. That is what disables the
+  //    button in the same commit that reports the send, with no frame in
+  //    between where a second press would land.
+  assert.equal(
+    resendCooldownRemainingMs(window, { window: undefined, ms: 0 }),
+    45_000
+  );
+  // …and the same holds for a count left over from the PREVIOUS window, which
+  // is the case that would otherwise bite: a resend a minute after the last one
+  // would start its countdown already spent, and the button would re-enable
+  // while the provider was still collapsing onto the message it just accepted.
+  assert.equal(
+    resendCooldownRemainingMs(window, { window: 399, ms: 44_000 }),
+    45_000
+  );
+
+  // 3. Part way through: the server's duration minus what this surface has
+  //    measured on its own clock. No instant is compared, so a workstation clock
+  //    minutes out of step still waits the right LENGTH.
+  assert.equal(
+    resendCooldownRemainingMs(window, { window: 400, ms: 5_000 }),
+    40_000
+  );
+
+  // 4. Spent, and past spent. Never negative — a late tick after the interval's
+  //    last run must not resurrect the countdown as a huge number.
+  assert.equal(
+    resendCooldownRemainingMs(window, { window: 400, ms: 45_000 }),
+    0
+  );
+  assert.equal(
+    resendCooldownRemainingMs(window, { window: 400, ms: 90_000 }),
+    0
+  );
+});
+
 test("a successful resend reports the window it was keyed in", async () => {
   const transport = recorder();
 
@@ -941,10 +986,115 @@ test("the countdown is never announced — the live region says 'Email sent' onc
   assert.ok(region.length > 0, "the success region is missing");
   assert.doesNotMatch(region, /secondsLeft|cooling|cooldown/);
   assert.match(region, /Email sent/);
-  // One claim per window, and it is the only one: with the button disabled for
-  // the remainder there is no second submission to produce a second "Email
-  // sent" — the disabled assertion above is what makes that true.
+  // The sentence is written ONCE, so the claim cannot drift into a second place
+  // — a copy in the button's own label would be announced on every tick. This is
+  // a source-shape assertion about where the string lives, and NOTHING MORE: it
+  // says nothing about how many times the region renders at runtime. The test
+  // below is what speaks to that.
   assert.equal(button.match(/Email sent/g)?.length, 1);
+});
+
+test("NAMED LIMITATION: a session that never saw the send still gets a live button inside the window", async () => {
+  // Executed, not asserted about — this is the case the cooldown CANNOT reach,
+  // and it is pinned so that nobody reads §8's disabled-button assertions as a
+  // guarantee the product does not make.
+  //
+  // The cooldown lives in `useActionState`, which is per client session by the
+  // ruling's own no-persistence constraint. Admin A resends; admin A reloads (or
+  // admin B has the page open in another browser); the fresh mount has no
+  // cooldown, so the button is live. Both calls below stand for that second
+  // press inside the same bucket.
+  const transport = recorder();
+
+  const first = await resendInvitationEmailAs(
+    SC_ADMIN,
+    INVITATION_ID,
+    deps({ send: transport.send })
+  );
+  const second = await resendInvitationEmailAs(
+    SC_ADMIN,
+    INVITATION_ID,
+    deps({ send: transport.send, now: new Date(NOW.getTime() + 15_000) })
+  );
+
+  // One bucket, so ONE message: the provider collapses the second request onto
+  // the first, and the invitee's inbox — the thing the window exists to protect
+  // — is correct either way.
+  assert.equal(
+    transport.sent[1].idempotencyKey,
+    transport.sent[0].idempotencyKey
+  );
+
+  // …and the second call still reports a send, because the server has nothing to
+  // condition the claim on: nothing is persisted about delivery, and an
+  // idempotent replay returns the ORIGINAL response, so the transport cannot
+  // report "this one was collapsed" either. THIS is the residual defect, stated
+  // in the PR body as a limitation rather than left for a reader to discover.
+  assert.equal(first.emailSent, true);
+  assert.equal(second.emailSent, true);
+
+  // What the second call DOES carry is the same window the first did, so the
+  // moment that fresh session receives an answer its button refuses for the
+  // remainder — the claim is wrong once per session, never twice.
+  assert.equal(second.dedupeWindow.index, first.dedupeWindow.index);
+  assert.ok(second.dedupeWindow.remainingMs < first.dedupeWindow.remainingMs);
+});
+
+// ----------------------------------------------------------------------------
+// 9. Nothing from the ruling ROUND survives it
+// ----------------------------------------------------------------------------
+//
+// The four directions this ruling was decided from shipped as a throwaway bench
+// behind `@/components/prototype-switcher`, mounted on the real
+// `/oversight/invitations` page so Sebastian could operate them on a preview.
+// Round 2 was ruled and the bench stayed — 421 disposable lines and a
+// `dangerouslySetInnerHTML` localStorage script that would have rendered a fake
+// invitee above a real admin's real pending list.
+//
+// The guard that existed for exactly this (`preference-matrix.test.ts` → "no
+// prototype scaffolding survives the ruling") is scoped to ONE component, which
+// is why it caught nothing here. This one is REPO-WIDE: the switcher is a
+// development instrument, so the set of modules importing it is empty between
+// rulings, whatever feature the next bench belongs to.
+// ----------------------------------------------------------------------------
+
+/** Every `.ts`/`.tsx` under `src/`, so the scan cannot be outrun by a new folder. */
+function sourceFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) return sourceFiles(full);
+    return /\.tsx?$/.test(entry.name) ? [full] : [];
+  });
+}
+
+test("no prototype scaffolding survives the ruling — repo-wide", () => {
+  const src = path.join(process.cwd(), "src");
+  const switcher = path.join(src, "components", "prototype-switcher.tsx");
+
+  const importers = sourceFiles(src).filter((file) => {
+    // The switcher itself, and any test asserting about it, name it on purpose.
+    if (file === switcher || /\.test\.tsx?$/.test(file)) return false;
+    return /from "@\/components\/prototype-switcher"/.test(
+      readFileSync(file, "utf8")
+    );
+  });
+
+  assert.deepEqual(
+    importers.map((file) => path.relative(process.cwd(), file)),
+    [],
+    "a prototype bench is mounted in shipping UI — delete it with the ruling"
+  );
+
+  // …and the bench modules themselves, which are the thing being mounted. A
+  // switcher deleted from the page while its 400 lines of variants stay in the
+  // tree is half a cleanup.
+  assert.deepEqual(
+    sourceFiles(src)
+      .filter((file) => /-prototypes?\.tsx?$/.test(path.basename(file)))
+      .map((file) => path.relative(process.cwd(), file)),
+    [],
+    "a throwaway prototype module is still in the tree"
+  );
 });
 
 test("the client counts the server's number down — it never re-derives the window", () => {

@@ -30,18 +30,6 @@ import { redirect } from "next/navigation";
 
 import { HeaderBreadcrumbs } from "@/components/header";
 import { InvitationCreateForm } from "@/components/oversight/invitation-create-form";
-// PROTOTYPE ONLY — the #392 resend-window ruling. Both imports and their two
-// mounts below come out with the losing variants once Sebastian rules
-// (.claude/skills/prototype/SKILL.md → "Applying the ruling").
-import { ResendPrototypeBench } from "@/components/oversight/resend-prototypes";
-import { PrototypeSwitcher } from "@/components/prototype-switcher";
-
-// ⚠️ PROTOTYPE — DISPOSABLE (#392). The init script is INLINED rather than
-// built with `prototypeInitScript`: that helper is exported from a "use client"
-// module, so a Server Component cannot call it (it is a client reference here,
-// not a function). It re-applies the stored choice before first paint so a
-// reload does not flash option A over the option being judged.
-const RESEND_PROTO_INIT = `try{var p=localStorage.getItem("resend-proto");document.documentElement.setAttribute("data-resend-proto",["a","b","c","d"].includes(p)?p:"a")}catch(e){document.documentElement.setAttribute("data-resend-proto","a")}`;
 import {
   InvitationsList,
   type InvitationListRow,
@@ -111,38 +99,7 @@ export default async function OversightInvitationsPage() {
         expiryDays={INVITATION_EXPIRY_DAYS}
       />
 
-      <ResendPrototypeBench />
-
       <InvitationsList rows={rows} />
-
-      <script dangerouslySetInnerHTML={{ __html: RESEND_PROTO_INIT }} />
-      <PrototypeSwitcher
-        attribute="data-resend-proto"
-        storageKey="resend-proto"
-        label="Resend"
-        options={[
-          {
-            id: "a",
-            label: "A · As built",
-            hint: "Always says “Email sent”, including for the dropped duplicate",
-          },
-          {
-            id: "b",
-            label: "B · Name the minute",
-            hint: "Copy only: a repeat inside the window says it repeated",
-          },
-          {
-            id: "c",
-            label: "C · No window",
-            hint: "Every press is a new key, so every press really delivers",
-          },
-          {
-            id: "d",
-            label: "D · Countdown",
-            hint: "Button holds until a new send would actually be delivered",
-          },
-        ]}
-      />
     </div>
   );
 }

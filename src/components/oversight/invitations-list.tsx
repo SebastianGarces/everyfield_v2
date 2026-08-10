@@ -42,9 +42,10 @@ import { invitationRegisterPath } from "@/lib/invitations/register-path";
 // The other import-free leaf on this path, and imported for the same reason:
 // the cooldown arithmetic is shared with the provider dedupe key, and the module
 // that builds that key reaches the Resend SDK. `@/lib/invitations/resend-window`
-// imports nothing at all, so the browser gets the two functions and no client.
+// imports nothing at all, so the browser gets these functions and no client.
 import {
   resendCooldownLabel,
+  resendCooldownRemainingMs,
   resendCooldownSecondsLeft,
 } from "@/lib/invitations/resend-window";
 
@@ -219,10 +220,30 @@ type ResendCooldown = NonNullable<ResendInvitationEmailState["cooldown"]>;
  * effect that sets state after paint.
  *
  * `windowIndex` is IDENTITY, not arithmetic: two successes inside one bucket
- * report one index, so a second admin's send lands on the countdown already
- * running rather than restarting it, and a genuinely later send is a different
- * index and a fresh one. Keying on "did the action state change" would restart
- * it on every submit, including the refusals.
+ * report one index, so a second send by this admin lands on the countdown
+ * already running rather than restarting it, and a genuinely later send is a
+ * different index and a fresh one. Keying on "did the action state change"
+ * would restart it on every submit, including the refusals. The comparison
+ * itself is `resendCooldownRemainingMs` in the leaf, where the four boundaries
+ * — no cooldown, a window not yet counted, part way through, spent — are pinned
+ * by test rather than left as the one untested line the button's honesty rests
+ * on.
+ *
+ * WHAT THIS CANNOT DO, stated because the product must not imply otherwise:
+ * the cooldown lives in `useActionState`, which is per client session by
+ * design. A page reload, a second tab, or a SECOND ADMIN's browser mounts this
+ * row with no cooldown, so the button is live even though the window is open,
+ * and a press inside it reports "Email sent" over a message the provider
+ * collapses onto the one already accepted. Closing that needs a durable record
+ * of the last send keyed by invitation — exactly the persistence round 1 of the
+ * ruling refused (no `email_sent` column, no migration, nothing stored about
+ * delivery) — and the provider gives no replay signal to derive it from: an
+ * idempotent replay returns the ORIGINAL response, so `sendEmail` cannot tell a
+ * new message from a collapsed one. `resend.test.ts` §8 executes the case
+ * rather than leaving it as prose. The guard therefore holds for the two things
+ * one admin actually does — the double-click and the impatient second press —
+ * and the window itself still protects the INVITEE's inbox in every case,
+ * which is the half that was always about the provider.
  *
  * The `useEffect` here is a TIMER, not data synchronization
  * (memory/contracts/data-patterns.md): it subscribes to the clock, an external
@@ -263,8 +284,9 @@ function useResendCooldown(cooldown: ResendCooldown | undefined): number {
     return () => clearInterval(timer);
   }, [windowIndex, remainingMs]);
 
-  const countedMs = elapsed.window === windowIndex ? elapsed.ms : 0;
-  return resendCooldownSecondsLeft(remainingMs - countedMs);
+  return resendCooldownSecondsLeft(
+    resendCooldownRemainingMs(cooldown, elapsed)
+  );
 }
 
 /**
@@ -284,10 +306,12 @@ function useResendCooldown(cooldown: ResendCooldown | undefined): number {
  * and says how long that is. The window is kept — it is the double-click guard,
  * and the two-admins-on-one-page guard — but round 1 left the button live inside
  * it, so a second press returned "Email sent" while the provider collapsed the
- * message onto the one it had already accepted. The product must never claim a
- * send the provider will drop, so the control is unavailable for exactly as long
- * as that claim would be false, and the label counts the wait down instead of
- * leaving the admin to guess.
+ * message onto the one it had already accepted. The control is now unavailable
+ * for exactly as long as that claim would be false, and the label counts the
+ * wait down instead of leaving the admin to guess — WITHIN ONE CLIENT SESSION,
+ * which is as far as a cooldown with nothing persisted behind it can reach. See
+ * `useResendCooldown` for what that leaves open and why nothing here can close
+ * it.
  *
  * NATIVE `disabled`, not `aria-disabled`: the send genuinely cannot happen, so
  * the platform behaviour — out of the tab order, unclickable, dimmed, no
