@@ -320,6 +320,11 @@ const RING_SURFACES = [
   "sidebar-accent",
 ] as const;
 
+/** The grounds --sidebar-ring can land on: the sidebar's own share of the set. */
+const SIDEBAR_RING_SURFACES = RING_SURFACES.filter((surface) =>
+  surface.startsWith("sidebar")
+);
+
 /**
  * The alpha the ring is ACTUALLY painted at, read out of the shipped markup.
  * Hard-coding 0.5 here would let a component introduce `ring-ring/30` and keep
@@ -387,8 +392,10 @@ for (const theme of themes) {
     // The sidebar paints `ring-sidebar-ring focus-visible:ring-2` — no alpha —
     // so full strength IS what renders there. It carries its own token, which
     // is why it needs its own assertion: the two drifted apart is how a fixed
-    // --ring would still leave the sidebar failing.
-    for (const surface of ["sidebar", "sidebar-accent"] as const) {
+    // --ring would still leave the sidebar failing. Its grounds are the sidebar
+    // subset of RING_SURFACES rather than a second hand-written list, so adding
+    // a sidebar surface there adds it here too.
+    for (const surface of SIDEBAR_RING_SURFACES) {
       const ratio = contrastRatio(
         readToken(theme, "sidebar-ring"),
         readToken(theme, surface)
@@ -443,7 +450,11 @@ test("every destructive focus-ring override is visible too", () => {
     const themesForRule = dark ? (["dark"] as const) : themes;
 
     for (const theme of themesForRule) {
-      for (const surface of ["background", "card"] as const) {
+      // The same eight grounds the --ring cases measure: a destructive Button
+      // lands in a bg-muted panel, a popover and the sidebar just as readily as
+      // on the page ground, so measuring two surfaces here would be the exact
+      // shortcut RING_SURFACES exists to refuse.
+      for (const surface of RING_SURFACES) {
         const ground = readToken(theme, surface);
         const ratio = contrastRatio(
           composite(readToken(theme, "destructive"), ground, alpha),
