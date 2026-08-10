@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import {
   NOTIFICATION_CATEGORIES,
+  OVERSIGHT_CONSENT_SURFACES,
   OVERSIGHT_ELIGIBLE_CATEGORIES,
   OVERSIGHT_OWN_RELATIONSHIP_TYPES,
   OVERSIGHT_SHARING_EXEMPT_TYPES,
@@ -329,26 +331,68 @@ const EXEMPT_TYPE_COPY: Readonly<Record<string, RegExp>> = {
     /when your association with them ends/,
 };
 
-test("the copy names every consent-exempt event, one phrase per exempt type", () => {
-  // Half one: the map covers the exempt list EXACTLY. A new exemption with no
-  // phrase fails here; a phrase for a type that is no longer exempt fails here
-  // too, so the copy cannot over-claim in the other direction either.
+test("the exempt-phrase map covers the exempt list exactly", () => {
+  // The map covers the exempt list EXACTLY. A new exemption with no phrase
+  // fails here; a phrase for a type that is no longer exempt fails here too, so
+  // the copy cannot over-claim in the other direction either.
   assert.deepEqual(
     Object.keys(EXEMPT_TYPE_COPY).sort(),
     [...OVERSIGHT_SHARING_EXEMPT_TYPES].sort()
   );
+});
 
-  // Half two: every phrase is actually on the screen. `detail` is handed whole
-  // to `/settings/sharing` (`detail={OVERSIGHT_SHARING_TOGGLE.detail}`), so a
-  // sentence in this array is a sentence the planter reads.
-  const prose = OVERSIGHT_SHARING_TOGGLE.detail.join(" ");
-  for (const [type, phrase] of Object.entries(EXEMPT_TYPE_COPY)) {
-    assert.match(prose, phrase, type);
-  }
+/**
+ * EVERY consent surface, not one constant.
+ *
+ * Round 5 pinned `OVERSIGHT_SHARING_TOGGLE.detail` and the suite went green
+ * while `/settings` — a SECOND surface making the same promise — still said
+ * "apart from being told you accepted their invitation … no updates about this
+ * plant unless you turn sharing on". One constant guarded, one sibling file
+ * hardcoding a competing sentence: the hand-written-list problem one level up,
+ * and the drift guard had its hole exactly where the drift was. So the subject
+ * is now `OVERSIGHT_CONSENT_SURFACES`, and a surface joins the guard by
+ * existing in it. Ruled 2026-08-10 (round 6 of #304).
+ */
+for (const [route, lines] of Object.entries(OVERSIGHT_CONSENT_SURFACES)) {
+  test(`${route} names every consent-exempt event, one phrase per exempt type`, () => {
+    // Every phrase is actually on THIS screen. `detail` is handed whole to
+    // `/settings/sharing` (`detail={OVERSIGHT_SHARING_TOGGLE.detail}`) and
+    // `OVERSIGHT_SHARING_TEASER` is rendered whole by `/settings`, so a
+    // sentence in either is a sentence the planter reads.
+    const prose = lines.join(" ");
+    for (const [type, phrase] of Object.entries(EXEMPT_TYPE_COPY)) {
+      assert.match(prose, phrase, `${route} — ${type}`);
+    }
 
-  // And the ruled sentence, verbatim — it is one bullet, not three scattered
-  // clauses, because the REASON ("the relationship itself is theirs too") is
-  // what makes the exemption legible rather than arbitrary.
+    // The acceptance-ONLY framings these replaced must be gone, on every
+    // surface, not merely gone from the one that was corrected first.
+    assert.doesNotMatch(prose, /they were told the moment you accepted/i);
+    assert.doesNotMatch(prose, /apart from being told you accepted/i);
+  });
+
+  test(`${route} cannot read as if the toggle covered the exempt events`, () => {
+    // "Turn it off whenever you like. Sharing stops at the next update" is true
+    // of everything the toggle governs and FALSE of the three exemptions, which
+    // keep arriving after it is off. Put the toggle's promise last and it reads
+    // as the closing word over the exemptions above it. So the order is
+    // load-bearing on EVERY surface: the promise first, the exemptions last.
+    const prose = lines.join(" ");
+    const promise = prose.search(/turn it off|turn sharing on/i);
+    const exemptions = prose.search(/reach them either way/i);
+
+    assert.ok(promise >= 0, `${route} never states the toggle's own promise`);
+    assert.ok(exemptions >= 0, `${route} never names the exempt events`);
+    assert.ok(
+      promise < exemptions,
+      `${route}: the toggle promise (${promise}) must precede the exemptions (${exemptions})`
+    );
+  });
+}
+
+test("the ruled exemption sentence is in the sharing screen's copy verbatim", () => {
+  // It is one bullet, not three scattered clauses, because the REASON ("the
+  // relationship itself is theirs too") is what makes the exemption legible
+  // rather than arbitrary.
   assert.ok(
     OVERSIGHT_SHARING_TOGGLE.detail.includes(
       "Three things reach them either way, because the relationship itself is theirs too: when you accept their invitation, when you decline one, and when your association with them ends."
@@ -356,33 +400,50 @@ test("the copy names every consent-exempt event, one phrase per exempt type", ()
     "the ruled exemption sentence is not in the copy verbatim"
   );
 
-  // The acceptance-only sentence it replaced must be gone, not merely joined.
-  assert.doesNotMatch(prose, /they were told the moment you accepted/i);
-});
-
-test("the reversibility bullet cannot read as covering the exempt events", () => {
-  // "Turn it off whenever you like. Sharing stops at the next update" is true
-  // of everything the toggle governs and FALSE of the three exemptions, which
-  // keep arriving after it is off. Put it last and it reads as the closing
-  // promise over the sentence above it. So the order is load-bearing: the
-  // reversibility bullet comes first, the exemptions have the final word.
-  const reversibility = OVERSIGHT_SHARING_TOGGLE.detail.findIndex((line) =>
-    /turn it off/i.test(line)
-  );
+  // And nothing after the exemptions bullet re-opens the promise.
   const exemptions = OVERSIGHT_SHARING_TOGGLE.detail.findIndex((line) =>
     /reach them either way/i.test(line)
   );
+  assert.deepEqual(OVERSIGHT_SHARING_TOGGLE.detail.slice(exemptions + 1), []);
+});
 
-  assert.ok(reversibility >= 0, "the copy never says it is reversible");
-  assert.ok(exemptions >= 0, "the copy never names the exempt events");
-  assert.ok(
-    reversibility < exemptions,
-    `the turn-it-off bullet (${reversibility}) must precede the exemptions bullet (${exemptions})`
-  );
+test("no page hardcodes its own version of the consent promise", () => {
+  // The guard above can only see copy that lives in `categories.ts`. This one
+  // closes the loop: a page that writes the promise itself is invisible to it,
+  // which is how `/settings` drifted for two rulings. Both consent routes must
+  // render the shared constants and hold no claim prose of their own.
+  const surfaces = {
+    "/settings": "../../app/(dashboard)/settings/page.tsx",
+    "/settings/sharing": "../../app/(dashboard)/settings/sharing/page.tsx",
+  } as const;
 
-  // And nothing after the exemptions re-opens the promise.
-  const trailing = OVERSIGHT_SHARING_TOGGLE.detail.slice(exemptions + 1);
-  assert.deepEqual(trailing, []);
+  for (const [route, relative] of Object.entries(surfaces)) {
+    const source = readFileSync(new URL(relative, import.meta.url), "utf8");
+
+    assert.match(
+      source,
+      /from "@\/lib\/notifications\/categories"/,
+      `${route} does not take its consent copy from categories.ts`
+    );
+
+    // Comments explain the copy and legitimately quote the old sentence, so
+    // strip them before looking for prose the page would RENDER.
+    const rendered = source
+      .replace(/\/\*[\s\S]*?\*\//g, " ")
+      .replace(/^\s*\/\/.*$/gm, " ");
+
+    for (const claim of [
+      /unless you turn sharing on/i,
+      /get no updates/i,
+      /reach them either way/i,
+    ]) {
+      assert.doesNotMatch(
+        rendered,
+        claim,
+        `${route} hardcodes consent copy (${claim}) instead of importing it`
+      );
+    }
+  }
 });
 
 test("the milestones category description covers both directions of the association", () => {

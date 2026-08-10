@@ -66,6 +66,7 @@ local dev, so the seeded accounts work:
 |---|---|---|---|
 | Planter | `planter1@everyfield.app` | `password123` | **Church has 0 people** — fine for empty states, useless for anything about a list |
 | Network admin | `admin@everyfield.app` | `password123` | |
+| Sending church admin | `sending-church-admin@everyfield.app` | `password123` | Belongs to "Dev Sending Church", which belongs to NO network — so `/settings/association` opens on the admin's *answering* view. Added #304 round 6; before it the dev DB held no `sending_church_admin` at all and this whole role was unreachable in a browser |
 | Coach | `coach1@everyfield.app` | `password123` | |
 | Eval planter | `planter-dayspring@eval.phase-engine.everyfield.app` | `eval-password-123` | ~100 people, meetings, assessments |
 | Eval planter | `planter-evergreen@eval.phase-engine.everyfield.app` | `eval-password-123` | ~89 people, different church |

@@ -176,6 +176,7 @@ Why and how: [`contracts/db.md`](contracts/db.md) → The dev-seed wipe. Applies
 - `wiki_articles` and `wiki_sections` are `PROTECTED_TABLES`: never deleted AND never walked through, so nothing downstream of them is dragged in either. The corpus is migrated content no script rebuilds (#317).
 - A protected row pointing at a table the wipe deletes (a church-scoped wiki article) ABORTS the whole seed before its first DELETE — `assertProtectedTablesAreSafe()`. Stop and re-point by hand; never widen the wipe to cover it.
 - Every script that inserts a `churches` row stamps `onboarding_completed_at` with `now()` in that same INSERT — an unstamped seeded church puts its planter in the onboarding wizard instead of the dashboard. Pinned by `src/lib/onboarding/seeded-churches.test.ts`.
+- The seed owns exactly ONE `sending_networks` row and ONE `sending_churches` row, on PINNED uuids inserted with `onConflictDoNothing`. They exist so a `sending_church_admin` has an org to belong to: before #304 round 6 the dev database held NO account with that role, so every screen it reaches was unreachable by a real login and could not be browser-validated at all. They stay OUTSIDE the wipe (`planWipe` reaches neither table) — deleting them would take org rows the script never created — and the pinned ids make that free, since a re-seed re-inserts the same keys instead of accumulating a second copy.
 
 ## Request Deduplication
 

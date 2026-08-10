@@ -516,6 +516,48 @@ export const OVERSIGHT_SHARING_TOGGLE = {
   ],
 } as const;
 
+/**
+ * The SAME consent promise, one sentence long, as `/settings` teases it.
+ *
+ * It lives here beside `OVERSIGHT_SHARING_TOGGLE` rather than inside
+ * `src/app/(dashboard)/settings/page.tsx` because that is precisely how it went
+ * stale. It was written in #258 when the exempt list held ONE type, and it read
+ * "apart from being told you accepted their invitation … no updates about this
+ * plant unless you turn sharing on". The list then grew to three, round 5 of
+ * #304 corrected the sharing screen's own copy, and this sentence went on
+ * telling a planter that a DECLINE and a DEPARTURE were covered by a switch
+ * that has never gated either. The drift guard could not see it: a test that
+ * inspects one constant while a sibling file hardcodes a competing sentence is
+ * the hand-written-list problem one level up. Consent copy that lives in a page
+ * is consent copy no guard can hold to the code.
+ *
+ * The clauses naming the exempt events are the ruled sentence's OWN words
+ * (ruled 2026-08-10, round 5 of #304), reused rather than re-written. The
+ * toggle's promise comes first and the exemptions have the last word, the same
+ * order `detail` uses and for the same reason — a reader who meets "unless you
+ * turn sharing on" AFTER the three exemptions reads it as covering them.
+ */
+export const OVERSIGHT_SHARING_TEASER =
+  "Your sending church and network get no updates about this plant unless you turn sharing on — except for three things that reach them either way: when you accept their invitation, when you decline one, and when your association with them ends.";
+
+/**
+ * EVERY surface that makes the planter this consent promise, keyed by the route
+ * they read it on.
+ *
+ * This record is the drift guard's subject. `oversight.test.ts` asserts each
+ * exempt phrase against ALL of it, so the question "did the copy fall behind
+ * the exempt list?" is asked once for every place the promise is made rather
+ * than once for the place someone remembered. A new consent surface joins the
+ * guard by being added here — which is the only way to add one, since the copy
+ * itself has to live in this module to be added at all.
+ */
+export const OVERSIGHT_CONSENT_SURFACES: Readonly<
+  Record<string, readonly string[]>
+> = {
+  "/settings/sharing": OVERSIGHT_SHARING_TOGGLE.detail,
+  "/settings": [OVERSIGHT_SHARING_TEASER],
+};
+
 // ----------------------------------------------------------------------------
 // Guards + lookups
 // ----------------------------------------------------------------------------
