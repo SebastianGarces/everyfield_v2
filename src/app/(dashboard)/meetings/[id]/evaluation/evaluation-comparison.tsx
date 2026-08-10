@@ -1,7 +1,10 @@
 import { Minus, TrendingDown, TrendingUp } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { type EvaluationComparison } from "@/lib/meetings/service";
+import {
+  EVALUATION_COMPARISON_EMPTY_COPY,
+  type EvaluationComparison,
+} from "@/lib/meetings/service";
 
 interface EvaluationComparisonCardProps {
   /** `null` when nothing in the fetched window is earlier than this meeting. */
@@ -50,13 +53,15 @@ export function EvaluationComparisonCard({
         </CardHeader>
         <CardContent>
           {/*
-            The ruled sentence (round 2, 2026-08-10, #312). One line, no
-            window number, and true of BOTH causes of `null` — so it is
-            rendered unconditionally, with nothing for a caller to get wrong.
+            The ruled sentence (round 2, 2026-08-10, #312), rendered from the
+            constant that `service.ts` exports so the ruling is pinned by an
+            equality in a test rather than by re-parsing this JSX. It is
+            rendered unconditionally: one line, no window number, and true of
+            BOTH causes of `null`, so there is nothing here for a caller to
+            get wrong.
           */}
           <p className="text-muted-foreground text-sm">
-            No comparison available — no earlier evaluated meeting to compare
-            against.
+            {EVALUATION_COMPARISON_EMPTY_COPY}
           </p>
         </CardContent>
       </Card>

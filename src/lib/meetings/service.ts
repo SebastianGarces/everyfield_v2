@@ -1124,6 +1124,28 @@ export interface EvaluationTrendPoint {
 export const EVALUATION_COMPARISON_WINDOW = 50;
 
 /**
+ * What the comparison card says when it has no baseline (ruled 2026-08-10 on
+ * #312, round 2).
+ *
+ * It lives here, as a plain string, because it is the one sentence in the
+ * feature that a ruling pins. A test can import and compare it; a sentence
+ * built inline in JSX can only be re-parsed out of the source, and a test that
+ * parses JSX starts failing for reasons that have nothing to do with the
+ * ruling.
+ *
+ * Two properties this string must keep, both of them the ruling itself:
+ *
+ * 1. It never says "first". `compareEvaluationToHistory` returns `null` for two
+ *    different reasons — nothing was evaluated earlier, or everything earlier
+ *    fell outside `EVALUATION_COMPARISON_WINDOW` — and the card cannot tell
+ *    them apart. One sentence has to be true of both.
+ * 2. It names no window and no number. The window is a mechanism the planter
+ *    did not ask about; it stays in code, named only by the constant above.
+ */
+export const EVALUATION_COMPARISON_EMPTY_COPY =
+  "No comparison available — no earlier evaluated meeting to compare against.";
+
+/**
  * Get evaluation score trend across meetings (most recent first, returned chronologically).
  *
  * `meetingId` is on every point because `meetingNumber` cannot identify one:
