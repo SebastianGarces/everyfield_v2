@@ -228,3 +228,39 @@ test("a step the server declines is redirected out of the URL, not ignored", () 
     /if \(requestedStep && !honouredStep\) \{\s*redirect\("\/dashboard"\);/
   );
 });
+
+test("a FINISHED dashboard refuses a stray `?step=` too, not only the flow", () => {
+  // AC 3's second half, and the half that was reachable in the first attempt.
+  //
+  // The refusal above lives INSIDE the `shouldShowOnboarding` branch, so it
+  // stops running the moment `onboarding_completed_at` is set — and nothing
+  // else scrubs the param. The guide resolves from pathname + search params
+  // alone (`wiki-guide-provider.tsx`), so a finished dashboard sitting at
+  // `/dashboard?step=journey` renders the Guide button, which the PR #367
+  // ruling (option C) forbids. Reached without typing anything: finish from the
+  // journey step, land on `/dashboard?churchCreated=true` (a Server Action
+  // redirect is a history PUSH), press Back.
+  //
+  // So the slice below is the point of the test — the refusal has to be AFTER
+  // the branch, not merely somewhere in the file.
+  const branchStart = PAGE_CODE.indexOf("shouldShowOnboarding({");
+  assert.ok(branchStart > 0, "the onboarding branch must still exist");
+  const branchEnd = PAGE_CODE.indexOf("\n  }\n", branchStart);
+  assert.ok(branchEnd > branchStart, "the onboarding branch must still close");
+  const finishedDashboardCode = PAGE_CODE.slice(branchEnd);
+
+  assert.match(
+    finishedDashboardCode,
+    /if \(step !== undefined && !wantsLeadershipStep\) \{\s*redirect\("\/dashboard"\);/,
+    "a finished dashboard must redirect every `?step=` but OB-004's leadership"
+  );
+
+  // And the reason it must: this is the one `?step=` value that resolves a
+  // guide entry, so it is the one that must never survive onto a finished
+  // dashboard. `leadership` is the exception the redirect keeps, and it
+  // resolves nothing — asserted above — so keeping it shows no button either.
+  assert.ok(
+    resolveGuideEntry("/dashboard", { [ONBOARDING_STEP_PARAM]: "journey" }),
+    "the journey guide entry is what makes the stray param dangerous"
+  );
+});

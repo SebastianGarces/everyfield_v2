@@ -125,6 +125,28 @@ export default async function DashboardPage({
     );
   }
 
+  // Onboarding is OVER from here down, and the refusal above stopped running
+  // with it — so this is its other half (#373, AC 3). The flow owned `?step=`
+  // while it rendered; nothing owns it now, and nothing scrubbed it, so a value
+  // left in the address bar would survive onto a finished dashboard. That is not
+  // cosmetic: the wiki guide resolves from pathname + search params alone
+  // (`wiki-guide-provider.tsx`), so `/dashboard?step=journey` would put the
+  // Guide button on a finished dashboard, which the PR #367 ruling (option C,
+  // step-scoped) forbids.
+  //
+  // Reachable without typing a URL: finishing from step 3 redirects to
+  // `/dashboard?churchCreated=true`, and a Server Action redirect PUSHES, so
+  // Back returns to `/dashboard?step=journey` — now finished.
+  //
+  // `leadership` is the one exception, because it is the one step a finished
+  // dashboard genuinely answers to (OB-004's re-entry, handled below). Every
+  // other value goes, recognised or not: an unrecognised one is refused here
+  // rather than left to a resume rule, since past this point there is no flow
+  // left to resume into. Placed before the queries so a refused URL costs none.
+  if (step !== undefined && !wantsLeadershipStep) {
+    redirect("/dashboard");
+  }
+
   // Fetch dashboard data
   const churchId = user!.churchId!;
   const userId = user!.id;
