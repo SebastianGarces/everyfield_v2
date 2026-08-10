@@ -23,35 +23,34 @@
 // the UPDATE (`revokeInvitationQuery`) rather than in a prop.
 //
 // THE NARROWING IS ALSO WHAT KEEPS THE ACCOUNT-EXISTENCE ORACLE CLOSED — #304
-// ruling 4 item 5, extended to the LIST (2026-08-09). `target_church_id` and
-// `target_sending_church_id` are the server's answer to "does this address
-// already have an EveryField account", so NOTHING derived from them may enter
-// an `InvitationListRow`. A row used to carry `isOpen` (both targets null) and
-// the list rendered a `/register?invitation=` Copy-link button on exactly those
-// rows — which put a per-address probe one section below the create form on
-// this very page, undoing the collapse item 5 made to the success notice. The
-// mapping below names five fields and none of them is target-derived; the
-// invitation email is what will carry the token when delivery ships. Dates are
-// formatted here too, against `APP_TIME_ZONE` — a `Date` formatted in the
-// visitor's zone and again on the server is a hydration mismatch
-// (memory/invariants.md → Date & Time Rendering).
+// ruling 4 item 5, extended to the LIST (2026-08-09) and then to the row's
+// CAPTION (2026-08-10). `target_church_id` and `target_sending_church_id` are
+// the server's answer to "does this address already have an EveryField
+// account", so nothing derived from them — including `type`, which is derived
+// from them — may enter an `InvitationListRow`.
+//
+// The narrowing is no longer written here. It is `toInvitationListRow` in
+// `@/lib/invitations/list-row`, one exported pure function, because both times
+// this rule was broken it was broken by a field added to an inline `.map()`
+// that only regexes over this file were watching (`isOpen` plus a
+// `/register?invitation=` Copy-link button, then `kindLabel` off `type`).
+// A pure function is something `invitations-ui.test.ts` §9b can CALL for the
+// two target shapes an admin can produce and compare, which is the only check
+// that sees a transitive derivation. Read that file before adding a field here.
 // ============================================================================
 
 import { redirect } from "next/navigation";
 
 import { HeaderBreadcrumbs } from "@/components/header";
 import { InvitationCreateForm } from "@/components/oversight/invitation-create-form";
-import {
-  InvitationsList,
-  type InvitationListRow,
-} from "@/components/oversight/invitations-list";
+import { InvitationsList } from "@/components/oversight/invitations-list";
 import { getCurrentSession } from "@/lib/auth";
-import { formatDate } from "@/lib/datetime";
 import {
   INVITATION_EXPIRY_DAYS,
   getInvitationsForOrg,
   invitationActorFromSession,
 } from "@/lib/invitations/core";
+import { toInvitationListRow } from "@/lib/invitations/list-row";
 
 export const metadata = {
   title: "Invitations",
@@ -74,21 +73,7 @@ export default async function OversightInvitationsPage() {
   const actor = invitationActorFromSession({ user });
   const invitations = await getInvitationsForOrg(actor);
 
-  const rows: InvitationListRow[] = invitations.map((invitation) => ({
-    id: invitation.id,
-    // Rows predating #23 have no address recorded; say so rather than render a
-    // blank identity.
-    inviteeEmail: invitation.inviteeEmail ?? "(no address recorded)",
-    kindLabel:
-      invitation.type === "sending_church_to_network"
-        ? "Sending church"
-        : "Church plant",
-    status: invitation.status,
-    sentLabel: formatDate(invitation.createdAt, "short"),
-    expiresLabel: invitation.expiresAt
-      ? formatDate(invitation.expiresAt, "short")
-      : null,
-  }));
+  const rows = invitations.map(toInvitationListRow);
 
   return (
     <div className="space-y-6 p-6">

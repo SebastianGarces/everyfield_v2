@@ -107,6 +107,31 @@ The first attempt at item 5 fixed the notice and left the oracle standing one se
 
 What is lost, in both halves, is the admin hand-forwarding the register URL out of band — a stopgap for the email delivery that has not shipped, priced at an account-existence disclosure on every successful invite. The token itself is untouched: `/register?invitation=<id>` still redeems an open invitation, and it is what the invitation email will carry. Do not reintroduce a link or a target-derived row field on this page without a ruling that supersedes item 5. Pinned by `invitations-ui.test.ts` §9, which asserts the property behaviourally (two addresses, two target shapes, one rendered surface).
 
+### The derivation is TRANSITIVE — the caption was the third attempt (extended 2026-08-10, on the verdict that rejected the second)
+
+Removing `isOpen` and the Copy-link button left the oracle standing **one field over on the same row**. The page still mapped
+
+```ts
+kindLabel: invitation.type === "sending_church_to_network" ? "Sending church" : "Church plant"
+```
+
+and `type` is target-derived too. `resolveInvitationRequest` computes `const kind` from the RESOLVED target first and falls back to the admin's `inviteAs` only when there is no target. Executed against the real exported resolver with the exact expression `page.tsx` used, the four combinations a network admin can produce were:
+
+| form selection | address | caption |
+|---|---|---|
+| Church plant | no account | Church plant |
+| Church plant | sending-church admin | **Sending church** |
+| Sending church | no account | Sending church |
+| Sending church | planter with a plant | **Church plant** |
+
+So the caption equalled the admin's own selection when the address had no EveryField account and flipped when it had one of the other kind. One submission, no error, same screen: pick "Church plant", read "Sending church" on the row that just appeared, and you have learned that the address is a registered sending-church admin with an organization. Same class as the two before it, and it too was **dead code on `main`** — every creatable invitation was open there, so `type` always followed `inviteAs` and the caption could never disagree.
+
+**The fix (Option A again, consistent with `isOpen`).** `kindLabel` is gone from `InvitationListRow`. The row is five fields — `id`, `inviteeEmail`, `status`, `sentLabel`, `expiresLabel` — and the mapping is `toInvitationListRow` in `src/lib/invitations/list-row.ts`, an exported pure function rather than an inline `.map()` in `page.tsx`.
+
+**Why not refuse a kind mismatch instead** (make `type` follow `inviteAs` by rejecting, post-resolution, when the resolved kind disagrees, with `ACCOUNT_NOT_INVITABLE_MESSAGE`): it would fix the silent intent flip, but it ADDS an oracle bit rather than removing one. Today a network admin who picks "Church plant" and types a sending-church admin's address gets a successful create, indistinguishable in outcome from an accountless address. Under the refusal that submission would fail — and a refusal where an accountless address succeeds is precisely the account-existence answer item 5 forbids. The flip itself is not an authority escalation: a network admin may invite both kinds anyway, and a sending-church admin's mismatch is already refused inside `resolveInvitationRequest` and collapsed to the one message. If the caption is wanted back, it needs a column recording what was ASKED, plus a ruling.
+
+**And the reason it survived two guards: the tests were regexes.** `assert.doesNotMatch(page, /targetChurchId/)`, `/isOpen/`, and an allowed-field set that explicitly listed `kindLabel` — every one passed while the property was false, because the derivation ran through `type`. Text checks cannot follow an intermediate column. §9b now CALLS `resolveInvitationForResolvedTarget` for both target shapes, builds a stored row from what it returned, runs `toInvitationListRow` on each and asserts the two are deep-equal, with a `notEqual` on `type` first so the test cannot pass vacuously if targeting is ever refused again. Reintroducing `kindLabel` fails it by name. Keep the regexes as a second net; never as the proof.
+
 ## A token is bound to the address (ruled 2026-08-04, #23)
 
 An invite link is a uuid in a URL — forwarded, pasted, archived — and it buys two things: the association, and (when `BETA_INVITE_CODE` is set) a bypass of the beta gate, which is why both go through one check (`registrationEmailMatchesInvitation`, `(auth)/register/beta-gate.ts`) before the gate and before any account exists. A row with NO recorded address (pre-#23) matches nobody. The register form pre-fills the address `readOnly` — not `disabled`, which submits nothing — but that is convenience: the action is a POST that never saw the form.

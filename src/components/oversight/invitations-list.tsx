@@ -40,6 +40,21 @@
 // shapes crossing the wire is an oracle whether or not a component renders the
 // difference, and this component did render it.
 //
+// AND IT CARRIES NO `kindLabel` EITHER — the same ruling, extended a second
+// time (2026-08-10, on the verdict that rejected the attempt above). Removing
+// `isOpen` left the oracle standing ONE FIELD OVER: the row's caption read
+// `invitation.type === "sending_church_to_network" ? "Sending church" :
+// "Church plant"`, and `type` is target-derived too (core.ts picks the kind
+// from the RESOLVED target and falls back to the admin's `inviteAs` only when
+// there is no target). So the caption matched the admin's own selection for an
+// accountless address and flipped for an address holding an account of the
+// other kind — the identical probe, in a caption instead of a button.
+//
+// The row shape now lives in `@/lib/invitations/list-row`, as one exported pure
+// function, so §9b can CALL it for both target shapes and compare the results
+// rather than grep this file for field names. Every regex that guarded the
+// previous two attempts passed while the property was false.
+//
 // WHY NOT "show the link on every pending row" (the variant that keeps
 // delivery): it does not close the oracle, it relocates it. `/register` renders
 // an invitation-specific banner only when `describeInvitationForRegistration`
@@ -63,22 +78,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import type { InvitationListRow } from "@/lib/invitations/list-row";
 
-export type InvitationStatus =
-  | "pending"
-  | "accepted"
-  | "declined"
-  | "expired"
-  | "revoked";
+export type { InvitationListRow };
 
-export type InvitationListRow = {
-  id: string;
-  inviteeEmail: string;
-  kindLabel: string;
-  status: InvitationStatus;
-  sentLabel: string;
-  expiresLabel: string | null;
-};
+type InvitationStatus = InvitationListRow["status"];
 
 const STATUS_STYLE: Record<
   InvitationStatus,
@@ -159,7 +163,7 @@ function InvitationRow({ row }: { row: InvitationListRow }) {
       <div className="min-w-0 space-y-1">
         <p className="truncate font-medium">{row.inviteeEmail}</p>
         <p className="text-muted-foreground text-xs">
-          {row.kindLabel} · Sent {row.sentLabel}
+          Sent {row.sentLabel}
           {row.expiresLabel ? ` · Expires ${row.expiresLabel}` : ""}
         </p>
       </div>

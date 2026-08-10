@@ -14,6 +14,7 @@ import {
   slotRefusalMessage,
   type InvitationActor,
 } from "./core";
+import { toInvitationListRow } from "./list-row";
 import {
   invitationEmailMismatchMessage,
   registrationEmailMatchesInvitation,
@@ -94,6 +95,7 @@ const INVITATIONS_LIST = read(
   "oversight",
   "invitations-list.tsx"
 );
+const LIST_ROW = read("lib", "invitations", "list-row.ts");
 const REGISTER_ACTIONS = read("app", "(auth)", "register", "actions.ts");
 const REGISTER_FORM = read("app", "(auth)", "register", "register-form.tsx");
 const REGISTER_BETA_GATE = read("app", "(auth)", "register", "beta-gate.ts");
@@ -886,18 +888,119 @@ test("the two target shapes an admin can produce are distinguishable — server-
   assert.equal(hasAccount.values.targetChurchId, PLANT);
 });
 
+// ----------------------------------------------------------------------------
+// …AND NEITHER DOES THE ROW'S CAPTION
+// (#304 ruling 4 item 5, extended a SECOND time, 2026-08-10)
+// ----------------------------------------------------------------------------
+//
+// The attempt above removed `isOpen` and the Copy-link button, and left the
+// oracle standing ONE FIELD OVER on the same row. The caption was
+//
+//     kindLabel: invitation.type === "sending_church_to_network"
+//       ? "Sending church" : "Church plant"
+//
+// and `type` is target-derived as well: `resolveInvitationRequest` picks the
+// kind from the RESOLVED target and falls back to the admin's `inviteAs` only
+// when there is no target. Executed, the four combinations an admin can produce
+// were:
+//
+//     inviteAs=church,         accountless   -> "Church plant"
+//     inviteAs=church,         sc-admin addr -> "Sending church"
+//     inviteAs=sending_church, accountless   -> "Sending church"
+//     inviteAs=sending_church, planter addr  -> "Church plant"
+//
+// i.e. the caption equalled the admin's own selection when the address had no
+// EveryField account and flipped when it had one of the other kind. One
+// submission, no error, same screen.
+//
+// WHY EVERY GUARD ABOVE MISSED IT, and what this section does instead. The
+// checks were regexes over `page.tsx` (`/targetChurchId/`, `/isOpen/`) plus an
+// allowed-field set that WHITELISTED `kindLabel` — all of them passed while the
+// property was false, because the derivation was transitive through `type`. A
+// regex cannot follow that. So the row mapping is now one exported pure
+// function, `toInvitationListRow`, and the test below CALLS it: it runs the
+// real resolver for the two target shapes an admin can produce and asserts the
+// rendered row is byte-identical. Any field that varies with the target — named
+// after `type`, `targetChurchId` or anything else — fails it whatever it is
+// called. The regexes are kept as a cheap second net, never as the proof.
+
+/** One stored invitation row, built from what the resolver actually returned. */
+function storedRowFrom(resolved: ReturnType<typeof resolveInvitationRequest>) {
+  assert.ok(resolved.ok, "the resolver refused a request this test needs");
+  const sentAt = new Date("2026-08-10T15:00:00.000Z");
+  return {
+    id: "99999999-9999-4999-8999-999999999999",
+    ...resolved.values,
+    status: "pending" as const,
+    createdAt: sentAt,
+    expiresAt: new Date("2026-08-24T15:00:00.000Z"),
+    respondedAt: null,
+    respondedBy: null,
+  };
+}
+
+test("the rendered row is identical for an accountless address and for one with an account of the other kind", () => {
+  // A network admin submits the SAME form selection twice. The only difference
+  // is what the server found behind each address — which is exactly the fact
+  // item 5 says the admin may not learn from this page.
+  for (const inviteAs of ["church", "sending_church"] as const) {
+    const accountless = storedRowFrom(
+      resolveInvitationForResolvedTarget(
+        NET_ADMIN,
+        { inviteeEmail: "nobody@example.com", inviteAs },
+        {}
+      )
+    );
+    // The other kind, so `type` flips: a plant for "sending_church", a sending
+    // church for "church".
+    const withAccount = storedRowFrom(
+      resolveInvitationForResolvedTarget(
+        NET_ADMIN,
+        { inviteeEmail: "nobody@example.com", inviteAs },
+        inviteAs === "sending_church"
+          ? { targetChurchId: PLANT }
+          : { targetSendingChurchId: SENDING_CHURCH }
+      )
+    );
+
+    // The premise: the two rows really are different on the server, so this is
+    // not a tautology. If targeting is ever refused again this fails loudly
+    // rather than passing vacuously.
+    assert.notEqual(
+      accountless.type,
+      withAccount.type,
+      `inviteAs=${inviteAs}: the two target shapes produced the same type`
+    );
+
+    // The property: one rendered row for both.
+    assert.deepEqual(
+      toInvitationListRow(accountless),
+      toInvitationListRow(withAccount),
+      `inviteAs=${inviteAs}: the row differs with what the server found behind the address`
+    );
+  }
+});
+
 test("no row field on the invitations page is derived from a target column", () => {
   const page = code(INVITATIONS_PAGE);
+  const listRow = code(LIST_ROW);
 
-  // The mapping that builds `InvitationListRow[]`. Neither target column may be
-  // read in it — not as a boolean, not as a nullable id, not as a label.
-  assert.doesNotMatch(page, /targetChurchId/);
-  assert.doesNotMatch(page, /targetSendingChurchId/);
-  assert.doesNotMatch(page, /isOpen/);
+  // The mapping that builds `InvitationListRow[]` — now `toInvitationListRow`,
+  // with the page holding only the call. Neither target column may be read in
+  // either, and neither may `type`, which is computed from them (that is the
+  // derivation both previous attempts missed).
+  for (const source of [page, listRow]) {
+    assert.doesNotMatch(source, /targetChurchId/);
+    assert.doesNotMatch(source, /targetSendingChurchId/);
+    assert.doesNotMatch(source, /isOpen/);
+    assert.doesNotMatch(source, /invitation\.type/);
+    assert.doesNotMatch(source, /kindLabel/);
+  }
 
   // The row type is the contract, so a future edit has to change the type
   // rather than slip a field through it.
   assert.doesNotMatch(code(INVITATIONS_LIST), /isOpen/);
+  assert.doesNotMatch(code(INVITATIONS_LIST), /kindLabel/);
 });
 
 test("the pending list renders no register link and no per-row variation", () => {
@@ -910,13 +1013,14 @@ test("the pending list renders no register link and no per-row variation", () =>
   assert.doesNotMatch(list, /Copy link/);
 
   // Every pending row renders the SAME controls. The only row fields this
-  // component may read are the six the page is allowed to send — `status` is
-  // the invitee's own answer and may branch; a seventh field is how the oracle
-  // came back last time, so it has to be added here deliberately.
+  // component may read are the five `toInvitationListRow` builds — `status` is
+  // the invitee's own answer and may branch; a sixth field is how the oracle
+  // came back BOTH previous times, so it has to be added here deliberately.
+  // Adding one here is not enough on its own: the deep-equal test above is what
+  // decides whether it varies with the target.
   const allowed = new Set([
     "id",
     "inviteeEmail",
-    "kindLabel",
     "status",
     "sentLabel",
     "expiresLabel",
