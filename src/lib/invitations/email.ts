@@ -57,22 +57,24 @@ import { formatDate } from "@/lib/datetime";
 // machinery" — nothing about categories, preferences, enqueueing or dispatch is
 // reachable from here (see rule 3 above).
 import { appBaseUrl } from "@/lib/notifications/channels/email";
+// The `?invitation=` contract, from the import-free leaf that owns it. It does
+// NOT live in this module: this one imports `@/lib/email/client`, which builds
+// a Resend instance at module scope, so the "Copy link" button on the pending
+// list could not have imported it from here without shipping the Resend SDK to
+// the browser — and so hand-built the URL instead, which is the drift the
+// helper exists to prevent. See `./register-path.ts`.
+import {
+  INVITATION_REGISTER_PATH,
+  invitationRegisterPath,
+} from "./register-path";
 
 // ----------------------------------------------------------------------------
 // The link
 // ----------------------------------------------------------------------------
 
-/**
- * The register route an invitation link points at. One spelling, shared by the
- * email and by anything else that has to build the same URL, so the query key
- * cannot drift from the one `register/page.tsx` reads.
- */
-export const INVITATION_REGISTER_PATH = "/register";
-
-/** `/register?invitation=<id>` — the path half, for a surface that already knows its own origin. */
-export function invitationRegisterPath(invitationId: string): string {
-  return `${INVITATION_REGISTER_PATH}?invitation=${encodeURIComponent(invitationId)}`;
-}
+// Re-exported so the send path's own callers keep one import, and so a reader
+// of this module still finds the contract where they expect it.
+export { INVITATION_REGISTER_PATH, invitationRegisterPath };
 
 /**
  * The absolute, token-bound register URL — what the email actually links to.

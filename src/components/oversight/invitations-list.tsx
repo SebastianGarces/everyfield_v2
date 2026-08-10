@@ -32,6 +32,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+// Import-free by construction, so a client component may hold the same
+// `?invitation=` contract the email does without dragging the Resend SDK into
+// this chunk (`@/lib/invitations/register-path` explains why it is its own
+// file). Never re-spell the query string here.
+import { invitationRegisterPath } from "@/lib/invitations/register-path";
 
 export type InvitationStatus =
   | "pending"
@@ -158,7 +163,7 @@ function CopyInviteLinkButton({ invitationId }: { invitationId: string }) {
       className="cursor-pointer"
       onClick={async () => {
         await navigator.clipboard.writeText(
-          `${window.location.origin}/register?invitation=${invitationId}`
+          `${window.location.origin}${invitationRegisterPath(invitationId)}`
         );
         setCopied(true);
       }}

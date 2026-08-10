@@ -12,8 +12,11 @@
 // `verifySession()`, so a forged POST at either of these endpoints has no
 // parameter to name somebody else in.
 //
-// This module deliberately imports ONLY `@/lib/invitations/service`, never
-// `@/lib/invitations/core`. `service.test.ts` treats a `"use server"` module
+// For behaviour this module deliberately imports ONLY
+// `@/lib/invitations/service`, never `@/lib/invitations/core` (the one other
+// import, `@/lib/invitations/register-path`, is an import-free leaf holding a
+// string contract — it decides nothing and reaches nothing).
+// `service.test.ts` treats a `"use server"` module
 // that reaches the logic layer as something a reviewer has to sign off on
 // (`CORE_REACHING_ACTION_MODULES`); routing through the action layer's front
 // door means there is nothing to sign off on here.
@@ -26,6 +29,7 @@
 import { refresh } from "next/cache";
 import { z } from "zod";
 
+import { invitationRegisterPath } from "@/lib/invitations/register-path";
 import { createInvitation, revokeInvitation } from "@/lib/invitations/service";
 
 /** What the create form asks for. Note what is NOT here. */
@@ -120,7 +124,11 @@ export async function createInvitationAction(
   // values reach the surface intact.
   return {
     created: {
-      inviteePath: `/register?invitation=${result.invitation.id}`,
+      // Built by the helper, never spelled out here: the query key is a
+      // contract shared with the email and with the list's "Copy link" button,
+      // and a hand-rolled third copy is how a rename ships half-applied
+      // (`@/lib/invitations/register-path`).
+      inviteePath: invitationRegisterPath(result.invitation.id),
       inviteeEmail: result.invitation.inviteeEmail ?? parsed.data.inviteeEmail,
       emailSent: result.emailSent,
     },

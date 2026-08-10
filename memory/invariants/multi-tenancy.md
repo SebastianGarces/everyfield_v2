@@ -28,6 +28,20 @@ Consequently `createInvitation` currently issues only OPEN invitations, and `ass
 
 An invite link is a uuid in a URL — forwarded, pasted, archived — and it buys two things: the association, and (when `BETA_INVITE_CODE` is set) a bypass of the beta gate, which is why both go through one check (`registrationEmailMatchesInvitation`, `(auth)/register/beta-gate.ts`) before the gate and before any account exists. A row with NO recorded address (pre-#23) matches nobody. The register form pre-fills the address `readOnly` — not `disabled`, which submits nothing — but that is convenience: the action is a POST that never saw the form.
 
+## The invitation email: transactional, best-effort, and never logged (OV-003b, #293)
+
+**Source:** `src/lib/invitations/email.ts`, `src/lib/invitations/register-path.ts`, `src/lib/email/redact.ts`
+
+The invitation email is the delivery channel for the token above, so the three rules that govern it belong beside it.
+
+**It is not a notification.** The invitee has no account: no preference row, no category, nothing to unsubscribe from — so `enqueue`, `NOTIFICATION_CATEGORIES` and the dispatcher are all off this path, and the message carries no `List-Unsubscribe` (CAN-SPAM asks for one on commercial mail, not on a message the recipient's counterparty addressed to them personally). The one thing borrowed from the notification channel is `appBaseUrl()`, the repo's single definition of "the absolute base a link in an inbox needs".
+
+**It is best-effort, and the status guard is in the sender.** The row is the durable thing; the email is delivery of a link the admin can also copy. Every failure returns `{ sent: false }` — an email failure that rolled back the invitation would be strictly worse, because the admin's retry then hits the duplicate-pending refusal. `emailSent` is three-valued (`true` / `false` / `undefined` = nothing tried) and must not be collapsed to a boolean on the way to the surface, which reads it through `invitationCreatedNotice` (`create-notice.ts`). The "only a pending invitation is emailed" check sits inside `sendInvitationEmail`, not at the call site, so "a revoked invitation sends nothing further" holds for every caller that ever appears. Re-inviting after a revoke inserts a NEW row with a NEW id, and the URL is a function of that id, so a fresh email cannot carry a dead token.
+
+**The id is a bearer credential, so it is never logged.** It is both the register token and the beta-gate bypass; anyone holding it holds the invitation. So it does not reach `console`, and neither does the URL, the subject or the invitee address — failure logs carry the invitation TYPE and a reason code, which is enough to debug a misconfigured sender and useless to a reader of a log drain.
+
+**One spelling of the link.** `invitationRegisterPath()` lives in `register-path.ts`, which is **import-free on purpose** — the same rule `create-notice.ts` follows. It was born in `email.ts`, which imports `@/lib/email/client` and therefore evaluates `new Resend(...)` at module scope: server-only by construction. A build with the pending list's "Copy link" button importing it from there put `api.resend.com`, `resend-node` and `RESEND_API_KEY` in a 687 KB browser chunk on `/oversight/invitations`. So the client could not use the helper, hand-built the URL, and the "single spelling" was three. `register-path.test.ts` fails if an import appears in the leaf, or if any of the three call sites writes `?invitation=` itself.
+
 ## Slot checked twice; revoke scoped to the org
 
 The create-time refusal is SELECT-then-INSERT, so two racing admins still both get a row. Deleting it loses the legible refusal; deleting the accept-time one loses correctness.
