@@ -5,6 +5,7 @@ import type { PhaseNumber } from "@/lib/constants";
 
 import { toCalendarDate } from "./recurrence";
 import {
+  UNKNOWN_TEMPLATE_ERROR,
   findTaskTemplate,
   taskTemplateItemPriority,
   type TaskTemplate,
@@ -35,19 +36,32 @@ import {
 // meeting in March and another in June wants the follow-up list twice. What a
 // planter must never get is a second copy they did not ask for and cannot see
 // coming, which is what the note prevents.
+//
+// THIS MODULE IS SERVER-ONLY, AND NOT BY CONVENTION. Line 1 imports `@/db`,
+// whose module scope calls `neon(process.env.DATABASE_URL!)`. Anything a
+// `"use client"` file imports from here comes with drizzle, the schema and
+// `@neondatabase/serverless` attached, and the chunk throws while it evaluates.
+// That is what killed /tasks/templates: the picker imported one *string*.
+//
+// The two strings the browser needs now live in the db-free `./templates.ts`
+// and are re-exported below, so server callers keep importing them from here
+// and there is still one definition of each. `import "server-only"` is the
+// repo's usual rail (`src/lib/auth/admin.ts:1`) but is not usable on this
+// module for the same reason it was rejected on `src/lib/invitations/core.ts`
+// (`src/lib/invitations/service.test.ts:849`): the package's default entry is a
+// bare `throw` and resolves to the empty file only under the `react-server`
+// condition, so `import.test.ts`, `import-live.test.ts` and the two
+// phase-prompt suites — bare node processes that import this file directly —
+// would all fail at load. The replacement rail is
+// `src/components/tasks/template-picker.bundle.test.ts`, which walks the
+// picker's transitive imports and fails in `pnpm test` (a required CI step)
+// the moment a client module can reach `@/db` again.
 // ============================================================================
 
-/** Thrown when the key does not name a template in the catalog. */
-export const UNKNOWN_TEMPLATE_ERROR = "That checklist template does not exist";
-
-/**
- * Said out loud wherever the import is offered.
- *
- * The AC allows either policy — repeat, or dedupe — as long as the product
- * says which. This is the sentence that says it.
- */
-export const TEMPLATE_REIMPORT_NOTE =
-  "Importing a checklist again adds a second copy of its tasks. Nothing is merged, replaced or skipped.";
+// Re-exported, not redefined: `./templates.ts` is the db-free module the
+// browser is allowed to import, and these are the only two names it owns that
+// read as belonging here.
+export { TEMPLATE_REIMPORT_NOTE, UNKNOWN_TEMPLATE_ERROR } from "./templates";
 
 // ----------------------------------------------------------------------------
 // The pure half: what an import WOULD create

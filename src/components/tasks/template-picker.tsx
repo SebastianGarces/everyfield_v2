@@ -6,8 +6,11 @@ import { toast } from "sonner";
 import { importTaskTemplateAction } from "@/app/(dashboard)/tasks/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { TEMPLATE_REIMPORT_NOTE } from "@/lib/tasks/import";
+// `@/lib/tasks/templates` ONLY — never `@/lib/tasks/import`, which imports
+// `@/db` and would put `neon()` in this client chunk. See the bundle-graph
+// test beside this file.
 import {
+  TEMPLATE_REIMPORT_NOTE,
   taskTemplateSize,
   taskTemplatesByPhase,
   type TaskTemplate,

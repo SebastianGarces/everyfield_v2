@@ -5,8 +5,11 @@ import { test } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { TEMPLATE_REIMPORT_NOTE } from "@/lib/tasks/import";
-import { TASK_TEMPLATES, taskTemplatesByPhase } from "@/lib/tasks/templates";
+import {
+  TASK_TEMPLATES,
+  TEMPLATE_REIMPORT_NOTE,
+  taskTemplatesByPhase,
+} from "@/lib/tasks/templates";
 
 import { TaskTemplatePicker } from "./template-picker";
 

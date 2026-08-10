@@ -64,6 +64,39 @@ export interface TaskTemplate {
 }
 
 // ----------------------------------------------------------------------------
+// Copy the BROWSER needs — and why it lives in this file
+// ----------------------------------------------------------------------------
+//
+// These two strings belong to the import story, so `./import.ts` is where a
+// reader looks for them and where they used to live. They cannot stay there.
+// `./import.ts` imports `@/db`, whose module scope calls
+// `neon(process.env.DATABASE_URL!)`; the picker is a `"use client"` module, so
+// importing one string from it dragged drizzle, `@neondatabase/serverless` and
+// the whole schema — 222 KB — into a client chunk that threw
+// "No database connection string was provided to `neon()`" while it evaluated,
+// and /tasks/templates rendered nothing but the Next.js error boundary.
+//
+// This module is the db-free half of the pair: its only `@/db` reference is an
+// `import type`, which is erased, so it is safe to reach from the browser.
+// `./import.ts` re-exports both names, so server callers keep their old import
+// path and there is still exactly one definition of each string.
+// `template-picker.bundle.test.ts` walks the picker's transitive imports and
+// fails if anything ever reconnects the client to `@/db`.
+
+/** Thrown when a key does not name a template in the catalog. */
+export const UNKNOWN_TEMPLATE_ERROR = "That checklist template does not exist";
+
+/**
+ * Said out loud wherever the import is offered.
+ *
+ * The AC allows either policy — repeat, or dedupe — as long as the product
+ * says which. This is the sentence that says it. See `./import.ts` for why
+ * repeating is the right answer.
+ */
+export const TEMPLATE_REIMPORT_NOTE =
+  "Importing a checklist again adds a second copy of its tasks. Nothing is merged, replaced or skipped.";
+
+// ----------------------------------------------------------------------------
 // The catalog
 // ----------------------------------------------------------------------------
 //
