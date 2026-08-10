@@ -229,6 +229,12 @@ individually correct and jointly wrong.*
 
 - A **separate** `code-reviewer` agent (NOT the implementer) confirms G1–G5 **from the evidence,
   adversarially** — default to reject when a gate's evidence is missing or unconvincing.
+- The reviewer also answers two **structural** questions from the integrated diff
+  (`ops/agent-os/delegation-rules.md` R2/R4): did the track add a second implementation of a
+  decision that already has one (a predicate, a policy, a shared calculation)? And is new logic
+  behind a testable seam (a pure core, a builder assertable via `.toSQL()`), or reachable only
+  through a browser? A duplicated decision implementation is a FAIL; a missing seam is at minimum
+  a warning carried into the PR body.
 - Verdict ∈ `PASS` | `PASS_WITH_WARNINGS` | `FAIL`. Only `PASS` / `PASS_WITH_WARNINGS` may open a PR.
 - **Evidence:** reviewer verdict + findings.
 

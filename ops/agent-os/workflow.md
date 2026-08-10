@@ -118,6 +118,7 @@ ruling.
 |---|---|
 | Status labels + board structure | `ops/agent-os/labels.md` |
 | DoD gates (G0–G6, the scoped/integration split, HR lenses) | `ops/agent-os/dod.md` |
+| What makes work delegable (design-first, modularity, seams, rule strengths) | `ops/agent-os/delegation-rules.md` |
 | The build loop + auto-merge gate | `.claude/workflows/build-until-done.js` |
 | Board mirror (labels → columns, closed → Done) | `.github/workflows/board-sync.yml` |
 | Intake, dispatch, PR, validation skills | `.claude/skills/{spec-intake,dispatch,open-pr,browser-validation,definition-of-done}/` |
