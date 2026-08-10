@@ -16,19 +16,21 @@ import {
   EVALUATION_COMPARISON_WINDOW,
 } from "@/lib/meetings/service";
 
-import {
-  PrototypeSwitcher,
-  prototypeInitScript,
-} from "@/components/prototype-switcher";
+import { PrototypeSwitcher } from "@/components/prototype-switcher";
 
 import { EvaluationComparisonCard } from "./evaluation-comparison";
 
 /**
  * PROTOTYPE (2026-08-10, #312) — the comparison empty state's sentence has
- * four competing candidates on this branch. The switcher and this list are
- * deleted when the sentence is ruled.
+ * four competing candidates on this branch. Deleted when it is ruled.
+ *
+ * The init script is INLINED rather than built with `prototypeInitScript`:
+ * that helper is exported from a "use client" module, so a Server Component
+ * cannot call it (it is a client reference here, not a function). It
+ * re-applies the stored choice before first paint, so a reload does not flash
+ * option A over the option being judged.
  */
-const COMPARISON_PROTOTYPE_IDS = ["a", "b", "c", "d"];
+const COMPARISON_PROTO_INIT = `try{var p=localStorage.getItem("cmp-proto");document.documentElement.setAttribute("data-cmp-proto",["a","b","c","d"].includes(p)?p:"a")}catch(e){document.documentElement.setAttribute("data-cmp-proto","a")}`;
 
 export const dynamic = "force-dynamic";
 
@@ -75,15 +77,7 @@ export default async function EvaluationPage({ params }: EvaluationPageProps) {
   return (
     <div className="mx-auto max-w-3xl space-y-8">
       {/* PROTOTYPE (#312) — delete with the losing variants. */}
-      <script
-        dangerouslySetInnerHTML={{
-          __html: prototypeInitScript(
-            "data-cmp-proto",
-            "cmp-proto",
-            COMPARISON_PROTOTYPE_IDS
-          ),
-        }}
-      />
+      <script dangerouslySetInnerHTML={{ __html: COMPARISON_PROTO_INIT }} />
       <PrototypeSwitcher
         attribute="data-cmp-proto"
         storageKey="cmp-proto"
