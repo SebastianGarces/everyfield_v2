@@ -63,6 +63,28 @@ html:has(.marketing) {
   text-decoration-line: underline;
   text-underline-offset: 4px;
 }
+
+/* ============================================================
+   PROTOTYPE — marketing prose-link treatment (PR #387, issue #357)
+   Four candidates for the ruling on how a marketing prose link
+   carries a NON-COLOUR cue. Selected by `data-mktlink` on <html>
+   (see PrototypeSwitcher in (marketing)/layout.tsx). Option A is
+   the rule above, so it needs no override.
+   THROWAWAY: delete this block, the switcher mount and the init
+   script when the ruling lands. Nothing here may merge.
+   ============================================================ */
+html[data-mktlink="b"] .marketing p a[href] {
+  text-decoration-thickness: 1px;
+  text-decoration-color: rgba(11, 122, 63, 0.4);
+  text-underline-offset: 3px;
+}
+html[data-mktlink="c"] .marketing p a[href] {
+  text-decoration-line: none;
+  font-weight: 600;
+}
+html[data-mktlink="d"] .marketing p a[href] {
+  text-decoration-line: none;
+}
 .marketing :focus-visible {
   outline: 2px solid var(--field);
   outline-offset: 2px;
