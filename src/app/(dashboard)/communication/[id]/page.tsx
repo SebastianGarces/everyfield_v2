@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ResendNonOpeners } from "@/components/communication/resend-non-openers";
+import { MessageBody } from "@/components/communication/message-body";
 import {
   summarizeMessageDelivery,
   type MessageTileKey,
@@ -33,6 +34,7 @@ import {
   buildMeetingMergeData,
   buildPersonMergeData,
 } from "@/lib/communication/merge";
+import { escapeMergeValues, toRichTextHtml } from "@/lib/rich-text/format";
 import { db } from "@/db";
 import { churches } from "@/db/schema/church";
 import { churchMeetings } from "@/db/schema/meetings";
@@ -146,7 +148,13 @@ export default async function MessageDetailPage({
   const resolvedSubject = comm.subject
     ? renderTemplate(comm.subject, mergeData)
     : "(No subject)";
-  const resolvedBody = renderTemplate(comm.body, mergeData);
+  // Same two steps, in the same order, as the send path and the compose
+  // preview: sanitise the body first, then substitute merge values with those
+  // values escaped, so a person's name can never be markup here either.
+  const resolvedBody = renderTemplate(
+    toRichTextHtml(comm.body),
+    escapeMergeValues(mergeData)
+  );
 
   const tiles = summarizeMessageDelivery(comm.stats);
 
@@ -307,7 +315,10 @@ export default async function MessageDetailPage({
             </CardHeader>
             <CardContent>
               <div className="rounded-lg bg-gray-50 p-4">
-                <p className="text-sm whitespace-pre-wrap">{resolvedBody}</p>
+                {/* The body a planter composed is rich text (COM-017), so it
+                    is rendered, not printed — `MessageBody` re-sanitises and
+                    carries the plain-text bodies sent before it shipped. */}
+                <MessageBody body={resolvedBody} />
               </div>
             </CardContent>
           </Card>

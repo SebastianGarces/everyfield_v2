@@ -2,9 +2,15 @@
 
 import { renderTemplate, getSampleData } from "@/lib/communication/merge";
 import {
+  escapeMergeValues,
+  isRichTextEmpty,
+  toRichTextHtml,
+} from "@/lib/rich-text/format";
+import { escapeHtml } from "@/lib/rich-text/sanitize";
+import {
   CONFIRM_PLACEHOLDER,
   DECLINE_PLACEHOLDER,
-} from "@/lib/email/components/communication-email";
+} from "@/lib/email/rsvp-placeholders";
 
 interface EmailPreviewProps {
   subject: string;
@@ -81,15 +87,25 @@ function escapeRegex(str: string): string {
 }
 
 /**
- * Live email preview component.
+ * Live email preview component (COM-015).
  * Renders subject + body with merge fields replaced by sample data.
  * Highlights unresolved {{...}} tokens in red.
  * Renders {{confirm_link}} / {{decline_link}} as styled RSVP buttons.
+ *
+ * COM-017: the body is rich text, and this preview shows the FORMATTING, not
+ * the markup — it is the only place a planter sees what the recipient will get
+ * before they send it. It runs the same two steps the send path runs, in the
+ * same order: sanitise the body, then substitute merge values with those values
+ * escaped. Anything else here would preview a different email from the one that
+ * goes out.
  */
 export function EmailPreview({ subject, body, mergeData }: EmailPreviewProps) {
   const data = mergeData ?? getSampleData();
   const renderedSubject = subject ? renderTemplate(subject, data) : "";
-  const renderedBody = renderTemplate(body || "", data);
+  const renderedBody = renderTemplate(
+    toRichTextHtml(body),
+    escapeMergeValues(data)
+  );
 
   // Highlight unresolved merge fields
   const highlightUnresolved = (text: string) => {
@@ -99,10 +115,12 @@ export function EmailPreview({ subject, body, mergeData }: EmailPreviewProps) {
     );
   };
 
-  const displaySubject = highlightUnresolved(renderedSubject);
+  // The subject is plain text going into innerHTML, so it is escaped first —
+  // the body arrives already sanitised, the subject never was.
+  const displaySubject = highlightUnresolved(escapeHtml(renderedSubject));
 
-  // Convert newlines to <br>, highlight unresolved fields, then render RSVP buttons
-  let displayBody = highlightUnresolved(renderedBody.replace(/\n/g, "<br>"));
+  // Highlight unresolved fields, then render the RSVP tokens as buttons.
+  let displayBody = highlightUnresolved(renderedBody);
   displayBody = renderRsvpButtons(displayBody);
 
   return (
@@ -138,9 +156,9 @@ export function EmailPreview({ subject, body, mergeData }: EmailPreviewProps) {
                 "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
             }}
           >
-            {body ? (
+            {!isRichTextEmpty(body) ? (
               <div
-                className="leading-relaxed text-[#4b5563]"
+                className="leading-relaxed text-[#4b5563] [&_a]:text-[#0b7a3f] [&_a]:underline [&_ol]:mb-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_ul]:mb-3 [&_ul]:list-disc [&_ul]:pl-6"
                 style={{ fontSize: "16px" }}
                 dangerouslySetInnerHTML={{ __html: displayBody }}
               />

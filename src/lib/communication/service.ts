@@ -63,6 +63,11 @@ import {
   evaluateResendEligibility,
   resendBlockedMessage,
 } from "./resend-policy";
+import {
+  escapeMergeValues,
+  richTextToPlainText,
+  toRichTextHtml,
+} from "@/lib/rich-text/format";
 import type { ComposeMessageInput } from "@/lib/validations/communication";
 
 // ---------------------------------------------------------------------------
@@ -113,6 +118,18 @@ export async function sendCommunication(
 
   const churchMergeData = buildChurchMergeData(church);
 
+  // COM-017. The body is rich text, and THIS is the gate — not the editor.
+  // Every export of the compose action is a POSTable endpoint, so the markup
+  // arriving here has never been anywhere near the toolbar. It is sanitised
+  // once, before it is stored and before it is rendered, and the stored row is
+  // the sanitised form: nothing downstream re-derives it and gets it wrong.
+  // A legacy plain-text body (a system template, a resend of an older message)
+  // is converted rather than escaped into gibberish — `toRichTextHtml` decides.
+  const safeBodyHtml = toRichTextHtml(input.body);
+  // The text/plain half of the email is flattened from the SAME safe HTML, so
+  // the two halves can never say different things.
+  const safeBodyText = richTextToPlainText(safeBodyHtml);
+
   // 2. Load meeting if provided
   let meetingMergeData: Record<string, string> = {};
   let meeting: typeof churchMeetings.$inferSelect | null = null;
@@ -154,7 +171,7 @@ export async function sendCommunication(
     .values({
       churchId,
       subject: input.subject,
-      body: input.body,
+      body: safeBodyHtml,
       channel: input.channel,
       templateId: input.templateId,
       meetingId: input.meetingId,
@@ -212,11 +229,18 @@ export async function sendCommunication(
     const renderedSubject = input.subject
       ? renderTemplate(input.subject, mergeData)
       : "";
-    const renderedBody = renderTemplate(input.body, mergeData);
+    // Merge VALUES are escaped before they land in an HTML body — a person
+    // called `Bobby <script>` is a name, not markup. The token substitution
+    // itself is still `renderTemplate`, the one implementation of it.
+    const renderedBodyHtml = renderTemplate(
+      safeBodyHtml,
+      escapeMergeValues(mergeData)
+    );
+    const renderedBodyText = renderTemplate(safeBodyText, mergeData);
 
     const html = await render(
       CommunicationEmail({
-        body: renderedBody,
+        bodyHtml: renderedBodyHtml,
         confirmUrl,
         declineUrl,
         churchName: church.name,
@@ -226,7 +250,7 @@ export async function sendCommunication(
 
     const text = await render(
       CommunicationEmail({
-        body: renderedBody,
+        body: renderedBodyText,
         churchName: church.name,
       }),
       { plainText: true }

@@ -118,6 +118,19 @@ Applies to `src/lib/communication/**` and the `/communication` surfaces. Ruled 2
 - ⚖ "Delivery rate" names exactly ONE figure: `delivered / attempted`, on the church-wide overview only. A single message's tiles report COUNTS with the denominator in the caption ("Delivered · 6 · of 10 recipients") and claim no rate — the tile once divided by all recipient rows and called that the delivery rate too, which is a different number under the same name.
 - A rate with a zero denominator is UNKNOWN (`toPercent` → `null`, rendered as `—`), never `0%`. "0% open rate" is a claim about a send that never arrived.
 
+## Rich Text — Stored HTML & the Sanitiser
+
+Applies to `src/lib/rich-text/**`, `src/components/shared/rich-text-editor.tsx` and every writer or reader of a rich-text body (COM-017 / T-021).
+
+- A body composed in the editor is stored as HTML, and the SERVER is what makes it safe: `sendCommunication` sanitises before the insert, because every export of the compose action is a POSTable endpoint that never saw the toolbar. The editor's paste-time pass is a courtesy, never the gate.
+- ONE sanitiser, `sanitizeRichText` (`src/lib/rich-text/sanitize.ts`), allow-list only: nine elements, and `href` on `<a>` is the only attribute that survives. Never a second sanitiser, and never a regex that "strips script tags" — that is the shape of every XSS that ever shipped.
+- A URL is vetted by `sanitizeUrl` AFTER entity-decoding and control-character stripping, or `javascript:` walks in spelled `&#106;avascript:`. A refused href unwraps the anchor and keeps the text.
+- ONE door converts a stored value for reading or editing: `toRichTextHtml` (`format.ts`). It sanitises markup and converts legacy plain text, which is what makes "no migration" true — every template body and every message sent before COM-017 is plain text with newlines.
+- Merge substitution into an HTML body is `renderTemplate(html, escapeMergeValues(data))` — the token replacement stays the ONE implementation in `merge.ts`, and only the VALUES are escaped, so a person named `Bobby <script>` is a name. The send path, the COM-015 preview and the message detail page all run those two steps in that order; a surface that runs one of them shows a different email from the one that went out.
+- The RSVP placeholders live in `src/lib/email/rsvp-placeholders.ts`, imported by both the email template and `parseRichEmailBody` — the splitter may not import the template it feeds, which is a cycle that loads as `undefined`.
+- Every `html` segment `parseRichEmailBody` returns is balanced on its own: the cut is made at paragraph boundaries, never at the token's offset, because each segment becomes its own `dangerouslySetInnerHTML`.
+- `isRichTextEmpty`, not `.trim()`, decides whether a body is blank. An emptied contentEditable leaves `<p><br></p>`, which is truthy and sends a blank email.
+
 ## Tasks, Subtasks & Recurrence
 
 → [tasks](invariants/tasks.md) — `src/lib/tasks/**`, `src/app/(dashboard)/tasks/**`.

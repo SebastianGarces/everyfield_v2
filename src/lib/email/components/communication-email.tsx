@@ -9,16 +9,33 @@ import {
   Section,
   Text,
 } from "@react-email/components";
+import { parseRichEmailBody } from "@/components/communication/email-body-segments";
+import {
+  CONFIRM_PLACEHOLDER,
+  DECLINE_PLACEHOLDER,
+} from "@/lib/email/rsvp-placeholders";
 
 // RSVP placeholder tokens used to identify where buttons should be rendered.
 // These tokens are inserted by the merge engine in place of raw URLs,
 // then detected here and replaced with styled Button components.
-export const CONFIRM_PLACEHOLDER = "__EF_CONFIRM__";
-export const DECLINE_PLACEHOLDER = "__EF_DECLINE__";
+// Defined in `../rsvp-placeholders` and re-exported here, which is where every
+// caller already imports them from.
+export { CONFIRM_PLACEHOLDER, DECLINE_PLACEHOLDER };
 
 interface CommunicationEmailProps {
-  /** Rendered plain text body (after merge field replacement) */
-  body: string;
+  /**
+   * Rendered plain text body (after merge field replacement).
+   *
+   * Still the only input for the text/plain render, and the fallback for any
+   * caller that has not moved to `bodyHtml`.
+   */
+  body?: string;
+  /**
+   * Rendered rich-text body — sanitised HTML with merge fields already
+   * substituted (COM-017). Preferred when present: it is what the author
+   * actually composed, bold and links included.
+   */
+  bodyHtml?: string;
   /** RSVP confirm URL — if provided, CONFIRM_PLACEHOLDER is rendered as a button */
   confirmUrl?: string;
   /** RSVP decline URL — if provided, DECLINE_PLACEHOLDER is rendered as a button */
@@ -89,12 +106,19 @@ function parseBody(body: string): Segment[] {
  */
 export function CommunicationEmail({
   body,
+  bodyHtml,
   confirmUrl,
   declineUrl,
   churchName,
   previewText,
 }: CommunicationEmailProps) {
-  const segments = parseBody(body);
+  const segments = parseBody(body ?? "");
+
+  // COM-017: a composed body is rich text. Each html segment is balanced on
+  // its own (`parseRichEmailBody`), so each can be its own inner-HTML block —
+  // the RSVP buttons still render as react-email Buttons between them, which
+  // is what keeps them clickable in Outlook.
+  const richSegments = bodyHtml ? parseRichEmailBody(bodyHtml) : null;
 
   return (
     <Html>
@@ -103,55 +127,79 @@ export function CommunicationEmail({
       <Body style={bodyStyle}>
         <Container style={container}>
           <Section style={content}>
-            {segments.map((segment, i) => {
-              if (segment.type === "buttons" && confirmUrl && declineUrl) {
-                return (
-                  <Section key={i} style={buttonSection}>
-                    <Button href={confirmUrl} style={confirmButton}>
-                      I&apos;ll be there
-                    </Button>
-                    <Button href={declineUrl} style={declineButton}>
-                      Can&apos;t make it
-                    </Button>
-                  </Section>
-                );
-              }
+            {richSegments
+              ? richSegments.map((segment, i) => {
+                  if (segment.type === "buttons") {
+                    if (!confirmUrl || !declineUrl) return null;
+                    return (
+                      <Section key={`rich-${i}`} style={buttonSection}>
+                        <Button href={confirmUrl} style={confirmButton}>
+                          I&apos;ll be there
+                        </Button>
+                        <Button href={declineUrl} style={declineButton}>
+                          Can&apos;t make it
+                        </Button>
+                      </Section>
+                    );
+                  }
 
-              if (segment.type === "buttons") {
-                // Placeholders present but no URLs — skip
-                return null;
-              }
+                  return (
+                    <div
+                      key={`rich-${i}`}
+                      style={richText}
+                      dangerouslySetInnerHTML={{ __html: segment.html }}
+                    />
+                  );
+                })
+              : segments.map((segment, i) => {
+                  if (segment.type === "buttons" && confirmUrl && declineUrl) {
+                    return (
+                      <Section key={i} style={buttonSection}>
+                        <Button href={confirmUrl} style={confirmButton}>
+                          I&apos;ll be there
+                        </Button>
+                        <Button href={declineUrl} style={declineButton}>
+                          Can&apos;t make it
+                        </Button>
+                      </Section>
+                    );
+                  }
 
-              // Text segment: split into paragraphs by blank lines,
-              // render each paragraph as a Text component
-              const paragraphs: string[][] = [];
-              let currentParagraph: string[] = [];
+                  if (segment.type === "buttons") {
+                    // Placeholders present but no URLs — skip
+                    return null;
+                  }
 
-              for (const line of segment.lines) {
-                if (line.trim() === "") {
+                  // Text segment: split into paragraphs by blank lines,
+                  // render each paragraph as a Text component
+                  const paragraphs: string[][] = [];
+                  let currentParagraph: string[] = [];
+
+                  for (const line of segment.lines) {
+                    if (line.trim() === "") {
+                      if (currentParagraph.length > 0) {
+                        paragraphs.push(currentParagraph);
+                        currentParagraph = [];
+                      }
+                    } else {
+                      currentParagraph.push(line);
+                    }
+                  }
                   if (currentParagraph.length > 0) {
                     paragraphs.push(currentParagraph);
-                    currentParagraph = [];
                   }
-                } else {
-                  currentParagraph.push(line);
-                }
-              }
-              if (currentParagraph.length > 0) {
-                paragraphs.push(currentParagraph);
-              }
 
-              return paragraphs.map((paraLines, j) => (
-                <Text key={`${i}-${j}`} style={text}>
-                  {paraLines.map((line, k) => (
-                    <span key={k}>
-                      {line}
-                      {k < paraLines.length - 1 && <br />}
-                    </span>
-                  ))}
-                </Text>
-              ));
-            })}
+                  return paragraphs.map((paraLines, j) => (
+                    <Text key={`${i}-${j}`} style={text}>
+                      {paraLines.map((line, k) => (
+                        <span key={k}>
+                          {line}
+                          {k < paraLines.length - 1 && <br />}
+                        </span>
+                      ))}
+                    </Text>
+                  ));
+                })}
           </Section>
           <Hr style={hr} />
           <Text style={footer}>— {churchName} via EveryField</Text>
@@ -187,6 +235,19 @@ const content: React.CSSProperties = {
 };
 
 const text: React.CSSProperties = {
+  fontSize: "16px",
+  color: "#4b5563",
+  lineHeight: "1.6",
+  margin: "0 0 16px",
+};
+
+/**
+ * The rich-text wrapper. The author's own `<p>`, `<strong>`, `<em>`, `<u>`,
+ * `<a>` and list tags sit inside it, so the type settings are inherited rather
+ * than repeated per element — email clients strip `<style>` blocks, and there
+ * is nowhere else to put element rules.
+ */
+const richText: React.CSSProperties = {
   fontSize: "16px",
   color: "#4b5563",
   lineHeight: "1.6",

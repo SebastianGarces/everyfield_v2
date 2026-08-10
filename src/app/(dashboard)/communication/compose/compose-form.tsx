@@ -6,7 +6,6 @@ import { Send, Loader2, AlertTriangle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -18,6 +17,10 @@ import {
 import { RecipientPicker } from "@/components/communication/recipient-picker";
 import { MergeFieldInserter } from "@/components/communication/merge-field-inserter";
 import { EmailPreview } from "@/components/communication/email-preview";
+import {
+  RichTextEditor,
+  type RichTextEditorHandle,
+} from "@/components/shared/rich-text-editor";
 import { sendMessageAction } from "@/app/(dashboard)/communication/actions";
 // Zone-pinned, not `toLocaleDateString`: this picker renders in the browser
 // while the meeting pages render on the server, and an unpinned formatter makes
@@ -30,6 +33,9 @@ import {
   buildMeetingMergeData,
   MERGE_FIELDS,
 } from "@/lib/communication/merge";
+// The body is rich text (COM-017). Templates and drafts written before it are
+// plain text; `toRichTextHtml` is the one door that converts them on the way in.
+import { isRichTextEmpty, toRichTextHtml } from "@/lib/rich-text/format";
 import type { MessageTemplate } from "@/db/schema/communication";
 import type { RecipientTeamOption } from "@/lib/communication/service";
 
@@ -103,7 +109,9 @@ export function ComposeForm({
   const effectiveTemplate = initialTemplate ?? autoTemplate;
 
   const [subject, setSubject] = useState(effectiveTemplate?.subject ?? "");
-  const [body, setBody] = useState(effectiveTemplate?.body ?? "");
+  const [body, setBody] = useState(() =>
+    toRichTextHtml(effectiveTemplate?.body ?? "")
+  );
   const [selectedTemplateId, setSelectedTemplateId] = useState(
     effectiveTemplate?.id ?? ""
   );
@@ -160,7 +168,7 @@ export function ComposeForm({
   }, [churchName, selectedMeetingId, meetings]);
 
   const subjectRef = useRef<HTMLInputElement>(null);
-  const bodyRef = useRef<HTMLTextAreaElement>(null);
+  const bodyRef = useRef<RichTextEditorHandle>(null);
   const lastFocusedRef = useRef<"subject" | "body">("body");
 
   const handleTemplateChange = (templateId: string) => {
@@ -168,7 +176,7 @@ export function ComposeForm({
     const template = templates.find((t) => t.id === templateId);
     if (template) {
       setSubject(template.subject ?? "");
-      setBody(template.body);
+      setBody(toRichTextHtml(template.body));
     }
   };
 
@@ -187,22 +195,14 @@ export function ComposeForm({
           input.focus();
           input.setSelectionRange(start + token.length, start + token.length);
         });
-      } else if (bodyRef.current) {
-        const textarea = bodyRef.current;
-        const start = textarea.selectionStart ?? body.length;
-        const end = textarea.selectionEnd ?? body.length;
-        const newValue = body.substring(0, start) + token + body.substring(end);
-        setBody(newValue);
-        requestAnimationFrame(() => {
-          textarea.focus();
-          textarea.setSelectionRange(
-            start + token.length,
-            start + token.length
-          );
-        });
+      } else {
+        // The body is contentEditable now, so the caret belongs to the editor —
+        // it inserts at its own selection rather than the form splicing a
+        // string, which is what keeps a token landing INSIDE a bold run.
+        bodyRef.current?.insertText(token);
       }
     },
-    [subject, body]
+    [subject]
   );
 
   const handleSend = async () => {
@@ -214,7 +214,9 @@ export function ComposeForm({
       setError("Please enter a subject");
       return;
     }
-    if (!body.trim()) {
+    // `<p><br></p>` is what an emptied editor leaves behind — truthy, and a
+    // `.trim()` guard would wave a blank email straight through.
+    if (isRichTextEmpty(body)) {
       setError("Please enter a message body");
       return;
     }
@@ -335,14 +337,14 @@ export function ComposeForm({
           {/* Body */}
           <div className="space-y-2">
             <Label htmlFor="body">Message</Label>
-            <Textarea
+            <RichTextEditor
               ref={bodyRef}
               id="body"
+              aria-label="Message"
               value={body}
-              onChange={(e) => setBody(e.target.value)}
+              onChange={setBody}
               onFocus={() => (lastFocusedRef.current = "body")}
               placeholder="Write your message..."
-              className="min-h-[240px] resize-y font-mono text-sm"
             />
           </div>
 
