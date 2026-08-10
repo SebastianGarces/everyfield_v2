@@ -71,3 +71,31 @@ Not carried: `completionEvent`. An auto-completion hook is installed by whatever
 ## Completion is written before its successor
 
 The reverse of the usual "durable marker last" rule, and deliberate, because the two failure modes are not symmetric. A successor with no completion leaves **two** open instances of one series, breaking the guarantee a planter relies on. A completion with no successor leaves a gap that reopening and re-completing repairs. We take the recoverable one, and `completeTask` swallows a recurrence failure rather than telling the planter their completed task failed to complete.
+
+## A phase change prompts; it never creates (T-020)
+
+**Source:** `src/lib/tasks/phase-prompt.ts`, `src/components/tasks/phase-template-prompt.tsx`, `src/lib/events/subscriptions.ts`, `src/lib/tasks/templates.ts`, `src/lib/tasks/import.ts`
+
+`phase.changed` has a task-side handler, and the handler writes nothing. That is not an unfinished wire — it is the rule. A planter who advances a stage and finds twenty tasks they did not ask for stops trusting the list with the ones they did, so the stage change makes the stage's checklists *visible*, with their real dates already worked out, and the planter presses or does not. `handlePhaseChangedForTemplatePrompt` is registered precisely so the place a future author would add auto-creation already carries the argument against it; `phase-prompt-live.test.ts` asserts a phase change leaves the tasks table empty.
+
+### The prompt is derived, the answer is stored
+
+There is no `phase_prompts` table and no migration. `phase_transitions` already records durably, append-only, that a plant moved and when, and the catalog is code — so `buildPhaseTemplatePrompt(latestTransition, answeredTransitionId)` is a pure function and the prompt cannot go stale, cannot be half-written by a failed handler, and needed nothing back-filled for plants that moved before it shipped.
+
+Four ways to get "prompt nothing", each a real case: no transition at all; a move that went nowhere (`toPhase === fromPhase`); the transition is already answered; the new phase has no templates. The last one is the guard for a phase the catalog has not caught up with — every phase 0–6 carries a template today.
+
+A `kind = 'initial_declaration'` row is filtered out, for the reason [`../invariants.md`](../invariants.md) → Phase History gives: nobody moved anywhere. Prompting a planter mid-onboarding with a checklist import is the same surprise from the other direction.
+
+A **backward** move still prompts. "Advance" is the oversight milestone's rule, because that one announces progress; a planter who moves 3 → 2 is doing phase-2 work and wants the phase-2 checklist.
+
+The only non-derivable fact is "this planter already said no", and it lives in a cookie holding the **answered transition's id** — which is what makes the prompt re-arm on its own, since the next move has a different id and the stored answer simply stops matching. The residual is honest and named in [`../invariants.md`](../invariants.md): the answer is per-browser.
+
+### Dates come from the transition, not from the press
+
+`acceptPhaseTemplatePrompt` hands `transition.createdAt` to the T-011 import path, so a planter who answers three days later gets the schedule they would have got by answering immediately. Counting from the press instead quietly punishes anyone who thought about it first, and it makes the dates the prompt *showed* different from the dates it *wrote*.
+
+It also re-derives the prompt from the database and filters the request's template keys against it. The keys come from a browser, so a forged one can name a checklist from a stage this plant has never reached; re-deriving turns that into a no-op instead of a private import path around the picker. It closes the other window too — if the plant moved again between render and press, the answer applies to the *current* transition and is dated from it, which is the only answer still true.
+
+### Two handlers on one event
+
+`phase.changed` now carries the oversight milestone (N-025) and this prompt. The bus runs handlers through `Promise.allSettled`, so neither can cost the other its turn, and `subscriptions.test.ts` asserts both are registered — a single `bus.on` per event type would have replaced the first silently.

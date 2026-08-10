@@ -131,6 +131,11 @@ Applies to `src/lib/communication/**` and the `/communication` surfaces. Ruled 2
 - ⚖ Exactly ONE instance of a recurring series is open at a time, minted on completion — never by a cron. The guard runs BEFORE the successor insert, so a resurrected series gains neither a second open task nor a duplicate checklist.
 - `completionEvent` is never copied to a successor: `meeting.evaluation.completed` is backed by a partial unique index, so copying it aborts the second instance's insert. Recurrence mints plain work; hooks stay with the generator.
 - A completion is written FIRST and its successor second — the reverse of the usual durable-marker-last rule, deliberately. A successor with no completion leaves two open instances; a completion with no successor is repaired by reopening and re-completing.
+- ⚖ A phase change PROMPTS, it never creates (T-020). `handlePhaseChangedForTemplatePrompt` is registered on `phase.changed` and writes NOTHING; the absence is the ruling. Twenty tasks a planter did not ask for is the surprise the feature exists to avoid.
+- The prompt is DERIVED, never stored: the latest `phase_transitions` row with `kind = 'transition'` plus the code-defined catalog. No table, no migration, nothing to back-fill. A `kind = 'initial_declaration'` row is not a move and prompts nothing.
+- The one stored thing is the ANSWER — `PHASE_TEMPLATE_PROMPT_COOKIE` holding the ANSWERED TRANSITION'S id. That is what re-arms the prompt by itself: the next move has a different id, so the stored answer stops matching.
+- Accepting dates the checklist from the TRANSITION instant, never from the press (`importedAt: transition.createdAt`), and the keys are re-filtered against a freshly derived prompt so a forged key imports nothing.
+- Accepted residual: a decline is per-browser, because the answer is a cookie. Declining on a laptop does not silence the prompt on a phone; a cross-device answer needs a column and a migration.
 
 ## Dev Seeds
 

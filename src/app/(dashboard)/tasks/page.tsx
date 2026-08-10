@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 
 import { HeaderBreadcrumbs } from "@/components/header";
 import { TaskFilters, TaskList, TaskQuickAdd } from "@/components/tasks";
+import { PhaseTemplatePrompt } from "@/components/tasks/phase-template-prompt";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { TaskCategory, TaskPriority, TaskStatus } from "@/db/schema";
@@ -163,7 +164,15 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
         </div>
 
         {/* Task list */}
-        <div className="flex-1 overflow-auto p-6">
+        <div className="flex-1 space-y-6 overflow-auto p-6">
+          {/*
+            T-020. Renders nothing unless the plant has just changed stage and
+            the prompt has not been answered, so it costs an unprompted planter
+            one query and no pixels. It sits ABOVE the list because accepting
+            it changes that list.
+          */}
+          <PhaseTemplatePrompt />
+
           <TaskList
             tasks={result.tasks}
             total={result.total}
