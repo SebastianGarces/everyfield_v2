@@ -42,6 +42,7 @@ leadership is derived from `MinistryTeam.leader_id`, never from a role.
 - **"admin", "church admin", "org admin"** on their own → name the role.
 - **"user"** where a specific role is meant → name the role. "User" is fine only when the sentence
   is true of every role.
+
 **Two things named "coach" that this entry does not govern.** Both are content, not prose about
 the role, and both keep their names:
 

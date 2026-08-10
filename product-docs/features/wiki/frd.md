@@ -36,7 +36,7 @@ The primary knowledge foundation is the **Launch Playbook** methodology (Harvest
 - Administrative setup (legal, financial, technology)
 
 Secondary sources include:
-- Experiential knowledge from coaches and oversight staff
+- Experiential knowledge from coaches and oversight admins
 - Successful planters' retrospectives and case studies
 - Templates and documents from actual church plants
 - Video content from training events
