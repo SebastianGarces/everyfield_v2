@@ -1106,10 +1106,16 @@ export interface EvaluationTrendPoint {
  *
  * The comparison is against the trend window, not against all history: a
  * planter with more evaluated meetings than this would be compared to the most
- * recent `EVALUATION_COMPARISON_WINDOW` of them. That is deliberate — the
- * number a planter cares about is "how did this one go against how things have
- * been going" — and the rendered copy always says how many meetings the
- * average covers, so the figure never claims more than it counted.
+ * recent `EVALUATION_COMPARISON_WINDOW` of them. That is deliberate (ruled
+ * 2026-08-10 on #312, the window kept as-is) — the number a planter cares
+ * about is "how did this one go against how things have been going" — and the
+ * rendered copy always says how many meetings the average covers, so the
+ * figure never claims more than it counted.
+ *
+ * The cost of keeping it: for a church past the window, opening an EARLY
+ * meeting hands `compareEvaluationToHistory` a window of only LATER meetings,
+ * so it returns `null`. The card must therefore never read that `null` as
+ * "this is your first evaluated meeting" — see `evaluation-comparison.tsx`.
  */
 export const EVALUATION_COMPARISON_WINDOW = 50;
 
@@ -1171,18 +1177,25 @@ function toOneDecimal(value: number): number {
 /**
  * Compare one meeting's evaluation against the meetings evaluated before it.
  *
- * Returns `null` when there is nothing earlier to compare against — a first
- * evaluated meeting has NO comparison, which is a different statement from
- * "compared to 0.0" or "0% change". Rendering a delta against an absent
- * history would tell the planter their first meeting was a catastrophic drop.
+ * Returns `null` when NOTHING IN THE GIVEN TREND is earlier than `current`,
+ * which is a different statement from "compared to 0.0" or "0% change".
+ * Rendering a delta against an absent history would tell the planter their
+ * meeting was a catastrophic drop.
+ *
+ * `null` is NOT the same as "this is the first evaluated meeting", and no
+ * caller may render it as that (ruled 2026-08-10, #312). It has two causes:
+ * nothing was evaluated earlier, or everything earlier fell outside the window
+ * the caller drew `trend` from. This function is handed an array; it cannot
+ * tell the two apart, and neither can the card.
  *
  * "Before" is decided by `datetime`, not by position in the array, and the
  * current meeting is excluded by id — a meeting evaluated on the same day as
  * another must not end up inside its own baseline.
  *
- * `currentScore` is passed in rather than looked up in `trend` so the
- * comparison still works for a meeting that has fallen outside the trend
- * window: the baseline shrinks, the figure never becomes wrong.
+ * `currentScore` is passed in rather than looked up in `trend`, so a meeting
+ * that has itself fallen outside the window is still scored correctly against
+ * whatever earlier points survived in the window. When none survived, the
+ * baseline has not shrunk — it is gone, and the answer is `null`.
  */
 export function compareEvaluationToHistory(
   trend: readonly EvaluationTrendPoint[],

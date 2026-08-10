@@ -1,7 +1,10 @@
 import { Minus, TrendingDown, TrendingUp } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { EvaluationComparison } from "@/lib/meetings/service";
+import {
+  EVALUATION_COMPARISON_WINDOW,
+  type EvaluationComparison,
+} from "@/lib/meetings/service";
 
 interface EvaluationComparisonCardProps {
   /** `null` when nothing was evaluated before this meeting. */
@@ -17,9 +20,17 @@ function formatDelta(delta: number): string {
 /**
  * How this meeting's evaluation compares to the ones before it (VM-016c).
  *
- * Two states, and the second is the point of the requirement: a first-ever
- * evaluated meeting says it has no comparison YET. It does not compare against
- * zero, which would render a first meeting scoring 4.2 as a 4.2-point collapse.
+ * Two states, and the second is the point of the requirement: a meeting with
+ * no baseline says it has no comparison. It does not compare against zero,
+ * which would render a meeting scoring 4.2 as a 4.2-point collapse.
+ *
+ * The empty state does NOT say "this is your first evaluated meeting" — ruled
+ * 2026-08-10 on #312. `null` has two causes and the card cannot tell them
+ * apart: nothing was evaluated earlier, OR everything earlier fell outside the
+ * `EVALUATION_COMPARISON_WINDOW` most recent evaluations. A planter opening
+ * their third meeting out of sixty was being told it was their first. The
+ * window is deliberately unchanged; only this sentence is, and it must stay
+ * true of both causes.
  *
  * Direction is never carried by colour alone — the arrow and the sentence both
  * say which way it went, so the card survives greyscale and colour blindness.
@@ -36,9 +47,16 @@ export function EvaluationComparisonCard({
           </CardTitle>
         </CardHeader>
         <CardContent>
+          {/*
+            The window is named from the constant, never typed as a literal —
+            a hand-written "50" here is the copy that goes quietly wrong the
+            day the window changes.
+          */}
           <p className="text-muted-foreground text-sm">
-            No comparison yet — this is the first meeting you have evaluated.
-            Evaluate another and this card shows how the scores move.
+            No comparison available. This card measures a meeting against the
+            evaluated meetings before it, and none of your{" "}
+            {EVALUATION_COMPARISON_WINDOW} most recent evaluations came before
+            this one.
           </p>
         </CardContent>
       </Card>
