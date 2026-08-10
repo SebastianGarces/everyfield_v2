@@ -53,12 +53,32 @@ const revokeSchema = z.object({
 export type CreateInvitationState = {
   error?: string;
   /**
-   * Set on success — the surface shows the link the invitee should be sent.
-   * Every invitation this action can create is an OPEN one (the 2026-08-04
-   * ruling refuses addresses that already have an account), so the link is the
-   * whole delivery mechanism and there is no second shape to render.
+   * Set on success — the surface shows what happened and the link that carries
+   * the invitation. Every invitation this action can create is an OPEN one (the
+   * 2026-08-04 ruling refuses addresses that already have an account), so there
+   * is no second TARGET shape to render.
+   *
+   * `emailSent` is carried through verbatim from `createInvitation`, and it is
+   * OPTIONAL on purpose (OV-003b / #293). Three values, three different things
+   * to say:
+   *
+   *   * `true`      — the provider accepted the email; the link below is a
+   *                   backup, not the delivery mechanism;
+   *   * `false`     — it did not, so the row exists and the invitee has NOT
+   *                   been told. The notice says exactly that and promotes the
+   *                   link;
+   *   * `undefined` — nothing tried to send. Not the same fact as `false`.
+   *
+   * Normalising it to a boolean here would destroy the distinction before the
+   * surface could read it, which is the whole point of the contract pinned in
+   * `src/lib/invitations/service.test.ts`. The words themselves live in
+   * `@/lib/invitations/create-notice`, so they are executable.
    */
-  created?: { inviteePath: string; inviteeEmail: string };
+  created?: {
+    inviteePath: string;
+    inviteeEmail: string;
+    emailSent?: boolean;
+  };
 };
 
 export type RevokeInvitationState = { error?: string };
@@ -93,10 +113,16 @@ export async function createInvitationAction(
 
   refresh();
 
+  // `emailSent` is passed through UNTOUCHED — no `?? false`, no `Boolean(…)`.
+  // The send is best-effort by design (`@/lib/invitations/email`), so an
+  // invitation whose email was refused still succeeds here; what changes is
+  // what the admin is told, and they can only be told the truth if the three
+  // values reach the surface intact.
   return {
     created: {
       inviteePath: `/register?invitation=${result.invitation.id}`,
       inviteeEmail: result.invitation.inviteeEmail ?? parsed.data.inviteeEmail,
+      emailSent: result.emailSent,
     },
   };
 }

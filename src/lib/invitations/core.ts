@@ -56,9 +56,10 @@ import type {
   OrganizationInvitationStatus,
   OrganizationInvitationType,
 } from "@/db/schema/organization-invitation";
+import { redactForLog } from "@/lib/email/redact";
 import { announceInvitationAccepted } from "@/lib/notifications/oversight";
 
-import { sendInvitationEmail } from "./email";
+import { sendInvitationEmail, type InvitationEmailDeps } from "./email";
 
 // ============================================================================
 // Constants
@@ -713,19 +714,39 @@ export async function createInvitationAs(
  * `announceInvitationAcceptedForChurch` derives its audience that way: nothing
  * constrains a row to one FK, and an email that misnames who invited you is
  * indistinguishable from a phishing attempt.
+ *
+ * EXPORTED, and it takes seams. This is the one link in the chain between the
+ * action and the well-tested send path, and it was the only untested one: every
+ * rule in `./email.ts` is proven against `sendInvitationEmail` directly, which
+ * says nothing about whether anything CALLS it, with what, or what a thrown
+ * org-name lookup does to the create. Both seams default to the real thing, so
+ * production has one code path; `./core-email.test.ts` replaces them.
  */
-async function emailInvitee(
-  invitation: OrganizationInvitation
+export async function emailInvitee(
+  invitation: OrganizationInvitation,
+  deps: {
+    /** The org-name read. A database query in production, and it can throw. */
+    lookupOrgName?: (
+      invitation: OrganizationInvitation
+    ) => Promise<string | null>;
+    /** Passed straight to `sendInvitationEmail`; see `InvitationEmailDeps`. */
+    send?: InvitationEmailDeps["send"];
+  } = {}
 ): Promise<boolean> {
+  const lookupOrgName = deps.lookupOrgName ?? invitingOrgName;
+
   try {
-    const outcome = await sendInvitationEmail({
-      invitationId: invitation.id,
-      inviteeEmail: invitation.inviteeEmail,
-      status: invitation.status,
-      type: invitation.type,
-      invitingOrgName: await invitingOrgName(invitation),
-      expiresAt: invitation.expiresAt,
-    });
+    const outcome = await sendInvitationEmail(
+      {
+        invitationId: invitation.id,
+        inviteeEmail: invitation.inviteeEmail,
+        status: invitation.status,
+        type: invitation.type,
+        invitingOrgName: await lookupOrgName(invitation),
+        expiresAt: invitation.expiresAt,
+      },
+      deps.send ? { send: deps.send } : {}
+    );
     return outcome.sent;
   } catch (error) {
     // No id, no address, no link: the invitation id is the register bearer
@@ -733,7 +754,7 @@ async function emailInvitee(
     // belongs.
     console.error("invitation email could not be prepared", {
       type: invitation.type,
-      message: error instanceof Error ? error.message : "unknown error",
+      message: redactForLog(error),
     });
     return false;
   }

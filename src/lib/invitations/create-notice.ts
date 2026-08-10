@@ -1,0 +1,98 @@
+// ============================================================================
+// What the admin READS after creating an invitation — OV-003b (#293).
+//
+// `createInvitationAs` reports `emailSent`, three-valued on purpose (see
+// `./service.ts`). This module is the one place that turns those three values
+// into words, and it lives here rather than in the notice component for two
+// reasons:
+//
+//   1. THE ACCEPTANCE CRITERION IS ABOUT THE COPY, not about the boolean. "A
+//      failed send does not fail the create" is only half of it; the other half
+//      is that the admin is told "invitation created — email could not be sent"
+//      and handed the link. A test that stops at `{ sent: false }` proves the
+//      first half and nothing of the second. Pure copy is executable, so the
+//      sentence itself is asserted (`./create-notice.test.ts`).
+//
+//   2. THE THREE VALUES MUST NOT COLLAPSE. `undefined` means "this path does
+//      not send email at all" and `false` means "it tried and failed". A notice
+//      written as `emailSent ? … : …` folds them together and tells somebody
+//      an email failed when none was ever attempted. The switch below is
+//      exhaustive over the three, so the distinction survives a rewrite.
+//
+// No imports, deliberately: the create form is a client component, so anything
+// this module pulled in would be pulled into the browser bundle with it.
+// ============================================================================
+
+/**
+ * The exact sentence the AC names for a created-but-unsent invitation.
+ *
+ * Exported as a constant so the surface, the test and any future retry affordance
+ * quote ONE string. "Created" first, because that is the durable fact and the
+ * one the admin must not misread as a failure: the invitation exists, is in the
+ * list below, and can be revoked — only the delivery did not happen.
+ */
+export const INVITATION_EMAIL_FAILED_HEADLINE =
+  "Invitation created — email could not be sent.";
+
+/** Which of the three `emailSent` values produced this copy. */
+export type InvitationNoticeState = "sent" | "not_sent" | "no_send_attempted";
+
+export interface InvitationCreatedNotice {
+  state: InvitationNoticeState;
+  /** The fact, in one line. */
+  headline: string;
+  /** What the admin should do about it. */
+  detail: string;
+  /**
+   * Is the copyable link a BACKUP (the email went out and carries it), or is it
+   * the delivery mechanism the admin now has to use themselves?
+   *
+   * The surface promotes the link when this is false and demotes it when it is
+   * true. It is not a visibility flag: the link is rendered either way, because
+   * an admin whose invitee never received the mail needs it, and "sent" is a
+   * provider acceptance rather than a delivery receipt.
+   */
+  linkIsBackup: boolean;
+}
+
+/**
+ * Turn a create result into the notice.
+ *
+ * `emailSent` is exactly what `createInvitation` returned — do not normalise it
+ * to a boolean on the way in, or the third state is lost before it arrives.
+ */
+export function invitationCreatedNotice({
+  inviteeEmail,
+  emailSent,
+}: {
+  inviteeEmail: string;
+  emailSent?: boolean;
+}): InvitationCreatedNotice {
+  if (emailSent === true) {
+    return {
+      state: "sent",
+      headline: `Invitation sent to ${inviteeEmail}`,
+      detail:
+        "The email carries the link, so there is nothing more to send. It only works for that address, so if the address is wrong, revoke this invitation and create a new one.",
+      linkIsBackup: true,
+    };
+  }
+
+  if (emailSent === false) {
+    return {
+      state: "not_sent",
+      headline: INVITATION_EMAIL_FAILED_HEADLINE,
+      detail: `The invitation exists and is in the list below. Send this link to ${inviteeEmail} yourself — it carries the invitation, so the plant they create arrives already associated with you, and it only works for that address.`,
+      linkIsBackup: false,
+    };
+  }
+
+  // `undefined`: nothing tried to send, so nothing failed. Says neither.
+  return {
+    state: "no_send_attempted",
+    headline: `Invitation created for ${inviteeEmail}`,
+    detail:
+      "Send them this link. It carries the invitation, so the plant they create arrives already associated with you, and it only works for that address.",
+    linkIsBackup: false,
+  };
+}

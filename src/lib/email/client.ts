@@ -1,5 +1,7 @@
 import { Resend } from "resend";
 
+import { redactForLog } from "./redact";
+
 // Initialize Resend client
 // RESEND_API_KEY must be set in environment variables
 const resend = new Resend(process.env.RESEND_API_KEY);
@@ -83,7 +85,12 @@ export async function sendEmail({
     });
 
     if (error) {
-      console.error("[EMAIL] Send failed:", error);
+      // Name and REDACTED message, for the same reason as the catch below: the
+      // provider's error is free to quote the request it refused.
+      console.error("[EMAIL] Send failed:", {
+        name: error.name,
+        message: redactForLog(error.message),
+      });
       return { success: false, error: error.message };
     }
 
@@ -93,7 +100,13 @@ export async function sendEmail({
 
     return { success: true, id: data?.id };
   } catch (err) {
-    console.error("[EMAIL] Exception:", err);
+    // Never the error object, and never its raw message either. A thrown
+    // transport error quotes the request it failed on; the request holds the
+    // HTML body; the invitation email's body holds `/register?invitation=<id>`,
+    // which is the register bearer token (`@/lib/invitations/email`, rule 4).
+    // `redactForLog` strips URLs and ids and truncates the rest — see
+    // `./redact.ts` for why the message alone was not enough.
+    console.error("[EMAIL] Exception:", { message: redactForLog(err) });
     return {
       success: false,
       error: err instanceof Error ? err.message : "Unknown error",

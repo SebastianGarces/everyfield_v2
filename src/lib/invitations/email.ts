@@ -45,6 +45,7 @@ import type {
   OrganizationInvitationType,
 } from "@/db/schema/organization-invitation";
 import { EMAIL_REPLY_TO, sendEmail } from "@/lib/email/client";
+import { redactForLog } from "@/lib/email/redact";
 import {
   organizationInvitationEmail,
   type InviteeOrgKind,
@@ -248,11 +249,13 @@ export async function sendInvitationEmail(
     return { sent: true };
   } catch (error) {
     // The error object itself may quote the payload, and the payload holds the
-    // URL — so only its message is logged, and only when it is a string we
-    // wrote or the provider wrote. Never the facts.
+    // URL — so only its message is logged, and only after `redactForLog` has
+    // stripped URLs and ids out of it. The message is provider-authored text
+    // and can embed the request just as the object can (`@/lib/email/redact`).
+    // Never the facts.
     console.error("invitation email transport threw", {
       type: facts.type,
-      message: error instanceof Error ? error.message : "unknown error",
+      message: redactForLog(error),
     });
     return { sent: false, reason: "transport_threw" };
   }

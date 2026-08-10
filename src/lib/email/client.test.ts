@@ -197,3 +197,83 @@ test("a provider refusal is reported, not thrown, so a delivery row can record i
   assert.equal(result.success, false);
   assert.equal(result.error, "Invalid `to` field");
 });
+
+test("a failing send never logs the message it was carrying", async (t) => {
+  // #293's rule 4, enforced one layer lower than `@/lib/invitations/email`.
+  // That module refuses to log the invitation id or the URL built from it — but
+  // it delegates the actual send to here, and a thrown transport error is free
+  // to quote the request that produced it. `console.error("…", err)` then prints
+  // the whole request, HTML body included, and the invitation email's body holds
+  // `/register?invitation=<id>` — which is the register bearer token and the
+  // beta-gate bypass. So the logs carry the message text and nothing else.
+  const logged: unknown[] = [];
+  t.mock.method(console, "error", (...args: unknown[]) => {
+    logged.push(...args);
+  });
+
+  const SECRET_URL =
+    "https://app.everyfield.test/register?invitation=77777777-7777-4777-8777-777777777777";
+
+  // A throwing transport, whose error quotes the payload the way a real
+  // fetch/validation failure does.
+  t.mock.method(resend.emails, "send", async (payload: SendPayload) => {
+    throw new Error(`request failed: ${JSON.stringify(payload)}`);
+  });
+
+  const thrown = await sendEmail({
+    to: "planter@example.test",
+    subject: "Grace Church invited you to EveryField",
+    html: `<a href="${SECRET_URL}">Accept</a>`,
+    text: SECRET_URL,
+  });
+  assert.equal(thrown.success, false);
+
+  // A provider refusal, same rule.
+  t.mock.method(resend.emails, "send", async () => ({
+    data: null,
+    error: { message: "Invalid `to` field", name: "validation_error" },
+  }));
+  await sendEmail({
+    to: "planter@example.test",
+    subject: "Grace Church invited you to EveryField",
+    html: `<a href="${SECRET_URL}">Accept</a>`,
+  });
+
+  const transcript = logged
+    .map((entry) =>
+      typeof entry === "string" ? entry : JSON.stringify(entry, null, 0)
+    )
+    .join("\n");
+
+  // The credential is gone in both spellings: the id itself, and the URL that
+  // carries it. That is the property — the rest of a quoted payload is noise,
+  // and `redactForLog` caps it by truncating.
+  assert.doesNotMatch(transcript, /77777777-7777-4777-8777-777777777777/);
+  assert.doesNotMatch(transcript, /https?:\/\//);
+  assert.doesNotMatch(transcript, /\/register\?invitation=/);
+  assert.match(transcript, /\[url\]/, "the redaction marker should be visible");
+
+  // …and the log is still useful: the provider's reason survives.
+  assert.match(transcript, /Invalid `to` field/);
+});
+
+test("a runaway error message is truncated rather than flooding the drain", async (t) => {
+  const logged: unknown[] = [];
+  t.mock.method(console, "error", (...args: unknown[]) => {
+    logged.push(...args);
+  });
+
+  t.mock.method(resend.emails, "send", async () => {
+    throw new Error("x".repeat(5000));
+  });
+
+  await sendEmail({
+    to: "planter@example.test",
+    subject: "s",
+    html: "<p>x</p>",
+  });
+
+  const line = JSON.stringify(logged);
+  assert.ok(line.length < 600, `log line was ${line.length} characters`);
+  assert.match(line, /truncated/);
+});

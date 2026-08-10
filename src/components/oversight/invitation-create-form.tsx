@@ -35,6 +35,9 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+// Pure copy, no imports of its own — safe to pull into a client bundle, and the
+// reason the sentence #293's AC names is executable rather than JSX.
+import { invitationCreatedNotice } from "@/lib/invitations/create-notice";
 import {
   Select,
   SelectContent,
@@ -154,10 +157,23 @@ export function InvitationCreateForm({
 }
 
 /**
- * What to do next, shown once the row exists. Email delivery is not part of
- * this surface yet, so the link is handed to the admin rather than implied —
- * telling somebody an invitation was "sent" when nothing left the building is
- * the kind of copy that costs a user a week.
+ * What the admin reads once the row exists — and it BRANCHES on whether the
+ * invitation email actually went out (OV-003b / #293).
+ *
+ * Before #293 nothing left the building, so this notice always handed the link
+ * over with "send them this link". Now the create sends, and a single unbranched
+ * message would be wrong in both directions: on a successful send it tells the
+ * admin to go do the delivery themselves, and on a failed send it says nothing
+ * at all, so the two cases read identically. An admin who cannot tell them apart
+ * either duplicates a message the invitee already has, or believes an invitation
+ * arrived that never did.
+ *
+ * The three states and their words come from `invitationCreatedNotice`
+ * (`@/lib/invitations/create-notice`) rather than from JSX, so the sentence the
+ * acceptance criterion names is executable and asserted. This component decides
+ * only EMPHASIS: the link block is quiet when the email carries it and prominent
+ * when the admin has to send it. It is never hidden — "sent" is a provider
+ * acceptance, not a delivery receipt.
  */
 function InviteCreatedNotice({
   created,
@@ -165,6 +181,11 @@ function InviteCreatedNotice({
   created: NonNullable<CreateInvitationState["created"]>;
 }) {
   const [copied, setCopied] = useState(false);
+  const notice = invitationCreatedNotice({
+    inviteeEmail: created.inviteeEmail,
+    emailSent: created.emailSent,
+  });
+  const failed = notice.state === "not_sent";
   const url =
     typeof window === "undefined"
       ? created.inviteePath
@@ -173,23 +194,30 @@ function InviteCreatedNotice({
   return (
     <div
       role="status"
-      className="border-primary/30 bg-primary/5 space-y-2 rounded-md border p-3 text-sm"
+      className={
+        // Amber, not destructive: the invitation was CREATED. This is the
+        // repo's caution treatment (`status-confirmation-modal.tsx`) — "there
+        // is something left for you to do", not "this failed".
+        failed
+          ? "space-y-2 rounded-md border border-amber-500/50 bg-amber-50 p-3 text-sm dark:bg-amber-950/20"
+          : "border-primary/30 bg-primary/5 space-y-2 rounded-md border p-3 text-sm"
+      }
     >
-      <p className="font-medium">
-        Invitation created for {created.inviteeEmail}
-      </p>
-      <p className="text-muted-foreground">
-        Send them this link. It carries the invitation, so the plant they create
-        arrives already associated with you — and it only works for the address
-        above, so if that is wrong, revoke this invitation and send a new one.
-      </p>
+      <p className="font-medium">{notice.headline}</p>
+      <p className="text-muted-foreground">{notice.detail}</p>
       <div className="flex flex-wrap items-center gap-2">
-        <code className="bg-muted min-w-0 flex-1 truncate rounded px-2 py-1 text-xs">
+        <code
+          className={
+            notice.linkIsBackup
+              ? "bg-muted text-muted-foreground min-w-0 flex-1 truncate rounded px-2 py-1 text-xs"
+              : "bg-muted min-w-0 flex-1 truncate rounded px-2 py-1 text-xs"
+          }
+        >
           {url}
         </code>
         <Button
           type="button"
-          variant="outline"
+          variant={notice.linkIsBackup ? "ghost" : "outline"}
           size="sm"
           className="cursor-pointer"
           onClick={async () => {
