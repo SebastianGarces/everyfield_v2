@@ -580,12 +580,12 @@ Key dates and achievements.
 
 | Category | Description | Auto-created By |
 |----------|-------------|-----------------|
-| Vision Meeting | VM planning and preparation | F3 |
-| Follow-up | Post-meeting follow-up | F3 |
-| Training | Training scheduling and completion | F8 |
+| Vision Meeting | VM planning and preparation | Meetings |
+| Follow-up | Post-meeting follow-up | Meetings |
+| Training | Training scheduling and completion | Ministry Teams |
 | Promotion | Marketing and outreach | Phase 4 templates |
 | Administrative | Legal, financial, operational | Phase templates |
-| Ministry Team | Team-specific tasks | F8 |
+| Ministry Team | Team-specific tasks | Ministry Teams |
 | Launch Prep | Pre-launch and launch day | Phase 4-5 templates |
 | Recurring | Weekly operational tasks | Phase 6 templates |
 | General | Uncategorized tasks | Manual entry |
