@@ -95,6 +95,27 @@ function makeSnapshot(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/**
+ * The manual block as `build-fact-snapshot.ts` actually writes it: every
+ * attestation appears TWICE, once as a `byKey` entry and once as a row of
+ * `attestations[]`. The fixtures above keep `attestations` empty on purpose (the
+ * older tests only care about `byKey`), so the attribution tests build the real
+ * two-sided shape here rather than hand-editing that default.
+ */
+function manualBlock(
+  entries: readonly { signalKey: string; value: unknown }[]
+): Record<string, unknown> {
+  return {
+    attestations: entries.map((entry) => ({
+      signalKey: entry.signalKey,
+      value: entry.value,
+      attestedAt: GENERATED_AT.toISOString(),
+    })),
+    byKey: Object.fromEntries(entries.map((e) => [e.signalKey, e.value])),
+    isEmpty: entries.length === 0,
+  };
+}
+
 function makeAssessment(
   overrides: Partial<PlantAssessment> = {}
 ): PlantAssessment {
@@ -335,6 +356,240 @@ test("PE-022: a gate with no fact paths is reachable only through its category",
     criterion(progress, "committed_adults").standing,
     "not_addressed"
   );
+});
+
+// ----------------------------------------------------------------------------
+// AC: an attested gate is addressed through EITHER legal spelling of its
+// citation (ruled 2026-08-10 on #319).
+//
+// The snapshot writes every manual attestation twice — `manual.byKey.<signal>`
+// and `manual.attestations[]` — and the judge's ledger is the whole flattened
+// snapshot, so both are citations a model may legitimately emit for the same
+// fact. Attribution normalises the array form onto the keyed one by resolving
+// the row's `signalKey`, so which spelling the model chose cannot decide whether
+// the row reads "Not addressed".
+// ----------------------------------------------------------------------------
+
+/** Phase 1's attested gate, plus a neighbouring signal no phase-1 gate measures. */
+const MANUAL_TWO_SIGNALS = manualBlock([
+  { signalKey: "values_documented", value: true },
+  { signalKey: "financial_base_established", value: false },
+]);
+
+test("PE-022: a byKey citation attributes to the attested gate it names", () => {
+  const progress = buildExitCriteriaProgress(
+    makeLatest(
+      [
+        makeInsight({
+          category: "generosity",
+          title: "Your financial base is not confirmed",
+          citedFacts: ["manual.byKey.financial_base_established=false"],
+        }),
+      ],
+      { factSnapshot: makeSnapshot({ manual: MANUAL_TWO_SIGNALS }) }
+    )
+  )!;
+
+  assert.equal(criterion(progress, "financial_base").standing, "watch");
+  assert.deepEqual(
+    criterion(progress, "financial_base").evidence.map((e) => e.path),
+    ["manual.byKey.financial_base_established"]
+  );
+  // …and it stays on that gate.
+  assert.equal(
+    criterion(progress, "committed_adults").standing,
+    "not_addressed"
+  );
+});
+
+test("PE-022: an attestations-array citation reaches the gate that measures entry N's signal", () => {
+  const progress = buildExitCriteriaProgress(
+    makeLatest(
+      [
+        makeInsight({
+          category: "generosity",
+          title: "Your financial base is not confirmed",
+          citedFacts: ["manual.attestations.1.value=false"],
+        }),
+      ],
+      { factSnapshot: makeSnapshot({ manual: MANUAL_TWO_SIGNALS }) }
+    )
+  )!;
+
+  // Entry 1 is `financial_base_established`, so this is the financial-base gate.
+  assert.equal(criterion(progress, "financial_base").standing, "watch");
+
+  // The drill-down is NOT rewritten: the planter sees the citation as the judge
+  // wrote it, re-resolved against the snapshot. Normalisation is attribution
+  // only.
+  const [evidence] = criterion(progress, "financial_base").evidence;
+  assert.equal(evidence.path, "manual.attestations.1.value");
+  assert.equal(evidence.snapshotValue, "false");
+  assert.equal(evidence.inSnapshot, true);
+  assert.equal(evidence.agrees, true);
+});
+
+test("PE-022: the array form resolves per signal, so it cannot spill onto a gate it does not name", () => {
+  // Entry 0 is `values_documented` — a phase-0 gate, measured by no phase-1 one.
+  const progress = buildExitCriteriaProgress(
+    makeLatest(
+      [
+        makeInsight({
+          category: "vision_casting",
+          citedFacts: ["manual.attestations.0.attestedAt=2026-07-20"],
+          title: "Your values are written down",
+        }),
+      ],
+      { factSnapshot: makeSnapshot({ manual: MANUAL_TWO_SIGNALS }) }
+    )
+  )!;
+
+  // Widening the three attested gates to the bare `manual` prefix would light
+  // this one up; resolving the row does not.
+  assert.equal(criterion(progress, "financial_base").standing, "not_addressed");
+  assert.deepEqual(criterion(progress, "financial_base").evidence, []);
+
+  // The same citation DOES reach the gate that measures entry 0, in phase 0.
+  const phaseZero = buildExitCriteriaProgress(
+    makeLatest(
+      [
+        makeInsight({
+          category: "vision_casting",
+          citedFacts: ["manual.attestations.0.attestedAt=2026-07-20"],
+          title: "Your values are written down",
+        }),
+      ],
+      { phase: 0, factSnapshot: makeSnapshot({ manual: MANUAL_TWO_SIGNALS }) }
+    )
+  )!;
+  assert.equal(criterion(phaseZero, "values_documented").standing, "watch");
+});
+
+test("PE-022: a bracketed attestation index reaches the same gate as a dotted one", () => {
+  const progress = buildExitCriteriaProgress(
+    makeLatest(
+      [
+        makeInsight({
+          category: "generosity",
+          citedFacts: [
+            "manual.attestations[1].signalKey=financial_base_established",
+          ],
+          title: "Financial base outstanding",
+        }),
+      ],
+      { factSnapshot: makeSnapshot({ manual: MANUAL_TWO_SIGNALS }) }
+    )
+  )!;
+
+  assert.equal(criterion(progress, "financial_base").standing, "watch");
+});
+
+test("PE-022: an out-of-range attestation index attributes to nothing, and never throws", () => {
+  const progress = buildExitCriteriaProgress(
+    makeLatest(
+      [
+        makeInsight({
+          category: "generosity",
+          citedFacts: ["manual.attestations.9.value=false"],
+          title: "A row that is not in this snapshot",
+        }),
+      ],
+      { factSnapshot: makeSnapshot({ manual: MANUAL_TWO_SIGNALS }) }
+    )
+  )!;
+
+  // An unresolvable citation is not a licence to guess a gate.
+  assert.equal(criterion(progress, "financial_base").standing, "not_addressed");
+  assert.equal(progress.addressedCount, 0);
+  // The measurement is untouched — it is not the judge's.
+  assert.equal(criterion(progress, "financial_base").measurement, "not_met");
+});
+
+test("PE-022: a malformed attestation citation attributes to nothing, and never throws", () => {
+  const malformed = [
+    "manual.attestations.notanindex.value=false",
+    "manual.attestations=whatever",
+    "manual.attestations.-1.value=false",
+    "manual.attestations..value=false",
+    "manual.attestations.1e0.value=false",
+  ];
+
+  for (const citation of malformed) {
+    const progress = buildExitCriteriaProgress(
+      makeLatest(
+        [makeInsight({ category: "generosity", citedFacts: [citation] })],
+        {
+          factSnapshot: makeSnapshot({ manual: MANUAL_TWO_SIGNALS }),
+        }
+      )
+    )!;
+
+    assert.equal(
+      criterion(progress, "financial_base").standing,
+      "not_addressed",
+      `${citation} must reach no gate`
+    );
+  }
+});
+
+test("PE-022: an attestation row with no signalKey resolves to nothing", () => {
+  const progress = buildExitCriteriaProgress(
+    makeLatest(
+      [
+        makeInsight({
+          category: "generosity",
+          citedFacts: ["manual.attestations.0.value=false"],
+        }),
+      ],
+      {
+        factSnapshot: makeSnapshot({
+          manual: {
+            attestations: [{ value: false, attestedAt: "2026-07-20" }],
+            byKey: { financial_base_established: false },
+            isEmpty: false,
+          },
+        }),
+      }
+    )
+  )!;
+
+  assert.equal(criterion(progress, "financial_base").standing, "not_addressed");
+});
+
+test("PE-022: both spellings reach the attested gates of every phase that has one", () => {
+  const cases = [
+    { phase: 0, key: "values_documented", signal: "values_documented" },
+    { phase: 1, key: "financial_base", signal: "financial_base_established" },
+    { phase: 3, key: "systems_tested", signal: "systems_tested" },
+  ];
+
+  for (const { phase, key, signal } of cases) {
+    const manual = manualBlock([{ signalKey: signal, value: true }]);
+
+    for (const citation of [
+      `manual.byKey.${signal}=true`,
+      "manual.attestations.0.value=true",
+    ]) {
+      const progress = buildExitCriteriaProgress(
+        makeLatest(
+          [
+            makeInsight({
+              severity: "high",
+              citedFacts: [citation],
+              title: `About ${signal}`,
+            }),
+          ],
+          { phase, factSnapshot: makeSnapshot({ manual }) }
+        )
+      )!;
+
+      assert.equal(
+        criterion(progress, key).standing,
+        "attention",
+        `${citation} must address ${key} in phase ${phase}`
+      );
+    }
+  }
 });
 
 // ----------------------------------------------------------------------------

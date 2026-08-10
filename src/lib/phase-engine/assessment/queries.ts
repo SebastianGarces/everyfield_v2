@@ -540,6 +540,14 @@ export async function getCsfScorecard(
 //      assessment failing it, and rendering silence as a red mark would be the
 //      engine inventing a judgement it never made.
 //
+// WHICH gate a judgement lands on is decided by the paths it cited, and the
+// snapshot spells some facts two ways — a manual attestation is written to both
+// `manual.byKey.<signal>` and `manual.attestations[]`, and the judge may cite
+// either. Citations are therefore normalised onto ONE spelling before they are
+// matched (`normalizeManualCitation`), so the gate a planter sees a standing on
+// does not depend on which of two equally legal forms the model happened to
+// emit. Ruled 2026-08-10 on #319.
+//
 // A criterion can therefore read "met" with no standing at all (the snapshot
 // clears the gate and the judge had nothing to add), or "not tracked" with a
 // standing of "needs attention" (EveryField cannot measure it, the judge still
@@ -718,6 +726,11 @@ export interface ExitCriterionDefinition {
    * under) one of them is a judgement about this gate — that is what makes the
    * standing per-criterion rather than per-phase. A prefix counts: an insight
    * citing `ministryRoles.roles.2.filled` speaks to `ministryRoles`.
+   *
+   * A manual gate declares only the `manual.byKey.<signal>` spelling. It does
+   * not need the other one: `manual.attestations.N.…` citations are rewritten
+   * onto it first (`normalizeManualCitation`), so one declared path catches both
+   * legal ways of citing the same attestation.
    */
   factPaths: readonly string[];
   /**
@@ -1214,14 +1227,70 @@ function citationMatchesPath(citedPath: string, factPath: string): boolean {
   return citedPath === factPath || citedPath.startsWith(`${factPath}.`);
 }
 
-/** The cited paths of one insight, normalised; tolerates a malformed column. */
-function citedPathsOf(insight: PlantInsight): string[] {
+/**
+ * The manual block is written into the snapshot TWICE — `manual.byKey.<signal>`
+ * and `manual.attestations[]` (signals/build-fact-snapshot.ts) — and the judge's
+ * citable ledger is the whole flattened snapshot, so BOTH spellings are legal
+ * citations of the same attestation.
+ */
+const MANUAL_ATTESTATIONS_PREFIX = "manual.attestations.";
+
+/**
+ * Rewrite an `manual.attestations.N.…` citation onto the `manual.byKey.<signal>`
+ * form the attested criteria declare, by resolving entry N's `signalKey` in the
+ * snapshot the insight was made against (ruled 2026-08-10 on #319).
+ *
+ * ATTRIBUTION ONLY. This normalisation exists so the standing column names the
+ * criterion the judge actually spoke to; it never touches the drill-down, where
+ * `buildEvidence` still resolves the citation EXACTLY as the judge wrote it. The
+ * planter therefore reads the real citation and its real snapshot value, while
+ * the row it lands on is decided by which signal it names.
+ *
+ * Why by signal and not by widening the criteria to the `manual` prefix: the
+ * three attested gates each measure ONE signal, so a prefix rule would light all
+ * three up for a citation of any manual signal at all — telling a planter the
+ * engine addressed their financial base because it mentioned something else.
+ * Resolving the row gives full recall with no precision lost.
+ *
+ * Returns `null` when the citation names no resolvable entry — an out-of-range
+ * index, a non-numeric one, or a snapshot whose row carries no `signalKey`. An
+ * unresolvable citation attributes to NOTHING rather than guessing a gate; the
+ * criterion then reads `not_addressed`, which is the honest answer.
+ */
+function normalizeManualCitation(
+  citedPath: string,
+  snapshot: unknown
+): string | null {
+  if (!citedPath.startsWith(MANUAL_ATTESTATIONS_PREFIX)) return citedPath;
+
+  const [index] = citedPath.slice(MANUAL_ATTESTATIONS_PREFIX.length).split(".");
+  if (!/^\d+$/.test(index)) return null;
+
+  const signalKey = readSnapshotFact(
+    snapshot,
+    `${MANUAL_ATTESTATIONS_PREFIX}${index}.signalKey`
+  );
+  if (!signalKey.present || signalKey.value === null) return null;
+
+  const key = signalKey.value.trim();
+  return key.length > 0 ? `manual.byKey.${key}` : null;
+}
+
+/**
+ * The cited paths of one insight, normalised for ATTRIBUTION; tolerates a
+ * malformed column. `snapshot` is the assessment's own fact snapshot — the one
+ * the judge cited — because resolving an attestation row to its signal is a read
+ * of that snapshot, not a syntax rule.
+ */
+function citedPathsOf(insight: PlantInsight, snapshot: unknown): string[] {
   const facts = insight.citedFacts;
   if (!Array.isArray(facts)) return [];
   return facts
     .filter((fact): fact is string => typeof fact === "string")
     .map((fact) => dottedPath(parseCitedFact(fact).path))
-    .filter((path) => path.length > 0);
+    .filter((path) => path.length > 0)
+    .map((path) => normalizeManualCitation(path, snapshot))
+    .filter((path): path is string => path !== null);
 }
 
 /**
@@ -1325,7 +1394,10 @@ export function buildExitCriteriaProgress(
     (insight) => insight.audience === audience
   );
   const citedPathsByInsight = new Map<string, string[]>(
-    audienceInsights.map((insight) => [insight.id, citedPathsOf(insight)])
+    audienceInsights.map((insight) => [
+      insight.id,
+      citedPathsOf(insight, snapshot),
+    ])
   );
 
   const criteria = (definitions ?? []).map((definition) => {
