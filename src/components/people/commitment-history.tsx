@@ -1,6 +1,6 @@
 "use client";
 
-import { getCommitmentDownloadUrlAction } from "@/app/(dashboard)/people/actions";
+import { getCommitmentDownloadUrlAction } from "@/app/(dashboard)/people/assessment-actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {

@@ -1,6 +1,6 @@
 "use client";
 
-import { addNoteAction } from "@/app/(dashboard)/people/actions";
+import { addNoteAction } from "@/app/(dashboard)/people/activity-actions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { type ActivityWithPerformer } from "@/lib/people/activity.shared";
 import { useOptimistic, useTransition } from "react";

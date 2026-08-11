@@ -4,7 +4,7 @@ import {
   downloadCsvTemplateAction,
   executeBulkImportAction,
   previewImportAction,
-} from "@/app/(dashboard)/people/actions";
+} from "@/app/(dashboard)/people/import-export-actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {

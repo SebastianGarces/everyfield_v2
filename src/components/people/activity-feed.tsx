@@ -3,7 +3,7 @@
 import {
   deleteNoteAction,
   getMoreActivitiesAction,
-} from "@/app/(dashboard)/people/actions";
+} from "@/app/(dashboard)/people/activity-actions";
 import {
   AlertDialog,
   AlertDialogAction,

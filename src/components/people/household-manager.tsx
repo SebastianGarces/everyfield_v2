@@ -6,7 +6,7 @@ import {
   createHouseholdFromPersonAction,
   propagateAddressAction,
   removeFromHouseholdAction,
-} from "@/app/(dashboard)/people/actions";
+} from "@/app/(dashboard)/people/household-actions";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
