@@ -23,38 +23,18 @@
 // ============================================================================
 
 import Link from "next/link";
-import {
-  Baby,
-  Building,
-  Crown,
-  Handshake,
-  Heart,
-  Megaphone,
-  Monitor,
-  Music,
-  Rocket,
-  Users,
-  type LucideIcon,
-} from "lucide-react";
+import { Users } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
+import { TEAM_ICONS, staffingPercent } from "@/lib/ministry-teams/team-display";
 import type { TeamStatus, TeamType } from "@/db/schema";
 
-export const TEAM_ICONS: Record<string, LucideIcon> = {
-  crown: Crown,
-  rocket: Rocket,
-  music: Music,
-  baby: Baby,
-  building: Building,
-  handshake: Handshake,
-  users: Users,
-  megaphone: Megaphone,
-  heart: Heart,
-  monitor: Monitor,
-};
+// Re-exported so existing importers of the card's icon map keep working; the
+// canonical home is lib/ministry-teams/team-display.ts.
+export { TEAM_ICONS };
 
 /**
  * The shape the tile actually reads. Deliberately narrower than
@@ -99,13 +79,9 @@ export interface TeamCardViewProps {
  */
 export function TeamCardView({ team, href, linkStatic }: TeamCardViewProps) {
   const Icon = TEAM_ICONS[team.icon ?? ""] ?? Users;
-  const staffingPercent =
-    team.totalRoles > 0
-      ? Math.round((team.filledRoles / team.totalRoles) * 100)
-      : 0;
+  const staffing = staffingPercent(team.filledRoles, team.totalRoles);
 
-  const alertLevel =
-    staffingPercent < 40 ? "red" : staffingPercent < 60 ? "yellow" : "green";
+  const alertLevel = staffing < 40 ? "red" : staffing < 60 ? "yellow" : "green";
 
   const card = (
     <Card className="flex h-full cursor-pointer flex-col gap-0 py-0 shadow-sm transition-all duration-200 hover:shadow-md">
@@ -150,7 +126,7 @@ export function TeamCardView({ team, href, linkStatic }: TeamCardViewProps) {
               {team.filledRoles}/{team.totalRoles}
             </span>
           </div>
-          <Progress value={staffingPercent} className="h-2" />
+          <Progress value={staffing} className="h-2" />
         </div>
 
         <div className="mt-auto flex items-center justify-between pt-1">
