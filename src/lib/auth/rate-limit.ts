@@ -96,18 +96,16 @@ export async function checkRateLimit(
 
   // Checked in order: identifier first, then IP. A null value (no IP on the
   // request) or an absent threshold skips that axis.
-  const axes: Array<
-    [
-      typeof authAttempts.identifier | typeof authAttempts.ip,
-      string | null,
-      number | undefined,
-    ]
-  > = [
-    [authAttempts.identifier, identifier.toLowerCase(), limit.perIdentifier],
-    [authAttempts.ip, ip, limit.perIp],
+  const axes = [
+    {
+      column: authAttempts.identifier,
+      value: identifier.toLowerCase(),
+      max: limit.perIdentifier,
+    },
+    { column: authAttempts.ip, value: ip, max: limit.perIp },
   ];
 
-  for (const [column, value, max] of axes) {
+  for (const { column, value, max } of axes) {
     if (max === undefined || value === null) {
       continue;
     }
