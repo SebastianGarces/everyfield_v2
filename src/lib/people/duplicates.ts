@@ -1,7 +1,8 @@
 import { db } from "@/db";
-import { persons, personTags, tags, type Tag } from "@/db/schema";
+import { persons, type Person } from "@/db/schema";
 import { and, eq, ilike, isNull, ne, or, sql } from "drizzle-orm";
-import type { DuplicateCheck, PersonWithTags } from "./types";
+import { getTagsForPeople } from "./tags";
+import type { DuplicateCheck } from "./types";
 
 /**
  * Check for duplicate persons in a church
@@ -19,9 +20,6 @@ export async function checkForDuplicates(
   },
   excludePersonId?: string
 ): Promise<DuplicateCheck> {
-  let exactMatch: PersonWithTags | null = null;
-  const potentialMatches: PersonWithTags[] = [];
-
   const baseConditions = [
     eq(persons.churchId, churchId),
     isNull(persons.deletedAt),
@@ -32,6 +30,7 @@ export async function checkForDuplicates(
   }
 
   // 1. Check for exact email match
+  let exactRow: Person | null = null;
   const normalizedEmail = input.email?.trim().toLowerCase();
   if (normalizedEmail && normalizedEmail !== "") {
     const emailMatches = await db
@@ -40,10 +39,7 @@ export async function checkForDuplicates(
       .where(and(...baseConditions, ilike(persons.email, normalizedEmail)))
       .limit(1);
 
-    if (emailMatches[0]) {
-      const personTags_ = await getPersonTags(churchId, emailMatches[0].id);
-      exactMatch = { ...emailMatches[0], tags: personTags_ };
-    }
+    exactRow = emailMatches[0] ?? null;
   }
 
   // 2. Check for potential matches (fuzzy name + phone)
@@ -69,47 +65,36 @@ export async function checkForDuplicates(
     );
   }
 
+  let fuzzyRows: Person[] = [];
   if (fuzzyConditions.length > 0) {
-    const fuzzyMatches = await db
+    fuzzyRows = await db
       .select()
       .from(persons)
       .where(
         and(
           ...baseConditions,
           // Exclude the exact match from potential matches
-          exactMatch ? ne(persons.id, exactMatch.id) : undefined,
+          exactRow ? ne(persons.id, exactRow.id) : undefined,
           or(...fuzzyConditions)
         )
       )
       .limit(5);
-
-    for (const match of fuzzyMatches) {
-      const matchTags = await getPersonTags(churchId, match.id);
-      potentialMatches.push({ ...match, tags: matchTags });
-    }
   }
 
-  return { exactMatch, potentialMatches };
-}
+  // 3. Resolve tags for every match with ONE batched query — the canonical
+  // helper in tags.ts — instead of a per-match round trip.
+  const tagMap = await getTagsForPeople(churchId, [
+    ...(exactRow ? [exactRow.id] : []),
+    ...fuzzyRows.map((m) => m.id),
+  ]);
 
-/**
- * Helper: get tags for a person
- */
-async function getPersonTags(
-  churchId: string,
-  personId: string
-): Promise<Tag[]> {
-  const rows = await db
-    .select({
-      id: tags.id,
-      churchId: tags.churchId,
-      name: tags.name,
-      color: tags.color,
-      createdAt: tags.createdAt,
-    })
-    .from(personTags)
-    .innerJoin(tags, eq(personTags.tagId, tags.id))
-    .where(and(eq(personTags.personId, personId), eq(tags.churchId, churchId)));
-
-  return rows;
+  return {
+    exactMatch: exactRow
+      ? { ...exactRow, tags: tagMap.get(exactRow.id) ?? [] }
+      : null,
+    potentialMatches: fuzzyRows.map((match) => ({
+      ...match,
+      tags: tagMap.get(match.id) ?? [],
+    })),
+  };
 }

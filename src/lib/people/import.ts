@@ -4,7 +4,12 @@ import { personCreateSchema } from "@/lib/validations/people";
 import { logPersonActivity } from "./activity";
 import { emitPersonCreated } from "./events";
 import { checkForDuplicates } from "./duplicates";
-import type { ImportPreview, ImportRow, ImportSummary } from "./types";
+import type {
+  DuplicateCheck,
+  ImportPreview,
+  ImportRow,
+  ImportSummary,
+} from "./types";
 
 // ============================================================================
 // CSV Template
@@ -204,6 +209,12 @@ function parseImportRowData(data: Record<string, string>) {
 // ============================================================================
 
 /**
+ * How many duplicate checks run concurrently during preview. Bounded so a
+ * large CSV cannot open an unbounded number of simultaneous queries.
+ */
+const DUPLICATE_CHECK_CONCURRENCY = 10;
+
+/**
  * Parse and validate a CSV file, returning a preview with validation results
  * and duplicate detection per row
  */
@@ -220,6 +231,25 @@ export async function parseCsvImport(
       invalidRows: [],
       duplicateRows: [],
     };
+  }
+
+  // The per-row duplicate checks are independent, so run them in bounded
+  // chunks instead of one serialized round trip per CSV row — preview time
+  // stops being linear in round trips.
+  const duplicateChecks: DuplicateCheck[] = [];
+  for (let i = 0; i < rawRows.length; i += DUPLICATE_CHECK_CONCURRENCY) {
+    const chunk = rawRows.slice(i, i + DUPLICATE_CHECK_CONCURRENCY);
+    const results = await Promise.all(
+      chunk.map((rawRow) =>
+        checkForDuplicates(churchId, {
+          email: rawRow.email || null,
+          firstName: rawRow.firstName,
+          lastName: rawRow.lastName,
+          phone: rawRow.phone || null,
+        })
+      )
+    );
+    duplicateChecks.push(...results);
   }
 
   const validRows: ImportRow[] = [];
@@ -248,13 +278,7 @@ export async function parseCsvImport(
       );
     }
 
-    // Check for duplicates
-    const duplicates = await checkForDuplicates(churchId, {
-      email: rawRow.email || null,
-      firstName: rawRow.firstName,
-      lastName: rawRow.lastName,
-      phone: rawRow.phone || null,
-    });
+    const duplicates = duplicateChecks[i];
 
     const row: ImportRow = {
       rowNumber,
