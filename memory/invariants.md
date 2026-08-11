@@ -168,6 +168,10 @@ Applies to `src/lib/communication/**` and the `/communication` surfaces. Ruled 2
 - `completionEvent` is never copied to a successor: `meeting.evaluation.completed` is backed by a partial unique index, so copying it aborts the second instance's insert. Recurrence mints plain work; hooks stay with the generator.
 - A completion is written FIRST and its successor second — the reverse of the usual durable-marker-last rule, deliberately. A successor with no completion leaves two open instances; a completion with no successor is repaired by reopening and re-completing.
 
+## Migrations
+
+- ⚖ A RENUMBERED migration ships with an OPERATOR RECONCILE step or it does not ship (#304 round 8, ruled 2026-08-10). `drizzle-kit migrate` decides what to apply by comparing each journal `when` against the ledger's MAXIMUM `created_at` — never by asking whether THIS migration's own row is present — so every database that already applied the OLD number is invisible to it: the columns are there, the new `when` is higher, the DDL re-runs and the apply aborts on `column ... already exists`. The renumbered file's header must therefore carry the reconcile: how to detect that state (the `information_schema.columns` probe plus `select max(created_at) from drizzle.__drizzle_migrations`) and both exits — record the apply that already happened on a database with rows worth keeping, or run the rollback block and re-apply on a scratch one. Prove either from `information_schema.columns`; the CLI exits 0 for "skipped" and for "applied" alike. Worked example: `src/db/migrations/0036_association_subject_and_notification_anchor.sql`.
+
 ## Dev Seeds
 
 Why and how: [`contracts/db.md`](contracts/db.md) → The dev-seed wipe. Applies to
