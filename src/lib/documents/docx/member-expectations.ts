@@ -10,6 +10,7 @@ import {
   TextRun,
 } from "docx";
 
+import { churchNameOf } from "../render-text";
 import type { DocumentMergeValues } from "../types";
 
 const EXPECTATIONS: string[] = [
@@ -21,7 +22,7 @@ const EXPECTATIONS: string[] = [
 ];
 
 export function buildMemberExpectations(values: DocumentMergeValues): Document {
-  const churchName = values.church_name || "Our Church";
+  const churchName = churchNameOf(values);
 
   return new Document({
     sections: [

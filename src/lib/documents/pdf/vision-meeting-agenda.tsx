@@ -8,6 +8,7 @@ import {
   VISION_MEETING_AGENDA,
   visionMeetingClosing,
 } from "../content/vision-meeting-agenda";
+import { churchNameOf, documentSubtitle } from "../render-text";
 import type { DocumentMergeValues } from "../types";
 import { styles } from "./styles";
 
@@ -16,17 +17,17 @@ export function VisionMeetingAgendaDocument({
 }: {
   values: DocumentMergeValues;
 }) {
-  const churchName = values.church_name || "Our Church";
-  const headerParts = [
+  const churchName = churchNameOf(values);
+  const subtitle = documentSubtitle(
     "Vision Meeting Agenda",
-    values.meeting_date || null,
-  ].filter(Boolean);
+    values.meeting_date || null
+  );
 
   return (
     <Document title="Vision Meeting Agenda">
       <Page size="LETTER" style={styles.page}>
         <Text style={styles.h1}>{churchName}</Text>
-        <Text style={styles.subtitle}>{headerParts.join("  •  ")}</Text>
+        <Text style={styles.subtitle}>{subtitle}</Text>
 
         {VISION_MEETING_AGENDA.map((item, i) => (
           <View key={item.title} style={{ marginBottom: 12 }}>

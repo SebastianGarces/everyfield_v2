@@ -12,15 +12,17 @@ import {
   VISION_MEETING_AGENDA,
   visionMeetingClosing,
 } from "../content/vision-meeting-agenda";
+import { churchNameOf, documentSubtitle } from "../render-text";
 import type { DocumentMergeValues } from "../types";
 
 export function buildVisionMeetingAgenda(
   values: DocumentMergeValues
 ): Document {
-  const churchName = values.church_name || "Our Church";
-  const header = ["Vision Meeting Agenda", values.meeting_date || null]
-    .filter(Boolean)
-    .join("  •  ");
+  const churchName = churchNameOf(values);
+  const header = documentSubtitle(
+    "Vision Meeting Agenda",
+    values.meeting_date || null
+  );
 
   return new Document({
     sections: [

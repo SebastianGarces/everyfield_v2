@@ -10,6 +10,7 @@ import {
   TextRun,
 } from "docx";
 
+import { churchNameOf } from "../render-text";
 import type { DocumentMergeValues } from "../types";
 
 const COMMITMENTS: string[] = [
@@ -23,7 +24,7 @@ const COMMITMENTS: string[] = [
 export function buildLaunchTeamCommitment(
   values: DocumentMergeValues
 ): Document {
-  const churchName = values.church_name || "Our Church";
+  const churchName = churchNameOf(values);
 
   return new Document({
     sections: [
