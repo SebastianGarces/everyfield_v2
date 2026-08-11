@@ -1,0 +1,369 @@
+import assert from "node:assert/strict";
+import path from "node:path";
+import { test } from "node:test";
+
+import {
+  SRC,
+  TS_FILES,
+  codeOf,
+  declaresDirective,
+  functionBodies,
+  isPublicRouteGroup,
+  isUseClientModule,
+  isUseServerModule,
+  mintingNames,
+  parsingServerActionExports,
+  rel,
+  valueExportStatements,
+} from "./server-action-surface";
+
+// ============================================================================
+// SESSION FIRST, THEN THE PARSE — asserted over the WHOLE repository (#304).
+//
+// The rule (`memory/invariants.md` → Authentication & Session): every export of
+// a `"use server"` module is a POSTable endpoint reachable with no session, so
+// the actor is minted from `verifySession()` BEFORE the argument is parsed.
+// Parsing first is not usually exploitable, but it answers a sessionless caller
+// differently for a malformed argument (`{ success: false }`) than for a
+// well-formed one (a throw) — a free shape-oracle — and it makes "does this
+// endpoint check anybody?" a question about reading order instead of about
+// line one.
+//
+// WHY THIS FILE EXISTS AT ALL, rather than the walk living inside whichever
+// domain first needed it: the claim is about every action module in the
+// product, and it was written down as universal TWICE while only a file list
+// enforced it. Both times the unlisted modules were the ones parsing first —
+// five of them at round 7. A rule about sessions belongs next to the module
+// that owns sessions, and the walker (`./server-action-surface.ts`) is an
+// importable module rather than a test so the next caller does not copy it.
+//
+// Three assertions, and the second and third exist because the first one has
+// two ways to be quietly true:
+//
+//   1. ORDER — for every export that parses, the mint precedes the parse.
+//   2. THE EXEMPT SET, EXACTLY — the `(auth)`/`(marketing)` endpoints are named
+//      one by one, so moving an authenticated action into a public group fails
+//      the test instead of silently leaving the claim.
+//   3. THE PARSER'S BLIND SPOT — `functionBodies` reads `function`
+//      DECLARATIONS. `export const fooAction = async (input) => …` is just as
+//      POSTable and would be invisible, so that form (and `export default`, and
+//      re-exports) is banned outright in `"use server"` modules and the
+//      failure message says which matcher cannot see it.
+//
+// And one NAMED RESIDUAL, pinned the same way as the exempt set — see
+// `TRY_WRAPPED_MINTS` below.
+// ============================================================================
+
+/**
+ * The five endpoints round 7 found parsing first, outside the invitations
+ * domain. A scan that matched nothing would pass silently, which is how a
+ * guardrail becomes decoration; these must be among what it saw.
+ */
+const ROUND_7_ENDPOINTS = [
+  "settings/actions.ts → setNotificationPreferenceAction",
+  "settings/actions.ts → setDigestCadenceAction",
+  "settings/sharing/actions.ts → setOversightSharingAction",
+  "notifications/actions.ts → markNotificationReadAction",
+  "notifications/actions.ts → loadMoreNotificationsAction",
+];
+
+/**
+ * THE NAMED RESIDUAL (round 8, 2026-08-10).
+ *
+ * These exports mint the actor before they parse — assertion 1 holds for every
+ * one of them — but they mint it INSIDE a `try` whose `catch` turns the
+ * `Unauthorized` throw into a handled `{ success: false, error: "You must be
+ * logged in …" }`. So a sessionless call gets a RESULT rather than a throw.
+ *
+ * Why that is a residual and not a hole: the mint still precedes the parse, so
+ * an anonymous caller gets the identical answer for a well-formed argument and
+ * for a malformed one. There is no shape-oracle, nothing is read, and nothing
+ * is written — which is the property the rule exists to protect. What is lost
+ * is only the crispness of "a sessionless call throws", and lifting 44 mints
+ * above 44 `try` blocks is a refactor of nine action modules that #304 does not
+ * own.
+ *
+ * Why it is written down HERE rather than left to prose: the invariant file
+ * said "above the `try`" as a universal rule for a whole round while nothing
+ * tested it, which is the third repetition of exactly that failure mode. This
+ * list is asserted EXACTLY, so the next try-wrapped action fails this test and
+ * has to be added on purpose (or, better, written the new way).
+ *
+ * It retires when these nine modules mint above the `try` — at which point this
+ * constant is emptied and `assert.ok(action.try < 0 || action.mint <
+ * action.try)` becomes the universal form of assertion 1.
+ */
+const TRY_WRAPPED_MINTS = [
+  "src/app/(dashboard)/feedback/actions.ts → submitFeedbackAction",
+  "src/app/(dashboard)/launch/actions.ts → scheduleLaunchAction",
+  "src/app/(dashboard)/meetings/actions.ts → addAttendeeAction",
+  "src/app/(dashboard)/meetings/actions.ts → createEvaluationAction",
+  "src/app/(dashboard)/meetings/actions.ts → createInvitationAction",
+  "src/app/(dashboard)/meetings/actions.ts → createLocationAction",
+  "src/app/(dashboard)/meetings/actions.ts → createMeetingAction",
+  "src/app/(dashboard)/meetings/actions.ts → quickAddAttendeeAction",
+  "src/app/(dashboard)/meetings/actions.ts → recordAttendanceBatchAction",
+  "src/app/(dashboard)/meetings/actions.ts → updateChecklistItemAction",
+  "src/app/(dashboard)/meetings/actions.ts → updateInvitationStatusAction",
+  "src/app/(dashboard)/meetings/actions.ts → updateLocationAction",
+  "src/app/(dashboard)/meetings/actions.ts → updateMeetingAction",
+  "src/app/(dashboard)/meetings/actions.ts → updateMeetingStatusAction",
+  "src/app/(dashboard)/people/actions.ts → addSkillAction",
+  "src/app/(dashboard)/people/actions.ts → changeStatusAction",
+  "src/app/(dashboard)/people/actions.ts → changeStatusWithReasonAction",
+  "src/app/(dashboard)/people/actions.ts → createAssessmentAction",
+  "src/app/(dashboard)/people/actions.ts → createCommitmentAction",
+  "src/app/(dashboard)/people/actions.ts → createHouseholdAction",
+  "src/app/(dashboard)/people/actions.ts → createInterviewAction",
+  "src/app/(dashboard)/people/actions.ts → createPersonAction",
+  "src/app/(dashboard)/people/actions.ts → createTagAction",
+  "src/app/(dashboard)/people/actions.ts → quickAddPersonAction",
+  "src/app/(dashboard)/people/actions.ts → updateHouseholdAction",
+  "src/app/(dashboard)/people/actions.ts → updatePersonAction",
+  "src/app/(dashboard)/people/actions.ts → updateTagAction",
+  "src/app/(dashboard)/phase/actions.ts → transitionPhaseAction",
+  "src/app/(dashboard)/phase/feedback-actions.ts → submitInsightFeedbackAction",
+  "src/app/(dashboard)/phase/signals-actions.ts → setManualSignalAction",
+  "src/app/(dashboard)/tasks/actions.ts → addSubtaskAction",
+  "src/app/(dashboard)/tasks/actions.ts → bulkCompleteTasksAction",
+  "src/app/(dashboard)/tasks/actions.ts → bulkRescheduleTasksAction",
+  "src/app/(dashboard)/tasks/actions.ts → createTaskAction",
+  "src/app/(dashboard)/tasks/actions.ts → quickAddTaskAction",
+  "src/app/(dashboard)/tasks/actions.ts → updateTaskAction",
+  "src/app/(dashboard)/teams/actions.ts → assignMemberAction",
+  "src/app/(dashboard)/teams/actions.ts → createMeetingAction",
+  "src/app/(dashboard)/teams/actions.ts → createRoleAction",
+  "src/app/(dashboard)/teams/actions.ts → createTeamAction",
+  "src/app/(dashboard)/teams/actions.ts → createTrainingProgramAction",
+  "src/app/(dashboard)/teams/actions.ts → markTrainingCompleteAction",
+  "src/app/(dashboard)/teams/actions.ts → recordAttendanceAction",
+  "src/app/(dashboard)/teams/actions.ts → updateRoleAction",
+  "src/app/(dashboard)/teams/actions.ts → updateTeamAction",
+];
+
+test('the session mint precedes the parse in EVERY "use server" module in the repository', () => {
+  // The universal claim, asserted universally. No file list: every `"use
+  // server"` module under `src/` is walked, so an endpoint written next month
+  // is inside the claim without anybody remembering to add it.
+  const serverModules = TS_FILES.filter(isUseServerModule);
+
+  assert.ok(
+    serverModules.length > 5,
+    `only ${serverModules.length} "use server" modules found — the walk is broken`
+  );
+
+  const checked: string[] = [];
+  const unauthenticated: string[] = [];
+
+  for (const action of parsingServerActionExports()) {
+    if (isPublicRouteGroup(action.file)) {
+      unauthenticated.push(action.label);
+      continue;
+    }
+
+    assert.ok(
+      action.mint >= 0,
+      `${action.label} parses an argument and never mints an actor`
+    );
+    assert.ok(
+      action.mint < action.parse,
+      `${action.label} parses its argument before checking the session`
+    );
+
+    checked.push(action.label);
+  }
+
+  for (const expected of ROUND_7_ENDPOINTS) {
+    assert.ok(
+      checked.some((seen) => seen.endsWith(expected)),
+      `the scan never reached ${expected} — it saw ${checked.join(", ")}`
+    );
+  }
+
+  // The exemption stays three endpoints wide. A fourth arrival here is either a
+  // new unauthenticated way into the product — which is a security review, not
+  // a test edit — or an authenticated action that has been moved somewhere the
+  // rule does not reach.
+  assert.deepEqual(unauthenticated.toSorted(), [
+    "src/app/(auth)/login/actions.ts → login",
+    "src/app/(auth)/register/actions.ts → register",
+    "src/app/(marketing)/actions.ts → requestInviteAction",
+  ]);
+});
+
+test("the try-wrapped mints are a closed, named set — an unlisted one fails here", () => {
+  // The residual pinned. `TRY_WRAPPED_MINTS` documents why these are safe (the
+  // mint still precedes the parse, so both argument shapes get the identical
+  // answer); this asserts the set is exactly that and no larger, so a new
+  // action that buries its mint inside a `try` — where the catch converts
+  // `Unauthorized` into a handled result — fails `pnpm test` instead of joining
+  // an unlisted group. Written the new way (mint above the `try`) it is not on
+  // this list at all and nothing needs editing.
+  const tryWrapped = parsingServerActionExports()
+    .filter((action) => !isPublicRouteGroup(action.file))
+    .filter((action) => action.try >= 0 && action.try < action.mint)
+    .map((action) => action.label);
+
+  assert.deepEqual(
+    tryWrapped.toSorted(),
+    TRY_WRAPPED_MINTS.toSorted(),
+    'a `"use server"` export mints its actor INSIDE a `try`, so a sessionless call comes back as a handled result instead of throwing. Mint above the `try` (see settings/actions.ts for the shape) — or, if this is deliberate, add it to TRY_WRAPPED_MINTS with the reason'
+  );
+
+  // The residual is a residual, not a licence: everything on the list still
+  // satisfies the rule the invariant actually enforces.
+  for (const action of parsingServerActionExports()) {
+    if (isPublicRouteGroup(action.file)) continue;
+    assert.ok(action.mint < action.parse, action.label);
+  }
+});
+
+test('no "use server" module publishes an endpoint the walk cannot read', () => {
+  // The parser's blind spot, closed loudly. `functionBodies` matches `function`
+  // DECLARATIONS, so `export const fooAction = async (input) => {…}` — equally
+  // POSTable — would be invisible to the scan above, and so would `export
+  // default async function …` (the `default` keyword sits where the matcher
+  // expects the name) and `export { x } from "./core"` (somebody else's
+  // function, republished as an endpoint; that is HOLE 2 of #265).
+  //
+  // Extending the matcher would be one more parser to get wrong. Banning the
+  // forms is stronger and the product already writes none of them: every action
+  // in the repository today is an `export async function`.
+  const offenders: string[] = [];
+
+  for (const full of TS_FILES) {
+    if (!isUseServerModule(full)) continue;
+    for (const statement of valueExportStatements(codeOf(full))) {
+      offenders.push(`${rel(full)} → ${statement}`);
+    }
+  }
+
+  assert.deepEqual(
+    offenders,
+    [],
+    "`functionBodies` reads `export (async) function NAME(…)` and nothing else, so an endpoint published any other way is not covered by the SESSION-FIRST scan. Write it as an `export async function`:\n  " +
+      offenders.join("\n  ")
+  );
+});
+
+test("the brace matcher reads a whole function, not up to the first nested close", () => {
+  // The scan above is only as good as this, and the version it replaces was
+  // not: slicing at the first `\n}` stops at the end of a nested `try`, so a
+  // mint moved BELOW one would sit outside the text being judged and the
+  // assertion would pass on a body it never read. This is the fixture that
+  // fails on that parser and passes on this one.
+  const code = [
+    "export async function act(input) {",
+    "  try {",
+    "    const x = 1;",
+    "  } catch (error) {",
+    "    return null;",
+    "  }",
+    "  const parsed = schema.safeParse(input);",
+    "  const session = await verifySession();",
+    "  return parsed;",
+    "}",
+  ].join("\n");
+
+  const [fn] = functionBodies(code);
+
+  assert.equal(fn.name, "act");
+  assert.equal(fn.exported, true);
+  assert.ok(
+    fn.body.includes("verifySession()"),
+    "the body was truncated early"
+  );
+  assert.ok(
+    fn.body.indexOf(".safeParse(") < fn.body.indexOf("verifySession()"),
+    "the fixture is meant to be a violation — it is what the scan must catch"
+  );
+});
+
+test("an arrow-function export is not a function declaration", () => {
+  // The blind spot, demonstrated rather than asserted about: this is the exact
+  // module shape the ban above exists for. `functionBodies` returns nothing for
+  // it, so without that ban the endpoint would parse first and the repo-wide
+  // scan would still be green.
+  const code = [
+    '"use server";',
+    "export const probeAction = async (input) => {",
+    "  const parsed = schema.safeParse(input);",
+    "  await verifySession();",
+    "  return parsed;",
+    "};",
+  ].join("\n");
+
+  assert.deepEqual(functionBodies(code), []);
+  assert.deepEqual(valueExportStatements(code), [
+    "export const probeAction = async (input) => {",
+  ]);
+});
+
+test("a module's own mint helper counts as the mint", () => {
+  // `notifications/actions.ts` mints through `currentViewer()`. Deriving the
+  // minting names from the module means that file needs no exemption, and an
+  // exemption is exactly what a later reader would have widened.
+  const code = [
+    "async function currentViewer() {",
+    "  const session = await verifySession();",
+    "  return session;",
+    "}",
+    "export async function act(input) {",
+    "  const viewer = await currentViewer();",
+    "  const parsed = schema.safeParse(input);",
+    "  return parsed;",
+    "}",
+  ].join("\n");
+
+  const mints = mintingNames(path.join(SRC, "fixture.ts"), code);
+
+  assert.ok(mints.has("currentViewer"));
+
+  const [, act] = functionBodies(code);
+  const pattern = new RegExp(`\\b(?:${[...mints].join("|")})\\s*\\(`);
+
+  assert.ok(act.body.search(pattern) < act.body.indexOf(".safeParse("));
+});
+
+test("a directive is a directive without its semicolon", () => {
+  // The guardrail on the guardrail (#265 r2, HOLE 4 — documented mutation 7 in
+  // `src/lib/invitations/service.test.ts`). Every walk asks
+  // `isUseServerModule`, and the previous detector required a trailing
+  // semicolon: `"use server"` on its own is the same directive (ASI; Next.js
+  // reads it), so a module written that way was invisible to both closure walks
+  // and shipped a live unauthenticated endpoint through a green 37/37 suite.
+  // Only `format:check` noticed, and a formatter is not a security control —
+  // which is why the rule is pinned here, against synthetic code, and not only
+  // exercised on whatever the repo's files happen to look like today.
+  for (const code of [
+    '"use server";\nexport const a = 1;',
+    '"use server"\nexport const a = 1;',
+    "'use server'\nexport const a = 1;",
+    '"use server"    \n',
+    '\n\n  "use server"\n',
+    '"use strict";\n"use server"\n',
+  ]) {
+    assert.ok(declaresDirective(code, "use server"), JSON.stringify(code));
+  }
+
+  // And a directive is only one as the module's FIRST statement, so a mention
+  // further down — a regex, an array entry, a template — is not one. Over-eager
+  // detection is its own bug: the closure walks STOP at `"use server"`
+  // boundaries, so a false positive silently prunes the subtree it should have
+  // followed.
+  for (const code of [
+    'export const a = 1;\n"use server";',
+    'const directives = ["use server"];',
+    'if (x) { "use server"; }',
+    "export const RE = /[\"']use server[\"']/;",
+    "",
+  ]) {
+    assert.ok(!declaresDirective(code, "use server"), JSON.stringify(code));
+  }
+
+  // The client half of the boundary uses the same rule, and there is at least
+  // one real file of each kind — otherwise the walks walk nothing.
+  assert.ok(declaresDirective('"use client"\n', "use client"));
+  assert.ok(TS_FILES.some(isUseClientModule), "no client entries found");
+  assert.ok(TS_FILES.some(isUseServerModule), "no action modules found");
+});
