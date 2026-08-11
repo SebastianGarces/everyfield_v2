@@ -39,6 +39,25 @@ interface PendingTransition {
 }
 
 // ============================================================================
+// Hooks
+// ============================================================================
+
+/**
+ * A ref that always points at the latest value — so the once-subscribed drag
+ * monitor and its async handlers read current props/state through `.current`
+ * instead of stale closures, without hand-writing a ref + useEffect pair per
+ * value. (The assignment lives in an effect because the react-hooks/refs rule
+ * forbids ref writes during render.)
+ */
+function useLatestRef<T>(value: T) {
+  const ref = useRef(value);
+  useEffect(() => {
+    ref.current = value;
+  });
+  return ref;
+}
+
+// ============================================================================
 // Post-move flash
 // ============================================================================
 
@@ -76,27 +95,19 @@ export function PipelineView({
     data.people
   );
 
-  // Stable ref so async handlers and callbacks always see the latest state
+  // Latest-value refs so the once-subscribed monitor never re-subscribes
+  const onReorderRef = useLatestRef(onReorder);
+  const onStatusChangeRef = useLatestRef(onStatusChange);
+  const dataRef = useLatestRef(data);
+
+  // `items` additionally needs a synchronously-updated ref (a drop can land
+  // before React re-renders), so every write goes through applyItems — the
+  // ONE place setItems and itemsRef are kept in lockstep.
   const itemsRef = useRef(items);
-  useEffect(() => {
-    itemsRef.current = items;
-  }, [items]);
-
-  // Stable refs for callbacks so the monitor effect never re-subscribes
-  const onReorderRef = useRef(onReorder);
-  useEffect(() => {
-    onReorderRef.current = onReorder;
-  }, [onReorder]);
-
-  const onStatusChangeRef = useRef(onStatusChange);
-  useEffect(() => {
-    onStatusChangeRef.current = onStatusChange;
-  }, [onStatusChange]);
-
-  const dataRef = useRef(data);
-  useEffect(() => {
-    dataRef.current = data;
-  }, [data]);
+  const applyItems = useCallback((next: Record<string, PersonWithTags[]>) => {
+    itemsRef.current = next;
+    setItems(next);
+  }, []);
 
   // State for confirmation modal
   const [pendingTransition, setPendingTransition] =
@@ -106,10 +117,9 @@ export function PipelineView({
   // Sync with server data when it changes
   useEffect(() => {
     queueMicrotask(() => {
-      setItems(data.people);
-      itemsRef.current = data.people;
+      applyItems(data.people);
     });
-  }, [data.people]);
+  }, [data.people, applyItems]);
 
   // ────────────────────────────────────────────────────────────────────────
   // Status transition logic
@@ -143,11 +153,10 @@ export function PipelineView({
         toast.error("Failed to update status", {
           description: "Please try again.",
         });
-        setItems(dataRef.current.people);
-        itemsRef.current = dataRef.current.people;
+        applyItems(dataRef.current.people);
       }
     },
-    []
+    [applyItems, dataRef, onReorderRef, onStatusChangeRef]
   );
 
   // ────────────────────────────────────────────────────────────────────────
@@ -174,8 +183,7 @@ export function PipelineView({
       });
 
       const next = { ...current, [columnId]: reordered };
-      setItems(next);
-      itemsRef.current = next;
+      applyItems(next);
 
       // Post-move flash
       triggerPostMoveFlash(columnItems[startIndex].id);
@@ -183,7 +191,7 @@ export function PipelineView({
       // Persist
       onReorderRef.current(reordered.map((p) => p.id)).catch(console.error);
     },
-    []
+    [applyItems, onReorderRef]
   );
 
   // ────────────────────────────────────────────────────────────────────────
@@ -218,8 +226,7 @@ export function PipelineView({
         [startColumnId]: sourceColumn.filter((p) => p.id !== person.id),
         [finishColumnId]: destinationItems,
       };
-      setItems(next);
-      itemsRef.current = next;
+      applyItems(next);
 
       // Post-move flash
       triggerPostMoveFlash(person.id);
@@ -227,7 +234,7 @@ export function PipelineView({
       // Handle status transition
       handleStatusTransition(person, finishColumnId);
     },
-    [handleStatusTransition]
+    [applyItems, handleStatusTransition]
   );
 
   // ────────────────────────────────────────────────────────────────────────
@@ -358,8 +365,7 @@ export function PipelineView({
       toast.error("Failed to update status", {
         description: "Please try again.",
       });
-      setItems(data.people);
-      itemsRef.current = data.people;
+      applyItems(data.people);
     }
 
     setPendingTransition(null);
@@ -367,8 +373,7 @@ export function PipelineView({
   };
 
   const handleCancel = () => {
-    setItems(data.people);
-    itemsRef.current = data.people;
+    applyItems(data.people);
     setPendingTransition(null);
     setConfirmModalOpen(false);
   };
