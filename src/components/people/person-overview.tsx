@@ -31,6 +31,8 @@ interface PersonOverviewProps {
   skills?: SkillInventory[];
   household?: Household | null;
   householdMembers?: Person[];
+  /** All households of the church, fetched server-side for HouseholdManager */
+  households?: Household[];
   onEdit?: () => void;
 }
 
@@ -57,6 +59,7 @@ export function PersonOverview({
   skills = [],
   household,
   householdMembers = [],
+  households = [],
   onEdit,
 }: PersonOverviewProps) {
   const router = useRouter();
@@ -205,6 +208,7 @@ export function PersonOverview({
         person={person}
         household={household ?? null}
         members={householdMembers}
+        households={households}
       />
 
       {/* Commitment */}

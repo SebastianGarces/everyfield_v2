@@ -22,6 +22,7 @@ import {
   sql,
   type SQL,
 } from "drizzle-orm";
+import { cache } from "react";
 import { emitPersonCreated } from "./events";
 
 // ============================================================================
@@ -55,26 +56,33 @@ export interface GetPersonOptions {
 /**
  * Get a single person by ID
  * Returns null if not found or if deleted (unless includeDeleted is true)
+ *
+ * Wrapped in React.cache() (the getCurrentSession precedent —
+ * memory/invariants.md → Request Deduplication) so the [id] layout and the
+ * page under it, which both need the same row every navigation, issue one
+ * query per request instead of two.
  */
-export async function getPerson(
-  churchId: string,
-  personId: string,
-  options: GetPersonOptions = {}
-): Promise<Person | null> {
-  const { includeDeleted = false } = options;
+export const getPerson = cache(
+  async (
+    churchId: string,
+    personId: string,
+    options: GetPersonOptions = {}
+  ): Promise<Person | null> => {
+    const { includeDeleted = false } = options;
 
-  const conditions = includeDeleted
-    ? and(eq(persons.churchId, churchId), eq(persons.id, personId))
-    : and(
-        eq(persons.churchId, churchId),
-        eq(persons.id, personId),
-        isNull(persons.deletedAt)
-      );
+    const conditions = includeDeleted
+      ? and(eq(persons.churchId, churchId), eq(persons.id, personId))
+      : and(
+          eq(persons.churchId, churchId),
+          eq(persons.id, personId),
+          isNull(persons.deletedAt)
+        );
 
-  const result = await db.select().from(persons).where(conditions).limit(1);
+    const result = await db.select().from(persons).where(conditions).limit(1);
 
-  return result[0] ?? null;
-}
+    return result[0] ?? null;
+  }
+);
 
 /**
  * Assert that `personId` names a live person in `churchId`.
