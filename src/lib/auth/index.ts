@@ -24,7 +24,6 @@ export {
   setSessionCookie,
   deleteSessionCookie,
   getSessionToken,
-  getSessionCookieOptions,
 } from "./cookies";
 
 // Password utilities
