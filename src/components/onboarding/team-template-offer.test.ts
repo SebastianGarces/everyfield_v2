@@ -77,8 +77,10 @@ const OFFER_ACTION = (() => {
   const start = TEAM_ACTIONS_CODE.indexOf(
     "export async function initializeTeamsWithRolesAction"
   );
+  // The next export after the offer. (It was listRolesAction until the #403
+  // sweep moved the caller-less reads into teams/queries.ts.)
   const end = TEAM_ACTIONS_CODE.indexOf(
-    "export async function listRolesAction"
+    "export async function createRoleAction"
   );
   assert.ok(start > -1 && end > start, "the offer's action must exist");
   return TEAM_ACTIONS_CODE.slice(start, end);
