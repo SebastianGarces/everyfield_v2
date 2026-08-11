@@ -18,7 +18,6 @@ import type { StatusTransition } from "./types";
 export {
   getAvailableStatuses,
   getNextStatus,
-  handleOutOfOrderProgression,
   isBackwardProgression,
   isForwardProgression,
   STATUS_LABELS,
@@ -55,24 +54,10 @@ export interface StatusWarning {
 // ============================================================================
 
 // Import shared utilities for internal use
-import { validateStatusTransition as _validateStatusTransition } from "./status.shared";
-
-/**
- * Status order for index calculations (server-side only)
- */
-const STATUS_ORDER: PersonStatus[] = [
-  "prospect",
-  "attendee",
-  "following_up",
-  "interviewed",
-  "core_group",
-  "launch_team",
-  "leader",
-];
-
-function getStatusIndex(status: PersonStatus): number {
-  return STATUS_ORDER.indexOf(status);
-}
+import {
+  getStatusIndex,
+  validateStatusTransition as _validateStatusTransition,
+} from "./status.shared";
 
 /**
  * Get warnings for a specific action based on person's current state.
@@ -187,7 +172,7 @@ export async function changeStatus(
   }
 
   // Validate the transition
-  const transition = _validateStatusTransition(oldStatus, newStatus, existing);
+  const transition = _validateStatusTransition(oldStatus, newStatus);
 
   // Update the person's status
   const [updated] = await db

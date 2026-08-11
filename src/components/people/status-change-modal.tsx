@@ -56,11 +56,7 @@ export function StatusChangeModal({
   const [error, setError] = useState<string | null>(null);
 
   // Get validation result for the selected transition
-  const transition = validateStatusTransition(
-    person.status,
-    selectedStatus,
-    person
-  );
+  const transition = validateStatusTransition(person.status, selectedStatus);
 
   const hasChanges = selectedStatus !== person.status;
   const isMovingBackward =

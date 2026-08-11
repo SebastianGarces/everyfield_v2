@@ -125,11 +125,7 @@ export function PipelineView({
       if (isStatusInColumn) return;
 
       const newStatus = destCol.statuses[0];
-      const transition = validateStatusTransition(
-        person.status,
-        newStatus,
-        person
-      );
+      const transition = validateStatusTransition(person.status, newStatus);
 
       if (transition.requiresConfirmation) {
         setPendingTransition({ person, newStatus });

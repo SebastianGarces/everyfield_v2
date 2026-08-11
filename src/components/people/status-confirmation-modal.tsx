@@ -44,7 +44,7 @@ export function StatusConfirmationModal({
   const [reason, setReason] = useState("");
 
   // Get validation result for the transition
-  const transition = validateStatusTransition(person.status, newStatus, person);
+  const transition = validateStatusTransition(person.status, newStatus);
 
   const isMovingBackward = isBackwardProgression(person.status, newStatus);
 
