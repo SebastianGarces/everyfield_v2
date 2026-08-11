@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getCurrentSession } from "@/lib/auth";
-import { getCurrentUserChurch } from "@/lib/auth/session";
 import {
   FORMAT_OUTPUT,
   getTemplateById,
@@ -10,8 +9,8 @@ import {
   type DocumentFormat,
   type DocumentMergeValues,
 } from "@/lib/documents";
+import { resolveDocumentMergeContext } from "@/lib/documents/merge-context";
 import { canRenderDocument, renderDocument } from "@/lib/documents/render";
-import { getLaunchForChurch } from "@/lib/launch/queries";
 
 // react-pdf / docx / exceljs need the Node.js runtime (not edge).
 export const runtime = "nodejs";
@@ -56,8 +55,8 @@ export async function GET(
     );
   }
 
-  const church = await getCurrentUserChurch();
-  if (!church) {
+  const resolved = await resolveDocumentMergeContext();
+  if (!resolved) {
     return NextResponse.json(
       { error: "No church associated with this account" },
       { status: 400 }
@@ -71,23 +70,7 @@ export async function GET(
     if (value !== null) provided[field.key] = value;
   }
 
-  // The launch date comes from the LAUNCH ENTITY (`launches.target_date`,
-  // LS-001) — `churches.launch_date` was dropped by migration 0032. Read the
-  // same way as `(dashboard)/documents/page.tsx`, which is what keeps the
-  // dialog's preview and the generated file agreeing about the day (#306). A
-  // request-supplied `?launch_date=` still overrides it: `provided` wins in
-  // `resolveMergeValues`, and this is only the auto-fill default.
-  const launch = await getLaunchForChurch(church.id);
-
-  const values = resolveMergeValues(
-    template,
-    {
-      churchName: church.name,
-      userName: user.name ?? null,
-      launchDate: launch?.targetDate ?? null,
-    },
-    provided
-  );
+  const values = resolveMergeValues(template, resolved.context, provided);
 
   let file: Buffer;
   try {
