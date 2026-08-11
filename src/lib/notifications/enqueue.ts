@@ -608,6 +608,15 @@ export const dbEnqueueDeps: EnqueueDeps = {
       // refused with before, and every other notification type in the product
       // — including the two gated milestones and the digest — cannot reach this
       // branch at all.
+      //
+      // AND THE ORG IS PAIRED TO THE ROLE (#304 round 8). `recipient` is a
+      // whole `users` row and both oversight FKs live on it, so the probe used
+      // to OR them together and a `network_admin` carrying a stray
+      // `sending_church_id` could rest on an invitation THAT sending church
+      // issued — the same hierarchy walk `recipientAdministersOrg` refuses one
+      // arm up. `orgHasRecordedRelationshipWithChurch` now takes the recipient
+      // rather than a pair of ids and pairs them itself, so there is no shape a
+      // call site could get wrong.
       const mayRestOnRecord =
         isOwnRelationshipType(type) &&
         isOversightUser(recipient) &&

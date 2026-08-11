@@ -82,6 +82,17 @@ import {
 //    names the schemas read. The source-order assertion below now covers all
 //    three files, so the invariant is true domain-wide or the suite is red.
 //
+//    §1b‴ makes it true REPO-WIDE (round 8). Domain-wide was never what the
+//    invariant said: it says "the mint is the FIRST statement of the export", of
+//    every export, everywhere. Round 7 measured the rest of the repository and
+//    found five endpoints that still parsed first — two on the settings screen,
+//    one on the sharing screen, two on the notification feed — so the line was
+//    still false at the sha that claimed it. The five are called sessionless with
+//    both argument shapes here, and the source-order assertion is no longer a
+//    hand-kept list of files at all: it WALKS every `"use server"` module under
+//    `src/` and matches braces, so the sixth one is covered on the day it is
+//    written.
+//
 // 3. AUTHORITY — the check that stood between an anonymous request and a
 //    stranger's association, now unit-tested per invitation type. §5 adds the
 //    WRITES that authority guards: a response is a compare-and-set on `pending`,
@@ -931,6 +942,510 @@ test("the session mint is the FIRST statement of every invitation-domain action"
       }
     }
   }
+});
+
+// ----------------------------------------------------------------------------
+// 1b‴. The invariant is UNIVERSAL — the rest of the repository (round 8)
+//
+// `memory/invariants.md` → Authentication states SESSION FIRST, THEN THE PARSE
+// about every export of every `"use server"` module. Rounds 5 and 6 made it true
+// of the invitation domain and wrote it down as universal; round 7 measured the
+// rest of the repository and found five endpoints that still parsed first:
+//
+//   settings/actions.ts          setNotificationPreferenceAction, setDigestCadenceAction
+//   settings/sharing/actions.ts  setOversightSharingAction
+//   notifications/actions.ts     markNotificationReadAction, loadMoreNotificationsAction
+//
+// None was exploitable in the sense of writing anything — but each answered an
+// anonymous caller differently for a malformed argument (`{ success: false, … }`)
+// than for a well-formed one (a throw), which is the shape-oracle the ruling
+// names, and which is why the rule is positional rather than a judgement call.
+//
+// The two halves below are deliberately different in kind. The runtime half
+// calls the five endpoints; the structural half walks EVERY `"use server"`
+// module under `src/` and matches braces, so it is not a list anybody has to
+// remember to extend. A file-list assertion is what let the invitations surface
+// sit outside the claim for a whole round.
+// ----------------------------------------------------------------------------
+
+/**
+ * The five endpoints round 7 measured, each with an argument `safeParse` would
+ * ACCEPT and one it would REJECT.
+ *
+ * `markAllNotificationsReadAction` takes nothing and parses nothing, and is here
+ * anyway: it shares `currentViewer()` with the other two, so a regression that
+ * moved the mint out of that helper would be caught by whichever export ran
+ * first rather than by luck.
+ */
+const REPO_WIDE_ACTION_MODULES: ReadonlyArray<{
+  readonly label: string;
+  readonly load: () => Promise<Record<string, unknown>>;
+  readonly exports: ReadonlyArray<{
+    readonly name: string;
+    readonly wellFormed: readonly unknown[];
+    readonly malformed: readonly unknown[];
+  }>;
+}> = [
+  {
+    label: "src/app/(dashboard)/settings/actions.ts",
+    load: async () =>
+      (await import("@/app/(dashboard)/settings/actions")) as unknown as Record<
+        string,
+        unknown
+      >,
+    exports: [
+      {
+        name: "setNotificationPreferenceAction",
+        wellFormed: [{ category: "tasks", channel: "email", enabled: true }],
+        malformed: [{ category: "nope", channel: "carrier-pigeon" }],
+      },
+      {
+        name: "setDigestCadenceAction",
+        wellFormed: ["daily"],
+        malformed: ["hourly"],
+      },
+    ],
+  },
+  {
+    label: "src/app/(dashboard)/settings/sharing/actions.ts",
+    load: async () =>
+      (await import("@/app/(dashboard)/settings/sharing/actions")) as unknown as Record<
+        string,
+        unknown
+      >,
+    exports: [
+      {
+        name: "setOversightSharingAction",
+        wellFormed: [true],
+        malformed: ["yes"],
+      },
+    ],
+  },
+  {
+    label: "src/app/(dashboard)/notifications/actions.ts",
+    load: async () =>
+      (await import("@/app/(dashboard)/notifications/actions")) as unknown as Record<
+        string,
+        unknown
+      >,
+    exports: [
+      {
+        name: "markNotificationReadAction",
+        wellFormed: ["77777777-7777-4777-8777-777777777777"],
+        malformed: ["not-a-uuid"],
+      },
+      {
+        name: "markAllNotificationsReadAction",
+        wellFormed: [],
+        malformed: [],
+      },
+      {
+        name: "loadMoreNotificationsAction",
+        wellFormed: [
+          {
+            cursor: {
+              createdAt: "2026-08-10T12:00:00.000Z",
+              id: "77777777-7777-4777-8777-777777777777",
+            },
+            unreadOnly: false,
+          },
+        ],
+        malformed: [{ cursor: { createdAt: "yesterday", id: "x" } }],
+      },
+    ],
+  },
+];
+
+test("the settings and notification modules publish exactly the endpoints they declare", async () => {
+  // The module namespace IS the auth surface, here as much as in §1a: a sixth
+  // endpoint on any of these three files fails until it is written down above
+  // and put through the sessionless call.
+  for (const target of REPO_WIDE_ACTION_MODULES) {
+    const mod = await target.load();
+    assert.deepEqual(
+      Object.keys(mod).sort(),
+      target.exports.map((e) => e.name).toSorted(),
+      target.label
+    );
+  }
+});
+
+test("every settings and notification action refuses a call with no session, well-formed argument or not", async () => {
+  for (const target of REPO_WIDE_ACTION_MODULES) {
+    const mod = await target.load();
+
+    for (const { name, wellFormed, malformed } of target.exports) {
+      const action = mod[name];
+      assert.equal(typeof action, "function", `${target.label} → ${name}`);
+
+      for (const [shape, args] of [
+        ["well-formed", wellFormed],
+        ["malformed", malformed],
+        ["no argument", []],
+      ] as const) {
+        await assert.rejects(
+          async () =>
+            (action as (...a: unknown[]) => Promise<unknown>)(...args),
+          (error: unknown) =>
+            error instanceof Error &&
+            /Unauthorized|outside a request scope/.test(error.message),
+          `${target.label} → ${name} (${shape})`
+        );
+      }
+    }
+  }
+});
+
+/**
+ * The body of every top-level function in `code`, by name, found by MATCHING
+ * BRACES rather than by looking for the next `\n}`.
+ *
+ * The round-6 version of the source assertion sliced at the first line-initial
+ * `}` it could find, which is the closing brace of whatever nested block came
+ * first — a `try`, an `if`, an object literal spread over lines. That is fine
+ * while the mint is at the very top and catastrophic the moment somebody moves
+ * it below one, because the scan then reads a body that stops before the
+ * statement it is judging. Counting braces reads the whole function or nothing.
+ *
+ * THE RETURN TYPE IS NOT THE BODY. Finding the opening brace is its own small
+ * problem, because a return type may CONTAIN braces:
+ *
+ *   async function currentViewer(): Promise<
+ *     { ok: true; viewer: NotificationViewer } | { ok: false; error: string }
+ *   > { … }
+ *
+ * — which is the real signature in `notifications/actions.ts`. A pattern that
+ * took the first `{` after the parameter list would open at `{ ok: true …` and
+ * read a "body" that is a type. So the scan walks forward from the closing
+ * parenthesis and takes the first brace at ANGLE DEPTH ZERO; `=>` inside a
+ * function type is not a closing angle bracket and is skipped.
+ *
+ * Strings and template literals are not tracked. They do not need to be for this
+ * corpus, and a mis-parse fails LOUD (an unbalanced count runs to end of file
+ * and the assertions still see the real body) rather than silently short.
+ */
+function functionBodies(
+  code: string
+): { name: string; body: string; exported: boolean }[] {
+  const found: { name: string; body: string; exported: boolean }[] = [];
+  const header = /(export\s+)?(?:async\s+)?function\s+(\w+)\s*\(/g;
+
+  for (const match of code.matchAll(header)) {
+    let i = match.index + match[0].length;
+
+    // The parameter list, which nests: `(fn: (a: string) => void)`.
+    for (let parens = 1; i < code.length && parens > 0; i++) {
+      if (code[i] === "(") parens++;
+      else if (code[i] === ")") parens--;
+    }
+
+    // The return type, skipped to the first brace outside any `<…>`.
+    let angle = 0;
+    let open = -1;
+    for (; i < code.length; i++) {
+      const char = code[i];
+      if (char === "<") angle++;
+      else if (char === ">" && code[i - 1] !== "=")
+        angle = Math.max(0, angle - 1);
+      else if (char === "{" && angle === 0) {
+        open = i;
+        break;
+      } else if (char === ";" && angle === 0) break; // an overload signature
+    }
+    if (open < 0) continue;
+
+    let depth = 0;
+    let end = code.length;
+
+    for (let j = open; j < code.length; j++) {
+      if (code[j] === "{") depth++;
+      else if (code[j] === "}") {
+        depth--;
+        if (depth === 0) {
+          end = j;
+          break;
+        }
+      }
+    }
+
+    found.push({
+      name: match[2],
+      body: code.slice(open + 1, end),
+      exported: Boolean(match[1]),
+    });
+  }
+
+  return found;
+}
+
+/**
+ * The two functions that READ THE SESSION COOKIE. Everything else that counts as
+ * a mint counts because it reaches one of these.
+ *
+ * `verifySession` is the throwing form every action uses; `getCurrentSession` is
+ * the nullable one it and the page guards are built on. Both live in
+ * `src/lib/auth/session.ts` and nothing else in the product opens that cookie.
+ */
+const SESSION_READS = ["verifySession", "getCurrentSession"];
+
+/** `import { a, b as c } from "x"` → local name ⇒ { module, original }. */
+function importedBindings(
+  file: string,
+  code: string
+): Map<string, { module: string; original: string }> {
+  const bindings = new Map<string, { module: string; original: string }>();
+
+  for (const match of code.matchAll(
+    /^\s*import\s+(?!type\b)\{([^}]*)\}\s*from\s*["']([^"']+)["']/gm
+  )) {
+    const target = resolveModule(file, match[2]);
+    if (target === null) continue;
+
+    for (const clause of match[1].split(",")) {
+      const parts = clause.trim().split(/\s+as\s+/);
+      const original = parts[0]?.trim();
+      const local = (parts[1] ?? parts[0])?.trim();
+      if (!original || !local || original === "type") continue;
+      bindings.set(local, { module: target, original });
+    }
+  }
+
+  return bindings;
+}
+
+const MINTING_EXPORTS = new Map<string, Set<string>>();
+
+/**
+ * The names that MINT an actor when called from `file`: the two session reads,
+ * any LOCAL function that reaches one transitively, and any IMPORTED binding
+ * whose own module mints.
+ *
+ * Derived rather than declared, because a module is allowed to name its mint and
+ * two of them do. `notifications/actions.ts` calls `currentViewer()`, a local
+ * helper whose first line awaits `verifySession()`;
+ * `admin/feedback/actions.ts` calls `requirePlatformAdmin()`, which is imported
+ * and reaches `getCurrentSession()` one module away. A scan that only knew the
+ * literal string would have called four live, correctly-guarded endpoints
+ * unminted and forced hand-written exemptions for them — and an exemption list
+ * is exactly the thing that hid the invitations surface for a whole round.
+ *
+ * `stack` breaks import cycles: a module already being resolved contributes
+ * nothing rather than recursing, which under-approximates (a cyclic mint would
+ * be missed) and so fails CLOSED — the assertion complains rather than passing.
+ */
+function mintingNames(
+  file: string,
+  code: string,
+  stack: ReadonlySet<string> = new Set()
+): Set<string> {
+  const mints = new Set(SESSION_READS);
+
+  for (const [local, { module, original }] of importedBindings(file, code)) {
+    if (stack.has(module)) continue;
+    if (mintingExportsOf(module, new Set([...stack, file])).has(original)) {
+      mints.add(local);
+    }
+  }
+
+  const bodies = functionBodies(code);
+
+  for (let pass = 0; pass <= bodies.length; pass++) {
+    let grew = false;
+    for (const fn of bodies) {
+      if (mints.has(fn.name)) continue;
+      for (const mint of mints) {
+        if (new RegExp(`\\b${mint}\\s*\\(`).test(fn.body)) {
+          mints.add(fn.name);
+          grew = true;
+          break;
+        }
+      }
+    }
+    if (!grew) break;
+  }
+
+  return mints;
+}
+
+/** Which of `file`'s exported functions mint, for an importer to consult. */
+function mintingExportsOf(
+  file: string,
+  stack: ReadonlySet<string>
+): Set<string> {
+  const cached = MINTING_EXPORTS.get(file);
+  if (cached !== undefined) return cached;
+
+  const code = codeOf(file);
+  const mints = mintingNames(file, code, stack);
+  const exported = new Set(
+    functionBodies(code)
+      .filter((fn) => fn.exported && mints.has(fn.name))
+      .map((fn) => fn.name)
+  );
+
+  // `verifySession` and `getCurrentSession` are exported from session.ts as the
+  // base case; they mint by definition rather than by reaching anything.
+  for (const name of SESSION_READS) {
+    if (
+      new RegExp(
+        `export\\s+(?:async\\s+)?(?:function|const)\\s+${name}\\b`
+      ).test(code)
+    ) {
+      exported.add(name);
+    }
+  }
+
+  if (stack.size === 0) MINTING_EXPORTS.set(file, exported);
+  return exported;
+}
+
+test('the session mint precedes the parse in EVERY "use server" module in the repository', () => {
+  // The universal claim, asserted universally. No file list: every `"use
+  // server"` module under `src/` is walked, so an endpoint written next month
+  // is inside the claim without anybody remembering to add it.
+  //
+  // What is asserted, per exported function: if the body parses an argument at
+  // all, the actor must be minted BEFORE the first `.safeParse(`. An export
+  // that parses nothing is not judged here — it has no oracle to leak and no
+  // ordering to get wrong — which is what keeps this scan honest about the rule
+  // rather than inventing a stricter one that would fail on unrelated files.
+  const serverModules = TS_FILES.filter(isUseServerModule);
+
+  assert.ok(
+    serverModules.length > 5,
+    `only ${serverModules.length} "use server" modules found — the walk is broken`
+  );
+
+  const checked: string[] = [];
+  const unauthenticated: string[] = [];
+
+  for (const file of serverModules) {
+    const code = codeOf(file);
+    const mints = mintingNames(file, code);
+    const mintPattern = new RegExp(`\\b(?:${[...mints].join("|")})\\s*\\(`);
+
+    // THE EXEMPTION, and it is the ROUTE GROUP rather than a file list: `(auth)`
+    // and `(marketing)` are the product's two unauthenticated groups
+    // (memory/entrypoints.md), and an endpoint published there is public by
+    // construction — `login` and `register` CREATE the session they could not
+    // have verified, and the landing page's invite request is a form for people
+    // who have no account at all. Everything else in `src/app` sits behind the
+    // `(dashboard)` layout's guard and is inside the claim.
+    //
+    // The exempted endpoints are enumerated exactly below, so the group cannot
+    // become a hiding place: moving an authenticated action into `(marketing)`
+    // fails this test rather than silently leaving the rule.
+    const isPublicGroup = /\/app\/\((?:auth|marketing)\)\//.test(file);
+
+    for (const fn of functionBodies(code)) {
+      if (!fn.exported) continue;
+
+      const parse = fn.body.indexOf(".safeParse(");
+      if (parse < 0) continue;
+
+      if (isPublicGroup) {
+        unauthenticated.push(`${rel(file)} → ${fn.name}`);
+        continue;
+      }
+
+      const mint = fn.body.search(mintPattern);
+
+      assert.ok(
+        mint >= 0,
+        `${rel(file)} → ${fn.name} parses an argument and never mints an actor`
+      );
+      assert.ok(
+        mint < parse,
+        `${rel(file)} → ${fn.name} parses its argument before checking the session`
+      );
+
+      checked.push(`${rel(file)} → ${fn.name}`);
+    }
+  }
+
+  // A scan that matched nothing would pass silently, which is how a guardrail
+  // becomes decoration. The five round-7 endpoints must be among what it saw.
+  for (const expected of [
+    "settings/actions.ts → setNotificationPreferenceAction",
+    "settings/actions.ts → setDigestCadenceAction",
+    "settings/sharing/actions.ts → setOversightSharingAction",
+    "notifications/actions.ts → markNotificationReadAction",
+    "notifications/actions.ts → loadMoreNotificationsAction",
+  ]) {
+    assert.ok(
+      checked.some((seen) => seen.endsWith(expected)),
+      `the scan never reached ${expected} — it saw ${checked.join(", ")}`
+    );
+  }
+
+  // And the exemption stays three endpoints wide. A fourth arrival here is
+  // either a new unauthenticated way into the product — which is a security
+  // review, not a test edit — or an authenticated action that has been moved
+  // somewhere the rule does not reach.
+  assert.deepEqual(unauthenticated.toSorted(), [
+    "src/app/(auth)/login/actions.ts → login",
+    "src/app/(auth)/register/actions.ts → register",
+    "src/app/(marketing)/actions.ts → requestInviteAction",
+  ]);
+});
+
+test("the brace matcher reads a whole function, not up to the first nested close", () => {
+  // The scan above is only as good as this, and the version it replaces was
+  // not: slicing at the first `\n}` stops at the end of a nested `try`, so a
+  // mint moved BELOW one would sit outside the text being judged and the
+  // assertion would pass on a body it never read. This is the fixture that
+  // fails on that parser and passes on this one.
+  const code = [
+    "export async function act(input) {",
+    "  try {",
+    "    const x = 1;",
+    "  } catch (error) {",
+    "    return null;",
+    "  }",
+    "  const parsed = schema.safeParse(input);",
+    "  const session = await verifySession();",
+    "  return parsed;",
+    "}",
+  ].join("\n");
+
+  const [fn] = functionBodies(code);
+
+  assert.equal(fn.name, "act");
+  assert.equal(fn.exported, true);
+  assert.ok(
+    fn.body.includes("verifySession()"),
+    "the body was truncated early"
+  );
+  assert.ok(
+    fn.body.indexOf(".safeParse(") < fn.body.indexOf("verifySession()"),
+    "the fixture is meant to be a violation — it is what the scan must catch"
+  );
+});
+
+test("a module's own mint helper counts as the mint", () => {
+  // `notifications/actions.ts` mints through `currentViewer()`. Deriving the
+  // minting names from the module means that file needs no exemption, and an
+  // exemption is exactly what a later reader would have widened.
+  const code = [
+    "async function currentViewer() {",
+    "  const session = await verifySession();",
+    "  return session;",
+    "}",
+    "export async function act(input) {",
+    "  const viewer = await currentViewer();",
+    "  const parsed = schema.safeParse(input);",
+    "  return parsed;",
+    "}",
+  ].join("\n");
+
+  const mints = mintingNames(path.join(SRC, "fixture.ts"), code);
+
+  assert.ok(mints.has("currentViewer"));
+
+  const [, act] = functionBodies(code);
+  const pattern = new RegExp(`\\b(?:${[...mints].join("|")})\\s*\\(`);
+
+  assert.ok(act.body.search(pattern) < act.body.indexOf(".safeParse("));
 });
 
 // ----------------------------------------------------------------------------

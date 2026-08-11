@@ -1,7 +1,11 @@
 import { and, eq, or, sql, type SQL } from "drizzle-orm";
 
 import { db } from "@/db";
-import { associationEvents, organizationInvitations } from "@/db/schema";
+import {
+  associationEvents,
+  organizationInvitations,
+  type User,
+} from "@/db/schema";
 
 // ============================================================================
 // The recorded-relationship tenancy basis (#304, OV-006 / OV-007).
@@ -40,14 +44,61 @@ import { associationEvents, organizationInvitations } from "@/db/schema";
 // ============================================================================
 
 /**
- * The recipient's own org, as `enqueue` already has it projected off the `users`
- * row. At most one field is meaningfully set — an oversight admin belongs to a
- * sending church or to a network — and a recipient with NEITHER matches nothing
- * rather than everything (see `orgFilters` below).
+ * The org this recipient may be asked about — EXACTLY ONE field set, or neither.
+ *
+ * Not a projection of the `users` row, and that is the whole point: both org FKs
+ * live on the same row and nothing stops a user carrying both. Only
+ * `recipientOrgOf` produces this shape, so the pairing of role to org kind
+ * cannot be skipped by a caller who happens to hold a `users` row.
  */
 export interface RecipientOrg {
   sendingChurchId: string | null;
   sendingNetworkId: string | null;
+}
+
+/** The columns the pairing reads — exactly what `enqueue` already projects. */
+export type OversightRecipient = Pick<
+  User,
+  "role" | "sendingChurchId" | "sendingNetworkId"
+>;
+
+/**
+ * THE ROLE IS PAIRED WITH THE ORG KIND — #304 round 8 (ruled 2026-08-10),
+ * the same rule `recipientAdministersOrg` applies to an org-ANCHORED row.
+ *
+ * Both oversight FKs live on one `users` row and neither implies the other
+ * (memory/invariants.md → Multi-Tenancy). Until this function existed, the
+ * recorded-relationship probe took the row as it came and OR'd the two arms
+ * together, so a `network_admin` who also carried a `sending_church_id` — a
+ * founder who administers both, or a row where the second FK was set once and
+ * never cleared — could satisfy the probe through an invitation that SENDING
+ * CHURCH had issued, and receive an own-relationship notification about a plant
+ * they administer nothing of. That is the hierarchy walk `memory/invariants.md`
+ * forbids, arriving through the role instead of through the FK.
+ *
+ * So each role contributes EXACTLY its own kind of org and nothing else:
+ * `sending_church_admin` → the sending church, `network_admin` → the network,
+ * every other role → neither, which matches nothing at all rather than
+ * everything (see the `false` returns below).
+ *
+ * Pure, and exported so it can be tested over the whole role × org-FK domain.
+ */
+export function recipientOrgOf(recipient: OversightRecipient): RecipientOrg {
+  if (recipient.role === "sending_church_admin") {
+    return {
+      sendingChurchId: recipient.sendingChurchId,
+      sendingNetworkId: null,
+    };
+  }
+
+  if (recipient.role === "network_admin") {
+    return {
+      sendingChurchId: null,
+      sendingNetworkId: recipient.sendingNetworkId,
+    };
+  }
+
+  return { sendingChurchId: null, sendingNetworkId: null };
 }
 
 /**
@@ -102,17 +153,25 @@ function auditRelationship(org: RecipientOrg, churchId: string): SQL {
 }
 
 /**
- * Is there a record of a relationship between this org and this plant?
+ * Is there a record of a relationship between this recipient's org and this
+ * plant?
  *
  * Two `LIMIT 1` probes, run only on the path where `canAccessChurch` has already
  * said no and the notification's `type` is one of the two own-relationship
  * events — so the ordinary fan-out (a digest, a gated milestone) never reaches
  * it and never pays for it.
+ *
+ * TAKES THE RECIPIENT, NOT AN ORG (#304 round 8). The pairing happens HERE,
+ * behind the only door callers use, so there is no signature that accepts an
+ * unpaired pair of FKs and no call site that has to remember to build one. The
+ * caller in `enqueue` hands over the row it already projected.
  */
 export async function orgHasRecordedRelationshipWithChurch(
-  org: RecipientOrg,
+  recipient: OversightRecipient,
   churchId: string
 ): Promise<boolean> {
+  const org = recipientOrgOf(recipient);
+
   if (!org.sendingChurchId && !org.sendingNetworkId) return false;
 
   const [invited] = await db

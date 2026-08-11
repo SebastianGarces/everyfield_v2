@@ -56,7 +56,7 @@ const SCHEMA_CODE = readFileSync(
 const MIGRATION = readFileSync(
   path.join(
     process.cwd(),
-    "src/db/migrations/0035_association_subject_and_notification_anchor.sql"
+    "src/db/migrations/0036_association_subject_and_notification_anchor.sql"
   ),
   "utf8"
 );

@@ -8,17 +8,29 @@
  * Usage:
  *   bun run scripts/seed-dev-db.ts
  *   bun run scripts/seed-dev-db.ts --clean-only          # Only clean, don't seed
- *   bun run scripts/seed-dev-db.ts --oversight-orgs-only # Upsert only; NO wipe
+ *   SEED_ADMIN_PASSWORD=… bun run scripts/seed-dev-db.ts --oversight-orgs-only
  *
  * The wipe below is not scoped to the rows this file creates — see
  * `cleanDatabase()`. It refuses to run against a database holding the alpha
  * cohort's accounts unless `--allow-protected-db` is passed.
  *
- * `--oversight-orgs-only` is the exception: it returns before the wipe is even
- * reached and only upserts the sending network, the sending church and the
- * `sending_church_admin` who belongs to them. It is therefore the one mode that
- * is safe to run against the shared development database, which is why it
- * exists — that account had no other reproducible way to be created there.
+ * EVERY MODE ASKS THE SENTINEL BEFORE IT WRITES (#304 round 8, ruled
+ * 2026-08-10). `--oversight-orgs-only` deletes nothing and upserts only the
+ * sending network, the sending church and the `sending_church_admin` who
+ * belongs to them — and for three rounds this header called that "safe to run
+ * against the shared development database". It was not. Additive is not safe:
+ * the mode INSERTS a real, enabled oversight login, and until round 8 its
+ * password was a constant in this repository, so every reader of this file held
+ * a working credential for that account on whatever database it last ran
+ * against. The account it created on the shared database was neutralised by
+ * hand on 2026-08-10.
+ *
+ * So the mode now asks `decideSeedAccounts` the same sentinel question the wipe
+ * asks — and refuses with NO override, because there is no honest way to mean
+ * "add a login to the database real people use" from a script that also runs
+ * unattended. Its password comes from `SEED_ADMIN_PASSWORD` and has no default;
+ * unset is a refusal, not a fallback. No mode of this script has a working
+ * password for a protected database.
  */
 
 import { neon } from "@neondatabase/serverless";
@@ -40,8 +52,10 @@ import {
 import { hashPassword } from "../src/lib/auth/password";
 import {
   ALLOW_PROTECTED_DB_FLAG,
+  decideSeedAccounts,
   decideWipe,
   matchProtectedAccounts,
+  SEED_ADMIN_PASSWORD_ENV,
 } from "../src/lib/dev-seed/protected-database";
 
 // Load environment variables for scripts
@@ -52,8 +66,12 @@ const cleanOnly = process.argv.includes("--clean-only");
 const allowProtectedDb = process.argv.includes(ALLOW_PROTECTED_DB_FLAG);
 /**
  * Upsert the oversight orgs and their admin, and do NOTHING else — no wipe, no
- * churches, no launches. The one mode of this script that is safe on the shared
- * development database. See `seedOversightOrgs`.
+ * churches, no launches.
+ *
+ * Deleting nothing is not the same as being safe anywhere: this mode writes a
+ * LOGIN. It asks the sentinel first and refuses on a protected database with no
+ * override, and it takes its password from `SEED_ADMIN_PASSWORD`. See
+ * `seedOversightOrgs` and `decideSeedAccounts`.
  */
 const oversightOrgsOnly = process.argv.includes("--oversight-orgs-only");
 
@@ -308,6 +326,31 @@ async function assertDatabaseIsWipeable(): Promise<void> {
 }
 
 /**
+ * Refuse to write an ACCOUNT on a database people share, and refuse to write one
+ * with a password this repository knows (#304 round 8, ruled 2026-08-10).
+ *
+ * The same query as `assertDatabaseIsWipeable` — the sentinel question does not
+ * change with the mode asking it, only the answer's consequence does — handed to
+ * `decideSeedAccounts`, whose refusals have no override. Returns the password to
+ * hash, so there is no path through this function that leaves the caller holding
+ * a default.
+ *
+ * A query that throws propagates and aborts the run, for the reason the wipe's
+ * guard does: an unanswered question about which database this is, is a no.
+ */
+async function passwordForSeededAccounts(): Promise<string> {
+  const rows = await db.select({ email: users.email }).from(users);
+  const decision = decideSeedAccounts({
+    accountsFound: matchProtectedAccounts(rows.map((row) => row.email)),
+    password: process.env[SEED_ADMIN_PASSWORD_ENV],
+  });
+
+  if (decision.verdict === "refuse") throw new Error(decision.message);
+
+  return decision.password;
+}
+
+/**
  * Wipe the fixture — every user and every church, not only the seeded ones.
  *
  * The guard above runs first, before the FK graph is even read: nothing here is
@@ -535,13 +578,19 @@ const SEED_USERS: SeedUser[] = [
  * The oversight orgs and the admin who belongs to them — every write here is
  * an upsert, and NOTHING here deletes.
  *
- * That is what makes `--oversight-orgs-only` safe to run against the shared
- * development database, and why it exists. The full seed cannot be: its wipe
- * takes every user and every church unscoped, and on the shared branch that is
- * the alpha cohort's logins. So "just re-seed to get the fixture" is not an
- * option there, and the alternative — hand-inserting the rows during a
+ * WHY IT EXISTS. The full seed's wipe takes every user and every church
+ * unscoped, so "just re-seed to get the fixture" is not an option on any
+ * database worth keeping; the alternative — hand-inserting rows during a
  * validation run — is the reproducibility failure ruled out in round 4 of #304.
  * A committed, idempotent, additive script path is neither.
+ *
+ * WHAT IT IS NOT. It is not "the safe mode", and this docblock said so for three
+ * rounds. The last write below INSERTS A LOGIN, which on a database real people
+ * use is a live credential no matter how carefully nothing was deleted. Its
+ * caller must therefore have cleared `decideSeedAccounts` — the sentinel, then
+ * the password — and the `passwordHash` parameter is how that is enforced here:
+ * this function cannot mint one, so there is no way to reach the INSERT without
+ * having answered both questions first.
  */
 async function insertOversightOrgs(): Promise<void> {
   await db
@@ -704,9 +753,17 @@ async function main(): Promise<void> {
     // Checked BEFORE `cleanDatabase()`, which is the whole point: this mode
     // must never reach the wipe.
     if (oversightOrgsOnly) {
+      // ...and the sentinel is asked before THIS mode writes anything either
+      // (#304 round 8). It throws on refuse, which `main`'s catch turns into a
+      // non-zero exit, so a protected database gets an error and no rows — not
+      // a warning and an oversight admin account.
+      const password = await passwordForSeededAccounts();
+
       console.log("🏛️  Upserting oversight orgs (no wipe, no other rows)...");
-      await seedOversightOrgs(await hashPassword(DEV_PASSWORD));
-      console.log(`\n   Password: ${DEV_PASSWORD}\n`);
+      await seedOversightOrgs(await hashPassword(password));
+      console.log(
+        `\n   Password: the ${SEED_ADMIN_PASSWORD_ENV} you passed (not printed)\n`
+      );
       process.exit(0);
     }
 

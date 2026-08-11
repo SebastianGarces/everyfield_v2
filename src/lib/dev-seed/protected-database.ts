@@ -110,3 +110,99 @@ export function decideWipe(input: {
       `If wiping THIS database is genuinely what you mean, re-run with ${ALLOW_PROTECTED_DB_FLAG}.`,
   };
 }
+
+// ----------------------------------------------------------------------------
+// The ADDITIVE mode's guard (#304 round 8, ruled 2026-08-10)
+// ----------------------------------------------------------------------------
+
+/**
+ * The environment variable `--oversight-orgs-only` reads its admin password
+ * from. There is NO default and there must never be one.
+ *
+ * An env var rather than a flag, unlike `ALLOW_PROTECTED_DB_FLAG`: a password
+ * typed on a command line lands in shell history and in the process table,
+ * where the override flag — which is a decision, not a secret — is exactly what
+ * you want to find later.
+ */
+export const SEED_ADMIN_PASSWORD_ENV = "SEED_ADMIN_PASSWORD";
+
+export type SeedAccountsDecision =
+  | { verdict: "proceed"; password: string }
+  | {
+      verdict: "refuse";
+      reason: "protected-database";
+      accounts: string[];
+      message: string;
+    }
+  | {
+      verdict: "refuse";
+      reason: "no-password";
+      accounts: string[];
+      message: string;
+    };
+
+/**
+ * Whether the additive seed mode may WRITE AN ACCOUNT here.
+ *
+ * A sibling of `decideWipe` rather than a call into it, because the danger is a
+ * different one and so is the sentence. `decideWipe` guards a DELETE and has an
+ * override, because "wipe this database anyway" is a thing an operator can
+ * legitimately mean. This guards an INSERT of a login, and it has none.
+ *
+ * WHAT ROUND 7 FOUND. `--oversight-orgs-only` deletes nothing, and three places
+ * in the seed script called that "safe on the shared development database".
+ * Additive is not the same as safe: the mode minted a real, enabled
+ * `sending_church_admin` account whose password was a constant in this
+ * repository, so anyone who could read the repo could sign in to the shared
+ * database as an oversight admin. The account it created there was neutralised
+ * by hand on 2026-08-10; this function is why it cannot be re-created.
+ *
+ * TWO REFUSALS, and the sentinel one is asked FIRST — before the password
+ * question, and before the mode writes anything at all. A missing password on a
+ * throwaway database is a fixable mistake; a well-chosen password on the shared
+ * database is still an account on the shared database, so the order of the
+ * questions is the order of the stakes.
+ *
+ * There is deliberately no override. The one honest way to put a row on a
+ * protected database is a reviewed statement written by hand for that database,
+ * not a script mode that also runs unattended in a build loop.
+ */
+export function decideSeedAccounts(input: {
+  accountsFound: readonly string[];
+  password: string | undefined;
+}): SeedAccountsDecision {
+  const accounts = [...input.accountsFound];
+
+  if (accounts.length > 0) {
+    return {
+      verdict: "refuse",
+      reason: "protected-database",
+      accounts,
+      message:
+        `Refusing to seed accounts: this database holds ${accounts.length} protected account(s) — ` +
+        `${accounts.join(", ")}. ` +
+        `This mode deletes nothing, and that is not the same as safe: it INSERTS a sending_church_admin ` +
+        `login, and a login on a database real people use is a live credential. ` +
+        `There is no override for this — point DATABASE_URL at your own or a throwaway database. ` +
+        `If a protected database genuinely needs these rows, write the statement by hand, for that database, ` +
+        `and choose the password there.`,
+    };
+  }
+
+  const password = input.password?.trim();
+
+  if (!password) {
+    return {
+      verdict: "refuse",
+      reason: "no-password",
+      accounts,
+      message:
+        `Refusing to seed accounts: ${SEED_ADMIN_PASSWORD_ENV} is not set. ` +
+        `The account this mode creates is a real login, so its password is chosen by whoever runs it — ` +
+        `there is no constant in this repository that opens it. ` +
+        `Re-run with ${SEED_ADMIN_PASSWORD_ENV}=<a password you choose>.`,
+    };
+  }
+
+  return { verdict: "proceed", password };
+}

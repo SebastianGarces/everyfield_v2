@@ -470,7 +470,7 @@ test("the ON CONFLICT predicate is byte-identical to the index predicate", () =>
   const orgMigration = readFileSync(
     path.join(
       process.cwd(),
-      "src/db/migrations/0035_association_subject_and_notification_anchor.sql"
+      "src/db/migrations/0036_association_subject_and_notification_anchor.sql"
     ),
     "utf8"
   )

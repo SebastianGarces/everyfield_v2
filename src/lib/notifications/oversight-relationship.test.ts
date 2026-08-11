@@ -3,11 +3,18 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
+import type { User } from "@/db/schema";
+
 import {
   OVERSIGHT_OWN_RELATIONSHIP_TYPES,
   isOwnRelationshipType,
 } from "./categories";
-import { orgHasRecordedRelationshipWithChurch } from "./oversight-relationship";
+import { recipientAdministersOrg } from "./enqueue";
+import {
+  orgHasRecordedRelationshipWithChurch,
+  recipientOrgOf,
+  type OversightRecipient,
+} from "./oversight-relationship";
 
 // ============================================================================
 // #304 — the recorded-relationship tenancy basis, and the ordering that keeps
@@ -48,11 +55,158 @@ test("a recipient with no org of their own matches nothing, and asks the DB noth
   // church-level user never costs a round trip — this runs with no database.
   assert.equal(
     await orgHasRecordedRelationshipWithChurch(
-      { sendingChurchId: null, sendingNetworkId: null },
+      {
+        role: "sending_church_admin",
+        sendingChurchId: null,
+        sendingNetworkId: null,
+      },
       CHURCH
     ),
     false
   );
+});
+
+// ----------------------------------------------------------------------------
+// The pairing — role × org FK (#304 round 8, ruled 2026-08-10)
+//
+// Both oversight FKs live on ONE `users` row and neither implies the other
+// (memory/invariants.md → Multi-Tenancy). Round 7 found that this probe took the
+// row as it came and OR'd the two arms, so a `network_admin` carrying a
+// `sending_church_id` they do not administer satisfied it through THAT sending
+// church's invitations — the hierarchy walk the invariant forbids, arriving
+// through the role rather than through the FK. `recipientOrgOf` is the fix, and
+// it is asserted over the whole domain rather than on the one case that bit.
+// ----------------------------------------------------------------------------
+
+const SENDING_CHURCH = "22222222-2222-4222-8222-222222222222";
+const NETWORK = "33333333-3333-4333-8333-333333333333";
+
+const ROLES = [
+  "planter",
+  "coach",
+  "team_member",
+  "sending_church_admin",
+  "network_admin",
+] as const;
+
+/** A whole `users` row around the three columns the pairing reads. */
+function user(recipient: OversightRecipient): User {
+  return {
+    id: "44444444-4444-4444-8444-444444444444",
+    churchId: null,
+    name: null,
+    email: "admin@example.test",
+    passwordHash: "x",
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...recipient,
+  } as User;
+}
+
+/** Every combination of the two FKs: neither, one, the other, both. */
+const ORG_FKS = [
+  { sendingChurchId: null, sendingNetworkId: null },
+  { sendingChurchId: SENDING_CHURCH, sendingNetworkId: null },
+  { sendingChurchId: null, sendingNetworkId: NETWORK },
+  { sendingChurchId: SENDING_CHURCH, sendingNetworkId: NETWORK },
+] as const;
+
+test("each role contributes exactly its own kind of org, over the whole domain", () => {
+  // 5 roles × 4 FK shapes, and the expected answer is stated as a rule rather
+  // than a table: the sending-church admin contributes ONLY `sendingChurchId`,
+  // the network admin ONLY `sendingNetworkId`, everybody else nothing.
+  for (const role of ROLES) {
+    for (const fks of ORG_FKS) {
+      const paired = recipientOrgOf({ role, ...fks });
+      const label = `${role} + ${JSON.stringify(fks)}`;
+
+      if (role === "sending_church_admin") {
+        assert.deepEqual(
+          paired,
+          { sendingChurchId: fks.sendingChurchId, sendingNetworkId: null },
+          label
+        );
+      } else if (role === "network_admin") {
+        assert.deepEqual(
+          paired,
+          { sendingChurchId: null, sendingNetworkId: fks.sendingNetworkId },
+          label
+        );
+      } else {
+        assert.deepEqual(
+          paired,
+          { sendingChurchId: null, sendingNetworkId: null },
+          label
+        );
+      }
+    }
+  }
+});
+
+test("a network admin carrying a foreign sending_church_id reaches no sending church", async () => {
+  // The exact shape round 7 named. The recipient IS a network admin, they DO
+  // carry a `sending_church_id`, and the plant's only recorded relationship is
+  // an invitation that sending church issued — so the OR'd version returned
+  // true and `enqueue` filed the row. With the pairing there is nothing for the
+  // sending-church arm to be built from, the network arm names an org the
+  // record does not mention, and the probe never asks the database at all,
+  // which is why this runs without one.
+  assert.equal(
+    await orgHasRecordedRelationshipWithChurch(
+      {
+        role: "network_admin",
+        sendingChurchId: SENDING_CHURCH,
+        sendingNetworkId: null,
+      },
+      CHURCH
+    ),
+    false
+  );
+
+  // The mirror case: a sending-church admin carrying a stray network id.
+  assert.equal(
+    await orgHasRecordedRelationshipWithChurch(
+      {
+        role: "sending_church_admin",
+        sendingChurchId: null,
+        sendingNetworkId: NETWORK,
+      },
+      CHURCH
+    ),
+    false
+  );
+});
+
+test("the pairing agrees with the org-anchored gate, which is the other half of the same rule", () => {
+  // `recipientAdministersOrg` pairs role to anchor KIND for an org-anchored row;
+  // this pairs role to org FK for a church-anchored one. Two questions, one
+  // rule — and they are asserted against each other so a later edit cannot
+  // relax one and leave the other looking like it still holds.
+  for (const role of ROLES) {
+    const recipient = {
+      role,
+      sendingChurchId: SENDING_CHURCH,
+      sendingNetworkId: NETWORK,
+    };
+    const paired = recipientOrgOf(recipient);
+
+    assert.equal(
+      paired.sendingChurchId !== null,
+      recipientAdministersOrg(user(recipient), {
+        type: "sending_church",
+        orgId: SENDING_CHURCH,
+      }),
+      `${role} — sending church`
+    );
+    assert.equal(
+      paired.sendingNetworkId !== null,
+      recipientAdministersOrg(user(recipient), {
+        type: "network",
+        orgId: NETWORK,
+      }),
+      `${role} — network`
+    );
+  }
 });
 
 // ----------------------------------------------------------------------------
