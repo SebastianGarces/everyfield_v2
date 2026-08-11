@@ -31,7 +31,7 @@ import {
   MERGE_FIELDS,
 } from "@/lib/communication/merge";
 import type { MessageTemplate } from "@/db/schema/communication";
-import type { RecipientTeamOption } from "@/lib/communication/service";
+import type { RecipientTeamOption } from "@/lib/communication/recipient-groups";
 
 interface Recipient {
   id: string;

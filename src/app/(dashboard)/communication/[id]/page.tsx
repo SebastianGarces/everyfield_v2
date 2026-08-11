@@ -24,8 +24,8 @@ import { verifySession } from "@/lib/auth/session";
 import {
   getCommunication,
   getCommunicationRecipients,
-  getNonOpenerSummary,
 } from "@/lib/communication/service";
+import { getNonOpenerSummary } from "@/lib/communication/send";
 import { evaluateResendEligibility } from "@/lib/communication/resend-policy";
 import {
   renderTemplate,

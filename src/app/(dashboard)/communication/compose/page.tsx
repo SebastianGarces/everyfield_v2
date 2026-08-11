@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { verifySession } from "@/lib/auth/session";
 import { getTemplates, getTemplate } from "@/lib/communication/templates";
-import { listRecipientTeams } from "@/lib/communication/service";
+import { listRecipientTeams } from "@/lib/communication/recipient-groups";
 import { listMeetings } from "@/lib/meetings/service";
 import { db } from "@/db";
 import { persons } from "@/db/schema/people";
