@@ -97,14 +97,37 @@ function isSkippedStep(id: OnboardingStepId): id is SkippedStepId {
 }
 
 /**
+ * Who is looking, as far as the leadership row is concerned. The row is the raw
+ * fact — "nobody answered the question" — so it is filtered twice before it can
+ * mislead: dropped for anybody whose answer would be refused (a link that
+ * quietly does nothing is worse than no link), and dropped while the pastor
+ * prompt is up, since that IS this question and asking it twice on one screen
+ * reads as a bug. What survives is the case the indicator is for: somebody who
+ * can answer, is not being asked, and never did — a planter who skipped step 2,
+ * or a plant that predates the flow entirely.
+ */
+export type IncompleteOnboardingVisibility = {
+  /** `canAnswerLeadershipQuestion` for this viewer and this church. */
+  canAnswerLeadership: boolean;
+  /** Is the pastor-confirmation prompt already asking on this render? */
+  pastorPromptShowing: boolean;
+};
+
+/**
  * The rows to show, in flow order. Empty means the indicator does not render —
  * which is how "completing the remaining steps removes it" works: nothing is
  * dismissed or cleared, the facts simply stop being missing.
  */
 export function incompleteOnboardingItems(
-  facts: OnboardingFacts
+  facts: OnboardingFacts,
+  visibility: IncompleteOnboardingVisibility
 ): IncompleteOnboardingItem[] {
   return incompleteOnboardingSteps(facts)
     .filter(isSkippedStep)
+    .filter(
+      (id) =>
+        id !== "leadership" ||
+        (visibility.canAnswerLeadership && !visibility.pastorPromptShowing)
+    )
     .map((id) => INCOMPLETE_ONBOARDING_ITEMS[id]);
 }
