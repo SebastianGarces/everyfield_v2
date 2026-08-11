@@ -1,6 +1,7 @@
 import { cache } from "react";
 import { eq, and, gt, lt } from "drizzle-orm";
 import { db } from "@/db";
+import { getSessionToken } from "./cookies";
 import {
   sessions,
   users,
@@ -248,19 +249,12 @@ export async function cleanupExpiredSessions(): Promise<number> {
   return result.length;
 }
 
-// Import cookies module lazily to avoid circular dependencies
-// and to ensure it's only loaded in server context
-async function getCookiesModule() {
-  return import("./cookies");
-}
-
 /**
  * Get the current session and user (cached per request)
  * Uses React.cache() for request-level deduplication
  */
 export const getCurrentSession = cache(
   async (): Promise<SessionValidationResult | SessionValidationFailure> => {
-    const { getSessionToken } = await getCookiesModule();
     const token = await getSessionToken();
 
     if (!token) {
