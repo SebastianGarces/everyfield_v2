@@ -6,7 +6,7 @@
 // profile and the current user, and merges them with planter-supplied values.
 // ============================================================================
 
-import { APP_TIME_ZONE } from "@/lib/datetime";
+import { formatDayLong } from "@/lib/datetime";
 import { parseTargetDate } from "@/lib/launch/countdown";
 import type { DocumentMergeValues, DocumentTemplate } from "./types";
 
@@ -31,19 +31,13 @@ export interface MergeContext {
 function formatLaunchDate(launchDate: string | null): string {
   if (!launchDate) return "";
   // A stored launch day is a WALL CLOCK, so both halves of this are pinned:
-  // `parseTargetDate` reads it at UTC midnight, and the formatter names
-  // `APP_TIME_ZONE` explicitly. Without the zone `Intl` follows the RUNTIME's,
+  // `parseTargetDate` reads it at UTC midnight, and `formatDayLong` is pinned
+  // to `APP_TIME_ZONE`. Without the pin `Intl` follows the RUNTIME's zone,
   // which is UTC on the server and the visitor's in a browser — the document
   // would name a different day depending on where it was rendered
   // (memory/invariants.md → Date & Time Rendering).
   const parsed = parseTargetDate(launchDate);
-  if (Number.isNaN(parsed.getTime())) return "";
-  return parsed.toLocaleDateString("en-US", {
-    timeZone: APP_TIME_ZONE,
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
+  return Number.isNaN(parsed.getTime()) ? "" : formatDayLong(parsed);
 }
 
 /**
