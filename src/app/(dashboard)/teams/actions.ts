@@ -16,7 +16,6 @@ import {
   assignMember,
   removeMember,
   getPersonTeams,
-  getPersonTeamCount,
   listTrainingPrograms,
   createTrainingProgram,
   markTrainingComplete,
@@ -513,23 +512,6 @@ export async function getPersonTeamsAction(
     if (error instanceof Error && error.message === "Unauthorized")
       return { success: false, error: "You must be logged in" };
     return { success: false, error: "Failed to load person teams" };
-  }
-}
-
-export async function getPersonTeamCountAction(
-  personId: string
-): Promise<ActionResult<number>> {
-  try {
-    const { user } = await verifySession();
-    if (!user.churchId)
-      return { success: false, error: "No church associated" };
-
-    const count = await getPersonTeamCount(user.churchId, personId);
-    return { success: true, data: count };
-  } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized")
-      return { success: false, error: "You must be logged in" };
-    return { success: false, error: "Failed to get team count" };
   }
 }
 

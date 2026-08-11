@@ -40,7 +40,7 @@ export {
   assignMember,
   removeMember,
   getPersonTeams,
-  getPersonTeamCount,
+  getTeamCountsForPeople,
 } from "./memberships";
 export type { PersonTeamAssignment } from "./memberships";
 

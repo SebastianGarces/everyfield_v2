@@ -293,24 +293,30 @@ export async function getPersonTeams(
 }
 
 /**
- * Count how many teams a person is actively assigned to (for warnings)
+ * Count how many teams each of the given people is actively assigned to, in
+ * one grouped query (for the assign dialog's "already on N teams" warning).
+ * People with no active membership are simply absent from the result.
  */
-export async function getPersonTeamCount(
+export async function getTeamCountsForPeople(
   churchId: string,
-  personId: string
-): Promise<number> {
-  const [result] = await db
+  personIds: string[]
+): Promise<Record<string, number>> {
+  if (personIds.length === 0) return {};
+
+  const rows = await db
     .select({
+      personId: teamMemberships.personId,
       count: sql<number>`count(DISTINCT ${teamMemberships.teamId})::int`,
     })
     .from(teamMemberships)
     .where(
       and(
         eq(teamMemberships.churchId, churchId),
-        eq(teamMemberships.personId, personId),
+        inArray(teamMemberships.personId, personIds),
         eq(teamMemberships.status, "active")
       )
-    );
+    )
+    .groupBy(teamMemberships.personId);
 
-  return result?.count ?? 0;
+  return Object.fromEntries(rows.map((row) => [row.personId, row.count]));
 }
