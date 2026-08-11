@@ -9,9 +9,7 @@ import {
   type DocumentFormat,
   type DocumentMergeValues,
 } from "@/lib/documents";
-import { hasDocxRenderer, renderDocumentDocx } from "@/lib/documents/docx";
-import { hasRenderer, renderDocumentPdf } from "@/lib/documents/pdf";
-import { hasXlsxRenderer, renderDocumentXlsx } from "@/lib/documents/xlsx";
+import { canRenderDocument, renderDocument } from "@/lib/documents/render";
 import { getLaunchForChurch } from "@/lib/launch/queries";
 
 // react-pdf / docx / exceljs need the Node.js runtime (not edge).
@@ -48,13 +46,7 @@ export async function GET(
       : template.formats[0]
   ) as DocumentFormat;
 
-  const hasFor =
-    format === "docx"
-      ? hasDocxRenderer(templateId)
-      : format === "xlsx"
-        ? hasXlsxRenderer(templateId)
-        : hasRenderer(templateId);
-  if (!hasFor) {
+  if (!canRenderDocument(format, templateId)) {
     return NextResponse.json(
       { error: "Template cannot be generated in the requested format" },
       { status: 404 }
@@ -96,12 +88,7 @@ export async function GET(
 
   let file: Buffer;
   try {
-    file =
-      format === "docx"
-        ? await renderDocumentDocx(templateId, values)
-        : format === "xlsx"
-          ? await renderDocumentXlsx(templateId, values)
-          : await renderDocumentPdf(templateId, values);
+    file = await renderDocument(format, templateId, values);
   } catch (error) {
     console.error(
       `[documents] failed to render ${templateId} (${format}):`,
