@@ -172,6 +172,33 @@ function parseCsvLine(line: string): string[] {
 }
 
 // ============================================================================
+// Row Validation
+// ============================================================================
+
+/**
+ * Parse one CSV row's fields through the person schema — the ONE parse both
+ * the preview and the execute step use, so the rows that are written are
+ * validated by exactly the rule the preview showed.
+ */
+function parseImportRowData(data: Record<string, string>) {
+  return personCreateSchema.safeParse({
+    firstName: data.firstName,
+    lastName: data.lastName,
+    email: data.email || undefined,
+    phone: data.phone || undefined,
+    source: data.source || undefined,
+    addressLine1: data.addressLine1 || undefined,
+    addressLine2: data.addressLine2 || undefined,
+    city: data.city || undefined,
+    state: data.state || undefined,
+    postalCode: data.postalCode || undefined,
+    country: data.country || undefined,
+    notes: data.notes || undefined,
+    status: "prospect" as const, // Always default to prospect for imports
+  });
+}
+
+// ============================================================================
 // Import Preview
 // ============================================================================
 
@@ -203,21 +230,7 @@ export async function parseCsvImport(
     const rowNumber = i + 2; // +2 for 1-indexed + header row
 
     // Validate against schema
-    const parseResult = personCreateSchema.safeParse({
-      firstName: rawRow.firstName,
-      lastName: rawRow.lastName,
-      email: rawRow.email || undefined,
-      phone: rawRow.phone || undefined,
-      source: rawRow.source || undefined,
-      addressLine1: rawRow.addressLine1 || undefined,
-      addressLine2: rawRow.addressLine2 || undefined,
-      city: rawRow.city || undefined,
-      state: rawRow.state || undefined,
-      postalCode: rawRow.postalCode || undefined,
-      country: rawRow.country || undefined,
-      notes: rawRow.notes || undefined,
-      status: "prospect", // Always default to prospect for imports
-    });
+    const parseResult = parseImportRowData(rawRow);
 
     const errors: string[] = [];
 
@@ -300,14 +313,19 @@ export async function executeBulkImport(
       continue;
     }
 
-    // Skip invalid rows
-    if (!row.valid) {
+    // Re-validate server-side. The rows arrive from the client, so the
+    // client's `valid` flag is never trusted — each row goes through the
+    // same schema the preview used, and a parse failure counts as an error
+    // exactly like an invalid preview row did. Real imports are unaffected
+    // because the preview already parsed the same rows with the same schema.
+    const parseResult = parseImportRowData(row.data);
+    if (!parseResult.success) {
       errors++;
       continue;
     }
 
     try {
-      const data = row.data;
+      const data = parseResult.data;
 
       const values: NewPerson = {
         churchId,
@@ -321,9 +339,9 @@ export async function executeBulkImport(
         city: data.city || null,
         state: data.state || null,
         postalCode: data.postalCode || null,
-        country: data.country || "US",
+        country: data.country,
         status: "prospect",
-        source: (data.source as NewPerson["source"]) || null,
+        source: data.source ?? null,
         sourceDetails: null,
         notes: data.notes || null,
       };
