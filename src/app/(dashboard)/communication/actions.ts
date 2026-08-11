@@ -10,7 +10,6 @@ import {
 } from "@/lib/communication/service";
 import {
   getTemplates,
-  getTemplate,
   createTemplate,
   updateTemplate,
   deleteTemplate,
@@ -147,10 +146,6 @@ export async function getTemplatesAction(filters?: TemplateFilters) {
   if (!user.churchId) return [];
 
   return getTemplates(user.churchId, filters);
-}
-
-export async function getTemplateAction(id: string) {
-  return getTemplate(id);
 }
 
 export async function createTemplateAction(input: CreateTemplateInput) {
