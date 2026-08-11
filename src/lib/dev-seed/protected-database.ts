@@ -147,7 +147,8 @@ export type SeedAccountsDecision =
  * A sibling of `decideWipe` rather than a call into it, because the danger is a
  * different one and so is the sentence. `decideWipe` guards a DELETE and has an
  * override, because "wipe this database anyway" is a thing an operator can
- * legitimately mean. This guards an INSERT of a login, and it has none.
+ * legitimately mean. This guards the WRITING of a login — an insert, or since
+ * #304 round 9 a re-key of an address that already exists — and it has none.
  *
  * WHAT ROUND 7 FOUND. `--oversight-orgs-only` deletes nothing, and three places
  * in the seed script called that "safe on the shared development database".
@@ -156,6 +157,13 @@ export type SeedAccountsDecision =
  * repository, so anyone who could read the repo could sign in to the shared
  * database as an oversight admin. The account it created there was neutralised
  * by hand on 2026-08-10; this function is why it cannot be re-created.
+ *
+ * WHAT ROUND 9 CHANGED, and why this guard matters more now. The mode's account
+ * writes became upserts: the operator's `SEED_ADMIN_PASSWORD` now takes over an
+ * address that already exists, because the version that skipped it reported a
+ * password it had not set. Taking over an address is only ever acceptable on a
+ * database whose accounts are all fixture, which is precisely the question
+ * below.
  *
  * TWO REFUSALS, and the sentinel one is asked FIRST — before the password
  * question, and before the mode writes anything at all. A missing password on a
@@ -181,8 +189,9 @@ export function decideSeedAccounts(input: {
       message:
         `Refusing to seed accounts: this database holds ${accounts.length} protected account(s) — ` +
         `${accounts.join(", ")}. ` +
-        `This mode deletes nothing, and that is not the same as safe: it INSERTS a sending_church_admin ` +
-        `login, and a login on a database real people use is a live credential. ` +
+        `This mode deletes nothing, and that is not the same as safe: it WRITES the two oversight admin ` +
+        `logins and RE-KEYS them if the addresses already exist, and a login on a database real people ` +
+        `use is a live credential. ` +
         `There is no override for this — point DATABASE_URL at your own or a throwaway database. ` +
         `If a protected database genuinely needs these rows, write the statement by hand, for that database, ` +
         `and choose the password there.`,
@@ -198,7 +207,7 @@ export function decideSeedAccounts(input: {
       accounts,
       message:
         `Refusing to seed accounts: ${SEED_ADMIN_PASSWORD_ENV} is not set. ` +
-        `The account this mode creates is a real login, so its password is chosen by whoever runs it — ` +
+        `The accounts this mode writes are real logins, so their password is chosen by whoever runs it — ` +
         `there is no constant in this repository that opens it. ` +
         `Re-run with ${SEED_ADMIN_PASSWORD_ENV}=<a password you choose>.`,
     };

@@ -65,8 +65,8 @@ local dev, so the seeded accounts work:
 | Account | Email | Password | Notes |
 |---|---|---|---|
 | Planter | `planter1@everyfield.app` | `password123` | **Church has 0 people** — fine for empty states, useless for anything about a list |
-| Network admin | `admin@everyfield.app` | `password123` | |
-| Sending church admin | `sending-church-admin@everyfield.app` | `password123` | Belongs to "Dev Sending Church", which belongs to NO network — so `/settings/association` opens on the admin's *answering* view. Added #304 round 6; before it the dev DB held no `sending_church_admin` at all and this whole role was unreachable in a browser |
+| Network admin | `admin@everyfield.app` | operator-chosen — see below | Owns "Dev Church Planting Network". Its `sending_network_id` is what `/oversight/invitations` needs; without it the page says "Set up your network first" and no invitation can be sent |
+| Sending church admin | `sending-church-admin@everyfield.app` | operator-chosen — see below | Belongs to "Dev Sending Church", which belongs to NO network — so `/settings/association` opens on the admin's *answering* view. Added #304 round 6; before it the dev DB held no `sending_church_admin` at all and this whole role was unreachable in a browser |
 | Coach | `coach1@everyfield.app` | `password123` | |
 | Eval planter | `planter-dayspring@eval.phase-engine.everyfield.app` | `eval-password-123` | ~100 people, meetings, assessments |
 | Eval planter | `planter-evergreen@eval.phase-engine.everyfield.app` | `eval-password-123` | ~89 people, different church |
@@ -79,6 +79,21 @@ form is broken. The addresses come from `scripts/seed-dev-db.ts` and
 
 **Note the different password for eval accounts** — they are seeded by
 `scripts/seed-phase-engine-eval.ts`, not `seed-dev-db.ts`.
+
+**The two oversight admins have no password in this repository** (#304, ruled 2026-08-10). No
+in-repo constant may open an account on a database anyone else uses, so you choose theirs and then
+sign in with it:
+
+```bash
+SEED_ADMIN_PASSWORD=<a password you choose> pnpm exec tsx scripts/seed-dev-db.ts --oversight-orgs-only
+```
+
+That mode deletes nothing. It upserts the sending network, the sending church, and both admin rows
+— setting the password you passed, the role and the org FKs — so one command leaves a usable
+oversight fixture on both sides even if the accounts already exist with a forgotten password or a
+NULL org FK. It refuses outright, writing nothing, on any database holding an alpha-cohort account,
+and there is no override for that: point `DATABASE_URL` at the database you are validating against
+(a preview reads the development branch) and never at production.
 
 **If the eval logins are gone, someone ran `pnpm db:seed`.** That script wipes the whole fixture —
 every user and every church, not just the nine it creates — so it takes the eval corpus with it, and
