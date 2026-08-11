@@ -6,8 +6,8 @@ import {
   runCreateChurch,
   type CreateChurchOutcome,
 } from "@/lib/onboarding/create-church";
+import { completeOnboardingStatement } from "@/lib/onboarding/complete-onboarding";
 import {
-  completeOnboardingStatement,
   declareJourneyDeps,
   runDeclareJourney,
   type DeclareJourneyInput,
@@ -134,7 +134,7 @@ export type CompleteOnboardingState = { status: "error"; error: string };
  *
  * The one statement — the idempotent `IS NULL`-guarded completion UPDATE that
  * also marks the plant dirty (OB-009) — lives in
- * `completeOnboardingStatement` (`src/lib/onboarding/declare-journey.ts`),
+ * `completeOnboardingStatement` (`src/lib/onboarding/complete-onboarding.ts`),
  * where the tests can read its SQL. This export mints the actor and redirects.
  *
  * RETURN TYPE (#243). On success this `redirect()`s and never returns, and the

@@ -1,13 +1,7 @@
 import assert from "node:assert/strict";
 import { mock, test } from "node:test";
 
-import { PgDialect } from "drizzle-orm/pg-core";
-
-import {
-  completeOnboardingStatement,
-  runDeclareJourney,
-  type DeclareJourneyDeps,
-} from "./declare-journey";
+import { runDeclareJourney, type DeclareJourneyDeps } from "./declare-journey";
 import type { OnboardingActor } from "./create-church";
 
 // ----------------------------------------------------------------------------
@@ -273,32 +267,4 @@ test("a failed declaration is reported as a form error, not thrown", async () =>
   // No revalidate on the failure path — nothing changed to re-render.
   assert.deepEqual(kinds(), ["readLaunch", "declare"]);
   mock.restoreAll();
-});
-
-// ----------------------------------------------------------------------------
-// The completion statement (OB-001 + OB-009)
-// ----------------------------------------------------------------------------
-
-const dialect = new PgDialect();
-
-function render(statement: {
-  getSQL: () => Parameters<PgDialect["sqlToQuery"]>[0];
-}) {
-  return dialect.sqlToQuery(statement.getSQL()).sql;
-}
-
-test("completion is one idempotent UPDATE, guarded on the stamp being unset", () => {
-  const sql = render(completeOnboardingStatement(CHURCH_ID, new Date()));
-
-  assert.match(sql, /update\s+"churches"\s+set/i);
-  assert.match(sql, /"onboarding_completed_at"/);
-  // The `IS NULL` guard: a double submit cannot move a completion timestamp
-  // that is already set — nor re-dirty a plant that finished days ago.
-  assert.match(sql, /"onboarding_completed_at"\s+is\s+null/i);
-});
-
-test("finishing marks the plant dirty in the SAME statement (OB-009)", () => {
-  const sql = render(completeOnboardingStatement(CHURCH_ID, new Date()));
-
-  assert.match(sql, /"last_material_event_at"/);
 });
