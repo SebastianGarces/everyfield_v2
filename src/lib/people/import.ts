@@ -1,6 +1,7 @@
 import { db } from "@/db";
-import { personActivities, persons, type NewPerson } from "@/db/schema";
+import { persons, type NewPerson } from "@/db/schema";
 import { personCreateSchema } from "@/lib/validations/people";
+import { logPersonActivity } from "./activity";
 import { emitPersonCreated } from "./events";
 import { checkForDuplicates } from "./duplicates";
 import type { ImportPreview, ImportRow, ImportSummary } from "./types";
@@ -351,13 +352,13 @@ export async function executeBulkImport(
       await emitPersonCreated(person);
 
       // Log activity for person creation
-      await db.insert(personActivities).values({
+      await logPersonActivity(
         churchId,
-        personId: person.id,
-        activityType: "person_created",
-        metadata: { source: "bulk_import" },
-        performedBy: userId,
-      });
+        person.id,
+        "person_created",
+        { source: "bulk_import" },
+        userId
+      );
 
       created++;
     } catch {

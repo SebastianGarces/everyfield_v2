@@ -4,13 +4,9 @@
  */
 
 import { db } from "@/db";
-import {
-  personActivities,
-  persons,
-  type Person,
-  type PersonStatus,
-} from "@/db/schema";
+import { persons, type Person, type PersonStatus } from "@/db/schema";
 import { and, eq, isNull } from "drizzle-orm";
+import { logPersonActivity } from "./activity";
 import { emitPersonStatusChanged } from "./events";
 import type { StatusTransition } from "./types";
 
@@ -126,6 +122,51 @@ export function getStatusWarnings(
 // ============================================================================
 
 /**
+ * The one writer of `status_changed` activity rows.
+ *
+ * Both `changeStatus` and the profile-edit path (`updatePersonAction`) record
+ * through here, so the metadata shape cannot fork — `getPipelineMetrics`
+ * reads both populations as one.
+ */
+export async function recordStatusChange(
+  churchId: string,
+  personId: string,
+  userId: string,
+  oldStatus: PersonStatus,
+  newStatus: PersonStatus,
+  options: {
+    reason?: string;
+    source?: string;
+    skippedStatuses?: PersonStatus[];
+  } = {}
+): Promise<void> {
+  const metadata: Record<string, unknown> = {
+    oldStatus,
+    newStatus,
+  };
+
+  if (options.reason) {
+    metadata.reason = options.reason;
+  }
+
+  if (options.skippedStatuses && options.skippedStatuses.length > 0) {
+    metadata.skippedStatuses = options.skippedStatuses;
+  }
+
+  if (options.source) {
+    metadata.source = options.source;
+  }
+
+  await logPersonActivity(
+    churchId,
+    personId,
+    "status_changed",
+    metadata,
+    userId
+  );
+}
+
+/**
  * Change a person's status with proper validation, activity logging, and event emission.
  *
  * @param churchId - The church ID for multi-tenant scoping
@@ -194,27 +235,10 @@ export async function changeStatus(
     throw new Error("Failed to update person status");
   }
 
-  // Build activity metadata
-  const metadata: Record<string, unknown> = {
-    oldStatus,
-    newStatus,
-  };
-
-  if (reason) {
-    metadata.reason = reason;
-  }
-
-  if (transition.skippedStatuses.length > 0) {
-    metadata.skippedStatuses = transition.skippedStatuses;
-  }
-
   // Log the activity
-  await db.insert(personActivities).values({
-    churchId,
-    personId,
-    activityType: "status_changed",
-    metadata,
-    performedBy: userId,
+  await recordStatusChange(churchId, personId, userId, oldStatus, newStatus, {
+    reason,
+    skippedStatuses: transition.skippedStatuses,
   });
 
   // Emit event (stubbed for now)

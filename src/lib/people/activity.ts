@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { personActivities, users } from "@/db/schema";
+import { personActivities, users, type ActivityType } from "@/db/schema";
 import { and, desc, eq, lt } from "drizzle-orm";
 import {
   type ActivityWithPerformer,
@@ -13,6 +13,27 @@ export {
   type GetActivitiesOptions,
   type GetActivitiesResult,
 } from "./activity.shared";
+
+/**
+ * The one writer of person_activities rows — every timeline entry (notes,
+ * tags, skills, assessments, household moves, status changes) goes through
+ * here instead of a hand-rolled db.insert at each call site.
+ */
+export async function logPersonActivity(
+  churchId: string,
+  personId: string,
+  activityType: ActivityType,
+  metadata: Record<string, unknown>,
+  performedBy: string
+): Promise<void> {
+  await db.insert(personActivities).values({
+    churchId,
+    personId,
+    activityType,
+    metadata,
+    performedBy,
+  });
+}
 
 export async function getActivities(
   churchId: string,

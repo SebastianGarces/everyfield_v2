@@ -1,6 +1,7 @@
 import { db } from "@/db";
-import { personActivities, personTags, tags } from "@/db/schema";
+import { personTags, tags } from "@/db/schema";
 import { and, eq, inArray } from "drizzle-orm";
+import { logPersonActivity } from "./activity";
 import type { Tag } from "./types";
 
 /**
@@ -84,17 +85,13 @@ export async function assignTag(
     .onConflictDoNothing();
 
   // Record activity
-  await db.insert(personActivities).values({
+  await logPersonActivity(
     churchId,
     personId,
-    activityType: "tag_added",
-    metadata: {
-      tagId: tag.id,
-      tagName: tag.name,
-      tagColor: tag.color,
-    },
-    performedBy: userId,
-  });
+    "tag_added",
+    { tagId: tag.id, tagName: tag.name, tagColor: tag.color },
+    userId
+  );
 }
 
 /**
@@ -128,17 +125,13 @@ export async function removeTag(
     );
 
   // Record activity
-  await db.insert(personActivities).values({
+  await logPersonActivity(
     churchId,
     personId,
-    activityType: "tag_removed",
-    metadata: {
-      tagId: tag.id,
-      tagName: tag.name,
-      tagColor: tag.color,
-    },
-    performedBy: userId,
-  });
+    "tag_removed",
+    { tagId: tag.id, tagName: tag.name, tagColor: tag.color },
+    userId
+  );
 }
 
 /**

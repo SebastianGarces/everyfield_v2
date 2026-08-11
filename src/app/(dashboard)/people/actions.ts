@@ -9,7 +9,7 @@ import {
 } from "@/db/schema";
 import { persons } from "@/db/schema/people";
 import { verifySession } from "@/lib/auth/session";
-import { getActivities } from "@/lib/people/activity";
+import { getActivities, logPersonActivity } from "@/lib/people/activity";
 import { createAssessment, createInterview } from "@/lib/people/assessments";
 import { createCommitment, getCommitment } from "@/lib/people/commitments";
 import { checkForDuplicates } from "@/lib/people/duplicates";
@@ -33,8 +33,7 @@ import {
   updatePerson,
   type ExportPeopleOptions,
 } from "@/lib/people/service";
-import { changeStatus } from "@/lib/people/status";
-import { isBackwardProgression } from "@/lib/people/status.shared";
+import { changeStatus, recordStatusChange } from "@/lib/people/status";
 import {
   assignTag,
   createTag,
@@ -204,36 +203,20 @@ export async function updatePersonAction(
     // Update the person
     const person = await updatePerson(user.churchId, personId, parsed.data);
 
-    // Log status change activity if status changed
+    // Log status change activity if status changed — through the one
+    // status_changed writer, tagged with its profile-edit source
     if (newStatus && newStatus !== oldStatus) {
-      const isBackward = isBackwardProgression(oldStatus, newStatus);
-
-      // Build activity metadata
-      const metadata: Record<string, unknown> = {
+      await recordStatusChange(
+        user.churchId,
+        personId,
+        user.id,
         oldStatus,
         newStatus,
-        source: "profile_edit", // Track that this came from profile edit
-      };
-
-      // Log the activity
-      await db.insert(personActivities).values({
-        churchId: user.churchId,
-        personId: personId,
-        activityType: "status_changed",
-        metadata,
-        performedBy: user.id,
-      });
+        { source: "profile_edit" }
+      );
 
       // Emit event
       await emitPersonStatusChanged(person, oldStatus, newStatus);
-
-      // If backward movement, we still log it but user wasn't prompted for reason
-      // The activity will show it was from profile edit
-      if (isBackward) {
-        console.log(
-          `[STATUS] Backward movement via profile edit: ${oldStatus} -> ${newStatus} for person ${personId}`
-        );
-      }
     }
 
     // Revalidate the people list and detail page
@@ -489,13 +472,13 @@ export async function addNoteAction(
     // Never write against a personId the caller's church does not own
     await assertPersonInChurch(user.churchId, personId);
 
-    await db.insert(personActivities).values({
-      churchId: user.churchId,
-      personId: personId,
-      activityType: "note_added",
-      metadata: { note },
-      performedBy: user.id,
-    });
+    await logPersonActivity(
+      user.churchId,
+      personId,
+      "note_added",
+      { note },
+      user.id
+    );
 
     // Refresh the client router to show the new note
     // This reconciles the optimistic update with actual server state
@@ -785,11 +768,11 @@ export async function createAssessmentAction(
     );
 
     // Log activity
-    await db.insert(personActivities).values({
-      churchId: user.churchId,
+    await logPersonActivity(
+      user.churchId,
       personId,
-      activityType: "assessment_completed",
-      metadata: {
+      "assessment_completed",
+      {
         assessmentId: assessment.id,
         totalScore: assessment.totalScore,
         committedScore: assessment.committedScore,
@@ -797,8 +780,8 @@ export async function createAssessmentAction(
         contagiousScore: assessment.contagiousScore,
         courageousScore: assessment.courageousScore,
       },
-      performedBy: user.id,
-    });
+      user.id
+    );
 
     revalidatePath(`/people/${personId}`);
     revalidatePath(`/people/${personId}/assessments`);
@@ -872,11 +855,11 @@ export async function createInterviewAction(
     );
 
     // Log interview_completed activity
-    await db.insert(personActivities).values({
-      churchId: user.churchId,
+    await logPersonActivity(
+      user.churchId,
       personId,
-      activityType: "interview_completed",
-      metadata: {
+      "interview_completed",
+      {
         interviewId: interview.id,
         overallResult: interview.overallResult,
         maturityStatus: interview.maturityStatus,
@@ -885,8 +868,8 @@ export async function createInterviewAction(
         rightReasonsStatus: interview.rightReasonsStatus,
         seasonStatus: interview.seasonStatus,
       },
-      performedBy: user.id,
-    });
+      user.id
+    );
 
     // Auto-advance to 'interviewed' status
     // changeStatus handles activity logging and event emission
@@ -990,18 +973,18 @@ export async function createCommitmentAction(
     );
 
     // Log commitment_recorded activity
-    await db.insert(personActivities).values({
-      churchId: user.churchId,
+    await logPersonActivity(
+      user.churchId,
       personId,
-      activityType: "commitment_recorded",
-      metadata: {
+      "commitment_recorded",
+      {
         commitmentId: commitment.id,
         commitmentType: commitment.commitmentType,
         signedDate: commitment.signedDate,
         hasDocument: !!documentKey,
       },
-      performedBy: user.id,
-    });
+      user.id
+    );
 
     // Auto-advance to 'core_group' status (commitment = Core Group entry)
     // changeStatus handles activity logging and event emission
@@ -1170,17 +1153,17 @@ export async function createHouseholdFromPersonAction(
     );
 
     // Log activity for household creation
-    await db.insert(personActivities).values({
-      churchId: user.churchId,
+    await logPersonActivity(
+      user.churchId,
       personId,
-      activityType: "household_created",
-      metadata: {
+      "household_created",
+      {
         householdName: result.household.name,
         householdId: result.household.id,
         role: "head",
       },
-      performedBy: user.id,
-    });
+      user.id
+    );
 
     revalidatePath("/people");
     revalidatePath(`/people/${personId}`);
@@ -1294,17 +1277,17 @@ export async function addToHouseholdAction(
     );
 
     // Log activity
-    await db.insert(personActivities).values({
-      churchId: user.churchId,
+    await logPersonActivity(
+      user.churchId,
       personId,
-      activityType: "household_joined",
-      metadata: {
+      "household_joined",
+      {
         householdName: household.name,
         householdId: household.id,
         role,
       },
-      performedBy: user.id,
-    });
+      user.id
+    );
 
     revalidatePath("/people");
     revalidatePath(`/people/${personId}`);
@@ -1352,16 +1335,16 @@ export async function removeFromHouseholdAction(
 
     // Log activity if they were in a household
     if (householdName) {
-      await db.insert(personActivities).values({
-        churchId: user.churchId,
+      await logPersonActivity(
+        user.churchId,
         personId,
-        activityType: "household_left",
-        metadata: {
+        "household_left",
+        {
           householdName,
           householdId: existingPerson.householdId,
         },
-        performedBy: user.id,
-      });
+        user.id
+      );
     }
 
     revalidatePath("/people");
@@ -1452,17 +1435,17 @@ export async function addSkillAction(data: {
     const skill = await addSkill(user.churchId, parsed.data);
 
     // Log activity
-    await db.insert(personActivities).values({
-      churchId: user.churchId,
-      personId: data.personId,
-      activityType: "skill_added",
-      metadata: {
+    await logPersonActivity(
+      user.churchId,
+      data.personId,
+      "skill_added",
+      {
         skillName: skill.skillName,
         skillCategory: skill.skillCategory,
         proficiency: skill.proficiency,
       },
-      performedBy: user.id,
-    });
+      user.id
+    );
 
     revalidatePath(`/people/${data.personId}`);
     return { success: true, data: skill };
@@ -1502,11 +1485,11 @@ export async function updateSkillAction(
     });
 
     // Log activity
-    await db.insert(personActivities).values({
-      churchId: user.churchId,
-      personId: skill.personId,
-      activityType: "skill_updated",
-      metadata: {
+    await logPersonActivity(
+      user.churchId,
+      skill.personId,
+      "skill_updated",
+      {
         skillName: skill.skillName,
         skillCategory: skill.skillCategory,
         proficiency: skill.proficiency,
@@ -1519,8 +1502,8 @@ export async function updateSkillAction(
             ? existingSkill.proficiency
             : undefined,
       },
-      performedBy: user.id,
-    });
+      user.id
+    );
 
     revalidatePath("/people");
     return { success: true, data: skill };
@@ -1552,16 +1535,16 @@ export async function removeSkillAction(
     await removeSkill(user.churchId, skillId);
 
     // Log activity
-    await db.insert(personActivities).values({
-      churchId: user.churchId,
-      personId: skill.personId,
-      activityType: "skill_removed",
-      metadata: {
+    await logPersonActivity(
+      user.churchId,
+      skill.personId,
+      "skill_removed",
+      {
         skillName: skill.skillName,
         skillCategory: skill.skillCategory,
       },
-      performedBy: user.id,
-    });
+      user.id
+    );
 
     revalidatePath("/people");
     return { success: true, data: undefined };
@@ -1670,13 +1653,13 @@ export async function quickAddPersonAction(data: {
     });
 
     // Log activity
-    await db.insert(personActivities).values({
-      churchId: user.churchId,
-      personId: person.id,
-      activityType: "person_created",
-      metadata: { source: "quick_add" },
-      performedBy: user.id,
-    });
+    await logPersonActivity(
+      user.churchId,
+      person.id,
+      "person_created",
+      { source: "quick_add" },
+      user.id
+    );
 
     revalidatePath("/people");
     return { success: true, data: person };
