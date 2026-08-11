@@ -28,6 +28,7 @@ import {
 import { extractFieldErrors, registerSchema } from "@/lib/validations";
 import type { AccountType } from "@/lib/validations/auth";
 import { eq } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import { redirect } from "next/navigation";
 import {
   BETA_GATE_ERROR,
@@ -134,7 +135,11 @@ export async function register(
     }
   }
 
-  // Check if user already exists
+  // Check if user already exists. This SELECT is the LEGIBLE refusal only,
+  // never the concurrency guard — two concurrent registrations both pass it
+  // (memory/invariants.md → Transactions: "SELECT-then-INSERT is not a
+  // concurrency guard"). The real guard is `users_email_unique`, enforced
+  // where the batch below fails and is caught.
   const existingUser = await db
     .select({ id: users.id })
     .from(users)
@@ -143,7 +148,7 @@ export async function register(
 
   if (existingUser.length > 0) {
     await recordAttempt(identifier, ip, "register", false);
-    return { error: "An account with this email already exists" };
+    return { error: DUPLICATE_EMAIL_MESSAGE };
   }
 
   // Hash password
@@ -165,34 +170,79 @@ export async function register(
     };
   }
 
-  // Create entity + user based on account type
-  // Planters sign up without a church — they create one later from the dashboard
-  const { role, churchId, sendingChurchId, sendingNetworkId } =
-    await createAccountEntities(
-      accountType,
-      organizationName ?? null,
-      invitedPlanter
-    );
+  // Create entity + user + privacy settings as ONE `db.batch([...])` — a Neon
+  // batched transaction, all-or-nothing (`src/db/index.ts`, and the exact shape
+  // #198 gave `createChurchBasics`). Every id is minted up front so each
+  // statement can name the rows the others create. Two failure modes this
+  // closes, both previously reachable:
+  //
+  //  - two concurrent registrations of one address both passed the SELECT
+  //    above; the loser's user INSERT threw on `users_email_unique` AFTER its
+  //    church had committed — a 500 for the visitor and an orphan `churches`
+  //    row nobody is linked to. In one batch the church rolls back with the
+  //    user, and the catch below turns the violation into the same legible
+  //    refusal the SELECT gives.
+  //
+  //  - a failure at the privacy insert left a planter LINKED to a church with
+  //    no `church_privacy_settings` row, which no product path can repair
+  //    (`createChurchBasics` refuses a planter who already has a church) and
+  //    every `canAccessFeatureData` read then answered from a missing row.
+  //    In one batch the church rolls back too, and the retry starts clean.
+  //
+  // Planters sign up without a church — they create one later from the
+  // dashboard — so the org-entity statement list may be empty.
+  const userId = crypto.randomUUID();
+  const account = createAccountEntities(
+    accountType,
+    organizationName ?? null,
+    invitedPlanter
+  );
+  const { role, churchId, sendingChurchId, sendingNetworkId } = account;
 
-  const [user] = await db
-    .insert(users)
-    .values({
-      email: email.toLowerCase(),
-      passwordHash,
-      name,
-      role,
-      churchId,
-      sendingChurchId,
-      sendingNetworkId,
-    })
-    .returning();
+  const statements: [BatchItem<"pg">, ...BatchItem<"pg">[]] = [
+    db
+      .insert(users)
+      .values({
+        id: userId,
+        email: identifier,
+        passwordHash,
+        name,
+        role,
+        churchId,
+        sendingChurchId,
+        sendingNetworkId,
+      })
+      .returning({ id: users.id }),
+  ];
 
-  // Create default privacy settings for church plants
+  // Default privacy settings for church plants, in the SAME batch. The
+  // `ON CONFLICT DO NOTHING` mirrors `churchCreationStatements` (#198): a retry
+  // racing its own predecessor cannot dead-end on the unique index.
   if (churchId) {
-    await db.insert(churchPrivacySettings).values({
-      churchId,
-      updatedBy: user.id,
-    });
+    statements.push(
+      db
+        .insert(churchPrivacySettings)
+        .values({ churchId, updatedBy: userId })
+        .onConflictDoNothing()
+    );
+  }
+
+  // The org entity goes FIRST — the users FKs point at it. (`unshift` rather
+  // than a spread literal only because `db.batch` wants a provably non-empty
+  // tuple, which the always-present users insert supplies.)
+  statements.unshift(...account.statements);
+
+  try {
+    await db.batch(statements);
+  } catch (error) {
+    // The unique index losing a duplicate-address race is an expected outcome
+    // with a message, not a crash. Anything else is a real failure and stays
+    // one — nothing was written, the batch rolled back whole.
+    if (isDuplicateEmailError(error)) {
+      await recordAttempt(identifier, ip, "register", false);
+      return { error: DUPLICATE_EMAIL_MESSAGE };
+    }
+    throw error;
   }
 
   // Redeem the invitation now that the organization it associates exists.
@@ -202,7 +252,7 @@ export async function register(
   // invitation (memory/invariants.md → Multi-Tenancy).
   if (redeeming) {
     await redeemRegistrationInvitation(redeeming, {
-      id: user.id,
+      id: userId,
       role,
       churchId,
       sendingChurchId,
@@ -212,7 +262,7 @@ export async function register(
 
   // Create session
   const token = generateSessionToken();
-  const session = await createSession(token, user.id);
+  const session = await createSession(token, userId);
 
   // Set session cookie
   await setSessionCookie(token, session.expiresAt);
@@ -223,24 +273,76 @@ export async function register(
   redirect("/dashboard");
 }
 
+const DUPLICATE_EMAIL_MESSAGE = "An account with this email already exists";
+
+/** Postgres `unique_violation`. */
+const PG_UNIQUE_VIOLATION = "23505";
+
+/** The unique constraint on `users.email` — the REAL duplicate-account guard. */
+const USERS_EMAIL_UNIQUE = "users_email_unique";
+
 /**
- * Create the appropriate organizational entity based on account type.
- * Returns the role and FK values to set on the user.
+ * True when `error` is the registration batch losing a duplicate-address race —
+ * a unique violation on `users_email_unique`.
+ *
+ * Narrow on purpose: any OTHER unique violation is a real bug and must still
+ * propagate. Drizzle wraps driver errors, so the cause chain is walked rather
+ * than just the top error (same shape as `isDuplicateGenerationError`,
+ * `src/lib/tasks/events.ts`).
+ */
+function isDuplicateEmailError(error: unknown): boolean {
+  let current: unknown = error;
+
+  for (let depth = 0; current != null && depth < 5; depth += 1) {
+    if (typeof current !== "object") return false;
+
+    const candidate = current as {
+      code?: unknown;
+      constraint?: unknown;
+      message?: unknown;
+      cause?: unknown;
+    };
+    const message =
+      typeof candidate.message === "string" ? candidate.message : "";
+
+    if (
+      candidate.code === PG_UNIQUE_VIOLATION &&
+      (candidate.constraint === USERS_EMAIL_UNIQUE ||
+        message.includes(USERS_EMAIL_UNIQUE))
+    ) {
+      return true;
+    }
+
+    current = candidate.cause;
+  }
+
+  return false;
+}
+
+/**
+ * Plan the organizational entity for the account type: the role and FK values
+ * to set on the user, plus the org-entity INSERT (when the type creates one) as
+ * a statement for the caller's batch — never awaited here, so the entity, the
+ * user and the privacy row commit or roll back together. Ids are minted up
+ * front (`crypto.randomUUID()`, as `createChurchDeps.newChurchId` does) so the
+ * user statement can reference rows that do not exist yet.
  *
  * Planters sign up without creating a church — they get free access to
  * Phase 0 content and the Wiki. They create their church from the dashboard
  * when they're ready.
  */
-async function createAccountEntities(
+function createAccountEntities(
   accountType: AccountType,
   organizationName: string | null,
   createChurchForPlanter = false
-): Promise<{
+): {
   role: UserRole;
   churchId: string | null;
   sendingChurchId: string | null;
   sendingNetworkId: string | null;
-}> {
+  /** The org-entity insert, or empty for a cold planter signup. */
+  statements: BatchItem<"pg">[];
+} {
   switch (accountType) {
     case "planter": {
       // An INVITED planter is the exception: the invitation exists to associate
@@ -249,16 +351,18 @@ async function createAccountEntities(
       // by the accept path, guarded on the invitation reading `accepted`, so
       // the plant can never be bound to an org without an acceptance behind it.
       if (createChurchForPlanter && organizationName) {
-        const [church] = await db
-          .insert(churches)
-          .values({ name: organizationName })
-          .returning();
+        const churchId = crypto.randomUUID();
 
         return {
           role: "planter",
-          churchId: church.id,
+          churchId,
           sendingChurchId: null,
           sendingNetworkId: null,
+          statements: [
+            db
+              .insert(churches)
+              .values({ id: churchId, name: organizationName }),
+          ],
         };
       }
 
@@ -269,6 +373,7 @@ async function createAccountEntities(
         churchId: null,
         sendingChurchId: null,
         sendingNetworkId: null,
+        statements: [],
       };
     }
 
@@ -279,16 +384,18 @@ async function createAccountEntities(
         );
       }
       // Create a new sending church (independent, no network)
-      const [sendingChurch] = await db
-        .insert(sendingChurches)
-        .values({ name: organizationName })
-        .returning();
+      const sendingChurchId = crypto.randomUUID();
 
       return {
         role: "sending_church_admin",
         churchId: null,
-        sendingChurchId: sendingChurch.id,
+        sendingChurchId,
         sendingNetworkId: null,
+        statements: [
+          db
+            .insert(sendingChurches)
+            .values({ id: sendingChurchId, name: organizationName }),
+        ],
       };
     }
 
@@ -297,16 +404,18 @@ async function createAccountEntities(
         throw new Error("Organization name is required for network accounts");
       }
       // Create a new sending network
-      const [network] = await db
-        .insert(sendingNetworks)
-        .values({ name: organizationName })
-        .returning();
+      const sendingNetworkId = crypto.randomUUID();
 
       return {
         role: "network_admin",
         churchId: null,
         sendingChurchId: null,
-        sendingNetworkId: network.id,
+        sendingNetworkId,
+        statements: [
+          db
+            .insert(sendingNetworks)
+            .values({ id: sendingNetworkId, name: organizationName }),
+        ],
       };
     }
   }
