@@ -28,6 +28,19 @@ test("the backslash spelling browsers normalise to it falls back too", () => {
   assert.equal(safeRedirectPath("/\\evil.com"), "/dashboard");
 });
 
+test("the control-character spellings browsers strip before parsing fall back too", () => {
+  // Browsers remove ASCII tab/newline BEFORE parsing, so `/\t/evil.com`
+  // resolves protocol-relative: new URL("/\t/evil.com", base) is
+  // https://evil.com/. Reachable as `?redirect=/%09/evil.com`.
+  for (const control of ["\t", "\n", "\r"]) {
+    assert.equal(
+      safeRedirectPath(`/${control}/evil.com`),
+      "/dashboard",
+      JSON.stringify(control)
+    );
+  }
+});
+
 test("absolute URLs and garbage fall back", () => {
   for (const value of [
     "https://evil.com",
