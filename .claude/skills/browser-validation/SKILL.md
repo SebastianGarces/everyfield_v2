@@ -65,8 +65,8 @@ local dev, so the seeded accounts work:
 | Account | Email | Password | Notes |
 |---|---|---|---|
 | Planter | `planter1@everyfield.app` | `password123` | **Church has 0 people** — fine for empty states, useless for anything about a list |
-| Network admin | `admin@everyfield.app` | operator-chosen — see below | Owns "Dev Church Planting Network". Its `sending_network_id` is what `/oversight/invitations` needs; without it the page says "Set up your network first" and no invitation can be sent |
-| Sending church admin | `sending-church-admin@everyfield.app` | operator-chosen — see below | Belongs to "Dev Sending Church", which belongs to NO network — so `/settings/association` opens on the admin's *answering* view. Added #304 round 6; before it the dev DB held no `sending_church_admin` at all and this whole role was unreachable in a browser |
+| Network admin | `admin@everyfield.app` | none in this repo — you set it with `seed-dev-db.ts --oversight-orgs-only` (full command below) | Owns "Dev Church Planting Network". Its `sending_network_id` is what `/oversight/invitations` needs; without it the page says "Set up your network first" and no invitation can be sent |
+| Sending church admin | `sending-church-admin@everyfield.app` | none in this repo — you set it with `seed-dev-db.ts --oversight-orgs-only` (full command below) | Belongs to "Dev Sending Church", which belongs to NO network — so `/settings/association` opens on the admin's *answering* view. Added #304 round 6; before it the dev DB held no `sending_church_admin` at all and this whole role was unreachable in a browser |
 | Coach | `coach1@everyfield.app` | `password123` | |
 | Eval planter | `planter-dayspring@eval.phase-engine.everyfield.app` | `eval-password-123` | ~100 people, meetings, assessments |
 | Eval planter | `planter-evergreen@eval.phase-engine.everyfield.app` | `eval-password-123` | ~89 people, different church |

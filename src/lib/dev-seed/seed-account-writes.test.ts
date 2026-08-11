@@ -110,6 +110,7 @@ test("the docs do not hand anyone an in-repo password for these accounts", () =>
     "utf8"
   );
 
+  let oversightRows = 0;
   for (const line of skill.split("\n")) {
     if (!line.startsWith("|")) continue;
     if (
@@ -118,15 +119,37 @@ test("the docs do not hand anyone an in-repo password for these accounts", () =>
     ) {
       continue;
     }
+    oversightRows += 1;
+
     assert.doesNotMatch(
       line,
       /password123/,
       `the credentials table must not print a password for an oversight admin: ${line.trim()}`
     );
+
+    // AND it must NAME THE COMMAND in the row itself (#304 round 9). "See
+    // below" satisfies the rule above while telling a verifier who scans the
+    // table nothing they can act on; the row is where the eye stops, so the row
+    // is where the command has to be. The full invocation lives in the fenced
+    // block below the table — this is the pointer that gets anyone there.
+    assert.match(
+      line,
+      /--oversight-orgs-only/,
+      `an oversight admin's password cell must name the command that sets it: ${line.trim()}`
+    );
   }
 
-  assert.ok(
-    skill.includes("--oversight-orgs-only"),
-    "the table must point at the command that sets the password instead"
+  assert.equal(
+    oversightRows,
+    2,
+    "both oversight admins must still have a row in the credentials table"
+  );
+
+  // The fenced command the rows point at, with the env var that carries the
+  // operator's choice — a row naming the flag is useless if the block is gone.
+  assert.match(
+    skill,
+    /SEED_ADMIN_PASSWORD=.*tsx scripts\/seed-dev-db\.ts --oversight-orgs-only/,
+    "the skill must still spell out the full command the credentials rows point at"
   );
 });
