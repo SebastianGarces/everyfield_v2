@@ -9,6 +9,7 @@
 import type { User } from "@/db/schema";
 import { verifySession } from "@/lib/auth/session";
 import type { ActionResult } from "@/lib/people/types";
+import { unstable_rethrow } from "next/navigation";
 import type { ZodError } from "zod";
 
 /** What an action body receives once the session and church are verified. */
@@ -18,14 +19,27 @@ export interface ChurchActionContext {
   churchId: string;
 }
 
+/**
+ * Domain error strings that pass through to the user unchanged in every
+ * action. A per-action `known` table only carries the strings that actually
+ * differ (e.g. updatePersonAction's "Person not found or has been deleted").
+ */
+const DEFAULT_KNOWN_ERRORS: Record<string, string> = {
+  "Person not found": "Person not found",
+  "Household not found": "Household not found",
+  "Tag not found": "Tag not found",
+  "Skill not found": "Skill not found",
+};
+
 /** How an action's failures map to user-facing error strings. */
 export interface ActionMessages {
   /** Returned when the session user has no church. Default: "Unauthorized". */
   noChurch?: string;
   /**
-   * Thrown Error message → returned error string. Covers the known errors
-   * the domain throws: "Unauthorized", "Person not found",
-   * "Household not found", "Tag not found", "Skill not found".
+   * Thrown Error message → returned error string, merged over
+   * DEFAULT_KNOWN_ERRORS (an entry here wins). Only list strings that
+   * differ from the defaults, e.g. the "You must be logged in to …"
+   * mappings for "Unauthorized".
    */
   known?: Record<string, string>;
   /**
@@ -56,10 +70,16 @@ export async function withChurchSession<T>(
 
     return await fn({ user, churchId: user.churchId });
   } catch (error) {
+    // redirect()/notFound()/forbidden() work by throwing — hand those back
+    // to the framework instead of logging them and returning the fallback.
+    unstable_rethrow(error);
+
     console.error(`${label} error:`, error);
 
     if (error instanceof Error) {
-      const known = messages.known?.[error.message];
+      const known = { ...DEFAULT_KNOWN_ERRORS, ...messages.known }[
+        error.message
+      ];
       if (known) {
         return { success: false, error: known };
       }

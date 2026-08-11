@@ -52,9 +52,10 @@ const ROLE_LABELS: Record<HouseholdRole, string> = {
 type Mode = "view" | "create" | "join";
 
 /**
- * Wrapper that mounts the dialog body only while it is open, so every piece
- * of form state is fresh by construction on each open — no reset effect, no
- * prevOpenRef bookkeeping.
+ * Wrapper that keeps `DialogContent` rendered unconditionally so Radix can
+ * play the exit animation. Radix unmounts the portal's children once the
+ * close animation finishes, so every piece of the body's form state is fresh
+ * by construction on each open — no reset effect, no prevOpenRef bookkeeping.
  */
 export function HouseholdManager({
   person,
@@ -65,19 +66,19 @@ export function HouseholdManager({
 }: HouseholdManagerProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      {open && (
-        <HouseholdManagerContent
+      <DialogContent className="max-w-md">
+        <HouseholdManagerBody
           person={person}
           currentHousehold={currentHousehold}
           households={households}
           onOpenChange={onOpenChange}
         />
-      )}
+      </DialogContent>
     </Dialog>
   );
 }
 
-function HouseholdManagerContent({
+function HouseholdManagerBody({
   person,
   currentHousehold,
   households,
@@ -236,7 +237,7 @@ function HouseholdManagerContent({
   const hasAddress = person.addressLine1 || person.city;
 
   return (
-    <DialogContent className="max-w-md">
+    <>
       <DialogHeader>
         <DialogTitle className="flex items-center gap-2">
           <Home className="h-5 w-5" />
@@ -493,6 +494,6 @@ function HouseholdManagerContent({
           </div>
         </div>
       )}
-    </DialogContent>
+    </>
   );
 }

@@ -47,7 +47,6 @@ export async function createAssessmentAction(
   return withChurchSession(
     "createAssessmentAction",
     {
-      known: { "Person not found": "Person not found" },
       fallback: "Failed to create assessment",
     },
     async ({ user, churchId }) => {
@@ -72,11 +71,11 @@ export async function createAssessmentAction(
       const assessment = await createAssessment(churchId, user.id, parsed.data);
 
       // Log activity
-      await logPersonActivity(
+      await logPersonActivity({
         churchId,
         personId,
-        "assessment_completed",
-        {
+        activityType: "assessment_completed",
+        metadata: {
           assessmentId: assessment.id,
           totalScore: assessment.totalScore,
           committedScore: assessment.committedScore,
@@ -84,8 +83,8 @@ export async function createAssessmentAction(
           contagiousScore: assessment.contagiousScore,
           courageousScore: assessment.courageousScore,
         },
-        user.id
-      );
+        performedBy: user.id,
+      });
 
       revalidatePath(`/people/${personId}`);
       revalidatePath(`/people/${personId}/assessments`);
@@ -128,7 +127,6 @@ export async function createInterviewAction(
   return withChurchSession(
     "createInterviewAction",
     {
-      known: { "Person not found": "Person not found" },
       fallback: "Failed to create interview",
     },
     async ({ user, churchId }) => {
@@ -153,11 +151,11 @@ export async function createInterviewAction(
       const interview = await createInterview(churchId, user.id, parsed.data);
 
       // Log interview_completed activity
-      await logPersonActivity(
+      await logPersonActivity({
         churchId,
         personId,
-        "interview_completed",
-        {
+        activityType: "interview_completed",
+        metadata: {
           interviewId: interview.id,
           overallResult: interview.overallResult,
           maturityStatus: interview.maturityStatus,
@@ -166,8 +164,8 @@ export async function createInterviewAction(
           rightReasonsStatus: interview.rightReasonsStatus,
           seasonStatus: interview.seasonStatus,
         },
-        user.id
-      );
+        performedBy: user.id,
+      });
 
       // Auto-advance to 'interviewed' status
       // changeStatus handles activity logging and event emission
@@ -197,7 +195,6 @@ export async function createCommitmentAction(
   return withChurchSession(
     "createCommitmentAction",
     {
-      known: { "Person not found": "Person not found" },
       fallback: "Failed to create commitment",
     },
     async ({ user, churchId }) => {
@@ -270,18 +267,18 @@ export async function createCommitmentAction(
       );
 
       // Log commitment_recorded activity
-      await logPersonActivity(
+      await logPersonActivity({
         churchId,
         personId,
-        "commitment_recorded",
-        {
+        activityType: "commitment_recorded",
+        metadata: {
           commitmentId: commitment.id,
           commitmentType: commitment.commitmentType,
           signedDate: commitment.signedDate,
           hasDocument: !!documentKey,
         },
-        user.id
-      );
+        performedBy: user.id,
+      });
 
       // Auto-advance to 'core_group' status (commitment = Core Group entry)
       // changeStatus handles activity logging and event emission

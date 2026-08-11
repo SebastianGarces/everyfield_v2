@@ -18,21 +18,19 @@ export {
  * The one writer of person_activities rows — every timeline entry (notes,
  * tags, skills, assessments, household moves, status changes) goes through
  * here instead of a hand-rolled db.insert at each call site.
+ *
+ * Takes a single named-field object: three of the fields are interchangeable
+ * UUID strings, and positional slots let a transposed churchId/personId/
+ * performedBy type-check silently while writing a corrupt timeline row.
  */
-export async function logPersonActivity(
-  churchId: string,
-  personId: string,
-  activityType: ActivityType,
-  metadata: Record<string, unknown>,
-  performedBy: string
-): Promise<void> {
-  await db.insert(personActivities).values({
-    churchId,
-    personId,
-    activityType,
-    metadata,
-    performedBy,
-  });
+export async function logPersonActivity(entry: {
+  churchId: string;
+  personId: string;
+  activityType: ActivityType;
+  metadata: Record<string, unknown>;
+  performedBy: string;
+}): Promise<void> {
+  await db.insert(personActivities).values(entry);
 }
 
 export async function getActivities(

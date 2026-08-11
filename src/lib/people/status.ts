@@ -157,13 +157,13 @@ export async function recordStatusChange(
     metadata.source = options.source;
   }
 
-  await logPersonActivity(
+  await logPersonActivity({
     churchId,
     personId,
-    "status_changed",
+    activityType: "status_changed",
     metadata,
-    userId
-  );
+    performedBy: userId,
+  });
 }
 
 /**

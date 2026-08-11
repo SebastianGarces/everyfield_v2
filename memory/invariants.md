@@ -34,6 +34,7 @@ Each section links `invariants/<domain>.md` for the why, the pattern and the wor
 
 - All feature data carries `church_id`; `church_id = null` means global content (e.g. wiki articles).
 - Tenant isolation is enforced in the application layer — there is no RLS behind you.
+- A person-scoped write whose service does not itself scope the person by church calls `assertPersonInChurch(churchId, personId)` (src/lib/people/service.ts) FIRST — tags, skills and commitment uploads stamp the caller's church_id onto a client-supplied person_id and would otherwise write across tenants; the commitment check precedes the file upload so no object lands for a foreign person.
 - Hierarchy is SendingNetwork → SendingChurch → Church, every hierarchy FK nullable, and a plant's two oversight FKs are INDEPENDENT — neither implies the other.
 - An accept never replaces an existing association: both statements of the accept batch carry `fk IS NULL OR fk = <this org>`, and the guard sits on the CLAIM so a refusal writes nothing at all.
 - An invitation may name no target — that is the register path. Only `bindOpenInvitationTarget` (CAS on pending + both targets null + unexpired) gives it one, which is what makes a link single-use; registration binds BEFORE accepting, never after.

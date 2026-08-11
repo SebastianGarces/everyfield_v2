@@ -31,8 +31,12 @@ interface PersonOverviewProps {
   skills?: SkillInventory[];
   household?: Household | null;
   householdMembers?: Person[];
-  /** All households of the church, fetched server-side for HouseholdManager */
-  households?: Household[];
+  /**
+   * All households of the church, fetched server-side for HouseholdManager.
+   * Required — an empty default would silently remove the Join Existing
+   * Household path for any caller that forgets to pass it.
+   */
+  households: Household[];
   onEdit?: () => void;
 }
 
@@ -59,7 +63,7 @@ export function PersonOverview({
   skills = [],
   household,
   householdMembers = [],
-  households = [],
+  households,
   onEdit,
 }: PersonOverviewProps) {
   const router = useRouter();

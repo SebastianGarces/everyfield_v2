@@ -85,13 +85,13 @@ export async function assignTag(
     .onConflictDoNothing();
 
   // Record activity
-  await logPersonActivity(
+  await logPersonActivity({
     churchId,
     personId,
-    "tag_added",
-    { tagId: tag.id, tagName: tag.name, tagColor: tag.color },
-    userId
-  );
+    activityType: "tag_added",
+    metadata: { tagId: tag.id, tagName: tag.name, tagColor: tag.color },
+    performedBy: userId,
+  });
 }
 
 /**
@@ -125,13 +125,13 @@ export async function removeTag(
     );
 
   // Record activity
-  await logPersonActivity(
+  await logPersonActivity({
     churchId,
     personId,
-    "tag_removed",
-    { tagId: tag.id, tagName: tag.name, tagColor: tag.color },
-    userId
-  );
+    activityType: "tag_removed",
+    metadata: { tagId: tag.id, tagName: tag.name, tagColor: tag.color },
+    performedBy: userId,
+  });
 }
 
 /**

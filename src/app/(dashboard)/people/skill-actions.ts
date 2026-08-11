@@ -32,7 +32,6 @@ export async function addSkillAction(data: {
   return withChurchSession(
     "addSkillAction",
     {
-      known: { "Person not found": "Person not found" },
       fallback: "Failed to add skill",
     },
     async ({ user, churchId }) => {
@@ -50,20 +49,20 @@ export async function addSkillAction(data: {
 
       const skill = await addSkill(churchId, parsed.data);
 
-      // Log activity
-      await logPersonActivity(
+      // Log activity — against the SAME personId the assert above verified
+      await logPersonActivity({
         churchId,
-        data.personId,
-        "skill_added",
-        {
+        personId: parsed.data.personId,
+        activityType: "skill_added",
+        metadata: {
           skillName: skill.skillName,
           skillCategory: skill.skillCategory,
           proficiency: skill.proficiency,
         },
-        user.id
-      );
+        performedBy: user.id,
+      });
 
-      revalidatePath(`/people/${data.personId}`);
+      revalidatePath(`/people/${parsed.data.personId}`);
       return { success: true, data: skill };
     }
   );
@@ -84,7 +83,6 @@ export async function updateSkillAction(
   return withChurchSession(
     "updateSkillAction",
     {
-      known: { "Skill not found": "Skill not found" },
       fallback: "Failed to update skill",
     },
     async ({ user, churchId }) => {
@@ -102,11 +100,11 @@ export async function updateSkillAction(
       });
 
       // Log activity
-      await logPersonActivity(
+      await logPersonActivity({
         churchId,
-        skill.personId,
-        "skill_updated",
-        {
+        personId: skill.personId,
+        activityType: "skill_updated",
+        metadata: {
           skillName: skill.skillName,
           skillCategory: skill.skillCategory,
           proficiency: skill.proficiency,
@@ -119,8 +117,8 @@ export async function updateSkillAction(
               ? existingSkill.proficiency
               : undefined,
         },
-        user.id
-      );
+        performedBy: user.id,
+      });
 
       revalidatePath("/people");
       return { success: true, data: skill };
@@ -137,7 +135,6 @@ export async function removeSkillAction(
   return withChurchSession(
     "removeSkillAction",
     {
-      known: { "Skill not found": "Skill not found" },
       fallback: "Failed to remove skill",
     },
     async ({ user, churchId }) => {
@@ -150,16 +147,16 @@ export async function removeSkillAction(
       await removeSkill(churchId, skillId);
 
       // Log activity
-      await logPersonActivity(
+      await logPersonActivity({
         churchId,
-        skill.personId,
-        "skill_removed",
-        {
+        personId: skill.personId,
+        activityType: "skill_removed",
+        metadata: {
           skillName: skill.skillName,
           skillCategory: skill.skillCategory,
         },
-        user.id
-      );
+        performedBy: user.id,
+      });
 
       revalidatePath("/people");
       return { success: true, data: undefined };

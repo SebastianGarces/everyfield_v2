@@ -13,8 +13,11 @@ interface HouseholdMembersProps {
   person: Person;
   household: Household | null;
   members: Person[];
-  /** All households of the church, for the "join existing" list */
-  households?: Household[];
+  /**
+   * All households of the church, for the "join existing" list.
+   * Required — an empty default would silently remove that path.
+   */
+  households: Household[];
 }
 
 const ROLE_LABELS: Record<HouseholdRole, string> = {
@@ -32,7 +35,7 @@ export function HouseholdMembers({
   person,
   household,
   members,
-  households = [],
+  households,
 }: HouseholdMembersProps) {
   const [managerOpen, setManagerOpen] = useState(false);
 

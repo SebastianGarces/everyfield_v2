@@ -70,7 +70,6 @@ export async function updateTagAction(
   return withChurchSession(
     "updateTagAction",
     {
-      known: { "Tag not found": "Tag not found" },
       fallback: "Failed to update tag",
     },
     async ({ churchId }) => {
@@ -107,7 +106,6 @@ export async function assignTagAction(
   return withChurchSession(
     "assignTagAction",
     {
-      known: { "Person not found": "Person not found" },
       fallback: "Failed to assign tag",
     },
     async ({ user, churchId }) => {
@@ -133,7 +131,6 @@ export async function removeTagAction(
   return withChurchSession(
     "removeTagAction",
     {
-      known: { "Person not found": "Person not found" },
       fallback: "Failed to remove tag",
     },
     async ({ user, churchId }) => {

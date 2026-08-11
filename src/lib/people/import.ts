@@ -376,13 +376,13 @@ export async function executeBulkImport(
       await emitPersonCreated(person);
 
       // Log activity for person creation
-      await logPersonActivity(
+      await logPersonActivity({
         churchId,
-        person.id,
-        "person_created",
-        { source: "bulk_import" },
-        userId
-      );
+        personId: person.id,
+        activityType: "person_created",
+        metadata: { source: "bulk_import" },
+        performedBy: userId,
+      });
 
       created++;
     } catch {

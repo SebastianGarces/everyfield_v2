@@ -81,7 +81,6 @@ export async function createHouseholdFromPersonAction(
   return withChurchSession(
     "createHouseholdFromPersonAction",
     {
-      known: { "Person not found": "Person not found" },
       fallback: "Failed to create household",
     },
     async ({ user, churchId }) => {
@@ -92,17 +91,17 @@ export async function createHouseholdFromPersonAction(
       );
 
       // Log activity for household creation
-      await logPersonActivity(
+      await logPersonActivity({
         churchId,
         personId,
-        "household_created",
-        {
+        activityType: "household_created",
+        metadata: {
           householdName: result.household.name,
           householdId: result.household.id,
           role: "head",
         },
-        user.id
-      );
+        performedBy: user.id,
+      });
 
       revalidatePath("/people");
       revalidatePath(`/people/${personId}`);
@@ -129,7 +128,6 @@ export async function updateHouseholdAction(
   return withChurchSession(
     "updateHouseholdAction",
     {
-      known: { "Household not found": "Household not found" },
       fallback: "Failed to update household",
     },
     async ({ churchId }) => {
@@ -162,7 +160,6 @@ export async function deleteHouseholdAction(
   return withChurchSession(
     "deleteHouseholdAction",
     {
-      known: { "Household not found": "Household not found" },
       mapError: (error) =>
         error.message.includes("Cannot delete household with members")
           ? error.message
@@ -188,10 +185,6 @@ export async function addToHouseholdAction(
   return withChurchSession(
     "addToHouseholdAction",
     {
-      known: {
-        "Household not found": "Household not found",
-        "Person not found": "Person not found",
-      },
       fallback: "Failed to add to household",
     },
     async ({ user, churchId }) => {
@@ -209,17 +202,17 @@ export async function addToHouseholdAction(
       );
 
       // Log activity
-      await logPersonActivity(
+      await logPersonActivity({
         churchId,
         personId,
-        "household_joined",
-        {
+        activityType: "household_joined",
+        metadata: {
           householdName: household.name,
           householdId: household.id,
           role,
         },
-        user.id
-      );
+        performedBy: user.id,
+      });
 
       revalidatePath("/people");
       revalidatePath(`/people/${personId}`);
@@ -237,7 +230,6 @@ export async function removeFromHouseholdAction(
   return withChurchSession(
     "removeFromHouseholdAction",
     {
-      known: { "Person not found": "Person not found" },
       fallback: "Failed to remove from household",
     },
     async ({ user, churchId }) => {
@@ -260,16 +252,16 @@ export async function removeFromHouseholdAction(
 
       // Log activity if they were in a household
       if (householdName) {
-        await logPersonActivity(
+        await logPersonActivity({
           churchId,
           personId,
-          "household_left",
-          {
+          activityType: "household_left",
+          metadata: {
             householdName,
             householdId: existingPerson.householdId,
           },
-          user.id
-        );
+          performedBy: user.id,
+        });
       }
 
       revalidatePath("/people");
@@ -288,7 +280,6 @@ export async function propagateAddressAction(
   return withChurchSession(
     "propagateAddressAction",
     {
-      known: { "Household not found": "Household not found" },
       fallback: "Failed to propagate address",
     },
     async ({ churchId }) => {

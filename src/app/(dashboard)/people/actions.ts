@@ -328,13 +328,13 @@ export async function quickAddPersonAction(data: {
       });
 
       // Log activity
-      await logPersonActivity(
+      await logPersonActivity({
         churchId,
-        person.id,
-        "person_created",
-        { source: "quick_add" },
-        user.id
-      );
+        personId: person.id,
+        activityType: "person_created",
+        metadata: { source: "quick_add" },
+        performedBy: user.id,
+      });
 
       revalidatePath("/people");
       return { success: true, data: person };

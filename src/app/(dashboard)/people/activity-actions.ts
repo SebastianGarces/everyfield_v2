@@ -22,7 +22,6 @@ export async function addNoteAction(
   return withChurchSession(
     "addNoteAction",
     {
-      known: { "Person not found": "Person not found" },
       fallback: "Failed to add note",
     },
     async ({ user, churchId }) => {
@@ -33,13 +32,13 @@ export async function addNoteAction(
       // Never write against a personId the caller's church does not own
       await assertPersonInChurch(churchId, personId);
 
-      await logPersonActivity(
+      await logPersonActivity({
         churchId,
         personId,
-        "note_added",
-        { note },
-        user.id
-      );
+        activityType: "note_added",
+        metadata: { note },
+        performedBy: user.id,
+      });
 
       // Refresh the client router to show the new note
       // This reconciles the optimistic update with actual server state
