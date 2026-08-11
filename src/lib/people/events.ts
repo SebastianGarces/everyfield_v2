@@ -71,17 +71,26 @@ export async function emitPersonStatusChanged(
 // ============================================================================
 
 /**
- * Handle vision meeting attendance event from F3.
- * Auto-advances person from prospect to attendee when they attend a Vision Meeting.
+ * The one auto-advance rule: move a person from exactly `from` to `to`.
  *
- * Only advances if current status is "prospect". Other statuses are left unchanged
- * since the person is already further along the pipeline.
+ * Any other current status is left unchanged — the person is already further
+ * along (or not far enough), and an event must never demote or skip. A missing
+ * person is warned about, and a failed advance is swallowed and logged so the
+ * emitting flow (attendance, team assignment) never breaks on it.
+ *
+ * The `reason` is written into the status_changed activity metadata verbatim;
+ * `context` only decorates the dev logs.
  */
-export async function handleVisionMeetingAttendance(
-  personId: string,
-  meetingId: string,
-  churchId: string
-): Promise<void> {
+async function autoAdvanceStatus(options: {
+  churchId: string;
+  personId: string;
+  from: PersonStatus;
+  to: PersonStatus;
+  reason: string;
+  context: string;
+}): Promise<void> {
+  const { churchId, personId, from, to, reason, context } = options;
+
   const person = await db.query.persons.findFirst({
     where: and(
       eq(persons.churchId, churchId),
@@ -91,46 +100,56 @@ export async function handleVisionMeetingAttendance(
   });
 
   if (!person) {
-    console.warn(
-      `[EVENT] handleVisionMeetingAttendance: person ${personId} not found`
-    );
+    console.warn(`[EVENT] ${context}: person ${personId} not found`);
     return;
   }
 
-  // Only auto-advance prospects to attendee
-  if (person.status !== "prospect") {
+  if (person.status !== from) {
     if (process.env.NODE_ENV === "development") {
       console.log(
-        `[EVENT] Person ${personId} is "${person.status}", not advancing (only prospects are auto-advanced)`
+        `[EVENT] Person ${personId} is "${person.status}", not advancing to ${to} (only ${from} is auto-advanced)`
       );
     }
     return;
   }
 
   try {
-    await changeStatus(
-      churchId,
-      personId,
-      person.createdBy,
-      "attendee",
-      "Auto-advanced from vision meeting attendance"
-    );
+    await changeStatus(churchId, personId, person.createdBy, to, reason);
     if (process.env.NODE_ENV === "development") {
       console.log(
-        `[EVENT] Auto-advanced person ${personId} from prospect to attendee (meeting ${meetingId})`
+        `[EVENT] Auto-advanced person ${personId} from ${from} to ${to} (${context})`
       );
     }
   } catch (error) {
-    console.error(`[EVENT] Failed to auto-advance person ${personId}:`, error);
+    console.error(
+      `[EVENT] Failed to auto-advance person ${personId} to ${to}:`,
+      error
+    );
   }
+}
+
+/**
+ * Handle vision meeting attendance event from F3.
+ * Auto-advances person from prospect to attendee when they attend a Vision Meeting.
+ */
+export async function handleVisionMeetingAttendance(
+  personId: string,
+  meetingId: string,
+  churchId: string
+): Promise<void> {
+  await autoAdvanceStatus({
+    churchId,
+    personId,
+    from: "prospect",
+    to: "attendee",
+    reason: "Auto-advanced from vision meeting attendance",
+    context: `handleVisionMeetingAttendance (meeting ${meetingId})`,
+  });
 }
 
 /**
  * Handle team member assignment event from F8.
  * Auto-advances person from core_group to launch_team when assigned to a ministry team.
- *
- * Only advances if current status is "core_group". Other statuses are left unchanged
- * since the person is either not yet at core_group or already beyond launch_team.
  */
 export async function handleTeamMemberAssigned(
   personId: string,
@@ -138,110 +157,35 @@ export async function handleTeamMemberAssigned(
   roleId: string,
   churchId: string
 ): Promise<void> {
-  const person = await db.query.persons.findFirst({
-    where: and(
-      eq(persons.churchId, churchId),
-      eq(persons.id, personId),
-      isNull(persons.deletedAt)
-    ),
+  await autoAdvanceStatus({
+    churchId,
+    personId,
+    from: "core_group",
+    to: "launch_team",
+    reason: `Auto-advanced from team assignment (team: ${teamId}, role: ${roleId})`,
+    context: `handleTeamMemberAssigned (team ${teamId})`,
   });
-
-  if (!person) {
-    console.warn(
-      `[EVENT] handleTeamMemberAssigned: person ${personId} not found`
-    );
-    return;
-  }
-
-  // Only auto-advance core_group members to launch_team
-  if (person.status !== "core_group") {
-    if (process.env.NODE_ENV === "development") {
-      console.log(
-        `[EVENT] Person ${personId} is "${person.status}", not advancing to launch_team (only core_group members are auto-advanced)`
-      );
-    }
-    return;
-  }
-
-  try {
-    await changeStatus(
-      churchId,
-      personId,
-      person.createdBy,
-      "launch_team",
-      `Auto-advanced from team assignment (team: ${teamId}, role: ${roleId})`
-    );
-    if (process.env.NODE_ENV === "development") {
-      console.log(
-        `[EVENT] Auto-advanced person ${personId} from core_group to launch_team (team ${teamId})`
-      );
-    }
-  } catch (error) {
-    console.error(
-      `[EVENT] Failed to auto-advance person ${personId} to launch_team:`,
-      error
-    );
-  }
 }
 
 /**
  * Handle team leader assignment event from F8.
- * Auto-advances person to leader status when assigned as team leader or
- * assigned to a leadership role.
- *
- * Advances from launch_team to leader. If person is at core_group, they
- * will first be advanced to launch_team by the team.member.assigned handler,
- * and then to leader by this handler.
+ * Auto-advances person from launch_team to leader when assigned as team
+ * leader. If the person is at core_group, the team.member.assigned handler
+ * advances them to launch_team first, and then this handler to leader.
  */
 export async function handleTeamLeaderAssigned(
   personId: string,
   teamId: string,
   churchId: string
 ): Promise<void> {
-  const person = await db.query.persons.findFirst({
-    where: and(
-      eq(persons.churchId, churchId),
-      eq(persons.id, personId),
-      isNull(persons.deletedAt)
-    ),
+  await autoAdvanceStatus({
+    churchId,
+    personId,
+    from: "launch_team",
+    to: "leader",
+    reason: `Auto-advanced from team leader assignment (team: ${teamId})`,
+    context: `handleTeamLeaderAssigned (team ${teamId})`,
   });
-
-  if (!person) {
-    console.warn(
-      `[EVENT] handleTeamLeaderAssigned: person ${personId} not found`
-    );
-    return;
-  }
-
-  // Only auto-advance launch_team members to leader
-  if (person.status !== "launch_team") {
-    if (process.env.NODE_ENV === "development") {
-      console.log(
-        `[EVENT] Person ${personId} is "${person.status}", not advancing to leader (only launch_team members are auto-advanced)`
-      );
-    }
-    return;
-  }
-
-  try {
-    await changeStatus(
-      churchId,
-      personId,
-      person.createdBy,
-      "leader",
-      `Auto-advanced from team leader assignment (team: ${teamId})`
-    );
-    if (process.env.NODE_ENV === "development") {
-      console.log(
-        `[EVENT] Auto-advanced person ${personId} from launch_team to leader (team ${teamId})`
-      );
-    }
-  } catch (error) {
-    console.error(
-      `[EVENT] Failed to auto-advance person ${personId} to leader:`,
-      error
-    );
-  }
 }
 
 /**
