@@ -5,6 +5,7 @@ import { getCurrentUserChurch } from "@/lib/auth/session";
 import {
   FORMAT_OUTPUT,
   getTemplateById,
+  isDocumentFormat,
   resolveMergeValues,
   type DocumentFormat,
   type DocumentMergeValues,
@@ -38,13 +39,15 @@ export async function GET(
     return NextResponse.json({ error: "Template not found" }, { status: 404 });
   }
 
-  // Resolve requested format; must be one the template supports.
+  // Resolve requested format; must be one the template supports. A missing,
+  // unknown, or unsupported format falls back to the template's default.
   const requested = request.nextUrl.searchParams.get("format");
-  const format: DocumentFormat = (
-    requested && template.formats.includes(requested as DocumentFormat)
+  const format: DocumentFormat =
+    requested &&
+    isDocumentFormat(requested) &&
+    template.formats.includes(requested)
       ? requested
-      : template.formats[0]
-  ) as DocumentFormat;
+      : template.formats[0];
 
   if (!canRenderDocument(format, templateId)) {
     return NextResponse.json(
