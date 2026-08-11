@@ -17,7 +17,7 @@ export default async function EditTemplatePage({
   if (!user.churchId) redirect("/dashboard");
 
   const { id } = await params;
-  const template = await getTemplate(id);
+  const template = await getTemplate(id, user.churchId);
   if (!template) notFound();
 
   return (
