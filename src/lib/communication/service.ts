@@ -43,12 +43,15 @@ import {
 import {
   DELIVERED_STATUSES,
   OPENED_STATUSES,
+  RECIPIENT_STATUS_RANK,
   type DeliveryTotals,
+  type MessageDeliveryStats,
   churchDeliveryScope,
   countAttempted,
   countOfStatus,
   countOfStatuses,
   isTeamGroup,
+  meetingTrackingScope,
   messageRecipientScope,
   nonOpenerScope,
   parseTeamGroup,
@@ -56,6 +59,7 @@ import {
   selectableTeamsScope,
   sentMessagesScope,
   sentSinceScope,
+  summarizeRecipients,
   teamGroup,
   teamMemberScope,
 } from "./queries";
@@ -70,15 +74,7 @@ import type { ComposeMessageInput } from "@/lib/validations/communication";
 // ---------------------------------------------------------------------------
 
 export interface CommunicationWithStats extends Communication {
-  stats: {
-    total: number;
-    sent: number;
-    delivered: number;
-    opened: number;
-    clicked: number;
-    bounced: number;
-    failed: number;
-  };
+  stats: MessageDeliveryStats;
 }
 
 export interface RecipientWithPerson extends CommunicationRecipient {
@@ -452,7 +448,12 @@ export async function resolveSubjects(
     const meetings = await db
       .select()
       .from(churchMeetings)
-      .where(inArray(churchMeetings.id, meetingIds));
+      .where(
+        and(
+          inArray(churchMeetings.id, meetingIds),
+          eq(churchMeetings.churchId, churchId)
+        )
+      );
     for (const m of meetings) {
       meetingMap.set(m.id, buildMeetingMergeData(m));
     }
@@ -495,30 +496,16 @@ export async function getCommunication(
     .from(communicationRecipients)
     .where(eq(communicationRecipients.communicationId, id));
 
-  const stats = {
-    total: recipients.length,
-    sent: recipients.filter((r) => r.status !== "pending").length,
-    delivered: recipients.filter(
-      (r) =>
-        r.status === "delivered" ||
-        r.status === "opened" ||
-        r.status === "clicked"
-    ).length,
-    opened: recipients.filter(
-      (r) => r.status === "opened" || r.status === "clicked"
-    ).length,
-    clicked: recipients.filter((r) => r.status === "clicked").length,
-    bounced: recipients.filter((r) => r.status === "bounced").length,
-    failed: recipients.filter((r) => r.status === "failed").length,
-  };
-
-  return { ...comm, stats };
+  return { ...comm, stats: summarizeRecipients(recipients) };
 }
 
 /**
- * Get recipients for a communication with person details.
+ * Get recipients for a communication with person details. Church-scoped in the
+ * query itself — the isolation must not rest on a caller's `notFound()`
+ * ordering (`memory/invariants.md` -> Multi-Tenancy).
  */
 export async function getCommunicationRecipients(
+  churchId: string,
   communicationId: string
 ): Promise<RecipientWithPerson[]> {
   const rows = await db
@@ -532,7 +519,7 @@ export async function getCommunicationRecipients(
     })
     .from(communicationRecipients)
     .innerJoin(persons, eq(communicationRecipients.personId, persons.id))
-    .where(eq(communicationRecipients.communicationId, communicationId));
+    .where(messageRecipientScope(churchId, communicationId));
 
   return rows.map((row) => ({
     ...row.recipient,
@@ -608,35 +595,19 @@ export async function getMeetingCommunications(
     recipientsByComm.set(r.communicationId, existing);
   }
 
-  return comms.map((comm) => {
-    const recipients = recipientsByComm.get(comm.id) ?? [];
-    return {
-      ...comm,
-      stats: {
-        total: recipients.length,
-        sent: recipients.filter((r) => r.status !== "pending").length,
-        delivered: recipients.filter(
-          (r) =>
-            r.status === "delivered" ||
-            r.status === "opened" ||
-            r.status === "clicked"
-        ).length,
-        opened: recipients.filter(
-          (r) => r.status === "opened" || r.status === "clicked"
-        ).length,
-        clicked: recipients.filter((r) => r.status === "clicked").length,
-        bounced: recipients.filter((r) => r.status === "bounced").length,
-        failed: recipients.filter((r) => r.status === "failed").length,
-      },
-    };
-  });
+  return comms.map((comm) => ({
+    ...comm,
+    stats: summarizeRecipients(recipientsByComm.get(comm.id) ?? []),
+  }));
 }
 
 /**
  * Get tracking data for a meeting's recipients.
- * Returns per-person tracking keyed by person_id.
+ * Returns per-person tracking keyed by person_id. Church-scoped in the query
+ * itself, on both joined tables.
  */
 export async function getMeetingTrackingByPerson(
+  churchId: string,
   meetingId: string
 ): Promise<
   Map<
@@ -656,31 +627,22 @@ export async function getMeetingTrackingByPerson(
       communications,
       eq(communicationRecipients.communicationId, communications.id)
     )
-    .where(eq(communications.meetingId, meetingId));
+    .where(meetingTrackingScope(churchId, meetingId));
 
   const map = new Map<
     string,
     { status: RecipientStatus; deliveredAt: Date | null; openedAt: Date | null }
   >();
   for (const row of rows) {
-    // Keep the most advanced status per person
+    // Keep the highest-ranked status per person — the shared ladder, where
+    // bounced/failed are terminal.
     const existing = map.get(row.personId);
-    const statusOrder: RecipientStatus[] = [
-      "pending",
-      "failed",
-      "bounced",
-      "sent",
-      "delivered",
-      "opened",
-      "clicked",
-    ];
     if (
       !existing ||
-      statusOrder.indexOf(row.status as RecipientStatus) >
-        statusOrder.indexOf(existing.status)
+      RECIPIENT_STATUS_RANK[row.status] > RECIPIENT_STATUS_RANK[existing.status]
     ) {
       map.set(row.personId, {
-        status: row.status as RecipientStatus,
+        status: row.status,
         deliveredAt: row.deliveredAt,
         openedAt: row.openedAt,
       });

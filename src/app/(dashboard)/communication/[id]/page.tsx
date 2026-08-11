@@ -92,7 +92,7 @@ export default async function MessageDetailPage({
   const { id } = await params;
   const [comm, recipients, nonOpeners] = await Promise.all([
     getCommunication(user.churchId, id),
-    getCommunicationRecipients(id),
+    getCommunicationRecipients(user.churchId, id),
     getNonOpenerSummary(user.churchId, id),
   ]);
 

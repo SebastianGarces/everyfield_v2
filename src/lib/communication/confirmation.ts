@@ -22,6 +22,7 @@ import { invitations, meetingAttendance } from "@/db/schema/meetings";
 import { churchMeetings } from "@/db/schema/meetings";
 import { persons } from "@/db/schema/people";
 import { churches } from "@/db/schema/church";
+import { RECIPIENT_STATUS_RANK, isUnreachableStatus } from "./queries";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -242,16 +243,17 @@ export async function resolveConfirmation(
           .limit(1);
 
         if (recipient) {
-          // Only advance status — don't regress from "clicked" to "opened"
-          const statusRank: Record<string, number> = {
-            pending: 0,
-            sent: 1,
-            delivered: 2,
-            opened: 3,
-            clicked: 4,
-          };
-          const currentRank = statusRank[recipient.status] ?? 0;
-          if (currentRank < 4) {
+          // Only advance status — never regress from "clicked", and never
+          // touch a bounced/failed row: the click reached us through SOME
+          // channel, but the recipient row records that THIS address did not
+          // work, and overwriting it would erase the bounce from the delivery
+          // figures and re-enter the address into the resend pool
+          // (memory/invariants.md -> Communication, UNREACHABLE_STATUSES).
+          if (
+            !isUnreachableStatus(recipient.status) &&
+            RECIPIENT_STATUS_RANK[recipient.status] <
+              RECIPIENT_STATUS_RANK.clicked
+          ) {
             await db
               .update(communicationRecipients)
               .set({
