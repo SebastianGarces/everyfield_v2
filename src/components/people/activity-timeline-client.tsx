@@ -9,6 +9,8 @@ import { NoteForm } from "./note-form";
 
 interface ActivityTimelineClientProps {
   activities: ActivityWithPerformer[];
+  /** One instant for the whole render, threaded from the server component. */
+  now: Date;
   nextCursor?: Date;
   personId: string;
   currentUserId: string;
@@ -23,6 +25,7 @@ type OptimisticAction = { type: "add"; activity: ActivityWithPerformer };
  */
 export function ActivityTimelineClient({
   activities,
+  now,
   nextCursor,
   personId,
   currentUserId,
@@ -77,6 +80,7 @@ export function ActivityTimelineClient({
         <CardContent>
           <ActivityFeed
             activities={optimisticActivities}
+            now={now}
             nextCursor={nextCursor}
             personId={personId}
             currentUserId={currentUserId}

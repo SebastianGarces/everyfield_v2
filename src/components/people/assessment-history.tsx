@@ -7,6 +7,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import type { Assessment } from "@/db/schema";
+import { formatDateWithoutWeekday } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
 import { ChevronDown, TrendingDown, TrendingUp } from "lucide-react";
 import { useState } from "react";
@@ -59,13 +60,8 @@ function AssessmentCard({
     ? assessment.totalScore - previousAssessment.totalScore
     : null;
 
-  const formattedDate = new Date(assessment.assessmentDate).toLocaleDateString(
-    "en-US",
-    {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    }
+  const formattedDate = formatDateWithoutWeekday(
+    new Date(assessment.assessmentDate)
   );
 
   return (

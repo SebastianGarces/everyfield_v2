@@ -5,8 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import type { Commitment, Household, SkillInventory } from "@/db/schema";
+import { formatDateWithoutWeekday } from "@/lib/datetime";
 import type { Person, Tag } from "@/lib/people/types";
-import { format } from "date-fns";
 import {
   Calendar,
   FileSignature,
@@ -175,7 +175,10 @@ export function PersonOverview({
                 </p>
                 <p className="text-sm">
                   {person.createdAt
-                    ? format(new Date(person.createdAt), "MMM d, yyyy")
+                    ? formatDateWithoutWeekday(
+                        new Date(person.createdAt),
+                        "short"
+                      )
                     : "Unknown"}
                 </p>
               </div>
@@ -221,7 +224,10 @@ export function PersonOverview({
                 </div>
                 <p className="text-muted-foreground text-sm">
                   Signed{" "}
-                  {format(new Date(latestCommitment.signedDate), "MMM d, yyyy")}
+                  {formatDateWithoutWeekday(
+                    new Date(latestCommitment.signedDate),
+                    "short"
+                  )}
                 </p>
               </div>
               <Button variant="outline" size="sm" asChild>

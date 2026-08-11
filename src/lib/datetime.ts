@@ -88,6 +88,25 @@ export function formatDate(date: Date, variant: DateVariant = "long"): string {
   return dateFormatters[variant].format(date);
 }
 
+const longDateWithoutWeekday = new Intl.DateTimeFormat(LOCALE, {
+  timeZone: APP_TIME_ZONE,
+  month: "long",
+  day: "numeric",
+  year: "numeric",
+});
+
+/**
+ * `"July 30, 2026"` (long) / `"Jul 30, 2026"` (short) — `formatDate` without
+ * the weekday, for dense cards and history rows where the weekday is noise.
+ */
+export function formatDateWithoutWeekday(
+  date: Date,
+  variant: DateVariant = "long"
+): string {
+  if (variant === "long") return longDateWithoutWeekday.format(date);
+  return shortDateWithoutWeekday.format(date);
+}
+
 /** `"7:00 PM"`. */
 export function formatTime(date: Date): string {
   return timeFormatter.format(date);
