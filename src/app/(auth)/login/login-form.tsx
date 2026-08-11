@@ -78,7 +78,11 @@ export function LoginForm() {
         </CardContent>
 
         <CardFooter className="flex flex-col gap-4">
-          <Button type="submit" className="w-full" disabled={pending}>
+          <Button
+            type="submit"
+            className="w-full cursor-pointer"
+            disabled={pending}
+          >
             {pending ? "Signing in..." : "Sign in"}
           </Button>
           <p className="text-muted-foreground text-center text-sm">
