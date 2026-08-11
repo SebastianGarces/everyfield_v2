@@ -34,7 +34,7 @@ import {
 import {
   DELIVERED_STATUSES,
   OPENED_STATUSES,
-  RECIPIENT_STATUS_RANK,
+  TRACKING_DISPLAY_PRECEDENCE,
   type DeliveryTotals,
   type MessageDeliveryStats,
   churchDeliveryScope,
@@ -217,7 +217,7 @@ export async function getCommunication(
   const recipients = await db
     .select()
     .from(communicationRecipients)
-    .where(eq(communicationRecipients.communicationId, id));
+    .where(messageRecipientScope(churchId, id));
 
   return { ...comm, stats: summarizeRecipients(recipients) };
 }
@@ -357,12 +357,15 @@ export async function getMeetingTrackingByPerson(
     { status: RecipientStatus; deliveredAt: Date | null; openedAt: Date | null }
   >();
   for (const row of rows) {
-    // Keep the highest-ranked status per person — the shared ladder, where
-    // bounced/failed are terminal.
+    // Keep the BEST outcome per person, not the lifecycle rank: this folds
+    // across several messages, where a later delivered/opened email outranks
+    // an earlier bounce — see TRACKING_DISPLAY_PRECEDENCE for why the two
+    // orderings differ.
     const existing = map.get(row.personId);
     if (
       !existing ||
-      RECIPIENT_STATUS_RANK[row.status] > RECIPIENT_STATUS_RANK[existing.status]
+      TRACKING_DISPLAY_PRECEDENCE[row.status] >
+        TRACKING_DISPLAY_PRECEDENCE[existing.status]
     ) {
       map.set(row.personId, {
         status: row.status,

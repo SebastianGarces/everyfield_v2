@@ -356,9 +356,6 @@ export async function getNonOpenerSummary(
   };
 }
 
-/** Thrown when a resend has nobody left to reach. */
-export const NO_NON_OPENERS_MESSAGE = resendBlockedMessage("noNonOpeners");
-
 /**
  * Send the original message again, to the recipients who recorded no open.
  *

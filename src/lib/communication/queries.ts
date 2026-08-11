@@ -91,6 +91,28 @@ export const RECIPIENT_STATUS_RANK: Record<RecipientStatus, number> = {
   failed: 5,
 };
 
+/**
+ * NOT the ladder above — a different concept that happens to share the keys.
+ *
+ * `RECIPIENT_STATUS_RANK` orders ONE row's lifecycle, where bounced/failed are
+ * terminal and outrank everything. This ordering folds SEVERAL rows for one
+ * person (one per meeting email) into the single status the guest list shows,
+ * and there the best outcome achieved wins: a guest whose invite bounced, and
+ * who then opened a later email after the address was fixed, reads as
+ * `opened`, not `bounced`. Ranking the unreachable pair at the bottom is what
+ * the guest list has always shown; showing the bounce instead is a product
+ * question, not a refactor.
+ */
+export const TRACKING_DISPLAY_PRECEDENCE: Record<RecipientStatus, number> = {
+  pending: 0,
+  failed: 1,
+  bounced: 2,
+  sent: 3,
+  delivered: 4,
+  opened: 5,
+  clicked: 6,
+};
+
 /** Recipient counts for a single message, as `getCommunication` reports them. */
 export interface MessageDeliveryStats {
   total: number;

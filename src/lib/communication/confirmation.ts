@@ -227,10 +227,17 @@ export async function resolveConfirmation(
   // Update email tracking — the person clicked the link, so they opened + clicked
   // Find communication_recipients for this person + meeting
   try {
+    // Church-scoped in the predicate, not by FK topology — the token carries
+    // its own church_id (memory/invariants.md -> Multi-Tenancy).
     const meetingComms = await db
       .select({ id: communications.id })
       .from(communications)
-      .where(eq(communications.meetingId, tokenRecord.meetingId));
+      .where(
+        and(
+          eq(communications.meetingId, tokenRecord.meetingId),
+          eq(communications.churchId, tokenRecord.churchId)
+        )
+      );
 
     if (meetingComms.length > 0) {
       const commIds = meetingComms.map((c) => c.id);
@@ -241,7 +248,8 @@ export async function resolveConfirmation(
           .where(
             and(
               eq(communicationRecipients.communicationId, commId),
-              eq(communicationRecipients.personId, tokenRecord.personId)
+              eq(communicationRecipients.personId, tokenRecord.personId),
+              eq(communicationRecipients.churchId, tokenRecord.churchId)
             )
           )
           .limit(1);

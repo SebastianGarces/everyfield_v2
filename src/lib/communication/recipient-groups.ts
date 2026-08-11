@@ -106,18 +106,6 @@ export async function getGroupRecipients(
 }
 
 /**
- * Resolve a quick-select group into person IDs. Same resolution as
- * `getGroupRecipients` — including `team:<teamId>` — narrowed to ids.
- */
-export async function getRecipientsByGroup(
-  churchId: string,
-  group: string
-): Promise<string[]> {
-  const people = await getGroupRecipients(churchId, group);
-  return people.map((p) => p.id);
-}
-
-/**
  * The church's ministry teams, as recipient quick-selects with their active
  * member counts. Paused teams are left out; a `forming` team is one a planter
  * is actively staffing and very much wants to email.

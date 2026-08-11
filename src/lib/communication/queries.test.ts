@@ -11,6 +11,7 @@ import {
   OPENED_STATUSES,
   RECIPIENT_STATUS_RANK,
   TEAM_GROUP_PREFIX,
+  TRACKING_DISPLAY_PRECEDENCE,
   UNREACHABLE_STATUSES,
   churchDeliveryScope,
   countAttempted,
@@ -234,6 +235,43 @@ test("the rank ladder orders progress and keeps bounced/failed terminal", () => 
   // Terminal together: neither of the unreachable pair outranks the other,
   // so nothing can "advance" a bounce into a failure or back.
   assert.equal(RECIPIENT_STATUS_RANK.bounced, RECIPIENT_STATUS_RANK.failed);
+});
+
+// --- the cross-row display precedence ----------------------------------------
+
+test("the display precedence puts the unreachable pair at the BOTTOM, unlike the ladder", () => {
+  // A deliberately different ordering from RECIPIENT_STATUS_RANK: it folds
+  // several rows for one person into what the guest list shows, and there the
+  // best outcome achieved wins.
+  const ascending: RecipientStatus[] = [
+    "pending",
+    "failed",
+    "bounced",
+    "sent",
+    "delivered",
+    "opened",
+    "clicked",
+  ];
+  for (let i = 1; i < ascending.length; i++) {
+    assert.ok(
+      TRACKING_DISPLAY_PRECEDENCE[ascending[i - 1]] <
+        TRACKING_DISPLAY_PRECEDENCE[ascending[i]],
+      `${ascending[i - 1]} must display below ${ascending[i]}`
+    );
+  }
+});
+
+test("a person with a bounced row and a clicked row folds to clicked", () => {
+  // The invite bounced; the planter fixed the address; a later email was
+  // clicked. The guest list reports the click, not the historical bounce —
+  // the same fold `getMeetingTrackingByPerson` runs.
+  const rows: RecipientStatus[] = ["bounced", "clicked", "pending"];
+  const folded = rows.reduce((best, status) =>
+    TRACKING_DISPLAY_PRECEDENCE[status] > TRACKING_DISPLAY_PRECEDENCE[best]
+      ? status
+      : best
+  );
+  assert.equal(folded, "clicked");
 });
 
 // --- one message's stats fold ------------------------------------------------
