@@ -1,6 +1,7 @@
 "use server";
 
 import { db } from "@/db";
+import { isUniqueViolation } from "@/db/errors";
 import type { UserRole } from "@/db/schema";
 import {
   churchPrivacySettings,
@@ -236,9 +237,10 @@ export async function register(
     await db.batch(statements);
   } catch (error) {
     // The unique index losing a duplicate-address race is an expected outcome
-    // with a message, not a crash. Anything else is a real failure and stays
-    // one — nothing was written, the batch rolled back whole.
-    if (isDuplicateEmailError(error)) {
+    // with a message, not a crash. Anything else — including any OTHER unique
+    // violation — is a real failure and stays one: nothing was written, the
+    // batch rolled back whole.
+    if (isUniqueViolation(error, USERS_EMAIL_UNIQUE)) {
       await recordAttempt(identifier, ip, "register", false);
       return { error: DUPLICATE_EMAIL_MESSAGE };
     }
@@ -275,49 +277,8 @@ export async function register(
 
 const DUPLICATE_EMAIL_MESSAGE = "An account with this email already exists";
 
-/** Postgres `unique_violation`. */
-const PG_UNIQUE_VIOLATION = "23505";
-
 /** The unique constraint on `users.email` — the REAL duplicate-account guard. */
 const USERS_EMAIL_UNIQUE = "users_email_unique";
-
-/**
- * True when `error` is the registration batch losing a duplicate-address race —
- * a unique violation on `users_email_unique`.
- *
- * Narrow on purpose: any OTHER unique violation is a real bug and must still
- * propagate. Drizzle wraps driver errors, so the cause chain is walked rather
- * than just the top error (same shape as `isDuplicateGenerationError`,
- * `src/lib/tasks/events.ts`).
- */
-function isDuplicateEmailError(error: unknown): boolean {
-  let current: unknown = error;
-
-  for (let depth = 0; current != null && depth < 5; depth += 1) {
-    if (typeof current !== "object") return false;
-
-    const candidate = current as {
-      code?: unknown;
-      constraint?: unknown;
-      message?: unknown;
-      cause?: unknown;
-    };
-    const message =
-      typeof candidate.message === "string" ? candidate.message : "";
-
-    if (
-      candidate.code === PG_UNIQUE_VIOLATION &&
-      (candidate.constraint === USERS_EMAIL_UNIQUE ||
-        message.includes(USERS_EMAIL_UNIQUE))
-    ) {
-      return true;
-    }
-
-    current = candidate.cause;
-  }
-
-  return false;
-}
 
 /**
  * Plan the organizational entity for the account type: the role and FK values
