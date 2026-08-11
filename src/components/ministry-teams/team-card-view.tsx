@@ -32,10 +32,6 @@ import { cn } from "@/lib/utils";
 import { TEAM_ICONS, staffingPercent } from "@/lib/ministry-teams/team-display";
 import type { TeamStatus, TeamType } from "@/db/schema";
 
-// Re-exported so existing importers of the card's icon map keep working; the
-// canonical home is lib/ministry-teams/team-display.ts.
-export { TEAM_ICONS };
-
 /**
  * The shape the tile actually reads. Deliberately narrower than
  * `TeamWithStats` (lib/ministry-teams/service.ts), which satisfies it
