@@ -11,7 +11,17 @@ import type {
   PersonCreateInput,
   PersonUpdateInput,
 } from "@/lib/validations/people";
-import { and, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNull,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 import { emitPersonCreated } from "./events";
 
 // ============================================================================
@@ -85,77 +95,111 @@ export async function assertPersonInChurch(
   }
 }
 
+// ============================================================================
+// Shared Filter & Cursor Building Blocks
+// ============================================================================
+
 /**
- * List people with cursor-based pagination
- * Excludes soft-deleted by default
- * Order by created_at desc
+ * Filters shared by the people list, search and export queries.
+ *
+ * `textSearch` is passed IN as a predicate rather than derived here — the
+ * list/export use a four-column ilike while the search adds a concatenated
+ * full-name column, and this keeps those different behaviors with ONE
+ * condition builder.
  */
-export async function listPeople(
+export interface PeopleFilterOptions {
+  status?: PersonStatus[];
+  source?: PersonSource[];
+  tagIds?: string[]; // Filter by tags (AND logic - person must have ALL tags)
+  includeDeleted?: boolean;
+  textSearch?: SQL;
+}
+
+/**
+ * The one place the people filter predicate list (tenant scope, soft-delete,
+ * status, source, text search, tag-count subquery) is built.
+ */
+export function buildPeopleConditions(
   churchId: string,
-  options: ListPeopleOptions = {}
-): Promise<ListPeopleResult> {
+  options: PeopleFilterOptions = {}
+): SQL[] {
   const {
-    cursor,
-    limit = 25,
     status,
     source,
-    search,
     tagIds,
     includeDeleted = false,
+    textSearch,
   } = options;
 
-  // Clamp limit to max 100
-  const safeLimit = Math.min(Math.max(1, limit), 100);
-
-  // Build base conditions
-  const baseConditions = [eq(persons.churchId, churchId)];
+  const conditions: SQL[] = [eq(persons.churchId, churchId)];
 
   // Exclude deleted unless requested
   if (!includeDeleted) {
-    baseConditions.push(isNull(persons.deletedAt));
+    conditions.push(isNull(persons.deletedAt));
   }
 
   // Filter by status if provided
   if (status && status.length > 0) {
-    baseConditions.push(inArray(persons.status, status));
+    conditions.push(inArray(persons.status, status));
   }
 
   // Filter by source if provided
   if (source && source.length > 0) {
-    baseConditions.push(inArray(persons.source, source));
+    conditions.push(inArray(persons.source, source));
   }
 
-  // Filter by search term if provided
-  if (search) {
-    const searchLike = `%${search}%`;
-    const searchCondition = or(
-      ilike(persons.firstName, searchLike),
-      ilike(persons.lastName, searchLike),
-      ilike(persons.email, searchLike),
-      ilike(persons.phone, searchLike)
-    );
-
-    if (searchCondition) {
-      baseConditions.push(searchCondition);
-    }
+  // Filter by search term if provided (predicate built by the caller)
+  if (textSearch) {
+    conditions.push(textSearch);
   }
 
-  // Filter by tags (AND logic - person must have ALL specified tags)
+  // Filter by tags (AND logic - person must have ALL specified tags):
+  // a subquery counts the matching tags and requires it to equal the number
+  // of requested tags
   if (tagIds && tagIds.length > 0) {
-    // Using a subquery to find people who have ALL the specified tags
-    // This counts the matching tags and ensures it equals the number of requested tags
-    const tagSubquery = sql`(
-      SELECT COUNT(DISTINCT pt.tag_id)::int 
-      FROM person_tags pt 
-      WHERE pt.person_id = ${persons.id} 
+    conditions.push(sql`(
+      SELECT COUNT(DISTINCT pt.tag_id)::int
+      FROM person_tags pt
+      WHERE pt.person_id = ${persons.id}
         AND pt.church_id = ${churchId}
         AND pt.tag_id IN (${sql.join(
           tagIds.map((id) => sql`${id}::uuid`),
           sql`, `
         )})
-    ) = ${tagIds.length}`;
-    baseConditions.push(tagSubquery);
+    ) = ${tagIds.length}`);
   }
+
+  return conditions;
+}
+
+/**
+ * The list/export text predicate: case-insensitive match over first name,
+ * last name, email and phone.
+ */
+function listTextSearch(search: string): SQL | undefined {
+  const searchLike = `%${search}%`;
+  return or(
+    ilike(persons.firstName, searchLike),
+    ilike(persons.lastName, searchLike),
+    ilike(persons.email, searchLike),
+    ilike(persons.phone, searchLike)
+  );
+}
+
+/**
+ * The one `(created_at, id)` cursor pagination implementation: counts the
+ * filtered set, resolves the cursor id to its `created_at` (scoped to
+ * churchId so a cursor cannot be aimed across tenants), fetches one extra
+ * row to detect more results, and returns the next cursor.
+ */
+export async function paginatePeopleByCreatedAtCursor(
+  churchId: string,
+  baseConditions: SQL[],
+  cursor: string | undefined,
+  limit: number
+): Promise<ListPeopleResult> {
+  // Clamp limit to max 100
+  const safeLimit = Math.min(Math.max(1, limit), 100);
 
   // Get total count (without pagination)
   const [countResult] = await db
@@ -168,9 +212,9 @@ export async function listPeople(
   // Build query conditions with cursor
   const queryConditions = [...baseConditions];
   if (cursor) {
-    // Cursor is the last person's id
-    // We need to get that person's createdAt to use for comparison
-    // IMPORTANT: Scope cursor lookup to churchId to prevent cross-tenant cursor manipulation
+    // Cursor is the last person's id — resolve its createdAt for comparison.
+    // IMPORTANT: Scope cursor lookup to churchId to prevent cross-tenant
+    // cursor manipulation
     const cursorPerson = await db
       .select({ createdAt: persons.createdAt })
       .from(persons)
@@ -209,6 +253,36 @@ export async function listPeople(
 }
 
 /**
+ * List people with cursor-based pagination
+ * Excludes soft-deleted by default
+ * Order by created_at desc
+ */
+export async function listPeople(
+  churchId: string,
+  options: ListPeopleOptions = {}
+): Promise<ListPeopleResult> {
+  const {
+    cursor,
+    limit = 25,
+    status,
+    source,
+    search,
+    tagIds,
+    includeDeleted = false,
+  } = options;
+
+  const conditions = buildPeopleConditions(churchId, {
+    status,
+    source,
+    tagIds,
+    includeDeleted,
+    textSearch: search ? listTextSearch(search) : undefined,
+  });
+
+  return paginatePeopleByCreatedAtCursor(churchId, conditions, cursor, limit);
+}
+
+/**
  * Filters for the people export. Mirrors the list filters (status, source,
  * search, tags) but without pagination — every matching person is returned.
  */
@@ -233,46 +307,13 @@ export async function getPeopleForExport(
 ): Promise<Person[]> {
   const { status, source, search, tagIds, includeDeleted = false } = options;
 
-  const conditions = [eq(persons.churchId, churchId)];
-
-  if (!includeDeleted) {
-    conditions.push(isNull(persons.deletedAt));
-  }
-
-  if (status && status.length > 0) {
-    conditions.push(inArray(persons.status, status));
-  }
-
-  if (source && source.length > 0) {
-    conditions.push(inArray(persons.source, source));
-  }
-
-  if (search) {
-    const searchLike = `%${search}%`;
-    const searchCondition = or(
-      ilike(persons.firstName, searchLike),
-      ilike(persons.lastName, searchLike),
-      ilike(persons.email, searchLike),
-      ilike(persons.phone, searchLike)
-    );
-    if (searchCondition) {
-      conditions.push(searchCondition);
-    }
-  }
-
-  if (tagIds && tagIds.length > 0) {
-    const tagSubquery = sql`(
-      SELECT COUNT(DISTINCT pt.tag_id)::int
-      FROM person_tags pt
-      WHERE pt.person_id = ${persons.id}
-        AND pt.church_id = ${churchId}
-        AND pt.tag_id IN (${sql.join(
-          tagIds.map((id) => sql`${id}::uuid`),
-          sql`, `
-        )})
-    ) = ${tagIds.length}`;
-    conditions.push(tagSubquery);
-  }
+  const conditions = buildPeopleConditions(churchId, {
+    status,
+    source,
+    tagIds,
+    includeDeleted,
+    textSearch: search ? listTextSearch(search) : undefined,
+  });
 
   return db
     .select()
