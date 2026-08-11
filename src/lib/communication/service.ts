@@ -160,22 +160,18 @@ export async function sendCommunication(
     })
     .returning();
 
-  // 5. Create recipient records and prepare emails
-  const emailBatch: Array<{
-    from: string;
-    to: string[];
-    subject: string;
-    html: string;
-    text: string;
-  }> = [];
-
-  const recipientRecords: Array<{
-    churchId: string;
-    communicationId: string;
+  // 5. Prepare one payload per reachable recipient. The recipient id is
+  // minted HERE (the pattern log.ts uses), so provider results map back to
+  // rows by walking these same objects — never by assuming INSERT ...
+  // RETURNING preserves order and re-aligning arrays with index arithmetic.
+  const payloads: Array<{
+    recipientId: string;
     personId: string;
     email: string;
-    channel: "email";
-    status: "pending";
+    subject: string;
+    body: string;
+    confirmUrl?: string;
+    declineUrl?: string;
   }> = [];
 
   for (const person of recipientPersons) {
@@ -188,7 +184,9 @@ export async function sendCommunication(
       ...personMergeData,
     };
 
-    // Generate confirmation tokens if this is meeting-linked
+    // Generate confirmation tokens if this is meeting-linked. Sequential on
+    // purpose: createConfirmationToken is a SELECT-then-INSERT, and running
+    // them concurrently would widen its duplicate-token race.
     let confirmUrl: string | undefined;
     let declineUrl: string | undefined;
     if (meeting) {
@@ -205,71 +203,74 @@ export async function sendCommunication(
       mergeData.decline_link = DECLINE_PLACEHOLDER;
     }
 
-    const renderedSubject = input.subject
-      ? renderTemplate(input.subject, mergeData)
-      : "";
-    const renderedBody = renderTemplate(input.body, mergeData);
-
-    const html = await render(
-      CommunicationEmail({
-        body: renderedBody,
-        confirmUrl,
-        declineUrl,
-        churchName: church.name,
-        previewText: renderedSubject,
-      })
-    );
-
-    const text = await render(
-      CommunicationEmail({
-        body: renderedBody,
-        churchName: church.name,
-      }),
-      { plainText: true }
-    );
-
-    emailBatch.push({
-      from: EMAIL_FROM,
-      to: [person.email],
-      subject: renderedSubject,
-      html,
-      text,
-    });
-
-    recipientRecords.push({
-      churchId,
-      communicationId: comm.id,
+    payloads.push({
+      recipientId: crypto.randomUUID(),
       personId: person.id,
       email: person.email,
-      channel: "email" as const,
-      status: "pending" as const,
+      subject: input.subject ? renderTemplate(input.subject, mergeData) : "",
+      body: renderTemplate(input.body, mergeData),
+      confirmUrl,
+      declineUrl,
     });
   }
 
-  // 6. Insert recipient records
-  let insertedRecipients: CommunicationRecipient[] = [];
-  if (recipientRecords.length > 0) {
-    insertedRecipients = await db
-      .insert(communicationRecipients)
-      .values(recipientRecords)
-      .returning();
+  // Render the email trees in parallel — they are pure and independent of one
+  // another, and two sequential renders per recipient made a bulk send scale
+  // its wall-clock time with the recipient count.
+  const emails = await Promise.all(
+    payloads.map(async (p) => ({
+      ...p,
+      html: await render(
+        CommunicationEmail({
+          body: p.body,
+          confirmUrl: p.confirmUrl,
+          declineUrl: p.declineUrl,
+          churchName: church.name,
+          previewText: p.subject,
+        })
+      ),
+      text: await render(
+        CommunicationEmail({
+          body: p.body,
+          churchName: church.name,
+        }),
+        { plainText: true }
+      ),
+    }))
+  );
+
+  // 6. Insert recipient records under the minted ids
+  if (emails.length > 0) {
+    await db.insert(communicationRecipients).values(
+      emails.map((p) => ({
+        id: p.recipientId,
+        churchId,
+        communicationId: comm.id,
+        personId: p.personId,
+        email: p.email,
+        channel: "email" as const,
+        status: "pending" as const,
+      }))
+    );
   }
 
-  // 7. Send via Resend (batch if > 1, single otherwise)
+  // 7. Send via Resend (batch if > 1, single otherwise), then mark the
+  // message sent — one terminal update, whichever path dispatched it.
   try {
-    if (emailBatch.length === 0) {
-      // No valid email recipients
-      await db
-        .update(communications)
-        .set({ status: "sent", sentAt: new Date(), updatedAt: new Date() })
-        .where(eq(communications.id, comm.id));
-    } else if (emailBatch.length === 1) {
+    if (emails.length === 1) {
       // Single send
-      const { data, error } = await resend.emails.send(emailBatch[0]);
+      const [recipient] = emails;
+      const { data, error } = await resend.emails.send({
+        from: EMAIL_FROM,
+        to: [recipient.email],
+        subject: recipient.subject,
+        html: recipient.html,
+        text: recipient.text,
+      });
       if (error) {
         console.error("[COMM] Single send failed:", error);
         await updateRecipientStatus(
-          insertedRecipients[0].id,
+          recipient.recipientId,
           "failed",
           error.message
         );
@@ -277,53 +278,51 @@ export async function sendCommunication(
         await db
           .update(communicationRecipients)
           .set({ externalId: data.id, status: "sent" })
-          .where(eq(communicationRecipients.id, insertedRecipients[0].id));
+          .where(eq(communicationRecipients.id, recipient.recipientId));
       }
-      await db
-        .update(communications)
-        .set({ status: "sent", sentAt: new Date(), updatedAt: new Date() })
-        .where(eq(communications.id, comm.id));
-    } else {
+    } else if (emails.length > 1) {
       // Batch send (max 100 per batch)
-      const chunks = chunkArray(emailBatch, 100);
-      let recipientIdx = 0;
-
-      for (const chunk of chunks) {
-        const { data, error } = await resend.batch.send(chunk);
+      for (const chunk of chunkArray(emails, 100)) {
+        const { data, error } = await resend.batch.send(
+          chunk.map((p) => ({
+            from: EMAIL_FROM,
+            to: [p.email],
+            subject: p.subject,
+            html: p.html,
+            text: p.text,
+          }))
+        );
         if (error) {
           console.error("[COMM] Batch send failed:", error);
           // Mark all recipients in this chunk as failed
-          for (let i = 0; i < chunk.length; i++) {
-            if (insertedRecipients[recipientIdx + i]) {
-              await updateRecipientStatus(
-                insertedRecipients[recipientIdx + i].id,
-                "failed",
-                error.message
-              );
-            }
+          for (const recipient of chunk) {
+            await updateRecipientStatus(
+              recipient.recipientId,
+              "failed",
+              error.message
+            );
           }
         } else if (data) {
-          // Map Resend IDs back to recipient records
+          // Resend answers a batch in request order, one result per email
           const ids = Array.isArray(data) ? data : [data];
           for (let i = 0; i < ids.length; i++) {
             const resendItem = ids[i];
-            const recipient = insertedRecipients[recipientIdx + i];
+            const recipient = chunk[i];
             if (recipient && resendItem?.id) {
               await db
                 .update(communicationRecipients)
                 .set({ externalId: resendItem.id, status: "sent" })
-                .where(eq(communicationRecipients.id, recipient.id));
+                .where(eq(communicationRecipients.id, recipient.recipientId));
             }
           }
         }
-        recipientIdx += chunk.length;
       }
-
-      await db
-        .update(communications)
-        .set({ status: "sent", sentAt: new Date(), updatedAt: new Date() })
-        .where(eq(communications.id, comm.id));
     }
+
+    await db
+      .update(communications)
+      .set({ status: "sent", sentAt: new Date(), updatedAt: new Date() })
+      .where(eq(communications.id, comm.id));
   } catch (err) {
     console.error("[COMM] Send exception:", err);
     await db
