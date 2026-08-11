@@ -164,12 +164,17 @@ export async function importRoleTemplates(
     ? allTemplates.filter((t) => roleKeys.includes(t.key))
     : allTemplates;
 
-  const roles: TeamRole[] = [];
+  // An empty selection is a legitimate answer (`roleKeys` matching nothing),
+  // and an INSERT with no rows is a runtime error rather than a no-op.
+  if (templates.length === 0) return [];
 
-  for (const template of templates) {
-    const [role] = await db
-      .insert(teamRoles)
-      .values({
+  // ONE statement, not one per template — every row is known up front, so a
+  // mid-import failure can no longer leave a team with half its roles
+  // (memory/invariants.md → Transactions; initializePredefinedTeams is the
+  // precedent one module over).
+  const rows = templates.map(
+    (template) =>
+      ({
         churchId,
         teamId,
         name: template.roleName,
@@ -179,11 +184,10 @@ export async function importRoleTemplates(
         sortOrder: template.sortOrder,
         status: "open" as RoleStatus,
         createdBy: userId,
-      } satisfies NewTeamRole)
-      .returning();
+      }) satisfies NewTeamRole
+  );
 
-    roles.push(role);
-  }
+  const roles = await db.insert(teamRoles).values(rows).returning();
 
   // Emit staffing changed
   const stats = await getTeamStaffingCounts(churchId, teamId);

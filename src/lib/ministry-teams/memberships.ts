@@ -99,46 +99,55 @@ export async function assignMember(
     throw new Error("Person is already assigned to this role");
   }
 
-  let membership: TeamMembership;
-  if (existing) {
-    // Reactivate the inactive row: fresh startDate, cleared end fields.
-    const [reactivated] = await db
-      .update(teamMemberships)
-      .set({
-        status: "active" as MembershipStatus,
-        startDate: startDate ?? null,
-        endDate: null,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(teamMemberships.churchId, churchId),
-          eq(teamMemberships.id, existing.id)
-        )
-      )
-      .returning();
-    membership = reactivated;
-  } else {
-    const [inserted] = await db
-      .insert(teamMemberships)
-      .values({
-        churchId,
-        teamId,
-        personId,
-        roleId,
-        startDate: startDate ?? null,
-        status: "active" as MembershipStatus,
-        createdBy: userId,
-      } satisfies NewTeamMembership)
-      .returning();
-    membership = inserted;
-  }
-
-  // Mark role as filled
-  await db
+  // The membership write and the role's status flip are both known up front,
+  // so they ship as ONE db.batch — a Neon batched transaction, all-or-nothing
+  // (memory/invariants.md → Transactions). Two separate awaits could fail in
+  // between and leave a role reading Filled with no active membership.
+  const markRoleFilled = db
     .update(teamRoles)
     .set({ status: "filled" as RoleStatus, updatedAt: new Date() })
     .where(and(eq(teamRoles.id, roleId), eq(teamRoles.churchId, churchId)));
+
+  let membership: TeamMembership;
+  if (existing) {
+    // Reactivate the inactive row: fresh startDate, cleared end fields.
+    const [[reactivated]] = await db.batch([
+      db
+        .update(teamMemberships)
+        .set({
+          status: "active" as MembershipStatus,
+          startDate: startDate ?? null,
+          endDate: null,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(teamMemberships.churchId, churchId),
+            eq(teamMemberships.id, existing.id)
+          )
+        )
+        .returning(),
+      markRoleFilled,
+    ]);
+    membership = reactivated;
+  } else {
+    const [[inserted]] = await db.batch([
+      db
+        .insert(teamMemberships)
+        .values({
+          churchId,
+          teamId,
+          personId,
+          roleId,
+          startDate: startDate ?? null,
+          status: "active" as MembershipStatus,
+          createdBy: userId,
+        } satisfies NewTeamMembership)
+        .returning(),
+      markRoleFilled,
+    ]);
+    membership = inserted;
+  }
 
   // Emit events
   await emitTeamMemberAssigned(teamId, personId, roleId, churchId, userId);
@@ -181,28 +190,34 @@ export async function removeMember(
 
   if (!membership) throw new Error("Membership not found");
 
-  // Deactivate membership
-  await db
-    .update(teamMemberships)
-    .set({
-      status: "inactive" as MembershipStatus,
-      endDate: new Date().toISOString().split("T")[0],
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(teamMemberships.churchId, churchId),
-        eq(teamMemberships.id, membershipId)
-      )
-    );
-
-  // Mark role as open
-  await db
-    .update(teamRoles)
-    .set({ status: "open" as RoleStatus, updatedAt: new Date() })
-    .where(
-      and(eq(teamRoles.id, membership.roleId), eq(teamRoles.churchId, churchId))
-    );
+  // Deactivate the membership and reopen its role in ONE db.batch — both
+  // writes are known up front, so a failure in between can no longer leave the
+  // role Open while the person still reads assigned (memory/invariants.md →
+  // Transactions).
+  await db.batch([
+    db
+      .update(teamMemberships)
+      .set({
+        status: "inactive" as MembershipStatus,
+        endDate: new Date().toISOString().split("T")[0],
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(teamMemberships.churchId, churchId),
+          eq(teamMemberships.id, membershipId)
+        )
+      ),
+    db
+      .update(teamRoles)
+      .set({ status: "open" as RoleStatus, updatedAt: new Date() })
+      .where(
+        and(
+          eq(teamRoles.id, membership.roleId),
+          eq(teamRoles.churchId, churchId)
+        )
+      ),
+  ]);
 
   // Emit staffing changed
   const stats = await getTeamStaffingCounts(churchId, membership.teamId);

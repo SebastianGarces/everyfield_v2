@@ -135,23 +135,11 @@ export async function markTrainingComplete(
   if (!person) throw new Error("Person not found");
   if (!program) throw new Error("Program not found");
 
-  // Check for existing completion
-  const existing = await db
-    .select()
-    .from(trainingCompletions)
-    .where(
-      and(
-        eq(trainingCompletions.churchId, churchId),
-        eq(trainingCompletions.personId, personId),
-        eq(trainingCompletions.trainingProgramId, programId)
-      )
-    )
-    .limit(1);
-
-  if (existing.length > 0) {
-    throw new Error("Training already completed");
-  }
-
+  // The database already forbids a duplicate (`training_completions_unique`
+  // on person_id + training_program_id), so the INSERT itself carries the
+  // claim — SELECT-then-INSERT is not a concurrency guard
+  // (memory/invariants.md → Transactions). An empty returning() means the
+  // completion already existed.
   const [completion] = await db
     .insert(trainingCompletions)
     .values({
@@ -162,7 +150,17 @@ export async function markTrainingComplete(
       verifiedBy: userId,
       createdBy: userId,
     } satisfies NewTrainingCompletion)
+    .onConflictDoNothing({
+      target: [
+        trainingCompletions.personId,
+        trainingCompletions.trainingProgramId,
+      ],
+    })
     .returning();
+
+  if (!completion) {
+    throw new Error("Training already completed");
+  }
 
   return completion;
 }
