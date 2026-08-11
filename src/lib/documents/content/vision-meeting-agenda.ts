@@ -38,7 +38,7 @@ export const VISION_MEETING_AGENDA: readonly {
   },
 ];
 
-export const VISION_MEETING_CLOSING_FALLBACK =
+const VISION_MEETING_CLOSING_FALLBACK =
   "Keep it to 45–60 minutes. End on time and on vision.";
 
 /** The closing line — the leader's name when known, the timekeeping nudge otherwise. */

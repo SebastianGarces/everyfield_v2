@@ -15,15 +15,15 @@ export default async function DocumentsPage() {
   // One resolver for the church + launch-day context, shared with the
   // generation route (`merge-context.ts`), so the auto-fill preview and the
   // generated file name the same day. Null covers "no church" in every form.
-  const resolved = await resolveDocumentMergeContext();
-  if (!resolved) {
+  const context = await resolveDocumentMergeContext();
+  if (!context) {
     redirect("/dashboard");
   }
 
   // Resolve auto-fill defaults server-side; the client library filters/renders.
   const items = DOCUMENT_TEMPLATES.map((template) => ({
     template,
-    defaults: buildAutoFillDefaults(template, resolved.context),
+    defaults: buildAutoFillDefaults(template, context),
   }));
 
   // A contextual link (DOC-014) arrives with `?template=<id>` and opens that

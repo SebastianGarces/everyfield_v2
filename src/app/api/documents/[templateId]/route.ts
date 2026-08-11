@@ -55,8 +55,8 @@ export async function GET(
     );
   }
 
-  const resolved = await resolveDocumentMergeContext();
-  if (!resolved) {
+  const context = await resolveDocumentMergeContext();
+  if (!context) {
     return NextResponse.json(
       { error: "No church associated with this account" },
       { status: 400 }
@@ -70,7 +70,7 @@ export async function GET(
     if (value !== null) provided[field.key] = value;
   }
 
-  const values = resolveMergeValues(template, resolved.context, provided);
+  const values = resolveMergeValues(template, context, provided);
 
   let file: Buffer;
   try {

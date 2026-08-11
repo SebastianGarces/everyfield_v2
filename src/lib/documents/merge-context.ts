@@ -9,17 +9,16 @@
 // components import.
 // ============================================================================
 
-import type { Church } from "@/db/schema";
 import { getCurrentSession, getCurrentUserChurch } from "@/lib/auth/session";
 import { getLaunchForChurch } from "@/lib/launch/queries";
 
 import type { MergeContext } from "./merge";
 
 /**
- * Resolve the current user's church and the merge context for it, or `null`
- * when the session has no church behind it (no session, no `churchId`, or a
- * dangling church row). Each caller keeps its own failure shape — the route
- * answers 400, the page redirects.
+ * Resolve the merge context for the current user's church, or `null` when the
+ * session has no church behind it (no session, no `churchId`, or a dangling
+ * church row). Each caller keeps its own failure shape — the route answers
+ * 400, the page redirects.
  *
  * The launch date comes from the LAUNCH ENTITY (`launches.target_date`,
  * LS-001) and never from the church row, whose `launch_date` column migration
@@ -28,10 +27,7 @@ import type { MergeContext } from "./merge";
  * `?launch_date=` still overrides it: provided values win in
  * `resolveMergeValues`, and this is only the auto-fill default.
  */
-export async function resolveDocumentMergeContext(): Promise<{
-  church: Church;
-  context: MergeContext;
-} | null> {
+export async function resolveDocumentMergeContext(): Promise<MergeContext | null> {
   const church = await getCurrentUserChurch();
   if (!church) return null;
 
@@ -41,11 +37,8 @@ export async function resolveDocumentMergeContext(): Promise<{
   const launch = await getLaunchForChurch(church.id);
 
   return {
-    church,
-    context: {
-      churchName: church.name,
-      userName: user?.name ?? null,
-      launchDate: launch?.targetDate ?? null,
-    },
+    churchName: church.name,
+    userName: user?.name ?? null,
+    launchDate: launch?.targetDate ?? null,
   };
 }

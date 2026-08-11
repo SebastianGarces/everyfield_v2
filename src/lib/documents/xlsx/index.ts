@@ -17,12 +17,8 @@ const XLSX_BUILDERS: Record<string, XlsxBuilder> = {
   "budget-worksheet": buildBudgetWorksheet,
 };
 
-/** Registered template ids — the catalog↔registry sync test enumerates these. */
+/** Registered template ids — `render.ts` folds these into its format registry. */
 export const XLSX_TEMPLATE_IDS: readonly string[] = Object.keys(XLSX_BUILDERS);
-
-export function hasXlsxRenderer(templateId: string): boolean {
-  return templateId in XLSX_BUILDERS;
-}
 
 /**
  * Render a template to a .xlsx Buffer. Throws if the template id has no builder.

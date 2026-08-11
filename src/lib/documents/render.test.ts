@@ -12,18 +12,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { DOCX_TEMPLATE_IDS } from "./docx";
-import { PDF_TEMPLATE_IDS } from "./pdf";
-import { canRenderDocument } from "./render";
+import { canRenderDocument, registeredTemplateIds } from "./render";
 import { DOCUMENT_TEMPLATES, getTemplateById } from "./templates";
-import type { DocumentFormat } from "./types";
-import { XLSX_TEMPLATE_IDS } from "./xlsx";
-
-const REGISTRY_IDS: Record<DocumentFormat, readonly string[]> = {
-  pdf: PDF_TEMPLATE_IDS,
-  docx: DOCX_TEMPLATE_IDS,
-  xlsx: XLSX_TEMPLATE_IDS,
-};
+import { FORMAT_OUTPUT, type DocumentFormat } from "./types";
 
 test("every format a catalog entry declares has a registered renderer", () => {
   for (const template of DOCUMENT_TEMPLATES) {
@@ -37,8 +28,8 @@ test("every format a catalog entry declares has a registered renderer", () => {
 });
 
 test("every registered renderer belongs to a catalog entry declaring its format", () => {
-  for (const format of Object.keys(REGISTRY_IDS) as DocumentFormat[]) {
-    for (const id of REGISTRY_IDS[format]) {
+  for (const format of Object.keys(FORMAT_OUTPUT) as DocumentFormat[]) {
+    for (const id of registeredTemplateIds(format)) {
       const template = getTemplateById(id);
       assert.ok(
         template,

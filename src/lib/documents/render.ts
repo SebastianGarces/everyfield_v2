@@ -9,21 +9,21 @@
 // (the registries import @react-pdf/renderer / docx / exceljs).
 // ============================================================================
 
-import { hasDocxRenderer, renderDocumentDocx } from "./docx";
-import { hasRenderer, renderDocumentPdf } from "./pdf";
+import { DOCX_TEMPLATE_IDS, renderDocumentDocx } from "./docx";
+import { PDF_TEMPLATE_IDS, renderDocumentPdf } from "./pdf";
 import type { DocumentFormat, DocumentMergeValues } from "./types";
-import { hasXlsxRenderer, renderDocumentXlsx } from "./xlsx";
+import { XLSX_TEMPLATE_IDS, renderDocumentXlsx } from "./xlsx";
 
 const RENDERERS: Record<
   DocumentFormat,
   {
-    has(templateId: string): boolean;
+    ids: readonly string[];
     render(templateId: string, values: DocumentMergeValues): Promise<Buffer>;
   }
 > = {
-  pdf: { has: hasRenderer, render: renderDocumentPdf },
-  docx: { has: hasDocxRenderer, render: renderDocumentDocx },
-  xlsx: { has: hasXlsxRenderer, render: renderDocumentXlsx },
+  pdf: { ids: PDF_TEMPLATE_IDS, render: renderDocumentPdf },
+  docx: { ids: DOCX_TEMPLATE_IDS, render: renderDocumentDocx },
+  xlsx: { ids: XLSX_TEMPLATE_IDS, render: renderDocumentXlsx },
 };
 
 /** Whether `templateId` has a renderer registered for `format`. */
@@ -31,7 +31,14 @@ export function canRenderDocument(
   format: DocumentFormat,
   templateId: string
 ): boolean {
-  return RENDERERS[format].has(templateId);
+  return RENDERERS[format].ids.includes(templateId);
+}
+
+/** All template ids with a renderer registered for `format`. */
+export function registeredTemplateIds(
+  format: DocumentFormat
+): readonly string[] {
+  return RENDERERS[format].ids;
 }
 
 /**
