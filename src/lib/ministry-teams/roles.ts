@@ -89,7 +89,7 @@ export async function updateRole(
     sortOrder?: number;
   }
 ): Promise<TeamRole> {
-  const updateData: Record<string, unknown> = { updatedAt: new Date() };
+  const updateData: Partial<NewTeamRole> = { updatedAt: new Date() };
 
   if (data.name !== undefined) updateData.name = data.name;
   if (data.description !== undefined) updateData.description = data.description;
@@ -154,6 +154,11 @@ export async function importRoleTemplates(
   teamKey: PredefinedTeamKey,
   roleKeys?: string[]
 ): Promise<TeamRole[]> {
+  // The teamId arrives from the client (importRoleTemplatesAction is a public
+  // endpoint), so prove it belongs to the caller's church before writing rows
+  // that point at it — same rule as createRole above.
+  await verifyTeamOwnership(churchId, teamId);
+
   const allTemplates = getRoleTemplates(teamKey);
   const templates = roleKeys
     ? allTemplates.filter((t) => roleKeys.includes(t.key))

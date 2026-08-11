@@ -258,7 +258,7 @@ export async function updateTeam(
     status?: TeamStatus;
   }
 ): Promise<MinistryTeam> {
-  const updateData: Record<string, unknown> = { updatedAt: new Date() };
+  const updateData: Partial<NewMinistryTeam> = { updatedAt: new Date() };
 
   if (data.name !== undefined) updateData.name = data.name;
   if (data.description !== undefined) updateData.description = data.description;

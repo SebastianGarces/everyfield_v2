@@ -10,7 +10,8 @@ import {
   type TrainingCompletion,
   type NewTrainingCompletion,
 } from "@/db/schema";
-import { and, eq, inArray, sql, asc } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql, asc } from "drizzle-orm";
+import { verifyTeamOwnership } from "./shared";
 
 // ============================================================================
 // Types
@@ -73,6 +74,13 @@ export async function createTrainingProgram(
     isRequired?: boolean;
   }
 ): Promise<TrainingProgram> {
+  // teamId is client-supplied (createTrainingProgramAction is a public
+  // endpoint): prove it names one of the caller's own teams before stamping a
+  // program with it.
+  if (data.teamId) {
+    await verifyTeamOwnership(churchId, data.teamId);
+  }
+
   const [program] = await db
     .insert(trainingPrograms)
     .values({
@@ -97,6 +105,36 @@ export async function markTrainingComplete(
   programId: string,
   userId: string
 ): Promise<TrainingCompletion> {
+  // Both ids are client-supplied (markTrainingCompleteAction is a public
+  // endpoint): prove each belongs to the caller's church before writing a row
+  // that points at them — the same shape assignMember uses.
+  const [[person], [program]] = await Promise.all([
+    db
+      .select({ id: persons.id })
+      .from(persons)
+      .where(
+        and(
+          eq(persons.id, personId),
+          eq(persons.churchId, churchId),
+          isNull(persons.deletedAt)
+        )
+      )
+      .limit(1),
+    db
+      .select({ id: trainingPrograms.id })
+      .from(trainingPrograms)
+      .where(
+        and(
+          eq(trainingPrograms.id, programId),
+          eq(trainingPrograms.churchId, churchId)
+        )
+      )
+      .limit(1),
+  ]);
+
+  if (!person) throw new Error("Person not found");
+  if (!program) throw new Error("Program not found");
+
   // Check for existing completion
   const existing = await db
     .select()
@@ -266,7 +304,12 @@ export async function getTrainingMatrix(
         lastName: persons.lastName,
       })
       .from(persons)
-      .where(inArray(persons.id, memberPersonIds)),
+      .where(
+        and(
+          eq(persons.churchId, churchId),
+          inArray(persons.id, memberPersonIds)
+        )
+      ),
     db
       .select()
       .from(trainingCompletions)

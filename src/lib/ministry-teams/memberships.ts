@@ -249,11 +249,18 @@ export async function getPersonTeams(
     db
       .select({ id: ministryTeams.id, name: ministryTeams.name })
       .from(ministryTeams)
-      .where(inArray(ministryTeams.id, teamIdSet)),
+      .where(
+        and(
+          eq(ministryTeams.churchId, churchId),
+          inArray(ministryTeams.id, teamIdSet)
+        )
+      ),
     db
       .select({ id: teamRoles.id, name: teamRoles.name })
       .from(teamRoles)
-      .where(inArray(teamRoles.id, roleIdSet)),
+      .where(
+        and(eq(teamRoles.churchId, churchId), inArray(teamRoles.id, roleIdSet))
+      ),
   ]);
 
   const teamNameMap = new Map(teamRows.map((t) => [t.id, t.name]));
