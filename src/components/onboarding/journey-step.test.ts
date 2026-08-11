@@ -292,8 +292,14 @@ test("the step-3 fact comes from the declaration record, not the columns", () =>
 // ----------------------------------------------------------------------------
 
 test("both document call sites source the launch date from the entity", () => {
+  // Both surfaces resolve their MergeContext through ONE resolver,
+  // `resolveDocumentMergeContext` (`src/lib/documents/merge-context.ts`), and
+  // THAT resolver reads the launch entity. One function is what keeps the
+  // dialog's preview and the generated file agreeing about the day (#306) —
+  // stronger than the two-copies-that-must-agree shape this test used to pin.
   const page = read("app", "(dashboard)", "documents", "page.tsx");
   const route = read("app", "api", "documents", "[templateId]", "route.ts");
+  const resolver = read("lib", "documents", "merge-context.ts");
 
   for (const [name, source] of [
     ["documents/page.tsx", page],
@@ -301,16 +307,28 @@ test("both document call sites source the launch date from the entity", () => {
   ] as const) {
     assert.match(
       source,
-      /import \{ getLaunchForChurch \} from "@\/lib\/launch\/queries"/,
-      `${name} must read the launch entity`
+      /import \{ resolveDocumentMergeContext \} from "@\/lib\/documents\/merge-context"/,
+      `${name} must resolve its merge context through the shared resolver`
     );
-    assert.match(
-      source,
-      /launchDate: launch\?\.targetDate \?\? null/,
-      `${name} must pass the stored date, not a stub`
-    );
-    // The stale "null because sourcing is #203's job" stubs are gone — a
-    // hardcoded null that outlives its reason reads as a decision.
+  }
+
+  assert.match(
+    resolver,
+    /import \{ getLaunchForChurch \} from "@\/lib\/launch\/queries"/,
+    "the resolver must read the launch entity"
+  );
+  assert.match(
+    resolver,
+    /launchDate: launch\?\.targetDate \?\? null/,
+    "the resolver must pass the stored date, not a stub"
+  );
+  // The stale "null because sourcing is #203's job" stubs are gone — a
+  // hardcoded null that outlives its reason reads as a decision.
+  for (const [name, source] of [
+    ["documents/page.tsx", page],
+    ["api/documents/[templateId]/route.ts", route],
+    ["lib/documents/merge-context.ts", resolver],
+  ] as const) {
     assert.equal(
       /launchDate: null/.test(stripComments(source)),
       false,
