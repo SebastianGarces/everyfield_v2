@@ -67,6 +67,25 @@ export async function getPerson(
 }
 
 /**
+ * Assert that `personId` names a live person in `churchId`.
+ *
+ * The guard person-scoped actions call before writing rows (or uploading
+ * files) stamped with the caller's church: a client-supplied personId from
+ * another tenant must fail here, never surface as a cross-tenant write.
+ * Throws the "Person not found" the rest of the domain already maps to its
+ * standard error message.
+ */
+export async function assertPersonInChurch(
+  churchId: string,
+  personId: string
+): Promise<void> {
+  const person = await getPerson(churchId, personId);
+  if (!person) {
+    throw new Error("Person not found");
+  }
+}
+
+/**
  * List people with cursor-based pagination
  * Excludes soft-deleted by default
  * Order by created_at desc

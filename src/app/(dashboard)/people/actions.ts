@@ -25,6 +25,7 @@ import {
   parseCsvImport,
 } from "@/lib/people/import";
 import {
+  assertPersonInChurch,
   createPerson,
   deletePerson,
   getPeopleForExport,
@@ -485,6 +486,9 @@ export async function addNoteAction(
       return { success: false, error: "Note cannot be empty" };
     }
 
+    // Never write against a personId the caller's church does not own
+    await assertPersonInChurch(user.churchId, personId);
+
     await db.insert(personActivities).values({
       churchId: user.churchId,
       personId: personId,
@@ -668,6 +672,9 @@ export async function assignTagAction(
     const { user } = await verifySession();
     if (!user.churchId) return { success: false, error: "Unauthorized" };
 
+    // Never write against a personId the caller's church does not own
+    await assertPersonInChurch(user.churchId, personId);
+
     await assignTag(user.churchId, personId, tagId, user.id);
 
     revalidatePath(`/people/${personId}`);
@@ -689,6 +696,9 @@ export async function removeTagAction(
   try {
     const { user } = await verifySession();
     if (!user.churchId) return { success: false, error: "Unauthorized" };
+
+    // Never write against a personId the caller's church does not own
+    await assertPersonInChurch(user.churchId, personId);
 
     await removeTag(user.churchId, personId, tagId, user.id);
 
@@ -763,6 +773,9 @@ export async function createAssessmentAction(
         >,
       };
     }
+
+    // Never write against a personId the caller's church does not own
+    await assertPersonInChurch(user.churchId, personId);
 
     // Create the assessment
     const assessment = await createAssessment(
@@ -848,6 +861,9 @@ export async function createInterviewAction(
       };
     }
 
+    // Never write against a personId the caller's church does not own
+    await assertPersonInChurch(user.churchId, personId);
+
     // Create the interview
     const interview = await createInterview(
       user.churchId,
@@ -930,6 +946,10 @@ export async function createCommitmentAction(
         >,
       };
     }
+
+    // Never write against a personId the caller's church does not own —
+    // checked BEFORE the upload so no file lands for a foreign person
+    await assertPersonInChurch(user.churchId, parsed.data.personId);
 
     // Handle file upload if provided
     let documentKey: string | undefined;
@@ -1425,6 +1445,9 @@ export async function addSkillAction(data: {
         >,
       };
     }
+
+    // Never write against a personId the caller's church does not own
+    await assertPersonInChurch(user.churchId, parsed.data.personId);
 
     const skill = await addSkill(user.churchId, parsed.data);
 
