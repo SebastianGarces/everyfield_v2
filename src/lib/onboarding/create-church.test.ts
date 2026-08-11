@@ -363,9 +363,11 @@ test("a finish that never returns a state is still reported to the planter", () 
   );
 
   // Finishing is idempotent (`onboarding_completed_at IS NULL`), so the message
-  // is allowed to invite a retry; the action keeps the guard that makes that true.
-  const actions = source("app", "(dashboard)", "dashboard", "actions.ts");
-  assert.match(actions, /isNull\(churches\.onboardingCompletedAt\)/);
+  // is allowed to invite a retry; the statement the action awaits keeps the
+  // guard that makes that true (`completeOnboardingStatement`, whose SQL is
+  // pinned by `declare-journey.test.ts`).
+  const statement = source("lib", "onboarding", "declare-journey.ts");
+  assert.match(statement, /isNull\(churches\.onboardingCompletedAt\)/);
 });
 
 // ----------------------------------------------------------------------------

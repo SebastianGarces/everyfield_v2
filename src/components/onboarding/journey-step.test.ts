@@ -68,6 +68,12 @@ const FLOW_CODE = stripComments(
 const ACTIONS_CODE = stripComments(
   read("app", "(dashboard)", "dashboard", "actions.ts")
 );
+// Step 3's write path itself — extracted out of the `"use server"` module so
+// the ruled branches are drivable by `declare-journey.test.ts`; the source
+// pins below follow it there. The action stays a thin mint.
+const DECLARE_CODE = stripComments(
+  read("lib", "onboarding", "declare-journey.ts")
+);
 
 // ----------------------------------------------------------------------------
 // 1. The launch date goes through the entity, never a column on `churches`
@@ -75,10 +81,13 @@ const ACTIONS_CODE = stripComments(
 
 test("the date is written through the launch entity's service rail", () => {
   assert.match(
-    ACTIONS_CODE,
+    DECLARE_CODE,
     /import \{ scheduleLaunchAction \} from "@\/app\/\(dashboard\)\/launch\/actions"/
   );
-  assert.match(ACTIONS_CODE, /await scheduleLaunchAction\(\{/);
+  // The runner writes through its dep; the real deps bind that dep to the rail
+  // and nothing else.
+  assert.match(DECLARE_CODE, /await deps\.scheduleLaunch\(\{/);
+  assert.match(DECLARE_CODE, /scheduleLaunch: scheduleLaunchAction,/);
 });
 
 test("no onboarding surface writes a launch date to the church row", () => {
@@ -86,17 +95,17 @@ test("no onboarding surface writes a launch date to the church row", () => {
   // reaching for the service that used to own it — is the regression this
   // guards, and it is worth guarding because the column shape is what every
   // pre-0032 example in the repo's history shows.
-  for (const source of [STEP_CODE, ACTIONS_CODE]) {
+  for (const source of [STEP_CODE, ACTIONS_CODE, DECLARE_CODE]) {
     assert.equal(/launch_date/.test(source), false);
     assert.equal(/churches\/launch-date/.test(source), false);
-  }
 
-  // The action may not hand-roll the write either: the guards (the row lock,
-  // the compare-and-set, the `launch_events` journal) live in
-  // `src/lib/launch/service.ts`, and an action with its own statement would be
-  // a second write path with none of them.
-  assert.equal(/setLaunchDateStatement/.test(ACTIONS_CODE), false);
-  assert.equal(/update\(launches\)/.test(ACTIONS_CODE), false);
+    // The write path may not hand-roll the write either: the guards (the row
+    // lock, the compare-and-set, the `launch_events` journal) live in
+    // `src/lib/launch/service.ts`, and a module with its own statement would
+    // be a second write path with none of them.
+    assert.equal(/setLaunchDateStatement/.test(source), false);
+    assert.equal(/update\(launches\)/.test(source), false);
+  }
 });
 
 // ----------------------------------------------------------------------------
@@ -108,20 +117,20 @@ test("'no date yet' reaches no launch write at all", () => {
   // called with a null/empty target "so the row exists" — a planter who said
   // they have no date would get a launch row anyway, and the countdown would
   // have something to render.
-  const branch = ACTIONS_CODE.slice(
-    ACTIONS_CODE.indexOf("if (rawDate)"),
-    ACTIONS_CODE.indexOf("try {")
+  const branch = DECLARE_CODE.slice(
+    DECLARE_CODE.indexOf("if (rawDate)"),
+    DECLARE_CODE.indexOf("try {")
   );
-  assert.match(branch, /await scheduleLaunchAction\(/);
+  assert.match(branch, /await deps\.scheduleLaunch\(/);
   assert.equal(
-    (ACTIONS_CODE.match(/scheduleLaunchAction\(/g) ?? []).length,
+    (DECLARE_CODE.match(/deps\.scheduleLaunch\(/g) ?? []).length,
     1,
     "exactly one call site, and it is the one inside the has-a-date branch"
   );
 
   // No placeholder row by any other route either.
-  assert.equal(/planning/.test(ACTIONS_CODE), false);
-  assert.equal(/insert\(launches\)/.test(ACTIONS_CODE), false);
+  assert.equal(/planning/.test(DECLARE_CODE), false);
+  assert.equal(/insert\(launches\)/.test(DECLARE_CODE), false);
 });
 
 // ----------------------------------------------------------------------------
@@ -130,30 +139,32 @@ test("'no date yet' reaches no launch write at all", () => {
 
 test("the stage goes through declareInitialPhase, not transitionPhase", () => {
   assert.match(
-    ACTIONS_CODE,
+    DECLARE_CODE,
     /import \{ declareInitialPhase \} from "@\/lib\/phase-engine\/transitions"/
   );
-  assert.match(ACTIONS_CODE, /await declareInitialPhase\(/);
-  assert.equal(
-    /transitionPhase\(/.test(ACTIONS_CODE),
-    false,
-    "a transition would claim the planter moved phases inside EveryField"
-  );
+  assert.match(DECLARE_CODE, /await deps\.declareInitialPhase\(/);
+  for (const source of [ACTIONS_CODE, DECLARE_CODE]) {
+    assert.equal(
+      /transitionPhase\(/.test(source),
+      false,
+      "a transition would claim the planter moved phases inside EveryField"
+    );
+  }
 });
 
 test("the date is written BEFORE the declaration captures its snapshot", () => {
   // The declaration's fact snapshot includes the launch countdown. Declared
   // first, the plant's own audit row would record it as having no launch date
   // moments before it acquired one.
-  const scheduleAt = ACTIONS_CODE.indexOf("scheduleLaunchAction(");
-  const declareAt = ACTIONS_CODE.indexOf("declareInitialPhase(");
+  const scheduleAt = DECLARE_CODE.indexOf("deps.scheduleLaunch(");
+  const declareAt = DECLARE_CODE.indexOf("deps.declareInitialPhase(");
   assert.ok(scheduleAt > -1 && declareAt > scheduleAt);
 });
 
 test("the stage value becomes a phase through the one parser", () => {
-  assert.match(ACTIONS_CODE, /phaseForJourneyStage\(input\.stage\)/);
+  assert.match(DECLARE_CODE, /phaseForJourneyStage\(input\.stage\)/);
   assert.match(
-    ACTIONS_CODE,
+    DECLARE_CODE,
     /if \(phase === null\)/,
     "an unrecognised stage is refused, not defaulted"
   );
@@ -275,7 +286,7 @@ test("the step-3 fact comes from the declaration record, not the columns", () =>
   // planter who never saw the step look identical, and the OB-011 nudge would
   // keep asking forever.
   const page = stripComments(
-    read("app", "(dashboard)", "dashboard", "page.tsx")
+    read("app", "(dashboard)", "dashboard", "plant-dashboard.tsx")
   );
 
   assert.match(page, /hasInitialPhaseDeclaration\(churchId\)/);
@@ -502,17 +513,17 @@ test("the declared phase is the snapshot's phase, with no ladder behind it", () 
 
 test("the action reports a refused declaration as a refusal", () => {
   // The two outcomes of `declareInitialPhase` reach the client as two states.
-  assert.match(ACTIONS_CODE, /status: "already_declared"; phase: number/);
+  assert.match(DECLARE_CODE, /status: "already_declared"; phase: number/);
   assert.match(
-    ACTIONS_CODE,
+    DECLARE_CODE,
     /declared\.status === "already_declared"\s*\?\s*"already_declared"\s*:\s*"declared"/
   );
 
   // And the phase reported is the STORED one in both arms — `declared.phase`,
   // which `declareInitialPhase` reads off the locked church row — never the
   // number this request submitted.
-  assert.match(ACTIONS_CODE, /phase: declared\.phase/);
-  assert.equal(/phase: phase,/.test(ACTIONS_CODE), false);
+  assert.match(DECLARE_CODE, /phase: declared\.phase/);
+  assert.equal(/phase: phase,/.test(DECLARE_CODE), false);
 });
 
 test("the refusal names the stage, where to change it, and that the date saved", () => {
@@ -562,14 +573,16 @@ test("a refused declaration does not advance the flow by itself", () => {
 // ----------------------------------------------------------------------------
 
 test("'no date yet' over an existing date is refused, and refused before any write", () => {
-  const branch = ACTIONS_CODE.slice(
-    ACTIONS_CODE.indexOf("} else {"),
-    ACTIONS_CODE.indexOf("const declared = await declareInitialPhase")
+  const branch = DECLARE_CODE.slice(
+    DECLARE_CODE.indexOf("} else {"),
+    DECLARE_CODE.indexOf("const declared = await deps.declareInitialPhase")
   );
 
-  // It READS the stored launch through the launch module's own query, and
-  // returns a refusal attached to the date question.
-  assert.match(branch, /await getLaunchForChurch\(user\.churchId\)/);
+  // It READS the stored launch through the launch module's own query (bound as
+  // `readLaunch` by the real deps), and returns a refusal attached to the date
+  // question.
+  assert.match(branch, /await deps\.readLaunch\(actor\.churchId\)/);
+  assert.match(DECLARE_CODE, /readLaunch: getLaunchForChurch,/);
   assert.match(branch, /if \(launch\?\.targetDate\)/);
   assert.match(branch, /status: "error"/);
   assert.match(branch, /field: "date"/);
@@ -581,14 +594,14 @@ test("'no date yet' over an existing date is refused, and refused before any wri
 
   // And it does not quietly clear the date either — clearing is a launch write
   // path that does not exist, and inventing one here would be a second rail.
-  assert.equal(/delete\(launches\)/.test(ACTIONS_CODE), false);
+  assert.equal(/delete\(launches\)/.test(DECLARE_CODE), false);
   assert.equal(/targetDate: null/.test(branch), false);
 });
 
 test("the refusal is rendered under the date question that produced it", () => {
   // The action names the field; the step trusts that name and falls back to the
   // save-level slot only when there is none.
-  assert.match(ACTIONS_CODE, /field\?: DeclareJourneyErrorField/);
+  assert.match(DECLARE_CODE, /field\?: DeclareJourneyErrorField/);
   assert.match(STEP_CODE, /refuse\(result\.field \?\? "form", result\.error\)/);
 });
 
