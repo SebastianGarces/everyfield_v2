@@ -7,20 +7,17 @@ import { cn } from "@/lib/utils";
 import { MeetingCard } from "./meeting-card";
 import { Button } from "@/components/ui/button";
 import type { MeetingWithCounts } from "@/lib/meetings/types";
-import type { MeetingType } from "@/db/schema";
+import {
+  DEFAULT_LIST_MEETING_TYPE,
+  MEETING_TYPE_FILTERS,
+  parseListMeetingTypeFilter,
+} from "@/lib/meetings/meeting-type-filter";
 
 interface MeetingListProps {
   upcomingMeetings: MeetingWithCounts[];
   pastMeetings: MeetingWithCounts[];
   initialView: "upcoming" | "past" | "all";
 }
-
-const typeFilters: { value: MeetingType | "all"; label: string }[] = [
-  { value: "all", label: "All Types" },
-  { value: "vision_meeting", label: "Vision Meetings" },
-  { value: "orientation", label: "Orientations" },
-  { value: "team_meeting", label: "Team Meetings" },
-];
 
 export function MeetingList({
   upcomingMeetings,
@@ -31,7 +28,10 @@ export function MeetingList({
   const searchParams = useSearchParams();
   const view =
     (searchParams.get("view") as "upcoming" | "past" | "all") || initialView;
-  const activeType = (searchParams.get("type") as MeetingType | null) || "all";
+  // The SAME parser the server page runs over `?type=`, not a cast: the page
+  // and the chip row must agree about what the URL says, or a hand-edited
+  // `?type=x` lists everything while no chip is highlighted.
+  const activeType = parseListMeetingTypeFilter(searchParams.get("type"));
 
   const showUpcoming = view === "upcoming" || view === "all";
   const showPast = view === "past" || view === "all";
@@ -43,7 +43,7 @@ export function MeetingList({
       if (
         value === null ||
         (key === "view" && value === "upcoming") ||
-        (key === "type" && value === "all")
+        (key === "type" && value === DEFAULT_LIST_MEETING_TYPE)
       ) {
         params.delete(key);
       } else {
@@ -56,12 +56,23 @@ export function MeetingList({
 
   return (
     <div className="space-y-6">
-      {/* Type Filter */}
-      <div className="bg-muted flex w-fit gap-1 rounded-lg p-1">
-        {typeFilters.map((f) => (
+      {/*
+        Type filter. The offered filters come from `MEETING_TYPE_FILTERS` —
+        the same array the analytics view renders — so the two surfaces cannot
+        drift apart in values, labels or order. The DEFAULTS still differ on
+        purpose: this browse surface starts on "all", analytics starts on
+        vision meetings. See lib/meetings/meeting-type-filter.ts.
+      */}
+      <div
+        aria-label="Filter meetings by type"
+        className="bg-muted flex w-fit gap-1 rounded-lg p-1"
+        role="group"
+      >
+        {MEETING_TYPE_FILTERS.map((f) => (
           <button
             key={f.value}
             onClick={() => updateParams({ type: f.value })}
+            aria-current={activeType === f.value ? "true" : undefined}
             className={cn(
               "cursor-pointer rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
               activeType === f.value

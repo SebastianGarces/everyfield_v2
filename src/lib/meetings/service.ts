@@ -7,7 +7,7 @@ import {
   meetingEvaluations,
   ministryTeams,
   persons,
-  teamMemberships,
+  tasks,
   type AttendanceType,
   type ChurchMeeting,
   type MeetingChecklistItem,
@@ -26,6 +26,13 @@ import type {
 } from "@/lib/validations/meetings";
 import { and, asc, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import {
+  defaultAgendaTemplatesForType,
+  parseAgenda,
+  sectionsFromTemplates,
+  type AgendaSection,
+} from "./agenda";
+import type { EvaluationTrendPoint } from "./evaluation-comparison";
+import {
   emitAttendanceRecorded,
   emitAttendanceFinalized,
   emitEvaluationCompleted,
@@ -39,6 +46,12 @@ import type {
   MeetingWithCounts,
 } from "./types";
 import { emitTrainingScheduled } from "@/lib/ministry-teams/events";
+import {
+  addTeamMembersToGuestList,
+  listActiveTeamMemberIds,
+  shouldPopulateGuestListFromTeam,
+} from "./guest-list";
+import { topLevelTasksOnly } from "@/lib/tasks/service";
 import { deriveAttendanceType } from "./attendance-type";
 
 // ============================================================================
@@ -303,6 +316,16 @@ export async function createMeeting(
     meetingNumber = await getNextMeetingNumber(churchId);
   }
 
+  // VM-013: a new vision meeting arrives with the six-section running order
+  // already on it, so the planter edits an agenda instead of facing a blank
+  // one. An agenda supplied by the caller always wins; every other meeting type
+  // starts empty and gets the builder's empty state.
+  const suppliedAgenda = parseAgenda(data.agenda);
+  const agenda =
+    suppliedAgenda.length > 0
+      ? suppliedAgenda
+      : sectionsFromTemplates(defaultAgendaTemplatesForType(data.type));
+
   const values: NewChurchMeeting = {
     churchId,
     createdBy: userId,
@@ -319,7 +342,7 @@ export async function createMeeting(
     estimatedAttendance: data.estimatedAttendance ?? null,
     durationMinutes: data.durationMinutes ?? null,
     notes: data.notes ?? null,
-    agenda: data.agenda ?? null,
+    agenda,
   };
 
   const [meeting] = await db.insert(churchMeetings).values(values).returning();
@@ -329,26 +352,31 @@ export async function createMeeting(
     await populateChecklist(churchId, meeting.id);
   }
 
+  // VM-006 (#312): a team meeting starts with its team's roster on the guest
+  // list — a meeting of a team already knows who is invited, so the planter
+  // edits a list instead of retyping one. Every other meeting type is
+  // untouched and keeps its empty-then-invited guest list.
+  //
+  // ONE read serves both this and the training announcement below, so the
+  // people invited and the people announced to can never be different sets.
+  const teamMemberIds = shouldPopulateGuestListFromTeam(
+    values.type,
+    values.teamId
+  )
+    ? await listActiveTeamMemberIds(churchId, values.teamId)
+    : [];
+
+  await addTeamMembersToGuestList(churchId, meeting.id, teamMemberIds, userId);
+
   // If it's a training team meeting, emit training scheduled event
   if (
     data.type === "team_meeting" &&
     data.meetingSubtype === "training" &&
     data.teamId
   ) {
-    const members = await db
-      .select({ personId: teamMemberships.personId })
-      .from(teamMemberships)
-      .where(
-        and(
-          eq(teamMemberships.churchId, churchId),
-          eq(teamMemberships.teamId, data.teamId),
-          eq(teamMemberships.status, "active")
-        )
-      );
-
     await emitTrainingScheduled(
       data.teamId,
-      members.map((m) => m.personId),
+      teamMemberIds,
       "training",
       data.datetime,
       churchId,
@@ -1073,15 +1101,23 @@ export async function getEvaluation(
 
 /**
  * Get evaluation score trend across meetings (most recent first, returned chronologically).
+ *
+ * The QUERY half of VM-016c, and the only half that belongs in this module.
+ * The point shape, the window callers pass as `limit`, and the comparison
+ * itself touch no database and live in `./evaluation-comparison.ts`, which
+ * imports nothing. Nothing here re-exports them — import from there.
+ *
+ * `meetingId` is on every point because `meetingNumber` cannot identify one:
+ * it is null for every non-vision meeting and is only unique among vision
+ * meetings, so a comparison keyed on it would silently pair up the wrong rows.
  */
 export async function getEvaluationTrend(
   churchId: string,
   limit = 10
-): Promise<
-  { meetingNumber: number | null; totalScore: number; datetime: Date }[]
-> {
+): Promise<EvaluationTrendPoint[]> {
   const rows = await db
     .select({
+      meetingId: churchMeetings.id,
       meetingNumber: churchMeetings.meetingNumber,
       totalScore: meetingEvaluations.totalScore,
       datetime: churchMeetings.datetime,
@@ -1097,6 +1133,7 @@ export async function getEvaluationTrend(
 
   // Return in chronological order (oldest first)
   return rows.reverse().map((r) => ({
+    meetingId: r.meetingId,
     meetingNumber: r.meetingNumber,
     totalScore: parseFloat(r.totalScore),
     datetime: r.datetime,
@@ -1211,5 +1248,172 @@ export async function getChecklistSummary(
   return {
     total: row?.total ?? 0,
     checked: row?.checked ?? 0,
+  };
+}
+
+// ============================================================================
+// Agenda (VM-013)
+//
+// The shape, the bounds, the clamp, the reader, the offered defaults and the
+// template→section mint ALL live in `./agenda.ts`, which imports nothing but an
+// erased type — `AgendaBuilder` is a client component and needs the same
+// policy this module does. Nothing here re-exports them, and nothing here
+// decides any of them: `defaultAgendaForType` used to live in this module and
+// was a second copy of the detail page's `meeting.type === "vision_meeting"`
+// ternary. The one function left below is the WRITE.
+// ============================================================================
+
+/**
+ * Replace a meeting's agenda with `sections`.
+ *
+ * Whole-array replace, not per-section CRUD: add, remove, retime and reorder
+ * are all "the running order is now this", and one write means a reorder can
+ * never land half-applied. The stored value is the normalized array this
+ * returns, so what the next reader parses is exactly what was validated here.
+ *
+ * The church id is part of the `WHERE`, so a meeting id from another church
+ * matches no row and is refused rather than silently writing nothing.
+ */
+export async function setMeetingAgenda(
+  churchId: string,
+  meetingId: string,
+  sections: readonly unknown[]
+): Promise<AgendaSection[]> {
+  const normalized = parseAgenda(sections);
+
+  const [updated] = await db
+    .update(churchMeetings)
+    .set({ agenda: normalized, updatedAt: new Date() })
+    .where(
+      and(
+        eq(churchMeetings.churchId, churchId),
+        eq(churchMeetings.id, meetingId)
+      )
+    )
+    .returning({ id: churchMeetings.id });
+
+  if (!updated) {
+    throw new Error("Meeting not found");
+  }
+
+  return normalized;
+}
+
+// ============================================================================
+// Follow-up completion (VM-020)
+// ============================================================================
+
+/**
+ * How much of a meeting's linked task work is done.
+ *
+ * The card that renders this is titled `MEETING_EVALUATION_TASK_CARD_TITLE` and
+ * its progress line is `meetingLinkedTaskProgressCopy` — both in `copy.ts`,
+ * which is where the rulings behind them are written down.
+ */
+export interface MeetingFollowUpCompletion {
+  /** Tasks linked to this meeting. */
+  total: number;
+  /** How many of them are `complete`. */
+  completed: number;
+  /**
+   * 0–100, whole numbers. `null` when `total` is 0 — a percentage with a zero
+   * denominator is UNKNOWN, never 0%, the same rule the delivery figures follow
+   * (memory/invariants.md → Communication). "0% of follow-ups done" is a claim
+   * about work that does not exist.
+   */
+  percent: number | null;
+}
+
+/**
+ * "A task linked to THIS meeting", as a list of conditions.
+ *
+ * The link is `related_type = 'meeting' AND related_id = <this meeting>`, and
+ * deliberately nothing looser. Finalization also mints one follow-up per
+ * attendee, but F5 links those to the PERSON (`related_type = 'person'`,
+ * `related_id = <person id>` — `src/lib/tasks/events.ts`), so they carry no
+ * meeting id at all. Counting them would mean joining back through attendance
+ * on the person, and a person who attends two meetings would then have their
+ * single follow-up counted against both. A figure that double-counts is worse
+ * than a narrow one; widening this means giving those tasks a meeting link
+ * first, in the generator, not guessing at one here.
+ *
+ * `church_id` is in the WHERE rather than inferred from the meeting id:
+ * isolation is application-layer, so every read states its own tenant boundary
+ * (memory/invariants.md → Multi-Tenancy).
+ *
+ * `topLevelTasksOnly()` is imported rather than re-spelled because a subtask is
+ * a checklist item, not a task (#370) — anything reporting a NUMBER of tasks
+ * has to count the population `listTasks` and `getTaskCounts` count.
+ */
+export function meetingLinkedTaskConditions(
+  churchId: string,
+  meetingId: string
+) {
+  return [
+    eq(tasks.churchId, churchId),
+    eq(tasks.relatedType, "meeting"),
+    eq(tasks.relatedId, meetingId),
+    isNull(tasks.deletedAt),
+    topLevelTasksOnly(),
+  ];
+}
+
+/**
+ * The completed-of-total count, as a query.
+ *
+ * Exported un-awaited so a test can render it with `.toSQL()` and assert the
+ * tenant and meeting scoping without a database — the technique
+ * `src/lib/wiki/tenancy.test.ts` uses.
+ */
+export function meetingFollowUpCountQuery(churchId: string, meetingId: string) {
+  return db
+    .select({
+      total: sql<number>`count(*)::int`,
+      completed: sql<number>`count(*) filter (where ${tasks.status} = 'complete')::int`,
+    })
+    .from(tasks)
+    .where(and(...meetingLinkedTaskConditions(churchId, meetingId)));
+}
+
+/**
+ * Follow-up completion for one meeting (VM-020).
+ *
+ * `null` means "there is no figure to show", for two reasons that both render
+ * as nothing rather than as a number:
+ *
+ *  1. The meeting is not this church's. Scoping is asserted here, not assumed
+ *     from the caller having a meeting id.
+ *  2. Attendance was never finalized. `actual_attendance` non-null IS the
+ *     finalized marker (see the block comment above `runFinalizeAttendance`),
+ *     and follow-ups only exist once finalization has run. Before that "0%"
+ *     would read as "you have done none of your follow-ups" when the truthful
+ *     statement is "there are none yet".
+ */
+export async function getFollowUpCompletion(
+  churchId: string,
+  meetingId: string
+): Promise<MeetingFollowUpCompletion | null> {
+  const [meeting] = await db
+    .select({ actualAttendance: churchMeetings.actualAttendance })
+    .from(churchMeetings)
+    .where(
+      and(
+        eq(churchMeetings.churchId, churchId),
+        eq(churchMeetings.id, meetingId)
+      )
+    )
+    .limit(1);
+
+  if (!meeting || meeting.actualAttendance === null) return null;
+
+  const [row] = await meetingFollowUpCountQuery(churchId, meetingId);
+
+  const total = row?.total ?? 0;
+  const completed = row?.completed ?? 0;
+
+  return {
+    total,
+    completed,
+    percent: total === 0 ? null : Math.round((completed / total) * 100),
   };
 }
