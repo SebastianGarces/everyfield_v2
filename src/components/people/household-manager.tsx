@@ -2,8 +2,8 @@
 
 import {
   addToHouseholdAction,
-  createHouseholdAction,
   createHouseholdFromPersonAction,
+  createHouseholdWithHeadAction,
   propagateAddressAction,
   removeFromHouseholdAction,
 } from "@/app/(dashboard)/people/household-actions";
@@ -119,23 +119,15 @@ function HouseholdManagerBody({
           return;
         }
       } else {
-        const result = await createHouseholdAction({ name: newHouseholdName });
+        // One atomic action: household + head land together or not at all,
+        // so "created household but failed to add person" cannot happen.
+        const result = await createHouseholdWithHeadAction(
+          person.id,
+          newHouseholdName
+        );
         if (!result.success) {
           toast.error("Failed to create household", {
             description: result.error,
-          });
-          return;
-        }
-
-        // Created without the person's address, so add them to it explicitly
-        const addResult = await addToHouseholdAction(
-          person.id,
-          result.data.id,
-          "head"
-        );
-        if (!addResult.success) {
-          toast.error("Created household but failed to add person", {
-            description: addResult.error,
           });
           return;
         }

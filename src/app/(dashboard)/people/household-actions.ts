@@ -4,8 +4,8 @@ import type { Household, HouseholdRole } from "@/db/schema";
 import { logPersonActivity } from "@/lib/people/activity";
 import {
   addToHousehold,
-  createHousehold,
   createHouseholdFromPerson,
+  createHouseholdWithHead,
   deleteHousehold,
   getHousehold,
   getHouseholdMembers,
@@ -40,22 +40,23 @@ export async function listHouseholdsAction(): Promise<
 }
 
 /**
- * Create a new household
+ * Create an address-less household and add the person as its head, in one
+ * atomic batch (ruling 410-4B). Replaces the old client-side two-step
+ * (create household, then add person), whose second failure left an orphan
+ * empty household.
  */
-export async function createHouseholdAction(data: {
-  name: string;
-  addressLine1?: string;
-  addressLine2?: string;
-  city?: string;
-  state?: string;
-  postalCode?: string;
-  country?: string;
-}): Promise<ActionResult<Household>> {
+export async function createHouseholdWithHeadAction(
+  personId: string,
+  householdName: string
+): Promise<ActionResult<{ household: Household; person: Person }>> {
   return withChurchSession(
-    "createHouseholdAction",
-    { fallback: "Failed to create household" },
-    async ({ churchId }) => {
-      const parsed = householdCreateSchema.safeParse(data);
+    "createHouseholdWithHeadAction",
+    {
+      known: { "Person not found": "Person not found or has been deleted" },
+      fallback: "Failed to create household",
+    },
+    async ({ user, churchId }) => {
+      const parsed = householdCreateSchema.safeParse({ name: householdName });
       if (!parsed.success) {
         return {
           success: false,
@@ -64,9 +65,29 @@ export async function createHouseholdAction(data: {
         };
       }
 
-      const household = await createHousehold(churchId, parsed.data);
+      const result = await createHouseholdWithHead(
+        churchId,
+        personId,
+        parsed.data.name
+      );
+
+      // Log activity for household creation (same shape as the
+      // from-person path — the person created it and heads it)
+      await logPersonActivity({
+        churchId,
+        personId,
+        activityType: "household_created",
+        metadata: {
+          householdName: result.household.name,
+          householdId: result.household.id,
+          role: "head",
+        },
+        performedBy: user.id,
+      });
+
       revalidatePath("/people");
-      return { success: true, data: household };
+      revalidatePath(`/people/${personId}`);
+      return { success: true, data: result };
     }
   );
 }

@@ -396,3 +396,82 @@ export async function createHouseholdFromPerson(
 
   return { household, person: updatedPerson };
 }
+
+/**
+ * Create an address-less household and add the person as its head — in ONE
+ * `db.batch`, so "created the household but failed to add the person" cannot
+ * leave an orphan household row (ruling 410-4B). This replaces the client's
+ * old two-action sequence (create, then add).
+ *
+ * The new household deliberately carries no address, which is what collapses
+ * `addToHousehold`'s copy-the-household-address branch: there is nothing to
+ * copy, so the person's own address is left untouched — exactly what the old
+ * two-step flow did.
+ *
+ * `db.transaction()` throws on neon-http; both writes are known up front, so
+ * the sanctioned shape is one `db.batch` (memory/invariants.md → Transactions
+ * / Atomicity), with the household id minted here so the person update can
+ * reference it in the same round trip.
+ */
+export async function createHouseholdWithHead(
+  churchId: string,
+  personId: string,
+  householdName: string
+): Promise<{ household: Household; person: Person }> {
+  // Refuse legibly before writing anything — a bad personId (wrong tenant,
+  // deleted, forged) must not create a household. The person predicate is
+  // re-asserted inside the batch's UPDATE, scoped to churchId.
+  const [person] = await db
+    .select({ id: persons.id })
+    .from(persons)
+    .where(
+      and(
+        eq(persons.churchId, churchId),
+        eq(persons.id, personId),
+        isNull(persons.deletedAt)
+      )
+    )
+    .limit(1);
+
+  if (!person) {
+    throw new Error("Person not found");
+  }
+
+  const householdId = crypto.randomUUID();
+
+  const [insertedHouseholds, updatedPersons] = await db.batch([
+    db
+      .insert(households)
+      .values({
+        id: householdId,
+        churchId,
+        name: householdName,
+        country: "US",
+      })
+      .returning(),
+    db
+      .update(persons)
+      .set({
+        householdId,
+        householdRole: "head",
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(persons.churchId, churchId),
+          eq(persons.id, personId),
+          isNull(persons.deletedAt)
+        )
+      )
+      .returning(),
+  ]);
+
+  const household = insertedHouseholds[0];
+  const updatedPerson = updatedPersons[0];
+
+  if (!household || !updatedPerson) {
+    throw new Error("Failed to create household");
+  }
+
+  return { household, person: updatedPerson };
+}
