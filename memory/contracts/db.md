@@ -59,7 +59,7 @@ tenant scope; `created_at`/`updated_at` default now.
   `isInitialDeclaration` / `hasInitialPhaseDeclaration`, never the `reason` text — the reserved
   sentence there is display copy that `transitionPhaseSchema` merely refuses to let a planter
   retype.
-- **`phase_prompt_answers` is an idempotency key, not a log** (`tasks.ts`, migration 0035,
+- **`phase_prompt_answers` is an idempotency key, not a log** (`tasks.ts`, migration 0037,
   ruled 2026-08-10 on #393). One row per phase transition, unique on `transition_id` — the row
   EXISTING is what silences the T-020 checklist prompt and what makes a repeat accept a no-op, on
   any device. `answer` (`accepted` | `declined`, CHECK-closed) is recorded because "did anyone

@@ -41,7 +41,7 @@ import {
 // WHAT AN ANSWER IS RECORDED IN — A ROW, KEYED BY TRANSITION ID (ruled
 // 2026-08-10 on PR #393). The one thing that is NOT derivable is "this planter
 // already answered", and it now lives in `phase_prompt_answers`, one row per
-// transition, unique on `transition_id` (migration 0035). That is what makes
+// transition, unique on `transition_id` (migration 0037). That is what makes
 // the answer follow the PLANTER rather than the browser: declining on a laptop
 // silences the prompt on a phone, and pressing Import a second time — on a
 // second device, after clearing cookies, or by double-clicking — adds nothing.

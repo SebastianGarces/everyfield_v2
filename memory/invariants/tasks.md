@@ -98,7 +98,7 @@ A `kind = 'initial_declaration'` row is filtered out, for the reason [`../invari
 
 A **backward** move still prompts. "Advance" is the oversight milestone's rule, because that one announces progress; a planter who moves 3 → 2 is doing phase-2 work and wants the phase-2 checklist.
 
-The only non-derivable fact is "this planter already answered", and it lives in `phase_prompt_answers` — one row per transition, unique on `transition_id` (migration 0035). That key is what makes the prompt re-arm on its own: the next move is a different id with no row against it.
+The only non-derivable fact is "this planter already answered", and it lives in `phase_prompt_answers` — one row per transition, unique on `transition_id` (migration 0037). That key is what makes the prompt re-arm on its own: the next move is a different id with no row against it.
 
 It shipped as an httpOnly **cookie** holding the answered transition's id, and that was ruled out on 2026-08-10 (PR #393). A cookie answers for a BROWSER: the same planter on a phone, in a private window, or after clearing cookies was prompted about the same transition, and accepting there imported a second full set of 22–26 tasks. The residual was written up around declining, which is the mild half — declining twice costs nothing, accepting twice costs a duplicated task list.
 
