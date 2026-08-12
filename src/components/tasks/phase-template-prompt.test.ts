@@ -878,10 +878,7 @@ test("nothing answered leaves the prompt up and re-reads nothing", () => {
 
   assert.deepEqual(decision.outcome, { status: "nothing" });
   assert.equal(decision.answeredTransitionId, null, "an unanswered prompt");
-  assert.deepEqual(decision.revalidation, {
-    refresh: false,
-    revalidatePath: false,
-  });
+  assert.equal(decision.revalidation, "none");
 });
 
 test("a PARTIAL import revalidates NOTHING, or the receipt is destroyed", () => {
@@ -893,6 +890,10 @@ test("a PARTIAL import revalidates NOTHING, or the receipt is destroyed", () => 
   // (.next-docs/01-app/03-api-reference/04-functions/revalidatePath.mdx), and
   // the planter IS on that path. /tasks is `force-dynamic`, so neither call
   // buys anything either.
+  //
+  // The directive is ONE value now, so "revalidatePath without refresh" — the
+  // combination that actually shipped — is no longer expressible; this asserts
+  // the remaining choice is the right one.
   const result: AcceptPhaseTemplatePromptResult = {
     status: "partial",
     transitionId: TRANSITION_ID,
@@ -909,14 +910,9 @@ test("a PARTIAL import revalidates NOTHING, or the receipt is destroyed", () => 
     templateNames: ["Ministry Team Setup"],
   });
   assert.equal(
-    decision.revalidation.refresh,
-    false,
-    "a partial import called refresh() and took its own receipt down"
-  );
-  assert.equal(
-    decision.revalidation.revalidatePath,
-    false,
-    "a partial import called revalidatePath('/tasks') — which re-renders /tasks immediately for a Server Function and unmounts the receipt"
+    decision.revalidation,
+    "none",
+    "a partial import asked for a re-read — either call re-renders /tasks for a Server Function and unmounts the receipt"
   );
   assert.equal(
     decision.answeredTransitionId,
@@ -935,10 +931,7 @@ test("a clean import takes the prompt down and re-reads the list", () => {
   });
 
   assert.deepEqual(decision.outcome, { status: "idle" });
-  assert.deepEqual(decision.revalidation, {
-    refresh: true,
-    revalidatePath: true,
-  });
+  assert.equal(decision.revalidation, "full");
   assert.equal(decision.answeredTransitionId, TRANSITION_ID);
 });
 
@@ -954,8 +947,8 @@ test("a second press is a success that created nothing", () => {
     "answering twice reported a failure the planter cannot act on"
   );
   assert.equal(
-    decision.revalidation.refresh,
-    true,
+    decision.revalidation,
+    "full",
     "the prompt is answered and must come down"
   );
   assert.equal(decision.answeredTransitionId, TRANSITION_ID);
@@ -964,20 +957,14 @@ test("a second press is a success that created nothing", () => {
 test("declining decides the same way, from a transition id or its absence", () => {
   const landed = decidePhaseTemplateDismissOutcome(TRANSITION_ID);
   assert.deepEqual(landed.outcome, { status: "idle" });
-  assert.deepEqual(landed.revalidation, {
-    refresh: true,
-    revalidatePath: true,
-  });
+  assert.equal(landed.revalidation, "full");
   assert.equal(landed.answeredTransitionId, TRANSITION_ID);
 
   // No transition to decline: the press changed nothing, which from the
   // planter's side IS a failure — and nothing is re-read, so nothing is lost.
   const missed = decidePhaseTemplateDismissOutcome(null);
   assert.deepEqual(missed.outcome, { status: "failed" });
-  assert.deepEqual(missed.revalidation, {
-    refresh: false,
-    revalidatePath: false,
-  });
+  assert.equal(missed.revalidation, "none");
   assert.equal(missed.answeredTransitionId, null);
 });
 

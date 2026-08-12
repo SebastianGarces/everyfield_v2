@@ -80,11 +80,13 @@ The phase prompt is the *timely* entrance — one stage's checklists, offered at
 
 That route is also what makes `importTaskTemplateAction` legal where it lives. [`../invariants.md`](../invariants.md) → Authentication says a not-yet-wired write belongs in a sibling module with no `"use server"` directive; the action's auth shape was always right, but with the picker mounted nowhere it was still a POSTable endpoint no UI reached, and the first attempt at this track was rejected for exactly that. Unmounting the picker re-opens the finding — it does not merely lose a screen.
 
+Its mint is **above** the `try`, the shape [`../invariants.md`](../invariants.md) → Authentication requires of a NEW action, so a sessionless POST throws instead of being converted into a handled `{ success: false }` — and there is deliberately no `Unauthorized` branch in its catch, because that rejection can no longer arrive there. It is NOT on `TRY_WRAPPED_MINTS`, and it never should be: the repo-wide walk only follows exports containing `.safeParse(`, and this one takes a bare `string`, so nothing would have failed had it kept the old shape. The rule is the authority, not the walk.
+
 `/tasks/templates` is a **static segment beside `/tasks/[id]`**. Delete the directory and the URL does not 404; it resolves to a task whose id is the word "templates" and answers 500, which is why `template-picker.test.ts` asserts the route file renders the picker and the `/tasks` header links to it. Rendering the component in a test proves the markup, never that a browser can ask for it.
 
 ## A phase change prompts; it never creates (T-020)
 
-**Source:** `src/lib/tasks/phase-prompt.ts`, `src/components/tasks/phase-template-prompt.tsx`, `src/lib/events/subscriptions.ts`, `src/lib/tasks/templates.ts`, `src/lib/tasks/import.ts`
+**Source:** `src/lib/tasks/phase-prompt.ts`, `src/components/tasks/phase-template-prompt.tsx`, `src/components/tasks/phase-template-prompt-controls.tsx`, `src/lib/events/subscriptions.ts`, `src/lib/tasks/templates.ts`, `src/lib/tasks/import.ts`
 
 `phase.changed` has a task-side handler, and the handler writes nothing. That is not an unfinished wire — it is the rule. A planter who advances a stage and finds twenty tasks they did not ask for stops trusting the list with the ones they did, so the stage change makes the stage's checklists *visible*, with their real dates already worked out, and the planter presses or does not. `handlePhaseChangedForTemplatePrompt` is registered precisely so the place a future author would add auto-creation already carries the argument against it; `phase-prompt-live.test.ts` asserts a phase change leaves the tasks table empty.
 
@@ -143,7 +145,16 @@ Unticking every box and pressing Import used to do nothing at all: no answer row
 
 The fix is refusal, not explanation: `phaseTemplatePromptControlState` disables Import while `tickedCount === 0`, and the empty submit becomes impossible instead of silently pointless. "Not now" deliberately stays live — an empty selection IS a dismissal, and a panel with no enabled control is a trap. The disabled button is not left bare either; `NOTHING_TICKED_HINT` renders beside it in a `role="status"` line, because a disabled button is not focusable and its `aria-describedby` would never be read.
 
-The ticks are counted off the DOM (`change` bubbles to the form, the handler counts `input[name="templateKey"]:checked`) rather than mirrored into React state. The boxes stay uncontrolled server markup, and there is no second source of truth for something the form already knows.
+The ticks are counted off the DOM rather than mirrored into React state. The boxes stay uncontrolled server markup, and there is no second source of truth for something the form already knows. One reader answers "how many are ticked" — `tickedTemplateCount(form)`, counting `input[name="templateKey"]:checked`, the same selector the server action reads.
+
+**But that count has TWO writers, not one, and the second one is React (#313).** The obvious writer is the bubbled `change`: a tick anywhere in the form reaches the one handler on the form. The other is invisible from the code — **React 19 restores an uncontrolled form to its `defaultChecked` state once a `<form action>` action settles, and it fires no `change` doing it.** Round 3 added three settled outcomes that leave this panel mounted (import `nothing`, import `failed`, dismiss `failed` — all `revalidation: "none"`), so after any of them every box is ticked again while a count kept only by the `change` handler still holds its pre-submit value.
+
+Both halves of that desync were observed in a browser, and neither is cosmetic:
+
+- a **disabled Import above three visibly ticked boxes**, under a hint asking the planter to tick something — the exact trap the empty-selection refusal exists to prevent, arrived at from the other side;
+- a **retry that imported checklists the planter had unticked**, because the restored boxes are what the form submits.
+
+So a `useEffect` keyed on both outcomes re-reads `tickedTemplateCount(form)` after every settle. A settle is precisely what `useActionState` reports by handing back a new object, and the effect asks the DOM rather than branching on the status — what has to happen does not vary with which outcome it was. It is **not** the `useEffect`-for-data-synchronisation that [`../contracts/data-patterns.md`](../contracts/data-patterns.md) forbids: nothing here is server data and no state is mirrored from props. It is the DOM-subscription case that file names as legitimate — React mutated the checkboxes without telling us, and this reads them back. Deleting the effect restores a shipped defect.
 
 `acceptPhaseTemplatePrompt`'s own `keys.length === 0 → null` guard is untouched and must stay: the button stops the honest empty press, the guard stops a forged key list spending the planter's one answer.
 
@@ -163,6 +174,8 @@ So `acceptPhaseTemplatePrompt` **returns** `partial` rather than throwing once a
 This is the one place in the prompt where the house `refresh()` pattern is deliberately not followed, and it is the reason the lead is passed INTO the island — the receipt has to be able to replace it.
 
 **Where that decision lives.** All four branches are `decidePhaseTemplateImportOutcome` in `src/lib/tasks/phase-prompt.ts` — a pure function returning `{ outcome, revalidation, answeredTransitionId }`, with `decidePhaseTemplateDismissOutcome` beside it for "Not now". They were inline in `importPhaseTemplatesAction`, a non-exported `"use server"` closure that no test can call, which is exactly how the partial branch acquired a `revalidatePath` nobody could see. The action now only performs the directive.
+
+**And the directive is ONE value, not a pair of flags.** `PhasePromptRevalidation` is `"none" | "full"`: `"full"` runs `refresh()` *and* `revalidatePath("/tasks")`, `"none"` runs neither, and no branch has ever wanted one without the other. It was two booleans first, which made `{refresh: false, revalidatePath: true}` — the combination that actually shipped and had to be caught by a verifier — a legal value that four paragraphs of prose had to argue against. `applyRevalidation` in the server component is one branch, and the illegal state is now unrepresentable rather than merely documented.
 
 **One live region, not one per failure.** The three failure messages render through a single `role="alert"` paragraph derived by `phaseTemplatePromptAlert`. Each `useActionState` hook keeps its last result forever, so three independent conditionals put TWO alerts on screen after a failed import followed by a failed dismiss — two announcements for one press, the older describing a press already moved on from. The island tracks `lastPress` (UI state, set by each button's `onClick`) so the region carries the press that was actually made. The `role="status"` empty-tick hint is rendered **unconditionally with its text toggled**: a polite live region inserted together with its first message is commonly never announced. It carries no `aria-describedby` from the Import button, which is disabled — and therefore unfocusable — for exactly as long as the hint has anything to say.
 

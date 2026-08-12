@@ -677,13 +677,30 @@ export interface TemplateImportSummary {
  *
  * The key is checked against the catalog before anything is written, so an
  * unknown key is a refusal rather than an empty import that reports success.
+ *
+ * THE MINT IS ABOVE THE `try`, not merely first inside it, which is the shape
+ * `memory/invariants.md` → Authentication requires of a NEW action. Inside the
+ * `try` the catch converts a sessionless POST into a handled
+ * `{ success: false }`; above it the rejection escapes, which is what an
+ * anonymous caller is owed. The 45 older try-wrapped mints are a closed,
+ * pinned residual (`TRY_WRAPPED_MINTS` in
+ * `src/lib/auth/server-action-surface.test.ts`) and this export is not one of
+ * them — it also takes a bare `string` and parses nothing, so the repo-wide
+ * walk, which only follows exports containing `.safeParse(`, would never have
+ * seen it. The rule is the authority here, not the walk.
+ *
+ * The only caller, `template-picker.tsx`, already wraps the call in
+ * `try`/`catch` and renders `IMPORT_FAILED_MESSAGE` on an outright rejection.
  */
 export async function importTaskTemplateAction(
   templateKey: string
 ): Promise<ActionResult<TemplateImportSummary>> {
-  try {
-    const { user } = await verifySession();
+  const { user } = await verifySession();
 
+  try {
+    // Not part of the auth check: a session with no church is a signed-in user
+    // with nothing to import INTO, which is a data condition and gets a
+    // sentence.
     if (!user.churchId) {
       return {
         success: false,
@@ -725,13 +742,9 @@ export async function importTaskTemplateAction(
   } catch (error) {
     console.error("importTaskTemplateAction error:", error);
 
-    if (error instanceof Error && error.message === "Unauthorized") {
-      return {
-        success: false,
-        error: "You must be logged in to import a checklist",
-      };
-    }
-
+    // No `Unauthorized` branch here, and there must not be one: the mint is
+    // above this `try`, so that rejection never reaches this catch. Re-adding
+    // it would be the first half of moving the mint back down.
     const known = userFacingError(error);
     if (known) return { success: false, error: known };
 

@@ -150,10 +150,17 @@ async function markPromptAnswered(transitionId: string): Promise<void> {
 /**
  * Carry out a revalidation directive. Both actions answer the same way, and
  * WHAT to re-read is decided in `phase-prompt.ts`, where it can be tested.
+ *
+ * ONE BRANCH, because the directive has one bit. The two calls are never
+ * wanted apart here — for a Server Function, purging the `/tasks` entry
+ * re-renders the route just as `refresh()` does — and the pair of booleans
+ * this replaced is what let the partial import call one without the other.
  */
 function applyRevalidation(revalidation: PhasePromptRevalidation): void {
-  if (revalidation.refresh) refresh();
-  if (revalidation.revalidatePath) revalidatePath("/tasks");
+  if (revalidation === "none") return;
+
+  refresh();
+  revalidatePath("/tasks");
 }
 
 /**

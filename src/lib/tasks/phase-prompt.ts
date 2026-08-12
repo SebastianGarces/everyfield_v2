@@ -588,38 +588,25 @@ export type PhaseTemplateDismissOutcome =
  * What the caller must re-read after an answer — and, for the partial case,
  * what it must NOT (ruled 2026-08-12, round 3 on PR #393).
  *
- * BOTH FLAGS ARE FALSE FOR A PARTIAL IMPORT, and that is the whole point of
- * returning a directive instead of letting the action decide inline. The claim
- * is kept on a part-way import, so `/tasks` re-rendered has no prompt in it —
- * and the island holding the receipt goes with it. `refresh()` obviously does
- * that. So does `revalidatePath("/tasks")`: per
- * `.next-docs/01-app/03-api-reference/04-functions/revalidatePath.mdx`, a
+ * ONE VALUE, NOT A PAIR OF FLAGS, and the reason is the bug. `refresh()` and
+ * `revalidatePath("/tasks")` are never wanted apart on this route: `"full"`
+ * runs both (the list below the prompt gained tasks and the prompt itself must
+ * come down — `memory/contracts/data-patterns.md`), `"none"` runs neither. Two
+ * booleans made `{refresh: false, revalidatePath: true}` representable, which
+ * is precisely what shipped on the partial branch under the excuse "so the
+ * next navigation is correct". It was wrong twice over: per
+ * `.next-docs/01-app/03-api-reference/04-functions/revalidatePath.mdx` a
  * Server Function's call "Updates the UI immediately (if viewing the affected
- * path)" — and the planter IS on the affected path. The earlier code called it
- * "so the next navigation is correct", which was wrong twice over: it unmounts
- * the receipt now, and `/tasks` is `export const dynamic = "force-dynamic"`
+ * path)" — the planter IS on `/tasks`, so it unmounts the receipt exactly as
+ * `refresh()` would — and `/tasks` is `export const dynamic = "force-dynamic"`
  * (`src/app/(dashboard)/tasks/page.tsx`), so it is never cached and the next
  * navigation was already correct.
+ *
+ * `"none"` IS THE PARTIAL IMPORT'S ANSWER, and it is now the only way to write
+ * it. The claim is kept on a part-way import, so any re-render of `/tasks` has
+ * no prompt in it and takes the island holding the receipt with it.
  */
-export interface PhasePromptRevalidation {
-  /** Re-render the route the planter is looking at. */
-  refresh: boolean;
-  /** Purge the cached `/tasks` entry — which also re-renders it, here. */
-  revalidatePath: boolean;
-}
-
-/** Nothing changed on screen, or nothing may be allowed to. */
-const NO_REVALIDATION: PhasePromptRevalidation = {
-  refresh: false,
-  revalidatePath: false,
-};
-
-/** The list below this prompt gained tasks, so both halves are re-read
- *  (`memory/contracts/data-patterns.md`). */
-const FULL_REVALIDATION: PhasePromptRevalidation = {
-  refresh: true,
-  revalidatePath: true,
-};
+export type PhasePromptRevalidation = "none" | "full";
 
 export interface PhaseTemplateImportDecision {
   outcome: PhaseTemplateImportOutcome;
@@ -650,7 +637,7 @@ export function decidePhaseTemplateImportOutcome(
   if (!result) {
     return {
       outcome: { status: "nothing" },
-      revalidation: NO_REVALIDATION,
+      revalidation: "none",
       answeredTransitionId: null,
     };
   }
@@ -662,10 +649,7 @@ export function decidePhaseTemplateImportOutcome(
         createdCount: result.createdCount,
         templateNames: result.templateNames,
       },
-      // NOT A MISSING CASE. See `PhasePromptRevalidation` — either call takes
-      // the receipt off the screen, and neither buys anything on a
-      // `force-dynamic` route.
-      revalidation: NO_REVALIDATION,
+      revalidation: "none",
       answeredTransitionId: result.transitionId,
     };
   }
@@ -674,7 +658,7 @@ export function decidePhaseTemplateImportOutcome(
   // the prompt must come down; the second simply created nothing this time.
   return {
     outcome: { status: "idle" },
-    revalidation: FULL_REVALIDATION,
+    revalidation: "full",
     answeredTransitionId: result.transitionId,
   };
 }
@@ -699,14 +683,14 @@ export function decidePhaseTemplateDismissOutcome(
   if (!transitionId) {
     return {
       outcome: { status: "failed" },
-      revalidation: NO_REVALIDATION,
+      revalidation: "none",
       answeredTransitionId: null,
     };
   }
 
   return {
     outcome: { status: "idle" },
-    revalidation: FULL_REVALIDATION,
+    revalidation: "full",
     answeredTransitionId: transitionId,
   };
 }

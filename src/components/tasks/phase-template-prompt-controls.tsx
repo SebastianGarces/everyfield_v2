@@ -71,7 +71,7 @@ import {
 // UNCONTROLLED FORM AFTER A `<form action>` ACTION SETTLES, restoring every box
 // to its `defaultChecked` — and it fires NO change event doing it. Round 3 added
 // three settled outcomes that leave this panel mounted (import `nothing`, import
-// `failed`, dismiss `failed`, all NO_REVALIDATION), so after any of them the
+// `failed`, dismiss `failed`, all `revalidation: "none"`), so after any of them the
 // boxes are all ticked again while a count kept only by `countTicks` still holds
 // its pre-submit value. That desync was shipped and caught in the browser: three
 // visibly ticked boxes above a DISABLED Import, under a hint asking the planter
@@ -327,6 +327,18 @@ export interface PhaseTemplatePromptControlState {
 }
 
 /**
+ * How many of the prompt's checklists are ticked in this form, right now.
+ *
+ * ONE reader for BOTH writers — the bubbled `change` and the post-settle resync
+ * — so "how many are ticked" cannot come to mean two different things. The
+ * selector is the same one the server action reads (`templateKey`), which is
+ * what makes the count and the submitted payload the same set.
+ */
+export function tickedTemplateCount(form: HTMLFormElement): number {
+  return form.querySelectorAll('input[name="templateKey"]:checked').length;
+}
+
+/**
  * What the two buttons say and whether they accept a press.
  *
  * Pulled out of the component because neither pending flag can be driven from a
@@ -339,18 +351,6 @@ export interface PhaseTemplatePromptControlState {
  * Both buttons go inert together while ANY request is in flight: one form, one
  * answer.
  */
-/**
- * How many of the prompt's checklists are ticked in this form, right now.
- *
- * ONE reader for BOTH writers — the bubbled `change` and the post-settle resync
- * — so "how many are ticked" cannot come to mean two different things. The
- * selector is the same one the server action reads (`templateKey`), which is
- * what makes the count and the submitted payload the same set.
- */
-export function tickedTemplateCount(form: HTMLFormElement): number {
-  return form.querySelectorAll('input[name="templateKey"]:checked').length;
-}
-
 export function phaseTemplatePromptControlState(
   input: PhaseTemplatePromptControlInput
 ): PhaseTemplatePromptControlState {
