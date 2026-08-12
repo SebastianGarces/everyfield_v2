@@ -30,8 +30,9 @@ import {
   buildMeetingMergeData,
   MERGE_FIELDS,
 } from "@/lib/communication/merge";
+import { meetingTypeLabel } from "@/lib/meetings/labels";
 import type { MessageTemplate } from "@/db/schema/communication";
-import type { RecipientTeamOption } from "@/lib/communication/service";
+import type { RecipientTeamOption } from "@/lib/communication/recipient-groups";
 
 interface Recipient {
   id: string;
@@ -48,12 +49,6 @@ interface MeetingOption {
   locationName: string | null;
   locationAddress: string | null;
 }
-
-const meetingTypeLabels: Record<string, string> = {
-  vision_meeting: "Vision Meeting",
-  orientation: "Orientation",
-  team_meeting: "Team Meeting",
-};
 
 interface ComposeFormProps {
   templates: MessageTemplate[];
@@ -303,7 +298,7 @@ export function ComposeForm({
                       value={m.id}
                       className="cursor-pointer"
                     >
-                      {m.title ?? meetingTypeLabels[m.type] ?? m.type} —{" "}
+                      {m.title ?? meetingTypeLabel(m.type)} —{" "}
                       {formatDateTime(new Date(m.datetime), "short")}
                     </SelectItem>
                   ))}

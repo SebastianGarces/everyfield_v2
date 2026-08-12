@@ -4,13 +4,9 @@
  */
 
 import { db } from "@/db";
-import {
-  personActivities,
-  persons,
-  type Person,
-  type PersonStatus,
-} from "@/db/schema";
+import { persons, type Person, type PersonStatus } from "@/db/schema";
 import { and, eq, isNull } from "drizzle-orm";
+import { logPersonActivity } from "./activity";
 import { emitPersonStatusChanged } from "./events";
 import type { StatusTransition } from "./types";
 
@@ -18,7 +14,6 @@ import type { StatusTransition } from "./types";
 export {
   getAvailableStatuses,
   getNextStatus,
-  handleOutOfOrderProgression,
   isBackwardProgression,
   isForwardProgression,
   STATUS_LABELS,
@@ -55,24 +50,10 @@ export interface StatusWarning {
 // ============================================================================
 
 // Import shared utilities for internal use
-import { validateStatusTransition as _validateStatusTransition } from "./status.shared";
-
-/**
- * Status order for index calculations (server-side only)
- */
-const STATUS_ORDER: PersonStatus[] = [
-  "prospect",
-  "attendee",
-  "following_up",
-  "interviewed",
-  "core_group",
-  "launch_team",
-  "leader",
-];
-
-function getStatusIndex(status: PersonStatus): number {
-  return STATUS_ORDER.indexOf(status);
-}
+import {
+  getStatusIndex,
+  validateStatusTransition as _validateStatusTransition,
+} from "./status.shared";
 
 /**
  * Get warnings for a specific action based on person's current state.
@@ -141,6 +122,51 @@ export function getStatusWarnings(
 // ============================================================================
 
 /**
+ * The one writer of `status_changed` activity rows.
+ *
+ * Both `changeStatus` and the profile-edit path (`updatePersonAction`) record
+ * through here, so the metadata shape cannot fork — `getPipelineMetrics`
+ * reads both populations as one.
+ */
+export async function recordStatusChange(
+  churchId: string,
+  personId: string,
+  userId: string,
+  oldStatus: PersonStatus,
+  newStatus: PersonStatus,
+  options: {
+    reason?: string;
+    source?: string;
+    skippedStatuses?: PersonStatus[];
+  } = {}
+): Promise<void> {
+  const metadata: Record<string, unknown> = {
+    oldStatus,
+    newStatus,
+  };
+
+  if (options.reason) {
+    metadata.reason = options.reason;
+  }
+
+  if (options.skippedStatuses && options.skippedStatuses.length > 0) {
+    metadata.skippedStatuses = options.skippedStatuses;
+  }
+
+  if (options.source) {
+    metadata.source = options.source;
+  }
+
+  await logPersonActivity({
+    churchId,
+    personId,
+    activityType: "status_changed",
+    metadata,
+    performedBy: userId,
+  });
+}
+
+/**
  * Change a person's status with proper validation, activity logging, and event emission.
  *
  * @param churchId - The church ID for multi-tenant scoping
@@ -187,7 +213,7 @@ export async function changeStatus(
   }
 
   // Validate the transition
-  const transition = _validateStatusTransition(oldStatus, newStatus, existing);
+  const transition = _validateStatusTransition(oldStatus, newStatus);
 
   // Update the person's status
   const [updated] = await db
@@ -209,27 +235,10 @@ export async function changeStatus(
     throw new Error("Failed to update person status");
   }
 
-  // Build activity metadata
-  const metadata: Record<string, unknown> = {
-    oldStatus,
-    newStatus,
-  };
-
-  if (reason) {
-    metadata.reason = reason;
-  }
-
-  if (transition.skippedStatuses.length > 0) {
-    metadata.skippedStatuses = transition.skippedStatuses;
-  }
-
   // Log the activity
-  await db.insert(personActivities).values({
-    churchId,
-    personId,
-    activityType: "status_changed",
-    metadata,
-    performedBy: userId,
+  await recordStatusChange(churchId, personId, userId, oldStatus, newStatus, {
+    reason,
+    skippedStatuses: transition.skippedStatuses,
   });
 
   // Emit event (stubbed for now)

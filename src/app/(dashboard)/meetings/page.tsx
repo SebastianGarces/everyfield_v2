@@ -7,7 +7,10 @@ import { MeetingList } from "@/components/meetings/meeting-list";
 import { Button } from "@/components/ui/button";
 import { verifySession } from "@/lib/auth/session";
 import { listMeetings } from "@/lib/meetings/service";
-import type { MeetingType } from "@/db/schema";
+import {
+  analyticsMeetingTypeArg,
+  parseListMeetingTypeFilter,
+} from "@/lib/meetings/meeting-type-filter";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +31,13 @@ export default async function MeetingsPage({
   const view = (
     params.view === "past" ? "past" : params.view === "all" ? "all" : "upcoming"
   ) as "upcoming" | "past" | "all";
-  const typeFilter = params.type as MeetingType | undefined;
+  // Parsed, never cast. `?type=` reaches `churchMeetings.type`, the
+  // `meeting_type` pg enum, so `?type=all` — the exact value the chip row
+  // writes — used to reach Postgres as `type = 'all'` and 500 the route.
+  // `MeetingList` derives its highlighted chip from the same parser.
+  const typeFilter = analyticsMeetingTypeArg(
+    parseListMeetingTypeFilter(params.type)
+  );
 
   const [upcomingResult, pastResult] = await Promise.all([
     view !== "past"

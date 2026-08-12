@@ -1,10 +1,10 @@
-import { format } from "date-fns";
 import { Mail, Phone, Rocket, Star, User } from "lucide-react";
 import Link from "next/link";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { formatDateWithoutWeekday } from "@/lib/datetime";
 import { STATUS_BADGE_CONFIG } from "@/lib/people/status-colors";
 import { Person, PersonStatus, Tag } from "@/lib/people/types";
 import { cn } from "@/lib/utils";
@@ -66,7 +66,8 @@ export function PersonCard({ person, linkStatic }: PersonCardProps) {
               </Badge>
             )}
             <span className="truncate text-xs">
-              Added {format(new Date(person.createdAt), "MMM d, yyyy")}
+              Added{" "}
+              {formatDateWithoutWeekday(new Date(person.createdAt), "short")}
             </span>
           </div>
         </div>

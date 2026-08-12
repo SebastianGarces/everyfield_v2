@@ -45,10 +45,17 @@ export function contextualTemplateHref(templateId: string): string {
 }
 
 /**
- * Resolve catalog ids to renderable links. Unknown ids are dropped rather than
- * rendered as dead links.
+ * Resolve catalog ids to renderable links. Unknown ids are DROPPED rather than
+ * rendered as dead links — a template can be renamed or retired in
+ * `templates.ts` without every id list being updated in the same commit, and
+ * the failure mode of a stale id must be one missing link, not a link into a
+ * page that answers "unknown template".
+ *
+ * The one resolver for both directions of DOC-014: the feature-context lists
+ * below and the wiki's `ARTICLE_TEMPLATE_IDS` map
+ * (`src/components/wiki/article-templates.ts`) both resolve through here.
  */
-function toContextualTemplates(
+export function resolveContextualTemplates(
   ids: readonly string[],
   notes: Readonly<Record<string, string>> = {}
 ): ContextualTemplate[] {
@@ -108,7 +115,7 @@ export function getMeetingContextualTemplates(
   const entry = MEETING_TEMPLATES[meetingType as MeetingType];
   if (!entry) return null;
 
-  const templates = toContextualTemplates(entry.ids);
+  const templates = resolveContextualTemplates(entry.ids);
   if (templates.length === 0) return null;
 
   return { title: entry.title, templates };
@@ -177,7 +184,7 @@ export function getTeamContextualTemplates(team: {
 }): ContextualTemplate[] {
   const section = getLaunchChecklistSection(team.name);
 
-  return toContextualTemplates(
+  return resolveContextualTemplates(
     [LAUNCH_CHECKLISTS_ID],
     section
       ? { [LAUNCH_CHECKLISTS_ID]: `Includes the ${section} checklist.` }

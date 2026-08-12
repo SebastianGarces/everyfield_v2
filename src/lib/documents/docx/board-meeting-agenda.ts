@@ -4,6 +4,7 @@
 
 import { Document, HeadingLevel, Paragraph, TextRun } from "docx";
 
+import { churchNameOf, documentSubtitle } from "../render-text";
 import type { DocumentMergeValues } from "../types";
 
 const AGENDA: { title: string; detail: string }[] = [
@@ -30,10 +31,11 @@ const AGENDA: { title: string; detail: string }[] = [
 ];
 
 export function buildBoardMeetingAgenda(values: DocumentMergeValues): Document {
-  const churchName = values.church_name || "Our Church";
-  const header = ["Board / Elder Meeting Agenda", values.meeting_date || null]
-    .filter(Boolean)
-    .join("  •  ");
+  const churchName = churchNameOf(values);
+  const header = documentSubtitle(
+    "Board / Elder Meeting Agenda",
+    values.meeting_date || null
+  );
 
   return new Document({
     sections: [

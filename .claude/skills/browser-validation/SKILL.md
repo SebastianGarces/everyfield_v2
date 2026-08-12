@@ -65,7 +65,8 @@ local dev, so the seeded accounts work:
 | Account | Email | Password | Notes |
 |---|---|---|---|
 | Planter | `planter1@everyfield.app` | `password123` | **Church has 0 people** — fine for empty states, useless for anything about a list |
-| Network admin | `admin@everyfield.app` | `password123` | |
+| Network admin | `admin@everyfield.app` | not in this repo — read `SEED_ADMIN_PASSWORD` from `.env.local`; set it there and run `seed-dev-db.ts --oversight-orgs-only` (full command below) | Owns "Dev Church Planting Network". Its `sending_network_id` is what `/oversight/invitations` needs; without it the page says "Set up your network first" and no invitation can be sent |
+| Sending church admin | `sending-church-admin@everyfield.app` | not in this repo — read `SEED_ADMIN_PASSWORD` from `.env.local`; set it there and run `seed-dev-db.ts --oversight-orgs-only` (full command below) | Belongs to "Dev Sending Church", which belongs to NO network — so `/settings/association` opens on the admin's *answering* view. Added #304 round 6; before it the dev DB held no `sending_church_admin` at all and this whole role was unreachable in a browser |
 | Coach | `coach1@everyfield.app` | `password123` | |
 | Eval planter | `planter-dayspring@eval.phase-engine.everyfield.app` | `eval-password-123` | ~100 people, meetings, assessments |
 | Eval planter | `planter-evergreen@eval.phase-engine.everyfield.app` | `eval-password-123` | ~89 people, different church |
@@ -78,6 +79,59 @@ form is broken. The addresses come from `scripts/seed-dev-db.ts` and
 
 **Note the different password for eval accounts** — they are seeded by
 `scripts/seed-phase-engine-eval.ts`, not `seed-dev-db.ts`.
+
+**On the database you are validating against, the two oversight admins have no password in this
+repository** (#304, ruled 2026-08-10). No in-repo constant may open an account on a database anyone
+else uses. **It lives in `.env.local` instead** — gitignored and machine-local, beside the
+`VERCEL_AUTOMATION_BYPASS_SECRET` you already need for step 2, so it is readable by whoever is
+validating and by nobody who can only read the repo. **Read it there first; do not invent one and do
+not re-seed if it is already set.**
+
+(`scripts/seed-dev-db.ts`'s FULL seed does give these two `password123` like everyone else — but a
+full seed wipes every user and church, so it only ever runs against a throwaway database. The shared
+development branch a preview reads is never full-seeded, which is why `password123` has never opened
+these two accounts there.)
+
+```bash
+# 1. Is it already recorded? If this prints a value, that is the password — use it and stop.
+#    -E and the optional `export` matter: the seed accepts both spellings, and a grep that
+#    misses one tells you "nothing recorded" for a password someone else already set.
+grep -E '^[[:space:]]*(export[[:space:]]+)?SEED_ADMIN_PASSWORD=' .env.local
+
+# 2. Only if it printed nothing: choose one, record it, then run the seed.
+#    printf with a leading newline, never `echo >>`: .env.local may not end in one, and an
+#    append onto a partial last line silently corrupts that variable and this one.
+printf '\nSEED_ADMIN_PASSWORD="<a password you choose>"\n' >> .env.local
+pnpm exec tsx scripts/seed-dev-db.ts --oversight-orgs-only
+```
+
+Passing the value inline instead (`SEED_ADMIN_PASSWORD=… pnpm exec tsx …`) still re-keys the
+accounts, and the script will warn you that nothing recorded it. Heed that warning: an unrecorded
+password is what stranded this fixture between #304 rounds 8 and 10 — the accounts existed, worked
+for exactly one person, and no later verifier could sign in to exercise a single interactive
+criterion.
+
+That mode deletes nothing. It upserts the sending network, the sending church, and both admin rows
+— setting the password you passed, the role and the org FKs — so one command leaves a usable
+oversight fixture on both sides even if the accounts already exist with a forgotten password or a
+NULL org FK. It refuses outright, writing nothing, on any database holding an alpha-cohort account,
+and there is no override for that: point `DATABASE_URL` at the database you are validating against
+(a preview reads the development branch) and never at production.
+
+**Which database does it actually succeed against?** The **Neon `development` branch** — the one a
+preview reads and the one `DATABASE_URL` in `.env.local` names. Step 2 is expected to work there,
+and the refusal above is not a contradiction: the guard asks exactly one question, *are any of the
+three `PROTECTED_ACCOUNTS` sentinels present*, and on the development branch the answer is **no**
+(read-only probe run 2026-08-12 for #304 round 10 — 0 of 3 present; the alpha-cohort logins
+`memory/invariants.md` → Dev Seeds warns the WIPE about are not these three addresses). The full
+step-2 command was then run once end to end against that branch and printed its four upsert lines,
+so this path is exercised, not merely documented. Re-run the probe rather than assuming it: if a
+sentinel is ever added there, this mode has no override and the only honest recovery is a statement
+written by hand for that database, with the password chosen there.
+
+**Production is a different answer** — it holds the sentinels by definition, so the mode refuses and
+must. Never reach for `--allow-protected-db` here; it is the *wipe's* flag and does not exist for
+this mode.
 
 **If the eval logins are gone, someone ran `pnpm db:seed`.** That script wipes the whole fixture —
 every user and every church, not just the nine it creates — so it takes the eval corpus with it, and

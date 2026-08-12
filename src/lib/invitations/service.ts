@@ -21,8 +21,10 @@
 //      `hasValidInvitationBypass` (register) and the G3 harness import it
 //      directly; the client cannot.
 //
-// The exports here are exactly the four invitation-lifecycle mutations a user
-// performs on their own behalf. Disassociation is NOT one of them and does not
+// The exports here are exactly the five invitation-lifecycle mutations a user
+// performs on their own behalf — the four responses plus the 2026-08-10 resend,
+// which sends mail rather than writing a row and is scoped to the inviting org
+// by the same predicate the list and the revoke share. Disassociation is NOT one of them and does not
 // belong here: #274 ruled that both sides may sever, and each side's
 // authenticated wrapper ships with the surface that owns it (#277 planter,
 // #278 org admin) — see `./core` → Disassociation.
@@ -40,6 +42,8 @@
 // the imported module, so `export default` and re-exports are caught too.
 // ============================================================================
 
+import { z } from "zod";
+
 import type { OrganizationInvitation } from "@/db/schema";
 import { verifySession } from "@/lib/auth/session";
 
@@ -49,17 +53,67 @@ import {
   createInvitationAs,
   declineInvitationAs,
   invitationActorFromSession,
+  invitationTargetKinds,
   invitationView,
   revokeInvitationAs,
   type InvitationRequest,
   type InvitationView,
 } from "./core";
+// The resend path is its own module (extracted 2026-08-12, PR #392 warning (c)),
+// so this is the same logic layer, one file over — not a second way in.
+import { resendInvitationEmailAs } from "./resend";
+// Type only, from the import-free leaf that owns the bucket — nothing at runtime
+// crosses this boundary that did not already.
+import type { ResendDedupeWindow } from "./resend-window";
 
 export type InvitationActionResult =
-  | { success: true; invitation: InvitationView }
+  | {
+      success: true;
+      invitation: InvitationView;
+      /**
+       * THE TWO SENDING PATHS ONLY, and three-valued on purpose (OV-003b /
+       * #293):
+       *
+       *   * `true`      — the provider accepted the invitation email;
+       *   * `false`     — it did not, so the invitation exists and the invitee
+       *                   has NOT been told. The surface says
+       *                   `INVITATION_EMAIL_FAILED_HEADLINE` ("Invitation
+       *                   created — email could not be sent.") and points at
+       *                   **Resend email** on the row — never at a link for the
+       *                   admin to forward, which #304 ruling 4 item 5 removed
+       *                   from this page (`./create-notice`);
+       *   * `undefined` — this action does not send email at all (accept,
+       *                   decline, revoke). Not the same fact as `false`, and a
+       *                   surface that treated them alike would tell a planter
+       *                   who just declined that an email had failed.
+       *
+       * `resendInvitationEmail` only ever reports `true` here, and that is not
+       * an oversight: a resend has no durable artefact to protect, so a refused
+       * send is a failed ACTION and comes back as `{ success: false, error }`
+       * with the reason in words (`./core` → `resendInvitationEmailAs`).
+       */
+      emailSent?: boolean;
+      /**
+       * THE RESEND PATH ONLY (RULED 2026-08-10 round 2). The provider dedupe
+       * bucket the send that just succeeded was keyed with: for the rest of it
+       * every further attempt at this invitation is collapsed onto the message
+       * already accepted, so the surface refuses one rather than reporting a
+       * send that will not happen. `undefined` on every other action — none of
+       * them presents a resend key, and there is nothing to wait for.
+       */
+      resendWindow?: ResendDedupeWindow;
+    }
   | { success: false; error: string };
 
 const GENERIC_ERROR = "Something went wrong — try that again";
+
+/** What a mutation hands back: always the row, plus whatever else it settled. */
+type InvitationMutation = {
+  invitation: OrganizationInvitation;
+  emailSent?: boolean;
+  /** Set by the resend only — the bucket its key fell in. */
+  dedupeWindow?: ResendDedupeWindow;
+};
 
 /**
  * One place where a mutation becomes a result: the row is narrowed to
@@ -69,10 +123,16 @@ const GENERIC_ERROR = "Something went wrong — try that again";
  */
 async function run(
   label: string,
-  mutate: () => Promise<OrganizationInvitation>
+  mutate: () => Promise<InvitationMutation>
 ): Promise<InvitationActionResult> {
   try {
-    return { success: true, invitation: invitationView(await mutate()) };
+    const mutated = await mutate();
+    return {
+      success: true,
+      invitation: invitationView(mutated.invitation),
+      emailSent: mutated.emailSent,
+      resendWindow: mutated.dedupeWindow,
+    };
   } catch (error) {
     if (error instanceof InvitationError) {
       return { success: false, error: error.message };
@@ -83,15 +143,112 @@ async function run(
 }
 
 /**
+ * A response settles a row and nothing else — no email leaves on an accept, a
+ * decline or a revoke. Written as one adapter rather than three, so "answering
+ * an invitation sends nothing" is a single line somebody has to delete on
+ * purpose.
+ */
+async function answered(
+  respond: Promise<OrganizationInvitation>
+): Promise<InvitationMutation> {
+  return { invitation: await respond };
+}
+
+/**
+ * The ONLY shape a client may POST at `createInvitation` (#304 ruling 4, fix 2
+ * — HR4 2026-08-09).
+ *
+ * WHY A RUNTIME SCHEMA AND NOT THE TYPE. `createInvitation` is an export of a
+ * `"use server"` module, so it is an HTTP endpoint, and its parameter is a
+ * TYPED OBJECT rather than a string. TypeScript erases: `InvitationRequest`
+ * describes what a well-behaved caller sends and constrains a forged body not
+ * at all. That type also declares `targetChurchId` / `targetSendingChurchId` —
+ * the keys the SERVER writes on after resolving the address — so the endpoint's
+ * declared surface literally included the fields that decide which organization
+ * gets enrolled. `strictObject` is what makes the two shapes the same thing at
+ * runtime: an unknown key is a REFUSAL, not a silently stripped extra, so a
+ * probe of this endpoint fails loudly instead of half-working.
+ *
+ * The rule this instances: every `"use server"` export whose parameter is an
+ * object parses a strict schema before the logic layer sees it. The other four
+ * actions here take a bare `invitationId: string` and are covered by the id
+ * checks in the logic layer; the object-taking actions elsewhere in this track
+ * (`settings/association/actions.ts`, `oversight/plants/[id]/actions.ts`) parse
+ * their own. `service.test.ts` pins that this file has no unparsed object
+ * parameter.
+ *
+ * Deliberately NOT a place that re-decides anything: no expiry (server-fixed),
+ * no inviting org, no target. Just the two fields a form has.
+ */
+const invitationRequestSchema = z.strictObject({
+  inviteeEmail: z.string(),
+  inviteAs: z.enum(invitationTargetKinds).optional(),
+});
+
+/**
+ * What a refused parse reads as. One message, and it names the form rather than
+ * the schema: a real user only ever reaches it by a bug, and everybody else
+ * reaching it is probing.
+ */
+const INVALID_REQUEST_ERROR = "Check the form and try again";
+
+/**
  * Issue an invitation. The inviting org and the invitation `type` are derived
  * from the session — a client says only who is being invited — so an oversight
  * admin can never enrol a plant into an org that is not theirs.
+ *
+ * The invitation email goes out on this path too (OV-003b / #293) and its
+ * outcome comes back as `emailSent`. A failed send does NOT fail the create:
+ * the row is the durable artefact, the email is best-effort delivery, and
+ * rolling the invitation back would leave the retry refused by the
+ * duplicate-pending guard. The recovery is **Resend email** on the row
+ * (`invitationCreatedNotice` writes the words) — #304 ruling 4 item 5 took the
+ * admin's copy of the register link off this page, and this send is what it was
+ * a stopgap for.
+ *
+ * The parse below is what makes "a client says only who is being invited" true
+ * of the wire and not just of the type.
+ *
+ * SESSION FIRST, THEN PARSE. Every action in this module rejects from its FIRST
+ * statement when there is no session — `service.test.ts` executes the forged
+ * call and requires the throw — so the schema must not run ahead of it. An
+ * anonymous POST that also carried a malformed body would otherwise read back
+ * a validation message instead of `Unauthorized`, which tells an unauthenticated
+ * caller that the endpoint exists and what it wants.
  */
 export async function createInvitation(
   request: InvitationRequest
 ): Promise<InvitationActionResult> {
   const actor = invitationActorFromSession(await verifySession());
-  return run("createInvitation", () => createInvitationAs(actor, request));
+
+  const parsed = invitationRequestSchema.safeParse(request);
+  if (!parsed.success) {
+    return { success: false, error: INVALID_REQUEST_ERROR };
+  }
+
+  return run("createInvitation", () => createInvitationAs(actor, parsed.data));
+}
+
+/**
+ * Send a pending invitation's email again — the recovery path for a send that
+ * failed, or never arrived (RULED 2026-08-10 on #392 / #293).
+ *
+ * Scoped to the actor's ORG by the same predicate as the list and the revoke,
+ * and it re-decides nothing about status: a revoked, accepted, declined or
+ * expired row is refused by the guard inside `sendInvitationEmail` and the
+ * refusal comes back as a message (`./core` → `resendInvitationEmailAs`).
+ *
+ * A success also carries `resendWindow` — the dedupe bucket the provider was
+ * keyed with, which is how long the surface must refuse the next press (RULED
+ * 2026-08-10 round 2).
+ */
+export async function resendInvitationEmail(
+  invitationId: string
+): Promise<InvitationActionResult> {
+  const actor = invitationActorFromSession(await verifySession());
+  return run("resendInvitationEmail", () =>
+    resendInvitationEmailAs(actor, invitationId)
+  );
 }
 
 /**
@@ -107,7 +264,9 @@ export async function acceptInvitation(
   invitationId: string
 ): Promise<InvitationActionResult> {
   const actor = invitationActorFromSession(await verifySession());
-  return run("acceptInvitation", () => acceptInvitationAs(actor, invitationId));
+  return run("acceptInvitation", () =>
+    answered(acceptInvitationAs(actor, invitationId))
+  );
 }
 
 /**
@@ -118,7 +277,7 @@ export async function declineInvitation(
 ): Promise<InvitationActionResult> {
   const actor = invitationActorFromSession(await verifySession());
   return run("declineInvitation", () =>
-    declineInvitationAs(actor, invitationId)
+    answered(declineInvitationAs(actor, invitationId))
   );
 }
 
@@ -130,5 +289,7 @@ export async function revokeInvitation(
   invitationId: string
 ): Promise<InvitationActionResult> {
   const actor = invitationActorFromSession(await verifySession());
-  return run("revokeInvitation", () => revokeInvitationAs(actor, invitationId));
+  return run("revokeInvitation", () =>
+    answered(revokeInvitationAs(actor, invitationId))
+  );
 }

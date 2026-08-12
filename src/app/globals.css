@@ -123,7 +123,18 @@ body {
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  /* The focus indicator, darkened for WCAG 2.2 SC 1.4.11 (#385). The ring is
+     painted at 50% alpha almost everywhere (`focus-visible:ring-ring/50` in
+     button, input, select, textarea, tabs, checkbox, switch…), so the token has
+     to clear 3:1 AFTER compositing, not just on its own. The shadcn default
+     oklch(0.708) measured 2.40:1 on --background and 2.59:1 on --card at full
+     strength — and only ~1.50:1 as rendered, which is a ring nobody can see.
+     L 0.2 composites to 3.37:1 on --background, 3.43:1 on --card and 3.29:1 on
+     --muted, the darkest surface a ring lands on. The floor sits near L 0.258,
+     so this is a step past it, not a hair over it. Kept neutral (C and H are 0)
+     by the 2026-07-31 ruling that surfaces and neutrals stay the pre-sharp
+     grays; only L moved. Pinned by src/app/text-contrast.test.ts. */
+  --ring: oklch(0.2 0 0);
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
@@ -136,7 +147,11 @@ body {
   --sidebar-accent: oklch(0.97 0 0);
   --sidebar-accent-foreground: oklch(0.224 0.011 151.267);
   --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  /* Moves with --ring: the sidebar paints its focus ring at FULL strength
+     (`ring-sidebar-ring focus-visible:ring-2`), where oklch(0.708) was 2.59:1
+     on the sidebar's white ground — the same SC 1.4.11 failure without the
+     alpha to hide behind. */
+  --sidebar-ring: oklch(0.2 0 0);
 
   /* Attention scale. Red (28) vs amber (76) reads as an intensity ramp on its
      own. The inks stop short of the darkest passing value on purpose: pushed
@@ -170,7 +185,13 @@ body {
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  /* The same SC 1.4.11 fix, mirrored for the dark ground (#385). oklch(0.556)
+     did clear 3:1 unaided — 4.18:1 on --background, 3.79:1 on --card — which is
+     exactly why the defect hid here: at the 50% alpha the components actually
+     paint it fell to ~1.87:1. L 0.85 composites to 3.76:1 on --background,
+     3.74:1 on --card and 3.51:1 on --muted. Lighter than that only adds glare;
+     the ring is 3px of near-white already. */
+  --ring: oklch(0.85 0 0);
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
@@ -183,7 +204,7 @@ body {
   --sidebar-accent: oklch(0.269 0 0);
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar-ring: oklch(0.85 0 0);
 
   /* Lifted for the dark surface rather than mechanically inverted. The inks
      invert their relationship to the base here — on a dark tile the readable

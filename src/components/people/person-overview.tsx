@@ -5,8 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import type { Commitment, Household, SkillInventory } from "@/db/schema";
+import { formatDateWithoutWeekday } from "@/lib/datetime";
 import type { Person, Tag } from "@/lib/people/types";
-import { format } from "date-fns";
 import {
   Calendar,
   FileSignature,
@@ -31,6 +31,12 @@ interface PersonOverviewProps {
   skills?: SkillInventory[];
   household?: Household | null;
   householdMembers?: Person[];
+  /**
+   * All households of the church, fetched server-side for HouseholdManager.
+   * Required — an empty default would silently remove the Join Existing
+   * Household path for any caller that forgets to pass it.
+   */
+  households: Household[];
   onEdit?: () => void;
 }
 
@@ -57,6 +63,7 @@ export function PersonOverview({
   skills = [],
   household,
   householdMembers = [],
+  households,
   onEdit,
 }: PersonOverviewProps) {
   const router = useRouter();
@@ -175,7 +182,10 @@ export function PersonOverview({
                 </p>
                 <p className="text-sm">
                   {person.createdAt
-                    ? format(new Date(person.createdAt), "MMM d, yyyy")
+                    ? formatDateWithoutWeekday(
+                        new Date(person.createdAt),
+                        "short"
+                      )
                     : "Unknown"}
                 </p>
               </div>
@@ -202,6 +212,7 @@ export function PersonOverview({
         person={person}
         household={household ?? null}
         members={householdMembers}
+        households={households}
       />
 
       {/* Commitment */}
@@ -221,7 +232,10 @@ export function PersonOverview({
                 </div>
                 <p className="text-muted-foreground text-sm">
                   Signed{" "}
-                  {format(new Date(latestCommitment.signedDate), "MMM d, yyyy")}
+                  {formatDateWithoutWeekday(
+                    new Date(latestCommitment.signedDate),
+                    "short"
+                  )}
                 </p>
               </div>
               <Button variant="outline" size="sm" asChild>

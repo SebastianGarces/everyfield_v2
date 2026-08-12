@@ -64,6 +64,32 @@ import {
 // reconciles with the same server state this write just produced.
 //
 // ----------------------------------------------------------------------------
+// SESSION FIRST, THEN THE PARSE (ruled 2026-08-10; extended repo-wide in round
+// 8 of #304)
+// ----------------------------------------------------------------------------
+//
+// Both exports open with `verifySession()`, ABOVE their `safeParse` and above
+// the `try` below. Parsing first was not exploitable here — neither action
+// names a user and neither reaches storage before the mint — but it answered an
+// anonymous caller differently depending on the SHAPE of what they sent: a
+// malformed payload came back `{ success: false, error: "That is not a setting
+// we can save" }`, a well-formed one hit the session check. That pair of answers
+// is a free shape-oracle for the schemas, and it makes "does this endpoint check
+// anybody?" a question about reading order rather than about line one.
+//
+// ABOVE THE `try`, not merely first inside it, and that is the deliberate part:
+// a sessionless call must THROW, exactly as every other action in the product
+// throws, rather than be converted into a handled `{ success: false }` by the
+// catch below. `service.test.ts` §1b‴ calls both exports with no session, with a
+// well-formed argument and a malformed one, and requires all four to reject.
+//
+// The cost, named rather than discovered: a session that expires while the page
+// is open no longer produces `PREFERENCE_SESSION_EXPIRED_MESSAGE` from here —
+// the switch snaps back with no sentence, the same as any other action in the
+// app. That is the trade the ruling makes; the helper keeps the message for the
+// failures that still arrive as caught errors.
+//
+// ----------------------------------------------------------------------------
 // Why every body is wrapped (#236)
 // ----------------------------------------------------------------------------
 //
@@ -117,15 +143,15 @@ const setDigestCadenceInputSchema = z.enum(digestCadences);
 export async function setNotificationPreferenceAction(
   input: SetPreferenceActionInput
 ): Promise<PreferenceActionResult> {
+  const session = await verifySession();
+  const owner = preferenceOwnerFromSession(session);
+
   const parsed = setPreferenceInputSchema.safeParse(input);
   if (!parsed.success) {
     return { success: false, error: "That is not a setting we can save" };
   }
 
   try {
-    const session = await verifySession();
-    const owner = preferenceOwnerFromSession(session);
-
     const { category, channel, enabled } = parsed.data;
 
     // Same audience the page rendered the matrix with — see
@@ -173,15 +199,15 @@ export async function setNotificationPreferenceAction(
 export async function setDigestCadenceAction(
   cadence: string
 ): Promise<PreferenceActionResult> {
+  const session = await verifySession();
+  const owner = preferenceOwnerFromSession(session);
+
   const parsed = setDigestCadenceInputSchema.safeParse(cadence);
   if (!parsed.success) {
     return { success: false, error: "That is not a cadence we can save" };
   }
 
   try {
-    const session = await verifySession();
-    const owner = preferenceOwnerFromSession(session);
-
     if (audienceForRole(session.user.role) === "oversight") {
       return { success: false, error: OVERSIGHT_DIGEST_CADENCE_NOTE };
     }

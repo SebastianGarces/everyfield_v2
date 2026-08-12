@@ -1,11 +1,16 @@
+import { PersonOverview } from "@/components/people";
+import { PersonProfileShell } from "@/components/people/person-profile-shell";
 import { verifySession } from "@/lib/auth/session";
 import { getLatestCommitment } from "@/lib/people/commitments";
-import { getHousehold, getHouseholdMembers } from "@/lib/people/household";
+import {
+  getHousehold,
+  getHouseholdMembers,
+  listHouseholds,
+} from "@/lib/people/household";
 import { getPerson } from "@/lib/people/service";
 import { getPersonSkills } from "@/lib/people/skills";
 import { getPersonTags, listTags } from "@/lib/people/tags";
 import { notFound, redirect } from "next/navigation";
-import { PersonDetailClient } from "./person-detail-client";
 
 interface PersonDetailPageProps {
   params: Promise<{ id: string }>;
@@ -22,14 +27,24 @@ export default async function PersonDetailPage({
 
   const { id } = await params;
 
-  const [person, personTags, availableTags, latestCommitment, skills] =
-    await Promise.all([
-      getPerson(user.churchId, id),
-      getPersonTags(user.churchId, id),
-      listTags(user.churchId),
-      getLatestCommitment(user.churchId, id),
-      getPersonSkills(user.churchId, id),
-    ]);
+  const [
+    person,
+    personTags,
+    availableTags,
+    latestCommitment,
+    skills,
+    households,
+  ] = await Promise.all([
+    getPerson(user.churchId, id),
+    getPersonTags(user.churchId, id),
+    listTags(user.churchId),
+    getLatestCommitment(user.churchId, id),
+    getPersonSkills(user.churchId, id),
+    // The full household list rides along server-side so HouseholdManager
+    // never has to fetch it from an effect (invariants → Client/Server Data
+    // Synchronization)
+    listHouseholds(user.churchId),
+  ]);
 
   if (!person) {
     notFound();
@@ -45,14 +60,21 @@ export default async function PersonDetailPage({
     : [];
 
   return (
-    <PersonDetailClient
+    <PersonProfileShell
       person={person}
-      tags={personTags}
-      availableTags={availableTags}
-      latestCommitment={latestCommitment}
+      activeTab="overview"
       household={household}
-      householdMembers={householdMembers}
-      skills={skills}
-    />
+    >
+      <PersonOverview
+        person={person}
+        tags={personTags}
+        availableTags={availableTags}
+        latestCommitment={latestCommitment}
+        skills={skills}
+        household={household}
+        householdMembers={householdMembers}
+        households={households}
+      />
+    </PersonProfileShell>
   );
 }

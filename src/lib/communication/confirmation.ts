@@ -22,6 +22,7 @@ import { invitations, meetingAttendance } from "@/db/schema/meetings";
 import { churchMeetings } from "@/db/schema/meetings";
 import { persons } from "@/db/schema/people";
 import { churches } from "@/db/schema/church";
+import { RECIPIENT_STATUS_RANK, isUnreachableStatus } from "./queries";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -181,51 +182,62 @@ export async function resolveConfirmation(
     };
   }
 
-  // Update token record
-  await db
-    .update(meetingConfirmationTokens)
-    .set({
-      status: response,
-      respondedAt: new Date(),
-    })
-    .where(eq(meetingConfirmationTokens.id, tokenRecord.id));
-
-  // Sync to invitations table (update the invitation for this meeting + person)
+  // All three writes are known up front, so they go in ONE `db.batch([...])`
+  // — a Neon batched transaction, all-or-nothing (memory/invariants.md ->
+  // Transactions). Three independent statements once left a consumed token
+  // whose RSVP was recorded nowhere when a later statement failed, and the
+  // `status !== "pending"` guard above then reported success forever. Now the
+  // token, the invitation and the guest-list row move together, and on failure
+  // the token stays `pending` so the link still works.
   const invitationStatus = response === "confirmed" ? "confirmed" : "declined";
-  await db
-    .update(invitations)
-    .set({
-      status: invitationStatus,
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(invitations.meetingId, tokenRecord.meetingId),
-        eq(invitations.inviteeId, tokenRecord.personId)
-      )
-    );
-
-  // Sync to meeting_attendance table (guest list RSVP)
-  await db
-    .update(meetingAttendance)
-    .set({
-      responseStatus: response,
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(meetingAttendance.meetingId, tokenRecord.meetingId),
-        eq(meetingAttendance.personId, tokenRecord.personId)
-      )
-    );
+  await db.batch([
+    db
+      .update(meetingConfirmationTokens)
+      .set({
+        status: response,
+        respondedAt: new Date(),
+      })
+      .where(eq(meetingConfirmationTokens.id, tokenRecord.id)),
+    db
+      .update(invitations)
+      .set({
+        status: invitationStatus,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(invitations.meetingId, tokenRecord.meetingId),
+          eq(invitations.inviteeId, tokenRecord.personId)
+        )
+      ),
+    db
+      .update(meetingAttendance)
+      .set({
+        responseStatus: response,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(meetingAttendance.meetingId, tokenRecord.meetingId),
+          eq(meetingAttendance.personId, tokenRecord.personId)
+        )
+      ),
+  ]);
 
   // Update email tracking — the person clicked the link, so they opened + clicked
   // Find communication_recipients for this person + meeting
   try {
+    // Church-scoped in the predicate, not by FK topology — the token carries
+    // its own church_id (memory/invariants.md -> Multi-Tenancy).
     const meetingComms = await db
       .select({ id: communications.id })
       .from(communications)
-      .where(eq(communications.meetingId, tokenRecord.meetingId));
+      .where(
+        and(
+          eq(communications.meetingId, tokenRecord.meetingId),
+          eq(communications.churchId, tokenRecord.churchId)
+        )
+      );
 
     if (meetingComms.length > 0) {
       const commIds = meetingComms.map((c) => c.id);
@@ -236,22 +248,24 @@ export async function resolveConfirmation(
           .where(
             and(
               eq(communicationRecipients.communicationId, commId),
-              eq(communicationRecipients.personId, tokenRecord.personId)
+              eq(communicationRecipients.personId, tokenRecord.personId),
+              eq(communicationRecipients.churchId, tokenRecord.churchId)
             )
           )
           .limit(1);
 
         if (recipient) {
-          // Only advance status — don't regress from "clicked" to "opened"
-          const statusRank: Record<string, number> = {
-            pending: 0,
-            sent: 1,
-            delivered: 2,
-            opened: 3,
-            clicked: 4,
-          };
-          const currentRank = statusRank[recipient.status] ?? 0;
-          if (currentRank < 4) {
+          // Only advance status — never regress from "clicked", and never
+          // touch a bounced/failed row: the click reached us through SOME
+          // channel, but the recipient row records that THIS address did not
+          // work, and overwriting it would erase the bounce from the delivery
+          // figures and re-enter the address into the resend pool
+          // (memory/invariants.md -> Communication, UNREACHABLE_STATUSES).
+          if (
+            !isUnreachableStatus(recipient.status) &&
+            RECIPIENT_STATUS_RANK[recipient.status] <
+              RECIPIENT_STATUS_RANK.clicked
+          ) {
             await db
               .update(communicationRecipients)
               .set({

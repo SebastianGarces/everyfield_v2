@@ -1,7 +1,6 @@
 "use client";
 
 import { changeStatusWithReasonAction } from "@/app/(dashboard)/people/actions";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -19,18 +18,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import {
   getAvailableStatuses,
-  isBackwardProgression,
   STATUS_LABELS,
   validateStatusTransition,
 } from "@/lib/people/status.shared";
 import type { Person, PersonStatus } from "@/lib/people/types";
-import { AlertTriangleIcon, ArrowDownIcon, InfoIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
+import { StatusTransitionFields } from "./status-transition-fields";
 
 interface StatusChangeModalProps {
   person: Person;
@@ -53,24 +50,15 @@ export function StatusChangeModal({
   );
   const [reason, setReason] = useState("");
   const [isPending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
 
   // Get validation result for the selected transition
-  const transition = validateStatusTransition(
-    person.status,
-    selectedStatus,
-    person
-  );
+  const transition = validateStatusTransition(person.status, selectedStatus);
 
   const hasChanges = selectedStatus !== person.status;
-  const isMovingBackward =
-    hasChanges && isBackwardProgression(person.status, selectedStatus);
   const availableStatuses = getAvailableStatuses();
 
   const handleSubmit = () => {
     if (!hasChanges) return;
-
-    setError(null);
 
     // Capture values before any state changes
     const statusValue = selectedStatus;
@@ -116,7 +104,6 @@ export function StatusChangeModal({
       // This avoids visual changes during close animation
       setSelectedStatus(person.status);
       setReason("");
-      setError(null);
     }
     onOpenChange(newOpen);
   };
@@ -156,70 +143,15 @@ export function StatusChangeModal({
             </Select>
           </div>
 
-          {/* Backward Movement Warning */}
-          {isMovingBackward && (
-            <Alert className="border-amber-500/50 bg-amber-50 dark:bg-amber-950/20">
-              <ArrowDownIcon className="h-4 w-4 text-amber-600" />
-              <AlertDescription className="text-amber-800 dark:text-amber-200">
-                <strong>Moving backward in the pipeline.</strong> This person
-                will go from {STATUS_LABELS[person.status]} back to{" "}
-                {STATUS_LABELS[selectedStatus]}. Please provide a reason below.
-              </AlertDescription>
-            </Alert>
-          )}
-
-          {/* Other Warnings */}
-          {hasChanges &&
-            !isMovingBackward &&
-            transition.warnings.length > 0 && (
-              <div className="space-y-2">
-                {transition.warnings.map((warning, index) => (
-                  <Alert key={index} variant="default">
-                    {transition.requiresConfirmation ? (
-                      <AlertTriangleIcon className="h-4 w-4 text-amber-500" />
-                    ) : (
-                      <InfoIcon className="h-4 w-4 text-blue-500" />
-                    )}
-                    <AlertDescription>{warning}</AlertDescription>
-                  </Alert>
-                ))}
-              </div>
-            )}
-
-          {/* Reason - Required for all status changes */}
+          {/* Warnings + required reason — shared with the drag-drop modal */}
           {hasChanges && (
-            <div className="space-y-2">
-              <Label htmlFor="reason">
-                Reason for change <span className="text-destructive">*</span>
-              </Label>
-              <Textarea
-                id="reason"
-                placeholder={
-                  isMovingBackward
-                    ? "Why is this person moving back in the pipeline? (e.g., changed circumstances, data correction, etc.)"
-                    : "Enter a reason for this status change..."
-                }
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                rows={3}
-                className={
-                  isMovingBackward
-                    ? "border-amber-500/50 focus-visible:ring-amber-500"
-                    : ""
-                }
-              />
-              <p className="text-muted-foreground text-xs">
-                This will be recorded in the activity timeline.
-              </p>
-            </div>
-          )}
-
-          {/* Error display */}
-          {error && (
-            <Alert variant="destructive">
-              <AlertTriangleIcon className="h-4 w-4" />
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
+            <StatusTransitionFields
+              from={person.status}
+              to={selectedStatus}
+              transition={transition}
+              reason={reason}
+              onReasonChange={setReason}
+            />
           )}
         </div>
 

@@ -13,6 +13,24 @@ on:
   # diff nobody expected instead of as silence.
   pull_request:
 
+  # On demand, against any ref — the escape hatch for anchoring a sha that is
+  # not currently a PR head.
+  #
+  # `pull_request` alone can only ever anchor the PR's head commit. The loop in
+  # ops/agent-os/dod.md assumes "CI re-anchors G1/G2 at the final sha", but a
+  # fix round that lands on a side branch (`feature/X-fix`) leaves the PR head
+  # behind on `feature/X`, and then no event names the sha under test:
+  # `gh run list --commit <sha>` returns `[]` and G1/G2 have no evidence at the
+  # commit that would actually ship. #293 hit this three times.
+  #
+  # Re-pointing the PR head is still the right fix when the sha is meant to
+  # ship. This trigger is for proving a sha green *before* moving a ref, and
+  # for the case where the verdict is needed at a commit no PR names.
+  # Dispatch resolves the workflow file from the default branch, then runs it
+  # against the ref you pick, so the run's head_sha is that ref's tip and
+  # `gh run list --commit <sha>` finds it.
+  workflow_dispatch:
+
 jobs:
   validate:
     # This name is a CONTRACT, not a description. The `main protection` ruleset
@@ -40,11 +58,23 @@ jobs:
       #
       # Anything that is not markdown — including .json, .yml, and this
       # workflow itself — takes the full path.
+      #
+      # This shortcut is defined by a PR's file list, so it only applies to a
+      # `pull_request` event. A manual run has no `github.event.pull_request`,
+      # and asking for `pulls//files` would 404 the whole job — so a dispatch
+      # takes the full path unconditionally. That is also what you want from
+      # it: you dispatch this to anchor the suite at a sha, and a run that
+      # skipped the suite would anchor nothing.
       - name: Detect docs-only change
         id: scope
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "Manual run at ${{ github.sha }} — running the full pipeline."
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           files=$(gh api --paginate \
             "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
             --jq '.[].filename')

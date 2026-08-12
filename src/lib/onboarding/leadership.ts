@@ -149,7 +149,8 @@ function viewerBelongsTo(
  *
  * It does NOT follow that such a church is finished with the question, and the
  * incomplete-onboarding indicator deliberately says so: it reads the RAW column
- * (`dashboard/page.tsx` → `onboardingFacts`), so leadership stays on its list
+ * (`dashboard/plant-dashboard.tsx` → `onboardingFacts`), so leadership stays on
+ * its list
  * until an EXPLICIT answer is recorded, implicit planter or not. The two
  * surfaces disagree on purpose — a prompt that fires at somebody is a demand
  * and must not nag a plant that is plainly led, whereas the indicator is a

@@ -1,8 +1,8 @@
 import { redirect } from "next/navigation";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { verifySession } from "@/lib/auth/session";
 import { getTemplates, getTemplate } from "@/lib/communication/templates";
-import { listRecipientTeams } from "@/lib/communication/service";
+import { listRecipientTeams } from "@/lib/communication/recipient-groups";
 import { listMeetings } from "@/lib/meetings/service";
 import { db } from "@/db";
 import { persons } from "@/db/schema/people";
@@ -42,7 +42,9 @@ export default async function ComposePage({ searchParams }: ComposePageProps) {
     teams,
   ] = await Promise.all([
     getTemplates(user.churchId),
-    templateId ? getTemplate(templateId) : Promise.resolve(undefined),
+    templateId
+      ? getTemplate(templateId, user.churchId)
+      : Promise.resolve(undefined),
     listMeetings(user.churchId, { status: "upcoming", limit: 50 }),
     recipientIds.length > 0
       ? db
@@ -53,7 +55,15 @@ export default async function ComposePage({ searchParams }: ComposePageProps) {
             email: persons.email,
           })
           .from(persons)
-          .where(inArray(persons.id, recipientIds))
+          // Tenant isolation is application-layer — this predicate IS the
+          // boundary. A foreign or soft-deleted id preloads nobody.
+          .where(
+            and(
+              inArray(persons.id, recipientIds),
+              eq(persons.churchId, user.churchId),
+              isNull(persons.deletedAt)
+            )
+          )
       : Promise.resolve([]),
     db.select().from(churches).where(eq(churches.id, user.churchId)).limit(1),
     listRecipientTeams(user.churchId),

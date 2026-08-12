@@ -5,12 +5,11 @@ import { revalidatePath } from "next/cache";
 import { verifySession } from "@/lib/auth/session";
 import {
   sendCommunication,
-  getGroupRecipients,
   resendToNonOpeners,
-} from "@/lib/communication/service";
+} from "@/lib/communication/send";
+import { getGroupRecipients } from "@/lib/communication/recipient-groups";
 import {
   getTemplates,
-  getTemplate,
   createTemplate,
   updateTemplate,
   deleteTemplate,
@@ -147,10 +146,6 @@ export async function getTemplatesAction(filters?: TemplateFilters) {
   if (!user.churchId) return [];
 
   return getTemplates(user.churchId, filters);
-}
-
-export async function getTemplateAction(id: string) {
-  return getTemplate(id);
 }
 
 export async function createTemplateAction(input: CreateTemplateInput) {

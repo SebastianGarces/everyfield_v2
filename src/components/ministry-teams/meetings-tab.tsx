@@ -160,12 +160,21 @@ export function MeetingsTab({ teamId, meetings }: MeetingsTabProps) {
                     />
                   </div>
                 </div>
+                {/*
+                  Notes, NOT the agenda (ruled 2026-08-10, #312). This field
+                  posts to `church_meetings.notes`; the structured agenda is a
+                  separate concept the meeting detail page builds and renders.
+                  Labelling free text "Agenda" sent planters' running orders to
+                  a column the Agenda card never reads, and the card then told
+                  them "No agenda yet" over their own words. Neither the label
+                  nor the placeholder may say "agenda" again.
+                */}
                 <div className="grid gap-2">
-                  <Label htmlFor="notes">Agenda / Notes</Label>
+                  <Label htmlFor="notes">Notes</Label>
                   <Textarea
                     id="notes"
                     name="notes"
-                    placeholder="Meeting agenda..."
+                    placeholder="Anything to remember about this meeting..."
                     rows={3}
                   />
                 </div>
