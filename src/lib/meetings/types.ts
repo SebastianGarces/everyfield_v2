@@ -37,24 +37,6 @@ export {
 } from "@/db/schema";
 
 // ============================================================================
-// Labels
-// ============================================================================
-
-import type { MeetingType as MeetingTypeKey } from "@/db/schema";
-
-/**
- * Sentence-case labels for `meetingTypes` — keyed by the union, so a new
- * meeting type is a compile error here instead of a raw token leaking into
- * the UI. Canonical copy (ruled 2026-08-12, 407-4-1): the communication
- * surfaces read this; the remaining hand-copies consolidate in pass 2 (#411).
- */
-export const MEETING_TYPE_LABELS: Record<MeetingTypeKey, string> = {
-  vision_meeting: "Vision Meeting",
-  orientation: "Orientation",
-  team_meeting: "Team Meeting",
-};
-
-// ============================================================================
 // Extended Types
 // ============================================================================
 

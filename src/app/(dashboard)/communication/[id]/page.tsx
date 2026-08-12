@@ -44,8 +44,7 @@ import { eq, and } from "drizzle-orm";
 // Dates render through the pinned-zone formatter, never date-fns —
 // memory/invariants.md → Date & Time Rendering.
 import { formatDateTime } from "@/lib/datetime";
-import { MEETING_TYPE_LABELS } from "@/lib/meetings/types";
-import type { MeetingType } from "@/lib/meetings/types";
+import { meetingTypeLabel } from "@/lib/meetings/labels";
 
 export const dynamic = "force-dynamic";
 
@@ -170,9 +169,7 @@ export default async function MessageDetailPage({
                 className="bg-muted/50 text-foreground/70 hover:bg-muted hover:text-foreground inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors"
               >
                 <Calendar className="h-3.5 w-3.5" />
-                {meeting.title ||
-                  MEETING_TYPE_LABELS[meeting.type as MeetingType] ||
-                  meeting.type}
+                {meeting.title || meetingTypeLabel(meeting.type)}
                 <ExternalLink className="h-3 w-3" />
               </Link>
             )}

@@ -8,8 +8,7 @@
 // ============================================================================
 
 import { formatDateTime } from "@/lib/datetime";
-import { MEETING_TYPE_LABELS } from "@/lib/meetings/types";
-import type { MeetingType } from "@/lib/meetings/types";
+import { meetingTypeLabel } from "@/lib/meetings/labels";
 
 export interface MergeFieldDefinition {
   /** The field token (without braces), e.g. "first_name" */
@@ -220,9 +219,8 @@ export function buildMeetingMergeData(meeting: {
   locationAddress: string | null;
 }): Record<string, string> {
   // Canonical map (407-4-1): the type may have arrived from an older row,
-  // so fall back to the raw token exactly as the local copy did.
-  const typeLabel =
-    MEETING_TYPE_LABELS[meeting.type as MeetingType] ?? meeting.type;
+  // so the accessor falls back to the raw token exactly as the local copy did.
+  const typeLabel = meetingTypeLabel(meeting.type);
 
   return {
     meeting_title: meeting.title ?? typeLabel,

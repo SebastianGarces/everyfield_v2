@@ -30,8 +30,7 @@ import {
   buildMeetingMergeData,
   MERGE_FIELDS,
 } from "@/lib/communication/merge";
-import { MEETING_TYPE_LABELS } from "@/lib/meetings/types";
-import type { MeetingType } from "@/lib/meetings/types";
+import { meetingTypeLabel } from "@/lib/meetings/labels";
 import type { MessageTemplate } from "@/db/schema/communication";
 import type { RecipientTeamOption } from "@/lib/communication/recipient-groups";
 
@@ -299,10 +298,8 @@ export function ComposeForm({
                       value={m.id}
                       className="cursor-pointer"
                     >
-                      {m.title ??
-                        MEETING_TYPE_LABELS[m.type as MeetingType] ??
-                        m.type}{" "}
-                      — {formatDateTime(new Date(m.datetime), "short")}
+                      {m.title ?? meetingTypeLabel(m.type)} —{" "}
+                      {formatDateTime(new Date(m.datetime), "short")}
                     </SelectItem>
                   ))}
                 </SelectContent>
