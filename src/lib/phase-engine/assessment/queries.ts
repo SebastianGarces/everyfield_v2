@@ -45,7 +45,11 @@ import { parseTargetDate } from "@/lib/launch/countdown";
 // through. One reader of `plant_insights.cited_facts` syntax, so the read layer
 // and the surfaces above it can never disagree about where a path ends and a
 // quoted value begins.
-import { parseCitedFact } from "@/lib/phase-engine/fact-format";
+import {
+  citedFactPath,
+  parseCitedFact,
+  type CitedFactSignals,
+} from "@/lib/phase-engine/fact-format";
 import type { PlantFactSnapshot } from "@/lib/phase-engine/signals";
 import {
   filterDirtyOrStale,
@@ -56,10 +60,33 @@ import {
   selectionReasonFor,
 } from "./dirty";
 
+/**
+ * A persisted insight, plus the manual signal each of its citations resolves to
+ * in the snapshot that insight was made against.
+ *
+ * WHY THE READ LAYER CARRIES IT (ruled 2026-08-12 on #319). An attestation is
+ * citable two legal ways, and which one the model emitted must not decide what a
+ * planter reads. Resolving `manual.attestations.N.…` to its signal is a READ of
+ * the assessment's own snapshot, so a presentational component — which holds an
+ * insight row and nothing else — cannot do it. The projection that hands the
+ * component its insights does it instead, once, and the map rides along.
+ *
+ * Optional because a `PlantInsight` straight out of the table is still a valid
+ * input everywhere one is accepted (the marketing fixtures hand in exactly
+ * that); absent, every surface falls back to the generic self-report phrasing
+ * rather than guessing a signal.
+ *
+ * @see resolveCitedFactSignals for how the map is built, and
+ *      `fact-format.ts` → `CitedFactSignals` for how it is read.
+ */
+export interface AssessedInsight extends PlantInsight {
+  citedFactSignals?: CitedFactSignals;
+}
+
 /** A complete assessment snapshot plus its insights — the instant-read payload. */
 export interface LatestAssessment {
   assessment: PlantAssessment;
-  insights: PlantInsight[];
+  insights: AssessedInsight[];
 }
 
 /**
@@ -90,7 +117,16 @@ export async function getLatestAssessment(
     .where(eq(plantInsights.assessmentId, assessment.id))
     .orderBy(plantInsights.rank);
 
-  return { assessment, insights };
+  return {
+    assessment,
+    // Every surface that renders a citation hangs off this one read, so the
+    // attestation → signal resolution happens here rather than per-surface:
+    // the Focus insight card and the CSF scorecard hold no snapshot of their
+    // own and could not do it (see {@link AssessedInsight}).
+    insights: insights.map((insight) =>
+      withCitedFactSignals(insight, assessment.factSnapshot)
+    ),
+  };
 }
 
 /**
@@ -388,8 +424,12 @@ export interface CsfFactorStanding extends CsfDefinition {
    * The persisted insights behind the standing, most urgent first. These are
    * the exact `plant_insights` rows from the assessment — the trace from a
    * standing back to the judgement that produced it. Empty iff `not_raised`.
+   *
+   * Each carries `citedFactSignals`, resolved against this assessment's own
+   * snapshot, so the tile's "Based on …" line reads an attestation in the same
+   * words the exit-criteria drill-down does (ruled 2026-08-12 on #319).
    */
-  insights: PlantInsight[];
+  insights: AssessedInsight[];
 }
 
 /**
@@ -429,7 +469,9 @@ export function buildCsfScorecard(
 ): CsfScorecard | null {
   if (!latest) return null;
 
-  const byCategory = new Map<CsfCategory, PlantInsight[]>();
+  const snapshot = latest.assessment.factSnapshot;
+
+  const byCategory = new Map<CsfCategory, AssessedInsight[]>();
   for (const insight of latest.insights) {
     if (insight.audience !== audience) continue;
     if (!isCsfCategory(insight.category)) continue;
@@ -440,10 +482,14 @@ export function buildCsfScorecard(
 
   const factors = CSF_DEFINITIONS.map((definition) => {
     // Most urgent first, then the judge's own rank within a severity, so the
-    // leading insight the tile shows is the one that set the standing.
-    const insights = [...(byCategory.get(definition.category) ?? [])].sort(
-      compareInsightUrgency
-    );
+    // leading insight the tile shows is the one that set the standing. Each is
+    // resolved against this assessment's snapshot here rather than trusted to
+    // arrive resolved: `getLatestAssessment` already did it, but a caller
+    // handing in a privacy-gated payload it assembled itself has not, and the
+    // scorecard's voice must not depend on which door its rows came through.
+    const insights = [...(byCategory.get(definition.category) ?? [])]
+      .sort(compareInsightUrgency)
+      .map((insight) => withCitedFactSignals(insight, snapshot));
 
     return {
       ...definition,
@@ -1275,6 +1321,69 @@ function attestationSignalKey(
 
   const key = signalKey.value.trim();
   return key.length > 0 ? key : null;
+}
+
+/**
+ * Every manual signal ONE insight's citations resolve to, keyed by the dotted
+ * path of the citation that names it (`citedFactPath`, the same key the
+ * formatter looks the map up under).
+ *
+ * This is the whole-column form of {@link attestationSignalKey} and the read-layer
+ * half of the 2026-08-12 ruling on #319: the insight card and the CSF scorecard
+ * render a `cited_facts` column with no snapshot in hand, so the projection that
+ * feeds them resolves the signals once and carries them
+ * ({@link AssessedInsight.citedFactSignals}).
+ *
+ * Only citations that RESOLVE get an entry. An unresolvable row — an
+ * out-of-range index, a non-numeric one, a row with no `signalKey` — is left
+ * out, and the surface then keeps the generic self-report phrasing rather than
+ * borrowing a signal. Nothing here rewrites a path: the citation a surface shows
+ * is still the judge's own (`buildEvidence`, and the round-2 ruling it records).
+ */
+export function resolveCitedFactSignals(
+  insight: PlantInsight,
+  snapshot: unknown
+): CitedFactSignals {
+  const facts = insight.citedFacts;
+  if (!Array.isArray(facts)) return {};
+
+  const signals: Record<string, string> = {};
+  for (const raw of facts) {
+    if (typeof raw !== "string" || raw.trim() === "") continue;
+    const path = citedFactPath(raw);
+    if (path.length === 0 || path in signals) continue;
+    const key = attestationSignalKey(path, snapshot);
+    if (key !== null) signals[path] = key;
+  }
+  return signals;
+}
+
+/**
+ * The same insight, carrying the signals its citations resolved to.
+ *
+ * Idempotent: an insight that already carries a map keeps it, so a projection
+ * built over `getLatestAssessment`'s output does not redo the resolution, and
+ * one built over a hand-assembled payload (the privacy-gated oversight read)
+ * still gets it.
+ *
+ * An insight with nothing to resolve is returned UNCHANGED — the same object,
+ * not a copy of it. Almost no insight cites an attestation, and the rows a
+ * surface renders are meant to BE the persisted `plant_insights` rows rather
+ * than projections of them (`CsfFactorStanding.insights`, pinned by reference in
+ * `queries.test.ts`). Adding an empty map to every row to make the shape uniform
+ * would weaken that for nothing: `{}` and absent are the same answer to every
+ * reader, because a lookup that misses falls back to the generic phrasing either
+ * way.
+ */
+function withCitedFactSignals(
+  insight: AssessedInsight,
+  snapshot: unknown
+): AssessedInsight {
+  if (insight.citedFactSignals) return insight;
+
+  const citedFactSignals = resolveCitedFactSignals(insight, snapshot);
+  if (Object.keys(citedFactSignals).length === 0) return insight;
+  return { ...insight, citedFactSignals };
 }
 
 /**

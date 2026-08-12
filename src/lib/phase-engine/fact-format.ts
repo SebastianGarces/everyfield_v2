@@ -13,9 +13,11 @@
 //   - It leaks the shape of the fact store to end users.
 //
 // This module is the ONE place that turns a stored citation into a phrase a
-// planter reads. Both surfaces that render citations — the CSF scorecard tiles
-// and the Focus insight cards — go through it, so the fix lands once rather
-// than per-surface.
+// planter reads. All THREE surfaces that render citations — the CSF scorecard
+// tiles, the Focus insight cards and the exit-criteria drill-down — go through
+// it, so the fix lands once rather than per-surface. All three sit on `/phase`
+// at once, which is why one citation must read as one sentence across them
+// (ruled 2026-08-12 on #319; see `CitedFactSignals`).
 //
 // ---------------------------------------------------------------------------
 // The rules this file is written against
@@ -107,6 +109,19 @@ function normalizePath(path: string): string {
 function citationIdentity(fact: string): string {
   const { path, value } = parseCitedFact(fact);
   return `${dotIndices(path)}=${value ?? ""}`;
+}
+
+/**
+ * The dotted path of a citation: its asserted value stripped, both index
+ * spellings unified, the row index KEPT.
+ *
+ * Exported because it is the KEY a {@link CitedFactSignals} map is built under
+ * in the read layer and read under here. One function for both sides, so the
+ * projection that resolves `manual.attestations.1.value` and the formatter that
+ * looks it up cannot disagree about what that citation is called.
+ */
+export function citedFactPath(fact: string): string {
+  return dotIndices(parseCitedFact(fact).path);
 }
 
 // ----------------------------------------------------------------------------
@@ -664,6 +679,18 @@ export interface CitedFactContext {
   signalKey?: string | null;
 }
 
+/**
+ * The same knowledge for a WHOLE cited-facts column: the signal each citation
+ * resolved to, keyed by that citation's {@link citedFactPath}.
+ *
+ * The insight card and the CSF scorecard render a column at a time and hold no
+ * snapshot of their own, so the read layer that builds their projection resolves
+ * the signals and hands the map down (ruled 2026-08-12 on #319 —
+ * `AssessedInsight.citedFactSignals`). A path with no entry, or an entry of
+ * `null`, is a citation that did not resolve; nothing is guessed for it.
+ */
+export type CitedFactSignals = Readonly<Record<string, string | null>>;
+
 /** Resolve one citation to its phrase, or `null` when there is nothing to say. */
 function buildPhrase(fact: unknown, context?: CitedFactContext): Phrase | null {
   if (typeof fact !== "string" || fact.trim() === "") return null;
@@ -706,6 +733,36 @@ export function formatCitedFact(
 }
 
 /**
+ * The sentence ONE resolved attestation reads as, or `null` when this citation
+ * is not a resolved attestation at all.
+ *
+ * It is the SAME call `buildPhrase` makes for `formatCitedFact(fact, { signalKey
+ * })`, which is what makes "the plural formatter says what the drill-down says"
+ * true by construction rather than by two templates kept in step by hand.
+ */
+function resolvedSignalSentence(
+  fact: string,
+  signalKey: string | null
+): string | null {
+  if (signalKey === null) return null;
+  const { path, value } = parseCitedFact(fact);
+  return manualAttestationPhrase(normalizePath(path), value, signalKey);
+}
+
+/** One phrase's group while a column is being folded. */
+interface CitedFactGroup {
+  /** The COUNTING phrase — the group's identity and its fallback rendering. */
+  phrase: Phrase;
+  rows: number;
+  /** What the group reads as when it is one resolved signal; null otherwise. */
+  specific: string | null;
+  /** The signal every member so far resolved to (`null` = none did). */
+  signal: string | null;
+  /** Two members disagreed about the signal, so the group is a count again. */
+  mixed: boolean;
+}
+
+/**
  * Humanise a whole `cited_facts` column.
  *
  * Takes `unknown` because the column is `jsonb`: both render surfaces would
@@ -728,11 +785,40 @@ export function formatCitedFact(
  *
  * Phrases with a fixed subject — including ones that name their row, like a
  * ministry role's own label — carry no count and simply group.
+ *
+ * ---------------------------------------------------------------------------
+ * `signals` — one voice for one citation (ruled 2026-08-12 on #319)
+ * ---------------------------------------------------------------------------
+ *
+ * An attestation is citable two legal ways (`manual.byKey.<signal>` and
+ * `manual.attestations[N]`), and until this ruling the singular formatter spoke
+ * the specific sentence for both while THIS one still said "something you
+ * confirmed" for the array spelling. Both live on `/phase` — the drill-down
+ * beside the insight card and the scorecard — so one planter could read the
+ * same fact told two ways in one screenful, decided by a spelling the model
+ * happened to pick.
+ *
+ * Supplying `signals` closes that, and the shape of the fix is the ruling:
+ *
+ *   - ONE resolved signal in a group reads the drill-down's own sentence;
+ *   - MIXED signals — two attestations of DIFFERENT signals, or one that
+ *     resolved beside one that did not — collapse back to the count ("3 things
+ *     you confirmed"). THIS PATH IS A COUNTER AND NEVER BECOMES A LISTER: the
+ *     group is keyed on the counting phrase precisely so two different
+ *     attestations stay one group, and naming them both here would turn a chip
+ *     that says how much evidence there is into a second copy of the drill-down.
+ *
+ * A rendered line is emitted once: the keyed spelling and the array spelling of
+ * ONE attestation are two groups that now say the identical sentence, and
+ * printing it twice is exactly the doubled evidence this ruling exists to stop.
  */
-export function formatCitedFacts(citedFacts: unknown): string[] {
+export function formatCitedFacts(
+  citedFacts: unknown,
+  signals?: CitedFactSignals
+): string[] {
   if (!Array.isArray(citedFacts)) return [];
 
-  const groups = new Map<string, { phrase: Phrase; rows: number }>();
+  const groups = new Map<string, CitedFactGroup>();
   const seen = new Set<string>();
 
   for (const fact of citedFacts) {
@@ -742,8 +828,13 @@ export function formatCitedFacts(citedFacts: unknown): string[] {
     if (seen.has(identity)) continue;
     seen.add(identity);
 
+    // The COUNTING phrase is the group's identity, resolved signal or not.
+    // That is what keeps two different attestations in one group, where the
+    // ruling wants them counted rather than listed.
     const phrase = buildPhrase(fact);
     if (phrase === null) continue;
+
+    const signal = signals?.[citedFactPath(fact)] ?? null;
 
     // Group on the singular: it is the phrase's identity, independent of how
     // many rows end up in the group.
@@ -751,12 +842,26 @@ export function formatCitedFacts(citedFacts: unknown): string[] {
     const group = groups.get(key);
     if (group) {
       group.rows += 1;
+      if (group.signal !== signal) group.mixed = true;
       continue;
     }
-    groups.set(key, { phrase, rows: 1 });
+    groups.set(key, {
+      phrase,
+      rows: 1,
+      specific: resolvedSignalSentence(fact, signal),
+      signal,
+      mixed: false,
+    });
   }
 
-  return [...groups.values()].map(({ phrase, rows }) =>
-    renderPhrase(phrase, rows)
-  );
+  const lines: string[] = [];
+  const emitted = new Set<string>();
+  for (const { phrase, rows, specific, mixed } of groups.values()) {
+    const line =
+      !mixed && specific !== null ? specific : renderPhrase(phrase, rows);
+    if (emitted.has(line)) continue;
+    emitted.add(line);
+    lines.push(line);
+  }
+  return lines;
 }

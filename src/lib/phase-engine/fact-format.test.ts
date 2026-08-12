@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  citedFactPath,
   formatCitedFact,
   formatCitedFacts,
   parseCitedFact,
@@ -531,4 +532,178 @@ test("an unknown signal still degrades to words, never to ledger syntax", () => 
   assert.doesNotMatch(phrase, CAMEL_CASE);
   assert.ok(!phrase.includes("_"), phrase);
   assert.match(phrase, /you confirmed/);
+});
+
+// ----------------------------------------------------------------------------
+// The PLURAL formatter reads that same one voice (#319, ruled 2026-08-12).
+//
+// Round 2 unified the drill-down (`formatCitedFact` + `signalKey`) and stopped
+// there, so the insight card and the CSF scorecard — which render a whole
+// column through `formatCitedFacts` — still said "something you confirmed"
+// about the fact the drill-down named, on the same page. Option A extends the
+// unification to them via a read-layer-resolved `CitedFactSignals` map, with one
+// hard limit: MIXED signals collapse to a count. The counting path stays a
+// counter, never a lister.
+// ----------------------------------------------------------------------------
+
+/** The map key both sides agree on, so no test invents its own spelling. */
+const FINANCIAL_BASE = {
+  [citedFactPath("manual.attestations.1.value=true")]:
+    "financial_base_established",
+} as const;
+
+test("citedFactPath strips the value and unifies both index spellings", () => {
+  assert.equal(
+    citedFactPath("manual.attestations[1].value=true"),
+    "manual.attestations.1.value"
+  );
+  assert.equal(
+    citedFactPath("manual.attestations.1.value=true"),
+    "manual.attestations.1.value"
+  );
+  assert.equal(
+    citedFactPath(" manual.byKey.systems_tested "),
+    "manual.byKey.systems_tested"
+  );
+});
+
+test("the formerly-divergent pair now agrees for a single resolved signal", () => {
+  // Reproduced verbatim from the spec-question on PR 394. Before this change:
+  //   formatCitedFacts([arrayForm])            -> ["something you confirmed"]
+  //   formatCitedFact(arrayForm, { signalKey}) -> "you confirmed your financial
+  //                                                base is in place"
+  const arrayForm = "manual.attestations.1.value=true";
+  const drillDown = formatCitedFact(arrayForm, {
+    signalKey: "financial_base_established",
+  });
+
+  assert.deepEqual(formatCitedFacts([arrayForm], FINANCIAL_BASE), [drillDown]);
+  assert.deepEqual(formatCitedFacts([arrayForm], FINANCIAL_BASE), [
+    "you confirmed your financial base is in place",
+  ]);
+});
+
+test("all three surfaces read one citation as one sentence", () => {
+  // The scorecard tile / insight card (plural), the drill-down (singular) and
+  // the keyed spelling of the very same fact.
+  const [plural] = formatCitedFacts(
+    ["manual.attestations.1.value=true"],
+    FINANCIAL_BASE
+  );
+
+  assert.equal(
+    plural,
+    formatCitedFact("manual.attestations.1.value=true", {
+      signalKey: "financial_base_established",
+    })
+  );
+  assert.equal(
+    plural,
+    formatCitedFact("manual.byKey.financial_base_established=true")
+  );
+});
+
+test("both spellings of ONE attestation render one line, not the same line twice", () => {
+  assert.deepEqual(
+    formatCitedFacts(
+      [
+        "manual.byKey.financial_base_established=true",
+        "manual.attestations.1.value=true",
+      ],
+      FINANCIAL_BASE
+    ),
+    ["you confirmed your financial base is in place"]
+  );
+});
+
+test("MIXED signals collapse to a count — the counting path never lists", () => {
+  const signals = {
+    "manual.attestations.0.value": "values_documented",
+    "manual.attestations.1.value": "financial_base_established",
+    "manual.attestations.2.value": "systems_tested",
+  };
+  const [line] = formatCitedFacts(
+    [
+      "manual.attestations.0.value=true",
+      "manual.attestations.1.value=true",
+      "manual.attestations.2.value=true",
+    ],
+    signals
+  );
+
+  assert.equal(line, "3 things you confirmed");
+  // Not one signal is named: the moment two disagree, this is a count.
+  assert.doesNotMatch(line, /core values|financial base|launch systems/);
+});
+
+test("one resolved beside one unresolved is MIXED, so it counts too", () => {
+  assert.deepEqual(
+    formatCitedFacts(
+      ["manual.attestations.1.value=true", "manual.attestations.9.value=true"],
+      FINANCIAL_BASE
+    ),
+    ["2 things you confirmed"]
+  );
+});
+
+test("a column with no signals is byte-for-byte what it was before", () => {
+  // The map is additive: every caller that has no snapshot to resolve against
+  // — the marketing fixtures, and anything predating the ruling — is untouched.
+  const column = [
+    "manual.attestations.0.value=true",
+    "manual.attestations.1.value=true",
+    "coreGroup.committedCount=22",
+  ];
+
+  assert.deepEqual(formatCitedFacts(column), [
+    "2 things you confirmed",
+    "22 committed core-group members",
+  ]);
+  assert.deepEqual(formatCitedFacts(column), formatCitedFacts(column, {}));
+});
+
+test("a signal is ignored on a path that is not an attestation row", () => {
+  assert.deepEqual(
+    formatCitedFacts(["coreGroup.committedCount=22"], {
+      "coreGroup.committedCount": "financial_base_established",
+    }),
+    ["22 committed core-group members"]
+  );
+});
+
+test("the resolved signal reaches the other two attestation paths as well", () => {
+  assert.deepEqual(
+    formatCitedFacts(
+      ["manual.attestations.1.signalKey=financial_base_established"],
+      {
+        "manual.attestations.1.signalKey": "financial_base_established",
+      }
+    ),
+    ["your financial base is in place"]
+  );
+
+  const [dated] = formatCitedFacts(
+    ["manual.attestations.1.attestedAt=2026-07-19T09:30:00.000Z"],
+    { "manual.attestations.1.attestedAt": "financial_base_established" }
+  );
+  assert.match(dated, /your financial base is in place/);
+  assert.match(dated, /2026/);
+});
+
+test("a resolved plural line still leaks no ledger syntax", () => {
+  for (const line of formatCitedFacts(
+    [
+      "manual.attestations.1.value=true",
+      "manual.attestations.2.value=false",
+      "coreGroup.committedCount=22",
+    ],
+    {
+      "manual.attestations.1.value": "financial_base_established",
+      "manual.attestations.2.value": "systems_tested",
+    }
+  )) {
+    assert.doesNotMatch(line, LEDGER_SYNTAX);
+    assert.doesNotMatch(line, CAMEL_CASE);
+    assert.ok(!line.includes("="), line);
+  }
 });

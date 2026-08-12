@@ -195,7 +195,12 @@ const MAX_TILE_FACTS = 2;
 export function FactorTile({ factor }: { factor: CsfFactorStanding }) {
   const style = STANDING_STYLES[factor.standing];
   const [lead, ...rest] = factor.insights;
-  const citedFacts = formatCitedFacts(lead?.citedFacts);
+  // The signals ride on the insight, resolved by the projection that built this
+  // scorecard against the assessment's own snapshot (ruled 2026-08-12 on #319):
+  // an attestation reads here in the same words the exit-criteria drill-down
+  // gives it, and two DIFFERENT attestations collapse to a count rather than
+  // turning this line into a second copy of that drill-down.
+  const citedFacts = formatCitedFacts(lead?.citedFacts, lead?.citedFactSignals);
   const shownFacts = citedFacts.slice(0, MAX_TILE_FACTS);
   const hiddenFactCount = citedFacts.length - shownFacts.length;
 

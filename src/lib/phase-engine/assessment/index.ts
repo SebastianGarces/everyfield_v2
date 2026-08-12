@@ -17,6 +17,13 @@ export {
   selectPlantsForAssessment,
   getLatestAssessment,
   getLatestCompleteSnapshot,
+  // The attestation → signal resolution the surfaces read a citation through
+  // (ruled 2026-08-12 on #319). `AssessedInsight` is a `PlantInsight` carrying
+  // that map; every component that renders `cited_facts` takes one, so the
+  // words a planter reads cannot depend on which of two legal spellings the
+  // judge happened to emit.
+  resolveCitedFactSignals,
+  type AssessedInsight,
   type LatestAssessment,
   type SelectedPlant,
 } from "./queries";

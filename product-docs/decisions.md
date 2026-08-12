@@ -189,11 +189,11 @@ verbatim:
 | PR&nbsp;390 (a) | **The contextual wiki guide is suppressed on the OB-015 finish screen by REMOVING `?step=`, not by giving the screen a URL of its own.** Chosen over accepting the guide there (PR #367 scoped it to *the one step that raises the question*, and the finish screen does not raise it) and over inventing a fifth `?step=` value — which was rejected because it would hand a planter a shareable, bookmarkable URL that reopens an offer whose gate they already answered. | The finish screen is `/dashboard` with the param removed, so it matches no guide entry and no second "is the guide on?" mechanism is added. Reloading it resumes the flow rather than reopening the offer. Enforcement line in `memory/invariants.md` (Onboarding). |
 | PR&nbsp;390 (b) | **Step 1 is not in the browser history.** Once the church exists the 1→2 transition `replaceState`s instead of pushing, and the same rule declines the deep link `/dashboard?step=basics` — "step 1 is not re-enterable" becomes true everywhere instead of only in-app, where `backTarget` already said so. Option C (a read-only done state for step 1) was rejected as the largest change for a state only ever seen travelling backwards. | **Accepted cost, in the ruling's own terms: browser Back from step 2 now leaves the flow** — the behaviour issue #373's AC 5 was originally written to stop. AC 5 is amended on the issue so the next reader does not file it as a regression. The rule lives in `resolveOnboardingStepRequest` (server) and `addressableOnboardingStep` (client mirror); enforcement line in `memory/invariants.md` (Onboarding). |
 
-### Ruled 2026-08-10 — how a manual attestation may be cited (#319, PR 394)
+### Ruled 2026-08-10 / 2026-08-12 — how a manual attestation may be cited (#319, PR 394)
 
 The fact snapshot writes every manual attestation TWICE — `manual.byKey.<signal>` and
 `manual.attestations[]` — and the judge's citable ledger is the whole flattened snapshot, so both
-spellings are legal citations of one fact. Ruled by Sebastian on the PR thread across two rounds.
+spellings are legal citations of one fact. Ruled by Sebastian on the PR thread across three rounds.
 The round-2 comment, verbatim:
 
 > **RULING round 2 (2026-08-10, Sebastian):** unify the drill-down wording — the formatter resolves
@@ -202,10 +202,23 @@ The round-2 comment, verbatim:
 > bookkeeping the PR names: the citation-normalisation ruling into product-docs/decisions.md.
 > Amend this PR.
 
+Round 2 unified the drill-down and stopped there, which left the other two surfaces on the same
+page speaking differently about the same citation. The round-3 comment, verbatim:
+
+> **RULING (2026-08-12, Sebastian): Option A — extend the unification to both surfaces, mixed
+> signals collapse to a count.** Resolve `signalKey` where the insight-card and CSF-scorecard
+> projections are built, carry it to the components, and pass it through a context-aware plural
+> formatter. One resolved signal reads the same specific sentence the drill-down reads; MIXED
+> signals collapse to a count ("3 things you confirmed") — the counting path stays a counter, never
+> a lister. All three surfaces on /phase then read one voice for one citation. The raw citation path
+> (data-path) stays verbatim, per the round-2 ruling. Confirm the owed decisions.md bookkeeping row
+> from round 2 actually landed; if not, it lands in this amendment.
+
 | # | Decision | Consequence |
 |---|----------|-------------|
 | PR&nbsp;394 (a) | **A citation is normalised onto its signal at parse time, by resolving the row.** `manual.attestations.N.…` is rewritten to `manual.byKey.<signal>` for ATTRIBUTION, reading entry N's `signalKey` out of the assessment's own snapshot — so which of two equally legal spellings the model happened to emit cannot decide whether a gate reads "Not addressed". Widening the three attested criteria to the bare `manual` prefix was rejected: each measures ONE signal, so a prefix rule would tell a planter the engine addressed their financial base because it mentioned an unrelated one. An unresolvable row (out-of-range index, non-numeric index, no `signalKey`) attributes to NOTHING rather than guessing a gate. | `normalizeManualCitation` in `src/lib/phase-engine/assessment/queries.ts`, applied by `citedPathsOf`. The criteria keep declaring only the keyed spelling. `buildEvidence` is deliberately untouched, so the drill-down still shows the citation as the judge wrote it. |
 | PR&nbsp;394 (b) | **Having landed on the same gate, both spellings must also READ the same** (round 2). The formatter resolves the signal the same way the normaliser does and phrases the array spelling with the `MANUAL_SIGNAL_CLAUSES` sentence the keyed one uses — "you confirmed your financial base is in place", not "something you confirmed" beside it. Same evidence told twice, once vaguely, is what makes a planter doubt the specific telling. The RAW citation path is unchanged: `data-path` stays verbatim, and an unresolved row keeps the generic self-report phrasing rather than borrowing a signal. | The resolved signal rides on `CitedFactEvidence.signalKey` and reaches `formatCitedFact(fact, { signalKey })` (`src/lib/phase-engine/fact-format.ts`); nothing rewrites `path`. Pinned by `fact-format.test.ts` (the two spellings render the identical sentence) and `exit-criteria.test.ts` (the rendered `data-path` is still the judge's own). |
+| PR&nbsp;394 (c) | **The unification reaches ALL THREE surfaces, and it is a READ-LAYER fix** (round 3, option A). The insight card and the CSF scorecard fold a whole `cited_facts` column and hold no snapshot, so the projection that feeds them resolves each citation's signal and carries it; the components pass it to a context-aware plural formatter. Option (b), accepting the divergence, was rejected because all three cards sit on `/phase` at once — a planter could read one attestation named by the drill-down and called "something you confirmed" by the card above it, in one screenful. Widening the formatter's own guesswork was rejected for the same reason the prefix rule was in (a): resolving a row is a read of the snapshot, not a syntax rule. | **The counting path stays a counter.** One resolved signal in a group reads the drill-down's sentence; MIXED signals — two different attestations, or one resolved beside one that is not — collapse back to "3 things you confirmed" rather than listing them. `resolveCitedFactSignals` + `AssessedInsight.citedFactSignals` (`assessment/queries.ts`), read by `formatCitedFacts(citedFacts, signals)` (`fact-format.ts`). `data-path` is still verbatim. Pinned by `fact-format.test.ts`, `assessment/exit-criteria.test.ts` (the real projections) and `components/phase-engine/citation-voice.test.ts`, which renders all three components from ONE assessment and asserts they say the same sentence. |
 
 ## 2026-08-12 — Debt-sweep rulings (#403, PRs #404–#410)
 

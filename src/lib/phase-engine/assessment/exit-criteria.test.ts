@@ -23,10 +23,17 @@ import { test } from "node:test";
 import type { PlantAssessment, PlantInsight } from "@/db/schema";
 
 import {
+  formatCitedFact,
+  formatCitedFacts,
+} from "@/lib/phase-engine/fact-format";
+
+import {
+  buildCsfScorecard,
   buildExitCriteriaProgress,
   EXIT_CRITERION_STANDINGS,
   PHASE_EXIT_CRITERIA,
   readSnapshotFact,
+  resolveCitedFactSignals,
   type ExitCriteriaProgress,
   type LatestAssessment,
 } from "./queries";
@@ -973,4 +980,213 @@ test("PE-022: every phase up to the terminal one names its gates, and they are u
     }
   }
   assert.equal(PHASE_EXIT_CRITERIA[6], undefined, "phase 6 is terminal");
+});
+
+// ----------------------------------------------------------------------------
+// AC: ONE VOICE PER CITATION ACROSS ALL THREE /phase SURFACES (ruled
+// 2026-08-12 on #319, option A).
+//
+// Round 2 unified the drill-down only. The insight card and the CSF scorecard
+// render a whole `cited_facts` column with no snapshot in hand, so they still
+// said "something you confirmed" about the fact the drill-down named — three
+// cards on ONE page disagreeing about one citation, decided by which of two
+// legal spellings the model happened to emit.
+//
+// The fix is a read-layer one: the projection that feeds those components
+// resolves each citation's signal against the assessment's own snapshot and
+// carries it (`AssessedInsight.citedFactSignals`). The tests below drive the
+// REAL projections and the REAL formatter, so they fail if either half drifts.
+// ----------------------------------------------------------------------------
+
+test("#319: resolveCitedFactSignals resolves every attestation spelling, and nothing else", () => {
+  const snapshot = makeSnapshot({ manual: MANUAL_TWO_SIGNALS });
+  const signals = resolveCitedFactSignals(
+    makeInsight({
+      citedFacts: [
+        "manual.attestations.1.value=false",
+        "manual.attestations[1].attestedAt=2026-07-20",
+        "manual.attestations.0.signalKey=values_documented",
+        // Not an attestation row: nothing to resolve.
+        "manual.byKey.financial_base_established=false",
+        "coreGroup.committedCount=22",
+        // Out of range: left OUT of the map rather than guessed at.
+        "manual.attestations.9.value=false",
+      ],
+    }),
+    snapshot
+  );
+
+  assert.deepEqual(signals, {
+    "manual.attestations.1.value": "financial_base_established",
+    "manual.attestations.1.attestedAt": "financial_base_established",
+    "manual.attestations.0.signalKey": "values_documented",
+  });
+});
+
+test("#319: the scorecard's insights carry the signals their citations resolved to", () => {
+  const scorecard = buildCsfScorecard(
+    makeLatest(
+      [
+        makeInsight({
+          category: "generosity",
+          citedFacts: ["manual.attestations.1.value=false"],
+        }),
+      ],
+      { factSnapshot: makeSnapshot({ manual: MANUAL_TWO_SIGNALS }) }
+    )
+  )!;
+
+  const generosity = scorecard.factors.find(
+    (f) => f.category === "generosity"
+  )!;
+  assert.deepEqual(generosity.insights[0].citedFactSignals, {
+    "manual.attestations.1.value": "financial_base_established",
+  });
+  // The citation itself is untouched — the round-2 ruling, still standing.
+  assert.deepEqual(generosity.insights[0].citedFacts, [
+    "manual.attestations.1.value=false",
+  ]);
+});
+
+test("#319: an insight with nothing to resolve is the persisted row itself", () => {
+  // `CsfFactorStanding.insights` promises the rows, not projections of them.
+  // Almost no insight cites an attestation, so almost none is copied.
+  const persisted = makeInsight({
+    category: "critical_mass",
+    citedFacts: ["coreGroup.committedCount=22"],
+  });
+  const scorecard = buildCsfScorecard(makeLatest([persisted]))!;
+
+  assert.equal(
+    scorecard.factors.find((f) => f.category === "critical_mass")!.insights[0],
+    persisted
+  );
+});
+
+test("#319: the scorecard tile and the drill-down say the identical sentence", () => {
+  const latest = makeLatest(
+    [
+      makeInsight({
+        category: "generosity",
+        title: "Your financial base is not confirmed",
+        citedFacts: ["manual.attestations.1.value=false"],
+      }),
+    ],
+    { factSnapshot: makeSnapshot({ manual: MANUAL_TWO_SIGNALS }) }
+  );
+
+  // Surface 1 + 2 — the CSF tile and the insight card, both `formatCitedFacts`
+  // over a projection's insight.
+  const lead = buildCsfScorecard(latest)!.factors.find(
+    (f) => f.category === "generosity"
+  )!.insights[0];
+  const column = formatCitedFacts(lead.citedFacts, lead.citedFactSignals);
+
+  // Surface 3 — the exit-criteria drill-down, `formatCitedFact` over the
+  // evidence row's own resolved signal.
+  const evidence = criterion(
+    buildExitCriteriaProgress(latest)!,
+    "financial_base"
+  ).evidence[0];
+  const drillDown = formatCitedFact(`${evidence.path}=${evidence.citedValue}`, {
+    signalKey: evidence.signalKey,
+  });
+
+  assert.deepEqual(column, [drillDown]);
+  assert.deepEqual(column, [
+    "you have not confirmed your financial base is in place",
+  ]);
+  // …and the raw citation is still the judge's own, on the surface that shows
+  // one (the round-2 ruling: attribution and wording unify, `data-path` does
+  // not).
+  assert.equal(evidence.path, "manual.attestations.1.value");
+});
+
+/** Two attested signals, both true, as the snapshot really writes them. */
+const MANUAL_BOTH_CONFIRMED = manualBlock([
+  { signalKey: "values_documented", value: true },
+  { signalKey: "financial_base_established", value: true },
+]);
+
+/** The lead insight of one factor, as the scorecard tile receives it. */
+function leadInsight(latest: LatestAssessment, category: string) {
+  return buildCsfScorecard(latest)!.factors.find(
+    (f) => f.category === category
+  )!.insights[0];
+}
+
+test("#319: MIXED signals on one tile collapse to a count, never to a list", () => {
+  // Two attestations that say the same KIND of thing about DIFFERENT signals
+  // are one group, and that group is a counter: it reports how much evidence
+  // there is, it never turns into a second copy of the drill-down.
+  const lead = leadInsight(
+    makeLatest(
+      [
+        makeInsight({
+          category: "generosity",
+          citedFacts: [
+            "manual.attestations.0.value=true",
+            "manual.attestations.1.value=true",
+          ],
+        }),
+      ],
+      { factSnapshot: makeSnapshot({ manual: MANUAL_BOTH_CONFIRMED }) }
+    ),
+    "generosity"
+  );
+
+  const column = formatCitedFacts(lead.citedFacts, lead.citedFactSignals);
+  assert.deepEqual(column, ["2 things you confirmed"]);
+  assert.doesNotMatch(column[0], /core values|financial base/);
+});
+
+test("#319: two citations that were never one group each keep their own voice", () => {
+  // A confirmation and a non-confirmation are two lines under the old rule too
+  // — the counting path never grouped them — so each is a SINGLE resolved
+  // signal and each reads the drill-down's sentence. Collapsing these to a
+  // count would lose evidence the ruling never asked us to spend.
+  const lead = leadInsight(
+    makeLatest(
+      [
+        makeInsight({
+          category: "generosity",
+          citedFacts: [
+            "manual.attestations.0.value=true",
+            "manual.attestations.1.value=false",
+          ],
+        }),
+      ],
+      { factSnapshot: makeSnapshot({ manual: MANUAL_BOTH_CONFIRMED }) }
+    ),
+    "generosity"
+  );
+
+  assert.deepEqual(formatCitedFacts(lead.citedFacts, lead.citedFactSignals), [
+    "you confirmed your core values are documented",
+    "you have not confirmed your financial base is in place",
+  ]);
+});
+
+test("#319: an unresolvable row keeps the generic phrasing on every surface", () => {
+  const latest = makeLatest(
+    [
+      makeInsight({
+        category: "generosity",
+        citedFacts: ["manual.attestations.9.value=false"],
+      }),
+    ],
+    { factSnapshot: makeSnapshot({ manual: MANUAL_TWO_SIGNALS }) }
+  );
+
+  const lead = buildCsfScorecard(latest)!.factors.find(
+    (f) => f.category === "generosity"
+  )!.insights[0];
+
+  assert.equal(
+    lead.citedFactSignals?.["manual.attestations.9.value"],
+    undefined
+  );
+  assert.deepEqual(formatCitedFacts(lead.citedFacts, lead.citedFactSignals), [
+    "something you have not confirmed",
+  ]);
 });
