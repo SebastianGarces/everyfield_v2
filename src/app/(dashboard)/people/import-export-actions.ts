@@ -131,6 +131,11 @@ export async function previewImportAction(
 
 /**
  * Execute bulk import of people
+ *
+ * The rows arrive back from the wizard carrying only redacted duplicate
+ * matches ({ id, displayName } — ruling 410-3C); any server-side logic that
+ * needs a matched contact resolves it by that id. Row data itself is
+ * re-validated inside `executeBulkImport`, never trusted.
  */
 export async function executeBulkImportAction(
   rows: ImportRow[],

@@ -619,10 +619,7 @@ function DuplicateRowDisplay({
         {match && (
           <div className="text-xs">
             <span className="text-muted-foreground">{matchLabel}:</span>{" "}
-            {match.firstName} {match.lastName}
-            {match.email && (
-              <span className="text-muted-foreground"> ({match.email})</span>
-            )}
+            {match.displayName}
           </div>
         )}
       </TableCell>

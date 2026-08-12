@@ -3,9 +3,12 @@ import { checkForDuplicates } from "./duplicates";
 import { createPerson } from "./service";
 import type {
   DuplicateCheck,
+  ImportDuplicateMatch,
   ImportPreview,
   ImportRow,
+  ImportRowDuplicates,
   ImportSummary,
+  Person,
 } from "./types";
 
 // ============================================================================
@@ -212,6 +215,25 @@ function parseImportRowData(data: Record<string, string>) {
 const DUPLICATE_CHECK_CONCURRENCY = 10;
 
 /**
+ * Strip a duplicate check down to what the wizard needs to explain a match
+ * (ruling 410-3C): id + display name. The matched contacts' full records
+ * (emails, phones, addresses) never leave the server — the preview action
+ * returns this shape, and the execute action resolves any match it needs
+ * server-side by id.
+ */
+function toImportRowDuplicates(check: DuplicateCheck): ImportRowDuplicates {
+  const summarize = (person: Person): ImportDuplicateMatch => ({
+    id: person.id,
+    displayName: `${person.firstName} ${person.lastName}`,
+  });
+
+  return {
+    exactMatch: check.exactMatch ? summarize(check.exactMatch) : null,
+    potentialMatches: check.potentialMatches.map(summarize),
+  };
+}
+
+/**
  * Parse and validate a CSV file, returning a preview with validation results
  * and duplicate detection per row
  */
@@ -282,7 +304,7 @@ export async function parseCsvImport(
       data: rawRow,
       valid: errors.length === 0,
       errors,
-      duplicates,
+      duplicates: toImportRowDuplicates(duplicates),
     };
 
     if (errors.length > 0) {

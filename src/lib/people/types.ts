@@ -184,6 +184,25 @@ export type PipelineMetrics = {
 // ============================================================================
 
 /**
+ * A duplicate match as it travels to the import wizard (ruling 410-3C):
+ * just enough to explain the match — never the matched contact's full
+ * record. Anything server-side that needs the real record resolves it
+ * by `id`.
+ */
+export type ImportDuplicateMatch = {
+  id: string;
+  displayName: string;
+};
+
+/**
+ * The redacted duplicate-check shape carried on an import row.
+ */
+export type ImportRowDuplicates = {
+  exactMatch: ImportDuplicateMatch | null;
+  potentialMatches: ImportDuplicateMatch[];
+};
+
+/**
  * A single row from CSV import, after parsing and validation
  */
 export type ImportRow = {
@@ -191,7 +210,7 @@ export type ImportRow = {
   data: Record<string, string>;
   valid: boolean;
   errors: string[];
-  duplicates: DuplicateCheck;
+  duplicates: ImportRowDuplicates;
 };
 
 /**
