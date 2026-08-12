@@ -19,7 +19,7 @@ export const DOCUMENT_TEMPLATES: DocumentTemplate[] = [
     phase: 1,
     formats: ["pdf"],
     pageCount: 1,
-    relatedWikiSlug: "frameworks/the-3-key-documents",
+    relatedWikiSlug: "core-group/commitment/the-three-key-documents",
     mergeFields: [
       {
         key: "church_name",
@@ -45,7 +45,7 @@ export const DOCUMENT_TEMPLATES: DocumentTemplate[] = [
     phase: 1,
     formats: ["pdf"],
     pageCount: 1,
-    relatedWikiSlug: "vision-meetings/running-a-vision-meeting",
+    relatedWikiSlug: "core-group/vision-meetings/running-the-meeting",
     mergeFields: [
       {
         key: "church_name",
@@ -64,7 +64,7 @@ export const DOCUMENT_TEMPLATES: DocumentTemplate[] = [
     phase: 1,
     formats: ["pdf"],
     pageCount: 1,
-    relatedWikiSlug: "vision-meetings/running-a-vision-meeting",
+    relatedWikiSlug: "core-group/vision-meetings/running-the-meeting",
     mergeFields: [
       {
         key: "church_name",
@@ -96,7 +96,7 @@ export const DOCUMENT_TEMPLATES: DocumentTemplate[] = [
     phase: 1,
     formats: ["pdf", "docx"],
     pageCount: 1,
-    relatedWikiSlug: "vision-meetings/running-a-vision-meeting",
+    relatedWikiSlug: "core-group/vision-meetings/running-the-meeting",
     mergeFields: [
       {
         key: "church_name",
@@ -128,7 +128,7 @@ export const DOCUMENT_TEMPLATES: DocumentTemplate[] = [
     phase: 1,
     formats: ["docx"],
     pageCount: 1,
-    relatedWikiSlug: "frameworks/the-3-key-documents",
+    relatedWikiSlug: "core-group/commitment/the-three-key-documents",
     mergeFields: [
       {
         key: "church_name",
@@ -154,7 +154,7 @@ export const DOCUMENT_TEMPLATES: DocumentTemplate[] = [
     phase: 2,
     formats: ["docx"],
     pageCount: 1,
-    relatedWikiSlug: "frameworks/the-3-key-documents",
+    relatedWikiSlug: "core-group/commitment/the-three-key-documents",
     mergeFields: [
       {
         key: "church_name",
@@ -180,7 +180,7 @@ export const DOCUMENT_TEMPLATES: DocumentTemplate[] = [
     phase: 1,
     formats: ["docx"],
     pageCount: 1,
-    relatedWikiSlug: "vision-meetings/running-a-vision-meeting",
+    relatedWikiSlug: "core-group/vision-meetings/running-the-meeting",
     mergeFields: [
       {
         key: "church_name",

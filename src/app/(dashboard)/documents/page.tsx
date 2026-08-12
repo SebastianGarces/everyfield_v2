@@ -3,36 +3,22 @@ import { Suspense } from "react";
 
 import { DocumentsLibrary } from "@/components/documents";
 import { HeaderBreadcrumbs } from "@/components/header";
-import { getCurrentUserChurch, verifySession } from "@/lib/auth/session";
+import { verifySession } from "@/lib/auth/session";
 import { buildAutoFillDefaults, DOCUMENT_TEMPLATES } from "@/lib/documents";
-import { getLaunchForChurch } from "@/lib/launch/queries";
+import { resolveDocumentMergeContext } from "@/lib/documents/merge-context";
 
 export const dynamic = "force-dynamic";
 
 export default async function DocumentsPage() {
-  const { user } = await verifySession();
+  await verifySession();
 
-  if (!user.churchId) {
+  // One resolver for the church + launch-day context, shared with the
+  // generation route (`merge-context.ts`), so the auto-fill preview and the
+  // generated file name the same day. Null covers "no church" in every form.
+  const context = await resolveDocumentMergeContext();
+  if (!context) {
     redirect("/dashboard");
   }
-
-  const church = await getCurrentUserChurch();
-  if (!church) {
-    redirect("/dashboard");
-  }
-
-  // The launch date is read from the LAUNCH ENTITY (`launches.target_date`,
-  // LS-001) and never from the church row, whose `launch_date` column migration
-  // 0032 dropped. `null` here now means what it says — this plant has no launch
-  // row, or one still `planning` with no day named — rather than "nobody has
-  // wired this up yet" (#306).
-  const launch = await getLaunchForChurch(church.id);
-
-  const context = {
-    churchName: church.name,
-    userName: user.name ?? null,
-    launchDate: launch?.targetDate ?? null,
-  };
 
   // Resolve auto-fill defaults server-side; the client library filters/renders.
   const items = DOCUMENT_TEMPLATES.map((template) => ({
