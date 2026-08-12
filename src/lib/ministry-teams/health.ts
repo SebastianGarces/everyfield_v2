@@ -56,17 +56,41 @@ interface TeamHealthInputs {
   completedCount: number;
   /** Meetings inside the recent window (≤ RECENT_MEETING_WINDOW). */
   recentMeetingCount: number;
-  /** Attendance rows marked 'attended' across those meetings. */
+  /**
+   * Attendance rows marked 'attended' across those meetings, BY THE TEAM'S
+   * ACTIVE MEMBERS only — count them with `countAttendedByMembers`. The
+   * denominator is members × meetings, so counting a non-member guest here is
+   * what used to push the figure past 100% (ruling 409-4A, 2026-08-12).
+   */
   attendedCount: number;
+}
+
+/**
+ * The attendance numerator: rows marked 'attended' whose person is one of the
+ * team's active members. Both `getTeamHealth` and `getAllTeamsHealth` count
+ * through this, so an open meeting's guests can never inflate a team's
+ * attendance figure (ruling 409-4A, 2026-08-12).
+ */
+export function countAttendedByMembers(
+  rows: { personId: string; status: string }[],
+  memberPersonIds: Iterable<string>
+): number {
+  const memberSet = new Set(memberPersonIds);
+  let count = 0;
+  for (const row of rows) {
+    if (row.status === "attended" && memberSet.has(row.personId)) count++;
+  }
+  return count;
 }
 
 /**
  * The one place the health figures are derived. Both `getTeamHealth` and
  * `getAllTeamsHealth` feed this, so the single-team page and the dashboard
  * cannot drift apart. An empty denominator reads 100 throughout: nothing was
- * required, so nothing is missing.
+ * required, so nothing is missing. Exported for the unit tests only — the app
+ * reaches it through the two reads below.
  */
-function computeTeamHealth(inputs: TeamHealthInputs): TeamHealthMetrics {
+export function computeTeamHealth(inputs: TeamHealthInputs): TeamHealthMetrics {
   const staffing = staffingPercent(
     inputs.staffing.filled,
     inputs.staffing.total,
@@ -186,11 +210,16 @@ export async function getTeamHealth(
     completedCount = row?.completedCount ?? 0;
   }
 
-  // ONE read across the recent meetings instead of one per meeting.
+  // ONE read across the recent meetings instead of one per meeting. The rows
+  // carry personId so the numerator can be restricted to the team's active
+  // members (ruling 409-4A) — a guest at an open meeting is not attendance.
   let attendedCount = 0;
   if (recentMeetings.length > 0 && members.length > 0) {
     const attendance = await db
-      .select({ status: meetingAttendance.status })
+      .select({
+        personId: meetingAttendance.personId,
+        status: meetingAttendance.status,
+      })
       .from(meetingAttendance)
       .where(
         and(
@@ -201,7 +230,10 @@ export async function getTeamHealth(
           )
         )
       );
-    attendedCount = attendance.filter((a) => a.status === "attended").length;
+    attendedCount = countAttendedByMembers(
+      attendance,
+      members.map((m) => m.personId)
+    );
   }
 
   return computeTeamHealth({
@@ -323,6 +355,7 @@ export async function getAllTeamsHealth(
       ? db
           .select({
             meetingId: meetingAttendance.meetingId,
+            personId: meetingAttendance.personId,
             status: meetingAttendance.status,
           })
           .from(meetingAttendance)
@@ -346,13 +379,17 @@ export async function getAllTeamsHealth(
     membersByTeam.set(membership.teamId, list);
   }
 
-  const attendedByMeeting = new Map<string, number>();
+  // Grouped by meeting, persons kept: the numerator is restricted per team to
+  // its own active members (ruling 409-4A), and only the team knows who those
+  // are — so the count happens inside the team loop, not here.
+  const attendanceByMeeting = new Map<
+    string,
+    { personId: string; status: string }[]
+  >();
   for (const row of attendanceRows) {
-    if (row.status !== "attended") continue;
-    attendedByMeeting.set(
-      row.meetingId,
-      (attendedByMeeting.get(row.meetingId) ?? 0) + 1
-    );
+    const list = attendanceByMeeting.get(row.meetingId) ?? [];
+    list.push({ personId: row.personId, status: row.status });
+    attendanceByMeeting.set(row.meetingId, list);
   }
 
   return teams.map((team) => {
@@ -372,9 +409,11 @@ export async function getAllTeamsHealth(
           ).length
         : 0;
     const recentMeetingIds = recentMeetingsByTeam.get(team.id) ?? [];
-    const attendedCount = recentMeetingIds.reduce(
-      (sum, meetingId) => sum + (attendedByMeeting.get(meetingId) ?? 0),
-      0
+    const attendedCount = countAttendedByMembers(
+      recentMeetingIds.flatMap(
+        (meetingId) => attendanceByMeeting.get(meetingId) ?? []
+      ),
+      members
     );
 
     return computeTeamHealth({
