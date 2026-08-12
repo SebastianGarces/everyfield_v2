@@ -67,10 +67,10 @@ export function EvaluationComparisonCard({
 
   const sentence =
     direction === "up"
-      ? "above your previous average"
+      ? "above the earlier average"
       : direction === "down"
-        ? "below your previous average"
-        : "level with your previous average";
+        ? "below the earlier average"
+        : "level with the earlier average";
 
   return (
     <Card data-testid="evaluation-comparison">
