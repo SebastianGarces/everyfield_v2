@@ -17,9 +17,9 @@ import {
   decidePhaseTemplateDismissOutcome,
   decidePhaseTemplateImportOutcome,
   declinePhaseTemplatePrompt,
-  decodePartialImportReceipt,
   encodePartialImportReceipt,
-  getPhaseTemplatePrompt,
+  readPhaseTemplatePrompt,
+  receiptForTransition,
   type PhaseTemplateDismissOutcome,
   type PhaseTemplateImportOutcome,
   type PhaseTemplateOffer,
@@ -634,6 +634,17 @@ export function PhaseTemplatePromptView({
  * planter can still answer. The cookie is normally spent the moment the receipt
  * is drawn, but with JavaScript off it lives out its `maxAge`, and a plant that
  * changes stage inside that window must get its new prompt, not a stale report.
+ *
+ * …AND A RECEIPT THAT LOST TO A LIVE PROMPT IS NEVER DRAWN LATER. That rule
+ * above has a cost, and the cost is the second half of this branch. A receipt
+ * beaten by a new prompt is not shown, so `ClearReceiptCookie` never runs and
+ * the flash survives unspent; answer that new prompt — cleanly, everything
+ * imported — and this branch is reached again with the old cookie still in it.
+ * Drawn, it would state "the remaining checklists were not created" about a
+ * press where nothing was left behind, in a `role="alert"`. A render cannot
+ * clear a cookie (`cookies().set` is Server-Action-only), so the receipt
+ * carries the transition it belongs to and `receiptForTransition` refuses every
+ * other one — a superseded receipt renders nothing and expires on its `maxAge`.
  */
 export async function PhaseTemplatePrompt() {
   const { user } = await getCurrentSession();
@@ -643,14 +654,17 @@ export async function PhaseTemplatePrompt() {
   const answeredTransitionId =
     cookieStore.get(PHASE_TEMPLATE_PROMPT_COOKIE)?.value ?? null;
 
-  const prompt = await getPhaseTemplatePrompt(
+  // One read for both: the prompt, and the id of the transition this render is
+  // reporting on — which the receipt below has to match.
+  const { transitionId, prompt } = await readPhaseTemplatePrompt(
     user.churchId,
     answeredTransitionId
   );
 
   if (!prompt) {
-    const receipt = decodePartialImportReceipt(
-      cookieStore.get(PHASE_TEMPLATE_RECEIPT_COOKIE)?.value
+    const receipt = receiptForTransition(
+      cookieStore.get(PHASE_TEMPLATE_RECEIPT_COOKIE)?.value,
+      transitionId
     );
 
     return receipt ? (

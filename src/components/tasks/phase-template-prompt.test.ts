@@ -12,6 +12,7 @@ import {
   decidePhaseTemplateImportOutcome,
   decodePartialImportReceipt,
   encodePartialImportReceipt,
+  receiptForTransition,
   type AcceptPhaseTemplatePromptResult,
   type PhaseTemplatePrompt as PhaseTemplatePromptData,
 } from "@/lib/tasks/phase-prompt";
@@ -128,7 +129,7 @@ function renderAlert(message: string): string {
 function renderReceipt(createdCount: number, templateNames: string[]): string {
   return renderToStaticMarkup(
     createElement(PhaseTemplatePartialReceiptView, {
-      receipt: { createdCount, templateNames },
+      receipt: { transitionId: TRANSITION_ID, createdCount, templateNames },
     })
   );
 }
@@ -918,7 +919,13 @@ test("a PARTIAL import hands its receipt to the SERVER, not to the island", () =
 
   assert.deepEqual(
     decision.receipt,
-    { createdCount: 9, templateNames: ["Ministry Team Setup"] },
+    {
+      // The receipt names its own transition, so the render that draws it can
+      // check it is still the one being reported on.
+      transitionId: TRANSITION_ID,
+      createdCount: 9,
+      templateNames: ["Ministry Team Setup"],
+    },
     "a part-way import reported nothing the next render could draw"
   );
   assert.deepEqual(decision.outcome, { status: "idle" });
@@ -1029,6 +1036,7 @@ test("the action performs the decision rather than re-deciding it", () => {
 
 test("a receipt survives the round trip through a cookie value", () => {
   const receipt = {
+    transitionId: TRANSITION_ID,
     createdCount: 16,
     templateNames: ["Ministry Team Setup", "Launch Prep & Follow-up"],
   };
@@ -1056,22 +1064,74 @@ test("no cookie a browser can send makes the task list throw", () => {
     encodeURIComponent("[]"),
     encodeURIComponent("null"),
     encodeURIComponent('"16"'),
-    encodeURIComponent(JSON.stringify({ createdCount: 16 })),
-    encodeURIComponent(JSON.stringify({ templateNames: ["A"] })),
     encodeURIComponent(
-      JSON.stringify({ createdCount: 0, templateNames: ["A"] })
+      JSON.stringify({ transitionId: TRANSITION_ID, createdCount: 16 })
     ),
     encodeURIComponent(
-      JSON.stringify({ createdCount: -3, templateNames: ["A"] })
+      JSON.stringify({ transitionId: TRANSITION_ID, templateNames: ["A"] })
     ),
     encodeURIComponent(
-      JSON.stringify({ createdCount: 1.5, templateNames: ["A"] })
+      JSON.stringify({
+        transitionId: TRANSITION_ID,
+        createdCount: 0,
+        templateNames: ["A"],
+      })
     ),
     encodeURIComponent(
-      JSON.stringify({ createdCount: 4, templateNames: "Launch Prep" })
+      JSON.stringify({
+        transitionId: TRANSITION_ID,
+        createdCount: -3,
+        templateNames: ["A"],
+      })
     ),
     encodeURIComponent(
-      JSON.stringify({ createdCount: 4, templateNames: [{ name: "A" }] })
+      JSON.stringify({
+        transitionId: TRANSITION_ID,
+        createdCount: 1.5,
+        templateNames: ["A"],
+      })
+    ),
+    encodeURIComponent(
+      JSON.stringify({
+        transitionId: TRANSITION_ID,
+        createdCount: 4,
+        templateNames: "Launch Prep",
+      })
+    ),
+    encodeURIComponent(
+      JSON.stringify({
+        transitionId: TRANSITION_ID,
+        createdCount: 4,
+        templateNames: [{ name: "A" }],
+      })
+    ),
+    // …and a receipt that cannot say WHICH stage change it reports on. Nothing
+    // can match it, so it could only ever be drawn unconditionally — which is
+    // the stale-alarm bug. This arm also covers every receipt minted before the
+    // id existed, still sitting in a browser through its two-minute `maxAge`.
+    encodeURIComponent(
+      JSON.stringify({ createdCount: 4, templateNames: ["A"] })
+    ),
+    encodeURIComponent(
+      JSON.stringify({
+        transitionId: "",
+        createdCount: 4,
+        templateNames: ["A"],
+      })
+    ),
+    encodeURIComponent(
+      JSON.stringify({
+        transitionId: 42,
+        createdCount: 4,
+        templateNames: ["A"],
+      })
+    ),
+    encodeURIComponent(
+      JSON.stringify({
+        transitionId: "x".repeat(65),
+        createdCount: 4,
+        templateNames: ["A"],
+      })
     ),
   ];
 
@@ -1090,6 +1150,7 @@ test("a forged receipt cannot grow the page it renders", () => {
   // and it is clamped on the way back in.
   const forged = encodeURIComponent(
     JSON.stringify({
+      transitionId: TRANSITION_ID,
       createdCount: 9,
       templateNames: Array.from({ length: 40 }, () => "x".repeat(500)),
     })
@@ -1106,9 +1167,9 @@ test("a forged receipt cannot grow the page it renders", () => {
 
 test("no prompt is where the loader LOOKS for a receipt, not where it gives up", () => {
   // The loader's empty branch is the fix. A part-way import answers the
-  // transition, so `getPhaseTemplatePrompt` correctly returns null on the very
-  // render that has to carry the receipt — and `return null` there is exactly
-  // the silence that shipped and failed its browser gate.
+  // transition, so the prompt is correctly `null` on the very render that has
+  // to carry the receipt — and `return null` there is exactly the silence that
+  // shipped and failed its browser gate.
   const source = readFileSync(
     path.join(process.cwd(), "src/components/tasks/phase-template-prompt.tsx"),
     "utf8"
@@ -1116,9 +1177,65 @@ test("no prompt is where the loader LOOKS for a receipt, not where it gives up",
 
   assert.match(
     source,
-    /if \(!prompt\) \{[\s\S]*?decodePartialImportReceipt\([\s\S]*?PhaseTemplatePartialReceiptView[\s\S]*?\n {2}\}/,
+    /if \(!prompt\) \{[\s\S]*?receiptForTransition\([\s\S]*?PhaseTemplatePartialReceiptView[\s\S]*?\n {2}\}/,
     "an empty prompt goes straight back to null again, so a part-way import says nothing"
   );
+
+  // And it asks the guarded reader, never the bare codec — `decodePartial…`
+  // answers "is this a receipt", which is only half the question the loader has
+  // to ask (see the test below).
+  assert.doesNotMatch(
+    source,
+    /decodePartialImportReceipt\(/,
+    "the loader decodes the flash without checking whose transition it is"
+  );
+});
+
+test("a receipt minted for one transition is never drawn for another", () => {
+  // THE STALE ALARM. `PHASE_TEMPLATE_RECEIPT_COOKIE` is spent by being SHOWN
+  // (`ClearReceiptCookie`), and a live prompt beats a receipt — so a receipt
+  // that loses that race is never shown and never spent. Inside its two-minute
+  // `maxAge`:
+  //
+  //   1. a part-way import of transition A writes the flash;
+  //   2. the plant moves again before it is drawn (another member, the phase
+  //      engine, an oversight action), so the render finds a prompt for B and
+  //      skips the receipt branch entirely;
+  //   3. the planter answers B — cleanly, everything imported, or declines;
+  //   4. the next render has no prompt, reaches this branch, and the cookie for
+  //      A is still sitting there.
+  //
+  // Drawn, it would say "the remaining checklists were not created, and this
+  // stage change is now answered" in a `role="alert"` about a press where every
+  // clause is false. A render cannot clear a cookie, so the id in the value is
+  // the whole defence.
+  const transitionA = TRANSITION_ID;
+  const transitionB = "33333333-3333-4333-8333-333333333333";
+
+  const flash = encodePartialImportReceipt({
+    transitionId: transitionA,
+    createdCount: 16,
+    templateNames: ["Ministry Team Setup"],
+  });
+
+  // Step 4, with B answered: the receipt belongs to a superseded transition.
+  assert.equal(
+    receiptForTransition(flash, transitionB),
+    null,
+    "a receipt for a superseded transition is drawn over the answer the planter just gave"
+  );
+
+  // …and the ordinary case still draws, or the fix would have deleted the
+  // feature instead of scoping it.
+  assert.deepEqual(receiptForTransition(flash, transitionA), {
+    transitionId: transitionA,
+    createdCount: 16,
+    templateNames: ["Ministry Team Setup"],
+  });
+
+  // A plant with no transition at all has nothing a receipt could be about.
+  assert.equal(receiptForTransition(flash, null), null);
+  assert.equal(receiptForTransition(undefined, transitionA), null);
 });
 
 test("the receipt is server markup — the island cannot outlive the answer", () => {

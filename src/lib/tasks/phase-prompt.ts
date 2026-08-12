@@ -274,13 +274,48 @@ export async function getLatestPhaseTransition(
   return row ?? null;
 }
 
+/**
+ * What one `/tasks` render needs to know about the plant's latest stage change:
+ * the prompt to ask, and the id of the transition it is reporting on.
+ *
+ * BOTH COME OUT OF ONE QUERY, and the id is here because the loader needs it
+ * even when there is no prompt. A part-way import answers its transition, so
+ * the render that owes the planter a receipt is exactly the render with no
+ * prompt in it — and that receipt may only be drawn for THIS transition
+ * (`receiptForTransition`). Reading the id separately would let the plant move
+ * in between and pair a receipt with the wrong stage change, which is the same
+ * trap `getLatestPhaseTransition` avoids by joining the answer rather than
+ * fetching it.
+ */
+export interface PhaseTemplatePromptRead {
+  /** The plant's current latest MOVE, or `null` if it has never moved. */
+  transitionId: string | null;
+  prompt: PhaseTemplatePrompt | null;
+}
+
+/** The one composition of "read the transition, build the prompt". */
+export async function readPhaseTemplatePrompt(
+  churchId: string,
+  answeredTransitionId: string | null
+): Promise<PhaseTemplatePromptRead> {
+  const transition = await getLatestPhaseTransition(churchId);
+
+  return {
+    transitionId: transition?.id ?? null,
+    prompt: buildPhaseTemplatePrompt(transition, answeredTransitionId),
+  };
+}
+
 /** The prompt for a church, or `null` when there is nothing to prompt. */
 export async function getPhaseTemplatePrompt(
   churchId: string,
   answeredTransitionId: string | null
 ): Promise<PhaseTemplatePrompt | null> {
-  const transition = await getLatestPhaseTransition(churchId);
-  return buildPhaseTemplatePrompt(transition, answeredTransitionId);
+  const { prompt } = await readPhaseTemplatePrompt(
+    churchId,
+    answeredTransitionId
+  );
+  return prompt;
 }
 
 // ----------------------------------------------------------------------------
@@ -606,6 +641,24 @@ export type PhaseTemplateDismissOutcome =
  * `JSON.parse` at the call site.
  */
 export interface PhaseTemplatePartialReceipt {
+  /**
+   * WHICH stage change this receipt reports on — and the reason it is here.
+   *
+   * A receipt is only true about the transition that minted it, and the cookie
+   * can outlive that transition: a live prompt WINS over a lingering receipt
+   * (the loader's rule), so a plant that moves stage again inside the two
+   * minutes puts a new prompt on screen, the receipt branch is skipped, and the
+   * flash is never spent by `ClearReceiptCookie`. Answer that new prompt — a
+   * clean, complete import — and the render after it has no prompt again,
+   * reaches the surviving cookie and says "the remaining checklists were not
+   * created" about a press where everything was.
+   *
+   * The cookie cannot be cleared from a render (`cookies().set` is a Server
+   * Action / Route Handler call only), so the identity travels IN the value and
+   * the loader refuses to draw a receipt belonging to any other transition. A
+   * superseded receipt renders nothing and expires on its own `maxAge`.
+   */
+  transitionId: string;
   createdCount: number;
   templateNames: string[];
 }
@@ -616,6 +669,11 @@ export interface PhaseTemplatePartialReceipt {
 const RECEIPT_MAX_NAMES = 8;
 const RECEIPT_MAX_NAME_LENGTH = 120;
 
+/** A transition id is a uuid (36). Bounded rather than truncated: a clipped id
+ *  matches nothing anyway, so the honest answer to an oversized one is "not a
+ *  receipt". */
+const RECEIPT_MAX_ID_LENGTH = 64;
+
 /** The receipt as a cookie value. `encodeURIComponent` because template names
  *  are prose — commas, semicolons and spaces are all legal in them and none of
  *  them are legal, unquoted, in a cookie. */
@@ -624,6 +682,7 @@ export function encodePartialImportReceipt(
 ): string {
   return encodeURIComponent(
     JSON.stringify({
+      transitionId: receipt.transitionId,
       createdCount: receipt.createdCount,
       templateNames: receipt.templateNames
         .slice(0, RECEIPT_MAX_NAMES)
@@ -660,10 +719,23 @@ export function decodePartialImportReceipt(
 
   if (typeof parsed !== "object" || parsed === null) return null;
 
-  const { createdCount, templateNames } = parsed as {
+  const { transitionId, createdCount, templateNames } = parsed as {
+    transitionId?: unknown;
     createdCount?: unknown;
     templateNames?: unknown;
   };
+
+  // No transition, no receipt. A value that cannot say WHICH stage change it
+  // reports on can never be matched against the render's own transition, so it
+  // would be exactly the unspendable, always-drawable flash this field exists
+  // to stop — including every receipt minted before this field did.
+  if (
+    typeof transitionId !== "string" ||
+    transitionId.length === 0 ||
+    transitionId.length > RECEIPT_MAX_ID_LENGTH
+  ) {
+    return null;
+  }
 
   // A partial import created at least one task, by definition — anything else
   // is a corrupted or forged value and has no sentence to render.
@@ -679,11 +751,39 @@ export function decodePartialImportReceipt(
   if (!templateNames.every((name) => typeof name === "string")) return null;
 
   return {
+    transitionId,
     createdCount,
     templateNames: templateNames
       .slice(0, RECEIPT_MAX_NAMES)
       .map((name) => name.slice(0, RECEIPT_MAX_NAME_LENGTH)),
   };
+}
+
+/**
+ * The receipt this render is allowed to draw, or `null`.
+ *
+ * ONE FUNCTION, BECAUSE THE DECODE ALONE IS NOT THE QUESTION. "Is this a
+ * well-formed receipt?" and "is it about the transition I am reporting on?" are
+ * both required, and a call site that asks only the first draws a stale alarm:
+ * a receipt minted for transition A, superseded by a stage change to B before
+ * it could be drawn, then met by the render that follows a clean answer to B —
+ * `role="alert"`, destructive, and false in every clause. The flash cannot be
+ * cleared from a render, so refusing it is the whole defence.
+ *
+ * `transitionId` is the plant's CURRENT latest transition (`null` when it has
+ * none, which no receipt can match). Never throws, for the same reason
+ * `decodePartialImportReceipt` does not.
+ */
+export function receiptForTransition(
+  raw: string | null | undefined,
+  transitionId: string | null
+): PhaseTemplatePartialReceipt | null {
+  if (!transitionId) return null;
+
+  const receipt = decodePartialImportReceipt(raw);
+  if (!receipt) return null;
+
+  return receipt.transitionId === transitionId ? receipt : null;
 }
 
 export interface PhaseTemplateImportDecision {
@@ -745,6 +845,11 @@ export function decidePhaseTemplateImportOutcome(
     return {
       outcome: { status: "idle" },
       receipt: {
+        // The receipt is only true about THIS transition, and the cookie can
+        // outlive it — a stage change inside the flash window puts a live
+        // prompt up, which wins, so the flash is never spent. The id is what
+        // lets the next render tell "my receipt" from "somebody else's".
+        transitionId: result.transitionId,
         createdCount: result.createdCount,
         templateNames: result.templateNames,
       },
