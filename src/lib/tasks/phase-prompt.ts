@@ -8,11 +8,7 @@ import { PHASES, type PhaseNumber } from "@/lib/constants";
 import type { PhaseChangedEvent } from "@/lib/phase-engine/events";
 
 import { importTaskTemplate, planTemplateImport } from "./import";
-import {
-  TASK_TEMPLATES,
-  taskTemplateSize,
-  type TaskTemplate,
-} from "./templates";
+import { phaseTemplatesFor, taskTemplateSize } from "./templates";
 
 // ============================================================================
 // T-020 — the phase-triggered template prompt.
@@ -86,23 +82,6 @@ export const PHASE_TEMPLATE_PROMPT_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
  * feature exists to avoid.
  */
 const TRANSITION_KIND: PhaseTransitionKind = "transition";
-
-// ----------------------------------------------------------------------------
-// The catalog side
-// ----------------------------------------------------------------------------
-
-/**
- * The templates that belong to a phase, in catalog order.
- *
- * Returns `[]` for a phase the catalog says nothing about, which is what makes
- * "a phase with no templates prompts nothing" fall out of the data rather than
- * out of a special case. Every phase 0–6 carries a template today
- * (`templates.test.ts` asserts it), so the empty answer is the guard for a
- * phase number the catalog has not caught up with.
- */
-export function phaseTemplatesFor(phase: number): TaskTemplate[] {
-  return TASK_TEMPLATES.filter((template) => template.phase === phase);
-}
 
 // ----------------------------------------------------------------------------
 // The prompt

@@ -7,11 +7,10 @@ import { planTemplateImport } from "./import";
 import {
   buildPhaseTemplatePrompt,
   handlePhaseChangedForTemplatePrompt,
-  phaseTemplatesFor,
   type PhaseTemplateOffer,
   type PhaseTransitionRow,
 } from "./phase-prompt";
-import { TASK_TEMPLATES } from "./templates";
+import { TASK_TEMPLATES, phaseTemplatesFor } from "./templates";
 
 // ----------------------------------------------------------------------------
 // T-020 — the half with no database in it.

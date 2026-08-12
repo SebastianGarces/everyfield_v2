@@ -10,10 +10,10 @@ import {
   buildPhaseTemplatePrompt,
   decidePhaseTemplateDismissOutcome,
   decidePhaseTemplateImportOutcome,
-  phaseTemplatesFor,
   type AcceptPhaseTemplatePromptResult,
   type PhaseTemplatePrompt as PhaseTemplatePromptData,
 } from "@/lib/tasks/phase-prompt";
+import { phaseTemplatesFor } from "@/lib/tasks/templates";
 
 import {
   DISMISS_FAILED_MESSAGE,

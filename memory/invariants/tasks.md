@@ -96,6 +96,8 @@ The **prompt** is still derived and always will be. `phase_transitions` already 
 
 Four ways to get "prompt nothing", each a real case: no transition at all; a move that went nowhere (`toPhase === fromPhase`); the transition is already answered; the new phase has no templates. The last one is the guard for a phase the catalog has not caught up with — every phase 0–6 carries a template today.
 
+"Which templates belong to a phase" is ONE function and it lives with the catalog: `phaseTemplatesFor` in `src/lib/tasks/templates.ts`, which `taskTemplatesByPhase` and the prompt both call. It was written out twice — once here, once in `phase-prompt.ts` — and the copies could not disagree only because both filtered the same literal. The header of `templates.ts` says what happens next: the day church-authored templates arrive this module becomes the `is_system` half of a union and grows a second source, and the reader that missed it would have been the prompt, i.e. the surface that decides what a stage change offers.
+
 A `kind = 'initial_declaration'` row is filtered out, for the reason [`../invariants.md`](../invariants.md) → Phase History gives: nobody moved anywhere. Prompting a planter mid-onboarding with a checklist import is the same surprise from the other direction.
 
 A **backward** move still prompts. "Advance" is the oversight milestone's rule, because that one announces progress; a planter who moves 3 → 2 is doing phase-2 work and wants the phase-2 checklist.
@@ -118,6 +120,8 @@ Two orderings inside the accept matter and are easy to get wrong:
 
 - The claim happens **after** the requested keys are filtered against the live prompt. Claiming first would let a forged POST naming only bogus keys spend the planter's one answer and leave them with no prompt and no tasks.
 - The already-answered check happens **before** the prompt is built, not by reading the built prompt's `null`. `buildPhaseTemplatePrompt` returns `null` for four different reasons and the caller has to tell "answered" (a success, prompt comes down) from "nothing to offer" (leave it up).
+
+Both of the prompt's actions are non-exported inline `"use server"` closures, and they mint with `verifySession()` **above** the `try` — the shape [`../invariants.md`](../invariants.md) → Authentication requires of a NEW action — with only the church-less branch (a data condition) left inside it. No test can notice if they stop: `src/lib/auth/server-action-surface.test.ts` walks the EXPORTS of `"use server"` modules, and an inline closure is neither. The rule is the authority, not the walk; they are not on `TRY_WRAPPED_MINTS` and never can be.
 
 The button is disabled while the request runs, which is the belt over these braces — it does not make the repeat harmless, it stops the planter watching a second request they have no reason to think is a no-op. `useActionState` needs a client component, so the `<form>` and its two buttons live in `phase-template-prompt-controls.tsx` and the rest of the prompt stays a server component — the lead, the checklist rows and the fine print are handed to the island as props, so they are still server markup and no row becomes client code. The decision the buttons render is the pure `phaseTemplatePromptControlState`, because `useActionState` reports `pending: false` under `renderToStaticMarkup` and could not otherwise be asserted.
 

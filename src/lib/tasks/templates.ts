@@ -1194,6 +1194,28 @@ const PHASE_NUMBERS = Object.keys(PHASES)
   .sort((a, b) => a - b) as PhaseNumber[];
 
 /**
+ * The templates that belong to a phase, in catalog order.
+ *
+ * ONE decision, and it lives with the catalog. "Which templates belong to a
+ * phase" was written out twice — here and again in the T-020 phase prompt —
+ * over the same array. The two could not disagree while both read this literal,
+ * but the header above says what happens next: the day church-authored
+ * templates arrive, this module becomes the `is_system` half of a union and
+ * gains a second source. One reader would have picked the new rows up and the
+ * other — the prompt, which decides what a stage change OFFERS — silently would
+ * not. `taskTemplatesByPhase` calls this, so there is exactly one filter.
+ *
+ * Returns `[]` for a phase the catalog says nothing about, which is what makes
+ * "a phase with no templates prompts nothing" fall out of the data rather than
+ * out of a special case. Every phase 0–6 carries a template today
+ * (`templates.test.ts` asserts it), so the empty answer is the guard for a
+ * phase number the catalog has not caught up with.
+ */
+export function phaseTemplatesFor(phase: number): TaskTemplate[] {
+  return TASK_TEMPLATES.filter((template) => template.phase === phase);
+}
+
+/**
  * The catalog grouped for display: every phase in order, each with its
  * templates in catalog order.
  *
@@ -1205,6 +1227,6 @@ export function taskTemplatesByPhase(): TaskTemplatePhaseGroup[] {
   return PHASE_NUMBERS.map((phase) => ({
     phase,
     phaseName: PHASES[phase],
-    templates: TASK_TEMPLATES.filter((template) => template.phase === phase),
+    templates: phaseTemplatesFor(phase),
   }));
 }

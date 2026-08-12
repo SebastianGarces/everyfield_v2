@@ -6,7 +6,7 @@ import {
   PHASE_TEMPLATE_PROMPT_HEADING_ID,
   PhaseTemplatePromptForm,
 } from "@/components/tasks/phase-template-prompt-controls";
-import { getCurrentSession } from "@/lib/auth/session";
+import { getCurrentSession, verifySession } from "@/lib/auth/session";
 import { formatDate } from "@/lib/datetime";
 import {
   PHASE_TEMPLATE_PROMPT_COOKIE,
@@ -39,7 +39,15 @@ import {
 // server and no row becomes a client component. It also keeps the auth surface
 // honest: the two actions below are the ONLY exports-shaped things in this file
 // that a browser can POST to, they capture nothing, and each mints its own
-// actor from the session (`memory/invariants.md` → Authentication).
+// actor with `verifySession()` ABOVE its `try` — not merely first inside it —
+// which is the shape `memory/invariants.md` → Authentication requires of a NEW
+// action. Inside the `try` the catch would convert a sessionless POST into a
+// handled `{ status: "failed" }`; above it the rejection escapes, which is what
+// an anonymous caller is owed. The 45 try-wrapped mints named in
+// `TRY_WRAPPED_MINTS` (`src/lib/auth/server-action-surface.test.ts`) are a
+// closed residual and these two are not in it — nor could they be, because that
+// walk reads only the EXPORTS of `"use server"` modules and these are
+// non-exported inline closures. The rule is the authority here, not the walk.
 //
 // EVERY OUTCOME IS SAID OUT LOUD (ruled 2026-08-12, round 3 on PR #393). Both
 // actions used to return `void` and log their failures to the console. A press
@@ -196,9 +204,12 @@ async function importPhaseTemplatesAction(
 ): Promise<PhaseTemplateImportOutcome> {
   "use server";
 
+  const { user } = await verifySession();
+
   try {
-    const { user } = await getCurrentSession();
-    if (!user?.churchId) return { status: "failed" };
+    // Not part of the auth check: a signed-in user with no church has no plant
+    // to import INTO, which is a data condition and gets a handled outcome.
+    if (!user.churchId) return { status: "failed" };
 
     const templateKeys = formData
       .getAll("templateKey")
@@ -258,9 +269,12 @@ async function dismissPhaseTemplatePromptAction(
 ): Promise<PhaseTemplateDismissOutcome> {
   "use server";
 
+  const { user } = await verifySession();
+
   try {
-    const { user } = await getCurrentSession();
-    if (!user?.churchId) return { status: "failed" };
+    // Not part of the auth check: a signed-in user with no church has no plant
+    // whose prompt this could be, which is a data condition.
+    if (!user.churchId) return { status: "failed" };
 
     // The hidden input is server-rendered inside this form, so EVERY submit
     // carries it — a submit with JavaScript, and a plain browser POST of the
