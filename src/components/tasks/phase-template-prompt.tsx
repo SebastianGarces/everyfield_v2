@@ -2,20 +2,21 @@ import { refresh, revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import Link from "next/link";
 
-import {
-  PhaseTemplatePromptForm,
-  type PhaseTemplateDismissOutcome,
-  type PhaseTemplateImportOutcome,
-} from "@/components/tasks/phase-template-prompt-controls";
+import { PhaseTemplatePromptForm } from "@/components/tasks/phase-template-prompt-controls";
 import { getCurrentSession } from "@/lib/auth/session";
 import { formatDate } from "@/lib/datetime";
 import {
   PHASE_TEMPLATE_PROMPT_COOKIE,
   PHASE_TEMPLATE_PROMPT_COOKIE_MAX_AGE,
   acceptPhaseTemplatePrompt,
+  decidePhaseTemplateDismissOutcome,
+  decidePhaseTemplateImportOutcome,
   declinePhaseTemplatePrompt,
   getPhaseTemplatePrompt,
+  type PhaseTemplateDismissOutcome,
+  type PhaseTemplateImportOutcome,
   type PhaseTemplateOffer,
+  type PhasePromptRevalidation,
   type PhaseTemplatePrompt as PhaseTemplatePromptData,
 } from "@/lib/tasks/phase-prompt";
 import { TEMPLATES_LINK_LABEL, TEMPLATES_ROUTE } from "@/lib/tasks/templates";
@@ -142,6 +143,15 @@ async function markPromptAnswered(transitionId: string): Promise<void> {
 }
 
 /**
+ * Carry out a revalidation directive. Both actions answer the same way, and
+ * WHAT to re-read is decided in `phase-prompt.ts`, where it can be tested.
+ */
+function applyRevalidation(revalidation: PhasePromptRevalidation): void {
+  if (revalidation.refresh) refresh();
+  if (revalidation.revalidatePath) revalidatePath("/tasks");
+}
+
+/**
  * Accept: import the ticked checklists, dated from the transition.
  *
  * Defined at module scope on purpose. An action closing over the session would
@@ -161,6 +171,12 @@ async function markPromptAnswered(transitionId: string): Promise<void> {
  * SHAPED FOR `useActionState`: `(previous outcome, form) → next outcome`. The
  * previous outcome is never read — an answer is decided by the database and the
  * form, not by what the last press reported.
+ *
+ * WHAT TO REPORT AND WHAT TO RE-READ IS NOT DECIDED HERE. This body reads the
+ * session, reads the form and performs the effects; the branching lives in
+ * `decidePhaseTemplateImportOutcome`, which is pure and exported so all four
+ * service results can be asserted. A `"use server"` closure cannot be called
+ * from a test, and the round-3 rulings were hiding inside one.
  */
 async function importPhaseTemplatesAction(
   _previous: PhaseTemplateImportOutcome,
@@ -176,45 +192,27 @@ async function importPhaseTemplatesAction(
       .getAll("templateKey")
       .filter((value): value is string => typeof value === "string");
 
-    // Unreachable from the buttons — Import refuses an empty selection — so
-    // this is a forged POST or a browser with no JavaScript. Either way it is
-    // answered in words rather than by doing nothing.
-    if (templateKeys.length === 0) return { status: "nothing" };
+    // An empty tick list is unreachable from the buttons — Import refuses it —
+    // so this is a forged POST or a browser with no JavaScript. It must not
+    // reach the service, because `acceptPhaseTemplatePrompt` would have nothing
+    // to filter; `null` is the same "nothing was answered" the service reports.
+    const result =
+      templateKeys.length === 0
+        ? null
+        : await acceptPhaseTemplatePrompt({
+            churchId: user.churchId,
+            userId: user.id,
+            templateKeys,
+          });
 
-    const result = await acceptPhaseTemplatePrompt({
-      churchId: user.churchId,
-      userId: user.id,
-      templateKeys,
-    });
+    const decision = decidePhaseTemplateImportOutcome(result);
 
-    // `null` means nothing was answered — no live prompt, or every key was
-    // forged. Nothing happened, so the prompt stays up and says why.
-    if (!result) return { status: "nothing" };
-
-    await markPromptAnswered(result.transitionId);
-
-    // A PART-WAY IMPORT DELIBERATELY DOES NOT `refresh()`. The claim is kept, so
-    // a refresh would re-render this route with no prompt in it — unmounting
-    // the one surface that can tell the planter half a set arrived. The page is
-    // revalidated so the next navigation is correct, and the panel stays put
-    // holding its receipt.
-    if (result.status === "partial") {
-      revalidatePath("/tasks");
-
-      return {
-        status: "partial",
-        createdCount: result.createdCount,
-        templateNames: result.templateNames,
-      };
+    if (decision.answeredTransitionId) {
+      await markPromptAnswered(decision.answeredTransitionId);
     }
+    applyRevalidation(decision.revalidation);
 
-    // The list this sits above is on the same page, so `refresh()` reconciles
-    // it; `revalidatePath` covers the same page reached from elsewhere
-    // (`memory/contracts/data-patterns.md`).
-    refresh();
-    revalidatePath("/tasks");
-
-    return { status: "idle" };
+    return decision.outcome;
   } catch (error) {
     console.error("importPhaseTemplatesAction error:", error);
     return { status: "failed" };
@@ -250,14 +248,15 @@ async function dismissPhaseTemplatePromptAction(
       churchId: user.churchId,
       userId: user.id,
     });
-    if (!transitionId) return { status: "failed" };
 
-    await markPromptAnswered(transitionId);
+    const decision = decidePhaseTemplateDismissOutcome(transitionId);
 
-    refresh();
-    revalidatePath("/tasks");
+    if (decision.answeredTransitionId) {
+      await markPromptAnswered(decision.answeredTransitionId);
+    }
+    applyRevalidation(decision.revalidation);
 
-    return { status: "idle" };
+    return decision.outcome;
   } catch (error) {
     console.error("dismissPhaseTemplatePromptAction error:", error);
     return { status: "failed" };

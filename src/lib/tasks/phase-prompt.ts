@@ -532,6 +532,165 @@ export async function acceptPhaseTemplatePrompt(
 }
 
 // ----------------------------------------------------------------------------
+// What the caller does with the result
+// ----------------------------------------------------------------------------
+
+/**
+ * What answering the prompt with Import did, in the words the island renders.
+ *
+ * Lives here rather than in the client island because it is the DOMAIN outcome
+ * of `acceptPhaseTemplatePrompt` — the island only draws it, and the pure
+ * mapper below is what decides it. The island imports it with `import type`, so
+ * nothing in this module reaches a browser bundle (the same shape
+ * `bulk-actions.tsx` uses for `BulkTaskResult`).
+ *
+ * `partial` is the case the review singled out: the claim is deliberately KEPT
+ * when an import got part-way (re-offering a checklist already in the list is
+ * how a planter imports it twice), so the prompt is answered and will not
+ * render again — this outcome is the only chance to say that half a set
+ * arrived. `nothing` is "no checklist on offer was ticked", which the disabled
+ * button makes unreachable from the UI but not from a forged POST or a stage
+ * change that moved under the planter's feet.
+ */
+export type PhaseTemplateImportOutcome =
+  | { status: "idle" }
+  | { status: "partial"; createdCount: number; templateNames: string[] }
+  | { status: "nothing" }
+  | { status: "failed" };
+
+/** Declining creates nothing, so it either landed or it did not. */
+export type PhaseTemplateDismissOutcome =
+  | { status: "idle" }
+  | { status: "failed" };
+
+/**
+ * What the caller must re-read after an answer — and, for the partial case,
+ * what it must NOT (ruled 2026-08-12, round 3 on PR #393).
+ *
+ * BOTH FLAGS ARE FALSE FOR A PARTIAL IMPORT, and that is the whole point of
+ * returning a directive instead of letting the action decide inline. The claim
+ * is kept on a part-way import, so `/tasks` re-rendered has no prompt in it —
+ * and the island holding the receipt goes with it. `refresh()` obviously does
+ * that. So does `revalidatePath("/tasks")`: per
+ * `.next-docs/01-app/03-api-reference/04-functions/revalidatePath.mdx`, a
+ * Server Function's call "Updates the UI immediately (if viewing the affected
+ * path)" — and the planter IS on the affected path. The earlier code called it
+ * "so the next navigation is correct", which was wrong twice over: it unmounts
+ * the receipt now, and `/tasks` is `export const dynamic = "force-dynamic"`
+ * (`src/app/(dashboard)/tasks/page.tsx`), so it is never cached and the next
+ * navigation was already correct.
+ */
+export interface PhasePromptRevalidation {
+  /** Re-render the route the planter is looking at. */
+  refresh: boolean;
+  /** Purge the cached `/tasks` entry — which also re-renders it, here. */
+  revalidatePath: boolean;
+}
+
+/** Nothing changed on screen, or nothing may be allowed to. */
+const NO_REVALIDATION: PhasePromptRevalidation = {
+  refresh: false,
+  revalidatePath: false,
+};
+
+/** The list below this prompt gained tasks, so both halves are re-read
+ *  (`memory/contracts/data-patterns.md`). */
+const FULL_REVALIDATION: PhasePromptRevalidation = {
+  refresh: true,
+  revalidatePath: true,
+};
+
+export interface PhaseTemplateImportDecision {
+  outcome: PhaseTemplateImportOutcome;
+  revalidation: PhasePromptRevalidation;
+  /**
+   * The transition to write the cookie fast path against, or `null` when
+   * nothing was answered and the prompt must stay up.
+   */
+  answeredTransitionId: string | null;
+}
+
+/**
+ * Every decision the Import press makes, as a pure function of what the service
+ * returned.
+ *
+ * Extracted from the inline server action because that action cannot be called
+ * from a test — it is a non-exported `"use server"` closure — and the round-3
+ * ruling lives entirely in these four branches. Here the whole set is
+ * assertable, including the one that has no visible symptom until a browser is
+ * open: the partial case must revalidate NOTHING.
+ *
+ * `null` in means "nothing was answered": no live prompt, an empty tick list, or
+ * every key forged. The prompt stays up and says so.
+ */
+export function decidePhaseTemplateImportOutcome(
+  result: AcceptPhaseTemplatePromptResult | null
+): PhaseTemplateImportDecision {
+  if (!result) {
+    return {
+      outcome: { status: "nothing" },
+      revalidation: NO_REVALIDATION,
+      answeredTransitionId: null,
+    };
+  }
+
+  if (result.status === "partial") {
+    return {
+      outcome: {
+        status: "partial",
+        createdCount: result.createdCount,
+        templateNames: result.templateNames,
+      },
+      // NOT A MISSING CASE. See `PhasePromptRevalidation` — either call takes
+      // the receipt off the screen, and neither buys anything on a
+      // `force-dynamic` route.
+      revalidation: NO_REVALIDATION,
+      answeredTransitionId: result.transitionId,
+    };
+  }
+
+  // `imported` and `already_answered` both mean the transition is answered and
+  // the prompt must come down; the second simply created nothing this time.
+  return {
+    outcome: { status: "idle" },
+    revalidation: FULL_REVALIDATION,
+    answeredTransitionId: result.transitionId,
+  };
+}
+
+export interface PhaseTemplateDismissDecision {
+  outcome: PhaseTemplateDismissOutcome;
+  revalidation: PhasePromptRevalidation;
+  answeredTransitionId: string | null;
+}
+
+/**
+ * The same seam for "Not now", from what `declinePhaseTemplatePrompt` returned.
+ *
+ * `null` means there was no transition to decline, so the press changed nothing
+ * — reported as a failure, because from the planter's side a press that changed
+ * nothing IS one. A decline that landed takes the prompt down, so the route is
+ * re-read.
+ */
+export function decidePhaseTemplateDismissOutcome(
+  transitionId: string | null
+): PhaseTemplateDismissDecision {
+  if (!transitionId) {
+    return {
+      outcome: { status: "failed" },
+      revalidation: NO_REVALIDATION,
+      answeredTransitionId: null,
+    };
+  }
+
+  return {
+    outcome: { status: "idle" },
+    revalidation: FULL_REVALIDATION,
+    answeredTransitionId: transitionId,
+  };
+}
+
+// ----------------------------------------------------------------------------
 // The subscription
 // ----------------------------------------------------------------------------
 

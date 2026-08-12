@@ -3,13 +3,16 @@
 import Link from "next/link";
 import {
   useActionState,
-  useId,
   useState,
   type FormEvent,
   type ReactNode,
 } from "react";
 
 import { Button } from "@/components/ui/button";
+import type {
+  PhaseTemplateDismissOutcome,
+  PhaseTemplateImportOutcome,
+} from "@/lib/tasks/phase-prompt";
 import { TEMPLATES_LINK_LABEL, TEMPLATES_ROUTE } from "@/lib/tasks/templates";
 
 // ============================================================================
@@ -40,6 +43,16 @@ import { TEMPLATES_LINK_LABEL, TEMPLATES_ROUTE } from "@/lib/tasks/templates";
 // dismissing everything is exactly what an empty selection means, and a screen
 // with no enabled control is a trap.
 //
+// ONE LIVE REGION FOR THE FAILURES, AND ONE FOR THE REFUSAL. Each failure used
+// to render its own `role="alert"`, independently — so a failed import followed
+// by a failed dismiss announced twice, the older of the two describing a press
+// the planter had already moved past. Both hooks keep their last result forever
+// and neither knows which ran more recently, so the buttons record `lastPress`
+// and `phaseTemplatePromptAlert` derives the single sentence from it. The
+// separate `role="status"` hint is mounted from the first paint with its text
+// toggled: a polite region inserted together with its first message is commonly
+// not announced at all.
+//
 // TICK COUNTING IS A DOM READ, NOT A MIRROR OF THE CHECKBOXES. The boxes stay
 // uncontrolled server markup; `change` bubbles to the form, and the handler
 // counts what is checked right then. Holding a copy of the tick state in React
@@ -53,29 +66,16 @@ import { TEMPLATES_LINK_LABEL, TEMPLATES_ROUTE } from "@/lib/tasks/templates";
 // ----------------------------------------------------------------------------
 
 /**
- * What answering the prompt with Import did.
- *
- * `partial` is the case the review singled out: the claim is deliberately KEPT
- * when an import got part-way (re-offering a checklist already in the list is
- * how a planter imports it twice), so the prompt is answered and will not
- * render again — this outcome is the only chance to say that half a set
- * arrived. `nothing` is "no checklist on offer was ticked", which the disabled
- * button makes unreachable from the UI but not from a forged POST or a stage
- * change that moved under the planter's feet.
+ * The outcome shapes are DEFINED IN `@/lib/tasks/phase-prompt`, next to the pure
+ * function that decides them, and re-exported here for the components and tests
+ * that only ever draw them. `import type` is erased, so this island still pulls
+ * nothing server-side into the browser bundle.
  */
-export type PhaseTemplateImportOutcome =
-  | { status: "idle" }
-  | { status: "partial"; createdCount: number; templateNames: string[] }
-  | { status: "nothing" }
-  | { status: "failed" };
+export type { PhaseTemplateDismissOutcome, PhaseTemplateImportOutcome };
 
 export const PHASE_TEMPLATE_IMPORT_IDLE: PhaseTemplateImportOutcome = {
   status: "idle",
 };
-
-export type PhaseTemplateDismissOutcome =
-  | { status: "idle" }
-  | { status: "failed" };
 
 export const PHASE_TEMPLATE_DISMISS_IDLE: PhaseTemplateDismissOutcome = {
   status: "idle",
@@ -135,6 +135,51 @@ export function partialImportMessage(
     templateNames.length > 0 ? ` from ${nameList(templateNames)}` : "";
 
   return `Only part of that import went through: ${created} created${from}. The remaining checklists were not created, and this stage change is now answered — import them at any time from`;
+}
+
+// ----------------------------------------------------------------------------
+// The one live region
+// ----------------------------------------------------------------------------
+
+/**
+ * Which button was pressed last. UI state, and the only thing that can tell two
+ * independent `useActionState` hooks apart in time.
+ */
+export type PhaseTemplatePromptPress = "import" | "dismiss";
+
+export interface PhaseTemplatePromptAlertInput {
+  lastPress: PhaseTemplatePromptPress;
+  importOutcome: PhaseTemplateImportOutcome;
+  dismissOutcome: PhaseTemplateDismissOutcome;
+}
+
+/**
+ * The ONE sentence the prompt announces, or `null` for silence.
+ *
+ * There used to be three `role="alert"` paragraphs, one per failure, each
+ * rendered independently. A failed import followed by a failed dismiss put TWO
+ * live regions on the page at once — two announcements for one press, and the
+ * older of them describing a press the planter had already moved on from. A
+ * live region is a channel, not a list, so there is one, and it carries the
+ * outcome of the press that was actually made.
+ *
+ * `lastPress` is what makes that possible. Each hook keeps its own last result
+ * forever, so "import failed" survives every later dismiss and vice versa;
+ * neither hook knows which ran more recently. The buttons record it.
+ */
+export function phaseTemplatePromptAlert(
+  input: PhaseTemplatePromptAlertInput
+): string | null {
+  if (input.lastPress === "dismiss") {
+    return input.dismissOutcome.status === "failed"
+      ? DISMISS_FAILED_MESSAGE
+      : null;
+  }
+
+  if (input.importOutcome.status === "failed") return IMPORT_FAILED_MESSAGE;
+  if (input.importOutcome.status === "nothing") return NOTHING_IMPORTED_MESSAGE;
+
+  return null;
 }
 
 // ----------------------------------------------------------------------------
@@ -217,6 +262,8 @@ export interface PhaseTemplatePromptFormProps {
    */
   initialImportOutcome?: PhaseTemplateImportOutcome;
   initialDismissOutcome?: PhaseTemplateDismissOutcome;
+  /** Test seam, same reason: which button the seeded outcome belongs to. */
+  initialLastPress?: PhaseTemplatePromptPress;
 }
 
 export function PhaseTemplatePromptForm({
@@ -227,6 +274,7 @@ export function PhaseTemplatePromptForm({
   dismissAction,
   initialImportOutcome = PHASE_TEMPLATE_IMPORT_IDLE,
   initialDismissOutcome = PHASE_TEMPLATE_DISMISS_IDLE,
+  initialLastPress = "import",
 }: PhaseTemplatePromptFormProps) {
   const [importOutcome, importFormAction, importPending] = useActionState(
     importAction,
@@ -237,7 +285,8 @@ export function PhaseTemplatePromptForm({
     initialDismissOutcome
   );
   const [tickedCount, setTickedCount] = useState(offerCount);
-  const hintId = useId();
+  const [lastPress, setLastPress] =
+    useState<PhaseTemplatePromptPress>(initialLastPress);
 
   const {
     importDisabled,
@@ -250,6 +299,12 @@ export function PhaseTemplatePromptForm({
     importPending,
     dismissPending,
     tickedCount,
+  });
+
+  const alertMessage = phaseTemplatePromptAlert({
+    lastPress,
+    importOutcome,
+    dismissOutcome,
   });
 
   /** `change` bubbles from the checkboxes to the form, so one handler on the
@@ -298,32 +353,18 @@ export function PhaseTemplatePromptForm({
         {children}
 
         {/*
-          Failures the planter can act on, said where the press happened —
-          `role="alert"` and the catalog's own treatment
-          (`template-picker.tsx`). Nothing here ends up in the console alone.
+          ONE live region, whichever press failed — `role="alert"` and the
+          catalog's own treatment (`template-picker.tsx`). Nothing here ends up
+          in the console alone, and nothing here ever announces twice: see
+          `phaseTemplatePromptAlert`.
         */}
-        {importOutcome.status === "failed" && (
+        {alertMessage && (
           <p
             role="alert"
+            data-testid="prompt-alert"
             className="bg-destructive/10 text-destructive rounded-md p-2 text-sm"
           >
-            {IMPORT_FAILED_MESSAGE}
-          </p>
-        )}
-        {importOutcome.status === "nothing" && (
-          <p
-            role="alert"
-            className="bg-destructive/10 text-destructive rounded-md p-2 text-sm"
-          >
-            {NOTHING_IMPORTED_MESSAGE}
-          </p>
-        )}
-        {dismissOutcome.status === "failed" && (
-          <p
-            role="alert"
-            className="bg-destructive/10 text-destructive rounded-md p-2 text-sm"
-          >
-            {DISMISS_FAILED_MESSAGE}
+            {alertMessage}
           </p>
         )}
 
@@ -334,7 +375,7 @@ export function PhaseTemplatePromptForm({
             className="cursor-pointer"
             disabled={importDisabled}
             aria-busy={importing}
-            aria-describedby={emptyHint ? hintId : undefined}
+            onClick={() => setLastPress("import")}
           >
             {importLabel}
           </Button>
@@ -352,27 +393,32 @@ export function PhaseTemplatePromptForm({
             className="cursor-pointer"
             disabled={dismissDisabled}
             aria-busy={dismissing}
+            onClick={() => setLastPress("dismiss")}
           >
             Not now
           </Button>
         </div>
 
         {/*
-          Announced, not just shown: a disabled button is not focusable, so the
-          `aria-describedby` above is never read out on its own. `role="status"`
-          is what tells a screen-reader user why Import stopped accepting the
-          press.
+          ALWAYS RENDERED, TEXT TOGGLED. `role="status"` is a polite live region,
+          and a polite region that is inserted into the DOM together with its
+          first message is commonly not announced at all — the assistive tech has
+          nothing to compare against. Mounted empty from the first paint, the
+          hint appearing IS a change, which is the event that gets read.
+
+          There is no `aria-describedby` pointing here, and there was: it was
+          dead. It sat on the Import button, which is DISABLED for exactly as
+          long as this hint has anything to say, and a disabled button is not
+          focusable — so the description could never be reached. This region is
+          how a screen-reader user learns why Import stopped accepting the press.
         */}
-        {emptyHint && (
-          <p
-            id={hintId}
-            role="status"
-            data-testid="prompt-empty-hint"
-            className="text-muted-foreground text-xs"
-          >
-            {emptyHint}
-          </p>
-        )}
+        <p
+          role="status"
+          data-testid="prompt-empty-hint"
+          className="text-muted-foreground text-xs"
+        >
+          {emptyHint ?? ""}
+        </p>
       </form>
     </>
   );

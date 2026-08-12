@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
 
 import { createElement } from "react";
@@ -6,7 +8,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   buildPhaseTemplatePrompt,
+  decidePhaseTemplateDismissOutcome,
+  decidePhaseTemplateImportOutcome,
   phaseTemplatesFor,
+  type AcceptPhaseTemplatePromptResult,
   type PhaseTemplatePrompt as PhaseTemplatePromptData,
 } from "@/lib/tasks/phase-prompt";
 
@@ -17,9 +22,11 @@ import {
   NOTHING_TICKED_HINT,
   PhaseTemplatePromptForm,
   partialImportMessage,
+  phaseTemplatePromptAlert,
   phaseTemplatePromptControlState,
   type PhaseTemplateDismissOutcome,
   type PhaseTemplateImportOutcome,
+  type PhaseTemplatePromptPress,
 } from "./phase-template-prompt-controls";
 import { PhaseTemplatePromptView } from "./phase-template-prompt";
 
@@ -84,6 +91,7 @@ function renderIsland(
     offerCount?: number;
     initialImportOutcome?: PhaseTemplateImportOutcome;
     initialDismissOutcome?: PhaseTemplateDismissOutcome;
+    initialLastPress?: PhaseTemplatePromptPress;
   } = {}
 ): string {
   return renderToStaticMarkup(
@@ -95,8 +103,14 @@ function renderIsland(
       dismissAction: noopDismiss,
       initialImportOutcome: overrides.initialImportOutcome,
       initialDismissOutcome: overrides.initialDismissOutcome,
+      initialLastPress: overrides.initialLastPress,
     })
   );
+}
+
+/** How many `role="alert"` live regions the markup carries. */
+function alertCount(html: string): number {
+  return (html.match(/role="alert"/g) ?? []).length;
 }
 
 /** The `<button>` tags in document order — Import first, then Not now. */
@@ -586,10 +600,274 @@ test("a submit naming no live checklist is answered in words", () => {
 });
 
 test("a failed decline is reported too", () => {
-  const html = renderIsland({ initialDismissOutcome: { status: "failed" } });
+  const html = renderIsland({
+    initialDismissOutcome: { status: "failed" },
+    initialLastPress: "dismiss",
+  });
 
   assert.ok(textOf(html).includes(DISMISS_FAILED_MESSAGE));
   assert.match(html, /role="alert"/);
+});
+
+// ----------------------------------------------------------------------------
+// ONE live region, not three
+//
+// Each failure used to render its own `role="alert"` paragraph, independently.
+// The two hooks keep their last result forever, so a failed import followed by
+// a failed dismiss put TWO live regions on screen — two announcements for one
+// press, the older describing a press already moved on from.
+// ----------------------------------------------------------------------------
+
+test("two failed presses never stack two live regions", () => {
+  for (const lastPress of ["import", "dismiss"] as const) {
+    const html = renderIsland({
+      initialImportOutcome: { status: "failed" },
+      initialDismissOutcome: { status: "failed" },
+      initialLastPress: lastPress,
+    });
+
+    assert.equal(
+      alertCount(html),
+      1,
+      `both presses failed and last=${lastPress} announced ${alertCount(html)} times`
+    );
+  }
+});
+
+test("the live region carries the press the planter actually just made", () => {
+  const bothFailed = {
+    importOutcome: { status: "failed" },
+    dismissOutcome: { status: "failed" },
+  } as const;
+
+  assert.equal(
+    phaseTemplatePromptAlert({ ...bothFailed, lastPress: "import" }),
+    IMPORT_FAILED_MESSAGE,
+    "a failed Import reported the stale decline instead"
+  );
+  assert.equal(
+    phaseTemplatePromptAlert({ ...bothFailed, lastPress: "dismiss" }),
+    DISMISS_FAILED_MESSAGE,
+    "a failed Not now reported the stale import instead"
+  );
+});
+
+test("a successful press says nothing at all", () => {
+  assert.equal(
+    phaseTemplatePromptAlert({
+      lastPress: "import",
+      importOutcome: { status: "idle" },
+      dismissOutcome: { status: "failed" },
+    }),
+    null,
+    "an import that landed still announced an older decline failure"
+  );
+  assert.equal(alertCount(renderIsland()), 0, "the resting prompt announces");
+});
+
+test("an empty submit is announced through the same one region", () => {
+  const html = renderIsland({ initialImportOutcome: { status: "nothing" } });
+
+  assert.equal(alertCount(html), 1);
+  assert.ok(textOf(html).includes(NOTHING_IMPORTED_MESSAGE));
+});
+
+// ----------------------------------------------------------------------------
+// The empty hint is a live region, so it must exist BEFORE it has anything to
+// say. A polite `role="status"` inserted together with its first message is
+// commonly never announced — there is nothing for the assistive tech to diff.
+// ----------------------------------------------------------------------------
+
+test("the empty hint region is mounted from the first paint, silent", () => {
+  const armed = renderIsland({ offerCount: 3 });
+
+  assert.match(
+    armed,
+    /role="status"/,
+    "the hint region only appears once it has something to say, so it is never announced"
+  );
+  assert.ok(
+    !armed.includes(NOTHING_TICKED_HINT),
+    "the armed prompt is explaining a refusal it is not making"
+  );
+});
+
+test("no aria-describedby points at the hint, because it could never be read", () => {
+  // It sat on the Import button, which is disabled for exactly as long as the
+  // hint has anything to say — and a disabled button is not focusable.
+  assert.ok(
+    !renderIsland({ offerCount: 0 }).includes("aria-describedby"),
+    "the dead aria-describedby is back on a button that cannot take focus"
+  );
+});
+
+// ----------------------------------------------------------------------------
+// The decision seam (ruled 2026-08-12, round 3)
+//
+// All of this used to live inside `importPhaseTemplatesAction`, a non-exported
+// `"use server"` closure that no test can call — so the branch that matters
+// most had no coverage at all, and shipped a `revalidatePath("/tasks")` that
+// unmounted the very receipt it was written to preserve.
+// ----------------------------------------------------------------------------
+
+const TRANSITION_ID = "22222222-2222-4222-8222-222222222222";
+
+test("nothing answered leaves the prompt up and re-reads nothing", () => {
+  // `null` is "no live prompt, or every requested key was forged" — and it is
+  // also the empty tick list, which the action never sends to the service.
+  const decision = decidePhaseTemplateImportOutcome(null);
+
+  assert.deepEqual(decision.outcome, { status: "nothing" });
+  assert.equal(decision.answeredTransitionId, null, "an unanswered prompt");
+  assert.deepEqual(decision.revalidation, {
+    refresh: false,
+    revalidatePath: false,
+  });
+});
+
+test("a PARTIAL import revalidates NOTHING, or the receipt is destroyed", () => {
+  // THE REGRESSION THIS FILE EXISTS FOR. The claim is kept on a part-way
+  // import, so /tasks re-rendered has no prompt in it and the island holding
+  // the receipt unmounts. `refresh()` does that — and so does
+  // `revalidatePath("/tasks")`, which for a Server Function "Updates the UI
+  // immediately (if viewing the affected path)"
+  // (.next-docs/01-app/03-api-reference/04-functions/revalidatePath.mdx), and
+  // the planter IS on that path. /tasks is `force-dynamic`, so neither call
+  // buys anything either.
+  const result: AcceptPhaseTemplatePromptResult = {
+    status: "partial",
+    transitionId: TRANSITION_ID,
+    importedOn: "2026-03-02",
+    createdCount: 9,
+    templateNames: ["Ministry Team Setup"],
+  };
+
+  const decision = decidePhaseTemplateImportOutcome(result);
+
+  assert.deepEqual(decision.outcome, {
+    status: "partial",
+    createdCount: 9,
+    templateNames: ["Ministry Team Setup"],
+  });
+  assert.equal(
+    decision.revalidation.refresh,
+    false,
+    "a partial import called refresh() and took its own receipt down"
+  );
+  assert.equal(
+    decision.revalidation.revalidatePath,
+    false,
+    "a partial import called revalidatePath('/tasks') — which re-renders /tasks immediately for a Server Function and unmounts the receipt"
+  );
+  assert.equal(
+    decision.answeredTransitionId,
+    TRANSITION_ID,
+    "the claim is kept, so the cookie fast path must be written too"
+  );
+});
+
+test("a clean import takes the prompt down and re-reads the list", () => {
+  const decision = decidePhaseTemplateImportOutcome({
+    status: "imported",
+    transitionId: TRANSITION_ID,
+    importedOn: "2026-03-02",
+    createdCount: 22,
+    templateNames: ["Ministry Team Setup", "Launch Prep"],
+  });
+
+  assert.deepEqual(decision.outcome, { status: "idle" });
+  assert.deepEqual(decision.revalidation, {
+    refresh: true,
+    revalidatePath: true,
+  });
+  assert.equal(decision.answeredTransitionId, TRANSITION_ID);
+});
+
+test("a second press is a success that created nothing", () => {
+  const decision = decidePhaseTemplateImportOutcome({
+    status: "already_answered",
+    transitionId: TRANSITION_ID,
+  });
+
+  assert.deepEqual(
+    decision.outcome,
+    { status: "idle" },
+    "answering twice reported a failure the planter cannot act on"
+  );
+  assert.equal(
+    decision.revalidation.refresh,
+    true,
+    "the prompt is answered and must come down"
+  );
+  assert.equal(decision.answeredTransitionId, TRANSITION_ID);
+});
+
+test("declining decides the same way, from a transition id or its absence", () => {
+  const landed = decidePhaseTemplateDismissOutcome(TRANSITION_ID);
+  assert.deepEqual(landed.outcome, { status: "idle" });
+  assert.deepEqual(landed.revalidation, {
+    refresh: true,
+    revalidatePath: true,
+  });
+  assert.equal(landed.answeredTransitionId, TRANSITION_ID);
+
+  // No transition to decline: the press changed nothing, which from the
+  // planter's side IS a failure — and nothing is re-read, so nothing is lost.
+  const missed = decidePhaseTemplateDismissOutcome(null);
+  assert.deepEqual(missed.outcome, { status: "failed" });
+  assert.deepEqual(missed.revalidation, {
+    refresh: false,
+    revalidatePath: false,
+  });
+  assert.equal(missed.answeredTransitionId, null);
+});
+
+test("the action performs the decision rather than re-deciding it", () => {
+  // The seam only helps if the action still routes through it. Both branches
+  // used to be written out inline, which is how the partial case acquired a
+  // revalidation nobody could test.
+  const action = readFileSync(
+    path.join(process.cwd(), "src/components/tasks/phase-template-prompt.tsx"),
+    "utf8"
+  );
+
+  assert.match(action, /decidePhaseTemplateImportOutcome\(/);
+  assert.match(action, /decidePhaseTemplateDismissOutcome\(/);
+  assert.equal(
+    (action.match(/revalidatePath\("\/tasks"\)/g) ?? []).length,
+    1,
+    "revalidatePath is called somewhere other than the one directive-driven place"
+  );
+});
+
+test("the island reaches the server module for TYPES ONLY", () => {
+  // `phase-prompt.ts` imports `@/db`, whose module scope calls `neon()`. A
+  // value import from this `"use client"` island would ship that to the browser
+  // and kill /tasks on load — the outage `template-picker.bundle.test.ts`
+  // documents. `import type` is erased, so it is safe and it is the only form
+  // allowed here.
+  const island = readFileSync(
+    path.join(
+      process.cwd(),
+      "src/components/tasks/phase-template-prompt-controls.tsx"
+    ),
+    "utf8"
+  );
+
+  const edges = [
+    ...island.matchAll(
+      /^\s*(?:import|export)\s+(\S+)[^;]*?\bfrom\s*["']@\/lib\/tasks\/phase-prompt["']/gm
+    ),
+  ];
+
+  assert.ok(edges.length > 0, "the outcome types are no longer imported here");
+  for (const [statement, firstWord] of edges) {
+    assert.equal(
+      firstWord,
+      "type",
+      `a VALUE import of the db-backed module ships neon() to the browser: ${statement.trim()}`
+    );
+  }
 });
 
 test("a partial import says what landed and points at the standing catalog", () => {
