@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import {
   TEMPLATES_LINK_LABEL,
   TEMPLATE_REIMPORT_NOTE,
+  taskCountLabel,
   taskTemplateSize,
   taskTemplatesByPhase,
   type TaskTemplate,
@@ -37,10 +38,6 @@ import {
 /** Copy shown when the request itself failed, as opposed to a refusal. */
 const IMPORT_FAILED_MESSAGE =
   "We could not import that checklist just now. Nothing was created — try again.";
-
-function taskCountLabel(count: number): string {
-  return count === 1 ? "1 task" : `${count} tasks`;
-}
 
 /**
  * How far the checklist reaches, in plain words.

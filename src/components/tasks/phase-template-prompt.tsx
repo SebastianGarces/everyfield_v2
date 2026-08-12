@@ -19,7 +19,11 @@ import {
   type PhasePromptRevalidation,
   type PhaseTemplatePrompt as PhaseTemplatePromptData,
 } from "@/lib/tasks/phase-prompt";
-import { TEMPLATES_LINK_LABEL, TEMPLATES_ROUTE } from "@/lib/tasks/templates";
+import {
+  TEMPLATES_LINK_LABEL,
+  TEMPLATES_ROUTE,
+  taskCountLabel,
+} from "@/lib/tasks/templates";
 
 // ============================================================================
 // T-020 — the prompt itself.
@@ -222,21 +226,27 @@ async function importPhaseTemplatesAction(
 /**
  * Decline: record the answer and create nothing.
  *
- * Reads NOTHING from the form. The transition being declined is re-read from
- * the database, so the request cannot aim the dismissal at a transition other
- * than the plant's current one. `useActionState` hands its action the previous
- * outcome and then a `FormData`; this signature accepts neither past the first,
- * which is the clearest way to say nothing in the form is read.
+ * IT READS ONE FIELD, AND ONLY AS A GUARD. The transition being declined is
+ * still re-read from the database and the church still comes from the session,
+ * so the request cannot AIM the dismissal — but the id the planter was looking
+ * at has to travel with the press. Without it a panel left open while the plant
+ * moved on (another member, the phase engine, an oversight action) declined the
+ * NEW stage change, permanently and for the whole plant, with no un-answer path
+ * (`memory/invariants.md` → Tasks: the answer belongs to the PLANT). The posted
+ * id must EQUAL the server's own latest transition, so the only outcome a
+ * forged or stale value can force is a no-op, which is reported as a failure
+ * and leaves the real, current prompt on the next render.
  *
  * The decline is written to `phase_prompt_answers`, so it holds on every
  * device — the cookie afterwards only saves this browser the join.
  *
- * `null` from the service means there is no transition to decline, which leaves
- * the prompt exactly as it was. Reported as a failure, because from the
- * planter's side a press that changed nothing IS one.
+ * `null` from the service means there is no transition to decline, or the one
+ * named is no longer current. Either way the press changed nothing, and from
+ * the planter's side a press that changed nothing IS a failure.
  */
 async function dismissPhaseTemplatePromptAction(
-  _previous: PhaseTemplateDismissOutcome
+  _previous: PhaseTemplateDismissOutcome,
+  formData: FormData
 ): Promise<PhaseTemplateDismissOutcome> {
   "use server";
 
@@ -244,9 +254,17 @@ async function dismissPhaseTemplatePromptAction(
     const { user } = await getCurrentSession();
     if (!user?.churchId) return { status: "failed" };
 
+    // A missing or empty field is "the client named nothing", which the service
+    // treats as no guard at all — the pre-#313 behaviour, and the only thing a
+    // JavaScript-free submit of this form could produce.
+    const posted = formData.get("transitionId");
+    const expectedTransitionId =
+      typeof posted === "string" && posted.length > 0 ? posted : null;
+
     const transitionId = await declinePhaseTemplatePrompt({
       churchId: user.churchId,
       userId: user.id,
+      expectedTransitionId,
     });
 
     const decision = decidePhaseTemplateDismissOutcome(transitionId);
@@ -266,10 +284,6 @@ async function dismissPhaseTemplatePromptAction(
 // ----------------------------------------------------------------------------
 // Copy helpers
 // ----------------------------------------------------------------------------
-
-function taskCountLabel(count: number): string {
-  return count === 1 ? "1 task" : `${count} tasks`;
-}
 
 /** `"Aug 24, 2026"`, pinned to `APP_TIME_ZONE` — a due date is a calendar day,
  *  and formatting one in the runtime's zone is how SSR and hydration disagree
@@ -298,7 +312,8 @@ export interface PhaseTemplatePromptViewProps {
     formData: FormData
   ) => Promise<PhaseTemplateImportOutcome>;
   dismissAction: (
-    state: PhaseTemplateDismissOutcome
+    state: PhaseTemplateDismissOutcome,
+    formData: FormData
   ) => Promise<PhaseTemplateDismissOutcome>;
 }
 
@@ -320,6 +335,7 @@ export function PhaseTemplatePromptView({
       className="border-border bg-card space-y-4 rounded-md border p-4 shadow-sm"
     >
       <PhaseTemplatePromptForm
+        transitionId={prompt.transitionId}
         offerCount={prompt.offers.length}
         importAction={importAction}
         dismissAction={dismissAction}

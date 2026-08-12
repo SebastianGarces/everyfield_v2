@@ -13,7 +13,11 @@ import type {
   PhaseTemplateDismissOutcome,
   PhaseTemplateImportOutcome,
 } from "@/lib/tasks/phase-prompt";
-import { TEMPLATES_LINK_LABEL, TEMPLATES_ROUTE } from "@/lib/tasks/templates";
+import {
+  TEMPLATES_LINK_LABEL,
+  TEMPLATES_ROUTE,
+  taskCountLabel,
+} from "@/lib/tasks/templates";
 
 // ============================================================================
 // T-020 — the prompt's form, its two buttons, and the only client code the
@@ -108,10 +112,6 @@ export const NOTHING_IMPORTED_MESSAGE =
 export const NOTHING_TICKED_HINT =
   "Tick at least one checklist to import. Press Not now to dismiss them all.";
 
-function taskCountLabel(count: number): string {
-  return count === 1 ? "1 task" : `${count} tasks`;
-}
-
 /** `"A"`, `"A and B"`, `"A, B and C"` — names read as a sentence, not a list. */
 function nameList(names: readonly string[]): string {
   if (names.length <= 1) return names[0] ?? "";
@@ -183,6 +183,74 @@ export function phaseTemplatePromptAlert(
 }
 
 // ----------------------------------------------------------------------------
+// The two outcome surfaces
+//
+// WHY THEY ARE THEIR OWN COMPONENTS. Both are pure functions of their data and
+// hold no hooks, and while they were inline in `PhaseTemplatePromptForm` the
+// only way a test could reach either was to seed `useActionState` — which
+// `renderToStaticMarkup` cannot drive, so the form grew three `initial*` props
+// whose comment said "Production never passes these." Test scaffolding in a
+// production component's public shape is a cost paid on every read of that
+// shape; extracted, the markup is renderable directly and the seams delete
+// themselves. What the FORM still owns is the CHOICE between them, and that
+// half was already pure and separately tested (`phaseTemplatePromptAlert`).
+// ----------------------------------------------------------------------------
+
+/**
+ * The partial-import receipt: what landed, what did not, and the one route the
+ * remainder is still on.
+ *
+ * It REPLACES the panel body rather than sitting under it. A part-way import
+ * keeps its claim (`phase-prompt.ts`), so the transition is answered and the
+ * prompt never renders again — the offers above it are offers that can no
+ * longer be taken, and this is the only screen that will ever say so.
+ */
+export function PartialImportReceipt({
+  createdCount,
+  templateNames,
+}: {
+  createdCount: number;
+  templateNames: readonly string[];
+}) {
+  return (
+    <p
+      data-testid="prompt-partial"
+      role="alert"
+      className="bg-destructive/10 text-destructive rounded-md p-3 text-sm"
+    >
+      {partialImportMessage(createdCount, templateNames)}{" "}
+      <Link
+        href={TEMPLATES_ROUTE}
+        className="cursor-pointer font-medium underline underline-offset-4"
+      >
+        {TEMPLATES_LINK_LABEL}
+      </Link>
+      .
+    </p>
+  );
+}
+
+/**
+ * The prompt's ONE live region — `role="alert"`, the catalog's own treatment.
+ *
+ * It takes a message rather than the two outcomes on purpose: WHICH sentence is
+ * `phaseTemplatePromptAlert`'s decision, and rendering it is this component's.
+ * Keeping them apart is what stops a second live region being added beside this
+ * one the next time a failure gets its own branch.
+ */
+export function PhaseTemplatePromptAlert({ message }: { message: string }) {
+  return (
+    <p
+      role="alert"
+      data-testid="prompt-alert"
+      className="bg-destructive/10 text-destructive rounded-md p-2 text-sm"
+    >
+      {message}
+    </p>
+  );
+}
+
+// ----------------------------------------------------------------------------
 // The button state
 // ----------------------------------------------------------------------------
 
@@ -239,6 +307,15 @@ export function phaseTemplatePromptControlState(
 // ----------------------------------------------------------------------------
 
 export interface PhaseTemplatePromptFormProps {
+  /**
+   * The transition this prompt is asking about, posted back with the answer.
+   *
+   * "Not now" reads it (see the hidden input below) so a press on a STALE panel
+   * cannot decline a stage change the planter never saw. It is not an aiming
+   * device: the server refuses any id that is not its own latest transition, so
+   * the only outcome a forged value can force is a no-op.
+   */
+  transitionId: string;
   /** How many boxes arrive ticked — every offer does, so this is the resting
    *  tick count and the value the server and the client both start from. */
   offerCount: number;
@@ -252,41 +329,30 @@ export interface PhaseTemplatePromptFormProps {
     formData: FormData
   ) => Promise<PhaseTemplateImportOutcome>;
   dismissAction: (
-    state: PhaseTemplateDismissOutcome
+    state: PhaseTemplateDismissOutcome,
+    formData: FormData
   ) => Promise<PhaseTemplateDismissOutcome>;
-  /**
-   * Test seam. `useActionState` has no way to be driven from
-   * `renderToStaticMarkup`, so the outcome markup — the partial receipt, the
-   * two alerts — is asserted by starting the hook at that outcome. Production
-   * never passes these.
-   */
-  initialImportOutcome?: PhaseTemplateImportOutcome;
-  initialDismissOutcome?: PhaseTemplateDismissOutcome;
-  /** Test seam, same reason: which button the seeded outcome belongs to. */
-  initialLastPress?: PhaseTemplatePromptPress;
 }
 
 export function PhaseTemplatePromptForm({
+  transitionId,
   offerCount,
   lead,
   children,
   importAction,
   dismissAction,
-  initialImportOutcome = PHASE_TEMPLATE_IMPORT_IDLE,
-  initialDismissOutcome = PHASE_TEMPLATE_DISMISS_IDLE,
-  initialLastPress = "import",
 }: PhaseTemplatePromptFormProps) {
   const [importOutcome, importFormAction, importPending] = useActionState(
     importAction,
-    initialImportOutcome
+    PHASE_TEMPLATE_IMPORT_IDLE
   );
   const [dismissOutcome, dismissFormAction, dismissPending] = useActionState(
     dismissAction,
-    initialDismissOutcome
+    PHASE_TEMPLATE_DISMISS_IDLE
   );
   const [tickedCount, setTickedCount] = useState(offerCount);
   const [lastPress, setLastPress] =
-    useState<PhaseTemplatePromptPress>(initialLastPress);
+    useState<PhaseTemplatePromptPress>("import");
 
   const {
     importDisabled,
@@ -321,23 +387,10 @@ export function PhaseTemplatePromptForm({
   // later screen that will say this.
   if (importOutcome.status === "partial") {
     return (
-      <p
-        data-testid="prompt-partial"
-        role="alert"
-        className="bg-destructive/10 text-destructive rounded-md p-3 text-sm"
-      >
-        {partialImportMessage(
-          importOutcome.createdCount,
-          importOutcome.templateNames
-        )}{" "}
-        <Link
-          href={TEMPLATES_ROUTE}
-          className="cursor-pointer font-medium underline underline-offset-4"
-        >
-          {TEMPLATES_LINK_LABEL}
-        </Link>
-        .
-      </p>
+      <PartialImportReceipt
+        createdCount={importOutcome.createdCount}
+        templateNames={importOutcome.templateNames}
+      />
     );
   }
 
@@ -350,23 +403,26 @@ export function PhaseTemplatePromptForm({
         onChange={countTicks}
         className="space-y-4"
       >
+        {/*
+          WHICH stage change this panel is answering. "Not now" still reads
+          nothing ELSE from the form — the church comes from the session and the
+          transition is re-read from the database — but the id the planter was
+          LOOKING AT has to travel with the press, or a panel left open while
+          the plant moved on declines the new stage change instead. The server
+          compares it with its own latest transition and refuses a mismatch, so
+          this input cannot aim the dismissal anywhere; the worst a forged value
+          buys is a press that does nothing and says so.
+        */}
+        <input type="hidden" name="transitionId" value={transitionId} />
+
         {children}
 
         {/*
-          ONE live region, whichever press failed — `role="alert"` and the
-          catalog's own treatment (`template-picker.tsx`). Nothing here ends up
-          in the console alone, and nothing here ever announces twice: see
-          `phaseTemplatePromptAlert`.
+          ONE live region, whichever press failed. Nothing here ends up in the
+          console alone, and nothing here ever announces twice: the sentence is
+          chosen by `phaseTemplatePromptAlert` and drawn by one component.
         */}
-        {alertMessage && (
-          <p
-            role="alert"
-            data-testid="prompt-alert"
-            className="bg-destructive/10 text-destructive rounded-md p-2 text-sm"
-          >
-            {alertMessage}
-          </p>
-        )}
+        {alertMessage && <PhaseTemplatePromptAlert message={alertMessage} />}
 
         <div className="flex flex-wrap items-center gap-2">
           <Button

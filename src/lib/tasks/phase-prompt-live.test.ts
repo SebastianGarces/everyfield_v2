@@ -603,6 +603,67 @@ test("declining twice records one answer and stays a decline", async (t: TestCon
   }
 });
 
+test("a decline naming a superseded transition writes nothing", async (t: TestContext) => {
+  if (!(await databaseReachable())) return t.skip(SKIP_NOTE);
+
+  const fixture = await seed(`__t320-${randomUUID().slice(0, 8)}`);
+
+  try {
+    // The panel the planter is looking at…
+    const staleId = await recordTransition(fixture, {
+      fromPhase: 1,
+      toPhase: TO_PHASE,
+      createdAt: new Date("2026-03-02T09:15:00.000Z"),
+    });
+
+    // …and the move that happened underneath it: another member, the phase
+    // engine, an oversight action. A different stage, a different set of
+    // checklists, and an answer the planter has never been asked for.
+    const currentId = await recordTransition(fixture, {
+      fromPhase: TO_PHASE,
+      toPhase: 3,
+      createdAt: new Date("2026-06-01T09:15:00.000Z"),
+    });
+
+    assert.equal(
+      await declinePhaseTemplatePrompt({
+        churchId: fixture.churchId,
+        userId: fixture.userId,
+        expectedTransitionId: staleId,
+      }),
+      null,
+      "a stale press answered a stage change the planter never saw"
+    );
+    assert.deepEqual(
+      await answersOf(fixture.churchId),
+      [],
+      "the stale decline wrote a row, which cannot be un-answered"
+    );
+
+    // The real prompt is untouched, and it is the CURRENT stage's.
+    const prompt = await getPhaseTemplatePrompt(fixture.churchId, null);
+    assert.ok(prompt, "the stale press took down the live prompt");
+    assert.equal(prompt.transitionId, currentId);
+    assert.equal(prompt.toPhase, 3);
+
+    // …and declining the one on screen still works.
+    assert.equal(
+      await declinePhaseTemplatePrompt({
+        churchId: fixture.churchId,
+        userId: fixture.userId,
+        expectedTransitionId: currentId,
+      }),
+      currentId
+    );
+    assert.deepEqual(await answersOf(fixture.churchId), [
+      { transitionId: currentId, answer: "declined" },
+    ]);
+    assert.deepEqual(await tasksOf(fixture.churchId), []);
+  } finally {
+    await cleanup(fixture);
+  }
+});
+
 test("a forged key list does not burn the planter's real prompt", async (t: TestContext) => {
   if (!(await databaseReachable())) return t.skip(SKIP_NOTE);
 

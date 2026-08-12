@@ -1150,6 +1150,25 @@ export function taskTemplateSize(template: TaskTemplate): number {
 }
 
 /**
+ * How the product says a number of tasks out loud: `"1 task"`, `"9 tasks"`.
+ *
+ * ONE decision, in one place. It was written out three times — the catalog
+ * picker, the phase prompt's server component, and the prompt's client island —
+ * and the third copy arrived only because the partial-import receipt moved into
+ * the island and nobody noticed the file two doors down already had it. Three
+ * copies of one sentence is three chances for the product to count differently
+ * on three screens.
+ *
+ * It lives HERE and not beside a component because this module is the db-free
+ * half of the pair (see the note above `UNKNOWN_TEMPLATE_ERROR`): the `"use
+ * client"` island already imports `TEMPLATES_ROUTE` from it, so one more export
+ * ships nothing new to the browser.
+ */
+export function taskCountLabel(count: number): string {
+  return count === 1 ? "1 task" : `${count} tasks`;
+}
+
+/**
  * The priority an item will be created with: its own, or its template's.
  *
  * One function so the picker's preview and the import cannot disagree about

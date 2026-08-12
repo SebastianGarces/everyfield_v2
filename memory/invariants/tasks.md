@@ -127,6 +127,16 @@ This is a consequence of the 2026-08-10 ruling, kept on purpose rather than disc
 
 If per-person answers are ever wanted, the key has to widen (`(transition_id, user_id)`, or an answer per offer) and the idempotency argument above has to be re-made against the new key. That is a new ruling, not a refactor.
 
+### "Not now" has a staleness guard, because the answer cannot be taken back (#313)
+
+Because the answer belongs to the plant and there is no un-answer path, a decline aimed at the wrong transition is unrecoverable. And that is exactly what a stale panel produced: the planter renders `/tasks` with the prompt for transition X, the plant advances to Y (another member, the phase engine, an oversight action), the planter presses "Not now" on the panel still on screen — and `declinePhaseTemplatePrompt` re-read the latest transition and declined **Y**, a stage change with a different set of 22–26 tasks that nobody had been shown.
+
+So the panel posts the transition it was rendered for — a hidden `transitionId` input inside the island's `<form>`, fed from `PhaseTemplatePromptView` — and `declinePhaseTemplatePrompt` refuses any `expectedTransitionId` that is not the plant's current one: no row, `null` back. `decidePhaseTemplateDismissOutcome(null)` already maps that to `{status:'failed'}` with no revalidation, so the planter reads `DISMISS_FAILED_MESSAGE` and the next render shows the real, current prompt.
+
+**It is a guard, not an aim, and that distinction is the whole reason it is allowed.** The action's documented posture is that the request may not choose which transition is declined; a posted id that must *equal* the server's own latest transition chooses nothing — it can only match the row the function would have picked anyway. The single outcome a forged or stale value can force is a no-op. An empty or missing field means "the client named nothing" and the old unguarded behaviour applies, which is what a JavaScript-free submit of this form produces.
+
+Accept was never exposed this way. `acceptPhaseTemplatePrompt` re-filters the posted keys against a freshly derived prompt, so a stale key list for a phase Y does not offer collapses to `keys.length === 0 → null → {status:'nothing'}` and the prompt survives. This was disclosed as open limitation 2 in PR #393's body; #313 closed it.
+
 ### An empty selection is refused, not swallowed (ruled 2026-08-12)
 
 Unticking every box and pressing Import used to do nothing at all: no answer row, no tasks, no message, and the form re-rendered with every box ticked again. It also made the round-2 copy *false* — the unticked checklists were offered again, immediately, which is the opposite of what the sentence promised.

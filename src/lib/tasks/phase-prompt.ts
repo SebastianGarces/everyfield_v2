@@ -378,16 +378,41 @@ async function releasePhaseTemplatePromptAnswer(
  * Decline the prompt for the plant's current transition, durably.
  *
  * Returns the transition id that was answered (whether this call recorded the
- * answer or found one already there), or `null` when there is no transition to
- * answer. A decline that loses the race is still a decline — the prompt is down
- * either way — so the two are not distinguished.
+ * answer or found one already there), or `null` when there is nothing this call
+ * may answer. A decline that loses the race is still a decline — the prompt is
+ * down either way — so those two are not distinguished.
+ *
+ * A STALE PRESS ANSWERS NOTHING (#313). `expectedTransitionId` is the id the
+ * PANEL was showing, and when it is supplied it must equal the plant's current
+ * transition or this call writes no row and returns `null`. Without that guard
+ * a prompt left open while the plant moved on — another member advanced it, the
+ * phase engine did, an oversight action did — declined the transition the
+ * planter never saw, for the WHOLE PLANT and permanently: the answer is keyed by
+ * transition alone and there is no un-answer path (`memory/invariants.md` →
+ * Tasks). Accept was never exposed this way; it re-filters the posted keys
+ * against a freshly derived prompt, so a stale key list collapses to nothing.
+ *
+ * The id is a GUARD, never an aim. It can only ever match the row this function
+ * would have chosen anyway, so a forged value buys a no-op and nothing else —
+ * which is why passing it does not weaken "the request cannot choose which
+ * transition is declined". Omitting it (or passing `null`) keeps the old
+ * behaviour, for a caller that genuinely has no rendered prompt behind it.
  */
 export async function declinePhaseTemplatePrompt(input: {
   churchId: string;
   userId: string;
+  /** The transition the prompt being answered was rendered for, if the caller
+   *  has one. A mismatch is refused rather than redirected. */
+  expectedTransitionId?: string | null;
 }): Promise<string | null> {
   const transition = await getLatestPhaseTransition(input.churchId);
   if (!transition) return null;
+
+  if (
+    input.expectedTransitionId &&
+    input.expectedTransitionId !== transition.id
+  )
+    return null;
 
   if (!transition.answeredAt) {
     await claimPhaseTemplatePromptAnswer({

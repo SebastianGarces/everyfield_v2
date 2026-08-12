@@ -20,13 +20,14 @@ import {
   IMPORT_FAILED_MESSAGE,
   NOTHING_IMPORTED_MESSAGE,
   NOTHING_TICKED_HINT,
+  PartialImportReceipt,
+  PhaseTemplatePromptAlert,
   PhaseTemplatePromptForm,
   partialImportMessage,
   phaseTemplatePromptAlert,
   phaseTemplatePromptControlState,
   type PhaseTemplateDismissOutcome,
   type PhaseTemplateImportOutcome,
-  type PhaseTemplatePromptPress,
 } from "./phase-template-prompt-controls";
 import { PhaseTemplatePromptView } from "./phase-template-prompt";
 
@@ -40,6 +41,9 @@ import { PhaseTemplatePromptView } from "./phase-template-prompt";
 // ----------------------------------------------------------------------------
 
 const TRANSITIONED_AT = new Date("2026-03-02T09:15:00.000Z");
+
+/** The transition every fixture here is answering. */
+const TRANSITION_ID = "22222222-2222-4222-8222-222222222222";
 
 function promptData(toPhase = 2): PhaseTemplatePromptData {
   const prompt = buildPhaseTemplatePrompt(
@@ -78,33 +82,45 @@ function render(prompt: PhaseTemplatePromptData = promptData()): string {
 }
 
 /**
- * The island on its own, at a tick count and an outcome a full render cannot
- * reach.
+ * The island on its own, at a tick count a full render cannot reach.
  *
- * `useActionState` reports `pending: false` and holds its initial state under
- * `renderToStaticMarkup`, and the checkboxes are uncontrolled server markup —
- * so "no box is ticked" and "the import came back partial" are set here, at the
- * island's own props, rather than simulated.
+ * The checkboxes are uncontrolled server markup, so "no box is ticked" is set
+ * here, at the island's own resting count, rather than simulated.
+ *
+ * THE OUTCOME MARKUP IS NOT REACHED THROUGH THIS. `useActionState` holds its
+ * initial state under `renderToStaticMarkup`, and the island used to carry
+ * three `initial*` props so a test could seed it — production scaffolding for
+ * test reach. The two outcome surfaces are components now, rendered directly
+ * below; what the island still decides is WHICH of them, and that decision is
+ * `phaseTemplatePromptAlert`, asserted as the pure function it is.
  */
-function renderIsland(
-  overrides: {
-    offerCount?: number;
-    initialImportOutcome?: PhaseTemplateImportOutcome;
-    initialDismissOutcome?: PhaseTemplateDismissOutcome;
-    initialLastPress?: PhaseTemplatePromptPress;
-  } = {}
-): string {
+function renderIsland(overrides: { offerCount?: number } = {}): string {
   return renderToStaticMarkup(
     createElement(PhaseTemplatePromptForm, {
+      transitionId: TRANSITION_ID,
       offerCount: overrides.offerCount ?? 2,
       lead: null,
       children: null,
       importAction: noopImport,
       dismissAction: noopDismiss,
-      initialImportOutcome: overrides.initialImportOutcome,
-      initialDismissOutcome: overrides.initialDismissOutcome,
-      initialLastPress: overrides.initialLastPress,
     })
+  );
+}
+
+/** The one live region, on its own. */
+function renderAlert(message: string): string {
+  return renderToStaticMarkup(
+    createElement(PhaseTemplatePromptAlert, { message })
+  );
+}
+
+/** The partial-import receipt, on its own. */
+function renderReceipt(
+  createdCount: number,
+  templateNames: readonly string[]
+): string {
+  return renderToStaticMarkup(
+    createElement(PartialImportReceipt, { createdCount, templateNames })
   );
 }
 
@@ -389,6 +405,30 @@ test("the fine print is stated above the buttons it describes", () => {
   );
 });
 
+test("the answer carries the transition the planter was looking at", () => {
+  // #313. 'Not now' had no staleness guard: a press on a panel left open while
+  // the plant moved on declined the NEW stage change — permanently, for the
+  // whole plant, with no un-answer path. The id travels with the press so the
+  // server can refuse a mismatch; it cannot AIM the decline, because the server
+  // compares it with its own latest transition and accepts nothing else.
+  const prompt = promptData(2);
+  const html = render(prompt);
+
+  assert.ok(
+    html.includes(
+      `<input type="hidden" name="transitionId" value="${prompt.transitionId}"/>`
+    ),
+    "the prompt posts no transition id, so a stale press answers the wrong stage change"
+  );
+
+  const formStart = html.indexOf("<form");
+  const hidden = html.indexOf('name="transitionId"');
+  assert.ok(
+    formStart >= 0 && hidden > formStart,
+    "the transition id is outside the form that posts it"
+  );
+});
+
 test("the prompt states the import policy before the press", () => {
   // AC5 allows either behaviour so long as the surface says which. The catalog
   // has said it since T-011; the prompt did not, and a repeat here is 22–26
@@ -581,30 +621,54 @@ test("the full prompt arms its Import button, because every box arrives ticked",
 // ----------------------------------------------------------------------------
 
 test("a total failure is reported where the press happened", () => {
-  const html = renderIsland({ initialImportOutcome: { status: "failed" } });
+  // Two halves, asserted apart: WHICH sentence a failed import produces, and
+  // that the sentence is announced when it is drawn.
+  assert.equal(
+    phaseTemplatePromptAlert({
+      lastPress: "import",
+      importOutcome: { status: "failed" },
+      dismissOutcome: IDLE_DISMISS,
+    }),
+    IMPORT_FAILED_MESSAGE
+  );
 
+  const html = renderAlert(IMPORT_FAILED_MESSAGE);
   assert.ok(textOf(html).includes(IMPORT_FAILED_MESSAGE));
   assert.match(html, /role="alert"/, "the failure is not announced");
+
   assert.equal(
-    buttons(html).length,
+    buttons(renderIsland()).length,
     2,
     "a failure that created nothing must leave both answers pressable"
   );
 });
 
 test("a submit naming no live checklist is answered in words", () => {
-  const html = renderIsland({ initialImportOutcome: { status: "nothing" } });
+  assert.equal(
+    phaseTemplatePromptAlert({
+      lastPress: "import",
+      importOutcome: { status: "nothing" },
+      dismissOutcome: IDLE_DISMISS,
+    }),
+    NOTHING_IMPORTED_MESSAGE
+  );
 
+  const html = renderAlert(NOTHING_IMPORTED_MESSAGE);
   assert.ok(textOf(html).includes(NOTHING_IMPORTED_MESSAGE));
   assert.match(html, /role="alert"/);
 });
 
 test("a failed decline is reported too", () => {
-  const html = renderIsland({
-    initialDismissOutcome: { status: "failed" },
-    initialLastPress: "dismiss",
-  });
+  assert.equal(
+    phaseTemplatePromptAlert({
+      lastPress: "dismiss",
+      importOutcome: IDLE_IMPORT,
+      dismissOutcome: { status: "failed" },
+    }),
+    DISMISS_FAILED_MESSAGE
+  );
 
+  const html = renderAlert(DISMISS_FAILED_MESSAGE);
   assert.ok(textOf(html).includes(DISMISS_FAILED_MESSAGE));
   assert.match(html, /role="alert"/);
 });
@@ -620,16 +684,22 @@ test("a failed decline is reported too", () => {
 
 test("two failed presses never stack two live regions", () => {
   for (const lastPress of ["import", "dismiss"] as const) {
-    const html = renderIsland({
-      initialImportOutcome: { status: "failed" },
-      initialDismissOutcome: { status: "failed" },
-      initialLastPress: lastPress,
+    // ONE sentence out of the decision, whichever pair of outcomes is on
+    // record — the two hooks each keep their last result forever, so this is
+    // the case that once put two regions on screen at the same time.
+    const message = phaseTemplatePromptAlert({
+      lastPress,
+      importOutcome: { status: "failed" },
+      dismissOutcome: { status: "failed" },
     });
+    assert.ok(message, `last=${lastPress} announced nothing`);
 
+    // …and drawing it produces exactly one region, never a second beside it.
+    const html = renderAlert(message);
     assert.equal(
       alertCount(html),
       1,
-      `both presses failed and last=${lastPress} announced ${alertCount(html)} times`
+      `last=${lastPress} announced ${alertCount(html)} times`
     );
   }
 });
@@ -666,8 +736,14 @@ test("a successful press says nothing at all", () => {
 });
 
 test("an empty submit is announced through the same one region", () => {
-  const html = renderIsland({ initialImportOutcome: { status: "nothing" } });
+  const message = phaseTemplatePromptAlert({
+    lastPress: "import",
+    importOutcome: { status: "nothing" },
+    dismissOutcome: IDLE_DISMISS,
+  });
+  assert.equal(message, NOTHING_IMPORTED_MESSAGE);
 
+  const html = renderAlert(message);
   assert.equal(alertCount(html), 1);
   assert.ok(textOf(html).includes(NOTHING_IMPORTED_MESSAGE));
 });
@@ -709,8 +785,6 @@ test("no aria-describedby points at the hint, because it could never be read", (
 // most had no coverage at all, and shipped a `revalidatePath("/tasks")` that
 // unmounted the very receipt it was written to preserve.
 // ----------------------------------------------------------------------------
-
-const TRANSITION_ID = "22222222-2222-4222-8222-222222222222";
 
 test("nothing answered leaves the prompt up and re-reads nothing", () => {
   // `null` is "no live prompt, or every requested key was forged" — and it is
@@ -872,15 +946,8 @@ test("the island reaches the server module for TYPES ONLY", () => {
 
 test("a partial import says what landed and points at the standing catalog", () => {
   // The claim is KEPT on a part-way import, so the prompt never renders again.
-  // This panel is the only place the planter can be told, which is why it
-  // replaces the offers rather than sitting under them.
-  const html = renderIsland({
-    initialImportOutcome: {
-      status: "partial",
-      createdCount: 9,
-      templateNames: ["Ministry Team Setup"],
-    },
-  });
+  // This panel is the only place the planter can be told.
+  const html = renderReceipt(9, ["Ministry Team Setup"]);
   const text = textOf(html);
 
   assert.match(html, /role="alert"/, "the partial import is not announced");
@@ -904,6 +971,31 @@ test("a partial import says what landed and points at the standing catalog", () 
     buttons(html).length,
     0,
     "the answered prompt still offers checklists it can no longer import"
+  );
+});
+
+test("the receipt REPLACES the panel body rather than joining it", () => {
+  // The one thing the extracted component cannot prove on its own: which
+  // branch the island takes. `useActionState` holds its initial state under
+  // `renderToStaticMarkup`, so `partial` is unreachable from a render without
+  // re-adding the seed props this round deleted — and the alternative, an
+  // island that renders the receipt UNDER the offers, is a screen that invites
+  // a second import of a set that already half-landed.
+  //
+  // Read as source, deliberately and narrowly: the early return is what makes
+  // the rule true, and the browser gate is what proves the wiring.
+  const island = readFileSync(
+    path.join(
+      process.cwd(),
+      "src/components/tasks/phase-template-prompt-controls.tsx"
+    ),
+    "utf8"
+  );
+
+  assert.match(
+    island,
+    /if \(importOutcome\.status === "partial"\) \{\s*return \(\s*<PartialImportReceipt/,
+    "the partial outcome no longer returns the receipt INSTEAD of the form"
   );
 });
 
