@@ -77,8 +77,10 @@ import {
 // visibly ticked boxes above a DISABLED Import, under a hint asking the planter
 // to tick something — the exact trap this design exists to prevent — and, worse,
 // a retry that imported 15 tasks from two checklists the planter had unticked.
-// So the count is RE-READ FROM THE DOM whenever an action settles
-// (`resyncTickCount` below). This is not `useEffect` for data synchronisation,
+// So the count is RE-READ FROM THE DOM whenever an action settles — one effect
+// in the island, keyed on the two outcomes, calling the same
+// `tickedTemplateCount` the `change` handler calls. It is not `useEffect` for
+// data synchronisation,
 // which `memory/contracts/data-patterns.md` forbids: nothing here is server data
 // and no state is mirrored from props. It is the DOM-subscription case that file
 // names as the legitimate one — React mutated the checkboxes without telling us,
