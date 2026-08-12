@@ -26,6 +26,7 @@ import {
   partialImportMessage,
   phaseTemplatePromptAlert,
   phaseTemplatePromptControlState,
+  tickedTemplateCount,
   type PhaseTemplateDismissOutcome,
   type PhaseTemplateImportOutcome,
 } from "./phase-template-prompt-controls";
@@ -558,6 +559,90 @@ test("one tick is enough to arm the import again", () => {
   assert.equal(state.emptyHint, null);
 });
 
+// ----------------------------------------------------------------------------
+// WHAT FEEDS THE COUNT — the round-3 exit defect
+//
+// `phaseTemplatePromptControlState` was correct at every input and still shipped
+// a trap, because the INPUT was wrong: `tickedCount` had one writer, the
+// bubbled `change`, and React 19 restores an uncontrolled form to its defaults
+// after a `<form action>` settles WITHOUT firing one. Round 3 added three
+// settled outcomes that leave the panel mounted, so after any of them the boxes
+// were all ticked again while the count still held its pre-submit value — a
+// disabled Import above three ticked checklists, and a retry that submitted
+// checklists the planter had unticked.
+//
+// So these do not add a case over that pure function. They pin the two things
+// that make its input trustworthy: the counter reads the very inputs the prompt
+// renders and the action submits, and every settled outcome re-reads them.
+// ----------------------------------------------------------------------------
+
+/** A form that records what it was asked for and answers with a count. Enough
+ *  for a function whose entire job is one `querySelectorAll`. */
+function recordingForm(asked: string[], checked: number): HTMLFormElement {
+  return {
+    querySelectorAll(selector: string) {
+      asked.push(selector);
+      return { length: checked } as unknown as NodeListOf<Element>;
+    },
+  } as unknown as HTMLFormElement;
+}
+
+test("the tick counter counts the very inputs the prompt renders", () => {
+  const asked: string[] = [];
+
+  assert.equal(
+    tickedTemplateCount(recordingForm(asked, 2)),
+    2,
+    "the counter does not report what the form says is checked"
+  );
+  assert.equal(asked.length, 1, "the counter reads the form more than once");
+
+  // The count and the submitted payload have to be the SAME set, or a disabled
+  // Import and an import of the wrong checklists are both one rename away.
+  const name = /^input\[name="([^"]+)"\]:checked$/.exec(asked[0])?.[1];
+  assert.ok(name, `the counter no longer selects checked inputs: ${asked[0]}`);
+
+  const html = render();
+  const rendered =
+    html.match(new RegExp(`<input[^>]*name="${name}"[^>]*>`, "g")) ?? [];
+
+  assert.equal(
+    rendered.length,
+    promptData().offers.length,
+    `the counter selects name="${name}", which is not what the checklist rows render`
+  );
+  assert.ok(
+    rendered.every((tag) => tag.includes("checked")),
+    "the offers no longer arrive ticked, so the island's resting count is wrong"
+  );
+});
+
+test("every settled outcome re-reads the boxes", () => {
+  // Read as source, deliberately and narrowly — the same compromise the
+  // receipt's early-return test makes, and for the same reason: the property is
+  // about what React does to the DOM after an action settles, and this suite
+  // has no client renderer to make it happen (`renderToStaticMarkup` never
+  // settles anything). The behaviour itself is pinned in the browser gate,
+  // where the defect was found: untick everything, force a settled failure, and
+  // the boxes and the Import button must agree afterwards.
+  //
+  // What this catches is the regression that is actually likely — somebody
+  // deleting the resync, or narrowing it to one of the two outcomes.
+  const island = readFileSync(
+    path.join(
+      process.cwd(),
+      "src/components/tasks/phase-template-prompt-controls.tsx"
+    ),
+    "utf8"
+  );
+
+  assert.match(
+    island,
+    /useEffect\(\(\) => \{[\s\S]*?setTickedCount\(tickedTemplateCount\(form\)\);[\s\S]*?\}, \[importOutcome, dismissOutcome\]\);/,
+    "a settled import or dismiss no longer re-reads the checkboxes, so the count can go stale against a form React has reset"
+  );
+});
+
 test("the hint is not offered while a request is in flight", () => {
   // Mid-request the button is inert because it is BUSY, not because the
   // selection is empty; two reasons on one control read as a contradiction.
@@ -971,6 +1056,26 @@ test("a partial import says what landed and points at the standing catalog", () 
     buttons(html).length,
     0,
     "the answered prompt still offers checklists it can no longer import"
+  );
+});
+
+test("the panel keeps its accessible name in BOTH of its bodies", () => {
+  // `<section aria-labelledby>` names the landmark by pointing at the heading
+  // in the lead — and the receipt REPLACES the lead. Pointed at an id that is
+  // no longer in the document, the attribute contributes nothing and the region
+  // goes unnamed in the one state that has no other route left. Both bodies
+  // carry the id; only one is ever mounted, so it stays unique.
+  const html = render();
+  const named = /aria-labelledby="([^"]+)"/.exec(html)?.[1];
+
+  assert.ok(named, "the prompt's section is not named by anything");
+  assert.ok(
+    html.includes(`id="${named}"`),
+    "the asking state names the section after an element it does not render"
+  );
+  assert.ok(
+    renderReceipt(9, ["Ministry Team Setup"]).includes(`id="${named}"`),
+    "the receipt drops the id the section is named by, so the landmark loses its accessible name exactly when it replaces the body"
   );
 });
 

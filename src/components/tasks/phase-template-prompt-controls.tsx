@@ -3,6 +3,8 @@
 import Link from "next/link";
 import {
   useActionState,
+  useEffect,
+  useRef,
   useState,
   type FormEvent,
   type ReactNode,
@@ -63,6 +65,24 @@ import {
 // would be a second source of truth for something the DOM already knows
 // (`memory/contracts/data-patterns.md` — this is UI state, and the least of
 // it).
+//
+// …AND A SETTLED ACTION IS THE SECOND MOMENT THE DOM CHANGES BEHIND THE COUNT.
+// `change` is not the only writer of those checkboxes: REACT 19 RESETS AN
+// UNCONTROLLED FORM AFTER A `<form action>` ACTION SETTLES, restoring every box
+// to its `defaultChecked` — and it fires NO change event doing it. Round 3 added
+// three settled outcomes that leave this panel mounted (import `nothing`, import
+// `failed`, dismiss `failed`, all NO_REVALIDATION), so after any of them the
+// boxes are all ticked again while a count kept only by `countTicks` still holds
+// its pre-submit value. That desync was shipped and caught in the browser: three
+// visibly ticked boxes above a DISABLED Import, under a hint asking the planter
+// to tick something — the exact trap this design exists to prevent — and, worse,
+// a retry that imported 15 tasks from two checklists the planter had unticked.
+// So the count is RE-READ FROM THE DOM whenever an action settles
+// (`resyncTickCount` below). This is not `useEffect` for data synchronisation,
+// which `memory/contracts/data-patterns.md` forbids: nothing here is server data
+// and no state is mirrored from props. It is the DOM-subscription case that file
+// names as the legitimate one — React mutated the checkboxes without telling us,
+// and this reads them back.
 // ============================================================================
 
 // ----------------------------------------------------------------------------
@@ -88,6 +108,26 @@ export const PHASE_TEMPLATE_DISMISS_IDLE: PhaseTemplateDismissOutcome = {
 // ----------------------------------------------------------------------------
 // Copy
 // ----------------------------------------------------------------------------
+
+/**
+ * What names the prompt's `<section>` landmark.
+ *
+ * IT LIVES HERE, IN THE LEAF, because the panel has TWO bodies and the landmark
+ * has to keep its name in both. The heading is normally in the `lead` the server
+ * component hands in — and a partial import REPLACES that lead with the receipt,
+ * which took the `<h2>` and the id with it and left `aria-labelledby` pointing at
+ * nothing, so the region lost its accessible name in exactly the state a planter
+ * most needs to know where they are. Both bodies carry the id now; only one of
+ * them is ever mounted, so it stays unique. The server component imports this
+ * (`phase-template-prompt.tsx` → `PhaseTemplatePromptView`) rather than the other
+ * way round, because that direction already exists and the reverse would be a
+ * cycle.
+ */
+export const PHASE_TEMPLATE_PROMPT_HEADING_ID = "phase-template-prompt-heading";
+
+/** The receipt's own heading. The panel is no longer asking anything, so it no
+ *  longer says which stage was moved to — it says what happened to the press. */
+export const PARTIAL_IMPORT_HEADING = "Import partly finished";
 
 /** The request itself failed and nothing was created — the catalog's wording
  *  (`template-picker.tsx` → `IMPORT_FAILED_MESSAGE`), in the plural, because
@@ -213,20 +253,31 @@ export function PartialImportReceipt({
   templateNames: readonly string[];
 }) {
   return (
-    <p
+    <div
       data-testid="prompt-partial"
       role="alert"
-      className="bg-destructive/10 text-destructive rounded-md p-3 text-sm"
+      className="bg-destructive/10 text-destructive space-y-1 rounded-md p-3 text-sm"
     >
-      {partialImportMessage(createdCount, templateNames)}{" "}
-      <Link
-        href={TEMPLATES_ROUTE}
-        className="cursor-pointer font-medium underline underline-offset-4"
-      >
-        {TEMPLATES_LINK_LABEL}
-      </Link>
-      .
-    </p>
+      {/*
+        The heading is not decoration: it carries the id the `<section>` around
+        this panel is named by. The lead that normally holds it has been replaced
+        by this receipt, and a landmark whose `aria-labelledby` points at a
+        removed element has no accessible name at all.
+      */}
+      <h2 id={PHASE_TEMPLATE_PROMPT_HEADING_ID} className="font-medium">
+        {PARTIAL_IMPORT_HEADING}
+      </h2>
+      <p>
+        {partialImportMessage(createdCount, templateNames)}{" "}
+        <Link
+          href={TEMPLATES_ROUTE}
+          className="cursor-pointer font-medium underline underline-offset-4"
+        >
+          {TEMPLATES_LINK_LABEL}
+        </Link>
+        .
+      </p>
+    </div>
   );
 }
 
@@ -286,6 +337,18 @@ export interface PhaseTemplatePromptControlState {
  * Both buttons go inert together while ANY request is in flight: one form, one
  * answer.
  */
+/**
+ * How many of the prompt's checklists are ticked in this form, right now.
+ *
+ * ONE reader for BOTH writers — the bubbled `change` and the post-settle resync
+ * — so "how many are ticked" cannot come to mean two different things. The
+ * selector is the same one the server action reads (`templateKey`), which is
+ * what makes the count and the submitted payload the same set.
+ */
+export function tickedTemplateCount(form: HTMLFormElement): number {
+  return form.querySelectorAll('input[name="templateKey"]:checked').length;
+}
+
 export function phaseTemplatePromptControlState(
   input: PhaseTemplatePromptControlInput
 ): PhaseTemplatePromptControlState {
@@ -353,6 +416,31 @@ export function PhaseTemplatePromptForm({
   const [tickedCount, setTickedCount] = useState(offerCount);
   const [lastPress, setLastPress] =
     useState<PhaseTemplatePromptPress>("import");
+  const formRef = useRef<HTMLFormElement>(null);
+
+  /**
+   * RE-READ THE BOXES EVERY TIME AN ACTION SETTLES.
+   *
+   * React 19 restores an uncontrolled form to its defaults once a `<form
+   * action>` action finishes, and it fires no `change` doing it — so `countTicks`
+   * never hears about it, and every outcome that leaves this panel mounted used
+   * to leave the count describing the ticks the planter had BEFORE the press.
+   * Both halves of that are dangerous and both were seen live: the buttons stop
+   * matching the boxes (a disabled Import above three ticked checklists), and a
+   * retry submits the restored ticks rather than the visible ones.
+   *
+   * The two outcomes are the dependency because a settle is exactly what
+   * `useActionState` reports by handing back a new object; whether it says
+   * `nothing`, `failed` or anything else does not change what has to happen, so
+   * the effect asks the DOM instead of branching on the status. `formRef` is
+   * null in the receipt state, which has no form and no boxes.
+   */
+  useEffect(() => {
+    const form = formRef.current;
+    if (!form) return;
+
+    setTickedCount(tickedTemplateCount(form));
+  }, [importOutcome, dismissOutcome]);
 
   const {
     importDisabled,
@@ -374,12 +462,10 @@ export function PhaseTemplatePromptForm({
   });
 
   /** `change` bubbles from the checkboxes to the form, so one handler on the
-   *  form counts them all — and no row has to become a client component. */
+   *  form counts them all — and no row has to become a client component. It is
+   *  one of TWO writers: see the resync above for the other. */
   function countTicks(event: FormEvent<HTMLFormElement>) {
-    setTickedCount(
-      event.currentTarget.querySelectorAll('input[name="templateKey"]:checked')
-        .length
-    );
+    setTickedCount(tickedTemplateCount(event.currentTarget));
   }
 
   // A partial import KEEPS the claim, so the next render of this route has no
@@ -399,6 +485,7 @@ export function PhaseTemplatePromptForm({
       {lead}
 
       <form
+        ref={formRef}
         action={importFormAction}
         onChange={countTicks}
         className="space-y-4"

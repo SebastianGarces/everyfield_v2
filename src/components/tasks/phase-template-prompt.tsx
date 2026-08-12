@@ -2,7 +2,10 @@ import { refresh, revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import Link from "next/link";
 
-import { PhaseTemplatePromptForm } from "@/components/tasks/phase-template-prompt-controls";
+import {
+  PHASE_TEMPLATE_PROMPT_HEADING_ID,
+  PhaseTemplatePromptForm,
+} from "@/components/tasks/phase-template-prompt-controls";
 import { getCurrentSession } from "@/lib/auth/session";
 import { formatDate } from "@/lib/datetime";
 import {
@@ -71,8 +74,6 @@ import {
 // standing policy (what an import does, what "Not now" does) to `text-xs` fine
 // print directly above the buttons. Two sizes, four sentences, one wall fewer.
 // ============================================================================
-
-const PROMPT_HEADING_ID = "phase-template-prompt-heading";
 
 /** Said where the press happens: this creates work, and only what is ticked. */
 const PROMPT_NOTE =
@@ -333,7 +334,7 @@ export function PhaseTemplatePromptView({
 }: PhaseTemplatePromptViewProps) {
   return (
     <section
-      aria-labelledby={PROMPT_HEADING_ID}
+      aria-labelledby={PHASE_TEMPLATE_PROMPT_HEADING_ID}
       data-testid="phase-template-prompt"
       className="border-border bg-card space-y-4 rounded-md border p-4 shadow-sm"
     >
@@ -356,7 +357,10 @@ export function PhaseTemplatePromptView({
             checklists that, by then, have been answered for.
           */
           <div data-testid="prompt-lead" className="space-y-1">
-            <h2 id={PROMPT_HEADING_ID} className="text-base font-medium">
+            <h2
+              id={PHASE_TEMPLATE_PROMPT_HEADING_ID}
+              className="text-base font-medium"
+            >
               You moved to {prompt.phaseName}
             </h2>
             <p className="text-muted-foreground text-sm">
