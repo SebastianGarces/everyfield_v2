@@ -10,7 +10,7 @@ import {
   type InvitationActor,
   type InviteeTarget,
 } from "./core";
-import { sourceReader } from "./source-span";
+import { assertInOrder, sourceReader } from "./source-span";
 
 // ============================================================================
 // #304 ruling 4, fixes 1–3 (HR4 security block, 2026-08-09) — a caller cannot
@@ -301,8 +301,10 @@ test("createInvitation parses a strict schema before the logic layer", () => {
     "export async function createInvitation(",
     "export async function resendInvitationEmail("
   );
-  assert.ok(
-    fn.indexOf("verifySession") < fn.indexOf("safeParse"),
+  assertInOrder(
+    fn,
+    "invitations/service.ts → createInvitation",
+    ["verifySession", "safeParse"],
     "the session check must precede the parse"
   );
 });

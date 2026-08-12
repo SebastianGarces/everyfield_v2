@@ -30,10 +30,22 @@
  * slices source by hand any more; it goes through a reader, and a moved anchor
  * THROWS.
  *
- * That is a property of the DIRECTORY, checkable rather than aspirational:
- * instrument `String.prototype.indexOf`, run every suite under
- * `src/lib/invitations/`, and no call from one of them may return -1 unless a
- * branch right there handles it. A bare `indexOf` never reaches a `slice`.
+ * ORDERING GOES THROUGH IT TOO, and that half needs no slice to bite. An
+ * `assert.ok(span.indexOf(A) < span.indexOf(B))` is the same rot one level up:
+ * delete `A`, `indexOf` returns -1, `-1 < N` is TRUE, and the assertion goes
+ * green on a subject that no longer exists. No slice is involved, so a reader
+ * that only owns spans never sees it — which is why `assertInOrder` below
+ * resolves every needle through the same throw-on-missing lookup BEFORE it
+ * compares them. Passing today is not the property; failing tomorrow is.
+ *
+ * Both halves are checkable rather than aspirational, and they ARE checked —
+ * the first sweep closed the slicing half and recorded the closure as total
+ * while nine vacuous orderings sat in the same suites, so the rule is no longer
+ * left to prose. `source-span.test.ts` reads every `*.test.ts` under
+ * `src/lib/invitations/` — its own file excepted, because a guard has to be
+ * able to write down what it forbids — and fails on a bare `.indexOf(` outside
+ * a four-line allowlist of sites that HANDLE -1 in a branch right there. A bare
+ * `indexOf` reaches neither a `slice` nor a `<`.
  *
  * Anchor on a DECLARATION (`export async function foo`, `const bar`,
  * `interface Baz`), never on a comment: a docblock is prose, prose gets
@@ -42,6 +54,81 @@
  * Nothing here is imported by application code — it is for tests and scripts,
  * like `src/lib/auth/server-action-surface.ts`.
  */
+
+/** `" — why"`, or nothing when the caller gave no reason. */
+function reason(because: string | undefined): string {
+  return because ? ` — ${because}` : "";
+}
+
+/**
+ * The position of `needle`, or a throw naming both the file and the needle.
+ *
+ * The single place -1 is turned into a failure. Every span, every tail and
+ * every ordering in this module goes through it, which is what makes "a moved
+ * anchor throws" one rule instead of three.
+ */
+function indexOfAnchor(
+  code: string,
+  label: string,
+  needle: string,
+  because?: string
+): number {
+  const index = code.indexOf(needle);
+
+  if (index === -1) {
+    throw new Error(`${label} no longer contains: ${needle}${reason(because)}`);
+  }
+
+  return index;
+}
+
+/**
+ * Assert that `needles` appear in `source` in the order given, strictly.
+ *
+ * The ordering counterpart of `span`/`after`, and the only sanctioned way to
+ * assert an order in this domain. It resolves each needle first, so a needle
+ * that has been deleted or renamed FAILS here instead of comparing -1 against
+ * a real position and passing.
+ *
+ * `label` names the file a failure should be grepped in, exactly as it does for
+ * `sourceReader`. `because` is the sentence the old `assert.ok(a < b, "…")`
+ * carried; it is appended to BOTH failure messages, because "this anchor is
+ * gone" and "these two swapped" need the same explanation of why the order was
+ * load-bearing. It is last, which is why `needles` is an array rather than a
+ * rest parameter.
+ *
+ * Positions are FIRST occurrences, like `span`, so anchor on text that occurs
+ * once — a call with its `await`, a declaration — not on a bare identifier the
+ * surrounding comments also use.
+ */
+export function assertInOrder(
+  source: string,
+  label: string,
+  needles: readonly string[],
+  because?: string
+): void {
+  if (needles.length < 2) {
+    throw new Error(
+      `${label}: assertInOrder needs at least two needles${reason(because)}`
+    );
+  }
+
+  let previousIndex = -1;
+  let previousNeedle = "";
+
+  for (const needle of needles) {
+    const index = indexOfAnchor(source, label, needle, because);
+
+    if (previousIndex !== -1 && index <= previousIndex) {
+      throw new Error(
+        `${label}: "${needle}" must follow "${previousNeedle}"${reason(because)}`
+      );
+    }
+
+    previousIndex = index;
+    previousNeedle = needle;
+  }
+}
 
 /** A source file, plus the two ways to cut a declaration out of it. */
 export interface SourceReader {
@@ -67,13 +154,7 @@ export interface SourceReader {
  */
 export function sourceReader(code: string, label: string): SourceReader {
   function at(needle: string): number {
-    const index = code.indexOf(needle);
-
-    if (index === -1) {
-      throw new Error(`${label} no longer contains: ${needle}`);
-    }
-
-    return index;
+    return indexOfAnchor(code, label, needle);
   }
 
   return {

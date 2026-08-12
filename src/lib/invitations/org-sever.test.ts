@@ -16,7 +16,7 @@ import {
   type InvitationActor,
 } from "./core";
 import { associationHistoryQuery } from "./history";
-import { sourceReader } from "./source-span";
+import { assertInOrder, sourceReader } from "./source-span";
 
 // ============================================================================
 // #304 / OV-007b + OV-011 — the ORG'S sever, and the audit read behind it.
@@ -317,15 +317,15 @@ test("the plant's own read is scoped by the same predicate the write is", () => 
 
   // The write, its refusal and the announcement, in that order. Announcing first
   // would tell a planter they had been removed while they still had not been.
-  assert.ok(
-    remove.indexOf("severAssociationWithAuditStatement") <
-      remove.indexOf("announcePlantRemovedFor"),
-    "the planter must not be told before the sever commits"
-  );
-  assert.match(remove, /if \(!severed\)/);
-  assert.ok(
-    remove.indexOf("if (!severed)") < remove.indexOf("announcePlantRemovedFor"),
-    "a refused removal announces nothing"
+  assertInOrder(
+    remove,
+    "core.ts → removePlantFromOrgAs",
+    [
+      "severAssociationWithAuditStatement",
+      "if (!severed)",
+      "announcePlantRemovedFor",
+    ],
+    "the planter must not be told before the sever commits, and a refused removal announces nothing"
   );
 
   // The org is passed to the sever from the session-derived value, never

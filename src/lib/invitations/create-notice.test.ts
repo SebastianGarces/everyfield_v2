@@ -14,7 +14,7 @@ import {
   INVITATION_EMAIL_FAILED_HEADLINE,
   invitationCreatedNotice,
 } from "./create-notice";
-import { sourceReader } from "./source-span";
+import { assertInOrder, sourceReader } from "./source-span";
 
 // ============================================================================
 // OV-003b (#293), AC 3 — the half a forced-failure test cannot reach.
@@ -107,10 +107,11 @@ test("a failed send is surfaced as 'invitation created — email could not be se
 
   // "Created" leads, because that is the durable fact. An admin who reads this
   // as a failed create will retry and hit the duplicate-pending refusal.
-  assert.ok(
-    notice.headline.toLowerCase().indexOf("created") <
-      notice.headline.toLowerCase().indexOf("could not"),
-    notice.headline
+  assertInOrder(
+    notice.headline.toLowerCase(),
+    "the not_sent headline",
+    ["created", "could not"],
+    '"created" leads, because that is the durable fact'
   );
 
   // …and it names the RECOVERY, which is what the AC's "fallback" clause means

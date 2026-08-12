@@ -20,12 +20,15 @@ import { formatDate } from "@/lib/datetime";
 import {
   buildInvitationEmail,
   invitationOrgKinds,
-  invitationRegisterPath,
   invitationRegisterUrl,
   sendInvitationEmail,
   type InvitationEmailFacts,
   type InvitationEmailMessage,
 } from "./email";
+// From the LEAF, deliberately — this module does not re-export the spelling,
+// and a test that imported it from `./email` would be the one consumer keeping
+// that second door plausible (`register-path.test.ts` §2).
+import { invitationRegisterPath } from "./register-path";
 
 // ============================================================================
 // OV-003b (#293) — creating an invitation SENDS it.

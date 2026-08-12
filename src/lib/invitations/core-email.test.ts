@@ -15,7 +15,7 @@ import type { OrganizationInvitation } from "@/db/schema/organization-invitation
 
 import { emailInvitee } from "./core";
 import type { InvitationEmailMessage } from "./email";
-import { sourceReader } from "./source-span";
+import { assertInOrder, sourceReader } from "./source-span";
 
 // ============================================================================
 // The WIRING — OV-003b (#293), the link `email.test.ts` cannot see.
@@ -191,8 +191,10 @@ test("createInvitationAs sends after the row is committed, and reports the outco
     "export async function emailInvitee"
   );
 
-  assert.ok(
-    body.indexOf("await insertInvitation") < body.indexOf("emailInvitee("),
+  assertInOrder(
+    body,
+    "core.ts → createInvitationAs",
+    ["await insertInvitation", "emailInvitee("],
     "the row must be committed before anything is sent"
   );
   assert.match(body, /emailSent: await emailInvitee\(invitation\)/);

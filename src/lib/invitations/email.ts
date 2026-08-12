@@ -72,10 +72,7 @@ import { appBaseUrl } from "@/lib/notifications/channels/email";
 // "Copy link" button could not have imported it from here without shipping the
 // Resend SDK to the browser — and so hand-built the URL instead, which is the
 // drift the helper exists to prevent. See `./register-path.ts`.
-import {
-  INVITATION_REGISTER_PATH,
-  invitationRegisterPath,
-} from "./register-path";
+import { invitationRegisterPath } from "./register-path";
 // The dedupe bucket, from the other import-free leaf on this path. ONE piece of
 // arithmetic serves the provider key below and the button's countdown; see
 // `./resend-window` for why it is not written twice.
@@ -89,9 +86,12 @@ import {
 // The link
 // ----------------------------------------------------------------------------
 
-// Re-exported so the send path's own callers keep one import, and so a reader
-// of this module still finds the contract where they expect it.
-export { INVITATION_REGISTER_PATH, invitationRegisterPath };
+// NOT re-exported. A leaf whose contents are also served from the trunk is not
+// a leaf: `export { invitationRegisterPath }` here would make
+// `import … from "@/lib/invitations/email"` type-check and work, and take the
+// Resend SDK into whatever chunk did it — the exact 687 KB bug that split
+// `./register-path.ts` off in the first place. There is one door, and it is the
+// leaf. Pinned by `register-path.test.ts` §2.
 
 /**
  * The absolute, token-bound register URL — what the email actually links to.

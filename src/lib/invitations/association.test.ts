@@ -14,7 +14,7 @@ import {
   type InvitationActor,
 } from "./core";
 import { associationOrg } from "./audit";
-import { sourceReader } from "./source-span";
+import { assertInOrder, sourceReader } from "./source-span";
 
 // ============================================================================
 // #304 / OV-007a + OV-008 — the planter's sever, and the audit that has to
@@ -323,9 +323,10 @@ test("the sever announces AFTER the write, and the decline announces at all", ()
   // Order is load-bearing twice over: announcing first would say a plant had
   // left before it had, and the announcement's tenancy basis is the audit row
   // this statement writes.
-  assert.ok(
-    leave.indexOf("severAssociationWithAuditStatement") <
-      leave.indexOf("announceAssociationEndedFor"),
+  assertInOrder(
+    leave,
+    "core.ts → leaveOversightOrgAs",
+    ["severAssociationWithAuditStatement", "announceAssociationEndedFor"],
     "the org must not be told before the sever commits"
   );
   // No audit row means the UPDATE matched nothing — nothing was written, so the
@@ -338,9 +339,11 @@ test("the sever announces AFTER the write, and the decline announces at all", ()
   );
   assert.match(decline, /announceInvitationDeclinedForChurch\(updated\)/);
   // Only after the compare-and-set actually recorded the answer.
-  assert.ok(
-    decline.indexOf("if (!updated)") <
-      decline.indexOf("announceInvitationDeclinedForChurch")
+  assertInOrder(
+    decline,
+    "core.ts → declineInvitationAs",
+    ["if (!updated)", "announceInvitationDeclinedForChurch"],
+    "the refused org must not be told before the compare-and-set recorded the answer"
   );
 });
 

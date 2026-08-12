@@ -12,7 +12,7 @@ import {
   invitesFromOrgToTargetQuery,
   targetReachFilter,
 } from "./core";
-import { sourceReader } from "./source-span";
+import { assertInOrder, sourceReader } from "./source-span";
 
 // ============================================================================
 // #304, HR4 2026-08-09 — an org cannot keep a banner on a stranger's dashboard.
@@ -210,16 +210,16 @@ test("an org with neither id matches nothing rather than everything", () => {
 test("the cap is applied before the address is resolved to a target", () => {
   const create = CREATE_PATH;
 
-  const cap = create.indexOf("assertInviteRateLimit");
-  const resolve = create.indexOf("await resolveInvitationTarget");
-  const slot = create.indexOf("assertTargetSlotFree");
-
-  assert.ok(cap > 0, "the cap is not wired into createInvitationAs at all");
-  assert.ok(
-    cap < resolve,
-    "the cap must run before the users lookup, or its refusal describes a stranger"
+  assertInOrder(
+    create,
+    "core.ts → createInvitationAs",
+    [
+      "assertInviteRateLimit",
+      "await resolveInvitationTarget",
+      "assertTargetSlotFree",
+    ],
+    "the cap must run before the users lookup — and therefore before every post-resolution guard — or its refusal describes a stranger"
   );
-  assert.ok(cap < slot, "…and therefore before every post-resolution guard");
 
   // It is fed the AUTHORITY pass's values — the target-less resolution, whose
   // org ids come from the session. Feeding it the post-resolution values would
@@ -364,12 +364,13 @@ test("the target-scoped refusal is the ONE message, not the legible cap", () => 
 test("createInvitationAs runs the cap again once a target exists", () => {
   const create = CREATE_PATH;
 
-  const resolve = create.indexOf("await resolveInvitationTarget");
-  const second = create.indexOf("assertTargetInviteRateLimit(resolved.values)");
-
-  assert.ok(second > 0, "the post-resolution pass is missing");
-  assert.ok(
-    second > resolve,
+  assertInOrder(
+    create,
+    "core.ts → createInvitationAs",
+    [
+      "await resolveInvitationTarget",
+      "assertTargetInviteRateLimit(resolved.values)",
+    ],
     "the target-scoped pass must run AFTER the address is resolved"
   );
 });

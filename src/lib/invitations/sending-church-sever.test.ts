@@ -12,7 +12,7 @@ import {
   leaveNetworkAsSendingChurchAdmin,
   type InvitationActor,
 } from "./core";
-import { sourceReader } from "./source-span";
+import { assertInOrder, sourceReader } from "./source-span";
 
 // ============================================================================
 // OV-013 — A SENDING CHURCH LEAVES ITS NETWORK (#304 WS3, ruling #351).
@@ -229,11 +229,16 @@ test("the accept side audits the same subject, from the invitation's type", () =
 test("the announcement follows the committed sever, never precedes it", () => {
   const body = LEAVE_NETWORK;
 
-  const severAt = body.indexOf("severAssociationWithAuditStatement");
-  const guardAt = body.indexOf("if (!severed)");
-  const announceAt = body.indexOf("announceSendingChurchLeftNetworkFor");
-
-  assert.ok(severAt > -1 && guardAt > severAt && announceAt > guardAt);
+  assertInOrder(
+    body,
+    "core.ts → leaveNetworkAsSendingChurchAdmin",
+    [
+      "severAssociationWithAuditStatement",
+      "if (!severed)",
+      "announceSendingChurchLeftNetworkFor",
+    ],
+    "the network must not be told before the sever commits, and a refused sever announces nothing"
+  );
 
   // The refusal when the UPDATE matched nothing is the honest one: nothing was
   // written — not the null, not the row — so nobody is told anything.

@@ -42,7 +42,7 @@ import {
   resendCooldownSecondsLeft,
   resendDedupeWindowAt,
 } from "./resend-window";
-import { sourceReader } from "./source-span";
+import { assertInOrder, sourceReader } from "./source-span";
 
 // ============================================================================
 // "Resend email" on a pending invitation — RULED 2026-08-10 (Sebastian, on
@@ -817,13 +817,10 @@ test("a refusal survives long enough to be read — the refresh is on the succes
     )
   );
 
-  const refusal = body.indexOf("if (!result.success)");
-  const refreshed = body.indexOf("refresh()");
-
-  assert.ok(refusal >= 0, "the refusal branch is missing");
-  assert.ok(refreshed >= 0, "the success path must still refresh the list");
-  assert.ok(
-    refusal < refreshed,
+  assertInOrder(
+    body,
+    "oversight/invitations/actions.ts → resendInvitationEmailAction",
+    ["if (!result.success)", "refresh()"],
     "refresh() must come AFTER the refusal returns, or the message never renders"
   );
   // Exactly one, so a re-added call on the failure path fails here too.
@@ -843,9 +840,10 @@ test("the action refuses a malformed id before anything is sent", () => {
   // repo-wide ordering `server-action-surface.test.ts` walks. An anonymous POST
   // is refused before its FormData is examined, so a malformed body and a
   // well-formed one answer a sessionless caller identically.
-  assert.ok(
-    action.indexOf("verifySession()") <
-      action.indexOf("resendSchema.safeParse"),
+  assertInOrder(
+    action,
+    "oversight/invitations/actions.ts → resendInvitationEmailAction (comments stripped)",
+    ["verifySession()", "resendSchema.safeParse"],
     "the session mint must precede the parse"
   );
 

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
@@ -44,6 +44,41 @@ const ROOT = path.join(process.cwd(), "src");
 
 function read(...segments: string[]): string {
   return readFileSync(path.join(ROOT, ...segments), "utf8");
+}
+
+/**
+ * Every SHIPPED `.ts`/`.tsx` under `src/<area>`, absolute and sorted.
+ *
+ * Suites are skipped: the rules below are about the module graph a bundler
+ * follows, and nothing imports a `*.test.ts`. A suite also has to be able to
+ * quote the export it forbids, which the door scan would otherwise read as a
+ * door.
+ */
+function sourceFilesUnder(...segments: string[]): string[] {
+  const found: string[] = [];
+
+  function walk(dir: string): void {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+
+      if (entry.isDirectory()) {
+        walk(full);
+      } else if (
+        /\.tsx?$/.test(entry.name) &&
+        !/\.test\.tsx?$/.test(entry.name)
+      ) {
+        found.push(full);
+      }
+    }
+  }
+
+  walk(path.join(ROOT, ...segments));
+
+  return found.sort();
+}
+
+function rel(file: string): string {
+  return path.relative(path.dirname(ROOT), file);
 }
 
 /** Source with comments stripped — the rules below are documented by naming what they forbid. */
@@ -95,6 +130,86 @@ test("register-path.ts imports nothing", () => {
   // And it must not be re-marked server-only, which would be the same failure
   // wearing a different hat.
   assert.doesNotMatch(source, /"use server"|"server-only"/);
+});
+
+// A LEAF WHOSE CONTENTS ARE ALSO SERVED FROM THE TRUNK IS NOT A LEAF. The two
+// tests below close the class the one above only closes an instance of.
+//
+// `email.ts` used to end its import block with
+// `export { INVITATION_REGISTER_PATH, invitationRegisterPath };`, justified as
+// "so the send path's own callers keep one import". There were no such callers
+// — and the cost was never dead code, it was a SECOND DOOR into a module that
+// must never reach a client. `email.ts` imports `@/lib/email/client`, which
+// constructs a Resend instance at module scope, so
+// `import { invitationRegisterPath } from "@/lib/invitations/email"`
+// type-checks, works, and ships ~687 KB of SDK into whatever chunk does it.
+// The guard below `invitations-list.tsx` only forbade that ONE file.
+
+const SPELLING = String.raw`(?:invitationRegisterPath|INVITATION_REGISTER_PATH)`;
+
+/** `export const/function X`, `export { X }`, `export * from "./register-path"`. */
+const EXPORTS_THE_SPELLING = new RegExp(
+  [
+    String.raw`export\s+(?:async\s+)?(?:const|let|function)\s+${SPELLING}\b`,
+    String.raw`export\s*\{[^}]*\b${SPELLING}\b[^}]*\}`,
+    String.raw`export\s*\*(?:\s+as\s+\w+)?\s+from\s*["'][^"']*register-path["']`,
+  ].join("|")
+);
+
+/** Any named import of either symbol, capturing the module it came from. */
+const IMPORTS_THE_SPELLING = new RegExp(
+  String.raw`import\s+(?:type\s+)?\{[^}]*\b${SPELLING}\b[^}]*\}\s*from\s*["']([^"']+)["']`,
+  "g"
+);
+
+const THE_ONE_DOOR = path.join(ROOT, "lib", "invitations", "register-path.ts");
+
+test("register-path.ts is the ONLY module that exports the spelling", () => {
+  // Not "no module that transitively imports the Resend SDK", which is a
+  // property nobody can grep: ONE definition, ONE export, everywhere in src.
+  // Any alias is a door, and a door through a module with imports of its own is
+  // the bundling bug wearing a re-export.
+  const doors = sourceFilesUnder()
+    .filter((file) => file !== THE_ONE_DOOR)
+    .filter((file) =>
+      EXPORTS_THE_SPELLING.test(code(readFileSync(file, "utf8")))
+    )
+    .map(rel);
+
+  assert.deepEqual(
+    doors,
+    [],
+    "the invite-link spelling is exported from somewhere other than the leaf — re-exporting it from a module with imports (`email.ts` pulls `@/lib/email/client`) puts the Resend SDK one import away from a client chunk"
+  );
+
+  // …and the leaf really does still export both, so the check above is not
+  // vacuously true of a spelling that has been renamed out from under it.
+  const leaf = code(readFileSync(THE_ONE_DOOR, "utf8"));
+  assert.match(leaf, /export const INVITATION_REGISTER_PATH\b/);
+  assert.match(leaf, /export function invitationRegisterPath\b/);
+});
+
+test("no page or component reaches the spelling through anything but the leaf", () => {
+  const offenders: string[] = [];
+
+  for (const file of [
+    ...sourceFilesUnder("app"),
+    ...sourceFilesUnder("components"),
+  ]) {
+    const source = code(readFileSync(file, "utf8"));
+
+    for (const match of source.matchAll(IMPORTS_THE_SPELLING)) {
+      if (match[1] === "@/lib/invitations/register-path") continue;
+
+      offenders.push(`${rel(file)} imports it from "${match[1]}"`);
+    }
+  }
+
+  assert.deepEqual(
+    offenders,
+    [],
+    `a page or component must reach the invite-link spelling at "@/lib/invitations/register-path" and nowhere else — every other path drags an import graph with it:\n${offenders.join("\n")}`
+  );
 });
 
 // ----------------------------------------------------------------------------

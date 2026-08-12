@@ -16,7 +16,7 @@ import {
 } from "./core";
 import { invitationCreatedNotice } from "./create-notice";
 import { toInvitationListRow } from "./list-row";
-import { sourceReader } from "./source-span";
+import { assertInOrder, sourceReader } from "./source-span";
 import {
   describeInvitationForRegistration,
   hasValidInvitationBypass,
@@ -207,8 +207,10 @@ test("the occupied-slot refusal is inside createInvitationAs, not the form", () 
   const body = CREATE_PATH;
 
   assert.match(body, /await assertTargetSlotFree\(resolved\.values\)/);
-  assert.ok(
-    body.indexOf("assertTargetSlotFree") < body.indexOf("insertInvitation"),
+  assertInOrder(
+    body,
+    "core.ts → createInvitationAs",
+    ["assertTargetSlotFree", "insertInvitation"],
     "the slot is checked BEFORE the row is written"
   );
 
@@ -217,9 +219,10 @@ test("the occupied-slot refusal is inside createInvitationAs, not the form", () 
   // which is an account-enumeration oracle: it must be unreachable to anyone
   // who may not invite at all. The authority call is pure and takes no target,
   // so it can run first without a lookup.
-  assert.ok(
-    body.indexOf("const authority = resolveInvitationRequest") <
-      body.indexOf("resolveInvitationTarget"),
+  assertInOrder(
+    body,
+    "core.ts → createInvitationAs",
+    ["const authority = resolveInvitationRequest", "resolveInvitationTarget"],
     "a non-oversight caller must be refused before any address is looked up"
   );
 
@@ -500,9 +503,10 @@ test("registration binds THEN accepts, never the other way round", () => {
   // reading `accepted` with no association behind it: the one state nothing in
   // the product can repair.
   const body = REGISTER.after("async function redeemRegistrationInvitation");
-  assert.ok(
-    body.indexOf("bindOpenInvitationTarget") <
-      body.indexOf("acceptInvitationAs"),
+  assertInOrder(
+    body,
+    "register/actions.ts → redeemRegistrationInvitation",
+    ["bindOpenInvitationTarget", "acceptInvitationAs"],
     "the target must be bound before the invitation is accepted"
   );
 
@@ -604,16 +608,18 @@ test("the account refusal is in the service, on the forged-call path", () => {
 
   const create = CREATE_PATH;
   assert.match(create, /await resolveInvitationTarget\(inviteeEmail\)/);
-  assert.ok(
-    create.indexOf("resolveInvitationTarget") <
-      create.indexOf("insertInvitation"),
+  assertInOrder(
+    create,
+    "core.ts → createInvitationAs",
+    ["resolveInvitationTarget", "insertInvitation"],
     "the address is judged BEFORE the row is written"
   );
   // Authority still comes first: this refusal is itself an account-existence
   // oracle, so it must be unreachable to anyone who may not invite at all.
-  assert.ok(
-    create.indexOf("const authority = resolveInvitationRequest") <
-      create.indexOf("resolveInvitationTarget"),
+  assertInOrder(
+    create,
+    "core.ts → createInvitationAs",
+    ["const authority = resolveInvitationRequest", "resolveInvitationTarget"],
     "a non-oversight caller must be refused before any address is looked up"
   );
 });
@@ -932,14 +938,16 @@ test("no per-row message survives on the anonymous POST", () => {
     body.includes(".insert(users)"),
     "the register action no longer inserts the account here — re-aim this check"
   );
-  assert.ok(
-    body.indexOf("invitationActedOnAtRegistration") <
-      body.indexOf("isBetaGateEnabled()"),
+  assertInOrder(
+    body,
+    "register/actions.ts → the register action",
+    ["invitationActedOnAtRegistration", "isBetaGateEnabled()"],
     "the invitation decision is made before the beta gate the token bypasses"
   );
-  assert.ok(
-    body.indexOf("invitationActedOnAtRegistration") <
-      body.indexOf(".insert(users)"),
+  assertInOrder(
+    body,
+    "register/actions.ts → the register action",
+    ["invitationActedOnAtRegistration", ".insert(users)"],
     "the invitation decision is made before an account is created"
   );
   assert.match(
@@ -1621,11 +1629,14 @@ test("ONE definition decides what /register may act on", async () => {
       gate,
       "register/beta-gate.ts (comments stripped)"
     ).after(reader);
-    assert.ok(
-      body.indexOf("isOpenRedeemableInvitation(") > -1 &&
-        body.indexOf("isOpenRedeemableInvitation(") <
-          body.indexOf("\n}\n", body.indexOf("{")),
-      `${reader} no longer calls the shared predicate`
+    // Inside its OWN body: the opening brace, the call, then the first
+    // top-level `}` — so a call that drifted into the next declaration fails
+    // here too.
+    assertInOrder(
+      body,
+      `register/beta-gate.ts → ${reader} (comments stripped)`,
+      ["{", "isOpenRedeemableInvitation(", "\n}\n"],
+      `${reader} no longer calls the shared predicate inside its own body`
     );
   }
 });
