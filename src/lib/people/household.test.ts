@@ -81,6 +81,10 @@ test("without usePersonAddress the household carries no address", () => {
   const sql = render(insertHousehold);
 
   assert.doesNotMatch(sql, /nullif/i);
-  // The six address-mode slots: line1, line2, city, state, postal — all null.
-  assert.match(sql, /select \$\d+::uuid, "church_id", \$\d+, null, null, null, null, null, \$\d+, now\(\), now\(\) from "persons"/i);
+  // The five address slots — line1, line2, city, state, postal — are null;
+  // country is a bound parameter that falls back to 'US'.
+  assert.match(
+    sql,
+    /select \$\d+::uuid, "church_id", \$\d+, null, null, null, null, null, \$\d+, now\(\), now\(\) from "persons"/i
+  );
 });
