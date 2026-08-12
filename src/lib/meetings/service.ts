@@ -1108,9 +1108,16 @@ export interface EvaluationTrendPoint {
  * planter with more evaluated meetings than this would be compared to the most
  * recent `EVALUATION_COMPARISON_WINDOW` of them. That is deliberate (ruled
  * 2026-08-10 on #312, the window kept as-is) — the number a planter cares
- * about is "how did this one go against how things have been going" — and the
- * rendered copy always says how many meetings the average covers, so the
- * figure never claims more than it counted.
+ * about is "how did this one go against how things have been going".
+ *
+ * This comment used to add that "the rendered copy always says how many
+ * meetings the average covers, so the figure never claims more than it
+ * counted". That was true of the COUNT and false of the CLAIM: the copy said
+ * the planter had EVALUATED that many meetings before this one, which is the
+ * window's size, not their history. Ruled 2026-08-12 on #312 (decision 1,
+ * option B) — the sentence now reports what the average covers and says
+ * nothing about what the planter did, so this comment vouches for nothing.
+ * See `evaluationComparisonDenominatorCopy` below.
  *
  * The cost of keeping it: for a church past the window, opening an EARLY
  * meeting hands `compareEvaluationToHistory` a window of only LATER meetings,
@@ -1144,6 +1151,57 @@ export const EVALUATION_COMPARISON_WINDOW = 50;
  */
 export const EVALUATION_COMPARISON_EMPTY_COPY =
   "No comparison available — no earlier evaluated meeting to compare against.";
+
+/**
+ * What the POPULATED comparison card says under the numbers (ruled 2026-08-12
+ * on #312, decision 1, option B).
+ *
+ * It reports what the average COVERS, not what the planter DID. `previousCount`
+ * is `earlier.length` from `compareEvaluationToHistory` — the earlier points
+ * inside the window `getEvaluationTrend` fetched, not the planter's history. A
+ * church with 60 evaluated meetings opening meeting #55 has 54 meetings behind
+ * it and a `previousCount` of 44, so the old sentence ("the 44 meetings you
+ * evaluated before this one") made a false claim about the planter with a true
+ * number. "In view" is true of both cases: window == history, and window <
+ * history.
+ *
+ * That is the same species of false claim the 2026-08-10 ruling took off the
+ * EMPTY branch, so the fix is the same shape — the string lives here, and the
+ * card renders it. Ruled explicitly: no query change and no extra state. The
+ * singular form is not a new branch on the data; it is the pre-existing
+ * grammar branch this sentence already carried.
+ */
+export function evaluationComparisonDenominatorCopy(
+  previousCount: number
+): string {
+  const meetings =
+    previousCount === 1
+      ? "one earlier meeting"
+      : `${previousCount} earlier meetings`;
+
+  return `Scores are out of 5.0. The average covers the ${meetings} in view.`;
+}
+
+/**
+ * The title of the meeting-detail card backed by `getFollowUpCompletion`
+ * (ruled 2026-08-12 on #312, decision 2, option A).
+ *
+ * It used to read "Follow-up completion", which promised more than the query
+ * counts. `meetingLinkedTaskConditions` admits only `related_type = 'meeting'`
+ * rows, and the one such task the product ever creates is the single "Complete
+ * evaluation for <meeting>" task (`src/lib/tasks/events.ts`). The per-attendee
+ * follow-ups minted by the same finalization are linked to the PERSON, so in
+ * production the card could only ever read "0 of 1" or "1 of 1" — an
+ * evaluation-done indicator wearing the name of a follow-up metric.
+ *
+ * The ruling keeps the narrow query and renames the card. Widening VM-020 at
+ * the generator was considered and explicitly NOT ruled in: if follow-up
+ * tracking earns a real metric later, that is its own issue. Widening it in the
+ * QUERY stays forbidden for the reason above `meetingLinkedTaskConditions` —
+ * joining back through attendance double-counts a person who attended two
+ * meetings.
+ */
+export const MEETING_EVALUATION_TASK_CARD_TITLE = "Evaluation task";
 
 /**
  * Get evaluation score trend across meetings (most recent first, returned chronologically).
@@ -1535,7 +1593,13 @@ export async function setMeetingAgenda(
 // Follow-up completion (VM-020)
 // ============================================================================
 
-/** How much of a meeting's follow-up work is done. */
+/**
+ * How much of a meeting's linked task work is done.
+ *
+ * The card that renders this is titled `MEETING_EVALUATION_TASK_CARD_TITLE`,
+ * not "Follow-up completion" — see that constant for why the name had to shrink
+ * to what the query counts.
+ */
 export interface MeetingFollowUpCompletion {
   /** Tasks linked to this meeting. */
   total: number;

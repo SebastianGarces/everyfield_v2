@@ -2,6 +2,7 @@ import { Minus, TrendingDown, TrendingUp } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
+  evaluationComparisonDenominatorCopy,
   EVALUATION_COMPARISON_EMPTY_COPY,
   type EvaluationComparison,
 } from "@/lib/meetings/service";
@@ -128,11 +129,18 @@ export function EvaluationComparisonCard({
         {/*
           The denominator, said out loud. "Above average" means nothing until
           the reader knows the average covers one meeting or twelve.
+
+          It says what the average COVERS, never what the planter EVALUATED —
+          ruled 2026-08-12 on #312 (decision 1, option B). `previousCount` is
+          the window's size, not the church's history, so the old wording
+          ("the N meetings you evaluated before this one") under-reported a
+          planter past the window by exactly the meetings the window dropped.
+          Rendered from the constant-shaped helper in `service.ts` for the same
+          reason as the empty state: a test pins it by import, not by re-parsing
+          this JSX.
         */}
         <p className="text-muted-foreground text-xs">
-          Scores are out of 5.0. The average covers the{" "}
-          {previousCount === 1 ? "one meeting" : `${previousCount} meetings`}{" "}
-          you evaluated before this one.
+          {evaluationComparisonDenominatorCopy(previousCount)}
         </p>
       </CardContent>
     </Card>

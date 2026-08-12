@@ -5,13 +5,15 @@ import { test } from "node:test";
 
 import {
   compareEvaluationToHistory,
+  evaluationComparisonDenominatorCopy,
   EVALUATION_COMPARISON_EMPTY_COPY,
   EVALUATION_COMPARISON_WINDOW,
+  MEETING_EVALUATION_TASK_CARD_TITLE,
   type EvaluationTrendPoint,
 } from "@/lib/meetings/service";
 
 // ----------------------------------------------------------------------------
-// The two copy rulings on #312 (2026-08-10, Sebastian).
+// The copy rulings on #312 (Sebastian). Two from 2026-08-10:
 //
 // 1. The team-meeting creation form's free-text field is called "Notes". Free
 //    text and the structured agenda are SEPARATE concepts. The field posts to
@@ -25,6 +27,21 @@ import {
 //    and the card cannot tell them apart. Only the sentence changed. Round 2
 //    of the ruling shortened it to one line and dropped the window number from
 //    the copy entirely; the window stays in code and is never rendered.
+//
+// The 2026-08-12 ruling on PR #395 added two more, both the same species as
+// ruling 2 — a card claiming more than its query counted:
+//
+// 3. The POPULATED comparison card reports what the average COVERS, never what
+//    the planter EVALUATED. `previousCount` is the window's size, not the
+//    church's history (decision 1, option B).
+//
+// 4. The meeting-detail card over `getFollowUpCompletion` is titled "Evaluation
+//    task", not "Follow-up completion": the query admits only
+//    `related_type = 'meeting'` rows, and the product creates exactly one of
+//    those per meeting (decision 2, option A). Only the NAME moved: the query
+//    is deliberately unchanged — `follow-up-and-comparison.test.ts` pins its
+//    shape with `.toSQL()` — and widening it at the task generator was
+//    considered and explicitly NOT ruled in.
 //
 // WHY THIS FILE LIVES IN src/lib/meetings/ AND NOT NEXT TO THE COMPONENT:
 // its natural home looks like the route directory, but that directory is
@@ -113,6 +130,17 @@ test("neither the label nor the placeholder calls that field an agenda", () => {
 // Ruling 2 — the comparison empty state never claims "first"
 // ============================================================================
 
+/** The comparison card, verbatim — the one component this file cannot import. */
+function comparisonCardSource(): string {
+  return readFileSync(
+    path.join(
+      __dirname,
+      "../../app/(dashboard)/meetings/[id]/evaluation/evaluation-comparison.tsx"
+    ),
+    "utf8"
+  );
+}
+
 /**
  * The sentence ruled on 2026-08-10 (round 2), written out once here so the
  * ruling and the shipped string are two independent things that must agree.
@@ -136,13 +164,7 @@ test("the empty-state card renders the constant rather than its own sentence", (
   // The one link the equality above cannot prove: that the card actually shows
   // this string. Without it, someone could re-hardcode a sentence in the JSX
   // and every other assertion here would still pass.
-  const card = readFileSync(
-    path.join(
-      __dirname,
-      "../../app/(dashboard)/meetings/[id]/evaluation/evaluation-comparison.tsx"
-    ),
-    "utf8"
-  );
+  const card = comparisonCardSource();
 
   assert.match(
     card,
@@ -237,5 +259,152 @@ test("a meeting older than the whole window gets no comparison", () => {
     }),
     null,
     "null — even though meeting 1 came before this one"
+  );
+});
+
+// ============================================================================
+// Ruling 3 — the POPULATED card says what the average covers, not what the
+// planter evaluated (2026-08-12, decision 1, option B)
+// ============================================================================
+
+/**
+ * The sentence ruled on 2026-08-12, written out here so the ruling and the
+ * shipped helper are two independent things that must agree — the same
+ * technique `RULED_EMPTY_STATE` uses one section up.
+ */
+function ruledDenominatorSentence(previousCount: number): string {
+  const meetings =
+    previousCount === 1
+      ? "one earlier meeting"
+      : `${previousCount} earlier meetings`;
+
+  return `Scores are out of 5.0. The average covers the ${meetings} in view.`;
+}
+
+test("the populated card reads exactly the ruled denominator sentence", () => {
+  for (const previousCount of [1, 2, 12, 44]) {
+    assert.equal(
+      evaluationComparisonDenominatorCopy(previousCount),
+      ruledDenominatorSentence(previousCount),
+      `the sentence ruled on #312 (2026-08-12) for previousCount=${previousCount}`
+    );
+  }
+});
+
+test("the populated card never claims the planter evaluated that many", () => {
+  // The load-bearing half of decision 1. `previousCount` is the size of the
+  // window `getEvaluationTrend` fetched, so a church past the window has MORE
+  // meetings behind this one than the card can see. Any sentence in the second
+  // person about what the planter did is a claim the number cannot support.
+  const copy = evaluationComparisonDenominatorCopy(44);
+
+  assert.doesNotMatch(
+    copy,
+    /you evaluated/i,
+    "previousCount is what the window kept, not what the planter evaluated"
+  );
+  assert.doesNotMatch(
+    copy,
+    /before this one/i,
+    "54 meetings can precede this one while previousCount reads 44"
+  );
+});
+
+test("the ruled sentence stays true for a church past the window", () => {
+  // The worked example from the ruling, run through the shipped comparison: 60
+  // evaluated meetings, the planter opens #55. 54 precede it; the window keeps
+  // 44 of them. The card must be readable as true with BOTH numbers on the
+  // table, which "in view" is and "you evaluated before this one" is not.
+  const all = Array.from({ length: 60 }, (_, i) => point(i, 4.0));
+  const current = all[54]!;
+
+  const comparison = compareEvaluationToHistory(windowedTrend(all), {
+    meetingId: current.meetingId,
+    datetime: current.datetime,
+    totalScore: current.totalScore,
+  });
+
+  assert.ok(comparison, "meeting #55 has a baseline inside the window");
+  assert.equal(comparison.previousCount, 44, "the window's earlier points");
+  assert.ok(
+    all.filter((p) => p.datetime < current.datetime).length >
+      comparison.previousCount,
+    "more meetings precede this one than the card counted — the whole point"
+  );
+  assert.equal(
+    evaluationComparisonDenominatorCopy(comparison.previousCount),
+    "Scores are out of 5.0. The average covers the 44 earlier meetings in view.",
+    "the card reports the 44 it counted, and claims nothing about the other 10"
+  );
+});
+
+test("the populated card renders the helper rather than its own sentence", () => {
+  // The link the equalities above cannot prove — the mirror of the empty
+  // state's assertion. Without it the JSX could re-hardcode the old claim and
+  // every other assertion in this section would still pass.
+  const card = comparisonCardSource();
+
+  assert.match(
+    card,
+    /<p[^>]*>\s*\{evaluationComparisonDenominatorCopy\(previousCount\)\}\s*<\/p>/,
+    "the populated card renders {evaluationComparisonDenominatorCopy(previousCount)}"
+  );
+});
+
+// ============================================================================
+// Ruling 4 — the follow-up card is renamed to what it counts
+// (2026-08-12, decision 2, option A)
+// ============================================================================
+
+const MEETING_DETAIL_PAGE = path.join(
+  __dirname,
+  "../../app/(dashboard)/meetings/[id]/page.tsx"
+);
+
+/**
+ * The meeting-detail page with comments stripped — the same precaution ruling 1
+ * takes, and for the same reason: the page's own comment quotes the retired
+ * title to explain why it is retired.
+ */
+function meetingDetailSource(): string {
+  return readFileSync(MEETING_DETAIL_PAGE, "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/.*$/gm, "");
+}
+
+test("the card is titled exactly what its query counts", () => {
+  assert.equal(
+    MEETING_EVALUATION_TASK_CARD_TITLE,
+    "Evaluation task",
+    "the title ruled on #312 (2026-08-12, decision 2, option A)"
+  );
+});
+
+test("the retired title is gone from the meeting detail page", () => {
+  // Case-sensitive on purpose: `data-testid="follow-up-completion"` is an
+  // addressing handle, not copy a planter reads, and it stays so the browser
+  // validation and any selector written against it keep working.
+  assert.doesNotMatch(
+    meetingDetailSource(),
+    /Follow-up completion/,
+    'no surface still reads "Follow-up completion" — it promised a metric over a figure that can only be 0 of 1 or 1 of 1'
+  );
+});
+
+test("the card title comes from the constant, not from the JSX", () => {
+  assert.match(
+    meetingDetailSource(),
+    /<CardTitle[^>]*>\s*\{MEETING_EVALUATION_TASK_CARD_TITLE\}\s*<\/CardTitle>/,
+    "the card renders {MEETING_EVALUATION_TASK_CARD_TITLE} verbatim"
+  );
+});
+
+test("the empty line under the renamed card promises one task, not a set", () => {
+  // "No follow-up tasks are linked to this meeting" was the plural half of the
+  // same over-promise. The card can hold one meeting-linked task.
+  assert.match(
+    meetingDetailSource(),
+    /No task is linked to this meeting\./,
+    "the empty line says what the query can find"
   );
 });

@@ -4,6 +4,7 @@ import { verifySession } from "@/lib/auth/session";
 import {
   getFollowUpCompletion,
   getMeeting,
+  MEETING_EVALUATION_TASK_CARD_TITLE,
   parseAgenda,
   setMeetingAgenda,
   VISION_MEETING_DEFAULT_AGENDA,
@@ -111,24 +112,35 @@ export default async function MeetingPage({ params }: MeetingPageProps) {
       <MeetingDetails meeting={meeting} locations={locations} />
 
       {/*
-        VM-020 — follow-up completion.
+        VM-020 — the tasks linked to this meeting.
+
+        Titled "Evaluation task", not "Follow-up completion" — ruled 2026-08-12
+        on #312 (decision 2, option A). The query counts only
+        `related_type = 'meeting'` rows, and the one such task the product
+        creates is the evaluation task; the per-attendee follow-ups are linked
+        to the PERSON. The old title promised a follow-up metric over a figure
+        that can only read "0 of 1" or "1 of 1". The ruling keeps the query
+        narrow and shrinks the name to fit it — widening VM-020 at the task
+        generator was considered and explicitly NOT ruled in.
 
         Rendered only when there is a figure. A meeting whose attendance was
-        never finalized has no follow-up work yet, and showing it "0%" would
+        never finalized has no linked task yet, and showing it "0%" would
         report a failure that has not happened; the card is simply absent
-        instead. Once finalized with no linked tasks, the card appears and says
+        instead. Once finalized with no linked task, the card appears and says
         so in words rather than dividing by zero.
       */}
       {followUp && (
         <div className="mx-auto max-w-3xl">
           <Card data-testid="follow-up-completion">
             <CardHeader>
-              <CardTitle className="text-base">Follow-up completion</CardTitle>
+              <CardTitle className="text-base">
+                {MEETING_EVALUATION_TASK_CARD_TITLE}
+              </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               {followUp.percent === null ? (
                 <p className="text-muted-foreground text-sm">
-                  No follow-up tasks are linked to this meeting.
+                  No task is linked to this meeting.
                 </p>
               ) : (
                 <>
@@ -143,7 +155,7 @@ export default async function MeetingPage({ params }: MeetingPageProps) {
                   </div>
                   <Progress
                     value={followUp.percent}
-                    aria-label={`Follow-up completion: ${followUp.completed} of ${followUp.total} tasks complete`}
+                    aria-label={`${MEETING_EVALUATION_TASK_CARD_TITLE}: ${followUp.completed} of ${followUp.total} tasks complete`}
                   />
                 </>
               )}
