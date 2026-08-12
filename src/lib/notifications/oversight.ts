@@ -302,7 +302,7 @@ export interface MilestoneFacts {
    * A plant for the five milestones that are about a plant; the NETWORK for the
    * three that are about a sending church's own membership of it. It is the
    * anchor rather than a church id because those three name no plant at all —
-   * which is exactly why they were unsendable before 0035.
+   * which is exactly why they were unsendable before 0036.
    */
   anchor: NotificationAnchor;
   /**
@@ -590,7 +590,7 @@ export async function announceAssociationEnded(
 //
 // WHAT IS DIFFERENT IS THE ANCHOR, AND IT IS THE WHOLE OF #351. There is no
 // plant, so there is no `church_id` these can be filed under; before migration
-// 0035 that meant they were composed and then dropped by a `if
+// 0036 that meant they were composed and then dropped by a `if
 // (updated.targetChurchId)` gate. They are now anchored to the NETWORK
 // (`orgAnchor`) — the tenant whose admins read them, and the only tenant party
 // to the event.

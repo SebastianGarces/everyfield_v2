@@ -217,7 +217,7 @@ test("the sever nulls the FK only while it still points at the org being left", 
   // "null whatever is there" — which severs the wrong org for a plant that
   // belongs to two, and severs anything at all for a caller aiming wrongly.
   //
-  // The subject is `target.id` since migration 0035 (#304 WS3): the statement
+  // The subject is `target.id` since migration 0036 (#304 WS3): the statement
   // serves a PLANT leaving an oversight org and a SENDING CHURCH leaving a
   // network, and `subjectSql` is the single place the two differ.
   assert.match(sever, /where "id" = \$\{target\.id\}::uuid/);
@@ -300,7 +300,7 @@ test("the accept batches the audit rather than following it with a second call",
 
   assert.match(accept, /db\.batch\(\[lock, claim, association, audit\]\)/);
   // The audit-less batch survives only for a row whose type-implied ids are
-  // missing (`auditableAssociationOrg` → null). Since migration 0035 all THREE
+  // missing (`auditableAssociationOrg` → null). Since migration 0036 all THREE
   // invitation types audit, the sending-church subject included.
   assert.match(accept, /db\.batch\(\[lock, claim, association\]\)/);
   assert.doesNotMatch(accept, /recordAssociationEvent/);
@@ -404,7 +404,7 @@ test("the audited org comes from the invitation's type", () => {
 });
 
 test("a sending church joining a network audits with a SENDING CHURCH subject", () => {
-  // #304 WS3 / ruling #351, migration 0035. This arm used to return `null` —
+  // #304 WS3 / ruling #351, migration 0036. This arm used to return `null` —
   // not on its merits, but because `association_events.church_id` was NOT NULL
   // and the third invitation type names no church. The table now carries a
   // subject discriminator, so the arm returns the real subject and the accept

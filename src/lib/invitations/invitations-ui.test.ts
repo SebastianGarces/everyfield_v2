@@ -16,8 +16,11 @@ import {
 } from "./core";
 import { toInvitationListRow } from "./list-row";
 import {
+  describeInvitationForRegistration,
   invitationEmailMismatchMessage,
   registrationEmailMatchesInvitation,
+  type InvitationForRegistration,
+  type RegistrationInvitationReader,
 } from "@/app/(auth)/register/beta-gate";
 
 // ============================================================================
@@ -819,8 +822,25 @@ test("the create surface renders no register link and no branch", () => {
 
   // The one message. It is true whether or not the address has an account, and
   // it names neither.
-  assert.match(form, /This invitation is answered inside EveryField\./);
+  assert.match(form, /Tell them directly that you have invited them\./);
   assert.doesNotMatch(form, /already have an EveryField account/);
+
+  // DELIVERY-NEUTRAL (round 10, ruled 2026-08-11). The previous wording
+  // promised "you will hear as soon as they answer", which is false for an
+  // address with nobody inside the product to answer. The replacement says the
+  // two things that are true either way — tell them yourself, and it sits in
+  // the revocable list — and says nothing about HOW an invitation travels, so
+  // it does not need re-reading the week email delivery ships.
+  assert.match(form, /sits in the list below, where you can revoke it/);
+  for (const mechanic of [
+    /you will hear/i,
+    /email delivery/i,
+    /not live yet/i,
+    /we (will )?(send|email)/i,
+    /out of band/i,
+  ]) {
+    assert.doesNotMatch(form, mechanic, String(mechanic));
+  }
 });
 
 test("no copy on the create surface claims an account does or does not exist", () => {
@@ -1032,4 +1052,185 @@ test("the pending list renders no register link and no per-row variation", () =>
   for (const field of readFields) {
     assert.ok(allowed.has(field), `row.${field} is not an allowed row field`);
   }
+});
+
+// ----------------------------------------------------------------------------
+// 9c. …AND NEITHER DOES `/register` — the oracle one route over
+//     (#304 round 10, RULED 2026-08-11)
+// ----------------------------------------------------------------------------
+//
+// Items 5, its extension to the page, and its extension to the caption all
+// closed the account-existence question on `/oversight/invitations`. The same
+// question stayed answerable on the PUBLIC register route, and this track is
+// what armed it: `describeInvitationForRegistration` returned
+//
+//     redeemable: targetChurchId === null && targetSendingChurchId === null
+//
+// and `register-form.tsx` branched the whole rendered form on it. On `main`
+// that was inert — every creatable invitation was open, so the flag was
+// constant true. #304 revives targeting and makes it live, which is the same
+// "reviving a refused path re-arms every conditional that was only safe
+// because the path was dead" lesson `list-row.ts` records about `kindLabel`.
+//
+// THE ATTACK needs no session and no error. An admin types any address, reads
+// the deliberately neutral notice, takes the new row's id — which is in their
+// own DOM by design, since Revoke needs it — and opens
+// `/register?invitation=<id>` in a private window.
+//
+// THE FIX is a null-return for any targeted row, so a targeted token and a
+// guessed uuid produce byte-identical pages, and `redeemable` is DELETED rather
+// than left constant.
+//
+// PINNED BY CALLING THE FUNCTION. Every previous guard of this family was a
+// regex over a page and every one of them passed while the property was false.
+// The function reads the database, so it is called through its reader seam with
+// rows the REAL resolver produced — the same technique §9b uses, for the same
+// reason: a hand-written row can be written to agree with whatever the code
+// does.
+
+/** A reader over a fixed row set, counting how far the function got. */
+function readerFor(
+  rows: InvitationForRegistration[]
+): RegistrationInvitationReader & {
+  orgLookups: number;
+} {
+  const seam = {
+    orgLookups: 0,
+    loadInvitation: async (id: string) =>
+      rows.find((row) => row.id === id) ?? null,
+    lookupInvitingOrgName: async () => {
+      seam.orgLookups += 1;
+      return "Dev Church Planting Network";
+    },
+  };
+  return seam;
+}
+
+/** The stored row shape `/register` reads, built from what the resolver returned. */
+function registrationRowFrom(
+  id: string,
+  resolved: ReturnType<typeof resolveInvitationRequest>
+): InvitationForRegistration {
+  assert.ok(resolved.ok, "the resolver refused a request this test needs");
+  return {
+    id,
+    type: resolved.values.type,
+    status: "pending",
+    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    inviteeEmail: resolved.values.inviteeEmail,
+    targetChurchId: resolved.values.targetChurchId,
+    targetSendingChurchId: resolved.values.targetSendingChurchId,
+    sendingChurchId: resolved.values.sendingChurchId,
+    sendingNetworkId: resolved.values.sendingNetworkId,
+  };
+}
+
+test("/register cannot describe a targeted invitation, and says nothing about a guessed uuid", async () => {
+  const TARGETED_PLANT = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const TARGETED_ORG = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const OPEN = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+
+  const rows = [
+    registrationRowFrom(
+      TARGETED_PLANT,
+      resolveInvitationForResolvedTarget(
+        NET_ADMIN,
+        { inviteeEmail: "planter@example.com", inviteAs: "church" },
+        { targetChurchId: PLANT }
+      )
+    ),
+    registrationRowFrom(
+      TARGETED_ORG,
+      resolveInvitationForResolvedTarget(
+        NET_ADMIN,
+        { inviteeEmail: "sc-admin@example.com", inviteAs: "sending_church" },
+        { targetSendingChurchId: SENDING_CHURCH }
+      )
+    ),
+    registrationRowFrom(
+      OPEN,
+      resolveInvitationForResolvedTarget(
+        NET_ADMIN,
+        { inviteeEmail: "nobody@example.com", inviteAs: "church" },
+        {}
+      )
+    ),
+  ];
+
+  // THE PREMISE: these rows differ only in what the server found behind the
+  // address. Everything else about them — pending, unexpired, addressed, from
+  // an org whose name resolves — is identical, so the target is the ONLY reason
+  // an answer below can be null.
+  assert.equal(rows[0].targetChurchId, PLANT);
+  assert.equal(rows[1].targetSendingChurchId, SENDING_CHURCH);
+  assert.equal(rows[2].targetChurchId, null);
+  assert.equal(rows[2].targetSendingChurchId, null);
+
+  const seam = readerFor(rows);
+
+  // The three nulls, deep-equal so a `{}` or an `undefined` cannot pass as one.
+  assert.deepEqual(
+    await describeInvitationForRegistration(TARGETED_PLANT, seam),
+    null,
+    "a resolved-church target is describable to /register"
+  );
+  assert.deepEqual(
+    await describeInvitationForRegistration(TARGETED_ORG, seam),
+    null,
+    "a resolved-sending-church target is describable to /register"
+  );
+  assert.deepEqual(
+    await describeInvitationForRegistration(
+      "00000000-0000-4000-8000-000000000000",
+      seam
+    ),
+    null
+  );
+
+  // The refusal happens BEFORE anything else is read, so a targeted token and a
+  // guessed uuid cost the same work as well as returning the same answer.
+  assert.equal(seam.orgLookups, 0, "a targeted row reached the org lookup");
+
+  // …and the OPEN row still describes, or the three nulls above prove nothing.
+  const open = await describeInvitationForRegistration(OPEN, seam);
+  assert.ok(open, "an open invitation stopped describing");
+  assert.equal(open.inviteeEmail, "nobody@example.com");
+  assert.equal(open.accountType, "planter");
+});
+
+test("the register invitation shape carries no redeemable flag, and nothing branches on one", async () => {
+  const OPEN = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const seam = readerFor([
+    registrationRowFrom(
+      OPEN,
+      resolveInvitationForResolvedTarget(
+        NET_ADMIN,
+        { inviteeEmail: "nobody@example.com", inviteAs: "sending_church" },
+        {}
+      )
+    ),
+  ]);
+
+  const open = await describeInvitationForRegistration(OPEN, seam);
+  assert.ok(open);
+  // The shape that crosses to the client. `redeemable` was the field that
+  // varied with the two target columns; it is gone, not merely always true.
+  assert.deepEqual(Object.keys(open).sort(), [
+    "accountType",
+    "id",
+    "inviteeEmail",
+    "invitingOrgName",
+  ]);
+  // An OPEN `sending_church_to_network` row still registers a SENDING CHURCH —
+  // which is why `accountType` survived the deletion. `type` follows the
+  // admin's own `inviteAs` here, because there was no target to derive it from.
+  assert.equal(open.accountType, "sending_church");
+
+  // The second net, never the proof: no client-side branch on redeemability
+  // survives in the form or in the action that redeems.
+  for (const source of [code(REGISTER_FORM), code(REGISTER_ACTIONS)]) {
+    assert.doesNotMatch(source, /redeemable/);
+    assert.doesNotMatch(source, /const redeeming/);
+  }
+  assert.doesNotMatch(code(REGISTER_BETA_GATE), /redeemable/);
 });

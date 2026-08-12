@@ -268,12 +268,12 @@ function subjectSql(subject: AssociationSubject, orgType: AssociationOrgType) {
  *     predicates above are both still true). This is what makes the whole
  *     statement idempotent per invitation.
  *
- * WORKS FOR BOTH SUBJECTS since migration 0035 (#304 WS3, ruling #351). The
+ * WORKS FOR BOTH SUBJECTS since migration 0036 (#304 WS3, ruling #351). The
  * three predicates are the same three; only WHICH ROW holds the association
  * changes — `churches.<sending_church_id|sending_network_id>` for a plant,
  * `sending_churches.sending_network_id` for a sending church. `subjectSql` is
  * the one place that difference is expressed, so the accept path cannot come to
- * guard one subject and not the other. Before 0035 the sending-church arm had
+ * guard one subject and not the other. Before 0036 the sending-church arm had
  * no row to write and the caller batched one statement fewer, which is the gap
  * #351 closed.
  */

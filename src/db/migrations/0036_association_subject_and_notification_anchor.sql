@@ -103,13 +103,36 @@
 -- that decides. Prove an apply from `information_schema.columns`, never from the
 -- CLI's exit status.
 --
--- THE JOURNAL SKIPS idx 35 ON PURPOSE, and that costs one thing. `_journal.json`
--- runs 34 → 36: idx 35 is reserved for `0035_phase_prompt_answers`, in flight on
--- `feature/U313-WS1`. Until that sibling merges, `drizzle-kit generate` computes
--- the next index from `entries.length` — which is 36 here, not 37 — so the next
--- generated migration on this branch is minted as a SECOND `0036_*` tag. Either
--- wait for the sibling to land, or rename the generated file and its journal
--- entry to 0037 by hand before committing it.
+-- THE JOURNAL SKIPS idx 35 ON PURPOSE, and it costs nothing here.
+-- `_journal.json` runs 34 → 36: idx 35 is reserved for
+-- `0035_phase_prompt_answers`, in flight on `feature/U313-WS1`. NOTHING NEEDS
+-- DOING ABOUT THAT NUMBER. `drizzle-kit generate` derives the next index from
+-- max(idx)+1, not from `entries.length`, so the next generated migration on this
+-- branch is minted as `0037_*` on its own — verified by forcing a schema change
+-- and running generate, which emitted `0037_*` with journal entry `{idx: 37}`.
+-- An earlier revision of this paragraph claimed `entries.length` and told the
+-- next operator to rename the generated file and its journal entry down to 0037
+-- by hand; following that would have MANUFACTURED the duplicate-0036 collision
+-- it warned about. Do not rename a generated migration by hand.
+--
+-- WHAT DOES NEED DOING IS THE ORDER, AND IT POINTS FORWARD — RESERVING AN idx
+-- DOES NOT RESERVE AN ORDER. `when` is what decides, and this file's `when`
+-- (1786480825911) was deliberately raised above every sibling in flight,
+-- including `0035_phase_prompt_answers` (`feature/U313-WS1`, `when`
+-- 1786372572220 — strictly LOWER). Because `drizzle-kit migrate` applies a
+-- migration only while the ledger's MAXIMUM `created_at` is strictly less than
+-- that migration's `when`, any database that has applied THIS file will SILENTLY
+-- SKIP that sibling: `pnpm db:migrate` prints success, exits 0, applies nothing,
+-- `phase_prompt_answers` never exists, and the failure finally surfaces as a
+-- runtime query error. This branch fixed the hazard for itself by raising its
+-- `when` and thereby created it for the sibling.
+--
+-- SO, BEFORE `feature/U313-WS1` MERGES: re-stamp `0035_phase_prompt_answers`
+-- with a `when` strictly greater than 1786480825911 and renumber it to `0037_*`
+-- in BOTH its filename and its `_journal.json` entry. That is a re-stamp of a
+-- migration that has not landed yet — not the hand-rename of a freshly generated
+-- file the paragraph above forbids. Whoever owns U313-WS1 does it there; it
+-- cannot be done from here.
 --
 -- OPERATOR RECONCILE — a database that applied the OLD 0035 needs a hand before
 -- `pnpm db:migrate`. The renumber above fixes the repository and leaves every

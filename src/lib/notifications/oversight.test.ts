@@ -1368,7 +1368,7 @@ test("listOversightAdminsOfOrg refuses an org with no ids without touching the d
 // ----------------------------------------------------------------------------
 //
 // The same three own-relationship milestones one level up the hierarchy. What
-// is new is the ANCHOR: these name no plant, so before migration 0035 they were
+// is new is the ANCHOR: these name no plant, so before migration 0036 they were
 // composed and then dropped by a `church_id` that had no honest value. Each
 // assertion below is about the anchor as much as about the copy.
 

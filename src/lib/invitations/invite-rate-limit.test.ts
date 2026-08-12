@@ -54,6 +54,28 @@ const SINCE = new Date("2026-07-10T12:00:00.000Z");
 const ADDRESS = "planter@example.com";
 
 /**
+ * The row filter WITHOUT the post-sever floor (#304 round 10).
+ *
+ * Both count queries now carry a correlated `not exists (…)` over
+ * `association_events`, and that subquery legitimately names both target
+ * columns — it has to, because it is what matches an event's subject to the
+ * invitation's own. Assertions about which column the OUTER predicate scopes on
+ * would otherwise read the subquery's mention and fail on a property that is
+ * still true.
+ */
+function outerWhere(sql: string): string {
+  const floor = sql.indexOf("not exists (");
+  return floor === -1 ? sql : sql.slice(0, floor);
+}
+
+/** The floor's own subquery, for assertions about the reset. */
+function postSeverFloor(sql: string): string {
+  const floor = sql.indexOf("not exists (");
+  assert.ok(floor > 0, "the post-sever floor is missing from this count");
+  return sql.slice(floor);
+}
+
+/**
  * `targetReachFilter` where the caller knows a target is set — the `null` arm
  * has its own test below.
  */
@@ -112,9 +134,10 @@ test("the cap counts one org's invitations to one address, whatever their status
   assert.doesNotMatch(sql, /"status"/);
 
   // Bounded by the cap: the question is "are there at least N?", never "how
-  // many has this org ever sent".
-  assert.match(sql, /limit \$4/);
-  assert.equal(params[3], INVITES_PER_INVITEE_PER_WINDOW);
+  // many has this org ever sent". The limit is the LAST bound parameter, not a
+  // fixed index — the post-sever floor binds the org pair ahead of it.
+  assert.match(sql, /limit \$\d+$/);
+  assert.equal(params.at(-1), INVITES_PER_INVITEE_PER_WINDOW);
 });
 
 test("a network admin's cap is scoped to their network, not to a sending church", () => {
@@ -257,7 +280,7 @@ test("the target-scoped count is the org's own rows aimed at one target", () => 
   // Same two properties as the address scope: no status predicate (a decline
   // must spend the allowance, not refund it) and bounded by the cap itself.
   assert.doesNotMatch(sql, /"status"/);
-  assert.equal(params[3], INVITES_PER_INVITEE_PER_WINDOW);
+  assert.equal(params.at(-1), INVITES_PER_INVITEE_PER_WINDOW);
 
   // The address is NOT in this predicate. That is the point — the count has to
   // cross addresses to see the bypass.
@@ -274,8 +297,11 @@ test("a sending-church target is counted on its own column", () => {
     SINCE
   ).toSQL();
 
-  assert.match(sql, /"target_sending_church_id" = \$1/);
-  assert.doesNotMatch(sql, /"target_church_id"/);
+  // The OUTER predicate only — the floor's subquery names both target columns
+  // by design, because it matches an event's subject against whichever one this
+  // row carries.
+  assert.match(outerWhere(sql), /"target_sending_church_id" = \$1/);
+  assert.doesNotMatch(outerWhere(sql), /"target_church_id"/);
   assert.equal(params[0], TARGET_SENDING_CHURCH);
 });
 
@@ -380,4 +406,96 @@ test("the duplicate check counts the target as well as the address", () => {
   // the two scopes cannot drift into two definitions of "ours".
   assert.match(duplicate, /const ourPending = and\(/);
   assert.match(duplicate, /invitingOrgFilter\(/);
+});
+
+// ----------------------------------------------------------------------------
+// 5. THE CAP RESETS AFTER A SEVER (#304 round 10, RULED 2026-08-11)
+// ----------------------------------------------------------------------------
+//
+// Counting every status is what defeats the decline–reinvite loop, and it also
+// meant an association that was ACCEPTED and later ENDED still spent the
+// allowance. This track ships three severs, so a plant that joined and left
+// inside the 30-day window burned an org's three attempts on invitations it had
+// answered — and the fourth was refused by `INVITE_RATE_LIMITED_MESSAGE`, which
+// says "wait for an answer" while nothing is pending, or by
+// `ACCOUNT_NOT_INVITABLE_MESSAGE`, which points at a plants list showing
+// nothing. `remove-plant-dialog.tsx` promises "you can invite them back later"
+// in the very dialog that spent the allowance.
+//
+// The floor is per ROW and correlated: an invitation counts unless this org has
+// an `association_events` row about the same subject that is NEWER than it. A
+// decline writes no event, so the loop is untouched.
+
+test("both counts drop invitations older than the org's last association event", () => {
+  const address = invitesFromOrgToAddressQuery(
+    {
+      inviteeEmail: ADDRESS,
+      sendingChurchId: null,
+      sendingNetworkId: NETWORK,
+    },
+    SINCE
+  ).toSQL();
+  const target = invitesFromOrgToTargetQuery(
+    { sendingChurchId: null, sendingNetworkId: NETWORK },
+    reach({ targetChurchId: TARGET_CHURCH, targetSendingChurchId: null }),
+    SINCE
+  ).toSQL();
+
+  for (const { sql, params } of [address, target]) {
+    const floor = postSeverFloor(sql);
+
+    // The org side is the discriminated pair the audit table stores, and it is
+    // the CALLER's own org — never coalesced with anything.
+    assert.match(floor, /"association_events"\."org_type" = \$\d+/);
+    assert.match(floor, /"association_events"\."org_id" = \$\d+/);
+    assert.ok(
+      (params as unknown[]).includes("network") &&
+        (params as unknown[]).includes(NETWORK),
+      "the floor is not bound to the caller's own org"
+    );
+
+    // The subject side is matched by FK against the invitation's own target,
+    // which is what makes it per (org, subject) rather than per org.
+    assert.match(
+      floor,
+      /"association_events"\."church_id" = "organization_invitations"\."target_church_id"/
+    );
+    assert.match(
+      floor,
+      /"association_events"\."subject_sending_church_id" = "organization_invitations"\."target_sending_church_id"/
+    );
+
+    // STRICTLY NEWER. `>=` would drop an invitation written in the same
+    // millisecond as the event it answered, and the event is what that
+    // invitation produced.
+    assert.match(
+      floor,
+      /"association_events"\."created_at" > "organization_invitations"\."created_at"/
+    );
+
+    // A DECLINE writes no association event, so nothing here reads a status and
+    // the decline–reinvite loop still exhausts the allowance.
+    assert.doesNotMatch(floor, /"status"/);
+  }
+});
+
+test("the floor is ONE predicate, shared by both scopes", () => {
+  // Two copies is how the address scope and the target scope start answering
+  // differently for one org — the same failure `targetReachFilter` exists to
+  // prevent one level up.
+  const both = CORE.slice(
+    CORE.indexOf("export function invitesFromOrgToAddressQuery"),
+    CORE.indexOf("export async function assertInviteRateLimit")
+  );
+  const calls = both.match(/afterTheLastAssociationEventFilter\(values\)/g);
+  assert.equal(calls?.length, 2, both);
+
+  // An org with neither id fails CLOSED here: it matches no event, so every
+  // invitation still counts. The opposite default would hand a caller with a
+  // malformed org an unlimited allowance.
+  const { sql } = invitesFromOrgToAddressQuery(
+    { inviteeEmail: ADDRESS, sendingChurchId: null, sendingNetworkId: null },
+    SINCE
+  ).toSQL();
+  assert.match(postSeverFloor(sql), /false/);
 });

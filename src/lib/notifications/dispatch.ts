@@ -355,7 +355,7 @@ export interface DispatchRecipient {
 
 /**
  * One provider call per (anchor, recipient, category, run) — the anchor being
- * the plant or the org the rows are filed under (migration 0035). Stable across
+ * the plant or the org the rows are filed under (migration 0036). Stable across
  * a retry of the SAME attempt set, which is what the provider needs to dedupe a
  * send we were killed before recording.
  */
@@ -486,7 +486,7 @@ export interface DispatchGroup {
   key: string;
   /**
    * The TENANT the group's rows are filed under — a plant's id, or an org's
-   * (migration 0035). Named for what it is rather than `churchId`, because
+   * (migration 0036). Named for what it is rather than `churchId`, because
    * since #304 WS3 a claimed row may be anchored to a sending church or a
    * network and have no `church_id` at all.
    */

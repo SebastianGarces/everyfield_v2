@@ -273,7 +273,7 @@ test("the table gives the code nothing to mutate", () => {
   assert.ok(!columns.includes("deletedAt"), columns.join(", "));
   assert.doesNotMatch(SCHEMA_CODE, /updated_at|deleted_at/);
 
-  // EVERY ROW HAS EXACTLY ONE SUBJECT, and since migration 0035 that is the
+  // EVERY ROW HAS EXACTLY ONE SUBJECT, and since migration 0036 that is the
   // CHECK's job rather than a NOT NULL's. `church_id` became nullable when the
   // table gained a second subject kind (a sending church, #351), so the property
   // that matters — an audit row is never subject-less, which is the shape a null

@@ -37,11 +37,24 @@
 // `preferenceOwnerFromSession` in `@/lib/notifications/preferences`.
 // ============================================================================
 
-import { and, desc, eq, exists, gte, lt, sql, type SQL } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  exists,
+  gt,
+  gte,
+  lt,
+  notExists,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 
 import { db } from "@/db";
 import {
+  associationEvents,
   churches,
   organizationInvitations,
   sendingChurches,
@@ -107,6 +120,16 @@ export const INVITATION_EXPIRY_DAYS = 30;
  * counts EVERY invitation the org has addressed to that address in the window,
  * whatever its status, so a decline–reinvite loop exhausts the allowance instead
  * of resetting it.
+ *
+ * AND IT RESETS AFTER A SEVER (round 10, ruled 2026-08-11). Counting every
+ * status is what defeats the loop; it also meant an association that was
+ * ACCEPTED and later ended still spent the allowance, so the three severs this
+ * track ships could lock an org out of re-inviting a plant it legitimately
+ * parted with — with a refusal message asserting a pending answer while nothing
+ * was pending. `afterTheLastAssociationEventFilter` is the floor that fixes it:
+ * only invitations created after the org's most recent `association_events` row
+ * about the same subject count. A decline writes no event, so the loop is
+ * unchanged.
  *
  * Three, not one: an admin genuinely does mistype an address, revoke, and send
  * again, and the window is a month. Three attempts a month is far more than that
@@ -802,6 +825,79 @@ export function targetReachFilter(
 }
 
 /**
+ * THE CAP RESETS AFTER A SEVER (#304 round 10, RULED 2026-08-11).
+ *
+ * Both count queries carry this, and it is one predicate rather than two so the
+ * address scope and the target scope cannot drift into two definitions of "does
+ * this invitation still count".
+ *
+ * WHY. The cap counts EVERY status, which is what defeats a decline–reinvite
+ * loop — and the same blindness made the three severs this track ships spend
+ * the allowance. A plant that joined and left inside the 30-day window burned
+ * the org's three attempts on invitations it had ANSWERED, and the org that
+ * `remove-plant-dialog.tsx` promises "you can invite them back later" could
+ * not: the 4th was refused by a message asserting a pending answer while
+ * nothing was pending. A cap defending "an org cannot keep a banner up" must
+ * not also punish an association that ran its full course.
+ *
+ * WHAT IT SAYS, per row: this invitation counts unless the org has an
+ * `association_events` row about ITS OWN subject that is NEWER than the
+ * invitation. The most recent event for the (org, subject) pair is therefore
+ * the floor, and a join-then-leave cycle refunds exactly the invitations it
+ * answered — never a decline, which writes no event at all.
+ *
+ * THE SUBJECT IS MATCHED BY FK, not by `subject_type`: the exactly-one CHECK on
+ * `association_events` makes a non-null `church_id` mean `subject_type =
+ * 'church'` and a non-null `subject_sending_church_id` mean `'sending_church'`,
+ * so comparing the invitation's own target column to the matching subject
+ * column is the discriminator. An OPEN invitation names no target, matches no
+ * event, and so always counts — it has no association to have severed.
+ *
+ * The ORG side is the caller's own, and it is compared as the discriminated
+ * pair the audit table stores (`org_type` + `org_id`, no FK). An org with
+ * neither id — impossible for a row `resolveInvitationRequest` produced —
+ * matches no event and every invitation counts, which is the fail-CLOSED
+ * direction for a cap.
+ */
+export function afterTheLastAssociationEventFilter(
+  values: Pick<ResolvedInvitation, "sendingChurchId" | "sendingNetworkId">
+): SQL {
+  const org = values.sendingChurchId
+    ? and(
+        eq(associationEvents.orgType, "sending_church"),
+        eq(associationEvents.orgId, values.sendingChurchId)
+      )
+    : values.sendingNetworkId
+      ? and(
+          eq(associationEvents.orgType, "network"),
+          eq(associationEvents.orgId, values.sendingNetworkId)
+        )
+      : sql`false`;
+
+  return notExists(
+    db
+      .select({ one: sql`1` })
+      .from(associationEvents)
+      .where(
+        and(
+          org,
+          or(
+            eq(
+              associationEvents.churchId,
+              organizationInvitations.targetChurchId
+            ),
+            eq(
+              associationEvents.subjectSendingChurchId,
+              organizationInvitations.targetSendingChurchId
+            )
+          ),
+          gt(associationEvents.createdAt, organizationInvitations.createdAt)
+        )
+      )
+  );
+}
+
+/**
  * Refuse a second pending invitation from the SAME org to the same address, or
  * — since #304 ruling 4 — to the same resolved TARGET under any address.
  *
@@ -864,6 +960,12 @@ async function assertNoDuplicatePending(
  * sent, to an address THEY typed — so it is legible without being an oracle
  * (see `assertInviteRateLimit` for why position, not wording, is what makes that
  * true here).
+ *
+ * "Wait for an answer" is TRUE of every state that can now reach it (round 10).
+ * The rows this message counts are all unanswered-or-refused ones: an accepted
+ * association that was later severed no longer counts at all, because
+ * `afterTheLastAssociationEventFilter` drops every invitation older than the
+ * sever. Widen the count again and this sentence has to be re-checked with it.
  */
 export const INVITE_RATE_LIMITED_MESSAGE =
   "Your organization has already sent that address several invitations recently — wait for an answer, or reach them another way";
@@ -878,6 +980,13 @@ export const INVITE_RATE_LIMITED_MESSAGE =
  * only pending ones would count exactly the invitations that are not the
  * problem. `limit` is the cap itself — the question is "are there at least N?",
  * so there is no reason to read the whole history.
+ *
+ * TWO FLOORS, not one (#304 round 10). The window is the older of them; the
+ * newer is `afterTheLastAssociationEventFilter`, which drops every invitation
+ * this org sent BEFORE its most recent association event about the same
+ * subject. Counting every status and never forgiving a completed association is
+ * what locked an org out of re-inviting a plant it had legitimately parted
+ * with.
  */
 export function invitesFromOrgToAddressQuery(
   values: Pick<
@@ -893,7 +1002,8 @@ export function invitesFromOrgToAddressQuery(
       and(
         eq(organizationInvitations.inviteeEmail, values.inviteeEmail),
         invitingOrgFilter(values.sendingChurchId, values.sendingNetworkId),
-        gte(organizationInvitations.createdAt, since)
+        gte(organizationInvitations.createdAt, since),
+        afterTheLastAssociationEventFilter(values)
       )
     )
     .limit(INVITES_PER_INVITEE_PER_WINDOW);
@@ -907,6 +1017,11 @@ export function invitesFromOrgToAddressQuery(
  * `reach` is the caller's, not this function's, so there is exactly one place
  * that decides what "aimed at this org" means (`targetReachFilter`) and no way
  * for the cap and the duplicate check to drift into two definitions of it.
+ *
+ * It carries the SAME post-sever floor as the address query (#304 round 10) and
+ * from the same function, for the same reason: two copies of "does this
+ * invitation still count" is how the two scopes start answering differently for
+ * one org.
  */
 export function invitesFromOrgToTargetQuery(
   values: Pick<ResolvedInvitation, "sendingChurchId" | "sendingNetworkId">,
@@ -920,7 +1035,8 @@ export function invitesFromOrgToTargetQuery(
       and(
         reach,
         invitingOrgFilter(values.sendingChurchId, values.sendingNetworkId),
-        gte(organizationInvitations.createdAt, since)
+        gte(organizationInvitations.createdAt, since),
+        afterTheLastAssociationEventFilter(values)
       )
     )
     .limit(INVITES_PER_INVITEE_PER_WINDOW);
@@ -1206,7 +1322,7 @@ export async function acceptInvitationAs(
   // outcome rather than trusting the batch (see
   // `acceptedAssociationEventStatement`).
   //
-  // ALL THREE INVITATION TYPES audit since #304 WS3 / migration 0035, the
+  // ALL THREE INVITATION TYPES audit since #304 WS3 / migration 0036, the
   // sending-church subject included. `null` now means only "this row's
   // type-implied ids are missing", which the statements above would already have
   // thrown on — not "this kind of association goes unrecorded".
@@ -1260,7 +1376,7 @@ export async function acceptInvitationAs(
   // BOTH SIDES OF THE HANDSHAKE NOW HAVE A RAIL (#304 WS3, ruling #351). This
   // used to be `if (updated.targetChurchId)` and nothing else: a sending church
   // joining a network names no plant, `notifications.church_id` was NOT NULL,
-  // and the milestone was composed and dropped. Migration 0035 anchored a
+  // and the milestone was composed and dropped. Migration 0036 anchored a
   // notification to a church OR an org, so the plantless answer is announced to
   // the NETWORK that asked — the same consent-exempt own-relationship rail,
   // filed under the tenant that reads it.
@@ -1878,11 +1994,11 @@ export async function disassociateSendingChurchFromNetwork(
  * none, so a `church_to_sending_church` row carrying a stray network id would
  * otherwise get an audit row naming a network that associated nobody.
  *
- * ALL THREE TYPES NOW RETURN A SUBJECT (#304 WS3, ruling #351, migration 0035).
+ * ALL THREE TYPES NOW RETURN A SUBJECT (#304 WS3, ruling #351, migration 0036).
  * The `sending_church_to_network` arm used to return `null` — not because that
  * association was unworthy of an audit, but because `association_events` made a
  * CHURCH its mandatory subject, and a sending church joining a network names no
- * church. 0035 gave the table the subject discriminator its own header had asked
+ * church. 0036 gave the table the subject discriminator its own header had asked
  * for, so the arm returns the real thing: the target SENDING CHURCH as subject,
  * the network as org.
  *
@@ -2266,7 +2382,7 @@ export const NOT_IN_A_NETWORK_MESSAGE =
  *
  * IT SHIPPED WITH #304 WS3 AND NOT BEFORE, and the reason is worth keeping. A
  * sever has to be audited (#274 / OV-007: type-to-confirm, a notification, an
- * `association_events` row) and until migration 0035 the audit table's subject
+ * `association_events` row) and until migration 0036 the audit table's subject
  * was a CHURCH, NOT NULL — so this button could only have been a sever with no
  * record of who ended it, which is the one thing that ruling forbids. #351 gave
  * the table a subject discriminator; this is what it unblocked.

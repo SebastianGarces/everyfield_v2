@@ -324,7 +324,7 @@ export async function getPendingInvitationsForSendingChurch(
  * rejected (`memory/invariants.md` → Multi-Tenancy).
  *
  * (This comment used to say the view was read-only "because there is no sever
- * for this side of the hierarchy". That was true only until migration 0035 gave
+ * for this side of the hierarchy". That was true only until migration 0036 gave
  * `association_events` a subject discriminator, which is what a sending church's
  * sever needed in order to be audited at all — #274 requires an audit row of
  * every sever, so OV-013 could not ship before it.)

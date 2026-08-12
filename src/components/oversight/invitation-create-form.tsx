@@ -169,8 +169,27 @@ export function InvitationCreateForm({
  * a closed one and an open one, and the open one is the easier probe, because
  * it needs no error at all.
  *
- * So both cases render this, and it is true of both: an invitation is answered
- * inside the product. It names no account, no organization and no link.
+ * So both cases render this, and it is true of both. It names no account, no
+ * organization and no link.
+ *
+ * ----------------------------------------------------------------------------
+ * DELIVERY-NEUTRAL, TOO (#304 round 10, RULED 2026-08-11)
+ * ----------------------------------------------------------------------------
+ *
+ * The previous wording — "This invitation is answered inside EveryField. You
+ * will hear as soon as they answer" — was false for half its audience. An
+ * address with no account has nobody inside the product to answer: the only
+ * route to that row is `/register?invitation=<id>`, and item 5 removed the one
+ * surface that ever showed it. The admin was told to wait for an answer nobody
+ * could give.
+ *
+ * The ruling names exactly two things to say, and both are true whatever is
+ * behind the address: the invitation SITS IN THE LIST BELOW and can be revoked
+ * there, and the admin should TELL THE PERSON DIRECTLY. Deliberately absent:
+ * any statement about delivery mechanics. Saying "email is not live yet" would
+ * be true today and false the week PR #392 ships, and the copy must not need
+ * re-reading then. Also absent, permanently: anything derived from the row's
+ * two target columns (item 5 stands).
  *
  * WHAT THE ADMIN LOSES, and why it is acceptable. An open invitation's token
  * still works — `/register?invitation=<id>` is untouched, and it is what the
@@ -193,9 +212,8 @@ function InviteCreatedNotice({
         Invitation created for {created.inviteeEmail}
       </p>
       <p className="text-muted-foreground">
-        This invitation is answered inside EveryField. You will hear as soon as
-        they answer; until then it sits in the list below, where you can revoke
-        it.
+        Tell them directly that you have invited them. Until they answer, it
+        sits in the list below, where you can revoke it.
       </p>
     </div>
   );

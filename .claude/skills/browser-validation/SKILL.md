@@ -118,6 +118,21 @@ NULL org FK. It refuses outright, writing nothing, on any database holding an al
 and there is no override for that: point `DATABASE_URL` at the database you are validating against
 (a preview reads the development branch) and never at production.
 
+**Which database does it actually succeed against?** The **Neon `development` branch** — the one a
+preview reads and the one `DATABASE_URL` in `.env.local` names. Step 2 is expected to work there,
+and the refusal above is not a contradiction: the guard asks exactly one question, *are any of the
+three `PROTECTED_ACCOUNTS` sentinels present*, and on the development branch the answer is **no**
+(read-only probe run 2026-08-12 for #304 round 10 — 0 of 3 present; the alpha-cohort logins
+`memory/invariants.md` → Dev Seeds warns the WIPE about are not these three addresses). The full
+step-2 command was then run once end to end against that branch and printed its four upsert lines,
+so this path is exercised, not merely documented. Re-run the probe rather than assuming it: if a
+sentinel is ever added there, this mode has no override and the only honest recovery is a statement
+written by hand for that database, with the password chosen there.
+
+**Production is a different answer** — it holds the sentinels by definition, so the mode refuses and
+must. Never reach for `--allow-protected-db` here; it is the *wipe's* flag and does not exist for
+this mode.
+
 **If the eval logins are gone, someone ran `pnpm db:seed`.** That script wipes the whole fixture —
 every user and every church, not just the nine it creates — so it takes the eval corpus with it, and
 with it the marketing-church fixture and any account someone registered by hand. Put the corpus back

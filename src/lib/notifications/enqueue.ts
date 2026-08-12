@@ -670,7 +670,7 @@ export const dbEnqueueDeps: EnqueueDeps = {
   },
 
   async insertIfAbsent(row) {
-    // TWO ARBITERS, ONE PER ANCHOR (migration 0035).
+    // TWO ARBITERS, ONE PER ANCHOR (migration 0036).
     //
     // A church-anchored row has a NULL `anchor_org_id` and an org-anchored row
     // has a NULL `church_id`, and NULLs never collide in a btree unique index —
@@ -682,7 +682,7 @@ export const dbEnqueueDeps: EnqueueDeps = {
       const [insertedOrg] = await db
         .insert(notifications)
         .values(row)
-        // Matches `notifications_org_dedupe_key_unique_idx` (migration 0035),
+        // Matches `notifications_org_dedupe_key_unique_idx` (migration 0036),
         // predicate included — the same byte-for-byte rule as the church index
         // below, and for the same reason.
         .onConflictDoNothing({

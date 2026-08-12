@@ -56,11 +56,16 @@
 // previous two attempts passed while the property was false.
 //
 // WHY NOT "show the link on every pending row" (the variant that keeps
-// delivery): it does not close the oracle, it relocates it. `/register` renders
-// an invitation-specific banner only when `describeInvitationForRegistration`
-// says `redeemable` — itself target-derived — so an admin who copies the link
-// and opens it reads the same fact one click later, and a targeted invitee is
-// handed a URL that redeems nothing. See memory/invariants/multi-tenancy.md.
+// delivery): it did not close the oracle, it relocated it — `/register` used to
+// render an invitation banner only when `describeInvitationForRegistration`
+// said `redeemable`, itself target-derived, so an admin who copied the link and
+// opened it read the same fact one click later. That relocation is now closed
+// AT `/register` ITSELF (round 10, ruled 2026-08-11): the function answers null
+// for any targeted row and `redeemable` is deleted, so a targeted token and a
+// guessed uuid render the identical page. The link still does not belong here —
+// a targeted invitee would be handed a URL that redeems nothing, and item 5
+// stands — but the reason is no longer "it leaks". See
+// memory/invariants/multi-tenancy.md.
 // ============================================================================
 
 import { useActionState } from "react";

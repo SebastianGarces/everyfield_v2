@@ -21,9 +21,9 @@ import {
 } from "./queries";
 
 // ============================================================================
-// THE NOTIFICATION ANCHOR (#304 WS3, ruling #351, migration 0035).
+// THE NOTIFICATION ANCHOR (#304 WS3, ruling #351, migration 0036).
 //
-// Until 0035 every notification was about a plant and `church_id` was NOT NULL.
+// Until 0036 every notification was about a plant and `church_id` was NOT NULL.
 // The events WS3 adds — a sending church accepting, declining or leaving a
 // NETWORK's invitation — name no plant, so they were composed and then dropped.
 // #351 ruled for a generalized anchor on the ONE table rather than a parallel

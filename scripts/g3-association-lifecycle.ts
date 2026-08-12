@@ -56,6 +56,7 @@ import assert from "node:assert/strict";
 
 import { and, eq, inArray, like } from "drizzle-orm";
 
+import { describeInvitationForRegistration } from "@/app/(auth)/register/beta-gate";
 import { db } from "@/db";
 import {
   associationEvents,
@@ -462,7 +463,7 @@ async function main() {
     ok("accept associated the sending church with the network");
 
     // ------------------------------------------------------------------------
-    // THE ACCEPTANCE CRITERION, NOW REQUIRED — #351 LANDED (migration 0035).
+    // THE ACCEPTANCE CRITERION, NOW REQUIRED — #351 LANDED (migration 0036).
     //
     // #304's WS3 AC has three clauses across the two answers:
     //
@@ -471,7 +472,7 @@ async function main() {
     //    NETWORK on the milestone rail; decline updates status and NOTIFIES,
     //    mirroring the planter flow."
     //
-    // Until 0035 this block PRINTED the miss and asserted the ABSENCE of all
+    // Until 0036 this block PRINTED the miss and asserted the ABSENCE of all
     // three rows, because both target tables made a CHURCH their mandatory
     // tenant and a sending church joining a network names none. Ruling #351
     // settled the shape — a subject discriminator on `association_events`, a
@@ -781,11 +782,162 @@ async function main() {
     assert.ok(netAudienceIds.includes(otherNetAdmin.id));
     ok("…and the same row IS an admin of the network it actually administers");
 
+    // ------------------------------------------------------------------------
+    console.log("\n--- 10. round 10: the invite cap RESETS after a sever ---");
+    // ------------------------------------------------------------------------
+    //
+    // §9 left `otherNetwork` capped against this run's sending church: three
+    // invitations inside the window, the fourth refused. Every one of them was
+    // DECLINED, which is the abuse the cap exists for and must stay refused.
+    //
+    // An association that was ACCEPTED and later ended is the other case, and
+    // until this ruling it was indistinguishable: the count carried no `status`
+    // predicate, so a join-then-leave cycle spent the allowance and the org was
+    // locked out of re-inviting a plant it had legitimately parted with. The
+    // fix is a floor, not an exemption — only invitations created AFTER the
+    // org's most recent `association_events` row about the same subject count.
+    //
+    // The invitation that seeds the association is written with
+    // `insertInvitation`, the same raw door §7 uses, precisely BECAUSE the cap
+    // is exhausted here: the point of the section is what happens after the
+    // sever, and using the capped path to set it up would only re-prove §9.
+    // ------------------------------------------------------------------------
+    const resetInvite = await insertInvitation({
+      type: "sending_church_to_network",
+      inviterUserId: otherNetAdmin.id,
+      inviteeEmail: scAdmin.email,
+      targetChurchId: null,
+      targetSendingChurchId: sendingChurch.id,
+      sendingChurchId: null,
+      sendingNetworkId: otherNetwork.id,
+    });
+    createdInvitationIds.push(resetInvite.id);
+    id("cap-reset invitation", resetInvite.id);
+
+    await acceptInvitationAs(actorFor(scAdmin), resetInvite.id);
+    const severed = await leaveNetworkAsSendingChurchAdmin(actorFor(scAdmin));
+    assert.deepEqual(severed, { orgType: "network", orgId: otherNetwork.id });
+    ok("the capped org associated with the sending church and then parted");
+
+    // THE ACCEPTANCE CRITERION: the next invitation — the FIFTH this org has
+    // aimed at this sending church inside the window, under an address whose
+    // own allowance §9 also spent — is created rather than refused.
+    const reinvited = await createInvitationAs(actorFor(otherNetAdmin), {
+      inviteeEmail: scAdmin2.email,
+      inviteAs: "sending_church",
+    });
+    createdInvitationIds.push(reinvited.id);
+    id("invitation after the sever", reinvited.id);
+    assert.equal(reinvited.targetSendingChurchId, sendingChurch.id);
+    ok("the cap accepts a re-invite once an association event postdates it");
+
+    // …and it RE-ARMS from the sever, rather than being spent for good. Three
+    // more, spread across both addresses again, and the fourth is refused in
+    // the one message exactly as before.
+    await declineInvitationAs(actorFor(scAdmin2), reinvited.id);
+
+    for (const invitee of [scAdmin, scAdmin2]) {
+      const again = await createInvitationAs(actorFor(otherNetAdmin), {
+        inviteeEmail: invitee.email,
+        inviteAs: "sending_church",
+      });
+      createdInvitationIds.push(again.id);
+      await declineInvitationAs(actorFor(invitee), again.id);
+    }
+
+    assert.equal(
+      await refusal(
+        createInvitationAs(actorFor(otherNetAdmin), {
+          inviteeEmail: scAdmin.email,
+          inviteAs: "sending_church",
+        })
+      ),
+      ACCOUNT_NOT_INVITABLE_MESSAGE
+    );
+    ok("decline-spam AFTER the reset is capped again at three");
+
+    // ------------------------------------------------------------------------
+    console.log(
+      "\n--- 11. round 10: /register cannot describe a TARGETED invitation ---"
+    );
+    // ------------------------------------------------------------------------
+    //
+    // The account-existence oracle rulings 2 and 4-item-5 closed on
+    // `/oversight/invitations`, one route over. `describeInvitationForRegistration`
+    // needs no session and the page that calls it is public, so an admin who
+    // takes the id out of their own DOM (Revoke carries it) and opens
+    // `/register?invitation=<id>` in a private window used to read `redeemable`
+    // off the two target columns.
+    //
+    // Proven by CALLING the function against REAL ROWS — never by a regex over
+    // the page, which passed twice while the property was false. Each targeted
+    // row below is pending, unexpired, addressed and issued by an org whose
+    // name resolves, so the ONLY reason it can answer null is the target.
+    // ------------------------------------------------------------------------
+    const targetedPlantInvite = await insertInvitation({
+      type: "church_to_network",
+      inviterUserId: otherNetAdmin.id,
+      inviteeEmail: address("register-targeted-plant"),
+      targetChurchId: plant.id,
+      targetSendingChurchId: null,
+      sendingChurchId: null,
+      sendingNetworkId: otherNetwork.id,
+    });
+    createdInvitationIds.push(targetedPlantInvite.id);
+    id("targeted (plant) invitation", targetedPlantInvite.id);
+
+    const targetedOrgInvite = await insertInvitation({
+      type: "sending_church_to_network",
+      inviterUserId: otherNetAdmin.id,
+      inviteeEmail: address("register-targeted-org"),
+      targetChurchId: null,
+      targetSendingChurchId: sendingChurch.id,
+      sendingChurchId: null,
+      sendingNetworkId: otherNetwork.id,
+    });
+    createdInvitationIds.push(targetedOrgInvite.id);
+    id("targeted (org) invitation", targetedOrgInvite.id);
+
+    assert.deepEqual(
+      await describeInvitationForRegistration(targetedPlantInvite.id),
+      null,
+      "a resolved-church target is describable to /register"
+    );
+    assert.deepEqual(
+      await describeInvitationForRegistration(targetedOrgInvite.id),
+      null,
+      "a resolved-sending-church target is describable to /register"
+    );
+    assert.deepEqual(
+      await describeInvitationForRegistration(
+        "00000000-0000-4000-8000-000000000000"
+      ),
+      null
+    );
+    ok("both target shapes and a guessed uuid answer the identical null");
+
+    // THE PREMISE, so the three nulls above are not vacuous: the same function
+    // still describes an OPEN row. `forged` is §9's — open because the forged
+    // target was dropped — and it is pending, addressed and unexpired.
+    const describedOpen = await describeInvitationForRegistration(forged.id);
+    assert.ok(describedOpen, "an open invitation stopped describing");
+    assert.equal(describedOpen.inviteeEmail, forgedAddress);
+    assert.equal(describedOpen.accountType, "planter");
+    // …and the shape carries no `redeemable`, which is the field that varied.
+    assert.deepEqual(Object.keys(describedOpen).sort(), [
+      "accountType",
+      "id",
+      "inviteeEmail",
+      "invitingOrgName",
+    ]);
+    ok("an OPEN invitation still describes, with no redeemable field");
+
     console.log(
       "\nALL ASSERTIONS PASSED — #304 WS3's audit-row and milestone clauses are" +
-        "\nnow REQUIRED by this harness (ruling #351, migration 0035), OV-013's" +
-        "\naudited sever is exercised end to end, and ruling 4's HR4 fixes are" +
-        "\nexercised as real forged requests (§9)."
+        "\nnow REQUIRED by this harness (ruling #351, migration 0036), OV-013's" +
+        "\naudited sever is exercised end to end, ruling 4's HR4 fixes are" +
+        "\nexercised as real forged requests (§9), and round 10's cap reset (§10)" +
+        "\nand /register oracle closure (§11) are exercised on real rows."
     );
   } finally {
     if (KEEP) {
