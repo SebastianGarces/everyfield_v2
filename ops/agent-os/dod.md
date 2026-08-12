@@ -228,15 +228,31 @@ It is also the gate that catches what no workstream could see: two file-disjoint
 individually correct and jointly wrong.*
 
 - A **separate** `code-reviewer` agent (NOT the implementer) confirms G1–G5 **from the evidence,
-  adversarially** — default to reject when a gate's evidence is missing or unconvincing.
+  adversarially** — default to reject when a gate's evidence is missing or unconvincing. The
+  reviewer applies `.claude/agents/code-reviewer.md`; findings come back typed
+  `critical | structural | suggestion`.
 - The reviewer also answers two **structural** questions from the integrated diff
   (`ops/agent-os/delegation-rules.md` R2/R4): did the track add a second implementation of a
   decision that already has one (a predicate, a policy, a shared calculation)? And is new logic
   behind a testable seam (a pure core, a builder assertable via `.toSQL()`), or reachable only
-  through a browser? A duplicated decision implementation is a FAIL; a missing seam is at minimum
-  a warning carried into the PR body.
+  through a browser? A duplicated decision implementation is a **critical** finding; a missing
+  seam is a **structural** finding — both route to the review-fix loop and are fixed in this
+  pass, never carried into the PR body as debt.
 - Verdict ∈ `PASS` | `PASS_WITH_WARNINGS` | `FAIL`. Only `PASS` / `PASS_WITH_WARNINGS` may open a PR.
 - **Evidence:** reviewer verdict + findings.
+
+**The review-fix loop.** Critical and structural findings return to an implementer agent and are
+fixed **in the same pass**, at BOTH review sites — scoped (per workstream) and integration (G6) —
+with at most **2 quality rounds per site**. Rounds are not attempts, but a re-review verdict of
+FAIL is a real gate failure and spends an attempt. When any integration round lands commits, the
+functional gate (**G3) re-runs pinned to the re-pushed sha** before HR4/PR/merge — CI re-anchors
+G1/G2 at the final sha, and this re-anchors the one gate CI cannot: no sha ships whose functional
+gate never ran at that sha. A fix round that cannot say what it did **per
+finding** is refused before a reviewer is spent on it — the #307 discipline, applied per finding.
+On exhaust the track **HOLDs with a DECISION comment** listing each unresolved finding, its fix
+history, and the options — merge as-is, direct a named fix, or take it manually — the same pattern
+as spec-question holds. Never `agent:blocked` (blocked means the DoD was not reached; here the
+gates passed). Never merged with findings. Suggestions never gate and never trigger a round.
 
 ---
 
@@ -287,6 +303,8 @@ WORKSTREAM DONE = G0 + G2-subset + G5 all PASS, in its own worktree
 TRACK DONE = every workstream DONE  AND  G1 + G2 (full) + G3 + G4 + G6 PASS
              (+ HR1..HR4 if high-risk)
         → open PR, attach evidence, label every issue the track closes `agent:in-review`
+        unresolved review findings after the fix loop → HOLD with a DECISION
+             (ships held; never merges, never blocks)
   NOT DONE
         → an integration failure that NAMES a workstream goes back to that workstream and
           consumes ITS attempt; an unattributable one consumes a track-level integration attempt
