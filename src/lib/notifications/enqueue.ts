@@ -17,7 +17,18 @@ import {
   isOversightUser,
 } from "@/lib/auth/access";
 
-import { OVERSIGHT_SHARING_FEATURE, oversightGateFor } from "./categories";
+import {
+  churchAnchor,
+  toAnchorColumns,
+  type NotificationAnchor,
+  type OrgAnchor,
+} from "./anchor";
+import {
+  isOwnRelationshipType,
+  OVERSIGHT_SHARING_FEATURE,
+  oversightGateFor,
+} from "./categories";
+import { orgHasRecordedRelationshipWithChurch } from "./oversight-relationship";
 
 // ============================================================================
 // The enqueue contract (N-001, N-002, N-011).
@@ -48,7 +59,12 @@ import { OVERSIGHT_SHARING_FEATURE, oversightGateFor } from "./categories";
 //   3. The recipient must be ALLOWED to be told. Three separate facts, all
 //      checked here rather than assumed of the caller — see
 //      `recipientMayBeNotified`:
-//        a. they can access the church the row is filed under,
+//        a. they can access the church the row is filed under — or, for the
+//           two own-relationship events of #304 alone, this org and this plant
+//           have a relationship ON RECORD (an invitation, or an
+//           `association_events` row). Those two report the END of a
+//           relationship, so current access is false by construction; see the
+//           branch itself and `OVERSIGHT_OWN_RELATIONSHIP_TYPES`,
 //        b. if they are an oversight user, the category is one oversight may
 //           receive at all — `milestones` or `digest`, never the granular
 //           per-event stream (N-025), and
@@ -90,8 +106,29 @@ import { OVERSIGHT_SHARING_FEATURE, oversightGateFor } from "./categories";
 
 export const enqueueNotificationSchema = z
   .object({
-    /** Tenancy. Verified against the recipient's own access, not trusted. */
-    churchId: z.string().uuid(),
+    /**
+     * Tenancy, the PLANT case. Verified against the recipient's own access, not
+     * trusted.
+     *
+     * Optional since #304 WS3 only because it is one of two anchors — see
+     * `anchorOrg` and the refinement below, which together make "exactly one"
+     * a parse error rather than a database error. Every pre-existing caller
+     * passes this and is unchanged.
+     */
+    churchId: z.string().uuid().optional(),
+    /**
+     * Tenancy, the ORG case (#304 WS3, ruling #351): a notification about a
+     * SENDING CHURCH's own network membership, which names no plant.
+     *
+     * A nested object rather than two loose fields, so a caller cannot supply an
+     * id without saying which kind of org it is.
+     */
+    anchorOrg: z
+      .object({
+        type: z.enum(["sending_church", "network"]),
+        orgId: z.string().uuid(),
+      })
+      .optional(),
     /** A user, never a bare address — a `person` with no login is not a recipient. */
     recipientUserId: z.string().uuid(),
     category: z.enum(notificationCategories),
@@ -115,11 +152,41 @@ export const enqueueNotificationSchema = z
         "entityType and entityId must be provided together — a half-reference cannot be cancelled or linked",
       path: ["entityId"],
     }
+  )
+  // EXACTLY ONE ANCHOR, at the boundary. The database says the same thing
+  // (`notifications_anchor_check`), and both are wanted: this one turns a
+  // caller's mistake into a legible parse error at the call site, rather than a
+  // constraint violation three layers down with no field name in it.
+  .refine(
+    (value) =>
+      (value.churchId === undefined) !== (value.anchorOrg === undefined),
+    {
+      message:
+        "a notification is anchored to exactly one tenant — pass churchId or anchorOrg, never both and never neither",
+      path: ["churchId"],
+    }
   );
 
 export type EnqueueNotificationInput = z.input<
   typeof enqueueNotificationSchema
 >;
+
+/**
+ * The anchor a parsed input describes. Total by construction — the refinement
+ * above has already rejected "neither" and "both".
+ */
+function anchorOf(parsed: {
+  churchId?: string;
+  anchorOrg?: { type: "sending_church" | "network"; orgId: string };
+}): NotificationAnchor {
+  if (parsed.churchId) return churchAnchor(parsed.churchId);
+  if (parsed.anchorOrg) {
+    return { type: parsed.anchorOrg.type, orgId: parsed.anchorOrg.orgId };
+  }
+  // Unreachable through `enqueueNotificationSchema.parse`; a loud throw rather
+  // than a guessed tenant if some future caller bypasses it.
+  throw new Error("enqueue: a notification with no anchor");
+}
 
 /**
  * Cancel-by-entity input.
@@ -206,7 +273,13 @@ export type RecipientCheck =
  * would type-check and silently gate the wrong thing.
  */
 export interface RecipientNotifiableInput {
-  churchId: string;
+  /**
+   * WHICH TENANT the row would be filed under, as a discriminated union rather
+   * than a church id (#304 WS3). Gate 1 asks a genuinely different question of
+   * each arm — "can this user reach that plant?" versus "is this user an admin
+   * OF that org?" — and a bare id could be handed to the wrong one.
+   */
+  anchor: NotificationAnchor;
   recipientUserId: string;
   category: NotificationCategory;
   /** The caller's discriminator — read only by the consent exemption (gate 3). */
@@ -252,7 +325,7 @@ export interface EnqueueDeps {
    * hit could hand back a cancelled row.
    */
   findByDedupeKey(
-    churchId: string,
+    anchor: NotificationAnchor,
     recipientUserId: string,
     dedupeKey: string
   ): Promise<Notification | null>;
@@ -303,9 +376,10 @@ export async function runEnqueue(
   input: EnqueueNotificationInput
 ): Promise<EnqueueResult> {
   const parsed = enqueueNotificationSchema.parse(input);
+  const anchor = anchorOf(parsed);
 
   const check = await deps.recipientMayBeNotified({
-    churchId: parsed.churchId,
+    anchor,
     recipientUserId: parsed.recipientUserId,
     category: parsed.category,
     type: parsed.type,
@@ -315,7 +389,9 @@ export async function runEnqueue(
   }
 
   const row: NewNotification = {
-    churchId: parsed.churchId,
+    // The union becomes columns exactly once (`toAnchorColumns`), so the
+    // "exactly one anchor" CHECK is satisfied by construction.
+    ...toAnchorColumns(anchor),
     recipientUserId: parsed.recipientUserId,
     category: parsed.category,
     type: parsed.type,
@@ -349,7 +425,7 @@ export async function runEnqueue(
   }
 
   const existing = await deps.findByDedupeKey(
-    parsed.churchId,
+    anchor,
     parsed.recipientUserId,
     parsed.dedupeKey
   );
@@ -416,8 +492,52 @@ const accessColumns = {
   sendingNetworkId: users.sendingNetworkId,
 };
 
+/**
+ * IS THIS RECIPIENT AN ADMIN OF THIS ORG? — gate 1 for an ORG-ANCHORED row
+ * (#304 WS3).
+ *
+ * The church arm of gate 1 asks `canAccessChurch`, which resolves an oversight
+ * admin's reach THROUGH a plant's FKs. An org-anchored notification has no
+ * plant, so there is nothing for that question to traverse, and the honest
+ * question is the direct one: does this user's own org FK name the org the row
+ * is filed under, and is their role an oversight one?
+ *
+ * Both halves matter. Without the ROLE check a `team_member` carrying a stray
+ * `sending_church_id` would qualify; without the ID check every oversight admin
+ * in the product would. It is deliberately NOT a hierarchy walk — a network
+ * admin does not receive a sending church's own notifications, because the
+ * notification is filed under the SENDING CHURCH and the network is a different
+ * tenant (the same rule that keeps a plant's rows out of its network's feed).
+ *
+ * THE ROLE IS PAIRED WITH THE ANCHOR KIND — #304 ruling 4, item 6 (HR4
+ * 2026-08-09). "An oversight role" was too coarse for this question. Both org
+ * FKs live on the same `users` row, so a `network_admin` who also carries a
+ * `sending_church_id` — a founder who administers both, or any row where the
+ * second FK was set once and never cleared — passed the sending-church arm and
+ * received that sending church's own notifications. That is the hierarchy walk
+ * the paragraph above says this is not, arriving through the role instead of
+ * through the FK. So each anchor kind now names EXACTLY the role that
+ * administers it: `sending_church` → `sending_church_admin`, `network` →
+ * `network_admin`. `listOversightAdminsOfOrg` pairs them the same way, so the
+ * fan-out and the per-recipient gate answer one question rather than two.
+ *
+ * Pure, and exported so it can be tested over the whole role × org domain.
+ */
+export function recipientAdministersOrg(
+  recipient: User,
+  anchor: OrgAnchor
+): boolean {
+  if (!isOversightUser(recipient)) return false;
+
+  return anchor.type === "sending_church"
+    ? recipient.role === "sending_church_admin" &&
+        recipient.sendingChurchId === anchor.orgId
+    : recipient.role === "network_admin" &&
+        recipient.sendingNetworkId === anchor.orgId;
+}
+
 export const dbEnqueueDeps: EnqueueDeps = {
-  async recipientMayBeNotified({ churchId, recipientUserId, category, type }) {
+  async recipientMayBeNotified({ anchor, recipientUserId, category, type }) {
     const [projected] = await db
       .select(accessColumns)
       .from(users)
@@ -431,12 +551,80 @@ export const dbEnqueueDeps: EnqueueDeps = {
     // query rather than out of the way.
     const recipient = projected as User;
 
+    // ------------------------------------------------------------------------
+    // THE ORG-ANCHORED ARM (#304 WS3, ruling #351) — a whole, separate gate.
+    //
+    // It returns before the church gates rather than weaving into them, and
+    // that is the safety property: none of the three questions below has an
+    // honest answer for a row with no plant. `canAccessChurch` has no church to
+    // resolve; `canAccessFeatureData` would read a privacy toggle belonging to
+    // a plant that is not the subject; and the recorded-relationship fallback
+    // (`OVERSIGHT_OWN_RELATIONSHIP_TYPES`) exists precisely to substitute for a
+    // plant FK that has just been nulled — which is not what happened here.
+    //
+    // What it asks instead: the recipient administers THIS org (tenancy), and
+    // the category is one oversight may receive at all (N-025, unchanged).
+    // Consent has no third party to come from — there is no plant to have
+    // opted in — so a category that REQUIRES sharing is refused outright rather
+    // than approximated. Today only the three consent-exempt own-relationship
+    // milestones are org-anchored, so that refusal is a fail-closed floor and
+    // not a live path.
+    // ------------------------------------------------------------------------
+    if (anchor.type !== "church") {
+      if (!recipientAdministersOrg(recipient, anchor)) {
+        return { allowed: false, reason: "outside_church" };
+      }
+
+      const gate = oversightGateFor(category, type);
+      if (gate !== "exempt") {
+        return { allowed: false, reason: "oversight_privacy" };
+      }
+
+      return { allowed: true };
+    }
+
+    const churchId = anchor.churchId;
+
     // Gate 1 — the SAME resolution the rest of the app authorises reads with,
     // so "may be notified about this church" and "may see this church" cannot
     // drift apart: a coach reached via coach_assignments qualifies, a planter
     // in another plant does not.
     if (!(await canAccessChurch(recipient, churchId))) {
-      return { allowed: false, reason: "outside_church" };
+      // ...with ONE alternative basis, for the two events that END an org's
+      // relationship with a plant (#304, OV-006/OV-007). Both are structurally
+      // unreachable through the check above — a declined invitation never put
+      // the plant in the org's scope, and a sever takes it out in the very write
+      // being announced — so composing them under the plant's `church_id`, which
+      // is the only tenant an event about a plant can be filed under, would skip
+      // them every time and the org would never learn its own relationship had
+      // changed. See `OVERSIGHT_OWN_RELATIONSHIP_TYPES` in ./categories.ts.
+      //
+      // NOT a bypass, and the ordering says so. `type` must be one of two
+      // server-composed literals (no caller-supplied string reaches this list),
+      // the recipient must be an oversight user with an org of their own, and
+      // there must be a RECORD in the database of a relationship between that
+      // org and this plant — an invitation, or an `association_events` row. An
+      // org with none of that is refused with the same `outside_church` it was
+      // refused with before, and every other notification type in the product
+      // — including the two gated milestones and the digest — cannot reach this
+      // branch at all.
+      //
+      // AND THE ORG IS PAIRED TO THE ROLE (#304 round 8). `recipient` is a
+      // whole `users` row and both oversight FKs live on it, so the probe used
+      // to OR them together and a `network_admin` carrying a stray
+      // `sending_church_id` could rest on an invitation THAT sending church
+      // issued — the same hierarchy walk `recipientAdministersOrg` refuses one
+      // arm up. `orgHasRecordedRelationshipWithChurch` now takes the recipient
+      // rather than a pair of ids and pairs them itself, so there is no shape a
+      // call site could get wrong.
+      const mayRestOnRecord =
+        isOwnRelationshipType(type) &&
+        isOversightUser(recipient) &&
+        (await orgHasRecordedRelationshipWithChurch(recipient, churchId));
+
+      if (!mayRestOnRecord) {
+        return { allowed: false, reason: "outside_church" };
+      }
     }
 
     if (isOversightUser(recipient)) {
@@ -482,6 +670,34 @@ export const dbEnqueueDeps: EnqueueDeps = {
   },
 
   async insertIfAbsent(row) {
+    // TWO ARBITERS, ONE PER ANCHOR (migration 0036).
+    //
+    // A church-anchored row has a NULL `anchor_org_id` and an org-anchored row
+    // has a NULL `church_id`, and NULLs never collide in a btree unique index —
+    // so neither index can arbitrate the other's rows, and pointing ON CONFLICT
+    // at the wrong one would silently turn `dedupeKey` back into a suggestion.
+    // The branch is on the stored discriminator, so it cannot disagree with what
+    // was written.
+    if (row.anchorType !== "church") {
+      const [insertedOrg] = await db
+        .insert(notifications)
+        .values(row)
+        // Matches `notifications_org_dedupe_key_unique_idx` (migration 0036),
+        // predicate included — the same byte-for-byte rule as the church index
+        // below, and for the same reason.
+        .onConflictDoNothing({
+          target: [
+            notifications.anchorOrgId,
+            notifications.recipientUserId,
+            notifications.dedupeKey,
+          ],
+          where: sql`${notifications.anchorOrgId} is not null and ${notifications.dedupeKey} is not null and ${notifications.status} <> 'cancelled'`,
+        })
+        .returning();
+
+      return insertedOrg ?? null;
+    }
+
     const [inserted] = await db
       .insert(notifications)
       .values(row)
@@ -509,13 +725,22 @@ export const dbEnqueueDeps: EnqueueDeps = {
     return inserted ?? null;
   },
 
-  async findByDedupeKey(churchId, recipientUserId, dedupeKey) {
+  async findByDedupeKey(anchor, recipientUserId, dedupeKey) {
+    // Scoped on the DISCRIMINATED column, never on a coalesced id: the read-back
+    // decides which row a caller is handed as "already recorded", so a predicate
+    // that could match the other anchor's column would hand a plant's row to an
+    // org (and the reverse) on a shared key.
+    const anchorWhere =
+      anchor.type === "church"
+        ? eq(notifications.churchId, anchor.churchId)
+        : eq(notifications.anchorOrgId, anchor.orgId);
+
     const [existing] = await db
       .select()
       .from(notifications)
       .where(
         and(
-          eq(notifications.churchId, churchId),
+          anchorWhere,
           eq(notifications.recipientUserId, recipientUserId),
           eq(notifications.dedupeKey, dedupeKey),
           // The same liveness term the index carries. Cancelled rows keep their

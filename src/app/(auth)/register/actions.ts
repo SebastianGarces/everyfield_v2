@@ -154,9 +154,13 @@ export async function register(
   // signup: the invitation is what the church gets associated with, and there
   // is nothing to associate until the church exists. So the name is required
   // here even though it is optional for a cold planter signup.
-  const redeeming = invitation?.redeemable ? invitation : null;
+  // No `redeemable` branch here since #304 round 10 (ruled 2026-08-11): a
+  // targeted invitation is `null` out of `describeInvitationForRegistration`,
+  // so an invitation that reached this far is OPEN and redeemable by
+  // definition. The flag was constant true and cost an account-existence
+  // oracle on this public route.
   const invitedPlanter =
-    redeeming?.accountType === "planter" && accountType === "planter";
+    invitation?.accountType === "planter" && accountType === "planter";
 
   if (invitedPlanter && !organizationName) {
     return {
@@ -248,8 +252,8 @@ export async function register(
   // invitation still pending, which the planter can answer later — the one
   // thing it must never leave behind is an association without an accepted
   // invitation (memory/invariants.md → Multi-Tenancy).
-  if (redeeming) {
-    await redeemRegistrationInvitation(redeeming, {
+  if (invitation) {
+    await redeemRegistrationInvitation(invitation, {
       id: userId,
       role,
       churchId,

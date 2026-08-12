@@ -40,6 +40,20 @@ import {
 // state the feed just re-read. The feed itself does not wait for it — it holds
 // an optimistic row state (memory/contracts/data-patterns.md) — so the visible
 // effect is instant and the badge follows.
+//
+// SESSION FIRST, THEN THE PARSE (ruled 2026-08-10; extended repo-wide in round
+// 8 of #304). Every export opens with `currentViewer()`, which is this module's
+// mint — it awaits `verifySession()` on its first line — and it sits ABOVE the
+// `safeParse` in the two exports that have one. While the parse ran first, an
+// anonymous POST of `"not-a-uuid"` came back `{ success: false, error: "Invalid
+// notification" }` while an anonymous POST of a well-formed uuid threw: a free
+// oracle for the id and cursor shapes, and, worse, an endpoint whose first line
+// said nothing about who was calling.
+//
+// The mint being a HELPER does not weaken the claim, but it does mean the
+// structural test cannot look for `verifySession()` in these bodies — it looks
+// for the mint this module actually uses. `service.test.ts` §1b‴ names it per
+// module for exactly that reason.
 // ============================================================================
 
 /** What a mark-read action tells the caller. */
@@ -107,14 +121,14 @@ async function currentViewer(): Promise<
 export async function markNotificationReadAction(
   notificationId: string
 ): Promise<MarkReadActionResult> {
-  const parsed = notificationIdSchema.safeParse(notificationId);
-  if (!parsed.success) {
-    return { success: false, error: "Invalid notification" };
-  }
-
   const resolved = await currentViewer();
   if (!resolved.ok) {
     return { success: false, error: resolved.error };
+  }
+
+  const parsed = notificationIdSchema.safeParse(notificationId);
+  if (!parsed.success) {
+    return { success: false, error: "Invalid notification" };
   }
 
   const { markedCount } = await markVisibleNotificationRead(
@@ -153,14 +167,14 @@ export async function markAllNotificationsReadAction(): Promise<MarkReadActionRe
 export async function loadMoreNotificationsAction(
   input: LoadMoreInput
 ): Promise<LoadMoreActionResult> {
-  const parsed = loadMoreSchema.safeParse(input);
-  if (!parsed.success) {
-    return { success: false, error: "Could not load more notifications" };
-  }
-
   const resolved = await currentViewer();
   if (!resolved.ok) {
     return { success: false, error: resolved.error };
+  }
+
+  const parsed = loadMoreSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: "Could not load more notifications" };
   }
 
   const now = new Date();

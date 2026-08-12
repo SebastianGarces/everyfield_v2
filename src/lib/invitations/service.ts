@@ -40,6 +40,8 @@
 // the imported module, so `export default` and re-exports are caught too.
 // ============================================================================
 
+import { z } from "zod";
+
 import type { OrganizationInvitation } from "@/db/schema";
 import { verifySession } from "@/lib/auth/session";
 
@@ -49,6 +51,7 @@ import {
   createInvitationAs,
   declineInvitationAs,
   invitationActorFromSession,
+  invitationTargetKinds,
   invitationView,
   revokeInvitationAs,
   type InvitationRequest,
@@ -83,15 +86,69 @@ async function run(
 }
 
 /**
+ * The ONLY shape a client may POST at `createInvitation` (#304 ruling 4, fix 2
+ * — HR4 2026-08-09).
+ *
+ * WHY A RUNTIME SCHEMA AND NOT THE TYPE. `createInvitation` is an export of a
+ * `"use server"` module, so it is an HTTP endpoint, and its parameter is a
+ * TYPED OBJECT rather than a string. TypeScript erases: `InvitationRequest`
+ * describes what a well-behaved caller sends and constrains a forged body not
+ * at all. That type also declares `targetChurchId` / `targetSendingChurchId` —
+ * the keys the SERVER writes on after resolving the address — so the endpoint's
+ * declared surface literally included the fields that decide which organization
+ * gets enrolled. `strictObject` is what makes the two shapes the same thing at
+ * runtime: an unknown key is a REFUSAL, not a silently stripped extra, so a
+ * probe of this endpoint fails loudly instead of half-working.
+ *
+ * The rule this instances: every `"use server"` export whose parameter is an
+ * object parses a strict schema before the logic layer sees it. The other three
+ * actions here take a bare `invitationId: string` and are covered by the id
+ * checks in the logic layer; the object-taking actions elsewhere in this track
+ * (`settings/association/actions.ts`, `oversight/plants/[id]/actions.ts`) parse
+ * their own. `service.test.ts` pins that this file has no unparsed object
+ * parameter.
+ *
+ * Deliberately NOT a place that re-decides anything: no expiry (server-fixed),
+ * no inviting org, no target. Just the two fields a form has.
+ */
+const invitationRequestSchema = z.strictObject({
+  inviteeEmail: z.string(),
+  inviteAs: z.enum(invitationTargetKinds).optional(),
+});
+
+/**
+ * What a refused parse reads as. One message, and it names the form rather than
+ * the schema: a real user only ever reaches it by a bug, and everybody else
+ * reaching it is probing.
+ */
+const INVALID_REQUEST_ERROR = "Check the form and try again";
+
+/**
  * Issue an invitation. The inviting org and the invitation `type` are derived
  * from the session — a client says only who is being invited — so an oversight
  * admin can never enrol a plant into an org that is not theirs.
+ *
+ * The parse below is what makes "a client says only who is being invited" true
+ * of the wire and not just of the type.
+ *
+ * SESSION FIRST, THEN PARSE. Every action in this module rejects from its FIRST
+ * statement when there is no session — `service.test.ts` executes the forged
+ * call and requires the throw — so the schema must not run ahead of it. An
+ * anonymous POST that also carried a malformed body would otherwise read back
+ * a validation message instead of `Unauthorized`, which tells an unauthenticated
+ * caller that the endpoint exists and what it wants.
  */
 export async function createInvitation(
   request: InvitationRequest
 ): Promise<InvitationActionResult> {
   const actor = invitationActorFromSession(await verifySession());
-  return run("createInvitation", () => createInvitationAs(actor, request));
+
+  const parsed = invitationRequestSchema.safeParse(request);
+  if (!parsed.success) {
+    return { success: false, error: INVALID_REQUEST_ERROR };
+  }
+
+  return run("createInvitation", () => createInvitationAs(actor, parsed.data));
 }
 
 /**

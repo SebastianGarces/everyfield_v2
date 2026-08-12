@@ -79,12 +79,19 @@ export function RegisterForm({
   invitation?: RegistrationInvitation | null;
 }) {
   const [state, formAction, pending] = useActionState(register, initialState);
-  const redeeming = invitation?.redeemable ? invitation : null;
-  // A redeemed invitation DECIDES the account type — it was issued to a church
-  // plant or to a sending church, and picking the other one would create an
-  // organization the invitation cannot associate. So the choice is not offered.
+  // EVERY INVITATION THAT REACHES THIS FORM IS REDEEMABLE (#304 round 10,
+  // ruled 2026-08-11). There used to be a `redeeming = invitation?.redeemable`
+  // branch here, and the whole form varied on it — which told a visitor
+  // holding any invitation id whether its address already had an account.
+  // `describeInvitationForRegistration` now answers `null` for a targeted row,
+  // so a non-null `invitation` is an OPEN one by construction and there is
+  // nothing left to branch on.
+  //
+  // An invitation DECIDES the account type — it was issued to a church plant or
+  // to a sending church, and picking the other one would create an organization
+  // the invitation cannot associate. So the choice is not offered.
   const [accountType, setAccountType] = useState<AccountType>(
-    redeeming?.accountType ?? "planter"
+    invitation?.accountType ?? "planter"
   );
 
   // Controlled so a rejected submit (e.g. invalid invite code) keeps everything
@@ -105,7 +112,7 @@ export function RegisterForm({
   // An invited planter names their plant here; a cold planter signup still
   // creates no church and is not asked for one.
   const needsPlantName =
-    redeeming?.accountType === "planter" && accountType === "planter";
+    invitation?.accountType === "planter" && accountType === "planter";
 
   return (
     <Card className="w-full max-w-md">
@@ -126,16 +133,16 @@ export function RegisterForm({
           <input type="hidden" name="invitationId" value={invitation.id} />
         )}
         <CardContent className="space-y-6">
-          {redeeming && (
+          {invitation && (
             <div
               role="status"
               className="border-primary/30 bg-primary/5 rounded-md border p-3 text-sm"
             >
               <p className="font-medium">
-                {redeeming.invitingOrgName} invited you to EveryField
+                {invitation.invitingOrgName} invited you to EveryField
               </p>
               <p className="text-muted-foreground mt-1">
-                {redeeming.accountType === "planter"
+                {invitation.accountType === "planter"
                   ? "Name your church plant below — it will be associated with them as soon as you finish."
                   : "Your sending church will be associated with them as soon as you finish."}
               </p>
@@ -149,7 +156,7 @@ export function RegisterForm({
 
           {/* Account Type Selection — not offered while redeeming an
               invitation, which already decided it (see above). */}
-          {!redeeming && (
+          {!invitation && (
             <div className="space-y-3">
               <Label>I am a...</Label>
               <RadioGroup

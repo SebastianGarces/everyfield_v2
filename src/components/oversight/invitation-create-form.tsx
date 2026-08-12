@@ -8,10 +8,12 @@
 //   * the invitee's EMAIL. There is no picker of existing church plants, on
 //     purpose: an oversight admin sees only the plants their org is associated
 //     with, so a dropdown of invitable plants would list every plant in the
-//     product to every org. The server resolves the address privately — and
-//     since 2026-08-04 an address that already has an account is REFUSED there,
-//     because nothing in the product lets that person answer yet (#277). The
-//     copy below says so before the admin types, and the refusal says so after.
+//     product to every org. The server resolves the address privately, and
+//     since #304 an address that already has an account is a legitimate target
+//     — there is now somewhere in the product for that person to answer from
+//     (`/settings/association`). NEITHER OUTCOME IS REPORTED: the refusal is
+//     always the same sentence (`ACCOUNT_NOT_INVITABLE_MESSAGE`) and, since
+//     ruling 4 item 5, so is the success notice. See `InviteCreatedNotice`.
 //   * what kind of organization they are. A sending church can only invite
 //     church plants, so it has no choice to make and the field is not rendered.
 //
@@ -70,8 +72,6 @@ export function InvitationCreateForm({
         <CardDescription>
           Send an invitation to a church planter&rsquo;s email address. They
           decide whether to accept — nothing is associated until they do.
-          Invitations go to people who have not signed up yet; an address that
-          already has an EveryField account cannot be invited.
         </CardDescription>
       </CardHeader>
       <form action={formAction}>
@@ -154,52 +154,67 @@ export function InvitationCreateForm({
 }
 
 /**
- * What to do next, shown once the row exists. Email delivery is not part of
- * this surface yet, so the link is handed to the admin rather than implied —
- * telling somebody an invitation was "sent" when nothing left the building is
- * the kind of copy that costs a user a week.
+ * What the admin reads once the row exists — ONE message, whatever was created.
+ *
+ * ----------------------------------------------------------------------------
+ * RULED 2026-08-09 (#304 ruling 4, item 5): reword, never assert existence
+ * ----------------------------------------------------------------------------
+ *
+ * There used to be two notices. One said "they already have an EveryField
+ * account, so there is no link to send"; the other handed over a
+ * `/register?invitation=…` URL with a Copy button. Between them they answered,
+ * for any address an admin cared to type, the single question ruling 2 spent
+ * the whole refusal vocabulary hiding: does this person have an account? A
+ * collapsed refusal and a branching success are not a closed oracle — they are
+ * a closed one and an open one, and the open one is the easier probe, because
+ * it needs no error at all.
+ *
+ * So both cases render this, and it is true of both. It names no account, no
+ * organization and no link.
+ *
+ * ----------------------------------------------------------------------------
+ * DELIVERY-NEUTRAL, TOO (#304 round 10, RULED 2026-08-11)
+ * ----------------------------------------------------------------------------
+ *
+ * The previous wording — "This invitation is answered inside EveryField. You
+ * will hear as soon as they answer" — was false for half its audience. An
+ * address with no account has nobody inside the product to answer: the only
+ * route to that row is `/register?invitation=<id>`, and item 5 removed the one
+ * surface that ever showed it. The admin was told to wait for an answer nobody
+ * could give.
+ *
+ * The ruling names exactly two things to say, and both are true whatever is
+ * behind the address: the invitation SITS IN THE LIST BELOW and can be revoked
+ * there, and the admin should TELL THE PERSON DIRECTLY. Deliberately absent:
+ * any statement about delivery mechanics. Saying "email is not live yet" would
+ * be true today and false the week PR #392 ships, and the copy must not need
+ * re-reading then. Also absent, permanently: anything derived from the row's
+ * two target columns (item 5 stands).
+ *
+ * WHAT THE ADMIN LOSES, and why it is acceptable. An open invitation's token
+ * still works — `/register?invitation=<id>` is untouched, and it is what the
+ * invitation EMAIL will carry when delivery ships. What is gone is the admin
+ * hand-forwarding that URL out of band, which was a stopgap for the missing
+ * email and cost an account-existence disclosure on every successful invite.
+ * Do not reintroduce a link here without a ruling that supersedes item 5.
  */
 function InviteCreatedNotice({
   created,
 }: {
   created: NonNullable<CreateInvitationState["created"]>;
 }) {
-  const [copied, setCopied] = useState(false);
-  const url =
-    typeof window === "undefined"
-      ? created.inviteePath
-      : `${window.location.origin}${created.inviteePath}`;
-
   return (
     <div
       role="status"
-      className="border-primary/30 bg-primary/5 space-y-2 rounded-md border p-3 text-sm"
+      className="border-primary/30 bg-primary/5 space-y-1 rounded-md border p-3 text-sm"
     >
       <p className="font-medium">
         Invitation created for {created.inviteeEmail}
       </p>
       <p className="text-muted-foreground">
-        Send them this link. It carries the invitation, so the plant they create
-        arrives already associated with you — and it only works for the address
-        above, so if that is wrong, revoke this invitation and send a new one.
+        Tell them directly that you have invited them. Until they answer, it
+        sits in the list below, where you can revoke it.
       </p>
-      <div className="flex flex-wrap items-center gap-2">
-        <code className="bg-muted min-w-0 flex-1 truncate rounded px-2 py-1 text-xs">
-          {url}
-        </code>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="cursor-pointer"
-          onClick={async () => {
-            await navigator.clipboard.writeText(url);
-            setCopied(true);
-          }}
-        >
-          {copied ? "Copied" : "Copy link"}
-        </Button>
-      </div>
     </div>
   );
 }

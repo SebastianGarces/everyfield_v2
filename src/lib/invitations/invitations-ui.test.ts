@@ -4,19 +4,23 @@ import path from "node:path";
 import { test } from "node:test";
 
 import {
-  ACCOUNT_EXISTS_MESSAGE,
-  ALREADY_OURS_MESSAGE,
-  SLOT_TAKEN_MESSAGE,
+  ACCOUNT_NOT_INVITABLE_MESSAGE,
   bindOpenInvitationTargetQuery,
-  inviteeAccountRefusal,
+  inviteeAccountTarget,
   isInvitationTargetKind,
   normalizeInviteeEmail,
+  resolveInvitationForResolvedTarget,
   resolveInvitationRequest,
+  slotRefusalMessage,
   type InvitationActor,
 } from "./core";
+import { toInvitationListRow } from "./list-row";
 import {
+  describeInvitationForRegistration,
   invitationEmailMismatchMessage,
   registrationEmailMatchesInvitation,
+  type InvitationForRegistration,
+  type RegistrationInvitationReader,
 } from "@/app/(auth)/register/beta-gate";
 
 // ============================================================================
@@ -94,6 +98,7 @@ const INVITATIONS_LIST = read(
   "oversight",
   "invitations-list.tsx"
 );
+const LIST_ROW = read("lib", "invitations", "list-row.ts");
 const REGISTER_ACTIONS = read("app", "(auth)", "register", "actions.ts");
 const REGISTER_FORM = read("app", "(auth)", "register", "register-form.tsx");
 const REGISTER_BETA_GATE = read("app", "(auth)", "register", "beta-gate.ts");
@@ -120,6 +125,11 @@ const SC_ADMIN = actor({
   sendingChurchId: SENDING_CHURCH,
 });
 const NET_ADMIN = actor({ role: "network_admin", sendingNetworkId: NETWORK });
+
+/** A sending church that is NOT the one `SC_ADMIN` speaks for. */
+const OTHER_SENDING_CHURCH = "66666666-6666-4666-8666-666666666666";
+/** The stand-in for "the invitation was created" in the refusal enumeration. */
+const SUCCESS = "created";
 
 // ----------------------------------------------------------------------------
 // 1. Ruling: no expiry field
@@ -188,16 +198,142 @@ test("the occupied-slot refusal is inside createInvitationAs, not the form", () 
   assert.match(CREATE_FORM, /state\.error/);
 });
 
-test("the two refusals say different things", () => {
-  // "already yours" and "belongs to somebody else" are different facts and lead
-  // to different next actions (nothing to do vs. ask them to leave that org
-  // first, #277/#278). They must not read alike — the same rule
-  // `lostClaimReason` follows for accept-time refusals.
-  assert.notEqual(SLOT_TAKEN_MESSAGE, ALREADY_OURS_MESSAGE);
-  for (const message of [SLOT_TAKEN_MESSAGE, ALREADY_OURS_MESSAGE]) {
-    assert.ok(message.length > 20, message);
-    assert.doesNotMatch(message, /error|failed|invalid/i);
+test("every slot refusal is the SAME sentence — ruled 2026-08-09", () => {
+  // RULING 2 on #304. Until this ruling the slot check answered "that plant
+  // belongs to another org" and "that plant is already yours" separately, and
+  // `resolveInvitationTarget` answered "we cannot invite that account". An
+  // authenticated admin could therefore type any address and read back which of
+  // those was true of the stranger behind it — an account/association
+  // enumeration oracle costing one form submission per probe.
+  //
+  // The domain of the verdict is three values and this enumerates all of them,
+  // so the collapse is proven rather than asserted about one branch.
+  assert.equal(slotRefusalMessage(null), null, "a free slot is not a refusal");
+  for (const held of ["ours", "other"] as const) {
+    assert.equal(slotRefusalMessage(held), ACCOUNT_NOT_INVITABLE_MESSAGE, held);
   }
+
+  // …and it is the very message the ACCOUNT lookup already refused with, so
+  // "we cannot invite that account" and "that plant's slot is taken" are one
+  // outcome from outside: the two checks are the two halves of the oracle, and
+  // collapsing only one of them would have collapsed nothing.
+  assert.deepEqual(
+    inviteeAccountTarget({
+      role: "coach",
+      churchId: null,
+      sendingChurchId: null,
+    }),
+    { ok: false, error: slotRefusalMessage("other") }
+  );
+});
+
+test("no second refusal message survives anywhere in the invitation logic", () => {
+  // The constants the ruling retired. Kept as a source assertion because the
+  // failure mode is a well-meaning re-introduction ("the admin can't tell
+  // what's wrong"), and a deleted export is invisible to a behavioural test.
+  assert.doesNotMatch(CORE_CODE, /SLOT_TAKEN_MESSAGE|ALREADY_OURS_MESSAGE/);
+  assert.doesNotMatch(CORE_CODE, /already belongs to a sending church/);
+  assert.doesNotMatch(CORE_CODE, /already part of your organization/);
+
+  // `assertTargetSlotFree` has no message of its own: it asks
+  // `slotRefusalMessage` and throws whatever it gets.
+  const guard = CORE_CODE.slice(
+    CORE_CODE.indexOf("export async function assertTargetSlotFree"),
+    CORE_CODE.indexOf("export function slotRefusalMessage")
+  );
+  assert.match(guard, /const refusal = slotRefusalMessage\(held\)/);
+  assert.match(guard, /throw new InvitationError\(refusal\)/);
+  assert.doesNotMatch(guard, /"/, "no string literal is composed in the guard");
+});
+
+test("EVERY post-resolution refusal is the one message, for every account", () => {
+  // The regression this file did not have. `assertTargetSlotFree` was collapsed
+  // (above), but `createInvitationAs` re-runs the pure authority rules on the
+  // RESOLVED target, and that second call had a sentence of its own: a
+  // `sending_church_admin` who probed an address belonging to another
+  // sending-church admin read back "A sending church can only invite church
+  // plants" — a THIRD outcome, which is the oracle wearing a different hat.
+  //
+  // So the property is asserted over the whole email→verdict pipeline and over
+  // the whole account domain, not over one branch: whatever the address turns
+  // out to be, an admin may learn only "this worked" or "not this address".
+  const accounts = [
+    ["no account at all", undefined],
+    ["planter with a plant", { role: "planter", churchId: PLANT }],
+    ["planter with no plant yet", { role: "planter" }],
+    ["team member", { role: "team_member", churchId: PLANT }],
+    ["coach", { role: "coach", churchId: PLANT }],
+    ["network admin", { role: "network_admin", sendingNetworkId: NETWORK }],
+    [
+      "sending church admin WITH a sending church",
+      { role: "sending_church_admin", sendingChurchId: OTHER_SENDING_CHURCH },
+    ],
+    ["sending church admin with none yet", { role: "sending_church_admin" }],
+  ] as const;
+
+  for (const [who, actingFor] of [
+    ["a sending church admin", SC_ADMIN],
+    ["a network admin", NET_ADMIN],
+  ] as const) {
+    const outcomes = new Set<string>();
+
+    for (const [label, account] of accounts) {
+      const lookup = inviteeAccountTarget(
+        account && {
+          role: account.role,
+          churchId: ("churchId" in account && account.churchId) || null,
+          sendingChurchId:
+            ("sendingChurchId" in account && account.sendingChurchId) || null,
+        }
+      );
+
+      const verdict = !lookup.ok
+        ? lookup.error
+        : // Exactly what `createInvitationAs` does with the resolved target.
+          (() => {
+            const resolved = resolveInvitationForResolvedTarget(
+              actingFor,
+              { inviteeEmail: "probe@example.com" },
+              lookup.target
+            );
+            return resolved.ok ? SUCCESS : resolved.error;
+          })();
+
+      assert.ok(
+        verdict === SUCCESS || verdict === ACCOUNT_NOT_INVITABLE_MESSAGE,
+        `${who} probing ${label} learned: ${verdict}`
+      );
+      outcomes.add(verdict);
+    }
+
+    // …and the set is exactly two values, so no branch smuggles a third.
+    assert.deepEqual(
+      [...outcomes].sort(),
+      [ACCOUNT_NOT_INVITABLE_MESSAGE, SUCCESS].sort(),
+      who
+    );
+  }
+});
+
+test("the post-resolution pass is the collapsed one, at the call site", () => {
+  // The behavioural property above holds only while `createInvitationAs` routes
+  // the second pass through the collapsing wrapper. Reverting it to a bare
+  // `resolveInvitationRequest(actor, {...resolvedTarget.target})` re-opens the
+  // oracle without failing anything else, so the wiring is pinned here.
+  const body = CORE_CODE.slice(
+    CORE_CODE.indexOf("export async function createInvitationAs"),
+    CORE_CODE.indexOf("// Respond")
+  );
+  const calls = code(body).match(/resolveInvitation\w*\(/g) ?? [];
+
+  assert.deepEqual(calls, [
+    // 1. AUTHORITY, before any lookup — legible, and about the ACTOR.
+    "resolveInvitationRequest(",
+    // 2. the address → target lookup.
+    "resolveInvitationTarget(",
+    // 3. the second pass, collapsed, because it speaks about the ADDRESS.
+    "resolveInvitationForResolvedTarget(",
+  ]);
 });
 
 // ----------------------------------------------------------------------------
@@ -354,30 +490,63 @@ test("registration binds THEN accepts, never the other way round", () => {
 });
 
 // ----------------------------------------------------------------------------
-// 6. Ruling (2026-08-04): an address that already has an account is refused
+// 6. #304 restored the targeted path — an existing account now maps to its org
+// ----------------------------------------------------------------------------
+//
+// The 2026-08-04 ruling refused EVERY existing account, on a premise it stated
+// out loud: the only place an invitation could be answered was `/register`, and
+// somebody who already registered cannot register again. #304 removed that
+// premise by building `/settings/association` and the dashboard reminder, so the
+// mapping the ruling described as the restoration is what is asserted here.
 // ----------------------------------------------------------------------------
 
-test("every existing account is refused, whatever role it holds", () => {
-  // The ruling, executed. Until #277 gives an existing account somewhere to
-  // answer from, the only place an invitation CAN be answered is `/register` —
-  // and somebody who already registered cannot register again. So an invitation
-  // to them would sit pending for 30 days with no surface to act on, while the
-  // admin believed it was sent.
-  //
-  // Pure, so it is a real behavioural assertion and not a grep: every role is
-  // refused, with or without an organization of its own, and only "nobody here"
-  // proceeds.
-  for (const role of [
-    "planter",
-    "coach",
-    "team_member",
-    "sending_church_admin",
-    "network_admin",
-  ] as const) {
-    assert.equal(inviteeAccountRefusal({ role }), ACCOUNT_EXISTS_MESSAGE, role);
-  }
+test("an existing account maps to the organization it speaks for", () => {
+  // Pure, so this is a real behavioural assertion and not a grep.
+  assert.deepEqual(
+    inviteeAccountTarget({
+      role: "planter",
+      churchId: PLANT,
+      sendingChurchId: null,
+    }),
+    { ok: true, target: { targetChurchId: PLANT } }
+  );
 
-  assert.equal(inviteeAccountRefusal(undefined), null);
+  assert.deepEqual(
+    inviteeAccountTarget({
+      role: "sending_church_admin",
+      churchId: null,
+      sendingChurchId: SENDING_CHURCH,
+    }),
+    { ok: true, target: { targetSendingChurchId: SENDING_CHURCH } }
+  );
+
+  // No account at all is still the OPEN invitation path, untouched: no target,
+  // and `/register` binds one when they sign up.
+  assert.deepEqual(inviteeAccountTarget(undefined), { ok: true, target: {} });
+});
+
+test("an account that speaks for no invitable org is refused, with ONE message", () => {
+  // The account-enumeration property the 2026-08-04 ruling introduced survives
+  // the restoration: a team member, a coach, a network admin and a planter with
+  // no plant yet are four different facts about an address, and the inviter is
+  // told none of them — only "not this address".
+  const refusals = [
+    { role: "team_member", churchId: PLANT, sendingChurchId: null },
+    { role: "coach", churchId: PLANT, sendingChurchId: null },
+    { role: "network_admin", churchId: null, sendingChurchId: null },
+    // A planter who has not created their plant yet: there is no row to target.
+    { role: "planter", churchId: null, sendingChurchId: null },
+    // A sending church admin with no sending church yet, likewise.
+    { role: "sending_church_admin", churchId: null, sendingChurchId: null },
+  ] as const;
+
+  for (const account of refusals) {
+    assert.deepEqual(
+      inviteeAccountTarget(account),
+      { ok: false, error: ACCOUNT_NOT_INVITABLE_MESSAGE },
+      account.role
+    );
+  }
 });
 
 test("the account refusal is in the service, on the forged-call path", () => {
@@ -390,8 +559,11 @@ test("the account refusal is in the service, on the forged-call path", () => {
     CORE_CODE.indexOf("export async function resolveInvitationTarget"),
     CORE_CODE.indexOf("export async function assertTargetSlotFree")
   );
-  assert.match(target, /inviteeAccountRefusal\(existing\)/);
-  assert.match(target, /if \(refusal\) return \{ ok: false, error: refusal \}/);
+  assert.match(target, /return inviteeAccountTarget\(existing\)/);
+  // The projection is the three columns the pure mapper reads — and nothing
+  // else. Selecting the row would pull `password_hash` into memory to answer
+  // "which org is this".
+  assert.doesNotMatch(target, /\.select\(\)/);
 
   const create = CORE_CODE.slice(
     CORE_CODE.indexOf("export async function createInvitationAs"),
@@ -416,17 +588,36 @@ test("the account refusal reads as a next action, not as a failure", () => {
   // Surfaced as a FORM ERROR — the action returns `result.error` verbatim
   // (asserted in §2) and the create form renders it — so the wording is the
   // whole of what the admin gets. It has to say what happened and what to do.
-  assert.match(ACCOUNT_EXISTS_MESSAGE, /account/i);
-  assert.doesNotMatch(ACCOUNT_EXISTS_MESSAGE, /error|failed|invalid/i);
-  assert.notEqual(ACCOUNT_EXISTS_MESSAGE, SLOT_TAKEN_MESSAGE);
-  assert.notEqual(ACCOUNT_EXISTS_MESSAGE, ALREADY_OURS_MESSAGE);
+  assert.doesNotMatch(ACCOUNT_NOT_INVITABLE_MESSAGE, /error|failed|invalid/i);
 
-  // And the form says it before the admin types, rather than only after the
-  // refusal — the ruling is a real narrowing of who can be invited today.
-  assert.match(
+  // It is now the ONLY thing an admin reads about an address, so it has to be
+  // true of all four situations behind it at once — which means naming none of
+  // them. No role, no organization, no relationship: a message that said "that
+  // plant already belongs to somebody" would be the oracle wearing softer
+  // words.
+  for (const leak of [
+    /already (belongs|part of|yours)/i,
+    /sending church|network/i,
+    /coach|team member/i,
+  ]) {
+    assert.doesNotMatch(ACCOUNT_NOT_INVITABLE_MESSAGE, leak);
+  }
+
+  // What it must still do is point at the two lists that answer "is this
+  // already handled?" from inside the admin's own tenancy.
+  assert.match(ACCOUNT_NOT_INVITABLE_MESSAGE, /pending invitations/i);
+  assert.match(ACCOUNT_NOT_INVITABLE_MESSAGE, /plants/i);
+
+  // The form's own copy has to describe TODAY's rule, not the one #304
+  // replaced: an existing planter can now be invited and answers from
+  // `/settings/association`. Copy that survives only because nobody changed it
+  // is not truthful copy — the same standard `OVERSIGHT_SHARING_TOGGLE` is held
+  // to.
+  assert.doesNotMatch(
     CREATE_FORM,
     /already has an EveryField account cannot be invited/
   );
+  assert.match(CREATE_FORM, /planter/i);
 });
 
 // ----------------------------------------------------------------------------
@@ -586,4 +777,460 @@ test("the mismatch message says which address the invitation is for", () => {
   const addressless = invitationEmailMismatchMessage(null);
   assert.doesNotMatch(addressless, /undefined|null/);
   assert.match(addressless, /new one/i);
+});
+
+// ----------------------------------------------------------------------------
+// 9. The success notice NEVER asserts whether an account exists
+//    (#304 ruling 4 item 5, RULED 2026-08-09 — supersedes the HR4 fix that
+//    branched the notice)
+// ----------------------------------------------------------------------------
+//
+// The earlier revision returned `/register?invitation=…` for an OPEN invitation
+// and `null` for a TARGETED one, and rendered a different notice for each. That
+// is the enumeration oracle ruling 2 closed on the REFUSAL path, reopened on the
+// success path where it costs an attacker no error at all. The ruling: one
+// neutral message for both, and no register link on this surface.
+
+test("the create action returns one success shape, carrying no target signal", () => {
+  const action = code(INVITATIONS_ACTIONS);
+
+  // The two columns that answer "does this address already have an account" are
+  // the server's alone. Nothing derived from either may be composed into the
+  // response — not a boolean, not a nullable path.
+  assert.doesNotMatch(action, /result\.invitation\.targetChurchId/);
+  assert.doesNotMatch(action, /result\.invitation\.targetSendingChurchId/);
+  assert.doesNotMatch(action, /inviteePath/);
+
+  // …and the state type has no key for one to come back in, so a future edit
+  // has to change the contract rather than slip a field through it.
+  assert.match(action, /created\?: \{ inviteeEmail: string \}/);
+});
+
+test("the create surface renders no register link and no branch", () => {
+  const form = code(CREATE_FORM);
+
+  // No branch on the created shape: one message for both kinds of invitation.
+  assert.doesNotMatch(form, /inviteePath/);
+  assert.doesNotMatch(form, /InviteLink/);
+
+  // The link, its URL composition and the clipboard control are all gone from
+  // this surface — `/register` is the invitee's own path, not something an
+  // admin is handed to forward.
+  assert.doesNotMatch(form, /register\?invitation=/);
+  assert.doesNotMatch(form, /clipboard/);
+  assert.doesNotMatch(form, /location\.origin/);
+
+  // The one message. It is true whether or not the address has an account, and
+  // it names neither.
+  assert.match(form, /Tell them directly that you have invited them\./);
+  assert.doesNotMatch(form, /already have an EveryField account/);
+
+  // DELIVERY-NEUTRAL (round 10, ruled 2026-08-11). The previous wording
+  // promised "you will hear as soon as they answer", which is false for an
+  // address with nobody inside the product to answer. The replacement says the
+  // two things that are true either way — tell them yourself, and it sits in
+  // the revocable list — and says nothing about HOW an invitation travels, so
+  // it does not need re-reading the week email delivery ships.
+  assert.match(form, /sits in the list below, where you can revoke it/);
+  for (const mechanic of [
+    /you will hear/i,
+    /email delivery/i,
+    /not live yet/i,
+    /we (will )?(send|email)/i,
+    /out of band/i,
+  ]) {
+    assert.doesNotMatch(form, mechanic, String(mechanic));
+  }
+});
+
+test("no copy on the create surface claims an account does or does not exist", () => {
+  // Comments stripped, JSX text kept: the disclosure would be in a rendered
+  // sentence, and the comment RECORDING the removed sentence must not be what
+  // fails the test (the same reason `code()` exists).
+  const rendered = code(CREATE_FORM).split(
+    "export function InvitationCreateForm"
+  )[1];
+
+  for (const tell of [
+    /they already have/i,
+    /has not signed up/i,
+    /creates their account/i,
+    /no link to send/i,
+  ]) {
+    assert.doesNotMatch(rendered, tell, String(tell));
+  }
+});
+
+test("the register token wire is untouched by the notice ruling", () => {
+  // What item 5 removed is the ADMIN-FACING link, not the token. `/register`
+  // still redeems an open invitation — it is what an invitation email will
+  // carry — so the register surface's own binding must not have moved.
+  assert.match(code(REGISTER_ACTIONS), /invitation/i);
+  assert.match(code(REGISTER_FORM), /invitation/i);
+});
+
+// ----------------------------------------------------------------------------
+// 9b. …and neither does the PENDING LIST, on the same page
+//     (#304 ruling 4 item 5, extended 2026-08-09 on the integration verdict)
+// ----------------------------------------------------------------------------
+//
+// The first pass at item 5 fixed the notice and left the oracle standing one
+// section below it. `/oversight/invitations` mounts the create form and the
+// list together; each row arrived with `isOpen` (both target columns null) and
+// the list rendered a `/register?invitation=` Copy-link button on exactly those
+// rows. Type an address, read the neutral notice, look at the row that just
+// appeared: Copy link present means no EveryField account, absent means there
+// is one. Same probe, in a control instead of a sentence, and cheaper — the row
+// is already on screen.
+//
+// It was DEAD CODE before this track: `resolveInvitationTarget` refused every
+// address that already had an account, so `isOpen` was always true. #304 revives
+// targeting and makes the conditional live. Hence the behavioural test below:
+// the two target shapes an admin can now produce must both render one surface.
+
+test("the two target shapes an admin can produce are distinguishable — server-side only", () => {
+  // The PREMISE, executed, so this section cannot rot into a tautology: with
+  // targeting revived, one admin typing two addresses gets two different rows.
+  // Everything after this test is about that difference never being rendered.
+  const accountless = resolveInvitationForResolvedTarget(
+    NET_ADMIN,
+    { inviteeEmail: "nobody@example.com" },
+    {}
+  );
+  const hasAccount = resolveInvitationForResolvedTarget(
+    NET_ADMIN,
+    { inviteeEmail: "planter@example.com" },
+    { targetChurchId: PLANT }
+  );
+
+  assert.ok(accountless.ok && hasAccount.ok);
+  assert.equal(accountless.values.targetChurchId, null);
+  assert.equal(hasAccount.values.targetChurchId, PLANT);
+});
+
+// ----------------------------------------------------------------------------
+// …AND NEITHER DOES THE ROW'S CAPTION
+// (#304 ruling 4 item 5, extended a SECOND time, 2026-08-10)
+// ----------------------------------------------------------------------------
+//
+// The attempt above removed `isOpen` and the Copy-link button, and left the
+// oracle standing ONE FIELD OVER on the same row. The caption was
+//
+//     kindLabel: invitation.type === "sending_church_to_network"
+//       ? "Sending church" : "Church plant"
+//
+// and `type` is target-derived as well: `resolveInvitationRequest` picks the
+// kind from the RESOLVED target and falls back to the admin's `inviteAs` only
+// when there is no target. Executed, the four combinations an admin can produce
+// were:
+//
+//     inviteAs=church,         accountless   -> "Church plant"
+//     inviteAs=church,         sc-admin addr -> "Sending church"
+//     inviteAs=sending_church, accountless   -> "Sending church"
+//     inviteAs=sending_church, planter addr  -> "Church plant"
+//
+// i.e. the caption equalled the admin's own selection when the address had no
+// EveryField account and flipped when it had one of the other kind. One
+// submission, no error, same screen.
+//
+// WHY EVERY GUARD ABOVE MISSED IT, and what this section does instead. The
+// checks were regexes over `page.tsx` (`/targetChurchId/`, `/isOpen/`) plus an
+// allowed-field set that WHITELISTED `kindLabel` — all of them passed while the
+// property was false, because the derivation was transitive through `type`. A
+// regex cannot follow that. So the row mapping is now one exported pure
+// function, `toInvitationListRow`, and the test below CALLS it: it runs the
+// real resolver for the two target shapes an admin can produce and asserts the
+// rendered row is byte-identical. Any field that varies with the target — named
+// after `type`, `targetChurchId` or anything else — fails it whatever it is
+// called. The regexes are kept as a cheap second net, never as the proof.
+
+/** One stored invitation row, built from what the resolver actually returned. */
+function storedRowFrom(resolved: ReturnType<typeof resolveInvitationRequest>) {
+  assert.ok(resolved.ok, "the resolver refused a request this test needs");
+  const sentAt = new Date("2026-08-10T15:00:00.000Z");
+  return {
+    id: "99999999-9999-4999-8999-999999999999",
+    ...resolved.values,
+    status: "pending" as const,
+    createdAt: sentAt,
+    expiresAt: new Date("2026-08-24T15:00:00.000Z"),
+    respondedAt: null,
+    respondedBy: null,
+  };
+}
+
+test("the rendered row is identical for an accountless address and for one with an account of the other kind", () => {
+  // A network admin submits the SAME form selection twice. The only difference
+  // is what the server found behind each address — which is exactly the fact
+  // item 5 says the admin may not learn from this page.
+  for (const inviteAs of ["church", "sending_church"] as const) {
+    const accountless = storedRowFrom(
+      resolveInvitationForResolvedTarget(
+        NET_ADMIN,
+        { inviteeEmail: "nobody@example.com", inviteAs },
+        {}
+      )
+    );
+    // The other kind, so `type` flips: a plant for "sending_church", a sending
+    // church for "church".
+    const withAccount = storedRowFrom(
+      resolveInvitationForResolvedTarget(
+        NET_ADMIN,
+        { inviteeEmail: "nobody@example.com", inviteAs },
+        inviteAs === "sending_church"
+          ? { targetChurchId: PLANT }
+          : { targetSendingChurchId: SENDING_CHURCH }
+      )
+    );
+
+    // The premise: the two rows really are different on the server, so this is
+    // not a tautology. If targeting is ever refused again this fails loudly
+    // rather than passing vacuously.
+    assert.notEqual(
+      accountless.type,
+      withAccount.type,
+      `inviteAs=${inviteAs}: the two target shapes produced the same type`
+    );
+
+    // The property: one rendered row for both.
+    assert.deepEqual(
+      toInvitationListRow(accountless),
+      toInvitationListRow(withAccount),
+      `inviteAs=${inviteAs}: the row differs with what the server found behind the address`
+    );
+  }
+});
+
+test("no row field on the invitations page is derived from a target column", () => {
+  const page = code(INVITATIONS_PAGE);
+  const listRow = code(LIST_ROW);
+
+  // The mapping that builds `InvitationListRow[]` — now `toInvitationListRow`,
+  // with the page holding only the call. Neither target column may be read in
+  // either, and neither may `type`, which is computed from them (that is the
+  // derivation both previous attempts missed).
+  for (const source of [page, listRow]) {
+    assert.doesNotMatch(source, /targetChurchId/);
+    assert.doesNotMatch(source, /targetSendingChurchId/);
+    assert.doesNotMatch(source, /isOpen/);
+    assert.doesNotMatch(source, /invitation\.type/);
+    assert.doesNotMatch(source, /kindLabel/);
+  }
+
+  // The row type is the contract, so a future edit has to change the type
+  // rather than slip a field through it.
+  assert.doesNotMatch(code(INVITATIONS_LIST), /isOpen/);
+  assert.doesNotMatch(code(INVITATIONS_LIST), /kindLabel/);
+});
+
+test("the pending list renders no register link and no per-row variation", () => {
+  const list = code(INVITATIONS_LIST);
+
+  // The control, its URL composition and the clipboard call are all gone.
+  assert.doesNotMatch(list, /register\?invitation=/);
+  assert.doesNotMatch(list, /clipboard/);
+  assert.doesNotMatch(list, /location\.origin/);
+  assert.doesNotMatch(list, /Copy link/);
+
+  // Every pending row renders the SAME controls. The only row fields this
+  // component may read are the five `toInvitationListRow` builds — `status` is
+  // the invitee's own answer and may branch; a sixth field is how the oracle
+  // came back BOTH previous times, so it has to be added here deliberately.
+  // Adding one here is not enough on its own: the deep-equal test above is what
+  // decides whether it varies with the target.
+  const allowed = new Set([
+    "id",
+    "inviteeEmail",
+    "status",
+    "sentLabel",
+    "expiresLabel",
+  ]);
+  const readFields = new Set(
+    [...list.matchAll(/\brow\.(\w+)/g)].map((match) => match[1])
+  );
+  assert.ok(readFields.size > 0, "the component reads no row fields at all");
+  for (const field of readFields) {
+    assert.ok(allowed.has(field), `row.${field} is not an allowed row field`);
+  }
+});
+
+// ----------------------------------------------------------------------------
+// 9c. …AND NEITHER DOES `/register` — the oracle one route over
+//     (#304 round 10, RULED 2026-08-11)
+// ----------------------------------------------------------------------------
+//
+// Items 5, its extension to the page, and its extension to the caption all
+// closed the account-existence question on `/oversight/invitations`. The same
+// question stayed answerable on the PUBLIC register route, and this track is
+// what armed it: `describeInvitationForRegistration` returned
+//
+//     redeemable: targetChurchId === null && targetSendingChurchId === null
+//
+// and `register-form.tsx` branched the whole rendered form on it. On `main`
+// that was inert — every creatable invitation was open, so the flag was
+// constant true. #304 revives targeting and makes it live, which is the same
+// "reviving a refused path re-arms every conditional that was only safe
+// because the path was dead" lesson `list-row.ts` records about `kindLabel`.
+//
+// THE ATTACK needs no session and no error. An admin types any address, reads
+// the deliberately neutral notice, takes the new row's id — which is in their
+// own DOM by design, since Revoke needs it — and opens
+// `/register?invitation=<id>` in a private window.
+//
+// THE FIX is a null-return for any targeted row, so a targeted token and a
+// guessed uuid produce byte-identical pages, and `redeemable` is DELETED rather
+// than left constant.
+//
+// PINNED BY CALLING THE FUNCTION. Every previous guard of this family was a
+// regex over a page and every one of them passed while the property was false.
+// The function reads the database, so it is called through its reader seam with
+// rows the REAL resolver produced — the same technique §9b uses, for the same
+// reason: a hand-written row can be written to agree with whatever the code
+// does.
+
+/** A reader over a fixed row set, counting how far the function got. */
+function readerFor(
+  rows: InvitationForRegistration[]
+): RegistrationInvitationReader & {
+  orgLookups: number;
+} {
+  const seam = {
+    orgLookups: 0,
+    loadInvitation: async (id: string) =>
+      rows.find((row) => row.id === id) ?? null,
+    lookupInvitingOrgName: async () => {
+      seam.orgLookups += 1;
+      return "Dev Church Planting Network";
+    },
+  };
+  return seam;
+}
+
+/** The stored row shape `/register` reads, built from what the resolver returned. */
+function registrationRowFrom(
+  id: string,
+  resolved: ReturnType<typeof resolveInvitationRequest>
+): InvitationForRegistration {
+  assert.ok(resolved.ok, "the resolver refused a request this test needs");
+  return {
+    id,
+    type: resolved.values.type,
+    status: "pending",
+    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    inviteeEmail: resolved.values.inviteeEmail,
+    targetChurchId: resolved.values.targetChurchId,
+    targetSendingChurchId: resolved.values.targetSendingChurchId,
+    sendingChurchId: resolved.values.sendingChurchId,
+    sendingNetworkId: resolved.values.sendingNetworkId,
+  };
+}
+
+test("/register cannot describe a targeted invitation, and says nothing about a guessed uuid", async () => {
+  const TARGETED_PLANT = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const TARGETED_ORG = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const OPEN = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+
+  const rows = [
+    registrationRowFrom(
+      TARGETED_PLANT,
+      resolveInvitationForResolvedTarget(
+        NET_ADMIN,
+        { inviteeEmail: "planter@example.com", inviteAs: "church" },
+        { targetChurchId: PLANT }
+      )
+    ),
+    registrationRowFrom(
+      TARGETED_ORG,
+      resolveInvitationForResolvedTarget(
+        NET_ADMIN,
+        { inviteeEmail: "sc-admin@example.com", inviteAs: "sending_church" },
+        { targetSendingChurchId: SENDING_CHURCH }
+      )
+    ),
+    registrationRowFrom(
+      OPEN,
+      resolveInvitationForResolvedTarget(
+        NET_ADMIN,
+        { inviteeEmail: "nobody@example.com", inviteAs: "church" },
+        {}
+      )
+    ),
+  ];
+
+  // THE PREMISE: these rows differ only in what the server found behind the
+  // address. Everything else about them — pending, unexpired, addressed, from
+  // an org whose name resolves — is identical, so the target is the ONLY reason
+  // an answer below can be null.
+  assert.equal(rows[0].targetChurchId, PLANT);
+  assert.equal(rows[1].targetSendingChurchId, SENDING_CHURCH);
+  assert.equal(rows[2].targetChurchId, null);
+  assert.equal(rows[2].targetSendingChurchId, null);
+
+  const seam = readerFor(rows);
+
+  // The three nulls, deep-equal so a `{}` or an `undefined` cannot pass as one.
+  assert.deepEqual(
+    await describeInvitationForRegistration(TARGETED_PLANT, seam),
+    null,
+    "a resolved-church target is describable to /register"
+  );
+  assert.deepEqual(
+    await describeInvitationForRegistration(TARGETED_ORG, seam),
+    null,
+    "a resolved-sending-church target is describable to /register"
+  );
+  assert.deepEqual(
+    await describeInvitationForRegistration(
+      "00000000-0000-4000-8000-000000000000",
+      seam
+    ),
+    null
+  );
+
+  // The refusal happens BEFORE anything else is read, so a targeted token and a
+  // guessed uuid cost the same work as well as returning the same answer.
+  assert.equal(seam.orgLookups, 0, "a targeted row reached the org lookup");
+
+  // …and the OPEN row still describes, or the three nulls above prove nothing.
+  const open = await describeInvitationForRegistration(OPEN, seam);
+  assert.ok(open, "an open invitation stopped describing");
+  assert.equal(open.inviteeEmail, "nobody@example.com");
+  assert.equal(open.accountType, "planter");
+});
+
+test("the register invitation shape carries no redeemable flag, and nothing branches on one", async () => {
+  const OPEN = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const seam = readerFor([
+    registrationRowFrom(
+      OPEN,
+      resolveInvitationForResolvedTarget(
+        NET_ADMIN,
+        { inviteeEmail: "nobody@example.com", inviteAs: "sending_church" },
+        {}
+      )
+    ),
+  ]);
+
+  const open = await describeInvitationForRegistration(OPEN, seam);
+  assert.ok(open);
+  // The shape that crosses to the client. `redeemable` was the field that
+  // varied with the two target columns; it is gone, not merely always true.
+  assert.deepEqual(Object.keys(open).sort(), [
+    "accountType",
+    "id",
+    "inviteeEmail",
+    "invitingOrgName",
+  ]);
+  // An OPEN `sending_church_to_network` row still registers a SENDING CHURCH —
+  // which is why `accountType` survived the deletion. `type` follows the
+  // admin's own `inviteAs` here, because there was no target to derive it from.
+  assert.equal(open.accountType, "sending_church");
+
+  // The second net, never the proof: no client-side branch on redeemability
+  // survives in the form or in the action that redeems.
+  for (const source of [code(REGISTER_FORM), code(REGISTER_ACTIONS)]) {
+    assert.doesNotMatch(source, /redeemable/);
+    assert.doesNotMatch(source, /const redeeming/);
+  }
+  assert.doesNotMatch(code(REGISTER_BETA_GATE), /redeemable/);
 });

@@ -133,7 +133,9 @@ class FakeDispatchStore implements DispatchDeps {
     this.sequence += 1;
     const stored: Notification = {
       id: `n-${this.sequence}`,
+      anchorType: row.anchorType ?? "church",
       churchId: row.churchId ?? CHURCH,
+      anchorOrgId: row.anchorOrgId ?? null,
       recipientUserId: row.recipientUserId ?? PLANTER,
       category: row.category ?? "tasks",
       type: row.type ?? "task.overdue",
