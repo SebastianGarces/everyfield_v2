@@ -7,14 +7,19 @@
  * from `verifySession()`, and the rules live here where they can be driven by a
  * test through `DeclareJourneyDeps` without a request or a database. Same shape
  * as `./create-church` (#198) and `dashboard/confirm-leadership.ts`.
+ *
+ * THE COMPOSITION ROOT LIVES IN THE ACTION, NOT HERE (ruling on 408's item 5).
+ * `src/lib` is the shared layer every route, script and the phase engine may
+ * import, so nothing in it may import from `src/app` — binding the concrete
+ * deps (`scheduleLaunchAction`, a route-group `"use server"` module, among
+ * them) is `dashboard/actions.ts`'s job, at its call site. A factory here
+ * would drag /launch's action graph into every consumer of this module,
+ * including the test whose whole point is running without a request.
  */
 
 import { formatDate } from "@/lib/datetime";
 import { parseTargetDate } from "@/lib/launch/countdown";
-import { getLaunchForChurch } from "@/lib/launch/queries";
 import { launchTargetDateSchema } from "@/lib/launch/validation";
-import { declareInitialPhase } from "@/lib/phase-engine/transitions";
-import { scheduleLaunchAction } from "@/app/(dashboard)/launch/actions";
 
 import type { OnboardingActor } from "./create-church";
 import { phaseForJourneyStage } from "./steps";
@@ -231,14 +236,4 @@ export async function runDeclareJourney(
       error: "We could not save where you are just now. Please try again.",
     };
   }
-}
-
-/** The real deps. `revalidate` is a parameter so `next/cache` stays in the action. */
-export function declareJourneyDeps(revalidate: () => void): DeclareJourneyDeps {
-  return {
-    revalidate,
-    scheduleLaunch: scheduleLaunchAction,
-    readLaunch: getLaunchForChurch,
-    declareInitialPhase,
-  };
 }

@@ -80,14 +80,18 @@ const DECLARE_CODE = stripComments(
 // ----------------------------------------------------------------------------
 
 test("the date is written through the launch entity's service rail", () => {
+  // The composition root is the ACTION (ruling on 408's item 5): only the app
+  // layer may bind a route-group `"use server"` action, so the import and the
+  // binding are pinned against `dashboard/actions.ts`, not the lib module —
+  // which stays free of `@/app` imports so its test runs without a request.
   assert.match(
-    DECLARE_CODE,
+    ACTIONS_CODE,
     /import \{ scheduleLaunchAction \} from "@\/app\/\(dashboard\)\/launch\/actions"/
   );
-  // The runner writes through its dep; the real deps bind that dep to the rail
+  // The runner writes through its dep; the action binds that dep to the rail
   // and nothing else.
   assert.match(DECLARE_CODE, /await deps\.scheduleLaunch\(\{/);
-  assert.match(DECLARE_CODE, /scheduleLaunch: scheduleLaunchAction,/);
+  assert.match(ACTIONS_CODE, /scheduleLaunch: scheduleLaunchAction,/);
 });
 
 test("no onboarding surface writes a launch date to the church row", () => {
@@ -138,10 +142,13 @@ test("'no date yet' reaches no launch write at all", () => {
 // ----------------------------------------------------------------------------
 
 test("the stage goes through declareInitialPhase, not transitionPhase", () => {
+  // The concrete binding lives in the action's composition root, alongside the
+  // other deps (ruling on 408's item 5); the runner only knows its dep.
   assert.match(
-    DECLARE_CODE,
+    ACTIONS_CODE,
     /import \{ declareInitialPhase \} from "@\/lib\/phase-engine\/transitions"/
   );
+  assert.match(ACTIONS_CODE, /declareInitialPhase,/);
   assert.match(DECLARE_CODE, /await deps\.declareInitialPhase\(/);
   for (const source of [ACTIONS_CODE, DECLARE_CODE]) {
     assert.equal(
@@ -579,10 +586,10 @@ test("'no date yet' over an existing date is refused, and refused before any wri
   );
 
   // It READS the stored launch through the launch module's own query (bound as
-  // `readLaunch` by the real deps), and returns a refusal attached to the date
-  // question.
+  // `readLaunch` by the action's composition root), and returns a refusal
+  // attached to the date question.
   assert.match(branch, /await deps\.readLaunch\(actor\.churchId\)/);
-  assert.match(DECLARE_CODE, /readLaunch: getLaunchForChurch,/);
+  assert.match(ACTIONS_CODE, /readLaunch: getLaunchForChurch,/);
   assert.match(branch, /if \(launch\?\.targetDate\)/);
   assert.match(branch, /status: "error"/);
   assert.match(branch, /field: "date"/);

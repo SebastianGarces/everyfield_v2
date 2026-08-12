@@ -1,6 +1,7 @@
 "use server";
 
 import { verifySession } from "@/lib/auth/session";
+import { getLaunchForChurch } from "@/lib/launch/queries";
 import {
   createChurchDeps,
   runCreateChurch,
@@ -8,11 +9,12 @@ import {
 } from "@/lib/onboarding/create-church";
 import { completeOnboardingStatement } from "@/lib/onboarding/complete-onboarding";
 import {
-  declareJourneyDeps,
   runDeclareJourney,
   type DeclareJourneyInput,
   type DeclareJourneyState,
 } from "@/lib/onboarding/declare-journey";
+import { declareInitialPhase } from "@/lib/phase-engine/transitions";
+import { scheduleLaunchAction } from "@/app/(dashboard)/launch/actions";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import {
@@ -114,6 +116,14 @@ export type {
  * `verifySession()` — no parameter names a user or a church, so a forged POST
  * cannot declare somebody else's plant (`memory/invariants.md` →
  * Authentication).
+ *
+ * The deps are COMPOSED HERE, not in the lib module (ruling on 408's item 5):
+ * `scheduleLaunchAction` is a route-group `"use server"` action, and only the
+ * app layer may bind one — `src/lib` importing from `src/app` would drag
+ * /launch's action graph into every consumer of `declare-journey`. The
+ * bindings themselves are the ruled ones: the launch entity's ONE rail
+ * (LS-001) for the date, the launch module's own read for the re-entry
+ * refusal, and the once-only initial declaration.
  */
 export async function declareJourney(
   input: DeclareJourneyInput
@@ -121,7 +131,12 @@ export async function declareJourney(
   const { user } = await verifySession();
 
   return runDeclareJourney(
-    declareJourneyDeps(revalidateDashboard),
+    {
+      revalidate: revalidateDashboard,
+      scheduleLaunch: scheduleLaunchAction,
+      readLaunch: getLaunchForChurch,
+      declareInitialPhase,
+    },
     { id: user.id, role: user.role, churchId: user.churchId },
     input
   );
