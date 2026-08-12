@@ -4,14 +4,14 @@ import { test } from "node:test";
 import {
   agendaTotalMinutes,
   buildDefaultAgenda,
-  defaultAgendaForType,
   MAX_AGENDA_SECTIONS,
   MAX_SECTION_MINUTES,
   MAX_SECTION_TITLE_LENGTH,
   parseAgenda,
   VISION_MEETING_DEFAULT_AGENDA,
   type AgendaSection,
-} from "./service";
+} from "./agenda";
+import { defaultAgendaForType } from "./service";
 
 // ----------------------------------------------------------------------------
 // VM-013 — the meeting agenda.

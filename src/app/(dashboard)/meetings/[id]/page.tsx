@@ -4,12 +4,17 @@ import { verifySession } from "@/lib/auth/session";
 import {
   getFollowUpCompletion,
   getMeeting,
-  parseAgenda,
   setMeetingAgenda,
+} from "@/lib/meetings/service";
+import {
+  parseAgenda,
   VISION_MEETING_DEFAULT_AGENDA,
   type AgendaSection,
-} from "@/lib/meetings/service";
-import { MEETING_EVALUATION_TASK_CARD_TITLE } from "@/lib/meetings/copy";
+} from "@/lib/meetings/agenda";
+import {
+  meetingLinkedTaskProgressCopy,
+  MEETING_EVALUATION_TASK_CARD_TITLE,
+} from "@/lib/meetings/copy";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { listLocations } from "@/lib/meetings/locations";
@@ -36,15 +41,10 @@ interface MeetingPageProps {
 /**
  * Save this meeting's running order (VM-013).
  *
- * Inline rather than in `meetings/actions.ts` because it is the agenda card's
- * only write and nothing else calls it. Like every action it takes no actor:
- * the church comes from `verifySession()`, and the meeting id is only ever
- * matched inside that church's rows (`setMeetingAgenda` puts the church in the
- * `WHERE`), so a meeting id from another tenant matches nothing and is refused.
- *
- * `refresh()` rather than `revalidatePath` — the house rule for a mutation
- * whose only reader is the page the planter is already on
- * (memory/contracts/data-patterns.md).
+ * Inline because the agenda card is its only caller. It takes no actor — the
+ * church comes from `verifySession()` and `setMeetingAgenda` puts it in the
+ * `WHERE`, so a meeting id from another tenant matches nothing. `refresh()`,
+ * not `revalidatePath` (memory/contracts/data-patterns.md).
  */
 async function saveAgendaAction(
   meetingId: string,
@@ -111,24 +111,8 @@ export default async function MeetingPage({ params }: MeetingPageProps) {
     <div className="space-y-6">
       <MeetingDetails meeting={meeting} locations={locations} />
 
-      {/*
-        VM-020 — the tasks linked to this meeting.
-
-        Titled "Evaluation task", not "Follow-up completion" — ruled 2026-08-12
-        on #312 (decision 2, option A). The query counts only
-        `related_type = 'meeting'` rows, and the one such task the product
-        creates is the evaluation task; the per-attendee follow-ups are linked
-        to the PERSON. The old title promised a follow-up metric over a figure
-        that can only read "0 of 1" or "1 of 1". The ruling keeps the query
-        narrow and shrinks the name to fit it — widening VM-020 at the task
-        generator was considered and explicitly NOT ruled in.
-
-        Rendered only when there is a figure. A meeting whose attendance was
-        never finalized has no linked task yet, and showing it "0%" would
-        report a failure that has not happened; the card is simply absent
-        instead. Once finalized with no linked task, the card appears and says
-        so in words rather than dividing by zero.
-      */}
+      {/* VM-020. Ruled 2026-08-12 on #312 (decision 2, option A) — rationale in copy.ts.
+          `null` until attendance is finalized, so the card is absent rather than 0%. */}
       {followUp && (
         <div className="mx-auto max-w-3xl">
           <Card data-testid="follow-up-completion">
@@ -145,24 +129,16 @@ export default async function MeetingPage({ params }: MeetingPageProps) {
               ) : (
                 <>
                   <div className="flex items-baseline justify-between gap-4">
-                    {/*
-                      The bar's accessible name, not a second copy of it. This
-                      line used to be duplicated into an `aria-label` on the
-                      `Progress` below, and the duplicate had already drifted:
-                      it hardcoded "tasks" while this line branches on
-                      `total === 1`. The ruling's own premise is that
-                      `meetingLinkedTaskConditions` can only ever return
-                      `total: 1`, so the plural was not wrong in an edge case —
-                      it was wrong in the ONLY case a planter can reach. One
-                      sentence, rendered once and pointed at by
-                      `aria-labelledby`, cannot drift from itself.
-                    */}
+                    {/* The bar's accessible name, not a second copy of it — the
+                        `Progress` below points at this id. Sentence in copy.ts. */}
                     <p
                       id="meeting-evaluation-task-progress-label"
                       className="text-sm font-medium"
                     >
-                      {followUp.completed} of {followUp.total}{" "}
-                      {followUp.total === 1 ? "task" : "tasks"} complete
+                      {meetingLinkedTaskProgressCopy(
+                        followUp.completed,
+                        followUp.total
+                      )}
                     </p>
                     <p className="text-2xl font-bold tabular-nums">
                       {followUp.percent}%

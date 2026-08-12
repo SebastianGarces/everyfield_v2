@@ -9,14 +9,24 @@
  *    meant every future ruled string landed in the 1.7k-line data-access
  *    module by precedent.
  * 2. BOUNDARY. `service.ts` opens by importing `@/db`, ten schema tables,
- *    drizzle and `src/lib/tasks/events`, and carries no `import "server-only"`
- *    guard. The moment a card that renders one of these strings becomes
- *    interactive and gains `"use client"`, that whole graph would follow the
- *    import edge into the client bundle. A copy module cannot drag anything.
+ *    drizzle and `src/lib/tasks/events`. The moment a card that renders one of
+ *    these strings becomes interactive and gains `"use client"`, that whole
+ *    graph would follow the import edge into the client bundle. A copy module
+ *    cannot drag anything.
+ *
+ * That boundary is ENFORCED, not merely described — but not by the compiler.
+ * `import "server-only"` is unusable in `service.ts`: the package is a Next.js
+ * build-time alias with no `react-server` export condition under `pnpm test`,
+ * so adding it makes five test files unresolvable, and forcing the condition on
+ * the runner breaks every suite that renders email with `react-dom/server`.
+ * `ruled-copy.test.ts` walks every `"use client"` module in `src` instead and
+ * fails if one value-imports `service.ts`. See the accepted residual in
+ * `memory/invariants.md` → Meetings — Evaluation Comparison.
  *
  * `service.ts` deliberately does NOT re-export these: a pass-through keeps the
  * coupling this module exists to remove and adds a second name for one string.
- * Import them from here.
+ * Import them from here. `agenda.ts` is the same module shape for the agenda's
+ * bounds, clamp and reader, which the client component needs too.
  *
  * The rulings themselves are recorded in `memory/invariants.md` → Meetings —
  * Evaluation Comparison, and asserted in `src/lib/meetings/ruled-copy.test.ts`.
@@ -95,3 +105,29 @@ export function evaluationComparisonDenominatorCopy(
  * meetings.
  */
 export const MEETING_EVALUATION_TASK_CARD_TITLE = "Evaluation task";
+
+/**
+ * The progress line under that card: "1 of 1 task complete".
+ *
+ * One function so there is exactly ONE grammar branch. The sentence used to be
+ * assembled in the page's JSX, which cost twice: the `Progress` bar carried a
+ * second, drifted copy in an `aria-label` (hardcoded "tasks" while the visible
+ * line branched on `total === 1`), and the test that policed it could only read
+ * the page's source text — including a regex over the ternary's exact shape,
+ * which a Prettier re-wrap breaks with no behaviour change.
+ *
+ * As a value it is asserted by equality, and the bar names it with
+ * `aria-labelledby` instead of restating it.
+ *
+ * The singular is not an edge case here. `meetingLinkedTaskConditions` admits
+ * only `related_type = 'meeting'` rows and the product creates exactly one such
+ * task per meeting, so `total === 1` is the ONLY case a planter reaches — see
+ * `MEETING_EVALUATION_TASK_CARD_TITLE` above. The plural stays because the
+ * figure is a count and a count that can read 1 can read 2.
+ */
+export function meetingLinkedTaskProgressCopy(
+  completed: number,
+  total: number
+): string {
+  return `${completed} of ${total} ${total === 1 ? "task" : "tasks"} complete`;
+}

@@ -21,25 +21,9 @@ function formatDelta(delta: number): string {
 /**
  * How this meeting's evaluation compares to the ones before it (VM-016c).
  *
- * Two states, and the second is the point of the requirement: a meeting with
- * no baseline says it has no comparison. It does not compare against zero,
- * which would render a meeting scoring 4.2 as a 4.2-point collapse.
- *
- * The empty state does NOT say "this is your first evaluated meeting" — ruled
- * 2026-08-10 on #312. `null` has two causes and the card cannot tell them
- * apart: nothing was evaluated earlier, OR everything earlier fell outside the
- * `EVALUATION_COMPARISON_WINDOW` most recent evaluations. A planter opening
- * their third meeting out of sixty was being told it was their first. The
- * window is deliberately unchanged; only this sentence is, and it must stay
- * true of both causes.
- *
- * Round 2 of the same ruling (2026-08-10) shortened the sentence and took the
- * window number out of it: the window is a mechanism the planter did not ask
- * about, and a card that has nothing to show should say so in one line. The
- * window stays in code, named only by the constant in `service.ts`.
- *
- * Direction is never carried by colour alone — the arrow and the sentence both
- * say which way it went, so the card survives greyscale and colour blindness.
+ * Both sentences it can show are ruled copy from `copy.ts` — rationale there.
+ * No baseline shows the empty state, never a comparison against zero. Direction
+ * is never carried by colour alone: the arrow and the sentence both say it.
  */
 export function EvaluationComparisonCard({
   comparison,
@@ -53,14 +37,7 @@ export function EvaluationComparisonCard({
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {/*
-            The ruled sentence (round 2, 2026-08-10, #312), rendered from the
-            constant that `copy.ts` exports so the ruling is pinned by an
-            equality in a test rather than by re-parsing this JSX. It is
-            rendered unconditionally: one line, no window number, and true of
-            BOTH causes of `null`, so there is nothing here for a caller to
-            get wrong.
-          */}
+          {/* Ruled 2026-08-10 on #312 (round 2) — rationale in copy.ts. */}
           <p className="text-muted-foreground text-sm">
             {EVALUATION_COMPARISON_EMPTY_COPY}
           </p>
@@ -119,21 +96,8 @@ export function EvaluationComparisonCard({
             <dd className="font-semibold">{previousScore.toFixed(1)}</dd>
           </div>
           <div>
-            {/*
-              This label is deliberately static, and it names its own noun. It
-              used to read "Average of previous {previousCount}", which
-              rendered as the ungrammatical "Average of previous 1" — a bare
-              number with no noun — and stated the denominator a third time on
-              a card that already states it twice: here, and in the ruled
-              sentence three lines below. The count belongs to the sentence
-              that was ruled on.
-
-              Dropping the count left "Previous average", which reads as the
-              average OF the previous meeting — the figure in the column
-              immediately to its left. Restoring the plural noun without the
-              number keeps the term unambiguous and still leaves the
-              denominator to the one sentence that states it.
-            */}
+            {/* Static by ruling (2026-08-12 on #312, decision 1) — the count belongs
+                to the sentence below, and only to it. Rationale in copy.ts. */}
             <dt className="text-muted-foreground">
               Average of previous meetings
             </dt>
@@ -141,21 +105,8 @@ export function EvaluationComparisonCard({
           </div>
         </dl>
 
-        {/*
-          The denominator, said out loud, ONCE. "Above average" means nothing
-          until the reader knows the average covers one meeting or twelve — and
-          knowing it twice helps nobody, so this is the only place the card
-          says how many meetings are behind the number.
-
-          It says what the average COVERS, never what the planter EVALUATED —
-          ruled 2026-08-12 on #312 (decision 1, option B). `previousCount` is
-          the window's size, not the church's history, so the old wording
-          ("the N meetings you evaluated before this one") under-reported a
-          planter past the window by exactly the meetings the window dropped.
-          Rendered from the constant-shaped helper in `copy.ts` for the same
-          reason as the empty state: a test pins it by import, not by re-parsing
-          this JSX.
-        */}
+        {/* The card's ONE statement of the denominator. Ruled 2026-08-12 on #312
+            (decision 1, option B) — rationale in copy.ts. */}
         <p className="text-muted-foreground text-xs">
           {evaluationComparisonDenominatorCopy(previousCount)}
         </p>

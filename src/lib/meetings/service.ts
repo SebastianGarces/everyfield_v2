@@ -25,6 +25,7 @@ import type {
   MeetingUpdateInput,
 } from "@/lib/validations/meetings";
 import { and, asc, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
+import { buildDefaultAgenda, parseAgenda, type AgendaSection } from "./agenda";
 import {
   emitAttendanceRecorded,
   emitAttendanceFinalized,
@@ -1110,20 +1111,14 @@ export interface EvaluationTrendPoint {
  * 2026-08-10 on #312, the window kept as-is) — the number a planter cares
  * about is "how did this one go against how things have been going".
  *
- * This comment used to add that "the rendered copy always says how many
- * meetings the average covers, so the figure never claims more than it
- * counted". That was true of the COUNT and false of the CLAIM: the copy said
- * the planter had EVALUATED that many meetings before this one, which is the
- * window's size, not their history. Ruled 2026-08-12 on #312 (decision 1,
- * option B) — the sentence now reports what the average covers and says
- * nothing about what the planter did, so this comment vouches for nothing.
- * See `evaluationComparisonDenominatorCopy` in `copy.ts`, which holds every
- * ruled string this feature renders — none of them live in this module.
+ * The rendered denominator sentence is `evaluationComparisonDenominatorCopy`
+ * in `copy.ts` — it reports what the average covers, and this comment asserts
+ * nothing about it.
  *
  * The cost of keeping it: for a church past the window, opening an EARLY
  * meeting hands `compareEvaluationToHistory` a window of only LATER meetings,
- * so it returns `null`. The card must therefore never read that `null` as
- * "this is your first evaluated meeting" — see `evaluation-comparison.tsx`.
+ * so it returns `null` even though earlier meetings exist. That is why the
+ * empty-state sentence is ruled — it lives in `copy.ts`.
  *
  * This number is never rendered. Round 2 of the same ruling took the window
  * out of the empty-state sentence, so changing it here changes behaviour only
@@ -1352,133 +1347,23 @@ export async function getChecklistSummary(
 
 // ============================================================================
 // Agenda (VM-013)
+//
+// The shape, the bounds, the clamp and the reader live in `./agenda.ts`, which
+// imports nothing — `AgendaBuilder` is a client component and needs the same
+// bounds and the same clamp this module does. Nothing here re-exports them.
 // ============================================================================
-
-/**
- * One line of a meeting's running order.
- *
- * The agenda lives in `church_meetings.agenda`, a `jsonb` column typed
- * `unknown` by Drizzle — the database will accept any shape at all, including
- * shapes written before this type existed. So nothing here trusts the column:
- * every read goes through `parseAgenda`, which keeps what it can read and drops
- * the rest rather than letting a malformed row throw on render.
- *
- * `minutes` is a duration, never a clock time. Sections are timed relative to
- * whenever the meeting actually starts, so a meeting that begins late does not
- * need its agenda rewritten.
- */
-export interface AgendaSection {
-  /** Stable across reorders — it is what React and the optimistic UI key on. */
-  id: string;
-  title: string;
-  /** Planned length in minutes. Always an integer in [0, MAX_SECTION_MINUTES]. */
-  minutes: number;
-}
-
-/** A single section may not be planned longer than a working day. */
-export const MAX_SECTION_MINUTES = 600;
-/** Guard against a client posting an unbounded array into the jsonb column. */
-export const MAX_AGENDA_SECTIONS = 40;
-/** Long enough for a real section name, short enough to render on one line. */
-export const MAX_SECTION_TITLE_LENGTH = 120;
-
-/**
- * The six-section running order a new vision meeting starts from (VM-013).
- *
- * Titles and order are the requirement, not a suggestion — the FRD names
- * Welcome, Worship, Vision, Q&A, Response, Fellowship. The timings are a
- * starting point the planter is expected to edit; they add to 90 minutes,
- * which is what the Vision Meeting Agenda handout (F6) is written against.
- */
-export const VISION_MEETING_DEFAULT_AGENDA: readonly {
-  title: string;
-  minutes: number;
-}[] = [
-  { title: "Welcome", minutes: 10 },
-  { title: "Worship", minutes: 15 },
-  { title: "Vision", minutes: 25 },
-  { title: "Q&A", minutes: 15 },
-  { title: "Response", minutes: 10 },
-  { title: "Fellowship", minutes: 15 },
-] as const;
-
-/**
- * Mint the default agenda with fresh section ids.
- *
- * Returns a new array of new objects every call: the ids must be unique per
- * meeting, and the constant above must stay frozen no matter what a caller
- * does to what it gets back.
- */
-export function buildDefaultAgenda(): AgendaSection[] {
-  return VISION_MEETING_DEFAULT_AGENDA.map((section) => ({
-    id: crypto.randomUUID(),
-    title: section.title,
-    minutes: section.minutes,
-  }));
-}
 
 /**
  * The default a meeting of this type is offered when it has no agenda.
  * Only vision meetings have a prescribed running order; everything else starts
  * empty and gets the empty state.
+ *
+ * It is the one agenda function that stays in this module: it is keyed on
+ * `MeetingType`, the database's own enum, which is what `agenda.ts` is kept
+ * clear of.
  */
 export function defaultAgendaForType(type: MeetingType): AgendaSection[] {
   return type === "vision_meeting" ? buildDefaultAgenda() : [];
-}
-
-function clampMinutes(value: unknown): number {
-  const parsed =
-    typeof value === "number"
-      ? value
-      : typeof value === "string"
-        ? Number(value)
-        : Number.NaN;
-
-  if (!Number.isFinite(parsed)) return 0;
-  return Math.min(Math.max(Math.round(parsed), 0), MAX_SECTION_MINUTES);
-}
-
-/**
- * Read the `agenda` column into sections, keeping only what is legible.
- *
- * Total function: any input at all — `null`, a legacy string, an object, an
- * array of junk — yields an array, possibly empty. A row that cannot be read
- * renders the empty state; it never breaks the page.
- *
- * Rows missing an `id` are given one here so the UI always has a stable key;
- * the id is persisted on the next save.
- */
-export function parseAgenda(value: unknown): AgendaSection[] {
-  if (!Array.isArray(value)) return [];
-
-  const sections: AgendaSection[] = [];
-
-  for (const entry of value) {
-    if (!entry || typeof entry !== "object") continue;
-
-    const record = entry as Record<string, unknown>;
-    const rawTitle = typeof record.title === "string" ? record.title : "";
-    const title = rawTitle.trim().slice(0, MAX_SECTION_TITLE_LENGTH);
-    if (!title) continue;
-
-    sections.push({
-      id:
-        typeof record.id === "string" && record.id.trim().length > 0
-          ? record.id
-          : crypto.randomUUID(),
-      title,
-      minutes: clampMinutes(record.minutes),
-    });
-
-    if (sections.length >= MAX_AGENDA_SECTIONS) break;
-  }
-
-  return sections;
-}
-
-/** The planned length of the whole meeting, in minutes. */
-export function agendaTotalMinutes(sections: readonly AgendaSection[]): number {
-  return sections.reduce((total, section) => total + section.minutes, 0);
 }
 
 /**
@@ -1524,9 +1409,9 @@ export async function setMeetingAgenda(
 /**
  * How much of a meeting's linked task work is done.
  *
- * The card that renders this is titled `MEETING_EVALUATION_TASK_CARD_TITLE`
- * (`copy.ts`), not "Follow-up completion" — see that constant for why the name
- * had to shrink to what the query counts.
+ * The card that renders this is titled `MEETING_EVALUATION_TASK_CARD_TITLE` and
+ * its progress line is `meetingLinkedTaskProgressCopy` — both in `copy.ts`,
+ * which is where the rulings behind them are written down.
  */
 export interface MeetingFollowUpCompletion {
   /** Tasks linked to this meeting. */

@@ -28,10 +28,12 @@
 //     stacks: the name takes the full row, the timing and the controls sit
 //     under it.
 //
-// It imports nothing at runtime from `lib/meetings/service.ts`: that module
-// pulls in the database client, and this is a client component. The section
-// type comes across as a type-only import (erased at compile time) and the
-// default running order arrives as a prop.
+// It imports nothing from `lib/meetings/service.ts`: that module pulls in the
+// database client, and this is a client component. The section type, the two
+// bounds and the clamp all come from `lib/meetings/agenda.ts`, which imports
+// nothing and is the ONE place that policy is written — restating it here and
+// keeping the two in agreement by hand is what agenda.ts exists to end. The
+// default running order still arrives as a prop.
 // ============================================================================
 
 import { useOptimistic, useState, useTransition } from "react";
@@ -56,7 +58,12 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { AgendaSection } from "@/lib/meetings/service";
+import {
+  clampAgendaMinutes,
+  MAX_AGENDA_SECTIONS,
+  MAX_SECTION_MINUTES,
+  type AgendaSection,
+} from "@/lib/meetings/agenda";
 
 /** What the save action reports back. Never throws at the component. */
 export type AgendaSaveResult =
@@ -86,11 +93,6 @@ export interface AgendaBuilderProps {
   ) => Promise<AgendaSaveResult>;
 }
 
-/** Mirrors `MAX_SECTION_MINUTES` in lib/meetings/service.ts. */
-const MAX_SECTION_MINUTES = 600;
-/** Mirrors `MAX_AGENDA_SECTIONS` in lib/meetings/service.ts. */
-const MAX_AGENDA_SECTIONS = 40;
-
 /**
  * "1h 30m", "45m", "2h". Zero reads as "0m", never as an empty string — a
  * total of nothing is still a total, and a blank there looks like a bug.
@@ -103,11 +105,6 @@ export function formatAgendaDuration(totalMinutes: number): string {
   if (hours === 0) return `${minutes}m`;
   if (minutes === 0) return `${hours}h`;
   return `${hours}h ${minutes}m`;
-}
-
-function clampMinutes(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.min(Math.max(Math.round(value), 0), MAX_SECTION_MINUTES);
 }
 
 export function AgendaBuilder({
@@ -146,7 +143,7 @@ export function AgendaBuilder({
       defaultSections.map((section) => ({
         id: crypto.randomUUID(),
         title: section.title,
-        minutes: clampMinutes(section.minutes),
+        minutes: clampAgendaMinutes(section.minutes),
       }))
     );
   };
@@ -169,7 +166,7 @@ export function AgendaBuilder({
       {
         id: crypto.randomUUID(),
         title,
-        minutes: clampMinutes(Number(newMinutes)),
+        minutes: clampAgendaMinutes(Number(newMinutes)),
       },
     ]);
     setNewTitle("");
@@ -192,7 +189,7 @@ export function AgendaBuilder({
   };
 
   const handleRetime = (section: AgendaSection, raw: string) => {
-    const minutes = clampMinutes(Number(raw));
+    const minutes = clampAgendaMinutes(Number(raw));
     if (minutes === section.minutes) return;
 
     commit(
@@ -345,7 +342,7 @@ export function AgendaBuilder({
                       className="w-20 tabular-nums"
                       data-testid="agenda-section-minutes"
                       onBlur={(event) => {
-                        const clamped = clampMinutes(
+                        const clamped = clampAgendaMinutes(
                           Number(event.target.value)
                         );
                         // Show what was actually stored, not what was typed.
