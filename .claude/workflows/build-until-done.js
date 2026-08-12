@@ -33,6 +33,41 @@ if (!Array.isArray(units) || units.length === 0)
   throw new Error(
     "Pass the wave's units array as args, e.g. [{id,title,lane,files,summary,acceptanceCriteria,issue,risk}, ...]"
   );
+// Child scriptPaths resolve against the SESSION CWD, not this file's directory
+// (probed 2026-08-10: a worktree-located parent loaded the main checkout's
+// child). Default assumes the parent runs from the main checkout; a canary run
+// of an unmerged factory branch MUST pass factoryRoot as the worktree's
+// .claude/workflows, or its children silently load main's (or fail to load).
+const FACTORY_ROOT = parsed?.factoryRoot || ".claude/workflows";
+// ---------------------------------------------------------------------------
+// Recipes — the strategy layer (#399). A recipe is a child workflow at
+// .claude/workflows/recipes/<id>.js that implements ONE WORKSTREAM ATTEMPT and
+// nothing else; the guarantee layer keeps everything around it (claiming,
+// staging, worktrees, scoped verify, attempt accounting, merge-back, and the
+// whole verify-and-ship tail). Contract: ops/agent-os/recipes.md.
+//
+// An unknown id fails HERE, at parse — before any claim, before any worktree,
+// never mid-build.
+// ---------------------------------------------------------------------------
+const KNOWN_RECIPES = ["implement-straight", "generate-and-filter"];
+const recipeOf = (u) => u.recipe || "implement-straight";
+for (const u of units)
+  if (!KNOWN_RECIPES.includes(recipeOf(u)))
+    throw new Error(
+      `unit "${u.id}" names unknown recipe "${u.recipe}". Known recipes: ${KNOWN_RECIPES.join(", ")}. ` +
+        `Recipe validation is a parse-time gate — failing here means nothing was claimed and no worktree was cut.`
+    );
+// ---------------------------------------------------------------------------
+// Recipe cost, in concurrent agents — which is also how many attempt-reserves
+// one call needs. generate-and-filter fans out 3 candidate implementers inside
+// its child workflow, where the agent cap cannot see them; recipes.md and
+// dispatch's SKILL.md say it "counts as 3 agents against the cap", and this
+// literal is where that claim is ENFORCED: boundedParallel chunks stages and
+// tracks by summed weight, and both reserve checks multiply by it. A recipe
+// missing here weighs 1.
+// ---------------------------------------------------------------------------
+const RECIPE_AGENT_COST = { "implement-straight": 1, "generate-and-filter": 3 };
+const agentCostOf = (ws) => RECIPE_AGENT_COST[ws.recipe] || 1;
 const MAX_ATTEMPTS = parsed?.maxAttempts || 3;
 // How many times a label write is re-attempted before the track is errored.
 // A label write is idempotent, so retrying is free; NOT retrying is what left
@@ -126,140 +161,9 @@ const RETRY_IMPL_SCHEMA = {
     },
   },
 };
-const DOD_SCHEMA = {
-  type: "object",
-  required: ["verdict", "gates", "acceptanceCriteria", "summary"],
-  properties: {
-    verdict: { type: "string", enum: ["PASS", "PASS_WITH_WARNINGS", "FAIL"] },
-    highRisk: { type: "boolean" },
-    gates: {
-      type: "array",
-      items: {
-        type: "object",
-        required: ["id", "status", "evidence"],
-        properties: {
-          id: { type: "string" },
-          status: { type: "string", enum: ["PASS", "FAIL", "SKIPPED"] },
-          evidence: { type: "string" },
-        },
-      },
-    },
-    acceptanceCriteria: {
-      type: "array",
-      items: {
-        type: "object",
-        required: ["ac", "status", "evidence"],
-        properties: {
-          ac: { type: "string" },
-          status: { type: "string", enum: ["PASS", "FAIL"] },
-          evidence: { type: "string" },
-        },
-      },
-    },
-    screenshots: { type: "array", items: { type: "string" } },
-    // Warnings decide whether a passing track may merge without a human.
-    //
-    // The DoD proves the code does what the SPEC said. It cannot prove the spec
-    // was right. Every warning in the 2026-07-26 batch that genuinely needed the
-    // human was of the second kind — "is a church-wide packet the intended read
-    // of DOC-014?" — while the code-quality ones (a UTC date format, a contrast
-    // ratio, a duplicated constant) were real but decidable without them. So the
-    // classification below, not the severity, is what gates auto-merge.
-    warnings: {
-      type: "array",
-      items: {
-        type: "object",
-        required: ["kind", "summary"],
-        properties: {
-          kind: {
-            type: "string",
-            enum: ["code-quality", "spec-question"],
-            description:
-              "spec-question = answering it could change WHAT was built (product intent, an AC that did not say, a requirement read two ways). code-quality = a defect or improvement in HOW it was built, decidable from the codebase alone. When genuinely torn, choose spec-question.",
-          },
-          summary: { type: "string" },
-          detail: {
-            type: "string",
-            description:
-              "for code-quality: enough to file as a standalone issue. for spec-question: the decision the human must make, and the options.",
-          },
-          files: { type: "array", items: { type: "string" } },
-        },
-      },
-    },
-    failingGate: { type: "string" },
-    failingWorkstream: {
-      type: "string",
-      description:
-        "the workstream id a failure belongs to, when it belongs to exactly one. Empty for failures of the assembly itself — misattributing one of those sends the fix to an agent that cannot see the other half.",
-    },
-    fixInstructions: { type: "string" },
-    summary: { type: "string" },
-  },
-};
-const MERGE_SCHEMA = {
-  type: "object",
-  required: ["merged", "state"],
-  properties: {
-    merged: { type: "boolean" },
-    state: {
-      type: "string",
-      enum: ["merged", "queued-for-auto-merge", "refused", "failed"],
-      description: "what GitHub actually reported — not what was attempted",
-    },
-    detail: { type: "string" },
-  },
-};
-
-// ---------------------------------------------------------------------------
-// The preview must contain the code that is being validated.
-//
-// G3 drives the branch's Vercel preview, and the preview is built from what
-// `origin/<branch>` holds — not from what the worktree holds. On #307 the later
-// attempts validated a preview built from f604b2b while the worktree sat on
-// a4c5ede, so two attempts were spent proving things about code the fix had
-// already replaced. The loop now pushes and asserts the two shas match BEFORE
-// the integration verifier runs, and reports what `git rev-parse` printed rather
-// than whether the push felt successful.
-// ---------------------------------------------------------------------------
-const PUSH_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  required: ["pushed", "headSha", "remoteSha"],
-  properties: {
-    pushed: { type: "boolean" },
-    headSha: {
-      type: "string",
-      description: "what `git -C <wt> rev-parse HEAD` printed, verbatim",
-    },
-    remoteSha: {
-      type: "string",
-      description:
-        "what `git -C <wt> rev-parse origin/<branch>` printed AFTER the push and a fetch, verbatim",
-    },
-    detail: { type: "string" },
-  },
-};
-
-// A merged track owns its own leftovers; a held or blocked one hands them over.
-const CLEANUP_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  required: ["removed"],
-  properties: {
-    removed: {
-      type: "array",
-      items: { type: "string" },
-      description: "worktree paths and local branches actually gone afterwards",
-    },
-    remaining: {
-      type: "array",
-      items: { type: "string" },
-      description: "anything still there, with the reason",
-    },
-    note: { type: "string" },
-  },
-};
+// DOD_SCHEMA, MERGE_SCHEMA, PUSH_SCHEMA, CLEANUP_SCHEMA, PR_SCHEMA,
+// LENS_SCHEMA and HIGH_RISK_LENSES MOVED to .claude/workflows/verify-and-ship.js
+// with the guarantee tail (#399). They live ONLY there now.
 
 // ---------------------------------------------------------------------------
 // The SCOPED verdict — one workstream, not one track.
@@ -300,6 +204,35 @@ const SCOPED_DOD_SCHEMA = {
         },
       },
     },
+    // The reviewer's actionable output (#399), mapped from the code-reviewer
+    // brief: Critical → "critical", structural Warnings → "structural",
+    // Suggestions → "suggestion". Critical ∪ structural are fixed IN THIS PASS
+    // by the quality rounds; suggestions never gate and never trigger a round.
+    findings: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["severity", "summary", "remedy"],
+        properties: {
+          severity: {
+            type: "string",
+            enum: ["critical", "structural", "suggestion"],
+          },
+          summary: { type: "string" },
+          detail: {
+            type: "string",
+            description:
+              "exact lines and the defect, stated so an implementer can act on it directly",
+          },
+          files: { type: "array", items: { type: "string" } },
+          remedy: {
+            type: "string",
+            description:
+              'what "fixed" looks like, concretely — the re-review verifies against this',
+          },
+        },
+      },
+    },
     failingGate: { type: "string" },
     fixInstructions: { type: "string" },
     summary: { type: "string" },
@@ -329,80 +262,54 @@ const INTEGRATE_SCHEMA = {
 };
 
 // ---------------------------------------------------------------------------
-// Folding code-quality warnings into a per-parent rollup (RULED 2026-08-05).
+// The review-fix loop (#399, RULED 2026-08-10): reviewer findings are fixed
+// IN-PASS, never filed as debt. The follow-ups rollup machinery that used to
+// live here is DELETED — existing open rollup issues belong to the separate
+// codebase-wide debt pass (`ops/agent-os/labels.md` records the removal).
 //
-// The old path filed one `agent:queued` issue per warning, and 12 of an 86-issue
-// backlog arrived that way: a contrast ratio, a docblock, a stale line in a
-// memory contract — each then demanding a branch, a hermetic build, a full test
-// suite, a preview deploy, a CI wait and a human-facing PR. One of them (#231)
-// was the loop filing an issue about its own G0 violation.
-//
-// What must NOT be lost in the change: the warnings still land BEFORE the merge,
-// so a merge cannot swallow them. An append mutates an existing body, which is
-// precisely the operation that failed silently on 2026-07-26 — so, exactly like
-// settleLabels, the agent reports what `gh issue view --json body` PRINTED and
-// the loop asserts it.
+// The cap. TWIN: verify-and-ship.js declares the same constant for the
+// integration-site loop — change one, change both; frd-workflows.test.mjs
+// asserts every TWIN:BEGIN/END block is text-identical across the two files.
 // ---------------------------------------------------------------------------
-const FOLLOWUP_SCHEMA = {
+// TWIN:BEGIN QUALITY_ROUNDS
+const QUALITY_ROUNDS = 2;
+// TWIN:END QUALITY_ROUNDS
+
+// The per-finding analogue of `rootCauseAddressed` (the #307 discipline): a
+// fix that cannot say what it did about each finding is refused before a
+// re-review is spent on it. TWIN: verify-and-ship.js — change one, change both.
+// TWIN:BEGIN FIX_SCHEMA
+const FIX_SCHEMA = {
   type: "object",
-  additionalProperties: false,
-  required: ["followUps"],
+  required: ["committed", "filesChanged", "summary", "perFinding"],
   properties: {
-    followUps: {
+    committed: {
+      type: "boolean",
+      description: "the fix is committed on the branch",
+    },
+    filesChanged: { type: "array", items: { type: "string" } },
+    summary: { type: "string" },
+    perFinding: {
       type: "array",
       items: {
         type: "object",
-        additionalProperties: false,
-        required: ["issue", "kind", "anchor", "confirmed"],
+        required: ["finding", "addressed"],
         properties: {
-          issue: {
-            type: "integer",
-            description: "the rollup issue the AC was appended to",
+          finding: {
+            type: "string",
+            description: "the finding, restated in your own words",
           },
-          kind: { type: "string", enum: ["appended", "created"] },
-          anchor: {
+          addressed: {
             type: "string",
             description:
-              "the exact AC line written, so the loop can find it in the read-back",
-          },
-          confirmed: {
-            type: "boolean",
-            description:
-              "true ONLY if you saw this line in the body `gh issue view` printed AFTER the write",
+              "what you changed so this finding is gone, and how you proved it — or a plain 'not addressed, here is why'. Empty means the round is refused.",
           },
         },
       },
     },
-    rollupLabels: {
-      type: "array",
-      items: { type: "string" },
-      description: "labels the rollup carries after the write",
-    },
-    note: { type: "string" },
   },
 };
-const PR_SCHEMA = {
-  type: "object",
-  required: ["opened", "url", "checkConclusion"],
-  properties: {
-    opened: { type: "boolean" },
-    url: { type: "string" },
-    reason: { type: "string", description: "if not opened, why" },
-    // The anchor. Everything else in this loop is an agent's account of its own
-    // work; this is the one field a model cannot talk its way past. A track is
-    // not shipped until GitHub says the required check is green.
-    checkConclusion: {
-      type: "string",
-      enum: ["success", "failure", "timed_out", "none"],
-      description:
-        "conclusion of the required check on the PR, from `gh pr checks` — NOT the agent's opinion",
-    },
-    checkSummary: {
-      type: "string",
-      description: "if not success: which step failed and the error excerpt",
-    },
-  },
-};
+// TWIN:END FIX_SCHEMA
 const CLAIM_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -422,11 +329,15 @@ const CLAIM_SCHEMA = {
   },
 };
 
+// DUPLICATED in .claude/workflows/verify-and-ship.js (the two-table pattern,
+// like dispatch/token-preflight): change one, change both.
+// TWIN:BEGIN BLOCK_SCHEMA
 const BLOCK_SCHEMA = {
   type: "object",
   required: ["commented"],
   properties: { commented: { type: "boolean" }, note: { type: "string" } },
 };
+// TWIN:END BLOCK_SCHEMA
 
 // ---------------------------------------------------------------------------
 // The label is the outcome — so it is read back, not assumed.
@@ -446,7 +357,13 @@ const BLOCK_SCHEMA = {
 // `gh issue view` PRINTED after the write, the loop asserts that observation,
 // retries, and on final failure the track is ERRORED rather than reported as
 // success. An agent's "I labelled it" is not evidence; the read-back is.
+//
+// DUPLICATED in .claude/workflows/verify-and-ship.js (the two-table pattern,
+// like dispatch/token-preflight): change one, change both. The parent keeps
+// its copy for blockTrack and the claim path; the child owns the ship-side
+// label writes.
 // ---------------------------------------------------------------------------
+// TWIN:BEGIN LABEL_STATE_SCHEMA
 const LABEL_STATE_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -475,49 +392,7 @@ const LABEL_STATE_SCHEMA = {
     note: { type: "string" },
   },
 };
-const LENS_SCHEMA = {
-  type: "object",
-  required: ["verdict", "lens", "findings", "summary"],
-  properties: {
-    verdict: { type: "string", enum: ["PASS", "FAIL"] },
-    lens: { type: "string" },
-    findings: { type: "array", items: { type: "string" } },
-    failingGate: { type: "string" },
-    fixInstructions: { type: "string" },
-    summary: { type: "string" },
-  },
-};
-
-// ---------------------------------------------------------------------------
-// HR4 — diverse-lens sign-off for high-risk tracks.
-//
-// This replaced a SECOND IDENTICAL code-reviewer pass. Two identical reviewers
-// mostly reproduce each other's blind spots: the second agrees with the first
-// for the same reasons the first was wrong. Three different QUESTIONS do not
-// correlate that way — each lens is the only one looking down its own axis.
-//
-// Which is exactly why these votes are NOT majority-pooled. Majority voting is
-// the right aggregation for REDUNDANT verifiers (identical skeptics produce
-// correlated noise, so outvoting filters it). With DIVERSE verifiers a security
-// FAIL is not noise the other two can outvote — they never looked at security.
-// So: any lens FAIL blocks, and a lens that DIED counts as a NO, because
-// dod.md's own rule is to default to FAIL when evidence is missing.
-// ---------------------------------------------------------------------------
-const HIGH_RISK_LENSES = [
-  {
-    key: "correctness",
-    brief: `Read the diff against the acceptance criteria and the data model. Does it actually do what was asked, including the edge cases nobody wrote an AC for — empty states, the second call, concurrent writes, null/missing rows? For migrations: is the DDL itself right (nullability, defaults, indexes, cascade behaviour), and does existing data survive it?`,
-  },
-  {
-    key: "security",
-    brief: `Attack the diff. Auth and permission checks on every new entrypoint; multi-tenant boundaries (can org A read or write org B's rows through anything this adds?); injection and unsafe interpolation; secrets or internal data reaching a client bundle or a log; over-broad SELECTs that widen what a response exposes. Read memory/invariants.md and every file under memory/invariants/, and treat every rule in them as a hard requirement, not a guideline. You are the ONLY reviewer looking down this axis — if you pass this, nobody else will catch it.`,
-  },
-  {
-    key: "reproducibility",
-    brief: `Do NOT reason about the code — RE-RUN the evidence. Execute the migration dry-run, the rollback, and \`pnpm test\` yourself in the worktree, and re-derive the schema diff. Then compare what you observed against what the first verifier's report claims. Any claim you cannot reproduce is a FAIL, and say which claim and what you got instead.`,
-  },
-];
-
+// TWIN:END LABEL_STATE_SCHEMA
 // ---------------------------------------------------------------------------
 // Grouping, in two layers that used to be one.
 //
@@ -656,9 +531,22 @@ function planStages(trackUnits, trackId) {
     const inLevel = trackUnits.filter((u) => level.get(u.id) === l);
     if (!inLevel.length) continue;
     stages.push(
-      clusterByFile(inLevel).map((us, i) =>
-        summarise(us, { id: `${trackId}-s${stages.length}w${i + 1}` })
-      )
+      clusterByFile(inLevel).map((us, i) => {
+        // One workstream runs ONE recipe. Units may only share a workstream
+        // (same stage + shared files) when they agree on it — a mixed set is a
+        // plan defect, thrown here at plan time, never mid-build.
+        const recipes = [...new Set(us.map(recipeOf))];
+        if (recipes.length > 1)
+          throw new Error(
+            `units ${us.map((u) => `"${u.id}"`).join(", ")} share a workstream in track "${trackId}" ` +
+              `but name different recipes (${recipes.join(", ")}) — a workstream runs one recipe. ` +
+              `Fix the decomposition or the recipe choices.`
+          );
+        return summarise(us, {
+          id: `${trackId}-s${stages.length}w${i + 1}`,
+          recipe: recipes[0],
+        });
+      })
     );
   }
   return stages;
@@ -710,7 +598,10 @@ const allCriteria = (holder) =>
     .map((u) => (u.acceptanceCriteria || []).map((a) => `  - ${a}`).join("\n"))
     .join("\n");
 
+// DUPLICATED in .claude/workflows/verify-and-ship.js — change one, change both.
+// TWIN:BEGIN hashes
 const hashes = (issues) => issues.map((n) => `#${n}`).join(", ");
+// TWIN:END hashes
 
 /**
  * The failing gate's evidence, VERBATIM — not a summary of it.
@@ -770,25 +661,52 @@ function survivingTrees(track, branch, wt) {
   return trees;
 }
 
+// DUPLICATED in .claude/workflows/verify-and-ship.js — change one, change both.
+// TWIN:BEGIN treeLines
 const treeLines = (trees) =>
   (trees || [])
     .map(
       (t) => `  - worktree \`${t.path}\` on branch \`${t.branch}\` — ${t.holds}`
     )
     .join("\n") || "  (none — nothing was created)";
+// TWIN:END treeLines
 
 /**
- * `parallel()` with a ceiling. Runs thunks in chunks of `limit` so a track with
- * eight workstreams cannot put eight agents in flight at once.
+ * `parallel()` with a ceiling. Runs thunks in chunks so a track with eight
+ * workstreams cannot put eight agents in flight at once.
+ *
+ * The cap is on AGENTS, and a thunk is not always one agent: a
+ * generate-and-filter workstream runs 3 candidate implementers inside its
+ * recipe child, invisible to this loop. `weights` carries that cost
+ * (RECIPE_AGENT_COST), and a chunk closes when its summed weight would exceed
+ * `limit` — so a stage of six generate-and-filter workstreams runs at most two
+ * recipe children at once under the default cap of 6, instead of putting 18
+ * implementers in flight (the 2026-08-09 machine-freeze class). A single thunk
+ * heavier than the limit still runs, alone.
  *
  * Chunking rather than a rolling window is deliberate: a stage is a barrier
  * anyway (nothing in stage N+1 may start before stage N integrates), so the
  * scheduling this gives up is scheduling the design does not want.
  */
-async function boundedParallel(thunks, limit = MAX_CONCURRENT_AGENTS) {
+async function boundedParallel(
+  thunks,
+  limit = MAX_CONCURRENT_AGENTS,
+  weights = null
+) {
   const out = [];
-  for (let i = 0; i < thunks.length; i += limit)
-    out.push(...(await parallel(thunks.slice(i, i + limit))));
+  let i = 0;
+  while (i < thunks.length) {
+    const chunk = [];
+    let load = 0;
+    while (i < thunks.length) {
+      const w = Math.min(weights ? weights[i] || 1 : 1, limit);
+      if (chunk.length && load + w > limit) break;
+      chunk.push(thunks[i]);
+      load += w;
+      i += 1;
+    }
+    out.push(...(await parallel(chunk)));
+  }
   return out;
 }
 
@@ -799,7 +717,10 @@ async function boundedParallel(thunks, limit = MAX_CONCURRENT_AGENTS) {
  * nobody looked at. `agent:in-progress` surviving alongside the target counts
  * too — the status labels are mutually exclusive (labels.md), and the observed
  * failure mode was exactly a stale `agent:in-progress` left in place.
+ *
+ * DUPLICATED in .claude/workflows/verify-and-ship.js — change one, change both.
  */
+// TWIN:BEGIN labelViolations
 function labelViolations(issues, observed, target) {
   return (issues || []).filter((n) => {
     const row = (observed || []).find((o) => Number(o?.issue) === Number(n));
@@ -808,14 +729,18 @@ function labelViolations(issues, observed, target) {
     return !labels.includes(target) || labels.includes("agent:in-progress");
   });
 }
+// TWIN:END labelViolations
 
 /**
  * Write `target` onto the track's issues (and, for the review queue, its PR),
  * then READ THE LABELS BACK and assert them. Retries, and reports failure
  * instead of a cheerful boolean.
  *
+ * DUPLICATED in .claude/workflows/verify-and-ship.js — change one, change both.
+ *
  * Returns { settled, observed, prLabels, attempts, missing }.
  */
+// TWIN:BEGIN settleLabels
 async function settleLabels(track, target, { phase = "Ship", pr = null } = {}) {
   if (!track.issues.length)
     return { settled: true, observed: [], attempts: 0, missing: [] };
@@ -886,6 +811,7 @@ Return {"observed":[{"issue":n,"labels":[...]} for every issue in ${list}]${want
     missing: labelViolations(track.issues, observed, target),
   };
 }
+// TWIN:END settleLabels
 
 async function blockTrack(track, reason, lastReport, trees = []) {
   log(`⛔ ${track.id} blocked: ${reason}`);
@@ -1088,6 +1014,280 @@ The loop checks these rather than trusting you: a FRESH cut must have headSha ==
 }
 
 /**
+ * The reviewer's findings, VERBATIM — the fix agent quotes these rather than
+ * paraphrasing them, for the same reason evidenceBlock exists: a paraphrase is
+ * where a named defect becomes a vague hunch.
+ * (DUPLICATED in .claude/workflows/verify-and-ship.js — change one, change both.)
+ */
+// TWIN:BEGIN findingsBlock
+function findingsBlock(findings) {
+  return (
+    (findings || [])
+      .map(
+        (f, i) =>
+          `--- finding ${i + 1} [${f.severity}]${f.workstream ? ` (from ${f.workstream})` : ""} ---\n` +
+          `${f.summary}\n` +
+          `${f.detail || "(no further detail given)"}\n` +
+          `Files: ${(f.files || []).join(", ") || "(none named)"}\n` +
+          `What "fixed" looks like: ${f.remedy || "(not stated)"}`
+      )
+      .join("\n\n") || "(no findings)"
+  );
+}
+// TWIN:END findingsBlock
+
+/**
+ * The review-fix loop (#399): reviewer findings are fixed IN-PASS, never filed
+ * as debt. Runs only on a passing verdict with actionable findings (critical ∪
+ * structural) — gate/AC FAILs take the attempt machinery untouched. One round
+ * = fix agent, then re-review. A round whose fix answers no finding COUNTS and
+ * skips the re-review (the #307 refuse-before-reviewer discipline). A
+ * re-review FAIL is a real gate failure and re-enters the attempt machinery.
+ *
+ * The two sites differ ONLY through `opts`: the fix agent's type, the
+ * re-review schema, the site-specific prompt fragments, and `afterFixCommit` —
+ * the integration site re-publishes after every committed fix (the preview-sha
+ * discipline extends to fix commits) while the scoped site passes null.
+ * Returns {journal, leftovers}, or {gateFail} / {pushFail} with them.
+ *
+ * TWIN: verify-and-ship.js carries the byte-identical function for the
+ * integration site — change one, change both; frd-workflows.test.mjs asserts
+ * the two copies are text-identical.
+ */
+// TWIN:BEGIN review-fix-loop
+const actionableFindings = (findings) =>
+  (findings || []).filter(
+    (f) => f?.severity === "critical" || f?.severity === "structural"
+  );
+
+async function runReviewFixLoop(holder, branch, wt, firstFindings, opts) {
+  const journal = [];
+  let current = firstFindings;
+  for (let round = 1; round <= QUALITY_ROUNDS && current.length; round++) {
+    log(
+      `🔧 ${holder.id} quality round ${round}/${QUALITY_ROUNDS}: ${current.length} actionable finding(s)`
+    );
+    const fix = await agent(
+      `You are fixing review findings on branch ${branch} in worktree ${wt} (issue(s) ${hashes(holder.issues)}). ${CONVENTIONS}
+
+The ${opts.reviewerNoun} PASSED the gates but returned findings that are fixed IN THIS PASS — quality round ${round} of ${QUALITY_ROUNDS}. They are quoted below VERBATIM; address each one.
+
+${findingsBlock(current)}
+
+Work in ${wt} on ${branch}. Fix the findings and nothing else${opts.scopeLine}. Run \`pnpm typecheck\` and the tests covering the files you touch, and commit (conventional commits). Do NOT push, do NOT open a PR, do NOT edit labels or issues, and do NOT merge — the loop ${opts.shipVerb} and ships.
+
+For EVERY finding above, fill \`perFinding\`: restate the finding and say exactly what you changed so it is addressed, with the command output proving it — or say plainly that you did not address it and why. A report whose \`perFinding\` answers nothing is refused without spending a re-review on it, exactly like an unanswered root cause. Return strictly the schema.`,
+      {
+        label: `fix:${holder.id}#r${round}`,
+        phase: "Build",
+        agentType: opts.fixAgentType,
+        schema: FIX_SCHEMA,
+      }
+    );
+    const answered = (fix?.perFinding || []).filter((p) =>
+      String(p?.addressed || "").trim()
+    );
+    journal.push({
+      round,
+      fix: fix
+        ? {
+            summary: fix.summary,
+            filesChanged: fix.filesChanged || [],
+            perFinding: fix.perFinding || [],
+          }
+        : null,
+    });
+    if (!fix || !answered.length) {
+      log(
+        `↩️  ${holder.id} quality round ${round}: the fix answered no finding — round counts, re-review skipped, findings stand`
+      );
+      continue;
+    }
+
+    if (fix.committed && opts.afterFixCommit) {
+      const push = await opts.afterFixCommit(round);
+      if (!push.ok)
+        return { pushFail: push.failReport, journal, leftovers: current };
+    }
+
+    const rereview = await agent(
+      `You are the code-reviewer, re-reviewing quality round ${round}/${QUALITY_ROUNDS} on branch ${branch} in worktree ${wt} (issue(s) ${hashes(holder.issues)}). A fix agent just addressed the findings below. Re-verify ONLY those findings and the new diff — do not re-run the whole ${opts.dodNoun}.
+
+The findings that were to be fixed, verbatim:
+
+${findingsBlock(current)}
+
+The fix agent's report:
+${JSON.stringify({ summary: fix.summary, filesChanged: fix.filesChanged, perFinding: fix.perFinding })}
+
+Run \`pnpm typecheck\` in ${wt} and the tests covering the changed files yourself — a fix that breaks the build or the tests is a FAIL, not a smaller finding, and a FAIL from you re-enters the attempt machinery as a real gate failure. Otherwise: re-examine each finding against the code as it now stands. A finding that is genuinely fixed disappears; one that is not comes back in \`findings\` at the same severity; a new problem the fix INTRODUCED is a finding too. Return strictly the schema, verdict PASS or PASS_WITH_WARNINGS unless a gate actually broke.`,
+      {
+        label: `re-review:${holder.id}#r${round}`,
+        phase: "Verify",
+        agentType: "code-reviewer",
+        schema: opts.reviewSchema,
+      }
+    );
+    journal[journal.length - 1].reReview = rereview
+      ? { verdict: rereview.verdict, findings: rereview.findings || [] }
+      : null;
+    if (!rereview) {
+      log(
+        `↩️  ${holder.id} quality round ${round}: the re-reviewer died — missing evidence is not a fix, findings stand`
+      );
+      continue;
+    }
+    if (rereview.verdict === "FAIL")
+      return { gateFail: rereview, journal, leftovers: current };
+    current = actionableFindings(rereview.findings);
+  }
+  return { journal, leftovers: current };
+}
+// TWIN:END review-fix-loop
+
+/**
+ * The #307 root-cause preamble, rendered by the PARENT and prepended verbatim
+ * by every recipe (ruling mod 2: the lesson never moves into recipe files).
+ * The evidence is quoted VERBATIM via evidenceBlock — a paraphrase is where a
+ * named `ReferenceError` becomes "the page does not render".
+ */
+function renderRetryBlock(report, branch, wt) {
+  return `The branch ${branch} and worktree ${wt} already exist with the prior work. A verifier REJECTED it. Fix ONLY what is needed.
+
+**THE ROOT CAUSE IS BELOW, IN THE VERIFIER'S OWN WORDS. Read it before you open a file.**
+
+\`\`\`
+${evidenceBlock(report)}
+\`\`\`
+
+Start from that named cause and reproduce it yourself — run the thing the evidence describes and see the failure before you change anything. Do not start from what looks wrong to you: on #307 three attempts fixed a stuck button and a flaky test while the \`ReferenceError\` the verifier had named crashed the page on every one of them, and the track was blocked with the cause untouched.
+
+Your result MUST answer it:
+- \`rootCause\` — the cause NAMED above, restated in your own words.
+- \`rootCauseAddressed\` — what you changed so that cause is gone, and the command output proving it.
+
+Nothing else you did counts until those two are filled in — the loop rejects the attempt without even calling a verifier if they are empty. If you could NOT fix the named cause, say that in \`rootCauseAddressed\` and why; an honest miss is worth more than a fix report for something else.`;
+}
+
+// The recipe side-effect detector's transcript shape (ruling mod 4).
+const REFS_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["refs"],
+  properties: {
+    refs: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["ref", "sha"],
+        properties: {
+          ref: {
+            type: "string",
+            description: "the full ref path, exactly as printed",
+          },
+          sha: { type: "string", description: "the sha, exactly as printed" },
+        },
+      },
+    },
+    note: { type: "string" },
+  },
+};
+
+/**
+ * Transcribe `git ls-remote --heads origin <branches>` before and after a
+ * recipe runs. Any new, moved or deleted origin ref between the two snapshots
+ * is a recipe-contract violation and a failed attempt (ruling mod 4).
+ * Cheap-model-safe because the parent compares the transcripts — the agent
+ * only copies what the command printed.
+ */
+async function snapshotRefs(label, branches) {
+  const reply = await agent(
+    `Transcribe remote ref state. Run exactly this, and nothing that writes:
+\`git ls-remote --heads origin ${branches.join(" ")}\`
+Report every output line VERBATIM as a {ref, sha} row — the full ref path as printed, the sha as printed. Empty output is a real answer: return an empty refs array. Do NOT push, do NOT fetch --prune, do NOT edit anything. Return strictly the schema.`,
+    {
+      label,
+      phase: "Build",
+      model: "haiku",
+      effort: "low",
+      schema: REFS_SCHEMA,
+    }
+  );
+  return (reply?.refs || []).map((r) => `${r.sha} ${r.ref}`).sort();
+}
+
+/**
+ * Cut a non-solo workstream's worktree from the TRACK branch — a parent-owned
+ * step (#399): under the recipe contract the worktree is a parent-provided
+ * input, never something the recipe creates for itself. Solo workstreams keep
+ * the track worktree and never come here.
+ */
+async function prepareWorkstreamTree(ws, trackBranch) {
+  const ready = await agent(
+    `Prepare the worktree for ONE workstream of a staged track. Run exactly this, in this order, and nothing that writes code:
+
+1. \`git worktree add -b ${ws.branch} ${ws.wt} ${trackBranch}\`
+   Cut from the TRACK branch, never from ${BASE}: the track branch already carries every earlier stage's commits, and cutting anywhere else silently drops the prerequisite this workstream was ordered after. If the branch already exists from an earlier attempt, re-attach instead of re-cutting: \`git worktree add ${ws.wt} ${ws.branch}\` (no \`-b\`), do NOT reset it, and report \`resumed: true\`.
+2. \`scripts/worktree-env.sh ${ws.wt}\` — give it a test env. It is idempotent; a fresh worktree has no \`.env.local\`, so \`pnpm test\` fails every DB suite until you run it.
+
+Then report, VERBATIM, what each of these printed:
+  - \`git -C ${ws.wt} rev-parse --abbrev-ref HEAD\` → \`branch\`
+  - \`git -C ${ws.wt} rev-parse HEAD\` → \`headSha\`
+  - \`git rev-parse ${trackBranch}\` → \`trackSha\`
+
+The loop asserts the branch and the cut point rather than trusting you — a fresh cut IS the track tip, and anything else means it came from somewhere older. Transcribe what you saw. Return strictly the schema.`,
+    {
+      label: `tree:${ws.id}`,
+      phase: "Build",
+      // Two git commands and a script, asserted below — same reasoning as prep.
+      model: "haiku",
+      effort: "low",
+      schema: {
+        type: "object",
+        required: ["ready", "branch", "headSha", "trackSha"],
+        properties: {
+          ready: { type: "boolean" },
+          branch: { type: "string" },
+          resumed: {
+            type: "boolean",
+            description:
+              "true if the branch already existed and was re-attached rather than cut",
+          },
+          headSha: {
+            type: "string",
+            description: "`git -C <wt> rev-parse HEAD`, verbatim",
+          },
+          trackSha: {
+            type: "string",
+            description: "`git rev-parse <trackBranch>`, verbatim",
+          },
+          note: { type: "string" },
+        },
+      },
+    }
+  );
+
+  if (ready?.ready !== true || ready.branch !== ws.branch)
+    return {
+      ok: false,
+      reason: `the worktree ${ws.wt} is not on ${ws.branch}`,
+    };
+  const head = String(ready.headSha || "").trim();
+  const tip = String(ready.trackSha || "").trim();
+  if (!head || !tip)
+    return {
+      ok: false,
+      reason: `tree prep for ${ws.id} did not report both shas (HEAD ${head || "(none)"}, ${trackBranch} ${tip || "(none)"}) — an unverifiable cut point is treated as a wrong one`,
+    };
+  if (ready.resumed !== true && head !== tip)
+    return {
+      ok: false,
+      reason: `${ws.branch} was cut at ${head} but ${trackBranch} is at ${tip} — a workstream cut anywhere but the track tip silently drops the prerequisite stages`,
+    };
+  return { ok: true };
+}
+
+/**
  * One workstream: implement → SCOPED verify → retry, with its own attempt budget.
  *
  * The attempt counter living here rather than on the track is the point. It used
@@ -1116,65 +1316,107 @@ async function runWorkstream(
   // first-attempt prompt and never saw the failure it was sent back to fix.
   let report = priorReport;
 
+  // Recipe-weighted, like the stage check: a generate-and-filter attempt funds
+  // 3 candidates + a judge, and starting it with one attempt's reserve is how
+  // the budget throws mid-flight inside the child and the track comes back as
+  // a fan-in-guard LOST hole instead of a clean pre-attempt block.
+  const wsCost = agentCostOf(ws);
+
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    if (budget.total && budget.remaining() < RESERVE)
+    if (budget.total && budget.remaining() < RESERVE * wsCost)
       return {
         ok: false,
         ws,
         branch,
         report,
-        reason: `token reserve hit before ${ws.id} attempt ${attempt} (remaining ${Math.round(budget.remaining() / 1000)}k < ${Math.round(RESERVE / 1000)}k)`,
+        reason: `token reserve hit before ${ws.id} attempt ${attempt} (remaining ${Math.round(budget.remaining() / 1000)}k < ${Math.round((RESERVE * wsCost) / 1000)}k = ${Math.round(RESERVE / 1000)}k reserve × ${wsCost} for recipe "${ws.recipe}")`,
       };
 
     // A retry is defined by having a verdict to answer, not by the counter —
     // an integration failure sent back to this workstream arrives on attempt 1.
     const isRetry = Boolean(report);
-    const setup = isRetry
-      ? `The branch ${branch} and worktree ${wt} already exist with the prior work. A verifier REJECTED it. Fix ONLY what is needed.
 
-**THE ROOT CAUSE IS BELOW, IN THE VERIFIER'S OWN WORDS. Read it before you open a file.**
+    // The worktree is a parent-provided input, not something a recipe cuts for
+    // itself (#399). A non-solo workstream gets its tree here, once, before
+    // its first attempt; solo workstreams keep the track worktree.
+    if (attempt === 1 && !solo) {
+      const tree = await prepareWorkstreamTree(ws, trackBranch);
+      if (!tree.ok)
+        return { ok: false, ws, branch, report, reason: tree.reason };
+    }
 
-\`\`\`
-${evidenceBlock(report)}
-\`\`\`
+    // -----------------------------------------------------------------------
+    // The recipe seam (#399): one child workflow call = one workstream
+    // attempt. The recipe gets a worktree, the structured priorReport (ruling
+    // mod 1 — never a flattened string), and the parent-rendered retryBlock
+    // (mod 2 — the #307 lesson never moves into recipe files). It must commit
+    // to `branch` and return {summary, commits, warnings} (+rootCause,
+    // rootCauseAddressed on retries, mod 3). It must NOT push, open PRs, edit
+    // labels/issues, merge elsewhere, or call workflow(). The ref snapshots
+    // around it are the side-effect detector (mod 4).
+    // -----------------------------------------------------------------------
+    const watchedRefs = [...new Set([branch, trackBranch])];
+    const before = await snapshotRefs(
+      `refs:${ws.id}#${attempt}:before`,
+      watchedRefs
+    );
 
-Start from that named cause and reproduce it yourself — run the thing the evidence describes and see the failure before you change anything. Do not start from what looks wrong to you: on #307 three attempts fixed a stuck button and a flaky test while the \`ReferenceError\` the verifier had named crashed the page on every one of them, and the track was blocked with the cause untouched.
-
-Your result MUST answer it:
-- \`rootCause\` — the cause NAMED above, restated in your own words.
-- \`rootCauseAddressed\` — what you changed so that cause is gone, and the command output proving it.
-
-Nothing else you did counts until those two are filled in — the loop rejects the attempt without even calling a verifier if they are empty. If you could NOT fix the named cause, say that in \`rootCauseAddressed\` and why; an honest miss is worth more than a fix report for something else.`
-      : solo
-        ? `Work in the existing worktree ${wt}, which is already on branch ${branch} with a test env. Just \`cd\` into it.`
-        : `Create your OWN worktree, branched from the TRACK branch — not from ${BASE}. The track branch already carries every earlier stage's commits, and branching anywhere else silently drops the prerequisite this workstream was ordered after:\n\`git worktree add -b ${branch} ${wt} ${trackBranch}\`\nThen \`scripts/worktree-env.sh ${wt}\` (idempotent; a fresh worktree has no \`.env.local\`, so \`pnpm test\` fails every DB suite until you run it).`;
-
-    const impl = await agent(
-      `You are a ${ws.lane} engineer. ${CONVENTIONS}
-
-${setup}
-
-You own ONE workstream of a larger track. Implement exactly the unit(s) below and NOTHING else — other agents are working other workstreams of this same track in parallel, and every file outside your declared list may be theirs. Touching one is how two worktrees collide at integration.
-
-${unitBlocks(ws)}
-
-Your declared files — stay inside them:
-${ws.files.map((f) => `  - ${f}`).join("\n") || "  (none declared)"}
-
-Write code AND tests. Run \`pnpm typecheck\` and \`pnpm lint\` in ${wt} and fix what you can. Commit to ${branch} (conventional commits). Do NOT push, do NOT open a PR, and do NOT merge anything — the loop integrates the workstreams and ships the track. Return strictly the schema.`,
+    const impl = await workflow(
+      { scriptPath: `${FACTORY_ROOT}/recipes/${ws.recipe}.js` },
       {
-        label: `impl:${ws.id}#${attempt}`,
-        phase: "Build",
-        agentType: implAgent,
-        schema: isRetry ? RETRY_IMPL_SCHEMA : IMPL_SCHEMA,
+        track: { id: track.id, issues: track.issues, branch: trackBranch },
+        workstream: {
+          id: ws.id,
+          lane: ws.lane,
+          issues: ws.issues,
+          files: ws.files,
+          summary: ws.units.map((u) => u.summary).join("; "),
+          units: ws.units,
+        },
+        worktree: wt,
+        branch,
+        stageIndex,
+        attempt,
+        priorReport: report ?? null,
+        retryBlock: isRetry ? renderRetryBlock(report, branch, wt) : null,
+        conventions: CONVENTIONS,
+        implAgentType: implAgent,
+        unitBlocksRendered: unitBlocks(ws),
       }
     );
-    if (!impl) {
+
+    const after = await snapshotRefs(
+      `refs:${ws.id}#${attempt}:after`,
+      watchedRefs
+    );
+    const drift = [
+      ...after.filter((x) => !before.includes(x)),
+      ...before.filter((x) => !after.includes(x)),
+    ];
+    if (drift.length) {
       report = {
         verdict: "FAIL",
-        failingGate: "implementer",
-        fixInstructions: `the implementer died on attempt ${attempt}`,
-        summary: `${ws.id}: implementer produced no result`,
+        failingGate: "recipe-contract",
+        fixInstructions:
+          `The recipe changed origin refs it must never touch: ${drift.join("; ")}. ` +
+          `Recipes MUST NOT push, open PRs, or move any remote ref — the guarantee layer publishes. ` +
+          `This attempt is refused without a verifier.`,
+        summary: `${ws.id}: recipe "${ws.recipe}" violated the side-effect contract (origin refs changed)`,
+      };
+      log(
+        `⛔ ${ws.id} attempt ${attempt}: recipe-contract violation — origin refs drifted (${drift.join("; ")})`
+      );
+      continue;
+    }
+
+    if (!impl || !(impl.commits || []).length) {
+      report = {
+        verdict: "FAIL",
+        failingGate: "recipe",
+        fixInstructions: !impl
+          ? `the recipe returned nothing on attempt ${attempt}`
+          : `the recipe returned no commits on attempt ${attempt} — an attempt that committed nothing built nothing`,
+        summary: `${ws.id}: recipe "${ws.recipe}" returned ${!impl ? "nothing" : "no commits"}`,
       };
       continue;
     }
@@ -1218,6 +1460,8 @@ Run ONLY these gates. The others (G1 hermetic build, G3 functional/preview, G4, 
 Acceptance criteria to prove:
 ${allCriteria(ws)}
 
+FINALLY — report everything else you saw in \`findings\`, because it is FIXED IN THIS PASS (#399), never filed as debt. Map your review output onto \`severity\`: Critical → \`critical\`, structural Warnings → \`structural\`, Suggestions → \`suggestion\`. Critical and structural findings go to a fix agent and a re-review in this same pass; suggestions never gate and never trigger a round. State each finding so an implementer can act on it directly: exact files and lines, the defect, and \`remedy\` — what "fixed" looks like. Anything decidable from the codebase alone is a finding — do not soften it, and do not invent findings to seem thorough; an empty list is a real answer.
+
 Default to FAIL when evidence is missing or unconvincing. Do NOT fix the code — report, and the implementer fixes. Return strictly the schema.`,
       {
         label: `verify:${ws.id}#${attempt}`,
@@ -1234,6 +1478,50 @@ Default to FAIL when evidence is missing or unconvincing. Do NOT fix the code �
       );
       continue;
     }
+
+    // -----------------------------------------------------------------------
+    // Scoped review-fix loop (#399): the verdict passed, so any actionable
+    // findings are fixed HERE, in this workstream's worktree, before the
+    // stage integrates. On exhaust with leftovers: do NOT block and do NOT
+    // keep looping — the leftovers ride into verify-and-ship as
+    // carriedFindings and force the HOLD at the auto-merge gate, where they
+    // arrive as a DECISION (the held-PR pattern), not as filed debt.
+    // -----------------------------------------------------------------------
+    const quality = await runReviewFixLoop(
+      ws,
+      branch,
+      wt,
+      actionableFindings(scoped.findings),
+      {
+        // The scoped site: the workstream's own lane fixes, the re-review runs
+        // the SCOPED schema, and nothing is pushed — the track publishes once,
+        // at integration, so there is no afterFixCommit here.
+        fixAgentType: implAgent,
+        reviewSchema: SCOPED_DOD_SCHEMA,
+        reviewerNoun: "scoped verifier",
+        scopeLine: " — stay inside this workstream's declared files",
+        shipVerb: "integrates",
+        dodNoun: "scoped DoD",
+        afterFixCommit: null,
+      }
+    );
+    if (quality.gateFail) {
+      report = quality.gateFail;
+      log(
+        `❌ ${ws.id} attempt ${attempt}: a quality-round re-review FAILed (${quality.gateFail.failingGate || "gate"}) — retrying`
+      );
+      continue;
+    }
+    scoped.fixRounds = quality.journal;
+    ws.unresolvedFindings = quality.leftovers.map((f) => ({
+      workstream: ws.id,
+      ...f,
+      rounds: quality.journal,
+    }));
+    if (ws.unresolvedFindings.length)
+      log(
+        `⚠️  ${ws.id}: ${ws.unresolvedFindings.length} review finding(s) unresolved after ${QUALITY_ROUNDS} quality round(s) — they will HOLD the track at the gate`
+      );
     return { ok: true, ws, branch, wt, report: scoped, attempts: attempt };
   }
 
@@ -1257,15 +1545,19 @@ Default to FAIL when evidence is missing or unconvincing. Do NOT fix the code �
  */
 async function runStage(track, stage, stageIndex, trackBranch, trackWt) {
   const solo = stage.length === 1;
-  const need = RESERVE * stage.length;
+  // Recipe-weighted: a generate-and-filter workstream needs 3 attempt-reserves
+  // and 3 agent slots, and starting a stage on a third of the funding it needs
+  // is exactly the stop-before-you-cannot-finish failure the reserve prevents.
+  const stageCost = stage.reduce((n, ws) => n + agentCostOf(ws), 0);
+  const need = RESERVE * stageCost;
   if (budget.total && budget.remaining() < need)
     return {
       ok: false,
-      reason: `token reserve hit before stage ${stageIndex}: ${stage.length} workstream(s) need ${Math.round(need / 1000)}k, ${Math.round(budget.remaining() / 1000)}k left`,
+      reason: `token reserve hit before stage ${stageIndex}: ${stage.length} workstream(s) weigh ${stageCost} agent-reserve(s) (recipe-weighted) and need ${Math.round(need / 1000)}k, ${Math.round(budget.remaining() / 1000)}k left`,
     };
 
   log(
-    `🔨 ${track.id} stage ${stageIndex}: ${stage.length} workstream(s)${solo ? "" : " in parallel"}`
+    `🔨 ${track.id} stage ${stageIndex}: ${stage.length} workstream(s)${solo ? "" : " in parallel"}${stageCost > stage.length ? ` (agent weight ${stageCost} — recipe-weighted chunking under the cap of ${MAX_CONCURRENT_AGENTS})` : ""}`
   );
   for (const ws of stage) {
     ws.solo = solo;
@@ -1279,7 +1571,9 @@ async function runStage(track, stage, stageIndex, trackBranch, trackWt) {
     stage.map(
       (ws) => () =>
         runWorkstream(track, ws, { stageIndex, trackBranch, trackWt })
-    )
+    ),
+    MAX_CONCURRENT_AGENTS,
+    stage.map(agentCostOf)
   );
   const settled = stage.map(
     (ws, i) =>
@@ -1341,91 +1635,10 @@ Report which branches merged and which did not. A branch you could not merge cle
   return { ok: true, results: settled };
 }
 
-/**
- * Fold code-quality warnings into the parent feature's follow-up rollup, then
- * READ THE BODY BACK and assert every line landed.
- *
- * Same shape as settleLabels, for the same reason: the agent reports what
- * `gh issue view --json body` printed, the loop compares that against what it
- * asked for, and an unconfirmed write is an error rather than a footnote. The
- * pre-merge ordering guarantee is unchanged — only the destination moved from
- * one-issue-per-warning to one rollup per parent.
- */
-async function foldFollowUps(track, warnings, pr) {
-  const wanted = warnings.map(
-    (w) =>
-      `- [ ] ${w.summary}${w.files?.length ? ` (${w.files.join(", ")})` : ""}`
-  );
-  let followUps = [];
-
-  for (let attempt = 1; attempt <= LABEL_ATTEMPTS; attempt++) {
-    const reply = await agent(
-      `Record ${warnings.length} code-quality finding(s) from PR ${pr.url} on the parent feature's follow-up rollup. They must be recorded BEFORE the merge, so a merge cannot lose them.
-${
-  attempt > 1
-    ? `\nATTEMPT ${attempt}: a previous attempt did not land. These lines were NOT found in the body afterwards:\n${
-        followUps
-          .filter((f) => !f.confirmed)
-          .map((f) => `  ${f.anchor}`)
-          .join("\n") || "  (nothing was reported at all)"
-      }\nRe-apply those and read the body back again.\n`
-    : ""
-}
-1. **Find the parent.** \`gh issue view ${track.issues[0]} --json parent --jq .parent\` — the GraphQL-backed read, which is the ONLY one that works. Do NOT read the REST field (\`gh api repos/{owner}/{repo}/issues/<n> --jq .parent\`): it returns \`null\` on issues that demonstrably have a parent, and an agent that trusts it concludes the issue is an orphan. Platform work with no FRD may genuinely have none — in that case use the track's own issue as the anchor and say so in \`note\`.
-
-2. **Find or create the rollup.** One open issue per parent, titled exactly \`Follow-ups — <parent title>\`, labelled \`follow-ups\`. Search before creating: \`gh issue list --state open --label follow-ups --limit 200 --search "<parent title> in:title"\`. If it does not exist, create it with \`--label follow-ups --parent <parent>\` and a body that opens with a \`## Follow-up acceptance criteria\` heading. Do NOT give a new rollup any \`agent:*\` label yet — step 4 decides that.
-
-3. **Append**, under \`## Follow-up acceptance criteria\`, exactly these lines — verbatim, one per line, preserving the leading \`- [ ] \`:
-${wanted.map((l) => `   ${l}`).join("\n")}
-   Then, beneath each, an indented detail line naming ${pr.url} and:
-${warnings.map((w) => `   - ${w.summary} → ${w.detail || "(no detail given)"}`).join("\n")}
-   Append — never replace the body. Read the current body, add to it, write it back with \`gh issue edit <n> --body-file\`. Clobbering someone else's follow-ups to add yours is worse than failing.
-
-4. **Takeability.** Count the \`- [ ]\` items under that heading AFTER your append. If there are **3 or more**, the rollup becomes takeable: \`gh issue edit <n> --add-label agent:queued\`. Below 3 it carries NO \`agent:*\` label and waits — dispatch picks it up with the parent's next track regardless of count.
-
-5. **READ IT BACK.** \`gh issue view <n> --json body --jq .body\` and \`gh issue view <n> --json labels --jq '[.labels[].name]'\`. For each line you appended, set \`confirmed\` true ONLY if you can see that exact line in what the command printed. Report what you saw, not what you intended — the loop compares your report against what it asked for, and a false confirmation is worse than a failed write because it makes lost findings look recorded.
-
-Return strictly the schema.`,
-      {
-        label: `follow-ups:${track.id}#${attempt}`,
-        phase: "Ship",
-        // Same tier as the merge node: this writes durable state that a merge
-        // then makes permanent, and it is the last chance to not lose a finding.
-        model: "opus",
-        effort: "low",
-        schema: FOLLOWUP_SCHEMA,
-      }
-    );
-
-    followUps = reply?.followUps || [];
-    const missing = wanted.filter(
-      (line) =>
-        !followUps.some(
-          (f) => f.confirmed && f.anchor && line.includes(f.anchor.trim())
-        ) && !followUps.some((f) => f.confirmed && f.anchor === line)
-    );
-    if (!missing.length)
-      return { settled: true, followUps, attempts: attempt, missing: [] };
-
-    log(
-      `📝 ${track.id} follow-up fold did not stick on attempt ${attempt}/${LABEL_ATTEMPTS} — ${missing.length} finding(s) unconfirmed`
-    );
-    if (attempt === LABEL_ATTEMPTS)
-      return { settled: false, followUps, attempts: attempt, missing };
-  }
-  return {
-    settled: false,
-    followUps,
-    attempts: LABEL_ATTEMPTS,
-    missing: wanted,
-  };
-}
-
 async function buildTrack(track) {
   const branch = `feature/${track.id}`;
   const wt = `.claude/worktrees/bud-${track.id}`;
   let lastReport = null;
-  let followUps = [];
   // True when the last assembly repair changed things without answering the
   // root cause it was handed. The next repair prompt is told.
   let repairDodged = false;
@@ -1526,107 +1739,67 @@ Return {"claimed": [the numbers you edited], "inProgressNow": [every number that
       );
 
     // -----------------------------------------------------------------------
-    // Push FIRST, and prove the remote has what the worktree has.
+    // The guarantee tail — ONE child workflow call per integration attempt.
     //
-    // G3 validates the branch's preview deployment, and the preview is built
-    // from `origin/<branch>`. On #307 the worktree was a commit ahead of the
-    // remote for two attempts, so the gate kept reporting on code the fix had
-    // already replaced. The ordering is the guarantee: no verifier runs against
-    // a preview until `HEAD == origin/<branch>` has been observed.
+    // verify-and-ship.js owns: push + sha assert (no verifier runs until
+    // HEAD == origin/<branch> is observed), the integration DoD, the G6
+    // review-fix loop, HR4 lenses, the PR, the CI anchor, label settle, and
+    // the auto-merge gate. It never calls workflow() — nesting is one level,
+    // and this loop is the one parent. The two behaviors that only survive
+    // HERE stay here: attempt accounting, and byWorkstream re-entry with
+    // priorReport.
     // -----------------------------------------------------------------------
-    const push = await agent(
-      `Publish branch ${branch} from worktree ${wt} so its preview deployment contains what is about to be validated.
-
-1. \`git -C ${wt} push -u origin ${branch}\`
-2. \`git -C ${wt} fetch origin ${branch}\`
-3. Report, VERBATIM, what these printed:
-   - \`git -C ${wt} rev-parse HEAD\` → \`headSha\`
-   - \`git -C ${wt} rev-parse origin/${branch}\` → \`remoteSha\`
-
-The loop compares those two and will NOT run the functional gate until they are equal, so transcribe what you saw rather than what you expect. If the push was rejected, say why in \`detail\` and report the shas anyway — the mismatch is the diagnosis. Do NOT open a PR and do NOT merge. Return strictly the schema.`,
+    const ship = await workflow(
+      { scriptPath: `${FACTORY_ROOT}/verify-and-ship.js` },
       {
-        label: `push:${track.id}#${attempt}`,
-        phase: "Verify",
-        // Two git commands and two rev-parses, and the answer is asserted below.
-        model: "haiku",
-        effort: "low",
-        schema: PUSH_SCHEMA,
+        track: {
+          id: track.id,
+          issues: track.issues,
+          risk: track.risk,
+          hold: track.hold,
+          lane: track.lane,
+        },
+        branch,
+        wt,
+        base: BASE,
+        attempt,
+        labelAttempts: LABEL_ATTEMPTS,
+        autoMerge: AUTO_MERGE,
+        conventions: CONVENTIONS,
+        criteria: allCriteria(track),
+        wsSummaries: wsOutcomes.map((r) => ({
+          id: r.ws.id,
+          issues: r.ws.issues,
+          summary: r.report?.summary || "passed its scoped gates",
+        })),
+        wsIds: wsOutcomes.map((r) => r.ws.id),
+        carriedFindings: wsOutcomes.flatMap(
+          (r) => r.ws.unresolvedFindings || []
+        ),
+        survivingTrees: trees(),
       }
     );
-
-    const headSha = String(push?.headSha || "").trim();
-    const remoteSha = String(push?.remoteSha || "").trim();
-    if (!push?.pushed || !headSha || !remoteSha || headSha !== remoteSha) {
-      lastReport = {
-        verdict: "FAIL",
-        gates: [
-          {
-            id: "G3",
-            status: "FAIL",
-            evidence:
-              `git -C ${wt} rev-parse HEAD → ${headSha || "(nothing reported)"}\n` +
-              `git -C ${wt} rev-parse origin/${branch} → ${remoteSha || "(nothing reported)"}\n` +
-              `${push?.detail || "no detail returned"}`,
-          },
-        ],
-        acceptanceCriteria: [],
-        failingGate: "G3/preview-sync",
-        fixInstructions: `The preview is built from \`origin/${branch}\`, which does not match the worktree. Push ${branch} from ${wt} and re-check before anything validates it.`,
-        summary: `${track.id}: the branch was not published, so the preview would not contain the code under test`,
-      };
+    if (!ship) {
       log(
-        `🔁 ${track.id} attempt ${attempt}: worktree is at ${headSha || "?"} but origin/${branch} is at ${remoteSha || "?"} — not validating a stale preview`
+        `💥 ${track.id} attempt ${attempt}: verify-and-ship returned nothing (the child died) — counting the attempt`
       );
       continue;
     }
+    lastReport = ship.report || lastReport;
 
-    log(
-      `🧪 ${track.id} — integration verify ${attempt}/${MAX_ATTEMPTS} (origin/${branch} @ ${remoteSha.slice(0, 7)})`
-    );
-
-    // Independent verifier (G6): a DIFFERENT agent runs the integration gates.
-    const verify = await agent(
-      `You are the code-reviewer and the INDEPENDENT verifier. Use the \`definition-of-done\` skill and \`ops/agent-os/dod.md\`. Validate branch ${branch} in worktree ${wt} for issue(s) ${track.issues.map((n) => `#${n}`).join(", ")}.
-This track was built in ${track.stages.length} stage(s) by ${wsOutcomes.length} workstream(s), each of which already passed its OWN scoped gates (G0, a G2 subset, and G5 against its own declared files) in its own worktree. Those verdicts are inputs, not conclusions — your job is the whole assembled branch, which no scoped verifier has ever seen:
-
-${wsOutcomes.map((r) => `- **${r.ws.id}** (issue(s) ${hashes(r.ws.issues)}) — ${r.report?.summary || "passed its scoped gates"}`).join("\n")}
-
-Run every INTEGRATION gate yourself — do not trust the implementers, and do not re-run the scoped ones:
-- G1 \`pnpm typecheck && pnpm lint && pnpm build\` in ${wt} (hermetic, the way CI runs it)
-- G2 \`pnpm test\` — the FULL suite, not a subset. Two workstreams that each passed their own tests can still break each other's, and this is the first moment that is visible. If the worktree has no \`.env.local\`, run \`scripts/worktree-env.sh ${wt}\` first and re-run. A missing env is not a test failure, and reporting it as one blames the track for the harness.
-- G3 functional: use \`${track.lane === "backend" ? "validate-backend" : "validate-frontend"}\` and PROVE each acceptance criterion with an assertion + screenshot/transcript; console must be error-free; lighthouse a11y ≥ 90 for UI. Frontend validates against the branch's VERCEL PREVIEW (scripts/preview-url.sh --wait --bypass), never localhost:3000 — localhost serves main and would pass code this track never wrote. Backend prefers a tsx harness in the worktree.
-  ${branch} has ALREADY been pushed for you and \`origin/${branch}\` is at \`${remoteSha}\`, which equals the worktree HEAD. Before you trust a preview, confirm the deployment you are driving was built from that sha (\`scripts/preview-url.sh\` resolves the latest deployment for the branch) — a preview one commit behind is how #307 spent two attempts proving things about code that had already been replaced. If they differ, FAIL on G3 and say which sha the preview was built from rather than validating it anyway.
-- G4 conventions, and G5 across the WHOLE track (the union of every workstream's declared files, against \`origin/main\`).
-Acceptance criteria to prove — all of them, across every workstream:
-${allCriteria(track)}
-${track.risk === "high" ? "This is HIGH-RISK: also run HR1–HR3 (migration dry-run + schema diff + rollback proof)." : ""}
-Default to FAIL when evidence is missing or unconvincing.
-
-**If a failure belongs to one workstream, say which** in \`failingWorkstream\` — one of: ${wsOutcomes.map((r) => r.ws.id).join(", ")}. That sends the fix to that workstream alone and spends only its attempt, instead of re-opening the whole track. Leave it empty when the failure is genuinely of the assembly — a contradiction between two workstreams, a build that only breaks once both are present — because attributing that to one of them sends the fix to an agent that cannot see the other half.
-
-FINALLY — classify every warning you raise, because this decides whether the track merges without a human:
-
-- **spec-question** — answering it could change WHAT was built. A requirement that reads two ways, an AC that did not say, a product judgement, a behaviour that satisfies the letter of the AC while arguably missing its intent. Anything you would want the requirement's owner to rule on.
-- **code-quality** — a defect or improvement in HOW it was built, decidable from the codebase alone: a wrong date format, a contrast ratio, a duplicated constant, dead code, an overclaiming comment.
-
-A **spec-question warning holds the track for a human**; code-quality warnings are folded into the parent feature's follow-up rollup and the track merges. So the cost is asymmetric: a code-quality item wrongly marked spec-question wastes a little of the human's attention, while a spec-question wrongly marked code-quality ships a product decision they never made. **When genuinely torn, choose spec-question.**
-
-Do not invent warnings to seem thorough, and do not suppress one to get a clean merge. An empty list is a real answer.
-
-Return strictly the DoD report schema.`,
-      {
-        label: `verify:${track.id}#${attempt}`,
-        phase: "Verify",
-        agentType: "code-reviewer",
-        schema: DOD_SCHEMA,
-      }
-    );
-    lastReport = verify;
-    if (!verify) continue;
-
-    const passed =
-      verify.verdict === "PASS" || verify.verdict === "PASS_WITH_WARNINGS";
-    if (!passed) {
+    if (ship.outcome === "verify-failed") {
+      const verify = ship.report;
+      // Machinery-synthesized failures — a stale preview (G3/preview-sync), a
+      // red CI check, an HR4 dissent, or a verifier that died (no report at
+      // all) — retry the whole integration attempt, exactly as they did before
+      // the extraction. Only a verifier-authored FAIL routes to attribution,
+      // because only a verifier can name a failingWorkstream.
+      const synthesized =
+        !verify ||
+        verify.failingGate === "G3/preview-sync" ||
+        verify.failingGate === "CI" ||
+        /^HR4\//.test(verify.failingGate || "");
+      if (synthesized) continue;
       // Attributable → send it back to that workstream, which still has its own
       // attempts and its own worktree. Unattributable → the whole track retries.
       const owner = byWorkstream.get(verify.failingWorkstream);
@@ -1689,374 +1862,44 @@ Work in ${wt} on ${branch}. Fix ONLY what that requires. You are looking at the 
       continue;
     }
 
-    // High-risk → diverse-lens sign-off (HR4). Every lens must clear.
-    if (track.risk === "high") {
-      const votes = await parallel(
-        HIGH_RISK_LENSES.map(
-          (lens) => () =>
-            agent(
-              `You are an independent adversarial reviewer of HIGH-RISK branch ${branch} (worktree ${wt}), issue(s) ${track.issues.map((n) => `#${n}`).join(", ")}. ${CONVENTIONS}
-
-You review through ONE lens only: **${lens.key}**. Stay in it — other reviewers cover the other axes, and anything you wave through on your axis ships unexamined.
-
-${lens.brief}
-
-The first verifier reported PASS. Do not assume it was right; its report is below so you can check it, not so you can agree with it.
-${JSON.stringify({ gates: verify.gates, acceptanceCriteria: verify.acceptanceCriteria, summary: verify.summary })}
-
-Acceptance criteria in scope:
-${track.units.map((u) => (u.acceptanceCriteria || []).map((a) => `  - ${a}`).join("\n")).join("\n")}
-
-Default to FAIL when evidence is missing or unconvincing. Set lens to "${lens.key}". Return strictly the schema.`,
-              {
-                label: `lens:${lens.key}:${track.id}#${attempt}`,
-                // Explicit — nested inside parallel(), so don't race the global phase().
-                phase: "Verify",
-                agentType: "code-reviewer",
-                schema: LENS_SCHEMA,
-              }
-            ).then((v) => ({ lens: lens.key, report: v }))
-        )
-      );
-
-      // A dead lens is missing evidence, not a pass. Fail closed.
-      const tally = HIGH_RISK_LENSES.map((lens, i) => {
-        const r = votes[i];
-        return {
-          lens: lens.key,
-          report: r?.report ?? null,
-          cleared: r?.report?.verdict === "PASS",
-          died: !r?.report,
-        };
-      });
-      const dissent = tally.filter((t) => !t.cleared);
-      log(
-        `🔎 ${track.id} HR4 lenses: ${tally.map((t) => `${t.lens}=${t.died ? "DIED" : t.report.verdict}`).join(" ")}`
-      );
-
-      if (dissent.length) {
-        const first = dissent.find((d) => !d.died) || dissent[0];
-        lastReport = {
-          ...verify,
-          verdict: "FAIL",
-          failingGate: `HR4/${first.lens}`,
-          fixInstructions: dissent
-            .map((d) =>
-              d.died
-                ? `[${d.lens}] lens agent died — no evidence on this axis; it must be re-reviewed.`
-                : `[${d.lens}] ${d.report.fixInstructions || d.report.summary}\n${(d.report.findings || []).map((f) => `  - ${f}`).join("\n")}`
-            )
-            .join("\n\n"),
-          summary: `HR4 rejected by ${dissent.map((d) => d.lens).join(", ")}.`,
-          lenses: tally.map(({ lens, cleared, died, report }) => ({
-            lens,
-            cleared,
-            died,
-            findings: report?.findings || [],
-          })),
-        };
-        log(
-          `❌ ${track.id} attempt ${attempt}: HR4 rejected by ${dissent.map((d) => d.lens).join(", ")} — retrying`
-        );
-        continue;
-      }
-
-      // Cleared by every lens — carry their findings into the PR body so the
-      // human reviewer sees what each axis actually looked at.
-      verify.lensFindings = tally.map(({ lens, report }) => ({
-        lens,
-        summary: report.summary,
-        findings: report.findings || [],
-      }));
-    }
-
-    // PASS (per the verifier) → push, open the PR, and WAIT FOR THE REAL CHECK.
-    log(`✅ ${track.id} passed DoD on attempt ${attempt} — opening PR`);
-    const pr = await agent(
-      `You are the release agent. Use the \`open-pr\` skill. Branch ${branch} (worktree ${wt}) PASSED the Definition of Done. The verifier's evidence report:
-${JSON.stringify(verify)}
-Push the branch. If a PR for this branch already EXISTS (an earlier attempt opened one), do NOT open a second — the push updates it. Otherwise open a PR against main with --label agent:in-review${track.risk === "high" ? " and --label risk:high" : ""}. Build the PR body from the evidence bundle (the DoD table + AC checklist + screenshots/lighthouse/migration). Include "Closes ${track.issues.map((n) => `#${n}`).join(", Closes ")}". Then flip each issue label agent:in-progress → agent:in-review — and do not report the flip you did not verify: the loop re-reads every one of those labels after you and will error this track if the board does not agree with you.
-
-The body MUST include the skill's **## 👀 Manual QA** section: the preview URL and exact path(s), a numbered happy-path walkthrough, and — the part that matters — **what the automation could NOT check**. Do NOT restate the acceptance criteria there; G3 already proved those, and a reviewer re-reading them learns nothing. Name the judgement calls instead (does it look right, read right, feel fast) and any edge case no AC asserted. Human attention is the scarcest resource in this system: spend it on what a gate cannot decide. If this track genuinely has nothing to eyeball, say so in one line.
-
-THEN WAIT FOR CI AND REPORT WHAT IT SAID, NOT WHAT YOU BELIEVE:
-\`gh pr checks <number> --watch --fail-fast\`, then read the conclusion of the "Format, Lint, Typecheck, Build" check. Put it in checkConclusion verbatim (success | failure | timed_out | none). If it is not success, pull the failing step and its error with \`gh run view <run-id> --log-failed\` and put that in checkSummary. Do not summarise it as "probably unrelated" and do not claim success you did not observe. Return strictly the schema.`,
-      // Pinned to opus, the executor tier. This node transcribes the CI
-      // conclusion, and the anchoring story rests on it reporting what GitHub
-      // said instead of summarising it into "probably unrelated" — so it must
-      // not drop to the quick-command tier. It also must not inherit the
-      // session model: shipping is executor work, not frontier work.
-      {
-        label: `pr:${track.id}#${attempt}`,
-        phase: "Ship",
-        model: "opus",
-        schema: PR_SCHEMA,
-      }
-    );
-
-    // The anchor decides, not the verifier. A green DoD with a red check is a
-    // failed attempt — the PR stays open and the next attempt pushes a fix to
-    // it. This is the cycle that stops "done" from meaning "an agent said so".
-    if (pr?.opened && pr.checkConclusion !== "success") {
-      lastReport = {
-        ...verify,
-        verdict: "FAIL",
-        failingGate: "CI",
-        notes: `CI reported "${pr.checkConclusion}" on ${pr.url}. ${pr.checkSummary || "no summary returned"}`,
-      };
-      log(
-        `🔴 ${track.id} attempt ${attempt}: DoD passed but CI said "${pr.checkConclusion}" — retrying against the real failure`
-      );
-      continue;
-    }
-
-    const shipped = pr?.opened && pr.checkConclusion === "success";
-
-    // -----------------------------------------------------------------------
-    // The DoD passed and the PR step still produced no PR.
-    //
-    // This is NOT `agent:blocked`. Blocked means the work did not reach the
-    // Definition of Done, and it sends a human to read a failing gate and fix
-    // code. Here the gates all passed and the commit is sitting on its branch —
-    // only the push/PR call failed (auth, a network blip, a rejected push, a
-    // dead `gh`). The human action is to retry the delivery, and telling them
-    // to go debug a build that already passed wastes the scarcest resource in
-    // this system. So the outcome gets its own label (`labels.md`) and its own
-    // bucket in the report.
-    // -----------------------------------------------------------------------
-    if (!shipped) {
-      const why = pr?.reason || "no reason given";
-      log(`📦 ${track.id} passed the DoD but delivery failed: ${why}`);
-      await agent(
-        `A build loop for issue(s) ${track.issues.map((n) => `#${n}`).join(", ")} PASSED the Definition of Done, but the delivery step failed to open a PR.
-Delivery failure: ${why}.
-The evidence bundle the DoD produced: ${JSON.stringify({ verdict: verify.verdict, summary: verify.summary, gates: verify.gates })}.
-Branch \`${branch}\` (worktree ${wt}) holds the committed work.
-For EACH issue, post a comment (\`gh issue comment <n>\`) that makes these three things unmissable:
-  1. The DoD PASSED — quote the evidence above. Nothing is known to be wrong with the code.
-  2. The DELIVERY step failed, and exactly why: ${why}.
-  3. What the human should do: retry the delivery (push \`${branch}\` and open the PR). Do NOT re-review or re-build the code; it already passed its gates.
-  4. A **Surviving worktrees** section, listing each of these verbatim — path, branch, and what it holds. They were left in place deliberately: they are where the passing work lives.
-${treeLines(trees())}
-Do NOT remove any worktree or branch yourself. Do NOT open a PR yourself and do NOT edit labels — the loop writes and verifies the \`agent:delivery-failed\` label itself in the next step. Return strictly the schema.`,
-        {
-          label: `delivery-failed:${track.id}`,
-          phase: "Ship",
-          // Mechanical: it transcribes a verdict and a failure string it was
-          // handed. It produces no judgement of its own.
-          model: "sonnet",
-          effort: "low",
-          schema: BLOCK_SCHEMA,
-        }
-      );
-
-      const labelState = await settleLabels(track, "agent:delivery-failed");
-      if (!labelState.settled)
-        log(
-          `🚨 ${track.id} failed to open a PR AND its agent:delivery-failed label did not settle — issue(s) ${labelState.missing.join(", ")} need a manual fix.`
-        );
+    if (ship.outcome === "delivery-failed")
       return {
         track,
         status: "pr-failed",
-        reason: `the PR step did not open a PR (${why})`,
-        pr,
-        report: verify,
+        reason: `the PR step did not open a PR (${ship.pr?.reason || "no reason given"})`,
+        pr: ship.pr,
+        report: ship.report,
         attempts: attempt,
-        labelState,
+        labelState: ship.labelState,
         survivingTrees: trees(),
       };
-    }
 
-    // -----------------------------------------------------------------------
-    // Settle the label BEFORE anything downstream trusts "shipped".
-    //
-    // This is the step that was missing. It runs before auto-merge on purpose:
-    // merging on the strength of a board state nobody verified is how a blocked
-    // PR got promoted into the review queue in the first place.
-    // -----------------------------------------------------------------------
-    const labelState = await settleLabels(track, "agent:in-review", { pr });
-    if (!labelState.settled) {
-      log(
-        `🚨 ${track.id} opened ${pr.url} with a green check, but the board does NOT say so after ${labelState.attempts} attempt(s): ` +
-          `issue(s) ${labelState.missing.join(", ") || "(none reported)"} do not read agent:in-review. ` +
-          `Reporting this track as ERRORED rather than shipped — a PR whose issue still reads agent:in-progress is indistinguishable from a failure.`
-      );
+    if (ship.outcome === "errored")
       return {
         track,
         status: "errored",
-        reason: `PR ${pr.url} is open and green, but agent:in-review could not be confirmed on issue(s) ${labelState.missing.join(", ") || "(unreported)"} after ${labelState.attempts} attempt(s)`,
-        pr,
-        report: verify,
-        warnings: verify.warnings || [],
+        reason: `PR ${ship.pr?.url} is open and green, but agent:in-review could not be confirmed on issue(s) ${ship.labelState?.missing?.join(", ") || "(unreported)"} after ${ship.labelState?.attempts ?? "?"} attempt(s)`,
+        pr: ship.pr,
+        report: ship.report,
+        warnings: ship.warnings || [],
         attempts: attempt,
-        labelState,
+        labelState: ship.labelState,
       };
-    }
-
-    // -----------------------------------------------------------------------
-    // Auto-merge — the review queue, not the budget, is what caps this factory.
-    //
-    // Four things must all hold, and each is a different kind of guarantee:
-    //   1. the DoD passed AND the real CI check is green (proven above),
-    //   2. the track is not risk:high — schema/auth/tenancy is where a bad
-    //      merge is unrecoverable, so those keep a human regardless,
-    //   3. the track is not `hold` — the standing policy is that a change to
-    //      the factory itself (this loop, the delivery-OS skills, ops/agent-os)
-    //      keeps a human, because the thing being changed is the thing that
-    //      would have caught the mistake. Before the flag existed the only way
-    //      to honour that was `autoMerge: false` for the whole pass, which
-    //      punished every clean track in a mixed wave; the flag is per unit so
-    //      only the factory track is held,
-    //   4. no warning is a spec-question — see DOD_SCHEMA.warnings.
-    //
-    // Code-quality warnings do NOT hold the merge. They are filed as issues and
-    // re-enter this same loop, which is the whole point: small known defects
-    // become tracked work instead of a reason to stall a good branch.
-    // -----------------------------------------------------------------------
-    let merge = null;
-    let cleanup = null;
-    if (AUTO_MERGE) {
-      const warnings = verify.warnings || [];
-      const specQuestions = warnings.filter((w) => w.kind === "spec-question");
-      const codeQuality = warnings.filter((w) => w.kind === "code-quality");
-      const holds = [];
-      if (track.risk === "high") holds.push("risk:high — never auto-merges");
-      if (track.hold)
-        holds.push(
-          "hold — declared never-auto-merge (factory policy or issue directive)"
-        );
-      if (specQuestions.length)
-        holds.push(
-          `${specQuestions.length} spec-question warning(s): ${specQuestions.map((w) => w.summary).join(" | ")}`
-        );
-
-      if (holds.length) {
-        log(`⏸️  ${track.id} held for review — ${holds.join("; ")}`);
-        await agent(
-          `PR ${pr.url} passed the DoD but is deliberately NOT auto-merged. Comment on it with \`gh pr comment\` explaining exactly why. Do NOT touch labels — the loop has already written and verified \`agent:in-review\` on this PR and its issue(s).
-
-Reason(s) it is held:
-${holds.map((h) => `- ${h}`).join("\n")}
-
-${specQuestions.length ? `The decisions the human must make:\n${specQuestions.map((w) => `- **${w.summary}** — ${w.detail || "(no detail given)"}`).join("\n")}\n\nPresent each as a decision with its options, not as a defect report. The reviewer's job here is to RULE, not to hunt.\n\nIf a decision is a DIRECTION question — two or more plausible directions where trying them beats reading about them — invoke the prototype skill (.claude/skills/prototype/SKILL.md) BEFORE commenting: build 3-4 candidates into this PR's branch (UI question → variants behind the prototype switcher, then ./scripts/preview-url.sh --wait --bypass for the link; behavior question → a throwaway CLI under prototypes/), verify each one works, and write the DECISION comment in the skill's format so the reviewer can operate the options instead of imagining them.` : ""}
-End the comment with a **Surviving worktrees** section, listing each of these verbatim — path, branch, and what it holds. A held track keeps its trees on purpose: whoever rules on this may want to re-run or extend them, and PR #333 was held with nobody told what was still on disk.
-${treeLines(trees())}
-Say plainly that these are the reviewer's to remove (\`git worktree remove <path>\` once the PR merges), and do NOT remove them yourself.
-
-Return strictly {"merged": false, "state": "refused", "detail": "<one line>"}.`,
-          {
-            label: `hold:${track.id}`,
-            phase: "Ship",
-            // Opus, not the session model: building prototypes and writing a
-            // DECISION comment is executor work. Not "low" effort either — a
-            // direction-shaped spec-question means this agent builds live
-            // prototypes before it comments, not just a comment.
-            model: "opus",
-            effort: "medium",
-            schema: MERGE_SCHEMA,
-          }
-        );
-      } else {
-        // Fold the code-quality warnings into the parent's rollup BEFORE the
-        // merge, and confirm they landed. If they cannot be confirmed the track
-        // is errored rather than merged — an unconfirmed append is exactly the
-        // silent no-op that lost two tracks' outcomes on 2026-07-26, and merging
-        // on top of one would discard the warnings for good.
-        if (codeQuality.length) {
-          const fold = await foldFollowUps(track, codeQuality, pr);
-          if (!fold.settled)
-            return {
-              track,
-              status: "errored",
-              reason: `PR ${pr.url} is green, but ${fold.missing.length} code-quality warning(s) could not be confirmed on a follow-up rollup after ${fold.attempts} attempt(s): ${fold.missing.join(" | ")}. NOT merged — merging would lose them.`,
-              pr,
-              report: verify,
-              warnings: verify.warnings || [],
-              attempts: attempt,
-              labelState,
-              followUps: fold.followUps,
-            };
-          followUps = fold.followUps;
-        }
-
-        log(`🟢 ${track.id} clean pass — auto-merging`);
-        merge = await agent(
-          `Auto-merge PR ${pr.url} (issue(s) ${track.issues.map((n) => `#${n}`).join(", ")}). It passed the full DoD and the required check is green, with no spec-question warnings.
-
-1. ${
-            codeQuality.length
-              ? `The ${codeQuality.length} code-quality warning(s) are ALREADY recorded on the follow-up rollup(s) ${[...new Set(followUps.map((f) => `#${f.issue}`))].join(", ")} and confirmed there. Do NOT file them again as issues.`
-              : `No follow-ups to record.`
-          }
-2. Then merge: \`gh pr merge <number> --squash --delete-branch --auto\`.
-   \`--auto\` is deliberate: the main ruleset requires branches to be up to date, so if this PR is behind main GitHub will re-run the checks and merge only when they pass green against what it actually lands on. If the merge is refused because the branch is behind and auto-merge is unavailable, run \`gh pr update-branch\` first and then retry with \`--auto\`.
-3. Report what GitHub ACTUALLY did — \`merged\` if it merged now, \`queued-for-auto-merge\` if it is waiting on checks, \`failed\` if it refused. Do NOT report success you did not observe; re-read with \`gh pr view <number> --json state,mergedAt\` before answering.
-
-Return strictly the schema.`,
-          {
-            // Opus: this one mutates main and transcribes GitHub's answer, so
-            // it stays at the executor tier — same reasoning as the PR node.
-            label: `merge:${track.id}`,
-            phase: "Ship",
-            model: "opus",
-            schema: MERGE_SCHEMA,
-          }
-        );
-
-        // ---------------------------------------------------------------
-        // Merged and done → the track owns its own leftovers.
-        //
-        // Only on `merged`. `queued-for-auto-merge` means GitHub is still
-        // waiting on checks, and deleting the worktree under a branch that
-        // has not landed is how the work disappears. The held and blocked
-        // paths never reach here: they hand their trees over in the exit
-        // comment instead, because those trees ARE the work.
-        // ---------------------------------------------------------------
-        if (merge?.state === "merged") {
-          cleanup = await agent(
-            `PR ${pr.url} for issue(s) ${hashes(track.issues)} is MERGED into main. Its build trees are now dead weight — remove them.
-
-For each of these, in order:
-${treeLines(trees())}
-
-  1. \`git worktree remove <path> --force\` (the tree is disposable; the work is on main).
-  2. \`git branch -D <branch>\` — the local branch only. Never touch \`main\`, never touch a remote branch, and never touch a path that is not in the list above: other tracks are building in sibling worktrees right now.
-  3. \`git worktree prune\`.
-
-Then run \`git worktree list\` and report what it PRINTED: every path from the list above that is gone belongs in \`removed\`, and anything still there belongs in \`remaining\` with the reason (an uncommitted change you did not expect is a reason to leave it and say so, not to force harder). Return strictly the schema.`,
-            {
-              label: `cleanup:${track.id}`,
-              phase: "Ship",
-              // Mechanical git, over an explicit list, verified by a listing.
-              model: "haiku",
-              effort: "low",
-              schema: CLEANUP_SCHEMA,
-            }
-          );
-          log(
-            `🧹 ${track.id} merged — removed ${cleanup?.removed?.length ?? 0} worktree/branch entr(ies)` +
-              (cleanup?.remaining?.length
-                ? `; ${cleanup.remaining.length} left behind: ${cleanup.remaining.join("; ")}`
-                : "")
-          );
-        }
-      }
-    }
 
     return {
       track,
       status: "shipped",
-      pr,
-      merge,
-      warnings: verify.warnings || [],
-      followUps,
-      report: verify,
+      pr: ship.pr,
+      merge: ship.merge,
+      warnings: ship.warnings || [],
+      report: ship.report,
       attempts: attempt,
-      labelState,
-      cleanup,
+      labelState: ship.labelState,
+      cleanup: ship.cleanup,
+      unresolvedFindings: ship.unresolvedFindings || [],
       // A merged track leaves nothing; every other shipped outcome is held, and
       // a held track's trees belong to the reviewer named in its PR comment.
-      survivingTrees: merge?.state === "merged" ? [] : trees(),
+      survivingTrees: ship.merge?.state === "merged" ? [] : trees(),
     };
   }
 
@@ -2070,10 +1913,18 @@ Then run \`git worktree list\` and report what it PRINTED: every path from the l
 
 phase("Build");
 // Bounded here too: a pass of three tracks that each fan out to four workstreams
-// is twelve agents, and the cap is on agents.
+// is twelve agents, and the cap is on agents. A track's weight is its PEAK
+// stage load (recipe-weighted) — stages run sequentially, so the most agents a
+// track can have in flight at once is its heaviest stage's summed cost.
 const results = await boundedParallel(
   tracks.map((t) => () => buildTrack(t)),
-  Math.max(1, Math.min(tracks.length, MAX_CONCURRENT_AGENTS))
+  MAX_CONCURRENT_AGENTS,
+  tracks.map((t) =>
+    Math.max(
+      1,
+      ...t.stages.map((s) => s.reduce((n, ws) => n + agentCostOf(ws), 0))
+    )
+  )
 );
 
 // ---------------------------------------------------------------------------
@@ -2155,12 +2006,9 @@ return {
     merge: r.merge?.state || (AUTO_MERGE ? "held-for-review" : "not-attempted"),
     // Not decoration: "shipped" is only true of the board if this is true.
     labelsConfirmed: r.labelState?.settled === true,
-    // Where the code-quality warnings went, and whether the write was seen.
-    followUps: (r.followUps || []).map((f) => ({
-      issue: f.issue,
-      kind: f.kind,
-      anchor: f.anchor,
-    })),
+    // Findings that survived the quality rounds — each one is a DECISION
+    // waiting on the held PR, never silently merged and never filed as debt.
+    unresolvedFindings: (r.unresolvedFindings || []).map((f) => f.summary),
     heldBy: (r.warnings || [])
       .filter((w) => w.kind === "spec-question")
       .map((w) => w.summary),
@@ -2203,7 +2051,7 @@ return {
       ? `🚨 FIRST: ${errored.length} track(s) errored because their label could not be confirmed. Their PRs may be open and green while their issues still read agent:in-progress — set the labels by hand before reading anything else on the board, because until then the board is lying about them. `
       : "") +
     (AUTO_MERGE
-      ? "Your queue is ONLY the held PRs — each is held because a warning raises a question about what should have been built, so it needs a ruling rather than a code review. Auto-merged PRs need no action; their code-quality warnings were folded into their parent's follow-up rollup, which becomes takeable at 3 items or with that parent's next track."
+      ? "Your queue is ONLY the held PRs — each is held because a spec-question or an unresolved review finding needs a ruling rather than a code review; findings arrive on the PR as a DECISION menu (accept as-is, direct a named fix, or take it manually). Auto-merged PRs need no action; reviewer findings were already fixed in-pass by the quality rounds."
       : "Review the opened PRs (your queue).") +
     " For blocked issues, read the issue comment for the failing gate + evidence and decide: tighten the spec, raise budget (+Nk), or take it manually." +
     " Blocked and held tracks deliberately KEEP their worktrees — each exit comment names the path, the branch and what it holds, and `survivingWorktrees` repeats them here; merged tracks removed their own." +

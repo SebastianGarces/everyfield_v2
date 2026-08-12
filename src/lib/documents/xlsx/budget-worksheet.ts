@@ -7,6 +7,7 @@
 
 import ExcelJS from "exceljs";
 
+import { churchNameOf } from "../render-text";
 import type { DocumentMergeValues } from "../types";
 
 const CATEGORIES = [
@@ -23,7 +24,7 @@ const CATEGORIES = [
 export async function buildBudgetWorksheet(
   values: DocumentMergeValues
 ): Promise<Buffer> {
-  const churchName = values.church_name || "Our Church";
+  const churchName = churchNameOf(values);
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Budget Worksheet");
 

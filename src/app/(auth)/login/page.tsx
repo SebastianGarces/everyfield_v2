@@ -3,6 +3,7 @@ import { LoginForm } from "./login-form";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { isDevLoginEnabled, listDevAccounts } from "./dev-accounts";
+import { safeRedirectPath } from "@/lib/auth/safe-redirect";
 
 function LoginFormSkeleton() {
   return (
@@ -53,10 +54,7 @@ export default async function LoginPage({
   searchParams: Promise<{ redirect?: string }>;
 }) {
   const { redirect } = await searchParams;
-  const redirectTo =
-    typeof redirect === "string" && redirect.startsWith("/")
-      ? redirect
-      : "/dashboard";
+  const redirectTo = safeRedirectPath(redirect);
 
   // The auth layout is a flex row; stack so the dev switcher sits BELOW the
   // form rather than beside it.

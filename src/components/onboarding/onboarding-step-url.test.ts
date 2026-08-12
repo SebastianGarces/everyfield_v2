@@ -8,6 +8,7 @@ import {
   ONBOARDING_STEP_PARAM,
   addressableOnboardingStep,
   isOnboardingStepId,
+  resolveFinishedDashboardStepRequest,
   resolveOnboardingStepRequest,
 } from "@/lib/onboarding/steps";
 import { resolveGuideEntry, wikiGuideConfig } from "@/lib/wiki/guide-config";
@@ -58,6 +59,11 @@ const FLOW_CODE = stripComments(
 );
 const PAGE_CODE = stripComments(
   read("app", "(dashboard)", "dashboard", "page.tsx")
+);
+// The onboarding half of the split route — the flow's own `?step=` guard
+// lives with the flow it guards.
+const ONBOARDING_PAGE_CODE = stripComments(
+  read("app", "(dashboard)", "dashboard", "onboarding-dashboard.tsx")
 );
 
 // ----------------------------------------------------------------------------
@@ -220,12 +226,12 @@ test("every other query param survives a step change", () => {
 
 test("the page resolves `?step=` through the shared guard", () => {
   assert.match(
-    PAGE_CODE,
-    /const stepRequest = resolveOnboardingStepRequest\(\{\s*step,\s*churchId: user\?\.churchId,\s*\}\);/,
+    ONBOARDING_PAGE_CODE,
+    /const stepRequest = resolveOnboardingStepRequest\(\{ step, churchId \}\);/,
     "the decision is CALLED, not restated inline where only a regex can see it"
   );
   assert.match(
-    PAGE_CODE,
+    ONBOARDING_PAGE_CODE,
     /stepRequest\.outcome === "honour"\s*\?\s*stepRequest\.step\s*:\s*resolveResumeStep\(/,
     "an honoured step wins; anything else falls to the resume rule"
   );
@@ -237,7 +243,7 @@ test("a step the server declines is redirected out of the URL, not ignored", () 
   // URL, so an ignored value would still be obeyed by the client on the next
   // render. The refusal has to leave the address bar.
   assert.match(
-    PAGE_CODE,
+    ONBOARDING_PAGE_CODE,
     /if \(stepRequest\.outcome === "refuse"\) \{\s*redirect\("\/dashboard"\);/
   );
 
@@ -301,7 +307,10 @@ test("a FINISHED dashboard refuses a stray `?step=` too, not only the flow", () 
   // redirect is a history PUSH), press Back.
   //
   // So the slice below is the point of the test — the refusal has to be AFTER
-  // the branch, not merely somewhere in the file.
+  // the branch, not merely somewhere in the file. The rule itself is the pure
+  // `resolveFinishedDashboardStepRequest` (exercised by `steps.test.ts`);
+  // what this pins is that the finished half of the page actually calls it
+  // and redirects on its refusal.
   const branchStart = PAGE_CODE.indexOf("shouldShowOnboarding({");
   assert.ok(branchStart > 0, "the onboarding branch must still exist");
   const branchEnd = PAGE_CODE.indexOf("\n  }\n", branchStart);
@@ -310,9 +319,20 @@ test("a FINISHED dashboard refuses a stray `?step=` too, not only the flow", () 
 
   assert.match(
     finishedDashboardCode,
-    /if \(step !== undefined && !wantsLeadershipStep\) \{\s*redirect\("\/dashboard"\);/,
+    /const stepRequest = resolveFinishedDashboardStepRequest\(step\);/,
+    "the finished dashboard's `?step=` decision is CALLED, never re-derived"
+  );
+  assert.match(
+    finishedDashboardCode,
+    /if \(stepRequest\.outcome === "refuse"\) \{\s*redirect\("\/dashboard"\);/,
     "a finished dashboard must redirect every `?step=` but OB-004's leadership"
   );
+  assert.deepEqual(resolveFinishedDashboardStepRequest("journey"), {
+    outcome: "refuse",
+  });
+  assert.deepEqual(resolveFinishedDashboardStepRequest("leadership"), {
+    outcome: "leadership",
+  });
 
   // And the reason it must: this is the one `?step=` value that resolves a
   // guide entry, so it is the one that must never survive onto a finished

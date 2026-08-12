@@ -1,49 +1,33 @@
 import { getCurrentSession, getCurrentUserChurch } from "@/lib/auth";
-import { redirect } from "next/navigation";
-import { ChurchCreatedConfetti } from "./church-created-confetti";
-import { OnboardingFlow } from "@/components/onboarding/onboarding-flow";
 import {
-  resolveOnboardingStepRequest,
-  resolveResumeStep,
+  resolveFinishedDashboardStepRequest,
   shouldShowOnboarding,
-  type OnboardingFacts,
 } from "@/lib/onboarding/steps";
-import {
-  canAnswerLeadershipQuestion,
-  shouldPromptPastorConfirmation,
-  shouldShowNoPlanterNudge,
-  type ChurchLeadershipState,
-} from "@/lib/onboarding/leadership";
-import { NoPlanterNudge } from "@/components/onboarding/no-planter-nudge";
-import { LeadershipReentry } from "@/components/onboarding/leadership-reentry";
-import { churchHasPlanterUser } from "./confirm-leadership";
-import { incompleteOnboardingItems } from "./incomplete-onboarding";
-import { IncompleteOnboardingIndicator } from "./incomplete-onboarding-indicator";
-import { PastorConfirmationPrompt } from "./pastor-confirmation-prompt";
-import {
-  getDashboardMetrics,
-  getRecentActivity,
-} from "@/lib/dashboard/service";
-import { getLaunchForChurch } from "@/lib/launch/queries";
-import { getLaunchReadiness } from "@/lib/launch/milestones";
-import { daysUntilTarget } from "@/lib/launch/countdown";
-import { hasInitialPhaseDeclaration } from "@/lib/phase-engine/transitions";
-import { LaunchStatusCard } from "@/components/launch/launch-status-card";
-import { PHASES, type PhaseNumber } from "@/lib/constants";
-import { MetricCard } from "@/components/dashboard/metric-card";
-import { ActivityFeed } from "@/components/dashboard/activity-feed";
-import { QuickActions } from "@/components/dashboard/quick-actions";
-import { AlertCircle, CalendarCheck, Users, UsersRound } from "lucide-react";
+import { redirect } from "next/navigation";
+import { NoPlantEmptyState } from "./no-plant-empty-state";
+import { OnboardingDashboard } from "./onboarding-dashboard";
+import { PlantDashboard } from "./plant-dashboard";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * `/dashboard` is two pages sharing one route, and this file is only the fork:
+ * the onboarding flow (`./onboarding-dashboard.tsx`) while
+ * `onboarding_completed_at` is null, and the finished plant dashboard
+ * (`./plant-dashboard.tsx`) after. Each half owns its own reads; what lives
+ * here is what both need — the session, the church row (request-cached, so
+ * handing it down costs the halves nothing) and the `?step=` resolution for
+ * the finished half, placed before the fork's queries so a refused URL costs
+ * none.
+ */
 export default async function DashboardPage({
   searchParams,
 }: {
   // Next hands a REPEATED query param back as an array (`?step=a&step=b`), so
   // this is the honest type rather than the convenient one. Narrowing is the
-  // guard's job — `resolveOnboardingStepRequest` — and typing it as a plain
-  // string is what let a repeated param slip past that guard entirely.
+  // guard's job — the two resolvers in `@/lib/onboarding/steps` — and typing
+  // it as a plain string is what let a repeated param slip past that guard
+  // entirely.
   searchParams: Promise<{
     churchCreated?: string | string[];
     step?: string | string[];
@@ -55,295 +39,65 @@ export default async function DashboardPage({
   ]);
   const { churchCreated, step } = resolvedSearchParams;
 
-  // OB-004: the one step a FINISHED dashboard answers to. Re-entry is a single
-  // question, not the whole wizard (ruling 2026-07-31), so this stays a check
-  // for one literal value rather than becoming "any step" alongside #373 below.
-  // A repeated `?step=leadership&step=journey` is an array, which equals no
-  // literal — so it falls to the redirect below rather than re-entering here
-  // with the guide's own reader (`forEach`, last value wins) pointed elsewhere.
-  const wantsLeadershipStep = step === "leadership";
-
   // Redirect oversight users to their dedicated dashboard
   if (user?.role === "sending_church_admin" || user?.role === "network_admin") {
     redirect("/oversight");
   }
 
+  // The proxy already bounces unauthenticated requests to /login
+  // (`PROTECTED_ROUTE_PREFIXES`); a null session here is a request that
+  // slipped past it, and it gets the same answer.
+  if (!user) {
+    redirect("/login");
+  }
+
   // F12 / OB-001: the onboarding flow is the primary dashboard content for a
   // planter who has not finished setting up — whether that means no church at
   // all, or a church created at step 1 and then abandoned. `getCurrentUserChurch`
-  // is request-cached, so reading it here does not cost the render below a query.
-  const churchDuringOnboarding = await getCurrentUserChurch();
+  // is request-cached, so reading it here does not cost the halves a query.
+  const church = await getCurrentUserChurch();
 
   if (
     shouldShowOnboarding({
-      role: user?.role,
-      churchId: user?.churchId,
-      onboardingCompletedAt: churchDuringOnboarding?.onboardingCompletedAt,
+      role: user.role,
+      churchId: user.churchId,
+      onboardingCompletedAt: church?.onboardingCompletedAt,
     })
   ) {
-    // OB-003/005: step 3's fact is asked of phase HISTORY, not of
-    // `current_phase` or of the launch row — "not sure, and no date yet" is a
-    // real answer that leaves both of those exactly as a planter who never saw
-    // the step would leave them. Only asked when there is a church to ask about.
-    const journeyDeclared = user?.churchId
-      ? await hasInitialPhaseDeclaration(user.churchId)
-      : false;
-
-    // The guard OB-004 carried, widened from one step to four and moved into a
-    // pure function so it can be exercised by CALLING it (#373 fix pass): a URL
-    // may name a later step only once step 1's church exists, and may name step
-    // 1 only while it does not. Every rule, and why each answer is the one it
-    // is, lives on `resolveOnboardingStepRequest`.
-    const stepRequest = resolveOnboardingStepRequest({
-      step,
-      churchId: user?.churchId,
-    });
-
-    // Refusing is a REDIRECT, not a shrug (#373). The flow now reads its step
-    // from the URL, so a refused value left sitting in the address bar would be
-    // read by the client on the very next render and honoured there instead —
-    // the server's answer has to be the one in the URL, and this is what makes
-    // it so. Only `refuse` comes here: a plain `/dashboard`, an unrecognised
-    // value and a closed `?step=basics` all resolve to `none` and are answered
-    // by the resume rule below without a navigation.
-    if (stepRequest.outcome === "refuse") {
-      redirect("/dashboard");
-    }
-
     return (
-      <div className="p-6">
-        <OnboardingFlow
-          initialStep={
-            stepRequest.outcome === "honour"
-              ? stepRequest.step
-              : resolveResumeStep({
-                  churchId: user?.churchId,
-                  leadershipStatus: churchDuringOnboarding?.leadershipStatus,
-                  journeyDeclared,
-                })
-          }
-          leadershipStatus={churchDuringOnboarding?.leadershipStatus}
-        />
-      </div>
+      <OnboardingDashboard
+        step={step}
+        churchId={user.churchId}
+        leadershipStatus={church?.leadershipStatus}
+      />
     );
   }
 
-  // Onboarding is OVER from here down, and the refusal above stopped running
-  // with it — so this is its other half (#373, AC 3). The flow owned `?step=`
-  // while it rendered; nothing owns it now, and nothing scrubbed it, so a value
-  // left in the address bar would survive onto a finished dashboard. That is not
-  // cosmetic: the wiki guide resolves from pathname + search params alone
-  // (`wiki-guide-provider.tsx`), so `/dashboard?step=journey` would put the
-  // Guide button on a finished dashboard, which the PR #367 ruling (option C,
-  // step-scoped) forbids.
-  //
-  // Reachable without typing a URL: finishing from step 3 redirects to
-  // `/dashboard?churchCreated=true`, and a Server Action redirect PUSHES, so
-  // Back returns to `/dashboard?step=journey` — now finished.
-  //
-  // `leadership` is the one exception, because it is the one step a finished
-  // dashboard genuinely answers to (OB-004's re-entry, handled below). Every
-  // other value goes, recognised or not: an unrecognised one is refused here
-  // rather than left to a resume rule, since past this point there is no flow
-  // left to resume into. Placed before the queries so a refused URL costs none.
-  if (step !== undefined && !wantsLeadershipStep) {
+  // Onboarding is OVER from here down, and the flow's own `?step=` refusal
+  // stopped running with it — so this is its other half (#373, AC 3), one call
+  // to the canonical resolver (`memory/invariants.md` → Onboarding: a `?step=`
+  // value becomes a step in exactly ONE place). `leadership` is the one value
+  // a finished dashboard honours (OB-004's re-entry); everything else is
+  // scrubbed by redirect, before any query runs.
+  const stepRequest = resolveFinishedDashboardStepRequest(step);
+  if (stepRequest.outcome === "refuse") {
     redirect("/dashboard");
   }
 
-  // Fetch dashboard data
-  const churchId = user!.churchId!;
-  const userId = user!.id;
-
-  const [
-    church,
-    metrics,
-    activities,
-    hasPlanterUser,
-    launchCard,
-    journeyDeclared,
-  ] = await Promise.all([
-    getCurrentUserChurch(),
-    getDashboardMetrics(churchId, userId),
-    getRecentActivity(churchId),
-    // OB-010: the IMPLICIT assignment — a `users` row with the planter role
-    // pointing here. It is what tells a church that predates OB-004 apart from
-    // one that genuinely has nobody leading it, and the two get opposite
-    // treatment: the first is left alone, the second is asked.
-    churchHasPlanterUser(churchId),
-    // LS-001: the launch date moved off the church row onto its own entity
-    // (migration 0032), so step 3's fact is read from here now.
-    //
-    // LS-003/LS-005: readiness rides along on this ARM rather than beside it,
-    // because it is keyed by the launch's id and cannot start until the launch
-    // read has answered. Chained here, the other three arms still overlap
-    // both; hoisted out, the card's progress bar would cost the dashboard a
-    // serial round trip. It is skipped for a launch that has no day (nothing
-    // is seeded until one is named) and for a completed one (the celebrate
-    // card shows the outcome, not a progress bar) — so the extra query is only
-    // run when the card will actually render its answer.
-    getLaunchForChurch(churchId).then(async (row) => ({
-      launch: row,
-      readiness:
-        row?.targetDate && row.status !== "completed"
-          ? await getLaunchReadiness(row.id, churchId)
-          : null,
-    })),
-    // OB-003/005: step 3's fact. Phase HISTORY, not `current_phase` and not
-    // the launch row — "not sure, and no date yet" is a real answer that
-    // leaves both of those looking exactly like never having been asked.
-    hasInitialPhaseDeclaration(churchId),
-  ]);
-
-  const { launch, readiness: launchReadiness } = launchCard;
-
-  const leadership: ChurchLeadershipState = {
-    churchId,
-    leadershipStatus: church?.leadershipStatus,
-    hasPlanterUser,
-  };
-
-  const viewer = { role: user?.role, churchId: user?.churchId };
-
-  // OB-004: the one way back INTO a finished flow. The no-planter nudge and the
-  // incomplete-onboarding indicator link here; leaving onboarding is otherwise
-  // one-way (ruling 2026-07-31), so this re-enters the single question rather
-  // than the whole wizard — and only for somebody whose answer would be
-  // accepted, which under OB-010 includes a team member of a plant with an
-  // empty planter seat.
-  const canAnswerLeadership = canAnswerLeadershipQuestion(viewer, leadership);
-
-  if (wantsLeadershipStep && canAnswerLeadership) {
-    return (
-      <div className="p-6">
-        <LeadershipReentry leadershipStatus={church?.leadershipStatus} />
-      </div>
-    );
+  // Ruled 2026-08-12 (408-2B): a viewer with no church — a coach, or a team
+  // member whose plant link is gone — is told so explicitly and kept here.
+  // The guard sits BEFORE the finished dashboard so none of its church-scoped
+  // reads run, and `PlantDashboard` takes a proven non-null `churchId`.
+  if (!user.churchId) {
+    return <NoPlantEmptyState />;
   }
 
-  const showNoPlanterNudge = shouldShowNoPlanterNudge(viewer, leadership);
-  const showPastorPrompt = shouldPromptPastorConfirmation(viewer, leadership);
-
-  // OB-011: which onboarding facts are still missing, read from the church row
-  // rather than from any record of how far the flow got — answering a step's
-  // question anywhere in the product drops it off this list.
-  const onboardingFacts: OnboardingFacts = {
-    churchId,
-    leadershipStatus: church?.leadershipStatus,
-    // Step 3's fact, read from the record the declaration itself writes (#306).
-    // It used to be inferred from the columns — a launch date, or a phase above
-    // 0 — and that inference could not see the honest answer: a planter who
-    // said "not sure" and "no date yet" leaves phase 0 and no launch row, and
-    // was nagged forever to answer a question they had answered.
-    journeyDeclared,
-    // Step 4's fact: anybody at all on the plant's list (OB-006).
-    peopleAdded: metrics.totalPeople > 0,
-  };
-
-  // The leadership row is the raw fact — "nobody answered the question" — so it
-  // is filtered twice before it can mislead. It is dropped for anybody whose
-  // answer would be refused (a link that quietly does nothing is worse than no
-  // link), and dropped while the pastor prompt is up, since that IS this
-  // question and asking it twice on one screen reads as a bug. What survives is
-  // the case the indicator is for: somebody who can answer, is not being asked,
-  // and never did — a planter who skipped step 2, or a plant that predates the
-  // flow entirely.
-  const incompleteSteps = incompleteOnboardingItems(onboardingFacts).filter(
-    (item) =>
-      item.id !== "leadership" || (canAnswerLeadership && !showPastorPrompt)
-  );
-
-  const phaseLabel =
-    PHASES[(church?.currentPhase ?? 0) as PhaseNumber] ?? "Pre-Phase 1";
-
   return (
-    <div className="p-6">
-      {churchCreated === "true" && <ChurchCreatedConfetti />}
-
-      <div className="mx-auto max-w-6xl space-y-6">
-        {showPastorPrompt && <PastorConfirmationPrompt churchId={churchId} />}
-
-        {showNoPlanterNudge && <NoPlanterNudge />}
-
-        <IncompleteOnboardingIndicator
-          items={incompleteSteps}
-          churchId={churchId}
-        />
-
-        {/* Header */}
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">
-            {church?.name ?? "Dashboard"}
-          </h1>
-          <p className="text-muted-foreground mt-1">{phaseLabel}</p>
-        </div>
-
-        {/* Metric Cards */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <MetricCard
-            title="Core Group"
-            value={metrics.coreGroupSize}
-            icon={UsersRound}
-            variant="success"
-            description="Core group, launch team & leaders"
-          />
-          <MetricCard
-            title="Total People"
-            value={metrics.totalPeople}
-            icon={Users}
-            description="All contacts in your pipeline"
-          />
-          <MetricCard
-            title="Overdue Tasks"
-            value={metrics.overdueTasks}
-            icon={AlertCircle}
-            variant={metrics.overdueTasks > 0 ? "warning" : "default"}
-            description={
-              metrics.overdueTasks > 0
-                ? "Tasks past their due date"
-                : "You're all caught up!"
-            }
-          />
-          <MetricCard
-            title="Vision Meetings"
-            value={metrics.visionMeetingsHeld}
-            icon={CalendarCheck}
-            variant="success"
-            description="Completed vision meetings"
-          />
-        </div>
-
-        {/* Activity Feed + Quick Actions */}
-        <div className="grid gap-6 lg:grid-cols-3">
-          <div className="lg:col-span-2">
-            <ActivityFeed activities={activities} />
-          </div>
-          <div className="space-y-6">
-            {/* LS-005: the compact countdown/status card. The countdown is
-                computed HERE with `daysUntilTarget` — the one implementation,
-                shared with /launch and the phase-engine snapshot — and handed
-                down as a number, so no card can re-derive it and disagree
-                (#338). */}
-            <LaunchStatusCard
-              targetDate={launch?.targetDate ?? null}
-              status={launch?.status ?? null}
-              daysUntil={daysUntilTarget(
-                launch?.targetDate ?? null,
-                new Date()
-              )}
-              readiness={launchReadiness}
-              outcome={
-                launch
-                  ? {
-                      attendanceCount: launch.attendanceCount,
-                      decisionsCount: launch.decisionsCount,
-                    }
-                  : undefined
-              }
-            />
-            <QuickActions />
-          </div>
-        </div>
-      </div>
-    </div>
+    <PlantDashboard
+      viewer={{ id: user.id, role: user.role, churchId: user.churchId }}
+      church={church}
+      wantsLeadershipStep={stepRequest.outcome === "leadership"}
+      showConfetti={churchCreated === "true"}
+    />
   );
 }

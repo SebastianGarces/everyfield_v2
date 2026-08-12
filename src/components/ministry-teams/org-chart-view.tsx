@@ -1,38 +1,14 @@
 "use client";
 
-import {
-  Baby,
-  Building,
-  Crown,
-  Handshake,
-  Heart,
-  Megaphone,
-  Monitor,
-  Music,
-  Rocket,
-  Users,
-  type LucideIcon,
-} from "lucide-react";
+import { Users } from "lucide-react";
 import Link from "next/link";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { TEAM_ICONS, staffingPercent } from "@/lib/ministry-teams/team-display";
 import type { TeamWithStats } from "@/lib/ministry-teams/service";
-
-const TEAM_ICONS: Record<string, LucideIcon> = {
-  crown: Crown,
-  rocket: Rocket,
-  music: Music,
-  baby: Baby,
-  building: Building,
-  handshake: Handshake,
-  users: Users,
-  megaphone: Megaphone,
-  heart: Heart,
-  monitor: Monitor,
-};
 
 interface OrgChartViewProps {
   teams: TeamWithStats[];
@@ -90,10 +66,7 @@ function OrgNode({
   isRoot?: boolean;
 }) {
   const Icon = TEAM_ICONS[team.icon ?? ""] ?? Users;
-  const staffingPercent =
-    team.totalRoles > 0
-      ? Math.round((team.filledRoles / team.totalRoles) * 100)
-      : 0;
+  const staffing = staffingPercent(team.filledRoles, team.totalRoles);
 
   return (
     <Link href={`/teams/${team.id}`} className="w-full">
@@ -142,11 +115,11 @@ function OrgNode({
             variant="secondary"
             className={cn(
               "text-[10px]",
-              staffingPercent === 100 &&
+              staffing === 100 &&
                 "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-400",
-              staffingPercent < 60 &&
+              staffing < 60 &&
                 "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400",
-              staffingPercent < 40 &&
+              staffing < 40 &&
                 "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400"
             )}
           >

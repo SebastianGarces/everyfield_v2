@@ -1,42 +1,31 @@
 "use server";
 
-import { verifySession } from "@/lib/auth/session";
+// ============================================================================
+// The ministry-teams endpoints. Every export here is a POSTable endpoint some
+// UI actually calls (memory/invariants.md → Authentication); a read with no
+// caller does not get an action at all — server components call the service
+// directly. The shared shell — session, error policy, validation plumbing,
+// revalidation — lives in ./action-shell.ts.
+// ============================================================================
+
 import {
   listTeams,
-  getTeam,
   createTeam,
   updateTeam,
   assignTeamLeader,
   initializePredefinedTeams,
-  listRoles,
   createRole,
   updateRole,
   deleteRole,
   importRoleTemplates,
   assignMember,
   removeMember,
-  getPersonTeams,
-  getPersonTeamCount,
-  listTrainingPrograms,
   createTrainingProgram,
   markTrainingComplete,
-  getTeamHealth,
-  getAllTeamsHealth,
-  getStaffingSummary,
 } from "@/lib/ministry-teams/service";
-import type {
-  TeamWithStats,
-  TeamDetail,
-  PersonTeamAssignment,
-  StaffingSummary,
-  TeamHealthMetrics,
-} from "@/lib/ministry-teams/service";
-import {
-  createMeeting as createUnifiedMeeting,
-  listMeetings as listUnifiedMeetings,
-  recordAttendanceBatch,
-} from "@/lib/meetings/service";
-import type { ChurchMeeting, MeetingWithCounts } from "@/lib/meetings/types";
+import type { TeamWithStats } from "@/lib/ministry-teams/service";
+import { createMeeting as createUnifiedMeeting } from "@/lib/meetings/service";
+import type { ChurchMeeting } from "@/lib/meetings/types";
 import {
   teamCreateSchema,
   teamUpdateSchema,
@@ -46,10 +35,7 @@ import {
   trainingProgramCreateSchema,
   trainingCompleteSchema,
 } from "@/lib/validations/ministry-teams";
-import {
-  meetingCreateSchema,
-  attendanceBatchSchema,
-} from "@/lib/validations/meetings";
+import { meetingCreateSchema } from "@/lib/validations/meetings";
 import type {
   MinistryTeam,
   TeamRole,
@@ -62,14 +48,15 @@ import {
   type PredefinedTeamKey,
 } from "@/lib/ministry-teams/role-templates";
 import { revalidatePath } from "next/cache";
+import {
+  fieldErrorResult,
+  formEntries,
+  revalidateTeamSurfaces,
+  withChurch,
+} from "./action-shell";
+import type { ActionResult } from "./action-shell";
 
-// ============================================================================
-// Types
-// ============================================================================
-
-export type ActionResult<T = void> =
-  | { success: true; data: T }
-  | { success: false; error: string; fieldErrors?: Record<string, string[]> };
+export type { ActionResult };
 
 // ============================================================================
 // Team Actions
@@ -78,147 +65,65 @@ export type ActionResult<T = void> =
 export async function listTeamsAction(): Promise<
   ActionResult<TeamWithStats[]>
 > {
-  try {
-    const { user } = await verifySession();
-    if (!user.churchId)
-      return { success: false, error: "No church associated" };
-
-    const teams = await listTeams(user.churchId);
+  return withChurch("Failed to load teams", async ({ churchId }) => {
+    const teams = await listTeams(churchId);
     return { success: true, data: teams };
-  } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized")
-      return { success: false, error: "You must be logged in" };
-    return { success: false, error: "Failed to load teams" };
-  }
-}
-
-export async function getTeamAction(
-  teamId: string
-): Promise<ActionResult<TeamDetail>> {
-  try {
-    const { user } = await verifySession();
-    if (!user.churchId)
-      return { success: false, error: "No church associated" };
-
-    const team = await getTeam(user.churchId, teamId);
-    if (!team) return { success: false, error: "Team not found" };
-
-    return { success: true, data: team };
-  } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized")
-      return { success: false, error: "You must be logged in" };
-    return { success: false, error: "Failed to load team" };
-  }
+  });
 }
 
 export async function createTeamAction(
   formData: FormData
 ): Promise<ActionResult<MinistryTeam>> {
-  try {
-    const { user } = await verifySession();
-    if (!user.churchId)
-      return { success: false, error: "No church associated" };
+  return withChurch("Failed to create team", async ({ churchId, userId }) => {
+    const parsed = teamCreateSchema.safeParse(
+      Object.fromEntries(formData.entries())
+    );
+    if (!parsed.success) return fieldErrorResult(parsed.error);
 
-    const rawData = Object.fromEntries(formData.entries());
-    const parsed = teamCreateSchema.safeParse(rawData);
-    if (!parsed.success) {
-      return {
-        success: false,
-        error: "Validation failed",
-        fieldErrors: parsed.error.flatten().fieldErrors as Record<
-          string,
-          string[]
-        >,
-      };
-    }
-
-    const team = await createTeam(user.churchId, user.id, parsed.data);
-    revalidatePath("/teams");
+    const team = await createTeam(churchId, userId, parsed.data);
+    revalidateTeamSurfaces();
     return { success: true, data: team };
-  } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized")
-      return { success: false, error: "You must be logged in" };
-    return { success: false, error: "Failed to create team" };
-  }
+  });
 }
 
 export async function updateTeamAction(
   teamId: string,
   formData: FormData
 ): Promise<ActionResult<MinistryTeam>> {
-  try {
-    const { user } = await verifySession();
-    if (!user.churchId)
-      return { success: false, error: "No church associated" };
+  return withChurch("Failed to update team", async ({ churchId }) => {
+    const parsed = teamUpdateSchema.safeParse(
+      Object.fromEntries(formData.entries())
+    );
+    if (!parsed.success) return fieldErrorResult(parsed.error);
 
-    const rawData = Object.fromEntries(formData.entries());
-    const parsed = teamUpdateSchema.safeParse(rawData);
-    if (!parsed.success) {
-      return {
-        success: false,
-        error: "Validation failed",
-        fieldErrors: parsed.error.flatten().fieldErrors as Record<
-          string,
-          string[]
-        >,
-      };
-    }
-
-    const team = await updateTeam(user.churchId, teamId, parsed.data);
-    revalidatePath("/teams");
+    const team = await updateTeam(churchId, teamId, parsed.data);
+    revalidateTeamSurfaces();
     return { success: true, data: team };
-  } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized")
-      return { success: false, error: "You must be logged in" };
-    return { success: false, error: "Failed to update team" };
-  }
+  });
 }
 
 export async function assignTeamLeaderAction(
   teamId: string,
   personId: string
 ): Promise<ActionResult<MinistryTeam>> {
-  try {
-    const { user } = await verifySession();
-    if (!user.churchId)
-      return { success: false, error: "No church associated" };
-
-    const team = await assignTeamLeader(
-      user.churchId,
-      teamId,
-      personId,
-      user.id
-    );
-    revalidatePath("/teams");
+  return withChurch("Failed to assign leader", async ({ churchId, userId }) => {
+    const team = await assignTeamLeader(churchId, teamId, personId, userId);
+    revalidateTeamSurfaces();
     return { success: true, data: team };
-  } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized")
-      return { success: false, error: "You must be logged in" };
-    if (error instanceof Error) return { success: false, error: error.message };
-    return { success: false, error: "Failed to assign leader" };
-  }
+  });
 }
 
 export async function initializeTeamsAction(
   teamKeys?: PredefinedTeamKey[]
 ): Promise<ActionResult<MinistryTeam[]>> {
-  try {
-    const { user } = await verifySession();
-    if (!user.churchId)
-      return { success: false, error: "No church associated" };
-
-    const teams = await initializePredefinedTeams(
-      user.churchId,
-      user.id,
-      teamKeys
-    );
-    revalidatePath("/teams");
-    return { success: true, data: teams };
-  } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized")
-      return { success: false, error: "You must be logged in" };
-    return { success: false, error: "Failed to initialize teams" };
-  }
+  return withChurch(
+    "Failed to initialize teams",
+    async ({ churchId, userId }) => {
+      const teams = await initializePredefinedTeams(churchId, userId, teamKeys);
+      revalidateTeamSurfaces();
+      return { success: true, data: teams };
+    }
+  );
 }
 
 /**
@@ -299,114 +204,40 @@ export async function initializeTeamsWithRolesAction(): Promise<
 // Role Actions
 // ============================================================================
 
-export async function listRolesAction(
-  teamId: string
-): Promise<ActionResult<TeamRole[]>> {
-  try {
-    const { user } = await verifySession();
-    if (!user.churchId)
-      return { success: false, error: "No church associated" };
-
-    const roles = await listRoles(user.churchId, teamId);
-    return { success: true, data: roles };
-  } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized")
-      return { success: false, error: "You must be logged in" };
-    return { success: false, error: "Failed to load roles" };
-  }
-}
-
 export async function createRoleAction(
   teamId: string,
   formData: FormData
 ): Promise<ActionResult<TeamRole>> {
-  try {
-    const { user } = await verifySession();
-    if (!user.churchId)
-      return { success: false, error: "No church associated" };
+  return withChurch("Failed to create role", async ({ churchId, userId }) => {
+    const parsed = roleCreateSchema.safeParse(formEntries(formData));
+    if (!parsed.success) return fieldErrorResult(parsed.error);
 
-    const rawData: Record<string, unknown> = {};
-    formData.forEach((value, key) => {
-      if (key === "isLeadershipRole") rawData[key] = value === "true";
-      else if (key === "sortOrder") rawData[key] = parseInt(value as string);
-      else if (value !== "") rawData[key] = value;
-    });
-
-    const parsed = roleCreateSchema.safeParse(rawData);
-    if (!parsed.success) {
-      return {
-        success: false,
-        error: "Validation failed",
-        fieldErrors: parsed.error.flatten().fieldErrors as Record<
-          string,
-          string[]
-        >,
-      };
-    }
-
-    const role = await createRole(user.churchId, teamId, user.id, parsed.data);
-    revalidatePath(`/teams/${teamId}`);
+    const role = await createRole(churchId, teamId, userId, parsed.data);
+    revalidateTeamSurfaces();
     return { success: true, data: role };
-  } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized")
-      return { success: false, error: "You must be logged in" };
-    return { success: false, error: "Failed to create role" };
-  }
+  });
 }
 
 export async function updateRoleAction(
   roleId: string,
   formData: FormData
 ): Promise<ActionResult<TeamRole>> {
-  try {
-    const { user } = await verifySession();
-    if (!user.churchId)
-      return { success: false, error: "No church associated" };
+  return withChurch("Failed to update role", async ({ churchId }) => {
+    const parsed = roleUpdateSchema.safeParse(formEntries(formData));
+    if (!parsed.success) return fieldErrorResult(parsed.error);
 
-    const rawData: Record<string, unknown> = {};
-    formData.forEach((value, key) => {
-      if (key === "isLeadershipRole") rawData[key] = value === "true";
-      else if (key === "sortOrder") rawData[key] = parseInt(value as string);
-      else if (value !== "") rawData[key] = value;
-    });
-
-    const parsed = roleUpdateSchema.safeParse(rawData);
-    if (!parsed.success) {
-      return {
-        success: false,
-        error: "Validation failed",
-        fieldErrors: parsed.error.flatten().fieldErrors as Record<
-          string,
-          string[]
-        >,
-      };
-    }
-
-    const role = await updateRole(user.churchId, roleId, parsed.data);
-    revalidatePath("/teams");
+    const role = await updateRole(churchId, roleId, parsed.data);
+    revalidateTeamSurfaces();
     return { success: true, data: role };
-  } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized")
-      return { success: false, error: "You must be logged in" };
-    return { success: false, error: "Failed to update role" };
-  }
+  });
 }
 
 export async function deleteRoleAction(roleId: string): Promise<ActionResult> {
-  try {
-    const { user } = await verifySession();
-    if (!user.churchId)
-      return { success: false, error: "No church associated" };
-
-    await deleteRole(user.churchId, roleId, user.id);
-    revalidatePath("/teams");
+  return withChurch("Failed to delete role", async ({ churchId, userId }) => {
+    await deleteRole(churchId, roleId, userId);
+    revalidateTeamSurfaces();
     return { success: true, data: undefined };
-  } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized")
-      return { success: false, error: "You must be logged in" };
-    if (error instanceof Error) return { success: false, error: error.message };
-    return { success: false, error: "Failed to delete role" };
-  }
+  });
 }
 
 export async function importRoleTemplatesAction(
@@ -414,25 +245,20 @@ export async function importRoleTemplatesAction(
   teamKey: PredefinedTeamKey,
   roleKeys?: string[]
 ): Promise<ActionResult<TeamRole[]>> {
-  try {
-    const { user } = await verifySession();
-    if (!user.churchId)
-      return { success: false, error: "No church associated" };
-
-    const roles = await importRoleTemplates(
-      user.churchId,
-      teamId,
-      user.id,
-      teamKey,
-      roleKeys
-    );
-    revalidatePath(`/teams/${teamId}`);
-    return { success: true, data: roles };
-  } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized")
-      return { success: false, error: "You must be logged in" };
-    return { success: false, error: "Failed to import templates" };
-  }
+  return withChurch(
+    "Failed to import templates",
+    async ({ churchId, userId }) => {
+      const roles = await importRoleTemplates(
+        churchId,
+        teamId,
+        userId,
+        teamKey,
+        roleKeys
+      );
+      revalidateTeamSurfaces();
+      return { success: true, data: roles };
+    }
+  );
 }
 
 // ============================================================================
@@ -444,351 +270,109 @@ export async function assignMemberAction(
   roleId: string,
   data: { personId: string; startDate?: string }
 ): Promise<ActionResult<TeamMembership>> {
-  try {
-    const { user } = await verifySession();
-    if (!user.churchId)
-      return { success: false, error: "No church associated" };
-
+  return withChurch("Failed to assign member", async ({ churchId, userId }) => {
     const parsed = memberAssignSchema.safeParse(data);
-    if (!parsed.success) {
-      return {
-        success: false,
-        error: "Validation failed",
-        fieldErrors: parsed.error.flatten().fieldErrors as Record<
-          string,
-          string[]
-        >,
-      };
-    }
+    if (!parsed.success) return fieldErrorResult(parsed.error);
 
     const membership = await assignMember(
-      user.churchId,
+      churchId,
       teamId,
       roleId,
       parsed.data.personId,
-      user.id,
+      userId,
       parsed.data.startDate
     );
-    revalidatePath(`/teams/${teamId}`);
-    revalidatePath("/teams");
+    revalidateTeamSurfaces();
     return { success: true, data: membership };
-  } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized")
-      return { success: false, error: "You must be logged in" };
-    if (error instanceof Error) return { success: false, error: error.message };
-    return { success: false, error: "Failed to assign member" };
-  }
+  });
 }
 
 export async function removeMemberAction(
   membershipId: string
 ): Promise<ActionResult> {
-  try {
-    const { user } = await verifySession();
-    if (!user.churchId)
-      return { success: false, error: "No church associated" };
-
-    await removeMember(user.churchId, membershipId, user.id);
-    revalidatePath("/teams");
+  return withChurch("Failed to remove member", async ({ churchId, userId }) => {
+    await removeMember(churchId, membershipId, userId);
+    revalidateTeamSurfaces();
     return { success: true, data: undefined };
-  } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized")
-      return { success: false, error: "You must be logged in" };
-    if (error instanceof Error) return { success: false, error: error.message };
-    return { success: false, error: "Failed to remove member" };
-  }
-}
-
-export async function getPersonTeamsAction(
-  personId: string
-): Promise<ActionResult<PersonTeamAssignment[]>> {
-  try {
-    const { user } = await verifySession();
-    if (!user.churchId)
-      return { success: false, error: "No church associated" };
-
-    const teams = await getPersonTeams(user.churchId, personId);
-    return { success: true, data: teams };
-  } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized")
-      return { success: false, error: "You must be logged in" };
-    return { success: false, error: "Failed to load person teams" };
-  }
-}
-
-export async function getPersonTeamCountAction(
-  personId: string
-): Promise<ActionResult<number>> {
-  try {
-    const { user } = await verifySession();
-    if (!user.churchId)
-      return { success: false, error: "No church associated" };
-
-    const count = await getPersonTeamCount(user.churchId, personId);
-    return { success: true, data: count };
-  } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized")
-      return { success: false, error: "You must be logged in" };
-    return { success: false, error: "Failed to get team count" };
-  }
+  });
 }
 
 // ============================================================================
 // Meeting Actions (using unified meetings service)
 // ============================================================================
 
-export async function listMeetingsAction(
-  teamId: string
-): Promise<ActionResult<MeetingWithCounts[]>> {
-  try {
-    const { user } = await verifySession();
-    if (!user.churchId)
-      return { success: false, error: "No church associated" };
-
-    const result = await listUnifiedMeetings(user.churchId, {
-      teamId,
-      limit: 50,
-    });
-    return { success: true, data: result.meetings };
-  } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized")
-      return { success: false, error: "You must be logged in" };
-    return { success: false, error: "Failed to load meetings" };
-  }
-}
-
 export async function createMeetingAction(
   teamId: string,
   formData: FormData
 ): Promise<ActionResult<ChurchMeeting>> {
-  try {
-    const { user } = await verifySession();
-    if (!user.churchId)
-      return { success: false, error: "No church associated" };
+  return withChurch(
+    "Failed to create meeting",
+    async ({ churchId, userId }) => {
+      const rawData: Record<string, unknown> = formEntries(formData);
 
-    const rawData: Record<string, unknown> = {};
-    formData.forEach((value, key) => {
-      if (key === "durationMinutes")
-        rawData[key] = value ? parseInt(value as string) : undefined;
-      else if (value !== "") rawData[key] = value;
-    });
+      // Inject team meeting type and teamId — real mapping, not coercion.
+      rawData.type = "team_meeting";
+      rawData.teamId = teamId;
+      // Map meetingType to meetingSubtype
+      if (rawData.meetingType) {
+        rawData.meetingSubtype = rawData.meetingType;
+        delete rawData.meetingType;
+      }
 
-    // Inject team meeting type and teamId
-    rawData.type = "team_meeting";
-    rawData.teamId = teamId;
-    // Map meetingType to meetingSubtype
-    if (rawData.meetingType) {
-      rawData.meetingSubtype = rawData.meetingType;
-      delete rawData.meetingType;
+      const parsed = meetingCreateSchema.safeParse(rawData);
+      if (!parsed.success) return fieldErrorResult(parsed.error);
+
+      const meeting = await createUnifiedMeeting(churchId, userId, parsed.data);
+      revalidatePath(`/teams/${teamId}/meetings`);
+      revalidatePath("/meetings");
+      return { success: true, data: meeting };
     }
-
-    const parsed = meetingCreateSchema.safeParse(rawData);
-    if (!parsed.success) {
-      return {
-        success: false,
-        error: "Validation failed",
-        fieldErrors: parsed.error.flatten().fieldErrors as Record<
-          string,
-          string[]
-        >,
-      };
-    }
-
-    const meeting = await createUnifiedMeeting(
-      user.churchId,
-      user.id,
-      parsed.data
-    );
-    revalidatePath(`/teams/${teamId}/meetings`);
-    revalidatePath("/meetings");
-    return { success: true, data: meeting };
-  } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized")
-      return { success: false, error: "You must be logged in" };
-    return { success: false, error: "Failed to create meeting" };
-  }
-}
-
-export async function recordAttendanceAction(
-  meetingId: string,
-  data: {
-    records: { personId: string; status: "attended" | "absent" | "excused" }[];
-  }
-): Promise<ActionResult> {
-  try {
-    const { user } = await verifySession();
-    if (!user.churchId)
-      return { success: false, error: "No church associated" };
-
-    const parsed = attendanceBatchSchema.safeParse(data);
-    if (!parsed.success) {
-      return {
-        success: false,
-        error: "Validation failed",
-      };
-    }
-
-    await recordAttendanceBatch(
-      user.churchId,
-      meetingId,
-      parsed.data.records,
-      user.id
-    );
-    revalidatePath("/teams");
-    revalidatePath("/meetings");
-    return { success: true, data: undefined };
-  } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized")
-      return { success: false, error: "You must be logged in" };
-    return { success: false, error: "Failed to record attendance" };
-  }
+  );
 }
 
 // ============================================================================
 // Training Actions
 // ============================================================================
 
-export async function listTrainingProgramsAction(
-  teamId?: string
-): Promise<ActionResult<TrainingProgram[]>> {
-  try {
-    const { user } = await verifySession();
-    if (!user.churchId)
-      return { success: false, error: "No church associated" };
-
-    const programs = await listTrainingPrograms(user.churchId, teamId);
-    return { success: true, data: programs };
-  } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized")
-      return { success: false, error: "You must be logged in" };
-    return { success: false, error: "Failed to load programs" };
-  }
-}
-
 export async function createTrainingProgramAction(
   formData: FormData
 ): Promise<ActionResult<TrainingProgram>> {
-  try {
-    const { user } = await verifySession();
-    if (!user.churchId)
-      return { success: false, error: "No church associated" };
+  return withChurch(
+    "Failed to create program",
+    async ({ churchId, userId }) => {
+      const parsed = trainingProgramCreateSchema.safeParse(
+        formEntries(formData)
+      );
+      if (!parsed.success) return fieldErrorResult(parsed.error);
 
-    const rawData: Record<string, unknown> = {};
-    formData.forEach((value, key) => {
-      if (key === "isRequired") rawData[key] = value === "true";
-      else if (value !== "") rawData[key] = value;
-    });
-
-    const parsed = trainingProgramCreateSchema.safeParse(rawData);
-    if (!parsed.success) {
-      return {
-        success: false,
-        error: "Validation failed",
-        fieldErrors: parsed.error.flatten().fieldErrors as Record<
-          string,
-          string[]
-        >,
-      };
+      const program = await createTrainingProgram(
+        churchId,
+        userId,
+        parsed.data
+      );
+      revalidateTeamSurfaces();
+      return { success: true, data: program };
     }
-
-    const program = await createTrainingProgram(
-      user.churchId,
-      user.id,
-      parsed.data
-    );
-    revalidatePath("/teams");
-    return { success: true, data: program };
-  } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized")
-      return { success: false, error: "You must be logged in" };
-    return { success: false, error: "Failed to create program" };
-  }
+  );
 }
 
 export async function markTrainingCompleteAction(data: {
   personId: string;
   programId: string;
 }): Promise<ActionResult<TrainingCompletion>> {
-  try {
-    const { user } = await verifySession();
-    if (!user.churchId)
-      return { success: false, error: "No church associated" };
-
+  return withChurch("Failed to mark complete", async ({ churchId, userId }) => {
     const parsed = trainingCompleteSchema.safeParse(data);
     if (!parsed.success) {
-      return {
-        success: false,
-        error: "Validation failed",
-      };
+      return { success: false, error: "Validation failed" };
     }
 
     const completion = await markTrainingComplete(
-      user.churchId,
+      churchId,
       parsed.data.personId,
       parsed.data.programId,
-      user.id
+      userId
     );
-    revalidatePath("/teams");
+    revalidateTeamSurfaces();
     return { success: true, data: completion };
-  } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized")
-      return { success: false, error: "You must be logged in" };
-    if (error instanceof Error) return { success: false, error: error.message };
-    return { success: false, error: "Failed to mark complete" };
-  }
-}
-
-// ============================================================================
-// Health / Metrics Actions
-// ============================================================================
-
-export async function getStaffingSummaryAction(): Promise<
-  ActionResult<StaffingSummary>
-> {
-  try {
-    const { user } = await verifySession();
-    if (!user.churchId)
-      return { success: false, error: "No church associated" };
-
-    const summary = await getStaffingSummary(user.churchId);
-    return { success: true, data: summary };
-  } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized")
-      return { success: false, error: "You must be logged in" };
-    return { success: false, error: "Failed to load staffing summary" };
-  }
-}
-
-export async function getTeamHealthAction(
-  teamId: string
-): Promise<ActionResult<TeamHealthMetrics>> {
-  try {
-    const { user } = await verifySession();
-    if (!user.churchId)
-      return { success: false, error: "No church associated" };
-
-    const health = await getTeamHealth(user.churchId, teamId);
-    return { success: true, data: health };
-  } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized")
-      return { success: false, error: "You must be logged in" };
-    return { success: false, error: "Failed to load team health" };
-  }
-}
-
-export async function getAllTeamsHealthAction(): Promise<
-  ActionResult<TeamHealthMetrics[]>
-> {
-  try {
-    const { user } = await verifySession();
-    if (!user.churchId)
-      return { success: false, error: "No church associated" };
-
-    const health = await getAllTeamsHealth(user.churchId);
-    return { success: true, data: health };
-  } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized")
-      return { success: false, error: "You must be logged in" };
-    return { success: false, error: "Failed to load team health" };
-  }
+  });
 }

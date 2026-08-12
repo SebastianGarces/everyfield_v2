@@ -1,4 +1,4 @@
-import { sql, type SQL } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import {
   check,
   index,
@@ -12,12 +12,8 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 import { churches } from "./church";
+import { inList } from "./sql";
 import { users } from "./user";
-
-/** `'a', 'b'` — the CHECK's value list, built from the tuples below so the two cannot drift. */
-function inList(values: readonly string[]): SQL {
-  return sql.raw(values.map((value) => `'${value}'`).join(", "));
-}
 
 // ============================================================================
 // Phase Engine (Plant Intelligence) — feature-owned schema

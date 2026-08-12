@@ -52,6 +52,55 @@ export function urlWithoutTemplateParam(
   return query ? `${pathname}?${query}` : pathname;
 }
 
+/**
+ * One filter dropdown of the bar below — an "All …" entry plus the derived
+ * options. Local on purpose: the three filters differ only in width, label,
+ * and option list, and this is what keeps their styling and a11y attributes
+ * from drifting apart.
+ */
+function FilterSelect({
+  value,
+  onValueChange,
+  ariaLabel,
+  placeholder,
+  allLabel,
+  widthClass,
+  options,
+}: {
+  value: string;
+  onValueChange: (value: string) => void;
+  ariaLabel: string;
+  placeholder: string;
+  allLabel: string;
+  widthClass: string;
+  options: { value: string; label: string }[];
+}) {
+  return (
+    <Select value={value} onValueChange={onValueChange}>
+      <SelectTrigger
+        aria-label={ariaLabel}
+        className={`${widthClass} cursor-pointer`}
+      >
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={ALL} className="cursor-pointer">
+          {allLabel}
+        </SelectItem>
+        {options.map((option) => (
+          <SelectItem
+            key={option.value}
+            value={option.value}
+            className="cursor-pointer"
+          >
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
 export function DocumentsLibrary({ items }: { items: DocumentLibraryItem[] }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -166,68 +215,46 @@ export function DocumentsLibrary({ items }: { items: DocumentLibraryItem[] }) {
           />
         </div>
         <div className="flex gap-2">
-          <Select value={category} onValueChange={setCategory}>
-            <SelectTrigger
-              aria-label="Filter templates by category"
-              className="w-[160px] cursor-pointer"
-            >
-              <SelectValue placeholder="Category" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL} className="cursor-pointer">
-                All categories
-              </SelectItem>
-              {categories.map((c) => (
-                <SelectItem key={c} value={c} className="cursor-pointer">
-                  {CATEGORY_LABELS[c]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <FilterSelect
+            value={category}
+            onValueChange={setCategory}
+            ariaLabel="Filter templates by category"
+            placeholder="Category"
+            allLabel="All categories"
+            widthClass="w-[160px]"
+            options={categories.map((c) => ({
+              value: c,
+              label: CATEGORY_LABELS[c],
+            }))}
+          />
 
           {phases.length > 0 && (
-            <Select value={phase} onValueChange={setPhase}>
-              <SelectTrigger
-                aria-label="Filter templates by phase"
-                className="w-[130px] cursor-pointer"
-              >
-                <SelectValue placeholder="Phase" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL} className="cursor-pointer">
-                  All phases
-                </SelectItem>
-                {phases.map((p) => (
-                  <SelectItem
-                    key={p}
-                    value={String(p)}
-                    className="cursor-pointer"
-                  >
-                    Phase {p}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <FilterSelect
+              value={phase}
+              onValueChange={setPhase}
+              ariaLabel="Filter templates by phase"
+              placeholder="Phase"
+              allLabel="All phases"
+              widthClass="w-[130px]"
+              options={phases.map((p) => ({
+                value: String(p),
+                label: `Phase ${p}`,
+              }))}
+            />
           )}
 
-          <Select value={format} onValueChange={setFormat}>
-            <SelectTrigger
-              aria-label="Filter templates by file format"
-              className="w-[120px] cursor-pointer"
-            >
-              <SelectValue placeholder="Format" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL} className="cursor-pointer">
-                All formats
-              </SelectItem>
-              {formats.map((f) => (
-                <SelectItem key={f} value={f} className="cursor-pointer">
-                  {FORMAT_LABELS[f]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <FilterSelect
+            value={format}
+            onValueChange={setFormat}
+            ariaLabel="Filter templates by file format"
+            placeholder="Format"
+            allLabel="All formats"
+            widthClass="w-[120px]"
+            options={formats.map((f) => ({
+              value: f,
+              label: FORMAT_LABELS[f],
+            }))}
+          />
         </div>
       </div>
 

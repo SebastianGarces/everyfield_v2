@@ -1,4 +1,4 @@
-import { sql, type SQL } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import {
   check,
   date,
@@ -12,6 +12,7 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 import { churches } from "./church";
+import { inList } from "./sql";
 import { tasks } from "./tasks";
 import { users } from "./user";
 
@@ -42,11 +43,6 @@ import { users } from "./user";
 //                          exists.
 //   launch_events          the APPEND-ONLY date/status journal (LS-002/LS-009).
 // ============================================================================
-
-/** `'a', 'b'` — the CHECK's value list, built from the tuples below so the two cannot drift. */
-function inList(values: readonly string[]): SQL {
-  return sql.raw(values.map((value) => `'${value}'`).join(", "));
-}
 
 // ----------------------------------------------------------------------------
 // launches
