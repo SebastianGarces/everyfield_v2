@@ -8,7 +8,8 @@
  * Usage:
  *   bun run scripts/seed-dev-db.ts
  *   bun run scripts/seed-dev-db.ts --clean-only          # Only clean, don't seed
- *   SEED_ADMIN_PASSWORD=… bun run scripts/seed-dev-db.ts --oversight-orgs-only
+ *   pnpm exec tsx scripts/seed-dev-db.ts --oversight-orgs-only
+ *     ...with SEED_ADMIN_PASSWORD recorded in .env.local — see below.
  *
  * The wipe below is not scoped to the rows this file creates — see
  * `cleanDatabase()`. It refuses to run against a database holding the alpha
@@ -37,7 +38,20 @@
  * unattended. Its password comes from `SEED_ADMIN_PASSWORD` and has no default;
  * unset is a refusal, not a fallback. No mode of this script has a working
  * password for a protected database.
+ *
+ * ROUND 10 GAVE THE PASSWORD A HOME. Removing the in-repo constant was right
+ * and left a hole: the value became whatever the last operator typed, recorded
+ * nowhere, so the next agent to validate #304 in a browser could not sign in as
+ * either oversight admin — every interactive acceptance criterion went
+ * unexercised for want of a credential. Record it in `.env.local`, which this
+ * file already loads: gitignored and machine-local, so it is not an in-repo
+ * constant, and it is beside `VERCEL_AUTOMATION_BYPASS_SECRET`, which a
+ * verifier must open anyway to reach a preview. Running the mode with the value
+ * only on the command line still works and now prints a warning saying what it
+ * costs. See `src/lib/dev-seed/oversight-admin-upsert.ts`.
  */
+
+import { readFileSync } from "node:fs";
 
 import { neon } from "@neondatabase/serverless";
 import { config } from "dotenv";
@@ -57,6 +71,12 @@ import {
 } from "../src/db/schema";
 import { hashPassword } from "../src/lib/auth/password";
 import {
+  OVERSIGHT_ADMIN_EMAILS,
+  oversightAdminUpsert,
+  SEED_ENV_FILE,
+  unrecordedPasswordNotice,
+} from "../src/lib/dev-seed/oversight-admin-upsert";
+import {
   ALLOW_PROTECTED_DB_FLAG,
   decideSeedAccounts,
   decideWipe,
@@ -64,8 +84,22 @@ import {
   SEED_ADMIN_PASSWORD_ENV,
 } from "../src/lib/dev-seed/protected-database";
 
-// Load environment variables for scripts
-config({ path: ".env.local" });
+// Load environment variables for scripts.
+//
+// This is also the route by which `SEED_ADMIN_PASSWORD` reaches the additive
+// mode without anyone typing it on a command line: `.env.local` is gitignored
+// and machine-local, so recording it there keeps the credential out of the
+// repository AND leaves it somewhere a later verifier can read.
+config({ path: SEED_ENV_FILE });
+
+/** The env file's text, or `undefined` when there is no such file. */
+function readEnvFileText(file: string): string | undefined {
+  try {
+    return readFileSync(file, "utf8");
+  } catch {
+    return undefined;
+  }
+}
 
 // Parse command line args
 const cleanOnly = process.argv.includes("--clean-only");
@@ -616,7 +650,7 @@ async function insertOversightOrgs(): Promise<void> {
 }
 
 /**
- * The two oversight logins this mode restores — BOTH sides of the fixture.
+ * Restore BOTH sides of the oversight fixture, keyed by ADDRESS.
  *
  * One command has to leave a usable oversight fixture behind, and there are two
  * halves to it: the sending church that issues an invitation, and the network
@@ -624,58 +658,40 @@ async function insertOversightOrgs(): Promise<void> {
  * `admin@everyfield.app` kept whatever `sending_network_id` it happened to have
  * — NULL on the preview's database, which makes `/oversight/invitations` render
  * "Set up your network first" and hands a verifier no way to send anything.
+ *
+ * Round 9 fixed that by looping the two ROLES and taking whichever `SEED_USERS`
+ * entry carried each one. Round 10 keys on the ADDRESS instead
+ * (`OVERSIGHT_ADMIN_EMAILS`), because the address is what the documentation
+ * promises a verifier and the role is not unique by construction — a second
+ * `network_admin` in the fixture would silently move the credential write to
+ * another account. The lookup is total: an address this file no longer seeds is
+ * a thrown error, not a skipped admin.
+ *
+ * The statement itself lives in `src/lib/dev-seed/oversight-admin-upsert.ts` so
+ * a test can render it with `.toSQL()`.
  */
-const OVERSIGHT_ADMIN_ROLES = [
-  "sending_church_admin",
-  "network_admin",
-] as const;
-
 async function seedOversightOrgs(passwordHash: string): Promise<void> {
   await insertOversightOrgs();
 
-  for (const role of OVERSIGHT_ADMIN_ROLES) {
-    const admin = SEED_USERS.find((user) => user.role === role);
-    if (!admin) throw new Error(`no ${role} in SEED_USERS`);
+  const now = new Date();
 
-    // AN UPSERT, NOT `onConflictDoNothing` (#304 round 9). The point of this
-    // mode is to make an oversight login USABLE — the operator names a password
-    // and then signs in with it. `onConflictDoNothing` could only ever create
-    // the account, never re-key one that already exists, so a second run
-    // against a database that already had the address exited 0, printed
-    // "Password: the SEED_ADMIN_PASSWORD you passed" and left the OLD password
-    // working: a false success on a credential path, and the reason the fixture
-    // stayed unreachable after the shared-database account was neutralised.
-    //
-    // Re-keying an existing account is safe here only because
-    // `decideSeedAccounts` has already refused — with no override — on any
-    // database holding a sentinel. On a scratch or preview database the address
-    // is this fixture's own, and taking it over is exactly what was asked for.
-    //
-    // The org FKs are in the SET too, so a run also repairs an account whose
-    // `sending_church_id` / `sending_network_id` drifted to NULL. `name` is
-    // not: it identifies a person on screen, and a re-key is not a rename.
-    await db
-      .insert(users)
-      .values({
+  for (const email of OVERSIGHT_ADMIN_EMAILS) {
+    const admin = SEED_USERS.find((user) => user.email === email);
+    if (!admin) throw new Error(`no ${email} in SEED_USERS`);
+    if (!admin.name) throw new Error(`${email} has no name in SEED_USERS`);
+
+    await oversightAdminUpsert(
+      db,
+      {
         email: admin.email,
         name: admin.name,
         role: admin.role,
-        passwordHash,
-        churchId: null,
         sendingChurchId: admin.sendingChurchId ?? null,
         sendingNetworkId: admin.sendingNetworkId ?? null,
-      })
-      .onConflictDoUpdate({
-        target: users.email,
-        set: {
-          passwordHash,
-          role: admin.role,
-          churchId: null,
-          sendingChurchId: admin.sendingChurchId ?? null,
-          sendingNetworkId: admin.sendingNetworkId ?? null,
-          updatedAt: new Date(),
-        },
-      });
+      },
+      passwordHash,
+      now
+    );
 
     console.log(`   [${admin.role}] ${admin.email}`);
   }
@@ -813,8 +829,23 @@ async function main(): Promise<void> {
       console.log("🏛️  Upserting oversight orgs (no wipe, no other rows)...");
       await seedOversightOrgs(await hashPassword(password));
       console.log(
-        `\n   Password: the ${SEED_ADMIN_PASSWORD_ENV} you passed (not printed)\n`
+        `\n   Password: the ${SEED_ADMIN_PASSWORD_ENV} you passed (not printed)`
       );
+
+      // ...and SAY SO when nothing recorded it (#304 round 10). The mode has
+      // just re-keyed two logins; if the value lives only in this shell, the
+      // next person to validate in a browser cannot sign in, which is precisely
+      // how the fixture was stranded between rounds 8 and 10. Never printed —
+      // the notice names the file and the key, and the operator holds the
+      // value.
+      const notice = unrecordedPasswordNotice(
+        readEnvFileText(SEED_ENV_FILE),
+        password
+      );
+      console.log(
+        notice ? `\n${notice}\n` : `   Recorded in ${SEED_ENV_FILE}\n`
+      );
+
       process.exit(0);
     }
 

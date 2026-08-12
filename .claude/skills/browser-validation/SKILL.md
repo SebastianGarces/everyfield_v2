@@ -65,8 +65,8 @@ local dev, so the seeded accounts work:
 | Account | Email | Password | Notes |
 |---|---|---|---|
 | Planter | `planter1@everyfield.app` | `password123` | **Church has 0 people** — fine for empty states, useless for anything about a list |
-| Network admin | `admin@everyfield.app` | none in this repo — you set it with `seed-dev-db.ts --oversight-orgs-only` (full command below) | Owns "Dev Church Planting Network". Its `sending_network_id` is what `/oversight/invitations` needs; without it the page says "Set up your network first" and no invitation can be sent |
-| Sending church admin | `sending-church-admin@everyfield.app` | none in this repo — you set it with `seed-dev-db.ts --oversight-orgs-only` (full command below) | Belongs to "Dev Sending Church", which belongs to NO network — so `/settings/association` opens on the admin's *answering* view. Added #304 round 6; before it the dev DB held no `sending_church_admin` at all and this whole role was unreachable in a browser |
+| Network admin | `admin@everyfield.app` | not in this repo — read `SEED_ADMIN_PASSWORD` from `.env.local`; set it there and run `seed-dev-db.ts --oversight-orgs-only` (full command below) | Owns "Dev Church Planting Network". Its `sending_network_id` is what `/oversight/invitations` needs; without it the page says "Set up your network first" and no invitation can be sent |
+| Sending church admin | `sending-church-admin@everyfield.app` | not in this repo — read `SEED_ADMIN_PASSWORD` from `.env.local`; set it there and run `seed-dev-db.ts --oversight-orgs-only` (full command below) | Belongs to "Dev Sending Church", which belongs to NO network — so `/settings/association` opens on the admin's *answering* view. Added #304 round 6; before it the dev DB held no `sending_church_admin` at all and this whole role was unreachable in a browser |
 | Coach | `coach1@everyfield.app` | `password123` | |
 | Eval planter | `planter-dayspring@eval.phase-engine.everyfield.app` | `eval-password-123` | ~100 people, meetings, assessments |
 | Eval planter | `planter-evergreen@eval.phase-engine.everyfield.app` | `eval-password-123` | ~89 people, different church |
@@ -81,12 +81,26 @@ form is broken. The addresses come from `scripts/seed-dev-db.ts` and
 `scripts/seed-phase-engine-eval.ts`, not `seed-dev-db.ts`.
 
 **The two oversight admins have no password in this repository** (#304, ruled 2026-08-10). No
-in-repo constant may open an account on a database anyone else uses, so you choose theirs and then
-sign in with it:
+in-repo constant may open an account on a database anyone else uses. **It lives in `.env.local`
+instead** — gitignored and machine-local, beside the `VERCEL_AUTOMATION_BYPASS_SECRET` you already
+need for step 2, so it is readable by whoever is validating and by nobody who can only read the
+repo. **Read it there first; do not invent one and do not re-seed if it is already set.**
 
 ```bash
-SEED_ADMIN_PASSWORD=<a password you choose> pnpm exec tsx scripts/seed-dev-db.ts --oversight-orgs-only
+# 1. Is it already recorded? If this prints a value, that is the password — use it and stop.
+grep '^SEED_ADMIN_PASSWORD=' .env.local
+
+# 2. Only if it printed nothing: choose one, record it, then run the seed.
+#    The script loads .env.local itself, so the run needs no inline prefix.
+echo 'SEED_ADMIN_PASSWORD="<a password you choose>"' >> .env.local
+pnpm exec tsx scripts/seed-dev-db.ts --oversight-orgs-only
 ```
+
+Passing the value inline instead (`SEED_ADMIN_PASSWORD=… pnpm exec tsx …`) still re-keys the
+accounts, and the script will warn you that nothing recorded it. Heed that warning: an unrecorded
+password is what stranded this fixture between #304 rounds 8 and 10 — the accounts existed, worked
+for exactly one person, and no later verifier could sign in to exercise a single interactive
+criterion.
 
 That mode deletes nothing. It upserts the sending network, the sending church, and both admin rows
 — setting the password you passed, the role and the org FKs — so one command leaves a usable

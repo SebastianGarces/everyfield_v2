@@ -161,9 +161,21 @@ export type SeedAccountsDecision =
  * WHAT ROUND 9 CHANGED, and why this guard matters more now. The mode's account
  * writes became upserts: the operator's `SEED_ADMIN_PASSWORD` now takes over an
  * address that already exists, because the version that skipped it reported a
- * password it had not set. Taking over an address is only ever acceptable on a
- * database whose accounts are all fixture, which is precisely the question
- * below.
+ * password it had not set.
+ *
+ * BE PRECISE ABOUT WHAT THAT IS LICENSED BY. The probe below asks exactly one
+ * question — are any of the three `PROTECTED_ACCOUNTS` addresses present — and a
+ * "no" proves only that the alpha cohort is not here. It does NOT prove every
+ * account on this database is fixture, and it cannot: a teammate's hand-
+ * registered account, or a second agent's, answers "no" as loudly as an empty
+ * database does. So the guarantee this guard actually gives the re-key is
+ * narrow: it cannot seize a SENTINEL account. Seizing the two oversight
+ * addresses on any other non-sentinel database is a deliberate consequence of
+ * the mode, not something proven harmless here — which is why the two addresses
+ * it re-keys are a fixed, fixture-only pair named in
+ * `oversight-admin-upsert.ts` rather than anything an operator can point at a
+ * real person's address. Widening that pair, or the mode's reach, needs a
+ * ruling and not just this probe.
  *
  * TWO REFUSALS, and the sentinel one is asked FIRST — before the password
  * question, and before the mode writes anything at all. A missing password on a

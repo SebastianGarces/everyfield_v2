@@ -462,7 +462,7 @@ async function main() {
     ok("accept associated the sending church with the network");
 
     // ------------------------------------------------------------------------
-    // THE ACCEPTANCE CRITERION, NOW REQUIRED — #351 LANDED (migration 0035).
+    // THE ACCEPTANCE CRITERION, NOW REQUIRED — #351 LANDED (migration 0036).
     //
     // #304's WS3 AC has three clauses across the two answers:
     //
@@ -471,7 +471,7 @@ async function main() {
     //    NETWORK on the milestone rail; decline updates status and NOTIFIES,
     //    mirroring the planter flow."
     //
-    // Until 0035 this block PRINTED the miss and asserted the ABSENCE of all
+    // Until 0036 this block PRINTED the miss and asserted the ABSENCE of all
     // three rows, because both target tables made a CHURCH their mandatory
     // tenant and a sending church joining a network names none. Ruling #351
     // settled the shape — a subject discriminator on `association_events`, a
@@ -783,7 +783,7 @@ async function main() {
 
     console.log(
       "\nALL ASSERTIONS PASSED — #304 WS3's audit-row and milestone clauses are" +
-        "\nnow REQUIRED by this harness (ruling #351, migration 0035), OV-013's" +
+        "\nnow REQUIRED by this harness (ruling #351, migration 0036), OV-013's" +
         "\naudited sever is exercised end to end, and ruling 4's HR4 fixes are" +
         "\nexercised as real forged requests (§9)."
     );

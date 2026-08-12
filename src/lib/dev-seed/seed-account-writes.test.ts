@@ -3,108 +3,209 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
+import { db } from "@/db";
+
+import {
+  OVERSIGHT_ADMIN_EMAILS,
+  oversightAdminUpsert,
+  recordedSeedPassword,
+  unrecordedPasswordNotice,
+} from "./oversight-admin-upsert";
+
 // ----------------------------------------------------------------------------
-// The additive mode's ACCOUNT WRITES (#304 round 9).
+// The additive mode's ACCOUNT WRITES (#304 rounds 9-10).
 //
 // Round 8 gave `--oversight-orgs-only` a sentinel guard and an operator-chosen
 // password, and wrote the admin with `onConflictDoNothing`. That combination is
 // a false success: run the mode a second time with a different
 // SEED_ADMIN_PASSWORD and it exits 0, prints "Password: the SEED_ADMIN_PASSWORD
-// you passed", and leaves the OLD password opening the account. Proven on a
-// scratch Postgres — the first password still verified, the second did not.
+// you passed", and leaves the OLD password opening the account.
 //
-// It is what stranded the fixture. The same round neutralised that account's
-// password by hand on the shared database, and the docblock's claim that this
-// mode is the reproducible way to create it was then untrue: the mode could
-// create the account, never re-key it. A verifier following the documented
-// command could not sign in, so every interactive acceptance criterion of #304
-// went unexercised.
+// It is what stranded the fixture, together with the thing round 10 fixes: the
+// chosen password was recorded nowhere, so even after the write became an
+// upsert, only the operator who typed it could sign in. A verifier following
+// the documented command reached a login that rejected them, and every
+// interactive acceptance criterion of #304 went unexercised.
 //
-// These tests are source-level on purpose. The conflict clause is the defect,
-// and no pure function can stand in for it: the only honest end-to-end proof is
-// running the mode twice against a real database, which is the evidence in the
-// PR body, not a unit test. What a unit test CAN do is stop the clause from
-// quietly reverting.
+// WHAT IS ASSERTED, AND HOW. Round 9's version of this file read
+// `scripts/seed-dev-db.ts` as text and matched `.onConflictDoUpdate(` in it.
+// That is the technique this repo reserves for wiring it genuinely cannot
+// observe (a `revalidatePath` call, an RSC call site) — where the SQL itself is
+// the invariant, the rule is to render the builder and inspect the statement
+// (`memory/invariants/wiki-articles.md`; `src/lib/wiki/tenancy.test.ts`). The
+// conflict clause IS the defect, so it is rendered here with `.toSQL()`.
+// `.toSQL()` renders; it does not connect — but importing `@/db` constructs the
+// Neon client at module load, so a DATABASE_URL must be PRESENT, which
+// `pnpm test` and CI both supply as a placeholder.
+//
+// The end-to-end proof is still two runs against a real scratch database with
+// two different passwords — that is evidence for the PR body, not a unit test.
+// What these tests do is stop the clause, the key, and the documented route
+// from quietly reverting.
 // ----------------------------------------------------------------------------
 
-const SEED_SCRIPT = "scripts/seed-dev-db.ts";
-const SEED_SOURCE = readFileSync(path.join(process.cwd(), SEED_SCRIPT), "utf8");
+const ADMIN = {
+  email: "sending-church-admin@everyfield.app",
+  name: "Sarah Sending",
+  role: "sending_church_admin",
+  sendingChurchId: "d2000000-0000-4000-8000-000000000002",
+  sendingNetworkId: null,
+} as const;
 
-/** The body of `seedOversightOrgs`, so a match elsewhere cannot satisfy these. */
-function seedOversightOrgsBody(): string {
-  const start = SEED_SOURCE.indexOf("async function seedOversightOrgs(");
-  assert.notEqual(
-    start,
-    -1,
-    `${SEED_SCRIPT} no longer has a seedOversightOrgs()`
-  );
+const HASH = "$argon2id$v=19$m=19456,t=2,p=1$fixture$fixture";
+const NOW = new Date("2026-08-11T00:00:00.000Z");
 
-  // The next line that closes a declaration at column 0 ends the function.
-  const end = SEED_SOURCE.indexOf("\n}\n", start);
-  assert.notEqual(end, -1, "seedOversightOrgs() is unterminated");
-  return SEED_SOURCE.slice(start, end);
+function renderedUpsert() {
+  return oversightAdminUpsert(db, { ...ADMIN }, HASH, NOW).toSQL();
 }
 
-test("the admin write is an upsert, so a re-run re-keys the account", () => {
-  const body = seedOversightOrgsBody();
+test("the account write is an upsert on the address, so a re-run re-keys it", () => {
+  const { sql } = renderedUpsert();
+  const normalized = sql.toLowerCase().replace(/\s+/g, " ");
 
+  // The conflict TARGET is the unique address. Not a pinned id: the account is
+  // found by the address the documentation hands a verifier.
   assert.match(
-    body,
-    /\.onConflictDoUpdate\(/,
-    "the account write must re-key an existing address — `onConflictDoNothing` reports a password it did not set"
+    normalized,
+    /on conflict \("email"\) do update set/,
+    `the write must re-key an existing address; \`onConflictDoNothing\` reports a password it did not set. Rendered: ${sql}`
   );
   assert.doesNotMatch(
-    body,
-    /\.onConflictDoNothing\(/,
-    "no account write in this function may skip on conflict; that is the round-8 defect"
-  );
-  assert.match(
-    body,
-    /target:\s*users\.email/,
-    "the conflict target must be the unique address, not a pinned id — the account is found by email"
+    normalized,
+    /do nothing/,
+    `no account write here may skip on conflict — that is the round-8 defect. Rendered: ${sql}`
   );
 });
 
 test("the upsert sets everything the fixture needs, not only the password", () => {
-  const body = seedOversightOrgsBody();
-  const set = body.slice(body.indexOf("set: {"));
+  const { sql, params } = renderedUpsert();
+  const update = sql.slice(sql.toLowerCase().indexOf("do update set"));
 
-  for (const field of [
-    "passwordHash", // the whole point: the operator's chosen credential
-    "role", // an account demoted by hand is not an oversight admin any more
-    "churchId", // an oversight admin owns no plant of their own
-    "sendingChurchId", // what `getAccessibleChurchIds` reads
-    "sendingNetworkId", // NULL here is what renders "Set up your network first"
+  for (const column of [
+    '"password_hash"', // the whole point: the operator's chosen credential
+    '"role"', // an account demoted by hand is not an oversight admin any more
+    '"church_id"', // an oversight admin owns no plant of their own
+    '"sending_church_id"', // what `getAccessibleChurchIds` reads
+    '"sending_network_id"', // NULL here renders "Set up your network first"
+    '"updated_at"',
   ]) {
     assert.ok(
-      set.includes(`${field}`),
-      `the upsert must put ${field} back — a drifted FK is why the preview had no admin who could send an invitation`
+      update.includes(column),
+      `the upsert must put ${column} back — a drifted FK is why the preview had no admin who could send an invitation. Rendered SET: ${update}`
     );
   }
+
+  // `name` is deliberately NOT in the SET: it identifies a person on screen,
+  // and a re-key is not a rename.
+  assert.ok(
+    !update.includes('"name"'),
+    `a re-key must not rename the account. Rendered SET: ${update}`
+  );
+
+  // The hash reaches the statement as a bound parameter — twice, once for the
+  // INSERT and once for the UPDATE — rather than being interpolated into text.
+  assert.equal(
+    params.filter((param) => param === HASH).length,
+    2,
+    `the chosen password's hash must be bound for both the insert and the re-key. Params: ${JSON.stringify(params)}`
+  );
 });
 
-test("both oversight admins are written, so one command restores both sides", () => {
+test("both oversight admins are keyed by ADDRESS, so one command restores both sides", () => {
   // The fixture has two halves: the sending church that issues one kind of
   // invitation and the network that issues the other. Round 8 wrote only the
   // sending-church admin, so `admin@everyfield.app` kept whatever
   // `sending_network_id` it had — NULL on the preview's database.
-  assert.match(
-    SEED_SOURCE,
-    /OVERSIGHT_ADMIN_ROLES\s*=\s*\[\s*"sending_church_admin",\s*"network_admin",?\s*\]/,
-    `${SEED_SCRIPT} must write both oversight admin roles in the additive mode`
+  //
+  // The KEY is the address, not the role (#304 round 10). The docs promise a
+  // verifier two addresses; a role is not unique by construction, so a lookup
+  // by role would move the credential write the day a second `network_admin`
+  // joins the fixture.
+  assert.deepEqual(
+    [...OVERSIGHT_ADMIN_EMAILS],
+    ["sending-church-admin@everyfield.app", "admin@everyfield.app"],
+    "both oversight admins must be written, and by the address the docs name"
+  );
+
+  // The seed script must key its lookup on those addresses. This one assertion
+  // IS about the script's wiring rather than about SQL — the loop cannot be
+  // imported (the module connects and `process.exit`s at load), so it is pinned
+  // on the source, the same technique used for call-site wiring elsewhere.
+  const seedSource = readFileSync(
+    path.join(process.cwd(), "scripts/seed-dev-db.ts"),
+    "utf8"
   );
   assert.match(
-    seedOversightOrgsBody(),
-    /for\s*\(const role of OVERSIGHT_ADMIN_ROLES\)/,
-    "seedOversightOrgs() must loop the declared roles rather than hard-coding one of them"
+    seedSource,
+    /for \(const email of OVERSIGHT_ADMIN_EMAILS\)[\s\S]{0,200}user\.email === email/,
+    "seedOversightOrgs() must select its rows by address, not by role"
   );
 });
 
-test("the docs do not hand anyone an in-repo password for these accounts", () => {
+// ----------------------------------------------------------------------------
+// WHERE THE PASSWORD IS WRITTEN DOWN (#304 round 10)
+// ----------------------------------------------------------------------------
+
+test("a password recorded in .env.local is read back, whatever the quoting", () => {
+  assert.equal(recordedSeedPassword(undefined), undefined);
+  assert.equal(recordedSeedPassword("OTHER=1\n"), undefined);
+  assert.equal(recordedSeedPassword("SEED_ADMIN_PASSWORD=plain\n"), "plain");
+  assert.equal(recordedSeedPassword('SEED_ADMIN_PASSWORD="dq"\n'), "dq");
+  assert.equal(recordedSeedPassword("SEED_ADMIN_PASSWORD='sq'\n"), "sq");
+  assert.equal(
+    recordedSeedPassword("export SEED_ADMIN_PASSWORD=exported\n"),
+    "exported"
+  );
+  // dotenv semantics: the last assignment is the one that reaches process.env.
+  assert.equal(
+    recordedSeedPassword(
+      "SEED_ADMIN_PASSWORD=first\nSEED_ADMIN_PASSWORD=last\n"
+    ),
+    "last"
+  );
+  // A key that merely CONTAINS the name is a different variable.
+  assert.equal(recordedSeedPassword("OLD_SEED_ADMIN_PASSWORD=x\n"), undefined);
+});
+
+test("an unrecorded password is called out, and never printed", () => {
+  assert.equal(
+    unrecordedPasswordNotice('SEED_ADMIN_PASSWORD="hunter2"\n', "hunter2"),
+    null,
+    "nothing to warn about when the file records the password that was used"
+  );
+
+  for (const [text, used] of [
+    [undefined, "hunter2"], // no .env.local at all
+    ["VERCEL_AUTOMATION_BYPASS_SECRET=x\n", "hunter2"], // no such key
+    ['SEED_ADMIN_PASSWORD="stale"\n', "hunter2"], // records a DIFFERENT one
+  ] as const) {
+    const notice = unrecordedPasswordNotice(text, used);
+    assert.ok(
+      notice,
+      `an unrecorded password must be called out — this is what left the fixture reachable by one shell only (text: ${String(text)})`
+    );
+    assert.match(notice, /\.env\.local/);
+    assert.ok(
+      !notice.includes(used),
+      `the notice must name the file and the key, never the password itself: ${notice}`
+    );
+  }
+});
+
+// ----------------------------------------------------------------------------
+// THE DOCUMENTED ROUTE (#304 rounds 9-10)
+// ----------------------------------------------------------------------------
+
+test("the docs point a verifier at the password instead of printing one", () => {
   // The invariant is repo-wide: no constant in this repository opens an account
   // on a database anyone else uses. A skill file that prints one is the same
   // failure as a default in the script — round 8 fixed the script and left the
   // skill row saying `password123`, and the next verifier believed it.
+  //
+  // Round 9 then named the COMMAND in the row, which was still not enough: a
+  // command whose output is a password only its operator knows ends, for
+  // everyone else, at a login that rejects them. The row has to say where the
+  // value is READ FROM.
   const skill = readFileSync(
     path.join(process.cwd(), ".claude/skills/browser-validation/SKILL.md"),
     "utf8"
@@ -126,16 +227,15 @@ test("the docs do not hand anyone an in-repo password for these accounts", () =>
       /password123/,
       `the credentials table must not print a password for an oversight admin: ${line.trim()}`
     );
-
-    // AND it must NAME THE COMMAND in the row itself (#304 round 9). "See
-    // below" satisfies the rule above while telling a verifier who scans the
-    // table nothing they can act on; the row is where the eye stops, so the row
-    // is where the command has to be. The full invocation lives in the fenced
-    // block below the table — this is the pointer that gets anyone there.
     assert.match(
       line,
       /--oversight-orgs-only/,
       `an oversight admin's password cell must name the command that sets it: ${line.trim()}`
+    );
+    assert.match(
+      line,
+      /\.env\.local/,
+      `an oversight admin's password cell must name where the value is read from — the command alone leaves a later verifier at a login that rejects them: ${line.trim()}`
     );
   }
 
@@ -145,11 +245,17 @@ test("the docs do not hand anyone an in-repo password for these accounts", () =>
     "both oversight admins must still have a row in the credentials table"
   );
 
-  // The fenced command the rows point at, with the env var that carries the
-  // operator's choice — a row naming the flag is useless if the block is gone.
+  // The block the rows point at: read `.env.local` FIRST, and only seed when it
+  // holds nothing. A verifier who re-keys the accounts they could already have
+  // opened has changed the fixture out from under whoever recorded it.
   assert.match(
     skill,
-    /SEED_ADMIN_PASSWORD=.*tsx scripts\/seed-dev-db\.ts --oversight-orgs-only/,
-    "the skill must still spell out the full command the credentials rows point at"
+    /grep '\^SEED_ADMIN_PASSWORD=' \.env\.local/,
+    "the skill must show the verifier how to read the recorded password before seeding"
+  );
+  assert.match(
+    skill,
+    /tsx scripts\/seed-dev-db\.ts --oversight-orgs-only/,
+    "the skill must still spell out the seed command the credentials rows point at"
   );
 });
