@@ -1,8 +1,8 @@
 import { personCreateSchema } from "@/lib/validations/people";
-import { checkForDuplicates } from "./duplicates";
+import { findDuplicateMatches } from "./duplicates";
 import { createPerson } from "./service";
 import type {
-  DuplicateCheck,
+  DuplicateMatches,
   ImportDuplicateMatch,
   ImportPreview,
   ImportRow,
@@ -215,13 +215,15 @@ function parseImportRowData(data: Record<string, string>) {
 const DUPLICATE_CHECK_CONCURRENCY = 10;
 
 /**
- * Strip a duplicate check down to what the wizard needs to explain a match
- * (ruling 410-3C): id + display name. The matched contacts' full records
- * (emails, phones, addresses) never leave the server — the preview action
- * returns this shape, and the execute action resolves any match it needs
- * server-side by id.
+ * Strip the duplicate matches down to what the wizard needs to explain a
+ * match (ruling 410-3C): id + display name. The matched contacts' full
+ * records (emails, phones, addresses) never leave the server — the preview
+ * action returns this shape, and the execute action resolves any match it
+ * needs server-side by id. The preview also never loads what it would
+ * redact: it calls `findDuplicateMatches`, not the tag-decorating
+ * `checkForDuplicates`, so no `person_tags` query runs at all.
  */
-function toImportRowDuplicates(check: DuplicateCheck): ImportRowDuplicates {
+function toImportRowDuplicates(check: DuplicateMatches): ImportRowDuplicates {
   const summarize = (person: Person): ImportDuplicateMatch => ({
     id: person.id,
     displayName: `${person.firstName} ${person.lastName}`,
@@ -255,12 +257,12 @@ export async function parseCsvImport(
   // The per-row duplicate checks are independent, so run them in bounded
   // chunks instead of one serialized round trip per CSV row — preview time
   // stops being linear in round trips.
-  const duplicateChecks: DuplicateCheck[] = [];
+  const duplicateChecks: DuplicateMatches[] = [];
   for (let i = 0; i < rawRows.length; i += DUPLICATE_CHECK_CONCURRENCY) {
     const chunk = rawRows.slice(i, i + DUPLICATE_CHECK_CONCURRENCY);
     const results = await Promise.all(
       chunk.map((rawRow) =>
-        checkForDuplicates(churchId, {
+        findDuplicateMatches(churchId, {
           email: rawRow.email || null,
           firstName: rawRow.firstName,
           lastName: rawRow.lastName,

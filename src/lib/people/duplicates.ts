@@ -2,15 +2,19 @@ import { db } from "@/db";
 import { persons, type Person } from "@/db/schema";
 import { and, eq, ilike, isNull, ne, or, sql } from "drizzle-orm";
 import { getTagsForPeople } from "./tags";
-import type { DuplicateCheck } from "./types";
+import type { DuplicateCheck, DuplicateMatches } from "./types";
 
 /**
- * Check for duplicate persons in a church
+ * Find duplicate persons in a church — the two SELECTs, nothing more.
  *
  * - Exact match: same email address (case-insensitive)
  * - Potential match: similar name AND/OR last 4 digits of phone match
+ *
+ * The import preview calls this directly (ruling 410-3C): it only needs
+ * `id` + name to explain a match, so it never pays for the tag join that
+ * `checkForDuplicates` adds for the quick-add dialog.
  */
-export async function checkForDuplicates(
+export async function findDuplicateMatches(
   churchId: string,
   input: {
     email?: string | null;
@@ -19,7 +23,7 @@ export async function checkForDuplicates(
     phone?: string | null;
   },
   excludePersonId?: string
-): Promise<DuplicateCheck> {
+): Promise<DuplicateMatches> {
   const baseConditions = [
     eq(persons.churchId, churchId),
     isNull(persons.deletedAt),
@@ -81,18 +85,41 @@ export async function checkForDuplicates(
       .limit(5);
   }
 
-  // 3. Resolve tags for every match with ONE batched query — the canonical
-  // helper in tags.ts — instead of a per-match round trip.
+  return { exactMatch: exactRow, potentialMatches: fuzzyRows };
+}
+
+/**
+ * Find duplicates and decorate every match with its tags — for the
+ * quick-add dialog (`checkForDuplicatesAction`), the one consumer that
+ * renders them. Tag resolution is ONE batched query via the canonical
+ * helper in tags.ts, not a per-match round trip.
+ */
+export async function checkForDuplicates(
+  churchId: string,
+  input: {
+    email?: string | null;
+    firstName?: string;
+    lastName?: string;
+    phone?: string | null;
+  },
+  excludePersonId?: string
+): Promise<DuplicateCheck> {
+  const { exactMatch, potentialMatches } = await findDuplicateMatches(
+    churchId,
+    input,
+    excludePersonId
+  );
+
   const tagMap = await getTagsForPeople(churchId, [
-    ...(exactRow ? [exactRow.id] : []),
-    ...fuzzyRows.map((m) => m.id),
+    ...(exactMatch ? [exactMatch.id] : []),
+    ...potentialMatches.map((m) => m.id),
   ]);
 
   return {
-    exactMatch: exactRow
-      ? { ...exactRow, tags: tagMap.get(exactRow.id) ?? [] }
+    exactMatch: exactMatch
+      ? { ...exactMatch, tags: tagMap.get(exactMatch.id) ?? [] }
       : null,
-    potentialMatches: fuzzyRows.map((match) => ({
+    potentialMatches: potentialMatches.map((match) => ({
       ...match,
       tags: tagMap.get(match.id) ?? [],
     })),
