@@ -35,6 +35,14 @@
 // through one of them is not a block at all: its words join the line and its
 // box is lost. That is divergence 3 below, not a missing case here.
 //
+// A callout that is itself a block but holds NO blocks — the one-line
+// `<Callout>text</Callout>`, which MDX compiles to a bare string child — is a
+// different thing and IS handled: `collectCallout` falls back to reading it as
+// one line of runs, so the frame, the type and the words all survive. Without
+// that fallback the whole callout vanished, which is worse than divergence 3
+// promises and is why the "callouts … all carry across" sentence in
+// `article-actions.tsx` was false.
+//
 // TWO KNOWN DIVERGENCES FROM THE PRINTED PAGE are owned here — 2 and 3 of the
 // three listed in `article-actions.tsx`:
 //
@@ -252,8 +260,22 @@ function collectList(list: Element, out: PrintBlock[], depth: number): void {
  * of that same word carries `data-print-hide`, so the type is printed once,
  * here, and never a second time inside the box.
  *
- * An empty callout is not framed: a box drawn around nothing is a mark on the
- * page that the printed article does not have.
+ * A CALLOUT WRITTEN ON ONE LINE HAS NO BLOCKS AND IS STILL NOT EMPTY. MDX
+ * compiles `<Callout type="tip">One line.</Callout>` — open tag, text and close
+ * tag on a single line — to a BARE STRING child with no `<p>` around it; put
+ * emphasis in it and the children are a string and a `<strong>`, still with no
+ * paragraph. `collectBlocks` walks `children`, which is ELEMENTS only, so that
+ * callout's block list comes back empty although it has words, and returning
+ * here dropped the box, the type AND the sentence. Reading the element as one
+ * LINE of runs recovers all three, and it is the whole remaining shape: MDX
+ * refuses a callout that opens with text and then contains a block ("Expected a
+ * closing tag … before the end of `paragraph`"), so an author gets either all
+ * blocks or all inline — never a mixture this fallback would have to merge.
+ *
+ * An empty callout is still not framed: a box drawn around nothing is a mark on
+ * the page that the printed article does not have. The fallback preserves that,
+ * and preserves divergence 2 with it — an image-only callout contributes no
+ * runs either, so it stays dropped rather than becoming an empty box.
  */
 function collectCallout(
   element: Element,
@@ -262,7 +284,12 @@ function collectCallout(
 ): void {
   const blocks: PrintBlock[] = [];
   collectBlocks(element, blocks);
-  if (blocks.length === 0) return;
+
+  if (blocks.length === 0) {
+    const runs = inlineRuns(element);
+    if (runsText(runs).length === 0) return;
+    blocks.push({ kind: "paragraph", runs });
+  }
 
   out.push({ kind: "callout", label: label.trim(), blocks });
 }

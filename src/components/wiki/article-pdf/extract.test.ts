@@ -214,9 +214,75 @@ describe("extractPrintBlocks", () => {
     ]);
   });
 
+  test("frames a one-line callout, whose child is a bare string", () => {
+    // The shape that fell through the floor. `<Callout type="tip">One line
+    // here.</Callout>` written on ONE line compiles (verified against this
+    // repo's own @mdx-js/mdx) to a bare string child — no `<p>`. `collectBlocks`
+    // walks `children`, which is elements only, so the callout's block list came
+    // back empty and the early return in `collectCallout` discarded the box, the
+    // type AND the words. Divergence 3 promises the weaker failure ("keeps its
+    // words and loses its box"); this kept nothing, so the "callouts … all carry
+    // across" sentence in `article-actions.tsx` was false.
+    const blocks = extractPrintBlocks(
+      el("div", [calloutEl("Tip", textNode("One line here."))])
+    );
+
+    assert.deepEqual(blocks, [
+      {
+        kind: "callout",
+        label: "Tip",
+        blocks: [{ kind: "paragraph", runs: plain("One line here.") }],
+      },
+    ]);
+  });
+
+  test("keeps the emphasis in a one-line callout, since it reads as runs", () => {
+    // `<Callout type="warning">Do **not** skip this.</Callout>` on one line
+    // compiles to a string, a `<strong>` and a string — still no paragraph, so
+    // it takes the same fallback. Reading it through `inlineRuns` rather than
+    // through `textContent` is what keeps the bold word bold; emphasis in this
+    // corpus marks the step that must not be skipped.
+    const [block] = extractPrintBlocks(
+      el("div", [
+        calloutEl(
+          "Warning",
+          textNode("Do "),
+          el("strong", [textNode("not")]),
+          textNode(" skip this.")
+        ),
+      ])
+    );
+
+    assert.ok(block && block.kind === "callout");
+    assert.deepEqual(block.blocks, [
+      {
+        kind: "paragraph",
+        runs: [
+          { text: "Do " },
+          { bold: true, text: "not" },
+          { text: " skip this." },
+        ],
+      },
+    ]);
+  });
+
   test("draws no box round an empty callout", () => {
-    // A frame with nothing in it is a mark the printed page does not have.
+    // A frame with nothing in it is a mark the printed page does not have — and
+    // the one-line fallback above must not turn that into an empty box, which is
+    // why it asks for TEXT rather than merely for a missing block list.
     assert.deepEqual(extractPrintBlocks(el("div", [calloutEl("Tip")])), []);
+  });
+
+  test("still drops an image-only callout, as divergence 2 says", () => {
+    // The fallback is deliberately blind to an image: an `<img>` contributes no
+    // runs, so a callout holding nothing else stays dropped rather than becoming
+    // an empty frame. Divergence 2 is unchanged by the one-line fix.
+    assert.deepEqual(
+      extractPrintBlocks(
+        el("div", [calloutEl("Insight", el("img", [], { src: "/plan.png" }))])
+      ),
+      []
+    );
   });
 
   test("nests a callout inside a callout, because the contents recurse", () => {

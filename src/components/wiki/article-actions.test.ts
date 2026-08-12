@@ -291,6 +291,36 @@ describe("the print contract, across every file that holds a piece of it", () =>
     assert.equal(childrenOf(drawn)[0].props.children, "Warning");
   });
 
+  test("a callout written on ONE line carries across too, box and words", () => {
+    // The shape that made the "callouts … all carry across" sentence at the top
+    // of `article-actions.tsx` false. MDX compiles a callout whose tags and text
+    // share a line to a BARE STRING child — no `<p>` — so the extractor's block
+    // walk, which reads `children` and therefore elements only, found nothing
+    // inside and dropped the entire callout: box, type and sentence. That is
+    // strictly worse than divergence 3 promises ("keeps its words and loses its
+    // box"), and no divergence covered it.
+    //
+    // Pinned end to end, the way the image gap is pinned, because the two halves
+    // failed together: the extractor produced no block, so the renderer was
+    // never given the chance to draw one.
+    const [block] = extractPrintBlocks(
+      el("div", [calloutEl("Tip", textNode("Start with the pilot group."))])
+    );
+
+    assert.ok(
+      block && block.kind === "callout",
+      "a one-line callout must still be a callout block"
+    );
+    assert.deepEqual(block.blocks, [
+      { kind: "paragraph", runs: plain("Start with the pilot group.") },
+    ]);
+
+    const drawn = renderBlock(block, 0, primitives) as unknown as Rendered;
+    assert.equal(drawn.type, "View");
+    assert.ok(drawn.props.style?.borderWidth, "the box lost its border");
+    assert.equal(childrenOf(drawn)[0].props.children, "Tip");
+  });
+
   test("the component's sr-only type label is hidden from both paper paths", () => {
     // Third half of the same contract, and the one the stub above cannot hold
     // on its own: the component says the type TWICE — once in the marker, once

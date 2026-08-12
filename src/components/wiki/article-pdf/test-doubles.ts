@@ -82,8 +82,14 @@ export const plain = (text: string): PrintRun[] => [{ text }];
  * Built here rather than by rendering the component, because what the extractor
  * reads is the markup — the component's half of the same contract is asserted
  * on its own, by calling it (`article-actions.test.ts`).
+ *
+ * The contents are `StubChild`, not `Element`, because a TEXT node is a shape
+ * MDX really produces here: `<Callout>One line.</Callout>` written on one line
+ * compiles to a bare string child with no `<p>` around it, and that callout has
+ * no element children at all. Narrowing this to `Element` would have made the
+ * case that broke the extractor unwritable.
  */
-export const calloutEl = (label: string, ...children: Element[]): Element =>
+export const calloutEl = (label: string, ...children: StubChild[]): Element =>
   el(
     "div",
     [
