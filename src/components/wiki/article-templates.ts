@@ -19,22 +19,24 @@
 //   - It is the TEMPLATE's "read more" pointer (rendered by
 //     `components/documents/generate-dialog.tsx`), a different direction and a
 //     different editorial decision — one article per template, at most.
-//   - Its values do not match the corpus. Every one of them names a slug no
-//     published article has: `frameworks/the-3-key-documents` (the real article
-//     is `core-group/commitment/the-three-key-documents`) and
-//     `vision-meetings/running-a-vision-meeting` (really
-//     `core-group/vision-meetings/running-the-meeting`). Verified against all
+//   - Its values rotted once without anything failing. Every one of them
+//     named a slug no published article had (`frameworks/the-3-key-documents`
+//     for `core-group/commitment/the-three-key-documents`, and
+//     `vision-meetings/running-a-vision-meeting` for
+//     `core-group/vision-meetings/running-the-meeting`) — verified against all
 //     96 rows in `wiki_articles`. Building this feature on that field would
 //     have rendered an empty section on every article in the product while
 //     type-checking and passing review — the same unverifiable-by-construction
-//     trap W-009 hit with `related_article_slugs` (69ebbc1).
+//     trap W-009 hit with `related_article_slugs` (69ebbc1). The slugs were
+//     repointed under ruling 406-1-1 and are now corpus-pinned by
+//     `src/lib/documents/templates-live.test.ts`, but the direction argument
+//     above still holds.
 //   - Four templates (both budgets, the board agenda, the launch checklists)
 //     carry no `relatedWikiSlug` at all, so a reverse index could never reach
 //     them.
 //
-// Fixing those slugs belongs with the catalog and its dialog, not here — see
-// the note in the PR. `article-templates-live.test.ts` pins THIS map against
-// the corpus so it cannot rot the same way.
+// `article-templates-live.test.ts` pins THIS map against the corpus so it
+// cannot rot the same way.
 //
 // The keys are article slugs, exact match. An article that is not a key gets
 // no section at all — most articles have no document to hand out, and an empty
