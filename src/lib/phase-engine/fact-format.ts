@@ -524,24 +524,42 @@ const FACT_PHRASES: Record<string, FactPhrase> = {
   ),
 
   // -- manual self-attestations ---------------------------------------------
+  //
+  // Every attestation leaf obeys two rules the rest of this table does not have
+  // to think about, because the folding path counts attestations by SIGNAL:
+  //
+  //   1. IT NEVER RETURNS `null`. A `null` here hands the citation to
+  //      `fallbackPhrase`, which prints the ledger's own shape — a bare
+  //      `manual.attestations.N.signalKey` used to render "signal key (manual
+  //      attestations)" on the card, breaking module rule 2 for a path this
+  //      module knows perfectly well.
+  //   2. AT MORE THAN ONE ROW IT DROPS THE SPECIFICS AND COUNTS. The group these
+  //      phrases render for holds every attestation that asserts the same KIND
+  //      of thing, whatever signal each one names, so a phrase that baked in the
+  //      signal (or the date) would name ONE of the rows it is speaking for.
+  //      `rows === 1` is the only branch allowed to be specific.
   "manual.attestations.#.signalKey": (value) =>
-    value
-      ? perRow(SELF_REPORTS, (report) => `${report} about ${toWords(value)}`)
-      : null,
+    perRow(SELF_REPORTS, (report, rows) =>
+      rows === 1 && value ? `${report} about ${toWords(value)}` : report
+    ),
   "manual.attestations.#.value": (value) => {
     const flag = toBoolean(value);
     if (flag === null) {
-      return value
-        ? perRow(SELF_REPORTS, (report) => `${report} of ${toWords(value)}`)
-        : null;
+      return perRow(SELF_REPORTS, (report, rows) =>
+        rows === 1 && value ? `${report} of ${toWords(value)}` : report
+      );
     }
     return perRow(ATTESTED_THINGS, (thing) =>
       flag ? `${thing} you confirmed` : `${thing} you have not confirmed`
     );
   },
-  "manual.attestations.#.attestedAt": date((d) =>
-    perRow(SELF_REPORTS, (report) => `${report} from ${d}`)
-  ),
+  "manual.attestations.#.attestedAt": (value) => {
+    const readable =
+      value && ISO_DATE_PATTERN.test(value) ? toReadableDate(value) : null;
+    return perRow(SELF_REPORTS, (report, rows) =>
+      rows === 1 && readable ? `${report} from ${readable}` : report
+    );
+  },
   "manual.isEmpty": boolean(
     "nothing self-reported yet",
     "self-reports on record"
@@ -736,10 +754,19 @@ function attestationCitation(
     // Only the read layer can say which signal row N holds, so an unresolved
     // (or blank) key is an unresolved row — never a guess.
     const resolved = signalKey?.trim();
+    const signal = resolved ? resolved : null;
+    const leaf = normalized.slice(MANUAL_ATTESTATION_PREFIX.length);
     return {
-      leaf: normalized.slice(MANUAL_ATTESTATION_PREFIX.length),
-      asserted: value,
-      signal: resolved ? resolved : null,
+      leaf,
+      // NORMALISED ACROSS THE SPELLINGS. The `signalKey` leaf names the signal
+      // and asserts nothing else, which is exactly what a bare
+      // `manual.byKey.<signal>` does — and that spelling hands the signal down
+      // as its `asserted` (below). A bare `manual.attestations.N.signalKey`
+      // carries no `=`, so without this it handed down `null`, took a different
+      // branch of the same template and fell out to the ledger-shaped fallback.
+      // Two spellings of one citation must reach the template identically.
+      asserted: leaf === "signalKey" ? (value ?? signal) : value,
+      signal,
     };
   }
 
@@ -756,14 +783,60 @@ function attestationCitation(
   };
 }
 
+/**
+ * The IDENTITY of the group a citation folds into, for an attestation.
+ *
+ * Explicit, and deliberately built from the template plus the CLASS of the
+ * asserted value — never from the rendered phrase and never from the signal.
+ * Keying the fold on the phrase was the defect this function exists to remove:
+ * two of the four attestation templates put the signal (`signalKey`) or the date
+ * (`attestedAt`) INTO the phrase, so two distinct attestations never shared a
+ * group, every group held one member, and the counting path printed each one's
+ * specific sentence — a LISTER, which the ruling forbids
+ * (memory/invariants.md → Phase Engine, "a COUNTER and MUST NEVER BECOME A
+ * LISTER"). Being signal-independent is also what makes the fold
+ * spelling-independent: `manual.byKey.<signal>` and `manual.attestations.N.…`
+ * land on one key by construction rather than by rendering alike.
+ *
+ * The value CLASS still splits `value`, because "you confirmed" and "you have
+ * not confirmed" are two different assertions and counting them together would
+ * claim a planter confirmed something they refused.
+ *
+ * `null` for a leaf this module has no template for — that citation keeps the
+ * generic phrase-identity fold, so two unknown leaves cannot be silently merged
+ * into one line that speaks for both.
+ */
+function attestationGroupKey(
+  leaf: string,
+  asserted: string | null
+): string | null {
+  switch (leaf) {
+    case "value": {
+      const flag = toBoolean(asserted);
+      return `attestation:value:${flag === null ? "other" : String(flag)}`;
+    }
+    case "signalKey":
+    case "attestedAt":
+      return `attestation:${leaf}`;
+    default:
+      return null;
+  }
+}
+
 /** Everything one citation renders as — the ONE decision both surfaces read. */
 interface CitationRendering {
   /**
    * The GROUPING phrase: what this citation reads as with the specifics dropped,
-   * and therefore the group's identity while a column is folded. Signal-
-   * independent for an attestation, so both spellings share a group.
+   * and therefore what the group renders as. Rendered at the group's row count,
+   * so at more than one row an attestation phrase drops its specifics and counts.
    */
   group: Phrase;
+  /**
+   * The group's IDENTITY while a column is folded — signal-independent and
+   * date-independent for an attestation, so both spellings of one attestation
+   * and two different attestations of the same kind share a group.
+   */
+  groupKey: string;
   /** What it reads as on its own; `null` when there is no specific sentence. */
   specific: string | null;
   /**
@@ -805,9 +878,17 @@ function citationRendering(
   const asserted = attestation ? attestation.asserted : value;
   const signal = attestation?.signal ?? null;
 
+  const group =
+    FACT_PHRASES[template]?.(asserted) ?? fallbackPhrase(normalized, value);
+
   return {
-    group:
-      FACT_PHRASES[template]?.(asserted) ?? fallbackPhrase(normalized, value),
+    group,
+    // Everything that is NOT an attestation keeps the old identity — its own
+    // phrase, rendered singular. Those templates name their subject, not their
+    // row, so alike phrases really are one group.
+    groupKey:
+      (attestation && attestationGroupKey(attestation.leaf, asserted)) ??
+      renderPhrase(group, 1),
     specific:
       attestation && signal !== null
         ? manualAttestationPhrase(attestation.leaf, asserted, signal)
@@ -921,9 +1002,12 @@ export function formatCitedFacts(
     const rendering = citationRendering(fact, signals?.[citedFactPath(fact)]);
     if (rendering === null) continue;
 
-    // Group on the grouping phrase rendered singular: it is the phrase's
-    // identity, independent of how many rows end up in the group.
-    const key = renderPhrase(rendering.group, 1);
+    // Group on the identity the dispatcher decided — for an attestation an
+    // explicit, signal-independent key; for everything else the phrase itself,
+    // rendered singular. NEVER the rendered phrase for an attestation: two of
+    // its templates carry the signal or the date, so a phrase key put every
+    // attestation in a group of its own and the count below became a list.
+    const key = rendering.groupKey;
     let group = groups.get(key);
     if (!group) {
       group = {

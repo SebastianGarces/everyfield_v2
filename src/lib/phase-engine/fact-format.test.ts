@@ -794,6 +794,215 @@ test("a valueless attestation row reads as its signal on BOTH paths", () => {
   ]);
 });
 
+// ----------------------------------------------------------------------------
+// The fold is keyed on the SIGNAL, at EVERY leaf and in EVERY spelling
+// (round-4 regression, #319).
+//
+// The round-3 code keyed the fold on the RENDERED PHRASE, and two of the four
+// attestation templates bake the signal (`signalKey`) or the date
+// (`attestedAt`) into that phrase. So two distinct attestations never shared a
+// group, every group held exactly one member, and the counting path printed each
+// one's specific sentence — the counter had become a LISTER on three of the four
+// leaves, and the bare array `signalKey` spelling fell out of the templates
+// entirely and printed the ledger's own shape.
+//
+// The property under test is the one the ruling is about: THE SPELLING MUST NOT
+// DECIDE THE WORDING, at N=2 as well as at N=1. Every case below is TWO DISTINCT
+// resolved signals, and every case must answer with ONE count line that names
+// neither of them.
+// ----------------------------------------------------------------------------
+
+/** Two different attestations, resolved on all three array leaves. */
+const TWO_SIGNALS = {
+  "manual.attestations.0.signalKey": "values_documented",
+  "manual.attestations.1.signalKey": "financial_base_established",
+  "manual.attestations.0.value": "values_documented",
+  "manual.attestations.1.value": "financial_base_established",
+  "manual.attestations.0.attestedAt": "values_documented",
+  "manual.attestations.1.attestedAt": "financial_base_established",
+};
+
+/** Neither signal may be named once two of them are in one group. */
+const NAMES_A_SIGNAL = /core values|financial base/;
+
+/** The ledger-shaped label a valueless array `signalKey` used to render as. */
+const LEAKED_LABEL = "signal key (manual attestations)";
+
+for (const [spelling, column] of [
+  // The bare keyed pair — the signal is in the PATH, so nothing resolves it and
+  // nothing has to: this pair listed two sentences before the fix.
+  [
+    "bare keyed",
+    [
+      "manual.byKey.values_documented",
+      "manual.byKey.financial_base_established",
+    ],
+  ],
+  // The array `signalKey` pair, valueless — the spelling that leaked the label.
+  [
+    "array signalKey (valueless)",
+    ["manual.attestations.0.signalKey", "manual.attestations.1.signalKey"],
+  ],
+  // …and carrying its value, which is the signal written twice.
+  [
+    "array signalKey (valued)",
+    [
+      "manual.attestations.0.signalKey=values_documented",
+      "manual.attestations.1.signalKey=financial_base_established",
+    ],
+  ],
+  // The `attestedAt` pair — two different DATES, which the phrase used to carry.
+  [
+    "array attestedAt",
+    [
+      "manual.attestations.0.attestedAt=2026-05-01T00:00:00.000Z",
+      "manual.attestations.1.attestedAt=2026-05-02T00:00:00.000Z",
+    ],
+  ],
+  // Cross-spelling: one attestation named by key, the other by row.
+  [
+    "keyed + array signalKey",
+    ["manual.byKey.values_documented", "manual.attestations.1.signalKey"],
+  ],
+  [
+    "keyed + array signalKey (valued)",
+    [
+      "manual.byKey.values_documented",
+      "manual.attestations.1.signalKey=financial_base_established",
+    ],
+  ],
+] as const) {
+  test(`two attestations cited as ${spelling} COUNT, they do not list`, () => {
+    const lines = formatCitedFacts(column, TWO_SIGNALS);
+
+    assert.deepEqual(lines, ["2 self-reports"], spelling);
+    for (const line of lines) {
+      assert.doesNotMatch(line, NAMES_A_SIGNAL, spelling);
+      assert.ok(!line.includes(LEAKED_LABEL), spelling);
+      assert.doesNotMatch(line, LEDGER_SYNTAX, spelling);
+      assert.doesNotMatch(line, CAMEL_CASE, spelling);
+    }
+  });
+}
+
+test("the `value` leaf still counts in BOTH spellings and in a mix", () => {
+  // The round-3 assertions this must not relax: the `.value` leaf was the one
+  // leaf that already counted, in both spellings, and it still must.
+  for (const column of [
+    ["manual.attestations.0.value=true", "manual.attestations.1.value=true"],
+    [
+      "manual.byKey.values_documented=true",
+      "manual.byKey.financial_base_established=true",
+    ],
+    ["manual.byKey.values_documented=true", "manual.attestations.1.value=true"],
+  ]) {
+    assert.deepEqual(
+      formatCitedFacts(column, TWO_SIGNALS),
+      ["2 things you confirmed"],
+      column.join(" | ")
+    );
+  }
+});
+
+test("ONE attestation cited both legal ways paints ONE chip, not two", () => {
+  // The verifier's own case: the same attestation, once by key and once by row,
+  // rendered its sentence TWICE through the real insight card because the two
+  // spellings landed in two phrase-keyed groups.
+  const lines = formatCitedFacts(
+    [
+      "manual.byKey.financial_base_established",
+      "manual.attestations.1.signalKey",
+    ],
+    TWO_SIGNALS
+  );
+
+  assert.deepEqual(lines, ["your financial base is in place"]);
+});
+
+test("no attestation column ever renders the ledger's own label", () => {
+  // Rule 2: an unknown shape degrades to words, and a KNOWN one never degrades
+  // at all. Every leaf, valueless and valued, resolved and unresolved.
+  const columns = [
+    ["manual.attestations.0.signalKey"],
+    ["manual.attestations.0.value"],
+    ["manual.attestations.0.attestedAt"],
+    ["manual.attestations.0.attestedAt=not-a-date"],
+    ["manual.attestations.0.value=maybe"],
+    ["manual.attestations.0.signalKey", "manual.attestations.1.signalKey"],
+    ["manual.attestations.7.signalKey", "manual.attestations.8.signalKey"],
+  ];
+
+  for (const column of columns) {
+    for (const signals of [undefined, TWO_SIGNALS]) {
+      for (const line of formatCitedFacts(column, signals)) {
+        assert.ok(
+          !line.includes(LEAKED_LABEL),
+          `${column.join(" | ")}: ${line}`
+        );
+        assert.doesNotMatch(line, LEDGER_SYNTAX, line);
+        assert.doesNotMatch(line, CAMEL_CASE, line);
+      }
+    }
+  }
+});
+
+test("an unresolved attestation pair counts rather than labelling", () => {
+  // Neither row resolves, so there is no sentence to say — but there are still
+  // two of them, and "2 self-reports" is the honest answer.
+  assert.deepEqual(
+    formatCitedFacts([
+      "manual.attestations.7.signalKey",
+      "manual.attestations.8.signalKey",
+    ]),
+    ["2 self-reports"]
+  );
+});
+
+test("N=1 keeps its sentence on every leaf and in every spelling", () => {
+  // The round-3 N=1 assertions, restated as the floor this fix may not lower:
+  // one distinct attestation in a group still reads the drill-down's sentence.
+  assert.deepEqual(
+    formatCitedFacts(["manual.attestations.1.signalKey"], TWO_SIGNALS),
+    ["your financial base is in place"]
+  );
+  assert.deepEqual(
+    formatCitedFacts(["manual.byKey.financial_base_established"]),
+    ["your financial base is in place"]
+  );
+  assert.deepEqual(
+    formatCitedFacts(["manual.attestations.1.value=true"], TWO_SIGNALS),
+    ["you confirmed your financial base is in place"]
+  );
+
+  const [dated] = formatCitedFacts(
+    ["manual.attestations.1.attestedAt=2026-05-02T00:00:00.000Z"],
+    TWO_SIGNALS
+  );
+  assert.match(dated, /your financial base is in place/);
+  assert.match(dated, /2026/);
+});
+
+test("the singular formatter agrees with the fold at N=1 on every leaf", () => {
+  // ONE dispatcher, so this cannot drift — asserted anyway, because it is the
+  // property the whole ruling is about.
+  for (const [fact, signalKey] of [
+    ["manual.attestations.1.signalKey", "financial_base_established"],
+    ["manual.attestations.1.value=true", "financial_base_established"],
+    ["manual.attestations.1.value=false", "financial_base_established"],
+    ["manual.attestations.1.value", "financial_base_established"],
+    [
+      "manual.attestations.1.attestedAt=2026-05-02T00:00:00.000Z",
+      "financial_base_established",
+    ],
+  ] as const) {
+    assert.deepEqual(
+      formatCitedFacts([fact], { [citedFactPath(fact)]: signalKey }),
+      [formatCitedFact(fact, { signalKey })],
+      fact
+    );
+  }
+});
+
 test("a resolved plural line still leaks no ledger syntax", () => {
   for (const line of formatCitedFacts(
     [
