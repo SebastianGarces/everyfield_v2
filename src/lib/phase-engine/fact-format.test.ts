@@ -2,11 +2,21 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  ATTESTATION_LEAVES,
+  type AttestationLeafName,
+} from "./attestation-citation";
+import {
   citedFactPath,
   formatCitedFact,
   formatCitedFacts,
   parseCitedFact,
 } from "./fact-format";
+import { renderPhrase, toWords } from "./fact-phrases";
+
+/** Every leaf `manual.attestations.#.<leaf>` is allowed to be, from the table. */
+const ATTESTATION_LEAF_NAMES = Object.keys(
+  ATTESTATION_LEAVES
+) as AttestationLeafName[];
 
 // The shape the issue is about: a dotted path, a camelCase leaf, an `=`.
 // Nothing this module renders may match it.
@@ -812,21 +822,119 @@ test("a valueless attestation row reads as its signal on BOTH paths", () => {
 // neither of them.
 // ----------------------------------------------------------------------------
 
-/** Two different attestations, resolved on all three array leaves. */
-const TWO_SIGNALS = {
-  "manual.attestations.0.signalKey": "values_documented",
-  "manual.attestations.1.signalKey": "financial_base_established",
-  "manual.attestations.0.value": "values_documented",
-  "manual.attestations.1.value": "financial_base_established",
-  "manual.attestations.0.attestedAt": "values_documented",
-  "manual.attestations.1.attestedAt": "financial_base_established",
-};
+/**
+ * Two different attestations, resolved on EVERY leaf the table declares.
+ *
+ * Derived from `ATTESTATION_LEAVES` rather than hand-listed: a fourth leaf joins
+ * this fixture — and every case driven off it below — by existing.
+ */
+const TWO_SIGNALS: Record<string, string> = Object.fromEntries(
+  ATTESTATION_LEAF_NAMES.flatMap((leaf) => [
+    [`manual.attestations.0.${leaf}`, "values_documented"],
+    [`manual.attestations.1.${leaf}`, "financial_base_established"],
+  ])
+);
 
 /** Neither signal may be named once two of them are in one group. */
 const NAMES_A_SIGNAL = /core values|financial base/;
 
 /** The ledger-shaped label a valueless array `signalKey` used to render as. */
 const LEAKED_LABEL = "signal key (manual attestations)";
+
+/** The ledger-shaped label ANY leaf would render as if it fell to the fallback. */
+function leakedLabelFor(leaf: string): string {
+  return `${toWords(leaf)} (manual attestations)`;
+}
+
+/**
+ * One same-class PAIR of legal values per leaf — two DIFFERENT specifics of the
+ * kind that leaf carries, so "does it drop them above one row" is answerable.
+ *
+ * Typed on {@link AttestationLeafName}, so a fourth leaf does not COMPILE until
+ * it is given samples. That is the point of the whole block: the taxonomy lives
+ * in one table, and the guards below iterate it rather than repeating it.
+ */
+const LEAF_SAMPLES: Record<AttestationLeafName, readonly [string, string]> = {
+  // Non-boolean on purpose: the boolean branch of `value` is the one leaf case
+  // that is already specific-free, and it has its own test below.
+  value: ["values_documented", "financial_base_established"],
+  signalKey: ["values_documented", "financial_base_established"],
+  attestedAt: ["2026-05-01T00:00:00.000Z", "2026-05-02T00:00:00.000Z"],
+};
+
+for (const leaf of ATTESTATION_LEAF_NAMES) {
+  const [first, second] = LEAF_SAMPLES[leaf];
+
+  for (const [form, column] of [
+    // Valueless — the shape that fell out of the templates and printed the
+    // ledger's own label.
+    [
+      "valueless",
+      [`manual.attestations.0.${leaf}`, `manual.attestations.1.${leaf}`],
+    ],
+    // Valued, with two DIFFERENT specifics: the signal, or the date, that the
+    // phrase used to bake in.
+    [
+      "valued",
+      [
+        `manual.attestations.0.${leaf}=${first}`,
+        `manual.attestations.1.${leaf}=${second}`,
+      ],
+    ],
+  ] as const) {
+    test(`the ${leaf} leaf COUNTS two attestations (${form}), it does not list`, () => {
+      const lines = formatCitedFacts(column, TWO_SIGNALS);
+
+      // ONE line for the pair — a group per attestation is the lister bug.
+      assert.equal(lines.length, 1, `${leaf} ${form}: ${lines.join(" | ")}`);
+      const [line] = lines;
+      // …carrying the COUNT, because how much evidence there is IS the evidence.
+      assert.match(line, /\b2\b/, `${leaf} ${form}: ${line}`);
+      // …and naming neither of the two things it speaks for.
+      assert.doesNotMatch(line, NAMES_A_SIGNAL, `${leaf} ${form}: ${line}`);
+      assert.ok(!line.includes("2026"), `${leaf} ${form}: ${line}`);
+      // Never the fallback: `counted` is total, so no leaf reaches it.
+      assert.ok(
+        !line.includes(leakedLabelFor(leaf)),
+        `${leaf} ${form}: ${line}`
+      );
+      assert.doesNotMatch(line, LEDGER_SYNTAX, `${leaf} ${form}: ${line}`);
+      assert.doesNotMatch(line, CAMEL_CASE, `${leaf} ${form}: ${line}`);
+    });
+  }
+
+  test(`the ${leaf} leaf's counting phrase drops its specifics above one row`, () => {
+    // Straight at the table, not through the formatter: two DIFFERENT values of
+    // the same class must render identically at two rows, because the group they
+    // speak for holds both. `specificAtOne` is what makes this structural.
+    const [a, b] = [first, second].map((value) =>
+      renderPhrase(ATTESTATION_LEAVES[leaf].counted(value), 2)
+    );
+    assert.equal(a, b, leaf);
+    assert.match(a, /\b2\b/, leaf);
+
+    // …and it is a phrase at every input, `null` included — the invariant the
+    // `Phrase` (not `Phrase | null`) return type now enforces at compile time.
+    for (const value of [null, "", first, "not-a-date", "true", "false"]) {
+      const rendered = renderPhrase(ATTESTATION_LEAVES[leaf].counted(value), 1);
+      assert.ok(rendered.length > 0, `${leaf} ← ${String(value)}`);
+      assert.ok(
+        !rendered.includes(leakedLabelFor(leaf)),
+        `${leaf} ← ${String(value)}: ${rendered}`
+      );
+    }
+  });
+
+  test(`the ${leaf} leaf's group identity is signal-free and date-free`, () => {
+    // Two different specifics of the same class are ONE group, always. Keying
+    // the fold on the rendered phrase is what broke this.
+    assert.equal(
+      ATTESTATION_LEAVES[leaf].groupKey(first),
+      ATTESTATION_LEAVES[leaf].groupKey(second),
+      leaf
+    );
+  });
+}
 
 for (const [spelling, column] of [
   // The bare keyed pair — the signal is in the PATH, so nothing resolves it and
@@ -836,27 +944,6 @@ for (const [spelling, column] of [
     [
       "manual.byKey.values_documented",
       "manual.byKey.financial_base_established",
-    ],
-  ],
-  // The array `signalKey` pair, valueless — the spelling that leaked the label.
-  [
-    "array signalKey (valueless)",
-    ["manual.attestations.0.signalKey", "manual.attestations.1.signalKey"],
-  ],
-  // …and carrying its value, which is the signal written twice.
-  [
-    "array signalKey (valued)",
-    [
-      "manual.attestations.0.signalKey=values_documented",
-      "manual.attestations.1.signalKey=financial_base_established",
-    ],
-  ],
-  // The `attestedAt` pair — two different DATES, which the phrase used to carry.
-  [
-    "array attestedAt",
-    [
-      "manual.attestations.0.attestedAt=2026-05-01T00:00:00.000Z",
-      "manual.attestations.1.attestedAt=2026-05-02T00:00:00.000Z",
     ],
   ],
   // Cross-spelling: one attestation named by key, the other by row.
@@ -921,24 +1008,26 @@ test("ONE attestation cited both legal ways paints ONE chip, not two", () => {
 
 test("no attestation column ever renders the ledger's own label", () => {
   // Rule 2: an unknown shape degrades to words, and a KNOWN one never degrades
-  // at all. Every leaf, valueless and valued, resolved and unresolved.
-  const columns = [
-    ["manual.attestations.0.signalKey"],
-    ["manual.attestations.0.value"],
-    ["manual.attestations.0.attestedAt"],
-    ["manual.attestations.0.attestedAt=not-a-date"],
-    ["manual.attestations.0.value=maybe"],
-    ["manual.attestations.0.signalKey", "manual.attestations.1.signalKey"],
-    ["manual.attestations.7.signalKey", "manual.attestations.8.signalKey"],
-  ];
+  // at all. EVERY leaf the table declares, across the values that used to fall
+  // through it, resolved and unresolved and out of range.
+  const columns = ATTESTATION_LEAF_NAMES.flatMap((leaf) => [
+    [`manual.attestations.0.${leaf}`],
+    [`manual.attestations.0.${leaf}=maybe`],
+    [`manual.attestations.0.${leaf}=not-a-date`],
+    [`manual.attestations.0.${leaf}`, `manual.attestations.1.${leaf}`],
+    // Out of range on both rows: nothing resolves, and nothing may be guessed.
+    [`manual.attestations.7.${leaf}`, `manual.attestations.8.${leaf}`],
+  ]);
 
   for (const column of columns) {
     for (const signals of [undefined, TWO_SIGNALS]) {
       for (const line of formatCitedFacts(column, signals)) {
-        assert.ok(
-          !line.includes(LEAKED_LABEL),
-          `${column.join(" | ")}: ${line}`
-        );
+        for (const leaf of ATTESTATION_LEAF_NAMES) {
+          assert.ok(
+            !line.includes(leakedLabelFor(leaf)),
+            `${column.join(" | ")}: ${line}`
+          );
+        }
         assert.doesNotMatch(line, LEDGER_SYNTAX, line);
         assert.doesNotMatch(line, CAMEL_CASE, line);
       }
@@ -984,17 +1073,17 @@ test("N=1 keeps its sentence on every leaf and in every spelling", () => {
 
 test("the singular formatter agrees with the fold at N=1 on every leaf", () => {
   // ONE dispatcher, so this cannot drift — asserted anyway, because it is the
-  // property the whole ruling is about.
-  for (const [fact, signalKey] of [
-    ["manual.attestations.1.signalKey", "financial_base_established"],
-    ["manual.attestations.1.value=true", "financial_base_established"],
-    ["manual.attestations.1.value=false", "financial_base_established"],
-    ["manual.attestations.1.value", "financial_base_established"],
-    [
-      "manual.attestations.1.attestedAt=2026-05-02T00:00:00.000Z",
-      "financial_base_established",
-    ],
-  ] as const) {
+  // property the whole ruling is about. Driven off the leaf table, so a fourth
+  // leaf is held to it the moment it exists.
+  const signalKey = "financial_base_established";
+  const facts = ATTESTATION_LEAF_NAMES.flatMap((leaf) => [
+    `manual.attestations.1.${leaf}`,
+    `manual.attestations.1.${leaf}=${LEAF_SAMPLES[leaf][1]}`,
+    `manual.attestations.1.${leaf}=true`,
+    `manual.attestations.1.${leaf}=false`,
+  ]);
+
+  for (const fact of facts) {
     assert.deepEqual(
       formatCitedFacts([fact], { [citedFactPath(fact)]: signalKey }),
       [formatCitedFact(fact, { signalKey })],

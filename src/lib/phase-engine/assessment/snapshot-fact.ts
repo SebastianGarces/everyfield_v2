@@ -23,6 +23,14 @@
 // ============================================================================
 
 import type { PlantInsight } from "@/db/schema";
+// The owner of attestation-citation SYNTAX: the two legal spellings and the one
+// leaf table. The manual block is written into the snapshot TWICE —
+// `manual.byKey.<signal>` and `manual.attestations[]`
+// (signals/build-fact-snapshot.ts) — and the judge's citable ledger is the whole
+// flattened snapshot, so BOTH spellings are legal citations of the same
+// attestation. This module resolves the array one; it must not also decide what
+// that spelling is called.
+import { MANUAL_ATTESTATIONS_PREFIX } from "@/lib/phase-engine/attestation-citation";
 // The citation parser, shared with the humanising formatter the UI renders
 // through. One reader of `plant_insights.cited_facts` syntax, so the read layer
 // and the surfaces above it can never disagree about where a path ends and a
@@ -137,14 +145,6 @@ export function findSnapshotRowIndex(
 // ----------------------------------------------------------------------------
 // Resolving a citation against that snapshot.
 // ----------------------------------------------------------------------------
-
-/**
- * The manual block is written into the snapshot TWICE — `manual.byKey.<signal>`
- * and `manual.attestations[]` (signals/build-fact-snapshot.ts) — and the judge's
- * citable ledger is the whole flattened snapshot, so BOTH spellings are legal
- * citations of the same attestation.
- */
-export const MANUAL_ATTESTATIONS_PREFIX = "manual.attestations.";
 
 /**
  * Which manual signal an `manual.attestations.N.…` citation names, read out of

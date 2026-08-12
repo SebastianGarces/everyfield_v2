@@ -76,6 +76,13 @@ import {
   dotIndices,
   parseCitedFact,
 } from "@/lib/phase-engine/fact-format";
+// The owner of the two legal attestation spellings. A gate's declared path and
+// the rewrite that lands a citation on it are two halves of ONE decision, so
+// neither side spells `manual.byKey.` for itself.
+import {
+  MANUAL_ATTESTATIONS_PREFIX,
+  MANUAL_BY_KEY_PREFIX,
+} from "@/lib/phase-engine/attestation-citation";
 // The judge's severity, relabelled — the SAME relabelling and the SAME order the
 // CSF scorecard reads its tiles through, so the two projections of one
 // assessment cannot disagree about which finding is the headline.
@@ -87,7 +94,6 @@ import {
 import {
   attestationSignalKey,
   findSnapshotRowIndex,
-  MANUAL_ATTESTATIONS_PREFIX,
   readSnapshotFact,
   type SnapshotFact,
 } from "./snapshot-fact";
@@ -198,17 +204,33 @@ const CORE_GROUP_GATE = 30;
 /** "3–4 weeks to launch" as the outer bound, in days (rubric-v0 Part B). */
 const LAUNCH_WINDOW_DAYS = 28;
 
-/** A self-attestation gate (PE-005): the planter's own yes/no is the reading. */
+/** The keyed spelling of one manual signal — the path an attested gate lives on. */
+function manualSignalPath(signal: string): string {
+  return `${MANUAL_BY_KEY_PREFIX}${signal}`;
+}
+
+/**
+ * A self-attestation gate (PE-005): the planter's own yes/no is the reading.
+ *
+ * Declares AND measures the one keyed path, from the signal named ONCE, so a
+ * gate cannot drift between the path it claims citations on and the path it
+ * reads. Both come from {@link manualSignalPath}; nobody spells the prefix.
+ */
 function attested(
-  path: string,
+  signal: string,
   phrases: { met: string; notMet: string; unknown: string }
-): (lens: FactLens) => MeasuredReading {
-  return (lens) => {
-    const fact = lens.read(path);
-    if (fact.value === "true") return { status: "met", reading: phrases.met };
-    if (fact.value === "false")
-      return { status: "not_met", reading: phrases.notMet };
-    return { status: "unknown", reading: phrases.unknown };
+): Pick<ExitCriterionDefinition, "factPaths" | "categories" | "measure"> {
+  const path = manualSignalPath(signal);
+  return {
+    factPaths: [path],
+    categories: [],
+    measure: (lens) => {
+      const fact = lens.read(path);
+      if (fact.value === "true") return { status: "met", reading: phrases.met };
+      if (fact.value === "false")
+        return { status: "not_met", reading: phrases.notMet };
+      return { status: "unknown", reading: phrases.unknown };
+    },
   };
 }
 
@@ -236,9 +258,7 @@ export const PHASE_EXIT_CRITERIA: Record<
       key: "values_documented",
       label: "Core values documented",
       detail: "Your foundations are written down, not just discussed.",
-      factPaths: ["manual.byKey.values_documented"],
-      categories: [],
-      measure: attested("manual.byKey.values_documented", {
+      ...attested("values_documented", {
         met: "you confirmed your core values are documented",
         notMet: "you have not confirmed your core values are documented",
         unknown: "you have not answered this on the phase page yet",
@@ -287,9 +307,7 @@ export const PHASE_EXIT_CRITERIA: Record<
       key: "financial_base",
       label: "Financial base in place",
       detail: "Giving and a first-year budget you can plant on.",
-      factPaths: ["manual.byKey.financial_base_established"],
-      categories: [],
-      measure: attested("manual.byKey.financial_base_established", {
+      ...attested("financial_base_established", {
         met: "you confirmed your financial base is in place",
         notMet: "you have not confirmed your financial base is in place",
         unknown: "you have not answered this on the phase page yet",
@@ -412,9 +430,7 @@ export const PHASE_EXIT_CRITERIA: Record<
       key: "systems_tested",
       label: "Systems tested",
       detail: "Giving, check-in and the rest have been run for real.",
-      factPaths: ["manual.byKey.systems_tested"],
-      categories: [],
-      measure: attested("manual.byKey.systems_tested", {
+      ...attested("systems_tested", {
         met: "you confirmed your launch systems have been tested",
         notMet: "you have not confirmed your launch systems have been tested",
         unknown: "you have not answered this on the phase page yet",
@@ -715,7 +731,7 @@ function normalizeManualCitation(
   if (!citedPath.startsWith(MANUAL_ATTESTATIONS_PREFIX)) return citedPath;
 
   const key = attestationSignalKey(citedPath, snapshot);
-  return key === null ? null : `manual.byKey.${key}`;
+  return key === null ? null : manualSignalPath(key);
 }
 
 /**
