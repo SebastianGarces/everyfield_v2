@@ -11,6 +11,7 @@ import {
   type NewTrainingCompletion,
 } from "@/db/schema";
 import { and, eq, inArray, isNull, sql, asc } from "drizzle-orm";
+import { ExpectedError } from "./expected-error";
 import { verifyTeamOwnership } from "./shared";
 
 // ============================================================================
@@ -132,8 +133,10 @@ export async function markTrainingComplete(
       .limit(1),
   ]);
 
-  if (!person) throw new Error("Person not found");
-  if (!program) throw new Error("Program not found");
+  // ExpectedError throughout markTrainingComplete: these messages are user
+  // copy — the action shell surfaces them to the planter verbatim (409-6C).
+  if (!person) throw new ExpectedError("Person not found");
+  if (!program) throw new ExpectedError("Program not found");
 
   // The database already forbids a duplicate (`training_completions_unique`
   // on person_id + training_program_id), so the INSERT itself carries the
@@ -159,7 +162,7 @@ export async function markTrainingComplete(
     .returning();
 
   if (!completion) {
-    throw new Error("Training already completed");
+    throw new ExpectedError("Training already completed");
   }
 
   return completion;

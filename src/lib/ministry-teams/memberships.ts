@@ -15,6 +15,7 @@ import {
   emitTeamLeaderAssigned,
   emitTeamStaffingChanged,
 } from "./events";
+import { ExpectedError } from "./expected-error";
 import { getTeamStaffingCounts } from "./shared";
 
 // ============================================================================
@@ -59,7 +60,9 @@ export async function assignMember(
     )
     .limit(1);
 
-  if (!person) throw new Error("Person not found");
+  // ExpectedError throughout assignMember: these messages are user copy — the
+  // action shell surfaces them to the planter verbatim (ruling 409-6C).
+  if (!person) throw new ExpectedError("Person not found");
 
   // Verify role exists and belongs to team
   const [role] = await db
@@ -74,7 +77,7 @@ export async function assignMember(
     )
     .limit(1);
 
-  if (!role) throw new Error("Role not found in this team");
+  if (!role) throw new ExpectedError("Role not found in this team");
 
   // Look for any existing membership row for this (team, person, role).
   // A row may linger after removeMember sets status='inactive' (the partial
@@ -96,7 +99,7 @@ export async function assignMember(
     .limit(1);
 
   if (existing && existing.status === "active") {
-    throw new Error("Person is already assigned to this role");
+    throw new ExpectedError("Person is already assigned to this role");
   }
 
   // The membership write and the role's status flip are both known up front,
@@ -188,7 +191,8 @@ export async function removeMember(
     )
     .limit(1);
 
-  if (!membership) throw new Error("Membership not found");
+  // ExpectedError: user copy — surfaced to the planter verbatim (409-6C).
+  if (!membership) throw new ExpectedError("Membership not found");
 
   // Deactivate the membership and reopen its role in ONE db.batch — both
   // writes are known up front, so a failure in between can no longer leave the

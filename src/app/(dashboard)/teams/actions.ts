@@ -52,7 +52,6 @@ import {
   formEntries,
   revalidateTeamSurfaces,
   withChurch,
-  withChurchReportingErrors,
 } from "./action-shell";
 import type { ActionResult } from "./action-shell";
 
@@ -106,14 +105,11 @@ export async function assignTeamLeaderAction(
   teamId: string,
   personId: string
 ): Promise<ActionResult<MinistryTeam>> {
-  return withChurchReportingErrors(
-    "Failed to assign leader",
-    async ({ churchId, userId }) => {
-      const team = await assignTeamLeader(churchId, teamId, personId, userId);
-      revalidateTeamSurfaces();
-      return { success: true, data: team };
-    }
-  );
+  return withChurch("Failed to assign leader", async ({ churchId, userId }) => {
+    const team = await assignTeamLeader(churchId, teamId, personId, userId);
+    revalidateTeamSurfaces();
+    return { success: true, data: team };
+  });
 }
 
 export async function initializeTeamsAction(
@@ -236,14 +232,11 @@ export async function updateRoleAction(
 }
 
 export async function deleteRoleAction(roleId: string): Promise<ActionResult> {
-  return withChurchReportingErrors(
-    "Failed to delete role",
-    async ({ churchId, userId }) => {
-      await deleteRole(churchId, roleId, userId);
-      revalidateTeamSurfaces();
-      return { success: true, data: undefined };
-    }
-  );
+  return withChurch("Failed to delete role", async ({ churchId, userId }) => {
+    await deleteRole(churchId, roleId, userId);
+    revalidateTeamSurfaces();
+    return { success: true, data: undefined };
+  });
 }
 
 export async function importRoleTemplatesAction(
@@ -276,37 +269,31 @@ export async function assignMemberAction(
   roleId: string,
   data: { personId: string; startDate?: string }
 ): Promise<ActionResult<TeamMembership>> {
-  return withChurchReportingErrors(
-    "Failed to assign member",
-    async ({ churchId, userId }) => {
-      const parsed = memberAssignSchema.safeParse(data);
-      if (!parsed.success) return fieldErrorResult(parsed.error);
+  return withChurch("Failed to assign member", async ({ churchId, userId }) => {
+    const parsed = memberAssignSchema.safeParse(data);
+    if (!parsed.success) return fieldErrorResult(parsed.error);
 
-      const membership = await assignMember(
-        churchId,
-        teamId,
-        roleId,
-        parsed.data.personId,
-        userId,
-        parsed.data.startDate
-      );
-      revalidateTeamSurfaces();
-      return { success: true, data: membership };
-    }
-  );
+    const membership = await assignMember(
+      churchId,
+      teamId,
+      roleId,
+      parsed.data.personId,
+      userId,
+      parsed.data.startDate
+    );
+    revalidateTeamSurfaces();
+    return { success: true, data: membership };
+  });
 }
 
 export async function removeMemberAction(
   membershipId: string
 ): Promise<ActionResult> {
-  return withChurchReportingErrors(
-    "Failed to remove member",
-    async ({ churchId, userId }) => {
-      await removeMember(churchId, membershipId, userId);
-      revalidateTeamSurfaces();
-      return { success: true, data: undefined };
-    }
-  );
+  return withChurch("Failed to remove member", async ({ churchId, userId }) => {
+    await removeMember(churchId, membershipId, userId);
+    revalidateTeamSurfaces();
+    return { success: true, data: undefined };
+  });
 }
 
 // ============================================================================
@@ -372,22 +359,19 @@ export async function markTrainingCompleteAction(data: {
   personId: string;
   programId: string;
 }): Promise<ActionResult<TrainingCompletion>> {
-  return withChurchReportingErrors(
-    "Failed to mark complete",
-    async ({ churchId, userId }) => {
-      const parsed = trainingCompleteSchema.safeParse(data);
-      if (!parsed.success) {
-        return { success: false, error: "Validation failed" };
-      }
-
-      const completion = await markTrainingComplete(
-        churchId,
-        parsed.data.personId,
-        parsed.data.programId,
-        userId
-      );
-      revalidateTeamSurfaces();
-      return { success: true, data: completion };
+  return withChurch("Failed to mark complete", async ({ churchId, userId }) => {
+    const parsed = trainingCompleteSchema.safeParse(data);
+    if (!parsed.success) {
+      return { success: false, error: "Validation failed" };
     }
-  );
+
+    const completion = await markTrainingComplete(
+      churchId,
+      parsed.data.personId,
+      parsed.data.programId,
+      userId
+    );
+    revalidateTeamSurfaces();
+    return { success: true, data: completion };
+  });
 }

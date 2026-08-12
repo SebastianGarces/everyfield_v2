@@ -8,6 +8,7 @@ import {
 } from "@/db/schema";
 import { and, eq, asc } from "drizzle-orm";
 import { emitTeamStaffingChanged } from "./events";
+import { ExpectedError } from "./expected-error";
 import { getRoleTemplates, type PredefinedTeamKey } from "./role-templates";
 import { getTeamStaffingCounts, verifyTeamOwnership } from "./shared";
 
@@ -125,7 +126,8 @@ export async function deleteRole(
     .where(and(eq(teamRoles.churchId, churchId), eq(teamRoles.id, roleId)))
     .limit(1);
 
-  if (!role) throw new Error("Role not found");
+  // ExpectedError: user copy — surfaced to the planter verbatim (409-6C).
+  if (!role) throw new ExpectedError("Role not found");
 
   await db
     .delete(teamRoles)

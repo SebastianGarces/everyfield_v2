@@ -12,6 +12,7 @@ import {
 } from "@/db/schema";
 import { and, eq, inArray, sql, asc, isNull } from "drizzle-orm";
 import { emitTeamLeaderAssigned } from "./events";
+import { ExpectedError } from "./expected-error";
 import { TEAM_TEMPLATES, type PredefinedTeamKey } from "./role-templates";
 
 // ============================================================================
@@ -299,7 +300,9 @@ export async function assignTeamLeader(
     )
     .limit(1);
 
-  if (!person) throw new Error("Person not found");
+  // ExpectedError: these two messages are user copy — the action shell
+  // surfaces them to the planter verbatim (ruling 409-6C).
+  if (!person) throw new ExpectedError("Person not found");
 
   const [updated] = await db
     .update(ministryTeams)
@@ -309,7 +312,7 @@ export async function assignTeamLeader(
     )
     .returning();
 
-  if (!updated) throw new Error("Team not found");
+  if (!updated) throw new ExpectedError("Team not found");
 
   // Emit leader assigned event (F2 subscribes to auto-advance launch_team -> leader)
   await emitTeamLeaderAssigned(teamId, personId, churchId, userId);

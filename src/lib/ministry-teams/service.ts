@@ -12,6 +12,8 @@
 //   health.ts       the read-model: health metrics + staffing summary
 //   shared.ts       private helpers the modules share (ownership check,
 //                   staffing counts) — deliberately NOT re-exported here
+//   expected-error.ts  ExpectedError — a thrown message that IS user copy
+//                   (ruling 409-6C); the action shell surfaces it verbatim
 //
 // This barrel preserves the import path every caller already uses
 // (`@/lib/ministry-teams/service`) and its exact export surface. New callers
@@ -55,3 +57,5 @@ export type { TrainingMatrixRow, PersonTrainingItem } from "./training";
 
 export { getTeamHealth, getAllTeamsHealth, getStaffingSummary } from "./health";
 export type { StaffingSummary, TeamHealthMetrics } from "./health";
+
+export { ExpectedError } from "./expected-error";

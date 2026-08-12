@@ -3,7 +3,7 @@
 // module: nothing here is an endpoint (memory/invariants.md → Authentication —
 // the export list of a "use server" module IS the auth surface).
 //
-// Every action in actions.ts / queries.ts used to repeat the same 12 lines:
+// Every action in actions.ts used to repeat the same 12 lines:
 // verifySession → churchId guard → optional zod parse with a cast →
 // service call → revalidate → two-branch catch. The repetition is why the
 // revalidate paths and the error-message policy drifted per action; this
@@ -14,6 +14,7 @@ import { revalidatePath } from "next/cache";
 import type { z } from "zod";
 
 import { verifySession } from "@/lib/auth/session";
+import { ExpectedError } from "@/lib/ministry-teams/expected-error";
 
 export type ActionResult<T = void> =
   | { success: true; data: T }
@@ -25,9 +26,16 @@ export interface ChurchActor {
   userId: string;
 }
 
-async function runAsChurchActor<T>(
+/**
+ * Run a team action as the session's church actor — the ONE shell, one error
+ * policy (ruling 409-6C, 2026-08-12): a thrown `ExpectedError` carries user
+ * copy and its message is surfaced verbatim ("Person not found", "Training
+ * already completed"); every other throw is reported as `fallbackError`, so
+ * internal wording and driver errors never become UI copy. The service side
+ * of the contract lives in `src/lib/ministry-teams/expected-error.ts`.
+ */
+export async function withChurch<T>(
   fallbackError: string,
-  reportErrorMessages: boolean,
   run: (actor: ChurchActor) => Promise<ActionResult<T>>
 ): Promise<ActionResult<T>> {
   try {
@@ -40,35 +48,11 @@ async function runAsChurchActor<T>(
     if (error instanceof Error && error.message === "Unauthorized") {
       return { success: false, error: "You must be logged in" };
     }
-    if (reportErrorMessages && error instanceof Error) {
+    if (error instanceof ExpectedError) {
       return { success: false, error: error.message };
     }
     return { success: false, error: fallbackError };
   }
-}
-
-/**
- * Run a team action as the session's church actor. A thrown service error is
- * reported as `fallbackError` — the caller never sees the raw message.
- */
-export function withChurch<T>(
-  fallbackError: string,
-  run: (actor: ChurchActor) => Promise<ActionResult<T>>
-): Promise<ActionResult<T>> {
-  return runAsChurchActor(fallbackError, false, run);
-}
-
-/**
- * Like `withChurch`, but a thrown Error's own message is surfaced ("Person not
- * found", "Membership not found", …), with `fallbackError` for non-Errors.
- * Two explicit shells rather than a boolean flag: today's actions genuinely
- * differ in this policy, and unifying it is a product DECISION, not a refactor.
- */
-export function withChurchReportingErrors<T>(
-  fallbackError: string,
-  run: (actor: ChurchActor) => Promise<ActionResult<T>>
-): Promise<ActionResult<T>> {
-  return runAsChurchActor(fallbackError, true, run);
 }
 
 /** The one home of the flatten-and-cast every action used to repeat. */
