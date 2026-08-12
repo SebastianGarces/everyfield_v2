@@ -9,7 +9,7 @@ import {
   searchPeopleAction,
   resolveGroupAction,
 } from "@/app/(dashboard)/communication/actions";
-import type { RecipientTeamOption } from "@/lib/communication/service";
+import type { RecipientTeamOption } from "@/lib/communication/recipient-groups";
 
 interface Recipient {
   id: string;

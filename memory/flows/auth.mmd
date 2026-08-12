@@ -7,7 +7,7 @@ flowchart TD
         L4["Find user by email"]
         L5["verifyPassword - password.ts"]
         LF["recordAttempt failure - rate-limit.ts"]
-        LS["recordAttempt success - rate-limit.ts"]
+        LS["recordAttempt success - rate-limit.ts - clears the identifier's failed rows in the window"]
         L6["generateSessionToken - session.ts"]
         L7["createSession - session.ts"]
         L8["setSessionCookie - cookies.ts"]

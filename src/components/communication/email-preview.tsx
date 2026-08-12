@@ -81,6 +81,23 @@ function escapeRegex(str: string): string {
 }
 
 /**
+ * Escape planter-authored text BEFORE any of the preview's own markup is
+ * substituted in. The preview renders through dangerouslySetInnerHTML, and a
+ * template body is team-authored content — `<img onerror=...>` in a template
+ * must render as visible literal text here, never execute in the browser of
+ * whoever opens the compose form. (The real email is safe either way:
+ * react-email's <Text> escapes its children.)
+ */
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/**
  * Live email preview component.
  * Renders subject + body with merge fields replaced by sample data.
  * Highlights unresolved {{...}} tokens in red.
@@ -99,10 +116,14 @@ export function EmailPreview({ subject, body, mergeData }: EmailPreviewProps) {
     );
   };
 
-  const displaySubject = highlightUnresolved(renderedSubject);
+  // Escape first, decorate second: the highlight and RSVP substitutions
+  // inject their own trusted markup, so they run on the escaped text.
+  const displaySubject = highlightUnresolved(escapeHtml(renderedSubject));
 
   // Convert newlines to <br>, highlight unresolved fields, then render RSVP buttons
-  let displayBody = highlightUnresolved(renderedBody.replace(/\n/g, "<br>"));
+  let displayBody = highlightUnresolved(
+    escapeHtml(renderedBody).replace(/\n/g, "<br>")
+  );
   displayBody = renderRsvpButtons(displayBody);
 
   return (

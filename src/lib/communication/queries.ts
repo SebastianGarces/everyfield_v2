@@ -61,6 +61,100 @@ export const DELIVERED_STATUSES = ["delivered", "opened", "clicked"] as const;
  */
 export const UNREACHABLE_STATUSES = ["bounced", "failed"] as const;
 
+/**
+ * Whether a recipient row records an address that did not work. ONE predicate,
+ * because the two statuses are ruled inseparable (2026-08-09, PR #371) — any
+ * caller asking about one of them without the other is re-splitting the pair.
+ */
+export function isUnreachableStatus(status: RecipientStatus): boolean {
+  return (UNREACHABLE_STATUSES as readonly RecipientStatus[]).includes(status);
+}
+
+/**
+ * The one status ladder. A recipient row only ever moves UP this ranking:
+ * pending < sent < delivered < opened < clicked, with `bounced` and `failed`
+ * terminal — they share the top rank so neither outranks the other, nothing
+ * advances past them, and `isUnreachableStatus` (not this ladder) is what says
+ * a row must not be advanced at all.
+ *
+ * This record replaced four private encodings of the same concept, one of
+ * which ranked an unreachable row BELOW `clicked` and overwrote bounces with
+ * fabricated click telemetry. Never rebuild a local copy.
+ */
+export const RECIPIENT_STATUS_RANK: Record<RecipientStatus, number> = {
+  pending: 0,
+  sent: 1,
+  delivered: 2,
+  opened: 3,
+  clicked: 4,
+  bounced: 5,
+  failed: 5,
+};
+
+/**
+ * NOT the ladder above — a different concept that happens to share the keys.
+ *
+ * `RECIPIENT_STATUS_RANK` orders ONE row's lifecycle, where bounced/failed are
+ * terminal and outrank everything. This ordering folds SEVERAL rows for one
+ * person (one per meeting email) into the single status the guest list shows,
+ * and there the best outcome achieved wins: a guest whose invite bounced, and
+ * who then opened a later email after the address was fixed, reads as
+ * `opened`, not `bounced`. Ranking the unreachable pair at the bottom is what
+ * the guest list has always shown; showing the bounce instead is a product
+ * question, not a refactor.
+ */
+export const TRACKING_DISPLAY_PRECEDENCE: Record<RecipientStatus, number> = {
+  pending: 0,
+  failed: 1,
+  bounced: 2,
+  sent: 3,
+  delivered: 4,
+  opened: 5,
+  clicked: 6,
+};
+
+/** Recipient counts for a single message, as `getCommunication` reports them. */
+export interface MessageDeliveryStats {
+  total: number;
+  /** Rows past `pending` — what actually left the building. */
+  sent: number;
+  delivered: number;
+  opened: number;
+  clicked: number;
+  bounced: number;
+  failed: number;
+}
+
+/**
+ * Fold one message's recipient rows into its stats block. Delivered and opened
+ * are cumulative — `DELIVERED_STATUSES` / `OPENED_STATUSES` membership — so a
+ * clicked row counts as delivered and opened even when neither event fired.
+ */
+export function summarizeRecipients(
+  rows: ReadonlyArray<{ status: RecipientStatus }>
+): MessageDeliveryStats {
+  const delivered = DELIVERED_STATUSES as readonly RecipientStatus[];
+  const opened = OPENED_STATUSES as readonly RecipientStatus[];
+  const stats: MessageDeliveryStats = {
+    total: rows.length,
+    sent: 0,
+    delivered: 0,
+    opened: 0,
+    clicked: 0,
+    bounced: 0,
+    failed: 0,
+  };
+  for (const { status } of rows) {
+    if (status !== "pending") stats.sent += 1;
+    if (delivered.includes(status)) stats.delivered += 1;
+    if (opened.includes(status)) stats.opened += 1;
+    if (status === "clicked") stats.clicked += 1;
+    if (status === "bounced") stats.bounced += 1;
+    if (status === "failed") stats.failed += 1;
+  }
+  return stats;
+}
+
 // ---------------------------------------------------------------------------
 // Delivery statistics (COM-019)
 // ---------------------------------------------------------------------------
@@ -194,6 +288,19 @@ export function messageRecipientScope(
   return and(
     eq(communicationRecipients.churchId, churchId),
     eq(communicationRecipients.communicationId, communicationId)
+  ) as SQL;
+}
+
+/**
+ * Every recipient row across one meeting's communications. Written for a query
+ * joining `communication_recipients` -> `communications`, asserting the church
+ * on BOTH sides — the same both-sides assertion `churchDeliveryScope` documents.
+ */
+export function meetingTrackingScope(churchId: string, meetingId: string): SQL {
+  return and(
+    eq(communications.meetingId, meetingId),
+    eq(communications.churchId, churchId),
+    eq(communicationRecipients.churchId, churchId)
   ) as SQL;
 }
 

@@ -29,7 +29,12 @@ export function IncompleteOnboardingIndicator({
   churchId,
 }: {
   items: IncompleteOnboardingItem[];
-  churchId: string;
+  /**
+   * `null` for a viewer with no church (a coach on the empty dashboard shell)
+   * — their dismissal lands in the shared no-church bucket, which is the key
+   * this component has always produced for them.
+   */
+  churchId: string | null;
 }) {
   const { dismissed, dismiss } = useDismissed(
     dismissalKey("incomplete-onboarding", churchId),

@@ -1,4 +1,4 @@
-import { sql, type SQL } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import {
   check,
   index,
@@ -8,6 +8,7 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 import { churches } from "./church";
+import { inList } from "./sql";
 import { organizationInvitations } from "./organization-invitation";
 import { users } from "./user";
 
@@ -55,11 +56,6 @@ export type AssociationOrgType = (typeof associationOrgTypes)[number];
  */
 export const associationEventTypes = ["associated", "disassociated"] as const;
 export type AssociationEventType = (typeof associationEventTypes)[number];
-
-/** `'a', 'b'` — the CHECK's value list, built from the tuples above so the two cannot drift. */
-function inList(values: readonly string[]): SQL {
-  return sql.raw(values.map((value) => `'${value}'`).join(", "));
-}
 
 export const associationEvents = pgTable(
   "association_events",

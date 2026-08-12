@@ -4,22 +4,29 @@ import { test } from "node:test";
 import { PgDialect } from "drizzle-orm/pg-core";
 import type { SQL } from "drizzle-orm";
 
+import type { RecipientStatus } from "@/db/schema/communication";
+
 import {
   DELIVERED_STATUSES,
   OPENED_STATUSES,
+  RECIPIENT_STATUS_RANK,
   TEAM_GROUP_PREFIX,
+  TRACKING_DISPLAY_PRECEDENCE,
   UNREACHABLE_STATUSES,
   churchDeliveryScope,
   countAttempted,
   countOfStatus,
   countOfStatuses,
   isTeamGroup,
+  isUnreachableStatus,
+  meetingTrackingScope,
   messageRecipientScope,
   nonOpenerScope,
   parseTeamGroup,
   selectableTeamsScope,
   sentMessagesScope,
   sentSinceScope,
+  summarizeRecipients,
   teamGroup,
   teamMemberScope,
 } from "./queries";
@@ -193,6 +200,115 @@ test("the unreachable statuses are exactly bounced and failed", () => {
   assert.deepEqual([...UNREACHABLE_STATUSES], ["bounced", "failed"]);
 });
 
+test("isUnreachableStatus answers for every status, never re-splitting the pair", () => {
+  const expected: Record<RecipientStatus, boolean> = {
+    pending: false,
+    sent: false,
+    delivered: false,
+    opened: false,
+    clicked: false,
+    bounced: true,
+    failed: true,
+  };
+  for (const [status, unreachable] of Object.entries(expected)) {
+    assert.equal(isUnreachableStatus(status as RecipientStatus), unreachable);
+  }
+});
+
+// --- the one status ladder ---------------------------------------------------
+
+test("the rank ladder orders progress and keeps bounced/failed terminal", () => {
+  const ladder: Array<[RecipientStatus, RecipientStatus]> = [
+    ["pending", "sent"],
+    ["sent", "delivered"],
+    ["delivered", "opened"],
+    ["opened", "clicked"],
+    ["clicked", "bounced"],
+    ["clicked", "failed"],
+  ];
+  for (const [lower, higher] of ladder) {
+    assert.ok(
+      RECIPIENT_STATUS_RANK[lower] < RECIPIENT_STATUS_RANK[higher],
+      `${lower} must rank below ${higher}`
+    );
+  }
+  // Terminal together: neither of the unreachable pair outranks the other,
+  // so nothing can "advance" a bounce into a failure or back.
+  assert.equal(RECIPIENT_STATUS_RANK.bounced, RECIPIENT_STATUS_RANK.failed);
+});
+
+// --- the cross-row display precedence ----------------------------------------
+
+test("the display precedence puts the unreachable pair at the BOTTOM, unlike the ladder", () => {
+  // A deliberately different ordering from RECIPIENT_STATUS_RANK: it folds
+  // several rows for one person into what the guest list shows, and there the
+  // best outcome achieved wins.
+  const ascending: RecipientStatus[] = [
+    "pending",
+    "failed",
+    "bounced",
+    "sent",
+    "delivered",
+    "opened",
+    "clicked",
+  ];
+  for (let i = 1; i < ascending.length; i++) {
+    assert.ok(
+      TRACKING_DISPLAY_PRECEDENCE[ascending[i - 1]] <
+        TRACKING_DISPLAY_PRECEDENCE[ascending[i]],
+      `${ascending[i - 1]} must display below ${ascending[i]}`
+    );
+  }
+});
+
+test("a person with a bounced row and a clicked row folds to clicked", () => {
+  // The invite bounced; the planter fixed the address; a later email was
+  // clicked. The guest list reports the click, not the historical bounce —
+  // the same fold `getMeetingTrackingByPerson` runs.
+  const rows: RecipientStatus[] = ["bounced", "clicked", "pending"];
+  const folded = rows.reduce((best, status) =>
+    TRACKING_DISPLAY_PRECEDENCE[status] > TRACKING_DISPLAY_PRECEDENCE[best]
+      ? status
+      : best
+  );
+  assert.equal(folded, "clicked");
+});
+
+// --- one message's stats fold ------------------------------------------------
+
+test("summarizeRecipients counts delivered and opened cumulatively", () => {
+  const rows: Array<{ status: RecipientStatus }> = [
+    { status: "pending" },
+    { status: "sent" },
+    { status: "delivered" },
+    { status: "opened" },
+    { status: "clicked" },
+    { status: "bounced" },
+    { status: "failed" },
+  ];
+  assert.deepEqual(summarizeRecipients(rows), {
+    total: 7,
+    sent: 6, // everything past pending
+    delivered: 3, // delivered + opened + clicked
+    opened: 2, // opened + clicked
+    clicked: 1,
+    bounced: 1,
+    failed: 1,
+  });
+});
+
+test("summarizeRecipients over nothing is all zeroes", () => {
+  assert.deepEqual(summarizeRecipients([]), {
+    total: 0,
+    sent: 0,
+    delivered: 0,
+    opened: 0,
+    clicked: 0,
+    bounced: 0,
+    failed: 0,
+  });
+});
+
 test("the non-opener scope excludes deleted people and people with no address", () => {
   const { text } = compile(nonOpenerScope(CHURCH_ID, COMMUNICATION_ID));
 
@@ -208,6 +324,18 @@ test("the resend denominator is scoped to the church and the message", () => {
   assert.match(text, /"communication_recipients"\."church_id" = \$1/);
   assert.match(text, /"communication_recipients"\."communication_id" = \$2/);
   assert.deepEqual(params, [CHURCH_ID, COMMUNICATION_ID]);
+});
+
+// --- meeting tracking --------------------------------------------------------
+
+test("meeting tracking scopes BOTH joined tables to the church", () => {
+  const MEETING_ID = "55555555-5555-4555-8555-555555555555";
+  const { text, params } = compile(meetingTrackingScope(CHURCH_ID, MEETING_ID));
+
+  assert.match(text, /"communications"\."meeting_id" = \$1/);
+  assert.match(text, /"communications"\."church_id" = \$2/);
+  assert.match(text, /"communication_recipients"\."church_id" = \$3/);
+  assert.deepEqual(params, [MEETING_ID, CHURCH_ID, CHURCH_ID]);
 });
 
 // --- ministry-team recipient groups (MT-015) --------------------------------
