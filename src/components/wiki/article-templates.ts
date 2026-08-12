@@ -7,9 +7,10 @@
 // it, resolved through the catalog so a link can only ever open a template that
 // exists (`src/lib/documents/templates.ts`, read-only here).
 //
-// This is the wiki's half of DOC-014: the href contract is `contextualTemplateHref`
-// and the shape is `ContextualTemplate`, both imported rather than restated, so
-// the wiki cannot drift into a second definition of "link to a template".
+// This is the wiki's half of DOC-014: resolution goes through
+// `resolveContextualTemplates` and the shape is `ContextualTemplate`, both
+// imported rather than restated, so the wiki cannot drift into a second
+// definition of "link to a template".
 //
 // WHY A MAP AND NOT `template.relatedWikiSlug`
 // --------------------------------------------
@@ -44,10 +45,9 @@
 // ============================================================================
 
 import {
-  contextualTemplateHref,
+  resolveContextualTemplates,
   type ContextualTemplate,
 } from "@/lib/documents/contextual";
-import { getTemplateById } from "@/lib/documents/templates";
 
 /**
  * Article slug → the templates it hands out, in the order they are offered.
@@ -117,32 +117,14 @@ export const ARTICLE_TEMPLATE_IDS: Readonly<Record<string, readonly string[]>> =
   };
 
 /**
- * Resolve catalog ids to renderable links.
- *
- * An id the catalog does not know is DROPPED, never rendered — a template can
- * be renamed or retired in `templates.ts` without this map being updated in the
- * same commit, and the failure mode of a stale id must be one missing link, not
- * a link into a page that answers "unknown template".
+ * Resolve catalog ids to renderable links — the DOC-014 resolver, which drops
+ * an id the catalog does not know rather than rendering it (ruling 406-2-1;
+ * the drop rationale lives on `resolveContextualTemplates`).
  */
 export function resolveArticleTemplates(
   ids: readonly string[]
 ): ContextualTemplate[] {
-  const resolved: ContextualTemplate[] = [];
-
-  for (const id of ids) {
-    const template = getTemplateById(id);
-    if (!template) continue;
-
-    resolved.push({
-      id: template.id,
-      name: template.name,
-      description: template.description,
-      formats: template.formats,
-      href: contextualTemplateHref(template.id),
-    });
-  }
-
-  return resolved;
+  return resolveContextualTemplates(ids);
 }
 
 /**
