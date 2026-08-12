@@ -29,11 +29,13 @@
 //     under it.
 //
 // It imports nothing from `lib/meetings/service.ts`: that module pulls in the
-// database client, and this is a client component. The section type, the two
-// bounds and the clamp all come from `lib/meetings/agenda.ts`, which imports
-// nothing and is the ONE place that policy is written — restating it here and
-// keeping the two in agreement by hand is what agenda.ts exists to end. The
-// default running order still arrives as a prop.
+// database client, and this is a client component. EVERY piece of agenda policy
+// — the section type, the three bounds, the clamp and the total — comes from
+// `lib/meetings/agenda.ts`, which imports nothing and is the ONE place that
+// policy is written. Nothing here restates it: no `120` in a `maxLength`, no
+// hand-rolled sum over `minutes`. Restating policy and keeping the two copies
+// in agreement by hand is exactly what agenda.ts exists to end. The default
+// running order still arrives as a prop.
 // ============================================================================
 
 import { useOptimistic, useState, useTransition } from "react";
@@ -59,9 +61,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  agendaTotalMinutes,
   clampAgendaMinutes,
   MAX_AGENDA_SECTIONS,
   MAX_SECTION_MINUTES,
+  MAX_SECTION_TITLE_LENGTH,
   type AgendaSection,
 } from "@/lib/meetings/agenda";
 
@@ -121,10 +125,7 @@ export function AgendaBuilder({
   const [newTitle, setNewTitle] = useState("");
   const [newMinutes, setNewMinutes] = useState("10");
 
-  const totalMinutes = optimisticSections.reduce(
-    (total, section) => total + section.minutes,
-    0
-  );
+  const totalMinutes = agendaTotalMinutes(optimisticSections);
   const isFull = optimisticSections.length >= MAX_AGENDA_SECTIONS;
 
   const commit = (next: AgendaSection[]) => {
@@ -308,7 +309,7 @@ export function AgendaBuilder({
                       id={`agenda-title-${section.id}`}
                       defaultValue={section.title}
                       disabled={isPending}
-                      maxLength={120}
+                      maxLength={MAX_SECTION_TITLE_LENGTH}
                       data-testid="agenda-section-title"
                       onBlur={(event) =>
                         handleRename(section, event.target.value)
@@ -418,7 +419,7 @@ export function AgendaBuilder({
               value={newTitle}
               onChange={(event) => setNewTitle(event.target.value)}
               placeholder="Add a section — Welcome, Worship, Q&A…"
-              maxLength={120}
+              maxLength={MAX_SECTION_TITLE_LENGTH}
               disabled={isPending || isFull}
               data-testid="agenda-add-title"
             />
