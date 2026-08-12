@@ -1,4 +1,4 @@
-import { sql, type SQL } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import {
   boolean,
   check,
@@ -12,6 +12,7 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 import { churches } from "./church";
+import { inList } from "./sql";
 import { users } from "./user";
 
 // ============================================================================
@@ -147,19 +148,6 @@ export type NotificationEntityType = (typeof notificationEntityTypes)[number];
 //
 // They list values, not a pgEnum, deliberately: adding a category stays a code
 // change plus a small migration, never a type rewrite with a table rewrite.
-
-/**
- * Render a value tuple as a SQL literal list for a CHECK constraint.
- *
- * `sql.raw` with unescaped single quotes — safe ONLY because every argument is
- * a code-defined `as const` tuple in this file, compiled into the bundle. If a
- * caller ever sources these values from config, a database table, a plugin or
- * anything else that is not a literal in source, this becomes an injection
- * point and must switch to escaping (or to `sql.join` of parameters).
- */
-function inList(values: readonly string[]): SQL {
-  return sql.raw(values.map((value) => `'${value}'`).join(", "));
-}
 
 // ============================================================================
 // Tables

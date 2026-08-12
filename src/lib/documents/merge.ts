@@ -6,11 +6,11 @@
 // profile and the current user, and merges them with planter-supplied values.
 // ============================================================================
 
-import { APP_TIME_ZONE } from "@/lib/datetime";
+import { formatDayLong } from "@/lib/datetime";
 import { parseTargetDate } from "@/lib/launch/countdown";
 import type { DocumentMergeValues, DocumentTemplate } from "./types";
 
-interface MergeContext {
+export interface MergeContext {
   churchName: string;
   /** Current user's display name, used for pastor_name auto-fill. */
   userName: string | null;
@@ -18,11 +18,12 @@ interface MergeContext {
    * The plant's launch day as stored (`launches.target_date`, YYYY-MM-DD), or
    * null when it has no launch or no date yet. NOT a church column — migration
    * 0032 dropped `churches.launch_date` and the launch entity owns it (LS-001).
-   * Both callers — `(dashboard)/documents/page.tsx` and
-   * `api/documents/[templateId]/route.ts` — resolve it with
-   * `getLaunchForChurch` (`src/lib/launch/queries.ts`), so the dialog's preview
-   * and the generated file name the same day. Null here means the plant has no
-   * launch row or no day named yet, and `{{launch_date}}` renders empty (#306).
+   * Both surfaces — `(dashboard)/documents/page.tsx` and
+   * `api/documents/[templateId]/route.ts` — resolve it through
+   * `resolveDocumentMergeContext` (`./merge-context.ts`), so the dialog's
+   * preview and the generated file name the same day. Null here means the
+   * plant has no launch row or no day named yet, and `{{launch_date}}` renders
+   * empty (#306).
    */
   launchDate: string | null;
 }
@@ -30,19 +31,13 @@ interface MergeContext {
 function formatLaunchDate(launchDate: string | null): string {
   if (!launchDate) return "";
   // A stored launch day is a WALL CLOCK, so both halves of this are pinned:
-  // `parseTargetDate` reads it at UTC midnight, and the formatter names
-  // `APP_TIME_ZONE` explicitly. Without the zone `Intl` follows the RUNTIME's,
+  // `parseTargetDate` reads it at UTC midnight, and `formatDayLong` is pinned
+  // to `APP_TIME_ZONE`. Without the pin `Intl` follows the RUNTIME's zone,
   // which is UTC on the server and the visitor's in a browser — the document
   // would name a different day depending on where it was rendered
   // (memory/invariants.md → Date & Time Rendering).
   const parsed = parseTargetDate(launchDate);
-  if (Number.isNaN(parsed.getTime())) return "";
-  return parsed.toLocaleDateString("en-US", {
-    timeZone: APP_TIME_ZONE,
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
+  return Number.isNaN(parsed.getTime()) ? "" : formatDayLong(parsed);
 }
 
 /**

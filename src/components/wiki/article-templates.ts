@@ -7,9 +7,10 @@
 // it, resolved through the catalog so a link can only ever open a template that
 // exists (`src/lib/documents/templates.ts`, read-only here).
 //
-// This is the wiki's half of DOC-014: the href contract is `contextualTemplateHref`
-// and the shape is `ContextualTemplate`, both imported rather than restated, so
-// the wiki cannot drift into a second definition of "link to a template".
+// This is the wiki's half of DOC-014: resolution goes through
+// `resolveContextualTemplates` and the shape is `ContextualTemplate`, both
+// imported rather than restated, so the wiki cannot drift into a second
+// definition of "link to a template".
 //
 // WHY A MAP AND NOT `template.relatedWikiSlug`
 // --------------------------------------------
@@ -19,22 +20,24 @@
 //   - It is the TEMPLATE's "read more" pointer (rendered by
 //     `components/documents/generate-dialog.tsx`), a different direction and a
 //     different editorial decision — one article per template, at most.
-//   - Its values do not match the corpus. Every one of them names a slug no
-//     published article has: `frameworks/the-3-key-documents` (the real article
-//     is `core-group/commitment/the-three-key-documents`) and
-//     `vision-meetings/running-a-vision-meeting` (really
-//     `core-group/vision-meetings/running-the-meeting`). Verified against all
+//   - Its values rotted once without anything failing. Every one of them
+//     named a slug no published article had (`frameworks/the-3-key-documents`
+//     for `core-group/commitment/the-three-key-documents`, and
+//     `vision-meetings/running-a-vision-meeting` for
+//     `core-group/vision-meetings/running-the-meeting`) — verified against all
 //     96 rows in `wiki_articles`. Building this feature on that field would
 //     have rendered an empty section on every article in the product while
 //     type-checking and passing review — the same unverifiable-by-construction
-//     trap W-009 hit with `related_article_slugs` (69ebbc1).
+//     trap W-009 hit with `related_article_slugs` (69ebbc1). The slugs were
+//     repointed under ruling 406-1-1 and are now corpus-pinned by
+//     `src/lib/documents/templates-live.test.ts`, but the direction argument
+//     above still holds.
 //   - Four templates (both budgets, the board agenda, the launch checklists)
 //     carry no `relatedWikiSlug` at all, so a reverse index could never reach
 //     them.
 //
-// Fixing those slugs belongs with the catalog and its dialog, not here — see
-// the note in the PR. `article-templates-live.test.ts` pins THIS map against
-// the corpus so it cannot rot the same way.
+// `article-templates-live.test.ts` pins THIS map against the corpus so it
+// cannot rot the same way.
 //
 // The keys are article slugs, exact match. An article that is not a key gets
 // no section at all — most articles have no document to hand out, and an empty
@@ -42,10 +45,9 @@
 // ============================================================================
 
 import {
-  contextualTemplateHref,
+  resolveContextualTemplates,
   type ContextualTemplate,
 } from "@/lib/documents/contextual";
-import { getTemplateById } from "@/lib/documents/templates";
 
 /**
  * Article slug → the templates it hands out, in the order they are offered.
@@ -115,32 +117,14 @@ export const ARTICLE_TEMPLATE_IDS: Readonly<Record<string, readonly string[]>> =
   };
 
 /**
- * Resolve catalog ids to renderable links.
- *
- * An id the catalog does not know is DROPPED, never rendered — a template can
- * be renamed or retired in `templates.ts` without this map being updated in the
- * same commit, and the failure mode of a stale id must be one missing link, not
- * a link into a page that answers "unknown template".
+ * Resolve catalog ids to renderable links — the DOC-014 resolver, which drops
+ * an id the catalog does not know rather than rendering it (ruling 406-2-1;
+ * the drop rationale lives on `resolveContextualTemplates`).
  */
 export function resolveArticleTemplates(
   ids: readonly string[]
 ): ContextualTemplate[] {
-  const resolved: ContextualTemplate[] = [];
-
-  for (const id of ids) {
-    const template = getTemplateById(id);
-    if (!template) continue;
-
-    resolved.push({
-      id: template.id,
-      name: template.name,
-      description: template.description,
-      formats: template.formats,
-      href: contextualTemplateHref(template.id),
-    });
-  }
-
-  return resolved;
+  return resolveContextualTemplates(ids);
 }
 
 /**
