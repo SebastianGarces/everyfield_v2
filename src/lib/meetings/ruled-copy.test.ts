@@ -348,6 +348,39 @@ test("the ruled sentence stays true for a church past the window", () => {
   );
 });
 
+test("the card states the denominator exactly once", () => {
+  // The ruled sentence is the card's ONE statement of how many meetings are
+  // behind the average. The definition list used to restate it three lines
+  // above as `Average of previous {previousCount}`, which rendered on the
+  // preview as the ungrammatical "Average of previous 1" — a bare number with
+  // no noun, and a second denominator free to drift from the ruled one.
+  //
+  // Comments are stripped first, the way rulings 1 and 4 strip them: the JSX
+  // above the `<dt>` explains the retired wording and quotes it.
+  const card = comparisonCardSource()
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/.*$/gm, "");
+
+  const rendered = card.match(/\bpreviousCount\b/g) ?? [];
+  assert.equal(
+    rendered.length,
+    2,
+    "previousCount appears twice in the component and no more: once destructured off the comparison, once passed to the ruled helper"
+  );
+
+  assert.doesNotMatch(
+    card,
+    /Average of previous/,
+    'the <dt> no longer reads "Average of previous {n}" — the count is the ruled sentence\'s job'
+  );
+  assert.match(
+    card,
+    /<dt[^>]*>Previous average<\/dt>/,
+    "the term is static, so it cannot render a bare number and cannot drift from the sentence"
+  );
+});
+
 test("the populated card renders the helper rather than its own sentence", () => {
   // The link the equalities above cannot prove — the mirror of the empty
   // state's assertion. Without it the JSX could re-hardcode the old claim and

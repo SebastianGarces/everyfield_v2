@@ -119,16 +119,25 @@ export function EvaluationComparisonCard({
             <dd className="font-semibold">{previousScore.toFixed(1)}</dd>
           </div>
           <div>
-            <dt className="text-muted-foreground">
-              Average of previous {previousCount}
-            </dt>
+            {/*
+              This label is deliberately static. It used to read "Average of
+              previous {previousCount}", which rendered as the ungrammatical
+              "Average of previous 1" — a bare number with no noun — and stated
+              the denominator a third time on a card that already states it
+              twice: here, and in the ruled sentence three lines below. The
+              count belongs to the sentence that was ruled on; the term of this
+              definition list only has to name the figure beside it.
+            */}
+            <dt className="text-muted-foreground">Previous average</dt>
             <dd className="font-semibold">{previousAverage.toFixed(1)}</dd>
           </div>
         </dl>
 
         {/*
-          The denominator, said out loud. "Above average" means nothing until
-          the reader knows the average covers one meeting or twelve.
+          The denominator, said out loud, ONCE. "Above average" means nothing
+          until the reader knows the average covers one meeting or twelve — and
+          knowing it twice helps nobody, so this is the only place the card
+          says how many meetings are behind the number.
 
           It says what the average COVERS, never what the planter EVALUATED —
           ruled 2026-08-12 on #312 (decision 1, option B). `previousCount` is
