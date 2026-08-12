@@ -4,11 +4,13 @@ import path from "node:path";
 import { test } from "node:test";
 
 import {
-  compareEvaluationToHistory,
   evaluationComparisonDenominatorCopy,
   EVALUATION_COMPARISON_EMPTY_COPY,
-  EVALUATION_COMPARISON_WINDOW,
   MEETING_EVALUATION_TASK_CARD_TITLE,
+} from "@/lib/meetings/copy";
+import {
+  compareEvaluationToHistory,
+  EVALUATION_COMPARISON_WINDOW,
   type EvaluationTrendPoint,
 } from "@/lib/meetings/service";
 
@@ -42,6 +44,14 @@ import {
 //    is deliberately unchanged — `follow-up-and-comparison.test.ts` pins its
 //    shape with `.toSQL()` — and widening it at the task generator was
 //    considered and explicitly NOT ruled in.
+//
+// WHERE THE RULED STRINGS LIVE: `src/lib/meetings/copy.ts`, not `service.ts`.
+// They are UI copy, and their only consumers are two React Server Components
+// and this test. `service.ts` is the data-access module — it opens with `@/db`,
+// ten schema tables and drizzle, and carries no `import "server-only"` guard,
+// so an import edge from a component that later gains `"use client"` would drag
+// that whole graph into the client bundle. `copy.ts` cannot drag anything, and
+// the last test in this file pins that.
 //
 // WHY THIS FILE LIVES IN src/lib/meetings/ AND NOT NEXT TO THE COMPONENT:
 // its natural home looks like the route directory, but that directory is
@@ -406,5 +416,70 @@ test("the empty line under the renamed card promises one task, not a set", () =>
     meetingDetailSource(),
     /No task is linked to this meeting\./,
     "the empty line says what the query can find"
+  );
+});
+
+test("the progress figure is written once and pointed at, never copied", () => {
+  // The bar used to carry its own `aria-label` holding a second copy of the
+  // visible sentence, and the two had already drifted: the label hardcoded
+  // "tasks" while the visible line branches on `total === 1`. Because this
+  // query can only ever return `total: 1` — the premise the rename rests on —
+  // the plural was not an edge case, it was the ONLY case a planter reaches.
+  const page = meetingDetailSource();
+
+  assert.doesNotMatch(
+    page,
+    /tasks complete/,
+    'no hardcoded plural: the only "complete" sentence branches on total === 1'
+  );
+
+  const grammarBranches = page.match(
+    /followUp\.total === 1 \? "task" : "tasks"/g
+  );
+  assert.equal(
+    grammarBranches?.length,
+    1,
+    "exactly one grammar branch — a second one is a second sentence that can drift"
+  );
+
+  assert.match(
+    page,
+    /<p\s+id="meeting-evaluation-task-progress-label"/,
+    "the visible sentence carries the id the bar borrows"
+  );
+  // Scoped to the one element, not the whole file: a page-wide ban on
+  // `aria-label=` would fail the next legitimate use of it somewhere else here,
+  // the same booby trap the notes-field helpers above avoid.
+  const progress = page.match(/<Progress\b[^>]*\/>/);
+  assert.ok(progress, "expected a <Progress /> on the meeting detail page");
+  assert.match(
+    progress[0],
+    /aria-labelledby="meeting-evaluation-task-progress-label"/,
+    "the bar names the visible sentence instead of restating it"
+  );
+  assert.doesNotMatch(
+    progress[0],
+    /aria-label=/,
+    "the bar carries no aria-label — that attribute is how the copy split in two"
+  );
+});
+
+// ============================================================================
+// The layer the ruled strings live in
+// ============================================================================
+
+test("the ruled copy module pulls in no data-access graph", () => {
+  // `copy.ts` exists so a component can render a ruled string without importing
+  // `service.ts`, which opens with `@/db`, ten schema tables and drizzle and
+  // has no `import "server-only"` guard. If copy.ts ever grows one of those
+  // imports, the boundary is gone and the split bought nothing.
+  const copy = readFileSync(path.join(__dirname, "copy.ts"), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/.*$/gm, "");
+
+  assert.doesNotMatch(
+    copy,
+    /^\s*import\b/m,
+    "copy.ts imports nothing at all — it is strings and one string builder"
   );
 });

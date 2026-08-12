@@ -4,8 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   evaluationComparisonDenominatorCopy,
   EVALUATION_COMPARISON_EMPTY_COPY,
-  type EvaluationComparison,
-} from "@/lib/meetings/service";
+} from "@/lib/meetings/copy";
+import type { EvaluationComparison } from "@/lib/meetings/service";
 
 interface EvaluationComparisonCardProps {
   /** `null` when nothing in the fetched window is earlier than this meeting. */
@@ -55,7 +55,7 @@ export function EvaluationComparisonCard({
         <CardContent>
           {/*
             The ruled sentence (round 2, 2026-08-10, #312), rendered from the
-            constant that `service.ts` exports so the ruling is pinned by an
+            constant that `copy.ts` exports so the ruling is pinned by an
             equality in a test rather than by re-parsing this JSX. It is
             rendered unconditionally: one line, no window number, and true of
             BOTH causes of `null`, so there is nothing here for a caller to
@@ -135,7 +135,7 @@ export function EvaluationComparisonCard({
           the window's size, not the church's history, so the old wording
           ("the N meetings you evaluated before this one") under-reported a
           planter past the window by exactly the meetings the window dropped.
-          Rendered from the constant-shaped helper in `service.ts` for the same
+          Rendered from the constant-shaped helper in `copy.ts` for the same
           reason as the empty state: a test pins it by import, not by re-parsing
           this JSX.
         */}

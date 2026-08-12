@@ -4,12 +4,12 @@ import { verifySession } from "@/lib/auth/session";
 import {
   getFollowUpCompletion,
   getMeeting,
-  MEETING_EVALUATION_TASK_CARD_TITLE,
   parseAgenda,
   setMeetingAgenda,
   VISION_MEETING_DEFAULT_AGENDA,
   type AgendaSection,
 } from "@/lib/meetings/service";
+import { MEETING_EVALUATION_TASK_CARD_TITLE } from "@/lib/meetings/copy";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { listLocations } from "@/lib/meetings/locations";
@@ -145,7 +145,22 @@ export default async function MeetingPage({ params }: MeetingPageProps) {
               ) : (
                 <>
                   <div className="flex items-baseline justify-between gap-4">
-                    <p className="text-sm font-medium">
+                    {/*
+                      The bar's accessible name, not a second copy of it. This
+                      line used to be duplicated into an `aria-label` on the
+                      `Progress` below, and the duplicate had already drifted:
+                      it hardcoded "tasks" while this line branches on
+                      `total === 1`. The ruling's own premise is that
+                      `meetingLinkedTaskConditions` can only ever return
+                      `total: 1`, so the plural was not wrong in an edge case —
+                      it was wrong in the ONLY case a planter can reach. One
+                      sentence, rendered once and pointed at by
+                      `aria-labelledby`, cannot drift from itself.
+                    */}
+                    <p
+                      id="meeting-evaluation-task-progress-label"
+                      className="text-sm font-medium"
+                    >
                       {followUp.completed} of {followUp.total}{" "}
                       {followUp.total === 1 ? "task" : "tasks"} complete
                     </p>
@@ -155,7 +170,7 @@ export default async function MeetingPage({ params }: MeetingPageProps) {
                   </div>
                   <Progress
                     value={followUp.percent}
-                    aria-label={`${MEETING_EVALUATION_TASK_CARD_TITLE}: ${followUp.completed} of ${followUp.total} tasks complete`}
+                    aria-labelledby="meeting-evaluation-task-progress-label"
                   />
                 </>
               )}

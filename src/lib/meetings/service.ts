@@ -1117,7 +1117,8 @@ export interface EvaluationTrendPoint {
  * window's size, not their history. Ruled 2026-08-12 on #312 (decision 1,
  * option B) — the sentence now reports what the average covers and says
  * nothing about what the planter did, so this comment vouches for nothing.
- * See `evaluationComparisonDenominatorCopy` below.
+ * See `evaluationComparisonDenominatorCopy` in `copy.ts`, which holds every
+ * ruled string this feature renders — none of them live in this module.
  *
  * The cost of keeping it: for a church past the window, opening an EARLY
  * meeting hands `compareEvaluationToHistory` a window of only LATER meetings,
@@ -1129,79 +1130,6 @@ export interface EvaluationTrendPoint {
  * — no copy follows it.
  */
 export const EVALUATION_COMPARISON_WINDOW = 50;
-
-/**
- * What the comparison card says when it has no baseline (ruled 2026-08-10 on
- * #312, round 2).
- *
- * It lives here, as a plain string, because it is the one sentence in the
- * feature that a ruling pins. A test can import and compare it; a sentence
- * built inline in JSX can only be re-parsed out of the source, and a test that
- * parses JSX starts failing for reasons that have nothing to do with the
- * ruling.
- *
- * Two properties this string must keep, both of them the ruling itself:
- *
- * 1. It never says "first". `compareEvaluationToHistory` returns `null` for two
- *    different reasons — nothing was evaluated earlier, or everything earlier
- *    fell outside `EVALUATION_COMPARISON_WINDOW` — and the card cannot tell
- *    them apart. One sentence has to be true of both.
- * 2. It names no window and no number. The window is a mechanism the planter
- *    did not ask about; it stays in code, named only by the constant above.
- */
-export const EVALUATION_COMPARISON_EMPTY_COPY =
-  "No comparison available — no earlier evaluated meeting to compare against.";
-
-/**
- * What the POPULATED comparison card says under the numbers (ruled 2026-08-12
- * on #312, decision 1, option B).
- *
- * It reports what the average COVERS, not what the planter DID. `previousCount`
- * is `earlier.length` from `compareEvaluationToHistory` — the earlier points
- * inside the window `getEvaluationTrend` fetched, not the planter's history. A
- * church with 60 evaluated meetings opening meeting #55 has 54 meetings behind
- * it and a `previousCount` of 44, so the old sentence ("the 44 meetings you
- * evaluated before this one") made a false claim about the planter with a true
- * number. "In view" is true of both cases: window == history, and window <
- * history.
- *
- * That is the same species of false claim the 2026-08-10 ruling took off the
- * EMPTY branch, so the fix is the same shape — the string lives here, and the
- * card renders it. Ruled explicitly: no query change and no extra state. The
- * singular form is not a new branch on the data; it is the pre-existing
- * grammar branch this sentence already carried.
- */
-export function evaluationComparisonDenominatorCopy(
-  previousCount: number
-): string {
-  const meetings =
-    previousCount === 1
-      ? "one earlier meeting"
-      : `${previousCount} earlier meetings`;
-
-  return `Scores are out of 5.0. The average covers the ${meetings} in view.`;
-}
-
-/**
- * The title of the meeting-detail card backed by `getFollowUpCompletion`
- * (ruled 2026-08-12 on #312, decision 2, option A).
- *
- * It used to read "Follow-up completion", which promised more than the query
- * counts. `meetingLinkedTaskConditions` admits only `related_type = 'meeting'`
- * rows, and the one such task the product ever creates is the single "Complete
- * evaluation for <meeting>" task (`src/lib/tasks/events.ts`). The per-attendee
- * follow-ups minted by the same finalization are linked to the PERSON, so in
- * production the card could only ever read "0 of 1" or "1 of 1" — an
- * evaluation-done indicator wearing the name of a follow-up metric.
- *
- * The ruling keeps the narrow query and renames the card. Widening VM-020 at
- * the generator was considered and explicitly NOT ruled in: if follow-up
- * tracking earns a real metric later, that is its own issue. Widening it in the
- * QUERY stays forbidden for the reason above `meetingLinkedTaskConditions` —
- * joining back through attendance double-counts a person who attended two
- * meetings.
- */
-export const MEETING_EVALUATION_TASK_CARD_TITLE = "Evaluation task";
 
 /**
  * Get evaluation score trend across meetings (most recent first, returned chronologically).
@@ -1596,9 +1524,9 @@ export async function setMeetingAgenda(
 /**
  * How much of a meeting's linked task work is done.
  *
- * The card that renders this is titled `MEETING_EVALUATION_TASK_CARD_TITLE`,
- * not "Follow-up completion" — see that constant for why the name had to shrink
- * to what the query counts.
+ * The card that renders this is titled `MEETING_EVALUATION_TASK_CARD_TITLE`
+ * (`copy.ts`), not "Follow-up completion" — see that constant for why the name
+ * had to shrink to what the query counts.
  */
 export interface MeetingFollowUpCompletion {
   /** Tasks linked to this meeting. */
