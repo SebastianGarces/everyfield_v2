@@ -9,8 +9,6 @@ import { PHASES, type PhaseNumber } from "@/lib/constants";
 import {
   getDashboardMetrics,
   getRecentActivity,
-  type ActivityItem,
-  type DashboardMetrics,
 } from "@/lib/dashboard/service";
 import { daysUntilTarget } from "@/lib/launch/countdown";
 import { getLaunchReadiness } from "@/lib/launch/milestones";
@@ -35,26 +33,13 @@ export type PlantDashboardViewer = {
   id: string;
   role: string | null | undefined;
   /**
-   * `null` is REACHABLE here, not a theoretical case: a coach — or a team
-   * member whose plant link is gone — is neither redirected to `/oversight`
-   * nor put through onboarding, and lands on this dashboard with no church to
-   * scope it to. That viewer gets the empty shell: no church-scoped query
-   * runs, every metric reads zero, and none of the leadership surfaces render
-   * (`canAnswerLeadershipQuestion` refuses a viewer with no church).
+   * Non-null BY CONTRACT: the page guards the no-church viewer (a coach, or a
+   * team member whose plant link is gone) before this component renders and
+   * shows them `NoPlantEmptyState` instead (ruled 2026-08-12, 408-2B). Every
+   * read below may therefore scope to a real plant, with no null branch to
+   * carry.
    */
-  churchId: string | null;
-};
-
-/**
- * What the church-scoped reads answer for a viewer with no church — stated as
- * data instead of running four queries against a null scope, which is what
- * this page used to do behind a `churchId!` assertion.
- */
-const NO_CHURCH_METRICS: DashboardMetrics = {
-  coreGroupSize: 0,
-  totalPeople: 0,
-  overdueTasks: 0,
-  visionMeetingsHeld: 0,
+  churchId: string;
 };
 
 /**
@@ -80,61 +65,49 @@ export async function PlantDashboard({
   const { churchId } = viewer;
 
   const [metrics, activities, hasPlanterUser, launchCard, journeyDeclared] =
-    churchId
-      ? await Promise.all([
-          getDashboardMetrics(churchId, viewer.id),
-          getRecentActivity(churchId),
-          // OB-010: the IMPLICIT assignment — a `users` row with the planter
-          // role pointing here. It is what tells a church that predates OB-004
-          // apart from one that genuinely has nobody leading it, and the two
-          // get opposite treatment: the first is left alone, the second is
-          // asked.
-          churchHasPlanterUser(churchId),
-          // LS-001: the launch date moved off the church row onto its own
-          // entity (migration 0032), so step 3's fact is read from here now.
-          //
-          // LS-003/LS-005: readiness rides along on this ARM rather than
-          // beside it, because it is keyed by the launch's id and cannot start
-          // until the launch read has answered. Chained here, the other three
-          // arms still overlap both; hoisted out, the card's progress bar
-          // would cost the dashboard a serial round trip. It is skipped for a
-          // launch that has no day (nothing is seeded until one is named) and
-          // for a completed one (the celebrate card shows the outcome, not a
-          // progress bar) — so the extra query is only run when the card will
-          // actually render its answer.
-          getLaunchForChurch(churchId).then(async (row) => ({
-            launch: row,
-            readiness:
-              row?.targetDate && row.status !== "completed"
-                ? await getLaunchReadiness(row.id, churchId)
-                : null,
-          })),
-          // OB-003/005: step 3's fact. Phase HISTORY, not `current_phase` and
-          // not the launch row — "not sure, and no date yet" is a real answer
-          // that leaves both of those looking exactly like never having been
-          // asked.
-          hasInitialPhaseDeclaration(churchId),
-        ])
-      : ([
-          NO_CHURCH_METRICS,
-          [] as ActivityItem[],
-          false,
-          { launch: null, readiness: null },
-          false,
-        ] as const);
+    await Promise.all([
+      getDashboardMetrics(churchId, viewer.id),
+      getRecentActivity(churchId),
+      // OB-010: the IMPLICIT assignment — a `users` row with the planter
+      // role pointing here. It is what tells a church that predates OB-004
+      // apart from one that genuinely has nobody leading it, and the two
+      // get opposite treatment: the first is left alone, the second is
+      // asked.
+      churchHasPlanterUser(churchId),
+      // LS-001: the launch date moved off the church row onto its own
+      // entity (migration 0032), so step 3's fact is read from here now.
+      //
+      // LS-003/LS-005: readiness rides along on this ARM rather than
+      // beside it, because it is keyed by the launch's id and cannot start
+      // until the launch read has answered. Chained here, the other three
+      // arms still overlap both; hoisted out, the card's progress bar
+      // would cost the dashboard a serial round trip. It is skipped for a
+      // launch that has no day (nothing is seeded until one is named) and
+      // for a completed one (the celebrate card shows the outcome, not a
+      // progress bar) — so the extra query is only run when the card will
+      // actually render its answer.
+      getLaunchForChurch(churchId).then(async (row) => ({
+        launch: row,
+        readiness:
+          row?.targetDate && row.status !== "completed"
+            ? await getLaunchReadiness(row.id, churchId)
+            : null,
+      })),
+      // OB-003/005: step 3's fact. Phase HISTORY, not `current_phase` and
+      // not the launch row — "not sure, and no date yet" is a real answer
+      // that leaves both of those looking exactly like never having been
+      // asked.
+      hasInitialPhaseDeclaration(churchId),
+    ]);
 
   const { launch, readiness: launchReadiness } = launchCard;
 
-  // The church's leadership, both explicit and implicit — only a real church
-  // has one, and every surface below reads through this so none of them can
-  // render for a viewer with no church.
-  const leadership: ChurchLeadershipState | null = churchId
-    ? {
-        churchId,
-        leadershipStatus: church?.leadershipStatus,
-        hasPlanterUser,
-      }
-    : null;
+  // The church's leadership, both explicit and implicit.
+  const leadership: ChurchLeadershipState = {
+    churchId,
+    leadershipStatus: church?.leadershipStatus,
+    hasPlanterUser,
+  };
 
   // OB-004: the one way back INTO a finished flow. The no-planter nudge and the
   // incomplete-onboarding indicator link here; leaving onboarding is otherwise
@@ -142,8 +115,7 @@ export async function PlantDashboard({
   // than the whole wizard — and only for somebody whose answer would be
   // accepted, which under OB-010 includes a team member of a plant with an
   // empty planter seat.
-  const canAnswerLeadership =
-    leadership !== null && canAnswerLeadershipQuestion(viewer, leadership);
+  const canAnswerLeadership = canAnswerLeadershipQuestion(viewer, leadership);
 
   if (wantsLeadershipStep && canAnswerLeadership) {
     return (
@@ -153,10 +125,8 @@ export async function PlantDashboard({
     );
   }
 
-  const showNoPlanterNudge =
-    leadership !== null && shouldShowNoPlanterNudge(viewer, leadership);
-  const showPastorPrompt =
-    leadership !== null && shouldPromptPastorConfirmation(viewer, leadership);
+  const showNoPlanterNudge = shouldShowNoPlanterNudge(viewer, leadership);
+  const showPastorPrompt = shouldPromptPastorConfirmation(viewer, leadership);
 
   // OB-011: which onboarding facts are still missing, read from the church row
   // rather than from any record of how far the flow got — answering a step's
@@ -189,7 +159,7 @@ export async function PlantDashboard({
       {showConfetti && <ChurchCreatedConfetti />}
 
       <div className="mx-auto max-w-6xl space-y-6">
-        {leadership !== null && showPastorPrompt && (
+        {showPastorPrompt && (
           <PastorConfirmationPrompt churchId={leadership.churchId} />
         )}
 
