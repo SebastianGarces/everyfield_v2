@@ -1,5 +1,5 @@
 import { cache } from "react";
-import { eq, and, gt, lt } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { getSessionToken } from "./cookies";
 import {
@@ -180,43 +180,6 @@ export async function validateSessionToken(
  */
 export async function invalidateSession(sessionId: string): Promise<void> {
   await db.delete(sessions).where(eq(sessions.id, sessionId));
-}
-
-/**
- * Invalidate all sessions for a user
- * Useful for password changes, account compromise, etc.
- * @param userId - The user's ID
- */
-export async function invalidateUserSessions(userId: string): Promise<void> {
-  await db.delete(sessions).where(eq(sessions.userId, userId));
-}
-
-/**
- * Get all active sessions for a user
- * Useful for "manage sessions" UI
- * @param userId - The user's ID
- * @returns Array of active sessions
- */
-export async function getUserSessions(userId: string): Promise<Session[]> {
-  return db
-    .select()
-    .from(sessions)
-    .where(
-      and(eq(sessions.userId, userId), gt(sessions.expiresAt, new Date()))
-    );
-}
-
-/**
- * Delete expired sessions from the database
- * Can be called from a cron job or background task
- */
-export async function cleanupExpiredSessions(): Promise<number> {
-  const result = await db
-    .delete(sessions)
-    .where(lt(sessions.expiresAt, new Date()))
-    .returning({ id: sessions.id });
-
-  return result.length;
 }
 
 /**
