@@ -14,6 +14,7 @@ import {
   type InvitationActor,
 } from "./core";
 import { associationOrg } from "./audit";
+import { assertInOrder, sourceReader } from "@/lib/testing/source-span";
 
 // ============================================================================
 // #304 / OV-007a + OV-008 — the planter's sever, and the audit that has to
@@ -58,6 +59,19 @@ const ACTIONS_CODE = readFileSync(
   ),
   "utf8"
 );
+
+/**
+ * The readers, and the ONLY way this file cuts a declaration out of a module.
+ *
+ * `span` / `after` throw naming the missing needle (`@/lib/testing/source-span`). A bare
+ * `indexOf` pair returns -1 for an anchor that moved, `slice(start, -1)` then
+ * hands back almost the whole module, and a `doesNotMatch` about ONE function
+ * silently becomes a claim about all of them. It has happened three times in
+ * this domain.
+ */
+const AUDIT = sourceReader(AUDIT_CODE, "audit.ts");
+const CORE = sourceReader(CORE_CODE, "core.ts");
+const ACTIONS = sourceReader(ACTIONS_CODE, "settings/association/actions.ts");
 
 const PLANT = "11111111-1111-4111-8111-111111111111";
 const SENDING_CHURCH = "22222222-2222-4222-8222-222222222222";
@@ -177,9 +191,9 @@ test("the action takes a KIND, never a church or an org id", () => {
   // the actor is not an argument. `leaveOversightOrg` therefore has one
   // parameter, and it is the two-valued enum above — so there is no field a
   // forged POST could put another plant's id into.
-  const leave = ACTIONS_CODE.slice(
-    ACTIONS_CODE.indexOf("export async function leaveOversightOrg("),
-    ACTIONS_CODE.indexOf("export async function leaveNetwork(")
+  const leave = ACTIONS.span(
+    "export async function leaveOversightOrg(",
+    "export async function leaveNetwork("
   );
 
   assert.match(leave, /leaveOversightOrg\(\s*orgType: string\s*\)/);
@@ -205,11 +219,9 @@ test("the action takes a KIND, never a church or an org id", () => {
 // ----------------------------------------------------------------------------
 
 test("the sever nulls the FK only while it still points at the org being left", () => {
-  const sever = AUDIT_CODE.slice(
-    AUDIT_CODE.indexOf(
-      "export async function severAssociationWithAuditStatement"
-    ),
-    AUDIT_CODE.indexOf("export function associationOrg")
+  const sever = AUDIT.span(
+    "export async function severAssociationWithAuditStatement",
+    "export function associationOrg"
   );
 
   // The whole tenancy assertion: BOTH the subject and the org are in the WHERE.
@@ -247,11 +259,9 @@ test("the sever nulls the FK only while it still points at the org being left", 
 });
 
 test("the audit row is written FROM the sever, not beside it", () => {
-  const sever = AUDIT_CODE.slice(
-    AUDIT_CODE.indexOf(
-      "export async function severAssociationWithAuditStatement"
-    ),
-    AUDIT_CODE.indexOf("export function associationOrg")
+  const sever = AUDIT.span(
+    "export async function severAssociationWithAuditStatement",
+    "export function associationOrg"
   );
 
   // `memory/invariants.md` → Transactions / Atomicity: the dependent write must
@@ -271,11 +281,9 @@ test("the audit row is written FROM the sever, not beside it", () => {
 });
 
 test("the accept's audit row re-asserts the association it claims to record", () => {
-  const accept = AUDIT_CODE.slice(
-    AUDIT_CODE.indexOf("export function acceptedAssociationEventStatement"),
-    AUDIT_CODE.indexOf(
-      "export async function severAssociationWithAuditStatement"
-    )
+  const accept = AUDIT.span(
+    "export function acceptedAssociationEventStatement",
+    "export async function severAssociationWithAuditStatement"
   );
 
   // Batched with the claim and the association, so it must not trust either: an
@@ -293,9 +301,9 @@ test("the accept's audit row re-asserts the association it claims to record", ()
 });
 
 test("the accept batches the audit rather than following it with a second call", () => {
-  const accept = CORE_CODE.slice(
-    CORE_CODE.indexOf("export async function acceptInvitationAs"),
-    CORE_CODE.indexOf("async function announceInvitationAcceptedForChurch")
+  const accept = CORE.span(
+    "export async function acceptInvitationAs",
+    "async function announceInvitationAcceptedForChurch"
   );
 
   assert.match(accept, /db\.batch\(\[lock, claim, association, audit\]\)/);
@@ -307,32 +315,35 @@ test("the accept batches the audit rather than following it with a second call",
 });
 
 test("the sever announces AFTER the write, and the decline announces at all", () => {
-  const leave = CORE_CODE.slice(
-    CORE_CODE.indexOf("export async function leaveOversightOrgAs"),
-    CORE_CODE.indexOf("async function announceAssociationEndedFor")
+  const leave = CORE.span(
+    "export async function leaveOversightOrgAs",
+    "async function announceAssociationEndedFor"
   );
 
   // Order is load-bearing twice over: announcing first would say a plant had
   // left before it had, and the announcement's tenancy basis is the audit row
   // this statement writes.
-  assert.ok(
-    leave.indexOf("severAssociationWithAuditStatement") <
-      leave.indexOf("announceAssociationEndedFor"),
+  assertInOrder(
+    leave,
+    "core.ts → leaveOversightOrgAs",
+    ["severAssociationWithAuditStatement", "announceAssociationEndedFor"],
     "the org must not be told before the sever commits"
   );
   // No audit row means the UPDATE matched nothing — nothing was written, so the
   // refusal is honest and no announcement goes out.
   assert.match(leave, /if \(!severed\)/);
 
-  const decline = CORE_CODE.slice(
-    CORE_CODE.indexOf("export async function declineInvitationAs"),
-    CORE_CODE.indexOf("async function announceInvitationDeclinedForChurch")
+  const decline = CORE.span(
+    "export async function declineInvitationAs",
+    "async function announceInvitationDeclinedForChurch"
   );
   assert.match(decline, /announceInvitationDeclinedForChurch\(updated\)/);
   // Only after the compare-and-set actually recorded the answer.
-  assert.ok(
-    decline.indexOf("if (!updated)") <
-      decline.indexOf("announceInvitationDeclinedForChurch")
+  assertInOrder(
+    decline,
+    "core.ts → declineInvitationAs",
+    ["if (!updated)", "announceInvitationDeclinedForChurch"],
+    "the refused org must not be told before the compare-and-set recorded the answer"
   );
 });
 
@@ -342,9 +353,9 @@ test("the decline tells the refused org an address, and never reads the plant's 
   // typed itself. The absent READ is the assertion — `plantNameOf` still exists
   // for the ACCEPT path, so a later edit could easily "restore symmetry"
   // between the two announcers and hand the name over again.
-  const announce = CORE_CODE.slice(
-    CORE_CODE.indexOf("async function announceInvitationDeclinedForChurch"),
-    CORE_CODE.indexOf("async function plantNameOf")
+  const announce = CORE.span(
+    "async function announceInvitationDeclinedForChurch",
+    "async function plantNameOf"
   );
 
   assert.match(announce, /inviteeEmail,/);
@@ -356,9 +367,9 @@ test("the decline tells the refused org an address, and never reads the plant's 
 
   // The ACCEPT keeps the plant's name, because by then the org is associated
   // with it. The two announcers are deliberately asymmetric.
-  const accepted = CORE_CODE.slice(
-    CORE_CODE.indexOf("async function announceInvitationAcceptedForChurch"),
-    CORE_CODE.indexOf("async function lostClaimReason")
+  const accepted = CORE.span(
+    "async function announceInvitationAcceptedForChurch",
+    "async function lostClaimReason"
   );
   assert.match(accepted, /const plantName = await plantNameOf\(churchId\)/);
 });
