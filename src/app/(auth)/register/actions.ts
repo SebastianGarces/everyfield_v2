@@ -3,13 +3,7 @@
 import { db } from "@/db";
 import { isUniqueViolation } from "@/db/errors";
 import type { UserRole } from "@/db/schema";
-import {
-  churchPrivacySettings,
-  churches,
-  sendingChurches,
-  sendingNetworks,
-  users,
-} from "@/db/schema";
+import { sendingChurches, sendingNetworks, users } from "@/db/schema";
 import {
   createSession,
   generateSessionToken,
@@ -26,6 +20,7 @@ import {
   bindOpenInvitationTarget,
   invitationActorFromSession,
 } from "@/lib/invitations/core";
+import { churchCreationStatements } from "@/lib/onboarding/create-church";
 import { extractFieldErrors, registerSchema } from "@/lib/validations";
 import type { AccountType } from "@/lib/validations/auth";
 import { eq } from "drizzle-orm";
@@ -191,11 +186,12 @@ export async function register(
   //    In one batch the church rolls back too, and the retry starts clean.
   //
   // Planters sign up without a church — they create one later from the
-  // dashboard — so the org-entity statement list may be empty.
+  // dashboard — so both statement lists may be empty.
   const userId = crypto.randomUUID();
   const account = createAccountEntities(
     accountType,
     organizationName ?? null,
+    userId,
     invitedPlanter
   );
   const { role, churchId, sendingChurchId, sendingNetworkId } = account;
@@ -209,24 +205,23 @@ export async function register(
         passwordHash,
         name,
         role,
-        churchId,
+        // For an invited planter the church link is written by the
+        // `linkUserToChurchFilter` compare-and-set in `account.linkStatements`
+        // — the same statement onboarding's step 1 batches — never by this
+        // insert, so the link contract has exactly one spelling (ruling
+        // 408-4B). `account.churchId` still names the church for the
+        // invitation redemption below.
+        churchId: null,
         sendingChurchId,
         sendingNetworkId,
       })
       .returning({ id: users.id }),
+    // The church link + its privacy row, AFTER the users insert both
+    // reference. The `ON CONFLICT DO NOTHING` on the privacy row comes with
+    // the shared statements (#198): a retry racing its own predecessor cannot
+    // dead-end on the unique index.
+    ...account.linkStatements,
   ];
-
-  // Default privacy settings for church plants, in the SAME batch. The
-  // `ON CONFLICT DO NOTHING` mirrors `churchCreationStatements` (#198): a retry
-  // racing its own predecessor cannot dead-end on the unique index.
-  if (churchId) {
-    statements.push(
-      db
-        .insert(churchPrivacySettings)
-        .values({ churchId, updatedBy: userId })
-        .onConflictDoNothing()
-    );
-  }
 
   // The org entity goes FIRST — the users FKs point at it. (`unshift` rather
   // than a spread literal only because `db.batch` wants a provably non-empty
@@ -282,11 +277,16 @@ const USERS_EMAIL_UNIQUE = "users_email_unique";
 
 /**
  * Plan the organizational entity for the account type: the role and FK values
- * to set on the user, plus the org-entity INSERT (when the type creates one) as
- * a statement for the caller's batch — never awaited here, so the entity, the
- * user and the privacy row commit or roll back together. Ids are minted up
- * front (`crypto.randomUUID()`, as `createChurchDeps.newChurchId` does) so the
- * user statement can reference rows that do not exist yet.
+ * to set on the user, plus the entity's statements for the caller's batch —
+ * never awaited here, so the entity, the user, the church link and the privacy
+ * row commit or roll back together. Ids are minted up front
+ * (`crypto.randomUUID()`, as `createChurchDeps.newChurchId` does) so each
+ * statement can reference rows that do not exist yet.
+ *
+ * The statements come back in two lists because they straddle the users
+ * insert: `statements` is the org entity itself (the users FKs point at it, so
+ * it goes first), and `linkStatements` is what needs the users row to exist —
+ * the church link and its privacy row.
  *
  * Planters sign up without creating a church — they get free access to
  * Phase 0 content and the Wiki. They create their church from the dashboard
@@ -295,6 +295,7 @@ const USERS_EMAIL_UNIQUE = "users_email_unique";
 function createAccountEntities(
   accountType: AccountType,
   organizationName: string | null,
+  userId: string,
   createChurchForPlanter = false
 ): {
   role: UserRole;
@@ -303,6 +304,8 @@ function createAccountEntities(
   sendingNetworkId: string | null;
   /** The org-entity insert, or empty for a cold planter signup. */
   statements: BatchItem<"pg">[];
+  /** Statements that reference the users row — batched AFTER its insert. */
+  linkStatements: BatchItem<"pg">[];
 } {
   switch (accountType) {
     case "planter": {
@@ -312,18 +315,32 @@ function createAccountEntities(
       // by the accept path, guarded on the invitation reading `accepted`, so
       // the plant can never be bound to an org without an acceptance behind it.
       if (createChurchForPlanter && organizationName) {
+        // The church-creation contract is stated ONCE, by
+        // `churchCreationStatements` (`src/lib/onboarding/create-church.ts`,
+        // ruling 408-4B): the church insert, the `linkUserToChurchFilter`
+        // compare-and-set and the `ON CONFLICT DO NOTHING` privacy row are
+        // the same statements onboarding's step 1 batches — composed around
+        // this path's users insert rather than reimplemented beside it, so
+        // the privacy row and the FK order cannot drift between the two
+        // church-creation paths.
         const churchId = crypto.randomUUID();
+        const [createChurch, linkPlanter, privacyRow] =
+          churchCreationStatements({
+            churchId,
+            plantedBy: userId,
+            name: organizationName,
+            city: null,
+            stateRegion: null,
+            country: null,
+          });
 
         return {
           role: "planter",
           churchId,
           sendingChurchId: null,
           sendingNetworkId: null,
-          statements: [
-            db
-              .insert(churches)
-              .values({ id: churchId, name: organizationName }),
-          ],
+          statements: [createChurch],
+          linkStatements: [linkPlanter, privacyRow],
         };
       }
 
@@ -335,6 +352,7 @@ function createAccountEntities(
         sendingChurchId: null,
         sendingNetworkId: null,
         statements: [],
+        linkStatements: [],
       };
     }
 
@@ -357,6 +375,7 @@ function createAccountEntities(
             .insert(sendingChurches)
             .values({ id: sendingChurchId, name: organizationName }),
         ],
+        linkStatements: [],
       };
     }
 
@@ -377,6 +396,7 @@ function createAccountEntities(
             .insert(sendingNetworks)
             .values({ id: sendingNetworkId, name: organizationName }),
         ],
+        linkStatements: [],
       };
     }
   }
