@@ -44,6 +44,8 @@ import { eq, and } from "drizzle-orm";
 // Dates render through the pinned-zone formatter, never date-fns —
 // memory/invariants.md → Date & Time Rendering.
 import { formatDateTime } from "@/lib/datetime";
+import { MEETING_TYPE_LABELS } from "@/lib/meetings/types";
+import type { MeetingType } from "@/lib/meetings/types";
 
 export const dynamic = "force-dynamic";
 
@@ -56,12 +58,6 @@ const tileIcons: Record<MessageTileKey, LucideIcon> = {
   delivered: CheckCheck,
   opened: Eye,
   issues: AlertTriangle,
-};
-
-const meetingTypeLabels: Record<string, string> = {
-  vision_meeting: "Vision Meeting",
-  orientation: "Orientation",
-  team_meeting: "Team Meeting",
 };
 
 export default async function MessageDetailPage({
@@ -175,7 +171,7 @@ export default async function MessageDetailPage({
               >
                 <Calendar className="h-3.5 w-3.5" />
                 {meeting.title ||
-                  meetingTypeLabels[meeting.type] ||
+                  MEETING_TYPE_LABELS[meeting.type as MeetingType] ||
                   meeting.type}
                 <ExternalLink className="h-3 w-3" />
               </Link>
