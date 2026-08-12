@@ -247,7 +247,23 @@ with at most **2 quality rounds per site**. Rounds are not attempts, but a re-re
 FAIL is a real gate failure and spends an attempt. When any integration round lands commits, the
 functional gate (**G3) re-runs pinned to the re-pushed sha** before HR4/PR/merge — CI re-anchors
 G1/G2 at the final sha, and this re-anchors the one gate CI cannot: no sha ships whose functional
-gate never ran at that sha. A fix round that cannot say what it did **per
+gate never ran at that sha.
+
+> **"CI re-anchors G1/G2 at the final sha" holds only while the final sha is the PR head.** PR
+> Checks fires on `pull_request`, so it can name no other commit. A fix round that lands on a side
+> branch — `feature/X-fix` while the PR still points at `feature/X` — moves the tree but not the
+> ref, and then nothing anchors: `gh run list --commit <sha>` returns `[]`, and G1/G2 have no
+> evidence at the commit that would ship. #293 failed this way three times, each time with a green
+> local run and a green *older* CI run standing in for the sha under test.
+>
+> So the check is mechanical, and it comes first: `gh pr view <n> --json headRefOid` must equal the
+> sha you validated. If it does not, re-point the head (a fast-forward when the PR head is an
+> ancestor) and let PR Checks run there. To prove a sha green *before* moving a ref — or at a
+> commit no PR names — dispatch PR Checks at it (`gh workflow run "PR Checks" --ref <ref>`);
+> `workflow_dispatch` exists for exactly this. **Never** satisfy G1/G2 by citing a run at an
+> ancestor sha; a green run at the parent is the staleness this rule exists to catch.
+
+A fix round that cannot say what it did **per
 finding** is refused before a reviewer is spent on it — the #307 discipline, applied per finding.
 On exhaust the track **HOLDs with a DECISION comment** listing each unresolved finding, its fix
 history, and the options — merge as-is, direct a named fix, or take it manually — the same pattern
