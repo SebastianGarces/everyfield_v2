@@ -109,18 +109,13 @@ export async function assertPersonInChurch(
 
 /**
  * Filters shared by the people list, search and export queries.
- *
- * `textSearch` is passed IN as a predicate rather than derived here — the
- * list/export use a four-column ilike while the search adds a concatenated
- * full-name column, and this keeps those different behaviors with ONE
- * condition builder.
  */
 export interface PeopleFilterOptions {
   status?: PersonStatus[];
   source?: PersonSource[];
   tagIds?: string[]; // Filter by tags (AND logic - person must have ALL tags)
   includeDeleted?: boolean;
-  textSearch?: SQL;
+  search?: string;
 }
 
 /**
@@ -131,13 +126,7 @@ export function buildPeopleConditions(
   churchId: string,
   options: PeopleFilterOptions = {}
 ): SQL[] {
-  const {
-    status,
-    source,
-    tagIds,
-    includeDeleted = false,
-    textSearch,
-  } = options;
+  const { status, source, tagIds, includeDeleted = false, search } = options;
 
   const conditions: SQL[] = [eq(persons.churchId, churchId)];
 
@@ -156,9 +145,12 @@ export function buildPeopleConditions(
     conditions.push(inArray(persons.source, source));
   }
 
-  // Filter by search term if provided (predicate built by the caller)
-  if (textSearch) {
-    conditions.push(textSearch);
+  // Filter by search term if provided
+  if (search && search.trim().length > 0) {
+    const textSearch = peopleTextSearch(search);
+    if (textSearch) {
+      conditions.push(textSearch);
+    }
   }
 
   // Filter by tags (AND logic - person must have ALL specified tags):
@@ -181,16 +173,20 @@ export function buildPeopleConditions(
 }
 
 /**
- * The list/export text predicate: case-insensitive match over first name,
- * last name, email and phone.
+ * The ONE people text predicate (ruling 410-1B): case-insensitive match over
+ * first name, last name, email, phone, PLUS the concatenated full name so
+ * "Jane Smith" matches across first/last. Every text search (list, export,
+ * recipient pickers) goes through `buildPeopleConditions`, which calls this.
  */
-function listTextSearch(search: string): SQL | undefined {
-  const searchLike = `%${search}%`;
+export function peopleTextSearch(search: string): SQL | undefined {
+  const searchLike = `%${search.trim()}%`;
   return or(
     ilike(persons.firstName, searchLike),
     ilike(persons.lastName, searchLike),
     ilike(persons.email, searchLike),
-    ilike(persons.phone, searchLike)
+    ilike(persons.phone, searchLike),
+    // Search full name (first + last)
+    sql`concat(${persons.firstName}, ' ', ${persons.lastName}) ilike ${searchLike}`
   );
 }
 
@@ -284,7 +280,7 @@ export async function listPeople(
     source,
     tagIds,
     includeDeleted,
-    textSearch: search ? listTextSearch(search) : undefined,
+    search,
   });
 
   return paginatePeopleByCreatedAtCursor(churchId, conditions, cursor, limit);
@@ -320,7 +316,7 @@ export async function getPeopleForExport(
     source,
     tagIds,
     includeDeleted,
-    textSearch: search ? listTextSearch(search) : undefined,
+    search,
   });
 
   return db
