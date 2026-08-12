@@ -20,8 +20,8 @@ import {
   getLatestPhaseTransition,
   getPhaseTemplatePrompt,
   handlePhaseChangedForTemplatePrompt,
-  phaseTemplatesFor,
 } from "./phase-prompt";
+import { phaseTemplatesFor } from "./templates";
 
 // ----------------------------------------------------------------------------
 // T-020 — the half that EXECUTES against a database.
