@@ -694,6 +694,110 @@ test("only the invited address matches an invitation token", () => {
 });
 
 // ----------------------------------------------------------------------------
+// THE `/register` SEAM FIXTURE — ONE definition, shared by §8 and §9c
+// ----------------------------------------------------------------------------
+//
+// Both readers of the invitation row on `/register` read the database, so every
+// test of them is built the same way: a reader seam over rows the REAL resolver
+// produced — a hand-written row can be written to agree with whatever the code
+// happens to do — carrying the canonical triple (a targeted plant, a targeted
+// sending church, an open invitation, identical in every other respect).
+//
+// It is ONE copy on purpose. The triple is the fixture for the single rule this
+// whole round exists to state, `isOpenRedeemableInvitation`, so three pasted
+// copies differing only in uuid literals would be the same drift risk the
+// production fix just removed: a fifth clause added to the predicate must widen
+// exactly one fixture. It lives above its first use so the file reads
+// top-to-bottom rather than relying on function hoisting.
+
+/** A guessed uuid — an id no fixture row in this file carries. */
+const GUESSED_ID = "00000000-0000-4000-8000-000000000000";
+
+/** The three addresses the canonical triple is issued to. */
+const TARGETED_PLANTER_EMAIL = "planter@example.com";
+const TARGETED_SC_ADMIN_EMAIL = "sc-admin@example.com";
+const OPEN_INVITEE_EMAIL = "nobody@example.com";
+
+/** A reader over a fixed row set, counting how far the function got. */
+function readerFor(
+  rows: InvitationForRegistration[]
+): RegistrationInvitationReader & {
+  orgLookups: number;
+} {
+  const seam = {
+    orgLookups: 0,
+    loadInvitation: async (id: string) =>
+      rows.find((row) => row.id === id) ?? null,
+    lookupInvitingOrgName: async () => {
+      seam.orgLookups += 1;
+      return "Dev Church Planting Network";
+    },
+  };
+  return seam;
+}
+
+/** The stored row shape `/register` reads, built from what the resolver returned. */
+function registrationRowFrom(
+  id: string,
+  resolved: ReturnType<typeof resolveInvitationRequest>
+): InvitationForRegistration {
+  assert.ok(resolved.ok, "the resolver refused a request this test needs");
+  return {
+    id,
+    type: resolved.values.type,
+    status: "pending",
+    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    inviteeEmail: resolved.values.inviteeEmail,
+    targetChurchId: resolved.values.targetChurchId,
+    targetSendingChurchId: resolved.values.targetSendingChurchId,
+    sendingChurchId: resolved.values.sendingChurchId,
+    sendingNetworkId: resolved.values.sendingNetworkId,
+  };
+}
+
+/**
+ * The canonical triple, under caller-chosen ids, plus a reader seam over it.
+ *
+ * The rows differ ONLY in what the server found behind the address, which is
+ * what makes the target the only thing a refusal below can be reacting to. The
+ * ids are a parameter because each test wants its own, so a row leaking between
+ * tests through a shared seam is impossible.
+ */
+function threeRowSeam(ids: {
+  targetedPlant: string;
+  targetedOrg: string;
+  open: string;
+}) {
+  const rows = [
+    registrationRowFrom(
+      ids.targetedPlant,
+      resolveInvitationForResolvedTarget(
+        NET_ADMIN,
+        { inviteeEmail: TARGETED_PLANTER_EMAIL, inviteAs: "church" },
+        { targetChurchId: PLANT }
+      )
+    ),
+    registrationRowFrom(
+      ids.targetedOrg,
+      resolveInvitationForResolvedTarget(
+        NET_ADMIN,
+        { inviteeEmail: TARGETED_SC_ADMIN_EMAIL, inviteAs: "sending_church" },
+        { targetSendingChurchId: SENDING_CHURCH }
+      )
+    ),
+    registrationRowFrom(
+      ids.open,
+      resolveInvitationForResolvedTarget(
+        NET_ADMIN,
+        { inviteeEmail: OPEN_INVITEE_EMAIL, inviteAs: "church" },
+        {}
+      )
+    ),
+  ];
+  return { rows, seam: readerFor(rows) };
+}
+
+// ----------------------------------------------------------------------------
 // THE ANONYMOUS POST ANSWERS ONE WAY (Ruling C, #304 round 11, 2026-08-12)
 // ----------------------------------------------------------------------------
 //
@@ -715,43 +819,22 @@ test("the anonymous POST acts on no invitation it was not addressed to", async (
   const TARGETED_PLANT = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
   const TARGETED_ORG = "ffffffff-ffff-4fff-8fff-ffffffffffff";
   const OPEN = "12121212-1212-4121-8121-121212121212";
-  const GUESSED = "00000000-0000-4000-8000-000000000000";
 
-  // Real resolver output, exactly as §9c builds it: a hand-written row can be
-  // written to agree with whatever the code happens to do.
-  const seam = readerFor([
-    registrationRowFrom(
-      TARGETED_PLANT,
-      resolveInvitationForResolvedTarget(
-        NET_ADMIN,
-        { inviteeEmail: "planter@example.com", inviteAs: "church" },
-        { targetChurchId: PLANT }
-      )
-    ),
-    registrationRowFrom(
-      TARGETED_ORG,
-      resolveInvitationForResolvedTarget(
-        NET_ADMIN,
-        { inviteeEmail: "sc-admin@example.com", inviteAs: "sending_church" },
-        { targetSendingChurchId: SENDING_CHURCH }
-      )
-    ),
-    registrationRowFrom(
-      OPEN,
-      resolveInvitationForResolvedTarget(
-        NET_ADMIN,
-        { inviteeEmail: "nobody@example.com", inviteAs: "church" },
-        {}
-      )
-    ),
-  ]);
+  // The canonical triple, from `threeRowSeam` above — the SAME fixture §9c
+  // holds both readers to, so a fifth clause in `isOpenRedeemableInvitation`
+  // widens one definition rather than three copies of it.
+  const { seam } = threeRowSeam({
+    targetedPlant: TARGETED_PLANT,
+    targetedOrg: TARGETED_ORG,
+    open: OPEN,
+  });
 
   // The submitted address matches NONE of the three rows — the attacker is
   // probing ids, not answering an invitation.
   const SUBMITTED = "attacker@example.com";
 
   const decisions = await Promise.all(
-    [TARGETED_PLANT, TARGETED_ORG, OPEN, GUESSED].map(async (id) => [
+    [TARGETED_PLANT, TARGETED_ORG, OPEN, GUESSED_ID].map(async (id) => [
       id,
       invitationActedOnAtRegistration(
         await describeInvitationForRegistration(id, seam),
@@ -767,19 +850,20 @@ test("the anonymous POST acts on no invitation it was not addressed to", async (
     [TARGETED_PLANT, null],
     [TARGETED_ORG, null],
     [OPEN, null],
-    [GUESSED, null],
+    [GUESSED_ID, null],
   ]);
 
   // …and the open row is genuinely live, or the four nulls prove nothing: the
   // SAME id with the SAME reader, submitted by the address it names, is acted
-  // on. This is the one distinguishable outcome the ruling leaves — and it is
-  // an invitation being consumed, not a row being read.
+  // on. This is the one distinguishable POST the ruling leaves — and it is an
+  // invitation being consumed, not a row being read. (The GET is the other,
+  // wider half of the residual; see §9c and `memory/invariants.md`.)
   const answered = invitationActedOnAtRegistration(
     await describeInvitationForRegistration(OPEN, seam),
-    "nobody@example.com"
+    OPEN_INVITEE_EMAIL
   );
   assert.equal(answered?.id, OPEN);
-  assert.equal(answered?.inviteeEmail, "nobody@example.com");
+  assert.equal(answered?.inviteeEmail, OPEN_INVITEE_EMAIL);
 
   // Casing and stray whitespace are the same person, not a probe.
   assert.equal(
@@ -1213,79 +1297,22 @@ test("the pending list renders no register link and no per-row variation", () =>
 //
 // PINNED BY CALLING THE FUNCTION. Every previous guard of this family was a
 // regex over a page and every one of them passed while the property was false.
-// The function reads the database, so it is called through its reader seam with
+// The function reads the database, so it is called through the reader seam
+// `threeRowSeam` builds (defined above §8, one copy for all three tests) with
 // rows the REAL resolver produced — the same technique §9b uses, for the same
 // reason: a hand-written row can be written to agree with whatever the code
 // does.
-
-/** A reader over a fixed row set, counting how far the function got. */
-function readerFor(
-  rows: InvitationForRegistration[]
-): RegistrationInvitationReader & {
-  orgLookups: number;
-} {
-  const seam = {
-    orgLookups: 0,
-    loadInvitation: async (id: string) =>
-      rows.find((row) => row.id === id) ?? null,
-    lookupInvitingOrgName: async () => {
-      seam.orgLookups += 1;
-      return "Dev Church Planting Network";
-    },
-  };
-  return seam;
-}
-
-/** The stored row shape `/register` reads, built from what the resolver returned. */
-function registrationRowFrom(
-  id: string,
-  resolved: ReturnType<typeof resolveInvitationRequest>
-): InvitationForRegistration {
-  assert.ok(resolved.ok, "the resolver refused a request this test needs");
-  return {
-    id,
-    type: resolved.values.type,
-    status: "pending",
-    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-    inviteeEmail: resolved.values.inviteeEmail,
-    targetChurchId: resolved.values.targetChurchId,
-    targetSendingChurchId: resolved.values.targetSendingChurchId,
-    sendingChurchId: resolved.values.sendingChurchId,
-    sendingNetworkId: resolved.values.sendingNetworkId,
-  };
-}
 
 test("/register cannot describe a targeted invitation, and says nothing about a guessed uuid", async () => {
   const TARGETED_PLANT = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   const TARGETED_ORG = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
   const OPEN = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 
-  const rows = [
-    registrationRowFrom(
-      TARGETED_PLANT,
-      resolveInvitationForResolvedTarget(
-        NET_ADMIN,
-        { inviteeEmail: "planter@example.com", inviteAs: "church" },
-        { targetChurchId: PLANT }
-      )
-    ),
-    registrationRowFrom(
-      TARGETED_ORG,
-      resolveInvitationForResolvedTarget(
-        NET_ADMIN,
-        { inviteeEmail: "sc-admin@example.com", inviteAs: "sending_church" },
-        { targetSendingChurchId: SENDING_CHURCH }
-      )
-    ),
-    registrationRowFrom(
-      OPEN,
-      resolveInvitationForResolvedTarget(
-        NET_ADMIN,
-        { inviteeEmail: "nobody@example.com", inviteAs: "church" },
-        {}
-      )
-    ),
-  ];
+  const { rows, seam } = threeRowSeam({
+    targetedPlant: TARGETED_PLANT,
+    targetedOrg: TARGETED_ORG,
+    open: OPEN,
+  });
 
   // THE PREMISE: these rows differ only in what the server found behind the
   // address. Everything else about them — pending, unexpired, addressed, from
@@ -1295,8 +1322,6 @@ test("/register cannot describe a targeted invitation, and says nothing about a 
   assert.equal(rows[1].targetSendingChurchId, SENDING_CHURCH);
   assert.equal(rows[2].targetChurchId, null);
   assert.equal(rows[2].targetSendingChurchId, null);
-
-  const seam = readerFor(rows);
 
   // The three nulls, deep-equal so a `{}` or an `undefined` cannot pass as one.
   assert.deepEqual(
@@ -1310,10 +1335,7 @@ test("/register cannot describe a targeted invitation, and says nothing about a 
     "a resolved-sending-church target is describable to /register"
   );
   assert.deepEqual(
-    await describeInvitationForRegistration(
-      "00000000-0000-4000-8000-000000000000",
-      seam
-    ),
+    await describeInvitationForRegistration(GUESSED_ID, seam),
     null
   );
 
@@ -1322,9 +1344,13 @@ test("/register cannot describe a targeted invitation, and says nothing about a 
   assert.equal(seam.orgLookups, 0, "a targeted row reached the org lookup");
 
   // …and the OPEN row still describes, or the three nulls above prove nothing.
+  // That asymmetry is the GET half of the accepted residual (`memory/
+  // invariants.md` → Multi-Tenancy): an open row renders the redeeming form
+  // where the other three render the plain page, and it is inherent to
+  // invite-at-registration.
   const open = await describeInvitationForRegistration(OPEN, seam);
   assert.ok(open, "an open invitation stopped describing");
-  assert.equal(open.inviteeEmail, "nobody@example.com");
+  assert.equal(open.inviteeEmail, OPEN_INVITEE_EMAIL);
   assert.equal(open.accountType, "planter");
 });
 
@@ -1393,34 +1419,12 @@ test("the beta-gate bypass reads the row by the SAME rule, not its own", async (
   const TARGETED_PLANT = "13131313-1313-4131-8131-131313131313";
   const TARGETED_ORG = "14141414-1414-4141-8141-141414141414";
   const OPEN = "15151515-1515-4151-8151-151515151515";
-  const GUESSED = "00000000-0000-4000-8000-000000000000";
 
-  const seam = readerFor([
-    registrationRowFrom(
-      TARGETED_PLANT,
-      resolveInvitationForResolvedTarget(
-        NET_ADMIN,
-        { inviteeEmail: "planter@example.com", inviteAs: "church" },
-        { targetChurchId: PLANT }
-      )
-    ),
-    registrationRowFrom(
-      TARGETED_ORG,
-      resolveInvitationForResolvedTarget(
-        NET_ADMIN,
-        { inviteeEmail: "sc-admin@example.com", inviteAs: "sending_church" },
-        { targetSendingChurchId: SENDING_CHURCH }
-      )
-    ),
-    registrationRowFrom(
-      OPEN,
-      resolveInvitationForResolvedTarget(
-        NET_ADMIN,
-        { inviteeEmail: "nobody@example.com", inviteAs: "church" },
-        {}
-      )
-    ),
-  ]);
+  const { seam } = threeRowSeam({
+    targetedPlant: TARGETED_PLANT,
+    targetedOrg: TARGETED_ORG,
+    open: OPEN,
+  });
 
   // Each id is submitted with THE ADDRESS THAT ROW NAMES — the strongest form
   // of the claim, because the address check cannot be what refuses the targeted
@@ -1428,10 +1432,10 @@ test("the beta-gate bypass reads the row by the SAME rule, not its own", async (
   const bypasses = await Promise.all(
     (
       [
-        [TARGETED_PLANT, "planter@example.com"],
-        [TARGETED_ORG, "sc-admin@example.com"],
-        [GUESSED, "planter@example.com"],
-        [OPEN, "nobody@example.com"],
+        [TARGETED_PLANT, TARGETED_PLANTER_EMAIL],
+        [TARGETED_ORG, TARGETED_SC_ADMIN_EMAIL],
+        [GUESSED_ID, TARGETED_PLANTER_EMAIL],
+        [OPEN, OPEN_INVITEE_EMAIL],
       ] as const
     ).map(async ([id, email]) => [
       id,
@@ -1442,7 +1446,7 @@ test("the beta-gate bypass reads the row by the SAME rule, not its own", async (
   assert.deepEqual(bypasses, [
     [TARGETED_PLANT, false],
     [TARGETED_ORG, false],
-    [GUESSED, false],
+    [GUESSED_ID, false],
     // The premise. Without this the three falses are satisfied by a bypass that
     // refuses everything.
     [OPEN, true],
@@ -1454,10 +1458,7 @@ test("the beta-gate bypass reads the row by the SAME rule, not its own", async (
     await hasValidInvitationBypass(OPEN, "attacker@example.com", seam),
     false
   );
-  assert.equal(
-    await hasValidInvitationBypass(null, "nobody@example.com"),
-    false
-  );
+  assert.equal(await hasValidInvitationBypass(null, OPEN_INVITEE_EMAIL), false);
 });
 
 test("ONE definition decides what /register may act on", async () => {
@@ -1471,7 +1472,7 @@ test("ONE definition decides what /register may act on", async () => {
     OPEN,
     resolveInvitationForResolvedTarget(
       NET_ADMIN,
-      { inviteeEmail: "nobody@example.com", inviteAs: "church" },
+      { inviteeEmail: OPEN_INVITEE_EMAIL, inviteAs: "church" },
       {}
     )
   );
@@ -1519,12 +1520,12 @@ test("ONE definition decides what /register may act on", async () => {
 
   assert.equal(await describeInvitationForRegistration(REFUSED, seam), null);
   assert.equal(
-    await hasValidInvitationBypass(REFUSED, "nobody@example.com", seam),
+    await hasValidInvitationBypass(REFUSED, OPEN_INVITEE_EMAIL, seam),
     false
   );
   assert.ok(await describeInvitationForRegistration(OPEN, seam));
   assert.equal(
-    await hasValidInvitationBypass(OPEN, "nobody@example.com", seam),
+    await hasValidInvitationBypass(OPEN, OPEN_INVITEE_EMAIL, seam),
     true
   );
 
