@@ -17,7 +17,9 @@ import {
   communicationStatusLabel,
 } from "@/lib/communication/status-display";
 import { parseCommunicationFilters } from "@/lib/validations/communication";
-import { formatDistanceToNow } from "date-fns";
+// Dates render through the pinned-zone formatter, never date-fns —
+// memory/invariants.md → Date & Time Rendering (ruled 2026-08-12, 407-3-1).
+import { formatRelativeTimestamp } from "@/lib/datetime";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +36,10 @@ const channelLabels: Record<string, string> = {
 export default async function HistoryPage({ searchParams }: HistoryPageProps) {
   const { user } = await verifySession();
   if (!user.churchId) redirect("/dashboard");
+
+  // One `now` per render: every row's relative label is measured against the
+  // same instant, so a list can never show times that disagree with each other.
+  const now = new Date();
 
   const params = await searchParams;
   // Unparseable values are dropped, not thrown: a hand-edited or stale URL must
@@ -159,9 +165,7 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
                       >
                         <td className="px-4 py-3 text-sm">
                           {msg.sentAt
-                            ? formatDistanceToNow(msg.sentAt, {
-                                addSuffix: true,
-                              })
+                            ? formatRelativeTimestamp(msg.sentAt, now)
                             : "—"}
                         </td>
                         <td className="px-4 py-3">
