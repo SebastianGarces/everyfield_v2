@@ -34,6 +34,7 @@ import {
   verifyInvitationAuthority,
   type InvitationActor,
 } from "./core";
+import { sourceReader } from "@/lib/testing/source-span";
 
 // ============================================================================
 // Invitations — the auth surface (#265).
@@ -277,6 +278,15 @@ const SERVICE_CODE = codeOf(SERVICE_PATH);
 const CORE_CODE = codeOf(CORE_PATH);
 
 /**
+ * The reader, and the ONLY way this file cuts a declaration out of `service.ts`.
+ * `span` / `after` throw naming the missing needle (`@/lib/testing/source-span`); a bare
+ * `indexOf` returns -1 and turns an assertion about one function into one about
+ * the whole module. The label says "comments stripped" because `codeOf` strips
+ * them, and a stripped copy fails for different reasons than the original.
+ */
+const SERVICE = sourceReader(SERVICE_CODE, "service.ts (comments stripped)");
+
+/**
  * Every top-level `export` statement of the action layer, CLASSIFIED — not
  * pattern-matched for the forms somebody happened to think of.
  *
@@ -331,11 +341,21 @@ for (const statement of EXPORT_STATEMENTS) {
   UNCLASSIFIED.push(statement);
 }
 
-/** The four endpoints this module is allowed to have. */
+/**
+ * The five endpoints this module is allowed to have.
+ *
+ * The fifth arrived on 2026-08-10 (ruling on PR #392 / #293): `resendInvitationEmail`
+ * sends a pending invitation's email again, so a failed or missed send is
+ * recoverable. It writes no row of its own, but it IS a state change — mail
+ * leaves the building — so it goes through the same rules as the other four:
+ * the actor is minted from the session, and which invitations it may be aimed at
+ * is decided by `invitingOrgOf(actor)` inside `./core`, never by an argument.
+ */
 const LIFECYCLE_ACTIONS = [
   "acceptInvitation",
   "createInvitation",
   "declineInvitation",
+  "resendInvitationEmail",
   "revokeInvitation",
 ];
 
@@ -490,7 +510,7 @@ function importChainToCore(entry: string): string[] | null {
 const CORE_REACHING_ACTION_MODULES: ReadonlyArray<readonly [string, string]> = [
   [
     "src/lib/invitations/service.ts",
-    "the four session-minted lifecycle actions — this module is core's front door, and every other assertion in this file pins its shape",
+    "the five session-minted lifecycle actions — this module is core's front door, and every other assertion in this file pins its shape",
   ],
   [
     "src/app/(dashboard)/settings/association/actions.ts",
@@ -506,7 +526,7 @@ const CORE_REACHING_ACTION_MODULES: ReadonlyArray<readonly [string, string]> = [
   ],
 ];
 
-// The surface that consumes the four actions is deliberately NOT on that list:
+// The surface that consumes the five actions is deliberately NOT on that list:
 // `(dash)/oversight/invitations/actions.ts` imports `service.ts` only, so the
 // walk stops at that `"use server"` boundary and #23 added no new reach.
 
@@ -514,14 +534,14 @@ const CORE_REACHING_ACTION_MODULES: ReadonlyArray<readonly [string, string]> = [
 // 1a. Structural — the endpoint surface, read off the real module
 // ----------------------------------------------------------------------------
 
-test("the runtime export surface is exactly the four lifecycle mutations", async () => {
+test("the runtime export surface is exactly the five lifecycle mutations", async () => {
   // THE assertion of this file. Next.js publishes one POST endpoint per export
   // of a `"use server"` module, so the module namespace IS the auth surface —
   // and unlike a regex it cannot be out-thought. `export default` shows up here
   // as the key `default`; `export { x } from "./core"` shows up as `x`; a second
   // declarator smuggled onto an `export const` line shows up as itself.
   //
-  // The four are the invitation-lifecycle mutations a user performs on their own
+  // The five are the invitation-lifecycle mutations a user performs on their own
   // behalf. The eleven exports this module used to have were the finding: reads
   // exported from a `"use server"` module are an unauthenticated data leak, and
   // `disassociateChurchFromSendingChurch(churchId)` was a state change any
@@ -747,6 +767,14 @@ const FORM_ACTION_MODULE = {
       // `safeParse` would accept the first and reject the second.
       wellFormed: { inviteeEmail: "a@b.co", inviteAs: "church" },
       malformed: { inviteeEmail: "nope", inviteAs: "church" },
+    },
+    {
+      // OV-003b (#293), ruled 2026-08-10. It makes MAIL LEAVE THE BUILDING, so
+      // it is the endpoint on this surface with the most to lose from an
+      // anonymous POST — and it mints above its parse like the other two.
+      name: "resendInvitationEmailAction",
+      wellFormed: { invitationId: "77777777-7777-4777-8777-777777777777" },
+      malformed: { invitationId: "not-a-uuid" },
     },
     {
       name: "revokeInvitationAction",
@@ -1084,7 +1112,7 @@ test("the invitation actions do not reach the database directly", () => {
   assert.match(SERVICE_CODE, /from "\.\/core"/);
 });
 
-test("nothing but the four lifecycle mutations is an endpoint", () => {
+test("nothing but the five lifecycle mutations is an endpoint", () => {
   // The eleven exports are the finding. Reads, the association primitives and
   // the row builders are not endpoints and must not reappear here: a read
   // exported from a `"use server"` module is an unauthenticated data leak, and
@@ -1739,9 +1767,13 @@ test("a response records the session's user, and only a pending row", () => {
 
 /** Just the WHERE clause — `returning()` names every column and would answer for any of them. */
 function whereOf(sql: string): string {
-  const start = sql.indexOf(" where ");
-  const end = sql.indexOf(" returning ");
-  return sql.slice(start, end === -1 ? undefined : end);
+  // The START anchor goes through the reader (`@/lib/testing/source-span`): a statement that
+  // stopped emitting " where " made `slice(-1, end)` the empty string, and every
+  // `doesNotMatch` about the scope below is true of the empty string. The END is
+  // genuinely optional — not every statement has a `returning`.
+  const from = sourceReader(sql, "the invitation UPDATE").after(" where ");
+  const end = from.indexOf(" returning ");
+  return end === -1 ? from : from.slice(0, end);
 }
 
 test("the revoke statement is scoped to the session's own ORG", () => {
@@ -2176,7 +2208,59 @@ test("an action result carries no internal user ids", () => {
   assert.ok(!serialized.includes(PLANTER_ID), "the responder's user id leaked");
 
   // ...and the action layer returns THAT, not what the mutation handed it.
-  assert.match(SERVICE_CODE, /invitationView\(await mutate\(\)\)/);
+  // One narrowing point, in `run`, so all four actions inherit it — #293 gave
+  // `run` a richer input (the create now reports whether the invitation email
+  // went out), and the property that matters is unchanged: what reaches the
+  // client is `invitationView(...)` of the row and never the row.
+  assert.match(SERVICE_CODE, /invitationView\(mutated\.invitation\)/);
+  assert.doesNotMatch(
+    SERVICE_CODE,
+    /invitation: mutated\.invitation\b/,
+    "the raw row reached the result"
+  );
+});
+
+test("only the two sending paths report an email outcome", () => {
+  // OV-003b (#293). `emailSent` is three-valued and the third value is the
+  // point: `undefined` means "this action does not send email", which is a
+  // different fact from `false` ("it tried and failed"). A surface that folded
+  // them together would tell a planter who declined an invitation that an email
+  // could not be sent.
+  //
+  // Structural, because the alternative is a database: the three responses go
+  // through `answered`, which builds a mutation carrying the row and nothing
+  // else, and only the two SENDING paths — `createInvitationAs` and the
+  // 2026-08-10 `resendInvitationEmailAs` — are passed to `run` unwrapped.
+  // `parsed.data`, not `request`: #304 ruling 4 fix 2 parses a `z.strictObject`
+  // between the session mint and the logic layer, so the raw parameter is never
+  // what travels. Asserting the parsed value here is what keeps the two rules
+  // from being satisfiable one at a time.
+  assert.match(
+    SERVICE_CODE,
+    /run\("createInvitation", \(\) => createInvitationAs\(actor, parsed\.data\)\)/
+  );
+  assert.match(
+    SERVICE_CODE,
+    /run\("resendInvitationEmail", \(\) =>\s*resendInvitationEmailAs\(actor, invitationId\)\s*\)/
+  );
+
+  for (const action of ["accept", "decline", "revoke"]) {
+    assert.match(
+      SERVICE_CODE,
+      new RegExp(
+        `run\\("${action}Invitation", \\(\\) =>\\s*answered\\(${action}InvitationAs\\(actor, invitationId\\)\\)`
+      ),
+      action
+    );
+  }
+
+  // `answered` sets no email field at all, so the three responses cannot report
+  // one however `run` changes.
+  const adapter = SERVICE.span(
+    "async function answered",
+    "export async function createInvitation"
+  );
+  assert.doesNotMatch(adapter, /emailSent/, adapter);
 });
 
 test("isUuid accepts a uuid and nothing else", () => {

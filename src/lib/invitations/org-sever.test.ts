@@ -16,6 +16,7 @@ import {
   type InvitationActor,
 } from "./core";
 import { associationHistoryQuery } from "./history";
+import { assertInOrder, sourceReader } from "@/lib/testing/source-span";
 
 // ============================================================================
 // #304 / OV-007b + OV-011 — the ORG'S sever, and the audit read behind it.
@@ -58,6 +59,15 @@ const ACTIONS_CODE = readFileSync(
   ),
   "utf8"
 );
+
+/**
+ * The readers, and the ONLY way this file cuts a declaration out of a module.
+ * `span` / `after` throw naming the missing needle (`@/lib/testing/source-span`); a bare
+ * `indexOf` returns -1 and turns an assertion about one function into one about
+ * the whole file, silently.
+ */
+const CORE = sourceReader(CORE_CODE, "core.ts");
+const ACTIONS = sourceReader(ACTIONS_CODE, "oversight/plants/[id]/actions.ts");
 
 const PLANT = "11111111-1111-4111-8111-111111111111";
 const SENDING_CHURCH = "22222222-2222-4222-8222-222222222222";
@@ -267,9 +277,7 @@ test("the history read is scoped to the plant AND the caller's own org", () => {
 // ----------------------------------------------------------------------------
 
 test("the removal takes a church id and derives everything else from the session", () => {
-  const remove = ACTIONS_CODE.slice(
-    ACTIONS_CODE.indexOf("export async function removePlantFromOrg(")
-  );
+  const remove = ACTIONS.after("export async function removePlantFromOrg(");
 
   assert.match(remove, /removePlantFromOrg\(\s*churchId: string\s*\)/);
   assert.match(remove, /churchIdSchema\.safeParse\(churchId\)/);
@@ -294,9 +302,9 @@ test("the removal takes a church id and derives everything else from the session
 });
 
 test("the plant's own read is scoped by the same predicate the write is", () => {
-  const remove = CORE_CODE.slice(
-    CORE_CODE.indexOf("export async function removePlantFromOrgAs"),
-    CORE_CODE.indexOf("async function announcePlantRemovedFor")
+  const remove = CORE.span(
+    "export async function removePlantFromOrgAs",
+    "async function announcePlantRemovedFor"
   );
 
   // A read is never the guard, but a read scoped MORE LOOSELY than the write is
@@ -309,15 +317,15 @@ test("the plant's own read is scoped by the same predicate the write is", () => 
 
   // The write, its refusal and the announcement, in that order. Announcing first
   // would tell a planter they had been removed while they still had not been.
-  assert.ok(
-    remove.indexOf("severAssociationWithAuditStatement") <
-      remove.indexOf("announcePlantRemovedFor"),
-    "the planter must not be told before the sever commits"
-  );
-  assert.match(remove, /if \(!severed\)/);
-  assert.ok(
-    remove.indexOf("if (!severed)") < remove.indexOf("announcePlantRemovedFor"),
-    "a refused removal announces nothing"
+  assertInOrder(
+    remove,
+    "core.ts → removePlantFromOrgAs",
+    [
+      "severAssociationWithAuditStatement",
+      "if (!severed)",
+      "announcePlantRemovedFor",
+    ],
+    "the planter must not be told before the sever commits, and a refused removal announces nothing"
   );
 
   // The org is passed to the sever from the session-derived value, never

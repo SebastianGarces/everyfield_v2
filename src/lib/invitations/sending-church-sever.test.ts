@@ -12,6 +12,7 @@ import {
   leaveNetworkAsSendingChurchAdmin,
   type InvitationActor,
 } from "./core";
+import { assertInOrder, sourceReader } from "@/lib/testing/source-span";
 
 // ============================================================================
 // OV-013 — A SENDING CHURCH LEAVES ITS NETWORK (#304 WS3, ruling #351).
@@ -51,6 +52,23 @@ const CORE_CODE = readFileSync(
 const AUDIT_CODE = readFileSync(
   path.join(process.cwd(), "src/lib/invitations/audit.ts"),
   "utf8"
+);
+
+/**
+ * The readers, and the ONLY way this file cuts a declaration out of a module.
+ * `span` / `after` throw naming the missing needle (`@/lib/testing/source-span`) instead of
+ * letting a -1 widen one function's assertion to the whole file.
+ */
+const CORE = sourceReader(CORE_CODE, "core.ts");
+const AUDIT = sourceReader(AUDIT_CODE, "audit.ts");
+
+/**
+ * `leaveNetworkAsSendingChurchAdmin`'s own body — the subject of §1 and §4.
+ * Bounded at its announcer, which is the next declaration.
+ */
+const LEAVE_NETWORK = CORE.span(
+  "export async function leaveNetworkAsSendingChurchAdmin",
+  "async function announceSendingChurchLeftNetworkFor"
 );
 
 function actor(overrides: Partial<InvitationActor>): InvitationActor {
@@ -120,10 +138,7 @@ test("the action takes NO argument — there is nothing to aim", () => {
     /export async function leaveNetworkAsSendingChurchAdmin\(\s*actor: InvitationActor\s*\)/
   );
 
-  const body = CORE_CODE.slice(
-    CORE_CODE.indexOf("export async function leaveNetworkAsSendingChurchAdmin"),
-    CORE_CODE.indexOf("async function announceSendingChurchLeftNetworkFor")
-  );
+  const body = LEAVE_NETWORK;
   assert.match(body, /actor\.sendingChurchId/);
   // The network is READ, never received.
   assert.match(body, /org\.sendingNetworkId/);
@@ -135,11 +150,9 @@ test("the action takes NO argument — there is nothing to aim", () => {
 // ----------------------------------------------------------------------------
 
 test("the sever and its audit row are one statement, for both subjects", () => {
-  const sever = AUDIT_CODE.slice(
-    AUDIT_CODE.indexOf(
-      "export async function severAssociationWithAuditStatement"
-    ),
-    AUDIT_CODE.indexOf("export function associationOrg")
+  const sever = AUDIT.span(
+    "export async function severAssociationWithAuditStatement",
+    "export function associationOrg"
   );
 
   // `memory/invariants.md` → Transactions / Atomicity: the dependent write must
@@ -162,9 +175,9 @@ test("a sending church can only be severed FROM a network", () => {
   // A sending church has exactly one association FK. Asking to sever it from a
   // "sending_church" is a caller bug, and it throws rather than quietly nulling
   // the network association under the wrong label.
-  const subjectSql = AUDIT_CODE.slice(
-    AUDIT_CODE.indexOf("function subjectSql("),
-    AUDIT_CODE.indexOf("export function acceptedAssociationEventStatement")
+  const subjectSql = AUDIT.span(
+    "function subjectSql(",
+    "export function acceptedAssociationEventStatement"
   );
   assert.match(subjectSql, /orgType !== "network"/);
   assert.match(subjectSql, /throw new Error/);
@@ -214,24 +227,26 @@ test("the accept side audits the same subject, from the invitation's type", () =
 // ----------------------------------------------------------------------------
 
 test("the announcement follows the committed sever, never precedes it", () => {
-  const body = CORE_CODE.slice(
-    CORE_CODE.indexOf("export async function leaveNetworkAsSendingChurchAdmin"),
-    CORE_CODE.indexOf("async function announceSendingChurchLeftNetworkFor")
+  const body = LEAVE_NETWORK;
+
+  assertInOrder(
+    body,
+    "core.ts → leaveNetworkAsSendingChurchAdmin",
+    [
+      "severAssociationWithAuditStatement",
+      "if (!severed)",
+      "announceSendingChurchLeftNetworkFor",
+    ],
+    "the network must not be told before the sever commits, and a refused sever announces nothing"
   );
-
-  const severAt = body.indexOf("severAssociationWithAuditStatement");
-  const guardAt = body.indexOf("if (!severed)");
-  const announceAt = body.indexOf("announceSendingChurchLeftNetworkFor");
-
-  assert.ok(severAt > -1 && guardAt > severAt && announceAt > guardAt);
 
   // The refusal when the UPDATE matched nothing is the honest one: nothing was
   // written — not the null, not the row — so nobody is told anything.
   assert.match(body, /throw new InvitationError\(NOT_IN_A_NETWORK_MESSAGE\)/);
 
   // Best-effort: a notification failure never undoes a committed sever.
-  const announcer = CORE_CODE.slice(
-    CORE_CODE.indexOf("async function announceSendingChurchLeftNetworkFor")
+  const announcer = CORE.after(
+    "async function announceSendingChurchLeftNetworkFor"
   );
   assert.match(announcer.slice(0, 600), /try \{[\s\S]*?\} catch \(error\) \{/);
 });

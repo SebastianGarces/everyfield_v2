@@ -58,6 +58,7 @@ import {
   churches,
   organizationInvitations,
   sendingChurches,
+  sendingNetworks,
   users,
   type NewOrganizationInvitation,
   type OrganizationInvitation,
@@ -69,6 +70,7 @@ import type {
   OrganizationInvitationType,
 } from "@/db/schema/organization-invitation";
 import type { AssociationOrgType } from "@/db/schema";
+import { redactForLog } from "@/lib/email/redact";
 import {
   announceAssociationEnded,
   announceInvitationAccepted,
@@ -86,6 +88,17 @@ import {
   severAssociationWithAuditStatement,
   type AssociationSubject,
 } from "./audit";
+
+import {
+  sendInvitationEmail,
+  type InvitationEmailDeps,
+  type InvitationEmailOutcome,
+  type InvitationSendOccasion,
+} from "./email";
+// NOT `./resend-window`, and not `InvitationEmailRefusal` either — both left
+// with the resend path when it moved to `./resend.ts` (2026-08-12, PR #392
+// warning (c)). The dedupe bucket is reported by that module and consumed by
+// the surface; nothing in the shared layer reads it.
 
 // ============================================================================
 // Constants
@@ -1139,11 +1152,29 @@ export async function assertTargetInviteRateLimit(
   }
 }
 
-/** Resolve + guard + insert. The path the action layer takes. */
+/**
+ * What a create produces: the row, and whether the invitee was actually told.
+ *
+ * The two are reported separately because they FAIL separately (OV-003b / #293).
+ * The row is durable and the email is best-effort, so `emailSent: false` is not
+ * an error — it is the case where the invitee has not been told yet, and the
+ * surface says exactly that instead of claiming an invitation was "sent" when
+ * nothing left the building. The recovery is **Resend email** on the row, not a
+ * link the admin forwards: #304 ruling 4 item 5 removed the admin's copy of the
+ * `/register?invitation=` URL from this whole page, and #293 is the delivery it
+ * was a stopgap for (`./create-notice`).
+ */
+export interface CreatedInvitation {
+  invitation: OrganizationInvitation;
+  /** Did the provider accept the invitation email? See `./email`. */
+  emailSent: boolean;
+}
+
+/** Resolve + guard + insert + send. The path the action layer takes. */
 export async function createInvitationAs(
   actor: InvitationActor,
   request: InvitationRequest
-): Promise<OrganizationInvitation> {
+): Promise<CreatedInvitation> {
   const inviteeEmail = normalizeInviteeEmail(request.inviteeEmail);
   const inviteAs = request.inviteAs ?? "church";
 
@@ -1217,7 +1248,197 @@ export async function createInvitationAs(
   await assertTargetSlotFree(resolved.values);
   await assertNoDuplicatePending(resolved.values);
 
-  return insertInvitation(resolved.values);
+  const invitation = await insertInvitation(resolved.values);
+
+  // LAST, and deliberately after the committed row — an invitation that exists
+  // but was not emailed is repaired by Resend email on its row; an email sent
+  // for a row that failed to insert is a link to nothing. `emailInvitee` never
+  // throws.
+  return { invitation, emailSent: await emailInvitee(invitation) };
+}
+
+/**
+ * Tell the invitee. Best-effort by construction, and the boundary that keeps it
+ * that way is HERE: `sendInvitationEmail` swallows its own transport failures,
+ * and this wrapper swallows the one thing it cannot — a failed org-name lookup,
+ * which is a database read and can throw like any other.
+ *
+ * The name is derived from `type` (`lookupInvitingOrgName` below), not from
+ * whichever FK column happens to be populated, for the same reason
+ * `announceInvitationAcceptedForChurch` derives its audience that way: nothing
+ * constrains a row to one FK, and an email that misnames who invited you is
+ * indistinguishable from a phishing attempt.
+ *
+ * EXPORTED, and it takes seams. This is the one link in the chain between the
+ * action and the well-tested send path, and it was the only untested one: every
+ * rule in `./email.ts` is proven against `sendInvitationEmail` directly, which
+ * says nothing about whether anything CALLS it, with what, or what a thrown
+ * org-name lookup does to the create. Both seams default to the real thing, so
+ * production has one code path; `./core-email.test.ts` replaces them.
+ */
+export async function emailInvitee(
+  invitation: OrganizationInvitation,
+  deps: EmailInviteeDeps = {}
+): Promise<boolean> {
+  return (await emailInviteeOutcome(invitation, deps)).sent;
+}
+
+export interface EmailInviteeDeps {
+  /** The org-name read. A database query in production, and it can throw. */
+  lookupOrgName?: (
+    invitation: OrganizationInvitation
+  ) => Promise<string | null>;
+  /** Passed straight to `sendInvitationEmail`; see `InvitationEmailDeps`. */
+  send?: InvitationEmailDeps["send"];
+  /** Which send this is — create (the default) or a deliberate resend. */
+  occasion?: InvitationSendOccasion;
+}
+
+/**
+ * The same send, reporting WHY it did not happen.
+ *
+ * `emailInvitee` above is this function with the reason thrown away, because
+ * the create path has nothing to do with it: a failed send there is reported to
+ * the admin as one fact ("created — email could not be sent"), pointing at the
+ * Resend email control on the row the create just added. The RESEND path is the
+ * opposite — its entire product is the send, so the admin has to be told which
+ * of "no longer pending" and "the provider refused it" happened, and those
+ * words are derived from this reason code (`resendRefusalMessage`).
+ *
+ * Two shapes, ONE implementation, deliberately: a second call site that
+ * re-decided any of the guards would be the duplicated decision this file keeps
+ * hunting.
+ */
+export async function emailInviteeOutcome(
+  invitation: OrganizationInvitation,
+  deps: EmailInviteeDeps = {}
+): Promise<InvitationEmailOutcome> {
+  const lookupOrgName = deps.lookupOrgName ?? lookupInvitingOrgName;
+
+  try {
+    return await sendInvitationEmail(
+      {
+        invitationId: invitation.id,
+        inviteeEmail: invitation.inviteeEmail,
+        status: invitation.status,
+        type: invitation.type,
+        invitingOrgName: await lookupOrgName(invitation),
+        expiresAt: invitation.expiresAt,
+      },
+      {
+        ...(deps.send ? { send: deps.send } : {}),
+        ...(deps.occasion ? { occasion: deps.occasion } : {}),
+      }
+    );
+  } catch (error) {
+    // No id, no address, no link: the invitation id is the register bearer
+    // token (see `hasValidInvitationBypass`) and a log drain is not where it
+    // belongs.
+    console.error("invitation email could not be prepared", {
+      type: invitation.type,
+      message: redactForLog(error),
+    });
+    return { sent: false, reason: "preparation_threw" };
+  }
+}
+
+// ============================================================================
+// The org-scoped single-invitation read
+// ============================================================================
+//
+// One query, shared by everything that acts on ONE invitation the actor's org
+// issued. The resend path that used to live here moved to `./resend.ts` on
+// 2026-08-12 (PR #392 warning (c)); this predicate did NOT go with it, because
+// it is the same definition of "ours" the list and the revoke are built from
+// and two copies of it are how a screen shows a row it would then refuse.
+// ============================================================================
+
+/**
+ * `id = ? AND <the actor's own org issued it>` — the read behind a resend.
+ *
+ * Exported so a test can read the bound parameters, the same reason
+ * `revokeInvitationQuery` and `invitationsForOrgQuery` are: the org in the WHERE
+ * comes from the SESSION, and nothing a client sent can put another org's id
+ * there.
+ */
+export function orgInvitationQuery(
+  actor: InvitationActor,
+  invitationId: string
+) {
+  return db
+    .select()
+    .from(organizationInvitations)
+    .where(
+      and(eq(organizationInvitations.id, invitationId), invitingOrgOf(actor))
+    )
+    .limit(1);
+}
+
+/**
+ * The inviting organization's name, chosen by `type`. THE one implementation —
+ * never a second copy under any name, the same rule `daysUntilTarget` carries
+ * (memory/invariants.md → Hierarchical Access Control), because the copy is
+ * always the one that misses the fix.
+ *
+ * It had one, briefly: `(auth)/register/beta-gate.ts` answered the same
+ * question for the register screen with its own SQL against `sendingChurches`
+ * / `sendingNetworks`, which was both an R2 duplicated decision and an app
+ * route reaching into another domain's tables instead of through its exports.
+ * The two had already diverged — that copy took `type: string` and fell
+ * through to `null`, so a fourth `OrganizationInvitationType` would break the
+ * build HERE (the `never` guard below) and silently return `null` THERE,
+ * blanking the inviting org on the invitee's register screen. Both callers now
+ * come through this function; `./org-name.test.ts` fails if the copy returns.
+ *
+ * Deriving the name from `type` rather than from whichever FK is populated is
+ * the security-relevant half: `insertInvitation` performs no type↔id
+ * consistency check, so a row can carry a stray id, and an email or a register
+ * screen that misnames who invited you is indistinguishable from a phishing
+ * attempt.
+ *
+ * The parameter is structural so the register path can pass the row it already
+ * holds, but `type` is narrowed to `OrganizationInvitationType` — a widened
+ * `type: string` is exactly what let the copy fall through, and the `never`
+ * guard is the property that makes ONE implementation safe.
+ */
+export async function lookupInvitingOrgName(invitation: {
+  type: OrganizationInvitationType;
+  sendingChurchId: string | null;
+  sendingNetworkId: string | null;
+}): Promise<string | null> {
+  switch (invitation.type) {
+    case "church_to_sending_church": {
+      if (!invitation.sendingChurchId) return null;
+      const [org] = await db
+        .select({ name: sendingChurches.name })
+        .from(sendingChurches)
+        .where(eq(sendingChurches.id, invitation.sendingChurchId))
+        .limit(1);
+      return org?.name ?? null;
+    }
+
+    case "church_to_network":
+    case "sending_church_to_network": {
+      if (!invitation.sendingNetworkId) return null;
+      const [org] = await db
+        .select({ name: sendingNetworks.name })
+        .from(sendingNetworks)
+        .where(eq(sendingNetworks.id, invitation.sendingNetworkId))
+        .limit(1);
+      return org?.name ?? null;
+    }
+
+    default: {
+      // Fail CLOSED, like every other switch on `type` in this file: with no
+      // name there is nothing honest to put in the email, and `./email` refuses
+      // to render one.
+      const unknownType: never = invitation.type;
+      console.error("invitation type has no inviting org to name", {
+        type: unknownType,
+      });
+      return null;
+    }
+  }
 }
 
 // ============================================================================

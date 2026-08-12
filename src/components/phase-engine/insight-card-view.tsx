@@ -35,7 +35,10 @@ import type { PlantInsight } from "@/db/schema";
 // The one humanising formatter, shared with the CSF scorecard
 // (components/phase-engine/csf-scorecard.tsx): a planter reads the evidence in
 // English, never in the judge's fact-ledger syntax.
-import { formatCitedFacts } from "@/lib/phase-engine/fact-format";
+import {
+  formatCitedFacts,
+  type CitedFactSignals,
+} from "@/lib/phase-engine/fact-format";
 
 /**
  * The fields of a persisted insight this card actually renders. A `PlantInsight`
@@ -44,7 +47,21 @@ import { formatCitedFacts } from "@/lib/phase-engine/fact-format";
 export type InsightCardData = Pick<
   PlantInsight,
   "id" | "title" | "body" | "severity" | "citedFacts" | "relatedArticleSlugs"
->;
+> & {
+  /**
+   * The manual signal each citation resolved to, from the read layer that built
+   * this projection (`AssessedInsight.citedFactSignals`). It is what lets the
+   * "Based on" chips read an attestation in the SAME words the exit-criteria
+   * drill-down uses for it — all three surfaces sit on `/phase` together, and
+   * one citation must be one sentence across them (ruled 2026-08-12 on #319).
+   *
+   * Optional, and not by accident: resolving a signal is a read of the
+   * assessment's snapshot, which this component has no access to and a fixture
+   * has no reason to carry. Absent, the chips keep the generic self-report
+   * phrasing rather than guessing a signal.
+   */
+  citedFactSignals?: CitedFactSignals;
+};
 
 /**
  * A published wiki article, as the slug index yields it. Declared structurally
@@ -87,7 +104,10 @@ export function InsightCardView({
   linkStatic,
 }: InsightCardViewProps) {
   const severity = severityMeta(insight.severity);
-  const citedFacts = formatCitedFacts(insight.citedFacts);
+  const citedFacts = formatCitedFacts(
+    insight.citedFacts,
+    insight.citedFactSignals
+  );
 
   // Resolve the stored slugs against the live published wiki: only articles
   // that still exist become links (PE-024). No stored slug, or none that still
