@@ -254,17 +254,20 @@ async function dismissPhaseTemplatePromptAction(
     const { user } = await getCurrentSession();
     if (!user?.churchId) return { status: "failed" };
 
-    // A missing or empty field is "the client named nothing", which the service
-    // treats as no guard at all — the pre-#313 behaviour, and the only thing a
-    // JavaScript-free submit of this form could produce.
+    // The hidden input is server-rendered inside this form, so EVERY submit
+    // carries it — a submit with JavaScript, and a plain browser POST of the
+    // progressively-enhanced form alike. A press with no id is therefore not a
+    // client of this panel, and it gets no unguarded decline: it is refused
+    // here rather than passed down as "the client named nothing".
     const posted = formData.get("transitionId");
-    const expectedTransitionId =
-      typeof posted === "string" && posted.length > 0 ? posted : null;
+    if (typeof posted !== "string" || posted.length === 0) {
+      return { status: "failed" };
+    }
 
     const transitionId = await declinePhaseTemplatePrompt({
       churchId: user.churchId,
       userId: user.id,
-      expectedTransitionId,
+      expectedTransitionId: posted,
     });
 
     const decision = decidePhaseTemplateDismissOutcome(transitionId);

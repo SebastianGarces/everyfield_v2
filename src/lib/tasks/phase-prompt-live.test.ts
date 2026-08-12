@@ -377,6 +377,7 @@ test("declining leaves no tasks, and the prompt does not come back", async (t: T
       await declinePhaseTemplatePrompt({
         churchId: fixture.churchId,
         userId: fixture.userId,
+        expectedTransitionId: transitionId,
       }),
       transitionId
     );
@@ -561,6 +562,7 @@ test("an accept after a decline adds nothing, on any device", async (t: TestCont
     await declinePhaseTemplatePrompt({
       churchId: fixture.churchId,
       userId: fixture.userId,
+      expectedTransitionId: transitionId,
     });
 
     const result = await acceptPhaseTemplatePrompt({
@@ -591,7 +593,11 @@ test("declining twice records one answer and stays a decline", async (t: TestCon
       createdAt: new Date("2026-03-02T09:15:00.000Z"),
     });
 
-    const input = { churchId: fixture.churchId, userId: fixture.userId };
+    const input = {
+      churchId: fixture.churchId,
+      userId: fixture.userId,
+      expectedTransitionId: transitionId,
+    };
     assert.equal(await declinePhaseTemplatePrompt(input), transitionId);
     assert.equal(await declinePhaseTemplatePrompt(input), transitionId);
 

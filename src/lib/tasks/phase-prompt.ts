@@ -383,7 +383,7 @@ async function releasePhaseTemplatePromptAnswer(
  * down either way — so those two are not distinguished.
  *
  * A STALE PRESS ANSWERS NOTHING (#313). `expectedTransitionId` is the id the
- * PANEL was showing, and when it is supplied it must equal the plant's current
+ * PANEL was showing, and it is REQUIRED: it must equal the plant's current
  * transition or this call writes no row and returns `null`. Without that guard
  * a prompt left open while the plant moved on — another member advanced it, the
  * phase engine did, an oversight action did — declined the transition the
@@ -395,24 +395,20 @@ async function releasePhaseTemplatePromptAnswer(
  * The id is a GUARD, never an aim. It can only ever match the row this function
  * would have chosen anyway, so a forged value buys a no-op and nothing else —
  * which is why passing it does not weaken "the request cannot choose which
- * transition is declined". Omitting it (or passing `null`) keeps the old
- * behaviour, for a caller that genuinely has no rendered prompt behind it.
+ * transition is declined". There is no opt-out: a caller with no id has no
+ * rendered prompt behind it, and therefore nothing it is entitled to decline.
  */
 export async function declinePhaseTemplatePrompt(input: {
   churchId: string;
   userId: string;
-  /** The transition the prompt being answered was rendered for, if the caller
-   *  has one. A mismatch is refused rather than redirected. */
-  expectedTransitionId?: string | null;
+  /** The transition the prompt being answered was rendered for. A mismatch is
+   *  refused rather than redirected. */
+  expectedTransitionId: string;
 }): Promise<string | null> {
   const transition = await getLatestPhaseTransition(input.churchId);
   if (!transition) return null;
 
-  if (
-    input.expectedTransitionId &&
-    input.expectedTransitionId !== transition.id
-  )
-    return null;
+  if (input.expectedTransitionId !== transition.id) return null;
 
   if (!transition.answeredAt) {
     await claimPhaseTemplatePromptAnswer({
