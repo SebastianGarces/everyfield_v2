@@ -355,6 +355,11 @@ test("the card states the denominator exactly once", () => {
   // preview as the ungrammatical "Average of previous 1" — a bare number with
   // no noun, and a second denominator free to drift from the ruled one.
   //
+  // The term still has to NAME its figure, though: with the count gone it read
+  // "Previous average", which a reader takes as the average OF the previous
+  // meeting — the column immediately to its left. So it carries the plural
+  // noun and no number.
+  //
   // Comments are stripped first, the way rulings 1 and 4 strip them: the JSX
   // above the `<dt>` explains the retired wording and quotes it.
   const card = comparisonCardSource()
@@ -362,22 +367,15 @@ test("the card states the denominator exactly once", () => {
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/\/\/.*$/gm, "");
 
-  const rendered = card.match(/\bpreviousCount\b/g) ?? [];
-  assert.equal(
-    rendered.length,
-    2,
-    "previousCount appears twice in the component and no more: once destructured off the comparison, once passed to the ruled helper"
-  );
-
   assert.doesNotMatch(
     card,
-    /Average of previous/,
-    'the <dt> no longer reads "Average of previous {n}" — the count is the ruled sentence\'s job'
+    /Average of previous\s*\{/,
+    'the <dt> never interpolates the count back in — "Average of previous {n}" is the ruled sentence\'s job'
   );
   assert.match(
     card,
-    /<dt[^>]*>Previous average<\/dt>/,
-    "the term is static, so it cannot render a bare number and cannot drift from the sentence"
+    /<dt[^>]*>\s*Average of previous meetings\s*<\/dt>/,
+    "the term is static and names its own noun, so it cannot render a bare number, cannot drift from the ruled sentence, and cannot be read as the average of the previous meeting"
   );
 });
 

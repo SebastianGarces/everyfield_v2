@@ -120,15 +120,23 @@ export function EvaluationComparisonCard({
           </div>
           <div>
             {/*
-              This label is deliberately static. It used to read "Average of
-              previous {previousCount}", which rendered as the ungrammatical
-              "Average of previous 1" — a bare number with no noun — and stated
-              the denominator a third time on a card that already states it
-              twice: here, and in the ruled sentence three lines below. The
-              count belongs to the sentence that was ruled on; the term of this
-              definition list only has to name the figure beside it.
+              This label is deliberately static, and it names its own noun. It
+              used to read "Average of previous {previousCount}", which
+              rendered as the ungrammatical "Average of previous 1" — a bare
+              number with no noun — and stated the denominator a third time on
+              a card that already states it twice: here, and in the ruled
+              sentence three lines below. The count belongs to the sentence
+              that was ruled on.
+
+              Dropping the count left "Previous average", which reads as the
+              average OF the previous meeting — the figure in the column
+              immediately to its left. Restoring the plural noun without the
+              number keeps the term unambiguous and still leaves the
+              denominator to the one sentence that states it.
             */}
-            <dt className="text-muted-foreground">Previous average</dt>
+            <dt className="text-muted-foreground">
+              Average of previous meetings
+            </dt>
             <dd className="font-semibold">{previousAverage.toFixed(1)}</dd>
           </div>
         </dl>
