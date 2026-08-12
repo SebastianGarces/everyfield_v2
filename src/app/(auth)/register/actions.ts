@@ -1,14 +1,9 @@
 "use server";
 
 import { db } from "@/db";
+import { isUniqueViolation } from "@/db/errors";
 import type { UserRole } from "@/db/schema";
-import {
-  churchPrivacySettings,
-  churches,
-  sendingChurches,
-  sendingNetworks,
-  users,
-} from "@/db/schema";
+import { sendingChurches, sendingNetworks, users } from "@/db/schema";
 import {
   createSession,
   generateSessionToken,
@@ -25,19 +20,20 @@ import {
   bindOpenInvitationTarget,
   invitationActorFromSession,
 } from "@/lib/invitations/core";
+import { churchCreationStatements } from "@/lib/onboarding/create-church";
 import { extractFieldErrors, registerSchema } from "@/lib/validations";
 import type { AccountType } from "@/lib/validations/auth";
 import { eq } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import { redirect } from "next/navigation";
 import {
   BETA_GATE_ERROR,
   BETA_GATE_INVALID_ERROR,
   describeInvitationForRegistration,
   hasValidInvitationBypass,
-  invitationEmailMismatchMessage,
+  invitationActedOnAtRegistration,
   isBetaCodeValid,
   isBetaGateEnabled,
-  registrationEmailMatchesInvitation,
   type RegistrationInvitation,
 } from "./beta-gate";
 
@@ -89,37 +85,45 @@ export async function register(
   // and looked up AFTER the rate limit so a guessed uuid cannot be probed for
   // free (an invitation id doubles as the beta-gate bypass token).
   const invitationId = (formData.get("invitationId") as string | null) || null;
-  const invitation = await describeInvitationForRegistration(invitationId);
 
-  // THE TOKEN IS BOUND TO THE INVITED ADDRESS — RULED 2026-08-04 (#23).
+  // THE TOKEN IS BOUND TO THE INVITED ADDRESS — RULED 2026-08-04 (#23), and
+  // SILENTLY SINCE 2026-08-12 (#304 round 11, Ruling C).
   //
   // An invitation link is a uuid in a URL: it is forwarded, pasted, archived.
-  // Until this check, whoever held one could register under any address they
-  // liked and receive the association meant for somebody else — the form
-  // pre-fills the invited address, but a pre-filled field is a suggestion, and
-  // this action is a POST endpoint that never saw the form. So the address is
-  // re-checked HERE, before the beta gate (a token is also a bypass of it) and
-  // before any account exists. A wrong address is not re-aimed at: the admin
-  // revokes and re-invites, which is the only path that leaves an audit trail
-  // of who was actually invited.
-  if (
-    invitation &&
-    !registrationEmailMatchesInvitation(invitation.inviteeEmail, identifier)
-  ) {
-    return {
-      fieldErrors: {
-        email: invitationEmailMismatchMessage(invitation.inviteeEmail),
-      },
-    };
-  }
+  // Whoever held one could otherwise register under any address they liked and
+  // receive the association meant for somebody else — the form pre-fills the
+  // invited address, but a pre-filled field is a suggestion, and this action is
+  // a POST endpoint that never saw the form.
+  //
+  // `invitationActedOnAtRegistration` is that binding, and it is the ONLY place
+  // this action decides anything about the token: from here down there is one
+  // variable, and a null one means "no invitation", whatever the visitor
+  // submitted. That matters because this endpoint takes no session — a
+  // targeted id, an open id with the wrong address and a guessed uuid must be
+  // indistinguishable in the response, and they are only indistinguishable if
+  // every later branch reads the same null. The mismatch MESSAGE was the last
+  // thing that told them apart, and Ruling C deleted it.
+  const invitation = invitationActedOnAtRegistration(
+    await describeInvitationForRegistration(invitationId),
+    identifier
+  );
 
   // Private-beta gate (server-side enforced). Skipped entirely when the env
   // var is unset/empty. Org-invitation signups (the invitation IS the invite)
   // bypass the code — but only for the address the invitation names, or the
   // link would be a free pass into the beta for anyone it was forwarded to.
   // Validated regardless of client-side visibility.
+  //
+  // The id handed over is `invitation?.id`, never the raw submitted one: a
+  // token this action decided not to act on must not still buy a gate bypass.
+  // `hasValidInvitationBypass` applies the same `isOpenRedeemableInvitation`
+  // rule again on its own read, so this is belt AND braces rather than a
+  // delegation — round 11 exists because those two readers disagreed.
   if (isBetaGateEnabled()) {
-    const bypassed = await hasValidInvitationBypass(invitationId, identifier);
+    const bypassed = await hasValidInvitationBypass(
+      invitation?.id ?? null,
+      identifier
+    );
 
     if (!bypassed) {
       const submittedCode = formData.get("inviteCode") as string | null;
@@ -134,7 +138,11 @@ export async function register(
     }
   }
 
-  // Check if user already exists
+  // Check if user already exists. This SELECT is the LEGIBLE refusal only,
+  // never the concurrency guard — two concurrent registrations both pass it
+  // (memory/invariants.md → Transactions: "SELECT-then-INSERT is not a
+  // concurrency guard"). The real guard is `users_email_unique`, enforced
+  // where the batch below fails and is caught.
   const existingUser = await db
     .select({ id: users.id })
     .from(users)
@@ -143,7 +151,7 @@ export async function register(
 
   if (existingUser.length > 0) {
     await recordAttempt(identifier, ip, "register", false);
-    return { error: "An account with this email already exists" };
+    return { error: DUPLICATE_EMAIL_MESSAGE };
   }
 
   // Hash password
@@ -153,9 +161,17 @@ export async function register(
   // signup: the invitation is what the church gets associated with, and there
   // is nothing to associate until the church exists. So the name is required
   // here even though it is optional for a cold planter signup.
-  const redeeming = invitation?.redeemable ? invitation : null;
+  // No `redeemable` branch here since #304 round 10 (ruled 2026-08-11): a
+  // targeted invitation is `null` out of `describeInvitationForRegistration`,
+  // so an invitation that reached this far is OPEN and redeemable by
+  // definition. The flag was constant true and cost an account-existence
+  // oracle on this public route.
+  //
+  // And it is `invitation`, not the submitted id, which is why THIS branch is
+  // not an oracle either (round 11): "please name your church plant" is only
+  // ever asked of somebody who submitted the address the invitation names.
   const invitedPlanter =
-    redeeming?.accountType === "planter" && accountType === "planter";
+    invitation?.accountType === "planter" && accountType === "planter";
 
   if (invitedPlanter && !organizationName) {
     return {
@@ -165,34 +181,81 @@ export async function register(
     };
   }
 
-  // Create entity + user based on account type
-  // Planters sign up without a church — they create one later from the dashboard
-  const { role, churchId, sendingChurchId, sendingNetworkId } =
-    await createAccountEntities(
-      accountType,
-      organizationName ?? null,
-      invitedPlanter
-    );
+  // Create entity + user + privacy settings as ONE `db.batch([...])` — a Neon
+  // batched transaction, all-or-nothing (`src/db/index.ts`, and the exact shape
+  // #198 gave `createChurchBasics`). Every id is minted up front so each
+  // statement can name the rows the others create. Two failure modes this
+  // closes, both previously reachable:
+  //
+  //  - two concurrent registrations of one address both passed the SELECT
+  //    above; the loser's user INSERT threw on `users_email_unique` AFTER its
+  //    church had committed — a 500 for the visitor and an orphan `churches`
+  //    row nobody is linked to. In one batch the church rolls back with the
+  //    user, and the catch below turns the violation into the same legible
+  //    refusal the SELECT gives.
+  //
+  //  - a failure at the privacy insert left a planter LINKED to a church with
+  //    no `church_privacy_settings` row, which no product path can repair
+  //    (`createChurchBasics` refuses a planter who already has a church) and
+  //    every `canAccessFeatureData` read then answered from a missing row.
+  //    In one batch the church rolls back too, and the retry starts clean.
+  //
+  // Planters sign up without a church — they create one later from the
+  // dashboard — so both statement lists may be empty.
+  const userId = crypto.randomUUID();
+  const account = createAccountEntities(
+    accountType,
+    organizationName ?? null,
+    userId,
+    invitedPlanter
+  );
+  const { role, churchId, sendingChurchId, sendingNetworkId } = account;
 
-  const [user] = await db
-    .insert(users)
-    .values({
-      email: email.toLowerCase(),
-      passwordHash,
-      name,
-      role,
-      churchId,
-      sendingChurchId,
-      sendingNetworkId,
-    })
-    .returning();
+  const statements: [BatchItem<"pg">, ...BatchItem<"pg">[]] = [
+    db
+      .insert(users)
+      .values({
+        id: userId,
+        email: identifier,
+        passwordHash,
+        name,
+        role,
+        // For an invited planter the church link is written by the
+        // `linkUserToChurchFilter` compare-and-set in `account.linkStatements`
+        // — the same statement onboarding's step 1 batches — never by this
+        // insert, so the link contract has exactly one spelling (ruling
+        // 408-4B). `account.churchId` still names the church for the
+        // invitation redemption below.
+        churchId: null,
+        sendingChurchId,
+        sendingNetworkId,
+      })
+      .returning({ id: users.id }),
+    // For an invited planter: the WHOLE church-creation tuple, verbatim,
+    // AFTER the users insert its compare-and-set and privacy row reference.
+    // The `ON CONFLICT DO NOTHING` on the privacy row comes with the shared
+    // statements (#198): a retry racing its own predecessor cannot dead-end
+    // on the unique index.
+    ...account.linkStatements,
+  ];
 
-  // Create default privacy settings for church plants
-  if (churchId) {
-    await db.insert(churchPrivacySettings).values({
-      churchId,
-      updatedBy: user.id,
-    });
+  // The org entity goes FIRST — the users FKs point at it. (`unshift` rather
+  // than a spread literal only because `db.batch` wants a provably non-empty
+  // tuple, which the always-present users insert supplies.)
+  statements.unshift(...account.statements);
+
+  try {
+    await db.batch(statements);
+  } catch (error) {
+    // The unique index losing a duplicate-address race is an expected outcome
+    // with a message, not a crash. Anything else — including any OTHER unique
+    // violation — is a real failure and stays one: nothing was written, the
+    // batch rolled back whole.
+    if (isUniqueViolation(error, USERS_EMAIL_UNIQUE)) {
+      await recordAttempt(identifier, ip, "register", false);
+      return { error: DUPLICATE_EMAIL_MESSAGE };
+    }
+    throw error;
   }
 
   // Redeem the invitation now that the organization it associates exists.
@@ -200,9 +263,9 @@ export async function register(
   // invitation still pending, which the planter can answer later — the one
   // thing it must never leave behind is an association without an accepted
   // invitation (memory/invariants.md → Multi-Tenancy).
-  if (redeeming) {
-    await redeemRegistrationInvitation(redeeming, {
-      id: user.id,
+  if (invitation) {
+    await redeemRegistrationInvitation(invitation, {
+      id: userId,
       role,
       churchId,
       sendingChurchId,
@@ -212,7 +275,7 @@ export async function register(
 
   // Create session
   const token = generateSessionToken();
-  const session = await createSession(token, user.id);
+  const session = await createSession(token, userId);
 
   // Set session cookie
   await setSessionCookie(token, session.expiresAt);
@@ -223,24 +286,44 @@ export async function register(
   redirect("/dashboard");
 }
 
+const DUPLICATE_EMAIL_MESSAGE = "An account with this email already exists";
+
+/** The unique constraint on `users.email` — the REAL duplicate-account guard. */
+const USERS_EMAIL_UNIQUE = "users_email_unique";
+
 /**
- * Create the appropriate organizational entity based on account type.
- * Returns the role and FK values to set on the user.
+ * Plan the organizational entity for the account type: the role and FK values
+ * to set on the user, plus the entity's statements for the caller's batch —
+ * never awaited here, so the entity, the user, the church link and the privacy
+ * row commit or roll back together. Ids are minted up front
+ * (`crypto.randomUUID()`, as `createChurchDeps.newChurchId` does) so each
+ * statement can reference rows that do not exist yet.
  *
  * Planters sign up without creating a church — they get free access to
  * Phase 0 content and the Wiki. They create their church from the dashboard
  * when they're ready.
  */
-async function createAccountEntities(
+function createAccountEntities(
   accountType: AccountType,
   organizationName: string | null,
+  userId: string,
   createChurchForPlanter = false
-): Promise<{
+): {
   role: UserRole;
   churchId: string | null;
   sendingChurchId: string | null;
   sendingNetworkId: string | null;
-}> {
+  /**
+   * Statements the users FKs point at — batched BEFORE its insert. Empty for
+   * planters: an invited planter's church tuple lives in `linkStatements`.
+   */
+  statements: BatchItem<"pg">[];
+  /**
+   * Statements that need the users row to exist — batched AFTER its insert.
+   * For an invited planter this is `churchCreationStatements` whole.
+   */
+  linkStatements: BatchItem<"pg">[];
+} {
   switch (accountType) {
     case "planter": {
       // An INVITED planter is the exception: the invitation exists to associate
@@ -249,16 +332,33 @@ async function createAccountEntities(
       // by the accept path, guarded on the invitation reading `accepted`, so
       // the plant can never be bound to an org without an acceptance behind it.
       if (createChurchForPlanter && organizationName) {
-        const [church] = await db
-          .insert(churches)
-          .values({ name: organizationName })
-          .returning();
+        // The church-creation contract is stated ONCE, by
+        // `churchCreationStatements` (`src/lib/onboarding/create-church.ts`,
+        // ruling 408-4B), and spread here WHOLE, in the tuple's own order —
+        // no individual statement is named, so a statement added to the
+        // contract reaches this path with no edit here. The whole tuple goes
+        // AFTER the users insert, which is FK-safe: `churches` references no
+        // users column, and the users insert writes `churchId: null` (the
+        // tuple's own compare-and-set writes the link), so register and
+        // onboarding's step 1 issue identical church-creation SQL.
+        const churchId = crypto.randomUUID();
 
         return {
           role: "planter",
-          churchId: church.id,
+          churchId,
           sendingChurchId: null,
           sendingNetworkId: null,
+          statements: [],
+          linkStatements: [
+            ...churchCreationStatements({
+              churchId,
+              plantedBy: userId,
+              name: organizationName,
+              city: null,
+              stateRegion: null,
+              country: null,
+            }),
+          ],
         };
       }
 
@@ -269,6 +369,8 @@ async function createAccountEntities(
         churchId: null,
         sendingChurchId: null,
         sendingNetworkId: null,
+        statements: [],
+        linkStatements: [],
       };
     }
 
@@ -279,16 +381,19 @@ async function createAccountEntities(
         );
       }
       // Create a new sending church (independent, no network)
-      const [sendingChurch] = await db
-        .insert(sendingChurches)
-        .values({ name: organizationName })
-        .returning();
+      const sendingChurchId = crypto.randomUUID();
 
       return {
         role: "sending_church_admin",
         churchId: null,
-        sendingChurchId: sendingChurch.id,
+        sendingChurchId,
         sendingNetworkId: null,
+        statements: [
+          db
+            .insert(sendingChurches)
+            .values({ id: sendingChurchId, name: organizationName }),
+        ],
+        linkStatements: [],
       };
     }
 
@@ -297,16 +402,19 @@ async function createAccountEntities(
         throw new Error("Organization name is required for network accounts");
       }
       // Create a new sending network
-      const [network] = await db
-        .insert(sendingNetworks)
-        .values({ name: organizationName })
-        .returning();
+      const sendingNetworkId = crypto.randomUUID();
 
       return {
         role: "network_admin",
         churchId: null,
         sendingChurchId: null,
-        sendingNetworkId: network.id,
+        sendingNetworkId,
+        statements: [
+          db
+            .insert(sendingNetworks)
+            .values({ id: sendingNetworkId, name: organizationName }),
+        ],
+        linkStatements: [],
       };
     }
   }

@@ -1,6 +1,5 @@
 "use client";
 
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -11,15 +10,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
-  isBackwardProgression,
   STATUS_LABELS,
   validateStatusTransition,
 } from "@/lib/people/status.shared";
 import type { PersonStatus, PersonWithTags } from "@/lib/people/types";
-import { AlertTriangleIcon, ArrowDownIcon } from "lucide-react";
 import { useState } from "react";
+import { StatusTransitionFields } from "./status-transition-fields";
 
 interface StatusConfirmationModalProps {
   person: PersonWithTags;
@@ -32,7 +29,7 @@ interface StatusConfirmationModalProps {
 /**
  * A simplified status change modal for pipeline drag-drop.
  * The new status is pre-determined (by the target column), so there's no dropdown.
- * Shows warnings and allows adding an optional reason/note.
+ * Shows warnings and allows adding a reason/note.
  */
 export function StatusConfirmationModal({
   person,
@@ -44,9 +41,7 @@ export function StatusConfirmationModal({
   const [reason, setReason] = useState("");
 
   // Get validation result for the transition
-  const transition = validateStatusTransition(person.status, newStatus, person);
-
-  const isMovingBackward = isBackwardProgression(person.status, newStatus);
+  const transition = validateStatusTransition(person.status, newStatus);
 
   const handleSubmit = () => {
     const reasonValue = reason.trim() || undefined;
@@ -83,51 +78,14 @@ export function StatusConfirmationModal({
             </div>
           </div>
 
-          {/* Backward Movement Warning */}
-          {isMovingBackward && (
-            <Alert className="border-amber-500/50 bg-amber-50 dark:bg-amber-950/20">
-              <ArrowDownIcon className="h-4 w-4 text-amber-600" />
-              <AlertDescription className="text-amber-800 dark:text-amber-200">
-                <strong>Moving backward in the pipeline.</strong> This person
-                will go from {STATUS_LABELS[person.status]} back to{" "}
-                {STATUS_LABELS[newStatus]}. Please provide a reason below.
-              </AlertDescription>
-            </Alert>
-          )}
-
-          {/* Other Warnings (skipping stages, etc.) */}
-          {!isMovingBackward && transition.warnings.length > 0 && (
-            <div className="space-y-2">
-              {transition.warnings.map((warning, index) => (
-                <Alert key={index} variant="default">
-                  <AlertTriangleIcon className="h-4 w-4 text-amber-500" />
-                  <AlertDescription>{warning}</AlertDescription>
-                </Alert>
-              ))}
-            </div>
-          )}
-
-          {/* Reason - Required for all status changes */}
-          <div className="space-y-2">
-            <Label htmlFor="reason">
-              Reason for change <span className="text-destructive">*</span>
-            </Label>
-            <Textarea
-              id="reason"
-              placeholder="Enter a reason for this status change..."
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              rows={3}
-              className={
-                isMovingBackward
-                  ? "border-amber-500/50 focus-visible:ring-amber-500"
-                  : ""
-              }
-            />
-            <p className="text-muted-foreground text-xs">
-              This will be recorded in the activity timeline.
-            </p>
-          </div>
+          {/* Warnings + required reason — shared with the dropdown modal */}
+          <StatusTransitionFields
+            from={person.status}
+            to={newStatus}
+            transition={transition}
+            reason={reason}
+            onReasonChange={setReason}
+          />
         </div>
 
         <DialogFooter>

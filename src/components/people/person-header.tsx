@@ -23,10 +23,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { Household } from "@/db/schema";
+import { formatDateWithoutWeekday } from "@/lib/datetime";
 import { STATUS_BADGE_CONFIG } from "@/lib/people/status-colors";
 import type { Person, PersonStatus } from "@/lib/people/types";
 import { cn } from "@/lib/utils";
-import { format } from "date-fns";
 import {
   ArrowRightLeft,
   Calendar,
@@ -96,7 +96,7 @@ export function PersonHeader({
             <span>
               Joined on{" "}
               {person.createdAt
-                ? format(new Date(person.createdAt), "MMM d, yyyy")
+                ? formatDateWithoutWeekday(new Date(person.createdAt), "short")
                 : "Unknown"}
             </span>
           </div>

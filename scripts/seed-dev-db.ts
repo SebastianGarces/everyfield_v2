@@ -7,12 +7,40 @@
  *
  * Usage:
  *   bun run scripts/seed-dev-db.ts
- *   bun run scripts/seed-dev-db.ts --clean-only  # Only clean, don't seed
+ *   bun run scripts/seed-dev-db.ts --clean-only          # Only clean, don't seed
+ *   pnpm exec tsx scripts/seed-dev-db.ts --oversight-orgs-only
+ *     ...with SEED_ADMIN_PASSWORD recorded in .env.local — see below.
  *
  * The wipe below is not scoped to the rows this file creates — see
  * `cleanDatabase()`. It refuses to run against a database holding the alpha
  * cohort's accounts unless `--allow-protected-db` is passed.
+ *
+ * EVERY MODE ASKS THE SENTINEL BEFORE IT WRITES (#304, ruled 2026-08-10).
+ * `--oversight-orgs-only` deletes nothing, and deleting nothing is not the same
+ * as being safe on a database other people use: the mode WRITES two real,
+ * enabled oversight logins and RE-KEYS them when the addresses already exist.
+ * So it asks `decideSeedAccounts` — the same sentinel question the wipe asks —
+ * and refuses with NO override. Its password comes
+ * from `SEED_ADMIN_PASSWORD` and has no default; unset is a refusal, not a
+ * fallback. No mode of this script has a working password for a protected
+ * database.
+ *
+ * IT RE-KEYS, IT DOES NOT SKIP. The writes are upserts on `users.email`: an
+ * existing address gets the password you passed, plus its role and org FKs put
+ * back. `onConflictDoNothing` here meant a second run exited 0 announcing a
+ * password it had not set while the old one still opened the account.
+ *
+ * THE PASSWORD HAS A HOME: `.env.local`, which this file loads before it reads
+ * the variable. A credential removed from the repository still needs a route,
+ * or the fixture it opens is reachable by exactly one shell. Passing the value
+ * inline works and prints a warning saying what it costs. See
+ * `src/lib/dev-seed/protected-database.ts`.
+ *
+ * The rounds behind all of this are in `memory/contracts/db.md` → "The dev-seed
+ * wipe"; the rules themselves are in `memory/invariants.md` → Dev Seeds.
  */
+
+import { readFileSync } from "node:fs";
 
 import { neon } from "@neondatabase/serverless";
 import { config } from "dotenv";
@@ -24,23 +52,58 @@ import {
   churches,
   launchEvents,
   launches,
+  sendingChurches,
+  sendingNetworks,
   users,
   type NewChurch,
   type NewUser,
 } from "../src/db/schema";
 import { hashPassword } from "../src/lib/auth/password";
 import {
+  oversightAdminSeeds,
+  oversightAdminUpsert,
+} from "../src/lib/dev-seed/oversight-admin-upsert";
+import {
   ALLOW_PROTECTED_DB_FLAG,
+  decideSeedAccounts,
   decideWipe,
   matchProtectedAccounts,
+  SEED_ADMIN_PASSWORD_ENV,
+  SEED_ENV_FILE,
+  unrecordedPasswordNotice,
 } from "../src/lib/dev-seed/protected-database";
 
-// Load environment variables for scripts
-config({ path: ".env.local" });
+// Load environment variables for scripts.
+//
+// This is also the route by which `SEED_ADMIN_PASSWORD` reaches the additive
+// mode without anyone typing it on a command line: `.env.local` is gitignored
+// and machine-local, so recording it there keeps the credential out of the
+// repository AND leaves it somewhere a later verifier can read.
+config({ path: SEED_ENV_FILE });
+
+/** The env file's text, or `undefined` when there is no such file. */
+function readEnvFileText(file: string): string | undefined {
+  try {
+    return readFileSync(file, "utf8");
+  } catch {
+    return undefined;
+  }
+}
 
 // Parse command line args
 const cleanOnly = process.argv.includes("--clean-only");
 const allowProtectedDb = process.argv.includes(ALLOW_PROTECTED_DB_FLAG);
+/**
+ * Upsert the oversight orgs and their two admins, and do NOTHING else — no
+ * wipe, no churches, no launches.
+ *
+ * Deleting nothing is not the same as being safe anywhere: this mode writes
+ * LOGINS, and re-keys them when they already exist. It asks the sentinel first
+ * and refuses on a protected database with no override, and it takes its
+ * password from `SEED_ADMIN_PASSWORD`. See `seedOversightOrgs` and
+ * `decideSeedAccounts`.
+ */
+const oversightOrgsOnly = process.argv.includes("--oversight-orgs-only");
 
 // Database connection
 const connectionString = process.env.DATABASE_URL;
@@ -150,7 +213,15 @@ async function foreignKeys(): Promise<ForeignKey[]> {
  * points at something already in the set, transitively. A row that cannot be
  * reached from a user or a church is not part of the fixture and is left alone
  * — `sending_networks`, `sending_churches` and `wiki_sections` are parents of
- * the fixture, not dependents of it, and this script never created them.
+ * the fixture, not dependents of it.
+ *
+ * Since #304 round 6 the seed DOES create one of each oversight org, so that a
+ * `sending_church_admin` has somewhere to belong. They stay outside the wipe
+ * anyway: deleting them would take org rows this script did not create (every
+ * hand-registered network, and every org an earlier harness run left behind).
+ * The seed's own two rows carry PINNED ids inserted with
+ * `onConflictDoNothing`, so surviving the wipe costs nothing — a re-seed
+ * re-inserts the same keys instead of accumulating duplicates.
  *
  * Self-referencing keys (`ministry_teams.reports_to_team_id` and friends) are
  * dropped from the ordering: `DELETE FROM t` removes the referencing rows in
@@ -285,6 +356,31 @@ async function assertDatabaseIsWipeable(): Promise<void> {
 }
 
 /**
+ * Refuse to write an ACCOUNT on a database people share, and refuse to write one
+ * with a password this repository knows (#304 round 8, ruled 2026-08-10).
+ *
+ * The same query as `assertDatabaseIsWipeable` — the sentinel question does not
+ * change with the mode asking it, only the answer's consequence does — handed to
+ * `decideSeedAccounts`, whose refusals have no override. Returns the password to
+ * hash, so there is no path through this function that leaves the caller holding
+ * a default.
+ *
+ * A query that throws propagates and aborts the run, for the reason the wipe's
+ * guard does: an unanswered question about which database this is, is a no.
+ */
+async function passwordForSeededAccounts(): Promise<string> {
+  const rows = await db.select({ email: users.email }).from(users);
+  const decision = decideSeedAccounts({
+    accountsFound: matchProtectedAccounts(rows.map((row) => row.email)),
+    password: process.env[SEED_ADMIN_PASSWORD_ENV],
+  });
+
+  if (decision.verdict === "refuse") throw new Error(decision.message);
+
+  return decision.password;
+}
+
+/**
  * Wipe the fixture — every user and every church, not only the seeded ones.
  *
  * The guard above runs first, before the FK graph is even read: nothing here is
@@ -389,8 +485,47 @@ const DEV_PASSWORD = "password123";
  * nine literals to keep in step. Docs that hand an agent a login —
  * `.claude/skills/browser-validation/SKILL.md` above all — quote these
  * addresses, so a change here is a change there.
+ *
+ * `OVERSIGHT_ADMIN_EMAILS` spells two of them out instead, because this file
+ * cannot be imported; `oversightAdminSeeds()` throws rather than let the two
+ * lists drift apart quietly.
  */
 const DEV_EMAIL_DOMAIN = "everyfield.app";
+
+/**
+ * The one oversight ORG the seed owns, with PINNED ids (#304 round 6).
+ *
+ * Until now this script created no `sending_churches` row at all, which had a
+ * consequence nobody had written down: the whole sending-church-admin half of
+ * the product was unreachable by any real login. The dev database held exactly
+ * two oversight accounts, both `network_admin`, and `sending_church_admin` —
+ * a role with its own settings screen, its own association view and its own
+ * leave dialog — had zero rows. A surface no seeded account can open is a
+ * surface no browser validation can cover, so #304's WS3 shipped unphotographed
+ * and the G3 gate failed on evidence that could not exist.
+ *
+ * The ids are pinned and the inserts are `onConflictDoNothing`, which is what
+ * keeps the old property true in the way that matters. `planWipe()` reaches
+ * these tables from neither root, so the wipe still does not delete them — and
+ * because a re-seed re-inserts the same primary keys, it does not accumulate a
+ * second copy either. Widening the wipe instead would have deleted org rows
+ * this script did not create, which is the one thing the reachability rule
+ * exists to prevent.
+ *
+ * The sending church is deliberately left with NO network. Unassociated IS the
+ * WS3 surface — an admin answering an invitation — and the associated view with
+ * its leave control is one accept away, reached the way a user reaches it.
+ */
+const SEED_SENDING_NETWORK = {
+  id: "d1000000-0000-4000-8000-000000000001",
+  name: "Dev Church Planting Network",
+} as const;
+
+const SEED_SENDING_CHURCH = {
+  id: "d2000000-0000-4000-8000-000000000002",
+  name: "Dev Sending Church",
+  sendingNetworkId: null,
+} as const;
 
 interface SeedUser extends Omit<NewUser, "passwordHash" | "churchId"> {
   churchIndex: number | null; // Index into SEED_CHURCHES, null for network admin
@@ -403,6 +538,18 @@ const SEED_USERS: SeedUser[] = [
     name: "Network Admin",
     role: "network_admin",
     churchIndex: null,
+    sendingNetworkId: SEED_SENDING_NETWORK.id,
+  },
+  // Sending church admin (no church of their own — they oversee plants).
+  // Their `sending_church_id` is what `getAccessibleChurchIds` reads, and it is
+  // also what makes `/settings/association` render the admin's view rather than
+  // the planter's. Without this row that branch had no way to be opened.
+  {
+    email: `sending-church-admin@${DEV_EMAIL_DOMAIN}`,
+    name: "Sarah Sending",
+    role: "sending_church_admin",
+    churchIndex: null,
+    sendingChurchId: SEED_SENDING_CHURCH.id,
   },
   // Planters (one per church)
   {
@@ -461,6 +608,66 @@ const SEED_USERS: SeedUser[] = [
 // Seed Procedure
 // ============================================================================
 
+/**
+ * The oversight orgs and the two admins who belong to them — every write here
+ * is an upsert, and NOTHING here deletes.
+ *
+ * WHY IT EXISTS. The full seed's wipe takes every user and every church
+ * unscoped, so "just re-seed to get the fixture" is not an option on any
+ * database worth keeping; the alternative — hand-inserting rows during a
+ * validation run — is the reproducibility failure ruled out in round 4 of #304.
+ * A committed, idempotent, additive script path is neither.
+ *
+ * WHAT IT IS NOT. It is not "the safe mode", and this docblock said so for three
+ * rounds. The last writes below SET A PASSWORD ON TWO LOGINS, which on a
+ * database real people use are live credentials no matter how carefully nothing
+ * was deleted — and since round 9 they re-key an account that already exists
+ * rather than skipping it, so the reach is larger, not smaller. Its caller must
+ * therefore have cleared `decideSeedAccounts` — the sentinel, then the password
+ * — and the `passwordHash` parameter is how that is enforced here: this
+ * function cannot mint one, so there is no way to reach the writes without
+ * having answered both questions first.
+ */
+async function insertOversightOrgs(): Promise<void> {
+  await db
+    .insert(sendingNetworks)
+    .values(SEED_SENDING_NETWORK)
+    .onConflictDoNothing();
+  await db
+    .insert(sendingChurches)
+    .values(SEED_SENDING_CHURCH)
+    .onConflictDoNothing();
+
+  console.log(`   [network]        ${SEED_SENDING_NETWORK.name}`);
+  console.log(`   [sending church] ${SEED_SENDING_CHURCH.name}`);
+}
+
+/**
+ * Restore BOTH sides of the oversight fixture, keyed by ADDRESS.
+ *
+ * One command has to leave a usable oversight fixture behind, and there are two
+ * halves to it: the sending church that issues an invitation, and the network
+ * that issues the other kind. Round 8 wrote only the `sending_church_admin`, so
+ * `admin@everyfield.app` kept whatever `sending_network_id` it happened to have
+ * — NULL on the preview's database, which makes `/oversight/invitations` render
+ * "Set up your network first" and hands a verifier no way to send anything.
+ *
+ * Which two rows those are, and the refusal when the fixture no longer carries
+ * one, is `oversightAdminSeeds()`; the statement is `oversightAdminUpsert()`.
+ * Both live in `src/lib/dev-seed/oversight-admin-upsert.ts` so the tests can
+ * exercise them directly instead of reading this file as text.
+ */
+async function seedOversightOrgs(passwordHash: string): Promise<void> {
+  await insertOversightOrgs();
+
+  const now = new Date();
+
+  for (const admin of oversightAdminSeeds(SEED_USERS)) {
+    await oversightAdminUpsert(db, admin, passwordHash, now);
+    console.log(`   [${admin.role}] ${admin.email}`);
+  }
+}
+
 async function seedDatabase(): Promise<void> {
   console.log("🌱 Seeding database...\n");
 
@@ -481,7 +688,16 @@ async function seedDatabase(): Promise<void> {
   }
   console.log();
 
-  // 2. Create users
+  // 2. Create the oversight orgs the admins point at.
+  //
+  // These two tables are outside the wipe (see `planWipe`), so the inserts are
+  // idempotent on their pinned primary keys rather than unconditional — a
+  // re-seed must not leave a second "Dev Sending Church" behind.
+  console.log("🏛️  Creating oversight orgs...");
+  await insertOversightOrgs();
+  console.log();
+
+  // 3. Create users
   console.log("👥 Creating users...");
   const passwordHash = await hashPassword(DEV_PASSWORD);
 
@@ -492,6 +708,8 @@ async function seedDatabase(): Promise<void> {
     passwordHash,
     churchId:
       user.churchIndex !== null ? createdChurches[user.churchIndex].id : null,
+    sendingChurchId: user.sendingChurchId ?? null,
+    sendingNetworkId: user.sendingNetworkId ?? null,
   }));
 
   const createdUsers = await db.insert(users).values(usersToCreate).returning();
@@ -503,7 +721,7 @@ async function seedDatabase(): Promise<void> {
   }
   console.log();
 
-  // 3. Create launches (#305 / LS-001)
+  // 4. Create launches (#305 / LS-001)
   console.log("🚀 Creating launches...");
   for (const seed of SEED_LAUNCHES) {
     const church = createdChurches[seed.churchIndex];
@@ -550,12 +768,34 @@ async function seedDatabase(): Promise<void> {
   console.log(
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   );
-  console.log(`   Password for all users: ${DEV_PASSWORD}`);
+  console.log(`   Password for the accounts on THIS database: ${DEV_PASSWORD}`);
   console.log();
-  console.log(`   Network Admin:  admin@${DEV_EMAIL_DOMAIN}`);
   console.log(`   Planter:        planter1@${DEV_EMAIL_DOMAIN}`);
   console.log(`   Coach:          coach1@${DEV_EMAIL_DOMAIN}`);
   console.log(`   Team Member:    team1@${DEV_EMAIL_DOMAIN}`);
+  console.log();
+  // One credential story per address. This run wiped and rebuilt THIS database,
+  // so the two oversight admins carry `password123` here like everyone else —
+  // but no database anyone else uses is ever full-seeded, and on those the only
+  // thing that sets their password is `--oversight-orgs-only`. Saying "password
+  // for all users" and then listing these two told a verifier on a preview to
+  // try a password that has never opened those accounts there.
+  console.log(`   The two OVERSIGHT admins below carry ${DEV_PASSWORD} HERE,`);
+  console.log(`   because this run rebuilt this database from empty. Anywhere`);
+  console.log(`   else — a preview reads the shared development branch, which`);
+  console.log(
+    `   is never full-seeded — their password is whatever was set by`
+  );
+  console.log(
+    `   ${SEED_ADMIN_PASSWORD_ENV} (recorded in ${SEED_ENV_FILE}) via:`
+  );
+  console.log(
+    `     pnpm exec tsx scripts/seed-dev-db.ts --oversight-orgs-only\n`
+  );
+  console.log(`   Network Admin:        admin@${DEV_EMAIL_DOMAIN}`);
+  console.log(
+    `   Sending Church Admin: sending-church-admin@${DEV_EMAIL_DOMAIN}`
+  );
   console.log(
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
   );
@@ -567,6 +807,38 @@ async function seedDatabase(): Promise<void> {
 
 async function main(): Promise<void> {
   try {
+    // Checked BEFORE `cleanDatabase()`, which is the whole point: this mode
+    // must never reach the wipe.
+    if (oversightOrgsOnly) {
+      // ...and the sentinel is asked before THIS mode writes anything either
+      // (#304 round 8). It throws on refuse, which `main`'s catch turns into a
+      // non-zero exit, so a protected database gets an error and no rows — not
+      // a warning and an oversight admin account.
+      const password = await passwordForSeededAccounts();
+
+      console.log("🏛️  Upserting oversight orgs (no wipe, no other rows)...");
+      await seedOversightOrgs(await hashPassword(password));
+      console.log(
+        `\n   Password: the ${SEED_ADMIN_PASSWORD_ENV} you passed (not printed)`
+      );
+
+      // ...and SAY SO when nothing recorded it (#304 round 10). The mode has
+      // just re-keyed two logins; if the value lives only in this shell, the
+      // next person to validate in a browser cannot sign in, which is precisely
+      // how the fixture was stranded between rounds 8 and 10. Never printed —
+      // the notice names the file and the key, and the operator holds the
+      // value.
+      const notice = unrecordedPasswordNotice(
+        readEnvFileText(SEED_ENV_FILE),
+        password
+      );
+      console.log(
+        notice ? `\n${notice}\n` : `   Recorded in ${SEED_ENV_FILE}\n`
+      );
+
+      process.exit(0);
+    }
+
     await cleanDatabase();
 
     if (!cleanOnly) {

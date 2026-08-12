@@ -7,6 +7,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import type { Interview, InterviewResult, InterviewStatus } from "@/db/schema";
+import { formatDateWithoutWeekday } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
 import { AlertTriangle, Check, ChevronDown, X } from "lucide-react";
 import { useState } from "react";
@@ -98,13 +99,8 @@ function InterviewCard({
 }) {
   const [isOpen, setIsOpen] = useState(isLatest);
 
-  const formattedDate = new Date(interview.interviewDate).toLocaleDateString(
-    "en-US",
-    {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    }
+  const formattedDate = formatDateWithoutWeekday(
+    new Date(interview.interviewDate)
   );
 
   const resultInfo = RESULT_LABELS[interview.overallResult];

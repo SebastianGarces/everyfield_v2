@@ -8,6 +8,7 @@
 // ============================================================================
 
 import { formatDateTime } from "@/lib/datetime";
+import { meetingTypeLabel } from "@/lib/meetings/labels";
 
 export interface MergeFieldDefinition {
   /** The field token (without braces), e.g. "first_name" */
@@ -217,15 +218,13 @@ export function buildMeetingMergeData(meeting: {
   locationName: string | null;
   locationAddress: string | null;
 }): Record<string, string> {
-  const typeLabels: Record<string, string> = {
-    vision_meeting: "Vision Meeting",
-    orientation: "Orientation",
-    team_meeting: "Team Meeting",
-  };
+  // Canonical map (407-4-1): the type may have arrived from an older row,
+  // so the accessor falls back to the raw token exactly as the local copy did.
+  const typeLabel = meetingTypeLabel(meeting.type);
 
   return {
-    meeting_title: meeting.title ?? typeLabels[meeting.type] ?? meeting.type,
-    meeting_type: typeLabels[meeting.type] ?? meeting.type,
+    meeting_title: meeting.title ?? typeLabel,
+    meeting_type: typeLabel,
     // Zone-pinned: this runs both on the server (sending mail) and inside the
     // client preview on /meetings/[id]. A locale-default format would put a
     // different time in the SSR markup than in the hydrated preview — and a

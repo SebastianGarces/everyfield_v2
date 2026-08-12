@@ -8,10 +8,11 @@
 
 import { Document, Paragraph, TextRun } from "docx";
 
+import { churchNameOf } from "../render-text";
 import type { DocumentMergeValues } from "../types";
 
 export function buildFollowUpLetter(values: DocumentMergeValues): Document {
-  const churchName = values.church_name || "Our Church";
+  const churchName = churchNameOf(values);
   const signOff = values.pastor_name || `The ${churchName} Team`;
 
   const body: string[] = [

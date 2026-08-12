@@ -1,6 +1,7 @@
 import { cache } from "react";
-import { eq, and, gt, lt } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/db";
+import { getSessionToken } from "./cookies";
 import {
   sessions,
   users,
@@ -13,7 +14,6 @@ import {
 // Constants
 const SESSION_EXPIRY_DAYS = 30;
 const SESSION_REFRESH_THRESHOLD_DAYS = 15;
-const FRESH_SESSION_MINUTES = 10;
 
 // Encoding helpers
 const encodeHexLowerCase = (bytes: Uint8Array): string => {
@@ -99,6 +99,8 @@ export async function createSession(
       userAgent: metadata.userAgent,
       country: metadata.country,
       city: metadata.city,
+      // No reader yet: the freshness control is deliberately unwired until
+      // the first sensitive op ships (ruled 405-2b, 2026-08-12).
       fresh: true,
     })
     .returning();
@@ -181,86 +183,11 @@ export async function invalidateSession(sessionId: string): Promise<void> {
 }
 
 /**
- * Invalidate all sessions for a user
- * Useful for password changes, account compromise, etc.
- * @param userId - The user's ID
- */
-export async function invalidateUserSessions(userId: string): Promise<void> {
-  await db.delete(sessions).where(eq(sessions.userId, userId));
-}
-
-/**
- * Get all active sessions for a user
- * Useful for "manage sessions" UI
- * @param userId - The user's ID
- * @returns Array of active sessions
- */
-export async function getUserSessions(userId: string): Promise<Session[]> {
-  return db
-    .select()
-    .from(sessions)
-    .where(
-      and(eq(sessions.userId, userId), gt(sessions.expiresAt, new Date()))
-    );
-}
-
-/**
- * Mark a session as no longer fresh
- * @param sessionId - The hashed session ID from the database
- */
-export async function markSessionStale(sessionId: string): Promise<void> {
-  await db
-    .update(sessions)
-    .set({ fresh: false })
-    .where(eq(sessions.id, sessionId));
-}
-
-/**
- * Check if a session is fresh (for sensitive operations)
- * A session is fresh if it was created within maxAgeMinutes
- * @param session - The session to check
- * @param maxAgeMinutes - Maximum age in minutes (default: 10)
- */
-export function isSessionFresh(
-  session: Session,
-  maxAgeMinutes: number = FRESH_SESSION_MINUTES
-): boolean {
-  if (!session.fresh) {
-    return false;
-  }
-
-  const maxAge = maxAgeMinutes * 60 * 1000;
-  const sessionAge = Date.now() - session.createdAt.getTime();
-
-  return sessionAge < maxAge;
-}
-
-/**
- * Delete expired sessions from the database
- * Can be called from a cron job or background task
- */
-export async function cleanupExpiredSessions(): Promise<number> {
-  const result = await db
-    .delete(sessions)
-    .where(lt(sessions.expiresAt, new Date()))
-    .returning({ id: sessions.id });
-
-  return result.length;
-}
-
-// Import cookies module lazily to avoid circular dependencies
-// and to ensure it's only loaded in server context
-async function getCookiesModule() {
-  return import("./cookies");
-}
-
-/**
  * Get the current session and user (cached per request)
  * Uses React.cache() for request-level deduplication
  */
 export const getCurrentSession = cache(
   async (): Promise<SessionValidationResult | SessionValidationFailure> => {
-    const { getSessionToken } = await getCookiesModule();
     const token = await getSessionToken();
 
     if (!token) {

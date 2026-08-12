@@ -1,4 +1,5 @@
-import { type ActivityType } from "@/db/schema/people";
+import { type ActivityType, type PersonStatus } from "@/db/schema/people";
+import { STATUS_LABELS, STATUS_ORDER } from "./status.shared";
 
 /**
  * Shared types and pure functions for activity timeline.
@@ -30,23 +31,11 @@ export interface GetActivitiesResult {
 }
 
 /**
- * Status labels for display
- */
-const STATUS_LABELS: Record<string, string> = {
-  prospect: "Prospect",
-  attendee: "Attendee",
-  following_up: "Following Up",
-  interviewed: "Interviewed",
-  core_group: "Core Group",
-  launch_team: "Launch Team",
-  leader: "Leader",
-};
-
-/**
- * Format a status value into a human-readable label
+ * Format a status value into a human-readable label.
+ * Metadata statuses are stored strings, so unknown values fall through as-is.
  */
 function formatStatus(status: string): string {
-  return STATUS_LABELS[status] || status;
+  return STATUS_LABELS[status as PersonStatus] || status;
 }
 
 /**
@@ -57,18 +46,8 @@ export function isStatusChangeBackward(
 ): boolean {
   if (!metadata?.oldStatus || !metadata?.newStatus) return false;
 
-  const statusOrder = [
-    "prospect",
-    "attendee",
-    "following_up",
-    "interviewed",
-    "core_group",
-    "launch_team",
-    "leader",
-  ];
-
-  const oldIndex = statusOrder.indexOf(metadata.oldStatus as string);
-  const newIndex = statusOrder.indexOf(metadata.newStatus as string);
+  const oldIndex = STATUS_ORDER.indexOf(metadata.oldStatus as PersonStatus);
+  const newIndex = STATUS_ORDER.indexOf(metadata.newStatus as PersonStatus);
 
   return oldIndex > newIndex;
 }

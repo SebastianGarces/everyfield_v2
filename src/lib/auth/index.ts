@@ -5,11 +5,6 @@ export {
   createSession,
   validateSessionToken,
   invalidateSession,
-  invalidateUserSessions,
-  getUserSessions,
-  markSessionStale,
-  isSessionFresh,
-  cleanupExpiredSessions,
   getCurrentSession,
   getCurrentUserChurch,
   verifySession,
@@ -24,7 +19,6 @@ export {
   setSessionCookie,
   deleteSessionCookie,
   getSessionToken,
-  getSessionCookieOptions,
 } from "./cookies";
 
 // Password utilities

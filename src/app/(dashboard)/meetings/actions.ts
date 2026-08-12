@@ -433,15 +433,20 @@ export async function quickAddAttendeeAction(
       };
     }
 
-    const person = await createPerson(user.churchId, user.id, {
-      firstName: parsed.data.firstName,
-      lastName: parsed.data.lastName,
-      email: parsed.data.email,
-      phone: parsed.data.phone,
-      source: "vision_meeting",
-      status: "prospect",
-      country: "US",
-    });
+    const person = await createPerson(
+      user.churchId,
+      user.id,
+      {
+        firstName: parsed.data.firstName,
+        lastName: parsed.data.lastName,
+        email: parsed.data.email,
+        phone: parsed.data.phone,
+        source: "vision_meeting",
+        status: "prospect",
+        country: "US",
+      },
+      "meeting_attendance"
+    );
 
     const record = await addAttendee(user.churchId, meetingId, {
       personId: person.id,
@@ -775,14 +780,19 @@ export async function quickAddPersonToGuestListAction(
     }
 
     // Create person in the People database
-    const person = await createPerson(user.churchId, user.id, {
-      firstName,
-      lastName,
-      email,
-      phone,
-      country: "US",
-      status: "prospect",
-    });
+    const person = await createPerson(
+      user.churchId,
+      user.id,
+      {
+        firstName,
+        lastName,
+        email,
+        phone,
+        country: "US",
+        status: "prospect",
+      },
+      "meeting_guest_list"
+    );
 
     // Add to guest list
     const { addToGuestList } = await import("@/lib/meetings/guest-list");
@@ -900,14 +910,19 @@ export async function quickAddWalkInAction(
       return { success: false, error: "First and last name are required" };
     }
 
-    const person = await createPerson(user.churchId, user.id, {
-      firstName,
-      lastName,
-      email,
-      phone,
-      country: "US",
-      status: "prospect",
-    });
+    const person = await createPerson(
+      user.churchId,
+      user.id,
+      {
+        firstName,
+        lastName,
+        email,
+        phone,
+        country: "US",
+        status: "prospect",
+      },
+      "meeting_guest_list"
+    );
 
     const { addToGuestList } = await import("@/lib/meetings/guest-list");
     const record = await addToGuestList(

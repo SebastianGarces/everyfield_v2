@@ -155,6 +155,51 @@ export function addressableOnboardingStep(
   return value;
 }
 
+/**
+ * What a FINISHED dashboard does with the `?step=` a request arrived carrying —
+ * the resolver's other half (#373 AC 3), for once `onboarding_completed_at` is
+ * set and `resolveOnboardingStepRequest` above no longer runs.
+ */
+export type FinishedDashboardStepRequest =
+  | { outcome: "none" }
+  | { outcome: "leadership" }
+  | { outcome: "refuse" };
+
+/**
+ * The honour/refuse decision for a dashboard the flow no longer owns, as a pure
+ * function — same reason `resolveOnboardingStepRequest` is one: a rule that can
+ * only be exercised by rendering an async server component is pinned by regex
+ * against its own source, which catches a deletion and cannot catch a wrong
+ * answer.
+ *
+ * The rules:
+ *
+ *  - No `?step=` at all → `none`. A plain `/dashboard` never redirects.
+ *  - `leadership` → the one step a finished dashboard answers to. Re-entry is a
+ *    single question, not the whole wizard (OB-004, ruling 2026-07-31), so this
+ *    is one literal value and never becomes "any recognised step".
+ *  - EVERYTHING else → `refuse`. The flow owned `?step=` while it rendered;
+ *    nothing owns it now, and a value left in the address bar would put the
+ *    contextual wiki guide on a finished dashboard — the guide resolves from
+ *    pathname + search params alone, and the PR #367 ruling (step-scoped)
+ *    forbids it there. Reachable without typing a URL: finishing from step 3
+ *    redirects to `/dashboard?churchCreated=true`, and a Server Action redirect
+ *    PUSHES, so Back returns to `/dashboard?step=journey` — now finished. An
+ *    unrecognised value is refused too, since past this point there is no flow
+ *    left to resume into.
+ *  - A REPEATED param (`?step=leadership&step=journey`, an array) equals no
+ *    literal and is refused with the rest — never resolved to one of its
+ *    values, for the same reader-disagreement reason the flow's resolver
+ *    refuses it.
+ */
+export function resolveFinishedDashboardStepRequest(
+  step: string | string[] | undefined
+): FinishedDashboardStepRequest {
+  if (step === undefined) return { outcome: "none" };
+  if (step === "leadership") return { outcome: "leadership" };
+  return { outcome: "refuse" };
+}
+
 export type OnboardingStep = {
   id: OnboardingStepId;
   /** 1-based, for "Step 2 of 4" and the step rail. */

@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { Mail, Send } from "lucide-react";
-import { format } from "date-fns";
 
 import { PersonProfileWrapper } from "@/components/people/person-profile-wrapper";
 import { Button } from "@/components/ui/button";
@@ -9,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { verifySession } from "@/lib/auth/session";
 import { getPersonCommunications } from "@/lib/communication/service";
+import { formatDateTime } from "@/lib/datetime";
 import {
   COMMUNICATION_STATUS_BADGE_CLASSES,
   COMMUNICATION_STATUS_LABELS,
@@ -93,10 +93,7 @@ export default async function PersonCommunicationPage({
                         </p>
                         <p className="text-muted-foreground mt-1 text-sm">
                           {communication.sentAt
-                            ? format(
-                                communication.sentAt,
-                                "MMM d, yyyy 'at' h:mm a"
-                              )
+                            ? formatDateTime(communication.sentAt, "short")
                             : "—"}
                         </p>
                         {isLoggedContact && (

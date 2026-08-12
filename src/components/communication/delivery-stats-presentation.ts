@@ -10,9 +10,12 @@
 // and `null` is the honest answer.
 // ============================================================================
 
-import type { DeliveryTotals } from "@/lib/communication/queries";
+import type {
+  DeliveryTotals,
+  MessageDeliveryStats,
+} from "@/lib/communication/queries";
 
-export type { DeliveryTotals };
+export type { DeliveryTotals, MessageDeliveryStats };
 
 export type DeliveryRateKey = "delivered" | "opened" | "clicked";
 
@@ -125,17 +128,6 @@ export function summarizeDelivery(totals: DeliveryTotals): DeliveryOverview {
 // ---------------------------------------------------------------------------
 // One message's tiles
 // ---------------------------------------------------------------------------
-
-/** Recipient counts for a single message, as `getCommunication` reports them. */
-export interface MessageDeliveryStats {
-  total: number;
-  sent: number;
-  delivered: number;
-  opened: number;
-  clicked: number;
-  bounced: number;
-  failed: number;
-}
 
 export type MessageTileKey = "sent" | "delivered" | "opened" | "issues";
 

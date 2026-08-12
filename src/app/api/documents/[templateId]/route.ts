@@ -1,18 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getCurrentSession } from "@/lib/auth";
-import { getCurrentUserChurch } from "@/lib/auth/session";
 import {
   FORMAT_OUTPUT,
   getTemplateById,
+  isDocumentFormat,
   resolveMergeValues,
   type DocumentFormat,
   type DocumentMergeValues,
 } from "@/lib/documents";
-import { hasDocxRenderer, renderDocumentDocx } from "@/lib/documents/docx";
-import { hasRenderer, renderDocumentPdf } from "@/lib/documents/pdf";
-import { hasXlsxRenderer, renderDocumentXlsx } from "@/lib/documents/xlsx";
-import { getLaunchForChurch } from "@/lib/launch/queries";
+import { resolveDocumentMergeContext } from "@/lib/documents/merge-context";
+import { canRenderDocument, renderDocument } from "@/lib/documents/render";
 
 // react-pdf / docx / exceljs need the Node.js runtime (not edge).
 export const runtime = "nodejs";
@@ -40,29 +38,25 @@ export async function GET(
     return NextResponse.json({ error: "Template not found" }, { status: 404 });
   }
 
-  // Resolve requested format; must be one the template supports.
+  // Resolve requested format; must be one the template supports. A missing,
+  // unknown, or unsupported format falls back to the template's default.
   const requested = request.nextUrl.searchParams.get("format");
-  const format: DocumentFormat = (
-    requested && template.formats.includes(requested as DocumentFormat)
+  const format: DocumentFormat =
+    requested &&
+    isDocumentFormat(requested) &&
+    template.formats.includes(requested)
       ? requested
-      : template.formats[0]
-  ) as DocumentFormat;
+      : template.formats[0];
 
-  const hasFor =
-    format === "docx"
-      ? hasDocxRenderer(templateId)
-      : format === "xlsx"
-        ? hasXlsxRenderer(templateId)
-        : hasRenderer(templateId);
-  if (!hasFor) {
+  if (!canRenderDocument(format, templateId)) {
     return NextResponse.json(
       { error: "Template cannot be generated in the requested format" },
       { status: 404 }
     );
   }
 
-  const church = await getCurrentUserChurch();
-  if (!church) {
+  const context = await resolveDocumentMergeContext();
+  if (!context) {
     return NextResponse.json(
       { error: "No church associated with this account" },
       { status: 400 }
@@ -76,32 +70,11 @@ export async function GET(
     if (value !== null) provided[field.key] = value;
   }
 
-  // The launch date comes from the LAUNCH ENTITY (`launches.target_date`,
-  // LS-001) — `churches.launch_date` was dropped by migration 0032. Read the
-  // same way as `(dashboard)/documents/page.tsx`, which is what keeps the
-  // dialog's preview and the generated file agreeing about the day (#306). A
-  // request-supplied `?launch_date=` still overrides it: `provided` wins in
-  // `resolveMergeValues`, and this is only the auto-fill default.
-  const launch = await getLaunchForChurch(church.id);
-
-  const values = resolveMergeValues(
-    template,
-    {
-      churchName: church.name,
-      userName: user.name ?? null,
-      launchDate: launch?.targetDate ?? null,
-    },
-    provided
-  );
+  const values = resolveMergeValues(template, context, provided);
 
   let file: Buffer;
   try {
-    file =
-      format === "docx"
-        ? await renderDocumentDocx(templateId, values)
-        : format === "xlsx"
-          ? await renderDocumentXlsx(templateId, values)
-          : await renderDocumentPdf(templateId, values);
+    file = await renderDocument(format, templateId, values);
   } catch (error) {
     console.error(
       `[documents] failed to render ${templateId} (${format}):`,

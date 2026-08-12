@@ -16,6 +16,7 @@ import {
   getRequestIp,
   recordAttempt,
 } from "@/lib/auth/rate-limit";
+import { safeRedirectPath } from "@/lib/auth/safe-redirect";
 
 export type LoginState = {
   error?: string;
@@ -73,8 +74,9 @@ export async function login(
     return { error: "Invalid email or password" };
   }
 
-  // Record the successful attempt (counts toward success, not the failure
-  // threshold — the failed-attempt window effectively resets on success).
+  // Recorded with success=true: never counted toward a threshold, and it
+  // clears this identifier's failed rows inside the window (ruled 405-4b) —
+  // a successful login starts the failure count over.
   await recordAttempt(identifier, ip, "login", true);
 
   // Create session
@@ -84,12 +86,7 @@ export async function login(
   // Set session cookie
   await setSessionCookie(token, session.expiresAt);
 
-  // Get redirect path from form, default to dashboard
-  const redirectTo = formData.get("redirect");
-  const redirectPath =
-    typeof redirectTo === "string" && redirectTo.startsWith("/")
-      ? redirectTo
-      : "/dashboard";
-
-  redirect(redirectPath);
+  // Get redirect path from form, default to dashboard. The hidden field
+  // carries the raw URL param, so this call is the open-redirect gate.
+  redirect(safeRedirectPath(formData.get("redirect")));
 }
