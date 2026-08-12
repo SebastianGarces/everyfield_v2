@@ -2,7 +2,6 @@
 
 import {
   addToHouseholdAction,
-  createHouseholdFromPersonAction,
   createHouseholdWithHeadAction,
   propagateAddressAction,
   removeFromHouseholdAction,
@@ -107,30 +106,19 @@ function HouseholdManagerBody({
 
   const handleCreateHousehold = () => {
     startTransition(async () => {
-      if (usePersonAddress) {
-        const result = await createHouseholdFromPersonAction(
-          person.id,
-          newHouseholdName
-        );
-        if (!result.success) {
-          toast.error("Failed to create household", {
-            description: result.error,
-          });
-          return;
-        }
-      } else {
-        // One atomic action: household + head land together or not at all,
-        // so "created household but failed to add person" cannot happen.
-        const result = await createHouseholdWithHeadAction(
-          person.id,
-          newHouseholdName
-        );
-        if (!result.success) {
-          toast.error("Failed to create household", {
-            description: result.error,
-          });
-          return;
-        }
+      // One atomic action: household + head land together or not at all,
+      // so "created household but failed to add person" cannot happen —
+      // with or without the person's address on the household.
+      const result = await createHouseholdWithHeadAction(
+        person.id,
+        newHouseholdName,
+        usePersonAddress
+      );
+      if (!result.success) {
+        toast.error("Failed to create household", {
+          description: result.error,
+        });
+        return;
       }
 
       toast.success("Household created", {

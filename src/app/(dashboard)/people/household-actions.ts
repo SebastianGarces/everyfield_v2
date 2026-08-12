@@ -4,7 +4,6 @@ import type { Household, HouseholdRole } from "@/db/schema";
 import { logPersonActivity } from "@/lib/people/activity";
 import {
   addToHousehold,
-  createHouseholdFromPerson,
   createHouseholdWithHead,
   deleteHousehold,
   getHousehold,
@@ -40,14 +39,17 @@ export async function listHouseholdsAction(): Promise<
 }
 
 /**
- * Create an address-less household and add the person as its head, in one
- * atomic batch (ruling 410-4B). Replaces the old client-side two-step
- * (create household, then add person), whose second failure left an orphan
+ * Create a household and add the person as its head, in one atomic batch
+ * (ruling 410-4B). `usePersonAddress` decides whether the household copies
+ * the person's address. Replaces both of the old shapes — the client-side
+ * two-step (create household, then add person) and the from-person helper's
+ * two sequential writes — either of whose second failure left an orphan
  * empty household.
  */
 export async function createHouseholdWithHeadAction(
   personId: string,
-  householdName: string
+  householdName: string,
+  usePersonAddress: boolean
 ): Promise<ActionResult<{ household: Household; person: Person }>> {
   return withChurchSession(
     "createHouseholdWithHeadAction",
@@ -68,50 +70,12 @@ export async function createHouseholdWithHeadAction(
       const result = await createHouseholdWithHead(
         churchId,
         personId,
-        parsed.data.name
+        parsed.data.name,
+        usePersonAddress
       );
 
-      // Log activity for household creation (same shape as the
-      // from-person path — the person created it and heads it)
-      await logPersonActivity({
-        churchId,
-        personId,
-        activityType: "household_created",
-        metadata: {
-          householdName: result.household.name,
-          householdId: result.household.id,
-          role: "head",
-        },
-        performedBy: user.id,
-      });
-
-      revalidatePath("/people");
-      revalidatePath(`/people/${personId}`);
-      return { success: true, data: result };
-    }
-  );
-}
-
-/**
- * Create a household from a person's address and add them as head
- */
-export async function createHouseholdFromPersonAction(
-  personId: string,
-  householdName: string
-): Promise<ActionResult<{ household: Household; person: Person }>> {
-  return withChurchSession(
-    "createHouseholdFromPersonAction",
-    {
-      fallback: "Failed to create household",
-    },
-    async ({ user, churchId }) => {
-      const result = await createHouseholdFromPerson(
-        churchId,
-        personId,
-        householdName
-      );
-
-      // Log activity for household creation
+      // Log activity for household creation — the person created it
+      // and heads it
       await logPersonActivity({
         churchId,
         personId,

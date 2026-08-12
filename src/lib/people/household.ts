@@ -7,10 +7,7 @@ import {
   type NewHousehold,
   type Person,
 } from "@/db/schema";
-import type {
-  HouseholdCreateInput,
-  HouseholdUpdateInput,
-} from "@/lib/validations/people";
+import type { HouseholdUpdateInput } from "@/lib/validations/people";
 import { and, eq, isNull, sql } from "drizzle-orm";
 
 // ============================================================================
@@ -100,29 +97,6 @@ export async function getHouseholdMemberCount(
 // ============================================================================
 // Mutations
 // ============================================================================
-
-/**
- * Create a new household
- */
-export async function createHousehold(
-  churchId: string,
-  data: HouseholdCreateInput
-): Promise<Household> {
-  const values: NewHousehold = {
-    churchId,
-    name: data.name,
-    addressLine1: data.addressLine1,
-    addressLine2: data.addressLine2,
-    city: data.city,
-    state: data.state,
-    postalCode: data.postalCode,
-    country: data.country,
-  };
-
-  const [household] = await db.insert(households).values(values).returning();
-
-  return household;
-}
 
 /**
  * Update an existing household
@@ -347,130 +321,120 @@ export async function propagateAddress(
 }
 
 /**
- * Create a household from a person's current address
- * Automatically adds the person as the head of the household
+ * Build the two statements `createHouseholdWithHead` batches, exported so
+ * tests can pin the rendered SQL (the create-church.test.ts precedent).
+ *
+ * The household INSERT is an `insert … select` sourced FROM the person row
+ * itself: the person existence check IS the insert's row source, so a bad
+ * personId (wrong tenant, soft-deleted, forged) selects zero rows and no
+ * household is written — there is no pre-flight SELECT for a delete to slip
+ * behind. With `usePersonAddress`, the person's address columns feed the
+ * household's (empty strings become null, like the old skip-if-falsy build);
+ * without it, the household gets no address, which is also why
+ * `addToHousehold`'s copy-the-household-address branch stays collapsed:
+ * a brand-new address-less household has nothing to copy back.
+ *
+ * drizzle's insert-from-select emits the FULL insertable column list in
+ * table-definition order, so the select must supply every `households`
+ * column, in that exact order.
  */
-export async function createHouseholdFromPerson(
+export function buildCreateHouseholdWithHeadStatements(
   churchId: string,
   personId: string,
-  householdName: string
-): Promise<{ household: Household; person: Person }> {
-  // Get the person
-  const [person] = await db
-    .select()
-    .from(persons)
-    .where(
-      and(
-        eq(persons.churchId, churchId),
-        eq(persons.id, personId),
-        isNull(persons.deletedAt)
-      )
-    )
-    .limit(1);
-
-  if (!person) {
-    throw new Error("Person not found");
-  }
-
-  // Build household data from person's address, only including defined values
-  const householdData: HouseholdCreateInput = {
-    name: householdName,
-    country: person.country ?? "US",
-  };
-  if (person.addressLine1) householdData.addressLine1 = person.addressLine1;
-  if (person.addressLine2) householdData.addressLine2 = person.addressLine2;
-  if (person.city) householdData.city = person.city;
-  if (person.state) householdData.state = person.state;
-  if (person.postalCode) householdData.postalCode = person.postalCode;
-
-  // Create household with person's address
-  const household = await createHousehold(churchId, householdData);
-
-  // Add person to household as head
-  const updatedPerson = await addToHousehold(
-    churchId,
-    personId,
-    household.id,
-    "head"
+  householdName: string,
+  usePersonAddress: boolean,
+  householdId: string
+) {
+  const personPredicate = and(
+    eq(persons.churchId, churchId),
+    eq(persons.id, personId),
+    isNull(persons.deletedAt)
   );
 
-  return { household, person: updatedPerson };
+  const insertHousehold = db
+    .insert(households)
+    .select((qb) =>
+      qb
+        .select({
+          id: sql`${householdId}::uuid`,
+          churchId: persons.churchId,
+          name: sql`${householdName}`,
+          addressLine1: usePersonAddress
+            ? sql`nullif(${persons.addressLine1}, '')`
+            : sql`null`,
+          addressLine2: usePersonAddress
+            ? sql`nullif(${persons.addressLine2}, '')`
+            : sql`null`,
+          city: usePersonAddress ? sql`nullif(${persons.city}, '')` : sql`null`,
+          state: usePersonAddress
+            ? sql`nullif(${persons.state}, '')`
+            : sql`null`,
+          postalCode: usePersonAddress
+            ? sql`nullif(${persons.postalCode}, '')`
+            : sql`null`,
+          country: usePersonAddress
+            ? sql`coalesce(${persons.country}, 'US')`
+            : sql`${"US"}`,
+          createdAt: sql`now()`,
+          updatedAt: sql`now()`,
+        })
+        .from(persons)
+        .where(personPredicate)
+        .getSQL()
+    )
+    .returning();
+
+  const updatePerson = db
+    .update(persons)
+    .set({
+      householdId,
+      householdRole: "head",
+      updatedAt: new Date(),
+    })
+    .where(personPredicate)
+    .returning();
+
+  return { insertHousehold, updatePerson };
 }
 
 /**
- * Create an address-less household and add the person as its head — in ONE
- * `db.batch`, so "created the household but failed to add the person" cannot
- * leave an orphan household row (ruling 410-4B). This replaces the client's
- * old two-action sequence (create, then add).
- *
- * The new household deliberately carries no address, which is what collapses
- * `addToHousehold`'s copy-the-household-address branch: there is nothing to
- * copy, so the person's own address is left untouched — exactly what the old
- * two-step flow did.
+ * Create a household and add the person as its head — in ONE `db.batch`, so
+ * "created the household but failed to add the person" cannot leave an
+ * orphan household row on EITHER address mode (ruling 410-4B, fix round 2).
+ * This replaces the client's old two-action sequence (create, then add) and
+ * the from-person two-write helper alike.
  *
  * `db.transaction()` throws on neon-http; both writes are known up front, so
  * the sanctioned shape is one `db.batch` (memory/invariants.md → Transactions
  * / Atomicity), with the household id minted here so the person update can
- * reference it in the same round trip.
+ * reference it in the same round trip. Zero rows back means the person was
+ * not found — and nothing was written.
  */
 export async function createHouseholdWithHead(
   churchId: string,
   personId: string,
-  householdName: string
+  householdName: string,
+  usePersonAddress: boolean
 ): Promise<{ household: Household; person: Person }> {
-  // Refuse legibly before writing anything — a bad personId (wrong tenant,
-  // deleted, forged) must not create a household. The person predicate is
-  // re-asserted inside the batch's UPDATE, scoped to churchId.
-  const [person] = await db
-    .select({ id: persons.id })
-    .from(persons)
-    .where(
-      and(
-        eq(persons.churchId, churchId),
-        eq(persons.id, personId),
-        isNull(persons.deletedAt)
-      )
-    )
-    .limit(1);
-
-  if (!person) {
-    throw new Error("Person not found");
-  }
-
-  const householdId = crypto.randomUUID();
+  const { insertHousehold, updatePerson } =
+    buildCreateHouseholdWithHeadStatements(
+      churchId,
+      personId,
+      householdName,
+      usePersonAddress,
+      crypto.randomUUID()
+    );
 
   const [insertedHouseholds, updatedPersons] = await db.batch([
-    db
-      .insert(households)
-      .values({
-        id: householdId,
-        churchId,
-        name: householdName,
-        country: "US",
-      })
-      .returning(),
-    db
-      .update(persons)
-      .set({
-        householdId,
-        householdRole: "head",
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(persons.churchId, churchId),
-          eq(persons.id, personId),
-          isNull(persons.deletedAt)
-        )
-      )
-      .returning(),
+    insertHousehold,
+    updatePerson,
   ]);
 
   const household = insertedHouseholds[0];
   const updatedPerson = updatedPersons[0];
 
   if (!household || !updatedPerson) {
-    throw new Error("Failed to create household");
+    throw new Error("Person not found");
   }
 
   return { household, person: updatedPerson };
