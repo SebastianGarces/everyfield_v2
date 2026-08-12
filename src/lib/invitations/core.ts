@@ -93,14 +93,12 @@ import {
   sendInvitationEmail,
   type InvitationEmailDeps,
   type InvitationEmailOutcome,
-  type InvitationEmailRefusal,
   type InvitationSendOccasion,
 } from "./email";
-// The dedupe bucket, from the import-free leaf that owns it. A successful resend
-// reports its window to the surface, which refuses a second press until the next
-// one opens (RULED 2026-08-10 round 2) — the same arithmetic the provider key
-// above is built from, never a second copy of it.
-import { resendDedupeWindowAt, type ResendDedupeWindow } from "./resend-window";
+// NOT `./resend-window`, and not `InvitationEmailRefusal` either — both left
+// with the resend path when it moved to `./resend.ts` (2026-08-12, PR #392
+// warning (c)). The dedupe bucket is reported by that module and consumed by
+// the surface; nothing in the shared layer reads it.
 
 // ============================================================================
 // Constants
@@ -1159,9 +1157,12 @@ export async function assertTargetInviteRateLimit(
  *
  * The two are reported separately because they FAIL separately (OV-003b / #293).
  * The row is durable and the email is best-effort, so `emailSent: false` is not
- * an error — it is the case where the admin has to send the link themselves, and
- * the surface says exactly that instead of claiming an invitation was "sent"
- * when nothing left the building.
+ * an error — it is the case where the invitee has not been told yet, and the
+ * surface says exactly that instead of claiming an invitation was "sent" when
+ * nothing left the building. The recovery is **Resend email** on the row, not a
+ * link the admin forwards: #304 ruling 4 item 5 removed the admin's copy of the
+ * `/register?invitation=` URL from this whole page, and #293 is the delivery it
+ * was a stopgap for (`./create-notice`).
  */
 export interface CreatedInvitation {
   invitation: OrganizationInvitation;
@@ -1250,8 +1251,9 @@ export async function createInvitationAs(
   const invitation = await insertInvitation(resolved.values);
 
   // LAST, and deliberately after the committed row — an invitation that exists
-  // but was not emailed is repaired by copying the link; an email sent for a row
-  // that failed to insert is a link to nothing. `emailInvitee` never throws.
+  // but was not emailed is repaired by Resend email on its row; an email sent
+  // for a row that failed to insert is a link to nothing. `emailInvitee` never
+  // throws.
   return { invitation, emailSent: await emailInvitee(invitation) };
 }
 
@@ -1297,11 +1299,11 @@ export interface EmailInviteeDeps {
  *
  * `emailInvitee` above is this function with the reason thrown away, because
  * the create path has nothing to do with it: a failed send there is reported to
- * the admin as one fact ("created — email could not be sent") next to the link
- * they can copy instead. The RESEND path is the opposite — its entire product is
- * the send, so the admin has to be told which of "no longer pending" and "the
- * provider refused it" happened, and those words are derived from this reason
- * code (`resendRefusalMessage`).
+ * the admin as one fact ("created — email could not be sent"), pointing at the
+ * Resend email control on the row the create just added. The RESEND path is the
+ * opposite — its entire product is the send, so the admin has to be told which
+ * of "no longer pending" and "the provider refused it" happened, and those
+ * words are derived from this reason code (`resendRefusalMessage`).
  *
  * Two shapes, ONE implementation, deliberately: a second call site that
  * re-decided any of the guards would be the duplicated decision this file keeps
@@ -1341,72 +1343,15 @@ export async function emailInviteeOutcome(
 }
 
 // ============================================================================
-// Resend
+// The org-scoped single-invitation read
 // ============================================================================
 //
-// RULED 2026-08-10 (Sebastian, on PR #392 / #293): a pending invitation carries
-// a "Resend email" action, so a send that failed — or that the invitee deleted,
-// or that their provider ate — is recoverable AT ANY TIME. Nothing is
-// persisted: no `email_sent` column, no migration, no delivery badge. The
-// alternative that was rejected (persist the outcome and badge the row) records
-// "the provider accepted it", which is not a delivery receipt, so the badge
-// would assert something the product never actually knows.
-//
-// What this path adds over `emailInvitee` is authority and words. It adds no
-// status rule of its own — see `./email` rule 2.
+// One query, shared by everything that acts on ONE invitation the actor's org
+// issued. The resend path that used to live here moved to `./resend.ts` on
+// 2026-08-12 (PR #392 warning (c)); this predicate did NOT go with it, because
+// it is the same definition of "ours" the list and the revoke are built from
+// and two copies of it are how a screen shows a row it would then refuse.
 // ============================================================================
-
-/**
- * One message for "there is no such invitation" and "that one is not yours".
- *
- * The same reason `NOT_AUTHORIZED_MESSAGE` covers both on the respond path:
- * telling the two apart turns any authenticated user into a reader of which
- * uuids exist, and an invitation id is also an unauthenticated beta-gate bearer
- * token (`hasValidInvitationBypass`).
- */
-export const INVITATION_NOT_OURS_MESSAGE =
-  "Invitation not found, or not sent by your organization";
-
-export const INVITATION_EXPIRED_MESSAGE =
-  "That invitation has expired — invite them again to send a new link";
-
-/**
- * What the admin reads when a resend produced nothing. Pure and exhaustive over
- * `InvitationEmailRefusal`, so a new refusal code is a compile error here rather
- * than a silent fall-through to "we could not send that email".
- *
- * `not_pending` is the guard inside `sendInvitationEmail` — the one that makes a
- * revoked invitation unsendable for EVERY caller — surfacing as words. Nothing
- * on this path re-checks the status; if that guard were deleted, this branch
- * would go dead and a revoked row would be emailed, which is what
- * `email.test.ts` and `resend.test.ts` both watch for.
- */
-export function resendRefusalMessage(reason: InvitationEmailRefusal): string {
-  switch (reason) {
-    case "not_pending":
-      return "That invitation is no longer pending — nothing was sent";
-    case "no_address":
-      return "That invitation has no email address on it";
-    case "no_inviting_org":
-    case "unknown_type":
-    case "provider_refused":
-    case "transport_threw":
-    case "preparation_threw":
-      // Deliberately one message for the five. They differ only in which
-      // internal thing failed, the admin's move is the same in all of them —
-      // copy the link and send it themselves, which is one button away — and
-      // "the provider rejected the address" is a fact about the invitee's mail
-      // host that the log records and the screen does not need.
-      return "We could not send that email — copy the link and send it yourself";
-    default: {
-      const unknownReason: never = reason;
-      console.error("invitation resend has no message for this refusal", {
-        reason: unknownReason,
-      });
-      return "We could not send that email — copy the link and send it yourself";
-    }
-  }
-}
 
 /**
  * `id = ? AND <the actor's own org issued it>` — the read behind a resend.
@@ -1427,134 +1372,6 @@ export function orgInvitationQuery(
       and(eq(organizationInvitations.id, invitationId), invitingOrgOf(actor))
     )
     .limit(1);
-}
-
-/** Run it. `undefined` means "no such invitation, or not ours" — one fact. */
-async function loadOrgInvitation(
-  actor: InvitationActor,
-  invitationId: string
-): Promise<OrganizationInvitation | undefined> {
-  const [invitation] = await orgInvitationQuery(actor, invitationId);
-  return invitation;
-}
-
-/** Run the auto-expire compare-and-set. */
-async function expireInvitation(
-  invitationId: string,
-  now: Date
-): Promise<void> {
-  await expireInvitationQuery(invitationId, now);
-}
-
-export interface ResendInvitationDeps extends EmailInviteeDeps {
-  /**
-   * The org-scoped row read. Defaults to `orgInvitationQuery` — THE authority
-   * check of this path — and is replaced only by `resend.test.ts`.
-   */
-  loadInvitation?: (
-    actor: InvitationActor,
-    invitationId: string
-  ) => Promise<OrganizationInvitation | undefined>;
-  /** The auto-expire write. Defaults to `expireInvitationQuery`. */
-  expire?: (invitationId: string, now: Date) => Promise<void>;
-  /** The instant the window is judged against. Defaults to now. */
-  now?: Date;
-}
-
-/**
- * Send the invitation email again for a pending invitation the actor's ORG
- * issued.
- *
- * AUTHORITY IS THE `WHERE`, and it is the same `invitingOrgOf(actor)` predicate
- * the list and the revoke are built from — so an admin sees, revokes and
- * resends exactly one population and the three can never disagree about what
- * "ours" means. Every role that does not invite matches nothing, as does an
- * oversight admin with no org of their own. This matters more here than on a
- * read: the export in `service.ts` is a POSTable endpoint that makes mail leave
- * the building, so "which invitations may I aim it at" has to be decided from
- * the session and nowhere else.
- *
- * EXPIRY IS REFUSED, and the refusal writes. `sendInvitationEmail` guards the
- * status, not the window, so a pending-but-expired row would otherwise be
- * emailed with a link `bindOpenInvitationTarget` is guaranteed to reject —
- * telling the invitee to click something that cannot work. The auto-expire is
- * the existing compare-and-set (`expireInvitationQuery`), which cannot overwrite
- * an answer a concurrent request recorded.
- *
- * A FAILED RESEND IS A FAILED ACTION — the opposite of the create, on purpose.
- * A create protects a durable row, so its email is best-effort and a failure is
- * reported alongside a success. A resend has no artefact to protect: the send is
- * the entire product of the action, so a refusal throws an `InvitationError`
- * whose message the surface renders verbatim.
- *
- * THE SEAMS default to the real thing, exactly as `emailInvitee`'s do, so
- * production has one code path and `resend.test.ts` can drive the guards without
- * a database. `loadInvitation` in particular is the org scope: a test may hand
- * in a row, and nothing else can — this module has no `"use server"` directive,
- * so no browser reaches it, and `service.ts` calls the two-argument form.
- *
- * IT REPORTS ITS DEDUPE WINDOW (RULED 2026-08-10 round 2). The send that just
- * succeeded presented a key the provider will now collapse every duplicate onto
- * until the next bucket opens, so a second press inside that span produces
- * nothing while the surface says "Email sent" — the product claiming a send the
- * provider dropped. The window travels back with the success so the button can
- * refuse for exactly as long as that is true, and it is `resendDedupeWindowAt`
- * of the SAME instant the key was built from: one bucket, two consumers.
- */
-export async function resendInvitationEmailAs(
-  actor: InvitationActor,
-  invitationId: string,
-  deps: ResendInvitationDeps = {}
-): Promise<{
-  invitation: OrganizationInvitation;
-  emailSent: boolean;
-  dedupeWindow: ResendDedupeWindow;
-}> {
-  if (!isUuid(invitationId)) {
-    throw new InvitationError(INVITATION_NOT_OURS_MESSAGE);
-  }
-
-  const loadInvitation = deps.loadInvitation ?? loadOrgInvitation;
-  const expire = deps.expire ?? expireInvitation;
-
-  const invitation = await loadInvitation(actor, invitationId);
-
-  if (!invitation) {
-    throw new InvitationError(INVITATION_NOT_OURS_MESSAGE);
-  }
-
-  const now = deps.now ?? new Date();
-
-  if (
-    invitation.status === "pending" &&
-    invitation.expiresAt &&
-    invitation.expiresAt < now
-  ) {
-    await expire(invitationId, now);
-    throw new InvitationError(INVITATION_EXPIRED_MESSAGE);
-  }
-
-  const outcome = await emailInviteeOutcome(invitation, {
-    ...deps,
-    // A DELIBERATE resend, which is what keeps the provider from deduping it
-    // against the key the create already presented for this same invitation
-    // (`./email` → `invitationEmailIdempotencyKey`).
-    occasion: { kind: "resend", at: now },
-  });
-
-  if (!outcome.sent) {
-    throw new InvitationError(resendRefusalMessage(outcome.reason));
-  }
-
-  // `now` — the instant the occasion above was keyed with, not a second reading
-  // of the clock. A fresh `new Date()` here would report a window one bucket
-  // later for a send keyed a millisecond before the boundary, and the button
-  // would re-enable while the provider was still deduping.
-  return {
-    invitation,
-    emailSent: true,
-    dedupeWindow: resendDedupeWindowAt(now),
-  };
 }
 
 /**

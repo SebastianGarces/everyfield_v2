@@ -17,12 +17,8 @@ import type {
 } from "@/db/schema/organization-invitation";
 
 import {
-  INVITATION_EXPIRED_MESSAGE,
-  INVITATION_NOT_OURS_MESSAGE,
   InvitationError,
   orgInvitationQuery,
-  resendInvitationEmailAs,
-  resendRefusalMessage,
   type InvitationActor,
 } from "./core";
 import {
@@ -31,7 +27,15 @@ import {
   sendInvitationEmail,
   type InvitationEmailFacts,
   type InvitationEmailMessage,
+  type InvitationEmailRefusal,
 } from "./email";
+import {
+  INVITATION_EXPIRED_MESSAGE,
+  INVITATION_NOT_OURS_MESSAGE,
+  INVITATION_SEND_FAILED_MESSAGE,
+  resendInvitationEmailAs,
+  resendRefusalMessage,
+} from "./resend";
 import {
   resendCooldownLabel,
   resendCooldownRemainingMs,
@@ -163,6 +167,16 @@ const CORE_CODE = readFileSync(
   path.join(process.cwd(), "src", "lib", "invitations", "core.ts"),
   "utf8"
 );
+/**
+ * The resend path's own module (extracted from `core.ts` on 2026-08-12, PR #392
+ * warning (c)). Every source-shaped assertion about the RESEND reads this file;
+ * `CORE_CODE` is still read where the property is about the shared layer —
+ * `orgInvitationQuery` and "nothing anywhere persists delivery".
+ */
+const RESEND_CODE = readFileSync(
+  path.join(process.cwd(), "src", "lib", "invitations", "resend.ts"),
+  "utf8"
+);
 const SERVICE_CODE = readFileSync(
   path.join(process.cwd(), "src", "lib", "invitations", "service.ts"),
   "utf8"
@@ -203,14 +217,15 @@ function code(source: string): string {
  * become an assertion about the rest of the file.
  */
 function resendBody(): string {
-  const stripped = code(CORE_CODE);
+  const stripped = code(RESEND_CODE);
   const start = stripped.indexOf(
     "export async function resendInvitationEmailAs"
   );
-  const end = stripped.indexOf("export async function lookupInvitingOrgName");
 
-  assert.ok(start >= 0 && end > start, "resendInvitationEmailAs moved");
-  return stripped.slice(start, end);
+  assert.ok(start >= 0, "resendInvitationEmailAs moved");
+  // It is the last declaration in its own module now, so the bound is the end
+  // of the file rather than the next function's name.
+  return stripped.slice(start);
 }
 
 // ----------------------------------------------------------------------------
@@ -427,7 +442,10 @@ test("a refused provider is a failed ACTION, not a quiet false", async () => {
   // The deliberate difference from the create. A create protects a durable row,
   // so its email is best-effort and a failure is reported next to a success. A
   // resend has nothing to protect — the send IS the action — so a refusal comes
-  // back as a message the admin reads, next to the Copy link button it names.
+  // back as a message the admin reads, beside the Resend email button it tells
+  // them to press again. It used to name a Copy link button instead; #304
+  // ruling 4 item 5 deleted that control from every admin surface, so the
+  // sentence was pointing at nothing (reconciled 2026-08-12, #293 × #304).
   for (const send of [
     async () => ({ success: false, error: "Invalid `to` field" }),
     async () => {
@@ -438,10 +456,15 @@ test("a refused provider is a failed ACTION, not a quiet false", async () => {
       () => resendInvitationEmailAs(SC_ADMIN, INVITATION_ID, deps({ send })),
       (error: unknown) =>
         error instanceof InvitationError &&
-        error.message ===
-          "We could not send that email — copy the link and send it yourself"
+        error.message === INVITATION_SEND_FAILED_MESSAGE
     );
   }
+
+  // The words themselves, so the constant cannot quietly become anything.
+  assert.equal(
+    INVITATION_SEND_FAILED_MESSAGE,
+    "We could not send that email — nothing reached them, so try again in a moment"
+  );
 });
 
 test("a throwing org-name lookup is refused, not leaked", async () => {
@@ -465,27 +488,59 @@ test("a throwing org-name lookup is refused, not leaked", async () => {
   assert.equal(transport.sent.length, 0);
 });
 
+/**
+ * Every `InvitationEmailRefusal`, and the list cannot fall behind the union.
+ *
+ * A `Record<InvitationEmailRefusal, true>` is a COMPILE error the moment a
+ * reason is added, so the two tests below are exhaustive by construction rather
+ * than by somebody remembering to extend an array — which is exactly how the
+ * link sentence survived item 5 in one of the five collapsed branches while
+ * every other surface had it removed.
+ */
+const ALL_REFUSALS = Object.keys({
+  not_pending: true,
+  no_address: true,
+  no_inviting_org: true,
+  unknown_type: true,
+  provider_refused: true,
+  transport_threw: true,
+  preparation_threw: true,
+} satisfies Record<InvitationEmailRefusal, true>) as InvitationEmailRefusal[];
+
 test("every refusal reason has words, and none of them is a code", () => {
   // Exhaustive by construction — `resendRefusalMessage` switches on the union
   // with a `never` default, so a new reason is a compile error rather than a
   // silent fall-through. This checks the OTHER half: what comes out is a
   // sentence, never the reason code itself.
-  const reasons = [
-    "not_pending",
-    "no_address",
-    "no_inviting_org",
-    "unknown_type",
-    "provider_refused",
-    "transport_threw",
-    "preparation_threw",
-  ] as const;
+  assert.equal(ALL_REFUSALS.length, 7);
 
-  for (const reason of reasons) {
+  for (const reason of ALL_REFUSALS) {
     const message = resendRefusalMessage(reason);
     assert.ok(message.length > 0, reason);
     assert.ok(!message.includes(reason), message);
     assert.ok(!message.includes("_"), message);
   }
+});
+
+test("no refusal message offers a link, or tells the admin to forward one", () => {
+  // #304 ruling 4 item 5, on the LAST surface that still broke it (reconciled
+  // 2026-08-12, #293 × #304). No `/register?invitation=` control survives on
+  // any admin surface — not on the create notice, not on the create form, not
+  // on a pending row — so a refusal that says "copy the link and send it
+  // yourself" is an instruction pointing at a button that was deleted. This is
+  // the same guard `create-notice.test.ts` §5 gives the three create notices,
+  // and it runs over the WHOLE union rather than the one branch that was wrong.
+  for (const reason of ALL_REFUSALS) {
+    assert.doesNotMatch(
+      resendRefusalMessage(reason),
+      /\/register|invitation=|copy the link|this link/i,
+      reason
+    );
+  }
+
+  // …and the constant itself names the recovery that does exist, so "no link"
+  // cannot be satisfied by a sentence that leaves the admin with nothing.
+  assert.match(INVITATION_SEND_FAILED_MESSAGE, /try again/i);
 });
 
 // ----------------------------------------------------------------------------
@@ -572,11 +627,21 @@ test("the seams default to the real, org-scoped read", () => {
 
   assert.match(body, /deps\.loadInvitation \?\? loadOrgInvitation/);
   assert.match(body, /deps\.expire \?\? expireInvitation/);
-  assert.match(code(CORE_CODE), /orgInvitationQuery\(actor, invitationId\)/);
+  assert.match(code(RESEND_CODE), /orgInvitationQuery\(actor, invitationId\)/);
   assert.match(
     code(SERVICE_CODE),
     /resendInvitationEmailAs\(actor, invitationId\)/
   );
+  // …and the query itself stays in the shared layer, so "ours" has exactly one
+  // definition for the list, the revoke and this path (PR #392 warning (c)).
+  assert.match(code(CORE_CODE), /export function orgInvitationQuery\(/);
+  assert.doesNotMatch(
+    code(RESEND_CODE),
+    /export function orgInvitationQuery\(/
+  );
+  assert.match(code(RESEND_CODE), /from "\.\/core"/);
+  // One direction only — a cycle would make the extraction cosmetic.
+  assert.doesNotMatch(code(CORE_CODE), /from "\.\/resend"/);
   // The actor is minted from the session, never taken as an argument.
   assert.match(
     code(SERVICE_CODE),
@@ -594,6 +659,7 @@ test("the resend persists nothing about delivery", () => {
   // flag would assert something the product never observes.
   for (const forbidden of [/email_sent/, /emailSentAt/, /deliveredAt/]) {
     assert.doesNotMatch(code(CORE_CODE), forbidden, String(forbidden));
+    assert.doesNotMatch(code(RESEND_CODE), forbidden, String(forbidden));
     assert.doesNotMatch(code(LIST_CODE), forbidden, String(forbidden));
     assert.doesNotMatch(code(ACTIONS_CODE), forbidden, String(forbidden));
   }
@@ -606,14 +672,26 @@ test("the resend persists nothing about delivery", () => {
 test("no resend path logs the token, the address or the link", () => {
   // The invitation id IS the register bearer token. Source-shaped for the same
   // reason `email.test.ts` is: the property is about what the code CAN log.
-  const body = code(CORE_CODE).slice(
-    code(CORE_CODE).indexOf("// Resend"),
-    code(CORE_CODE).indexOf("// Respond")
-  );
+  //
+  // THIS TEST USED TO SCAN NOTHING, and the extraction is what exposed it. The
+  // body was sliced out of `core.ts` between `indexOf("// Resend")` and
+  // `indexOf("// Respond")` — on source that `code()` had ALREADY STRIPPED THE
+  // COMMENTS FROM. Both needles were comments, so both `indexOf`s returned -1,
+  // `slice(-1, -1)` returned `""`, the `matchAll` found zero calls and the loop
+  // never ran. A bound that names a comment cannot survive a comment stripper;
+  // the bound is now the module itself, which has nothing to keep in sync.
+  const calls = [...code(RESEND_CODE).matchAll(/console\.\w+\(([\s\S]*?)\);/g)]
+    .map((match) => match[1])
+    // A plain quoted string is a CONSTANT — `console.error("invitation resend
+    // has no message …")` names the event and can leak nothing. What must not
+    // appear is a runtime value, so the literals are blanked and everything
+    // else is scanned. Template literals are deliberately NOT blanked: `${...}`
+    // interpolates, which is exactly the leak this test is looking for.
+    .map((call) => call.replace(/"[^"\\]*"|'[^'\\]*'/g, '""'));
 
-  for (const call of [...body.matchAll(/console\.\w+\(([\s\S]*?)\);/g)].map(
-    (match) => match[1]
-  )) {
+  assert.ok(calls.length > 0, "the console scan found no calls to check");
+
+  for (const call of calls) {
     for (const forbidden of [
       /invitationId/,
       /inviteeEmail/,
@@ -1009,6 +1087,42 @@ test("the countdown is never announced — the live region says 'Email sent' onc
   assert.equal(button.match(/Email sent/g)?.length, 1);
 });
 
+test("a keyboard send keeps its place — focus moves to the outcome, not to <body>", () => {
+  // PR #392 warning (b), measured on the preview and fixed 2026-08-12. Round 2
+  // made the button natively `disabled` the instant a send succeeds, and a
+  // disabled element cannot hold focus — so pressing Enter dropped
+  // `document.activeElement` to `<body>` and threw a keyboard user to the top
+  // of the page. The remedy keeps the native `disabled` (it is the only guard
+  // no submission path gets around) and hands focus to the sentence that says
+  // what happened, which is inside the row and one Tab from Revoke.
+  const button = resendButtonSource();
+
+  // The seam: a ref on the status span, and an effect that focuses it.
+  assert.match(button, /ref=\{sentNotice\}/);
+  assert.match(button, /sentNotice\.current\?\.focus\(\)/);
+
+  // Keyed on the SEND, so it fires once per completed send: not on mount
+  // (`state.sent` starts false) and not on every tick of the countdown, which
+  // changes neither dependency. A tick that re-stole focus would be worse than
+  // the bug.
+  assert.match(button, /const sent = Boolean\(state\.sent\) && !pending/);
+  assert.match(
+    button,
+    /useEffect\(\(\) => \{\s*if \(sent\)[\s\S]*?\}, \[sent\]\)/
+  );
+
+  // Focusable programmatically, never a Tab stop, and the ring is not
+  // suppressed — a sighted keyboard user has to be able to SEE where they were
+  // put.
+  assert.match(button, /tabIndex=\{-1\}/);
+  assert.doesNotMatch(button, /outline-none|focus:outline-0/);
+
+  // The button itself keeps the honest native state; the fix must not have
+  // quietly traded it for the aria fake to keep focus where it was.
+  assert.doesNotMatch(button, /aria-disabled/);
+  assert.match(button, /disabled=\{pending \|\| cooling\}/);
+});
+
 test("NAMED LIMITATION: a session that never saw the send still gets a live button inside the window", async () => {
   // Executed, not asserted about — this is the case the cooldown CANNOT reach,
   // and it is pinned so that nobody reads §8's disabled-button assertions as a
@@ -1136,6 +1250,11 @@ test("the client counts the server's number down — it never re-derives the win
   assert.match(list, /from "@\/lib\/invitations\/resend-window"/);
   // …and it reaches the leaf, never the module that builds the key: that one
   // imports `@/lib/email/client`, so this import would ship the Resend SDK to
-  // the browser.
-  assert.doesNotMatch(list, /from "@\/lib\/invitations\/(email|core|service)"/);
+  // the browser. `resend` joins the list because it imports `core`, which
+  // imports `@/db` — the trailing quote is what keeps `resend-window`, the leaf
+  // this component legitimately needs, out of the pattern.
+  assert.doesNotMatch(
+    list,
+    /from "@\/lib\/invitations\/(email|core|service|resend)"/
+  );
 });

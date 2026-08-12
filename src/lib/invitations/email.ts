@@ -60,12 +60,14 @@ import { formatDate } from "@/lib/datetime";
 // machinery" — nothing about categories, preferences, enqueueing or dispatch is
 // reachable from here (see rule 3 above).
 import { appBaseUrl } from "@/lib/notifications/channels/email";
-// The `?invitation=` contract, from the import-free leaf that owns it. It does
-// NOT live in this module: this one imports `@/lib/email/client`, which builds
-// a Resend instance at module scope, so the "Copy link" button on the pending
-// list could not have imported it from here without shipping the Resend SDK to
-// the browser — and so hand-built the URL instead, which is the drift the
-// helper exists to prevent. See `./register-path.ts`.
+// The `?invitation=` contract, from the import-free leaf that owns it. This
+// module is now its ONLY caller — #304 ruling 4 item 5 took the link off every
+// admin surface, and #293 is the delivery that link was a stopgap for. The
+// spelling still does not live here: this module imports `@/lib/email/client`,
+// which builds a Resend instance at module scope, so the pending list's old
+// "Copy link" button could not have imported it from here without shipping the
+// Resend SDK to the browser — and so hand-built the URL instead, which is the
+// drift the helper exists to prevent. See `./register-path.ts`.
 import {
   INVITATION_REGISTER_PATH,
   invitationRegisterPath,

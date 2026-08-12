@@ -55,11 +55,13 @@ import {
   invitationActorFromSession,
   invitationTargetKinds,
   invitationView,
-  resendInvitationEmailAs,
   revokeInvitationAs,
   type InvitationRequest,
   type InvitationView,
 } from "./core";
+// The resend path is its own module (extracted 2026-08-12, PR #392 warning (c)),
+// so this is the same logic layer, one file over — not a second way in.
+import { resendInvitationEmailAs } from "./resend";
 // Type only, from the import-free leaf that owns the bucket — nothing at runtime
 // crosses this boundary that did not already.
 import type { ResendDedupeWindow } from "./resend-window";

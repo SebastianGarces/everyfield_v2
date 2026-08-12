@@ -86,7 +86,7 @@
 // `useResendCooldown` for what it cannot reach and why nothing here closes it.
 // ============================================================================
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 
 import {
   resendInvitationEmailAction,
@@ -348,6 +348,26 @@ function useResendCooldown(cooldown: ResendCooldown | undefined): number {
  * button's own label rather than in the `role="status"` region next to it: that
  * region says "Email sent" ONCE, and a live region re-announcing a number every
  * second would make this row unusable with a screen reader.
+ *
+ * …AND THE NATIVE `disabled` COSTS THE KEYBOARD ITS PLACE, which is what the
+ * effect below buys back (PR #392 warning (b), fixed 2026-08-12). Measured on
+ * the preview rather than reasoned about: focus the control, press Enter, and
+ * `document.activeElement` afterwards is `<body>` — a disabled element cannot
+ * hold focus, so the browser drops it to the document root and a keyboard or
+ * switch user is thrown to the top of the page, several dozen Tabs away from
+ * Revoke or the next row. Round 1 did not have this problem because the button
+ * stayed enabled; it is a regression introduced by round 2's guard, and axe
+ * cannot see it (0 violations in both states) because losing focus is not
+ * itself a WCAG failure.
+ *
+ * THE REMEDY KEEPS THE NATIVE `disabled` and moves focus to the sentence that
+ * says what happened: the `role="status"` span takes a `tabIndex={-1}` — which
+ * makes it programmatically focusable WITHOUT adding it to the tab order — and
+ * the effect focuses it on the transition into the sent state. Focus lands
+ * inside the row on the outcome, and the next Tab reaches Revoke. The effect is
+ * keyed on `state.sent` and `pending`, so it fires once per completed send and
+ * not on mount (`state.sent` starts false) and not on every tick of the
+ * countdown (neither dependency changes while it runs).
  */
 function ResendEmailButton({
   invitationId,
@@ -362,6 +382,16 @@ function ResendEmailButton({
   );
   const secondsLeft = useResendCooldown(state.cooldown);
   const cooling = secondsLeft > 0;
+  const sentNotice = useRef<HTMLSpanElement>(null);
+  const sent = Boolean(state.sent) && !pending;
+
+  // Not data synchronization — the repo's `useEffect` rule is about server data
+  // (memory/contracts/data-patterns.md), and nothing here reads or mirrors any.
+  // This is the one thing an effect is for: a DOM command that can only run
+  // after the browser has committed the element it commands.
+  useEffect(() => {
+    if (sent) sentNotice.current?.focus();
+  }, [sent]);
 
   return (
     <form action={formAction} className="flex items-center gap-2">
@@ -371,8 +401,19 @@ function ResendEmailButton({
           {state.error}
         </span>
       )}
-      {state.sent && !pending && (
-        <span role="status" className="text-muted-foreground text-xs">
+      {sent && (
+        <span
+          ref={sentNotice}
+          // Programmatically focusable, never in the tab order: a pointer user
+          // must not collect an extra Tab stop for a sentence they can read.
+          tabIndex={-1}
+          role="status"
+          // The focus ring is NOT suppressed. A sighted keyboard user who just
+          // pressed Enter needs to see where focus went, and this element is
+          // unreachable by Tab, so the ring can only ever appear right after the
+          // send it reports.
+          className="text-muted-foreground text-xs"
+        >
           Email sent
         </span>
       )}
