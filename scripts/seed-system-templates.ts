@@ -2,17 +2,22 @@
 // Seed System Templates
 // ============================================================================
 //
-// Run via: npx tsx src/lib/communication/seed-templates.ts
+// Run via: npx tsx scripts/seed-system-templates.ts
 //
 // Creates platform-provided system templates. Idempotent — skips templates
 // that already exist (matched by name + is_system).
+//
+// A one-shot script, NOT a library module: it loads .env.local and opens its
+// own connection at module scope, then executes on import. That is why it
+// lives in scripts/ beside its peers — importing it from app code would
+// rewrite every system template in whatever DATABASE_URL points at.
 // ============================================================================
 
 import { config } from "dotenv";
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import { eq, and } from "drizzle-orm";
-import { messageTemplates } from "../../db/schema/communication";
+import { messageTemplates } from "@/db/schema/communication";
 
 // Load env before connecting
 config({ path: ".env.local" });

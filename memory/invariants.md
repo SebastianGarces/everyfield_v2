@@ -64,11 +64,13 @@ Each section links `invariants/<domain>.md` for the why, the pattern and the wor
 → [authentication](invariants/authentication.md) — sessions, `"use server"` modules, route handlers, `src/proxy.ts`.
 
 - Session-based, NOT JWT, for immediate revocability; `sessions` is keyed by the hashed token.
-- Cookie `session` (httpOnly, secure in prod, sameSite=lax); 30-day expiry, 15-day sliding refresh; "fresh" for 10 minutes after login, which sensitive ops require.
+- Cookie `session` (httpOnly, secure in prod, sameSite=lax); 30-day expiry, 15-day sliding refresh.
+- The `sessions.fresh` column exists, but the freshness control is deliberately unwired — no helper, nothing gates on it — until the first sensitive op ships (ruled 405-2b, 2026-08-12).
 - **Every export of a `"use server"` module is a POSTable endpoint reachable with no session and no UI** — the export list IS the auth surface. Keep helpers, reads and not-yet-wired writes in a sibling module with no directive.
 - A state-changing action never takes its actor as an argument — it mints one from `verifySession()`. An entity implied by the actor (their own plant, their own org) is not an argument either.
 - A shared secret is never compared with `===`: use `matchesBearerSecret`/`constantTimeEquals` from `src/lib/security/constant-time.ts`, which hashes both sides to a fixed length first. Covers `CRON_SECRET` and `REVALIDATION_SECRET`.
-- A request header the app does not write UNCONDITIONALLY is client input and nothing may branch on it. `x-pathname` (`PATHNAME_HEADER`) is the one trusted header, and its absence must fail closed.
+- A request header the app does not write UNCONDITIONALLY is client input and nothing may branch on it. The trusted headers are `x-pathname` (`PATHNAME_HEADER`, absence fails closed) and the platform-written `x-real-ip`.
+- Client IP resolution reads `x-real-ip` first, then falls back to the LAST hop of `x-forwarded-for` — never the first hop, which the client writes (`getRequestIp`, ruled 405-1a, 2026-08-12).
 - The crawler allowance is ONE predicate, `isCrawlerPreviewRequest(userAgent, pathname)`, over a fixed route list that is a STRICT subset of the protected list — `/wiki` only. It buys the unauthenticated shell, never a session and never per-user data.
 - Listing a route there means "this route produces a session-less render worth previewing" (ruled 2026-08-09): it must render with no session AND that render must be the page, not a redirect. `/dashboard` failed the first (it calls `verifySession()`, so crawlers 500'd); `/oversight` failed the second (its pages redirect to /login, so no card was ever produced).
 - Both stay in the proxy's `PROTECTED_ROUTE_PREFIXES`, named EXPLICITLY and not through the spread of the previewable list — dropping a prefix from that list must never unprotect the route as a side effect.

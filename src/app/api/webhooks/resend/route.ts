@@ -9,20 +9,10 @@ import {
   notificationDeliveryOutcome,
   WEBHOOK_OVERWRITABLE_DELIVERY_STATUSES,
 } from "@/lib/notifications/channels/delivery-events";
+import { RECIPIENT_STATUS_RANK } from "@/lib/communication/queries";
 
 // Initialize Resend client for webhook verification
 const resend = new Resend(process.env.RESEND_API_KEY);
-
-// Status progression order (we only advance forward, never backward)
-const statusOrder: RecipientStatus[] = [
-  "pending",
-  "sent",
-  "delivered",
-  "opened",
-  "clicked",
-  "bounced",
-  "failed",
-];
 
 interface WebhookEvent {
   type: string;
@@ -171,16 +161,16 @@ export async function POST(req: NextRequest) {
     }
 
     if (newStatus) {
-      // Only advance status forward (prevent regression from async events)
-      const currentIdx = statusOrder.indexOf(
-        recipient.status as RecipientStatus
-      );
-      const newIdx = statusOrder.indexOf(newStatus);
-
-      // Special handling: bounced/failed always take effect
+      // Only advance status forward (prevent regression from async events).
+      // Bounced/failed always take effect — the short-circuit, not the rank,
+      // is what decides between the two terminal statuses.
       const isBounceOrFail = newStatus === "bounced" || newStatus === "failed";
 
-      if (isBounceOrFail || newIdx > currentIdx) {
+      if (
+        isBounceOrFail ||
+        RECIPIENT_STATUS_RANK[newStatus] >
+          RECIPIENT_STATUS_RANK[recipient.status]
+      ) {
         await db
           .update(communicationRecipients)
           .set({ status: newStatus, ...updates })

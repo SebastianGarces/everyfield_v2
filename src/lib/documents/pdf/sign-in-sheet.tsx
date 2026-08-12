@@ -4,6 +4,7 @@
 
 import { Document, Page, Text, View } from "@react-pdf/renderer";
 
+import { churchNameOf, documentSubtitle } from "../render-text";
 import type { DocumentMergeValues } from "../types";
 import { styles } from "./styles";
 
@@ -21,18 +22,18 @@ export function SignInSheetDocument({
 }: {
   values: DocumentMergeValues;
 }) {
-  const churchName = values.church_name || "Our Church";
-  const subtitleParts = [
+  const churchName = churchNameOf(values);
+  const subtitle = documentSubtitle(
     "Guest Sign-in Sheet",
     values.meeting_number ? `Vision Meeting #${values.meeting_number}` : null,
-    values.meeting_date || null,
-  ].filter(Boolean);
+    values.meeting_date || null
+  );
 
   return (
     <Document title="Guest Sign-in Sheet">
       <Page size="LETTER" style={styles.page}>
         <Text style={styles.h1}>{churchName}</Text>
-        <Text style={styles.subtitle}>{subtitleParts.join("  •  ")}</Text>
+        <Text style={styles.subtitle}>{subtitle}</Text>
 
         <View style={styles.tableHeader}>
           {COLUMNS.map((col) => (

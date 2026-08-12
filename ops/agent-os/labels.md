@@ -68,28 +68,20 @@ board-sync workflow logs a warning rather than guessing which one wins.
 | `feature`    | A feature parent. Links its FRD, holds scope decisions, owns the progress bar. |
 | `decision`   | An open ruling that gates work. **No PR closes it** — it closes by a ruling recorded in the decision ledger. |
 | `deferred`   | Off the active roadmap: cut, or kept-but-post-beta. Carries no `agent:*` label. |
-| `follow-ups` | The code-quality rollup for one feature parent — **one open issue per parent**, titled `Follow-ups — <parent title>`. Warnings arrive as unchecked ACs, not as new issues. |
 
 `feature` and `deferred` combine — a cut feature is a closed tombstone, a post-beta feature is an
 open one with no children.
 
-### The follow-ups rollup and its takeability rule
+### The follow-ups rollup — REMOVED (2026-08-10, #399)
 
-`follow-ups` is the one label that legitimately holds live work with **no `agent:*` label on it**. The
-merge gate appends each code-quality warning to the rollup as an unchecked AC under
-`## Follow-up acceptance criteria`, **before** the merge, then reads the body back and asserts every
-appended line is there — an append it cannot confirm errors the track rather than shipping it. So
-nothing is lost; the ACs simply accumulate on one issue instead of spawning one issue apiece.
-
-It becomes takeable two ways, and both halves are load-bearing:
-
-- **At 3 or more follow-up ACs** it gets `agent:queued` and enters the frontier like anything else.
-- **Regardless of count**, it joins the next track dispatched for its parent.
-
-Without the second, a rollup sitting at two ACs would wait forever — strictly worse than the 12
-one-per-warning issues this replaced, which at least reached the frontier. With it, a follow-up rides
-a fixed cost that was going to be paid anyway. Ruling and measurements:
-`product-docs/board-design-2026-07.md` §13.
+The `follow-ups` label, its rollup issues, and the takeability rule are gone. Reviewer findings
+(Critical + structural, per `.claude/agents/code-reviewer.md`) are now **fixed in the same pass**
+by the review-fix loop — fix agent, then re-review, capped at 2 quality rounds, at both the scoped
+and integration review sites. A finding that survives the rounds **holds the PR with a DECISION
+comment** (accept as-is, direct a named fix, or take it manually) instead of becoming filed debt —
+never `agent:blocked`, never merge-with-findings. Verifier warnings are spec-questions only.
+Existing open `Follow-ups — <parent title>` issues are untouched: the separate codebase-wide debt
+pass owns them.
 
 ## Modifier labels
 
@@ -188,7 +180,7 @@ gh label create "needs-spec"        --color 5319E7 --description "Not build-read
 gh label create "feature"           --color 0052CC --description "Feature parent issue — the FRD's home on the board" --force
 gh label create "decision"          --color 8B5CF6 --description "An open ruling that gates work; resolution lands in the decision ledger" --force
 gh label create "deferred"          --color BFDADC --description "Off the active roadmap — cut or post-beta" --force
-gh label create "follow-ups"        --color C2E0C6 --description "Code-quality rollup for one feature parent — warnings land here as ACs" --force
+# "follow-ups" was removed 2026-08-10 (#399): findings are fixed in-pass by the review-fix loop; existing rollup issues stay with the debt pass.
 ```
 
 `--force` makes this idempotent (safe to re-run).

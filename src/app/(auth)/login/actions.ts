@@ -74,8 +74,9 @@ export async function login(
     return { error: "Invalid email or password" };
   }
 
-  // Record the successful attempt (counts toward success, not the failure
-  // threshold — the failed-attempt window effectively resets on success).
+  // Recorded with success=true: never counted toward a threshold, and it
+  // clears this identifier's failed rows inside the window (ruled 405-4b) —
+  // a successful login starts the failure count over.
   await recordAttempt(identifier, ip, "login", true);
 
   // Create session

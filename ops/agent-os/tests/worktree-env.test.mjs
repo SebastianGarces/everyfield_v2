@@ -280,7 +280,14 @@ test("the loop's worktree-creation step and the G2 gate point at the script", ()
     "worktree creation must set up the env"
   );
 
-  const g2 = loop.split("\n").find((l) => l.includes("- G2 \\`pnpm test"));
+  // The integration verifier prompt (and its G2 line) moved to the
+  // verify-and-ship child in the #399 split; the creation step stays in the
+  // parent, so this test now reads both files.
+  const ship = fs.readFileSync(
+    path.join(ROOT, ".claude/workflows/verify-and-ship.js"),
+    "utf8"
+  );
+  const g2 = ship.split("\n").find((l) => l.includes("- G2 \\`pnpm test"));
   assert.ok(g2, "the verifier prompt still has a G2 line");
   assert.match(
     g2,

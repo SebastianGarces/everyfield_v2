@@ -20,13 +20,19 @@ import {
   communicationStatusLabel,
 } from "@/lib/communication/status-display";
 import { getTemplates } from "@/lib/communication/templates";
-import { formatDistanceToNow } from "date-fns";
+// Dates render through the pinned-zone formatter, never date-fns —
+// memory/invariants.md → Date & Time Rendering (ruled 2026-08-12, 407-3-1).
+import { formatRelativeTimestamp } from "@/lib/datetime";
 
 export const dynamic = "force-dynamic";
 
 export default async function CommunicationPage() {
   const { user } = await verifySession();
   if (!user.churchId) redirect("/dashboard");
+
+  // One `now` per render: every row's relative label is measured against the
+  // same instant, so a list can never show times that disagree with each other.
+  const now = new Date();
 
   const weekAgo = new Date();
   weekAgo.setDate(weekAgo.getDate() - 7);
@@ -215,7 +221,7 @@ export default async function CommunicationPage() {
                             {msg.recipientCount ?? 0} recipient
                             {(msg.recipientCount ?? 0) !== 1 ? "s" : ""}
                             {msg.sentAt &&
-                              ` · ${formatDistanceToNow(msg.sentAt)}`}
+                              ` · ${formatRelativeTimestamp(msg.sentAt, now)}`}
                           </p>
                         </div>
                         <Badge

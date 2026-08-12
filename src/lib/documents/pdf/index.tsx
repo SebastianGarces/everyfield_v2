@@ -28,9 +28,8 @@ const PDF_COMPONENTS: Record<string, TemplateComponent> = {
   "launch-sunday-checklists": LaunchSundayChecklistsDocument,
 };
 
-export function hasRenderer(templateId: string): boolean {
-  return templateId in PDF_COMPONENTS;
-}
+/** Registered template ids — `render.ts` folds these into its format registry. */
+export const PDF_TEMPLATE_IDS: readonly string[] = Object.keys(PDF_COMPONENTS);
 
 /**
  * Render a template to a PDF Buffer. Throws if the template id has no renderer.
