@@ -17,7 +17,10 @@ import {
 import { toInvitationListRow } from "./list-row";
 import {
   describeInvitationForRegistration,
+  hasValidInvitationBypass,
+  invitationActedOnAtRegistration,
   invitationEmailMismatchMessage,
+  isOpenRedeemableInvitation,
   registrationEmailMatchesInvitation,
   type InvitationForRegistration,
   type RegistrationInvitationReader,
@@ -690,58 +693,179 @@ test("only the invited address matches an invitation token", () => {
   assert.ok(!registrationEmailMatchesInvitation("planter@example.com", ""));
 });
 
-test("the mismatch is refused server-side, before an account exists", () => {
-  // The rule lives in the ACTION, not in the pre-filled field: this endpoint is
-  // a POST that never saw the form. The refusal is returned before the account
-  // is created and before the beta gate, which the same token also bypasses.
+// ----------------------------------------------------------------------------
+// THE ANONYMOUS POST ANSWERS ONE WAY (Ruling C, #304 round 11, 2026-08-12)
+// ----------------------------------------------------------------------------
+//
+// What stood here until round 11 was three regexes over `register/actions.ts`
+// asserting that the mismatch guard existed, in that order, before the insert.
+// Every one of them passed for the whole of rounds 8, 9 and 10 while the
+// property they stood for — "a session-free POST cannot tell a targeted id from
+// an open one from a guessed uuid" — was FALSE, because a regex can only see
+// the branch it names and the disclosure was in a different branch
+// (`hasValidInvitationBypass`) two files away. That is the fourth guard of this
+// family in this track to fail that way; `memory/invariants.md` → Multi-Tenancy
+// records the rule that came out of it.
+//
+// So the decision is a callable now. `invitationActedOnAtRegistration` IS the
+// action's whole invitation decision, and it is asserted deepEqual across the
+// four rows an attacker can submit — with an address that matches none of them.
+
+test("the anonymous POST acts on no invitation it was not addressed to", async () => {
+  const TARGETED_PLANT = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+  const TARGETED_ORG = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+  const OPEN = "12121212-1212-4121-8121-121212121212";
+  const GUESSED = "00000000-0000-4000-8000-000000000000";
+
+  // Real resolver output, exactly as §9c builds it: a hand-written row can be
+  // written to agree with whatever the code happens to do.
+  const seam = readerFor([
+    registrationRowFrom(
+      TARGETED_PLANT,
+      resolveInvitationForResolvedTarget(
+        NET_ADMIN,
+        { inviteeEmail: "planter@example.com", inviteAs: "church" },
+        { targetChurchId: PLANT }
+      )
+    ),
+    registrationRowFrom(
+      TARGETED_ORG,
+      resolveInvitationForResolvedTarget(
+        NET_ADMIN,
+        { inviteeEmail: "sc-admin@example.com", inviteAs: "sending_church" },
+        { targetSendingChurchId: SENDING_CHURCH }
+      )
+    ),
+    registrationRowFrom(
+      OPEN,
+      resolveInvitationForResolvedTarget(
+        NET_ADMIN,
+        { inviteeEmail: "nobody@example.com", inviteAs: "church" },
+        {}
+      )
+    ),
+  ]);
+
+  // The submitted address matches NONE of the three rows — the attacker is
+  // probing ids, not answering an invitation.
+  const SUBMITTED = "attacker@example.com";
+
+  const decisions = await Promise.all(
+    [TARGETED_PLANT, TARGETED_ORG, OPEN, GUESSED].map(async (id) => [
+      id,
+      invitationActedOnAtRegistration(
+        await describeInvitationForRegistration(id, seam),
+        SUBMITTED
+      ),
+    ])
+  );
+
+  // FOUR IDS, ONE ANSWER. deepEqual over the whole set rather than four
+  // separate `assert.equal(…, null)` calls, because the property is that they
+  // AGREE: a diff here names the id that answered differently.
+  assert.deepEqual(decisions, [
+    [TARGETED_PLANT, null],
+    [TARGETED_ORG, null],
+    [OPEN, null],
+    [GUESSED, null],
+  ]);
+
+  // …and the open row is genuinely live, or the four nulls prove nothing: the
+  // SAME id with the SAME reader, submitted by the address it names, is acted
+  // on. This is the one distinguishable outcome the ruling leaves — and it is
+  // an invitation being consumed, not a row being read.
+  const answered = invitationActedOnAtRegistration(
+    await describeInvitationForRegistration(OPEN, seam),
+    "nobody@example.com"
+  );
+  assert.equal(answered?.id, OPEN);
+  assert.equal(answered?.inviteeEmail, "nobody@example.com");
+
+  // Casing and stray whitespace are the same person, not a probe.
+  assert.equal(
+    invitationActedOnAtRegistration(
+      await describeInvitationForRegistration(OPEN, seam),
+      "  NoBody@Example.COM "
+    )?.id,
+    OPEN
+  );
+});
+
+test("no per-row message survives on the anonymous POST", () => {
+  // Ruling C as a source fact, which is the honest shape for it: the claim is
+  // that a particular STRING BUILDER is not reachable from this endpoint, and
+  // its absence is not observable by calling anything. The behavioural half —
+  // that all four ids answer identically — is the callable test above; this is
+  // what stops the message being wired back in.
   const body = REGISTER_ACTIONS.slice(
     REGISTER_ACTIONS.indexOf("export async function register"),
     REGISTER_ACTIONS.indexOf("async function createAccountEntities")
   );
 
-  assert.match(
-    body,
-    /!registrationEmailMatchesInvitation\(invitation\.inviteeEmail, identifier\)/
-  );
-  assert.match(
-    body,
-    /invitationEmailMismatchMessage\(invitation\.inviteeEmail\)/
-  );
+  assert.doesNotMatch(code(body), /invitationEmailMismatchMessage/);
+  assert.doesNotMatch(code(REGISTER_ACTIONS), /invitationEmailMismatchMessage/);
+
+  // The decision is made ONCE, above the gate and above the insert, and every
+  // later branch reads that one result. `invitationId` — the raw submitted
+  // string — must not be what any of them consults.
+  assert.match(body, /invitationActedOnAtRegistration\(/);
   assert.ok(
     body.includes(".insert(users)"),
     "the register action no longer inserts the account here — re-aim this check"
   );
   assert.ok(
-    body.indexOf("registrationEmailMatchesInvitation") <
-      body.indexOf(".insert(users)"),
-    "the address is checked before an account is created"
+    body.indexOf("invitationActedOnAtRegistration") <
+      body.indexOf("isBetaGateEnabled()"),
+    "the invitation decision is made before the beta gate the token bypasses"
   );
   assert.ok(
-    body.indexOf("registrationEmailMatchesInvitation") <
-      body.indexOf("isBetaGateEnabled()"),
-    "the address is checked before the beta gate it would otherwise bypass"
+    body.indexOf("invitationActedOnAtRegistration") <
+      body.indexOf(".insert(users)"),
+    "the invitation decision is made before an account is created"
   );
-
-  // The bypass is bound to the address too — otherwise a forwarded link stayed
-  // a free pass into a private beta for whoever received it.
-  assert.match(body, /hasValidInvitationBypass\(invitationId, identifier\)/);
-  const bypass = REGISTER_BETA_GATE.slice(
-    REGISTER_BETA_GATE.indexOf("export async function hasValidInvitationBypass")
+  assert.match(
+    body,
+    /hasValidInvitationBypass\(\s*invitation\?\.id \?\? null,\s*identifier\s*\)/,
+    "the gate bypass is handed the decided invitation, not the submitted id"
   );
-  assert.match(bypass, /registrationEmailMatchesInvitation\(/);
 });
 
-test("an invitation with no address describes nothing to register with", () => {
-  // `describeInvitationForRegistration` is what the page and the action both
-  // read. A row with no `invitee_email` cannot be bound to anybody, so it stops
-  // being a registration invitation at all rather than becoming an unbindable
-  // one — and the type says so, which is what keeps the form's pre-fill total.
-  const describe = REGISTER_BETA_GATE.slice(
-    REGISTER_BETA_GATE.indexOf(
-      "export async function describeInvitationForRegistration"
-    )
+test("an invitation with no address describes nothing to register with", async () => {
+  // A row with no `invitee_email` cannot be bound to anybody, so it stops being
+  // a registration invitation at all rather than becoming an unbindable one —
+  // and the type says so, which is what keeps the form's pre-fill total.
+  //
+  // Asserted by CALLING both readers since round 11: the guard used to be an
+  // inline `if` in `describeInvitationForRegistration` and a regex found it
+  // there. It now lives in the shared predicate, and the property worth pinning
+  // was never where the line sat — it is that BOTH readers refuse the row.
+  const ADDRESSLESS = "18181818-1818-4181-8181-181818181818";
+  const addressless: InvitationForRegistration = {
+    ...registrationRowFrom(
+      ADDRESSLESS,
+      resolveInvitationForResolvedTarget(
+        NET_ADMIN,
+        { inviteeEmail: "nobody@example.com", inviteAs: "church" },
+        {}
+      )
+    ),
+    inviteeEmail: "",
+  };
+  const seam = readerFor([addressless]);
+
+  assert.equal(isOpenRedeemableInvitation(addressless), false);
+  assert.equal(
+    await describeInvitationForRegistration(ADDRESSLESS, seam),
+    null
   );
-  assert.match(describe, /if \(!invitation\.inviteeEmail\) return null/);
+  // …and it buys no beta-gate bypass either, for ANY submitted address.
+  assert.equal(
+    await hasValidInvitationBypass(ADDRESSLESS, "nobody@example.com", seam),
+    false
+  );
+  assert.equal(await hasValidInvitationBypass(ADDRESSLESS, "", seam), false);
+
+  // The narrowing that makes the described shape's address non-null.
   assert.match(REGISTER_BETA_GATE, /inviteeEmail: string;/);
 });
 
@@ -764,9 +888,15 @@ test("the register form fills the invited address in and locks it", () => {
 
 test("the mismatch message says which address the invitation is for", () => {
   // "Wrong address = admin revokes + re-invites" — so the copy has to name the
-  // address that WILL work and point at the person who can change it. The link
-  // holder can already see that address on this page (the field is pre-filled
-  // from the token), so naming it in the error leaks nothing new.
+  // address that WILL work and point at the person who can change it.
+  //
+  // THE COPY IS RULED AND THE FUNCTION HAS NO CALLER (Ruling C, round 11). It
+  // named the invited address, which is safe only where the reader has already
+  // been proven to be the invitee — and the anonymous `/register` POST is not
+  // that place, so the message was taken off it rather than reworded. The test
+  // above (`no per-row message survives on the anonymous POST`) is what keeps
+  // it off; this one keeps the copy correct for the invitee-proven surface it
+  // returns on.
   const message = invitationEmailMismatchMessage("planter@example.com");
   assert.match(message, /planter@example\.com/);
   assert.match(message, /invite/i);
@@ -1233,4 +1363,198 @@ test("the register invitation shape carries no redeemable flag, and nothing bran
     assert.doesNotMatch(source, /const redeeming/);
   }
   assert.doesNotMatch(code(REGISTER_BETA_GATE), /redeemable/);
+});
+
+// ----------------------------------------------------------------------------
+// 9c (round 11, RULED 2026-08-12). …AND NEITHER DOES THE OTHER READER.
+// ----------------------------------------------------------------------------
+//
+// Round 10 fixed `describeInvitationForRegistration` and stopped. The same row
+// is read a SECOND time on the same route by `hasValidInvitationBypass` — the
+// other thing an invitation token buys — and that reader kept its own copy of
+// the rule: pending, expiry, address, and no target check. With
+// `BETA_INVITE_CODE` set, that copy was the whole oracle back, on the POST
+// instead of the GET.
+//
+// The fix is not a third copy of four guards. It is one exported predicate,
+// `isOpenRedeemableInvitation`, that both readers call — and these tests hold
+// them to it BY CALLING BOTH, through the seam the bypass gained for exactly
+// this reason.
+
+test("the beta-gate bypass reads the row by the SAME rule, not its own", async () => {
+  // THE ROUND-11 HOLE ITSELF. `hasValidInvitationBypass` is the second reader of
+  // the same row on the same public route, and until 2026-08-12 it checked only
+  // pending + expiry + address — so with `BETA_INVITE_CODE` set, a targeted id
+  // bypassed the gate (and the response became "an account with this email
+  // already exists") while a guessed uuid did not (`BETA_GATE_ERROR`). Two
+  // responses, no session, one question answered.
+  //
+  // Asserted by CALLING it through the reader seam it gained for this purpose.
+  const TARGETED_PLANT = "13131313-1313-4131-8131-131313131313";
+  const TARGETED_ORG = "14141414-1414-4141-8141-141414141414";
+  const OPEN = "15151515-1515-4151-8151-151515151515";
+  const GUESSED = "00000000-0000-4000-8000-000000000000";
+
+  const seam = readerFor([
+    registrationRowFrom(
+      TARGETED_PLANT,
+      resolveInvitationForResolvedTarget(
+        NET_ADMIN,
+        { inviteeEmail: "planter@example.com", inviteAs: "church" },
+        { targetChurchId: PLANT }
+      )
+    ),
+    registrationRowFrom(
+      TARGETED_ORG,
+      resolveInvitationForResolvedTarget(
+        NET_ADMIN,
+        { inviteeEmail: "sc-admin@example.com", inviteAs: "sending_church" },
+        { targetSendingChurchId: SENDING_CHURCH }
+      )
+    ),
+    registrationRowFrom(
+      OPEN,
+      resolveInvitationForResolvedTarget(
+        NET_ADMIN,
+        { inviteeEmail: "nobody@example.com", inviteAs: "church" },
+        {}
+      )
+    ),
+  ]);
+
+  // Each id is submitted with THE ADDRESS THAT ROW NAMES — the strongest form
+  // of the claim, because the address check cannot be what refuses the targeted
+  // rows. Only the target columns can.
+  const bypasses = await Promise.all(
+    (
+      [
+        [TARGETED_PLANT, "planter@example.com"],
+        [TARGETED_ORG, "sc-admin@example.com"],
+        [GUESSED, "planter@example.com"],
+        [OPEN, "nobody@example.com"],
+      ] as const
+    ).map(async ([id, email]) => [
+      id,
+      await hasValidInvitationBypass(id, email, seam),
+    ])
+  );
+
+  assert.deepEqual(bypasses, [
+    [TARGETED_PLANT, false],
+    [TARGETED_ORG, false],
+    [GUESSED, false],
+    // The premise. Without this the three falses are satisfied by a bypass that
+    // refuses everything.
+    [OPEN, true],
+  ]);
+
+  // A forwarded OPEN link is still not a bearer token: the right id with the
+  // wrong address buys nothing either.
+  assert.equal(
+    await hasValidInvitationBypass(OPEN, "attacker@example.com", seam),
+    false
+  );
+  assert.equal(
+    await hasValidInvitationBypass(null, "nobody@example.com"),
+    false
+  );
+});
+
+test("ONE definition decides what /register may act on", async () => {
+  // The structural half of the ruling, and the reason the two tests above stay
+  // true: `isOpenRedeemableInvitation` is the single exported predicate, and
+  // BOTH readers of the row on this route call it. Round 11 happened because
+  // round 10 fixed one reader and left the other with its own copy of a
+  // four-clause rule; a second copy is what drifts.
+  const OPEN = "16161616-1616-4161-8161-161616161616";
+  const open = registrationRowFrom(
+    OPEN,
+    resolveInvitationForResolvedTarget(
+      NET_ADMIN,
+      { inviteeEmail: "nobody@example.com", inviteAs: "church" },
+      {}
+    )
+  );
+
+  assert.equal(isOpenRedeemableInvitation(open), true);
+
+  // The four clauses, each falsified on its own from that one accepted row —
+  // so the predicate is the whole rule and not three-quarters of it.
+  assert.equal(
+    isOpenRedeemableInvitation({ ...open, status: "accepted" }),
+    false
+  );
+  assert.equal(
+    isOpenRedeemableInvitation({ ...open, expiresAt: new Date(0) }),
+    false
+  );
+  assert.equal(
+    isOpenRedeemableInvitation({ ...open, inviteeEmail: "" }),
+    false
+  );
+  assert.equal(
+    isOpenRedeemableInvitation({ ...open, targetChurchId: PLANT }),
+    false
+  );
+  assert.equal(
+    isOpenRedeemableInvitation({
+      ...open,
+      targetSendingChurchId: SENDING_CHURCH,
+    }),
+    false
+  );
+
+  // Expiry is judged against the `now` the caller passes, not only the wall
+  // clock — the shipped readers pass none, so this is what pins the boundary.
+  const expiring = { ...open, expiresAt: new Date(1_000) };
+  assert.equal(isOpenRedeemableInvitation(expiring, new Date(999)), true);
+  assert.equal(isOpenRedeemableInvitation(expiring, new Date(1_001)), false);
+
+  // BOTH READERS, ONE RULE. Not a grep for the identifier: the same row that
+  // the predicate refuses is refused by each reader, and the row it accepts is
+  // accepted by each.
+  const REFUSED = "17171717-1717-4171-8171-171717171717";
+  const refused = { ...open, id: REFUSED, targetChurchId: PLANT };
+  const seam = readerFor([open, refused]);
+
+  assert.equal(await describeInvitationForRegistration(REFUSED, seam), null);
+  assert.equal(
+    await hasValidInvitationBypass(REFUSED, "nobody@example.com", seam),
+    false
+  );
+  assert.ok(await describeInvitationForRegistration(OPEN, seam));
+  assert.equal(
+    await hasValidInvitationBypass(OPEN, "nobody@example.com", seam),
+    true
+  );
+
+  // THE SECOND NET, never the proof (the calls above are the proof): the target
+  // comparison appears in the module exactly where the predicate defines it. A
+  // reader that grows its own copy — which is literally what round 11 removed —
+  // fails here by count, before the two readers have had time to drift apart.
+  const gate = code(REGISTER_BETA_GATE);
+  assert.equal(
+    (gate.match(/targetChurchId === null/g) ?? []).length,
+    1,
+    "a second copy of the open-invitation rule appeared in beta-gate.ts"
+  );
+  assert.equal(
+    (gate.match(/targetSendingChurchId === null/g) ?? []).length,
+    1,
+    "a second copy of the open-invitation rule appeared in beta-gate.ts"
+  );
+  // …and both readers reach it by NAME, so neither can be reverted to an
+  // inline `if` without this failing.
+  for (const reader of [
+    "export async function describeInvitationForRegistration",
+    "export async function hasValidInvitationBypass",
+  ]) {
+    const body = gate.slice(gate.indexOf(reader));
+    assert.ok(
+      body.indexOf("isOpenRedeemableInvitation(") > -1 &&
+        body.indexOf("isOpenRedeemableInvitation(") <
+          body.indexOf("\n}\n", body.indexOf("{")),
+      `${reader} no longer calls the shared predicate`
+    );
+  }
 });

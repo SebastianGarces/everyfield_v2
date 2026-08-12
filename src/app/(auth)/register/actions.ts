@@ -31,10 +31,9 @@ import {
   BETA_GATE_INVALID_ERROR,
   describeInvitationForRegistration,
   hasValidInvitationBypass,
-  invitationEmailMismatchMessage,
+  invitationActedOnAtRegistration,
   isBetaCodeValid,
   isBetaGateEnabled,
-  registrationEmailMatchesInvitation,
   type RegistrationInvitation,
 } from "./beta-gate";
 
@@ -86,37 +85,45 @@ export async function register(
   // and looked up AFTER the rate limit so a guessed uuid cannot be probed for
   // free (an invitation id doubles as the beta-gate bypass token).
   const invitationId = (formData.get("invitationId") as string | null) || null;
-  const invitation = await describeInvitationForRegistration(invitationId);
 
-  // THE TOKEN IS BOUND TO THE INVITED ADDRESS — RULED 2026-08-04 (#23).
+  // THE TOKEN IS BOUND TO THE INVITED ADDRESS — RULED 2026-08-04 (#23), and
+  // SILENTLY SINCE 2026-08-12 (#304 round 11, Ruling C).
   //
   // An invitation link is a uuid in a URL: it is forwarded, pasted, archived.
-  // Until this check, whoever held one could register under any address they
-  // liked and receive the association meant for somebody else — the form
-  // pre-fills the invited address, but a pre-filled field is a suggestion, and
-  // this action is a POST endpoint that never saw the form. So the address is
-  // re-checked HERE, before the beta gate (a token is also a bypass of it) and
-  // before any account exists. A wrong address is not re-aimed at: the admin
-  // revokes and re-invites, which is the only path that leaves an audit trail
-  // of who was actually invited.
-  if (
-    invitation &&
-    !registrationEmailMatchesInvitation(invitation.inviteeEmail, identifier)
-  ) {
-    return {
-      fieldErrors: {
-        email: invitationEmailMismatchMessage(invitation.inviteeEmail),
-      },
-    };
-  }
+  // Whoever held one could otherwise register under any address they liked and
+  // receive the association meant for somebody else — the form pre-fills the
+  // invited address, but a pre-filled field is a suggestion, and this action is
+  // a POST endpoint that never saw the form.
+  //
+  // `invitationActedOnAtRegistration` is that binding, and it is the ONLY place
+  // this action decides anything about the token: from here down there is one
+  // variable, and a null one means "no invitation", whatever the visitor
+  // submitted. That matters because this endpoint takes no session — a
+  // targeted id, an open id with the wrong address and a guessed uuid must be
+  // indistinguishable in the response, and they are only indistinguishable if
+  // every later branch reads the same null. The mismatch MESSAGE was the last
+  // thing that told them apart, and Ruling C deleted it.
+  const invitation = invitationActedOnAtRegistration(
+    await describeInvitationForRegistration(invitationId),
+    identifier
+  );
 
   // Private-beta gate (server-side enforced). Skipped entirely when the env
   // var is unset/empty. Org-invitation signups (the invitation IS the invite)
   // bypass the code — but only for the address the invitation names, or the
   // link would be a free pass into the beta for anyone it was forwarded to.
   // Validated regardless of client-side visibility.
+  //
+  // The id handed over is `invitation?.id`, never the raw submitted one: a
+  // token this action decided not to act on must not still buy a gate bypass.
+  // `hasValidInvitationBypass` applies the same `isOpenRedeemableInvitation`
+  // rule again on its own read, so this is belt AND braces rather than a
+  // delegation — round 11 exists because those two readers disagreed.
   if (isBetaGateEnabled()) {
-    const bypassed = await hasValidInvitationBypass(invitationId, identifier);
+    const bypassed = await hasValidInvitationBypass(
+      invitation?.id ?? null,
+      identifier
+    );
 
     if (!bypassed) {
       const submittedCode = formData.get("inviteCode") as string | null;
@@ -159,6 +166,10 @@ export async function register(
   // so an invitation that reached this far is OPEN and redeemable by
   // definition. The flag was constant true and cost an account-existence
   // oracle on this public route.
+  //
+  // And it is `invitation`, not the submitted id, which is why THIS branch is
+  // not an oracle either (round 11): "please name your church plant" is only
+  // ever asked of somebody who submitted the address the invitation names.
   const invitedPlanter =
     invitation?.accountType === "planter" && accountType === "planter";
 

@@ -56,7 +56,11 @@ import assert from "node:assert/strict";
 
 import { and, eq, inArray, like } from "drizzle-orm";
 
-import { describeInvitationForRegistration } from "@/app/(auth)/register/beta-gate";
+import {
+  describeInvitationForRegistration,
+  hasValidInvitationBypass,
+  isBetaGateEnabled,
+} from "@/app/(auth)/register/beta-gate";
 import { db } from "@/db";
 import {
   associationEvents,
@@ -858,7 +862,7 @@ async function main() {
 
     // ------------------------------------------------------------------------
     console.log(
-      "\n--- 11. round 10: /register cannot describe a TARGETED invitation ---"
+      "\n--- 11. rounds 10+11: NEITHER /register reader acts on a TARGETED row ---"
     );
     // ------------------------------------------------------------------------
     //
@@ -869,15 +873,27 @@ async function main() {
     // `/register?invitation=<id>` in a private window used to read `redeemable`
     // off the two target columns.
     //
-    // Proven by CALLING the function against REAL ROWS — never by a regex over
-    // the page, which passed twice while the property was false. Each targeted
-    // row below is pending, unexpired, addressed and issued by an org whose
-    // name resolves, so the ONLY reason it can answer null is the target.
+    // ROUND 11 (ruled 2026-08-12): that route reads the row TWICE. Round 10
+    // fixed the GET-time reader and left `hasValidInvitationBypass` — the
+    // beta-gate bypass, which is the other thing an invitation token buys —
+    // reading the raw row with its own copy of the rule. With a non-empty
+    // `BETA_INVITE_CODE`, the POST therefore still separated a targeted id
+    // (bypass granted) from a guessed uuid (`BETA_GATE_ERROR`). Both readers
+    // now call `isOpenRedeemableInvitation`, and BOTH are exercised below.
+    //
+    // Proven by CALLING the functions against REAL ROWS — never by a regex over
+    // the source, which passed three rounds running while the property was
+    // false. Each targeted row below is pending, unexpired, addressed and
+    // issued by an org whose name resolves, so the ONLY reason it can be
+    // refused is the target.
     // ------------------------------------------------------------------------
+    const targetedPlantAddress = address("register-targeted-plant");
+    const targetedOrgAddress = address("register-targeted-org");
+
     const targetedPlantInvite = await insertInvitation({
       type: "church_to_network",
       inviterUserId: otherNetAdmin.id,
-      inviteeEmail: address("register-targeted-plant"),
+      inviteeEmail: targetedPlantAddress,
       targetChurchId: plant.id,
       targetSendingChurchId: null,
       sendingChurchId: null,
@@ -889,7 +905,7 @@ async function main() {
     const targetedOrgInvite = await insertInvitation({
       type: "sending_church_to_network",
       inviterUserId: otherNetAdmin.id,
-      inviteeEmail: address("register-targeted-org"),
+      inviteeEmail: targetedOrgAddress,
       targetChurchId: null,
       targetSendingChurchId: sendingChurch.id,
       sendingChurchId: null,
@@ -932,12 +948,82 @@ async function main() {
     ]);
     ok("an OPEN invitation still describes, with no redeemable field");
 
+    // ------------------------------------------------------------------------
+    // THE SECOND READER (round 11). The beta gate is what makes this branch
+    // reachable at all, so the code is put in scope for the assertions and
+    // taken back out afterwards — `hasValidInvitationBypass` does not read the
+    // env var itself, but a bypass nobody would consult proves nothing about
+    // the route, and `isBetaGateEnabled()` below is what says the branch is
+    // live while these run.
+    //
+    // Each id is submitted with THE ADDRESS ITS OWN ROW NAMES, so the address
+    // check cannot be what refuses the targeted ones. Only the target columns
+    // can be.
+    // ------------------------------------------------------------------------
+    const betaCodeBefore = process.env.BETA_INVITE_CODE;
+    process.env.BETA_INVITE_CODE = "g3-round-11-gate";
+    try {
+      assert.equal(
+        isBetaGateEnabled(),
+        true,
+        "the beta gate is off, so this section proves nothing about the POST"
+      );
+
+      assert.deepEqual(
+        await hasValidInvitationBypass(
+          targetedPlantInvite.id,
+          targetedPlantAddress
+        ),
+        false,
+        "a resolved-church target still bypasses the beta gate"
+      );
+      assert.deepEqual(
+        await hasValidInvitationBypass(
+          targetedOrgInvite.id,
+          targetedOrgAddress
+        ),
+        false,
+        "a resolved-sending-church target still bypasses the beta gate"
+      );
+      assert.deepEqual(
+        await hasValidInvitationBypass(
+          "00000000-0000-4000-8000-000000000000",
+          targetedPlantAddress
+        ),
+        false
+      );
+      ok("a targeted id and a guessed uuid buy the identical (no) bypass");
+
+      // THE PREMISE again: the bypass still works, or the three falses above
+      // are satisfied by a function that refuses everything. `forged` is §9's
+      // OPEN row and `forgedAddress` is the address it names.
+      assert.deepEqual(
+        await hasValidInvitationBypass(forged.id, forgedAddress),
+        true,
+        "an OPEN invitation stopped bypassing the beta gate"
+      );
+      // …and it is still not a bearer token: the right id, the wrong address.
+      assert.deepEqual(
+        await hasValidInvitationBypass(forged.id, address("gate-interloper")),
+        false
+      );
+      ok("an OPEN invitation bypasses for its OWN address and no other");
+    } finally {
+      if (betaCodeBefore === undefined) {
+        delete process.env.BETA_INVITE_CODE;
+      } else {
+        process.env.BETA_INVITE_CODE = betaCodeBefore;
+      }
+    }
+
     console.log(
       "\nALL ASSERTIONS PASSED — #304 WS3's audit-row and milestone clauses are" +
         "\nnow REQUIRED by this harness (ruling #351, migration 0036), OV-013's" +
         "\naudited sever is exercised end to end, ruling 4's HR4 fixes are" +
         "\nexercised as real forged requests (§9), and round 10's cap reset (§10)" +
-        "\nand /register oracle closure (§11) are exercised on real rows."
+        "\nand the /register oracle closure (§11) are exercised on real rows —" +
+        "\n§11 through BOTH readers of the row on that route, the describe and" +
+        "\nthe beta-gate bypass, with the gate on (round 11)."
     );
   } finally {
     if (KEEP) {

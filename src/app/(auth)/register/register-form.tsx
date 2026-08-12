@@ -67,9 +67,17 @@ const ACCOUNT_TYPE_CONFIG: Record<
  *
  * One thing it drives is NOT presentation, though it looks like it: the email
  * field is pre-filled and read-only (RULED 2026-08-04). The rule itself lives in
- * `register` and `hasValidInvitationBypass`, which refuse a registering address
- * that is not the invited one — this field just stops an honest user walking
- * into that refusal.
+ * `register` (through `invitationActedOnAtRegistration`) and in
+ * `hasValidInvitationBypass`, which both refuse to act on an invitation for a
+ * registering address that is not the invited one.
+ *
+ * THIS FIELD IS NOW THE ONLY WARNING A HONEST USER GETS, which is why it is
+ * pre-filled rather than merely validated. Ruling C (#304 round 11, 2026-08-12)
+ * deleted the server's mismatch message: `/register` is an anonymous POST, and a
+ * per-row message there told a stranger holding any invitation id whether that
+ * id was live and which address it named. A wrong address now falls through to
+ * the ordinary sign-up in silence, so the form's job is to make the wrong
+ * address hard to submit in the first place.
  */
 export function RegisterForm({
   betaGateEnabled,
