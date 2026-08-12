@@ -10,7 +10,17 @@ import {
   type PhaseTemplatePrompt as PhaseTemplatePromptData,
 } from "@/lib/tasks/phase-prompt";
 
-import { phaseTemplatePromptControlState } from "./phase-template-prompt-controls";
+import {
+  DISMISS_FAILED_MESSAGE,
+  IMPORT_FAILED_MESSAGE,
+  NOTHING_IMPORTED_MESSAGE,
+  NOTHING_TICKED_HINT,
+  PhaseTemplatePromptForm,
+  partialImportMessage,
+  phaseTemplatePromptControlState,
+  type PhaseTemplateDismissOutcome,
+  type PhaseTemplateImportOutcome,
+} from "./phase-template-prompt-controls";
 import { PhaseTemplatePromptView } from "./phase-template-prompt";
 
 // ----------------------------------------------------------------------------
@@ -39,14 +49,59 @@ function promptData(toPhase = 2): PhaseTemplatePromptData {
   return prompt;
 }
 
+const IDLE_IMPORT: PhaseTemplateImportOutcome = { status: "idle" };
+const IDLE_DISMISS: PhaseTemplateDismissOutcome = { status: "idle" };
+
+async function noopImport(): Promise<PhaseTemplateImportOutcome> {
+  return IDLE_IMPORT;
+}
+
+async function noopDismiss(): Promise<PhaseTemplateDismissOutcome> {
+  return IDLE_DISMISS;
+}
+
 function render(prompt: PhaseTemplatePromptData = promptData()): string {
   return renderToStaticMarkup(
     createElement(PhaseTemplatePromptView, {
       prompt,
-      importAction: async () => {},
-      dismissAction: async () => {},
+      importAction: noopImport,
+      dismissAction: noopDismiss,
     })
   );
+}
+
+/**
+ * The island on its own, at a tick count and an outcome a full render cannot
+ * reach.
+ *
+ * `useActionState` reports `pending: false` and holds its initial state under
+ * `renderToStaticMarkup`, and the checkboxes are uncontrolled server markup —
+ * so "no box is ticked" and "the import came back partial" are set here, at the
+ * island's own props, rather than simulated.
+ */
+function renderIsland(
+  overrides: {
+    offerCount?: number;
+    initialImportOutcome?: PhaseTemplateImportOutcome;
+    initialDismissOutcome?: PhaseTemplateDismissOutcome;
+  } = {}
+): string {
+  return renderToStaticMarkup(
+    createElement(PhaseTemplatePromptForm, {
+      offerCount: overrides.offerCount ?? 2,
+      lead: null,
+      children: null,
+      importAction: noopImport,
+      dismissAction: noopDismiss,
+      initialImportOutcome: overrides.initialImportOutcome,
+      initialDismissOutcome: overrides.initialDismissOutcome,
+    })
+  );
+}
+
+/** The `<button>` tags in document order — Import first, then Not now. */
+function buttons(html: string): string[] {
+  return html.match(/<button[^>]*>/g) ?? [];
 }
 
 /** Undo React's HTML escaping, so an assertion can be written in the words a
@@ -343,37 +398,61 @@ test("the prompt states the import policy before the press", () => {
 // ----------------------------------------------------------------------------
 // The submit guard (ruled 2026-08-10, PR #393)
 //
-// `useFormStatus` reports `pending: false` under `renderToStaticMarkup` no
+// `useActionState` reports `pending: false` under `renderToStaticMarkup` no
 // matter what, so the decision it feeds is a pure function and is asserted at
 // every combination here. The wiring itself is a browser assertion.
 // ----------------------------------------------------------------------------
 
+const RESTING = {
+  importPending: false,
+  dismissPending: false,
+  tickedCount: 2,
+};
+
 test("both buttons rest enabled, with the resting label", () => {
-  assert.deepEqual(phaseTemplatePromptControlState(false, null), {
-    disabled: false,
+  assert.deepEqual(phaseTemplatePromptControlState(RESTING), {
+    importDisabled: false,
+    dismissDisabled: false,
     importing: false,
     dismissing: false,
     importLabel: "Import checklists",
+    emptyHint: null,
   });
 });
 
 test("a request in flight disables both buttons", () => {
-  for (const pressed of ["import", "dismiss", null] as const) {
+  for (const pending of ["importPending", "dismissPending"] as const) {
+    const state = phaseTemplatePromptControlState({
+      ...RESTING,
+      [pending]: true,
+    });
+
     assert.equal(
-      phaseTemplatePromptControlState(true, pressed).disabled,
+      state.importDisabled,
       true,
-      `pressing ${pressed ?? "nothing"} left a button live during the request`
+      `${pending} left the import live during the request`
+    );
+    assert.equal(
+      state.dismissDisabled,
+      true,
+      `${pending} left the decline live during the request`
     );
   }
 });
 
 test("only the pressed button reports itself busy", () => {
-  const importing = phaseTemplatePromptControlState(true, "import");
+  const importing = phaseTemplatePromptControlState({
+    ...RESTING,
+    importPending: true,
+  });
   assert.equal(importing.importing, true);
   assert.equal(importing.dismissing, false);
   assert.equal(importing.importLabel, "Importing…");
 
-  const dismissing = phaseTemplatePromptControlState(true, "dismiss");
+  const dismissing = phaseTemplatePromptControlState({
+    ...RESTING,
+    dismissPending: true,
+  });
   assert.equal(dismissing.dismissing, true);
   assert.equal(dismissing.importing, false);
   assert.equal(
@@ -383,19 +462,181 @@ test("only the pressed button reports itself busy", () => {
   );
 });
 
-test("a submit that went through neither handler reads as the import", () => {
-  // The form's default action IS the import, so an unattributed submit — the
-  // Enter key inside the checklist, say — must not report a decline.
-  const state = phaseTemplatePromptControlState(true, null);
+test("neither button is busy when nothing is in flight", () => {
+  const state = phaseTemplatePromptControlState(RESTING);
 
-  assert.equal(state.importing, true);
+  assert.equal(state.importing, false);
   assert.equal(state.dismissing, false);
 });
 
-test("neither button is busy when nothing is in flight", () => {
-  for (const pressed of ["import", "dismiss", null] as const) {
-    const state = phaseTemplatePromptControlState(false, pressed);
-    assert.equal(state.importing, false);
-    assert.equal(state.dismissing, false);
-  }
+// ----------------------------------------------------------------------------
+// The empty selection (ruled 2026-08-12, round 3 — "disable, not message")
+//
+// Unticking every box and pressing Import used to be a silent, feedback-free
+// no-op, which also made the round-2 untick copy false. These pin that the
+// state is now unreachable, and that it is explained rather than merely dead.
+// ----------------------------------------------------------------------------
+
+test("the zero-ticked state cannot produce a silent submit", () => {
+  const state = phaseTemplatePromptControlState({ ...RESTING, tickedCount: 0 });
+
+  assert.equal(
+    state.importDisabled,
+    true,
+    "an empty selection can still be submitted"
+  );
+  assert.equal(
+    state.emptyHint,
+    NOTHING_TICKED_HINT,
+    "an empty selection refuses the press without saying why"
+  );
+  assert.equal(
+    state.dismissDisabled,
+    false,
+    "with Import refusing, Not now is the only way out and must stay live"
+  );
+});
+
+test("one tick is enough to arm the import again", () => {
+  const state = phaseTemplatePromptControlState({ ...RESTING, tickedCount: 1 });
+
+  assert.equal(state.importDisabled, false);
+  assert.equal(state.emptyHint, null);
+});
+
+test("the hint is not offered while a request is in flight", () => {
+  // Mid-request the button is inert because it is BUSY, not because the
+  // selection is empty; two reasons on one control read as a contradiction.
+  const state = phaseTemplatePromptControlState({
+    importPending: true,
+    dismissPending: false,
+    tickedCount: 0,
+  });
+
+  assert.equal(state.importDisabled, true);
+  assert.equal(state.emptyHint, null);
+});
+
+test("with nothing ticked the rendered Import button is disabled and explained", () => {
+  const html = renderIsland({ offerCount: 0 });
+  const [importButton, dismissButton] = buttons(html);
+
+  assert.match(
+    importButton,
+    /disabled=""/,
+    "the Import button accepts a press with no checklist ticked"
+  );
+  assert.doesNotMatch(
+    dismissButton,
+    /disabled=""/,
+    "Not now went inert with the Import button, leaving no way out"
+  );
+  assert.ok(
+    textOf(html).includes(NOTHING_TICKED_HINT),
+    "the refusing button is not explained"
+  );
+  assert.match(
+    html,
+    /role="status"/,
+    "the reason Import refuses is never announced"
+  );
+});
+
+test("with every checklist ticked the Import button accepts the press", () => {
+  const [importButton] = buttons(renderIsland({ offerCount: 3 }));
+
+  assert.doesNotMatch(importButton, /disabled=""/);
+  assert.ok(!renderIsland({ offerCount: 3 }).includes(NOTHING_TICKED_HINT));
+});
+
+test("the full prompt arms its Import button, because every box arrives ticked", () => {
+  const [importButton] = buttons(render());
+
+  assert.doesNotMatch(
+    importButton,
+    /disabled=""/,
+    "the prompt renders refusing a press it has every reason to accept"
+  );
+});
+
+// ----------------------------------------------------------------------------
+// The failure paths (ruled 2026-08-12, round 3 — "both cases surface")
+//
+// Every outcome used to end in `console.error` and a `void` return. A press
+// that writes 22–26 tasks may not fail into a log file.
+// ----------------------------------------------------------------------------
+
+test("a total failure is reported where the press happened", () => {
+  const html = renderIsland({ initialImportOutcome: { status: "failed" } });
+
+  assert.ok(textOf(html).includes(IMPORT_FAILED_MESSAGE));
+  assert.match(html, /role="alert"/, "the failure is not announced");
+  assert.equal(
+    buttons(html).length,
+    2,
+    "a failure that created nothing must leave both answers pressable"
+  );
+});
+
+test("a submit naming no live checklist is answered in words", () => {
+  const html = renderIsland({ initialImportOutcome: { status: "nothing" } });
+
+  assert.ok(textOf(html).includes(NOTHING_IMPORTED_MESSAGE));
+  assert.match(html, /role="alert"/);
+});
+
+test("a failed decline is reported too", () => {
+  const html = renderIsland({ initialDismissOutcome: { status: "failed" } });
+
+  assert.ok(textOf(html).includes(DISMISS_FAILED_MESSAGE));
+  assert.match(html, /role="alert"/);
+});
+
+test("a partial import says what landed and points at the standing catalog", () => {
+  // The claim is KEPT on a part-way import, so the prompt never renders again.
+  // This panel is the only place the planter can be told, which is why it
+  // replaces the offers rather than sitting under them.
+  const html = renderIsland({
+    initialImportOutcome: {
+      status: "partial",
+      createdCount: 9,
+      templateNames: ["Ministry Team Setup"],
+    },
+  });
+  const text = textOf(html);
+
+  assert.match(html, /role="alert"/, "the partial import is not announced");
+  assert.ok(
+    text.includes("9 tasks created from Ministry Team Setup"),
+    "the partial import does not say what DID land"
+  );
+  assert.ok(
+    text.includes("The remaining checklists were not created"),
+    "the partial import does not say that something failed"
+  );
+  assert.ok(
+    text.includes("this stage change is now answered"),
+    "the partial import does not say the prompt is spent"
+  );
+  assert.ok(
+    html.includes('href="/tasks/templates"'),
+    "the partial import does not point at the route holding the remainder"
+  );
+  assert.equal(
+    buttons(html).length,
+    0,
+    "the answered prompt still offers checklists it can no longer import"
+  );
+});
+
+test("the partial receipt reads as a sentence at any number of checklists", () => {
+  assert.ok(partialImportMessage(1, ["A"]).includes("1 task created from A"));
+  assert.ok(
+    partialImportMessage(4, ["A", "B"]).includes("4 tasks created from A and B")
+  );
+  assert.ok(
+    partialImportMessage(6, ["A", "B", "C"]).includes(
+      "6 tasks created from A, B and C"
+    )
+  );
 });

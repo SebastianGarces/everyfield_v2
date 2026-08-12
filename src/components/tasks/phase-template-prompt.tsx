@@ -2,7 +2,11 @@ import { refresh, revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import Link from "next/link";
 
-import { PhaseTemplatePromptControls } from "@/components/tasks/phase-template-prompt-controls";
+import {
+  PhaseTemplatePromptForm,
+  type PhaseTemplateDismissOutcome,
+  type PhaseTemplateImportOutcome,
+} from "@/components/tasks/phase-template-prompt-controls";
 import { getCurrentSession } from "@/lib/auth/session";
 import { formatDate } from "@/lib/datetime";
 import {
@@ -19,14 +23,22 @@ import { TEMPLATES_LINK_LABEL, TEMPLATES_ROUTE } from "@/lib/tasks/templates";
 // ============================================================================
 // T-020 — the prompt itself.
 //
-// A SERVER COMPONENT WITH A PLAIN FORM, and no client bundle at all. What the
-// planter does here is tick boxes and press one of two buttons, which is what
-// a form is; making it a client island would buy an optimistic update for a
-// component whose whole job is to disappear once it is answered. It also keeps
-// the auth surface honest: the two actions below are the ONLY exports-shaped
-// things in this file that a browser can POST to, they capture nothing, and
-// each mints its own actor from the session (`memory/invariants.md` →
-// Authentication).
+// A SERVER COMPONENT, AND ALL OF ITS MARKUP IS SERVER MARKUP. What the planter
+// does here is tick boxes and press one of two buttons, which is what a form
+// is. The `<form>` element itself lives in the client island next door —
+// `useActionState` requires it — but the lead, the checklist rows and the fine
+// print are passed INTO the island as props, so they are still rendered on the
+// server and no row becomes a client component. It also keeps the auth surface
+// honest: the two actions below are the ONLY exports-shaped things in this file
+// that a browser can POST to, they capture nothing, and each mints its own
+// actor from the session (`memory/invariants.md` → Authentication).
+//
+// EVERY OUTCOME IS SAID OUT LOUD (ruled 2026-08-12, round 3 on PR #393). Both
+// actions used to return `void` and log their failures to the console. A press
+// that writes 22–26 tasks may not fail silently, and the PARTIAL import is the
+// case that has no second chance: the claim is kept by design, so the prompt is
+// answered and never renders again. Each action therefore returns an outcome
+// and the island renders it.
 //
 // TICKED BY DEFAULT, WHICH IS NOT THE SAME AS AUTOMATIC. The FRD's sketch
 // offers "Yes, import all" / "Let me choose" / "Skip"; one ticked list with an
@@ -145,19 +157,29 @@ async function markPromptAnswered(transitionId: string): Promise<void> {
  * cleared cookie, a double press — imports nothing and reports
  * `already_answered`. Both outcomes take the prompt down, because both mean the
  * transition has been answered.
+ *
+ * SHAPED FOR `useActionState`: `(previous outcome, form) → next outcome`. The
+ * previous outcome is never read — an answer is decided by the database and the
+ * form, not by what the last press reported.
  */
-async function importPhaseTemplatesAction(formData: FormData): Promise<void> {
+async function importPhaseTemplatesAction(
+  _previous: PhaseTemplateImportOutcome,
+  formData: FormData
+): Promise<PhaseTemplateImportOutcome> {
   "use server";
 
   try {
     const { user } = await getCurrentSession();
-    if (!user?.churchId) return;
+    if (!user?.churchId) return { status: "failed" };
 
     const templateKeys = formData
       .getAll("templateKey")
       .filter((value): value is string => typeof value === "string");
 
-    if (templateKeys.length === 0) return;
+    // Unreachable from the buttons — Import refuses an empty selection — so
+    // this is a forged POST or a browser with no JavaScript. Either way it is
+    // answered in words rather than by doing nothing.
+    if (templateKeys.length === 0) return { status: "nothing" };
 
     const result = await acceptPhaseTemplatePrompt({
       churchId: user.churchId,
@@ -166,18 +188,36 @@ async function importPhaseTemplatesAction(formData: FormData): Promise<void> {
     });
 
     // `null` means nothing was answered — no live prompt, or every key was
-    // forged. Nothing happened, so the prompt stays up.
-    if (!result) return;
+    // forged. Nothing happened, so the prompt stays up and says why.
+    if (!result) return { status: "nothing" };
 
     await markPromptAnswered(result.transitionId);
+
+    // A PART-WAY IMPORT DELIBERATELY DOES NOT `refresh()`. The claim is kept, so
+    // a refresh would re-render this route with no prompt in it — unmounting
+    // the one surface that can tell the planter half a set arrived. The page is
+    // revalidated so the next navigation is correct, and the panel stays put
+    // holding its receipt.
+    if (result.status === "partial") {
+      revalidatePath("/tasks");
+
+      return {
+        status: "partial",
+        createdCount: result.createdCount,
+        templateNames: result.templateNames,
+      };
+    }
 
     // The list this sits above is on the same page, so `refresh()` reconciles
     // it; `revalidatePath` covers the same page reached from elsewhere
     // (`memory/contracts/data-patterns.md`).
     refresh();
     revalidatePath("/tasks");
+
+    return { status: "idle" };
   } catch (error) {
     console.error("importPhaseTemplatesAction error:", error);
+    return { status: "failed" };
   }
 }
 
@@ -186,32 +226,41 @@ async function importPhaseTemplatesAction(formData: FormData): Promise<void> {
  *
  * Reads NOTHING from the form. The transition being declined is re-read from
  * the database, so the request cannot aim the dismissal at a transition other
- * than the plant's current one. React hands a `FormData` to every form action,
- * including this one; the signature simply does not accept it, which is the
- * clearest way to say nothing in the form is read.
+ * than the plant's current one. `useActionState` hands its action the previous
+ * outcome and then a `FormData`; this signature accepts neither past the first,
+ * which is the clearest way to say nothing in the form is read.
  *
  * The decline is written to `phase_prompt_answers`, so it holds on every
  * device — the cookie afterwards only saves this browser the join.
+ *
+ * `null` from the service means there is no transition to decline, which leaves
+ * the prompt exactly as it was. Reported as a failure, because from the
+ * planter's side a press that changed nothing IS one.
  */
-async function dismissPhaseTemplatePromptAction(): Promise<void> {
+async function dismissPhaseTemplatePromptAction(
+  _previous: PhaseTemplateDismissOutcome
+): Promise<PhaseTemplateDismissOutcome> {
   "use server";
 
   try {
     const { user } = await getCurrentSession();
-    if (!user?.churchId) return;
+    if (!user?.churchId) return { status: "failed" };
 
     const transitionId = await declinePhaseTemplatePrompt({
       churchId: user.churchId,
       userId: user.id,
     });
-    if (!transitionId) return;
+    if (!transitionId) return { status: "failed" };
 
     await markPromptAnswered(transitionId);
 
     refresh();
     revalidatePath("/tasks");
+
+    return { status: "idle" };
   } catch (error) {
     console.error("dismissPhaseTemplatePromptAction error:", error);
+    return { status: "failed" };
   }
 }
 
@@ -245,8 +294,13 @@ function offerSpan(offer: PhaseTemplateOffer): string {
 
 export interface PhaseTemplatePromptViewProps {
   prompt: PhaseTemplatePromptData;
-  importAction: (formData: FormData) => void | Promise<void>;
-  dismissAction: () => void | Promise<void>;
+  importAction: (
+    state: PhaseTemplateImportOutcome,
+    formData: FormData
+  ) => Promise<PhaseTemplateImportOutcome>;
+  dismissAction: (
+    state: PhaseTemplateDismissOutcome
+  ) => Promise<PhaseTemplateDismissOutcome>;
 }
 
 /**
@@ -266,38 +320,48 @@ export function PhaseTemplatePromptView({
       data-testid="phase-template-prompt"
       className="border-border bg-card space-y-4 rounded-md border p-4 shadow-sm"
     >
-      {/*
-        `data-testid` is a TEST SEAM, not styling. The structural tests assert
-        that the lead stays two paragraphs and that both standing notes sit in
-        the fine print — a rule about WHICH BLOCK a sentence lives in. Anchored
-        to the serialized class string, those tests broke on a prettier class
-        reorder; anchored here, they break only when a note actually moves.
-      */}
-      <div data-testid="prompt-lead" className="space-y-1">
-        <h2 id={PROMPT_HEADING_ID} className="text-base font-medium">
-          You moved to {prompt.phaseName}
-        </h2>
-        <p className="text-muted-foreground text-sm">
-          {prompt.offers.length === 1
-            ? "There is a ready-made checklist for this stage"
-            : `There are ${prompt.offers.length} ready-made checklists for this stage`}
-          {" — "}
-          {taskCountLabel(prompt.totalTaskCount)} in all, dated from the day you
-          moved ({formatDate(prompt.transitionedAt, "short")}).
-        </p>
-        <p className="text-muted-foreground text-sm">
-          {PROMPT_NOTE} {UNTICK_NOTE}{" "}
-          <Link
-            href={TEMPLATES_ROUTE}
-            className="text-primary cursor-pointer font-medium underline underline-offset-4"
-          >
-            {TEMPLATES_LINK_LABEL}
-          </Link>
-          .
-        </p>
-      </div>
+      <PhaseTemplatePromptForm
+        offerCount={prompt.offers.length}
+        importAction={importAction}
+        dismissAction={dismissAction}
+        lead={
+          /*
+            `data-testid` is a TEST SEAM, not styling. The structural tests
+            assert that the lead stays two paragraphs and that both standing
+            notes sit in the fine print — a rule about WHICH BLOCK a sentence
+            lives in. Anchored to the serialized class string, those tests broke
+            on a prettier class reorder; anchored here, they break only when a
+            note actually moves.
 
-      <form action={importAction} className="space-y-4">
+            Handed to the island rather than rendered beside it so a partial
+            import can replace the whole body with its receipt: the lead offers
+            checklists that, by then, have been answered for.
+          */
+          <div data-testid="prompt-lead" className="space-y-1">
+            <h2 id={PROMPT_HEADING_ID} className="text-base font-medium">
+              You moved to {prompt.phaseName}
+            </h2>
+            <p className="text-muted-foreground text-sm">
+              {prompt.offers.length === 1
+                ? "There is a ready-made checklist for this stage"
+                : `There are ${prompt.offers.length} ready-made checklists for this stage`}
+              {" — "}
+              {taskCountLabel(prompt.totalTaskCount)} in all, dated from the day
+              you moved ({formatDate(prompt.transitionedAt, "short")}).
+            </p>
+            <p className="text-muted-foreground text-sm">
+              {PROMPT_NOTE} {UNTICK_NOTE}{" "}
+              <Link
+                href={TEMPLATES_ROUTE}
+                className="text-primary cursor-pointer font-medium underline underline-offset-4"
+              >
+                {TEMPLATES_LINK_LABEL}
+              </Link>
+              .
+            </p>
+          </div>
+        }
+      >
         <ul className="divide-border border-border divide-y rounded-md border">
           {prompt.offers.map((offer) => {
             const inputId = `phase-template-${offer.key}`;
@@ -347,14 +411,7 @@ export function PhaseTemplatePromptView({
           <p>{IMPORT_POLICY_NOTE}</p>
           <p>{DISMISS_NOTE}</p>
         </div>
-
-        {/*
-          The one client island in the prompt. It renders INSIDE the form
-          because `useFormStatus` reports on the form above it — which is what
-          lets both buttons go inert for the length of the request.
-        */}
-        <PhaseTemplatePromptControls dismissAction={dismissAction} />
-      </form>
+      </PhaseTemplatePromptForm>
     </section>
   );
 }

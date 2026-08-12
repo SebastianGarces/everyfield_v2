@@ -117,7 +117,38 @@ Two orderings inside the accept matter and are easy to get wrong:
 - The claim happens **after** the requested keys are filtered against the live prompt. Claiming first would let a forged POST naming only bogus keys spend the planter's one answer and leave them with no prompt and no tasks.
 - The already-answered check happens **before** the prompt is built, not by reading the built prompt's `null`. `buildPhaseTemplatePrompt` returns `null` for four different reasons and the caller has to tell "answered" (a success, prompt comes down) from "nothing to offer" (leave it up).
 
-The button is disabled while the request runs, which is the belt over these braces — it does not make the repeat harmless, it stops the planter watching a second request they have no reason to think is a no-op. `useFormStatus` needs a client component, so the two buttons live in `phase-template-prompt-controls.tsx` and the rest of the prompt stays a server component; the decision they render is the pure `phaseTemplatePromptControlState`, because `useFormStatus` reports `pending: false` under `renderToStaticMarkup` and could not otherwise be asserted.
+The button is disabled while the request runs, which is the belt over these braces — it does not make the repeat harmless, it stops the planter watching a second request they have no reason to think is a no-op. `useActionState` needs a client component, so the `<form>` and its two buttons live in `phase-template-prompt-controls.tsx` and the rest of the prompt stays a server component — the lead, the checklist rows and the fine print are handed to the island as props, so they are still server markup and no row becomes client code. The decision the buttons render is the pure `phaseTemplatePromptControlState`, because `useActionState` reports `pending: false` under `renderToStaticMarkup` and could not otherwise be asserted.
+
+### The answer belongs to the plant, not to the planter (ruled 2026-08-12)
+
+`phase_prompt_answers` is unique on `transition_id` **alone**, and `/tasks` carries no role gate. So whoever reaches the page first answers that stage change for *everyone*: a `team_member` who presses "Not now" suppresses the prompt for the planter, on every device, permanently. Accepting is the same in the other direction — the checklists one person takes are the checklists the plant gets.
+
+This is a consequence of the 2026-08-10 ruling, kept on purpose rather than discovered. The prompt is about the PLANT's stage change, and the tasks it creates belong to the plant; an answer per person would mean the same 22–26 tasks created once per member who happened to visit. Before the ruling the answer was a cookie, so this blast radius is genuinely new — the earlier wording talked only about a planter following themselves across devices, and that is no longer the whole story.
+
+If per-person answers are ever wanted, the key has to widen (`(transition_id, user_id)`, or an answer per offer) and the idempotency argument above has to be re-made against the new key. That is a new ruling, not a refactor.
+
+### An empty selection is refused, not swallowed (ruled 2026-08-12)
+
+Unticking every box and pressing Import used to do nothing at all: no answer row, no tasks, no message, and the form re-rendered with every box ticked again. It also made the round-2 copy *false* — the unticked checklists were offered again, immediately, which is the opposite of what the sentence promised.
+
+The fix is refusal, not explanation: `phaseTemplatePromptControlState` disables Import while `tickedCount === 0`, and the empty submit becomes impossible instead of silently pointless. "Not now" deliberately stays live — an empty selection IS a dismissal, and a panel with no enabled control is a trap. The disabled button is not left bare either; `NOTHING_TICKED_HINT` renders beside it in a `role="status"` line, because a disabled button is not focusable and its `aria-describedby` would never be read.
+
+The ticks are counted off the DOM (`change` bubbles to the form, the handler counts `input[name="templateKey"]:checked`) rather than mirrored into React state. The boxes stay uncontrolled server markup, and there is no second source of truth for something the form already knows.
+
+`acceptPhaseTemplatePrompt`'s own `keys.length === 0 → null` guard is untouched and must stay: the button stops the honest empty press, the guard stops a forged key list spending the planter's one answer.
+
+### Every outcome is said out loud (ruled 2026-08-12)
+
+Both actions used to return `void` and log failures to the console. On a press that writes 22–26 tasks that is not acceptable, and the partial import is the case with no second chance — the claim is kept, so the prompt is answered and will never render again to explain itself.
+
+So `acceptPhaseTemplatePrompt` **returns** `partial` rather than throwing once any task exists, and `importPhaseTemplatesAction` is shaped for `useActionState`: `(previous outcome, form) → next outcome`. Four outcomes are rendered, all through the island:
+
+- `partial` — the receipt replaces the panel body: what landed, that the rest did not, that the stage change is now answered, and a link to `/tasks/templates` for the remainder.
+- `failed` — `role="alert"` and `IMPORT_FAILED_MESSAGE`, the same treatment `template-picker.tsx` gives a failed catalog import. Nothing was created, so both buttons stay pressable.
+- `nothing` — a submit that named no live checklist. Unreachable from the buttons; reachable from a forged POST, or from a plant that moved stage between the render and the press.
+- a failed decline — reported for the same reason, though it creates nothing either way.
+
+**The partial path must not call `refresh()`.** The claim is kept, so a refresh re-renders `/tasks` with no prompt in it and takes the receipt down with it. `revalidatePath("/tasks")` alone is correct: the next navigation is right, and the panel stays put long enough to be read. This is the one place in the prompt where the house `refresh()` pattern is deliberately not followed, and it is the reason the lead is passed INTO the island — the receipt has to be able to replace it.
 
 The prompt also states the import policy now, in its own words rather than the catalog's: the two surfaces no longer behave the same. Importing from `/tasks/templates` again really does add a second copy; this prompt can be answered exactly once per stage change. Both halves are surprising on their own, so both are said.
 

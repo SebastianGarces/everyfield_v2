@@ -292,10 +292,19 @@ export interface AcceptPhaseTemplatePromptInput {
  *
  * `already_answered` is a SUCCESS: the transition has an answer, so the prompt
  * is done and must come down — it simply created nothing this time.
+ *
+ * `partial` is a FAILURE THAT IS ALSO AN ANSWER, and it is returned rather than
+ * thrown on purpose (ruled 2026-08-12, round 3 on PR #393). Once any task
+ * exists the claim is kept — re-offering a checklist already in the list is how
+ * a planter imports it twice — so the transition is answered and the prompt
+ * will not render again. Thrown, that case is indistinguishable at the call
+ * site from a total failure, and the caller would tell the planter nothing was
+ * created when half a set was. `createdCount` and `templateNames` cover what
+ * DID land; the remainder stays reachable at `/tasks/templates`.
  */
 export type AcceptPhaseTemplatePromptResult =
   | {
-      status: "imported";
+      status: "imported" | "partial";
       transitionId: string;
       /** The calendar day the offsets were counted from — the TRANSITION's day. */
       importedOn: string;
@@ -423,6 +432,12 @@ export async function declinePhaseTemplatePrompt(input: {
  * real and invisible from the button, the prompt copy states it out loud
  * (`phase-template-prompt.tsx` → `UNTICK_NOTE`, ruled 2026-08-10 round 2).
  *
+ * A PART-WAY IMPORT IS REPORTED, NOT THROWN (ruled 2026-08-12, round 3). The
+ * claim is kept once any task exists, so the prompt is spent; `partial` is what
+ * lets the caller say so. Only a claim that wrote NOTHING is released, and that
+ * one still throws — the prompt returns, and the caller reports a clean
+ * failure.
+ *
  * Returns `null` when there is nothing to accept — no live prompt, or no
  * requested key survived the filter. The caller treats `null` as "leave the
  * prompt up": nothing was created and nothing has been answered.
@@ -485,12 +500,26 @@ export async function acceptPhaseTemplatePrompt(
     }
   } catch (error) {
     // Claimed but wrote nothing: hand the prompt back rather than leaving the
-    // planter answered with an empty list. Once ANY task exists the claim is
-    // kept — see `releasePhaseTemplatePromptAnswer`.
+    // planter answered with an empty list, and let the failure reach the caller
+    // so it can say "nothing was created".
     if (createdCount === 0) {
       await releasePhaseTemplatePromptAnswer(claimId);
+      throw error;
     }
-    throw error;
+
+    // Part-way. The claim is KEPT — see `releasePhaseTemplatePromptAnswer` —
+    // so the prompt is answered and this return is the ONLY chance to tell the
+    // planter that half a set arrived. Logged as well as returned: the caller
+    // gets the shape, the operator gets the cause.
+    console.error("acceptPhaseTemplatePrompt partial import:", error);
+
+    return {
+      status: "partial",
+      transitionId: transition.id,
+      importedOn,
+      createdCount,
+      templateNames,
+    };
   }
 
   return {

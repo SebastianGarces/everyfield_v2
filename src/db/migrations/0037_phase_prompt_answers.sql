@@ -66,20 +66,32 @@
 -- the dev-seed wipe on its own and no list has to be kept in step
 -- (`memory/invariants.md` → Dev Seeds).
 --
--- EXPAND-ONLY. Nothing is dropped and nothing is rewritten. A build deployed
--- BEFORE this migration keeps working (it never names the table — it answers
--- with the cookie only), and the build deployed AFTER it works against a
--- database that has not run the migration only until the first answer. Deploy
--- in either order. Nothing needs back-filling: an unanswered transition is the
--- absence of a row, and every planter's outstanding prompt is their LATEST
--- transition, which no cookie from before this change can have answered
--- durably. The worst a planter sees is one prompt they had already dismissed in
--- their own browser — where the cookie still suppresses it anyway.
+-- EXPAND-ONLY DDL — WHICH IS NOT THE SAME AS "DEPLOY IN EITHER ORDER". Nothing
+-- is dropped and nothing is rewritten, so a build deployed BEFORE this
+-- migration keeps working: it never names the table and answers with the cookie
+-- only. The build that SHIPS WITH this migration is the other story.
+-- `getLatestPhaseTransition` (src/lib/tasks/phase-prompt.ts) LEFT JOINs
+-- `phase_prompt_answers` on EVERY /tasks render, because `PhaseTemplatePrompt`
+-- is mounted unconditionally in src/app/(dashboard)/tasks/page.tsx, and there
+-- is no route-level error boundary anywhere under src/app — only
+-- src/app/global-error.tsx. A missing table is therefore not a degraded prompt.
+-- It is an unhandled Postgres error that fails the WHOLE /tasks render, for
+-- every planter, on their FIRST page load — not at the first answer.
 --
--- ROLLBACK (HR2). Drop what was added. Nothing else referenced it, and the
--- cookie fast path still works on its own, so the application code degrades to
--- the pre-ruling per-browser behaviour rather than breaking. Run in ONE psql
--- session:
+-- SO: APPLY THIS MIGRATION BEFORE DEPLOYING THIS BUILD. Nothing needs
+-- back-filling: an unanswered transition is the absence of a row, and every
+-- planter's outstanding prompt is their LATEST transition, which no cookie from
+-- before this change can have answered durably. The worst a planter sees is one
+-- prompt they had already dismissed in their own browser — where the cookie
+-- still suppresses it anyway.
+--
+-- ROLLBACK (HR2) RUNS THE ORDER BACKWARDS: CODE FIRST, TABLE SECOND. Ship the
+-- application revert first — or in the same deploy — and run the DDL only once
+-- no live build reads `phase_prompt_answers`. Dropping the table under a
+-- running build breaks /tasks for exactly the reason above. The revert is one
+-- change, not two: the `ON CONFLICT` claim in `acceptPhaseTemplatePrompt` goes
+-- with it, which un-fixes the cross-device duplicate this migration exists to
+-- close. Once the code is back, run in ONE psql session:
 --
 --   DROP TABLE IF EXISTS "phase_prompt_answers";
 --   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1786542394700;
@@ -98,10 +110,6 @@
 -- nothing and a hash-keyed DELETE reports `DELETE 0`. The literal above is
 -- this migration's `"when"` in `_journal.json`, which IS the ledger's
 -- `created_at`.
---
--- Rolling back also un-fixes the cross-device duplicate, so the `ON CONFLICT`
--- claim in `acceptPhaseTemplatePrompt` must be reverted with it — the two are
--- one change.
 CREATE TABLE "phase_prompt_answers" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"church_id" uuid NOT NULL,

@@ -190,6 +190,9 @@ Applies to `src/lib/communication/**` and the `/communication` surfaces. Ruled 2
 - The claim happens AFTER the requested keys are filtered against the live prompt, never before: a forged key list must buy nothing, and spending the planter's one answer is something.
 - Accepting dates the checklist from the TRANSITION instant, never from the press (`importedAt: transition.createdAt`), and the keys are re-filtered against a freshly derived prompt so a forged key imports nothing.
 - A claim whose import wrote NOTHING is released, so the prompt returns; a claim whose import got part-way is KEPT, because re-offering a checklist already in the list is how a planter imports it twice. The remainder stays reachable at `/tasks/templates`.
+- ⚖ The answer belongs to the PLANT, not to the planter (ruled 2026-08-12 on PR #393). `unique (transition_id)` is keyed by the transition alone and `/tasks` has no role gate, so ANY church member who opens it first answers that stage change **for everyone, on every device** — including pressing "Not now" on the planter's behalf. A deliberate consequence of the 2026-08-10 ruling, not an oversight; per-person answers need a wider key and a new ruling.
+- ⚖ Import REFUSES an empty selection (ruled 2026-08-12): the button disables while no checklist is ticked, says why beside itself, and "Not now" stays live as the only way out. Unticking everything and pressing Import was otherwise a silent no-op — and it made the untick copy false, because the checklists came straight back.
+- A part-way import RETURNS `partial`, it does not throw, and the action rendering it must NOT call `refresh()`. The claim is kept, so refreshing re-renders `/tasks` with no prompt in it and unmounts the only surface that can say half a set arrived. `revalidatePath` only, and the panel becomes the receipt.
 
 ## People — Contacts, Import & Households
 
