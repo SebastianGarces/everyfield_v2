@@ -6,6 +6,7 @@ import {
   isCrawlerPreviewRequest,
   PATHNAME_HEADER,
 } from "@/lib/crawler";
+import { safeRedirectPath } from "@/lib/auth/safe-redirect";
 
 const SESSION_COOKIE_NAME = "session";
 const SESSION_EXPIRY_SECONDS = 30 * 24 * 60 * 60; // 30 days
@@ -81,14 +82,15 @@ export function proxy(request: NextRequest): NextResponse {
 
   // 1. Auth routing for GET requests
   if (request.method === "GET") {
-    // Authenticated user on auth routes → redirect to dashboard (or redirect param)
+    // Authenticated user on auth routes → redirect to dashboard (or redirect param).
+    // The param is sanitised by `safeRedirectPath` — the ONE open-redirect
+    // predicate, shared with `login`/`devLoginAs` — because a bare
+    // `startsWith("/")` admits `//evil.com` and its control-character
+    // spellings (see `src/lib/auth/safe-redirect.ts`).
     if (hasSessionCookie && isAuthRoute(pathname)) {
-      const redirectTo =
-        request.nextUrl.searchParams.get("redirect") || "/dashboard";
-      // Prevent open redirect by ensuring redirectTo starts with /
-      const safeRedirect = redirectTo.startsWith("/")
-        ? redirectTo
-        : "/dashboard";
+      const safeRedirect = safeRedirectPath(
+        request.nextUrl.searchParams.get("redirect")
+      );
       return NextResponse.redirect(new URL(safeRedirect, request.url));
     }
 

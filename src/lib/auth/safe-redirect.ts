@@ -12,8 +12,9 @@
  * `?redirect=/%09/evil.com`, which `searchParams` decodes to a literal tab —
  * so any control character is refused outright rather than enumerated. All
  * three spellings are refused here, and every consumer of the param — `login`,
- * `devLoginAs`, and the login page that threads it into the form — calls this
- * instead of hand-rolling the ternary, so the fix cannot drift out of one copy.
+ * `devLoginAs`, the login page that threads it into the form, and the proxy's
+ * authenticated-on-/login bounce (`src/proxy.ts`) — calls this instead of
+ * hand-rolling the ternary, so the fix cannot drift out of one copy.
  */
 export function safeRedirectPath(
   value: unknown,
