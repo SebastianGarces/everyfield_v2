@@ -216,10 +216,11 @@ export async function register(
         sendingNetworkId,
       })
       .returning({ id: users.id }),
-    // The church link + its privacy row, AFTER the users insert both
-    // reference. The `ON CONFLICT DO NOTHING` on the privacy row comes with
-    // the shared statements (#198): a retry racing its own predecessor cannot
-    // dead-end on the unique index.
+    // For an invited planter: the WHOLE church-creation tuple, verbatim,
+    // AFTER the users insert its compare-and-set and privacy row reference.
+    // The `ON CONFLICT DO NOTHING` on the privacy row comes with the shared
+    // statements (#198): a retry racing its own predecessor cannot dead-end
+    // on the unique index.
     ...account.linkStatements,
   ];
 
@@ -283,11 +284,6 @@ const USERS_EMAIL_UNIQUE = "users_email_unique";
  * (`crypto.randomUUID()`, as `createChurchDeps.newChurchId` does) so each
  * statement can reference rows that do not exist yet.
  *
- * The statements come back in two lists because they straddle the users
- * insert: `statements` is the org entity itself (the users FKs point at it, so
- * it goes first), and `linkStatements` is what needs the users row to exist —
- * the church link and its privacy row.
- *
  * Planters sign up without creating a church — they get free access to
  * Phase 0 content and the Wiki. They create their church from the dashboard
  * when they're ready.
@@ -302,9 +298,15 @@ function createAccountEntities(
   churchId: string | null;
   sendingChurchId: string | null;
   sendingNetworkId: string | null;
-  /** The org-entity insert, or empty for a cold planter signup. */
+  /**
+   * Statements the users FKs point at — batched BEFORE its insert. Empty for
+   * planters: an invited planter's church tuple lives in `linkStatements`.
+   */
   statements: BatchItem<"pg">[];
-  /** Statements that reference the users row — batched AFTER its insert. */
+  /**
+   * Statements that need the users row to exist — batched AFTER its insert.
+   * For an invited planter this is `churchCreationStatements` whole.
+   */
   linkStatements: BatchItem<"pg">[];
 } {
   switch (accountType) {
@@ -317,30 +319,31 @@ function createAccountEntities(
       if (createChurchForPlanter && organizationName) {
         // The church-creation contract is stated ONCE, by
         // `churchCreationStatements` (`src/lib/onboarding/create-church.ts`,
-        // ruling 408-4B): the church insert, the `linkUserToChurchFilter`
-        // compare-and-set and the `ON CONFLICT DO NOTHING` privacy row are
-        // the same statements onboarding's step 1 batches — composed around
-        // this path's users insert rather than reimplemented beside it, so
-        // the privacy row and the FK order cannot drift between the two
-        // church-creation paths.
+        // ruling 408-4B), and spread here WHOLE, in the tuple's own order —
+        // no individual statement is named, so a statement added to the
+        // contract reaches this path with no edit here. The whole tuple goes
+        // AFTER the users insert, which is FK-safe: `churches` references no
+        // users column, and the users insert writes `churchId: null` (the
+        // tuple's own compare-and-set writes the link), so register and
+        // onboarding's step 1 issue identical church-creation SQL.
         const churchId = crypto.randomUUID();
-        const [createChurch, linkPlanter, privacyRow] =
-          churchCreationStatements({
-            churchId,
-            plantedBy: userId,
-            name: organizationName,
-            city: null,
-            stateRegion: null,
-            country: null,
-          });
 
         return {
           role: "planter",
           churchId,
           sendingChurchId: null,
           sendingNetworkId: null,
-          statements: [createChurch],
-          linkStatements: [linkPlanter, privacyRow],
+          statements: [],
+          linkStatements: [
+            ...churchCreationStatements({
+              churchId,
+              plantedBy: userId,
+              name: organizationName,
+              city: null,
+              stateRegion: null,
+              country: null,
+            }),
+          ],
         };
       }
 
