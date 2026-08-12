@@ -29,7 +29,7 @@
 
 ## Constants
 
-**Session** (`src/lib/auth/session.ts`): SESSION_EXPIRY_DAYS 30 · SESSION_REFRESH_THRESHOLD_DAYS 15 · FRESH_SESSION_MINUTES 10 · SESSION_COOKIE_NAME "session" (`src/lib/auth/cookies.ts`)
+**Session** (`src/lib/auth/session.ts`): SESSION_EXPIRY_DAYS 30 · SESSION_REFRESH_THRESHOLD_DAYS 15 · SESSION_COOKIE_NAME "session" (`src/lib/auth/cookies.ts`)
 
 **Password hashing — Argon2id** (`src/lib/auth/password.ts`): memoryCost 19456 KiB · timeCost 2 · outputLen 32 · parallelism 1
 

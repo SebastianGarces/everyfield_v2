@@ -7,8 +7,6 @@ export {
   invalidateSession,
   invalidateUserSessions,
   getUserSessions,
-  markSessionStale,
-  isSessionFresh,
   cleanupExpiredSessions,
   getCurrentSession,
   getCurrentUserChurch,

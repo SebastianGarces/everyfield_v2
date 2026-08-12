@@ -14,7 +14,6 @@ import {
 // Constants
 const SESSION_EXPIRY_DAYS = 30;
 const SESSION_REFRESH_THRESHOLD_DAYS = 15;
-const FRESH_SESSION_MINUTES = 10;
 
 // Encoding helpers
 const encodeHexLowerCase = (bytes: Uint8Array): string => {
@@ -100,6 +99,8 @@ export async function createSession(
       userAgent: metadata.userAgent,
       country: metadata.country,
       city: metadata.city,
+      // No reader yet: the freshness control is deliberately unwired until
+      // the first sensitive op ships (ruled 405-2b, 2026-08-12).
       fresh: true,
     })
     .returning();
@@ -203,37 +204,6 @@ export async function getUserSessions(userId: string): Promise<Session[]> {
     .where(
       and(eq(sessions.userId, userId), gt(sessions.expiresAt, new Date()))
     );
-}
-
-/**
- * Mark a session as no longer fresh
- * @param sessionId - The hashed session ID from the database
- */
-export async function markSessionStale(sessionId: string): Promise<void> {
-  await db
-    .update(sessions)
-    .set({ fresh: false })
-    .where(eq(sessions.id, sessionId));
-}
-
-/**
- * Check if a session is fresh (for sensitive operations)
- * A session is fresh if it was created within maxAgeMinutes
- * @param session - The session to check
- * @param maxAgeMinutes - Maximum age in minutes (default: 10)
- */
-export function isSessionFresh(
-  session: Session,
-  maxAgeMinutes: number = FRESH_SESSION_MINUTES
-): boolean {
-  if (!session.fresh) {
-    return false;
-  }
-
-  const maxAge = maxAgeMinutes * 60 * 1000;
-  const sessionAge = Date.now() - session.createdAt.getTime();
-
-  return sessionAge < maxAge;
 }
 
 /**
