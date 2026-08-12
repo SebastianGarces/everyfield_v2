@@ -2,10 +2,27 @@
 // Phase Engine — Signal layer queries
 //
 // Every read here is church_id-scoped (NFR-PE-6) and returns ONLY raw, countable
-// rows. There is no interpretation in this file: the builder (build-fact-snapshot)
-// assembles the deterministic snapshot from these primitives. Keeping the SQL
-// isolated makes the determinism easy to audit (AC-PE-2) and the queries easy to
-// reason about for tenant isolation.
+// rows. There is no interpretation in the SNAPSHOT half of this file: the builder
+// (build-fact-snapshot) assembles the deterministic snapshot from these
+// primitives. Keeping the SQL isolated makes the determinism easy to audit
+// (AC-PE-2) and the queries easy to reason about for tenant isolation.
+//
+// The READ LAYER that used to be this file's second half now sits beside it, one
+// module per projection (#319, round 4 — the split follows the section banners
+// this file already carried):
+//
+//   - `trends.ts`     — PE-026, trends and velocity;
+//   - `milestones.ts` — PE-027, the milestone timeline.
+//
+// Both are pure PROJECTIONS over rows read here — the same division of labour
+// `buildCsfScorecard` follows in assessment/queries.ts, and for the same reason:
+// a projection that recomputes nothing is testable without a database and cannot
+// disagree with the snapshot it was projected from. The rule they are written
+// against is stated at their own headers — every number is read out of a
+// persisted `fact_snapshot`, and every badge is a relabelled persisted severity.
+//
+// The dependency runs one way and must keep doing so: a projection may import a
+// primitive from here, and nothing here may import a projection.
 // ============================================================================
 
 import { db } from "@/db";
