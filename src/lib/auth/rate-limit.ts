@@ -42,17 +42,29 @@ const RATE_LIMITS: Record<
 export type RateLimitResult = { limited: boolean };
 
 /**
- * Read the originating IP from the `x-forwarded-for` header (first hop).
- * Returns `null` when unavailable.
+ * Resolve the client IP for rate limiting (ruled 405-1a, 2026-08-12).
+ *
+ * Reads the platform-written `x-real-ip` header first. Falls back to the LAST
+ * hop of `x-forwarded-for` — the hop nearest our proxy, which the client
+ * cannot write. NEVER the first hop: that segment arrives in the request, so
+ * a client can forge it and rotate it to evaporate every per-IP limit.
+ * Returns `null` when neither header yields a value.
  */
 export async function getRequestIp(): Promise<string | null> {
   const headersList = await headers();
+
+  const realIp = headersList.get("x-real-ip")?.trim();
+  if (realIp) {
+    return realIp;
+  }
+
   const forwardedFor = headersList.get("x-forwarded-for");
   if (!forwardedFor) {
     return null;
   }
-  const firstHop = forwardedFor.split(",")[0]?.trim();
-  return firstHop && firstHop.length > 0 ? firstHop : null;
+  const hops = forwardedFor.split(",");
+  const lastHop = hops[hops.length - 1]?.trim();
+  return lastHop && lastHop.length > 0 ? lastHop : null;
 }
 
 /**
