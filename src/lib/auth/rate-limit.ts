@@ -95,9 +95,10 @@ async function countFailures(
  * Determine whether an auth attempt should be rejected for exceeding limits.
  *
  * Only FAILED attempts inside the window count toward a threshold. A
- * successful attempt is recorded (success=true) but is neither counted nor
- * does it clear earlier failures — so a lockout persists until the failed
- * rows age out of the window, even across an intervening successful login.
+ * successful attempt is recorded (success=true) and is never counted, and
+ * `recordAttempt` deletes that identifier's failed rows inside the window on
+ * success (ruled 405-4b) — so a successful login clears the identifier's
+ * slate instead of leaving a near-lockout armed.
  */
 export async function checkRateLimit(
   identifier: string,
@@ -131,7 +132,11 @@ export async function checkRateLimit(
 }
 
 /**
- * Record an auth attempt. Opportunistically prunes rows older than one day on
+ * Record an auth attempt.
+ *
+ * On success, deletes that identifier's failed rows inside the kind's window
+ * (ruled 405-4b) so a successful login clears the failure count instead of
+ * leaving it armed. Also opportunistically prunes rows older than one day on
  * each write (no cron exists; acceptable at beta volume).
  */
 export async function recordAttempt(
@@ -140,18 +145,43 @@ export async function recordAttempt(
   kind: AuthAttemptKind,
   success: boolean
 ): Promise<void> {
-  // Both statements are known up front and touch only auth_attempts, so they
+  // All statements are known up front and touch only auth_attempts, so they
   // ship as one batched transaction (sanctioned shape #1, src/db/index.ts):
   // one round trip, all-or-nothing.
+  const normalizedIdentifier = identifier.toLowerCase();
   const cutoff = new Date(Date.now() - 24 * HOUR_MS);
+  const insertAttempt = db.insert(authAttempts).values({
+    identifier: normalizedIdentifier,
+    ip,
+    kind,
+    success,
+  });
+  // Opportunistic cleanup: delete rows older than one day.
+  const pruneOld = db
+    .delete(authAttempts)
+    .where(lt(authAttempts.createdAt, cutoff));
+
+  if (!success) {
+    await db.batch([insertAttempt, pruneOld]);
+    return;
+  }
+
+  // Clear this identifier's failed rows inside the window, in the SAME batch
+  // as the insert (ruled 405-4b). Identifier axis only — failed rows for
+  // OTHER identifiers from the same IP still count toward the per-IP limit.
+  const since = new Date(Date.now() - RATE_LIMITS[kind].windowMs);
   await db.batch([
-    db.insert(authAttempts).values({
-      identifier: identifier.toLowerCase(),
-      ip,
-      kind,
-      success,
-    }),
-    // Opportunistic cleanup: delete rows older than one day.
-    db.delete(authAttempts).where(lt(authAttempts.createdAt, cutoff)),
+    insertAttempt,
+    pruneOld,
+    db
+      .delete(authAttempts)
+      .where(
+        and(
+          eq(authAttempts.identifier, normalizedIdentifier),
+          eq(authAttempts.kind, kind),
+          eq(authAttempts.success, false),
+          gt(authAttempts.createdAt, since)
+        )
+      ),
   ]);
 }
