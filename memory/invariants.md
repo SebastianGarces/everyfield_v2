@@ -25,6 +25,8 @@ Each section links `invariants/<domain>.md` for the why, the pattern and the wor
 - A church and its `church_privacy_settings` row are created by ONE batch; the loser's orphan church is swept afterwards under a `NOT EXISTS` guard.
 - Both answers to an empty planter seat — the No as well as the Yes — open with `SELECT … FROM churches … FOR UPDATE` and are gated on their own rowcount.
 - `finalizeAttendance()` emits downstream first, then compare-and-sets `actual_attendance` (non-null = finalized = its idempotency key); `meeting.attendance.finalized` is emitted STRICTLY.
+- `createHouseholdWithHead` (src/lib/people/household.ts) is ONE `db.batch` whose household INSERT is an `insert … select` sourced FROM the person row — the person existence check IS the insert's row source, so never re-add a pre-flight SELECT. The household INSERT must stay FIRST: `persons.household_id` FKs `households.id`, so the person update needs the household row to already exist in the batch.
+- Accepted residual: the two `createHouseholdWithHead` statements take separate READ COMMITTED snapshots, so a person soft-deleted between them commits an orphan household — the JS `throw new Error("Person not found")` fires after COMMIT and rolls nothing back (the "empty `returning()` rolls nothing back" rule above).
 - Accepted residual: the COM-020 task→communication log entry has only a SELECT-then-INSERT on `communication_recipients.external_id = 'task:<id>'`; `completeTask` is a read-then-write, so a double-clicked Complete writes two entries until a partial unique index exists.
 - Accepted residual: `meeting.attendance.recorded` is non-strict — a failed prospect → attendee advance is swallowed rather than blocking finalization.
 
@@ -34,6 +36,7 @@ Each section links `invariants/<domain>.md` for the why, the pattern and the wor
 
 - All feature data carries `church_id`; `church_id = null` means global content (e.g. wiki articles).
 - Tenant isolation is enforced in the application layer — there is no RLS behind you.
+- A person-scoped write whose service does not itself scope the person by church calls `assertPersonInChurch(churchId, personId)` (src/lib/people/service.ts) FIRST — tags, skills and commitment uploads stamp the caller's church_id onto a client-supplied person_id and would otherwise write across tenants; the commitment check precedes the file upload so no object lands for a foreign person.
 - Hierarchy is SendingNetwork → SendingChurch → Church, every hierarchy FK nullable, and a plant's two oversight FKs are INDEPENDENT — neither implies the other.
 - An accept never replaces an existing association: both statements of the accept batch carry `fk IS NULL OR fk = <this org>`, and the guard sits on the CLAIM so a refusal writes nothing at all.
 - An invitation may name no target — that is the register path. Only `bindOpenInvitationTarget` (CAS on pending + both targets null + unexpired) gives it one, which is what makes a link single-use; registration binds BEFORE accepting, never after.
@@ -141,6 +144,14 @@ Applies to `src/lib/communication/**` and the `/communication` surfaces. Ruled 2
 - ⚖ Exactly ONE instance of a recurring series is open at a time, minted on completion — never by a cron. The guard runs BEFORE the successor insert, so a resurrected series gains neither a second open task nor a duplicate checklist.
 - `completionEvent` is never copied to a successor: `meeting.evaluation.completed` is backed by a partial unique index, so copying it aborts the second instance's insert. Recurrence mints plain work; hooks stay with the generator.
 - A completion is written FIRST and its successor second — the reverse of the usual durable-marker-last rule, deliberately. A successor with no completion leaves two open instances; a completion with no successor is repaired by reopening and re-completing.
+
+## People — Contacts, Import & Households
+
+Applies to `src/lib/people/**` and the `/people` surfaces. Rulings from the debt sweep on PR #410 (2026-08-12).
+
+- `createPerson()` (src/lib/people/service.ts) is the ONE writer of the `person_created` timeline activity (ruling 410-2A) — every creation path (form, quick add, bulk import, both meeting flows) goes through it, and a second `person_created` insert anywhere re-creates the duplication that ruling deleted. `activitySource` is the closed `PersonCreationSource` union with NO default, so a new path must name itself or it does not compile.
+- `peopleTextSearch` (src/lib/people/service.ts) is the ONE people text predicate — list, search and export all call it, and `search.ts` was deleted (ruling 410-1B). Never a second copy under any name — the copy is always the one that misses the fix.
+- The import preview carries REDACTED duplicate matches only — `{id, displayName}` via `toImportRowDuplicates`, fed by `findDuplicateMatches` which loads no tags (ruling 410-3C). Restoring the full person record to the preview re-opens the PII round trip to the client; anything server-side resolves a match by `id`.
 
 ## Dev Seeds
 

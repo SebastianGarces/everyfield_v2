@@ -1,12 +1,12 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { formatRelativeTimestamp } from "@/lib/datetime";
 import {
   type ActivityWithPerformer,
   formatActivityMessage,
   isStatusChangeBackward,
 } from "@/lib/people/activity.shared";
-import { formatDistanceToNow } from "date-fns";
 import {
   Activity,
   ArrowDown,
@@ -24,12 +24,19 @@ import {
 
 interface ActivityItemProps {
   activity: ActivityWithPerformer;
+  /**
+   * The one instant the whole feed is rendered against, threaded down from the
+   * server component — never a clock read here, which would make SSR and
+   * hydration disagree (memory/invariants.md → Date & Time Rendering).
+   */
+  now: Date;
   onDelete?: (activityId: string) => void;
   canDelete?: boolean;
 }
 
 export function ActivityItem({
   activity,
+  now,
   onDelete,
   canDelete,
 }: ActivityItemProps) {
@@ -93,9 +100,7 @@ export function ActivityItem({
             <span className="text-muted-foreground">{message}</span>
           </div>
           <span className="text-muted-foreground text-xs tabular-nums">
-            {formatDistanceToNow(new Date(activity.createdAt), {
-              addSuffix: true,
-            })}
+            {formatRelativeTimestamp(new Date(activity.createdAt), now)}
           </span>
         </div>
 

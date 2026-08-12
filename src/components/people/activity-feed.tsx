@@ -3,7 +3,7 @@
 import {
   deleteNoteAction,
   getMoreActivitiesAction,
-} from "@/app/(dashboard)/people/actions";
+} from "@/app/(dashboard)/people/activity-actions";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,6 +24,8 @@ import { ActivityItem } from "./activity-item";
 interface ActivityFeedProps {
   /** Activities from server - this is the source of truth */
   activities: ActivityWithPerformer[];
+  /** One instant for the whole render, threaded from the server component. */
+  now: Date;
   nextCursor?: Date;
   personId: string;
   currentUserId: string;
@@ -33,6 +35,7 @@ type OptimisticAction = { type: "delete"; activityId: string };
 
 export function ActivityFeed({
   activities,
+  now,
   nextCursor: initialNextCursor,
   personId,
   currentUserId,
@@ -120,6 +123,7 @@ export function ActivityFeed({
           <ActivityItem
             key={activity.id}
             activity={activity}
+            now={now}
             onDelete={handleDeleteNote}
             canDelete={
               activity.activityType === "note_added" &&

@@ -97,9 +97,21 @@ export function formatDate(date: Date, variant: DateVariant = "long"): string {
   return dateFormatters[variant].format(date);
 }
 
+/**
+ * `"July 30, 2026"` (long) / `"Jul 30, 2026"` (short) — `formatDate` without
+ * the weekday, for dense cards and history rows where the weekday is noise.
+ */
+export function formatDateWithoutWeekday(
+  date: Date,
+  variant: DateVariant = "long"
+): string {
+  if (variant === "long") return dayLongFormatter.format(date);
+  return shortDateWithoutWeekday.format(date);
+}
+
 /** `"September 14, 2026"` — the long date without its weekday. */
 export function formatDayLong(date: Date): string {
-  return dayLongFormatter.format(date);
+  return formatDateWithoutWeekday(date, "long");
 }
 
 /** `"7:00 PM"`. */

@@ -3,7 +3,7 @@
  * These functions don't require database access and can be used in client components.
  */
 
-import { personStatuses, type Person, type PersonStatus } from "@/db/schema";
+import { personStatuses, type PersonStatus } from "@/db/schema";
 import type { StatusTransition } from "./types";
 
 // ============================================================================
@@ -11,10 +11,10 @@ import type { StatusTransition } from "./types";
 // ============================================================================
 
 /**
- * The ordered progression of statuses.
+ * The ordered progression of statuses — the ONE copy in the domain.
  * Index represents the progression order (0 = earliest, 6 = latest)
  */
-const STATUS_ORDER: PersonStatus[] = [
+export const STATUS_ORDER: PersonStatus[] = [
   "prospect",
   "attendee",
   "following_up",
@@ -44,7 +44,7 @@ export const STATUS_LABELS: Record<PersonStatus, string> = {
 /**
  * Get the index of a status in the progression order
  */
-function getStatusIndex(status: PersonStatus): number {
+export function getStatusIndex(status: PersonStatus): number {
   return STATUS_ORDER.indexOf(status);
 }
 
@@ -95,8 +95,7 @@ function getStatusesBetween(
  */
 export function validateStatusTransition(
   from: PersonStatus,
-  to: PersonStatus,
-  _person: Person
+  to: PersonStatus
 ): StatusTransition {
   const warnings: string[] = [];
   let requiresConfirmation = false;
@@ -191,16 +190,4 @@ export function getAvailableStatuses(): Array<{
     value: status,
     label: STATUS_LABELS[status],
   }));
-}
-
-/**
- * Handle out-of-order progression by determining what the target status
- * should be based on the action performed.
- */
-export function handleOutOfOrderProgression(
-  currentStatus: PersonStatus,
-  targetStatus: PersonStatus
-): StatusTransition {
-  const minimalPerson = { status: currentStatus } as Person;
-  return validateStatusTransition(currentStatus, targetStatus, minimalPerson);
 }
