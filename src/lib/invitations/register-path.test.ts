@@ -153,6 +153,53 @@ test("no admin surface builds the invite link at all", () => {
   }
 });
 
+// ----------------------------------------------------------------------------
+// 4. …and the PROSE does not describe the stopgap either
+// ----------------------------------------------------------------------------
+
+// THE RULE REACHES THE COPY, COMMENTS INCLUDED (`memory/invariants.md`, the
+// 2026-08-12 #293 × #304 reconciliation). The first sweep read components, so a
+// refusal MESSAGE that said "copy the link and send it yourself" survived it;
+// the second sweep read messages, so three DOCBLOCKS survived that — `email.ts`
+// rule 1 and two in `service.ts`, each still calling the email "best-effort
+// delivery of a link the admin can also copy" and naming the link as the
+// fallback for a failed send. Nothing was wrong at runtime. What was wrong is
+// that the three documents a next implementer reads first described a retired
+// stopgap as the design, on a page where reintroducing it has been ruled out
+// twice.
+//
+// So this guard runs over the WHOLE FILE, comments and all — `code()` is
+// deliberately NOT applied — and over every module that has ever carried the
+// sentence. Patching the instances is not the fix; closing the class is.
+//
+// `resend.ts` is deliberately NOT in the list. Its `INVITATION_SEND_FAILED_MESSAGE`
+// docblock QUOTES the retired sentence to record that it was removed and must
+// not come back, which is the opposite of describing it as the design — the
+// same thing `memory/` does. A module that quotes it to forbid it has to be
+// able to name it.
+const NO_ADMIN_LINK_PROSE = [
+  ["lib", "invitations", "email.ts"],
+  ["lib", "invitations", "service.ts"],
+  ["lib", "invitations", "core.ts"],
+  ["lib", "invitations", "create-notice.ts"],
+] as const;
+
+const RETIRED_STOPGAP =
+  /copy the link|the link as (the )?fallback|admin can also copy|hands the admin the link/i;
+
+test("no module still documents the admin's copy of the link as the recovery", () => {
+  for (const segments of NO_ADMIN_LINK_PROSE) {
+    const source = read(...segments);
+    const where = segments.join("/");
+
+    assert.doesNotMatch(
+      source,
+      RETIRED_STOPGAP,
+      `${where} still names the admin's copy of the invite link — the recovery is "Resend email" on the row (#304 ruling 4 item 5, #293)`
+    );
+  }
+});
+
 test("the client surface reaches leaves only, never the send path", () => {
   // The specific import that put 687 KB of Resend SDK in the browser chunk.
   // `@/lib/invitations/email` pulls `@/lib/email/client`, which constructs a

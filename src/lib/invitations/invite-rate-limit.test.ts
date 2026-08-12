@@ -12,6 +12,7 @@ import {
   invitesFromOrgToTargetQuery,
   targetReachFilter,
 } from "./core";
+import { sourceReader } from "./source-span";
 
 // ============================================================================
 // #304, HR4 2026-08-09 — an org cannot keep a banner on a stranger's dashboard.
@@ -41,9 +42,21 @@ import {
 //      refusal speaks with the one message because it is post-resolution.
 // ============================================================================
 
-const CORE = readFileSync(
-  path.join(process.cwd(), "src", "lib", "invitations", "core.ts"),
-  "utf8"
+/**
+ * `core.ts`, and the ONLY way this file cuts a function out of it.
+ *
+ * `span` / `after` throw when an anchor has moved — see `./source-span` for why
+ * that is load-bearing rather than defensive dressing, and for the two times a
+ * bare `indexOf` turned an assertion about one function into an assertion about
+ * the whole module without anything going red. Nothing below slices `CORE.code`
+ * by hand.
+ */
+const CORE = sourceReader(
+  readFileSync(
+    path.join(process.cwd(), "src", "lib", "invitations", "core.ts"),
+    "utf8"
+  ),
+  "core.ts"
 );
 
 const SENDING_CHURCH = "22222222-2222-4222-8222-222222222222";
@@ -89,27 +102,6 @@ function reach(values: {
 }
 
 /**
- * A span of `core.ts` between two anchors, and it THROWS when either anchor has
- * moved.
- *
- * Not defensive dressing: `String.indexOf` returns -1 for a missing needle, and
- * `slice(start, -1)` silently returns almost the whole file instead of the
- * function under test. That is how a "no `users` read" assertion becomes an
- * assertion about the entire module and starts failing for the wrong reason —
- * which is exactly what OV-003b (#293) did to the END anchor here when it
- * renamed `createInvitationAs`'s docblock to say "+ send". A source-shaped test
- * has to fail on its own subject or not at all.
- */
-function span(from: string, to: string): string {
-  const start = CORE.indexOf(from);
-  const end = CORE.indexOf(to);
-  assert.notEqual(start, -1, `core.ts no longer contains: ${from}`);
-  assert.notEqual(end, -1, `core.ts no longer contains: ${to}`);
-  assert.ok(end > start, `${to} must follow ${from} in core.ts`);
-  return CORE.slice(start, end);
-}
-
-/**
  * BOTH guards' own source — `assertInviteRateLimit` (address scope, pre-
  * resolution), the shared `rateLimitWindowStart`, and
  * `assertTargetInviteRateLimit` (target scope, post-resolution) — minus
@@ -123,9 +115,24 @@ function span(from: string, to: string): string {
  * The end anchor is the `CreatedInvitation` declaration rather than a comment:
  * a docblock is prose and gets reworded, and this one did.
  */
-const RATE_LIMIT_GUARD = span(
+const RATE_LIMIT_GUARD = CORE.span(
   "export async function assertInviteRateLimit",
   "export interface CreatedInvitation"
+);
+
+/**
+ * `createInvitationAs`'s own body — the call site every ordering assertion below
+ * is about.
+ *
+ * Bounded at the next declaration for the same reason the guard above is: an
+ * unbounded slice runs to the end of a 3,000-line module, so "exactly one call
+ * to `assertInviteRateLimit` here" would silently become "exactly one in
+ * everything that follows", and would keep passing with the call deleted from
+ * this function and present in another.
+ */
+const CREATE_PATH = CORE.span(
+  "export async function createInvitationAs",
+  "export async function emailInvitee"
 );
 
 // ----------------------------------------------------------------------------
@@ -201,9 +208,7 @@ test("an org with neither id matches nothing rather than everything", () => {
 // ----------------------------------------------------------------------------
 
 test("the cap is applied before the address is resolved to a target", () => {
-  const create = CORE.slice(
-    CORE.indexOf("export async function createInvitationAs")
-  );
+  const create = CREATE_PATH;
 
   const cap = create.indexOf("assertInviteRateLimit");
   const resolve = create.indexOf("await resolveInvitationTarget");
@@ -236,10 +241,7 @@ test("the cap applies to open invitations too", () => {
   // keys are null by construction (the authority pass is run on
   // `{ inviteeEmail, inviteAs }`), so the address scope is the only one that can
   // fire there. §4 covers the second pass.
-  const create = CORE.slice(
-    CORE.indexOf("export async function createInvitationAs")
-  );
-  assert.match(create, /assertInviteRateLimit\(authority\.values\)/);
+  assert.match(CREATE_PATH, /assertInviteRateLimit\(authority\.values\)/);
 });
 
 // ----------------------------------------------------------------------------
@@ -348,9 +350,10 @@ test("the target-scoped refusal is the ONE message, not the legible cap", () => 
   // would say "this address and one you already used belong to the same
   // organization" — a fact about somebody else's tenancy, which is exactly what
   // ruling 2 collapsed.
-  const afterReach = RATE_LIMIT_GUARD.slice(
-    RATE_LIMIT_GUARD.indexOf("const reach = targetReachFilter")
-  );
+  const afterReach = sourceReader(
+    RATE_LIMIT_GUARD,
+    "core.ts (the two rate-limit guards)"
+  ).after("const reach = targetReachFilter");
   assert.match(
     afterReach,
     /throw new InvitationError\(ACCOUNT_NOT_INVITABLE_MESSAGE\)/
@@ -359,9 +362,7 @@ test("the target-scoped refusal is the ONE message, not the legible cap", () => 
 });
 
 test("createInvitationAs runs the cap again once a target exists", () => {
-  const create = CORE.slice(
-    CORE.indexOf("export async function createInvitationAs")
-  );
+  const create = CREATE_PATH;
 
   const resolve = create.indexOf("await resolveInvitationTarget");
   const second = create.indexOf("assertTargetInviteRateLimit(resolved.values)");
@@ -386,12 +387,19 @@ test("the post-resolution pass cannot compose the legible cap message", () => {
   // ordering comment — `assertTargetInviteRateLimit` must not name the legible
   // constant anywhere in its body, and `createInvitationAs` must not call the
   // address-scoped guard a second time.
-  const targetGuard = CORE.slice(
-    CORE.indexOf("export async function assertTargetInviteRateLimit"),
-    CORE.indexOf("/** Resolve + guard + insert.")
+  //
+  // The end anchor is the `CreatedInvitation` declaration, the same one
+  // `RATE_LIMIT_GUARD` uses. It was `/** Resolve + guard + insert.` until this
+  // round: OV-003b (#293) reworded that docblock to say "+ send", the needle
+  // stopped matching, and the span quietly became 82,835 chars of module
+  // instead of the 1,133-char function — at which point `doesNotMatch` passed
+  // by luck and `match` was satisfied by ANOTHER function's throw. Prose is not
+  // an anchor. `span` throws now, so the guard below is redundant and gone.
+  const targetGuard = CORE.span(
+    "export async function assertTargetInviteRateLimit",
+    "export interface CreatedInvitation"
   );
 
-  assert.ok(targetGuard.length > 0, "assertTargetInviteRateLimit is missing");
   assert.doesNotMatch(targetGuard, /INVITE_RATE_LIMITED_MESSAGE/);
   assert.match(
     targetGuard,
@@ -400,9 +408,7 @@ test("the post-resolution pass cannot compose the legible cap message", () => {
 
   // Exactly ONE call to the address-scoped guard in the whole create path, and
   // it is the pre-resolution one. A second call is the bug this test exists for.
-  const create = CORE.slice(
-    CORE.indexOf("export async function createInvitationAs")
-  );
+  const create = CREATE_PATH;
   // `assertTargetInviteRateLimit` does not contain this substring — "assert" is
   // followed by "Target", not by "Invite" — so the count is unambiguous.
   const addressCalls = create.match(/assertInviteRateLimit\(/g) ?? [];
@@ -412,9 +418,9 @@ test("the post-resolution pass cannot compose the legible cap message", () => {
 });
 
 test("the duplicate check counts the target as well as the address", () => {
-  const duplicate = CORE.slice(
-    CORE.indexOf("async function assertNoDuplicatePending"),
-    CORE.indexOf("export const INVITE_RATE_LIMITED_MESSAGE")
+  const duplicate = CORE.span(
+    "async function assertNoDuplicatePending",
+    "export const INVITE_RATE_LIMITED_MESSAGE"
   );
 
   // Two scopes, two messages. The ADDRESS scope stays legible — it reports the
@@ -507,9 +513,9 @@ test("the floor is ONE predicate, shared by both scopes", () => {
   // Two copies is how the address scope and the target scope start answering
   // differently for one org — the same failure `targetReachFilter` exists to
   // prevent one level up.
-  const both = CORE.slice(
-    CORE.indexOf("export function invitesFromOrgToAddressQuery"),
-    CORE.indexOf("export async function assertInviteRateLimit")
+  const both = CORE.span(
+    "export function invitesFromOrgToAddressQuery",
+    "export async function assertInviteRateLimit"
   );
   const calls = both.match(/afterTheLastAssociationEventFilter\(values\)/g);
   assert.equal(calls?.length, 2, both);

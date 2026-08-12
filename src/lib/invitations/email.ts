@@ -9,12 +9,16 @@
 // FOUR RULES, all of which have a test in `./email.test.ts`.
 //
 // 1. IT NEVER THROWS AND IT NEVER FAILS THE CREATE. The invitation row is the
-//    durable thing; the email is best-effort delivery of a link the admin can
-//    also copy. So every failure — a refused provider, a thrown transport, a
-//    row whose FKs make no sense — comes back as `{ sent: false }` and the
-//    caller reports "created, but not emailed" with the link as the fallback.
-//    An email failure that rolled back an invitation would be strictly worse:
-//    the admin would retry and hit the duplicate-pending refusal.
+//    durable thing; the email is best-effort delivery. So every failure — a
+//    refused provider, a thrown transport, a row whose FKs make no sense —
+//    comes back as `{ sent: false }`, and the caller reports
+//    `INVITATION_EMAIL_FAILED_HEADLINE` ("Invitation created — email could not
+//    be sent.") and points at **Resend email** on the invitation's own row
+//    (`./create-notice`). There is no admin-side copy of the link to fall back
+//    on: #304 ruling 4 item 5 removed it from this whole page, and #293 — this
+//    module — is the delivery it was a stopgap for. An email failure that
+//    rolled back an invitation would be strictly worse: the admin would retry
+//    and hit the duplicate-pending refusal.
 //
 // 2. ONLY A PENDING INVITATION IS EMAILED. The status guard is HERE, not at the
 //    call site, so "a revoked invitation sends nothing further" holds for every

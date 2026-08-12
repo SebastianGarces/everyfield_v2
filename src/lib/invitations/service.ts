@@ -76,8 +76,12 @@ export type InvitationActionResult =
        *
        *   * `true`      — the provider accepted the invitation email;
        *   * `false`     — it did not, so the invitation exists and the invitee
-       *                   has NOT been told. The surface says "created — email
-       *                   could not be sent" and hands the admin the link;
+       *                   has NOT been told. The surface says
+       *                   `INVITATION_EMAIL_FAILED_HEADLINE` ("Invitation
+       *                   created — email could not be sent.") and points at
+       *                   **Resend email** on the row — never at a link for the
+       *                   admin to forward, which #304 ruling 4 item 5 removed
+       *                   from this page (`./create-notice`);
        *   * `undefined` — this action does not send email at all (accept,
        *                   decline, revoke). Not the same fact as `false`, and a
        *                   surface that treated them alike would tell a planter
@@ -195,9 +199,12 @@ const INVALID_REQUEST_ERROR = "Check the form and try again";
  *
  * The invitation email goes out on this path too (OV-003b / #293) and its
  * outcome comes back as `emailSent`. A failed send does NOT fail the create:
- * the row is the durable artefact, the email is best-effort delivery of a link
- * the admin can also copy, and rolling the invitation back would leave the
- * retry refused by the duplicate-pending guard.
+ * the row is the durable artefact, the email is best-effort delivery, and
+ * rolling the invitation back would leave the retry refused by the
+ * duplicate-pending guard. The recovery is **Resend email** on the row
+ * (`invitationCreatedNotice` writes the words) — #304 ruling 4 item 5 took the
+ * admin's copy of the register link off this page, and this send is what it was
+ * a stopgap for.
  *
  * The parse below is what makes "a client says only who is being invited" true
  * of the wire and not just of the type.

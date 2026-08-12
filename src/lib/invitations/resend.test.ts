@@ -42,6 +42,7 @@ import {
   resendCooldownSecondsLeft,
   resendDedupeWindowAt,
 } from "./resend-window";
+import { sourceReader } from "./source-span";
 
 // ============================================================================
 // "Resend email" on a pending invitation — RULED 2026-08-10 (Sebastian, on
@@ -212,20 +213,35 @@ function code(source: string): string {
 }
 
 /**
+ * THE READERS, and the only way this file cuts a declaration out of a source
+ * file. `span` / `after` throw when an anchor has moved (`./source-span`).
+ *
+ * That is not decoration. The action-cluster test below was anchored on
+ * `function CopyInviteLinkButton` — a component #304 ruling 4 item 5 DELETED —
+ * so `indexOf` returned -1, the slice became the whole rest of
+ * `invitations-list.tsx` (12,899 chars for a 1,300-char component), and the
+ * `assert.ok(row.length > 0, "InvitationRow is missing")` line written to catch
+ * exactly that could never fire, because -1 always yields a long slice. Anchor
+ * on declarations only, and let a moved one throw.
+ */
+const LIST = sourceReader(LIST_CODE, "invitations-list.tsx");
+const ACTIONS = sourceReader(ACTIONS_CODE, "oversight/invitations/actions.ts");
+const ACTIONS_STRIPPED = sourceReader(
+  code(ACTIONS_CODE),
+  "oversight/invitations/actions.ts (comments stripped)"
+);
+
+/**
  * `resendInvitationEmailAs`'s body, comments stripped. Bounded at the next
  * declaration so an assertion about what this function does cannot silently
  * become an assertion about the rest of the file.
  */
 function resendBody(): string {
-  const stripped = code(RESEND_CODE);
-  const start = stripped.indexOf(
-    "export async function resendInvitationEmailAs"
-  );
-
-  assert.ok(start >= 0, "resendInvitationEmailAs moved");
   // It is the last declaration in its own module now, so the bound is the end
   // of the file rather than the next function's name.
-  return stripped.slice(start);
+  return sourceReader(code(RESEND_CODE), "resend.ts (comments stripped)").after(
+    "export async function resendInvitationEmailAs"
+  );
 }
 
 // ----------------------------------------------------------------------------
@@ -718,12 +734,11 @@ test("the Resend button is rendered for pending rows and nothing else", () => {
 });
 
 test("the Resend control is a button with cursor-pointer and an accessible name", () => {
-  const button = LIST_CODE.slice(
-    LIST_CODE.indexOf("function ResendEmailButton"),
-    LIST_CODE.indexOf("const initialRevokeState")
+  const button = LIST.span(
+    "function ResendEmailButton",
+    "const initialRevokeState"
   );
 
-  assert.ok(button.length > 0, "ResendEmailButton is missing");
   // Whatever else the className carries (`tabular-nums`, so a shrinking
   // countdown does not jog the row), the repo's cursor rule is not negotiable.
   assert.match(button, /className="[^"]*\bcursor-pointer\b[^"]*"/);
@@ -755,12 +770,15 @@ test("the row's action cluster wraps, so a third control cannot push a second on
   // fourth control is exactly the kind of change that would re-break it: an
   // author who deletes `flex-wrap` here fails this test rather than shipping an
   // invisible button.
-  const row = LIST_CODE.slice(
-    LIST_CODE.indexOf("function InvitationRow"),
-    LIST_CODE.indexOf("function CopyInviteLinkButton")
-  );
-
-  assert.ok(row.length > 0, "InvitationRow is missing");
+  //
+  // The end anchor was `function CopyInviteLinkButton` until this round — a
+  // component #304 ruling 4 item 5 deleted, which is the very deletion this
+  // pass reconciles. With it gone the slice ran to the end of the file and
+  // swallowed `useResendCooldown`, `ResendEmailButton` and `RevokeButton`; the
+  // assertions below still landed on the right `<div>` only because the first
+  // `<Badge` in that 12,899-char slice happened to be `InvitationRow`'s own. A
+  // second badge anywhere above it would have retargeted them silently.
+  const row = LIST.span("function InvitationRow", "const initialResendState");
 
   const cluster = row.slice(row.indexOf("<Badge") - 400, row.indexOf("<Badge"));
   const clusterClass = /<div className="([^"]*)">\s*$/.exec(cluster)?.[1] ?? "";
@@ -786,11 +804,12 @@ test("a refusal survives long enough to be read — the refresh is on the succes
   // therefore destroyed the message before it could paint, which made
   // `resendRefusalMessage("not_pending")` and `INVITATION_EXPIRED_MESSAGE`
   // dead on screen: the admin saw nothing at all.
-  const action = ACTIONS_CODE.slice(
-    ACTIONS_CODE.indexOf("export async function resendInvitationEmailAction"),
-    ACTIONS_CODE.indexOf("export async function revokeInvitationAction")
+  const body = code(
+    ACTIONS.span(
+      "export async function resendInvitationEmailAction",
+      "export async function revokeInvitationAction"
+    )
   );
-  const body = code(action);
 
   const refusal = body.indexOf("if (!result.success)");
   const refreshed = body.indexOf("refresh()");
@@ -809,13 +828,10 @@ test("the action refuses a malformed id before anything is sent", () => {
   // Comments stripped, like every other source-shaped check in this file: the
   // last assertion forbids the WORD "actor" in the body, and this action's
   // header comment has to be free to explain that the service mints its own.
-  const stripped = code(ACTIONS_CODE);
-  const action = stripped.slice(
-    stripped.indexOf("export async function resendInvitationEmailAction"),
-    stripped.indexOf("export async function revokeInvitationAction")
+  const action = ACTIONS_STRIPPED.span(
+    "export async function resendInvitationEmailAction",
+    "export async function revokeInvitationAction"
   );
-
-  assert.ok(action.length > 0, "resendInvitationEmailAction is missing");
 
   // SESSION FIRST, THEN THE PARSE (ruled 2026-08-10, round 6 of #304) — the
   // repo-wide ordering `server-action-surface.test.ts` walks. An anonymous POST
@@ -1031,18 +1047,14 @@ test("resend-window.ts imports nothing", () => {
  * sentence about what it used to render.
  */
 function resendButtonSource(): string {
-  const start = LIST_CODE.indexOf("type ResendCooldown");
-  const end = LIST_CODE.indexOf("const initialRevokeState");
-
-  assert.ok(start >= 0 && end > start, "ResendEmailButton moved");
-  return code(LIST_CODE.slice(start, end));
+  return code(LIST.span("type ResendCooldown", "const initialRevokeState"));
 }
 
 test("the action hands the surface the server's window and invents nothing", () => {
   const action = code(
-    ACTIONS_CODE.slice(
-      ACTIONS_CODE.indexOf("export async function resendInvitationEmailAction"),
-      ACTIONS_CODE.indexOf("export async function revokeInvitationAction")
+    ACTIONS.span(
+      "export async function resendInvitationEmailAction",
+      "export async function revokeInvitationAction"
     )
   );
 
@@ -1071,10 +1083,10 @@ test("the countdown is never announced — the live region says 'Email sent' onc
   // and the countdown are different elements: the region holds a fixed sentence,
   // and the ticking value lives in the button's label, which is not live.
   const button = resendButtonSource();
-  const region = button.slice(
-    button.indexOf('role="status"'),
-    button.indexOf("</span>", button.indexOf('role="status"'))
+  const fromStatus = sourceReader(button, "ResendEmailButton").after(
+    'role="status"'
   );
+  const region = fromStatus.slice(0, fromStatus.indexOf("</span>"));
 
   assert.ok(region.length > 0, "the success region is missing");
   assert.doesNotMatch(region, /secondsLeft|cooling|cooldown/);
