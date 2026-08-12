@@ -78,7 +78,8 @@ const OFFER_ACTION = (() => {
     "export async function initializeTeamsWithRolesAction"
   );
   // The next export after the offer. (It was listRolesAction until the #403
-  // sweep moved the caller-less reads into teams/queries.ts.)
+  // sweep deleted the caller-less read actions — server components call the
+  // service directly.)
   const end = TEAM_ACTIONS_CODE.indexOf(
     "export async function createRoleAction"
   );

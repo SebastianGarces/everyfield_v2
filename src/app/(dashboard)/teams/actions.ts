@@ -2,9 +2,10 @@
 
 // ============================================================================
 // The ministry-teams endpoints. Every export here is a POSTable endpoint some
-// UI actually calls (memory/invariants.md → Authentication); reads with no
-// caller live in ./queries.ts, and the shared shell — session, error policy,
-// validation plumbing, revalidation — lives in ./action-shell.ts.
+// UI actually calls (memory/invariants.md → Authentication); a read with no
+// caller does not get an action at all — server components call the service
+// directly. The shared shell — session, error policy, validation plumbing,
+// revalidation — lives in ./action-shell.ts.
 // ============================================================================
 
 import {
