@@ -12,7 +12,7 @@ import {
   invitesFromOrgToTargetQuery,
   targetReachFilter,
 } from "./core";
-import { assertInOrder, sourceReader } from "./source-span";
+import { assertInOrder, sourceReader } from "@/lib/testing/source-span";
 
 // ============================================================================
 // #304, HR4 2026-08-09 — an org cannot keep a banner on a stranger's dashboard.
@@ -45,7 +45,7 @@ import { assertInOrder, sourceReader } from "./source-span";
 /**
  * `core.ts`, and the ONLY way this file cuts a function out of it.
  *
- * `span` / `after` throw when an anchor has moved — see `./source-span` for why
+ * `span` / `after` throw when an anchor has moved — see `@/lib/testing/source-span` for why
  * that is load-bearing rather than defensive dressing, and for the two times a
  * bare `indexOf` turned an assertion about one function into an assertion about
  * the whole module without anything going red. Nothing below slices `CORE.code`

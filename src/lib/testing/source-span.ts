@@ -1,11 +1,11 @@
 /**
  * SPANS OF SOURCE, WITH A LOUD FAILURE WHEN AN ANCHOR MOVES.
  *
- * Several suites in this domain assert on the SOURCE of a function rather than
- * on its behaviour — a call graph, an ordering, a className — because the
- * subject is a client component or a `"use server"` module that a unit test's
- * process cannot execute. Every one of them starts by cutting the function out
- * of its file with `indexOf`, and that is where they rot:
+ * Some suites assert on the SOURCE of a function rather than on its behaviour —
+ * a call graph, an ordering, a className — because the subject is a client
+ * component or a `"use server"` module that a unit test's process cannot
+ * execute. Every one of them starts by cutting the function out of its file
+ * with `indexOf`, and that is where they rot:
  *
  *   * `String.indexOf` returns -1 for a needle that is no longer there;
  *   * `slice(start, -1)` then returns almost the WHOLE FILE instead of the
@@ -17,7 +17,9 @@
  *     `assert.match(fn, /X/)` keeps passing off some OTHER function's copy
  *     of `X`.
  *
- * Every one of those failures is silent, and all of them have happened here.
+ * Every one of those failures is silent, and all three found so far happened in
+ * `src/lib/invitations/`, which is why the enforcement below still scans only
+ * that directory (see "WHERE THIS LIVES, AND WHAT IT GUARDS" at the end).
  * OV-003b (#293) reworded `createInvitationAs`'s docblock to say "+ send" and
  * killed the end anchor of `invite-rate-limit.test.ts`'s post-resolution guard;
  * #304 ruling 4 item 5 deleted `CopyInviteLinkButton` and killed the end anchor
@@ -26,9 +28,9 @@
  * synchronous, so that needle had NEVER matched — one span was the empty string
  * and, four hundred lines later, the same dead needle made the `register` body
  * 93% of its module. No suite went red for any of the three. A source-shaped
- * test has to fail on its own subject or not at all — so nothing in this domain
- * slices source by hand any more; it goes through a reader, and a moved anchor
- * THROWS.
+ * test has to fail on its own subject or not at all — so nothing in the
+ * invitations domain slices source by hand any more; it goes through a reader,
+ * and a moved anchor THROWS.
  *
  * ORDERING GOES THROUGH IT TOO, and that half needs no slice to bite. An
  * `assert.ok(span.indexOf(A) < span.indexOf(B))` is the same rot one level up:
@@ -42,17 +44,32 @@
  * the first sweep closed the slicing half and recorded the closure as total
  * while nine vacuous orderings sat in the same suites, so the rule is no longer
  * left to prose. `source-span.test.ts` reads every `*.test.ts` under
- * `src/lib/invitations/` — its own file excepted, because a guard has to be
- * able to write down what it forbids — and fails on a bare `.indexOf(` outside
- * a four-line allowlist of sites that HANDLE -1 in a branch right there. A bare
- * `indexOf` reaches neither a `slice` nor a `<`.
+ * `src/lib/invitations/` and fails on a bare `.indexOf(` outside a four-line
+ * allowlist of sites that HANDLE -1 in a branch right there. A bare `indexOf`
+ * reaches neither a `slice` nor a `<`.
  *
  * Anchor on a DECLARATION (`export async function foo`, `const bar`,
  * `interface Baz`), never on a comment: a docblock is prose, prose gets
  * reworded, and that is how both of the above broke.
  *
- * Nothing here is imported by application code — it is for tests and scripts,
- * like `src/lib/auth/server-action-surface.ts`.
+ * WHERE THIS LIVES, AND WHAT IT GUARDS — two different questions.
+ *
+ * `src/lib/testing/` is this repo's home for test-only infrastructure that is
+ * ABOUT no feature: nothing in this file names a domain, imports one, or could
+ * be made to. Chosen once, here, so the next domain that needs a source-shaped
+ * test imports it instead of pasting a second copy — a duplicated decision is
+ * the exact failure the sweep that produced this module spent its effort
+ * deleting. (Contrast `src/lib/auth/server-action-surface.ts`, also test-only
+ * but genuinely about auth, so it sits with the module that owns sessions.)
+ *
+ * The GUARD in `source-span.test.ts` is narrower than the helper on purpose. It
+ * scans `src/lib/invitations/` only, because that is the directory that has
+ * actually been converted; the rest of the repo still has bare `indexOf`
+ * anchors and converting them is separate work. Widen the scan when a directory
+ * is converted, never before — a guard that fails on unconverted code gets
+ * disabled, and a disabled guard checks nothing.
+ *
+ * Nothing here is imported by application code — it is for tests and scripts.
  */
 
 /** `" — why"`, or nothing when the caller gave no reason. */

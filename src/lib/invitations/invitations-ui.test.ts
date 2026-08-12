@@ -16,7 +16,7 @@ import {
 } from "./core";
 import { invitationCreatedNotice } from "./create-notice";
 import { toInvitationListRow } from "./list-row";
-import { assertInOrder, sourceReader } from "./source-span";
+import { assertInOrder, sourceReader } from "@/lib/testing/source-span";
 import {
   describeInvitationForRegistration,
   hasValidInvitationBypass,
@@ -111,7 +111,7 @@ const REGISTER_BETA_GATE = read("app", "(auth)", "register", "beta-gate.ts");
 /**
  * The readers, and the ONLY way this file cuts a declaration out of a module.
  *
- * `span` / `after` throw naming the missing needle — see `./source-span` for why
+ * `span` / `after` throw naming the missing needle — see `@/lib/testing/source-span` for why
  * that is load-bearing. This file is where the rule was learnt the hard way a
  * third time: `async function createAccountEntities` was never `async`, so the
  * needle was -1, the "no oversight FK is written at registration" span was the

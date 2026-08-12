@@ -42,7 +42,7 @@ import {
   resendCooldownSecondsLeft,
   resendDedupeWindowAt,
 } from "./resend-window";
-import { assertInOrder, sourceReader } from "./source-span";
+import { assertInOrder, sourceReader } from "@/lib/testing/source-span";
 
 // ============================================================================
 // "Resend email" on a pending invitation — RULED 2026-08-10 (Sebastian, on
@@ -214,7 +214,7 @@ function code(source: string): string {
 
 /**
  * THE READERS, and the only way this file cuts a declaration out of a source
- * file. `span` / `after` throw when an anchor has moved (`./source-span`).
+ * file. `span` / `after` throw when an anchor has moved (`@/lib/testing/source-span`).
  *
  * That is not decoration. The action-cluster test below was anchored on
  * `function CopyInviteLinkButton` — a component #304 ruling 4 item 5 DELETED —

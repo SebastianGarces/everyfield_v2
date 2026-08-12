@@ -14,7 +14,7 @@ import {
   type InvitationActor,
 } from "./core";
 import { associationOrg } from "./audit";
-import { assertInOrder, sourceReader } from "./source-span";
+import { assertInOrder, sourceReader } from "@/lib/testing/source-span";
 
 // ============================================================================
 // #304 / OV-007a + OV-008 — the planter's sever, and the audit that has to
@@ -63,7 +63,7 @@ const ACTIONS_CODE = readFileSync(
 /**
  * The readers, and the ONLY way this file cuts a declaration out of a module.
  *
- * `span` / `after` throw naming the missing needle (`./source-span`). A bare
+ * `span` / `after` throw naming the missing needle (`@/lib/testing/source-span`). A bare
  * `indexOf` pair returns -1 for an anchor that moved, `slice(start, -1)` then
  * hands back almost the whole module, and a `doesNotMatch` about ONE function
  * silently becomes a claim about all of them. It has happened three times in

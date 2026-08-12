@@ -10,7 +10,7 @@ import {
   type InvitationActor,
   type InviteeTarget,
 } from "./core";
-import { assertInOrder, sourceReader } from "./source-span";
+import { assertInOrder, sourceReader } from "@/lib/testing/source-span";
 
 // ============================================================================
 // #304 ruling 4, fixes 1–3 (HR4 security block, 2026-08-09) — a caller cannot
@@ -56,7 +56,7 @@ const SERVICE = readFileSync(path.join(ROOT, "service.ts"), "utf8");
 
 /**
  * The readers, and the ONLY way this file cuts a declaration out of either
- * module. `span` / `after` throw naming the missing needle (`./source-span`) —
+ * module. `span` / `after` throw naming the missing needle (`@/lib/testing/source-span`) —
  * a bare `indexOf` pair returns -1 for a moved anchor, and a `doesNotMatch`
  * about one function then quietly becomes a claim about the whole file, or
  * about the empty string. Both have happened in this domain.

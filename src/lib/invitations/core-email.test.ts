@@ -15,7 +15,7 @@ import type { OrganizationInvitation } from "@/db/schema/organization-invitation
 
 import { emailInvitee } from "./core";
 import type { InvitationEmailMessage } from "./email";
-import { assertInOrder, sourceReader } from "./source-span";
+import { assertInOrder, sourceReader } from "@/lib/testing/source-span";
 
 // ============================================================================
 // The WIRING — OV-003b (#293), the link `email.test.ts` cannot see.
@@ -182,7 +182,7 @@ test("createInvitationAs sends after the row is committed, and reports the outco
   // link to nothing.
   //
   // Through the reader, so a moved anchor throws instead of quietly widening
-  // this to the whole module (`./source-span`).
+  // this to the whole module (`@/lib/testing/source-span`).
   const body = sourceReader(
     readFileSync(path.join(__dirname, "core.ts"), "utf8"),
     "core.ts"

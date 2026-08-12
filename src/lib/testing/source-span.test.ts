@@ -9,8 +9,8 @@ import { assertInOrder, sourceReader } from "./source-span";
 // The anchor rule, and the test that makes it a property of the DIRECTORY.
 //
 // `source-span.ts` exists because a source-shaped test that stops matching its
-// own subject passes silently — three times in this domain, all invisible. Two
-// shapes rot, and they rot independently:
+// own subject passes silently — three times in the invitations domain, all
+// invisible. Two shapes rot, and they rot independently:
 //
 //   1. SLICING. `slice(start, -1)` hands back almost the whole module and
 //      `slice(-1, end)` hands back the empty string, so a `doesNotMatch` about
@@ -22,11 +22,24 @@ import { assertInOrder, sourceReader } from "./source-span";
 // Sweep 3 closed (1) and recorded the closure as total, which left (2) open in
 // nine places — the pass's own theme applied to the pass itself. So the rule is
 // not written down and hoped for any more; the last test in this file reads
-// every suite in the directory and fails on a bare `.indexOf(` that is not on
-// the allowlist below.
+// every suite in `src/lib/invitations/` and fails on a bare `.indexOf(` that is
+// not on the allowlist below.
+//
+// The helper lives here, in the domain-neutral `src/lib/testing/`, because it is
+// about slicing strings and not about invitations. The GUARD is narrower than
+// the helper: `src/lib/invitations/` is the directory that has actually been
+// converted, and the rest of the repo has not. Widen `GUARDED` when a directory
+// is converted, never before.
 // ============================================================================
 
-const HERE = path.join(process.cwd(), "src", "lib", "invitations");
+/**
+ * The directory the guard below scans — NOT the directory this file is in.
+ *
+ * Resolved from `process.cwd()` (the repo root, where `pnpm test` runs) rather
+ * than relative to this file, so moving the guard again does not silently move
+ * what it guards.
+ */
+const GUARDED = path.join(process.cwd(), "src", "lib", "invitations");
 
 // ----------------------------------------------------------------------------
 // 1. The primitives fail the way the rule needs them to
@@ -111,12 +124,12 @@ test("a chain of three is checked pairwise, and the happy path is silent", () =>
 });
 
 // ----------------------------------------------------------------------------
-// 2. …and no suite in this directory may reintroduce either shape
+// 2. …and no suite in the GUARDED directory may reintroduce either shape
 // ----------------------------------------------------------------------------
 
 /**
- * The bare `indexOf` calls this directory is still allowed, by exact source
- * line, with the reason each one is not the rot above.
+ * The bare `indexOf` calls the GUARDED directory is still allowed, by exact
+ * source line, with the reason each one is not the rot above.
  *
  * By LINE TEXT rather than by file: allowlisting `service.test.ts` would let
  * the next bare pair in that file through, which is how the recorded rule came
@@ -148,31 +161,29 @@ const HANDLES_MINUS_ONE: ReadonlyMap<string, readonly string[]> = new Map([
   ],
 ]);
 
-/**
- * THIS file is not scanned, for the reason `register-path.test.ts` §4 excludes
- * `resend.ts` from the prose guard: the module that forbids a shape has to be
- * able to write it down. §1 above demonstrates the vacuous comparison in order
- * to prove `assertInOrder` refuses it, and the allowlist quotes four lines
- * verbatim. A guard that could not name what it forbids would forbid itself.
- */
-const THE_GUARD_ITSELF = "source-span.test.ts";
+// THIS file is outside `GUARDED`, which is what lets it write down the shape it
+// forbids — the reason `register-path.test.ts` §4 excludes `resend.ts` from the
+// prose guard. §1 above demonstrates the vacuous comparison in order to prove
+// `assertInOrder` refuses it, and the allowlist quotes four lines verbatim. A
+// guard that could not name what it forbids would forbid itself.
 
 test("no suite in src/lib/invitations slices or orders with a bare indexOf", () => {
-  const suites = readdirSync(HERE)
-    .filter((name) => name.endsWith(".test.ts") && name !== THE_GUARD_ITSELF)
+  const suites = readdirSync(GUARDED)
+    .filter((name) => name.endsWith(".test.ts"))
     .sort();
 
-  // A guard that found no files would pass forever.
+  // A guard that found no files — a renamed or moved directory — would pass
+  // forever.
   assert.ok(
     suites.length >= 10,
-    `only ${suites.length} suites found in ${HERE}`
+    `only ${suites.length} suites found in ${GUARDED}`
   );
 
   const offenders: string[] = [];
 
   for (const suite of suites) {
     const allowed = HANDLES_MINUS_ONE.get(suite) ?? [];
-    const lines = readFileSync(path.join(HERE, suite), "utf8").split("\n");
+    const lines = readFileSync(path.join(GUARDED, suite), "utf8").split("\n");
 
     lines.forEach((line, index) => {
       if (!line.includes(".indexOf(")) return;
@@ -185,13 +196,13 @@ test("no suite in src/lib/invitations slices or orders with a bare indexOf", () 
   assert.deepEqual(
     offenders,
     [],
-    `bare indexOf in a source-shaped suite — use sourceReader().span()/.after() for a slice and assertInOrder() for an order (./source-span), or add the line to HANDLES_MINUS_ONE with the branch that handles -1:\n${offenders.join("\n")}`
+    `bare indexOf in a source-shaped suite — use sourceReader().span()/.after() for a slice and assertInOrder() for an order (@/lib/testing/source-span), or add the line to HANDLES_MINUS_ONE with the branch that handles -1:\n${offenders.join("\n")}`
   );
 
   // The allowlist itself must stay honest: an entry whose line has been edited
   // away is a rule nobody is checking any more.
   for (const [suite, allowedLines] of HANDLES_MINUS_ONE) {
-    const source = readFileSync(path.join(HERE, suite), "utf8");
+    const source = readFileSync(path.join(GUARDED, suite), "utf8");
 
     for (const allowed of allowedLines) {
       assert.ok(

@@ -34,7 +34,7 @@ import {
   verifyInvitationAuthority,
   type InvitationActor,
 } from "./core";
-import { sourceReader } from "./source-span";
+import { sourceReader } from "@/lib/testing/source-span";
 
 // ============================================================================
 // Invitations — the auth surface (#265).
@@ -279,7 +279,7 @@ const CORE_CODE = codeOf(CORE_PATH);
 
 /**
  * The reader, and the ONLY way this file cuts a declaration out of `service.ts`.
- * `span` / `after` throw naming the missing needle (`./source-span`); a bare
+ * `span` / `after` throw naming the missing needle (`@/lib/testing/source-span`); a bare
  * `indexOf` returns -1 and turns an assertion about one function into one about
  * the whole module. The label says "comments stripped" because `codeOf` strips
  * them, and a stripped copy fails for different reasons than the original.
@@ -1767,7 +1767,7 @@ test("a response records the session's user, and only a pending row", () => {
 
 /** Just the WHERE clause — `returning()` names every column and would answer for any of them. */
 function whereOf(sql: string): string {
-  // The START anchor goes through the reader (`./source-span`): a statement that
+  // The START anchor goes through the reader (`@/lib/testing/source-span`): a statement that
   // stopped emitting " where " made `slice(-1, end)` the empty string, and every
   // `doesNotMatch` about the scope below is true of the empty string. The END is
   // genuinely optional — not every statement has a `returning`.

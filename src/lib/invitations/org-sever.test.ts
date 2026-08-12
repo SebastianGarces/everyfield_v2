@@ -16,7 +16,7 @@ import {
   type InvitationActor,
 } from "./core";
 import { associationHistoryQuery } from "./history";
-import { assertInOrder, sourceReader } from "./source-span";
+import { assertInOrder, sourceReader } from "@/lib/testing/source-span";
 
 // ============================================================================
 // #304 / OV-007b + OV-011 — the ORG'S sever, and the audit read behind it.
@@ -62,7 +62,7 @@ const ACTIONS_CODE = readFileSync(
 
 /**
  * The readers, and the ONLY way this file cuts a declaration out of a module.
- * `span` / `after` throw naming the missing needle (`./source-span`); a bare
+ * `span` / `after` throw naming the missing needle (`@/lib/testing/source-span`); a bare
  * `indexOf` returns -1 and turns an assertion about one function into one about
  * the whole file, silently.
  */

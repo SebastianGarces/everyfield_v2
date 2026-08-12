@@ -14,7 +14,7 @@ import {
   INVITATION_EMAIL_FAILED_HEADLINE,
   invitationCreatedNotice,
 } from "./create-notice";
-import { assertInOrder, sourceReader } from "./source-span";
+import { assertInOrder, sourceReader } from "@/lib/testing/source-span";
 
 // ============================================================================
 // OV-003b (#293), AC 3 — the half a forced-failure test cannot reach.
@@ -177,7 +177,7 @@ test("the create action carries emailSent through to the surface", () => {
   // `createInvitationAs`, propagated by `service.ts`, and then dropped by the
   // action, so no wording above could ever have been reached. Source-shaped,
   // because the action needs a session and a database to execute.
-  // Through the reader (`./source-span`): a bare `indexOf` that stopped matching
+  // Through the reader (`@/lib/testing/source-span`): a bare `indexOf` that stopped matching
   // would hand `assert.match` the last character of the module instead of the
   // success branch, and this file has no other guard that the branch exists.
   const returned = sourceReader(

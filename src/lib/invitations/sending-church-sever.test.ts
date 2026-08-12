@@ -12,7 +12,7 @@ import {
   leaveNetworkAsSendingChurchAdmin,
   type InvitationActor,
 } from "./core";
-import { assertInOrder, sourceReader } from "./source-span";
+import { assertInOrder, sourceReader } from "@/lib/testing/source-span";
 
 // ============================================================================
 // OV-013 — A SENDING CHURCH LEAVES ITS NETWORK (#304 WS3, ruling #351).
@@ -56,7 +56,7 @@ const AUDIT_CODE = readFileSync(
 
 /**
  * The readers, and the ONLY way this file cuts a declaration out of a module.
- * `span` / `after` throw naming the missing needle (`./source-span`) instead of
+ * `span` / `after` throw naming the missing needle (`@/lib/testing/source-span`) instead of
  * letting a -1 widen one function's assertion to the whole file.
  */
 const CORE = sourceReader(CORE_CODE, "core.ts");
