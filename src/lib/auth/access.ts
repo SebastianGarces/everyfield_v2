@@ -1,4 +1,4 @@
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { db } from "@/db";
 import {
   churches,
@@ -31,7 +31,7 @@ export const OVERSIGHT_ROLES: UserRole[] = [
  * @throws Error if the user does not have the required role.
  */
 export function requireRole(user: User, ...allowedRoles: UserRole[]): void {
-  if (!allowedRoles.includes(user.role as UserRole)) {
+  if (!hasRole(user, ...allowedRoles)) {
     throw new Error(
       `Forbidden: requires one of [${allowedRoles.join(", ")}], got "${user.role}"`
     );
@@ -42,7 +42,7 @@ export function requireRole(user: User, ...allowedRoles: UserRole[]): void {
  * Check if a user has a specific role (non-throwing).
  */
 export function hasRole(user: User, ...roles: UserRole[]): boolean {
-  return roles.includes(user.role as UserRole);
+  return roles.includes(user.role);
 }
 
 /**
@@ -94,8 +94,7 @@ export async function requireChurchAccess(
   user: User,
   churchId: string
 ): Promise<void> {
-  const accessibleIds = await getAccessibleChurchIds(user);
-  if (!accessibleIds.includes(churchId)) {
+  if (!(await canAccessChurch(user, churchId))) {
     throw new Error("Forbidden: no access to this church");
   }
 }
@@ -142,11 +141,19 @@ export type PrivacyFeatureKey =
   | "facilities"
   | "oversight_activity";
 
+/**
+ * The names of the boolean toggle columns on church_privacy_settings — the
+ * mapped type rejects `id`, `churchId`, `updatedAt` etc. at compile time, so a
+ * mapped column is a boolean by construction and needs no runtime cast.
+ */
+type PrivacyColumn = {
+  [K in keyof ChurchPrivacySettings]: ChurchPrivacySettings[K] extends boolean
+    ? K
+    : never;
+}[keyof ChurchPrivacySettings];
+
 /** Maps feature keys to their corresponding column in church_privacy_settings */
-const PRIVACY_COLUMN_MAP: Record<
-  PrivacyFeatureKey,
-  keyof ChurchPrivacySettings
-> = {
+const PRIVACY_COLUMN_MAP: Record<PrivacyFeatureKey, PrivacyColumn> = {
   people: "sharePeople",
   meetings: "shareMeetings",
   tasks: "shareTasks",
@@ -199,26 +206,7 @@ export async function canAccessFeatureData(
   }
 
   const column = PRIVACY_COLUMN_MAP[feature];
-  return settings[column] as boolean;
-}
-
-/**
- * For a list of church IDs, filter down to only those where the given feature
- * is shared. Useful for oversight dashboards that aggregate across churches.
- */
-export async function filterChurchesByPrivacy(
-  churchIds: string[],
-  feature: PrivacyFeatureKey
-): Promise<string[]> {
-  if (churchIds.length === 0) return [];
-
-  const column = PRIVACY_COLUMN_MAP[feature];
-  const allSettings = await db
-    .select()
-    .from(churchPrivacySettings)
-    .where(inArray(churchPrivacySettings.churchId, churchIds));
-
-  return allSettings.filter((s) => s[column] === true).map((s) => s.churchId);
+  return settings[column];
 }
 
 // ============================================================================

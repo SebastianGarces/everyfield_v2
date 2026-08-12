@@ -4,6 +4,7 @@
 
 import { Document, Page, Text, View } from "@react-pdf/renderer";
 
+import { churchNameOf } from "../render-text";
 import type { DocumentMergeValues } from "../types";
 import { PAGE_SIZE, styles } from "./styles";
 
@@ -21,7 +22,7 @@ export function ResponseCardDocument({
 }: {
   values: DocumentMergeValues;
 }) {
-  const churchName = values.church_name || "Our Church";
+  const churchName = churchNameOf(values);
 
   return (
     <Document title="Response Card">
