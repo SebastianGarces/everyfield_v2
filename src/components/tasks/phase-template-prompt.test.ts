@@ -10,6 +10,8 @@ import {
   buildPhaseTemplatePrompt,
   decidePhaseTemplateDismissOutcome,
   decidePhaseTemplateImportOutcome,
+  decodePartialImportReceipt,
+  encodePartialImportReceipt,
   type AcceptPhaseTemplatePromptResult,
   type PhaseTemplatePrompt as PhaseTemplatePromptData,
 } from "@/lib/tasks/phase-prompt";
@@ -20,17 +22,19 @@ import {
   IMPORT_FAILED_MESSAGE,
   NOTHING_IMPORTED_MESSAGE,
   NOTHING_TICKED_HINT,
-  PartialImportReceipt,
   PhaseTemplatePromptAlert,
   PhaseTemplatePromptForm,
-  partialImportMessage,
   phaseTemplatePromptAlert,
   phaseTemplatePromptControlState,
   tickedTemplateCount,
   type PhaseTemplateDismissOutcome,
   type PhaseTemplateImportOutcome,
 } from "./phase-template-prompt-controls";
-import { PhaseTemplatePromptView } from "./phase-template-prompt";
+import {
+  PhaseTemplatePartialReceiptView,
+  PhaseTemplatePromptView,
+  partialImportMessage,
+} from "./phase-template-prompt";
 
 // ----------------------------------------------------------------------------
 // The prompt, rendered. DOM assertions, not source scans: the Cursor Pointer
@@ -100,7 +104,6 @@ function renderIsland(overrides: { offerCount?: number } = {}): string {
     createElement(PhaseTemplatePromptForm, {
       transitionId: TRANSITION_ID,
       offerCount: overrides.offerCount ?? 2,
-      lead: null,
       children: null,
       importAction: noopImport,
       dismissAction: noopDismiss,
@@ -115,13 +118,18 @@ function renderAlert(message: string): string {
   );
 }
 
-/** The partial-import receipt, on its own. */
-function renderReceipt(
-  createdCount: number,
-  templateNames: readonly string[]
-): string {
+/**
+ * The panel in its OTHER body: the receipt, rendered by the server component
+ * from the flash cookie the action wrote.
+ *
+ * It takes no actions and no prompt, because by the time it renders there is
+ * neither — which is the whole reason it is not island state.
+ */
+function renderReceipt(createdCount: number, templateNames: string[]): string {
   return renderToStaticMarkup(
-    createElement(PartialImportReceipt, { createdCount, templateNames })
+    createElement(PhaseTemplatePartialReceiptView, {
+      receipt: { createdCount, templateNames },
+    })
   );
 }
 
@@ -878,22 +886,26 @@ test("nothing answered leaves the prompt up and re-reads nothing", () => {
 
   assert.deepEqual(decision.outcome, { status: "nothing" });
   assert.equal(decision.answeredTransitionId, null, "an unanswered prompt");
-  assert.equal(decision.revalidation, "none");
+  assert.equal(decision.receipt, null, "nothing landed, so nothing to report");
 });
 
-test("a PARTIAL import revalidates NOTHING, or the receipt is destroyed", () => {
-  // THE REGRESSION THIS FILE EXISTS FOR. The claim is kept on a part-way
-  // import, so /tasks re-rendered has no prompt in it and the island holding
-  // the receipt unmounts. `refresh()` does that — and so does
-  // `revalidatePath("/tasks")`, which for a Server Function "Updates the UI
-  // immediately (if viewing the affected path)"
-  // (.next-docs/01-app/03-api-reference/04-functions/revalidatePath.mdx), and
-  // the planter IS on that path. /tasks is `force-dynamic`, so neither call
-  // buys anything either.
+test("a PARTIAL import hands its receipt to the SERVER, not to the island", () => {
+  // THE REGRESSION THIS FILE EXISTS FOR, and the second attempt at it.
   //
-  // The directive is ONE value now, so "revalidatePath without refresh" — the
-  // combination that actually shipped — is no longer expressible; this asserts
-  // the remaining choice is the right one.
+  // The first fix returned `{status:"partial"}` for `useActionState` to render
+  // and asked for no revalidation, on the theory that re-reading nothing keeps
+  // the island alive. It cannot: the claim is KEPT on a part-way import, so the
+  // transition is answered — and the action writes the answered-cookie, which
+  // by itself re-renders the route ("after you set or delete a cookie in a
+  // Server Action, Next.js re-renders the current page and its layouts on the
+  // server", .next-docs/01-app/03-api-reference/04-functions/cookies.mdx). That
+  // render has no prompt in it, so the island and its receipt were gone before
+  // they could be seen: 16 of 22 tasks created, the stage change spent, and not
+  // one word on screen.
+  //
+  // So the decision carries a RECEIPT — a value for the next server render,
+  // written to a flash cookie — and the outcome it hands the doomed island is
+  // the resting one.
   const result: AcceptPhaseTemplatePromptResult = {
     status: "partial",
     transitionId: TRANSITION_ID,
@@ -904,16 +916,12 @@ test("a PARTIAL import revalidates NOTHING, or the receipt is destroyed", () => 
 
   const decision = decidePhaseTemplateImportOutcome(result);
 
-  assert.deepEqual(decision.outcome, {
-    status: "partial",
-    createdCount: 9,
-    templateNames: ["Ministry Team Setup"],
-  });
-  assert.equal(
-    decision.revalidation,
-    "none",
-    "a partial import asked for a re-read — either call re-renders /tasks for a Server Function and unmounts the receipt"
+  assert.deepEqual(
+    decision.receipt,
+    { createdCount: 9, templateNames: ["Ministry Team Setup"] },
+    "a part-way import reported nothing the next render could draw"
   );
+  assert.deepEqual(decision.outcome, { status: "idle" });
   assert.equal(
     decision.answeredTransitionId,
     TRANSITION_ID,
@@ -921,7 +929,7 @@ test("a PARTIAL import revalidates NOTHING, or the receipt is destroyed", () => 
   );
 });
 
-test("a clean import takes the prompt down and re-reads the list", () => {
+test("a clean import takes the prompt down and reports no receipt", () => {
   const decision = decidePhaseTemplateImportOutcome({
     status: "imported",
     transitionId: TRANSITION_ID,
@@ -931,7 +939,11 @@ test("a clean import takes the prompt down and re-reads the list", () => {
   });
 
   assert.deepEqual(decision.outcome, { status: "idle" });
-  assert.equal(decision.revalidation, "full");
+  assert.equal(
+    decision.receipt,
+    null,
+    "a clean import left a receipt for a failure that did not happen"
+  );
   assert.equal(decision.answeredTransitionId, TRANSITION_ID);
 });
 
@@ -946,25 +958,24 @@ test("a second press is a success that created nothing", () => {
     { status: "idle" },
     "answering twice reported a failure the planter cannot act on"
   );
+  assert.equal(decision.receipt, null);
   assert.equal(
-    decision.revalidation,
-    "full",
+    decision.answeredTransitionId,
+    TRANSITION_ID,
     "the prompt is answered and must come down"
   );
-  assert.equal(decision.answeredTransitionId, TRANSITION_ID);
 });
 
 test("declining decides the same way, from a transition id or its absence", () => {
   const landed = decidePhaseTemplateDismissOutcome(TRANSITION_ID);
   assert.deepEqual(landed.outcome, { status: "idle" });
-  assert.equal(landed.revalidation, "full");
   assert.equal(landed.answeredTransitionId, TRANSITION_ID);
 
   // No transition to decline: the press changed nothing, which from the
-  // planter's side IS a failure — and nothing is re-read, so nothing is lost.
+  // planter's side IS a failure — and nothing is answered, so nothing is
+  // re-read and the real prompt is still there on the next render.
   const missed = decidePhaseTemplateDismissOutcome(null);
   assert.deepEqual(missed.outcome, { status: "failed" });
-  assert.equal(missed.revalidation, "none");
   assert.equal(missed.answeredTransitionId, null);
 });
 
@@ -979,11 +990,168 @@ test("the action performs the decision rather than re-deciding it", () => {
 
   assert.match(action, /decidePhaseTemplateImportOutcome\(/);
   assert.match(action, /decidePhaseTemplateDismissOutcome\(/);
-  assert.equal(
-    (action.match(/revalidatePath\("\/tasks"\)/g) ?? []).length,
-    1,
-    "revalidatePath is called somewhere other than the one directive-driven place"
+
+  // The receipt is written BEFORE the answer cookie, because the answer cookie
+  // is what triggers the re-render that reads the receipt.
+  const receiptWrite = action.indexOf("markPartialImportReceipt(decision");
+  const answerWrite = action.indexOf(
+    "markPromptAnswered(decision.answeredTransitionId)"
   );
+  assert.ok(receiptWrite > 0, "the partial receipt is never written anywhere");
+  assert.ok(
+    receiptWrite < answerWrite,
+    "the answer cookie is set before the receipt, so the re-render it causes can read a receipt that is not there yet"
+  );
+
+  // `revalidatePath` is for OTHER pages (`memory/contracts/data-patterns.md`).
+  // The planter answering this prompt is ON /tasks, which is force-dynamic, so
+  // the house `refresh()` is the whole of what is owed.
+  assert.equal(
+    (action.match(/revalidatePath\(/g) ?? []).length,
+    0,
+    "revalidatePath is back on the route the planter is already standing on"
+  );
+  assert.equal(
+    (action.match(/^\s*refresh\(\);$/gm) ?? []).length,
+    2,
+    "each action refreshes exactly once, and only when it answered something"
+  );
+});
+
+// ----------------------------------------------------------------------------
+// The receipt's road: action → flash cookie → the NEXT server render
+//
+// The value crosses a browser to get there, so the codec is the trust boundary:
+// `/tasks` has no error boundary (see the header of
+// `src/db/migrations/0037_phase_prompt_answers.sql`), and a `JSON.parse` throw
+// in the render of a cookie the browser controls is a 500 on the task list.
+// ----------------------------------------------------------------------------
+
+test("a receipt survives the round trip through a cookie value", () => {
+  const receipt = {
+    createdCount: 16,
+    templateNames: ["Ministry Team Setup", "Launch Prep & Follow-up"],
+  };
+
+  const encoded = encodePartialImportReceipt(receipt);
+
+  assert.doesNotMatch(
+    encoded,
+    /[;,\s]/,
+    "the cookie value carries a character that ends a cookie"
+  );
+  assert.deepEqual(decodePartialImportReceipt(encoded), receipt);
+});
+
+test("no cookie a browser can send makes the task list throw", () => {
+  // Every one of these is reachable: no cookie at all, a cleared one, a proxy
+  // that mangled the encoding, a hand-written one, and a value shaped like a
+  // receipt that reports an import which cannot have happened.
+  const refused = [
+    undefined,
+    null,
+    "",
+    "%%%",
+    "not-json",
+    encodeURIComponent("[]"),
+    encodeURIComponent("null"),
+    encodeURIComponent('"16"'),
+    encodeURIComponent(JSON.stringify({ createdCount: 16 })),
+    encodeURIComponent(JSON.stringify({ templateNames: ["A"] })),
+    encodeURIComponent(
+      JSON.stringify({ createdCount: 0, templateNames: ["A"] })
+    ),
+    encodeURIComponent(
+      JSON.stringify({ createdCount: -3, templateNames: ["A"] })
+    ),
+    encodeURIComponent(
+      JSON.stringify({ createdCount: 1.5, templateNames: ["A"] })
+    ),
+    encodeURIComponent(
+      JSON.stringify({ createdCount: 4, templateNames: "Launch Prep" })
+    ),
+    encodeURIComponent(
+      JSON.stringify({ createdCount: 4, templateNames: [{ name: "A" }] })
+    ),
+  ];
+
+  for (const value of refused) {
+    assert.equal(
+      decodePartialImportReceipt(value),
+      null,
+      `a receipt was read out of ${JSON.stringify(value)}`
+    );
+  }
+});
+
+test("a forged receipt cannot grow the page it renders", () => {
+  // The cookie is not `httpOnly` — the browser clears it — so its content is
+  // whatever its owner wants. It buys them one sentence in their own browser,
+  // and it is clamped on the way back in.
+  const forged = encodeURIComponent(
+    JSON.stringify({
+      createdCount: 9,
+      templateNames: Array.from({ length: 40 }, () => "x".repeat(500)),
+    })
+  );
+
+  const receipt = decodePartialImportReceipt(forged);
+
+  assert.ok(receipt, "a well-formed oversized receipt was refused outright");
+  assert.ok(receipt.templateNames.length <= 8);
+  for (const name of receipt.templateNames) {
+    assert.ok(name.length <= 120);
+  }
+});
+
+test("no prompt is where the loader LOOKS for a receipt, not where it gives up", () => {
+  // The loader's empty branch is the fix. A part-way import answers the
+  // transition, so `getPhaseTemplatePrompt` correctly returns null on the very
+  // render that has to carry the receipt — and `return null` there is exactly
+  // the silence that shipped and failed its browser gate.
+  const source = readFileSync(
+    path.join(process.cwd(), "src/components/tasks/phase-template-prompt.tsx"),
+    "utf8"
+  );
+
+  assert.match(
+    source,
+    /if \(!prompt\) \{[\s\S]*?decodePartialImportReceipt\([\s\S]*?PhaseTemplatePartialReceiptView[\s\S]*?\n {2}\}/,
+    "an empty prompt goes straight back to null again, so a part-way import says nothing"
+  );
+});
+
+test("the receipt is server markup — the island cannot outlive the answer", () => {
+  // The island is inside the prompt, and answering the transition removes the
+  // prompt from the next server render. Anything the planter must still be able
+  // to read after an answer therefore cannot be island state, and this is the
+  // assertion that stops it moving back.
+  const island = readFileSync(
+    path.join(
+      process.cwd(),
+      "src/components/tasks/phase-template-prompt-controls.tsx"
+    ),
+    "utf8"
+  );
+
+  assert.doesNotMatch(
+    island,
+    /"partial"/,
+    "the partial import is being rendered from client state again"
+  );
+  assert.doesNotMatch(
+    island,
+    /data-testid="prompt-partial"/,
+    "the receipt markup is back in the island the answer unmounts"
+  );
+
+  // …and it really is rendered on the server side, from the decoded cookie.
+  const server = readFileSync(
+    path.join(process.cwd(), "src/components/tasks/phase-template-prompt.tsx"),
+    "utf8"
+  );
+  assert.match(server, /data-testid="prompt-partial"/);
+  assert.match(server, /<PhaseTemplatePartialReceiptView receipt=\{receipt\}/);
 });
 
 test("the island reaches the server module for TYPES ONLY", () => {
@@ -1067,27 +1235,24 @@ test("the panel keeps its accessible name in BOTH of its bodies", () => {
 });
 
 test("the receipt REPLACES the panel body rather than joining it", () => {
-  // The one thing the extracted component cannot prove on its own: which
-  // branch the island takes. `useActionState` holds its initial state under
-  // `renderToStaticMarkup`, so `partial` is unreachable from a render without
-  // re-adding the seed props this round deleted — and the alternative, an
-  // island that renders the receipt UNDER the offers, is a screen that invites
-  // a second import of a set that already half-landed.
-  //
-  // Read as source, deliberately and narrowly: the early return is what makes
-  // the rule true, and the browser gate is what proves the wiring.
-  const island = readFileSync(
-    path.join(
-      process.cwd(),
-      "src/components/tasks/phase-template-prompt-controls.tsx"
-    ),
-    "utf8"
-  );
+  // The receipt is the panel's whole content in this state, and it offers
+  // nothing: the alternative — a receipt UNDER the offers — is a screen that
+  // invites a second import of a set that already half-landed, and those offers
+  // cannot be taken anyway, because the transition is answered.
+  const html = renderReceipt(16, ["Ministry Team Setup"]);
 
-  assert.match(
-    island,
-    /if \(importOutcome\.status === "partial"\) \{\s*return \(\s*<PartialImportReceipt/,
-    "the partial outcome no longer returns the receipt INSTEAD of the form"
+  assert.equal(
+    buttons(html).length,
+    0,
+    "the answered panel still offers checklists it can no longer import"
+  );
+  assert.ok(
+    !html.includes("<form") && !html.includes('name="templateKey"'),
+    "the receipt still carries the form the answer made unusable"
+  );
+  assert.ok(
+    !textOf(html).includes("Nothing is created until you press Import"),
+    "the prompt's lead survived into a panel that is no longer asking"
   );
 });
 

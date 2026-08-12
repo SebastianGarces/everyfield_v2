@@ -1,9 +1,9 @@
-import { refresh, revalidatePath } from "next/cache";
+import { refresh } from "next/cache";
 import { cookies } from "next/headers";
 import Link from "next/link";
 
 import {
-  PHASE_TEMPLATE_PROMPT_HEADING_ID,
+  ClearReceiptCookie,
   PhaseTemplatePromptForm,
 } from "@/components/tasks/phase-template-prompt-controls";
 import { getCurrentSession, verifySession } from "@/lib/auth/session";
@@ -11,15 +11,19 @@ import { formatDate } from "@/lib/datetime";
 import {
   PHASE_TEMPLATE_PROMPT_COOKIE,
   PHASE_TEMPLATE_PROMPT_COOKIE_MAX_AGE,
+  PHASE_TEMPLATE_RECEIPT_COOKIE,
+  PHASE_TEMPLATE_RECEIPT_COOKIE_MAX_AGE,
   acceptPhaseTemplatePrompt,
   decidePhaseTemplateDismissOutcome,
   decidePhaseTemplateImportOutcome,
   declinePhaseTemplatePrompt,
+  decodePartialImportReceipt,
+  encodePartialImportReceipt,
   getPhaseTemplatePrompt,
   type PhaseTemplateDismissOutcome,
   type PhaseTemplateImportOutcome,
   type PhaseTemplateOffer,
-  type PhasePromptRevalidation,
+  type PhaseTemplatePartialReceipt,
   type PhaseTemplatePrompt as PhaseTemplatePromptData,
 } from "@/lib/tasks/phase-prompt";
 import {
@@ -56,6 +60,20 @@ import {
 // answered and never renders again. Each action therefore returns an outcome
 // and the island renders it.
 //
+// …EXCEPT THE PARTIAL IMPORT, WHICH THE ISLAND CANNOT OUTLIVE. That was the
+// first attempt and it failed its browser gate: 16 of 22 tasks created, the
+// transition answered, and no receipt anywhere. An outcome is only renderable
+// for as long as the component holding it is mounted, and answering the prompt
+// removes it — `.next-docs/01-app/03-api-reference/04-functions/cookies.mdx`:
+// "after you set or delete a cookie in a Server Action, Next.js re-renders the
+// current page and its layouts on the server", and the answer always sets the
+// fast-path cookie. That re-render finds an answered transition, so
+// `PhaseTemplatePrompt` returns the receipt state instead of the prompt — and
+// the island, receipt and all, is gone from the tree. No revalidation setting
+// could have saved it, which is why the "revalidate nothing" machinery is gone
+// too. The receipt travels in a flash cookie and is rendered HERE, on the
+// server, by `PhaseTemplatePartialReceiptView`.
+//
 // TICKED BY DEFAULT, WHICH IS NOT THE SAME AS AUTOMATIC. The FRD's sketch
 // offers "Yes, import all" / "Let me choose" / "Skip"; one ticked list with an
 // Import and a Not-now button is all three, without a second screen. Nothing
@@ -82,6 +100,22 @@ import {
 // standing policy (what an import does, what "Not now" does) to `text-xs` fine
 // print directly above the buttons. Two sizes, four sentences, one wall fewer.
 // ============================================================================
+
+/**
+ * What names the panel's `<section>` landmark.
+ *
+ * IT LIVES IN THIS FILE, WITH BOTH BODIES THAT CARRY IT. The panel asks in one
+ * body and reports in the other, and the landmark has to keep its name in both:
+ * `aria-labelledby` pointing at a heading that is no longer in the document
+ * leaves the region unnamed. Both the prompt's lead and the receipt render an
+ * `<h2>` with this id, and only one of them is ever mounted, so it stays unique.
+ *
+ * It used to live in the client island, and a server component imported it from
+ * there — the one direction the RSC graph does not owe you a plain string back,
+ * since every export of a `"use client"` module is a client reference on the
+ * server. Nothing crosses that boundary now but the two action references.
+ */
+export const PHASE_TEMPLATE_PROMPT_HEADING_ID = "phase-template-prompt-heading";
 
 /** Said where the press happens: this creates work, and only what is ticked. */
 const PROMPT_NOTE =
@@ -156,19 +190,38 @@ async function markPromptAnswered(transitionId: string): Promise<void> {
 }
 
 /**
- * Carry out a revalidation directive. Both actions answer the same way, and
- * WHAT to re-read is decided in `phase-prompt.ts`, where it can be tested.
+ * Hand a part-way import's receipt to the render that is about to replace this
+ * panel.
  *
- * ONE BRANCH, because the directive has one bit. The two calls are never
- * wanted apart here — for a Server Function, purging the `/tasks` entry
- * re-renders the route just as `refresh()` does — and the pair of booleans
- * this replaced is what let the partial import call one without the other.
+ * A COOKIE BECAUSE NOTHING ELSE SURVIVES THE PRESS. The claim is kept when an
+ * import gets part-way, so the transition is answered; the next render of
+ * `/tasks` has no prompt in it, and React state in the prompt's island dies
+ * with the prompt. The database holds "answered", not "answered badly" — and
+ * giving it a column for that would be a migration in a track whose migration
+ * is already stamped and reviewed. A short-lived cookie carries the two facts
+ * the planter is owed, exactly once.
+ *
+ * NOT `httpOnly`, deliberately: the browser deletes this cookie as soon as the
+ * receipt has been shown (`ClearReceiptCookie`), which is a `document.cookie`
+ * write. The value is a count and some template names, and forging it shows its
+ * own author one sentence about an import that never happened.
  */
-function applyRevalidation(revalidation: PhasePromptRevalidation): void {
-  if (revalidation === "none") return;
+async function markPartialImportReceipt(
+  receipt: PhaseTemplatePartialReceipt
+): Promise<void> {
+  const cookieStore = await cookies();
 
-  refresh();
-  revalidatePath("/tasks");
+  cookieStore.set(
+    PHASE_TEMPLATE_RECEIPT_COOKIE,
+    encodePartialImportReceipt(receipt),
+    {
+      path: "/",
+      httpOnly: false,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: PHASE_TEMPLATE_RECEIPT_COOKIE_MAX_AGE,
+    }
+  );
 }
 
 /**
@@ -230,10 +283,20 @@ async function importPhaseTemplatesAction(
 
     const decision = decidePhaseTemplateImportOutcome(result);
 
+    // BEFORE the answer cookie, because that one is what re-renders the route
+    // and the re-render is what reads this one.
+    if (decision.receipt) {
+      await markPartialImportReceipt(decision.receipt);
+    }
+
     if (decision.answeredTransitionId) {
       await markPromptAnswered(decision.answeredTransitionId);
+      // An answered transition is exactly the case where `/tasks` changed: the
+      // prompt comes down and the list gained tasks. `refresh()` and nothing
+      // else — the planter is ON the affected route, which is what
+      // `memory/contracts/data-patterns.md` reserves `revalidatePath` for.
+      refresh();
     }
-    applyRevalidation(decision.revalidation);
 
     return decision.outcome;
   } catch (error) {
@@ -296,8 +359,8 @@ async function dismissPhaseTemplatePromptAction(
 
     if (decision.answeredTransitionId) {
       await markPromptAnswered(decision.answeredTransitionId);
+      refresh();
     }
-    applyRevalidation(decision.revalidation);
 
     return decision.outcome;
   } catch (error) {
@@ -324,6 +387,93 @@ function offerSpan(offer: PhaseTemplateOffer): string {
   }
 
   return `${taskCountLabel(offer.taskCount)}, due between ${formatDueDate(offer.firstDueDate)} and ${formatDueDate(offer.lastDueDate)}.`;
+}
+
+// ----------------------------------------------------------------------------
+// The receipt — the panel's other body
+//
+// SERVER MARKUP, AND THAT IS THE WHOLE FIX. It was client state in the prompt's
+// island, and the island is removed from the tree by the very re-render the
+// answer causes. Rendered here it is drawn by the render that replaces the
+// prompt, from a flash cookie the action wrote — so it survives the press, a
+// reload, and a browser with no JavaScript at all.
+// ----------------------------------------------------------------------------
+
+/** The receipt's own heading. The panel is no longer asking anything, so it no
+ *  longer says which stage was moved to — it says what happened to the press. */
+export const PARTIAL_IMPORT_HEADING = "Import partly finished";
+
+/** `"A"`, `"A and B"`, `"A, B and C"` — names read as a sentence, not a list. */
+function nameList(names: readonly string[]): string {
+  if (names.length <= 1) return names[0] ?? "";
+  return `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+}
+
+/**
+ * The partial-import receipt, ending mid-sentence so the catalog link finishes
+ * it (the same shape as the prompt's untick note).
+ *
+ * It says three things in order, because the planter needs all three: what DID
+ * land, that the rest did not, and that the stage change is now spent — so the
+ * remainder has exactly one route left.
+ */
+export function partialImportMessage(
+  createdCount: number,
+  templateNames: readonly string[]
+): string {
+  const created = taskCountLabel(createdCount);
+  const from =
+    templateNames.length > 0 ? ` from ${nameList(templateNames)}` : "";
+
+  return `Only part of that import went through: ${created} created${from}. The remaining checklists were not created, and this stage change is now answered — import them at any time from`;
+}
+
+/**
+ * The panel, reporting instead of asking.
+ *
+ * It REPLACES the prompt rather than sitting under it, and it has no buttons: a
+ * part-way import keeps its claim (`phase-prompt.ts`), so the transition is
+ * answered and the offers it was showing can no longer be taken. This is the
+ * only screen that will ever say so — the prompt does not come back.
+ *
+ * `role="alert"` and not merely a paragraph, because the planter's attention is
+ * on a press that appeared to work; and `ClearReceiptCookie` beside it so the
+ * flash is spent by being read, rather than following them into their next
+ * visit to `/tasks`.
+ */
+export function PhaseTemplatePartialReceiptView({
+  receipt,
+}: {
+  receipt: PhaseTemplatePartialReceipt;
+}) {
+  return (
+    <section
+      aria-labelledby={PHASE_TEMPLATE_PROMPT_HEADING_ID}
+      data-testid="phase-template-prompt"
+      className="border-border bg-card space-y-4 rounded-md border p-4 shadow-sm"
+    >
+      <div
+        data-testid="prompt-partial"
+        role="alert"
+        className="bg-destructive/10 text-destructive space-y-1 rounded-md p-3 text-sm"
+      >
+        <h2 id={PHASE_TEMPLATE_PROMPT_HEADING_ID} className="font-medium">
+          {PARTIAL_IMPORT_HEADING}
+        </h2>
+        <p>
+          {partialImportMessage(receipt.createdCount, receipt.templateNames)}{" "}
+          <Link
+            href={TEMPLATES_ROUTE}
+            className="cursor-pointer font-medium underline underline-offset-4"
+          >
+            {TEMPLATES_LINK_LABEL}
+          </Link>
+          .
+        </p>
+      </div>
+      <ClearReceiptCookie name={PHASE_TEMPLATE_RECEIPT_COOKIE} />
+    </section>
+  );
 }
 
 // ----------------------------------------------------------------------------
@@ -359,51 +509,51 @@ export function PhaseTemplatePromptView({
       data-testid="phase-template-prompt"
       className="border-border bg-card space-y-4 rounded-md border p-4 shadow-sm"
     >
+      {/*
+        `data-testid` is a TEST SEAM, not styling. The structural tests assert
+        that the lead stays two paragraphs and that both standing notes sit in
+        the fine print — a rule about WHICH BLOCK a sentence lives in. Anchored
+        to the serialized class string, those tests broke on a prettier class
+        reorder; anchored here, they break only when a note actually moves.
+
+        It sits BESIDE the island, not inside it. It was passed in as a prop so
+        that a partial import could replace the panel body from client state —
+        machinery that could never work, because answering the prompt unmounts
+        the island. The receipt is a server render now, so the lead is plain
+        server markup again.
+      */}
+      <div data-testid="prompt-lead" className="space-y-1">
+        <h2
+          id={PHASE_TEMPLATE_PROMPT_HEADING_ID}
+          className="text-base font-medium"
+        >
+          You moved to {prompt.phaseName}
+        </h2>
+        <p className="text-muted-foreground text-sm">
+          {prompt.offers.length === 1
+            ? "There is a ready-made checklist for this stage"
+            : `There are ${prompt.offers.length} ready-made checklists for this stage`}
+          {" — "}
+          {taskCountLabel(prompt.totalTaskCount)} in all, dated from the day you
+          moved ({formatDate(prompt.transitionedAt, "short")}).
+        </p>
+        <p className="text-muted-foreground text-sm">
+          {PROMPT_NOTE} {UNTICK_NOTE}{" "}
+          <Link
+            href={TEMPLATES_ROUTE}
+            className="text-primary cursor-pointer font-medium underline underline-offset-4"
+          >
+            {TEMPLATES_LINK_LABEL}
+          </Link>
+          .
+        </p>
+      </div>
+
       <PhaseTemplatePromptForm
         transitionId={prompt.transitionId}
         offerCount={prompt.offers.length}
         importAction={importAction}
         dismissAction={dismissAction}
-        lead={
-          /*
-            `data-testid` is a TEST SEAM, not styling. The structural tests
-            assert that the lead stays two paragraphs and that both standing
-            notes sit in the fine print — a rule about WHICH BLOCK a sentence
-            lives in. Anchored to the serialized class string, those tests broke
-            on a prettier class reorder; anchored here, they break only when a
-            note actually moves.
-
-            Handed to the island rather than rendered beside it so a partial
-            import can replace the whole body with its receipt: the lead offers
-            checklists that, by then, have been answered for.
-          */
-          <div data-testid="prompt-lead" className="space-y-1">
-            <h2
-              id={PHASE_TEMPLATE_PROMPT_HEADING_ID}
-              className="text-base font-medium"
-            >
-              You moved to {prompt.phaseName}
-            </h2>
-            <p className="text-muted-foreground text-sm">
-              {prompt.offers.length === 1
-                ? "There is a ready-made checklist for this stage"
-                : `There are ${prompt.offers.length} ready-made checklists for this stage`}
-              {" — "}
-              {taskCountLabel(prompt.totalTaskCount)} in all, dated from the day
-              you moved ({formatDate(prompt.transitionedAt, "short")}).
-            </p>
-            <p className="text-muted-foreground text-sm">
-              {PROMPT_NOTE} {UNTICK_NOTE}{" "}
-              <Link
-                href={TEMPLATES_ROUTE}
-                className="text-primary cursor-pointer font-medium underline underline-offset-4"
-              >
-                {TEMPLATES_LINK_LABEL}
-              </Link>
-              .
-            </p>
-          </div>
-        }
       >
         <ul className="divide-border border-border divide-y rounded-md border">
           {prompt.offers.map((offer) => {
@@ -464,12 +614,26 @@ export function PhaseTemplatePromptView({
 // ----------------------------------------------------------------------------
 
 /**
- * The prompt for the signed-in planter's plant, or nothing.
+ * The prompt for the signed-in planter's plant, the receipt for a press that
+ * half-landed, or nothing.
  *
  * Renders `null` — no wrapper, no empty state — whenever there is nothing to
  * ask about: no session, no church, no transition, an already-answered
  * transition, or a phase the catalog has no checklist for. A prompt that is
  * always present is not a prompt.
+ *
+ * "NO PROMPT" IS NOT THE SAME AS "NOTHING TO SAY", AND THAT IS THE FIX. A
+ * part-way import ANSWERS the transition, so this loader is asked for a prompt
+ * on exactly the render that owes the planter a receipt and correctly finds
+ * none. Returning `null` there is the silence the round-3 ruling exists to end,
+ * and it is what shipped: 16 of 22 tasks created and not a word on screen. So
+ * the empty answer is where the flash cookie is read — written one render
+ * earlier by `importPhaseTemplatesAction` and by nothing else.
+ *
+ * A LIVE PROMPT STILL WINS. The receipt is history; a prompt is a question the
+ * planter can still answer. The cookie is normally spent the moment the receipt
+ * is drawn, but with JavaScript off it lives out its `maxAge`, and a plant that
+ * changes stage inside that window must get its new prompt, not a stale report.
  */
 export async function PhaseTemplatePrompt() {
   const { user } = await getCurrentSession();
@@ -483,7 +647,16 @@ export async function PhaseTemplatePrompt() {
     user.churchId,
     answeredTransitionId
   );
-  if (!prompt) return null;
+
+  if (!prompt) {
+    const receipt = decodePartialImportReceipt(
+      cookieStore.get(PHASE_TEMPLATE_RECEIPT_COOKIE)?.value
+    );
+
+    return receipt ? (
+      <PhaseTemplatePartialReceiptView receipt={receipt} />
+    ) : null;
+  }
 
   return (
     <PhaseTemplatePromptView

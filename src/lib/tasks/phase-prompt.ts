@@ -73,6 +73,36 @@ export const PHASE_TEMPLATE_PROMPT_COOKIE = "ef_phase_template_prompt";
 export const PHASE_TEMPLATE_PROMPT_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 
 /**
+ * WHERE A PART-WAY IMPORT'S RECEIPT LIVES BETWEEN THE PRESS AND THE RE-RENDER
+ * (ruled 2026-08-12, round 3 on PR #393; re-fixed after the G3 rejection).
+ *
+ * The receipt cannot be state in the prompt's client island, and that was the
+ * shipped bug. A part-way import KEEPS its claim, so the transition is answered
+ * — and per
+ * `.next-docs/01-app/03-api-reference/04-functions/cookies.mdx`, "after you set
+ * or delete a cookie in a Server Action, Next.js re-renders the current page and
+ * its layouts on the server". The action sets the answered-cookie, so `/tasks`
+ * re-renders whatever any revalidation directive says, `getPhaseTemplatePrompt`
+ * returns `null`, and the island holding the receipt is removed from the tree
+ * with the prompt around it. Sixteen of twenty-two tasks were created and the
+ * planter was told nothing.
+ *
+ * So the receipt is handed to the SERVER render that follows the press, in the
+ * only channel that survives it. It is a FLASH: `maxAge` is minutes, not a
+ * year, and the browser clears it as soon as the receipt has been shown
+ * (`ClearReceiptCookie`). It is read by exactly one surface and is not
+ * `httpOnly`, because that clearing is a `document.cookie` write — forging it
+ * shows its owner a message about an import that did not happen, which is the
+ * whole blast radius.
+ */
+export const PHASE_TEMPLATE_RECEIPT_COOKIE = "ef_phase_template_receipt";
+
+/** Long enough to survive the re-render, a reload and a second look; short
+ *  enough that it cannot follow the planter into a later visit. The browser
+ *  normally deletes it first — this is the no-JavaScript backstop. */
+export const PHASE_TEMPLATE_RECEIPT_COOKIE_MAX_AGE = 60 * 2;
+
+/**
  * `kind = 'transition'` IS PART OF THE QUESTION, not a refinement of it.
  *
  * `phase_transitions` is two populations (`memory/invariants.md` → Phase
@@ -544,17 +574,21 @@ export async function acceptPhaseTemplatePrompt(
  * nothing in this module reaches a browser bundle (the same shape
  * `bulk-actions.tsx` uses for `BulkTaskResult`).
  *
- * `partial` is the case the review singled out: the claim is deliberately KEPT
- * when an import got part-way (re-offering a checklist already in the list is
- * how a planter imports it twice), so the prompt is answered and will not
- * render again — this outcome is the only chance to say that half a set
- * arrived. `nothing` is "no checklist on offer was ticked", which the disabled
- * button makes unreachable from the UI but not from a forged POST or a stage
- * change that moved under the planter's feet.
+ * THESE ARE THE OUTCOMES THAT LEAVE THE PROMPT ON SCREEN, and that is why there
+ * is no `partial` among them. Every status here is rendered by the island,
+ * which only exists for as long as the prompt does: `failed` and `nothing` both
+ * leave the transition unanswered, so the next server render still contains the
+ * panel and the island keeps its state through it. A part-way import answers
+ * the transition, so the panel is gone by the time anything could be drawn from
+ * this value — its receipt travels a different road (`PhaseTemplateImportDecision`
+ * → `receipt`).
+ *
+ * `nothing` is "no checklist on offer was ticked", which the disabled button
+ * makes unreachable from the UI but not from a forged POST or a stage change
+ * that moved under the planter's feet.
  */
 export type PhaseTemplateImportOutcome =
   | { status: "idle" }
-  | { status: "partial"; createdCount: number; templateNames: string[] }
   | { status: "nothing" }
   | { status: "failed" };
 
@@ -564,35 +598,118 @@ export type PhaseTemplateDismissOutcome =
   | { status: "failed" };
 
 /**
- * What the caller must re-read after an answer — and, for the partial case,
- * what it must NOT (ruled 2026-08-12, round 3 on PR #393).
+ * What a part-way import left behind: the two facts the receipt states.
  *
- * ONE VALUE, NOT A PAIR OF FLAGS, and the reason is the bug. `refresh()` and
- * `revalidatePath("/tasks")` are never wanted apart on this route: `"full"`
- * runs both (the list below the prompt gained tasks and the prompt itself must
- * come down — `memory/contracts/data-patterns.md`), `"none"` runs neither. Two
- * booleans made `{refresh: false, revalidatePath: true}` representable, which
- * is precisely what shipped on the partial branch under the excuse "so the
- * next navigation is correct". It was wrong twice over: per
- * `.next-docs/01-app/03-api-reference/04-functions/revalidatePath.mdx` a
- * Server Function's call "Updates the UI immediately (if viewing the affected
- * path)" — the planter IS on `/tasks`, so it unmounts the receipt exactly as
- * `refresh()` would — and `/tasks` is `export const dynamic = "force-dynamic"`
- * (`src/app/(dashboard)/tasks/page.tsx`), so it is never cached and the next
- * navigation was already correct.
- *
- * `"none"` IS THE PARTIAL IMPORT'S ANSWER, and it is now the only way to write
- * it. The claim is kept on a part-way import, so any re-render of `/tasks` has
- * no prompt in it and takes the island holding the receipt with it.
+ * It is carried to the next SERVER render in a flash cookie
+ * (`PHASE_TEMPLATE_RECEIPT_COOKIE`), so it must round-trip through a string a
+ * browser can hold, forge or corrupt — hence the codec below rather than
+ * `JSON.parse` at the call site.
  */
-export type PhasePromptRevalidation = "none" | "full";
+export interface PhaseTemplatePartialReceipt {
+  createdCount: number;
+  templateNames: string[];
+}
+
+/** Enough names for the biggest phase in the catalog, and a cap so a cookie
+ *  cannot grow without bound. Both halves are enforced on the way out AND on
+ *  the way in — the value that comes back is a browser's, not ours. */
+const RECEIPT_MAX_NAMES = 8;
+const RECEIPT_MAX_NAME_LENGTH = 120;
+
+/** The receipt as a cookie value. `encodeURIComponent` because template names
+ *  are prose — commas, semicolons and spaces are all legal in them and none of
+ *  them are legal, unquoted, in a cookie. */
+export function encodePartialImportReceipt(
+  receipt: PhaseTemplatePartialReceipt
+): string {
+  return encodeURIComponent(
+    JSON.stringify({
+      createdCount: receipt.createdCount,
+      templateNames: receipt.templateNames
+        .slice(0, RECEIPT_MAX_NAMES)
+        .map((name) => name.slice(0, RECEIPT_MAX_NAME_LENGTH)),
+    })
+  );
+}
+
+/**
+ * The receipt back out of a cookie, or `null` — and NEVER a throw.
+ *
+ * This runs inside the `/tasks` render, where the value is whatever the browser
+ * sent: absent, truncated, half-URL-decoded by a proxy, or hand-written. There
+ * is no error boundary on that route (see the header of
+ * `src/db/migrations/0037_phase_prompt_answers.sql`), so a parse error here is a
+ * 500 on the task list. Every branch that is not a well-formed receipt returns
+ * `null`, which renders nothing at all.
+ *
+ * A forged value buys its author a sentence about an import that did not
+ * happen, in their own browser. Nothing is read from it but a count and some
+ * names, both re-clamped here.
+ */
+export function decodePartialImportReceipt(
+  raw: string | null | undefined
+): PhaseTemplatePartialReceipt | null {
+  if (!raw) return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(decodeURIComponent(raw));
+  } catch {
+    return null;
+  }
+
+  if (typeof parsed !== "object" || parsed === null) return null;
+
+  const { createdCount, templateNames } = parsed as {
+    createdCount?: unknown;
+    templateNames?: unknown;
+  };
+
+  // A partial import created at least one task, by definition — anything else
+  // is a corrupted or forged value and has no sentence to render.
+  if (
+    typeof createdCount !== "number" ||
+    !Number.isSafeInteger(createdCount) ||
+    createdCount <= 0
+  ) {
+    return null;
+  }
+
+  if (!Array.isArray(templateNames)) return null;
+  if (!templateNames.every((name) => typeof name === "string")) return null;
+
+  return {
+    createdCount,
+    templateNames: templateNames
+      .slice(0, RECEIPT_MAX_NAMES)
+      .map((name) => name.slice(0, RECEIPT_MAX_NAME_LENGTH)),
+  };
+}
 
 export interface PhaseTemplateImportDecision {
   outcome: PhaseTemplateImportOutcome;
-  revalidation: PhasePromptRevalidation;
+  /**
+   * What the NEXT server render must say, or `null` when it has nothing to say.
+   *
+   * Only a part-way import fills this in, and the reason it is a separate field
+   * rather than a status the island renders is the G3 rejection of 2026-08-12:
+   * the island is unmounted by the re-render that the answer itself causes, so
+   * an outcome is the one place this cannot be kept. The caller writes it to the
+   * flash cookie and the server component draws it.
+   */
+  receipt: PhaseTemplatePartialReceipt | null;
   /**
    * The transition to write the cookie fast path against, or `null` when
    * nothing was answered and the prompt must stay up.
+   *
+   * It doubles as "something changed": an answered transition is exactly the
+   * case where `/tasks` has to be re-read — the prompt comes down and the list
+   * gained tasks — so the caller's `refresh()` hangs off this and no separate
+   * revalidation directive exists. There WAS one, `PhasePromptRevalidation`,
+   * built to let the partial case re-read nothing so its receipt would survive.
+   * It could not work: setting a cookie re-renders the route by itself
+   * (`.next-docs/01-app/03-api-reference/04-functions/cookies.mdx`), and the
+   * answer always sets one.
    */
   answeredTransitionId: string | null;
 }
@@ -605,7 +722,7 @@ export interface PhaseTemplateImportDecision {
  * from a test — it is a non-exported `"use server"` closure — and the round-3
  * ruling lives entirely in these four branches. Here the whole set is
  * assertable, including the one that has no visible symptom until a browser is
- * open: the partial case must revalidate NOTHING.
+ * open: the partial case must hand its receipt to the next SERVER render.
  *
  * `null` in means "nothing was answered": no live prompt, an empty tick list, or
  * every key forged. The prompt stays up and says so.
@@ -616,19 +733,21 @@ export function decidePhaseTemplateImportOutcome(
   if (!result) {
     return {
       outcome: { status: "nothing" },
-      revalidation: "none",
+      receipt: null,
       answeredTransitionId: null,
     };
   }
 
+  // A part-way import ANSWERS the transition, so the prompt — and the island
+  // inside it — is gone from the next render of `/tasks`. The outcome it hands
+  // back is therefore never drawn; the receipt is, by the server.
   if (result.status === "partial") {
     return {
-      outcome: {
-        status: "partial",
+      outcome: { status: "idle" },
+      receipt: {
         createdCount: result.createdCount,
         templateNames: result.templateNames,
       },
-      revalidation: "none",
       answeredTransitionId: result.transitionId,
     };
   }
@@ -637,14 +756,13 @@ export function decidePhaseTemplateImportOutcome(
   // the prompt must come down; the second simply created nothing this time.
   return {
     outcome: { status: "idle" },
-    revalidation: "full",
+    receipt: null,
     answeredTransitionId: result.transitionId,
   };
 }
 
 export interface PhaseTemplateDismissDecision {
   outcome: PhaseTemplateDismissOutcome;
-  revalidation: PhasePromptRevalidation;
   answeredTransitionId: string | null;
 }
 
@@ -662,14 +780,12 @@ export function decidePhaseTemplateDismissOutcome(
   if (!transitionId) {
     return {
       outcome: { status: "failed" },
-      revalidation: "none",
       answeredTransitionId: null,
     };
   }
 
   return {
     outcome: { status: "idle" },
-    revalidation: "full",
     answeredTransitionId: transitionId,
   };
 }
