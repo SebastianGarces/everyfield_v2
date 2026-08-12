@@ -3,10 +3,11 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import { createElement } from "react";
+import { createElement, isValidElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import {
+  PHASE_TEMPLATE_RECEIPT_COOKIE,
   buildPhaseTemplatePrompt,
   decidePhaseTemplateDismissOutcome,
   decidePhaseTemplateImportOutcome,
@@ -19,6 +20,7 @@ import {
 import { phaseTemplatesFor } from "@/lib/tasks/templates";
 
 import {
+  ClearReceiptCookie,
   DISMISS_FAILED_MESSAGE,
   IMPORT_FAILED_MESSAGE,
   NOTHING_IMPORTED_MESSAGE,
@@ -132,6 +134,30 @@ function renderReceipt(createdCount: number, templateNames: string[]): string {
       receipt: { transitionId: TRANSITION_ID, createdCount, templateNames },
     })
   );
+}
+
+/**
+ * Every element of one component type in a returned tree, at any depth.
+ *
+ * A MARKUP ASSERTION CANNOT SEE `ClearReceiptCookie`: it renders `null`, so
+ * `renderReceipt` produces the same HTML whether it is there or not. The flash
+ * is spent by being shown, and "shown" means that component mounted — so the
+ * only honest place to assert it is the element tree the server component
+ * returns, before React throws the empty render away.
+ */
+function elementsOfType(
+  node: ReactNode,
+  type: unknown
+): { props: Record<string, unknown> }[] {
+  if (Array.isArray(node)) {
+    return node.flatMap((child) => elementsOfType(child as ReactNode, type));
+  }
+  if (!isValidElement(node)) return [];
+
+  const props = (node.props ?? {}) as Record<string, unknown>;
+  const nested = elementsOfType((props.children ?? null) as ReactNode, type);
+
+  return node.type === type ? [{ props }, ...nested] : nested;
 }
 
 /** How many `role="alert"` live regions the markup carries. */
@@ -1370,6 +1396,97 @@ test("the receipt REPLACES the panel body rather than joining it", () => {
   assert.ok(
     !textOf(html).includes("Nothing is created until you press Import"),
     "the prompt's lead survived into a panel that is no longer asking"
+  );
+});
+
+// ----------------------------------------------------------------------------
+// Spending the flash
+//
+// The transition id in the receipt closes ONE stale-alarm route: a receipt for
+// transition A met by a render reporting on B. It closes nothing at all on the
+// other route, which is a receipt for A met, again and again, by every later
+// render that is STILL reporting on A — a reload, a filter change, or the visit
+// after the planter has followed the link and imported the remainder, when
+// "the remaining checklists were not created" is false in a `role="alert"`.
+//
+// What closes that one is `ClearReceiptCookie`, and it is invisible to every
+// other test in this file: it renders `null`, so the receipt's HTML is byte for
+// byte the same with it and without it.
+// ----------------------------------------------------------------------------
+
+test("the receipt spends its own flash — shown once, then gone", () => {
+  const clears = elementsOfType(
+    PhaseTemplatePartialReceiptView({
+      receipt: {
+        transitionId: TRANSITION_ID,
+        createdCount: 9,
+        templateNames: ["Ministry Team Setup"],
+      },
+    }),
+    ClearReceiptCookie
+  );
+
+  assert.equal(
+    clears.length,
+    1,
+    "the receipt never clears its cookie, so it re-alarms on every /tasks render until the flash expires"
+  );
+  assert.equal(
+    clears[0].props.name,
+    PHASE_TEMPLATE_RECEIPT_COOKIE,
+    "the browser clears a different cookie than the loader reads, which deletes nothing and shows the receipt forever"
+  );
+});
+
+test("the asking body spends no flash, because it is showing none", () => {
+  // A live prompt WINS over a lingering receipt, and that receipt has not been
+  // read yet — clearing it from this body would throw away a report the planter
+  // is still owed, silently, in the one state that has no second chance.
+  assert.equal(
+    elementsOfType(
+      PhaseTemplatePromptView({
+        prompt: promptData(),
+        importAction: noopImport,
+        dismissAction: noopDismiss,
+      }),
+      ClearReceiptCookie
+    ).length,
+    0,
+    "the prompt clears a receipt it never showed"
+  );
+});
+
+test("the clear write expires the cookie the action set, not a namesake", () => {
+  // A cookie is identified by name AND path. The action sets `path: "/"`, so a
+  // `document.cookie` delete with no `Path` writes a second, path-scoped cookie
+  // at `/tasks` and leaves the real one standing — the receipt then survives its
+  // own clearing, which looks exactly like the clearing working.
+  const island = readFileSync(
+    path.join(
+      process.cwd(),
+      "src/components/tasks/phase-template-prompt-controls.tsx"
+    ),
+    "utf8"
+  );
+
+  const write = /document\.cookie\s*=\s*`([^`]*)`/.exec(island);
+  assert.ok(write, "the flash is never cleared from the browser at all");
+
+  const [, value] = write;
+  assert.match(
+    value,
+    /^\$\{name\}=/,
+    "the clear is not keyed on the name it was handed, so it cannot follow the cookie the loader reads"
+  );
+  assert.match(
+    value,
+    /Path=\//,
+    "a delete with no Path leaves the /-scoped cookie standing"
+  );
+  assert.match(
+    value,
+    /Max-Age=0/,
+    "the write re-arms the flash instead of expiring it"
   );
 });
 
