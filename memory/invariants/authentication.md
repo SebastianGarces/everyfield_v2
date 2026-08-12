@@ -2,7 +2,7 @@
 
 Why and how, for the Authentication rules in [`../invariants.md`](../invariants.md).
 
-**Source:** `src/lib/auth/session.ts`, `src/lib/auth/cookies.ts`, `src/lib/security/constant-time.ts`, `src/lib/crawler.ts`, `src/proxy.ts`
+**Source:** `src/lib/auth/session.ts`, `src/lib/auth/cookies.ts`, `src/lib/auth/rate-limit.ts`, `src/lib/security/constant-time.ts`, `src/lib/crawler.ts`, `src/proxy.ts`
 
 Sessions are server-side rather than JWT so one can be revoked immediately, and the row is keyed by the **hashed** token, so a database read never yields a usable credential.
 
@@ -21,6 +21,8 @@ One `CRON_SECRET` authorises BOTH `/api/notifications/dispatch` and `/api/phase-
 ## Request headers are client input
 
 `src/proxy.ts` set `x-is-crawler` on the RESPONSE (`NextResponse.next()`), so to the dashboard layout reading it off the REQUEST a proxy-set value and a forged one were *indistinguishable* — which is precisely why branching on it was unsafe (#240, removed). The trustworthy channel is `NextResponse.next({ request: { headers } })`, and only when the proxy writes the header on every continuation so a client value is always overwritten.
+
+The same rule decides how a client IP is read for rate limiting (ruled 405-1a, 2026-08-12). The FIRST hop of `x-forwarded-for` is the segment the client itself can send, so an attacker rotates a forged first hop and every per-IP limit evaporates. `getRequestIp` (`src/lib/auth/rate-limit.ts`) therefore reads the platform-written `x-real-ip` first and falls back to the LAST hop of `x-forwarded-for` — the hop appended nearest our proxy, which the client cannot write.
 
 ## The crawler allowance (ruled 2026-08-04, tightened by #297, narrowed 2026-08-09)
 
