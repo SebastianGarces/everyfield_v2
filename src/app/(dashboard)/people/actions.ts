@@ -1,6 +1,5 @@
 "use server";
 
-import { logPersonActivity } from "@/lib/people/activity";
 import { checkForDuplicates } from "@/lib/people/duplicates";
 import { emitPersonStatusChanged } from "@/lib/people/events";
 import {
@@ -316,25 +315,22 @@ export async function quickAddPersonAction(data: {
         };
       }
 
-      // Create person with defaults
-      const person = await createPerson(churchId, user.id, {
-        firstName: parsed.data.firstName,
-        lastName: parsed.data.lastName,
-        email: parsed.data.email || undefined,
-        phone: parsed.data.phone || undefined,
-        source: parsed.data.source,
-        status: "prospect",
-        country: "US",
-      });
-
-      // Log activity
-      await logPersonActivity({
+      // Create person with defaults; the service logs the person_created
+      // activity with this source
+      const person = await createPerson(
         churchId,
-        personId: person.id,
-        activityType: "person_created",
-        metadata: { source: "quick_add" },
-        performedBy: user.id,
-      });
+        user.id,
+        {
+          firstName: parsed.data.firstName,
+          lastName: parsed.data.lastName,
+          email: parsed.data.email || undefined,
+          phone: parsed.data.phone || undefined,
+          source: parsed.data.source,
+          status: "prospect",
+          country: "US",
+        },
+        "quick_add"
+      );
 
       revalidatePath("/people");
       return { success: true, data: person };

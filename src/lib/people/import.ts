@@ -1,9 +1,6 @@
-import { db } from "@/db";
-import { persons, type NewPerson } from "@/db/schema";
 import { personCreateSchema } from "@/lib/validations/people";
-import { logPersonActivity } from "./activity";
-import { emitPersonCreated } from "./events";
 import { checkForDuplicates } from "./duplicates";
+import { createPerson } from "./service";
 import type {
   DuplicateCheck,
   ImportPreview,
@@ -350,39 +347,9 @@ export async function executeBulkImport(
     }
 
     try {
-      const data = parseResult.data;
-
-      const values: NewPerson = {
-        churchId,
-        createdBy: userId,
-        firstName: data.firstName,
-        lastName: data.lastName,
-        email: data.email || null,
-        phone: data.phone || null,
-        addressLine1: data.addressLine1 || null,
-        addressLine2: data.addressLine2 || null,
-        city: data.city || null,
-        state: data.state || null,
-        postalCode: data.postalCode || null,
-        country: data.country,
-        status: "prospect",
-        source: data.source ?? null,
-        sourceDetails: null,
-        notes: data.notes || null,
-      };
-
-      const [person] = await db.insert(persons).values(values).returning();
-
-      await emitPersonCreated(person);
-
-      // Log activity for person creation
-      await logPersonActivity({
-        churchId,
-        personId: person.id,
-        activityType: "person_created",
-        metadata: { source: "bulk_import" },
-        performedBy: userId,
-      });
+      // The service owns the insert, the person.created emit and the
+      // person_created activity (ruling 410-2A) — no duplicated write path.
+      await createPerson(churchId, userId, parseResult.data, "bulk_import");
 
       created++;
     } catch {

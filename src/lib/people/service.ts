@@ -23,6 +23,7 @@ import {
   type SQL,
 } from "drizzle-orm";
 import { cache } from "react";
+import { logPersonActivity } from "./activity";
 import { emitPersonCreated } from "./events";
 
 // ============================================================================
@@ -377,11 +378,17 @@ export async function getLatestPersonNote(personId: string): Promise<{
 /**
  * Create a new person
  * Transforms empty string email to null
+ *
+ * Every creation path (full form, quick add, bulk import, meeting guest
+ * flows) goes through here, so this is also the ONE place the
+ * `person_created` timeline entry is written (ruling 410-2A).
+ * `activitySource` names the path in the activity metadata.
  */
 export async function createPerson(
   churchId: string,
   userId: string,
-  data: PersonCreateInput
+  data: PersonCreateInput,
+  activitySource: string = "form"
 ): Promise<Person> {
   // Transform empty string email to null
   const email = data.email === "" ? null : data.email;
@@ -410,6 +417,14 @@ export async function createPerson(
   const [person] = await db.insert(persons).values(values).returning();
 
   await emitPersonCreated(person);
+
+  await logPersonActivity({
+    churchId,
+    personId: person.id,
+    activityType: "person_created",
+    metadata: { source: activitySource },
+    performedBy: userId,
+  });
 
   return person;
 }
