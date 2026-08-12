@@ -5,11 +5,14 @@ import { test } from "node:test";
 
 import {
   analyticsMeetingTypeArg,
-  ANALYTICS_MEETING_TYPE_FILTERS,
-  compareEvaluationToHistory,
   DEFAULT_ANALYTICS_MEETING_TYPE,
-  meetingFollowUpCountQuery,
+  DEFAULT_LIST_MEETING_TYPE,
+  MEETING_TYPE_FILTERS,
   parseAnalyticsMeetingTypeFilter,
+} from "./analytics-filter";
+import {
+  compareEvaluationToHistory,
+  meetingFollowUpCountQuery,
   type EvaluationTrendPoint,
 } from "./service";
 
@@ -268,9 +271,54 @@ test("no ?type= is the vision-meeting view existing users already had", () => {
 });
 
 test("every offered filter round-trips through the parser", () => {
-  for (const option of ANALYTICS_MEETING_TYPE_FILTERS) {
+  for (const option of MEETING_TYPE_FILTERS) {
     assert.equal(parseAnalyticsMeetingTypeFilter(option.value), option.value);
   }
+});
+
+test("ONE filter table serves both surfaces, and no second one is declared", () => {
+  // The defect this pins: `meeting-list.tsx` ("use client") and the analytics
+  // page each used to declare the four values, the four labels and the same
+  // `?type=` param, and the two copies had already drifted apart in order.
+  // Both now render `MEETING_TYPE_FILTERS`, so the only way to change one
+  // surface's filters is to change the other's.
+  assert.deepEqual(
+    MEETING_TYPE_FILTERS.map((option) => option.value),
+    ["all", "vision_meeting", "orientation", "team_meeting"]
+  );
+  assert.deepEqual(
+    MEETING_TYPE_FILTERS.map((option) => option.label),
+    ["All Types", "Vision Meetings", "Orientations", "Team Meetings"]
+  );
+
+  const surfaces = [
+    "src/components/meetings/meeting-list.tsx",
+    "src/app/(dashboard)/meetings/[id]/analytics/page.tsx",
+  ];
+
+  for (const surface of surfaces) {
+    const source = readFileSync(path.join(process.cwd(), surface), "utf8");
+
+    assert.match(
+      source,
+      /MEETING_TYPE_FILTERS\.map\(/,
+      `${surface} renders the shared filter table rather than its own`
+    );
+    assert.doesNotMatch(
+      source,
+      /"All Types"/,
+      `${surface} declares no label of its own — the table owns every label`
+    );
+  }
+});
+
+test("the two surfaces share the table but NOT the default — that is ruled", () => {
+  // Analytics keeps `vision_meeting` for backwards compatibility with every
+  // bookmark that predates the filter; the browse list has always shown
+  // everything. Sharing the table must not quietly align these.
+  assert.equal(DEFAULT_ANALYTICS_MEETING_TYPE, "vision_meeting");
+  assert.equal(DEFAULT_LIST_MEETING_TYPE, "all");
+  assert.notEqual(DEFAULT_ANALYTICS_MEETING_TYPE, DEFAULT_LIST_MEETING_TYPE);
 });
 
 test("an unrecognised or repeated ?type= narrows to the default, never widens", () => {

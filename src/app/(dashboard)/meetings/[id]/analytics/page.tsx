@@ -10,10 +10,10 @@ import {
 import {
   analyticsMeetingTypeArg,
   analyticsMeetingTypeLabel,
-  ANALYTICS_MEETING_TYPE_FILTERS,
-  getMeeting,
+  MEETING_TYPE_FILTERS,
   parseAnalyticsMeetingTypeFilter,
-} from "@/lib/meetings/service";
+} from "@/lib/meetings/analytics-filter";
+import { getMeeting } from "@/lib/meetings/service";
 import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -67,7 +67,7 @@ export default async function AnalyticsPage({
           className="flex flex-wrap gap-2"
           data-testid="analytics-type-filter"
         >
-          {ANALYTICS_MEETING_TYPE_FILTERS.map((option) => {
+          {MEETING_TYPE_FILTERS.map((option) => {
             const isActive = option.value === filter;
             return (
               <Link

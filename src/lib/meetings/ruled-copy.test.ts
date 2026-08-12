@@ -536,3 +536,24 @@ test("the agenda module pulls in no data-access graph either", () => {
     "agenda.ts imports nothing at all — a type, two bounds, a clamp and a reader"
   );
 });
+
+test("the shared filter table imports a TYPE and nothing else", () => {
+  // Third sibling, same rule with one allowance. `analytics-filter.ts` holds
+  // the meeting-type filter that `MeetingList` ("use client") and the analytics
+  // server page must agree on, so it sits on both sides of the boundary. It
+  // needs `MeetingType` from the schema — but `import type` is erased at
+  // compile time, so it adds no bundle edge and `client-boundary.test.ts`
+  // (value edges only) never follows it. A VALUE import here would be the hole.
+  const filter = readFileSync(
+    path.join(__dirname, "analytics-filter.ts"),
+    "utf8"
+  )
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/.*$/gm, "");
+
+  assert.doesNotMatch(
+    filter,
+    /^\s*import\s+(?!type\b)/m,
+    "analytics-filter.ts has no VALUE import — a type-only import is erased, a value import ships the graph"
+  );
+});
