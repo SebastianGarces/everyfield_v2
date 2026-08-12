@@ -13,6 +13,13 @@
 // same hairline the print stylesheet does — `TABLE_BORDER` below is the 0.5pt
 // `globals.css` sets on every `th`/`td` (ruling on PR #391).
 //
+// A CALLOUT IS A BOX ON BOTH PATHS, AND ITS TYPE IS A WORD ON THIS ONE. The
+// screen draws the type as a lucide icon; a document built from text cannot
+// carry an icon, so the box is redrawn here as a bordered `View` and the type
+// is set as the label the icon stood for ("Warning", "Insight"). That label is
+// not invented here — `extract.ts` reads it off the callout itself, so the two
+// renderers name the same type (ruling on PR #391, 2026-08-12).
+//
 // EMPHASIS IS A FONT NAME, NEVER AN AXIS.
 //
 // Each styled run names a STANDARD-14 FONT outright (`Helvetica-Bold`,
@@ -63,6 +70,15 @@ const grid = "#9ca3af";
 
 /** Hairline weight, in points — `globals.css` prints cell borders at 0.5pt. */
 const TABLE_BORDER = 0.5;
+
+/**
+ * The callout box, in points.
+ *
+ * Heavier than the table hairline on purpose: a cell boundary is a rule inside
+ * one object, while a callout border is the edge of a separate one, and the
+ * printed page draws it at the browser's 1px default too.
+ */
+const CALLOUT_BORDER = 1;
 
 // The faces, by name. Every one of these is a standard-14 font, so the document
 // carries no font asset; see the header comment for why an emphasized run names
@@ -159,6 +175,26 @@ export const pdfStyles = {
     fontFamily: FONT_BOLD,
     fontSize: 10,
     lineHeight: 1.35,
+  },
+  // A callout is the only nested block, so its box carries the padding and the
+  // blocks inside it keep the spacing they have anywhere else. The bottom
+  // padding is short because the last child brings its own bottom margin.
+  callout: {
+    marginTop: 4,
+    marginBottom: 12,
+    paddingTop: 8,
+    paddingBottom: 2,
+    paddingHorizontal: 10,
+    borderWidth: CALLOUT_BORDER,
+    borderColor: grid,
+  },
+  // The word the icon stood for. Bold and tracked out so it reads as a label on
+  // the box rather than as the callout's first sentence.
+  calloutLabel: {
+    fontFamily: FONT_BOLD,
+    fontSize: 9,
+    letterSpacing: 0.6,
+    marginBottom: 4,
   },
   divider: {
     borderBottomWidth: 1,
@@ -301,6 +337,20 @@ export function renderBlock(
         </View>
       );
     }
+    case "callout":
+      return (
+        // The children are rendered by the same function, so a callout holding
+        // a list or a table draws them exactly as it would outside the box —
+        // there is no second, poorer renderer for framed content.
+        <View key={key} style={pdfStyles.callout}>
+          {block.label ? (
+            <Text style={pdfStyles.calloutLabel}>{block.label}</Text>
+          ) : null}
+          {block.blocks.map((child, index) =>
+            renderBlock(child, index, { Text, View })
+          )}
+        </View>
+      );
     case "divider":
       return <View key={key} style={pdfStyles.divider} />;
   }

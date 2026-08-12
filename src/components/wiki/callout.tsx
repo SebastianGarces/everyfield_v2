@@ -61,6 +61,19 @@ const calloutConfig: Record<
   },
 };
 
+/**
+ * A framed aside — an icon and its colour say what KIND of aside it is.
+ *
+ * `data-print-callout` writes that same type out in words, because the icon is
+ * the whole signal and an icon does not survive every way this article is read.
+ * It is the `data-print-*` marker contract (`article-pdf/extract.ts` →
+ * `PRINT_CALLOUT_ATTRIBUTE`, beside `data-print-root` and `data-print-hide`):
+ * the PDF download frames the box and prints this word in the icon's place,
+ * rather than letting a **Warning** arrive as ordinary prose (ruling on PR
+ * #391, 2026-08-12). A screen reader gets the word from the `sr-only` label,
+ * since the icon carries no accessible name and nothing else here says which
+ * kind of aside this is.
+ */
 export function Callout({ type = "tip", children, className }: CalloutProps) {
   const config = calloutConfig[type];
   const Icon = config.icon;
@@ -72,8 +85,13 @@ export function Callout({ type = "tip", children, className }: CalloutProps) {
         config.containerClass,
         className
       )}
+      data-print-callout={config.title}
     >
-      <Icon className={cn("mt-0.5 h-5 w-5 shrink-0", config.iconClass)} />
+      <Icon
+        aria-hidden="true"
+        className={cn("mt-0.5 h-5 w-5 shrink-0", config.iconClass)}
+      />
+      <span className="sr-only">{config.title}</span>
       <div className="prose-p:my-0 text-sm [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
         {children}
       </div>

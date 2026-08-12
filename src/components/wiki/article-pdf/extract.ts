@@ -19,6 +19,17 @@
 // skipped, so flattening it changes what an article SAYS (ruling on PR #391,
 // 2026-08-10).
 //
+// A CALLOUT KEEPS ITS FRAME, AND ITS TYPE ARRIVES AS A WORD.
+//
+// `callout.tsx` draws a callout's type as an ICON and nothing else, and an icon
+// is the one thing a document built from text cannot carry — so a callout used
+// to fall to the recursive default and land in the file as ordinary prose. A
+// **Warning** could reach a launch-team meeting looking like a paragraph.
+// `PRINT_CALLOUT_ATTRIBUTE` is how the component names its type in words for
+// this reader; a marked element becomes a `callout` block holding its own
+// blocks, and `render.tsx` draws the border and prints the word in place of the
+// icon (ruling on PR #391, 2026-08-12, option (c)).
+//
 // KNOWN DIVERGENCE FROM THE PRINTED PAGE, owned here: `collectBlocks` has no
 // `IMG` case, so an image falls to the recursive default, has no children, and
 // drops silently while the print stylesheet keeps it. It is divergence 2 of the
@@ -36,6 +47,21 @@
  */
 const ELEMENT_NODE = 1;
 const TEXT_NODE = 3;
+
+/**
+ * The attribute a callout names its TYPE in, for readers that have no icons.
+ *
+ * `callout.tsx` sets it to the type's own title ("Warning", "Insight", …) — the
+ * same string its `calloutConfig` labels the icon with — so the word in the PDF
+ * and the icon on the screen cannot drift apart. The constant is exported and
+ * imported rather than written twice: a marker misspelled on one side alone is
+ * a silent loss of the framing, not a failure anything would notice.
+ *
+ * It sits in the `data-print-*` family with `data-print-root`,
+ * `data-print-body` and `data-print-hide` — one marker contract that both the
+ * print stylesheet and this extractor read.
+ */
+export const PRINT_CALLOUT_ATTRIBUTE = "data-print-callout";
 
 // --- the shape the article is reduced to ------------------------------------
 
@@ -66,6 +92,20 @@ export function runsText(runs: PrintRun[]): string {
  */
 export type PrintTableRow = { cells: PrintRun[][]; isHeader: boolean };
 
+/**
+ * A framed aside, and the blocks inside it.
+ *
+ * The only block that NESTS. A callout is a box around whatever an author put
+ * in it — usually a paragraph, sometimes a list — so flattening it to runs
+ * would lose the list and the box in one move. `label` is the type in words
+ * ("Warning"), which is what the reader loses when the icon cannot travel.
+ */
+export type PrintCallout = {
+  kind: "callout";
+  label: string;
+  blocks: PrintBlock[];
+};
+
 export type PrintBlock =
   | { kind: "heading"; level: 1 | 2 | 3 | 4; runs: PrintRun[] }
   | { kind: "paragraph"; runs: PrintRun[] }
@@ -73,6 +113,7 @@ export type PrintBlock =
   | { kind: "code"; text: string }
   | { kind: "quote"; runs: PrintRun[] }
   | { kind: "table"; rows: PrintTableRow[] }
+  | PrintCallout
   | { kind: "divider" };
 
 // --- blocks -----------------------------------------------------------------
@@ -81,8 +122,11 @@ export type PrintBlock =
  * Reduce rendered prose to an ordered list of printable blocks.
  *
  * Unknown elements are RECURSED INTO rather than skipped, which is what keeps
- * MDX components working without being enumerated here: a `Callout` is a `div`
- * wrapping paragraphs, so its paragraphs arrive on their own.
+ * MDX components working without being enumerated here: an MDX wrapper is a
+ * `div` around paragraphs, so its paragraphs arrive on their own.
+ *
+ * The one MDX component this reader does know is a callout, and it says so
+ * itself — see `PRINT_CALLOUT_ATTRIBUTE`. Everything else stays anonymous.
  */
 export function extractPrintBlocks(root: Element): PrintBlock[] {
   const blocks: PrintBlock[] = [];
@@ -93,6 +137,15 @@ export function extractPrintBlocks(root: Element): PrintBlock[] {
 function collectBlocks(parent: Element, out: PrintBlock[]): void {
   for (const child of Array.from(parent.children)) {
     if (child.hasAttribute("data-print-hide")) continue;
+
+    // Checked before the tag, because a callout is a plain `div` and would
+    // otherwise fall to the recursive default — which is exactly how it used to
+    // arrive as unframed prose.
+    const calloutLabel = child.getAttribute(PRINT_CALLOUT_ATTRIBUTE);
+    if (calloutLabel !== null) {
+      collectCallout(child, calloutLabel, out);
+      continue;
+    }
 
     switch (child.tagName) {
       case "H1":
@@ -163,6 +216,29 @@ function collectList(list: Element, out: PrintBlock[], depth: number): void {
       }
     }
   }
+}
+
+/**
+ * Collect a callout as ONE nested block, keeping what is inside it whole.
+ *
+ * The contents go through `collectBlocks` unchanged, so a callout holding a
+ * list, a table or a second callout keeps all of it — and its icon still
+ * disappears, because the `SVG` case above already drops it and the label now
+ * says in words what the icon said in a picture.
+ *
+ * An empty callout is not framed: a box drawn around nothing is a mark on the
+ * page that the printed article does not have.
+ */
+function collectCallout(
+  element: Element,
+  label: string,
+  out: PrintBlock[]
+): void {
+  const blocks: PrintBlock[] = [];
+  collectBlocks(element, blocks);
+  if (blocks.length === 0) return;
+
+  out.push({ kind: "callout", label: label.trim(), blocks });
 }
 
 /**

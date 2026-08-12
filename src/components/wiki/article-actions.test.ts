@@ -5,6 +5,7 @@ import { describe, test } from "node:test";
 
 import { PRINT_BODY_SELECTOR, pdfFileName } from "./article-actions";
 import {
+  PRINT_CALLOUT_ATTRIBUTE,
   columnWidths,
   extractPrintBlocks,
   runsText,
@@ -12,6 +13,7 @@ import {
   type PrintTableRow,
 } from "./article-pdf/extract";
 import { renderBlock, runFontFamily } from "./article-pdf/render";
+import { Callout } from "./callout";
 
 // ----------------------------------------------------------------------------
 // Print and PDF (W-018, W-020).
@@ -119,6 +121,26 @@ function descendants(node: { children: StubChild[] }, tagName: string) {
 /** One unemphasized run — what most prose reduces to. */
 const plain = (text: string): PrintRun[] => [{ text }];
 
+/**
+ * The DOM shape `callout.tsx` renders: the marker, the icon, the prose.
+ *
+ * Built here rather than by rendering the component, because what the extractor
+ * reads is the markup — the component's half of the same contract is asserted
+ * on its own below, by calling it.
+ */
+const calloutEl = (label: string, ...children: Element[]): Element =>
+  el(
+    "div",
+    [
+      el("svg", [textNode("icon")]),
+      // The component's `sr-only` label. It holds the same word the marker
+      // does, so it must NOT reach the file a second time.
+      el("span", [textNode(label)]),
+      el("div", children),
+    ],
+    { [PRINT_CALLOUT_ATTRIBUTE]: label }
+  );
+
 describe("extractPrintBlocks", () => {
   test("keeps headings, prose, lists and code in reading order", () => {
     const blocks = extractPrintBlocks(
@@ -199,9 +221,9 @@ describe("extractPrintBlocks", () => {
     ]);
   });
 
-  test("recurses into an unknown wrapper, so an MDX callout still prints", () => {
-    // A `Callout` is a div nobody taught this extractor about; its prose has to
-    // arrive anyway, which is what makes MDX components work here unlisted.
+  test("recurses into an unknown wrapper, so an unlisted MDX component prints", () => {
+    // A wrapper nobody taught this extractor about; its prose has to arrive
+    // anyway, which is what makes MDX components work here unenumerated.
     const blocks = extractPrintBlocks(
       el("div", [
         el("div", [
@@ -214,6 +236,85 @@ describe("extractPrintBlocks", () => {
     assert.deepEqual(blocks, [
       { kind: "paragraph", runs: plain("Do not skip the vision meeting.") },
     ]);
+  });
+
+  test("keeps a callout whole, and names the type its icon stood for", () => {
+    // The 2026-08-12 ruling on PR #391, option (c). A callout used to fall to
+    // the recursive default above and arrive as bare paragraphs — a Warning
+    // reaching a launch meeting looking like ordinary prose. It is now its own
+    // NESTED block, so the box and its contents travel together.
+    const blocks = extractPrintBlocks(
+      el("div", [
+        calloutEl(
+          "Warning",
+          el("p", [textNode("Checklists are not optional.")]),
+          el("ul", [el("li", [textNode("Confirm the room")])])
+        ),
+      ])
+    );
+
+    assert.deepEqual(blocks, [
+      {
+        kind: "callout",
+        label: "Warning",
+        blocks: [
+          { kind: "paragraph", runs: plain("Checklists are not optional.") },
+          {
+            kind: "listItem",
+            depth: 0,
+            marker: "•",
+            runs: plain("Confirm the room"),
+          },
+        ],
+      },
+    ]);
+  });
+
+  test("takes the type from the marker, never from the icon or the sr-only label", () => {
+    // The icon is skipped as an SVG and the `sr-only` span holds no element
+    // children, so the word appears exactly once — as the block's label.
+    const [block] = extractPrintBlocks(
+      el("div", [calloutEl("Insight", el("p", [textNode("Plants grow.")]))])
+    );
+
+    assert.ok(block && block.kind === "callout");
+    assert.equal(block.label, "Insight");
+    assert.deepEqual(block.blocks, [
+      { kind: "paragraph", runs: plain("Plants grow.") },
+    ]);
+  });
+
+  test("draws no box round an empty callout", () => {
+    // A frame with nothing in it is a mark the printed page does not have.
+    assert.deepEqual(extractPrintBlocks(el("div", [calloutEl("Tip")])), []);
+  });
+
+  test("nests a callout inside a callout, because the contents recurse", () => {
+    const [block] = extractPrintBlocks(
+      el("div", [
+        el("div", [
+          el(
+            "div",
+            [
+              el("svg", []),
+              el("span", [textNode("Warning")]),
+              el("div", [
+                el("p", [textNode("Outer.")]),
+                calloutEl("Scripture", el("p", [textNode("Inner.")])),
+              ]),
+            ],
+            { [PRINT_CALLOUT_ATTRIBUTE]: "Warning" }
+          ),
+        ]),
+      ])
+    );
+
+    assert.ok(block && block.kind === "callout");
+    assert.deepEqual(block.blocks[1], {
+      kind: "callout",
+      label: "Scripture",
+      blocks: [{ kind: "paragraph", runs: plain("Inner.") }],
+    });
   });
 
   test("drops anything marked data-print-hide", () => {
@@ -763,6 +864,76 @@ describe("renderBlock — styled emphasis in the downloaded PDF", () => {
   });
 });
 
+describe("renderBlock — the callout box in the downloaded PDF", () => {
+  // A callout renders `{label}{blocks}`, so its children arrive as a Text
+  // beside an ARRAY of blocks. React flattens that; the assertions here do too.
+  const partsOf = (node: Rendered): Rendered[] =>
+    (childrenOf(node) as unknown as (Rendered | Rendered[] | null)[])
+      .flat()
+      .filter((child): child is Rendered => Boolean(child));
+
+  const callout = renderBlock(
+    {
+      kind: "callout",
+      label: "Warning",
+      blocks: [
+        { kind: "paragraph", runs: plain("Checklists are not optional.") },
+        {
+          kind: "listItem",
+          depth: 0,
+          marker: "•",
+          runs: plain("Confirm the room"),
+        },
+      ],
+    },
+    0,
+    primitives
+  ) as unknown as Rendered;
+
+  test("draws the frame the printed page draws", () => {
+    // The ruling on PR #391 (2026-08-12): the file must match the page. On
+    // paper the box is a border; here it is one too, on all four sides —
+    // a callout is a separate object, not a rule inside one.
+    assert.equal(callout.type, "View");
+    assert.equal(callout.props.style?.borderWidth, 1);
+    assert.ok(callout.props.style?.borderColor, "the box has no colour");
+  });
+
+  test("prints the type as a word, above the callout's own prose", () => {
+    // In place of the lucide icon, which no text renderer can carry.
+    const [label, ...rest] = partsOf(callout);
+    assert.equal(label.type, "Text");
+    assert.equal(label.props.children, "Warning");
+    assert.equal(label.props.style?.fontFamily, "Helvetica-Bold");
+    assert.equal(rest.length, 2);
+  });
+
+  test("renders what is inside with the same renderer as everything else", () => {
+    // A list inside a callout keeps its marker: there is no second, poorer
+    // renderer for framed content.
+    const [, paragraph, item] = partsOf(callout);
+    assert.deepEqual(childrenOf(paragraph), ["Checklists are not optional."]);
+    assert.equal(item.type, "View");
+    assert.equal(childrenOf(item)[0].props.children, "•");
+  });
+
+  test("omits the label rather than printing an empty line", () => {
+    const unlabelled = renderBlock(
+      {
+        kind: "callout",
+        label: "",
+        blocks: [{ kind: "paragraph", runs: plain("Just prose.") }],
+      },
+      0,
+      primitives
+    ) as unknown as Rendered;
+
+    const [only] = partsOf(unlabelled);
+    assert.deepEqual(childrenOf(only), ["Just prose."]);
+    assert.equal(partsOf(unlabelled).length, 1);
+  });
+});
+
 describe("pdfFileName", () => {
   test("flattens a nested slug to one safe name", () => {
     assert.equal(
@@ -933,6 +1104,41 @@ describe("the print contract across the three files", () => {
       { kind: "paragraph", runs: plain("before") },
       { kind: "paragraph", runs: plain("after") },
     ]);
+  });
+
+  test("a callout carries its framing into the PDF, box and type both", () => {
+    // Ruled on PR #391, 2026-08-12 (option (c)) — and pinned the way the image
+    // gap above is pinned, so this is a fact the suite holds rather than a
+    // sentence in a comment. It failed before the fix: a callout fell to the
+    // recursive default and its paragraphs arrived unframed, indistinguishable
+    // from the prose around them.
+    //
+    // The two halves of the contract are asserted separately, because either
+    // one alone puts the reader back where they started: the component has to
+    // NAME its type, and the download path has to draw what it names.
+    const marked = Callout({ type: "warning", children: null }) as unknown as {
+      props: Record<string, unknown>;
+    };
+    assert.equal(
+      marked.props[PRINT_CALLOUT_ATTRIBUTE],
+      "Warning",
+      "the callout must write its type out for readers that have no icons"
+    );
+
+    const [block] = extractPrintBlocks(
+      el("div", [
+        calloutEl(
+          String(marked.props[PRINT_CALLOUT_ATTRIBUTE]),
+          el("p", [textNode("Checklists are not optional.")])
+        ),
+      ])
+    );
+    assert.ok(block && block.kind === "callout", "a callout is its own block");
+
+    const drawn = renderBlock(block, 0, primitives) as unknown as Rendered;
+    assert.equal(drawn.type, "View");
+    assert.ok(drawn.props.style?.borderWidth, "the box lost its border");
+    assert.equal(childrenOf(drawn)[0].props.children, "Warning");
   });
 
   test("a link's URL survives into print", () => {

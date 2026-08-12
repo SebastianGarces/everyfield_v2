@@ -9,6 +9,14 @@
 // callouts, code, link destinations, inline emphasis and tables all carry
 // across.
 //
+// A callout carries across FRAME AND TYPE, not only its words: the download
+// draws the box and sets the type as a label ("Warning", "Insight") where the
+// screen draws a lucide icon, because an icon is the one thing a document built
+// from text cannot carry. `callout.tsx` names the type in `data-print-callout`
+// so neither renderer has to recognise a callout by its markup (ruling on PR
+// #391, 2026-08-12 — option (c), "the file must match the page"). Before that
+// ruling a Warning arrived in the file as ordinary prose.
+//
 //   Print     hands the page to the browser. The print stylesheet in
 //             `globals.css` drops the shell, the wiki sidebar, the table of
 //             contents and this toolbar, and sets the prose as ink on paper.
