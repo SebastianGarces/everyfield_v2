@@ -69,8 +69,9 @@ export async function createPersonAction(
         };
       }
 
-      // Create the person
-      const person = await createPerson(churchId, user.id, parsed.data);
+      // Create the person; the service logs the person_created activity
+      // with this source
+      const person = await createPerson(churchId, user.id, parsed.data, "form");
 
       // Revalidate the people list
       revalidatePath("/people");

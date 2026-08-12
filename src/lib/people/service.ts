@@ -25,6 +25,7 @@ import {
 import { cache } from "react";
 import { logPersonActivity } from "./activity";
 import { emitPersonCreated } from "./events";
+import type { PersonCreationSource } from "./types";
 
 // ============================================================================
 // Types
@@ -382,13 +383,15 @@ export async function getLatestPersonNote(personId: string): Promise<{
  * Every creation path (full form, quick add, bulk import, meeting guest
  * flows) goes through here, so this is also the ONE place the
  * `person_created` timeline entry is written (ruling 410-2A).
- * `activitySource` names the path in the activity metadata.
+ * `activitySource` names the path in the activity metadata — a closed union
+ * with NO default, so a new creation path that forgets to name itself is a
+ * compile error, not a silent "form" label.
  */
 export async function createPerson(
   churchId: string,
   userId: string,
   data: PersonCreateInput,
-  activitySource: string = "form"
+  activitySource: PersonCreationSource
 ): Promise<Person> {
   // Transform empty string email to null
   const email = data.email === "" ? null : data.email;
