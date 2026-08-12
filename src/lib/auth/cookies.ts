@@ -2,8 +2,6 @@ import { cookies } from "next/headers";
 
 export const SESSION_COOKIE_NAME = "session";
 
-const SESSION_EXPIRY_DAYS = 30;
-
 /**
  * Set the session cookie with secure attributes
  * @param token - The unhashed session token
@@ -46,18 +44,4 @@ export async function deleteSessionCookie(): Promise<void> {
 export async function getSessionToken(): Promise<string | null> {
   const cookieStore = await cookies();
   return cookieStore.get(SESSION_COOKIE_NAME)?.value ?? null;
-}
-
-/**
- * Get cookie options for session cookie
- * Useful when setting cookie in middleware
- */
-export function getSessionCookieOptions() {
-  return {
-    path: "/",
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax" as const,
-    maxAge: SESSION_EXPIRY_DAYS * 24 * 60 * 60, // 30 days in seconds
-  };
 }
