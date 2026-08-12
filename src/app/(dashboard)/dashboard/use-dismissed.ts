@@ -49,8 +49,12 @@ function notify(key: string) {
   for (const listener of subscribers) listener();
 }
 
-/** Keys are church-scoped so one plant's dismissal is not another's. */
-export function dismissalKey(name: string, churchId: string): string {
+/**
+ * Keys are church-scoped so one plant's dismissal is not another's. A viewer
+ * with no church (`null`) shares the literal `null` bucket — the key this
+ * template has always minted for them.
+ */
+export function dismissalKey(name: string, churchId: string | null): string {
   return `everyfield:${name}:${churchId}`;
 }
 

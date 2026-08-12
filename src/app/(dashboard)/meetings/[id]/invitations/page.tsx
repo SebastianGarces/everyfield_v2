@@ -20,7 +20,7 @@ export default async function GuestListPage({ params }: GuestListPageProps) {
   const [meeting, guests, emailTracking] = await Promise.all([
     getMeeting(user.churchId, id),
     getGuestList(user.churchId, id),
-    getMeetingTrackingByPerson(id),
+    getMeetingTrackingByPerson(user.churchId, id),
   ]);
 
   if (!meeting) notFound();

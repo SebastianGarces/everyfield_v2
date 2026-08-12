@@ -150,11 +150,40 @@ export type StatusTransition = {
 };
 
 // ============================================================================
+// Creation Source
+// ============================================================================
+
+/**
+ * The closed set of paths that create a person. `createPerson()` is the ONE
+ * writer of the `person_created` timeline entry (ruling 410-2A), so this
+ * label is the only thing that tells the paths apart in the activity
+ * metadata the dashboard and timeline read. No default anywhere — every new
+ * creation path must name itself here or it does not compile.
+ */
+export type PersonCreationSource =
+  | "form"
+  | "quick_add"
+  | "bulk_import"
+  | "meeting_attendance"
+  | "meeting_guest_list";
+
+// ============================================================================
 // Duplicate Detection Types
 // ============================================================================
 
 /**
- * Result of checking for duplicate persons
+ * The raw duplicate matches — full person rows, no tags. This shape never
+ * leaves the server; the import preview redacts it via
+ * `toImportRowDuplicates` before anything crosses to the client.
+ */
+export type DuplicateMatches = {
+  exactMatch: Person | null;
+  potentialMatches: Person[];
+};
+
+/**
+ * Result of checking for duplicate persons, decorated with tags for the
+ * quick-add dialog (the one consumer that renders them).
  */
 export type DuplicateCheck = {
   exactMatch: PersonWithTags | null;
@@ -184,6 +213,25 @@ export type PipelineMetrics = {
 // ============================================================================
 
 /**
+ * A duplicate match as it travels to the import wizard (ruling 410-3C):
+ * just enough to explain the match — never the matched contact's full
+ * record. Anything server-side that needs the real record resolves it
+ * by `id`.
+ */
+export type ImportDuplicateMatch = {
+  id: string;
+  displayName: string;
+};
+
+/**
+ * The redacted duplicate-check shape carried on an import row.
+ */
+export type ImportRowDuplicates = {
+  exactMatch: ImportDuplicateMatch | null;
+  potentialMatches: ImportDuplicateMatch[];
+};
+
+/**
  * A single row from CSV import, after parsing and validation
  */
 export type ImportRow = {
@@ -191,7 +239,7 @@ export type ImportRow = {
   data: Record<string, string>;
   valid: boolean;
   errors: string[];
-  duplicates: DuplicateCheck;
+  duplicates: ImportRowDuplicates;
 };
 
 /**

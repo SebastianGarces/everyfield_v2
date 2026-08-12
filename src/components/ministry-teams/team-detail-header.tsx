@@ -1,37 +1,13 @@
 "use client";
 
-import {
-  Baby,
-  Building,
-  Crown,
-  Handshake,
-  Heart,
-  Megaphone,
-  Monitor,
-  Music,
-  Rocket,
-  Users,
-  type LucideIcon,
-} from "lucide-react";
+import { Users } from "lucide-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
+import { TEAM_ICONS, staffingPercent } from "@/lib/ministry-teams/team-display";
 import type { TeamDetail } from "@/lib/ministry-teams/service";
-
-const TEAM_ICONS: Record<string, LucideIcon> = {
-  crown: Crown,
-  rocket: Rocket,
-  music: Music,
-  baby: Baby,
-  building: Building,
-  handshake: Handshake,
-  users: Users,
-  megaphone: Megaphone,
-  heart: Heart,
-  monitor: Monitor,
-};
 
 interface TeamDetailHeaderProps {
   team: TeamDetail;
@@ -39,10 +15,7 @@ interface TeamDetailHeaderProps {
 
 export function TeamDetailHeader({ team }: TeamDetailHeaderProps) {
   const Icon = TEAM_ICONS[team.icon ?? ""] ?? Users;
-  const staffingPercent =
-    team.totalRoles > 0
-      ? Math.round((team.filledRoles / team.totalRoles) * 100)
-      : 0;
+  const staffing = staffingPercent(team.filledRoles, team.totalRoles);
 
   return (
     <div className="bg-card border-b p-6">
@@ -104,7 +77,7 @@ export function TeamDetailHeader({ team }: TeamDetailHeaderProps) {
             </div>
             <div className="flex items-center gap-3">
               <span className="text-muted-foreground text-sm">Staffing:</span>
-              <Progress value={staffingPercent} className="h-2 w-24" />
+              <Progress value={staffing} className="h-2 w-24" />
               <span className="text-sm font-medium">
                 {team.filledRoles}/{team.totalRoles}
               </span>

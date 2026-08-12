@@ -21,6 +21,7 @@ import {
   onboardingStep,
   onboardingStepComplete,
   previousOnboardingStep,
+  resolveFinishedDashboardStepRequest,
   resolveOnboardingStepRequest,
   resolveResumeStep,
   shouldShowOnboarding,
@@ -338,6 +339,52 @@ test("a repeated `?step=` names no step and is refused", () => {
     }),
     { outcome: "refuse" }
   );
+});
+
+test("a finished dashboard honours no step, save the leadership re-entry", () => {
+  // #373 AC 3: nothing owns `?step=` past onboarding, so a value left in the
+  // address bar would put the wiki guide on a finished dashboard (#367 ruling).
+  assert.deepEqual(resolveFinishedDashboardStepRequest(undefined), {
+    outcome: "none",
+  });
+  assert.deepEqual(resolveFinishedDashboardStepRequest("leadership"), {
+    outcome: "leadership",
+  });
+
+  // Every other value goes, recognised or not — past this point there is no
+  // flow left to resume into. `journey` is the Back-button case: finishing
+  // from step 3 pushes `?churchCreated=true`, so Back lands on a finished
+  // `/dashboard?step=journey`.
+  for (const value of [
+    "journey",
+    "basics",
+    "people",
+    "",
+    "finish",
+    "Leadership",
+  ]) {
+    assert.deepEqual(
+      resolveFinishedDashboardStepRequest(value),
+      { outcome: "refuse" },
+      value
+    );
+  }
+});
+
+test("a repeated `?step=` is refused on a finished dashboard too", () => {
+  // An array equals no literal — including `?step=leadership&step=leadership`,
+  // which must not re-enter with the guide's own reader pointed elsewhere.
+  for (const value of [
+    ["leadership"],
+    ["leadership", "leadership"],
+    ["leadership", "journey"],
+  ]) {
+    assert.deepEqual(
+      resolveFinishedDashboardStepRequest(value),
+      { outcome: "refuse" },
+      JSON.stringify(value)
+    );
+  }
 });
 
 test("the client refuses a step the page would not resolve", () => {

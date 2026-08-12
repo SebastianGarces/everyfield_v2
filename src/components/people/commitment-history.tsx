@@ -1,6 +1,6 @@
 "use client";
 
-import { getCommitmentDownloadUrlAction } from "@/app/(dashboard)/people/actions";
+import { getCommitmentDownloadUrlAction } from "@/app/(dashboard)/people/assessment-actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,6 +9,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import type { Commitment, CommitmentType } from "@/db/schema";
+import { formatDateWithoutWeekday } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
 import { ChevronDown, Download, FileText, Loader2, Users } from "lucide-react";
 import { useState, useTransition } from "react";
@@ -36,13 +37,8 @@ function CommitmentCard({
   const [isOpen, setIsOpen] = useState(isLatest);
   const [isDownloading, startDownload] = useTransition();
 
-  const formattedDate = new Date(commitment.signedDate).toLocaleDateString(
-    "en-US",
-    {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    }
+  const formattedDate = formatDateWithoutWeekday(
+    new Date(commitment.signedDate)
   );
 
   const typeInfo = TYPE_LABELS[commitment.commitmentType];

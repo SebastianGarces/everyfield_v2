@@ -16,9 +16,15 @@ import { RoleTemplateImport } from "./role-template-import";
 interface MembersRolesTabProps {
   team: TeamDetail;
   people: Person[];
+  /** Active team count per person id, for the assign dialog's warning. */
+  teamCounts: Record<string, number>;
 }
 
-export function MembersRolesTab({ team, people }: MembersRolesTabProps) {
+export function MembersRolesTab({
+  team,
+  people,
+  teamCounts,
+}: MembersRolesTabProps) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -132,6 +138,7 @@ export function MembersRolesTab({ team, people }: MembersRolesTabProps) {
                       roleId={role.id}
                       roleName={role.name}
                       people={people}
+                      teamCounts={teamCounts}
                     />
                   </div>
                 )}

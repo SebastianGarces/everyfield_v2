@@ -15,9 +15,60 @@
 // to the inviting ORG, exactly like the list this page reads, so any admin who
 // can see a pending row may close it and there is nothing left for the client
 // to compare. The authority check itself is in the UPDATE, never here.
+//
+// ----------------------------------------------------------------------------
+// AND IT CARRIES NO `isOpen` — #304 ruling 4 item 5, extended to THIS LIST
+// (2026-08-09, on the integration verdict that rejected the first attempt)
+// ----------------------------------------------------------------------------
+//
+// A row used to arrive with `isOpen` — `targetChurchId === null &&
+// targetSendingChurchId === null` — and rendered a "Copy link"
+// (`/register?invitation=<id>`) button if and only if it was true. Those two
+// columns ARE the server's answer to "does this address already have an
+// EveryField account", so the button's presence answered it in the UI.
+//
+// That was dead code until this track: `resolveInvitationTarget` used to refuse
+// every address that already had an account, so every creatable invitation was
+// open and every pending row showed the button. #304 revives the targeted path,
+// which makes the conditional live — and puts the probe one section BELOW the
+// create form on the same page. Type an address, read the deliberately neutral
+// success notice, then look at the row that just appeared: Copy link means no
+// account, no Copy link means there is one. No error, no second request.
+//
+// So the flag does not cross the wire and the control is gone. Item 5 collapsed
+// the notice for exactly this reason and the same sentence applies here: two
+// shapes crossing the wire is an oracle whether or not a component renders the
+// difference, and this component did render it.
+//
+// AND IT CARRIES NO `kindLabel` EITHER — the same ruling, extended a second
+// time (2026-08-10, on the verdict that rejected the attempt above). Removing
+// `isOpen` left the oracle standing ONE FIELD OVER: the row's caption read
+// `invitation.type === "sending_church_to_network" ? "Sending church" :
+// "Church plant"`, and `type` is target-derived too (core.ts picks the kind
+// from the RESOLVED target and falls back to the admin's `inviteAs` only when
+// there is no target). So the caption matched the admin's own selection for an
+// accountless address and flipped for an address holding an account of the
+// other kind — the identical probe, in a caption instead of a button.
+//
+// The row shape now lives in `@/lib/invitations/list-row`, as one exported pure
+// function, so §9b can CALL it for both target shapes and compare the results
+// rather than grep this file for field names. Every regex that guarded the
+// previous two attempts passed while the property was false.
+//
+// WHY NOT "show the link on every pending row" (the variant that keeps
+// delivery): it did not close the oracle, it relocated it — `/register` used to
+// render an invitation banner only when `describeInvitationForRegistration`
+// said `redeemable`, itself target-derived, so an admin who copied the link and
+// opened it read the same fact one click later. That relocation is now closed
+// AT `/register` ITSELF (round 10, ruled 2026-08-11): the function answers null
+// for any targeted row and `redeemable` is deleted, so a targeted token and a
+// guessed uuid render the identical page. The link still does not belong here —
+// a targeted invitee would be handed a URL that redeems nothing, and item 5
+// stands — but the reason is no longer "it leaks". See
+// memory/invariants/multi-tenancy.md.
 // ============================================================================
 
-import { useActionState, useState } from "react";
+import { useActionState } from "react";
 
 import {
   revokeInvitationAction,
@@ -32,24 +83,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import type { InvitationListRow } from "@/lib/invitations/list-row";
 
-export type InvitationStatus =
-  | "pending"
-  | "accepted"
-  | "declined"
-  | "expired"
-  | "revoked";
+export type { InvitationListRow };
 
-export type InvitationListRow = {
-  id: string;
-  inviteeEmail: string;
-  kindLabel: string;
-  status: InvitationStatus;
-  /** No target row yet — the invitee redeems this one by registering. */
-  isOpen: boolean;
-  sentLabel: string;
-  expiresLabel: string | null;
-};
+type InvitationStatus = InvitationListRow["status"];
 
 const STATUS_STYLE: Record<
   InvitationStatus,
@@ -78,7 +116,7 @@ export function InvitationsList({ rows }: { rows: InvitationListRow[] }) {
           <CardTitle>Pending invitations</CardTitle>
           <CardDescription>
             Waiting on an answer. Anyone who can invite for your organization
-            can revoke one, which closes it immediately — the link stops
+            can revoke one, which closes it immediately — the invitation stops
             working.
           </CardDescription>
         </CardHeader>
@@ -130,41 +168,17 @@ function InvitationRow({ row }: { row: InvitationListRow }) {
       <div className="min-w-0 space-y-1">
         <p className="truncate font-medium">{row.inviteeEmail}</p>
         <p className="text-muted-foreground text-xs">
-          {row.kindLabel} · Sent {row.sentLabel}
+          Sent {row.sentLabel}
           {row.expiresLabel ? ` · Expires ${row.expiresLabel}` : ""}
         </p>
       </div>
       <div className="flex items-center gap-2">
         <Badge variant={status.variant}>{status.label}</Badge>
-        {row.status === "pending" && row.isOpen && (
-          <CopyInviteLinkButton invitationId={row.id} />
-        )}
         {row.status === "pending" && (
           <RevokeButton invitationId={row.id} email={row.inviteeEmail} />
         )}
       </div>
     </li>
-  );
-}
-
-function CopyInviteLinkButton({ invitationId }: { invitationId: string }) {
-  const [copied, setCopied] = useState(false);
-
-  return (
-    <Button
-      type="button"
-      variant="outline"
-      size="sm"
-      className="cursor-pointer"
-      onClick={async () => {
-        await navigator.clipboard.writeText(
-          `${window.location.origin}/register?invitation=${invitationId}`
-        );
-        setCopied(true);
-      }}
-    >
-      {copied ? "Copied" : "Copy link"}
-    </Button>
   );
 }
 

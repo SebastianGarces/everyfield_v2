@@ -55,6 +55,15 @@ const dateFormatters: Record<DateVariant, Intl.DateTimeFormat> = {
   }),
 };
 
+// The long date without its weekday, for prose and merged documents
+// ("September 14, 2026") — a place a weekday would read as clutter.
+const dayLongFormatter = new Intl.DateTimeFormat(LOCALE, {
+  timeZone: APP_TIME_ZONE,
+  year: "numeric",
+  month: "long",
+  day: "numeric",
+});
+
 const timeFormatter = new Intl.DateTimeFormat(LOCALE, {
   timeZone: APP_TIME_ZONE,
   hour: "numeric",
@@ -86,6 +95,23 @@ const longDateTimeFormatter = new Intl.DateTimeFormat(LOCALE, {
 /** `"Thursday, July 30, 2026"` (long) / `"Thu, Jul 30, 2026"` (short). */
 export function formatDate(date: Date, variant: DateVariant = "long"): string {
   return dateFormatters[variant].format(date);
+}
+
+/**
+ * `"July 30, 2026"` (long) / `"Jul 30, 2026"` (short) — `formatDate` without
+ * the weekday, for dense cards and history rows where the weekday is noise.
+ */
+export function formatDateWithoutWeekday(
+  date: Date,
+  variant: DateVariant = "long"
+): string {
+  if (variant === "long") return dayLongFormatter.format(date);
+  return shortDateWithoutWeekday.format(date);
+}
+
+/** `"September 14, 2026"` — the long date without its weekday. */
+export function formatDayLong(date: Date): string {
+  return formatDateWithoutWeekday(date, "long");
 }
 
 /** `"7:00 PM"`. */

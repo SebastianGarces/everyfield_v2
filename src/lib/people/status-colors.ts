@@ -1,10 +1,12 @@
 /**
  * Shared status badge configuration.
- * Single source of truth for status colors, labels, and variants
- * used across person-card, person-header, and person-status-card.
+ * Single source of truth for status colors and variants used across
+ * person-card, person-header, and person-status-card. Labels come from
+ * STATUS_LABELS (status.shared.ts) — the one label map in the domain.
  */
 
 import type { PersonStatus } from "@/lib/people/types";
+import { STATUS_LABELS } from "./status.shared";
 
 export type StatusBadgeConfig = {
   label: string;
@@ -16,38 +18,38 @@ export type StatusBadgeConfig = {
 
 export const STATUS_BADGE_CONFIG: Record<PersonStatus, StatusBadgeConfig> = {
   prospect: {
-    label: "Prospect",
+    label: STATUS_LABELS.prospect,
     className: "",
     variant: "secondary",
   },
   attendee: {
-    label: "Attendee",
+    label: STATUS_LABELS.attendee,
     className: "bg-blue-500 hover:bg-blue-600",
     variant: "default",
   },
   following_up: {
-    label: "Following Up",
+    label: STATUS_LABELS.following_up,
     className: "bg-yellow-500 text-white hover:bg-yellow-600",
     variant: "default",
   },
   interviewed: {
-    label: "Interviewed",
+    label: STATUS_LABELS.interviewed,
     className: "bg-purple-500 hover:bg-purple-600",
     variant: "default",
   },
   core_group: {
-    label: "Core Group",
+    label: STATUS_LABELS.core_group,
     className: "bg-emerald-600 hover:bg-emerald-700",
     variant: "default",
   },
   launch_team: {
-    label: "Launch Team",
+    label: STATUS_LABELS.launch_team,
     className: "bg-blue-600 hover:bg-blue-700",
     variant: "default",
     icon: "rocket",
   },
   leader: {
-    label: "Leader",
+    label: STATUS_LABELS.leader,
     className: "bg-amber-500 hover:bg-amber-600",
     variant: "default",
     icon: "star",

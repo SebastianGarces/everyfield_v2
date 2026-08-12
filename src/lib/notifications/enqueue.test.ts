@@ -13,6 +13,7 @@ import {
   notificationCategories,
   oversightGateFor,
 } from "./categories";
+import { churchAnchor, type NotificationAnchor } from "./anchor";
 import {
   cancelByEntitySchema,
   enqueueNotificationSchema,
@@ -50,12 +51,24 @@ const OUTSIDER = "77777777-7777-4777-8777-777777777777";
 /** A network admin whose oversight reach covers church A. */
 const OVERSIGHT = "88888888-8888-4888-8888-888888888888";
 
+/** The network `OVERSIGHT` administers — the ORG-ANCHOR fixture (#304 WS3). */
+const NETWORK = "99999999-9999-4999-8999-999999999999";
+
 /** Who may be notified about what — the membership source, faked. */
 const MEMBERSHIPS: Record<string, string[]> = {
   [USER]: [CHURCH_A, CHURCH_B],
   [OTHER_USER]: [CHURCH_A],
   [OUTSIDER]: [],
   [OVERSIGHT]: [CHURCH_A],
+};
+
+/**
+ * Who ADMINISTERS which org — the org-anchor equivalent of `MEMBERSHIPS`, and a
+ * separate map on purpose: reaching a plant and speaking for an org are
+ * different facts, and the production gate asks them of different columns.
+ */
+const ORG_ADMINS: Record<string, string[]> = {
+  [OVERSIGHT]: [NETWORK],
 };
 
 class FakeNotificationStore implements EnqueueDeps, CancelByEntityDeps {
@@ -78,11 +91,24 @@ class FakeNotificationStore implements EnqueueDeps, CancelByEntityDeps {
    * consent-exempt `type` past the toggle only.
    */
   async recipientMayBeNotified({
-    churchId,
+    anchor,
     recipientUserId,
     category,
     type,
   }: RecipientNotifiableInput): Promise<RecipientCheck> {
+    // The ORG arm (#304 WS3): membership is "administers this org", the fake's
+    // stand-in for `recipientAdministersOrg`, and only a consent-EXEMPT type is
+    // eligible — there is no plant whose sharing toggle could be consulted.
+    if (anchor.type !== "church") {
+      if (!(ORG_ADMINS[recipientUserId] ?? []).includes(anchor.orgId)) {
+        return { allowed: false, reason: "outside_church" };
+      }
+      return oversightGateFor(category, type) === "exempt"
+        ? { allowed: true }
+        : { allowed: false, reason: "oversight_privacy" };
+    }
+
+    const churchId = anchor.churchId;
     if (!(MEMBERSHIPS[recipientUserId] ?? []).includes(churchId)) {
       return { allowed: false, reason: "outside_church" };
     }
@@ -111,11 +137,16 @@ class FakeNotificationStore implements EnqueueDeps, CancelByEntityDeps {
     // WHERE dedupe_key IS NOT NULL AND status <> 'cancelled': NULL keys never
     // collide, the same key for a different recipient is a different row, and a
     // CANCELLED row is not in the index at all — so it cannot arbitrate.
+    // TWO indexes since migration 0036, one per anchor, and neither arbitrates
+    // the other's rows — a NULL column never collides in a btree unique index.
+    // The fake compares the anchor pair rather than `church_id` alone so it
+    // cannot claim an idempotency the database would not give.
     if (
       dedupeKey !== null &&
       this.rows.some(
         (existing) =>
-          existing.churchId === row.churchId &&
+          existing.churchId === (row.churchId ?? null) &&
+          existing.anchorOrgId === (row.anchorOrgId ?? null) &&
           existing.recipientUserId === row.recipientUserId &&
           existing.dedupeKey === dedupeKey &&
           existing.status !== "cancelled"
@@ -128,7 +159,9 @@ class FakeNotificationStore implements EnqueueDeps, CancelByEntityDeps {
     const now = new Date("2026-07-27T09:00:00.000Z");
     const stored: Notification = {
       id: `notification-${this.sequence}`,
-      churchId: row.churchId,
+      anchorType: row.anchorType ?? "church",
+      churchId: row.churchId ?? null,
+      anchorOrgId: row.anchorOrgId ?? null,
       recipientUserId: row.recipientUserId,
       category: row.category,
       type: row.type,
@@ -150,14 +183,19 @@ class FakeNotificationStore implements EnqueueDeps, CancelByEntityDeps {
 
   /** The read-back carries the index's liveness term, as production's does. */
   async findByDedupeKey(
-    churchId: string,
+    anchor: NotificationAnchor,
     recipientUserId: string,
     dedupeKey: string
   ): Promise<Notification | null> {
+    const matchesAnchor = (row: Notification) =>
+      anchor.type === "church"
+        ? row.churchId === anchor.churchId
+        : row.anchorOrgId === anchor.orgId;
+
     return (
       this.rows.find(
         (row) =>
-          row.churchId === churchId &&
+          matchesAnchor(row) &&
           row.recipientUserId === recipientUserId &&
           row.dedupeKey === dedupeKey &&
           row.status !== "cancelled"
@@ -425,19 +463,59 @@ test("the ON CONFLICT predicate is byte-identical to the index predicate", () =>
     "utf8"
   );
 
-  const indexPredicate = migration.match(
-    /CREATE UNIQUE INDEX "notifications_dedupe_key_unique_idx"[^;]*WHERE (.+);/
-  )?.[1];
-  assert.ok(indexPredicate, "no index predicate found in 0025");
+  // TWO indexes since migration 0036, one per anchor, and each has its OWN ON
+  // CONFLICT clause in `insertIfAbsent`. Both pairs are checked: a test that
+  // read only the first `where: sql\`…\`` in the file would have passed while
+  // the church path pointed at the org index.
+  const orgMigration = readFileSync(
+    path.join(
+      process.cwd(),
+      "src/db/migrations/0036_association_subject_and_notification_anchor.sql"
+    ),
+    "utf8"
+  )
+    .split("\n")
+    .filter((line) => !line.startsWith("--"))
+    .join("\n");
 
   // The drizzle template renders `${notifications.dedupeKey}` as the qualified
   // column, so normalise the interpolations to what reaches Postgres.
-  const conflictPredicate = source
-    .match(/where: sql`(.+)`,/)?.[1]
-    ?.replaceAll("${notifications.dedupeKey}", '"notifications"."dedupe_key"')
-    .replaceAll("${notifications.status}", '"notifications"."status"');
+  const normalise = (predicate: string) =>
+    predicate
+      .replaceAll("${notifications.dedupeKey}", '"notifications"."dedupe_key"')
+      .replaceAll("${notifications.status}", '"notifications"."status"')
+      .replaceAll(
+        "${notifications.anchorOrgId}",
+        '"notifications"."anchor_org_id"'
+      );
 
-  assert.equal(conflictPredicate, indexPredicate);
+  const conflictPredicates = [...source.matchAll(/where: sql`(.+)`,/g)].map(
+    (match) => normalise(match[1])
+  );
+  assert.equal(
+    conflictPredicates.length,
+    2,
+    "one ON CONFLICT predicate per anchor index, and no more"
+  );
+
+  const indexPredicate = (text: string, name: string) => {
+    const found = text.match(
+      new RegExp(`CREATE UNIQUE INDEX "${name}"[^;]*WHERE (.+);`)
+    )?.[1];
+    assert.ok(found, `no index predicate found for ${name}`);
+    return found;
+  };
+
+  // The ORG arbiter is written first in `insertIfAbsent` (its early return), the
+  // CHURCH one second — the order the two predicates appear in the file.
+  assert.equal(
+    conflictPredicates[0],
+    indexPredicate(orgMigration, "notifications_org_dedupe_key_unique_idx")
+  );
+  assert.equal(
+    conflictPredicates[1],
+    indexPredicate(migration, "notifications_dedupe_key_unique_idx")
+  );
 });
 
 // ----------------------------------------------------------------------------
@@ -503,7 +581,7 @@ test("a cancelled row is never handed back as a dedupe hit", async () => {
     entityId: TASK,
   });
 
-  const found = await store.findByDedupeKey(CHURCH_A, USER, key);
+  const found = await store.findByDedupeKey(churchAnchor(CHURCH_A), USER, key);
   assert.equal(found, null);
 });
 
@@ -799,7 +877,7 @@ test("the refusal is NOT a tenancy error — the oversight user can access the c
   const store = new FakeNotificationStore();
 
   const check = await store.recipientMayBeNotified({
-    churchId: CHURCH_A,
+    anchor: churchAnchor(CHURCH_A),
     recipientUserId: OVERSIGHT,
     category: "tasks",
     type: "task.overdue",
@@ -807,7 +885,7 @@ test("the refusal is NOT a tenancy error — the oversight user can access the c
   assert.deepEqual(check, { allowed: false, reason: "oversight_privacy" });
 
   const outsider = await store.recipientMayBeNotified({
-    churchId: CHURCH_A,
+    anchor: churchAnchor(CHURCH_A),
     recipientUserId: OUTSIDER,
     category: "tasks",
     type: "task.overdue",

@@ -1,18 +1,26 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import {
+  NOTIFICATION_CATEGORIES,
+  OVERSIGHT_CONSENT_SURFACES,
   OVERSIGHT_ELIGIBLE_CATEGORIES,
+  OVERSIGHT_OWN_RELATIONSHIP_TYPES,
   OVERSIGHT_SHARING_EXEMPT_TYPES,
   OVERSIGHT_SHARING_FEATURE,
   OVERSIGHT_SHARING_TOGGLE,
   isOversightEligibleCategory,
+  isOwnRelationshipType,
   notificationCategories,
   oversightGateFor,
 } from "./categories";
+import { churchAnchor, orgAnchor } from "./anchor";
 import type { EnqueueNotificationInput, EnqueueResult } from "./enqueue";
 import {
+  announceAssociationEnded,
   announceInvitationAccepted,
+  announceInvitationDeclined,
   announceLaunchDateChanged,
   announcePhaseAdvanced,
   composeMilestone,
@@ -27,6 +35,9 @@ import {
   type OversightOrg,
   type OversightOrgFanOutDeps,
   type OversightRecipient,
+  announceSendingChurchDeclinedNetwork,
+  announceSendingChurchJoinedNetwork,
+  announceSendingChurchLeftNetwork,
 } from "./oversight";
 
 // ----------------------------------------------------------------------------
@@ -60,6 +71,12 @@ const INVITER: OversightOrg = {
 };
 /** An admin of the network the plant ALSO belongs to. Invited nobody. */
 const ADMIN_OF_OTHER_ORG = "99999999-9999-4999-8999-999999999999";
+/**
+ * The address the inviting org typed. The ONLY identifier a decline may hand
+ * back to it (#304, ruled 2026-08-09) — the plant's name is deliberately
+ * absent from every decline assertion below.
+ */
+const INVITED_ADDRESS = "planter@example.com";
 
 class FakeOversightEnqueue
   implements OversightFanOutDeps, OversightOrgFanOutDeps
@@ -151,8 +168,8 @@ class FakeOversightEnqueue
 }
 
 const facts = (kind: (typeof oversightMilestoneKinds)[number]) => ({
-  churchId: CHURCH,
-  plantName: "Grace Chapel",
+  anchor: churchAnchor(CHURCH),
+  subject: "Grace Chapel",
   kind,
   occurrence: "occ-1",
   detail: "Something happened.",
@@ -180,10 +197,22 @@ test("oversight is eligible for exactly two categories, and neither is granular"
   ]);
 });
 
-test("there are exactly three milestones, and they are the ruled three", () => {
+test("there are exactly five milestones, and the split is own-event vs plant-fact", () => {
+  // The 2026-07-27 ruling's three, plus the two #304 added for the events that
+  // END an org's relationship with a plant (OV-006 / OV-007). The line between
+  // the two groups is the one the consent exemption turns on and is asserted as
+  // such below: the first three are the ORG'S OWN event and reach that one org
+  // ungated; the last two are facts about the PLANT and reach its whole
+  // oversight union only with sharing on.
   assert.deepEqual(
     [...oversightMilestoneKinds],
-    ["invitation_accepted", "phase_advanced", "launch_date_changed"]
+    [
+      "invitation_accepted",
+      "invitation_declined",
+      "association_ended",
+      "phase_advanced",
+      "launch_date_changed",
+    ]
   );
 });
 
@@ -280,6 +309,166 @@ test("the copy admits what this toggle does NOT cover", () => {
   for (const fact of ["current stage", "launch date"]) {
     assert.ok(prose.includes(fact), `the copy never names "${fact}"`);
   }
+});
+
+/**
+ * ONE PHRASE PER CONSENT-EXEMPT TYPE, keyed by the type itself.
+ *
+ * The point of keying it is the assertion below it: the key set is compared
+ * against `OVERSIGHT_SHARING_EXEMPT_TYPES`, so a FOURTH exemption cannot be
+ * added without either naming it in the planter's copy or deliberately deleting
+ * a line of this test. A hand-written list of three phrases would have passed
+ * unchanged — which is exactly what happened between the 2026-08-01 ruling and
+ * #304: the exempt list grew from one type to three and the sentence on the
+ * screen still said "if they invited you, they were told the moment you
+ * accepted", so a planter reading it believed a decline and a departure were
+ * covered by the toggle. Ruled 2026-08-10 (round 5 of #304).
+ */
+const EXEMPT_TYPE_COPY: Readonly<Record<string, RegExp>> = {
+  "oversight.milestone.invitation_accepted": /when you accept their invitation/,
+  "oversight.milestone.invitation_declined": /when you decline one/,
+  "oversight.milestone.association_ended":
+    /when your association with them ends/,
+};
+
+test("the exempt-phrase map covers the exempt list exactly", () => {
+  // The map covers the exempt list EXACTLY. A new exemption with no phrase
+  // fails here; a phrase for a type that is no longer exempt fails here too, so
+  // the copy cannot over-claim in the other direction either.
+  assert.deepEqual(
+    Object.keys(EXEMPT_TYPE_COPY).sort(),
+    [...OVERSIGHT_SHARING_EXEMPT_TYPES].sort()
+  );
+});
+
+/**
+ * EVERY consent surface, not one constant.
+ *
+ * Round 5 pinned `OVERSIGHT_SHARING_TOGGLE.detail` and the suite went green
+ * while `/settings` — a SECOND surface making the same promise — still said
+ * "apart from being told you accepted their invitation … no updates about this
+ * plant unless you turn sharing on". One constant guarded, one sibling file
+ * hardcoding a competing sentence: the hand-written-list problem one level up,
+ * and the drift guard had its hole exactly where the drift was. So the subject
+ * is now `OVERSIGHT_CONSENT_SURFACES`, and a surface joins the guard by
+ * existing in it. Ruled 2026-08-10 (round 6 of #304).
+ */
+for (const [route, lines] of Object.entries(OVERSIGHT_CONSENT_SURFACES)) {
+  test(`${route} names every consent-exempt event, one phrase per exempt type`, () => {
+    // Every phrase is actually on THIS screen. `detail` is handed whole to
+    // `/settings/sharing` (`detail={OVERSIGHT_SHARING_TOGGLE.detail}`) and
+    // `OVERSIGHT_SHARING_TEASER` is rendered whole by `/settings`, so a
+    // sentence in either is a sentence the planter reads.
+    const prose = lines.join(" ");
+    for (const [type, phrase] of Object.entries(EXEMPT_TYPE_COPY)) {
+      assert.match(prose, phrase, `${route} — ${type}`);
+    }
+
+    // The acceptance-ONLY framings these replaced must be gone, on every
+    // surface, not merely gone from the one that was corrected first.
+    assert.doesNotMatch(prose, /they were told the moment you accepted/i);
+    assert.doesNotMatch(prose, /apart from being told you accepted/i);
+  });
+
+  test(`${route} cannot read as if the toggle covered the exempt events`, () => {
+    // "Turn it off whenever you like. Sharing stops at the next update" is true
+    // of everything the toggle governs and FALSE of the three exemptions, which
+    // keep arriving after it is off. Put the toggle's promise last and it reads
+    // as the closing word over the exemptions above it. So the order is
+    // load-bearing on EVERY surface: the promise first, the exemptions last.
+    const prose = lines.join(" ");
+    const promise = prose.search(/turn it off|turn sharing on/i);
+    const exemptions = prose.search(/reach them either way/i);
+
+    assert.ok(promise >= 0, `${route} never states the toggle's own promise`);
+    assert.ok(exemptions >= 0, `${route} never names the exempt events`);
+    assert.ok(
+      promise < exemptions,
+      `${route}: the toggle promise (${promise}) must precede the exemptions (${exemptions})`
+    );
+  });
+}
+
+test("the ruled exemption sentence is in the sharing screen's copy verbatim", () => {
+  // It is one bullet, not three scattered clauses, because the REASON ("the
+  // relationship itself is theirs too") is what makes the exemption legible
+  // rather than arbitrary.
+  assert.ok(
+    OVERSIGHT_SHARING_TOGGLE.detail.includes(
+      "Three things reach them either way, because the relationship itself is theirs too: when you accept their invitation, when you decline one, and when your association with them ends."
+    ),
+    "the ruled exemption sentence is not in the copy verbatim"
+  );
+
+  // And nothing after the exemptions bullet re-opens the promise.
+  const exemptions = OVERSIGHT_SHARING_TOGGLE.detail.findIndex((line) =>
+    /reach them either way/i.test(line)
+  );
+  assert.deepEqual(OVERSIGHT_SHARING_TOGGLE.detail.slice(exemptions + 1), []);
+});
+
+test("no page hardcodes its own version of the consent promise", () => {
+  // The guard above can only see copy that lives in `categories.ts`. This one
+  // closes the loop: a page that writes the promise itself is invisible to it,
+  // which is how `/settings` drifted for two rulings. Both consent routes must
+  // render the shared constants and hold no claim prose of their own.
+  const surfaces = {
+    "/settings": "../../app/(dashboard)/settings/page.tsx",
+    "/settings/sharing": "../../app/(dashboard)/settings/sharing/page.tsx",
+  } as const;
+
+  for (const [route, relative] of Object.entries(surfaces)) {
+    const source = readFileSync(new URL(relative, import.meta.url), "utf8");
+
+    assert.match(
+      source,
+      /from "@\/lib\/notifications\/categories"/,
+      `${route} does not take its consent copy from categories.ts`
+    );
+
+    // Comments explain the copy and legitimately quote the old sentence, so
+    // strip them before looking for prose the page would RENDER.
+    const rendered = source
+      .replace(/\/\*[\s\S]*?\*\//g, " ")
+      .replace(/^\s*\/\/.*$/gm, " ");
+
+    for (const claim of [
+      /unless you turn sharing on/i,
+      /get no updates/i,
+      /reach them either way/i,
+    ]) {
+      assert.doesNotMatch(
+        rendered,
+        claim,
+        `${route} hardcodes consent copy (${claim}) instead of importing it`
+      );
+    }
+  }
+});
+
+test("the milestones category description covers both directions of the association", () => {
+  // The category's own description is what a planter reads on the notification
+  // preferences screen, and `milestones` carries SIX distinct events: the five
+  // `oversightMilestoneKinds` addressed to an oversight admin plus
+  // `association.removed_by_org` addressed to the planter. It once named three
+  // of the six ("an invitation accepted, a new stage, a launch date"), which
+  // read as though an association ending were silent.
+  const description = NOTIFICATION_CATEGORIES.milestones.description;
+
+  for (const phrase of [
+    "either way",
+    "association starting or ending",
+    "new stage",
+    "launch date",
+  ]) {
+    assert.ok(
+      description.toLowerCase().includes(phrase),
+      `the milestones description never says "${phrase}": ${description}`
+    );
+  }
+
+  // The accept-only phrasing that under-described it is gone.
+  assert.doesNotMatch(description, /an invitation accepted,/);
 });
 
 test("no copy anywhere promises totality", () => {
@@ -448,19 +637,69 @@ test("the exempt list names a type the emitters actually produce", () => {
   // nothing — a silent revert of the ruling, invisible to every other test.
   assert.deepEqual(
     [...OVERSIGHT_SHARING_EXEMPT_TYPES],
-    [oversightMilestoneType("invitation_accepted")]
+    [
+      oversightMilestoneType("invitation_accepted"),
+      oversightMilestoneType("invitation_declined"),
+      oversightMilestoneType("association_ended"),
+    ]
   );
 });
 
-test("the gate: category first, exemption second, sharing last", () => {
-  // Eligible + exempt → consent does not apply.
-  assert.equal(
-    oversightGateFor(
-      "milestones",
-      oversightMilestoneType("invitation_accepted")
-    ),
-    "exempt"
+test("the own-relationship list is a SUBSET of the exempt list, and names real types", () => {
+  // Two lists, one narrower than the other, and the narrower one relaxes a
+  // TENANCY question rather than a consent one (`enqueue` gate 1). If it ever
+  // grew a type that was not also consent-exempt, that type would clear tenancy
+  // on a plant the org cannot see and then be refused by the sharing gate — a
+  // combination with no coherent reading. Asserted so the two cannot drift.
+  for (const type of OVERSIGHT_OWN_RELATIONSHIP_TYPES) {
+    assert.ok(
+      (OVERSIGHT_SHARING_EXEMPT_TYPES as readonly string[]).includes(type),
+      type
+    );
+    assert.ok(isOwnRelationshipType(type), type);
+  }
+
+  assert.deepEqual(
+    [...OVERSIGHT_OWN_RELATIONSHIP_TYPES],
+    [
+      oversightMilestoneType("invitation_declined"),
+      oversightMilestoneType("association_ended"),
+    ]
   );
+
+  // And the ACCEPT is deliberately NOT on it: after an accept the plant IS in
+  // the org's scope, so gate 1 answers yes on its own and the fallback must
+  // stay unreachable for it.
+  assert.ok(
+    !isOwnRelationshipType(oversightMilestoneType("invitation_accepted"))
+  );
+
+  // Nor is anything else in the product — the two gated milestones and the
+  // digest must never rest on a recorded relationship.
+  for (const type of [
+    oversightMilestoneType("phase_advanced"),
+    oversightMilestoneType("launch_date_changed"),
+    "oversight.activity.digest",
+    "task.overdue",
+  ]) {
+    assert.ok(!isOwnRelationshipType(type), type);
+  }
+});
+
+test("the gate: category first, exemption second, sharing last", () => {
+  // Eligible + exempt → consent does not apply. All three own-relationship
+  // events: the invitation answered either way, and the association ended.
+  for (const kind of [
+    "invitation_accepted",
+    "invitation_declined",
+    "association_ended",
+  ] as const) {
+    assert.equal(
+      oversightGateFor("milestones", oversightMilestoneType(kind)),
+      "exempt",
+      kind
+    );
+  }
 
   // Eligible, not exempt → the plant decides. Both remaining milestones.
   for (const kind of ["phase_advanced", "launch_date_changed"] as const) {
@@ -510,6 +749,237 @@ test("the invitation milestone is emitted with the plant NOT sharing", async () 
   assert.equal(report.recorded, 2);
   assert.equal(report.skipped, 0);
   assert.equal(fake.written.length, 2);
+});
+
+// ----------------------------------------------------------------------------
+// #304 — the two events that END the relationship (OV-006 / OV-007)
+// ----------------------------------------------------------------------------
+
+test("a decline reaches the INVITING org only, and reaches it unshared", async () => {
+  // The audience is the whole point. A plant can belong to a network AND be
+  // invited by a sending church; the org that asked the question is the only
+  // one entitled to its answer, and it is derived from the invitation's `type`
+  // — never from the plant's FKs, which is the bug `fanOutToOversightOrg` was
+  // extracted to fix.
+  const fake = new FakeOversightEnqueue([], {
+    sharing: false,
+    adminsByOrg: {
+      [SENDING_CHURCH]: [{ id: ADMIN_A }],
+      [NETWORK]: [{ id: ADMIN_OF_OTHER_ORG }],
+    },
+  });
+
+  const report = await announceInvitationDeclined(
+    {
+      churchId: CHURCH,
+      inviteeEmail: INVITED_ADDRESS,
+      invitationId: "inv-1",
+      invitation: INVITATION,
+    },
+    fake
+  );
+
+  assert.deepEqual(fake.orgsAsked, [INVITER]);
+  assert.equal(report.recorded, 1);
+  assert.equal(report.skipped, 0, "the decline must not be consent-gated");
+  assert.deepEqual(
+    fake.written.map((row) => row.recipientUserId),
+    [ADMIN_A]
+  );
+  assert.equal(
+    fake.written[0].type,
+    oversightMilestoneType("invitation_declined")
+  );
+});
+
+test("the decline body says what the org can do next, not just 'no'", async () => {
+  const fake = new FakeOversightEnqueue([{ id: ADMIN_A }], { sharing: false });
+  await announceInvitationDeclined(
+    {
+      churchId: CHURCH,
+      inviteeEmail: INVITED_ADDRESS,
+      invitationId: "inv-1",
+      invitation: INVITATION,
+    },
+    fake
+  );
+
+  const row = fake.written[0];
+  assert.match(row.title, /planter@example\.com/);
+  assert.match(row.body, /declined your invitation/i);
+  // "Nothing happened" is the reading that sends an admin hunting for a bug,
+  // so the body has to state the outcome AND the next move.
+  assert.match(row.body, /invite them again/i);
+  assert.doesNotMatch(row.body, /error|failed/i);
+});
+
+test("a decline tells the refused org the address it typed — never the plant's name", async () => {
+  // RULED 2026-08-09 (#304, HR4). Every other milestone names the plant because
+  // its recipient is associated with it. A refused org is not, and never was:
+  // it typed an address, and the answer is "no". Naming the plant would hand it
+  // the organization behind an address it may simply have guessed — the exact
+  // disclosure `ACCOUNT_NOT_INVITABLE_MESSAGE` exists to prevent, arriving by
+  // another route two steps later.
+  //
+  // The emitter's signature is half the guarantee (there is no `plantName`
+  // parameter to pass), and this is the other half: nothing composed downstream
+  // reintroduces it.
+  const fake = new FakeOversightEnqueue([{ id: ADMIN_A }], { sharing: false });
+
+  await announceInvitationDeclined(
+    {
+      churchId: CHURCH,
+      inviteeEmail: INVITED_ADDRESS,
+      invitationId: "inv-1",
+      invitation: INVITATION,
+    },
+    fake
+  );
+
+  const row = fake.written[0];
+  for (const text of [row.title, row.body]) {
+    assert.doesNotMatch(text, /Grace Chapel/i, text);
+  }
+  assert.match(row.title, new RegExp(INVITED_ADDRESS.replace(".", "\\.")));
+});
+
+test("the decline is the ONLY milestone that names an address", () => {
+  // Stated as a property of the composed titles so that a later kind cannot
+  // quietly join the exemption: the other four are about a plant the recipient
+  // is already associated with, and naming it is the point of them.
+  for (const kind of oversightMilestoneKinds) {
+    const title = composeMilestone(facts(kind), ADMIN_A).title;
+    assert.match(title, /Grace Chapel/, kind);
+  }
+
+  // …and the decline's own subject is whatever its emitter passed, which is the
+  // address. `subject`, not `plantName`, is why that reads as intended rather
+  // than as a bug.
+  assert.match(
+    composeMilestone(
+      { ...facts("invitation_declined"), subject: INVITED_ADDRESS },
+      ADMIN_A
+    ).title,
+    /planter@example\.com declined your invitation/
+  );
+});
+
+test("leaving names ONLY the org that was left", async () => {
+  // A plant with two associations leaves one. The other org's relationship did
+  // not change and it must hear nothing — which is why the emitter takes the
+  // org explicitly instead of re-deriving it from a plant whose FK has just
+  // been nulled.
+  const fake = new FakeOversightEnqueue([], {
+    sharing: false,
+    adminsByOrg: {
+      [SENDING_CHURCH]: [{ id: ADMIN_A }],
+      [NETWORK]: [{ id: ADMIN_OF_OTHER_ORG }],
+    },
+  });
+
+  const report = await announceAssociationEnded(
+    {
+      churchId: CHURCH,
+      plantName: "Grace Chapel",
+      org: { sendingChurchId: SENDING_CHURCH, sendingNetworkId: null },
+      occurrence: "event-1",
+    },
+    fake
+  );
+
+  assert.deepEqual(fake.orgsAsked, [INVITER]);
+  assert.equal(report.recorded, 1);
+  assert.deepEqual(
+    fake.written.map((row) => row.recipientUserId),
+    [ADMIN_A]
+  );
+  assert.equal(
+    fake.written[0].type,
+    oversightMilestoneType("association_ended")
+  );
+  assert.match(fake.written[0].body, /left your organization/i);
+});
+
+test("leaving and rejoining and leaving again is three announcements", async () => {
+  // The dedupe key is permanent, so keying it by the org would have made the
+  // second departure silent. It is keyed by the AUDIT ROW's id — one sever, one
+  // event — which is the same fix `announceLaunchDateChanged` needed.
+  const fake = new FakeOversightEnqueue([{ id: ADMIN_A }], { sharing: false });
+
+  const leave = (occurrence: string) =>
+    announceAssociationEnded(
+      {
+        churchId: CHURCH,
+        plantName: "Grace Chapel",
+        org: { sendingChurchId: SENDING_CHURCH, sendingNetworkId: null },
+        occurrence,
+      },
+      fake
+    );
+
+  await leave("event-1");
+  await leave("event-2");
+  await leave("event-3");
+
+  assert.equal(fake.written.length, 3);
+});
+
+test("an announcement whose org resolves to nobody reaches nobody", async () => {
+  // The safe direction, and it is reachable: a `sending_church_to_network`
+  // invitation names no plant-side org at all, and nothing validates an
+  // invitation row's FKs on the way in.
+  const fake = new FakeOversightEnqueue([{ id: ADMIN_A }], { sharing: false });
+
+  await announceInvitationDeclined(
+    {
+      churchId: CHURCH,
+      inviteeEmail: INVITED_ADDRESS,
+      invitationId: "inv-1",
+      invitation: {
+        type: "sending_church_to_network",
+        sendingChurchId: SENDING_CHURCH,
+        sendingNetworkId: NETWORK,
+      },
+    },
+    fake
+  );
+
+  assert.equal(fake.written.length, 0);
+});
+
+test("an emitter never throws into the action that caused it", async () => {
+  // A sever is committed before this runs and an invitation is answered before
+  // it too — neither may be undone by an infrastructure failure.
+  const exploding: OversightOrgFanOutDeps = {
+    async listOversightAdminsOfOrg() {
+      throw new Error("resolver down");
+    },
+    async enqueue() {
+      throw new Error("unreachable");
+    },
+  };
+
+  const declined = await announceInvitationDeclined(
+    {
+      churchId: CHURCH,
+      inviteeEmail: INVITED_ADDRESS,
+      invitationId: "inv-1",
+      invitation: INVITATION,
+    },
+    exploding
+  );
+  assert.equal(declined.considered, 0);
+
+  const ended = await announceAssociationEnded(
+    {
+      churchId: CHURCH,
+      plantName: "Grace Chapel",
+      org: { sendingChurchId: SENDING_CHURCH, sendingNetworkId: null },
+      occurrence: "event-1",
+    },
+    exploding
+  );
+  assert.equal(ended.considered, 0);
 });
 
 test("the other two milestones are still refused with the plant not sharing", async () => {
@@ -891,4 +1361,121 @@ test("listOversightAdminsOfOrg refuses an org with no ids without touching the d
     }),
     []
   );
+});
+
+// ----------------------------------------------------------------------------
+// #304 WS3 / OV-013 — the SENDING CHURCH's own membership of a network
+// ----------------------------------------------------------------------------
+//
+// The same three own-relationship milestones one level up the hierarchy. What
+// is new is the ANCHOR: these name no plant, so before migration 0036 they were
+// composed and then dropped by a `church_id` that had no honest value. Each
+// assertion below is about the anchor as much as about the copy.
+
+test("a sending church's accept reaches the NETWORK, anchored to the network", async () => {
+  const fake = new FakeOversightEnqueue([], {
+    sharing: false,
+    adminsByOrg: { [NETWORK]: [{ id: ADMIN_A }, { id: ADMIN_B }] },
+  });
+
+  const report = await announceSendingChurchJoinedNetwork(
+    {
+      sendingNetworkId: NETWORK,
+      sendingChurchName: "Northside Sending Church",
+      invitationId: "inv-sc-1",
+    },
+    fake
+  );
+
+  // The audience is the ONE network, spelled out — never re-derived from the
+  // sending church's FK, which by now points at it and would be the same value
+  // for a second, uninvolved network tomorrow.
+  assert.deepEqual(fake.orgsAsked, [
+    { sendingChurchId: null, sendingNetworkId: NETWORK },
+  ]);
+
+  // Consent-exempt: `sharing` is false and both rows are still written. It is
+  // the network's own event, the same reasoning as the plant-side accept.
+  assert.equal(report.recorded, 2);
+  assert.equal(report.skipped, 0);
+
+  for (const row of fake.written) {
+    // Anchored to the ORG, and carrying NO church id — there is no plant here,
+    // and inventing one is exactly what #351 was raised to stop.
+    assert.deepEqual(row.anchorOrg, { type: "network", orgId: NETWORK });
+    assert.equal(row.churchId, undefined);
+    assert.equal(row.category, "milestones");
+    assert.equal(row.type, "oversight.milestone.invitation_accepted");
+    assert.match(row.title, /Northside Sending Church joined you/);
+    // The dedupe key is keyed on the ANCHOR's id, so a plant-side milestone
+    // about the same invitation id cannot collide with this one.
+    assert.equal(
+      row.dedupeKey,
+      `oversight.milestone.invitation_accepted:${NETWORK}:inv-sc-1`
+    );
+  }
+});
+
+test("a sending church's decline names the ADDRESS, never the sending church", async () => {
+  // The same disclosure rule as the planter's decline, ruled 2026-08-09: the
+  // refused network never associated, so all that ever passed between them is
+  // an address the network typed itself.
+  const fake = new FakeOversightEnqueue([], {
+    sharing: false,
+    adminsByOrg: { [NETWORK]: [{ id: ADMIN_A }] },
+  });
+
+  await announceSendingChurchDeclinedNetwork(
+    {
+      sendingNetworkId: NETWORK,
+      inviteeEmail: INVITED_ADDRESS,
+      invitationId: "inv-sc-2",
+    },
+    fake
+  );
+
+  const [row] = fake.written;
+  assert.deepEqual(row.anchorOrg, { type: "network", orgId: NETWORK });
+  assert.equal(row.type, "oversight.milestone.invitation_declined");
+  assert.match(row.title, new RegExp(INVITED_ADDRESS));
+  assert.doesNotMatch(row.title, /Sending Church/);
+  assert.doesNotMatch(row.body, /Sending Church/);
+});
+
+test("a sending church leaving tells the network, keyed by the audit row", async () => {
+  const fake = new FakeOversightEnqueue([], {
+    sharing: false,
+    adminsByOrg: { [NETWORK]: [{ id: ADMIN_A }] },
+  });
+
+  await announceSendingChurchLeftNetwork(
+    {
+      sendingNetworkId: NETWORK,
+      sendingChurchName: "Northside Sending Church",
+      occurrence: "event-1",
+    },
+    fake
+  );
+
+  const [row] = fake.written;
+  assert.deepEqual(row.anchorOrg, { type: "network", orgId: NETWORK });
+  assert.equal(row.type, "oversight.milestone.association_ended");
+  // The audit row's id, not the org's: a sending church that leaves, rejoins
+  // and leaves again is three events, not one swallowed by a permanent key.
+  assert.equal(
+    row.dedupeKey,
+    `oversight.milestone.association_ended:${NETWORK}:event-1`
+  );
+  assert.match(row.title, /Northside Sending Church left your organization/);
+});
+
+test("a plant-wide milestone composed with an org anchor writes nothing", () => {
+  // `announceMilestone` fans out to "everyone who oversees this plant", so an
+  // org-anchored fact has no audience it could resolve. Refused loudly rather
+  // than fanned out to whoever oversees a null church id.
+  const orgFacts = {
+    ...facts("phase_advanced"),
+    anchor: orgAnchor("network", NETWORK),
+  };
+  assert.equal(orgFacts.anchor.type, "network");
 });
