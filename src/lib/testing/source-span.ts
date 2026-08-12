@@ -17,9 +17,11 @@
  *     `assert.match(fn, /X/)` keeps passing off some OTHER function's copy
  *     of `X`.
  *
- * Every one of those failures is silent, and all three found so far happened in
- * `src/lib/invitations/`, which is why the enforcement below still scans only
- * that directory (see "WHERE THIS LIVES, AND WHAT IT GUARDS" at the end).
+ * Every one of those failures is silent. The first three all happened in
+ * `src/lib/invitations/`, and a fourth then landed in the invitation EMAIL
+ * template's own suite — one directory outside the first scan — which is why
+ * the enforcement below names a LIST of converted directories (see "WHERE THIS
+ * LIVES, AND WHAT IT GUARDS" at the end).
  * OV-003b (#293) reworded `createInvitationAs`'s docblock to say "+ send" and
  * killed the end anchor of `invite-rate-limit.test.ts`'s post-resolution guard;
  * #304 ruling 4 item 5 deleted `CopyInviteLinkButton` and killed the end anchor
@@ -43,10 +45,11 @@
  * Both halves are checkable rather than aspirational, and they ARE checked —
  * the first sweep closed the slicing half and recorded the closure as total
  * while nine vacuous orderings sat in the same suites, so the rule is no longer
- * left to prose. `source-span.test.ts` reads every `*.test.ts` under
- * `src/lib/invitations/` and fails on a bare `.indexOf(` outside a four-line
- * allowlist of sites that HANDLE -1 in a branch right there. A bare `indexOf`
- * reaches neither a `slice` nor a `<`.
+ * left to prose. `source-span.test.ts` reads every `*.test.ts` under each
+ * directory in its `GUARDED` list — `src/lib/invitations/` and
+ * `src/lib/email/templates/` — and fails on a bare `.indexOf(` outside a
+ * four-line allowlist of sites that HANDLE -1 in a branch right there. A bare
+ * `indexOf` reaches neither a `slice` nor a `<`.
  *
  * Anchor on a DECLARATION (`export async function foo`, `const bar`,
  * `interface Baz`), never on a comment: a docblock is prose, prose gets
@@ -63,11 +66,19 @@
  * but genuinely about auth, so it sits with the module that owns sessions.)
  *
  * The GUARD in `source-span.test.ts` is narrower than the helper on purpose. It
- * scans `src/lib/invitations/` only, because that is the directory that has
- * actually been converted; the rest of the repo still has bare `indexOf`
- * anchors and converting them is separate work. Widen the scan when a directory
- * is converted, never before — a guard that fails on unconverted code gets
- * disabled, and a disabled guard checks nothing.
+ * scans the directories that have actually been converted — today
+ * `src/lib/invitations/` and `src/lib/email/templates/` — because the rest of
+ * the repo still has bare `indexOf` anchors and converting them is separate
+ * work. Widen the scan as a directory is converted, never before: a guard that
+ * fails on unconverted code gets disabled, and a disabled guard checks nothing.
+ *
+ * But keep the scope at least as wide as the CONCERN. `src/lib/email/templates/`
+ * is on the list because the sweep that wrote this module shipped, in the same
+ * pass, an `html.slice(html.indexOf(inviteUrl))` in the invitation EMAIL's
+ * suite: unbounded, so "the CTA is a bordered box" was really "something at or
+ * below the CTA has a border", and any bordered element added underneath would
+ * have kept it green through a button that lost its own. A guard whose scope
+ * stops one directory short of the work it polices catches nothing there.
  *
  * Nothing here is imported by application code — it is for tests and scripts.
  */

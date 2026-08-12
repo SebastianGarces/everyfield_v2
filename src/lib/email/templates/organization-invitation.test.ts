@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
+import { sourceReader } from "@/lib/testing/source-span";
+
 import {
   organizationInvitationEmail,
   organizationInvitationPreview,
@@ -45,6 +47,15 @@ const PROPS: OrganizationInvitationEmailProps = {
     "https://app.everyfield.test/register?invitation=77777777-7777-4777-8777-777777777777",
   expiresLabel: "Thursday, September 3, 2026",
 };
+
+/**
+ * The CTA's label — the end anchor that bounds the button's markup.
+ *
+ * `<Button>` renders as `<a href=… style=…>` wrapping this text, so "the invite
+ * URL up to this label" is exactly the opening tag and nothing after it. Rename
+ * the button and the span throws, which is the point.
+ */
+const CTA_LABEL = "Accept and create your account";
 
 const TEMPLATE = path.join(__dirname, "organization-invitation.tsx");
 const SOURCE = readFileSync(TEMPLATE, "utf8");
@@ -159,9 +170,24 @@ test("the rendered HTML breaks none of the email-client hard rules", async () =>
   // The button is a real, tappable, bordered box — `box-sizing` and an explicit
   // border style are both on the skill's hard list, because a client that
   // supplies its own defaults for either reshapes the control.
-  const button = html.slice(html.indexOf(PROPS.inviteUrl));
+  //
+  // BOUNDED, and through the reader, for the reason in `@/lib/testing/source-span`:
+  // an open-ended cut from the CTA's href runs to the end of the document, so it
+  // also contains the pasteable fallback link, the `<hr>` and the footer — the
+  // two assertions below would then be satisfied by ANY bordered element added
+  // beneath the button, and a CTA that had lost its border would stay green. The
+  // span is the CTA's opening tag alone: its href to its label. A moved anchor
+  // (a renamed label, a reordered link) THROWS instead of widening the claim.
+  const button = sourceReader(html, "the rendered invitation email").span(
+    PROPS.inviteUrl,
+    CTA_LABEL
+  );
   assert.match(button, /box-sizing:\s*border-box/i);
   assert.match(button, /border:\s*1px solid/i);
+
+  // …and the span really is only the button: the bordered `<hr>` that follows it
+  // is outside, so neither assertion above can be satisfied by that one.
+  assert.doesNotMatch(button, /<hr\b/i);
 
   // Gmail clips over 102KB, and the clip can land above the button.
   assert.ok(
