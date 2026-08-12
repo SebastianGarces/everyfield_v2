@@ -15,6 +15,7 @@ import type { OrganizationInvitation } from "@/db/schema/organization-invitation
 
 import { emailInvitee } from "./core";
 import type { InvitationEmailMessage } from "./email";
+import { sourceReader } from "./source-span";
 
 // ============================================================================
 // The WIRING — OV-003b (#293), the link `email.test.ts` cannot see.
@@ -177,12 +178,17 @@ test("a revoked invitation sends nothing, even through this path", async () => {
 test("createInvitationAs sends after the row is committed, and reports the outcome", () => {
   // Source-shaped: `createInvitationAs` needs a database. The ORDER is the
   // property — an invitation that exists but was not emailed is repaired by
-  // copying the link; an email sent for a row that failed to insert is a link to
-  // nothing.
-  const code = readFileSync(path.join(__dirname, "core.ts"), "utf8");
-  const body = code.slice(
-    code.indexOf("export async function createInvitationAs"),
-    code.indexOf("export async function emailInvitee")
+  // Resend email on its row; an email sent for a row that failed to insert is a
+  // link to nothing.
+  //
+  // Through the reader, so a moved anchor throws instead of quietly widening
+  // this to the whole module (`./source-span`).
+  const body = sourceReader(
+    readFileSync(path.join(__dirname, "core.ts"), "utf8"),
+    "core.ts"
+  ).span(
+    "export async function createInvitationAs",
+    "export async function emailInvitee"
   );
 
   assert.ok(

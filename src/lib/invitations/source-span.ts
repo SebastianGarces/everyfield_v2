@@ -10,17 +10,30 @@
  *   * `String.indexOf` returns -1 for a needle that is no longer there;
  *   * `slice(start, -1)` then returns almost the WHOLE FILE instead of the
  *     function under test, and `slice(-1)` the last character;
+ *   * `slice(-1, end)` returns the EMPTY STRING whenever `end` is anywhere but
+ *     the very tail — and `assert.doesNotMatch("", /X/)` is a TAUTOLOGY;
  *   * so an `assert.doesNotMatch(fn, /X/)` becomes a module-wide claim that
- *     passes by luck, and an `assert.match(fn, /X/)` keeps passing off some
- *     OTHER function's copy of `X`.
+ *     passes by luck or a claim about nothing at all, and an
+ *     `assert.match(fn, /X/)` keeps passing off some OTHER function's copy
+ *     of `X`.
  *
- * Both failures are silent, and both have happened here. OV-003b (#293) reworded
- * `createInvitationAs`'s docblock to say "+ send" and killed the end anchor of
- * `invite-rate-limit.test.ts`'s post-resolution guard; #304 ruling 4 item 5
- * deleted `CopyInviteLinkButton` and killed the end anchor of `resend.test.ts`'s
- * action-cluster test. Neither suite went red. A source-shaped test has to fail
- * on its own subject or not at all — so nothing in this domain slices source by
- * hand any more; it goes through a reader, and a moved anchor THROWS.
+ * Every one of those failures is silent, and all of them have happened here.
+ * OV-003b (#293) reworded `createInvitationAs`'s docblock to say "+ send" and
+ * killed the end anchor of `invite-rate-limit.test.ts`'s post-resolution guard;
+ * #304 ruling 4 item 5 deleted `CopyInviteLinkButton` and killed the end anchor
+ * of `resend.test.ts`'s action-cluster test; and `invitations-ui.test.ts`
+ * anchored on `async function createAccountEntities` for a function that is
+ * synchronous, so that needle had NEVER matched — one span was the empty string
+ * and, four hundred lines later, the same dead needle made the `register` body
+ * 93% of its module. No suite went red for any of the three. A source-shaped
+ * test has to fail on its own subject or not at all — so nothing in this domain
+ * slices source by hand any more; it goes through a reader, and a moved anchor
+ * THROWS.
+ *
+ * That is a property of the DIRECTORY, checkable rather than aspirational:
+ * instrument `String.prototype.indexOf`, run every suite under
+ * `src/lib/invitations/`, and no call from one of them may return -1 unless a
+ * branch right there handles it. A bare `indexOf` never reaches a `slice`.
  *
  * Anchor on a DECLARATION (`export async function foo`, `const bar`,
  * `interface Baz`), never on a comment: a docblock is prose, prose gets

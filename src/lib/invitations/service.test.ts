@@ -34,6 +34,7 @@ import {
   verifyInvitationAuthority,
   type InvitationActor,
 } from "./core";
+import { sourceReader } from "./source-span";
 
 // ============================================================================
 // Invitations — the auth surface (#265).
@@ -275,6 +276,15 @@ const CORE_PATH = path.join(INVITATIONS_DIR, "core.ts");
 
 const SERVICE_CODE = codeOf(SERVICE_PATH);
 const CORE_CODE = codeOf(CORE_PATH);
+
+/**
+ * The reader, and the ONLY way this file cuts a declaration out of `service.ts`.
+ * `span` / `after` throw naming the missing needle (`./source-span`); a bare
+ * `indexOf` returns -1 and turns an assertion about one function into one about
+ * the whole module. The label says "comments stripped" because `codeOf` strips
+ * them, and a stripped copy fails for different reasons than the original.
+ */
+const SERVICE = sourceReader(SERVICE_CODE, "service.ts (comments stripped)");
 
 /**
  * Every top-level `export` statement of the action layer, CLASSIFIED — not
@@ -1757,9 +1767,13 @@ test("a response records the session's user, and only a pending row", () => {
 
 /** Just the WHERE clause — `returning()` names every column and would answer for any of them. */
 function whereOf(sql: string): string {
-  const start = sql.indexOf(" where ");
-  const end = sql.indexOf(" returning ");
-  return sql.slice(start, end === -1 ? undefined : end);
+  // The START anchor goes through the reader (`./source-span`): a statement that
+  // stopped emitting " where " made `slice(-1, end)` the empty string, and every
+  // `doesNotMatch` about the scope below is true of the empty string. The END is
+  // genuinely optional — not every statement has a `returning`.
+  const from = sourceReader(sql, "the invitation UPDATE").after(" where ");
+  const end = from.indexOf(" returning ");
+  return end === -1 ? from : from.slice(0, end);
 }
 
 test("the revoke statement is scoped to the session's own ORG", () => {
@@ -2242,9 +2256,9 @@ test("only the two sending paths report an email outcome", () => {
 
   // `answered` sets no email field at all, so the three responses cannot report
   // one however `run` changes.
-  const adapter = SERVICE_CODE.slice(
-    SERVICE_CODE.indexOf("async function answered"),
-    SERVICE_CODE.indexOf("export async function createInvitation")
+  const adapter = SERVICE.span(
+    "async function answered",
+    "export async function createInvitation"
   );
   assert.doesNotMatch(adapter, /emailSent/, adapter);
 });

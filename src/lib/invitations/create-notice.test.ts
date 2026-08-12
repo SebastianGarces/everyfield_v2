@@ -14,6 +14,7 @@ import {
   INVITATION_EMAIL_FAILED_HEADLINE,
   invitationCreatedNotice,
 } from "./create-notice";
+import { sourceReader } from "./source-span";
 
 // ============================================================================
 // OV-003b (#293), AC 3 — the half a forced-failure test cannot reach.
@@ -175,7 +176,13 @@ test("the create action carries emailSent through to the surface", () => {
   // `createInvitationAs`, propagated by `service.ts`, and then dropped by the
   // action, so no wording above could ever have been reached. Source-shaped,
   // because the action needs a session and a database to execute.
-  const returned = ACTIONS.slice(ACTIONS.indexOf("    created: {"));
+  // Through the reader (`./source-span`): a bare `indexOf` that stopped matching
+  // would hand `assert.match` the last character of the module instead of the
+  // success branch, and this file has no other guard that the branch exists.
+  const returned = sourceReader(
+    ACTIONS,
+    "oversight/invitations/actions.ts"
+  ).after("    created: {");
   assert.match(returned, /emailSent: result\.emailSent/);
 
   // Passed through untouched. `?? false` or `Boolean(...)` would collapse the

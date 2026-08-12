@@ -780,7 +780,13 @@ test("the row's action cluster wraps, so a third control cannot push a second on
   // second badge anywhere above it would have retargeted them silently.
   const row = LIST.span("function InvitationRow", "const initialResendState");
 
-  const cluster = row.slice(row.indexOf("<Badge") - 400, row.indexOf("<Badge"));
+  // The badge anchor goes through the reader too — the window we want is the
+  // 400 characters BEFORE it, and a bare `indexOf("<Badge") - 400` on a deleted
+  // badge is `slice(-401, -1)`, which is the row's LAST 400 characters and a
+  // different `<div>` entirely.
+  const cluster = sourceReader(row, "InvitationRow")
+    .span("function InvitationRow", "<Badge")
+    .slice(-400);
   const clusterClass = /<div className="([^"]*)">\s*$/.exec(cluster)?.[1] ?? "";
 
   assert.ok(
@@ -1083,12 +1089,21 @@ test("the countdown is never announced — the live region says 'Email sent' onc
   // and the countdown are different elements: the region holds a fixed sentence,
   // and the ticking value lives in the button's label, which is not live.
   const button = resendButtonSource();
+  // Both ends through the reader, and the close tag is resolved RELATIVE to the
+  // live region — the component closes an earlier `<span>` before it. The close
+  // used to be a bare `indexOf`, so a region rewritten to close some other way
+  // would have made this the whole rest of the component. There is no
+  // `assert.ok(region.length > 0)` floor any more because there cannot be one
+  // worth writing: `span` throws first, and a floor that can never fire is the
+  // defect this domain keeps finding.
   const fromStatus = sourceReader(button, "ResendEmailButton").after(
     'role="status"'
   );
-  const region = fromStatus.slice(0, fromStatus.indexOf("</span>"));
+  const region = sourceReader(
+    fromStatus,
+    'ResendEmailButton\'s role="status" region'
+  ).span('role="status"', "</span>");
 
-  assert.ok(region.length > 0, "the success region is missing");
   assert.doesNotMatch(region, /secondsLeft|cooling|cooldown/);
   assert.match(region, /Email sent/);
   // The sentence is written ONCE, so the claim cannot drift into a second place
