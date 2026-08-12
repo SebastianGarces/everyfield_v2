@@ -32,7 +32,7 @@ All meeting types share: scheduling, attendance capture, guest list management, 
 
 ## Access Prerequisites
 
-- Requires a paid subscription and an active church plant. Free-tier users have access to the Wiki (F1) only.
+- Requires a paid subscription and an active church plant. Free-tier users have access to the Wiki only.
 - User flow: sign up -> subscribe (paid) -> create church plant -> this feature becomes available.
 - Once a church plant exists, this feature is available regardless of current phase.
 
@@ -45,14 +45,14 @@ Users can:
 - Schedule and manage meetings of any type with date, location, status, and notes
 - Filter the meeting list by type (All, Vision Meetings, Orientations, Team Meetings)
 - Capture attendance during or after meetings, including new vs returning attendee status
-- Manage a guest list for each meeting and send email invitations via the Communication Hub (F9)
+- Manage a guest list for each meeting and send email invitations via the Communication Hub
 - Track RSVP status (pending, confirmed, declined, no response) for guest list members
 - Auto-populate team meeting guest lists from the ministry team roster
 - Link attendees to Person records and create new Person records inline
 - Generate and monitor 48-hour follow-up tasks for new attendees at vision meetings
 - View meeting-level outcomes and trends (attendance, follow-up, and conversion indicators)
 - Evaluate completed vision meetings using a consistent eight-factor quality rubric
-- Create team meetings from within the Ministry Teams feature (F8) or from the Meetings list
+- Create team meetings from within the Ministry Teams feature or from the Meetings list
 
 ---
 
@@ -81,9 +81,9 @@ Every Vision Meeting should aim to achieve these 8 meeting-level quality factors
 | VM-002 | Meeting list view | View all upcoming and past meetings with type filter tabs |
 | VM-003 | Attendance capture | Record who attended each meeting |
 | VM-004 | New vs returning tracking | Distinguish first-time, returning, and core-group attendees. The distinction is derived from person status and prior attendance, not entered by the user |
-| VM-005 | Attendee-to-person linking | Create Person records for new attendees (F2 integration) |
+| VM-005 | Attendee-to-person linking | Create Person records for new attendees (People/CRM integration) |
 | VM-006 | Guest list management | Add people from CRM to a meeting's guest list; auto-populate from team roster for team meetings |
-| VM-007 | Follow-up task generation | Emit event that triggers follow-up task creation for **first-time** vision meeting attendees only (`attendance_type = first_time`); returning and core-group attendees get none — returning attendees are already in the pipeline, and the committed core group needs no 48-hour touch. Due date anchors to meeting date + 48 hours. (F5 integration) |
+| VM-007 | Follow-up task generation | Emit event that triggers follow-up task creation for **first-time** vision meeting attendees only (`attendance_type = first_time`); returning and core-group attendees get none — returning attendees are already in the pipeline, and the committed core group needs no 48-hour touch. Due date anchors to meeting date + 48 hours. (Task Management integration) |
 | VM-008 | Meeting detail view | Full view of meeting details, attendance, and outcomes |
 | VM-009 | Location management | Save and reuse venue information across meeting types |
 | VM-010 | Basic analytics | Track attendance counts and trends, filterable by meeting type |
@@ -94,13 +94,13 @@ Every Vision Meeting should aim to achieve these 8 meeting-level quality factors
 
 | ID | Requirement | Description |
 |----|-------------|-------------|
-| VM-011 | Email invitation sending | Trigger email invitations to guest list members via Communication Hub (F9) using meeting templates |
+| VM-011 | Email invitation sending | Trigger email invitations to guest list members via the Communication Hub using meeting templates |
 | VM-012 | Materials checklist | Checklist of required materials (Vision Meeting kit) — vision meetings only |
 | VM-013 | Agenda builder | Create and customize meeting agendas |
 | VM-014 | Response card capture | Record response card data (interested, ready to commit, etc.) — vision meetings only |
 | VM-015 | Meeting evaluation | Self-assess 8 meeting quality factors after each vision meeting |
 | VM-016 | Success score tracking | Calculate and trend success scores over time — vision meetings only |
-| VM-018 | Meeting reminders | Automated reminders to guest list before meetings, delivered via Communication Hub (F9) |
+| VM-018 | Meeting reminders | Automated reminders to guest list before meetings, delivered via the Communication Hub |
 | VM-019 | Calendar integration | Create calendar events for meetings |
 | VM-020 | Follow-up completion tracking | Show follow-up completion percentage per vision meeting |
 | VM-027 | Team meeting auto-roster | Auto-populate guest list from team roster when creating a team meeting |
@@ -239,7 +239,7 @@ For upcoming meetings. Tabs vary by meeting type.
 - Add people from CRM search or by group (Core Group, team roster, etc.)
 - For team meetings: auto-populated from team roster with option to add/remove
 - RSVP status per invitee (pending, confirmed, declined, no response)
-- "Send Invitations" button: triggers email via Communication Hub (F9) using meeting templates
+- "Send Invitations" button: triggers email via the Communication Hub using meeting templates
 - Overall guest list metrics (total, confirmed, declined, pending)
 
 #### Tab: Logistics (vision meetings only)
@@ -445,7 +445,7 @@ System actions:
 +-- If vision meeting: meeting_number auto-assigned
 +-- If team meeting: guest list auto-populated from team roster (VM-027)
 +-- [Should Have: VM-019] Calendar event created
-+-- [Should Have: VM-018] Reminder scheduled via Communication Hub (F9)
++-- [Should Have: VM-018] Reminder scheduled via the Communication Hub
 +-- [Should Have: VM-012] Materials checklist populated from template (vision meetings only)
 ```
 
@@ -460,7 +460,7 @@ System actions:
 ```
 [Automated reminder: Meeting in 7 days]
     |
-Send reminder to guest list via Communication Hub (F9)
+Send reminder to guest list via the Communication Hub
     |
 [Day -3]: Materials checklist reminder to logistics owner (vision meetings)
     |
@@ -481,7 +481,7 @@ Send reminder to guest list via Communication Hub (F9)
 [Open Attendance Capture screen]
     |
 For each attendee:
-+-- Search existing contacts OR quick add new
++-- Search the people directory OR quick add new
 +-- Attendance type derived on marking attended (First-time, Returning, Core Group)
 +-- Capture response card data (optional, vision meetings)
     |
@@ -489,8 +489,8 @@ For each attendee:
     |
 System actions:
 +-- Create Person records for new contacts
-+-- Emit `meeting.attendance.recorded` per attendee (F2 handles status progression for vision meetings)
-+-- Emit `meeting.attendance.finalized` (F5 handles follow-up task creation for vision meetings)
++-- Emit `meeting.attendance.recorded` per attendee (People/CRM handles status progression for vision meetings)
++-- Emit `meeting.attendance.finalized` (Task Management handles follow-up task creation for vision meetings)
 ```
 
 ---
@@ -504,10 +504,10 @@ System actions:
 ```
 [Finalize Attendance]
     |
-F3 emits `meeting.attendance.finalized` event:
+Meetings emits the `meeting.attendance.finalized` event:
 +-- Payload: { meetingId, meetingType, churchId, attendeeIds[], totalAttendance }
     |
-F5 subscribes and creates follow-up tasks:
+Task Management subscribes and creates follow-up tasks:
 +-- One task per FIRST-TIME attendee only: "Follow up with [Name]"
 +-- (returning and core-group attendees get no follow-up task)
 +-- Assigned to: Senior Pastor (default) or customize
@@ -515,7 +515,7 @@ F5 subscribes and creates follow-up tasks:
 +-- Priority: High
 +-- Link to Person record
     |
-Tasks appear in Task Management (F5)
+Tasks appear in Task Management
     |
 As follow-up completed:
 +-- Mark task complete
@@ -580,16 +580,16 @@ Review guest list, manage RSVP status
     |
 [Send Invitations] button
     |
-Communication Hub (F9):
+The Communication Hub:
 +-- Auto-select meeting invitation template by meeting type
 +-- Auto-fill merge fields (meeting title, date, location, type)
 +-- Optional: preview before sending
 +-- Send emails to all pending/unsent invitees
     |
-Emails delivered, delivery status tracked in F9
+Emails delivered, delivery status tracked in the Communication Hub
     |
 Guest list updated:
-+-- Delivery status tracked per guest via F9
++-- Delivery status tracked per guest via the Communication Hub
 +-- RSVP responses update response_status as recipients answer from their confirmation links
     |
 [Resend to Pending] action available for follow-up
@@ -748,7 +748,7 @@ Standard materials tracked per vision meeting:
 
 | Item | Category | Notes |
 |------|----------|-------|
-| Guest Sign-in Sheet | Essential | Download template from F6 |
+| Guest Sign-in Sheet | Essential | Download template from the document-templates catalog |
 | Name Tags | Essential | Include markers |
 | Welcome Brochure | Materials | Church-specific content |
 | Constitution/Doctrinal Brochure | Materials | If available |
@@ -777,19 +777,19 @@ This feature integrates with cross-cutting services and shared canonical models 
 
 | Data | Contract | Source |
 |------|----------|--------|
-| **Person lookup** | Read `Person.id`, `first_name`, `last_name`, `email` for attendance, guest list, and invitation sending | People/CRM (F2) |
-| **Team roster lookup** | Read team membership by `team_id` to auto-populate guest list for team meetings | Ministry Teams (F8) |
-| **Template access** | Read template list by category `meeting_invitation` for materials checklist and email templates | Communication Hub (F9) |
+| **Person lookup** | Read `Person.id`, `first_name`, `last_name`, `email` for attendance, guest list, and invitation sending | People/CRM |
+| **Team roster lookup** | Read team membership by `team_id` to auto-populate guest list for team meetings | Ministry Teams |
+| **Template access** | Read template list by category `meeting_invitation` for materials checklist and email templates | Communication Hub |
 
 ### Outbound (This Feature Provides)
 
 | Event/Data | Contract | Consumers May |
 |------------|----------|---------------|
-| **`meeting.attendance.recorded`** | Emits `{ meetingId, meetingType, personId, churchId, attendanceType }` per attended person | F2 subscribes to auto-advance person status (Prospect to Attendee) for vision meetings |
-| **`meeting.attendance.finalized`** | Emits `{ meetingId, meetingType, churchId, attendeeIds[], totalAttendance }` when attendance is finalized (`attendeeIds` covers all attended people) | F5 subscribes to create 48-hour follow-up tasks (first-time attendees only — F5 filters by `attendance_type`) and a 24-hour evaluation task for vision meetings |
-| **`meeting.evaluation.completed`** | Emits `{ meetingId, churchId, evaluatedById }` when an evaluation is submitted | F5 subscribes to auto-complete the meeting's evaluation task |
+| **`meeting.attendance.recorded`** | Emits `{ meetingId, meetingType, personId, churchId, attendanceType }` per attended person | People/CRM subscribes to auto-advance person status (Prospect to Attendee) for vision meetings |
+| **`meeting.attendance.finalized`** | Emits `{ meetingId, meetingType, churchId, attendeeIds[], totalAttendance }` when attendance is finalized (`attendeeIds` covers all attended people) | Task Management subscribes to create 48-hour follow-up tasks (first-time attendees only — Task Management filters by `attendance_type`) and a 24-hour evaluation task for vision meetings |
+| **`meeting.evaluation.completed`** | Emits `{ meetingId, churchId, evaluatedById }` when an evaluation is submitted | Task Management subscribes to auto-complete the meeting's evaluation task |
 | **`meeting.completed`** | Emits `{ meetingId, meetingType, churchId, attendanceCount, newAttendeeCount }` | Update dashboard metrics |
-| **Meeting invitation requests** | Expose meeting details (title, datetime, location, type) and guest list (person IDs) to Communication Hub for email delivery | F9 sends invitation emails using meeting templates |
+| **Meeting invitation requests** | Expose meeting details (title, datetime, location, type) and guest list (person IDs) to Communication Hub for email delivery | Communication Hub sends invitation emails using meeting templates |
 | **Meeting metrics** | Exposes attendance counts and trends by `church_id`, filterable by meeting type | Dashboard aggregation |
 
 ---

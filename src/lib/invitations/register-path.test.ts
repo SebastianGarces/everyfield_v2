@@ -30,6 +30,14 @@ import {
 //      because the thing being pinned IS a call site: a client component and a
 //      `"use server"` module cannot be executed in a unit test's process, and
 //      it was exactly the un-executed call sites that drifted.
+//
+// RECONCILED 2026-08-12 with #304 ruling 4 item 5. Two of the three call sites
+// this file was written for are GONE, not moved: no admin surface may render a
+// `/register?invitation=` link, so the create action and the pending list build
+// nothing. The helper's remaining caller is the EMAIL — which is what the
+// ruling said would replace the admin's hand-forwarded copy. Rule 1 still
+// matters, because `invitations-list.tsx` holds the other import-free leaf
+// (`resend-window`) for the same bundling reason.
 // ============================================================================
 
 const ROOT = path.join(process.cwd(), "src");
@@ -93,14 +101,22 @@ test("register-path.ts imports nothing", () => {
 // 3. Nobody re-spells the query key
 // ----------------------------------------------------------------------------
 
+// THE ONE BUILDER, and it is now the only one. The create action and the
+// pending list used to build this link too; #304 ruling 4 item 5 (2026-08-09,
+// reinforced 2026-08-11) removed both, because a `/register?invitation=` URL on
+// an admin surface is an account-existence oracle one click later. The ruling
+// called the admin's copy of it "a stopgap for the email delivery that has not
+// shipped" — and this issue IS that delivery, so the stopgap does not return.
 const CALL_SITES = [
   // The email — absolute, via `invitationRegisterUrl`.
   ["lib", "invitations", "email.ts"],
-  // The admin's copyable fallback, returned by the create action.
+] as const;
+
+// Where the link must NOT be built, whatever else changes on those surfaces.
+const FORBIDDEN_SITES = [
   ["app", "(dashboard)", "oversight", "invitations", "actions.ts"],
-  // The "Copy link" button on the pending list — a `"use client"` component,
-  // and the surface that could not import the helper before this file existed.
   ["components", "oversight", "invitations-list.tsx"],
+  ["components", "oversight", "invitation-create-form.tsx"],
 ] as const;
 
 test("every builder of the invite link calls the helper", () => {
@@ -121,13 +137,32 @@ test("every builder of the invite link calls the helper", () => {
   }
 });
 
-test("the client surface reaches the leaf, never the send path", () => {
+test("no admin surface builds the invite link at all", () => {
+  // Item 5, from this module's side. The helper is not the escape hatch: a
+  // surface that must not show the link must not compose it either, by the
+  // helper or by hand.
+  for (const segments of FORBIDDEN_SITES) {
+    const source = code(read(...segments));
+    const where = segments.join("/");
+
+    assert.doesNotMatch(
+      source,
+      /invitationRegisterPath\(|invitationRegisterUrl\(|\?invitation=/,
+      `${where} renders a register link — #304 ruling 4 item 5 forbids it`
+    );
+  }
+});
+
+test("the client surface reaches leaves only, never the send path", () => {
   // The specific import that put 687 KB of Resend SDK in the browser chunk.
   // `@/lib/invitations/email` pulls `@/lib/email/client`, which constructs a
-  // Resend instance at module scope.
+  // Resend instance at module scope. The list no longer needs `register-path`
+  // (item 5 took its Copy-link button) but it does need `resend-window`, the
+  // other import-free leaf, for the cooldown countdown — so the rule is about
+  // leaves generally, not about one file.
   const list = code(read("components", "oversight", "invitations-list.tsx"));
 
-  assert.match(list, /from "@\/lib\/invitations\/register-path"/);
+  assert.match(list, /from "@\/lib\/invitations\/resend-window"/);
   assert.doesNotMatch(
     list,
     /from "@\/lib\/(invitations\/email|email\/client)"/,

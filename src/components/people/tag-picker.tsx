@@ -7,7 +7,7 @@ import {
   assignTagAction,
   createTagAction,
   removeTagAction,
-} from "@/app/(dashboard)/people/actions";
+} from "@/app/(dashboard)/people/tag-actions";
 import { Button } from "@/components/ui/button";
 import {
   Command,

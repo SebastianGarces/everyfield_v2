@@ -33,6 +33,19 @@ import {
 // through a carefully documented three-valued contract, and dropped one layer
 // above — so the surface told every admin to go send the link themselves whether
 // or not the email had gone out, and said nothing at all when it had not.
+//
+// ----------------------------------------------------------------------------
+// THE AC's "copyable link" CLAUSE IS SUPERSEDED (reconciled 2026-08-12)
+// ----------------------------------------------------------------------------
+//
+// #304 ruling 4 item 5 (2026-08-09, reinforced 2026-08-11) forbids
+// `/oversight/invitations` rendering a `/register?invitation=` link at all, and
+// named the admin's copy of it "a stopgap for the email delivery that has not
+// shipped". #293 IS that delivery. The AC was written before the ruling; the
+// ⚖ ruling is later and explicitly says not to reintroduce the link without one
+// that supersedes it. So the fallback the AC asks for is now **Resend email**
+// on the invitation's own row — the same track's work — and §5 below asserts
+// the ABSENCE of a link, which is the stronger guard the ruling wants.
 // ============================================================================
 
 const ROOT = path.join(process.cwd(), "src");
@@ -63,7 +76,6 @@ function created(
   emailSent?: boolean
 ): NonNullable<CreateInvitationState["created"]> {
   return {
-    inviteePath: "/register?invitation=77777777-7777-4777-8777-777777777777",
     inviteeEmail: INVITEE,
     emailSent,
   };
@@ -100,11 +112,14 @@ test("a failed send is surfaced as 'invitation created — email could not be se
     notice.headline
   );
 
-  // …and the link is the FALLBACK the AC asks for: promoted, with the invitee's
-  // address named, because the admin now has to do the delivery.
-  assert.equal(notice.linkIsBackup, false);
+  // …and it names the RECOVERY, which is what the AC's "fallback" clause means
+  // now that item 5 has removed the link (see the header). The invitee's
+  // address is named, because the point is that nothing reached it.
   assert.match(notice.detail, new RegExp(INVITEE));
-  assert.match(notice.detail, /send this link/i);
+  assert.match(notice.detail, /resend email/i);
+
+  // Never a link, in the one state most tempted to offer one.
+  assert.doesNotMatch(notice.detail, /\/register|invitation=|this link/i);
 });
 
 // ----------------------------------------------------------------------------
@@ -117,11 +132,9 @@ test("a successful send says so, and stops telling the admin to deliver it", () 
   assert.equal(notice.state, "sent");
   assert.equal(notice.headline, `Invitation sent to ${INVITEE}`);
 
-  // The link stays — a provider acceptance is not a delivery receipt — but it is
-  // demoted to a backup, and the instruction to go send it is gone. Telling an
-  // admin to forward a link the invitee already has is the "we sent nothing"
-  // copy failure inverted, and it costs the same trust.
-  assert.equal(notice.linkIsBackup, true);
+  // The instruction to go deliver it by hand is gone. Telling an admin to
+  // forward a link the invitee already has is the "we sent nothing" copy
+  // failure inverted, and it costs the same trust.
   assert.doesNotMatch(notice.detail, /send this link|send them this link/i);
   assert.match(notice.detail, /nothing more to send/i);
 
@@ -187,14 +200,23 @@ test("the notice component branches on it rather than hard-coding copy", () => {
     /Email delivery is not part of this surface/
   );
   assert.doesNotMatch(CREATE_FORM, /Send them this link\./);
+});
 
-  // The copyable link and its Copy button survive in both branches — the
-  // fallback the AC names — and the button keeps `cursor-pointer` (CLAUDE.md).
-  assert.match(CREATE_FORM, /navigator\.clipboard\.writeText\(url\)/);
-  assert.match(CREATE_FORM, /Copied.*:.*Copy link/);
-  const button = CREATE_FORM.slice(
-    CREATE_FORM.indexOf("onClick={async () => {") - 400,
-    CREATE_FORM.indexOf("navigator.clipboard")
-  );
-  assert.match(button, /cursor-pointer/);
+// ----------------------------------------------------------------------------
+// 5. …and no register link comes back with it (#304 ruling 4 item 5)
+// ----------------------------------------------------------------------------
+//
+// The COMPONENT-side half of this lives in `invitations-ui.test.ts` §9, which
+// owns the item-5 assertions for the whole page and strips comments before
+// scanning (a comment RECORDING the removed link must not be what fails a
+// test). What belongs here is the half §9 cannot see: the words themselves.
+
+test("the three notices never mention a link the surface does not render", () => {
+  // Copy and component cannot drift: the words live in `create-notice.ts` and
+  // the surface renders them verbatim, so a sentence offering a link would ship
+  // an instruction pointing at nothing.
+  for (const emailSent of [true, false, undefined]) {
+    const { headline, detail } = noticeFor(emailSent);
+    assert.doesNotMatch(`${headline} ${detail}`, /\/register|invitation=/i);
+  }
 });

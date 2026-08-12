@@ -728,12 +728,27 @@ test("a refusal survives long enough to be read — the refresh is on the succes
 });
 
 test("the action refuses a malformed id before anything is sent", () => {
-  const action = ACTIONS_CODE.slice(
-    ACTIONS_CODE.indexOf("export async function resendInvitationEmailAction"),
-    ACTIONS_CODE.indexOf("export async function revokeInvitationAction")
+  // Comments stripped, like every other source-shaped check in this file: the
+  // last assertion forbids the WORD "actor" in the body, and this action's
+  // header comment has to be free to explain that the service mints its own.
+  const stripped = code(ACTIONS_CODE);
+  const action = stripped.slice(
+    stripped.indexOf("export async function resendInvitationEmailAction"),
+    stripped.indexOf("export async function revokeInvitationAction")
   );
 
   assert.ok(action.length > 0, "resendInvitationEmailAction is missing");
+
+  // SESSION FIRST, THEN THE PARSE (ruled 2026-08-10, round 6 of #304) — the
+  // repo-wide ordering `server-action-surface.test.ts` walks. An anonymous POST
+  // is refused before its FormData is examined, so a malformed body and a
+  // well-formed one answer a sessionless caller identically.
+  assert.ok(
+    action.indexOf("verifySession()") <
+      action.indexOf("resendSchema.safeParse"),
+    "the session mint must precede the parse"
+  );
+
   assert.match(action, /resendSchema\.safeParse/);
   assert.match(action, /if \(!parsed\.success\)/);
   // No actor argument: the service mints one from `verifySession()`.
@@ -998,6 +1013,16 @@ test("NAMED LIMITATION: a session that never saw the send still gets a live butt
   // Executed, not asserted about — this is the case the cooldown CANNOT reach,
   // and it is pinned so that nobody reads §8's disabled-button assertions as a
   // guarantee the product does not make.
+  //
+  // ⚖ RULED 2026-08-12 (Sebastian, option (a) on PR #392): ACCEPTED AS IS. AC3
+  // reads "no second 'Email sent' claim can appear inside one window", with no
+  // session qualifier — and that letter loses to the round-1 no-persistence
+  // ruling it was written under. Satisfying it across sessions needs a durable
+  // last-send record, therefore a column and a migration, which round 1 refused
+  // outright. The cooldown stays per client session, the "Email sent" copy
+  // stays as written, and this test is the record. It is a residual, not a
+  // defect awaiting a fix: retiring it takes a NEW ruling that reverses the
+  // no-persistence constraint, not a patch.
   //
   // The cooldown lives in `useActionState`, which is per client session by the
   // ruling's own no-persistence constraint. Admin A resends; admin A reloads (or

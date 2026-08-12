@@ -57,6 +57,15 @@ export const FORMAT_OUTPUT: Record<
 };
 
 /**
+ * Narrow an untrusted string (e.g. the `?format=` query param) to a
+ * `DocumentFormat`. Derived from `FORMAT_OUTPUT`, which already enumerates
+ * the formats, so a new format joins the guard by construction.
+ */
+export function isDocumentFormat(value: string): value is DocumentFormat {
+  return Object.hasOwn(FORMAT_OUTPUT, value);
+}
+
+/**
  * A merge field on a template. `autoFill` names a value the server can resolve
  * from the church/user profile; fields without it are entered by the planter
  * at generation time (e.g. meeting date, meeting number).

@@ -37,11 +37,24 @@
 // `preferenceOwnerFromSession` in `@/lib/notifications/preferences`.
 // ============================================================================
 
-import { and, desc, eq, exists, lt, sql, type SQL } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  exists,
+  gt,
+  gte,
+  lt,
+  notExists,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 
 import { db } from "@/db";
 import {
+  associationEvents,
   churches,
   organizationInvitations,
   sendingChurches,
@@ -56,8 +69,25 @@ import type {
   OrganizationInvitationStatus,
   OrganizationInvitationType,
 } from "@/db/schema/organization-invitation";
+import type { AssociationOrgType } from "@/db/schema";
 import { redactForLog } from "@/lib/email/redact";
-import { announceInvitationAccepted } from "@/lib/notifications/oversight";
+import {
+  announceAssociationEnded,
+  announceInvitationAccepted,
+  announceInvitationDeclined,
+  announceSendingChurchDeclinedNetwork,
+  announceSendingChurchJoinedNetwork,
+  announceSendingChurchLeftNetwork,
+} from "@/lib/notifications/oversight";
+import { announceRemovedFromOversightOrg } from "@/lib/notifications/plant-association";
+
+import {
+  acceptedAssociationEventStatement,
+  churchSubject,
+  sendingChurchSubject,
+  severAssociationWithAuditStatement,
+  type AssociationSubject,
+} from "./audit";
 
 import {
   sendInvitationEmail,
@@ -88,6 +118,39 @@ import { resendDedupeWindowAt, type ResendDedupeWindow } from "./resend-window";
  * `service.test.ts` fails if `expiresInDays` reappears anywhere in this module.
  */
 export const INVITATION_EXPIRY_DAYS = 30;
+
+/**
+ * How many times ONE inviting org may address ONE email address inside a
+ * rolling `INVITATION_EXPIRY_DAYS` window (#304, HR4 2026-08-09).
+ *
+ * WHAT THIS IS FOR. #304 restored the targeted path, so an invitation addressed
+ * to somebody who already has an account produces a DASHBOARD REMINDER on their
+ * plant — and OV-005 makes that reminder dismissible ONLY by answering. The org
+ * chooses its own display name, so without a cap an oversight admin could park
+ * an attacker-chosen banner on an arbitrary planter's dashboard and, each time
+ * the planter declined, put it straight back. Declining has to END something.
+ *
+ * `assertNoDuplicatePending` already stops two banners standing at once; it does
+ * nothing about the replay, because a declined row is no longer pending. This
+ * counts EVERY invitation the org has addressed to that address in the window,
+ * whatever its status, so a decline–reinvite loop exhausts the allowance instead
+ * of resetting it.
+ *
+ * AND IT RESETS AFTER A SEVER (round 10, ruled 2026-08-11). Counting every
+ * status is what defeats the loop; it also meant an association that was
+ * ACCEPTED and later ended still spent the allowance, so the three severs this
+ * track ships could lock an org out of re-inviting a plant it legitimately
+ * parted with — with a refusal message asserting a pending answer while nothing
+ * was pending. `afterTheLastAssociationEventFilter` is the floor that fixes it:
+ * only invitations created after the org's most recent `association_events` row
+ * about the same subject count. A decline writes no event, so the loop is
+ * unchanged.
+ *
+ * Three, not one: an admin genuinely does mistype an address, revoke, and send
+ * again, and the window is a month. Three attempts a month is far more than that
+ * needs and far less than a nuisance channel.
+ */
+export const INVITES_PER_INVITEE_PER_WINDOW = 3;
 
 // ============================================================================
 // Errors
@@ -261,49 +324,56 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 export const INVALID_EMAIL_MESSAGE = "Enter a valid email address";
 
 /**
- * Already-taken slot, refused at CREATE time.
+ * The ONE refusal an admin ever reads about an address they typed — whatever
+ * the actual reason was.
  *
- * RULED 2026-08-03 (#23): `createInvitation` refuses up front when the target
- * plant's oversight slot is already held, rather than letting the admin send an
- * invitation that `acceptInvitationAs` is guaranteed to refuse days later with
- * nobody watching. Defense in depth — the accept-time guard
- * (`unboundTargetSlot`) is the one that has to hold under concurrency and is
- * NOT replaced by this; this one exists so the admin is told immediately, in
- * the form. Once severing ships (#277/#278) the slot frees and the org
- * re-invites.
+ * ----------------------------------------------------------------------------
+ * The history, because the rule inverted twice, and then collapsed
+ * ----------------------------------------------------------------------------
+ *
+ * RULED 2026-08-04 (#23): an invitation nobody can answer is not sent. At that
+ * point the only place an invitation could be answered was `/register` — the
+ * link creates the organization and redeems the invitation in one request — and
+ * somebody who already has an account cannot register again. So EVERY existing
+ * account was refused, with one message, and a targeted invitation would have
+ * sat `pending` for 30 days with no surface anywhere to answer it.
+ *
+ * #304 REMOVES THAT PREMISE, which is the condition the ruling itself named: the
+ * planter's association area (`/settings/association`) and the dashboard
+ * reminder are now the in-product place an existing account answers from. So the
+ * targeted path is restored — the address is looked up, the account is mapped to
+ * its organization, and the id becomes the invitation's target.
+ *
+ * ----------------------------------------------------------------------------
+ * ONE MESSAGE FOR EVERY REFUSAL — RULED 2026-08-09 (#304, ruling 2)
+ * ----------------------------------------------------------------------------
+ *
+ * Restoring the targeted path re-opened an enumeration oracle: an authenticated
+ * admin could type any address and read back which of four things was true of
+ * the person behind it — no account (an open invitation is created), an account
+ * we cannot invite, a plant whose oversight slot ANOTHER org holds, or one that
+ * is already ours. Three of those are facts about somebody else's tenancy, and
+ * the probe costs nothing but a form submission.
+ *
+ * So every refusal on an EMAIL-RESOLVED target — which is every target in the
+ * product, because the admin only ever types an address and the server resolves
+ * it (`resolveInvitationTarget`, "WHY THERE IS NO PICKER") — is this constant
+ * and nothing else. `assertTargetSlotFree` no longer has a message of its own;
+ * `slotRefusalMessage` below is the whole of its vocabulary.
+ *
+ * WHAT AN ADMIN LOSES, and why it is acceptable: they are no longer told that
+ * the plant they aimed at already belongs to somebody, or to them. Their OWN
+ * org's state is still legible in the two places that hold it — the pending
+ * invitations list on `/oversight/invitations` and the plants directory — and
+ * neither of those names anything outside their own tenancy.
+ *
+ * The wording therefore has to be true of all of them at once: it names no
+ * role, no organization and no relationship, and it points at the two lists
+ * that answer "is this already handled?" without asking the server about a
+ * stranger.
  */
-export const SLOT_TAKEN_MESSAGE =
-  "That organization already belongs to a sending church or network — it has to leave that one first";
-
-export const ALREADY_OURS_MESSAGE =
-  "That organization is already part of your organization";
-
-/**
- * An address that ALREADY has an EveryField account, refused at CREATE time.
- *
- * RULED 2026-08-04 (#23): an invitation nobody can answer is not sent. The only
- * place an invitation can be answered today is `/register` — the link creates
- * the organization and redeems the invitation in one request
- * (`redeemRegistrationInvitation`). Somebody who already has an account cannot
- * register again, and the in-app place they would answer from — the planter's
- * association area — ships with #277. So a targeted invitation would sit
- * `pending` for 30 days with no surface anywhere to accept or decline it, while
- * the admin believed it was sent.
- *
- * Same ruling family as `SLOT_TAKEN_MESSAGE` above and for the same reason: the
- * refusal happens where the admin is watching, not days later inside somebody
- * else's dead end.
- *
- * WHAT #277 CHANGES. When the association area exists, this refusal becomes the
- * targeted path again: look the address up in `users`, map the account to its
- * organization (a `planter` → their `church_id`, and for a network admin a
- * `sending_church_admin` → their `sending_church_id`), refuse an account that is
- * neither and a planter who has not created their plant yet, and hand the
- * resulting id to `resolveInvitationRequest` as the target. `assertTargetSlotFree`
- * below is already written for exactly that row and stays in place for it.
- */
-export const ACCOUNT_EXISTS_MESSAGE =
-  "That email already has an EveryField account — there is nowhere for them to answer an invitation yet, so invite an address that has not signed up";
+export const ACCOUNT_NOT_INVITABLE_MESSAGE =
+  "We cannot invite that email address — check your plants and pending invitations, or invite the planter's own address, or one that has not signed up yet";
 
 /**
  * The fields that decide WHAT association an accept makes: the target entity and
@@ -446,6 +516,78 @@ export function resolveInvitationRequest(
 }
 
 /**
+ * The SECOND pass of `resolveInvitationRequest` — the one that runs after the
+ * typed address has been resolved to a target — with its refusals collapsed.
+ * Pure, so the property the ruling demands is executable without a database.
+ *
+ * WHY THIS EXISTS — RULED 2026-08-09 (#304, ruling 2). A refusal produced on a
+ * SERVER-RESOLVED target is a statement about the stranger behind the probed
+ * address, not about the actor, and so it must speak with the one voice
+ * (`ACCOUNT_NOT_INVITABLE_MESSAGE`). Left legible, this call reopened the exact
+ * oracle the ruling closed: a `sending_church_admin` who typed an address
+ * belonging to ANOTHER sending church admin read back "A sending church can
+ * only invite church plants" — a third outcome, distinguishable from both
+ * success and the one message, that says "that address is a sending-church
+ * admin who has an organization".
+ *
+ * The collapse is HERE and not inside `resolveInvitationRequest`, because that
+ * function is also run on the target-less AUTHORITY pass in
+ * `createInvitationAs` — which happens BEFORE any address is looked up, whose
+ * messages describe the actor's own role and org ("Set up your sending church
+ * first"), and which therefore leaks nothing and must stay legible.
+ *
+ * The condition is on whether a target was actually resolved, not on which
+ * branch refused: it is the *reachability after resolution* that makes a
+ * message an oracle, so a rule added to `resolveInvitationRequest` later is
+ * collapsed by construction rather than needing to be found.
+ *
+ * ----------------------------------------------------------------------------
+ * THE REQUEST IS BUILT FROM SCRATCH — #304 ruling 4, fix 1 (HR4 2026-08-09)
+ * ----------------------------------------------------------------------------
+ *
+ * This used to compose `{ ...request, ...target }`, and a spread is not a
+ * filter. `target` is `{}` for an address nobody has registered, and an object
+ * spread contributes no keys at all in that case — so a caller-supplied
+ * `targetChurchId` survived untouched and became the invitation's target. That
+ * is a FORGED TARGET: `createInvitation` is a `"use server"` endpoint whose
+ * parameter is a typed object, `InvitationRequest` declares both target keys
+ * (they are the channel `resolveInvitationTarget` writes on), and TypeScript
+ * erases at runtime. A POST naming any plant's uuid with an unregistered
+ * address enrolled that plant into the caller's org the moment its planter
+ * pressed Accept. `target.targetChurchId ?? request.targetChurchId` would not
+ * have closed it either, and neither does a partial spread — the only shape
+ * with no hole is naming every key from the SERVER-RESOLVED value.
+ *
+ * So the object below is constructed key by key: the two target keys come from
+ * `target` and from nowhere else, and the two request keys are the only things
+ * a client is ever allowed to say (`InvitationRequest`). A key added to that
+ * type later is not silently forwarded — it has to be written in here, which is
+ * the point.
+ *
+ * `createInvitationAs` ALSO strips them at its call site, so the hole is closed
+ * twice: defence in depth, because this function is exported and a future
+ * caller may not read this comment.
+ */
+export function resolveInvitationForResolvedTarget(
+  actor: InvitationActor,
+  request: InvitationRequest,
+  target: InviteeTarget
+): ResolveResult {
+  const targeted =
+    target.targetChurchId != null || target.targetSendingChurchId != null;
+
+  const resolved = resolveInvitationRequest(actor, {
+    inviteeEmail: request.inviteeEmail,
+    inviteAs: request.inviteAs,
+    targetChurchId: target.targetChurchId,
+    targetSendingChurchId: target.targetSendingChurchId,
+  });
+  if (resolved.ok || !targeted) return resolved;
+
+  return { ok: false, error: ACCOUNT_NOT_INVITABLE_MESSAGE };
+}
+
+/**
  * Insert a resolved invitation. No authority check of its own — it writes
  * exactly what it is given, so every caller must have gone through
  * `resolveInvitationRequest` (the action layer) or be deliberately building an
@@ -483,25 +625,56 @@ export async function insertInvitation(
 }
 
 /**
- * May this address be invited at all, given what the account lookup found?
- * `null` to proceed, a user-facing message to refuse.
+ * WHAT ORGANIZATION does an existing account speak for? `undefined` for an
+ * address nobody has registered (the open-invitation path), a target for an
+ * account we can invite, and a user-facing message for one we cannot.
  *
- * Pure, so the 2026-08-04 ruling is executable without a database: EVERY
- * account is refused — whatever its role, and whether or not it has an
- * organization of its own — and only an address nobody has registered gets an
- * invitation. See `ACCOUNT_EXISTS_MESSAGE` for the reasoning and for what #277
- * puts back here.
+ * Pure, so the whole rule is executable without a database (#304 restores the
+ * targeted path; see `ACCOUNT_NOT_INVITABLE_MESSAGE` for the history):
  *
- * One message for all of them, deliberately. The finer-grained refusals this
- * replaced ("no organization yet", "cannot be invited", "wrong kind of
- * organization") told an inviter what KIND of account sits behind an address;
- * this tells them only that one does, which is the single bit they need to pick
- * a different address.
+ *   * `planter` WITH a `church_id`  → their plant is the target.
+ *   * `sending_church_admin` WITH a `sending_church_id` → their sending church.
+ *   * everything else — a team member, a coach, a network admin, and a planter
+ *     who has not created their plant yet — is refused, with ONE message.
+ *
+ * Only these two roles map to something an oversight org can associate with, and
+ * the mapping is the account's OWN organization: there is no parameter here a
+ * caller could aim at somebody else's church, and `resolveInvitationRequest`
+ * still decides independently whether the actor may invite that KIND of org at
+ * all (a sending church admin inviting a sending church is refused there).
  */
-export function inviteeAccountRefusal(
-  existingAccount: { role: UserRole } | undefined
-): string | null {
-  return existingAccount ? ACCOUNT_EXISTS_MESSAGE : null;
+export type InviteeTarget = Pick<
+  InvitationRequest,
+  "targetChurchId" | "targetSendingChurchId"
+>;
+
+export function inviteeAccountTarget(
+  existingAccount:
+    | {
+        role: UserRole;
+        churchId: string | null;
+        sendingChurchId: string | null;
+      }
+    | undefined
+): { ok: true; target: InviteeTarget } | { ok: false; error: string } {
+  // Nobody here yet — an open invitation, redeemed by registering.
+  if (!existingAccount) return { ok: true, target: {} };
+
+  if (existingAccount.role === "planter" && existingAccount.churchId) {
+    return { ok: true, target: { targetChurchId: existingAccount.churchId } };
+  }
+
+  if (
+    existingAccount.role === "sending_church_admin" &&
+    existingAccount.sendingChurchId
+  ) {
+    return {
+      ok: true,
+      target: { targetSendingChurchId: existingAccount.sendingChurchId },
+    };
+  }
+
+  return { ok: false, error: ACCOUNT_NOT_INVITABLE_MESSAGE };
 }
 
 /**
@@ -515,43 +688,42 @@ export function inviteeAccountRefusal(
  * and the server decides privately whether that address already belongs to an
  * organization.
  *
- * Two outcomes, since the 2026-08-04 ruling:
+ * Three outcomes since #304 restored the targeted path:
  *   * no account at all → an OPEN invitation with no target. The invite link
  *     carries the token to `/register`, where the organization is created and
  *     bound in one go (`bindOpenInvitationTarget`);
- *   * an account already exists → refused with `ACCOUNT_EXISTS_MESSAGE`,
- *     because there is no surface anywhere for that person to answer from
- *     until #277.
+ *   * an account that speaks for an organization → that organization is the
+ *     target, and the invitee answers from `/settings/association`;
+ *   * any other account → refused with `ACCOUNT_NOT_INVITABLE_MESSAGE`.
+ *
+ * The projection is exactly the three columns `inviteeAccountTarget` reads.
+ * Answering "which org is this" must not pull `password_hash` into application
+ * memory — the same reasoning as `accessColumns` in
+ * `@/lib/notifications/enqueue`.
  *
  * The refusal lives HERE rather than in the form: this is the path a forged
  * direct call to `createInvitation` takes too (`createInvitationAs` below), so
  * skipping the UI does not skip the rule.
  */
-export async function resolveInvitationTarget(inviteeEmail: string): Promise<
-  | {
-      ok: true;
-      target: Pick<
-        InvitationRequest,
-        "targetChurchId" | "targetSendingChurchId"
-      >;
-    }
-  | { ok: false; error: string }
-> {
+export async function resolveInvitationTarget(
+  inviteeEmail: string
+): Promise<{ ok: true; target: InviteeTarget } | { ok: false; error: string }> {
   const [existing] = await db
-    .select({ role: users.role })
+    .select({
+      role: users.role,
+      churchId: users.churchId,
+      sendingChurchId: users.sendingChurchId,
+    })
     .from(users)
     .where(eq(users.email, inviteeEmail))
     .limit(1);
 
-  const refusal = inviteeAccountRefusal(existing);
-  if (refusal) return { ok: false, error: refusal };
-
-  // Nobody here yet — an open invitation, redeemed by registering.
-  return { ok: true, target: {} };
+  return inviteeAccountTarget(existing);
 }
 
 /**
- * The occupied-slot refusal, RULED 2026-08-03 (#23) — see `SLOT_TAKEN_MESSAGE`.
+ * The occupied-slot refusal, RULED 2026-08-03 (#23), with its message collapsed
+ * RULED 2026-08-09 (#304, ruling 2) — see `ACCOUNT_NOT_INVITABLE_MESSAGE`.
  *
  * Reads the target's own oversight FK and refuses when it is held. `null`
  * targets (an open invitation) have nothing to check: the organization does not
@@ -561,17 +733,35 @@ export async function resolveInvitationTarget(inviteeEmail: string): Promise<
  * SELECT-then-INSERT guard never is (`memory/invariants.md`). Two admins racing
  * still both get an invitation created; what stops BOTH being honoured is
  * `unboundTargetSlot` + `lockTargetRow` at accept time, which is untouched. The
- * value of this check is that the admin is told NOW, in the form, instead of
+ * value of this check is that the admin is stopped NOW, in the form, instead of
  * the invitee discovering it when they try to accept.
+ *
+ * It refuses with the SAME sentence `resolveInvitationTarget` uses, so "the
+ * account cannot be invited", "the slot is another org's" and "the slot is
+ * already ours" are one outcome as far as the client can tell. The verdict
+ * itself stays three-valued — that is what is true of the row, and collapsing
+ * the FACT rather than the MESSAGE would make the next reader think the
+ * distinction was never there — but nothing derived from it reaches the
+ * response.
  */
 export async function assertTargetSlotFree(
   values: ResolvedInvitation
 ): Promise<void> {
   const held = await heldOversightSlot(values);
-  if (held === null) return;
-  throw new InvitationError(
-    held === "ours" ? ALREADY_OURS_MESSAGE : SLOT_TAKEN_MESSAGE
-  );
+  const refusal = slotRefusalMessage(held);
+  if (!refusal) return;
+  throw new InvitationError(refusal);
+}
+
+/**
+ * The verdict → what the admin reads. Pure and total, so the collapse is
+ * executable rather than a claim about a branch: EVERY non-free verdict maps to
+ * the one message, and a test can enumerate the whole domain.
+ */
+export function slotRefusalMessage(
+  held: "ours" | "other" | null
+): string | null {
+  return held === null ? null : ACCOUNT_NOT_INVITABLE_MESSAGE;
 }
 
 /** `"ours"` / `"other"` when the target's slot is taken, `null` when it is free. */
@@ -620,30 +810,347 @@ async function heldOversightSlot(
 }
 
 /**
- * Refuse a second pending invitation from the SAME org to the same address.
+ * "Aimed at THIS organization", whatever address named it — `null` when the
+ * invitation has no target at all (the open path).
+ *
+ * WHY IT EXISTS — #304 ruling 4, fix 4 (HR4 2026-08-09). Both create-time caps
+ * counted rows by `invitee_email`, and an ADDRESS is not the thing being
+ * protected. The banner OV-005 puts on a screen belongs to an ORGANIZATION, and
+ * an organization can have several accounts that resolve to it — every
+ * `sending_church_admin` of one sending church maps to that sending church, and
+ * a plant may carry more than one `planter`. So an org that had exhausted its
+ * three attempts at `admin1@…` simply typed `admin2@…` and had a fresh
+ * allowance against the same target, and `assertNoDuplicatePending` never saw
+ * the standing invitation either. Counting the resolved TARGET as well as the
+ * address is what makes both caps count the thing they defend.
+ */
+export function targetReachFilter(
+  values: Pick<ResolvedInvitation, "targetChurchId" | "targetSendingChurchId">
+): SQL | null {
+  if (values.targetChurchId) {
+    return eq(organizationInvitations.targetChurchId, values.targetChurchId);
+  }
+  if (values.targetSendingChurchId) {
+    return eq(
+      organizationInvitations.targetSendingChurchId,
+      values.targetSendingChurchId
+    );
+  }
+  return null;
+}
+
+/**
+ * THE CAP RESETS AFTER A SEVER (#304 round 10, RULED 2026-08-11).
+ *
+ * Both count queries carry this, and it is one predicate rather than two so the
+ * address scope and the target scope cannot drift into two definitions of "does
+ * this invitation still count".
+ *
+ * WHY. The cap counts EVERY status, which is what defeats a decline–reinvite
+ * loop — and the same blindness made the three severs this track ships spend
+ * the allowance. A plant that joined and left inside the 30-day window burned
+ * the org's three attempts on invitations it had ANSWERED, and the org that
+ * `remove-plant-dialog.tsx` promises "you can invite them back later" could
+ * not: the 4th was refused by a message asserting a pending answer while
+ * nothing was pending. A cap defending "an org cannot keep a banner up" must
+ * not also punish an association that ran its full course.
+ *
+ * WHAT IT SAYS, per row: this invitation counts unless the org has an
+ * `association_events` row about ITS OWN subject that is NEWER than the
+ * invitation. The most recent event for the (org, subject) pair is therefore
+ * the floor, and a join-then-leave cycle refunds exactly the invitations it
+ * answered — never a decline, which writes no event at all.
+ *
+ * THE SUBJECT IS MATCHED BY FK, not by `subject_type`: the exactly-one CHECK on
+ * `association_events` makes a non-null `church_id` mean `subject_type =
+ * 'church'` and a non-null `subject_sending_church_id` mean `'sending_church'`,
+ * so comparing the invitation's own target column to the matching subject
+ * column is the discriminator. An OPEN invitation names no target, matches no
+ * event, and so always counts — it has no association to have severed.
+ *
+ * The ORG side is the caller's own, and it is compared as the discriminated
+ * pair the audit table stores (`org_type` + `org_id`, no FK). An org with
+ * neither id — impossible for a row `resolveInvitationRequest` produced —
+ * matches no event and every invitation counts, which is the fail-CLOSED
+ * direction for a cap.
+ */
+export function afterTheLastAssociationEventFilter(
+  values: Pick<ResolvedInvitation, "sendingChurchId" | "sendingNetworkId">
+): SQL {
+  const org = values.sendingChurchId
+    ? and(
+        eq(associationEvents.orgType, "sending_church"),
+        eq(associationEvents.orgId, values.sendingChurchId)
+      )
+    : values.sendingNetworkId
+      ? and(
+          eq(associationEvents.orgType, "network"),
+          eq(associationEvents.orgId, values.sendingNetworkId)
+        )
+      : sql`false`;
+
+  return notExists(
+    db
+      .select({ one: sql`1` })
+      .from(associationEvents)
+      .where(
+        and(
+          org,
+          or(
+            eq(
+              associationEvents.churchId,
+              organizationInvitations.targetChurchId
+            ),
+            eq(
+              associationEvents.subjectSendingChurchId,
+              organizationInvitations.targetSendingChurchId
+            )
+          ),
+          gt(associationEvents.createdAt, organizationInvitations.createdAt)
+        )
+      )
+  );
+}
+
+/**
+ * Refuse a second pending invitation from the SAME org to the same address, or
+ * — since #304 ruling 4 — to the same resolved TARGET under any address.
+ *
  * Not a concurrency guard (invariants.md) — a duplicate is a nuisance, not a
  * correctness problem, and both would still be refused at accept time by the
  * slot rule. It exists so the list stays readable.
+ *
+ * TWO SCOPES, TWO MESSAGES, and the split is the oracle rule rather than a
+ * style choice. The ADDRESS scope describes the actor's own org state about an
+ * address the actor itself typed — a pending invitation their own list already
+ * shows them — so it stays legible. The TARGET scope can only fire on a
+ * DIFFERENT address that resolved to the same organization, and saying so would
+ * tell the admin that two addresses they typed belong to one org: a fact about
+ * somebody else's tenancy, which is exactly what ruling 2 collapsed. It refuses
+ * with the one message (`ACCOUNT_NOT_INVITABLE_MESSAGE`).
  */
 async function assertNoDuplicatePending(
   values: ResolvedInvitation
 ): Promise<void> {
-  const [duplicate] = await db
+  const ourPending = and(
+    eq(organizationInvitations.status, "pending"),
+    invitingOrgFilter(values.sendingChurchId, values.sendingNetworkId)
+  );
+
+  const [duplicateAddress] = await db
     .select({ id: organizationInvitations.id })
     .from(organizationInvitations)
     .where(
       and(
-        eq(organizationInvitations.status, "pending"),
-        eq(organizationInvitations.inviteeEmail, values.inviteeEmail),
-        invitingOrgFilter(values.sendingChurchId, values.sendingNetworkId)
+        ourPending,
+        eq(organizationInvitations.inviteeEmail, values.inviteeEmail)
       )
     )
     .limit(1);
 
-  if (duplicate) {
+  if (duplicateAddress) {
     throw new InvitationError(
       "There is already a pending invitation to that address — revoke it first"
     );
+  }
+
+  const reach = targetReachFilter(values);
+  if (!reach) return;
+
+  const [duplicateTarget] = await db
+    .select({ id: organizationInvitations.id })
+    .from(organizationInvitations)
+    .where(and(ourPending, reach))
+    .limit(1);
+
+  if (duplicateTarget) {
+    throw new InvitationError(ACCOUNT_NOT_INVITABLE_MESSAGE);
+  }
+}
+
+/**
+ * What an admin reads when their org has used up its attempts at one address.
+ *
+ * It names the org's OWN behaviour and nothing else — how many invitations THEY
+ * sent, to an address THEY typed — so it is legible without being an oracle
+ * (see `assertInviteRateLimit` for why position, not wording, is what makes that
+ * true here).
+ *
+ * "Wait for an answer" is TRUE of every state that can now reach it (round 10).
+ * The rows this message counts are all unanswered-or-refused ones: an accepted
+ * association that was later severed no longer counts at all, because
+ * `afterTheLastAssociationEventFilter` drops every invitation older than the
+ * sever. Widen the count again and this sentence has to be re-checked with it.
+ */
+export const INVITE_RATE_LIMITED_MESSAGE =
+  "Your organization has already sent that address several invitations recently — wait for an answer, or reach them another way";
+
+/**
+ * The statement behind the cap. Exported so a test can read its bound
+ * parameters: the scope is the ORG's own rows and the window is the SERVER's
+ * instant, neither of which a request can influence.
+ *
+ * No `status` predicate on purpose. The abuse this exists to stop is a
+ * decline–reinvite loop, and every one of those rows reads `declined`; counting
+ * only pending ones would count exactly the invitations that are not the
+ * problem. `limit` is the cap itself — the question is "are there at least N?",
+ * so there is no reason to read the whole history.
+ *
+ * TWO FLOORS, not one (#304 round 10). The window is the older of them; the
+ * newer is `afterTheLastAssociationEventFilter`, which drops every invitation
+ * this org sent BEFORE its most recent association event about the same
+ * subject. Counting every status and never forgiving a completed association is
+ * what locked an org out of re-inviting a plant it had legitimately parted
+ * with.
+ */
+export function invitesFromOrgToAddressQuery(
+  values: Pick<
+    ResolvedInvitation,
+    "inviteeEmail" | "sendingChurchId" | "sendingNetworkId"
+  >,
+  since: Date
+) {
+  return db
+    .select({ id: organizationInvitations.id })
+    .from(organizationInvitations)
+    .where(
+      and(
+        eq(organizationInvitations.inviteeEmail, values.inviteeEmail),
+        invitingOrgFilter(values.sendingChurchId, values.sendingNetworkId),
+        gte(organizationInvitations.createdAt, since),
+        afterTheLastAssociationEventFilter(values)
+      )
+    )
+    .limit(INVITES_PER_INVITEE_PER_WINDOW);
+}
+
+/**
+ * The same cap, counted against the resolved TARGET instead of the address
+ * (#304 ruling 4, fix 4). Exported for the same reason as the address query:
+ * a test reads its bound parameters rather than trusting the prose.
+ *
+ * `reach` is the caller's, not this function's, so there is exactly one place
+ * that decides what "aimed at this org" means (`targetReachFilter`) and no way
+ * for the cap and the duplicate check to drift into two definitions of it.
+ *
+ * It carries the SAME post-sever floor as the address query (#304 round 10) and
+ * from the same function, for the same reason: two copies of "does this
+ * invitation still count" is how the two scopes start answering differently for
+ * one org.
+ */
+export function invitesFromOrgToTargetQuery(
+  values: Pick<ResolvedInvitation, "sendingChurchId" | "sendingNetworkId">,
+  reach: SQL,
+  since: Date
+) {
+  return db
+    .select({ id: organizationInvitations.id })
+    .from(organizationInvitations)
+    .where(
+      and(
+        reach,
+        invitingOrgFilter(values.sendingChurchId, values.sendingNetworkId),
+        gte(organizationInvitations.createdAt, since),
+        afterTheLastAssociationEventFilter(values)
+      )
+    )
+    .limit(INVITES_PER_INVITEE_PER_WINDOW);
+}
+
+/**
+ * Refuse an org that has already addressed this ADDRESS
+ * `INVITES_PER_INVITEE_PER_WINDOW` times inside the window (#304, HR4).
+ *
+ * PRE-RESOLUTION ONLY. Its target-scoped twin is `assertTargetInviteRateLimit`
+ * below, and they are two functions rather than one on purpose (ruling 5,
+ * 2026-08-10): this is the only one that can compose the legible message, so
+ * keeping it out of the post-resolution call is a fact about the call graph
+ * instead of a comment asking the next reader to preserve an ordering. Its
+ * parameter is narrowed to the three fields it reads for the same reason — a
+ * `ResolvedInvitation` here would invite somebody to pass the resolved values.
+ *
+ * WHERE IT RUNS IS THE SECURITY PROPERTY, not the wording. Every refusal
+ * reachable AFTER `resolveInvitationTarget` has to be the one message
+ * (`ACCOUNT_NOT_INVITABLE_MESSAGE`) because it would otherwise describe a
+ * stranger. This one is deliberately placed BEFORE the address is looked up, so
+ * it cannot be that kind of refusal by construction: it reads only rows the
+ * caller's own org wrote, to an address the caller itself typed, and it answers
+ * identically whether or not an account exists behind it.
+ *
+ * That ordering also closes the obvious variant of the same oracle. A cap that
+ * applied only to the TARGETED path would itself be a probe — "this address is
+ * rate-limited, therefore somebody has an account here" — so the cap applies to
+ * every invitation the org addresses, open ones included.
+ *
+ * Like `assertNoDuplicatePending` this is SELECT-then-INSERT and therefore not a
+ * concurrency guard (`memory/invariants.md`): two simultaneous submissions can
+ * both pass the fourth attempt. That is acceptable — the property being defended
+ * is "an org cannot keep a banner up indefinitely", which one extra row does not
+ * threaten, and the alternative is a counter table for a nuisance control.
+ */
+export async function assertInviteRateLimit(
+  values: Pick<
+    ResolvedInvitation,
+    "inviteeEmail" | "sendingChurchId" | "sendingNetworkId"
+  >,
+  now = new Date()
+): Promise<void> {
+  const recent = await invitesFromOrgToAddressQuery(
+    values,
+    rateLimitWindowStart(now)
+  );
+
+  if (recent.length >= INVITES_PER_INVITEE_PER_WINDOW) {
+    throw new InvitationError(INVITE_RATE_LIMITED_MESSAGE);
+  }
+}
+
+/** The window both passes count inside — the SERVER's instant, never a request's. */
+function rateLimitWindowStart(now: Date): Date {
+  return new Date(now.getTime() - INVITATION_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
+}
+
+/**
+ * THE SECOND SCOPE — the same cap, counted against the resolved TARGET (#304
+ * ruling 4 fix 4; split out of `assertInviteRateLimit` by ruling 5,
+ * 2026-08-10).
+ *
+ * IT IS A SEPARATE FUNCTION BECAUSE THE TWO PASSES SPEAK DIFFERENTLY, and the
+ * difference is positional. `assertInviteRateLimit` runs BEFORE
+ * `resolveInvitationTarget` and may therefore be legible: it reads only rows the
+ * caller's own org wrote, to an address the caller itself typed. This one runs
+ * AFTER, where every refusal has to be the ONE message
+ * (`ACCOUNT_NOT_INVITABLE_MESSAGE`) — a target-scoped refusal fires on an
+ * address the org has NOT exhausted, so naming the cap would say "this address
+ * and one you already used belong to the same organization" (ruling 2,
+ * `memory/invariants.md` → Multi-Tenancy).
+ *
+ * While they were one function the post-resolution call re-ran the ADDRESS pass
+ * first, which could throw `INVITE_RATE_LIMITED_MESSAGE` from a post-resolution
+ * position — the legible message on the collapsed path, reachable whenever a row
+ * landed between the two calls. Nothing about the wording changed to fix that;
+ * the pass that composes the legible message simply no longer runs down there,
+ * which is a property of the CALL GRAPH and not of anybody remembering an
+ * ordering rule.
+ *
+ * An org with no reach filter — a target that resolved to nothing addressable —
+ * is not capped here at all. It was already capped by address, above.
+ */
+export async function assertTargetInviteRateLimit(
+  values: ResolvedInvitation,
+  now = new Date()
+): Promise<void> {
+  const reach = targetReachFilter(values);
+  if (!reach) return;
+
+  const recentToTarget = await invitesFromOrgToTargetQuery(
+    values,
+    reach,
+    rateLimitWindowStart(now)
+  );
+
+  if (recentToTarget.length >= INVITES_PER_INVITEE_PER_WINDOW) {
+    throw new InvitationError(ACCOUNT_NOT_INVITABLE_MESSAGE);
   }
 }
 
@@ -684,25 +1191,59 @@ export async function createInvitationAs(
     throw new InvitationError(authority.error);
   }
 
-  // A client never names a target; it is resolved from the address here — and
-  // an address that already has an account is refused outright (RULED
-  // 2026-08-04, `ACCOUNT_EXISTS_MESSAGE`). This runs inside the logic layer, so
-  // a forged POST straight at `createInvitation` is refused by the same
-  // statement the form is.
+  // THE CAP, and it runs HERE — before the lookup — on purpose (#304, HR4
+  // 2026-08-09). A targeted invitation puts a banner on a planter's dashboard
+  // that OV-005 makes dismissible only by answering, so an org that could
+  // re-issue after every decline would own a permanent, attacker-chosen slot on
+  // a stranger's screen. Placing the cap ahead of `resolveInvitationTarget`
+  // keeps it out of the post-resolution rule (`ACCOUNT_NOT_INVITABLE_MESSAGE`):
+  // it reads only the caller's own org's rows and answers the same whether or
+  // not an account exists behind the address, so it discloses nothing to probe.
+  await assertInviteRateLimit(authority.values);
+
+  // A client never names a target; it is resolved from the address here. An
+  // account that speaks for no invitable organization is refused with the one
+  // message (RULED 2026-08-09, `ACCOUNT_NOT_INVITABLE_MESSAGE`). This runs
+  // inside the logic layer, so a forged POST straight at `createInvitation` is
+  // refused by the same statement the form is.
   const resolvedTarget = await resolveInvitationTarget(inviteeEmail);
   if (!resolvedTarget.ok) {
     throw new InvitationError(resolvedTarget.error);
   }
 
-  const resolved = resolveInvitationRequest(actor, {
-    ...request,
-    inviteeEmail,
-    ...resolvedTarget.target,
-  });
+  // THE CALLER'S TARGET KEYS DO NOT TRAVEL (#304 ruling 4, fix 1 — defence in
+  // depth). `request` is a typed object that arrived at a `"use server"`
+  // endpoint, so at runtime it may carry anything, `targetChurchId` included —
+  // and `InvitationRequest` declares that key because the SERVER writes on it.
+  // The two fields below are the whole of what a client may say; the target
+  // comes from `resolvedTarget`, which was derived from the address alone.
+  // `resolveInvitationForResolvedTarget` rebuilds its request from scratch as
+  // well, so a forged key is dropped twice on this path.
+  const resolved = resolveInvitationForResolvedTarget(
+    actor,
+    { inviteeEmail, inviteAs },
+    resolvedTarget.target
+  );
   if (!resolved.ok) {
     throw new InvitationError(resolved.error);
   }
 
+  // THE CAP AGAIN, now that there is a target to count (#304 ruling 4, fix 4) —
+  // and it is a DIFFERENT function, which is the point (ruling 5, 2026-08-10).
+  // The pass above ran on the address alone and owns the legible message; this
+  // one adds the scope that actually matters — an ORG cannot be re-addressed
+  // through a second one of its admins' accounts — and can only refuse with
+  // `ACCOUNT_NOT_INVITABLE_MESSAGE`, because it contains no other. Calling the
+  // combined function here re-ran the address pass from a post-resolution
+  // position, where the legible message must not be reachable at all.
+  await assertTargetInviteRateLimit(resolved.values);
+
+  // Everything below is also post-resolution, and audited to the same rule:
+  // `assertTargetSlotFree` composes no message of its own (`slotRefusalMessage`
+  // is its whole vocabulary, and it is the one constant), and
+  // `assertNoDuplicatePending` reports the ACTOR's own org state under the
+  // address it typed — a pending invitation their own list already shows them —
+  // while its TARGET scope speaks with the one message.
   await assertTargetSlotFree(resolved.values);
   await assertNoDuplicatePending(resolved.values);
 
@@ -1174,17 +1715,39 @@ export async function acceptInvitationAs(
   // Authority first, then status: see `loadRespondableInvitation`.
   const invitation = await loadRespondableInvitation(actor, invitationId);
 
-  // All three built BEFORE anything is written, so an invitation whose FKs
+  // All of them built BEFORE anything is written, so an invitation whose FKs
   // contradict its `type` throws instead of half-applying.
   const lock = lockTargetRow(invitation);
   const association = associationStatement(invitation, invitationId);
   const slotIsOurs = unboundTargetSlot(invitation);
 
-  const [, claimed, associated] = await db.batch([
-    lock,
-    respondToInvitationQuery(actor, invitationId, "accepted", slotIsOurs),
-    association,
-  ]);
+  // OV-008 — the audit row travels IN the batch, so an association cannot commit
+  // without the record of who made it. It re-asserts the association's own
+  // outcome rather than trusting the batch (see
+  // `acceptedAssociationEventStatement`).
+  //
+  // ALL THREE INVITATION TYPES audit since #304 WS3 / migration 0036, the
+  // sending-church subject included. `null` now means only "this row's
+  // type-implied ids are missing", which the statements above would already have
+  // thrown on — not "this kind of association goes unrecorded".
+  const auditedOrg = auditableAssociationOrg(invitation);
+  const audit = auditedOrg
+    ? acceptedAssociationEventStatement(actor, {
+        ...auditedOrg,
+        invitationId,
+      })
+    : null;
+
+  const claim = respondToInvitationQuery(
+    actor,
+    invitationId,
+    "accepted",
+    slotIsOurs
+  );
+
+  const [, claimed, associated] = audit
+    ? await db.batch([lock, claim, association, audit])
+    : await db.batch([lock, claim, association]);
 
   const [updated] = claimed;
 
@@ -1211,19 +1774,55 @@ export async function acceptInvitationAs(
   // Last, and after the committed batch, so it fires only on a genuine FIRST
   // acceptance (`updated` is the claim's own returned row) and a notification
   // failure cannot leave an invitation half-accepted (memory/invariants.md →
-  // Atomicity). `announceInvitationAccepted` never throws and never decides
-  // whether the plant is sharing — `enqueue` does, per recipient, and writes
-  // nothing when it is not.
+  // Atomicity). Neither emitter throws, and neither decides whether the plant is
+  // sharing — `enqueue` does, per recipient, and writes nothing when it is not.
   //
-  // Only a PLANT-side acceptance is a milestone: `target_church_id` is set when
-  // a sending church or a network invited a church plant, which is the "planter
-  // accepted invitation" the ruling names. A sending church joining a network
-  // is a different event with no plant to report on.
+  // BOTH SIDES OF THE HANDSHAKE NOW HAVE A RAIL (#304 WS3, ruling #351). This
+  // used to be `if (updated.targetChurchId)` and nothing else: a sending church
+  // joining a network names no plant, `notifications.church_id` was NOT NULL,
+  // and the milestone was composed and dropped. Migration 0036 anchored a
+  // notification to a church OR an org, so the plantless answer is announced to
+  // the NETWORK that asked — the same consent-exempt own-relationship rail,
+  // filed under the tenant that reads it.
   if (updated.targetChurchId) {
     await announceInvitationAcceptedForChurch(updated);
+  } else if (updated.targetSendingChurchId) {
+    await announceSendingChurchAcceptedFor(updated);
   }
 
   return updated;
+}
+
+/**
+ * Announce a SENDING CHURCH's acceptance to the network that invited it (#304
+ * WS3). Best-effort by construction, exactly like the plant-side twin, and the
+ * network id comes from the invitation's own `sending_network_id` — the row that
+ * names who asked — never from the sending church's FK, which by now points at
+ * it and would be the same value for a second, uninvolved network tomorrow.
+ */
+async function announceSendingChurchAcceptedFor(
+  invitation: OrganizationInvitation
+): Promise<void> {
+  const sendingChurchId = invitation.targetSendingChurchId;
+  const sendingNetworkId = invitation.sendingNetworkId;
+  if (!sendingChurchId || !sendingNetworkId) return;
+
+  try {
+    const name = await sendingChurchNameOf(sendingChurchId);
+    if (!name) return;
+
+    await announceSendingChurchJoinedNetwork({
+      sendingNetworkId,
+      sendingChurchName: name,
+      invitationId: invitation.id,
+    });
+  } catch (error) {
+    console.error("sending church acceptance milestone failed", {
+      sendingChurchId,
+      invitationId: invitation.id,
+      error,
+    });
+  }
 }
 
 /**
@@ -1258,17 +1857,12 @@ async function announceInvitationAcceptedForChurch(
   if (!churchId) return;
 
   try {
-    const [plant] = await db
-      .select({ name: churches.name })
-      .from(churches)
-      .where(eq(churches.id, churchId))
-      .limit(1);
-
-    if (!plant) return;
+    const plantName = await plantNameOf(churchId);
+    if (!plantName) return;
 
     await announceInvitationAccepted({
       churchId,
-      plantName: plant.name,
+      plantName,
       invitationId: invitation.id,
       invitation: {
         type: invitation.type,
@@ -1305,7 +1899,18 @@ async function lostClaimReason(invitationId: string): Promise<string> {
 }
 
 /**
- * Decline an invitation. The actor must have authority over the target entity.
+ * Decline an invitation. The actor must have authority over the target entity —
+ * which for a plant means the PLANTER and nobody else
+ * (`verifyInvitationAuthority`, OV-010).
+ *
+ * ONE STATEMENT, no batch: a decline associates nothing, so there is no second
+ * write to be atomic with, and nothing is audited — `association_events` records
+ * associations and severs, and a declined invitation is neither (the invitation
+ * row is its own record, carrying `responded_by` and `responded_at`).
+ *
+ * OV-006 — the org that asked is told, LAST and best-effort, exactly like the
+ * accept's milestone: the answer is recorded whether or not the announcement
+ * lands, and `announceInvitationDeclined` never throws.
  */
 export async function declineInvitationAs(
   actor: InvitationActor,
@@ -1324,7 +1929,124 @@ export async function declineInvitationAs(
     throw new InvitationError("This invitation is no longer pending");
   }
 
+  // BOTH SIDES, since #304 WS3 / ruling #351 — the mirror of the accept path
+  // above. A sending church declining a network names no plant; the milestone is
+  // anchored to the NETWORK instead of being dropped for want of a `church_id`.
+  //
+  // Both arms obey the same disclosure rule: a decline names the ADDRESS THE ORG
+  // TYPED and nothing else (ruled 2026-08-09). The refused org never associated,
+  // so neither the plant's name nor the sending church's is theirs to learn.
+  if (updated.targetChurchId) {
+    await announceInvitationDeclinedForChurch(updated);
+  } else if (updated.targetSendingChurchId) {
+    await announceSendingChurchDeclinedFor(updated);
+  }
+
   return updated;
+}
+
+/**
+ * Announce a SENDING CHURCH's decline to the network that invited it (#304 WS3).
+ *
+ * Names `invitee_email` and never looks the sending church up — the same rule,
+ * and the same reason, as `announceInvitationDeclinedForChurch`: naming the
+ * organization behind an address the network may simply have guessed is the
+ * disclosure `ACCOUNT_NOT_INVITABLE_MESSAGE` exists to prevent, arriving two
+ * steps later by another route.
+ */
+async function announceSendingChurchDeclinedFor(
+  invitation: OrganizationInvitation
+): Promise<void> {
+  const sendingNetworkId = invitation.sendingNetworkId;
+  const inviteeEmail = invitation.inviteeEmail;
+  if (!sendingNetworkId || !inviteeEmail) return;
+
+  try {
+    await announceSendingChurchDeclinedNetwork({
+      sendingNetworkId,
+      inviteeEmail,
+      invitationId: invitation.id,
+    });
+  } catch (error) {
+    console.error("sending church decline milestone failed", {
+      invitationId: invitation.id,
+      error,
+    });
+  }
+}
+
+/**
+ * Announce the decline to the org that issued the invitation. Best-effort by
+ * construction, and a mirror of `announceInvitationAcceptedForChurch` —
+ * including the reason the whole invitation is passed rather than a church id:
+ * the audience is derived from `invitation.type` by `invitingOrgForInvitation`,
+ * never from the plant's FKs, so a plant that already belongs to another org
+ * cannot leak this to it.
+ *
+ * IT DOES NOT LOOK THE PLANT'S NAME UP, and the absent read is the point (#304,
+ * ruled 2026-08-09). The org that was refused never became associated with this
+ * plant, so the notification names the ADDRESS THE ORG ITSELF TYPED — the
+ * invitation's own `invitee_email` — and nothing else. Naming the plant told a
+ * stranger what organization sits behind an address they had guessed at, which
+ * is the disclosure the whole invitation surface is otherwise careful about
+ * (see `ACCOUNT_NOT_INVITABLE_MESSAGE`).
+ */
+async function announceInvitationDeclinedForChurch(
+  invitation: OrganizationInvitation
+): Promise<void> {
+  const churchId = invitation.targetChurchId;
+  if (!churchId) return;
+
+  // `invitee_email` is nullable — rows predating #23 recorded no address at all
+  // — and it is the ONLY identifier this org may be given back. With nothing to
+  // name, the milestone is skipped rather than composed around a blank or, far
+  // worse, quietly re-pointed at the plant's name. The decline itself is
+  // already recorded; this notification is best-effort by construction.
+  const inviteeEmail = invitation.inviteeEmail;
+  if (!inviteeEmail) return;
+
+  try {
+    await announceInvitationDeclined({
+      churchId,
+      inviteeEmail,
+      invitationId: invitation.id,
+      invitation: {
+        type: invitation.type,
+        sendingChurchId: invitation.sendingChurchId,
+        sendingNetworkId: invitation.sendingNetworkId,
+      },
+    });
+  } catch (error) {
+    console.error("oversight invitation decline milestone failed", {
+      churchId,
+      invitationId: invitation.id,
+      error,
+    });
+  }
+}
+
+/** The sending church's display name, or null when there is no such row. */
+async function sendingChurchNameOf(
+  sendingChurchId: string
+): Promise<string | null> {
+  const [org] = await db
+    .select({ name: sendingChurches.name })
+    .from(sendingChurches)
+    .where(eq(sendingChurches.id, sendingChurchId))
+    .limit(1);
+
+  return org?.name ?? null;
+}
+
+/** The plant's display name, or null when there is no such row. */
+async function plantNameOf(churchId: string): Promise<string | null> {
+  const [plant] = await db
+    .select({ name: churches.name })
+    .from(churches)
+    .where(eq(churches.id, churchId))
+    .limit(1);
+
+  return plant?.name ?? null;
 }
 
 /**
@@ -1597,10 +2319,20 @@ export async function revokeInvitationAs(
 // diff — deliberately, and reviewed — instead of discovering that routing the
 // import through a barrel makes the guardrail quiet.
 //
-// Until #277/#278 land, an accepted association has no in-product repair path.
-// That is why `acceptInvitationAs` above must never be able to create one that
-// was not accepted, and why it REFUSES to replace one that already exists
-// (`memory/invariants.md` → Multi-Tenancy).
+// BOTH SIDES NOW HAVE ONE, and NEITHER CALLS THESE THREE: `leaveOversightOrgAs`
+// (the planter, #304/OV-007a) and `removePlantFromOrgAs` (the org's admin,
+// #304/OV-007b) both go through `severAssociationWithAuditStatement` in
+// `./audit`. `set fk = null where id = ?` — the shape below — cannot express the
+// tenancy assertion a sever needs (it severs whichever org happens to be there,
+// for whoever asks), and it has no place to put the audit row that has to commit
+// with it.
+//
+// So the three are now genuinely unreferenced, and they are kept anyway, for one
+// reason: `service.test.ts`'s guardrail-mutation recipes are written in terms of
+// them, and those recipes are the evidence that the endpoint-surface tests have
+// been WATCHED to fail. Removing the primitives would silently retire that
+// evidence. They stay exported, unwrapped, and not endpoints; nothing new may
+// call them.
 // ============================================================================
 
 /**
@@ -1649,6 +2381,494 @@ export async function disassociateSendingChurchFromNetwork(
       updatedAt: new Date(),
     })
     .where(eq(sendingChurches.id, sendingChurchId));
+}
+
+// ----------------------------------------------------------------------------
+// The planter's sever (#304 / OV-007a, OV-010)
+// ----------------------------------------------------------------------------
+
+/**
+ * WHICH oversight org an invitation's association is with, in the audit's own
+ * vocabulary — derived from `type`, never from whichever of the row's two FK
+ * columns happens to be populated.
+ *
+ * Same rule, and the same reason, as `invitingOrgForInvitation` in
+ * `@/lib/notifications/oversight`: nothing constrains an
+ * `organization_invitations` row to one FK and `insertInvitation` validates
+ * none, so a `church_to_sending_church` row carrying a stray network id would
+ * otherwise get an audit row naming a network that associated nobody.
+ *
+ * ALL THREE TYPES NOW RETURN A SUBJECT (#304 WS3, ruling #351, migration 0036).
+ * The `sending_church_to_network` arm used to return `null` — not because that
+ * association was unworthy of an audit, but because `association_events` made a
+ * CHURCH its mandatory subject, and a sending church joining a network names no
+ * church. 0036 gave the table the subject discriminator its own header had asked
+ * for, so the arm returns the real thing: the target SENDING CHURCH as subject,
+ * the network as org.
+ *
+ * `null` still means "there is nothing honest to audit" — a row whose type-implied
+ * ids are missing. It never means "this kind of association is not recorded".
+ */
+export function auditableAssociationOrg(invitation: AssociationFacts): {
+  subject: AssociationSubject;
+  orgType: AssociationOrgType;
+  orgId: string;
+} | null {
+  switch (invitation.type) {
+    case "church_to_sending_church":
+      return invitation.targetChurchId && invitation.sendingChurchId
+        ? {
+            subject: churchSubject(invitation.targetChurchId),
+            orgType: "sending_church",
+            orgId: invitation.sendingChurchId,
+          }
+        : null;
+    case "church_to_network":
+      return invitation.targetChurchId && invitation.sendingNetworkId
+        ? {
+            subject: churchSubject(invitation.targetChurchId),
+            orgType: "network",
+            orgId: invitation.sendingNetworkId,
+          }
+        : null;
+    case "sending_church_to_network":
+      return invitation.targetSendingChurchId && invitation.sendingNetworkId
+        ? {
+            subject: sendingChurchSubject(invitation.targetSendingChurchId),
+            orgType: "network",
+            orgId: invitation.sendingNetworkId,
+          }
+        : null;
+  }
+}
+
+/** The two orgs a plant can leave, as the planter's surface names them. */
+export const oversightOrgTypes = ["sending_church", "network"] as const;
+
+export function isAssociationOrgType(
+  value: unknown
+): value is AssociationOrgType {
+  return (
+    typeof value === "string" &&
+    (oversightOrgTypes as readonly string[]).includes(value)
+  );
+}
+
+export const NOT_ASSOCIATED_MESSAGE =
+  "Your plant is not part of that organization";
+
+export const PLANTER_ONLY_SEVER_MESSAGE =
+  "Only the church planter can leave a sending church or network";
+
+/**
+ * LEAVE AN OVERSIGHT ORG — the planter side of the #274 sever ruling (OV-007a).
+ *
+ * THE ENTITY IS NOT AN ARGUMENT. There is no `churchId` parameter and there
+ * never may be: the plant is the actor's own (`actor.churchId`), minted from the
+ * session, which is the same shape `setOversightSharingAction` uses and the rule
+ * `memory/invariants.md` → Authentication states. All a caller says is WHICH OF
+ * ITS TWO oversight associations to end, and that is a two-valued enum, not an
+ * id.
+ *
+ * PLANTER ONLY, SERVER-SIDE (OV-010, ruled #274). A `team_member` or a `coach`
+ * of the plant is refused here, in the logic layer, so a forged POST straight at
+ * the action is refused by the same statement the button is. The role check is
+ * repeated in the SQL by construction — the statement's WHERE names
+ * `actor.churchId`, so an actor with no plant matches nothing whatever their
+ * role — but the explicit refusal is what produces a legible message rather than
+ * a silent no-op.
+ *
+ * ONE STATEMENT does the FK null and the audit row (`./audit` →
+ * `severAssociationWithAuditStatement`), so the association and the record of
+ * how it ended commit together or not at all. Its WHERE is the tenancy
+ * assertion: the FK is nulled only if it still points at the org being left, so
+ * a plant that belongs to a sending church AND a network keeps the other one,
+ * and a request naming an org the plant does not belong to writes nothing at
+ * all.
+ *
+ * THE ORG IS TOLD LAST, after the commit and best-effort — the sever is not
+ * undone by a notification failure, and `announceAssociationEnded` never throws.
+ * It has to be last for a second reason too: its recipients are told about a
+ * plant that is, by then, outside their access, and `enqueue` rests that on the
+ * `association_events` row this statement just wrote
+ * (`OVERSIGHT_OWN_RELATIONSHIP_TYPES`). Announcing first would have been a
+ * message saying a plant had left before it had.
+ */
+export async function leaveOversightOrgAs(
+  actor: InvitationActor,
+  orgType: AssociationOrgType
+): Promise<{ orgType: AssociationOrgType; orgId: string }> {
+  if (actor.role !== "planter") {
+    throw new InvitationError(PLANTER_ONLY_SEVER_MESSAGE);
+  }
+  if (!actor.churchId) {
+    throw new InvitationError("Create your church plant first");
+  }
+
+  const [plant] = await db
+    .select({
+      name: churches.name,
+      sendingChurchId: churches.sendingChurchId,
+      sendingNetworkId: churches.sendingNetworkId,
+    })
+    .from(churches)
+    .where(eq(churches.id, actor.churchId))
+    .limit(1);
+
+  const orgId =
+    orgType === "sending_church"
+      ? (plant?.sendingChurchId ?? null)
+      : (plant?.sendingNetworkId ?? null);
+
+  // A read, so not the guard — the statement below carries the same rule and is
+  // what actually decides. This only turns "nothing to leave" into a message.
+  if (!plant || !orgId) {
+    throw new InvitationError(NOT_ASSOCIATED_MESSAGE);
+  }
+
+  const severed = await severAssociationWithAuditStatement(actor, {
+    subject: churchSubject(actor.churchId),
+    orgType,
+    orgId,
+  });
+
+  // No audit row means the UPDATE matched nothing: the association moved between
+  // the read above and the write. Nothing was written — not the null, not the
+  // row — so the refusal is honest.
+  if (!severed) {
+    throw new InvitationError(NOT_ASSOCIATED_MESSAGE);
+  }
+
+  await announceAssociationEndedFor({
+    churchId: actor.churchId,
+    plantName: plant.name,
+    orgType,
+    orgId,
+    occurrence: severed.id,
+  });
+
+  return { orgType, orgId };
+}
+
+// ----------------------------------------------------------------------------
+// The org's sever (#304 / OV-007b, OV-011)
+// ----------------------------------------------------------------------------
+
+export const ORG_ADMIN_ONLY_SEVER_MESSAGE =
+  "Only a sending church or network admin can remove a plant from their organization";
+
+export const NO_ORG_TO_REMOVE_FROM_MESSAGE =
+  "Set up your organization before removing a plant from it";
+
+/**
+ * ONE message for "no such plant", "not a uuid" and "belongs to somebody else".
+ *
+ * The same symmetry `/oversight/plants/[id]` gets from its 404
+ * (`getOversightPlantDetail` answers null for all three): a refusal that told
+ * "exists, but not yours" apart from "does not exist" would answer a question
+ * about ANOTHER org's portfolio, one guessed uuid at a time, to an admin who is
+ * authenticated but not party to it.
+ */
+export const PLANT_NOT_IN_ORG_MESSAGE =
+  "That church plant is not part of your organization";
+
+/**
+ * WHICH oversight org a user speaks for — the org side's answer to "which of
+ * the plant's two associations is this about", and it is not an argument.
+ *
+ * A `sending_church_admin` can only ever end the plant's SENDING CHURCH
+ * association, a `network_admin` only its NETWORK one, and the id is their own
+ * (`memory/invariants.md` → Authentication: an entity implied by the actor is
+ * not an argument). So the org KIND is not a parameter here either — unlike the
+ * planter's `leaveOversightOrgAs`, where one actor genuinely has two
+ * associations to choose between.
+ *
+ * Pure, and deliberately structural rather than branded: the page renders the
+ * button from the same derivation the write is guarded by, so what an admin can
+ * see and what they can do cannot come from two different rules. Every actual
+ * WRITE still takes an `InvitationActor`.
+ */
+export function oversightOrgOfUser(user: {
+  role: UserRole;
+  sendingChurchId: string | null;
+  sendingNetworkId: string | null;
+}): { orgType: AssociationOrgType; orgId: string } | null {
+  if (user.role === "sending_church_admin") {
+    return user.sendingChurchId
+      ? { orgType: "sending_church", orgId: user.sendingChurchId }
+      : null;
+  }
+  if (user.role === "network_admin") {
+    return user.sendingNetworkId
+      ? { orgType: "network", orgId: user.sendingNetworkId }
+      : null;
+  }
+  return null;
+}
+
+/**
+ * `churches.<fk> = <org>` — "this plant is ours", as a predicate on the plant's
+ * own row. Built from the two-valued org kind, so there is no column name here
+ * that a request could influence.
+ *
+ * Exported so a test can read the generated SQL: which of the two independent
+ * oversight FKs a kind maps to is exactly the sort of thing an edit inverts
+ * silently, and a network admin whose predicate named `sending_church_id` would
+ * read and sever another org's associations.
+ */
+export function plantHeldByOrg(org: {
+  orgType: AssociationOrgType;
+  orgId: string;
+}): SQL {
+  return org.orgType === "sending_church"
+    ? eq(churches.sendingChurchId, org.orgId)
+    : eq(churches.sendingNetworkId, org.orgId);
+}
+
+/**
+ * REMOVE A PLANT FROM THE CALLER'S OWN ORG — the org side of the #274 sever
+ * ruling (OV-007b), and the mirror of `leaveOversightOrgAs` above.
+ *
+ * WHAT IS AN ARGUMENT AND WHAT IS NOT. `churchId` is, and has to be: an org has
+ * many plants, so which one is a genuine choice the admin makes. Nothing else
+ * is. The ORG comes from the session (`oversightOrgOfUser`), and so does the org
+ * KIND — a sending church admin has exactly one association with this plant to
+ * end, and a network admin has the other one. There is therefore no parameter on
+ * this function that could aim it at another org's association, which is the
+ * whole of the "an admin of a different org cannot sever this org's
+ * association" rule.
+ *
+ * THE TENANCY ASSERTION IS THE WRITE'S OWN WHERE, not the read above it
+ * (#304's high-risk extra). `severAssociationWithAuditStatement` nulls the FK
+ * only while it still points at THIS org, so:
+ *
+ *   * a plant in another org matches nothing, and nothing is written — the read
+ *     that precedes it only turns that into a legible message;
+ *   * a plant that belongs to a sending church AND a network keeps the other
+ *     one: the statement does not mention the other column at all;
+ *   * the `association_events` row is written FROM that UPDATE, so a refused
+ *     sever cannot leave an audit row claiming one happened.
+ *
+ * The moment it commits, `churches.<fk>` is null — which is the same column
+ * `getAccessibleChurchIds` resolves an oversight admin's reach from and the same
+ * one `listOversightPlants` filters on. So the plant leaves the directory, the
+ * detail page and the org's notification fan-out together, with no second write
+ * to keep in step.
+ *
+ * THE PLANTER IS TOLD LAST, after the commit and best-effort. Unlike the org's
+ * side of the planter's sever, this notification is an ordinary church-role one:
+ * its recipient is inside the plant, `canAccessChurch` is true for them by
+ * construction, and no oversight consent toggle applies (they are not an
+ * oversight user). Announcing before the write would tell a planter they had
+ * been removed while they still had not been.
+ */
+export async function removePlantFromOrgAs(
+  actor: InvitationActor,
+  churchId: string
+): Promise<{
+  orgType: AssociationOrgType;
+  orgId: string;
+  plantName: string;
+}> {
+  if (actor.role !== "sending_church_admin" && actor.role !== "network_admin") {
+    throw new InvitationError(ORG_ADMIN_ONLY_SEVER_MESSAGE);
+  }
+
+  const org = oversightOrgOfUser(actor);
+  if (!org) {
+    throw new InvitationError(NO_ORG_TO_REMOVE_FROM_MESSAGE);
+  }
+
+  if (!isUuid(churchId)) {
+    throw new InvitationError(PLANT_NOT_IN_ORG_MESSAGE);
+  }
+
+  // Scoped by the SAME predicate the write carries, so this read can never say
+  // yes to a plant the write would refuse. It is not the guard — a read never is
+  // (`memory/invariants.md`) — it exists for the message and for the plant's
+  // name, which the notification needs and which must not be read unscoped.
+  const [plant] = await db
+    .select({ name: churches.name })
+    .from(churches)
+    .where(and(eq(churches.id, churchId), plantHeldByOrg(org)))
+    .limit(1);
+
+  if (!plant) {
+    throw new InvitationError(PLANT_NOT_IN_ORG_MESSAGE);
+  }
+
+  const severed = await severAssociationWithAuditStatement(actor, {
+    subject: churchSubject(churchId),
+    orgType: org.orgType,
+    orgId: org.orgId,
+  });
+
+  // No audit row means the UPDATE matched nothing: the association moved between
+  // the read and the write. Nothing was written — not the null, not the row — so
+  // the refusal is honest and the planter is told nothing.
+  if (!severed) {
+    throw new InvitationError(PLANT_NOT_IN_ORG_MESSAGE);
+  }
+
+  await announcePlantRemovedFor({
+    churchId,
+    orgType: org.orgType,
+    orgId: org.orgId,
+    occurrence: severed.id,
+  });
+
+  return { orgType: org.orgType, orgId: org.orgId, plantName: plant.name };
+}
+
+/** Tell the plant it was removed. Best-effort; never throws into a committed sever. */
+async function announcePlantRemovedFor(input: {
+  churchId: string;
+  orgType: AssociationOrgType;
+  orgId: string;
+  occurrence: string;
+}): Promise<void> {
+  try {
+    await announceRemovedFromOversightOrg(input);
+  } catch (error) {
+    console.error("plant removal announcement failed", {
+      churchId: input.churchId,
+      orgType: input.orgType,
+      error,
+    });
+  }
+}
+
+/** Tell the org that was left. Best-effort; never throws into a committed sever. */
+async function announceAssociationEndedFor(input: {
+  churchId: string;
+  plantName: string;
+  orgType: AssociationOrgType;
+  orgId: string;
+  occurrence: string;
+}): Promise<void> {
+  try {
+    await announceAssociationEnded({
+      churchId: input.churchId,
+      plantName: input.plantName,
+      // The ONE org that was left, spelled out — never the plant's remaining
+      // FKs, which is how the other org would have been told about a change
+      // that did not involve it.
+      org: {
+        sendingChurchId:
+          input.orgType === "sending_church" ? input.orgId : null,
+        sendingNetworkId: input.orgType === "network" ? input.orgId : null,
+      },
+      occurrence: input.occurrence,
+    });
+  } catch (error) {
+    console.error("association ended announcement failed", {
+      churchId: input.churchId,
+      orgType: input.orgType,
+      error,
+    });
+  }
+}
+
+// ----------------------------------------------------------------------------
+// The sending church's sever (#304 WS3 / OV-013)
+// ----------------------------------------------------------------------------
+
+export const SENDING_CHURCH_ADMIN_ONLY_SEVER_MESSAGE =
+  "Only a sending church admin can leave their network";
+
+export const NOT_IN_A_NETWORK_MESSAGE =
+  "Your sending church is not part of a network";
+
+/**
+ * LEAVE THE NETWORK — the sending church's own sever (OV-013), and the third
+ * member of the #274 family alongside `leaveOversightOrgAs` (the planter) and
+ * `removePlantFromOrgAs` (the org's admin).
+ *
+ * IT SHIPPED WITH #304 WS3 AND NOT BEFORE, and the reason is worth keeping. A
+ * sever has to be audited (#274 / OV-007: type-to-confirm, a notification, an
+ * `association_events` row) and until migration 0036 the audit table's subject
+ * was a CHURCH, NOT NULL — so this button could only have been a sever with no
+ * record of who ended it, which is the one thing that ruling forbids. #351 gave
+ * the table a subject discriminator; this is what it unblocked.
+ *
+ * NOTHING IS AN ARGUMENT. Not the sending church (it is the actor's own,
+ * `actor.sendingChurchId`), not the network (it is whatever that sending church
+ * currently points at), and not the org kind (a sending church has exactly one
+ * association, and it is always with a network). So there is no parameter a
+ * forged POST could aim at another org — the "only the sending church's admin
+ * may sever" rule is structural before it is a check.
+ *
+ * ADMIN ONLY, SERVER-SIDE. A `team_member` who happens to carry a
+ * `sending_church_id` is refused here, in the logic layer, so a request that
+ * never loaded the dialog meets the same refusal the button does. The statement
+ * repeats it by construction — its WHERE names `actor.sendingChurchId`, which a
+ * user without one does not have — but the explicit check is what makes the
+ * refusal legible rather than a silent no-op.
+ *
+ * ONE STATEMENT for the FK null and the audit row, and the NETWORK IS TOLD LAST:
+ * the same two rules, for the same two reasons, as the planter's sever above.
+ */
+export async function leaveNetworkAsSendingChurchAdmin(
+  actor: InvitationActor
+): Promise<{ orgType: AssociationOrgType; orgId: string }> {
+  if (actor.role !== "sending_church_admin") {
+    throw new InvitationError(SENDING_CHURCH_ADMIN_ONLY_SEVER_MESSAGE);
+  }
+  if (!actor.sendingChurchId) {
+    throw new InvitationError("Set up your sending church first");
+  }
+
+  const [org] = await db
+    .select({
+      name: sendingChurches.name,
+      sendingNetworkId: sendingChurches.sendingNetworkId,
+    })
+    .from(sendingChurches)
+    .where(eq(sendingChurches.id, actor.sendingChurchId))
+    .limit(1);
+
+  // A read, so not the guard — the statement below carries the same rule and is
+  // what actually decides. This only turns "nothing to leave" into a message.
+  if (!org?.sendingNetworkId) {
+    throw new InvitationError(NOT_IN_A_NETWORK_MESSAGE);
+  }
+
+  const severed = await severAssociationWithAuditStatement(actor, {
+    subject: sendingChurchSubject(actor.sendingChurchId),
+    orgType: "network",
+    orgId: org.sendingNetworkId,
+  });
+
+  // No audit row means the UPDATE matched nothing: the association moved between
+  // the read and the write. Nothing was written — not the null, not the row — so
+  // the refusal is honest and the network is told nothing.
+  if (!severed) {
+    throw new InvitationError(NOT_IN_A_NETWORK_MESSAGE);
+  }
+
+  await announceSendingChurchLeftNetworkFor({
+    sendingNetworkId: org.sendingNetworkId,
+    sendingChurchName: org.name,
+    occurrence: severed.id,
+  });
+
+  return { orgType: "network", orgId: org.sendingNetworkId };
+}
+
+/** Tell the network that was left. Best-effort; never throws into a committed sever. */
+async function announceSendingChurchLeftNetworkFor(input: {
+  sendingNetworkId: string;
+  sendingChurchName: string;
+  occurrence: string;
+}): Promise<void> {
+  try {
+    await announceSendingChurchLeftNetwork(input);
+  } catch (error) {
+    console.error("sending church association ended announcement failed", {
+      sendingNetworkId: input.sendingNetworkId,
+      error,
+    });
+  }
 }
 
 // ============================================================================

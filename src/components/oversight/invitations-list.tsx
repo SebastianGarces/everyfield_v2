@@ -15,6 +15,75 @@
 // to the inviting ORG, exactly like the list this page reads, so any admin who
 // can see a pending row may close it and there is nothing left for the client
 // to compare. The authority check itself is in the UPDATE, never here.
+//
+// ----------------------------------------------------------------------------
+// AND IT CARRIES NO `isOpen` — #304 ruling 4 item 5, extended to THIS LIST
+// (2026-08-09, on the integration verdict that rejected the first attempt)
+// ----------------------------------------------------------------------------
+//
+// A row used to arrive with `isOpen` — `targetChurchId === null &&
+// targetSendingChurchId === null` — and rendered a "Copy link"
+// (`/register?invitation=<id>`) button if and only if it was true. Those two
+// columns ARE the server's answer to "does this address already have an
+// EveryField account", so the button's presence answered it in the UI.
+//
+// That was dead code until this track: `resolveInvitationTarget` used to refuse
+// every address that already had an account, so every creatable invitation was
+// open and every pending row showed the button. #304 revives the targeted path,
+// which makes the conditional live — and puts the probe one section BELOW the
+// create form on the same page. Type an address, read the deliberately neutral
+// success notice, then look at the row that just appeared: Copy link means no
+// account, no Copy link means there is one. No error, no second request.
+//
+// So the flag does not cross the wire and the control is gone. Item 5 collapsed
+// the notice for exactly this reason and the same sentence applies here: two
+// shapes crossing the wire is an oracle whether or not a component renders the
+// difference, and this component did render it.
+//
+// AND IT CARRIES NO `kindLabel` EITHER — the same ruling, extended a second
+// time (2026-08-10, on the verdict that rejected the attempt above). Removing
+// `isOpen` left the oracle standing ONE FIELD OVER: the row's caption read
+// `invitation.type === "sending_church_to_network" ? "Sending church" :
+// "Church plant"`, and `type` is target-derived too (core.ts picks the kind
+// from the RESOLVED target and falls back to the admin's `inviteAs` only when
+// there is no target). So the caption matched the admin's own selection for an
+// accountless address and flipped for an address holding an account of the
+// other kind — the identical probe, in a caption instead of a button.
+//
+// The row shape now lives in `@/lib/invitations/list-row`, as one exported pure
+// function, so §9b can CALL it for both target shapes and compare the results
+// rather than grep this file for field names. Every regex that guarded the
+// previous two attempts passed while the property was false.
+//
+// WHY NOT "show the link on every pending row" (the variant that keeps
+// delivery): it did not close the oracle, it relocated it — `/register` used to
+// render an invitation banner only when `describeInvitationForRegistration`
+// said `redeemable`, itself target-derived, so an admin who copied the link and
+// opened it read the same fact one click later. That relocation is now closed
+// AT `/register` ITSELF (round 10, ruled 2026-08-11): the function answers null
+// for any targeted row and `redeemable` is deleted, so a targeted token and a
+// guessed uuid render the identical page. The link still does not belong here —
+// a targeted invitee would be handed a URL that redeems nothing, and item 5
+// stands — but the reason is no longer "it leaks". See
+// memory/invariants/multi-tenancy.md.
+//
+// ----------------------------------------------------------------------------
+// WHAT A PENDING ROW CARRIES INSTEAD: "Resend email" (OV-003b / #293, ruled
+// 2026-08-10, reconciled with the above 2026-08-12)
+// ----------------------------------------------------------------------------
+//
+// The Copy-link button item 5 deleted was the admin's only way to get an
+// invitation in front of somebody, and the ruling said as much — it called that
+// link "a stopgap for the email delivery that has not shipped". #293 shipped the
+// delivery, so the row's control is now the one that USES it: press Resend and
+// the server sends, which needs no URL on screen and answers nothing about the
+// address. It is shown on EVERY pending row, never a subset, so its presence
+// derives from `status` alone and reintroduces no oracle — `isOpen` is exactly
+// the field that is gone.
+//
+// The countdown after a send is round 2 of the same ruling, and its per-session
+// limit is an accepted residual ruled 2026-08-12 (option (a) on PR #392). See
+// `useResendCooldown` for what it cannot reach and why nothing here closes it.
 // ============================================================================
 
 import { useActionState, useEffect, useState } from "react";
@@ -34,38 +103,20 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-// Import-free by construction, so a client component may hold the same
-// `?invitation=` contract the email does without dragging the Resend SDK into
-// this chunk (`@/lib/invitations/register-path` explains why it is its own
-// file). Never re-spell the query string here.
-import { invitationRegisterPath } from "@/lib/invitations/register-path";
-// The other import-free leaf on this path, and imported for the same reason:
-// the cooldown arithmetic is shared with the provider dedupe key, and the module
-// that builds that key reaches the Resend SDK. `@/lib/invitations/resend-window`
-// imports nothing at all, so the browser gets these functions and no client.
+import type { InvitationListRow } from "@/lib/invitations/list-row";
+// An import-free leaf, and imported for that reason: the cooldown arithmetic is
+// shared with the provider dedupe key, and the module that builds that key
+// reaches the Resend SDK. `@/lib/invitations/resend-window` imports nothing at
+// all, so the browser gets these functions and no client.
 import {
   resendCooldownLabel,
   resendCooldownRemainingMs,
   resendCooldownSecondsLeft,
 } from "@/lib/invitations/resend-window";
 
-export type InvitationStatus =
-  | "pending"
-  | "accepted"
-  | "declined"
-  | "expired"
-  | "revoked";
+export type { InvitationListRow };
 
-export type InvitationListRow = {
-  id: string;
-  inviteeEmail: string;
-  kindLabel: string;
-  status: InvitationStatus;
-  /** No target row yet — the invitee redeems this one by registering. */
-  isOpen: boolean;
-  sentLabel: string;
-  expiresLabel: string | null;
-};
+type InvitationStatus = InvitationListRow["status"];
 
 const STATUS_STYLE: Record<
   InvitationStatus,
@@ -95,7 +146,7 @@ export function InvitationsList({ rows }: { rows: InvitationListRow[] }) {
           <CardDescription>
             Waiting on an answer. Anyone who can invite for your organization
             can resend the email or revoke the invitation — revoking closes it
-            immediately, and the link stops working.
+            immediately, and the invitation stops working.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -146,23 +197,21 @@ function InvitationRow({ row }: { row: InvitationListRow }) {
       <div className="min-w-0 space-y-1">
         <p className="truncate font-medium">{row.inviteeEmail}</p>
         <p className="text-muted-foreground text-xs">
-          {row.kindLabel} · Sent {row.sentLabel}
+          Sent {row.sentLabel}
           {row.expiresLabel ? ` · Expires ${row.expiresLabel}` : ""}
         </p>
       </div>
       {/* WRAPS, and that is load-bearing rather than cosmetic. The cluster holds
-          up to four controls plus an inline refusal, and the row is 292px wide
-          on a 390px phone: without `flex-wrap` the overflow is CLIPPED, not
-          scrolled (the page's own scrollWidth stays 390), so a control pushed
-          past the edge is not merely awkward — it is unreachable. Measured
-          before this class existed: Revoke sat at right=411, and with the
-          longest refusal rendered Resend went with it at right=406, which took
-          away both buttons the failure message tells the admin to press. */}
+          the badge plus Resend and Revoke and an inline refusal, and the row is
+          292px wide on a 390px phone: without `flex-wrap` the overflow is
+          CLIPPED, not scrolled (the page's own scrollWidth stays 390), so a
+          control pushed past the edge is not merely awkward — it is
+          unreachable. Measured before this class existed: Revoke sat at
+          right=411, and with the longest refusal rendered Resend went with it
+          at right=406, which took away both buttons the failure message tells
+          the admin to press. */}
       <div className="flex flex-wrap items-center justify-end gap-2">
         <Badge variant={status.variant}>{status.label}</Badge>
-        {row.status === "pending" && row.isOpen && (
-          <CopyInviteLinkButton invitationId={row.id} />
-        )}
         {/* Pending only, and the same rule as Revoke: a resend of an answered
             invitation is refused by the guard inside `sendInvitationEmail`
             anyway, but offering it would be a lie. */}
@@ -174,27 +223,6 @@ function InvitationRow({ row }: { row: InvitationListRow }) {
         )}
       </div>
     </li>
-  );
-}
-
-function CopyInviteLinkButton({ invitationId }: { invitationId: string }) {
-  const [copied, setCopied] = useState(false);
-
-  return (
-    <Button
-      type="button"
-      variant="outline"
-      size="sm"
-      className="cursor-pointer"
-      onClick={async () => {
-        await navigator.clipboard.writeText(
-          `${window.location.origin}${invitationRegisterPath(invitationId)}`
-        );
-        setCopied(true);
-      }}
-    >
-      {copied ? "Copied" : "Copy link"}
-    </Button>
   );
 }
 

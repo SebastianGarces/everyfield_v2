@@ -21,6 +21,7 @@ import {
   generateSessionToken,
   setSessionCookie,
 } from "@/lib/auth";
+import { safeRedirectPath } from "@/lib/auth/safe-redirect";
 
 import { isDevLoginEnabled } from "./dev-accounts";
 
@@ -61,11 +62,5 @@ export async function devLoginAs(
   const session = await createSession(token, user.id);
   await setSessionCookie(token, session.expiresAt);
 
-  const redirectTo = formData.get("redirect");
-  const redirectPath =
-    typeof redirectTo === "string" && redirectTo.startsWith("/")
-      ? redirectTo
-      : "/dashboard";
-
-  redirect(redirectPath);
+  redirect(safeRedirectPath(formData.get("redirect")));
 }

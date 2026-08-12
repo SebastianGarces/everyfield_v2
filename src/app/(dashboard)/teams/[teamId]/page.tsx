@@ -4,7 +4,7 @@ import { ContextualTemplates } from "@/components/documents/contextual-templates
 import { MembersRolesTab } from "@/components/ministry-teams/members-roles-tab";
 import { verifySession } from "@/lib/auth/session";
 import { getTeamContextualTemplates } from "@/lib/documents/contextual";
-import { getTeam } from "@/lib/ministry-teams/service";
+import { getTeam, getTeamCountsForPeople } from "@/lib/ministry-teams/service";
 import { listPeople } from "@/lib/people/service";
 
 export const dynamic = "force-dynamic";
@@ -30,13 +30,25 @@ export default async function TeamMembersPage({
     notFound();
   }
 
+  // The assign dialog's "already on N teams" warning reads these counts from
+  // props — server data flows down, never into a client-side fetch
+  // (memory/invariants.md → Client/Server Data Synchronization).
+  const teamCounts = await getTeamCountsForPeople(
+    user.churchId,
+    peopleResult.people.map((person) => person.id)
+  );
+
   // DOC-014: the launch-day checklist packet this team works from, linked
   // straight to the template's generate dialog.
   const contextualTemplates = getTeamContextualTemplates(team);
 
   return (
     <div className="space-y-6">
-      <MembersRolesTab team={team} people={peopleResult.people} />
+      <MembersRolesTab
+        team={team}
+        people={peopleResult.people}
+        teamCounts={teamCounts}
+      />
 
       <ContextualTemplates
         templates={contextualTemplates}

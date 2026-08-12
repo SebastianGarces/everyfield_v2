@@ -29,13 +29,13 @@ an on-screen badge is invisible to the person who most needs it.
 
 The feature owns three things and deliberately nothing else:
 
-| Concern | What F11 owns |
+| Concern | What the notification service owns |
 |---------|---------------|
 | **Enqueue** | One contract any feature calls to say "tell this user this thing, at this time". |
 | **Preference** | Whether a given user wants a given *category* on a given *channel*. |
 | **Dispatch** | Draining due notifications to email and to the in-app feed, once each, on a schedule. |
 
-It does **not** own the content decisions of its callers. F11 does not know what makes a task overdue or a
+It does **not** own the content decisions of its callers. The service does not know what makes a task overdue or a
 meeting imminent; the owning feature decides that and hands over a rendered notification. This is what keeps
 the layer extensible rather than becoming a switch statement over every feature in the product.
 
@@ -43,8 +43,8 @@ the layer extensible rather than becoming a switch statement over every feature 
 
 Two channels ship in v1, chosen because they cover the two distinct failure modes:
 
-- **Email** — reaches a planter who is not in the app. Delivered through the existing transactional email
-  pipeline (Communication Hub's provider integration); F11 adds no new provider.
+- **Email** — reaches a planter who is not in the app. Delivered through the same transactional email
+  pipeline the Communication Hub owns; the notification service adds no second provider.
 - **In-app** — a notification feed with unread state, for a user who *is* in the app and wants a record of
   what happened while they were away.
 
@@ -175,7 +175,7 @@ that no longer exists is worse than no notification, because it teaches the user
 | **N-021** | SMS channel. |
 | **N-022** | Web push / PWA notifications. |
 | **N-023** | Per-notification snooze ("remind me tomorrow"). |
-| **N-024** | Per-notification threading so a re-notified entity updates its existing row rather than adding one. |
+| **N-024** | Per-notification threading so a re-notified entity updates its own row rather than adding one. |
 
 ---
 
@@ -284,14 +284,14 @@ A logged-out-safe page reached from an email footer.
 
 1. The owning feature detects a condition it wants to announce (a task became overdue, a meeting is three
    days out, an assessment completed).
-2. It renders the human-readable title and body itself — F11 does not template feature content.
+2. It renders the human-readable title and body itself — the notification service does not template feature content.
 3. It calls the enqueue contract with the recipient, category, type, rendered content, an entity reference,
    a scheduled time, and a dedupe key.
-4. F11 checks the recipient may be told: they can read the church, and — for an oversight recipient — the
+4. The service checks the recipient may be told: they can read the church, and — for an oversight recipient — the
    notification is one oversight may receive and the church has turned sharing on (or the notification is
    the consent-exempt invitation-accepted milestone). A recipient who fails is **skipped**, and the call
    says so; nothing is recorded for them.
-5. Otherwise F11 records a pending notification per enabled channel and returns. No provider call happens
+5. Otherwise the service records a pending notification per enabled channel and returns. No provider call happens
    here.
 6. A caller fanning out to several recipients loops this contract and collects the results. One barred
    recipient costs only that recipient their notification; the rest are recorded normally, and the skips are
@@ -339,7 +339,7 @@ happened.
 | `recipientUserId` | Who it is for. A user, never a bare address. |
 | `category` | One of the fixed category set. The unit of preference. |
 | `type` | Caller-defined discriminator within a category (e.g. task-overdue vs task-assigned), for grouping and analytics. |
-| `title` / `body` | Rendered by the caller. F11 stores, does not template. |
+| `title` / `body` | Rendered by the caller. The service stores, does not template. |
 | `entityType` / `entityId` | What it is about. Powers cancel-by-entity, the feed's link target, and the still-live re-check. |
 | `dedupeKey` | Caller-supplied idempotency key. A second enqueue with the same key does not create a second notification. |
 | `scheduledFor` | When it becomes eligible. Defaults to now. |
@@ -359,7 +359,7 @@ happened.
 | `digestCadence` | Only meaningful on the `digest` category. |
 
 **Absence is meaningful:** no row means "the code-defined default for this category", not "off". This keeps a
-new category working for existing users without a backfill.
+new category working for every user from the moment it is added, with no backfill.
 
 Uniqueness on `(userId, category, channel)`.
 
@@ -382,7 +382,7 @@ One row per channel attempt, so a retry history survives.
 
 ## Integration Contracts
 
-**This section is the feature's primary deliverable.** A caller must be able to adopt F11 without knowing how
+**This section is the feature's primary deliverable.** A caller must be able to adopt the notification service without knowing how
 dispatch works.
 
 ### Inbound (this feature consumes)
@@ -391,23 +391,23 @@ dispatch works.
 |------|----------|
 | Any feature | `enqueue(churchId, recipientUserId, category, type, title, body, { entityType, entityId, scheduledFor, dedupeKey })` → records pending notification(s). Idempotent on `dedupeKey`. Returns a per-recipient outcome: **recorded** (with the row) or **skipped** (with the reason — no church access, or an oversight recipient whose plant has not turned sharing on, or a notification oversight never receives). A refused recipient is never an exception, so a fan-out completes for everyone else. |
 | Any feature | `cancelByEntity(churchId, entityType, entityId, { category? })` → moves matching pending rows to cancelled. Safe to call when nothing is pending. |
-| Any feature | An optional **still-live predicate** registered per `type`, which dispatch calls before delivering, satisfying N-014 without F11 knowing any feature's domain rules. |
-| Communication Hub (F9) | The transactional email provider integration. F11 sends *through* it and adds no second provider. Provider delivery webhooks update `NotificationDelivery`. |
-| Platform | The recurring job scheduler. One additional scheduled entry; the existing Plant Intelligence daily job establishes the pattern. |
+| Any feature | An optional **still-live predicate** registered per `type`, which dispatch calls before delivering, satisfying N-014 without the service knowing any feature's domain rules. |
+| Communication Hub | The transactional email provider integration. The notification service sends *through* it and adds no second provider. Provider delivery webhooks update `NotificationDelivery`. |
+| Platform | The recurring job scheduler. One additional scheduled entry, following the same scheduler pattern as the Plant Intelligence daily job. |
 
 ### Outbound (this feature provides)
 
 | To | Contract |
 |----|----------|
 | App shell | Unread notification count for the current user. |
-| Task management (F5) | Due/overdue/assignment delivery, replacing that feature's blocked requirement. |
-| Meetings (F3) | Reminder-schedule and new-meeting delivery, replacing that feature's blocked requirement. |
-| Ministry teams (F8) | Team health and training alert delivery. |
+| Task Management | Due/overdue/assignment delivery, replacing that feature's blocked requirement. |
+| Meetings | Reminder-schedule and new-meeting delivery, replacing that feature's blocked requirement. |
+| Ministry Teams | Team health and training alert delivery. |
 | Plant Intelligence | New-assessment-available delivery. |
 
 ### Explicitly not provided
 
-- **Marketing or bulk sending.** That is Communication Hub's job. F11 is transactional only, and the
+- **Marketing or bulk sending.** That is the Communication Hub's job. The notification service is transactional only, and the
   distinction matters for compliance and deliverability.
 - **Content templating for callers.** Callers render their own copy.
 - **Notifications to non-users.** A `person` with no login is reached through Communication Hub, not here.

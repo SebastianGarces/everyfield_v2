@@ -4,7 +4,7 @@ import {
   downloadCsvTemplateAction,
   executeBulkImportAction,
   previewImportAction,
-} from "@/app/(dashboard)/people/actions";
+} from "@/app/(dashboard)/people/import-export-actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -619,10 +619,7 @@ function DuplicateRowDisplay({
         {match && (
           <div className="text-xs">
             <span className="text-muted-foreground">{matchLabel}:</span>{" "}
-            {match.firstName} {match.lastName}
-            {match.email && (
-              <span className="text-muted-foreground"> ({match.email})</span>
-            )}
+            {match.displayName}
           </div>
         )}
       </TableCell>

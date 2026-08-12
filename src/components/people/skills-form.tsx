@@ -3,7 +3,7 @@
 import {
   addSkillAction,
   updateSkillAction,
-} from "@/app/(dashboard)/people/actions";
+} from "@/app/(dashboard)/people/skill-actions";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,

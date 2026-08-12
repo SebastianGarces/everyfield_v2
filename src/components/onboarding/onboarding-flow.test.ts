@@ -127,7 +127,7 @@ test("the call site still imports one component, and it is the server half", () 
     /export async function OnboardingFlow\(\{\s*initialStep,\s*leadershipStatus,\s*\}/
   );
   assert.match(
-    read("app", "(dashboard)", "dashboard", "page.tsx"),
+    read("app", "(dashboard)", "dashboard", "onboarding-dashboard.tsx"),
     /import \{ OnboardingFlow \} from "@\/components\/onboarding\/onboarding-flow"/
   );
   assert.match(FLOW, /^"use client";/);

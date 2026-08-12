@@ -111,7 +111,7 @@ Schema detail belongs to the implementing unit.
 - Custom planter-defined milestones.
 - Post-launch recurring services (Sunday service tracking, worship/volunteer scheduling) — parked
   to its own discovery: the Services question, the ChMS boundary, and the oversight-value thesis.
-- Oversight-facing launch-progress surfaces beyond the existing date/countdown reads.
+- Oversight-facing launch-progress surfaces beyond the date/countdown reads named above.
 - Multi-launch history/attempt analytics (one live launch; the journal preserves the story).
 
 ## Open questions

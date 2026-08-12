@@ -132,6 +132,54 @@ test("an unauthenticated browser is still sent to /login", () => {
   );
 });
 
+// ============================================================================
+// The authenticated bounce off /login, and its `?redirect=` param.
+//
+// The param is followed through `safeRedirectPath` — the ONE open-redirect
+// predicate, shared with `login` and `devLoginAs` (ruling 408-1A). The proxy
+// used to hand-roll `startsWith("/")`, which `//evil.com` satisfies: resolved
+// against the request URL it is a PROTOCOL-RELATIVE URL, so a signed-in user
+// clicking `https://<app>/login?redirect=//evil.com` was sent off-site.
+// ============================================================================
+
+function authedGet(path: string): NextRequest {
+  return new NextRequest(
+    new Request(`${BASE}${path}`, {
+      headers: { "user-agent": CHROME, cookie: "session=token" },
+    })
+  );
+}
+
+test("a signed-in user's ?redirect= is followed only within the app", () => {
+  // A legitimate path is followed unchanged…
+  assert.equal(
+    loginRedirect(
+      proxy(authedGet("/login?redirect=%2Fwiki%2Fgetting-started"))
+    ),
+    `${BASE}/wiki/getting-started`
+  );
+
+  // …and every open-redirect spelling collapses to /dashboard, exactly as it
+  // does on the login action's own path.
+  for (const attack of [
+    "//evil.com",
+    "/\\evil.com",
+    "/\t/evil.com", // arrives as `?redirect=/%09/evil.com`; browsers strip the TAB
+    "https://evil.com",
+  ]) {
+    assert.equal(
+      loginRedirect(
+        proxy(authedGet(`/login?redirect=${encodeURIComponent(attack)}`))
+      ),
+      `${BASE}/dashboard`,
+      `${attack} escaped safeRedirectPath`
+    );
+  }
+
+  // No param at all still lands on the dashboard.
+  assert.equal(loginRedirect(proxy(authedGet("/login"))), `${BASE}/dashboard`);
+});
+
 test("/dashboard bounces a crawler exactly like a browser (#297)", () => {
   // The whole point of dropping it from the previewable list. `/dashboard` calls
   // `verifySession()`, so letting a crawler past the redirect handed it a shell

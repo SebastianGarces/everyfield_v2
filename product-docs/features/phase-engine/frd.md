@@ -13,7 +13,7 @@
 
 The Phase Engine answers two questions, continuously, for every church plant:
 
-1. **"What should I focus on right now, and why?"** — for the **planter** (coaching, prioritized next actions).
+1. **"What should I focus on right now, and why?"** — for the **planter** (guidance, prioritized next actions).
 2. **"How healthy is this plant, and is it on track?"** — for the **sending network / sending church** (oversight, readiness).
 
 It does this by judging the plant's **actual system activity** (core-group growth, vision-meeting cadence, leadership coverage, follow-up health, training progress, time-to-launch) against the **methodology** (the Launch Playbook and the 96-article wiki), expressed as a **versioned rubric** (`rubric-v0.md`). The judgment is produced by an **LLM-as-judge** grounded in retrieved methodology content (RAG), and stored as a **point-in-time assessment snapshot** that the UI reads instantly.
@@ -48,7 +48,7 @@ The engine is two layers that must never blur:
 - Each assessment shows **"as of <date>"** and **what changed since the last assessment**.
 
 ### Sending Network / Sending Church (oversight)
-- Sees a **health view** per plant: an evaluative-but-conservative summary (on track / watch / readiness), gated by the plant's existing privacy settings (`share_*`).
+- Sees a **health view** per plant: an evaluative-but-conservative summary (on track / watch / readiness), gated by the plant's own privacy settings (`share_*`).
 - Network-facing insights are framed as **observations, not verdicts**, and are **never** more granular than the plant's privacy settings allow (no individual-person insights to the network).
 - The planter always sees their own assessment **before or concurrently with** the network — no plant is surprised by what their overseer was told.
 
@@ -78,8 +78,8 @@ The engine is two layers that must never blur:
 
 - **PE-001 (Phase tracking & transitions):** Track `current_phase` per church. Support planter-initiated transitions **forward, backward, or skipping**, each requiring a short reason. No transition is ever blocked (soft gating).
 - **PE-002 (Transition audit trail):** Every transition records: from/to phase, initiating user, timestamp, reason, the **fact snapshot at that moment**, and the **rubric version**. Immutable.
-- **PE-003 (`phase.changed` event):** Emit `phase.changed` on every successful transition for downstream consumers (task templates, wiki recommendations, dashboard, notifications). This preserves the existing contract relied on by F5 and F1.
-- **PE-004 (Signal layer / Fact snapshot):** Compute a deterministic fact snapshot per plant from existing feature data — at minimum: committed core-group count + growth delta, vision-meeting cadence & attendance trend, follow-up staleness, ministry-role coverage (which of the 8 filled), per-person engagement/leadership-readiness signals, training progress, launch countdown. **No fact is ever produced by the LLM.**
+- **PE-003 (`phase.changed` event):** Emit `phase.changed` on every successful transition for downstream consumers (task templates, wiki recommendations, dashboard, notifications). Task Management and the wiki both subscribe to this event — one contract, not a per-consumer variant. `phase.changed`'s name and payload are a contract; consumers may be added, the shape may not change. Additive optional fields are permitted; removals and renames are not.
+- **PE-004 (Signal layer / Fact snapshot):** Compute a deterministic fact snapshot per plant from the plant's own feature data — at minimum: committed core-group count + growth delta, vision-meeting cadence & attendance trend, follow-up staleness, ministry-role coverage (which of the 8 filled), per-person engagement/leadership-readiness signals, training progress, launch countdown. **No fact is ever produced by the LLM.**
 - **PE-005 (Manual signals / self-attestation):** Allow planters to attest facts the system cannot observe (e.g., values documented, financial base, systems tested). Stored with who/when; included in the fact snapshot.
 - **PE-006 (Rubric artifact):** The judge evaluates against a **versioned rubric** (`rubric-v0.md` is v0). The rubric is editable without code changes to the engine logic, and each assessment records the rubric version used.
 - **PE-007 (LLM-as-judge assessment):** Produce an assessment by running the judge over (fact snapshot + current phase + rubric + retrieved methodology). The judge must reason **only over supplied facts**, must not invent numbers, and must cite which facts drove each insight.
@@ -89,7 +89,7 @@ The engine is two layers that must never blur:
 - **PE-011 (Instant reads):** All planter/oversight surfaces read the **latest cached snapshot**. No assessment performs an LLM call during a page request.
 - **PE-012 (Two audiences):** Each assessment yields planter-facing and network-facing insights. Network-facing insights are conservative (observations, not verdicts) and **privacy-gated** by the plant's `share_*` settings; individual-person insights are **never** exposed to the network.
 - **PE-013 (Planter-sees-first):** A plant's planter can always see their own assessment; network-facing content must not surface anything the planter has not been able to see.
-- **PE-014 (Insight feedback capture):** Capture per-insight feedback (rating + optional comment) from planters/coaches. This is retained from day one as the rubric-tuning signal — even before it is acted on.
+- **PE-014 (Insight feedback capture):** Capture per-insight feedback (rating + optional comment) from planters and coaches. This is retained from day one as the rubric-tuning signal — even before it is acted on.
 
 ### Should Have
 
@@ -120,7 +120,7 @@ them: a deterministic fact renders as a fact, an LLM-produced judgement is alway
 | **PE-026** | **Trend and velocity display.** Core-group growth rate, meeting attendance trend, 48-hour follow-up completion rate, ministry-team readiness. | D-010–D-013 | All four are deterministic facts, computable from feature data without the judge. |
 | **PE-027** | **Milestone timeline and alert badges.** Visual timeline of key milestones; badges for items needing attention. | D-014, D-015 | Badges must reflect engine-derived urgency, not a separate threshold system. |
 
-**Not carried across:** D-018 (coach dashboard) — multi-plant portfolio views belong to the
+**Not carried across:** D-018 — multi-plant portfolio views belong to the
 oversight surfaces; D-001/003/004/006/007/009 — ordinary phase and dashboard displays that need no
 separate requirement here; D-019–D-024 (customization, network comparison, export, weekly email,
 push, historical trends) — out of scope.
@@ -161,18 +161,18 @@ The launch date is owned by the Launch feature's launch entity, not by the Churc
 ## 7. Integration Points
 
 **Reads (Signal layer) from:**
-- **People/CRM (F2):** core-group size, person statuses, per-person activity/tenure.
-- **Vision Meetings (F3):** meeting cadence, attendance, new-contact inflow.
-- **Ministry Teams (F8):** the 8 role assignments, training programs & completions, per-person engagement.
-- **Tasks (F5):** task/checklist completion.
-- **Financial (F7, when present):** giving / budget base. Otherwise, manual signal.
+- **People/CRM:** core-group size, person statuses, per-person activity/tenure.
+- **Vision Meetings:** meeting cadence, attendance, new-contact inflow.
+- **Ministry Teams:** the 8 role assignments, training programs & completions, per-person engagement.
+- **Tasks:** task/checklist completion.
+- **Financial tracking (when present):** giving / budget base. Otherwise, manual signal.
 - **Launch:** target date, status, readiness progress, and outcome.
 - **Church:** `current_phase`, privacy settings.
 
 **Subscribes to events** (to mark plants dirty): `meeting.attendance.finalized`, `team.member.assigned`, `person.created`, `task.completed`, and similar material events.
 
 **Emits:**
-- `phase.changed` — on transition (consumers: F5 phase task templates, F1 wiki recommendations, the planter dashboard).
+- `phase.changed` — on transition (consumers: Task Management's phase task templates, the wiki's recommendations, the planter dashboard).
 - `plant.assessment.created` — when a new snapshot is ready (consumers: the planter dashboard, the notification/digest layer).
 
 **Provides to:**
@@ -190,7 +190,7 @@ The launch date is owned by the Launch feature's launch entity, not by the Churc
 - **NFR-PE-4 (Data privacy) — Must Have:** Plant data, including person-level facts, is sent to an external LLM provider during assessment. The requirement is a **documented, disclosed, and maximally-restricted data posture** — not zero retention:
   - The provider and its data-handling terms are recorded in this feature's configuration documentation.
   - The strongest retention and training controls the account is eligible for are enabled.
-  - Any planter, coach, or network user whose plant data is processed is told, in plain language, that it is.
+  - Any planter, coach, or oversight admin whose plant data is processed is told, in plain language, that it is.
   - Zero data retention is adopted when the account becomes contractually eligible for it — an enterprise, post-revenue milestone, tracked as **Should Have** and explicitly not a go-live gate.
 
   No data crosses tenant boundaries.
@@ -203,7 +203,7 @@ The launch date is owned by the Launch feature's launch entity, not by the Churc
 
 ## 9. Success Metrics
 
-- **Insight usefulness rate** — % of insights rated useful by planters/coaches (primary quality signal; also the rubric-tuning input).
+- **Insight usefulness rate** — % of insights rated useful by planters and coaches (primary quality signal; also the rubric-tuning input).
 - **Action rate** — % of insights followed by a corresponding plant action within N days (e.g., a "hold a vision meeting" insight followed by a logged meeting).
 - **Weekly engaged assessments** — plants with a viewed, fresh assessment per week.
 - **Network engagement** — oversight users viewing plant health.

@@ -3,7 +3,7 @@
 import {
   exportPeopleAction,
   type ExportPeopleFilters,
-} from "@/app/(dashboard)/people/actions";
+} from "@/app/(dashboard)/people/import-export-actions";
 import { Button } from "@/components/ui/button";
 import type { PersonSource, PersonStatus } from "@/lib/people/types";
 import { Download, Loader2 } from "lucide-react";

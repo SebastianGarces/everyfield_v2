@@ -1,6 +1,6 @@
 "use client";
 
-import { removeSkillAction } from "@/app/(dashboard)/people/actions";
+import { removeSkillAction } from "@/app/(dashboard)/people/skill-actions";
 import {
   AlertDialog,
   AlertDialogAction,
