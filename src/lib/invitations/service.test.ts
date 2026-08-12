@@ -1,8 +1,17 @@
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
+import {
+  SRC,
+  TS_FILES,
+  codeOf,
+  isUseClientModule,
+  isUseServerModule,
+  rel,
+  resolveModule,
+  valueSpecifiers,
+} from "@/lib/auth/server-action-surface";
 import type { OrganizationInvitation } from "@/db/schema";
 import type { OrganizationInvitationType } from "@/db/schema/organization-invitation";
 
@@ -62,6 +71,46 @@ import {
 //    smuggled onto the payload are absent from the row that gets written (§4).
 //    The compile-time half is the `@ts-expect-error`s below: a bare user object
 //    is not an `InvitationActor`, and `pnpm typecheck` enforces that.
+//
+//    §1b′ extends the same treatment to the two OTHER `"use server"` modules in
+//    this domain — the association surface and the org admin's sever, both added
+//    by #304 and both on the allowlist in part 4. Being allowed to reach `./core`
+//    is not the same claim as checking somebody first, and until round 5 nothing
+//    made the second one about those five endpoints. It also pins the SESSION-
+//    FIRST order ruled 2026-08-10: each export is called sessionless with a
+//    well-formed argument AND a malformed one, and both must throw, so no
+//    argument shape can be told from another with no session.
+//
+//    §1b″ closes the last gap in that claim (round 6). The invitations surface,
+//    `oversight/invitations/actions.ts`, is the domain's third `"use server"`
+//    module and its two `useActionState` endpoints parsed their FormData before
+//    checking anybody — so the universal invariant round 5 wrote into
+//    `memory/invariants.md` was false at the module the reader is most likely to
+//    open. It is enumerated separately because its arguments are `FormData`, not
+//    strings, and the well-formed/malformed pair has to be built with the field
+//    names the schemas read. The source-order assertion below now covers all
+//    three files, so the invariant is true domain-wide or the suite is red.
+//
+//    §1b‴ makes it true REPO-WIDE (round 8). Domain-wide was never what the
+//    invariant said: it says "the mint is the FIRST statement of the export", of
+//    every export, everywhere. Round 7 measured the rest of the repository and
+//    found five endpoints that still parsed first — two on the settings screen,
+//    one on the sharing screen, two on the notification feed — so the line was
+//    still false at the sha that claimed it. The five are called sessionless with
+//    both argument shapes here, and the source-order assertion is no longer a
+//    hand-kept list of files at all: it WALKS every `"use server"` module under
+//    `src/` and matches braces, so the sixth one is covered on the day it is
+//    written.
+//
+//    THAT WALK NO LONGER LIVES HERE. A scan about every action module in the
+//    product is not an invitations concern — the next domain that wants it
+//    should import it, not copy it, and a reader asking "what guards the
+//    endpoints?" has no reason to open this file. The walker is
+//    `src/lib/auth/server-action-surface.ts` and the repo-wide assertions are
+//    `src/lib/auth/server-action-surface.test.ts`, next to the module that owns
+//    sessions. §1b/§1b′/§1b″ — the RUNTIME sessionless calls against this
+//    domain's three action modules — stay here, because they are about these
+//    endpoints and not about the rule.
 //
 // 3. AUTHORITY — the check that stood between an anonymous request and a
 //    stranger's association, now unit-tested per invitation type. §5 adds the
@@ -187,10 +236,11 @@ import {
 //        with `tsc` at exit 0; the only thing that objected was
 //        `pnpm format:check`, and a formatter is not a security control. Now
 //        39 pass / 1 fail, same test as mutations 4-6, because the directive is
-//        read off the module's PROLOGUE (see `declaresDirective`) — and the rule
-//        is separately pinned against synthetic code by "a directive is a
-//        directive without its semicolon", so it cannot regress unnoticed on a
-//        tree where every real file happens to be formatted.
+//        read off the module's PROLOGUE (see `declaresDirective` in
+//        `@/lib/auth/server-action-surface`) — and the rule is separately pinned
+//        against synthetic code by "a directive is a directive without its
+//        semicolon" in that module's own test file, so it cannot regress
+//        unnoticed on a tree where every real file happens to be formatted.
 //
 // The compare-and-set is covered from both sides: §5 reads it off the generated
 // SQL (the claim's `status = 'pending'`, the association's
@@ -209,29 +259,19 @@ import {
 // the row, because the row carries two internal user uuids.
 // ============================================================================
 
-const SRC = path.join(process.cwd(), "src");
 const INVITATIONS_DIR = path.join(SRC, "lib/invitations");
 const SERVICE_PATH = path.join(INVITATIONS_DIR, "service.ts");
 const CORE_PATH = path.join(INVITATIONS_DIR, "core.ts");
 
-/**
- * A module with its comments removed. The absence assertions below are about
- * CODE: both modules explain the rule by naming the shapes it forbids
- * (`respondingUser`, `db.`), so documenting the fix would otherwise break the
- * test that enforces it.
- */
-const CODE_CACHE = new Map<string, string>();
-
-function codeOf(file: string): string {
-  const cached = CODE_CACHE.get(file);
-  if (cached !== undefined) return cached;
-
-  const code = readFileSync(file, "utf8")
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|\s)\/\/.*$/gm, "$1");
-  CODE_CACHE.set(file, code);
-  return code;
-}
+// The module-graph reader every walk below is built on — the file collector, the
+// comment stripper, the specifier resolver and the `"use server"` /
+// `"use client"` directive detectors — lives in
+// `@/lib/auth/server-action-surface`, beside the module that owns sessions,
+// because the rule it enforces is about the whole product's endpoint surface
+// and not about invitations. Its own tests (the brace matcher, the mint
+// resolver, the semicolon-less directive, the repo-wide SESSION-FIRST scan) are
+// in `src/lib/auth/server-action-surface.test.ts`. What stays here is the part
+// that is genuinely about THIS domain: §1b/§1b′/§1b″ and the two closure walks.
 
 const SERVICE_CODE = codeOf(SERVICE_PATH);
 const CORE_CODE = codeOf(CORE_PATH);
@@ -313,112 +353,16 @@ async function actionModule(): Promise<Record<string, unknown>> {
 // `./core`, so they have to resolve specifiers rather than grep for a substring:
 // `from "./core"` and `from "@/lib/invitations/core"` are the same module, and
 // only the second one contains the string "invitations/core".
+//
+// The generic half — `TS_FILES`, `codeOf`, `resolveModule`, `valueSpecifiers`,
+// `isUseServerModule`, `isUseClientModule` — is imported from
+// `@/lib/auth/server-action-surface`. What follows is the part that is about
+// THIS module graph: the re-export edges, and the two closures over them.
 // ----------------------------------------------------------------------------
-
-const TS_FILES: string[] = (function collect(dir: string): string[] {
-  const found: string[] = [];
-  for (const entry of readdirSync(dir)) {
-    const full = path.join(dir, entry);
-    if (statSync(full).isDirectory()) {
-      found.push(...collect(full));
-    } else if (/\.tsx?$/.test(entry)) {
-      found.push(full);
-    }
-  }
-  return found;
-})(SRC);
 
 /** `export * from "x"` / `export { a } from "x"` — a published endpoint. */
 const REEXPORT_FROM =
   /^export\s+(?:\*(?:\s+as\s+\w+)?|\{[^}]*\})\s*from\s*["']([^"']+)["']/gm;
-
-/** Specifiers whose module is actually emitted: value imports and `import()`. */
-function valueSpecifiers(code: string): string[] {
-  const statement =
-    /^\s*(?:import|export)\s+(?!type\b)[^;]*?\bfrom\s*["']([^"']+)["']/gm;
-  const sideEffect = /^\s*import\s*["']([^"']+)["']/gm;
-  const dynamic = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
-
-  return [statement, sideEffect, dynamic].flatMap((pattern) =>
-    [...code.matchAll(pattern)].map(([, specifier]) => specifier)
-  );
-}
-
-/** The file a specifier names, or `null` for a bare package. */
-function resolveModule(from: string, specifier: string): string | null {
-  const base = specifier.startsWith("@/")
-    ? path.join(SRC, specifier.slice(2))
-    : specifier.startsWith(".")
-      ? path.resolve(path.dirname(from), specifier)
-      : null;
-  if (base === null) return null;
-
-  for (const candidate of [
-    base,
-    `${base}.ts`,
-    `${base}.tsx`,
-    path.join(base, "index.ts"),
-    path.join(base, "index.tsx"),
-  ]) {
-    if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
-  }
-  return null;
-}
-
-/**
- * A module's DIRECTIVE PROLOGUE: the run of string-literal statements at the top
- * of the file, comments already stripped by `codeOf`.
- *
- * Both walks below turn on "is this a `"use server"` module", and getting that
- * answer wrong is not a cosmetic failure — a `"use server"` module is where the
- * endpoints are, and it is also the BOUNDARY both walks stop at. So a
- * false NEGATIVE hides a live endpoint from the reachability check, and a false
- * POSITIVE cuts the client-bundle walk short at a file that is not a boundary at
- * all. Neither may be decided by a pattern that happens to fit today's files.
- *
- * The bug this replaces (#265 r2, HR4 evidence 2026-08-03): `/^["']use
- * server["'];/m` required a SEMICOLON. `"use server"` without one is the same
- * directive — ASI makes it an expression statement either way, and Next.js reads
- * it — so a `"use server"` module written without the semicolon was invisible to
- * both closure walks, and a live unauthenticated detach endpoint passed a 37/37
- * green suite. Only `format:check` objected, and a formatter is not a security
- * control. It is documented mutation 7.
- *
- * Anchoring on the PROLOGUE rather than on a line anywhere in the file is what
- * keeps it precise: a directive is only a directive as the module's first
- * statement, so `["use server"]` in an array or `/^["']use server["']/` in a
- * regex further down cannot be mistaken for one.
- */
-const PROLOGUE = /^(?:\s*(?:"[^"\n]*"|'[^'\n]*')\s*;?)*/;
-
-/**
- * Does `code` open with this directive? Takes CODE, not a path, so the rule
- * itself is unit-testable — see "a directive is a directive without its
- * semicolon".
- */
-function declaresDirective(code: string, directive: string): boolean {
-  const prologue = PROLOGUE.exec(code)?.[0] ?? "";
-  return new RegExp(`["']${directive}["']`).test(prologue);
-}
-
-const DIRECTIVE_CACHE = new Map<string, boolean>();
-
-/** `"use server"` / `'use server'`, semicolon or not, as the first statement. */
-function isUseServerModule(full: string): boolean {
-  const cached = DIRECTIVE_CACHE.get(full);
-  if (cached !== undefined) return cached;
-
-  const declared = declaresDirective(codeOf(full), "use server");
-  DIRECTIVE_CACHE.set(full, declared);
-  return declared;
-}
-
-/** The same rule for the client half of the boundary (see §1d). */
-function isUseClientModule(full: string): boolean {
-  return declaresDirective(codeOf(full), "use client");
-}
-
-const rel = (full: string) => path.relative(process.cwd(), full);
 
 /**
  * The specifiers a module PUBLISHES through — its re-export edges, which are not
@@ -549,6 +493,14 @@ const CORE_REACHING_ACTION_MODULES: ReadonlyArray<readonly [string, string]> = [
     "the four session-minted lifecycle actions — this module is core's front door, and every other assertion in this file pins its shape",
   ],
   [
+    "src/app/(dashboard)/settings/association/actions.ts",
+    "#304/OV-007a — the PLANTER'S sever, which by ruling #274 ships with the surface that owns its authority rule rather than as a fifth lifecycle action. `leaveOversightOrgAs` takes the actor and a two-valued org KIND, never a church or org id; the FK null, its tenancy assertion and the audit row are one statement inside the logic layer. Accept and decline are re-wrapped here only to add `refresh()`",
+  ],
+  [
+    "src/app/(dashboard)/oversight/plants/[id]/actions.ts",
+    "#304/OV-007b — the ORG ADMIN'S sever, the mirror of the planter's and on the same ruling (#274): each side's wrapper ships with the surface that owns its authority rule, never as a fifth lifecycle action. `removePlantFromOrgAs` takes a church id — an org has many plants, so which one is a real choice — and NOTHING else: the org, its kind and the actor all come from the session, and the FK is nulled only while it still points at that org",
+  ],
+  [
     "src/app/(auth)/register/actions.ts",
     "two things, both necessarily session-free because no account exists yet: (1) the private-beta gate — `./beta-gate` → `hasValidInvitationBypass` → `getInvitation`, a READ, because an invitation id IS the bypass token (core.ts → Query Invitations); (2) #23's redemption — `bindOpenInvitationTarget` then `acceptInvitationAs`, which turn an invite link into an association. The WRITES are reached only from inside `register`, after the account has been created, and the actor is minted from the user row this same request inserted",
   ],
@@ -618,6 +570,443 @@ test("every action refuses a call with no session, whatever else it is sent", as
         /Unauthorized|outside a request scope/.test(error.message),
       name
     );
+  }
+});
+
+// ----------------------------------------------------------------------------
+// 1b′. Forgery — the two association action modules #304 added (OV-007a/b, WS3)
+//
+// `service.ts` is not the only `"use server"` module in the invitation domain
+// any more. #304 added the planter's association surface and the org admin's
+// sever, both on `CORE_REACHING_ACTION_MODULES` above, and each publishes its
+// own POST endpoints. §1b proves the four lifecycle actions refuse a sessionless
+// call; without this the five newest endpoints had no equivalent, and the walk
+// above only proves they are ALLOWED to reach `./core`, never that they check
+// anybody first.
+//
+// It also pins the SESSION-FIRST order ruled 2026-08-10 (round 5 of #304). Each
+// export is called twice with no session — once with a WELL-FORMED argument and
+// once with a malformed one — and both must throw. That is the assertion the
+// order exists for: while `safeParse` ran first, the malformed call returned
+// `{ success: false, error: "Unknown invitation" }` to an anonymous caller and
+// the well-formed one threw, so the pair of answers distinguished a valid uuid
+// from an invalid one with no session at all. Two identical throws is what
+// "nothing is examined before the session" looks like from outside.
+// ----------------------------------------------------------------------------
+
+/**
+ * The association endpoint surface, DECLARED — module by module, export by
+ * export. Asserted exhaustive against the real module namespace below, so a
+ * sixth endpoint added to either file fails here until it is written down and
+ * put through the sessionless call.
+ */
+const ASSOCIATION_ACTION_MODULES: ReadonlyArray<{
+  readonly label: string;
+  readonly load: () => Promise<Record<string, unknown>>;
+  readonly exports: readonly string[];
+}> = [
+  {
+    label: "src/app/(dashboard)/settings/association/actions.ts",
+    load: async () =>
+      (await import("@/app/(dashboard)/settings/association/actions")) as unknown as Record<
+        string,
+        unknown
+      >,
+    exports: [
+      "acceptAssociationInvitation",
+      "declineAssociationInvitation",
+      "leaveNetwork",
+      "leaveOversightOrg",
+    ],
+  },
+  {
+    label: "src/app/(dashboard)/oversight/plants/[id]/actions.ts",
+    load: async () =>
+      (await import("@/app/(dashboard)/oversight/plants/[id]/actions")) as unknown as Record<
+        string,
+        unknown
+      >,
+    exports: ["removePlantFromOrg"],
+  },
+];
+
+test("the association modules publish exactly the endpoints they declare", async () => {
+  // The same assertion §1a makes about `service.ts`, made about the two modules
+  // #304 added: the module namespace IS the auth surface, so it is read off the
+  // real import rather than grepped. `leaveNetwork` taking no argument at all is
+  // part of the shape being pinned — a later "convenience" parameter on it would
+  // be a network id a forged POST could aim (OV-013).
+  for (const target of ASSOCIATION_ACTION_MODULES) {
+    const mod = await target.load();
+    assert.deepEqual(
+      Object.keys(mod).sort(),
+      [...target.exports].sort(),
+      target.label
+    );
+  }
+});
+
+test("every association action refuses a call with no session, well-formed argument or not", async () => {
+  // The forged POST, executed against the newest endpoints. The forged actor is
+  // the same one §1b uses — the `respondingUser` shape that was once trusted —
+  // and it lands in no parameter, because none of these five declares one.
+  //
+  // Both spellings of the refusal are the same refusal: in a real request with
+  // no session cookie `verifySession()` throws `Unauthorized`; in this bare
+  // process `cookies()` itself refuses, there being no request to read one from.
+  // Either way it is a throw and not a `{ success: false }`, so nothing
+  // downstream can mistake it for a handled outcome — and, crucially, the
+  // malformed argument produces the SAME throw rather than a parse result.
+  const forged = {
+    id: "55555555-5555-4555-8555-555555555555",
+    role: "planter" as const,
+    churchId: "11111111-1111-4111-8111-111111111111",
+  };
+
+  // A syntactically valid uuid (`safeParse` would have accepted it) and a
+  // string that is not one (`safeParse` would have rejected it). The endpoints
+  // taking a two-valued org KIND read the same pair the same way: "network" is
+  // well-formed, "" is not.
+  const wellFormed = ["77777777-7777-4777-8777-777777777777", "network"];
+  const malformed = ["not-a-uuid", ""];
+
+  for (const target of ASSOCIATION_ACTION_MODULES) {
+    const mod = await target.load();
+
+    for (const name of target.exports) {
+      const action = mod[name];
+      assert.equal(typeof action, "function", `${target.label} → ${name}`);
+
+      for (const argument of [...wellFormed, ...malformed]) {
+        await assert.rejects(
+          async () =>
+            (action as (...args: unknown[]) => Promise<unknown>)(
+              argument,
+              forged
+            ),
+          (error: unknown) =>
+            error instanceof Error &&
+            /Unauthorized|outside a request scope/.test(error.message),
+          `${target.label} → ${name}(${JSON.stringify(argument)})`
+        );
+      }
+
+      // And with no argument at all — the shape `leaveNetwork` actually has.
+      await assert.rejects(
+        async () => (action as (...args: unknown[]) => Promise<unknown>)(),
+        (error: unknown) =>
+          error instanceof Error &&
+          /Unauthorized|outside a request scope/.test(error.message),
+        `${target.label} → ${name}()`
+      );
+    }
+  }
+});
+
+// ----------------------------------------------------------------------------
+// 1b″. Forgery — the FormData actions on the invitations surface (#23 / OV-003)
+//
+// The third `"use server"` module in this domain, and the one round 6 caught:
+// `oversight/invitations/actions.ts` publishes two `useActionState` endpoints,
+// and until this round both of them ran `safeParse` before any session check.
+// They are enumerated apart from `ASSOCIATION_ACTION_MODULES` because their
+// arguments are not strings — a `useActionState` action is called
+// `(prevState, formData)`, so the well-formed/malformed pair has to be built as
+// real `FormData` with the field names the schemas read.
+//
+// The same claim is being made about them: a sessionless call throws for BOTH
+// argument shapes. While the parse ran first, a malformed `inviteeEmail`
+// returned `{ error: "Enter a valid email address" }` to an anonymous caller
+// and a well-formed one threw — the pair of answers told a valid address shape
+// from an invalid one with no session at all. Two identical throws is what
+// "nothing is examined before the session" looks like from outside.
+//
+// The mint here is deliberately a DUPLICATE: the service mints its own actor
+// and this module passes nothing down. That is why the runtime assertion alone
+// would not have caught the fault — the endpoints already refused a sessionless
+// WELL-FORMED call, from inside the service. The malformed half is the half
+// that fails when the guard is missing.
+// ----------------------------------------------------------------------------
+
+/**
+ * The FormData endpoint surface, DECLARED — export by export, each with the
+ * form the real client submits and a malformed twin of it. Asserted exhaustive
+ * against the real module namespace below, so a third endpoint on this surface
+ * fails here until it is written down and put through the sessionless call.
+ */
+const FORM_ACTION_MODULE = {
+  label: "src/app/(dashboard)/oversight/invitations/actions.ts",
+  load: async () =>
+    (await import("@/app/(dashboard)/oversight/invitations/actions")) as unknown as Record<
+      string,
+      unknown
+    >,
+  exports: [
+    {
+      name: "createInvitationAction",
+      // `safeParse` would accept the first and reject the second.
+      wellFormed: { inviteeEmail: "a@b.co", inviteAs: "church" },
+      malformed: { inviteeEmail: "nope", inviteAs: "church" },
+    },
+    {
+      name: "revokeInvitationAction",
+      wellFormed: { invitationId: "77777777-7777-4777-8777-777777777777" },
+      malformed: { invitationId: "not-a-uuid" },
+    },
+  ],
+} as const;
+
+function formDataOf(fields: Readonly<Record<string, string>>): FormData {
+  const form = new FormData();
+  for (const [key, value] of Object.entries(fields)) form.append(key, value);
+  return form;
+}
+
+test("the invitations action module publishes exactly the endpoints it declares", async () => {
+  const mod = await FORM_ACTION_MODULE.load();
+
+  assert.deepEqual(
+    Object.keys(mod).sort(),
+    FORM_ACTION_MODULE.exports.map((e) => e.name).toSorted(),
+    FORM_ACTION_MODULE.label
+  );
+});
+
+test("every invitations FormData action refuses a call with no session, well-formed form or not", async () => {
+  const mod = await FORM_ACTION_MODULE.load();
+
+  for (const { name, wellFormed, malformed } of FORM_ACTION_MODULE.exports) {
+    const action = mod[name];
+    assert.equal(
+      typeof action,
+      "function",
+      `${FORM_ACTION_MODULE.label} → ${name}`
+    );
+
+    for (const [shape, fields] of [
+      ["well-formed", wellFormed],
+      ["malformed", malformed],
+    ] as const) {
+      // Called the way React calls it — previous state, then the form — and
+      // also with the form alone, which is what a hand-rolled POST produces.
+      for (const args of [[{}, formDataOf(fields)], [formDataOf(fields)]]) {
+        await assert.rejects(
+          async () =>
+            (action as (...a: unknown[]) => Promise<unknown>)(...args),
+          (error: unknown) =>
+            error instanceof Error &&
+            /Unauthorized|outside a request scope/.test(error.message),
+          `${FORM_ACTION_MODULE.label} → ${name} (${shape}, ${args.length} args)`
+        );
+      }
+    }
+
+    // And with no argument at all.
+    await assert.rejects(
+      async () => (action as (...a: unknown[]) => Promise<unknown>)(),
+      (error: unknown) =>
+        error instanceof Error &&
+        /Unauthorized|outside a request scope/.test(error.message),
+      `${FORM_ACTION_MODULE.label} → ${name}()`
+    );
+  }
+});
+
+test("the session mint is the FIRST statement of every invitation-domain action", () => {
+  // The structural half, read off the source. §1b′/§1b″ above prove the
+  // endpoints refuse; this proves WHERE they refuse, which is what stops the
+  // parse from creeping back above the mint in a later edit that still passes a
+  // sessionless call (it would — a malformed id would return
+  // `{ success: false }`, and `assert.rejects` on the well-formed one alone
+  // would not notice).
+  //
+  // The list is every `"use server"` module in this domain that parses an
+  // argument, and it is what round 6 grew: the invitations surface was the one
+  // module the round-5 pass wrote the universal invariant about without ever
+  // asserting it, and both of its exports parsed first.
+  //
+  // Read from the function body's first line: `verifySession()` must appear
+  // before the first `safeParse` in each exported function.
+  for (const file of [
+    path.join(SRC, "app/(dashboard)/settings/association/actions.ts"),
+    path.join(SRC, "app/(dashboard)/oversight/plants/[id]/actions.ts"),
+    path.join(SRC, "app/(dashboard)/oversight/invitations/actions.ts"),
+  ]) {
+    const code = codeOf(file);
+    const bodies = [
+      ...code.matchAll(/export\s+async\s+function\s+(\w+)\s*\([^)]*\)[^{]*\{/g),
+    ];
+
+    assert.ok(bodies.length > 0, `no exported actions found in ${rel(file)}`);
+
+    for (const match of bodies) {
+      const body = code.slice(match.index + match[0].length);
+      const end = body.search(/\n\}/);
+      const scoped = end === -1 ? body : body.slice(0, end);
+
+      const mint = scoped.indexOf("verifySession()");
+      const parse = scoped.indexOf(".safeParse(");
+
+      assert.ok(mint >= 0, `${rel(file)} → ${match[1]} never mints an actor`);
+      if (parse >= 0) {
+        assert.ok(
+          mint < parse,
+          `${rel(file)} → ${match[1]} parses its argument before checking the session`
+        );
+      }
+    }
+  }
+});
+
+// ----------------------------------------------------------------------------
+// 1b‴. The invariant is UNIVERSAL — the rest of the repository (round 8)
+//
+// `memory/invariants.md` → Authentication states SESSION FIRST, THEN THE PARSE
+// about every export of every `"use server"` module. Rounds 5 and 6 made it true
+// of the invitation domain and wrote it down as universal; round 7 measured the
+// rest of the repository and found five endpoints that still parsed first:
+//
+//   settings/actions.ts          setNotificationPreferenceAction, setDigestCadenceAction
+//   settings/sharing/actions.ts  setOversightSharingAction
+//   notifications/actions.ts     markNotificationReadAction, loadMoreNotificationsAction
+//
+// None was exploitable in the sense of writing anything — but each answered an
+// anonymous caller differently for a malformed argument (`{ success: false, … }`)
+// than for a well-formed one (a throw), which is the shape-oracle the ruling
+// names, and which is why the rule is positional rather than a judgement call.
+//
+// The two halves below are deliberately different in kind. The runtime half
+// calls the five endpoints; the structural half walks EVERY `"use server"`
+// module under `src/` and matches braces, so it is not a list anybody has to
+// remember to extend. A file-list assertion is what let the invitations surface
+// sit outside the claim for a whole round.
+// ----------------------------------------------------------------------------
+
+/**
+ * The five endpoints round 7 measured, each with an argument `safeParse` would
+ * ACCEPT and one it would REJECT.
+ *
+ * `markAllNotificationsReadAction` takes nothing and parses nothing, and is here
+ * anyway: it shares `currentViewer()` with the other two, so a regression that
+ * moved the mint out of that helper would be caught by whichever export ran
+ * first rather than by luck.
+ */
+const REPO_WIDE_ACTION_MODULES: ReadonlyArray<{
+  readonly label: string;
+  readonly load: () => Promise<Record<string, unknown>>;
+  readonly exports: ReadonlyArray<{
+    readonly name: string;
+    readonly wellFormed: readonly unknown[];
+    readonly malformed: readonly unknown[];
+  }>;
+}> = [
+  {
+    label: "src/app/(dashboard)/settings/actions.ts",
+    load: async () =>
+      (await import("@/app/(dashboard)/settings/actions")) as unknown as Record<
+        string,
+        unknown
+      >,
+    exports: [
+      {
+        name: "setNotificationPreferenceAction",
+        wellFormed: [{ category: "tasks", channel: "email", enabled: true }],
+        malformed: [{ category: "nope", channel: "carrier-pigeon" }],
+      },
+      {
+        name: "setDigestCadenceAction",
+        wellFormed: ["daily"],
+        malformed: ["hourly"],
+      },
+    ],
+  },
+  {
+    label: "src/app/(dashboard)/settings/sharing/actions.ts",
+    load: async () =>
+      (await import("@/app/(dashboard)/settings/sharing/actions")) as unknown as Record<
+        string,
+        unknown
+      >,
+    exports: [
+      {
+        name: "setOversightSharingAction",
+        wellFormed: [true],
+        malformed: ["yes"],
+      },
+    ],
+  },
+  {
+    label: "src/app/(dashboard)/notifications/actions.ts",
+    load: async () =>
+      (await import("@/app/(dashboard)/notifications/actions")) as unknown as Record<
+        string,
+        unknown
+      >,
+    exports: [
+      {
+        name: "markNotificationReadAction",
+        wellFormed: ["77777777-7777-4777-8777-777777777777"],
+        malformed: ["not-a-uuid"],
+      },
+      {
+        name: "markAllNotificationsReadAction",
+        wellFormed: [],
+        malformed: [],
+      },
+      {
+        name: "loadMoreNotificationsAction",
+        wellFormed: [
+          {
+            cursor: {
+              createdAt: "2026-08-10T12:00:00.000Z",
+              id: "77777777-7777-4777-8777-777777777777",
+            },
+            unreadOnly: false,
+          },
+        ],
+        malformed: [{ cursor: { createdAt: "yesterday", id: "x" } }],
+      },
+    ],
+  },
+];
+
+test("the settings and notification modules publish exactly the endpoints they declare", async () => {
+  // The module namespace IS the auth surface, here as much as in §1a: a sixth
+  // endpoint on any of these three files fails until it is written down above
+  // and put through the sessionless call.
+  for (const target of REPO_WIDE_ACTION_MODULES) {
+    const mod = await target.load();
+    assert.deepEqual(
+      Object.keys(mod).sort(),
+      target.exports.map((e) => e.name).toSorted(),
+      target.label
+    );
+  }
+});
+
+test("every settings and notification action refuses a call with no session, well-formed argument or not", async () => {
+  for (const target of REPO_WIDE_ACTION_MODULES) {
+    const mod = await target.load();
+
+    for (const { name, wellFormed, malformed } of target.exports) {
+      const action = mod[name];
+      assert.equal(typeof action, "function", `${target.label} → ${name}`);
+
+      for (const [shape, args] of [
+        ["well-formed", wellFormed],
+        ["malformed", malformed],
+        ["no argument", []],
+      ] as const) {
+        await assert.rejects(
+          async () =>
+            (action as (...a: unknown[]) => Promise<unknown>)(...args),
+          (error: unknown) =>
+            error instanceof Error &&
+            /Unauthorized|outside a request scope/.test(error.message),
+          `${target.label} → ${name} (${shape})`
+        );
+      }
+    }
   }
 });
 
@@ -720,47 +1109,6 @@ test("the logic layer is not a 'use server' module", () => {
   // ...and the two walks below agree, since they are what actually decides.
   assert.ok(isUseServerModule(SERVICE_PATH), "service.ts is the action layer");
   assert.ok(!isUseServerModule(CORE_PATH), "core.ts must not be an endpoint");
-});
-
-test("a directive is a directive without its semicolon", () => {
-  // The guardrail on the guardrail (#265 r2, HOLE 4 — documented mutation 7).
-  // Both closure walks ask `isUseServerModule`, and the previous detector
-  // required a trailing semicolon: `"use server"` on its own is the same
-  // directive (ASI; Next.js reads it), so a module written that way was invisible
-  // to both walks and shipped a live unauthenticated endpoint through a green
-  // 37/37 suite. Only `format:check` noticed, and a formatter is not a security
-  // control — which is why the rule is pinned here, against synthetic code, and
-  // not only exercised on whatever the repo's files happen to look like today.
-  for (const code of [
-    '"use server";\nexport const a = 1;',
-    '"use server"\nexport const a = 1;',
-    "'use server'\nexport const a = 1;",
-    '"use server"    \n',
-    '\n\n  "use server"\n',
-    '"use strict";\n"use server"\n',
-  ]) {
-    assert.ok(declaresDirective(code, "use server"), JSON.stringify(code));
-  }
-
-  // And a directive is only one as the module's FIRST statement, so a mention
-  // further down — a regex, an array entry, a template — is not one. Over-eager
-  // detection is its own bug: these walks STOP at `"use server"` boundaries, so
-  // a false positive silently prunes the subtree it should have followed.
-  for (const code of [
-    'export const a = 1;\n"use server";',
-    'const directives = ["use server"];',
-    'if (x) { "use server"; }',
-    "export const RE = /[\"']use server[\"']/;",
-    "",
-  ]) {
-    assert.ok(!declaresDirective(code, "use server"), JSON.stringify(code));
-  }
-
-  // The client half of the boundary uses the same rule, and there is at least
-  // one real file of each kind — otherwise §1d walks nothing.
-  assert.ok(declaresDirective('"use client"\n', "use client"));
-  assert.ok(TS_FILES.some(isUseClientModule), "no client entries found");
-  assert.ok(TS_FILES.some(isUseServerModule), "no action modules found");
 });
 
 test("no 'use server' module republishes the invitation logic layer", () => {

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { HeaderBreadcrumbs } from "@/components/header";
 import { PreferenceMatrix } from "@/components/notifications/preference-matrix";
 import { verifySession } from "@/lib/auth/session";
+import { OVERSIGHT_SHARING_TEASER } from "@/lib/notifications/categories";
 import {
   audienceForRole,
   buildPreferenceMatrixView,
@@ -49,6 +50,19 @@ export default async function SettingsPage() {
   const isPlanterWithPlant =
     session.user.role === "planter" && Boolean(session.user.churchId);
 
+  // #304 WS3 (ruled 2026-08-09): `/settings/association` serves TWO roles now —
+  // the planter answering for their plant, and a sending-church admin answering
+  // a network's invitation for their sending church. The link has to be visible
+  // to both or the second half of "no invitation that cannot be answered"
+  // (`memory/invariants.md` → Multi-Tenancy) is a page nobody can find. The
+  // condition mirrors the page's own guard exactly; anyone else is redirected
+  // there, and every write behind it refuses them again server-side.
+  const isSendingChurchAdminWithOrg =
+    session.user.role === "sending_church_admin" &&
+    Boolean(session.user.sendingChurchId);
+  const canManageAssociation =
+    isPlanterWithPlant || isSendingChurchAdminWithOrg;
+
   return (
     <>
       <HeaderBreadcrumbs items={[{ label: "Settings" }]} />
@@ -88,17 +102,69 @@ export default async function SettingsPage() {
             one more switch about email volume (N-026). Shown only to a planter
             with a plant, which is exactly who the target screen serves.
 
-            The copy names the exception rather than omitting it. This toggle
-            gates what is PUSHED to oversight — the digest and the two gated
-            milestones — but NOT "your invitation was accepted", which is
-            exempt (ruled 2026-08-01) because it is the inviting org's own
-            event. "No updates unless you turn sharing on" was therefore false
-            for the one message a planter is most likely to have already
-            caused. It is also not "nothing": the oversight dashboard already
-            lists the plant with its name, current stage and launch date,
-            ungated — see the header of OVERSIGHT_SHARING_TOGGLE. A teaser that
-            promises more than the setting delivers is the one way this feature
-            can fail its own purpose. */}
+            The copy names the exceptions rather than omitting them, and it is
+            NOT written here. This toggle gates what is PUSHED to oversight —
+            the digest and the two gated milestones — but not the THREE types in
+            OVERSIGHT_SHARING_EXEMPT_TYPES, each of which is the inviting org's
+            own relationship changing: an invitation accepted, an invitation
+            declined, an association ended (ruled 2026-08-01 for the accept,
+            extended to all three on 2026-08-10, round 5 of #304). "No updates
+            unless you turn sharing on" is therefore false three times over, and
+            the version of this teaser that named only the accept was false
+            twice — it told a planter their decline and their departure were
+            covered by a switch that has never gated either.
+
+            That is why the sentence now comes from OVERSIGHT_SHARING_TEASER in
+            src/lib/notifications/categories.ts and this file renders it
+            unchanged. A hardcoded sibling sentence is invisible to the guard
+            that keeps the sharing screen honest, which is exactly how this one
+            drifted; oversight.test.ts now checks every surface in
+            OVERSIGHT_CONSENT_SURFACES against the exempt list itself.
+
+            It is also not "nothing": the oversight dashboard already lists the
+            plant with its name, current stage and launch date, ungated — see
+            the header of OVERSIGHT_SHARING_TOGGLE. A teaser that promises more
+            than the setting delivers is the one way this feature can fail its
+            own purpose. */}
+        {/* #304 / OV-004 — the other org-wide decision, on the same "linked
+            rather than inlined" footing as Sharing below. The two are
+            neighbours on purpose: this one decides WHO your organization
+            belongs to, that one decides what they hear about it, and neither is
+            a preference about email volume.
+
+            Shown to BOTH roles that can answer an invitation since #304 WS3 —
+            the planter for their plant, a sending-church admin for their
+            sending church. A link only a planter can see was the visible half
+            of the dead end HR4 found. */}
+        {canManageAssociation && (
+          <section aria-labelledby="association-link" className="space-y-1">
+            <h2
+              id="association-link"
+              className="text-lg font-semibold tracking-tight"
+            >
+              Association
+            </h2>
+            <p className="text-muted-foreground text-sm text-pretty">
+              {/* BOTH branches name the LEAVE control, because both roles have
+                  one (OV-013 gave the sending church admin `LeaveNetworkDialog`
+                  on the same route's second view). The admin's sentence used to
+                  stop at "see which network your sending church belongs to",
+                  which described the screen as read-only and was the copy half
+                  of the dead end HR4 found on the planter's side: a control
+                  nobody is told about is a control nobody uses. */}
+              {isPlanterWithPlant
+                ? "Answer an invitation from a sending church or network, see who your plant belongs to, and leave an organization. "
+                : "Answer an invitation from a church planting network, see which network your sending church belongs to, and leave it. "}
+              <Link
+                href="/settings/association"
+                className="cursor-pointer font-medium underline underline-offset-4"
+              >
+                Manage your association
+              </Link>
+            </p>
+          </section>
+        )}
+
         {isPlanterWithPlant && (
           <section aria-labelledby="sharing-link" className="space-y-1">
             <h2
@@ -108,9 +174,7 @@ export default async function SettingsPage() {
               Sharing
             </h2>
             <p className="text-muted-foreground text-sm text-pretty">
-              Apart from being told you accepted their invitation, your sending
-              church and network get no updates about this plant unless you turn
-              sharing on.{" "}
+              {OVERSIGHT_SHARING_TEASER}{" "}
               <Link
                 href="/settings/sharing"
                 className="cursor-pointer font-medium underline underline-offset-4"

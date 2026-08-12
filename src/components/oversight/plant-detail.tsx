@@ -31,7 +31,9 @@
 import { ChevronLeft, EyeOff, Inbox } from "lucide-react";
 import Link from "next/link";
 
+import { AssociationHistory } from "@/components/oversight/association-history";
 import { PlantFacts } from "@/components/oversight/plant-facts";
+import { RemovePlantDialog } from "@/components/oversight/remove-plant-dialog";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -40,6 +42,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import type { AssociationHistoryEntry } from "@/lib/invitations/history";
 import { formatPhase } from "@/lib/oversight/presentation";
 import {
   EMPTY_HEADLINE,
@@ -58,10 +61,16 @@ import type {
 export function PlantDetail({
   detail,
   scopeLabel,
+  history,
 }: {
   detail: OversightPlantDetail;
   /** "network" or "sending church" — the caller's own org, in their words. */
   scopeLabel: string;
+  /**
+   * This plant's association events WITH THE CALLER'S OWN ORG (OV-011), already
+   * scoped by the read. Never another org's history.
+   */
+  history: AssociationHistoryEntry[];
 }) {
   const { plant, sections } = detail;
   const sharedCount = sections.filter(
@@ -103,9 +112,32 @@ export function PlantDetail({
               {plant.location ?? "Location not set"}
             </p>
           </div>
-          <Badge variant="secondary" className="shrink-0 font-medium">
-            {formatPhase(plant.currentPhase)}
-          </Badge>
+          {/*
+            The badge and the sever sit together at the end of the header row —
+            one is what this plant IS to the reader, the other is the only thing
+            on this page that changes it. The destructive action is an outline
+            button rather than a filled one, and it is nowhere near the top of
+            the reading order: it is the rarest thing an admin does here.
+          */}
+          <div className="flex shrink-0 flex-wrap items-center gap-3">
+            <Badge variant="secondary" className="font-medium">
+              {formatPhase(plant.currentPhase)}
+            </Badge>
+            {/*
+              OV-007b. Rendered from the SAME provenance the page's org scoping
+              is built from, so the button appears exactly when the caller's own
+              org holds this plant — which, on this page, is always: an oversight
+              admin reaches a plant only through their org's own FK
+              (`getAccessibleChurchIds`). Hiding it is never the control; the
+              authority rule and the tenancy assertion are server-side.
+            */}
+            <RemovePlantDialog
+              churchId={plant.churchId}
+              plantName={plant.name}
+              orgType={plant.provenance.orgType}
+              orgName={plant.provenance.orgName}
+            />
+          </div>
         </div>
         <div className="p-6">
           <PlantFacts plant={plant} />
@@ -143,6 +175,15 @@ export function PlantDetail({
             />
           ))}
         </div>
+      </section>
+
+      {/*
+        The heading this points at is the card's own visible title (design
+        pass, #304). It used to be a `sr-only` h2 here duplicating that title
+        word for word, so the section announced its name twice.
+      */}
+      <section aria-labelledby="plant-association-history">
+        <AssociationHistory entries={history} plantName={plant.name} />
       </section>
     </div>
   );
