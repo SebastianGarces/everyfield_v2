@@ -266,19 +266,6 @@ export async function addTeamMembersToGuestList(
 }
 
 /**
- * Put a team's active members on a meeting's guest list.
- */
-export async function populateGuestListFromTeam(
-  churchId: string,
-  meetingId: string,
-  teamId: string,
-  userId: string
-): Promise<number> {
-  const personIds = await listActiveTeamMemberIds(churchId, teamId);
-  return addTeamMembersToGuestList(churchId, meetingId, personIds, userId);
-}
-
-/**
  * Update RSVP status (confirmed/declined) for a guest.
  */
 export async function updateRsvpStatus(
