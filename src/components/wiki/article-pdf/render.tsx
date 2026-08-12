@@ -18,7 +18,10 @@
 // carry an icon, so the box is redrawn here as a bordered `View` and the type
 // is set as the label the icon stood for ("Warning", "Insight"). That label is
 // not invented here — `extract.ts` reads it off the callout itself, so the two
-// renderers name the same type (ruling on PR #391, 2026-08-12).
+// renderers name the same type (ruling on PR #391, 2026-08-12). Only a callout
+// that reached `extract.ts` as a BLOCK arrives here: one nested in a list item,
+// a blockquote or a table cell was flattened to text before this file sees it
+// (divergence 3 in `article-actions.tsx`).
 //
 // EMPHASIS IS A FONT NAME, NEVER AN AXIS.
 //

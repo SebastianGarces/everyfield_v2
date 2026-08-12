@@ -9,13 +9,16 @@
 // callouts, code, link destinations, inline emphasis and tables all carry
 // across.
 //
-// A callout carries across FRAME AND TYPE, not only its words: the download
-// draws the box and sets the type as a label ("Warning", "Insight") where the
-// screen draws a lucide icon, because an icon is the one thing a document built
-// from text cannot carry. `callout.tsx` names the type in `data-print-callout`
-// so neither renderer has to recognise a callout by its markup (ruling on PR
-// #391, 2026-08-12 — option (c), "the file must match the page"). Before that
-// ruling a Warning arrived in the file as ordinary prose.
+// A BLOCK-LEVEL callout carries across FRAME AND TYPE, not only its words: the
+// download draws the box and sets the type as a label ("Warning", "Insight")
+// where the screen draws a lucide icon, because an icon is the one thing a
+// document built from text cannot carry. `callout.tsx` names the type in
+// `data-print-callout` so neither renderer has to recognise a callout by its
+// markup (ruling on PR #391, 2026-08-12 — option (c), "the file must match the
+// page"). Before that ruling a Warning arrived in the file as ordinary prose.
+// A callout NESTED inside a list item, a blockquote or a table cell is
+// divergence 3 below: those three reduce to a single line of text, so nothing
+// inside one can stay a block.
 //
 //   Print     hands the page to the browser. The print stylesheet in
 //             `globals.css` drops the shell, the wiki sidebar, the table of
@@ -27,7 +30,7 @@
 // `article-pdf/` halves and `globals.css`, and fails when only one of them
 // draws the grid or keeps a word bold.
 //
-// TWO KNOWN DIVERGENCES, tracked rather than hidden:
+// THREE KNOWN DIVERGENCES, tracked rather than hidden:
 //
 //   1. Characters outside WinAnsi (`→`, `↓`, box drawing) print correctly and
 //      corrupt in the downloaded file, because the standard-14 fonts this
@@ -40,6 +43,13 @@
 //      it across means fetching and embedding the bytes, so it stayed out of
 //      scope; the PR body lists it as a limitation. Owned by
 //      `article-pdf/extract.ts`.
+//   3. Nesting inside a list item, a blockquote or a table cell FLATTENS. Those
+//      three are read out as one line of runs, so anything structural inside
+//      one loses its structure: a callout there keeps its words and loses its
+//      box, a table there loses its grid. The browser draws all of it on paper.
+//      Unflattening means those three becoming block containers like a callout
+//      is, which is a change to the block model rather than a missing case.
+//      Owned by `article-pdf/extract.ts`.
 //
 // WHERE THE REST OF THE PIPELINE LIVES
 //
@@ -47,6 +57,8 @@
 //                             Pure: no React, no renderer, no browser.
 //   `article-pdf/render.tsx`  blocks → a page. Owns the palette, the styles and
 //                             the font names emphasis resolves to.
+//   `callout.tsx`             the framed aside, and the marker that tells this
+//                             path its type in words.
 //
 // This file is only the control: it finds the prose, joins those two, and hands
 // the reader a file.
@@ -199,7 +211,10 @@ export function ArticleActions({
         onClick={handleDownload}
         disabled={isPreparing}
         aria-busy={isPreparing}
-        aria-label="Download this article as PDF"
+        // The visible label is "Download PDF", and WCAG 2.5.3 (Label in Name)
+        // asks the accessible name to START with the words a speech-input user
+        // would say. "Download this article as PDF" breaks the phrase in two.
+        aria-label="Download PDF of this article"
         data-testid="download-pdf"
       >
         {isPreparing ? (

@@ -134,8 +134,12 @@ const calloutEl = (label: string, ...children: Element[]): Element =>
     [
       el("svg", [textNode("icon")]),
       // The component's `sr-only` label. It holds the same word the marker
-      // does, so it must NOT reach the file a second time.
-      el("span", [textNode(label)]),
+      // does, so it must NOT reach the file a second time — which is why the
+      // component marks it `data-print-hide`. Without that attribute here the
+      // stub would stop resembling the markup and the leak it caused would go
+      // unnoticed: nested in a list item the word welded itself to the
+      // sentence ("Confirm the room. WarningChecklists are not optional.").
+      el("span", [textNode(label)], { "data-print-hide": "" }),
       el("div", children),
     ],
     { [PRINT_CALLOUT_ATTRIBUTE]: label }
@@ -284,6 +288,53 @@ describe("extractPrintBlocks", () => {
     ]);
   });
 
+  test("never leaks the sr-only type word into a line of prose", () => {
+    // The regression. A list item, a blockquote and a table cell are read as
+    // ONE LINE by `inlineRuns`, which walks text nodes and skips only
+    // `data-print-hide` — so a callout reached through one of them used to
+    // contribute its screen-reader label to the sentence, and `tidyRuns`
+    // merged it in without so much as a space:
+    //
+    //   "Confirm the room. WarningChecklists are not optional."
+    //
+    // A word the printed page shows NOWHERE, in the one path whose whole claim
+    // is that the file matches the page.
+    const inListItem = extractPrintBlocks(
+      el("div", [
+        el("ol", [
+          el("li", [
+            textNode("Confirm the room. "),
+            calloutEl(
+              "Warning",
+              el("p", [textNode("Checklists are not optional.")])
+            ),
+          ]),
+        ]),
+      ])
+    );
+
+    assert.deepEqual(inListItem, [
+      {
+        kind: "listItem",
+        depth: 0,
+        marker: "1.",
+        runs: plain("Confirm the room. Checklists are not optional."),
+      },
+    ]);
+
+    const inQuote = extractPrintBlocks(
+      el("div", [
+        el("blockquote", [
+          calloutEl("Scripture", el("p", [textNode("Go therefore.")])),
+        ]),
+      ])
+    );
+
+    assert.deepEqual(inQuote, [
+      { kind: "quote", runs: plain("Go therefore.") },
+    ]);
+  });
+
   test("draws no box round an empty callout", () => {
     // A frame with nothing in it is a mark the printed page does not have.
     assert.deepEqual(extractPrintBlocks(el("div", [calloutEl("Tip")])), []);
@@ -297,7 +348,7 @@ describe("extractPrintBlocks", () => {
             "div",
             [
               el("svg", []),
-              el("span", [textNode("Warning")]),
+              el("span", [textNode("Warning")], { "data-print-hide": "" }),
               el("div", [
                 el("p", [textNode("Outer.")]),
                 calloutEl("Scripture", el("p", [textNode("Inner.")])),
@@ -953,7 +1004,7 @@ describe("pdfFileName", () => {
   });
 });
 
-describe("the print contract across the three files", () => {
+describe("the print contract, across every file that holds a piece of it", () => {
   test("the article page marks the print root and the printable body", () => {
     assert.match(ARTICLE_PAGE, /<article data-print-root=""/);
     assert.match(ARTICLE_PAGE, /data-print-body=""/);
@@ -1076,13 +1127,19 @@ describe("the print contract across the three files", () => {
     // A new divergence is caught by the behavioural test that pins it (images,
     // below) or not at all.
     assert.ok(
-      ARTICLE_ACTIONS.includes("TWO KNOWN DIVERGENCES"),
+      ARTICLE_ACTIONS.includes("THREE KNOWN DIVERGENCES"),
       "the divergence count must match the list below it"
     );
     assert.ok(ARTICLE_ACTIONS.includes("#398"), "the arrow gap is named");
     assert.ok(
       /Images print and do not download/.test(ARTICLE_ACTIONS),
       "the image gap is named"
+    );
+    assert.ok(
+      /Nesting inside a list item, a blockquote or a table cell FLATTENS/.test(
+        ARTICLE_ACTIONS
+      ),
+      "the nesting gap is named"
     );
   });
 
@@ -1141,6 +1198,72 @@ describe("the print contract across the three files", () => {
     assert.equal(childrenOf(drawn)[0].props.children, "Warning");
   });
 
+  test("the component's sr-only type label is hidden from both paper paths", () => {
+    // Third half of the same contract, and the one the stub above cannot hold
+    // on its own: the component says the type TWICE — once in the marker, once
+    // in a visually hidden span for a screen reader — and only the marker is
+    // meant to travel. The span is `data-print-hide`, so `@media print` drops
+    // it and `collectRuns` skips it.
+    //
+    // Asserted against the component itself, because the failure this replaces
+    // was a stub that had drifted from the markup: the span was not marked, and
+    // wherever a callout was nested the word joined the sentence.
+    const rendered = Callout({
+      type: "warning",
+      children: null,
+    }) as unknown as { props: { children: unknown } };
+
+    const children = rendered.props.children as {
+      props?: Record<string, unknown>;
+    }[];
+    const label = children.find(
+      (child) => child?.props?.children === "Warning"
+    );
+
+    assert.ok(
+      label,
+      "the callout no longer names its type for a screen reader"
+    );
+    assert.equal(
+      label.props?.["data-print-hide"],
+      "",
+      "an unmarked sr-only label reaches the PDF as a word the page never shows"
+    );
+    assert.match(printBlock, /\[data-print-hide\]\s*\{\s*display:\s*none/);
+  });
+
+  test("a callout nested in a list item flattens, as divergence 3 says", () => {
+    // Pinned beside the image gap, for the same reason: a limitation nobody
+    // asserts is a limitation nobody notices has changed. `inlineRuns` reads a
+    // list item, a blockquote and a table cell as ONE LINE, so a callout inside
+    // one keeps its words and loses its box — while the browser prints the box.
+    //
+    // What must NOT happen is the words changing too: the type word belongs to
+    // the box, and where there is no box there is no word.
+    const [block] = extractPrintBlocks(
+      el("div", [
+        el("ul", [
+          el("li", [
+            textNode("Book the room. "),
+            calloutEl("Warning", el("p", [textNode("Confirm the date.")])),
+          ]),
+        ]),
+      ])
+    );
+
+    assert.equal(block?.kind, "listItem", "the callout did not stay a block");
+    assert.deepEqual(
+      block,
+      {
+        kind: "listItem",
+        depth: 0,
+        marker: "•",
+        runs: plain("Book the room. Confirm the date."),
+      },
+      "the flattened callout must read as the sentence, and nothing more"
+    );
+  });
+
   test("a link's URL survives into print", () => {
     assert.match(printBlock, /a\[href\]::after/);
     assert.match(printBlock, /content:\s*" \("\s*attr\(href\)\s*"\)"/);
@@ -1187,10 +1310,32 @@ describe("the download control", () => {
     // imported statically FROM here, so a static import of the renderer over
     // there would reach the bundle just the same. It may name the module in a
     // type position (`typeof import(...)`), which ships nothing.
+    //
+    // The pattern spans lines. `^import .* from "…";$` only ever saw an import
+    // written on ONE line, and prettier wraps an import the moment it names
+    // more than a couple of things — which is exactly the shape this one would
+    // take, so the guard could have stayed green while every wiki reader
+    // downloaded the renderer. `[^;]*` crosses newlines and stops at the first
+    // statement end, so it cannot run on into an unrelated line either.
+    const STATIC_IMPORT = /^import[^;]*from "@react-pdf\/renderer";/m;
+
     assert.ok(
-      !/^import .* from "@react-pdf\/renderer";$/m.test(PDF_SOURCE),
+      !STATIC_IMPORT.test(PDF_SOURCE),
       "a static import puts the whole PDF renderer in every reader's bundle"
     );
+
+    // The guard proves it can SEE the shape it forbids, in both spellings.
+    assert.ok(
+      STATIC_IMPORT.test('import { pdf } from "@react-pdf/renderer";'),
+      "the guard misses a single-line static import"
+    );
+    assert.ok(
+      STATIC_IMPORT.test(
+        'const before = 1;\nimport {\n  Document,\n  Page,\n  Text,\n  View,\n} from "@react-pdf/renderer";\nconst after = 2;'
+      ),
+      "the guard misses a wrapped static import — the shape prettier writes"
+    );
+
     assert.match(
       ARTICLE_ACTIONS,
       /await import\(\s*"@react-pdf\/renderer"\s*\)/

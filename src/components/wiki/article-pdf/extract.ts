@@ -19,22 +19,31 @@
 // skipped, so flattening it changes what an article SAYS (ruling on PR #391,
 // 2026-08-10).
 //
-// A CALLOUT KEEPS ITS FRAME, AND ITS TYPE ARRIVES AS A WORD.
+// A BLOCK-LEVEL CALLOUT KEEPS ITS FRAME, AND ITS TYPE ARRIVES AS A WORD.
 //
 // `callout.tsx` draws a callout's type as an ICON and nothing else, and an icon
 // is the one thing a document built from text cannot carry — so a callout used
 // to fall to the recursive default and land in the file as ordinary prose. A
 // **Warning** could reach a launch-team meeting looking like a paragraph.
 // `PRINT_CALLOUT_ATTRIBUTE` is how the component names its type in words for
-// this reader; a marked element becomes a `callout` block holding its own
-// blocks, and `render.tsx` draws the border and prints the word in place of the
-// icon (ruling on PR #391, 2026-08-12, option (c)).
+// this reader; a marked element reached by `collectBlocks` becomes a `callout`
+// block holding its own blocks, and `render.tsx` draws the border and prints
+// the word in place of the icon (ruling on PR #391, 2026-08-12, option (c)).
 //
-// KNOWN DIVERGENCE FROM THE PRINTED PAGE, owned here: `collectBlocks` has no
-// `IMG` case, so an image falls to the recursive default, has no children, and
-// drops silently while the print stylesheet keeps it. It is divergence 2 of the
-// two listed in `article-actions.tsx`; carrying it across means fetching and
-// embedding the bytes.
+// ONLY `collectBlocks` builds blocks. A list item, a blockquote and a table
+// cell are read out by `inlineRuns` as ONE LINE of text, so a callout reached
+// through one of them is not a block at all: its words join the line and its
+// box is lost. That is divergence 3 below, not a missing case here.
+//
+// TWO KNOWN DIVERGENCES FROM THE PRINTED PAGE are owned here — 2 and 3 of the
+// three listed in `article-actions.tsx`:
+//
+//   2. `collectBlocks` has no `IMG` case, so an image falls to the recursive
+//      default, has no children, and drops silently while the print stylesheet
+//      keeps it. Carrying it across means fetching and embedding the bytes.
+//   3. Nesting inside a list item, a blockquote or a table cell flattens, as
+//      above. Unflattening means those three becoming block containers the way
+//      a callout is, which changes the block model rather than adding a case.
 // ============================================================================
 
 /**
@@ -53,13 +62,17 @@ const TEXT_NODE = 3;
  *
  * `callout.tsx` sets it to the type's own title ("Warning", "Insight", …) — the
  * same string its `calloutConfig` labels the icon with — so the word in the PDF
- * and the icon on the screen cannot drift apart. The constant is exported and
- * imported rather than written twice: a marker misspelled on one side alone is
- * a silent loss of the framing, not a failure anything would notice.
+ * and the icon on the screen cannot drift apart. The component writes the
+ * attribute out literally rather than importing this constant, which would pull
+ * the extractor into every wiki reader's bundle for one string; what holds the
+ * two spellings together is a test that CALLS the component and reads the
+ * attribute off it (`article-actions.test.ts`). A marker misspelled on one side
+ * alone is a silent loss of the framing, so it is asserted rather than assumed.
  *
  * It sits in the `data-print-*` family with `data-print-root`,
- * `data-print-body` and `data-print-hide` — one marker contract that both the
- * print stylesheet and this extractor read.
+ * `data-print-body` and `data-print-hide`, but it is the only one of the four
+ * this extractor reads ALONE: the print stylesheet needs no callout marker,
+ * because the browser prints the box the screen already draws.
  */
 export const PRINT_CALLOUT_ATTRIBUTE = "data-print-callout";
 
@@ -115,6 +128,22 @@ export type PrintBlock =
   | { kind: "table"; rows: PrintTableRow[] }
   | PrintCallout
   | { kind: "divider" };
+
+/**
+ * Elements that are not prose, wherever they are reached.
+ *
+ * An icon, a control and a script tag carry nothing a reader would call part of
+ * the article — and `<svg>` is the one that matters here, because a callout's
+ * type is drawn as one. The set is consulted on BOTH walks: skipping a tag when
+ * it is a block and reading its text when it is inline is how a word the page
+ * never shows reaches the file, which is exactly what the `sr-only` type label
+ * did before it was marked `data-print-hide`. An `<svg>` holding a `<title>` or
+ * a `<text>` is the same defect waiting on a raw-SVG author.
+ *
+ * `svg` is matched in both cases because `tagName` is lower case for an SVG
+ * element in a real DOM and upper case for an HTML one.
+ */
+const NON_PROSE_TAGS = new Set(["SVG", "svg", "BUTTON", "SCRIPT", "STYLE"]);
 
 // --- blocks -----------------------------------------------------------------
 
@@ -183,13 +212,8 @@ function collectBlocks(parent: Element, out: PrintBlock[]): void {
       case "HR":
         out.push({ kind: "divider" });
         break;
-      case "SVG":
-      case "svg":
-      case "BUTTON":
-      case "SCRIPT":
-      case "STYLE":
-        break;
       default:
+        if (NON_PROSE_TAGS.has(child.tagName)) break;
         collectBlocks(child, out);
     }
   }
@@ -224,7 +248,9 @@ function collectList(list: Element, out: PrintBlock[], depth: number): void {
  * The contents go through `collectBlocks` unchanged, so a callout holding a
  * list, a table or a second callout keeps all of it — and its icon still
  * disappears, because the `SVG` case above already drops it and the label now
- * says in words what the icon said in a picture.
+ * says in words what the icon said in a picture. The component's `sr-only` copy
+ * of that same word carries `data-print-hide`, so the type is printed once,
+ * here, and never a second time inside the box.
  *
  * An empty callout is not framed: a box drawn around nothing is a mark on the
  * page that the printed article does not have.
@@ -378,6 +404,7 @@ function collectRuns(
 
     const child = node as Element;
     if (child.hasAttribute("data-print-hide")) continue;
+    if (NON_PROSE_TAGS.has(child.tagName)) continue;
     if (options.skipLists && (child.tagName === "UL" || child.tagName === "OL"))
       continue;
 
