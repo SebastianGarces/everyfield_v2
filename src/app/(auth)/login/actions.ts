@@ -16,6 +16,7 @@ import {
   getRequestIp,
   recordAttempt,
 } from "@/lib/auth/rate-limit";
+import { safeRedirectPath } from "@/lib/auth/safe-redirect";
 
 export type LoginState = {
   error?: string;
@@ -85,12 +86,7 @@ export async function login(
   // Set session cookie
   await setSessionCookie(token, session.expiresAt);
 
-  // Get redirect path from form, default to dashboard
-  const redirectTo = formData.get("redirect");
-  const redirectPath =
-    typeof redirectTo === "string" && redirectTo.startsWith("/")
-      ? redirectTo
-      : "/dashboard";
-
-  redirect(redirectPath);
+  // Get redirect path from form, default to dashboard. The hidden field
+  // carries the raw URL param, so this call is the open-redirect gate.
+  redirect(safeRedirectPath(formData.get("redirect")));
 }
