@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
@@ -51,9 +51,11 @@ import {
 // and this test. `service.ts` is the data-access module — it opens with `@/db`,
 // ten schema tables and drizzle, so an import edge from a component that later
 // gains `"use client"` would drag that whole graph into the client bundle.
-// `copy.ts` cannot drag anything, and the last section of this file pins both
-// halves: that copy.ts (and agenda.ts) import nothing, and that no client
-// component value-imports service.ts.
+// `copy.ts` cannot drag anything, and the last section of this file pins the
+// near half of that split: copy.ts and agenda.ts import nothing. The far half
+// — that no client component REACHES service.ts, directly or through any
+// non-server-action module — is an architecture guard rather than a copy
+// ruling, and lives in `client-boundary.test.ts` beside it.
 //
 // WHY THIS FILE LIVES IN src/lib/meetings/ AND NOT NEXT TO THE COMPONENT:
 // its natural home looks like the route directory, but that directory is
@@ -532,125 +534,5 @@ test("the agenda module pulls in no data-access graph either", () => {
     agenda,
     /^\s*import\b/m,
     "agenda.ts imports nothing at all — a type, two bounds, a clamp and a reader"
-  );
-});
-
-// ----------------------------------------------------------------------------
-// The other half of that boundary, enforced rather than described.
-//
-// The rule copy.ts and agenda.ts exist for is about `service.ts`: it opens with
-// `@/db`, ten schema tables and drizzle, so ONE `"use client"` file that
-// value-imports it ships the database client to the browser, silently.
-//
-// `import "server-only"` is the repo's usual rail for that (src/lib/auth/admin.ts
-// :1) and it CANNOT be used here — see the accepted residual in
-// memory/invariants.md. The package is a Next.js build-time alias: under `pnpm
-// test` (tsx, no `react-server` export condition) `import "server-only"` is an
-// unresolvable module, and forcing the condition on the runner breaks the suites
-// that render email with `react-dom/server`. So the guard is this walk instead:
-// it asserts the same property the compiler would, at the same moment CI would
-// have caught it, over every client component in the repo rather than over the
-// one that exists today.
-// ----------------------------------------------------------------------------
-
-const SRC_ROOT = path.join(__dirname, "../..");
-const SERVICE_MODULE = path.join(__dirname, "service");
-
-/** Every `.ts`/`.tsx` under `src`, ignoring nothing — the walk must be total. */
-function sourceFiles(dir: string): string[] {
-  const found: string[] = [];
-
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      found.push(...sourceFiles(full));
-    } else if (
-      /\.tsx?$/.test(entry.name) &&
-      !/\.test\.tsx?$/.test(entry.name)
-    ) {
-      found.push(full);
-    }
-  }
-
-  return found;
-}
-
-/** `"use client"` as the module's directive, not the word in some string. */
-function isClientModule(source: string): boolean {
-  return /^\s*(?:\/\/[^\n]*\n|\/\*[\s\S]*?\*\/\s*)*["']use client["']/.test(
-    source
-  );
-}
-
-/**
- * Every module this file imports for its VALUE, with `import type` dropped —
- * a type-only import is erased at compile time and adds no bundle edge, which
- * is exactly how `agenda-builder.tsx` used to reach `AgendaSection` safely.
- */
-function valueImportTargets(file: string, source: string): string[] {
-  const targets: string[] = [];
-  const pattern = /import\s+(?!type\s)([\s\S]*?)from\s*["']([^"']+)["']/g;
-
-  for (const match of source.matchAll(pattern)) {
-    const specifier = match[2]!;
-    const resolved = specifier.startsWith("@/")
-      ? path.join(SRC_ROOT, specifier.slice(2))
-      : specifier.startsWith(".")
-        ? path.resolve(path.dirname(file), specifier)
-        : null;
-
-    if (resolved) targets.push(resolved.replace(/\.tsx?$/, ""));
-  }
-
-  return targets;
-}
-
-test("no client component value-imports the meetings data-access module", () => {
-  const clientModules = sourceFiles(SRC_ROOT).filter((file) =>
-    isClientModule(readFileSync(file, "utf8"))
-  );
-
-  // A walk that found nothing passes for free. `src` has well over a hundred
-  // client components; a floor of fifty says the directory moved, not that the
-  // repo stopped having any.
-  assert.ok(
-    clientModules.length > 50,
-    `the walk found only ${clientModules.length} client modules — it is looking in the wrong place`
-  );
-
-  const offenders = clientModules
-    .filter((file) =>
-      valueImportTargets(file, readFileSync(file, "utf8")).includes(
-        SERVICE_MODULE
-      )
-    )
-    .map((file) => path.relative(SRC_ROOT, file));
-
-  assert.deepEqual(
-    offenders,
-    [],
-    'a "use client" module value-imports @/lib/meetings/service, which opens with @/db and drizzle — take the symbol from copy.ts or agenda.ts, or pass it down as a prop'
-  );
-});
-
-test("the walk can actually see a client component that reaches too far", () => {
-  // The guard above is only worth its line count if it FAILS on the thing it
-  // forbids. Three source-text assertions over another route's actions file
-  // passed while the property they described was false (memory/invariants.md,
-  // the /register readers), so a walk gets asserted against a fixture.
-  const clientFile = path.join(SRC_ROOT, "components/meetings/pretend.tsx");
-  const offending =
-    '"use client";\nimport { getMeeting } from "@/lib/meetings/service";\n';
-  const typeOnly =
-    '"use client";\nimport type { AgendaSection } from "@/lib/meetings/service";\n';
-
-  assert.ok(isClientModule(offending), "the directive is recognised");
-  assert.ok(
-    valueImportTargets(clientFile, offending).includes(SERVICE_MODULE),
-    "a value import of service.ts is caught"
-  );
-  assert.ok(
-    !valueImportTargets(clientFile, typeOnly).includes(SERVICE_MODULE),
-    "a type-only import is not — it is erased and adds no bundle edge"
   );
 });
