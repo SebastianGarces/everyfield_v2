@@ -29,20 +29,22 @@ import {
   assembleFactSnapshot,
   type SnapshotInputs,
 } from "@/lib/phase-engine/signals/build-fact-snapshot";
+import type { LaunchRow } from "@/lib/phase-engine/signals/queries";
 import {
   buildMilestoneTimeline,
+  type CompletedMilestoneRow,
+  type MilestoneEvent,
+  type PhaseTransitionRow,
+} from "@/lib/phase-engine/signals/milestones";
+import {
   buildPlantTrends,
   deriveEngineAlert,
   NO_ENGINE_ALERT,
   TREND_METRIC_KEYS,
-  type CompletedMilestoneRow,
-  type LaunchRow,
-  type MilestoneEvent,
-  type PhaseTransitionRow,
   type SnapshotHistoryRow,
   type TrendMetric,
   type TrendMetricKey,
-} from "@/lib/phase-engine/signals/queries";
+} from "@/lib/phase-engine/signals/trends";
 
 const CHURCH_ID = "11111111-1111-1111-1111-111111111111";
 const AS_OF = new Date("2026-06-22T00:00:00.000Z");

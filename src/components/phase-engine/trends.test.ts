@@ -34,7 +34,7 @@ import type {
   EngineAlert,
   PlantTrends,
   TrendMetric,
-} from "@/lib/phase-engine/signals/queries";
+} from "@/lib/phase-engine/signals/trends";
 
 import { Trends } from "./trends";
 

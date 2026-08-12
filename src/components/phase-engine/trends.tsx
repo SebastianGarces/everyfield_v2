@@ -77,7 +77,7 @@ import type {
   PlantTrends,
   TrendMetric,
   TrendPoint,
-} from "@/lib/phase-engine/signals/queries";
+} from "@/lib/phase-engine/signals/trends";
 import type { CsfStanding } from "@/lib/phase-engine/assessment";
 import { cn } from "@/lib/utils";
 

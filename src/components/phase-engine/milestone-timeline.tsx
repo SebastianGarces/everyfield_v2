@@ -51,10 +51,10 @@ import { formatDate } from "@/lib/datetime";
 import { parseTargetDate } from "@/lib/launch/countdown";
 import type { CsfStanding } from "@/lib/phase-engine/assessment";
 import type {
-  EngineAlert,
   MilestoneEvent,
   MilestoneTimeline as MilestoneTimelineData,
-} from "@/lib/phase-engine/signals/queries";
+} from "@/lib/phase-engine/signals/milestones";
+import type { EngineAlert } from "@/lib/phase-engine/signals/trends";
 import { cn } from "@/lib/utils";
 
 // ----------------------------------------------------------------------------

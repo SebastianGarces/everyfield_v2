@@ -49,10 +49,8 @@ import {
 } from "@/lib/phase-engine/assessment";
 import { assessmentColdStart } from "@/lib/phase-engine/cold-start";
 import { listManualSignals } from "@/lib/phase-engine/signals/attestation-service";
-import {
-  getMilestoneTimeline,
-  getPlantTrends,
-} from "@/lib/phase-engine/signals/queries";
+import { getMilestoneTimeline } from "@/lib/phase-engine/signals/milestones";
+import { getPlantTrends } from "@/lib/phase-engine/signals/trends";
 import { getPhaseReadiness } from "@/lib/phase-engine/transitions";
 
 export const metadata = {

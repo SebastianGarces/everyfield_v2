@@ -22,10 +22,10 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import type {
-  EngineAlert,
   MilestoneEvent,
   MilestoneTimeline as MilestoneTimelineData,
-} from "@/lib/phase-engine/signals/queries";
+} from "@/lib/phase-engine/signals/milestones";
+import type { EngineAlert } from "@/lib/phase-engine/signals/trends";
 
 import { MilestoneTimeline } from "./milestone-timeline";
 
