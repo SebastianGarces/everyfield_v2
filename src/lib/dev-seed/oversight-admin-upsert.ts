@@ -3,36 +3,43 @@ import type { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import { users, type UserRole } from "@/db/schema";
 
 // ============================================================================
-// THE OVERSIGHT ADMIN CREDENTIAL WRITE (#304 round 9/10).
+// THE OVERSIGHT ADMIN CREDENTIAL WRITE (#304).
 //
-// This is the one statement `--oversight-orgs-only` exists to run, lifted out
-// of `scripts/seed-dev-db.ts` so a test can render it with `.toSQL()` instead
-// of reading the script's source text. The round-9 tests grepped the file, and
-// this repo already rules against that where the SQL *is* the invariant
-// (`memory/invariants/wiki-articles.md` — `tenancy.test.ts` renders builders
-// rather than trusting the call site). The defect those tests were written to
-// catch is a CONFLICT CLAUSE, which is a property of the emitted statement, so
-// the emitted statement is what has to be asserted.
+// The statement `--oversight-orgs-only` exists to run, and the two addresses it
+// runs against — lifted out of `scripts/seed-dev-db.ts` so tests can assert
+// them. The conflict clause is the invariant, and a conflict clause is a
+// property of the emitted SQL, so `seed-account-writes.test.ts` renders this
+// builder with `.toSQL()` rather than grepping the script's source. Same rule
+// as `memory/invariants/wiki-articles.md` / `src/lib/wiki/tenancy.test.ts`.
 //
-// KEYED BY ADDRESS, NOT BY ROLE. `.claude/skills/browser-validation/SKILL.md`
-// promises a verifier two addresses; the seed used to look its rows up by role
-// and write whichever address happened to carry that role. Those are the same
-// thing only for as long as nobody adds a second `network_admin` to the
-// fixture. The addresses below are the key — the contract the docs state — and
-// the role is a value that gets written, not a selector.
+// Where the password comes from, and whether it is recoverable, is a different
+// question with a single home: `protected-database.ts`.
 // ============================================================================
 
 /**
  * The two addresses `--oversight-orgs-only` re-keys, in the order it writes
  * them, and the same two the browser-validation credentials table names.
  *
- * They are `everyfield.app` — the product domain, ruled 2026-07-31.
+ * KEYED BY ADDRESS, NOT BY ROLE. The docs promise a verifier two addresses; a
+ * role is not unique by construction, so a lookup by role moves the credential
+ * write to a different account the day a second `network_admin` joins the
+ * fixture. The address is the key; the role is a value that gets written.
+ *
+ * SPELLED OUT rather than built from `DEV_EMAIL_DOMAIN`, which is the one place
+ * the seed domain is declared (ruled 2026-07-31). That constant lives in
+ * `scripts/seed-dev-db.ts`, which cannot be imported — it constructs a database
+ * client and `process.exit`s at load — and `dev-accounts.test.ts` pins it there
+ * as the repo-wide retirement guard. The drift that would otherwise cost is
+ * closed BEHAVIOURALLY instead: `oversightAdminSeeds()` below throws when an
+ * address here is not in the fixture, so a domain change that missed this list
+ * fails the mode loudly on its next run rather than silently seeding nobody.
  */
 export const OVERSIGHT_ADMIN_EMAILS = [
   "sending-church-admin@everyfield.app",
   "admin@everyfield.app",
 ] as const;
 
+/** One resolved admin, ready to write. */
 export type OversightAdminSeed = {
   email: string;
   name: string;
@@ -41,27 +48,70 @@ export type OversightAdminSeed = {
   sendingNetworkId: string | null;
 };
 
+/** A candidate row from the seed script's `SEED_USERS` list. */
+export type SeedAccountRow = {
+  email: string;
+  name?: string | null;
+  role: UserRole;
+  sendingChurchId?: string | null;
+  sendingNetworkId?: string | null;
+};
+
+/**
+ * The two admins to write, resolved from the seed fixture BY ADDRESS.
+ *
+ * TOTAL, NOT BEST-EFFORT. An address in `OVERSIGHT_ADMIN_EMAILS` that the
+ * fixture no longer carries throws; so does one carrying no name. Both are
+ * `--oversight-orgs-only` silently restoring one half of a two-halved fixture,
+ * which is how the network admin kept a NULL `sending_network_id` and
+ * `/oversight/invitations` rendered "Set up your network first" with no way to
+ * send anything. A missing half must stop the run, not shorten the loop.
+ *
+ * Returns them in `OVERSIGHT_ADMIN_EMAILS` order so the mode's output is
+ * deterministic.
+ */
+export function oversightAdminSeeds(
+  candidates: readonly SeedAccountRow[]
+): OversightAdminSeed[] {
+  return OVERSIGHT_ADMIN_EMAILS.map((email) => {
+    const row = candidates.find((candidate) => candidate.email === email);
+    if (!row) {
+      throw new Error(
+        `no ${email} in the seed fixture — --oversight-orgs-only must restore both halves of the oversight fixture, and this one has no row to write`
+      );
+    }
+    if (!row.name) {
+      throw new Error(
+        `${email} has no name in the seed fixture — the upsert deliberately never sets \`name\`, so an unnamed row would be inserted nameless and never repaired`
+      );
+    }
+
+    return {
+      email: row.email,
+      name: row.name,
+      role: row.role,
+      sendingChurchId: row.sendingChurchId ?? null,
+      sendingNetworkId: row.sendingNetworkId ?? null,
+    };
+  });
+}
+
 /**
  * The upsert that makes an oversight login usable.
  *
- * AN UPSERT, NOT `onConflictDoNothing`. The point of the mode is that an
- * operator names a password and then signs in with it. A write that skips on
- * conflict can only ever create the account, never re-key one that already
- * exists — so a second run exited 0, announced "the SEED_ADMIN_PASSWORD you
- * passed", and left the OLD password working. A false success on a credential
- * path, and the reason the fixture stayed unreachable after the shared-database
- * account was neutralised by hand on 2026-08-10.
+ * AN UPSERT, NOT `onConflictDoNothing`. The mode exists so an operator names a
+ * password and then signs in with it. A write that skips on conflict can only
+ * create the account, never re-key one that already exists — so a second run
+ * exited 0, announced "the SEED_ADMIN_PASSWORD you passed", and left the OLD
+ * password working. A false success on a credential path.
  *
- * Re-keying an existing address is safe here ONLY because `decideSeedAccounts`
- * has already refused, with no override, on any database holding a sentinel.
- * On a scratch or preview database the address is this fixture's own, and
- * taking it over is exactly what was asked for.
+ * Re-keying an existing address is safe ONLY because `decideSeedAccounts` has
+ * already refused, with no override, on any database holding a sentinel. On a
+ * scratch or preview database the address is this fixture's own.
  *
  * `churchId` and both org FKs are in the SET, so a run also repairs an account
- * whose `sending_network_id` drifted to NULL — which is what made
- * `/oversight/invitations` render "Set up your network first" on the preview.
- * `name` is NOT: it identifies a person on screen, and a re-key is not a
- * rename.
+ * whose `sending_network_id` drifted to NULL. `name` is NOT: it identifies a
+ * person on screen, and a re-key is not a rename.
  */
 export function oversightAdminUpsert<TSchema extends Record<string, unknown>>(
   db: NeonHttpDatabase<TSchema>,
@@ -91,88 +141,4 @@ export function oversightAdminUpsert<TSchema extends Record<string, unknown>>(
         updatedAt: now,
       },
     });
-}
-
-// ============================================================================
-// WHERE THE CHOSEN PASSWORD IS WRITTEN DOWN (#304 round 10).
-//
-// Round 8 stopped shipping an in-repo password for these accounts, which was
-// right: no constant in this repository may open an account on a database
-// anyone else uses. But nothing replaced it as a ROUTE. The password became
-// whatever the last operator typed, recorded nowhere, so the next agent to
-// verify #304 could not sign in as either oversight admin, could not create an
-// invitation, and could not exercise one interactive acceptance criterion. The
-// gate was un-runnable by anyone except the person who happened to type it.
-//
-// The route is `.env.local`: gitignored, machine-local, already where
-// `VERCEL_AUTOMATION_BYPASS_SECRET` lives — the same file a verifier must
-// already open to reach a preview at all, and invisible to anyone who can only
-// read the repository. `scripts/seed-dev-db.ts` loads it with dotenv before it
-// reads `SEED_ADMIN_PASSWORD`, so recording it there is not an extra step
-// beside running the seed; it IS how the seed is run.
-//
-// A password passed inline on the command line still works, and still writes a
-// real credential. What it does not do is leave a route behind — so the mode
-// says so, loudly, rather than exiting 0 as though the fixture were now
-// reachable.
-// ============================================================================
-
-/** Where `SEED_ADMIN_PASSWORD` is recorded so a later verifier can re-derive it. */
-export const SEED_ENV_FILE = ".env.local";
-
-/**
- * Whether `.env.local` records the password this run actually used.
- *
- * Parses `KEY=value` the way dotenv does for the one key that matters: last
- * assignment wins, optional `export`, optional matching quotes. `undefined`
- * text means the file does not exist, which is not the same as the key being
- * absent from a file that does — both are "not recorded", and both get the
- * notice.
- */
-export function recordedSeedPassword(
-  envFileText: string | undefined
-): string | undefined {
-  if (envFileText === undefined) return undefined;
-
-  let value: string | undefined;
-  for (const line of envFileText.split("\n")) {
-    const match = /^\s*(?:export\s+)?SEED_ADMIN_PASSWORD\s*=\s*(.*?)\s*$/.exec(
-      line
-    );
-    if (!match) continue;
-
-    const raw = match[1] ?? "";
-    const quoted = /^(["'])([\s\S]*)\1$/.exec(raw);
-    value = quoted ? (quoted[2] ?? "") : raw;
-  }
-
-  return value;
-}
-
-/**
- * The warning to print when the password used is not the one `.env.local`
- * records — `null` when it is, and there is nothing to say.
- *
- * Never prints the password. It names the file and the key; the operator holds
- * the value and puts it there.
- */
-export function unrecordedPasswordNotice(
-  envFileText: string | undefined,
-  passwordUsed: string
-): string | null {
-  if (recordedSeedPassword(envFileText) === passwordUsed) return null;
-
-  return [
-    `⚠️  This password is not recorded in ${SEED_ENV_FILE}.`,
-    "",
-    `   The accounts are now keyed to a password only this shell knows, so the`,
-    `   next person to validate #304 in a browser cannot sign in as either`,
-    `   oversight admin — which is exactly how the fixture was stranded before.`,
-    "",
-    `   Record it (${SEED_ENV_FILE} is gitignored and machine-local):`,
-    "",
-    `     SEED_ADMIN_PASSWORD="<the password you just used>"`,
-    "",
-    `   Then re-run this mode with no inline prefix — it reads ${SEED_ENV_FILE}.`,
-  ].join("\n");
 }

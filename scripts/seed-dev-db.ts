@@ -15,40 +15,29 @@
  * `cleanDatabase()`. It refuses to run against a database holding the alpha
  * cohort's accounts unless `--allow-protected-db` is passed.
  *
- * EVERY MODE ASKS THE SENTINEL BEFORE IT WRITES (#304 round 8, ruled
- * 2026-08-10). `--oversight-orgs-only` deletes nothing and upserts only the
- * sending network, the sending church and the two oversight admins who belong
- * to them — and for three rounds this header called that "safe to run
- * against the shared development database". It was not. Additive is not safe:
- * the mode WRITES real, enabled oversight logins, and until round 8 their
- * password was a constant in this repository, so every reader of this file held
- * a working credential for those accounts on whatever database it last ran
- * against. The account it created on the shared database was neutralised by
- * hand on 2026-08-10.
+ * EVERY MODE ASKS THE SENTINEL BEFORE IT WRITES (#304, ruled 2026-08-10).
+ * `--oversight-orgs-only` deletes nothing, and deleting nothing is not the same
+ * as being safe on a database other people use: the mode WRITES two real,
+ * enabled oversight logins and RE-KEYS them when the addresses already exist.
+ * So it asks `decideSeedAccounts` — the same sentinel question the wipe asks —
+ * and refuses with NO override. Its password comes
+ * from `SEED_ADMIN_PASSWORD` and has no default; unset is a refusal, not a
+ * fallback. No mode of this script has a working password for a protected
+ * database.
  *
- * SINCE ROUND 9 IT RE-KEYS, it does not skip. The writes are upserts on
- * `users.email`: an address that already exists gets the password you passed,
- * plus its role and org FKs put back. Round 8 used `onConflictDoNothing`, which
- * meant a second run exited 0 announcing a password it had not set while the
- * old one still opened the account — a false success on a credential path.
+ * IT RE-KEYS, IT DOES NOT SKIP. The writes are upserts on `users.email`: an
+ * existing address gets the password you passed, plus its role and org FKs put
+ * back. `onConflictDoNothing` here meant a second run exited 0 announcing a
+ * password it had not set while the old one still opened the account.
  *
- * So the mode now asks `decideSeedAccounts` the same sentinel question the wipe
- * asks — and refuses with NO override, because there is no honest way to mean
- * "add a login to the database real people use" from a script that also runs
- * unattended. Its password comes from `SEED_ADMIN_PASSWORD` and has no default;
- * unset is a refusal, not a fallback. No mode of this script has a working
- * password for a protected database.
+ * THE PASSWORD HAS A HOME: `.env.local`, which this file loads before it reads
+ * the variable. A credential removed from the repository still needs a route,
+ * or the fixture it opens is reachable by exactly one shell. Passing the value
+ * inline works and prints a warning saying what it costs. See
+ * `src/lib/dev-seed/protected-database.ts`.
  *
- * ROUND 10 GAVE THE PASSWORD A HOME. Removing the in-repo constant was right
- * and left a hole: the value became whatever the last operator typed, recorded
- * nowhere, so the next agent to validate #304 in a browser could not sign in as
- * either oversight admin — every interactive acceptance criterion went
- * unexercised for want of a credential. Record it in `.env.local`, which this
- * file already loads: gitignored and machine-local, so it is not an in-repo
- * constant, and it is beside `VERCEL_AUTOMATION_BYPASS_SECRET`, which a
- * verifier must open anyway to reach a preview. Running the mode with the value
- * only on the command line still works and now prints a warning saying what it
- * costs. See `src/lib/dev-seed/oversight-admin-upsert.ts`.
+ * The rounds behind all of this are in `memory/contracts/db.md` → "The dev-seed
+ * wipe"; the rules themselves are in `memory/invariants.md` → Dev Seeds.
  */
 
 import { readFileSync } from "node:fs";
@@ -71,10 +60,8 @@ import {
 } from "../src/db/schema";
 import { hashPassword } from "../src/lib/auth/password";
 import {
-  OVERSIGHT_ADMIN_EMAILS,
+  oversightAdminSeeds,
   oversightAdminUpsert,
-  SEED_ENV_FILE,
-  unrecordedPasswordNotice,
 } from "../src/lib/dev-seed/oversight-admin-upsert";
 import {
   ALLOW_PROTECTED_DB_FLAG,
@@ -82,6 +69,8 @@ import {
   decideWipe,
   matchProtectedAccounts,
   SEED_ADMIN_PASSWORD_ENV,
+  SEED_ENV_FILE,
+  unrecordedPasswordNotice,
 } from "../src/lib/dev-seed/protected-database";
 
 // Load environment variables for scripts.
@@ -496,6 +485,10 @@ const DEV_PASSWORD = "password123";
  * nine literals to keep in step. Docs that hand an agent a login —
  * `.claude/skills/browser-validation/SKILL.md` above all — quote these
  * addresses, so a change here is a change there.
+ *
+ * `OVERSIGHT_ADMIN_EMAILS` spells two of them out instead, because this file
+ * cannot be imported; `oversightAdminSeeds()` throws rather than let the two
+ * lists drift apart quietly.
  */
 const DEV_EMAIL_DOMAIN = "everyfield.app";
 
@@ -659,40 +652,18 @@ async function insertOversightOrgs(): Promise<void> {
  * — NULL on the preview's database, which makes `/oversight/invitations` render
  * "Set up your network first" and hands a verifier no way to send anything.
  *
- * Round 9 fixed that by looping the two ROLES and taking whichever `SEED_USERS`
- * entry carried each one. Round 10 keys on the ADDRESS instead
- * (`OVERSIGHT_ADMIN_EMAILS`), because the address is what the documentation
- * promises a verifier and the role is not unique by construction — a second
- * `network_admin` in the fixture would silently move the credential write to
- * another account. The lookup is total: an address this file no longer seeds is
- * a thrown error, not a skipped admin.
- *
- * The statement itself lives in `src/lib/dev-seed/oversight-admin-upsert.ts` so
- * a test can render it with `.toSQL()`.
+ * Which two rows those are, and the refusal when the fixture no longer carries
+ * one, is `oversightAdminSeeds()`; the statement is `oversightAdminUpsert()`.
+ * Both live in `src/lib/dev-seed/oversight-admin-upsert.ts` so the tests can
+ * exercise them directly instead of reading this file as text.
  */
 async function seedOversightOrgs(passwordHash: string): Promise<void> {
   await insertOversightOrgs();
 
   const now = new Date();
 
-  for (const email of OVERSIGHT_ADMIN_EMAILS) {
-    const admin = SEED_USERS.find((user) => user.email === email);
-    if (!admin) throw new Error(`no ${email} in SEED_USERS`);
-    if (!admin.name) throw new Error(`${email} has no name in SEED_USERS`);
-
-    await oversightAdminUpsert(
-      db,
-      {
-        email: admin.email,
-        name: admin.name,
-        role: admin.role,
-        sendingChurchId: admin.sendingChurchId ?? null,
-        sendingNetworkId: admin.sendingNetworkId ?? null,
-      },
-      passwordHash,
-      now
-    );
-
+  for (const admin of oversightAdminSeeds(SEED_USERS)) {
+    await oversightAdminUpsert(db, admin, passwordHash, now);
     console.log(`   [${admin.role}] ${admin.email}`);
   }
 }
@@ -797,15 +768,34 @@ async function seedDatabase(): Promise<void> {
   console.log(
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   );
-  console.log(`   Password for all users: ${DEV_PASSWORD}`);
+  console.log(`   Password for the accounts on THIS database: ${DEV_PASSWORD}`);
   console.log();
-  console.log(`   Network Admin:  admin@${DEV_EMAIL_DOMAIN}`);
-  console.log(
-    `   Sending Church Admin: sending-church-admin@${DEV_EMAIL_DOMAIN}`
-  );
   console.log(`   Planter:        planter1@${DEV_EMAIL_DOMAIN}`);
   console.log(`   Coach:          coach1@${DEV_EMAIL_DOMAIN}`);
   console.log(`   Team Member:    team1@${DEV_EMAIL_DOMAIN}`);
+  console.log();
+  // One credential story per address. This run wiped and rebuilt THIS database,
+  // so the two oversight admins carry `password123` here like everyone else —
+  // but no database anyone else uses is ever full-seeded, and on those the only
+  // thing that sets their password is `--oversight-orgs-only`. Saying "password
+  // for all users" and then listing these two told a verifier on a preview to
+  // try a password that has never opened those accounts there.
+  console.log(`   The two OVERSIGHT admins below carry ${DEV_PASSWORD} HERE,`);
+  console.log(`   because this run rebuilt this database from empty. Anywhere`);
+  console.log(`   else — a preview reads the shared development branch, which`);
+  console.log(
+    `   is never full-seeded — their password is whatever was set by`
+  );
+  console.log(
+    `   ${SEED_ADMIN_PASSWORD_ENV} (recorded in ${SEED_ENV_FILE}) via:`
+  );
+  console.log(
+    `     pnpm exec tsx scripts/seed-dev-db.ts --oversight-orgs-only\n`
+  );
+  console.log(`   Network Admin:        admin@${DEV_EMAIL_DOMAIN}`);
+  console.log(
+    `   Sending Church Admin: sending-church-admin@${DEV_EMAIL_DOMAIN}`
+  );
   console.log(
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
   );

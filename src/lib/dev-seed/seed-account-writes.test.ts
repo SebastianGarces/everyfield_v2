@@ -7,41 +7,44 @@ import { db } from "@/db";
 
 import {
   OVERSIGHT_ADMIN_EMAILS,
+  oversightAdminSeeds,
   oversightAdminUpsert,
+  type SeedAccountRow,
+} from "./oversight-admin-upsert";
+import {
   recordedSeedPassword,
   unrecordedPasswordNotice,
-} from "./oversight-admin-upsert";
+} from "./protected-database";
 
 // ----------------------------------------------------------------------------
-// The additive mode's ACCOUNT WRITES (#304 rounds 9-10).
+// The additive mode's ACCOUNT WRITES (#304).
 //
-// Round 8 gave `--oversight-orgs-only` a sentinel guard and an operator-chosen
-// password, and wrote the admin with `onConflictDoNothing`. That combination is
-// a false success: run the mode a second time with a different
-// SEED_ADMIN_PASSWORD and it exits 0, prints "Password: the SEED_ADMIN_PASSWORD
-// you passed", and leaves the OLD password opening the account.
+// `--oversight-orgs-only` sets a password on two logins and then tells the
+// operator to sign in with it. Two defects made that sentence false, and these
+// tests exist so neither can return quietly:
 //
-// It is what stranded the fixture, together with the thing round 10 fixes: the
-// chosen password was recorded nowhere, so even after the write became an
-// upsert, only the operator who typed it could sign in. A verifier following
-// the documented command reached a login that rejected them, and every
-// interactive acceptance criterion of #304 went unexercised.
+//   - `onConflictDoNothing` could only CREATE the account. A second run with a
+//     different SEED_ADMIN_PASSWORD exited 0, printed "the SEED_ADMIN_PASSWORD
+//     you passed", and left the OLD password opening it.
+//   - The chosen password was recorded nowhere, so even once the write re-keyed
+//     correctly, only the shell that ran it could sign in.
 //
-// WHAT IS ASSERTED, AND HOW. Round 9's version of this file read
-// `scripts/seed-dev-db.ts` as text and matched `.onConflictDoUpdate(` in it.
-// That is the technique this repo reserves for wiring it genuinely cannot
-// observe (a `revalidatePath` call, an RSC call site) — where the SQL itself is
-// the invariant, the rule is to render the builder and inspect the statement
+// WHAT IS ASSERTED, AND HOW. Where the SQL is the invariant, render the builder
+// and inspect the statement — never grep the script's source
 // (`memory/invariants/wiki-articles.md`; `src/lib/wiki/tenancy.test.ts`). The
-// conflict clause IS the defect, so it is rendered here with `.toSQL()`.
+// conflict clause IS the defect, so `.toSQL()` renders it here. Which rows get
+// written is a function, `oversightAdminSeeds()`, so it is called with a
+// fixture rather than pattern-matched in the script that calls it.
+//
 // `.toSQL()` renders; it does not connect — but importing `@/db` constructs the
 // Neon client at module load, so a DATABASE_URL must be PRESENT, which
 // `pnpm test` and CI both supply as a placeholder.
 //
+// The SKILL.md assertions below DO read text, and legitimately: a document is
+// text, and what is being pinned is what it tells a human.
+//
 // The end-to-end proof is still two runs against a real scratch database with
-// two different passwords — that is evidence for the PR body, not a unit test.
-// What these tests do is stop the clause, the key, and the documented route
-// from quietly reverting.
+// two different passwords — evidence for the PR body, not a unit test.
 // ----------------------------------------------------------------------------
 
 const ADMIN = {
@@ -73,7 +76,7 @@ test("the account write is an upsert on the address, so a re-run re-keys it", ()
   assert.doesNotMatch(
     normalized,
     /do nothing/,
-    `no account write here may skip on conflict — that is the round-8 defect. Rendered: ${sql}`
+    `no account write here may skip on conflict — that is the defect this mode was rejected for. Rendered: ${sql}`
   );
 });
 
@@ -111,39 +114,103 @@ test("the upsert sets everything the fixture needs, not only the password", () =
   );
 });
 
-test("both oversight admins are keyed by ADDRESS, so one command restores both sides", () => {
+// ----------------------------------------------------------------------------
+// WHICH ROWS GET WRITTEN
+// ----------------------------------------------------------------------------
+
+const FIXTURE: SeedAccountRow[] = [
+  { email: "planter1@everyfield.app", name: "Pat Planter", role: "planter" },
+  {
+    email: "sending-church-admin@everyfield.app",
+    name: "Sarah Sending",
+    role: "sending_church_admin",
+    sendingChurchId: "d2000000-0000-4000-8000-000000000002",
+  },
+  {
+    email: "admin@everyfield.app",
+    name: "Network Admin",
+    role: "network_admin",
+    sendingNetworkId: "d1000000-0000-4000-8000-000000000001",
+  },
+];
+
+test("both oversight admins are selected by ADDRESS, so one command restores both sides", () => {
   // The fixture has two halves: the sending church that issues one kind of
-  // invitation and the network that issues the other. Round 8 wrote only the
-  // sending-church admin, so `admin@everyfield.app` kept whatever
+  // invitation and the network that issues the other. Writing only the
+  // sending-church admin left `admin@everyfield.app` with whatever
   // `sending_network_id` it had — NULL on the preview's database.
-  //
-  // The KEY is the address, not the role (#304 round 10). The docs promise a
-  // verifier two addresses; a role is not unique by construction, so a lookup
-  // by role would move the credential write the day a second `network_admin`
-  // joins the fixture.
   assert.deepEqual(
     [...OVERSIGHT_ADMIN_EMAILS],
     ["sending-church-admin@everyfield.app", "admin@everyfield.app"],
     "both oversight admins must be written, and by the address the docs name"
   );
 
-  // The seed script must key its lookup on those addresses. This one assertion
-  // IS about the script's wiring rather than about SQL — the loop cannot be
-  // imported (the module connects and `process.exit`s at load), so it is pinned
-  // on the source, the same technique used for call-site wiring elsewhere.
-  const seedSource = readFileSync(
-    path.join(process.cwd(), "scripts/seed-dev-db.ts"),
-    "utf8"
+  const seeds = oversightAdminSeeds(FIXTURE);
+
+  assert.deepEqual(
+    seeds.map((seed) => seed.email),
+    [...OVERSIGHT_ADMIN_EMAILS],
+    "the two admins are resolved in the documented order, and nobody else is"
   );
-  assert.match(
-    seedSource,
-    /for \(const email of OVERSIGHT_ADMIN_EMAILS\)[\s\S]{0,200}user\.email === email/,
-    "seedOversightOrgs() must select its rows by address, not by role"
+
+  // The org FKs come across, and absent ones become explicit NULLs rather than
+  // `undefined` — the upsert writes the column either way, which is how a
+  // drifted FK gets repaired.
+  assert.deepEqual(seeds[0], {
+    email: "sending-church-admin@everyfield.app",
+    name: "Sarah Sending",
+    role: "sending_church_admin",
+    sendingChurchId: "d2000000-0000-4000-8000-000000000002",
+    sendingNetworkId: null,
+  });
+  assert.deepEqual(seeds[1], {
+    email: "admin@everyfield.app",
+    name: "Network Admin",
+    role: "network_admin",
+    sendingChurchId: null,
+    sendingNetworkId: "d1000000-0000-4000-8000-000000000001",
+  });
+});
+
+test("a missing half of the fixture stops the run instead of shortening the loop", () => {
+  // The lookup is by ADDRESS, not by role, because a role is not unique by
+  // construction: a second `network_admin` in the fixture would silently move
+  // the credential write to another account.
+  const roleTwin: SeedAccountRow = {
+    email: "second-admin@everyfield.app",
+    name: "Second Admin",
+    role: "network_admin",
+    sendingNetworkId: "d1000000-0000-4000-8000-000000000001",
+  };
+  assert.deepEqual(
+    oversightAdminSeeds([...FIXTURE, roleTwin]).map((seed) => seed.email),
+    [...OVERSIGHT_ADMIN_EMAILS],
+    "a second account carrying the same role must not attract the credential write"
+  );
+
+  assert.throws(
+    () =>
+      oversightAdminSeeds(
+        FIXTURE.filter((row) => row.email !== "admin@everyfield.app")
+      ),
+    /admin@everyfield\.app/,
+    "an address the fixture no longer carries must throw — half a restored fixture is the 'Set up your network first' failure"
+  );
+
+  assert.throws(
+    () =>
+      oversightAdminSeeds(
+        FIXTURE.map((row) =>
+          row.email === "admin@everyfield.app" ? { ...row, name: null } : row
+        )
+      ),
+    /has no name/,
+    "the upsert never sets `name`, so a nameless row would be inserted nameless and never repaired"
   );
 });
 
 // ----------------------------------------------------------------------------
-// WHERE THE PASSWORD IS WRITTEN DOWN (#304 round 10)
+// WHERE THE PASSWORD IS WRITTEN DOWN
 // ----------------------------------------------------------------------------
 
 test("a password recorded in .env.local is read back, whatever the quoting", () => {
@@ -165,6 +232,20 @@ test("a password recorded in .env.local is read back, whatever the quoting", () 
   );
   // A key that merely CONTAINS the name is a different variable.
   assert.equal(recordedSeedPassword("OLD_SEED_ADMIN_PASSWORD=x\n"), undefined);
+
+  // dotenv strips a trailing comment from an UNQUOTED value. Disagreeing with
+  // it costs a spurious "not recorded" warning, which teaches an operator to
+  // ignore the one warning that matters.
+  assert.equal(
+    recordedSeedPassword("SEED_ADMIN_PASSWORD=plain # chosen 2026-08-11\n"),
+    "plain"
+  );
+  // ...and only when the `#` starts a comment. A `#` inside the value stays.
+  assert.equal(recordedSeedPassword("SEED_ADMIN_PASSWORD=pa#ss\n"), "pa#ss");
+  assert.equal(
+    recordedSeedPassword('SEED_ADMIN_PASSWORD="quoted # kept"\n'),
+    "quoted # kept"
+  );
 });
 
 test("an unrecorded password is called out, and never printed", () => {
@@ -193,19 +274,16 @@ test("an unrecorded password is called out, and never printed", () => {
 });
 
 // ----------------------------------------------------------------------------
-// THE DOCUMENTED ROUTE (#304 rounds 9-10)
+// THE DOCUMENTED ROUTE
 // ----------------------------------------------------------------------------
 
 test("the docs point a verifier at the password instead of printing one", () => {
   // The invariant is repo-wide: no constant in this repository opens an account
   // on a database anyone else uses. A skill file that prints one is the same
-  // failure as a default in the script — round 8 fixed the script and left the
-  // skill row saying `password123`, and the next verifier believed it.
-  //
-  // Round 9 then named the COMMAND in the row, which was still not enough: a
-  // command whose output is a password only its operator knows ends, for
-  // everyone else, at a login that rejects them. The row has to say where the
-  // value is READ FROM.
+  // failure as a default in the script. Naming the COMMAND was not enough
+  // either: a command whose output is a password only its operator knows ends,
+  // for everyone else, at a login that rejects them. The row has to say where
+  // the value is READ FROM.
   const skill = readFileSync(
     path.join(process.cwd(), ".claude/skills/browser-validation/SKILL.md"),
     "utf8"
@@ -248,14 +326,52 @@ test("the docs point a verifier at the password instead of printing one", () => 
   // The block the rows point at: read `.env.local` FIRST, and only seed when it
   // holds nothing. A verifier who re-keys the accounts they could already have
   // opened has changed the fixture out from under whoever recorded it.
-  assert.match(
-    skill,
-    /grep '\^SEED_ADMIN_PASSWORD=' \.env\.local/,
-    "the skill must show the verifier how to read the recorded password before seeding"
+  //
+  // The documented grep must match every spelling `recordedSeedPassword`
+  // accepts, or it reports "nothing recorded" for a value that IS recorded and
+  // the verifier re-keys on the strength of it.
+  const readFirst = skill.split("\n").find(
+    (line) => line.includes("grep") && line.includes("SEED_ADMIN_PASSWORD") // the read-first check
   );
+  assert.ok(readFirst, "the skill must show how to read the recorded password");
+  const grepPattern = /grep -E '([^']+)' \.env\.local/.exec(readFirst);
+  assert.ok(
+    grepPattern,
+    `the read-first check must be a quoted extended-regex grep over .env.local: ${readFirst}`
+  );
+  // POSIX classes, because grep must run on BSD and GNU alike; `\s` is only a
+  // GNU extension. Translated here so the documented pattern can be exercised.
+  const documented = new RegExp(
+    grepPattern[1].replace(/\[\[:space:\]\]/g, "\\s")
+  );
+  for (const recorded of [
+    'SEED_ADMIN_PASSWORD="dq"',
+    "SEED_ADMIN_PASSWORD=plain",
+    "export SEED_ADMIN_PASSWORD=exported",
+    "  SEED_ADMIN_PASSWORD=indented",
+  ]) {
+    assert.ok(
+      documented.test(recorded),
+      `the documented grep misses a spelling recordedSeedPassword accepts (${recorded}), so a verifier would be told nothing is recorded and re-key accounts someone else recorded`
+    );
+  }
+  assert.ok(
+    !documented.test("OLD_SEED_ADMIN_PASSWORD=x"),
+    "the documented grep must not match a different variable that merely contains the name"
+  );
+
   assert.match(
     skill,
     /tsx scripts\/seed-dev-db\.ts --oversight-orgs-only/,
     "the skill must still spell out the seed command the credentials rows point at"
+  );
+
+  // Appending without a leading newline concatenates onto whatever the file
+  // ended with, corrupting both variables, on any .env.local not ending in a
+  // newline.
+  assert.doesNotMatch(
+    skill,
+    /echo '.*SEED_ADMIN_PASSWORD.*' >> \.env\.local/,
+    "the recording step must not `echo >>` — use printf with a leading newline, or an .env.local with no trailing newline silently joins two variables"
   );
 });
