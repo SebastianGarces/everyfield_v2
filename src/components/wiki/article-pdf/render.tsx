@@ -34,11 +34,15 @@
 // failed download. Naming the combined face cannot miss. It also needs no font
 // asset, which is what kept this fix inside the ruling.
 //
-// KNOWN DIVERGENCE FROM THE PRINTED PAGE, owned here: the standard-14 faces
+// DIVERGENCE 1 FROM THE PRINTED PAGE is owned here: the standard-14 faces
 // cannot encode characters outside WinAnsi (`→`, `↓`, box drawing), so those
-// print correctly and corrupt in the downloaded file. It is divergence 1 of the
-// two listed in `article-actions.tsx`; the fix is a registered Unicode TTF,
-// which means shipping a font asset (#398).
+// print correctly and corrupt in the downloaded file. The fix is a registered
+// Unicode TTF, which means shipping a font asset (#398).
+//
+// The numbering is `article-actions.tsx`'s list, which is the ONE place that
+// states how many divergences there are. Cite an item by number from here;
+// never restate the total, or two files can disagree about it — this comment
+// claimed "two" for a while after that list grew to three.
 // ============================================================================
 
 import { type ReactElement } from "react";

@@ -43,8 +43,10 @@
 // promises and is why the "callouts … all carry across" sentence in
 // `article-actions.tsx` was false.
 //
-// TWO KNOWN DIVERGENCES FROM THE PRINTED PAGE are owned here — 2 and 3 of the
-// three listed in `article-actions.tsx`:
+// DIVERGENCES 2 AND 3 FROM THE PRINTED PAGE are owned here. The numbering is
+// `article-actions.tsx`'s list, which is the ONE place that states how many
+// divergences there are — cite an item by number from here, never restate the
+// total, or two files can disagree about it.
 //
 //   2. `collectBlocks` has no `IMG` case, so an image falls to the recursive
 //      default, has no children, and drops silently while the print stylesheet
