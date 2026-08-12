@@ -79,8 +79,15 @@ export function parseCitedFact(fact: string): ParsedCitedFact {
   };
 }
 
-/** Unify the two index spellings without discarding which row was cited. */
-function dotIndices(path: string): string {
+/**
+ * Unify the two index spellings without discarding which row was cited:
+ * `roles[0].filled` and `roles.0.filled` are the same path.
+ *
+ * Exported because the read layer walks stored snapshots by the same dotted
+ * path this module keys citations under (`assessment/queries.ts`), and two
+ * copies of one three-character regex are two things that can drift.
+ */
+export function dotIndices(path: string): string {
   return path.replace(/\[(\d+)\]/g, ".$1");
 }
 
@@ -541,12 +548,18 @@ function manualByKeyPhrase(
   normalized: string,
   value: string | null
 ): string | null {
-  const prefix = "manual.byKey.";
-  if (!normalized.startsWith(prefix)) return null;
-  const signalKey = normalized.slice(prefix.length);
-  if (!signalKey) return null;
+  const signalKey = manualByKeySignal(normalized);
+  return signalKey === null ? null : signalPhrase(signalKey, value);
+}
 
-  return signalPhrase(signalKey, value);
+/** The keyed spelling of an attestation: the signal is IN the path. */
+const MANUAL_BY_KEY_PREFIX = "manual.byKey.";
+
+/** The signal a `manual.byKey.<signal>` citation names, or null for any other path. */
+function manualByKeySignal(normalized: string): string | null {
+  if (!normalized.startsWith(MANUAL_BY_KEY_PREFIX)) return null;
+  const signalKey = normalized.slice(MANUAL_BY_KEY_PREFIX.length);
+  return signalKey.length > 0 ? signalKey : null;
 }
 
 /** What a citation of one manual signal reads as, keyed or not. */
@@ -733,33 +746,83 @@ export function formatCitedFact(
 }
 
 /**
- * The sentence ONE resolved attestation reads as, or `null` when this citation
- * is not a resolved attestation at all.
+ * One attestation citation reduced to what folding a column needs, with the
+ * spelling thrown away.
  *
- * It is the SAME call `buildPhrase` makes for `formatCitedFact(fact, { signalKey
- * })`, which is what makes "the plural formatter says what the drill-down says"
- * true by construction rather than by two templates kept in step by hand.
+ * Both legal spellings are mapped onto the ARRAY form's templates on purpose:
+ * that is what puts `manual.byKey.<signal>` and `manual.attestations[N].value`
+ * in ONE group, so how many attestations were cited — not which of two legal
+ * spellings the model picked — decides whether the column names them or counts
+ * them. Returns `null` for any citation that is not an attestation.
  */
-function resolvedSignalSentence(
+interface AttestationCitation {
+  /** The COUNTING phrase: signal-independent, so both spellings share a group. */
+  counting: Phrase;
+  /** What this citation reads as when it is the only one; null if unresolved. */
+  specific: string | null;
+  /**
+   * The thing counted. The SIGNAL when it is known, so one attestation cited
+   * twice — once each way — is one thing, never two.
+   */
+  member: string;
+}
+
+function attestationCitation(
   fact: string,
-  signalKey: string | null
-): string | null {
-  if (signalKey === null) return null;
+  signals: CitedFactSignals | undefined
+): AttestationCitation | null {
   const { path, value } = parseCitedFact(fact);
-  return manualAttestationPhrase(normalizePath(path), value, signalKey);
+  const normalized = normalizePath(path);
+
+  let leaf: string;
+  let signal: string | null;
+  let asserted: string | null;
+
+  const keyedSignal = manualByKeySignal(normalized);
+  if (normalized.startsWith(MANUAL_ATTESTATION_PREFIX)) {
+    leaf = normalized.slice(MANUAL_ATTESTATION_PREFIX.length);
+    // Only the read layer can say which signal row N holds (see below).
+    signal = signals?.[citedFactPath(fact)] ?? null;
+    asserted = value;
+  } else if (keyedSignal !== null) {
+    signal = keyedSignal;
+    // A keyed citation WITH a value asserts the attestation, exactly as
+    // `…attestations.N.value` does; a bare one only names it, as `…signalKey`
+    // does. The signal is in the path, so it never needs the map.
+    leaf = value === null ? "signalKey" : "value";
+    asserted = value === null ? keyedSignal : value;
+  } else {
+    return null;
+  }
+
+  const template = `${MANUAL_ATTESTATION_PREFIX}${leaf}`;
+  const counting = FACT_PHRASES[template]?.(asserted) ?? null;
+  if (counting === null) return null;
+
+  return {
+    counting,
+    // The SAME call `buildPhrase` makes for `formatCitedFact(fact, { signalKey
+    // })`, which is what makes "the plural formatter says what the drill-down
+    // says" true by construction rather than by two templates kept in step.
+    specific:
+      signal === null
+        ? null
+        : manualAttestationPhrase(template, asserted, signal),
+    member:
+      signal === null
+        ? `citation:${citationIdentity(fact)}`
+        : `signal:${signal}`,
+  };
 }
 
 /** One phrase's group while a column is being folded. */
 interface CitedFactGroup {
-  /** The COUNTING phrase — the group's identity and its fallback rendering. */
+  /** The COUNTING phrase — the group's identity and its rendering at N rows. */
   phrase: Phrase;
-  rows: number;
-  /** What the group reads as when it is one resolved signal; null otherwise. */
-  specific: string | null;
-  /** The signal every member so far resolved to (`null` = none did). */
-  signal: string | null;
-  /** Two members disagreed about the signal, so the group is a count again. */
-  mixed: boolean;
+  /** The DISTINCT things cited: one attestation is one, however it is spelled. */
+  members: Set<string>;
+  /** The sentences resolved members read as; empty when none resolved. */
+  specifics: Set<string>;
 }
 
 /**
@@ -800,17 +863,21 @@ interface CitedFactGroup {
  *
  * Supplying `signals` closes that, and the shape of the fix is the ruling:
  *
- *   - ONE resolved signal in a group reads the drill-down's own sentence;
- *   - MIXED signals — two attestations of DIFFERENT signals, or one that
- *     resolved beside one that did not — collapse back to the count ("3 things
- *     you confirmed"). THIS PATH IS A COUNTER AND NEVER BECOMES A LISTER: the
- *     group is keyed on the counting phrase precisely so two different
- *     attestations stay one group, and naming them both here would turn a chip
- *     that says how much evidence there is into a second copy of the drill-down.
+ *   - ONE distinct attestation in a group reads the drill-down's own sentence;
+ *   - MORE THAN ONE — two DIFFERENT signals, or one that resolved beside one
+ *     that did not — collapses to the count ("3 things you confirmed"). THIS
+ *     PATH IS A COUNTER AND NEVER BECOMES A LISTER: naming them all here would
+ *     turn a chip that says how much evidence there is into a second copy of
+ *     the drill-down.
  *
- * A rendered line is emitted once: the keyed spelling and the array spelling of
- * ONE attestation are two groups that now say the identical sentence, and
- * printing it twice is exactly the doubled evidence this ruling exists to stop.
+ * The rule is keyed on the SIGNAL, not on the rendered phrase, and that is what
+ * makes it spelling-independent — the property the ruling is actually about.
+ * Both spellings of one attestation are ONE member of ONE group, so:
+ *
+ *   - two attestations count the same whether they were cited by key or by row
+ *     (keying on the phrase counted the array pair and listed the keyed pair);
+ *   - an attestation cited BOTH ways beside another one counts as two things,
+ *     not as one named sentence beside a count that silently included it again.
  */
 export function formatCitedFacts(
   citedFacts: unknown,
@@ -819,49 +886,31 @@ export function formatCitedFacts(
   if (!Array.isArray(citedFacts)) return [];
 
   const groups = new Map<string, CitedFactGroup>();
-  const seen = new Set<string>();
 
   for (const fact of citedFacts) {
     if (typeof fact !== "string" || fact.trim() === "") continue;
 
-    const identity = citationIdentity(fact);
-    if (seen.has(identity)) continue;
-    seen.add(identity);
-
-    // The COUNTING phrase is the group's identity, resolved signal or not.
-    // That is what keeps two different attestations in one group, where the
-    // ruling wants them counted rather than listed.
-    const phrase = buildPhrase(fact);
+    // An attestation is folded by signal; everything else by its own citation.
+    const attestation = attestationCitation(fact, signals);
+    const phrase = attestation ? attestation.counting : buildPhrase(fact);
     if (phrase === null) continue;
 
-    const signal = signals?.[citedFactPath(fact)] ?? null;
-
-    // Group on the singular: it is the phrase's identity, independent of how
-    // many rows end up in the group.
+    // Group on the counting phrase rendered singular: it is the phrase's
+    // identity, independent of how many rows end up in the group.
     const key = renderPhrase(phrase, 1);
-    const group = groups.get(key);
-    if (group) {
-      group.rows += 1;
-      if (group.signal !== signal) group.mixed = true;
-      continue;
+    let group = groups.get(key);
+    if (!group) {
+      group = { phrase, members: new Set(), specifics: new Set() };
+      groups.set(key, group);
     }
-    groups.set(key, {
-      phrase,
-      rows: 1,
-      specific: resolvedSignalSentence(fact, signal),
-      signal,
-      mixed: false,
-    });
+    group.members.add(attestation?.member ?? citationIdentity(fact));
+    if (attestation?.specific) group.specifics.add(attestation.specific);
   }
 
-  const lines: string[] = [];
-  const emitted = new Set<string>();
-  for (const { phrase, rows, specific, mixed } of groups.values()) {
-    const line =
-      !mixed && specific !== null ? specific : renderPhrase(phrase, rows);
-    if (emitted.has(line)) continue;
-    emitted.add(line);
-    lines.push(line);
-  }
-  return lines;
+  return Array.from(groups.values(), ({ phrase, members, specifics }) => {
+    const [only] = specifics;
+    return members.size === 1 && specifics.size === 1
+      ? only
+      : renderPhrase(phrase, members.size);
+  });
 }

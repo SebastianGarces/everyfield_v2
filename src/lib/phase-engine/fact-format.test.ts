@@ -636,6 +636,92 @@ test("MIXED signals collapse to a count — the counting path never lists", () =
   assert.doesNotMatch(line, /core values|financial base|launch systems/);
 });
 
+test("the SPELLING never decides whether a pair counts or lists", () => {
+  // The class the ruling is about, at N>1. Keying the fold on the rendered
+  // phrase used to count the array pair ("2 things you confirmed") and LIST the
+  // keyed pair (two named sentences) — the same spelling-decides-the-wording
+  // harm the single-signal case was fixed for, surviving one citation later.
+  const signals = {
+    "manual.attestations.0.value": "values_documented",
+    "manual.attestations.1.value": "financial_base_established",
+  };
+  const asRows = formatCitedFacts(
+    ["manual.attestations.0.value=true", "manual.attestations.1.value=true"],
+    signals
+  );
+  const asKeys = formatCitedFacts([
+    "manual.byKey.values_documented=true",
+    "manual.byKey.financial_base_established=true",
+  ]);
+
+  assert.deepEqual(asRows, ["2 things you confirmed"]);
+  assert.deepEqual(asKeys, asRows);
+});
+
+test("an attestation cited BOTH ways beside another counts as two things", () => {
+  // Not ["2 things you confirmed", "you confirmed your core values are
+  // documented"]: printing the named one beside a count that already includes
+  // it is the doubled evidence this ruling exists to stop.
+  assert.deepEqual(
+    formatCitedFacts(
+      [
+        "manual.byKey.values_documented=true",
+        "manual.attestations.0.value=true",
+        "manual.attestations.1.value=true",
+      ],
+      {
+        "manual.attestations.0.value": "values_documented",
+        "manual.attestations.1.value": "financial_base_established",
+      }
+    ),
+    ["2 things you confirmed"]
+  );
+});
+
+test("one attestation cited both ways is one thing, not a pair", () => {
+  // The counterpart of the case above: the SAME signal, two spellings, one
+  // citation — so the group is a single member and reads as its own sentence.
+  assert.deepEqual(
+    formatCitedFacts(
+      [
+        "manual.byKey.values_documented=true",
+        "manual.attestations.0.value=true",
+      ],
+      { "manual.attestations.0.value": "values_documented" }
+    ),
+    ["you confirmed your core values are documented"]
+  );
+});
+
+test("a lone keyed attestation still names its fact", () => {
+  // Folding the keyed spelling into the array spelling's group must not cost
+  // the singular its sentence.
+  assert.deepEqual(formatCitedFacts(["manual.byKey.systems_tested=true"]), [
+    "you confirmed your launch systems have been tested",
+  ]);
+  assert.deepEqual(formatCitedFacts(["manual.byKey.systems_tested=false"]), [
+    "you have not confirmed your launch systems have been tested",
+  ]);
+  assert.deepEqual(formatCitedFacts(["manual.byKey.systems_tested"]), [
+    "your launch systems have been tested",
+  ]);
+});
+
+test("a confirmed attestation and an unconfirmed one are not one count", () => {
+  // Two different assertions are two groups: collapsing them would say "2
+  // things you confirmed" about something the planter did NOT confirm.
+  assert.deepEqual(
+    formatCitedFacts([
+      "manual.byKey.values_documented=true",
+      "manual.byKey.systems_tested=false",
+    ]),
+    [
+      "you confirmed your core values are documented",
+      "you have not confirmed your launch systems have been tested",
+    ]
+  );
+});
+
 test("one resolved beside one unresolved is MIXED, so it counts too", () => {
   assert.deepEqual(
     formatCitedFacts(

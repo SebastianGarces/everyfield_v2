@@ -47,6 +47,7 @@ import { parseTargetDate } from "@/lib/launch/countdown";
 // quoted value begins.
 import {
   citedFactPath,
+  dotIndices,
   parseCitedFact,
   type CitedFactSignals,
 } from "@/lib/phase-engine/fact-format";
@@ -633,11 +634,6 @@ export interface SnapshotFact {
   value: string | null;
 }
 
-/** `roles[0].filled` and `roles.0.filled` are the same path. */
-function dottedPath(path: string): string {
-  return path.replace(/\[(\d+)\]/g, ".$1");
-}
-
 /** A scalar rendered for display/comparison; containers are not facts. */
 function scalarToString(value: unknown): string | null {
   if (typeof value === "string") return value;
@@ -652,7 +648,7 @@ function resolveSnapshotPath(
   snapshot: unknown,
   path: string
 ): { found: boolean; value: unknown } {
-  const segments = dottedPath(path)
+  const segments = dotIndices(path)
     .split(".")
     .filter((segment) => segment.length > 0);
 
@@ -682,7 +678,7 @@ export function readSnapshotFact(
   snapshot: unknown,
   path: string
 ): SnapshotFact {
-  const normalized = dottedPath(path);
+  const normalized = dotIndices(path);
   const { found, value } = resolveSnapshotPath(snapshot, normalized);
   return {
     path: normalized,
@@ -1425,13 +1421,18 @@ function normalizeManualCitation(
  * malformed column. `snapshot` is the assessment's own fact snapshot — the one
  * the judge cited — because resolving an attestation row to its signal is a read
  * of that snapshot, not a syntax rule.
+ *
+ * The path is taken through `citedFactPath`, the same function
+ * {@link resolveCitedFactSignals} keys its map under and the formatter looks it
+ * up under: attribution and wording are two halves of one ruling, so they must
+ * not hold two ideas of what a citation's path is.
  */
 function citedPathsOf(insight: PlantInsight, snapshot: unknown): string[] {
   const facts = insight.citedFacts;
   if (!Array.isArray(facts)) return [];
   return facts
     .filter((fact): fact is string => typeof fact === "string")
-    .map((fact) => dottedPath(parseCitedFact(fact).path))
+    .map(citedFactPath)
     .filter((path) => path.length > 0)
     .map((path) => normalizeManualCitation(path, snapshot))
     .filter((path): path is string => path !== null);
@@ -1481,7 +1482,7 @@ function buildEvidence(
   for (const raw of facts) {
     if (typeof raw !== "string" || raw.trim() === "") continue;
     const { path, value } = parseCitedFact(raw);
-    const normalized = dottedPath(path);
+    const normalized = dotIndices(path);
     if (normalized.length === 0) continue;
 
     const stored = readSnapshotFact(snapshot, normalized);
