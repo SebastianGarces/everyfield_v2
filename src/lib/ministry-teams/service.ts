@@ -57,5 +57,3 @@ export type { TrainingMatrixRow, PersonTrainingItem } from "./training";
 
 export { getTeamHealth, getAllTeamsHealth, getStaffingSummary } from "./health";
 export type { StaffingSummary, TeamHealthMetrics } from "./health";
-
-export { ExpectedError } from "./expected-error";
