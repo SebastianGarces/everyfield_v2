@@ -50,7 +50,7 @@
  *    them apart. One sentence has to be true of both.
  * 2. It names no window and no number. The window is a mechanism the planter
  *    did not ask about; it stays in code, named only by
- *    `EVALUATION_COMPARISON_WINDOW` in `service.ts`.
+ *    `EVALUATION_COMPARISON_WINDOW` in `evaluation-comparison.ts`.
  */
 export const EVALUATION_COMPARISON_EMPTY_COPY =
   "No comparison available — no earlier evaluated meeting to compare against.";

@@ -1,21 +1,34 @@
 /**
- * The meeting agenda's shape, bounds and reader (VM-013).
+ * The meeting agenda's shape, bounds, defaults and reader (VM-013).
  *
- * This module imports NOTHING — the same rule `copy.ts` keeps, and for the same
+ * This module imports NOTHING but a TYPE — the rule `copy.ts` keeps outright
+ * and `meeting-type-filter.ts` keeps with the same one allowance, for the same
  * reason. `service.ts` opens with `@/db`, ten schema tables and drizzle, so
  * every symbol in it is one `"use client"` away from dragging that graph into
  * the client bundle. The agenda bounds and the clamp are needed on BOTH sides
  * of the boundary: the server normalises what it stores, and `AgendaBuilder`
  * (`"use client"`) clamps the same field as the planter types it.
+ * `import type { MeetingType }` is erased at compile time and adds no bundle
+ * edge, so it is the one import this module may have; `ruled-copy.test.ts`
+ * asserts that allowance rather than assuming it.
  *
  * They used to be declared twice — `MAX_SECTION_MINUTES`, `MAX_AGENDA_SECTIONS`
  * and the clamp expression restated in `agenda-builder.tsx` under a comment
  * saying "Mirrors …". A policy kept in agreement by a comment is a policy with
  * two implementations. One module both sides can import is the fix.
  *
+ * EVERY agenda decision is here, including the two that were not: which meeting
+ * types have a prescribed running order (`defaultAgendaTemplatesForType`, which
+ * was a `defaultAgendaForType` in `service.ts` AND a ternary in the detail
+ * page's JSX) and how a template becomes a section (`sectionsFromTemplates`,
+ * which was `buildDefaultAgenda`'s body AND `handleUseDefault`'s body). Both
+ * were the R2 duplicate-decision shape this module exists to end.
+ *
  * `service.ts` deliberately does NOT re-export any of this: a pass-through
  * keeps the coupling this module exists to remove. Import from here.
  */
+
+import type { MeetingType } from "@/db/schema";
 
 /**
  * One line of a meeting's running order.
@@ -46,6 +59,20 @@ export const MAX_AGENDA_SECTIONS = 40;
 export const MAX_SECTION_TITLE_LENGTH = 120;
 
 /**
+ * A section of an offered default, before it is given an id.
+ *
+ * Declared HERE and nowhere else. It was an anonymous object literal typing
+ * `VISION_MEETING_DEFAULT_AGENDA` and an identical `interface` in
+ * `agenda-builder.tsx`, so the policy module's default was typed by one shape
+ * and the client component's prop by another, with the server page in the
+ * middle having to satisfy both.
+ */
+export interface AgendaSectionTemplate {
+  title: string;
+  minutes: number;
+}
+
+/**
  * The six-section running order a new vision meeting starts from (VM-013).
  *
  * Titles and order are the requirement, not a suggestion — the FRD names
@@ -53,10 +80,7 @@ export const MAX_SECTION_TITLE_LENGTH = 120;
  * starting point the planter is expected to edit; they add to 90 minutes,
  * which is what the Vision Meeting Agenda handout (F6) is written against.
  */
-export const VISION_MEETING_DEFAULT_AGENDA: readonly {
-  title: string;
-  minutes: number;
-}[] = [
+export const VISION_MEETING_DEFAULT_AGENDA: readonly AgendaSectionTemplate[] = [
   { title: "Welcome", minutes: 10 },
   { title: "Worship", minutes: 15 },
   { title: "Vision", minutes: 25 },
@@ -66,18 +90,53 @@ export const VISION_MEETING_DEFAULT_AGENDA: readonly {
 ] as const;
 
 /**
- * Mint the default agenda with fresh section ids.
+ * WHICH meeting types have a prescribed running order — the one place it is
+ * decided.
  *
- * Returns a new array of new objects every call: the ids must be unique per
- * meeting, and the constant above must stay frozen no matter what a caller
- * does to what it gets back.
+ * Only vision meetings do; everything else starts empty and gets the builder's
+ * empty state. Both readers ask this: `createMeeting` seeds a new meeting's
+ * agenda from it, and the meeting-detail page hands it to `AgendaBuilder` as
+ * `defaultSections` so the empty state can offer "Start from the standard
+ * agenda". They used to be two copies of the same `type === "vision_meeting"`
+ * test — a service function and a ternary in JSX — so giving `orientation` a
+ * prescribed order would have seeded new orientations and left every existing
+ * one with a bare empty state.
+ *
+ * TEMPLATES, not sections: the caller decides when ids are minted, because ids
+ * must be unique per meeting and this constant must stay frozen.
+ *
+ * `MeetingType` is the database's own enum and arrives as a TYPE-ONLY import,
+ * which is erased at compile time — so keying on it here costs this module
+ * nothing at the client boundary.
  */
-export function buildDefaultAgenda(): AgendaSection[] {
-  return VISION_MEETING_DEFAULT_AGENDA.map((section) => ({
+export function defaultAgendaTemplatesForType(
+  type: MeetingType
+): readonly AgendaSectionTemplate[] {
+  return type === "vision_meeting" ? VISION_MEETING_DEFAULT_AGENDA : [];
+}
+
+/**
+ * Mint sections from templates: fresh ids, clamped timings.
+ *
+ * The ONE template→section step. Returns a new array of new objects every
+ * call, so the constants above are never handed out by reference and two
+ * meetings never share a section id. `AgendaBuilder`'s "Start from the standard
+ * agenda" restated this map inline, which meant a new field on `AgendaSection`
+ * would have reached a created vision meeting and not a converted empty state.
+ */
+export function sectionsFromTemplates(
+  templates: readonly AgendaSectionTemplate[]
+): AgendaSection[] {
+  return templates.map((template) => ({
     id: crypto.randomUUID(),
-    title: section.title,
-    minutes: section.minutes,
+    title: template.title,
+    minutes: clampAgendaMinutes(template.minutes),
   }));
+}
+
+/** The vision-meeting default, minted with fresh section ids. */
+export function buildDefaultAgenda(): AgendaSection[] {
+  return sectionsFromTemplates(VISION_MEETING_DEFAULT_AGENDA);
 }
 
 /**

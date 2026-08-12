@@ -7,8 +7,8 @@ import {
   setMeetingAgenda,
 } from "@/lib/meetings/service";
 import {
+  defaultAgendaTemplatesForType,
   parseAgenda,
-  VISION_MEETING_DEFAULT_AGENDA,
   type AgendaSection,
 } from "@/lib/meetings/agenda";
 import {
@@ -159,11 +159,7 @@ export default async function MeetingPage({ params }: MeetingPageProps) {
         <AgendaBuilder
           meetingId={meeting.id}
           sections={parseAgenda(meeting.agenda)}
-          defaultSections={
-            meeting.type === "vision_meeting"
-              ? VISION_MEETING_DEFAULT_AGENDA
-              : undefined
-          }
+          defaultSections={defaultAgendaTemplatesForType(meeting.type)}
           saveAction={saveAgendaAction}
         />
       </div>

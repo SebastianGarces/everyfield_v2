@@ -9,11 +9,13 @@ import { EvaluationSummary } from "@/components/meetings/evaluation-summary";
 import { verifySession } from "@/lib/auth/session";
 import {
   compareEvaluationToHistory,
+  EVALUATION_COMPARISON_WINDOW,
+} from "@/lib/meetings/evaluation-comparison";
+import {
   getEvaluation,
   getEvaluationTrend,
   getMeeting,
   listAttendees,
-  EVALUATION_COMPARISON_WINDOW,
 } from "@/lib/meetings/service";
 
 import { EvaluationComparisonCard } from "./evaluation-comparison";

@@ -5,7 +5,7 @@ import {
   evaluationComparisonDenominatorCopy,
   EVALUATION_COMPARISON_EMPTY_COPY,
 } from "@/lib/meetings/copy";
-import type { EvaluationComparison } from "@/lib/meetings/service";
+import type { EvaluationComparison } from "@/lib/meetings/evaluation-comparison";
 
 interface EvaluationComparisonCardProps {
   /** `null` when nothing in the fetched window is earlier than this meeting. */

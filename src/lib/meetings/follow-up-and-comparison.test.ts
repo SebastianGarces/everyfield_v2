@@ -9,12 +9,15 @@ import {
   DEFAULT_LIST_MEETING_TYPE,
   MEETING_TYPE_FILTERS,
   parseAnalyticsMeetingTypeFilter,
-} from "./analytics-filter";
+  parseListMeetingTypeFilter,
+} from "./meeting-type-filter";
 import {
   compareEvaluationToHistory,
-  meetingFollowUpCountQuery,
   type EvaluationTrendPoint,
-} from "./service";
+} from "./evaluation-comparison";
+// The one import of `./service` this file keeps, and it is earned: the
+// `.toSQL()` seam below asserts the SQL a real Drizzle query would emit.
+import { meetingFollowUpCountQuery } from "./service";
 
 // ----------------------------------------------------------------------------
 // VM-010k, VM-016c, VM-020 (#312).
@@ -273,6 +276,61 @@ test("no ?type= is the vision-meeting view existing users already had", () => {
 test("every offered filter round-trips through the parser", () => {
   for (const option of MEETING_TYPE_FILTERS) {
     assert.equal(parseAnalyticsMeetingTypeFilter(option.value), option.value);
+    assert.equal(parseListMeetingTypeFilter(option.value), option.value);
+  }
+});
+
+test("the BROWSE list parses ?type= too — a cast reached the pg enum and 500'd", () => {
+  // `/meetings/page.tsx` used to do `params.type as MeetingType | undefined`
+  // and hand the result to `listMeetings`, which builds
+  // `eq(churchMeetings.type, options.type)` against the `meeting_type` ENUM
+  // column. So `/meetings?type=all` — the exact literal the chip row writes,
+  // and the value a planter copies out of an analytics URL — reached Postgres
+  // as `type = 'all'` and raised `invalid input value for enum meeting_type`,
+  // rendering the route's error boundary instead of the list.
+  //
+  // Both halves are asserted: the filter the surfaces highlight, and the
+  // argument that reaches the query. `undefined` is the ONLY safe thing a
+  // browse-surface "all" may become.
+  for (const raw of ["all", "garbage", "", undefined, null, ["all", "x"]]) {
+    const filter = parseListMeetingTypeFilter(raw);
+
+    assert.equal(
+      filter,
+      DEFAULT_LIST_MEETING_TYPE,
+      `?type=${JSON.stringify(raw)} resolves to the list default`
+    );
+    assert.equal(
+      analyticsMeetingTypeArg(filter),
+      undefined,
+      `?type=${JSON.stringify(raw)} reaches listMeetings as "no type restriction", never as a string`
+    );
+  }
+});
+
+test("neither ?type= reader casts — both call the shared parser", () => {
+  // The defect was positional: this branch built the total parser, wired the
+  // chip row to the shared table, and left BOTH `/meetings` reads casting. A
+  // parser nothing calls is not a fix, and the page and the chip row
+  // disagreeing about the same URL is the visible half.
+  const readers = [
+    "src/app/(dashboard)/meetings/page.tsx",
+    "src/components/meetings/meeting-list.tsx",
+  ];
+
+  for (const reader of readers) {
+    const source = readFileSync(path.join(process.cwd(), reader), "utf8");
+
+    assert.match(
+      source,
+      /parseListMeetingTypeFilter\(/,
+      `${reader} parses ?type= through the shared parser`
+    );
+    assert.doesNotMatch(
+      source,
+      /\bas\s+Meeting(Type|TypeFilter)\b/,
+      `${reader} casts nothing out of the URL into a meeting type`
+    );
   }
 });
 

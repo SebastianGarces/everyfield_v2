@@ -13,7 +13,7 @@ import {
   compareEvaluationToHistory,
   EVALUATION_COMPARISON_WINDOW,
   type EvaluationTrendPoint,
-} from "@/lib/meetings/service";
+} from "@/lib/meetings/evaluation-comparison";
 
 // ----------------------------------------------------------------------------
 // The copy rulings on #312 (Sebastian). Two from 2026-08-10:
@@ -52,8 +52,10 @@ import {
 // ten schema tables and drizzle, so an import edge from a component that later
 // gains `"use client"` would drag that whole graph into the client bundle.
 // `copy.ts` cannot drag anything, and the last section of this file pins the
-// near half of that split: copy.ts and agenda.ts import nothing. The far half
-// — that no client component REACHES service.ts, directly or through any
+// near half of that split over all FOUR db-free siblings: `copy.ts` and
+// `evaluation-comparison.ts` import nothing at all, `agenda.ts` and
+// `meeting-type-filter.ts` import one erased TYPE each and no value. The far
+// half — that no client component REACHES service.ts, directly or through any
 // non-server-action module — is an architecture guard rather than a copy
 // ruling, and lives in `client-boundary.test.ts` beside it.
 //
@@ -64,8 +66,9 @@ import {
 // subset a verifier assembles — matches NOTHING there and still exits 0, so
 // the file reports green while running none of its assertions. Here it is
 // addressable, and it needs nothing from the route directory: it imports the
-// behaviour under test from `service.ts` and reads the one component it cannot
-// import by an explicit path.
+// behaviour under test from `evaluation-comparison.ts` — no database client at
+// module load — and reads the one component it cannot import by an explicit
+// path.
 // ----------------------------------------------------------------------------
 
 // ============================================================================
@@ -506,54 +509,88 @@ test("the progress figure is written once and pointed at, never copied", () => {
 // The layer the ruled strings live in
 // ============================================================================
 
-test("the ruled copy module pulls in no data-access graph", () => {
-  // `copy.ts` exists so a component can render a ruled string without importing
-  // `service.ts`, which opens with `@/db`, ten schema tables and drizzle. If
-  // copy.ts ever grows one of those imports, the boundary is gone and the split
-  // bought nothing.
-  const copy = readFileSync(path.join(__dirname, "copy.ts"), "utf8")
+/** A sibling's source with every comment stripped, so prose cannot satisfy a
+ * regex about code. */
+function siblingSource(file: string): string {
+  return readFileSync(path.join(__dirname, file), "utf8")
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/\/\/.*$/gm, "");
+}
 
-  assert.doesNotMatch(
-    copy,
-    /^\s*import\b/m,
-    "copy.ts imports nothing at all — it is strings and one string builder"
-  );
-});
+// The db-free siblings of `service.ts`, and what each is allowed to import.
+//
+// "nothing" is the strictest form: not one import statement. "type-only" is the
+// single allowance — `import type` is ERASED at compile time, so it adds no
+// bundle edge and `client-boundary.test.ts` (which walks value edges only)
+// never follows it. A VALUE import in any of these four is the hole.
+//
+// Every entry is a module a `"use client"` component may import directly. The
+// list is enumerated here rather than derived, so ADDING a db-free sibling is a
+// deliberate act that names its own allowance.
+const DB_FREE_SIBLINGS: readonly {
+  file: string;
+  allows: "nothing" | "type-only";
+  holds: string;
+}[] = [
+  { file: "copy.ts", allows: "nothing", holds: "every ruled string" },
+  {
+    file: "agenda.ts",
+    allows: "type-only",
+    holds: "the agenda policy — bounds, clamp, reader, defaults, mint",
+  },
+  {
+    file: "meeting-type-filter.ts",
+    allows: "type-only",
+    holds: "the ONE meeting-type filter table and its two parsers",
+  },
+  {
+    file: "evaluation-comparison.ts",
+    allows: "nothing",
+    holds: "the comparison window, shape and arithmetic",
+  },
+];
 
-test("the agenda module pulls in no data-access graph either", () => {
-  // Same rule, same reason. `agenda.ts` holds the bounds and the clamp that
-  // `AgendaBuilder` ("use client") and `service.ts` must agree on, so it sits
-  // on both sides of the boundary and may drag neither way.
-  const agenda = readFileSync(path.join(__dirname, "agenda.ts"), "utf8")
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/\/\/.*$/gm, "");
+for (const { file, allows, holds } of DB_FREE_SIBLINGS) {
+  test(`${file} pulls in no data-access graph (${holds})`, () => {
+    // These modules exist so a component can reach the meetings domain without
+    // importing `service.ts`, which opens with `@/db`, ten schema tables and
+    // drizzle. If one grows a value import, the boundary is gone and the split
+    // bought nothing.
+    const source = siblingSource(file);
 
-  assert.doesNotMatch(
-    agenda,
-    /^\s*import\b/m,
-    "agenda.ts imports nothing at all — a type, two bounds, a clamp and a reader"
-  );
-});
+    if (allows === "nothing") {
+      assert.doesNotMatch(
+        source,
+        /^\s*import\b/m,
+        `${file} imports nothing at all`
+      );
+    } else {
+      assert.doesNotMatch(
+        source,
+        /^\s*import\s+(?!type\b)/m,
+        `${file} has no VALUE import — a type-only import is erased, a value import ships the graph`
+      );
+      assert.match(
+        source,
+        /^\s*import\s+type\b/m,
+        `${file} is listed as type-only but imports no type — tighten it to "nothing"`
+      );
+    }
+  });
+}
 
-test("the shared filter table imports a TYPE and nothing else", () => {
-  // Third sibling, same rule with one allowance. `analytics-filter.ts` holds
-  // the meeting-type filter that `MeetingList` ("use client") and the analytics
-  // server page must agree on, so it sits on both sides of the boundary. It
-  // needs `MeetingType` from the schema — but `import type` is erased at
-  // compile time, so it adds no bundle edge and `client-boundary.test.ts`
-  // (value edges only) never follows it. A VALUE import here would be the hole.
-  const filter = readFileSync(
-    path.join(__dirname, "analytics-filter.ts"),
-    "utf8"
-  )
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/\/\/.*$/gm, "");
-
-  assert.doesNotMatch(
-    filter,
-    /^\s*import\s+(?!type\b)/m,
-    "analytics-filter.ts has no VALUE import — a type-only import is erased, a value import ships the graph"
-  );
+test("no db-free sibling is named after one of the two surfaces it serves", () => {
+  // `meeting-type-filter.ts` shipped for one commit as `analytics-filter.ts`,
+  // and the BROWSE surface imported it. The next developer adding a filter to
+  // `/meetings` reads that path, decides the analytics module is the wrong home
+  // for a browse-surface concern, and declares a local table — which is exactly
+  // the two-table drift the module was created to delete. The misnomer is the
+  // invitation, so the file name is pinned rather than left to taste.
+  for (const { file } of DB_FREE_SIBLINGS) {
+    assert.doesNotMatch(
+      file,
+      /^analytics-/,
+      `${file} is imported by non-analytics surfaces — name it for what it holds, not for one of its callers`
+    );
+  }
 });

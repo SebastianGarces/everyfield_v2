@@ -4,14 +4,15 @@ import { test } from "node:test";
 import {
   agendaTotalMinutes,
   buildDefaultAgenda,
+  defaultAgendaTemplatesForType,
   MAX_AGENDA_SECTIONS,
   MAX_SECTION_MINUTES,
   MAX_SECTION_TITLE_LENGTH,
   parseAgenda,
+  sectionsFromTemplates,
   VISION_MEETING_DEFAULT_AGENDA,
   type AgendaSection,
 } from "./agenda";
-import { defaultAgendaForType } from "./service";
 
 // ----------------------------------------------------------------------------
 // VM-013 — the meeting agenda.
@@ -20,6 +21,11 @@ import { defaultAgendaForType } from "./service";
 // only thing standing between a malformed row and a broken meeting page. These
 // tests pin the two halves of that contract: the six-section default a new
 // vision meeting is offered, and `parseAgenda` staying total over any input.
+//
+// EVERYTHING under test is imported from `./agenda`, which imports nothing but
+// an erased type. This file used to reach `./service` for a two-branch
+// dispatcher and so loaded `@/db`, ten schema tables and drizzle at module
+// scope to exercise it. That dispatcher is `defaultAgendaTemplatesForType` now.
 // ----------------------------------------------------------------------------
 
 // ----------------------------------------------------------------------------
@@ -70,9 +76,43 @@ test("buildDefaultAgenda mints fresh ids and never shares objects", () => {
 });
 
 test("only vision meetings are offered a default running order", () => {
-  assert.equal(defaultAgendaForType("vision_meeting").length, 6);
-  assert.deepEqual(defaultAgendaForType("team_meeting"), []);
-  assert.deepEqual(defaultAgendaForType("orientation"), []);
+  // The ONE place that decision is written. It was a `service.ts` function AND
+  // a ternary in the meeting-detail page's JSX, so adding a branch here would
+  // have seeded new meetings of that type and left every existing one with a
+  // bare empty state and no "Start from the standard agenda" button.
+  assert.deepEqual(
+    defaultAgendaTemplatesForType("vision_meeting"),
+    VISION_MEETING_DEFAULT_AGENDA
+  );
+  assert.deepEqual(defaultAgendaTemplatesForType("team_meeting"), []);
+  assert.deepEqual(defaultAgendaTemplatesForType("orientation"), []);
+});
+
+test("the offered default and a created meeting's agenda are one mint", () => {
+  // What `createMeeting` does, and what "Start from the standard agenda" does,
+  // are the same two calls in the same order. They were two copies of the map
+  // — so a new field on `AgendaSection` would have reached one and not the
+  // other.
+  const seeded = sectionsFromTemplates(
+    defaultAgendaTemplatesForType("vision_meeting")
+  );
+
+  assert.deepEqual(
+    seeded.map(({ title, minutes }) => ({ title, minutes })),
+    VISION_MEETING_DEFAULT_AGENDA.map(({ title, minutes }) => ({
+      title,
+      minutes,
+    }))
+  );
+  assert.equal(new Set(seeded.map((section) => section.id)).size, 6);
+});
+
+test("sectionsFromTemplates clamps a template's timing like any other input", () => {
+  const [section] = sectionsFromTemplates([
+    { title: "Absurd", minutes: 99999 },
+  ]);
+
+  assert.equal(section.minutes, MAX_SECTION_MINUTES);
 });
 
 // ----------------------------------------------------------------------------

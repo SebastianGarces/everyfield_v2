@@ -30,12 +30,16 @@
 //
 // It imports nothing from `lib/meetings/service.ts`: that module pulls in the
 // database client, and this is a client component. EVERY piece of agenda policy
-// — the section type, the three bounds, the clamp and the total — comes from
-// `lib/meetings/agenda.ts`, which imports nothing and is the ONE place that
-// policy is written. Nothing here restates it: no `120` in a `maxLength`, no
-// hand-rolled sum over `minutes`. Restating policy and keeping the two copies
-// in agreement by hand is exactly what agenda.ts exists to end. The default
-// running order still arrives as a prop.
+// — the section type, the template type, the three bounds, the clamp, the total
+// and the template→section mint — comes from `lib/meetings/agenda.ts`, which
+// imports nothing but an erased type and is the ONE place that policy is
+// written. Nothing here restates it: no `120` in a `maxLength`, no hand-rolled
+// sum over `minutes`, and not one section id minted in this file — both paths
+// that produce a section call `sectionsFromTemplates`, so this file contains no
+// `crypto.randomUUID()` at all.
+// Restating policy and keeping the two copies in agreement by hand is exactly
+// what agenda.ts exists to end. WHICH default this meeting gets is decided by
+// `defaultAgendaTemplatesForType` on the server and still arrives as a prop.
 // ============================================================================
 
 import { useOptimistic, useState, useTransition } from "react";
@@ -63,22 +67,18 @@ import { Label } from "@/components/ui/label";
 import {
   agendaTotalMinutes,
   clampAgendaMinutes,
+  sectionsFromTemplates,
   MAX_AGENDA_SECTIONS,
   MAX_SECTION_MINUTES,
   MAX_SECTION_TITLE_LENGTH,
   type AgendaSection,
+  type AgendaSectionTemplate,
 } from "@/lib/meetings/agenda";
 
 /** What the save action reports back. Never throws at the component. */
 export type AgendaSaveResult =
   | { success: true }
   | { success: false; error: string };
-
-/** A section of the offered default, before it is given an id. */
-export interface AgendaSectionTemplate {
-  title: string;
-  minutes: number;
-}
 
 export interface AgendaBuilderProps {
   meetingId: string;
@@ -140,13 +140,7 @@ export function AgendaBuilder({
 
   const handleUseDefault = () => {
     if (!defaultSections || defaultSections.length === 0) return;
-    commit(
-      defaultSections.map((section) => ({
-        id: crypto.randomUUID(),
-        title: section.title,
-        minutes: clampAgendaMinutes(section.minutes),
-      }))
-    );
+    commit(sectionsFromTemplates(defaultSections));
   };
 
   const handleAdd = (event: React.FormEvent<HTMLFormElement>) => {
@@ -162,13 +156,11 @@ export function AgendaBuilder({
       return;
     }
 
+    // A typed row is a one-element template: same id mint, same clamp, one
+    // implementation. Nothing in this file mints a section id of its own.
     commit([
       ...optimisticSections,
-      {
-        id: crypto.randomUUID(),
-        title,
-        minutes: clampAgendaMinutes(Number(newMinutes)),
-      },
+      ...sectionsFromTemplates([{ title, minutes: Number(newMinutes) }]),
     ]);
     setNewTitle("");
     setNewMinutes("10");

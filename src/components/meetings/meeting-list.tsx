@@ -10,8 +10,8 @@ import type { MeetingWithCounts } from "@/lib/meetings/types";
 import {
   DEFAULT_LIST_MEETING_TYPE,
   MEETING_TYPE_FILTERS,
-  type MeetingTypeFilter,
-} from "@/lib/meetings/analytics-filter";
+  parseListMeetingTypeFilter,
+} from "@/lib/meetings/meeting-type-filter";
 
 interface MeetingListProps {
   upcomingMeetings: MeetingWithCounts[];
@@ -28,9 +28,10 @@ export function MeetingList({
   const searchParams = useSearchParams();
   const view =
     (searchParams.get("view") as "upcoming" | "past" | "all") || initialView;
-  const activeType =
-    (searchParams.get("type") as MeetingTypeFilter | null) ||
-    DEFAULT_LIST_MEETING_TYPE;
+  // The SAME parser the server page runs over `?type=`, not a cast: the page
+  // and the chip row must agree about what the URL says, or a hand-edited
+  // `?type=x` lists everything while no chip is highlighted.
+  const activeType = parseListMeetingTypeFilter(searchParams.get("type"));
 
   const showUpcoming = view === "upcoming" || view === "all";
   const showPast = view === "past" || view === "all";
@@ -60,7 +61,7 @@ export function MeetingList({
         the same array the analytics view renders — so the two surfaces cannot
         drift apart in values, labels or order. The DEFAULTS still differ on
         purpose: this browse surface starts on "all", analytics starts on
-        vision meetings. See lib/meetings/analytics-filter.ts.
+        vision meetings. See lib/meetings/meeting-type-filter.ts.
       */}
       <div
         aria-label="Filter meetings by type"

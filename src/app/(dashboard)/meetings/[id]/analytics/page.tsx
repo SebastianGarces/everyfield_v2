@@ -12,7 +12,7 @@ import {
   analyticsMeetingTypeLabel,
   MEETING_TYPE_FILTERS,
   parseAnalyticsMeetingTypeFilter,
-} from "@/lib/meetings/analytics-filter";
+} from "@/lib/meetings/meeting-type-filter";
 import { getMeeting } from "@/lib/meetings/service";
 import { cn } from "@/lib/utils";
 
