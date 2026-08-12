@@ -291,6 +291,45 @@ test("malformed citations never throw", () => {
   }
 });
 
+// A citation is LLM-authored, so its path segments are attacker-shaped strings.
+// Both phrase vocabularies used to be indexed as objects, which reaches
+// `Object.prototype`: `constructor=4` and `valueOf=1` threw out of BOTH public
+// functions (a crashed `/phase` — all three surfaces call them), `toString=x`
+// printed "[object Object]", and `manual.byKey.toString` read back a native
+// function's source. Both tables are `Map`s now; this pins the behaviour, not
+// the mechanism.
+test("a path that collides with an Object.prototype key still degrades", () => {
+  const collisions = [
+    "constructor=4",
+    "valueOf=1",
+    "__proto__=x",
+    "toString=x",
+    "hasOwnProperty=true",
+    "constructor",
+    "manual.byKey.constructor=true",
+    "manual.byKey.toString=true",
+    "manual.byKey.__proto__",
+    "manual.attestations.0.value=true",
+  ];
+
+  for (const fact of collisions) {
+    assert.doesNotThrow(() => formatCitedFact(fact), fact);
+    assert.doesNotThrow(() => formatCitedFacts([fact]), fact);
+
+    const rendered = formatCitedFact(fact);
+    const [line] = formatCitedFacts([fact]);
+    for (const phrase of [rendered, line]) {
+      assert.equal(typeof phrase, "string", fact);
+      assert.ok(phrase.length > 0, `${fact} rendered nothing`);
+      assert.ok(!phrase.includes("[object"), `${fact} → ${phrase}`);
+      assert.ok(!phrase.includes("native code"), `${fact} → ${phrase}`);
+      assert.doesNotMatch(phrase, LEDGER_SYNTAX, `${fact} → ${phrase}`);
+      assert.doesNotMatch(phrase, CAMEL_CASE, `${fact} → ${phrase}`);
+      assert.ok(!phrase.includes("="), `${fact} → ${phrase}`);
+    }
+  }
+});
+
 // ----------------------------------------------------------------------------
 // formatCitedFacts — the column-level entry point both surfaces call.
 // ----------------------------------------------------------------------------

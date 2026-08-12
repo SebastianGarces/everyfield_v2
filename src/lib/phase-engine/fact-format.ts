@@ -331,8 +331,12 @@ function citationRendering(
     return attestationRendering(fact, attestation, normalized, value);
   }
 
+  // `.get`, never an index: the path is the model's own string, so an object
+  // lookup would reach `Object.prototype` and hand a native function to
+  // `renderPhrase` (see `FACT_PHRASES` — rule 2 is why both vocabularies are
+  // Maps).
   const group =
-    FACT_PHRASES[normalized]?.(value) ?? fallbackPhrase(normalized, value);
+    FACT_PHRASES.get(normalized)?.(value) ?? fallbackPhrase(normalized, value);
   return {
     group,
     // Everything that is NOT an attestation keeps the old identity — its own

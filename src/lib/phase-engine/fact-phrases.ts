@@ -139,17 +139,24 @@ const TOTAL_MINISTRY_ROLES = MINISTRY_ROLE_KEYS.length;
  * "you confirmed …". Wording tracks the toggle labels the planter answered
  * (components/phase-engine/signal-toggles.tsx) so the evidence uses the same
  * words as the control that produced it.
+ *
+ * A `Map`, not an object — see {@link FACT_PHRASES}: the key is a path segment
+ * out of an LLM-authored citation, so `manual.byKey.toString` indexed an object
+ * straight into `Object.prototype` and read "you confirmed function
+ * toString() { [native code] }" to a planter.
  */
-const MANUAL_SIGNAL_CLAUSES: Record<string, string> = {
-  values_documented: "your core values are documented",
-  financial_base_established: "your financial base is in place",
-  prayer_leader_assigned: "a prayer leader is assigned",
-  systems_tested: "your launch systems have been tested",
-};
+const MANUAL_SIGNAL_CLAUSES: ReadonlyMap<string, string> = new Map(
+  Object.entries({
+    values_documented: "your core values are documented",
+    financial_base_established: "your financial base is in place",
+    prayer_leader_assigned: "a prayer leader is assigned",
+    systems_tested: "your launch systems have been tested",
+  })
+);
 
 /** The clause one manual signal reads as; an unknown key de-camelises. */
 export function manualSignalClause(key: string): string {
-  return MANUAL_SIGNAL_CLAUSES[key] ?? toWords(key);
+  return MANUAL_SIGNAL_CLAUSES.get(key) ?? toWords(key);
 }
 
 // ----------------------------------------------------------------------------
@@ -192,7 +199,12 @@ function date(phrase: (readable: string) => Phrase): FactPhrase {
   };
 }
 
-export const FACT_PHRASES: Record<string, FactPhrase> = {
+/**
+ * The phrases themselves, written as a literal because that is how a table of
+ * 40-odd paths stays readable. Nothing reads it directly — {@link FACT_PHRASES}
+ * below is the lookup, and it is a `Map` for a reason.
+ */
+const FACT_PHRASE_TABLE: Record<string, FactPhrase> = {
   // -- the plant itself ------------------------------------------------------
   currentPhase: numeric((n) => `you are in phase ${n}`),
   isColdStart: boolean(
@@ -426,3 +438,20 @@ export const FACT_PHRASES: Record<string, FactPhrase> = {
     "self-reports on record"
   ),
 };
+
+/**
+ * One phrase per snapshot path — the lookup every caller uses.
+ *
+ * A `Map`, not the literal above, and that is load-bearing: the key is an
+ * LLM-authored citation path (`plant_insights.cited_facts`), so indexing an
+ * object with it reaches `Object.prototype`. A judge citing `constructor=4` or
+ * `valueOf=1` pulled a native function out of the table and THREW inside
+ * `formatCitedFact`/`formatCitedFacts` — a crashed `/phase`, since all three
+ * render surfaces call them — while `toString=x` printed "[object Object]".
+ * A `Map` has no prototype keys to reach, so rule 2 of `fact-format.ts` (an
+ * unknown shape degrades, it never throws and never leaks syntax) holds by
+ * construction instead of by a guard the next reader has to remember.
+ */
+export const FACT_PHRASES: ReadonlyMap<string, FactPhrase> = new Map(
+  Object.entries(FACT_PHRASE_TABLE)
+);
