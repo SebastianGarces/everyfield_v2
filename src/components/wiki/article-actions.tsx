@@ -41,7 +41,10 @@
 //      printed page, but `collectBlocks` has no `IMG` case, so an image falls
 //      to the recursive default, has no children, and drops silently. Carrying
 //      it across means fetching and embedding the bytes, so it stayed out of
-//      scope; the PR body lists it as a limitation. Owned by
+//      scope; the PR body lists it as a limitation. This reaches INSIDE a
+//      callout: a callout holding nothing but an image contributes no blocks
+//      and no runs, so the whole aside drops — frame, type label and all —
+//      rather than downloading as an empty box. Owned by
 //      `article-pdf/extract.ts`.
 //   3. Nesting inside a list item, a blockquote or a table cell FLATTENS. Those
 //      three are read out as one line of runs, so anything structural inside
