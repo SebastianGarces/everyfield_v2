@@ -45,6 +45,14 @@
 //    no trailing period. That is one capitalisation policy across both
 //    surfaces (better-writing §8) rather than two.
 //
+// 4. ONE DISPATCHER DECIDES WHAT A CITATION ASSERTS. `citationRendering` is
+//    that decision, and the two public functions are thin wrappers over it:
+//    `formatCitedFact` (the drill-down) prints its specific sentence,
+//    `formatCitedFacts` (the card and the scorecard) folds a column of them.
+//    A second dispatcher for the plural path is exactly how the surfaces
+//    diverged before — with two, the rule above holds only for as long as two
+//    test files happen to agree.
+//
 // Pure and IO-free — no DB, no DOM, no LLM — so it is unit-testable under the
 // repo's node:test harness, which only runs `src/**/*.test.ts`.
 // ============================================================================
@@ -84,7 +92,7 @@ export function parseCitedFact(fact: string): ParsedCitedFact {
  * `roles[0].filled` and `roles.0.filled` are the same path.
  *
  * Exported because the read layer walks stored snapshots by the same dotted
- * path this module keys citations under (`assessment/queries.ts`), and two
+ * path this module keys citations under (`assessment/snapshot-fact.ts`), and two
  * copies of one three-character regex are two things that can drift.
  */
 export function dotIndices(path: string): string {
@@ -540,18 +548,6 @@ const FACT_PHRASES: Record<string, FactPhrase> = {
   ),
 };
 
-/**
- * `manual.byKey.<signalKey>` is an open map, so it cannot live in the table
- * above — the key is data, not a fixed path.
- */
-function manualByKeyPhrase(
-  normalized: string,
-  value: string | null
-): string | null {
-  const signalKey = manualByKeySignal(normalized);
-  return signalKey === null ? null : signalPhrase(signalKey, value);
-}
-
 /** The keyed spelling of an attestation: the signal is IN the path. */
 const MANUAL_BY_KEY_PREFIX = "manual.byKey.";
 
@@ -575,20 +571,26 @@ function signalPhrase(signalKey: string, value: string | null): string {
 const MANUAL_ATTESTATION_PREFIX = "manual.attestations.#.";
 
 /**
- * The SAME attestation, cited the other legal way.
+ * What ONE attestation reads as once the signal it names is known — the SPECIFIC
+ * sentence, as opposed to the anonymous counting phrase in `FACT_PHRASES`.
  *
  * The fact snapshot writes every manual attestation twice —
  * `manual.byKey.<signal>` and `manual.attestations[]` — and the judge's citable
  * ledger is the whole flattened snapshot, so both spellings are legal citations
- * of one fact (assessment/queries.ts, `normalizeManualCitation`). Attribution
- * already resolves the row to its signal so the two spellings land on the same
- * exit criterion; this is the wording half of that ruling (2026-08-10, #319):
- * having landed on the same gate, they must also READ the same. "something you
- * confirmed" beside "you confirmed your financial base is in place" is the same
- * evidence told twice, once vaguely, and the vague one is the one that makes a
- * planter doubt the specific one.
+ * of one fact (assessment/exit-criteria.ts, `normalizeManualCitation`).
+ * Attribution already resolves the row to its signal so the two spellings land
+ * on the same exit criterion; this is the wording half of that ruling
+ * (2026-08-10, #319): having landed on the same gate, they must also READ the
+ * same. "something you confirmed" beside "you confirmed your financial base is
+ * in place" is the same evidence told twice, once vaguely, and the vague one is
+ * the one that makes a planter doubt the specific one.
  *
- * `signalKey` is resolved by the caller against the assessment's own snapshot,
+ * It is keyed on the ARRAY spelling's `leaf` for both spellings, because
+ * {@link citationRendering} has already mapped the keyed spelling onto that
+ * form — one taxonomy, so a new leaf is answered here once rather than in two
+ * places that can drift.
+ *
+ * The signal is resolved by the caller against the assessment's own snapshot,
  * because which signal row N holds is a READ of that snapshot, not a syntax
  * rule this pure module could work out. Without it — an unresolvable row, or a
  * surface that has no snapshot to hand — the citation keeps the generic
@@ -598,30 +600,25 @@ const MANUAL_ATTESTATION_PREFIX = "manual.attestations.#.";
  * surface shows or the value it reads back (see `CitedFactEvidence.path`).
  */
 function manualAttestationPhrase(
-  normalized: string,
-  value: string | null,
-  signalKey: string | null | undefined
+  leaf: string,
+  asserted: string | null,
+  signalKey: string
 ): string | null {
-  if (!normalized.startsWith(MANUAL_ATTESTATION_PREFIX)) return null;
-
-  const key = signalKey?.trim();
-  if (!key) return null;
-
-  switch (normalized.slice(MANUAL_ATTESTATION_PREFIX.length)) {
+  switch (leaf) {
     // `…value` asserts the attestation — exactly what the keyed spelling
     // asserts, so it is exactly the sentence the keyed spelling reads as.
     case "value":
-      return signalPhrase(key, value);
+      return signalPhrase(signalKey, asserted);
     // `…signalKey` names the fact and asserts nothing about it, which is what a
     // bare `manual.byKey.<signal>` citation does.
     case "signalKey":
-      return signalPhrase(key, null);
+      return signalPhrase(signalKey, null);
     // `…attestedAt` carries WHEN, which the keyed spelling has no path for. Name
     // the signal in the same words and keep the date — dropping it would lose
     // evidence (rule 1) to buy a uniformity nothing asked for.
     case "attestedAt":
-      return value && ISO_DATE_PATTERN.test(value)
-        ? `${manualSignalClause(key)}, self-reported on ${toReadableDate(value)}`
+      return asserted && ISO_DATE_PATTERN.test(asserted)
+        ? `${manualSignalClause(signalKey)}, self-reported on ${toReadableDate(asserted)}`
         : null;
     default:
       return null;
@@ -672,6 +669,13 @@ function fallbackLabel(normalized: string): string {
   return context ? `${leaf} (${context})` : leaf;
 }
 
+/** The whole fallback: a label for the path, plus the value if it says anything. */
+function fallbackPhrase(normalized: string, value: string | null): string {
+  const label = fallbackLabel(normalized);
+  const readable = fallbackValue(value);
+  return readable ? `${label}: ${readable}` : label;
+}
+
 // ----------------------------------------------------------------------------
 // Public API.
 // ----------------------------------------------------------------------------
@@ -684,7 +688,7 @@ function fallbackLabel(normalized: string): string {
 export interface CitedFactContext {
   /**
    * The manual signal an `manual.attestations.N.…` citation names, resolved out
-   * of that snapshot (assessment/queries.ts). Supplying it makes the array
+   * of that snapshot (assessment/snapshot-fact.ts). Supplying it makes the array
    * spelling read as the SAME sentence as `manual.byKey.<signal>`; omitting it
    * (or passing null, for a row that does not resolve) keeps the generic
    * self-report phrasing. Ignored for every other path.
@@ -704,25 +708,115 @@ export interface CitedFactContext {
  */
 export type CitedFactSignals = Readonly<Record<string, string | null>>;
 
-/** Resolve one citation to its phrase, or `null` when there is nothing to say. */
-function buildPhrase(fact: unknown, context?: CitedFactContext): Phrase | null {
+/**
+ * One attestation citation with its SPELLING thrown away: whichever of the two
+ * legal forms it arrived in, it is described here as the array form.
+ *
+ * That mapping is the whole point. It is what puts `manual.byKey.<signal>` and
+ * `manual.attestations[N].value` on ONE template and in ONE group, so how many
+ * attestations were cited — not which spelling the model picked — decides
+ * whether a column names them or counts them. `null` for any citation that is
+ * not an attestation.
+ */
+interface AttestationCitation {
+  /** The leaf of `manual.attestations.#.<leaf>` this citation speaks through. */
+  leaf: string;
+  /** What that leaf asserts, once the spelling has been mapped across. */
+  asserted: string | null;
+  /** The signal it names, or `null` when nothing resolved it. */
+  signal: string | null;
+}
+
+function attestationCitation(
+  normalized: string,
+  value: string | null,
+  signalKey: string | null | undefined
+): AttestationCitation | null {
+  if (normalized.startsWith(MANUAL_ATTESTATION_PREFIX)) {
+    // Only the read layer can say which signal row N holds, so an unresolved
+    // (or blank) key is an unresolved row — never a guess.
+    const resolved = signalKey?.trim();
+    return {
+      leaf: normalized.slice(MANUAL_ATTESTATION_PREFIX.length),
+      asserted: value,
+      signal: resolved ? resolved : null,
+    };
+  }
+
+  const keyedSignal = manualByKeySignal(normalized);
+  if (keyedSignal === null) return null;
+
+  // A keyed citation WITH a value asserts the attestation, exactly as
+  // `…attestations.N.value` does; a bare one only names it, as `…signalKey`
+  // does. The signal is in the path, so it never needs resolving.
+  return {
+    leaf: value === null ? "signalKey" : "value",
+    asserted: value === null ? keyedSignal : value,
+    signal: keyedSignal,
+  };
+}
+
+/** Everything one citation renders as — the ONE decision both surfaces read. */
+interface CitationRendering {
+  /**
+   * The GROUPING phrase: what this citation reads as with the specifics dropped,
+   * and therefore the group's identity while a column is folded. Signal-
+   * independent for an attestation, so both spellings share a group.
+   */
+  group: Phrase;
+  /** What it reads as on its own; `null` when there is no specific sentence. */
+  specific: string | null;
+  /**
+   * The distinct thing cited. The SIGNAL when it is known, so one attestation
+   * cited twice — once each way — is one thing, never two.
+   */
+  member: string;
+}
+
+/**
+ * Decide what a citation asserts, ONCE. Both public functions below are thin
+ * wrappers over this: the singular one prints `specific ?? group`, the plural
+ * one folds `group`/`member`/`specific` across a column.
+ *
+ * One dispatcher rather than two is the point (structural finding on #319). The
+ * property this whole ruling is about — the drill-down and the folding formatter
+ * saying the same thing about the same citation — is then true BY CONSTRUCTION:
+ * there is one taxonomy, one place that maps the keyed spelling onto the array
+ * form, and one place that decides what `manual.byKey.<signal>` means. Two
+ * dispatchers made it true only by two test files agreeing.
+ *
+ * Returns `null` for a non-string or empty citation, which both callers drop.
+ */
+function citationRendering(
+  fact: unknown,
+  signalKey: string | null | undefined
+): CitationRendering | null {
   if (typeof fact !== "string" || fact.trim() === "") return null;
 
   const { path, value } = parseCitedFact(fact);
   const normalized = normalizePath(path);
+  const attestation = attestationCitation(normalized, value, signalKey);
 
-  // The resolved attestation wins over the anonymous row template above: it is
-  // the same fact said precisely, and it is only reachable when the caller has
-  // resolved the row against the snapshot.
-  const known =
-    manualAttestationPhrase(normalized, value, context?.signalKey) ??
-    FACT_PHRASES[normalized]?.(value) ??
-    manualByKeyPhrase(normalized, value);
-  if (known) return known;
+  // An attestation is phrased through the array spelling's template whichever
+  // way it was written; everything else through its own path.
+  const template = attestation
+    ? `${MANUAL_ATTESTATION_PREFIX}${attestation.leaf}`
+    : normalized;
+  const asserted = attestation ? attestation.asserted : value;
+  const signal = attestation?.signal ?? null;
 
-  const label = fallbackLabel(normalized);
-  const readable = fallbackValue(value);
-  return readable ? `${label}: ${readable}` : label;
+  return {
+    group:
+      FACT_PHRASES[template]?.(asserted) ?? fallbackPhrase(normalized, value),
+    specific:
+      attestation && signal !== null
+        ? manualAttestationPhrase(attestation.leaf, asserted, signal)
+        : null,
+    member:
+      signal === null
+        ? `citation:${citationIdentity(fact)}`
+        : `signal:${signal}`,
+  };
 }
 
 /**
@@ -741,83 +835,14 @@ export function formatCitedFact(
   fact: string,
   context?: CitedFactContext
 ): string {
-  const phrase = buildPhrase(fact, context);
-  return phrase === null ? "" : renderPhrase(phrase, 1);
-}
-
-/**
- * One attestation citation reduced to what folding a column needs, with the
- * spelling thrown away.
- *
- * Both legal spellings are mapped onto the ARRAY form's templates on purpose:
- * that is what puts `manual.byKey.<signal>` and `manual.attestations[N].value`
- * in ONE group, so how many attestations were cited — not which of two legal
- * spellings the model picked — decides whether the column names them or counts
- * them. Returns `null` for any citation that is not an attestation.
- */
-interface AttestationCitation {
-  /** The COUNTING phrase: signal-independent, so both spellings share a group. */
-  counting: Phrase;
-  /** What this citation reads as when it is the only one; null if unresolved. */
-  specific: string | null;
-  /**
-   * The thing counted. The SIGNAL when it is known, so one attestation cited
-   * twice — once each way — is one thing, never two.
-   */
-  member: string;
-}
-
-function attestationCitation(
-  fact: string,
-  signals: CitedFactSignals | undefined
-): AttestationCitation | null {
-  const { path, value } = parseCitedFact(fact);
-  const normalized = normalizePath(path);
-
-  let leaf: string;
-  let signal: string | null;
-  let asserted: string | null;
-
-  const keyedSignal = manualByKeySignal(normalized);
-  if (normalized.startsWith(MANUAL_ATTESTATION_PREFIX)) {
-    leaf = normalized.slice(MANUAL_ATTESTATION_PREFIX.length);
-    // Only the read layer can say which signal row N holds (see below).
-    signal = signals?.[citedFactPath(fact)] ?? null;
-    asserted = value;
-  } else if (keyedSignal !== null) {
-    signal = keyedSignal;
-    // A keyed citation WITH a value asserts the attestation, exactly as
-    // `…attestations.N.value` does; a bare one only names it, as `…signalKey`
-    // does. The signal is in the path, so it never needs the map.
-    leaf = value === null ? "signalKey" : "value";
-    asserted = value === null ? keyedSignal : value;
-  } else {
-    return null;
-  }
-
-  const template = `${MANUAL_ATTESTATION_PREFIX}${leaf}`;
-  const counting = FACT_PHRASES[template]?.(asserted) ?? null;
-  if (counting === null) return null;
-
-  return {
-    counting,
-    // The SAME call `buildPhrase` makes for `formatCitedFact(fact, { signalKey
-    // })`, which is what makes "the plural formatter says what the drill-down
-    // says" true by construction rather than by two templates kept in step.
-    specific:
-      signal === null
-        ? null
-        : manualAttestationPhrase(template, asserted, signal),
-    member:
-      signal === null
-        ? `citation:${citationIdentity(fact)}`
-        : `signal:${signal}`,
-  };
+  const rendering = citationRendering(fact, context?.signalKey);
+  if (rendering === null) return "";
+  return rendering.specific ?? renderPhrase(rendering.group, 1);
 }
 
 /** One phrase's group while a column is being folded. */
 interface CitedFactGroup {
-  /** The COUNTING phrase — the group's identity and its rendering at N rows. */
+  /** The GROUPING phrase — the group's identity and its rendering at N rows. */
   phrase: Phrase;
   /** The DISTINCT things cited: one attestation is one, however it is spelled. */
   members: Set<string>;
@@ -888,23 +913,28 @@ export function formatCitedFacts(
   const groups = new Map<string, CitedFactGroup>();
 
   for (const fact of citedFacts) {
-    if (typeof fact !== "string" || fact.trim() === "") continue;
+    if (typeof fact !== "string") continue;
 
-    // An attestation is folded by signal; everything else by its own citation.
-    const attestation = attestationCitation(fact, signals);
-    const phrase = attestation ? attestation.counting : buildPhrase(fact);
-    if (phrase === null) continue;
+    // The same decision the drill-down reads, taken once (`citationRendering`).
+    // All this path adds is WHERE the resolved signal comes from: a column has
+    // one map for all of its citations, a drill-down one context per citation.
+    const rendering = citationRendering(fact, signals?.[citedFactPath(fact)]);
+    if (rendering === null) continue;
 
-    // Group on the counting phrase rendered singular: it is the phrase's
+    // Group on the grouping phrase rendered singular: it is the phrase's
     // identity, independent of how many rows end up in the group.
-    const key = renderPhrase(phrase, 1);
+    const key = renderPhrase(rendering.group, 1);
     let group = groups.get(key);
     if (!group) {
-      group = { phrase, members: new Set(), specifics: new Set() };
+      group = {
+        phrase: rendering.group,
+        members: new Set(),
+        specifics: new Set(),
+      };
       groups.set(key, group);
     }
-    group.members.add(attestation?.member ?? citationIdentity(fact));
-    if (attestation?.specific) group.specifics.add(attestation.specific);
+    group.members.add(rendering.member);
+    if (rendering.specific) group.specifics.add(rendering.specific);
   }
 
   return Array.from(groups.values(), ({ phrase, members, specifics }) => {

@@ -5,9 +5,9 @@
 // Presentational server component. It performs NO data access and NO judgement
 // of its own: it is handed an `ExitCriteriaProgress` that the assessment read
 // layer projected from the persisted `plant_assessments` snapshot
-// (lib/phase-engine/assessment/queries.ts, `buildExitCriteriaProgress`). Every
-// number on this card was read out of that snapshot by path; every standing is
-// a severity the judge already assigned.
+// (lib/phase-engine/assessment/exit-criteria.ts, `buildExitCriteriaProgress`).
+// Every number on this card was read out of that snapshot by path; every
+// standing is a severity the judge already assigned.
 //
 // Why it exists: the CSF scorecard above it answers "where does the plant
 // stand"; this answers the other question a planter asks — "what is left before

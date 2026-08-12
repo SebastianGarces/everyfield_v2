@@ -28,15 +28,13 @@ import {
 } from "@/lib/phase-engine/fact-format";
 
 import {
-  buildCsfScorecard,
   buildExitCriteriaProgress,
   EXIT_CRITERION_STANDINGS,
   PHASE_EXIT_CRITERIA,
-  readSnapshotFact,
-  resolveCitedFactSignals,
   type ExitCriteriaProgress,
-  type LatestAssessment,
-} from "./queries";
+} from "./exit-criteria";
+import { buildCsfScorecard, type LatestAssessment } from "./queries";
+import { readSnapshotFact, resolveCitedFactSignals } from "./snapshot-fact";
 
 // ----------------------------------------------------------------------------
 // Fixtures

@@ -776,6 +776,24 @@ test("the resolved signal reaches the other two attestation paths as well", () =
   assert.match(dated, /2026/);
 });
 
+test("a valueless attestation row reads as its signal on BOTH paths", () => {
+  // ONE dispatcher decides what a citation asserts, so the fold cannot land on
+  // a label the drill-down never shows. While the two paths were written
+  // separately this column read "value (manual attestations)" — the generic
+  // fallback — beside a drill-down that already said the sentence below.
+  const fact = "manual.attestations.1.value";
+  const signals = {
+    "manual.attestations.1.value": "financial_base_established",
+  };
+
+  assert.deepEqual(formatCitedFacts([fact], signals), [
+    formatCitedFact(fact, { signalKey: "financial_base_established" }),
+  ]);
+  assert.deepEqual(formatCitedFacts([fact], signals), [
+    "your financial base is in place",
+  ]);
+});
+
 test("a resolved plural line still leaks no ledger syntax", () => {
   for (const line of formatCitedFacts(
     [
