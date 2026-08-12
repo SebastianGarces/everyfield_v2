@@ -12,7 +12,14 @@
 //   - `buildCsfScorecard` / `getCsfScorecard` — the 8-factor CSF scorecard
 //     (PE-023), a pure PROJECTION of a snapshot that has already been read. It
 //     computes nothing of its own: every standing is the severity the judge
-//     assigned to an insight in that persisted assessment.
+//     assigned to an insight in that persisted assessment. `getCsfScorecard` is
+//     the DB-backed convenience wrapper and has no runtime caller by design —
+//     it is the landing-page fixture's regeneration step. Read its docblock
+//     before deleting it.
+//
+// The current phase's EXIT CRITERIA are the other projection of the same
+// snapshot, and they live next door in `exit-criteria.ts` — one concept per
+// file, one test file each.
 // ============================================================================
 
 import { and, desc, eq } from "drizzle-orm";
@@ -36,11 +43,16 @@ import {
   type SelectionReason,
   selectionReasonFor,
 } from "./dirty";
+// The attestation → signal resolution, and the snapshot reader under it. Both
+// projections of an assessment read a citation through the same module, so the
+// scorecard's "Based on …" line and the exit-criteria drill-down cannot end up
+// with two ideas of what a citation names (ruled 2026-08-12 on #319).
+import { withCitedFactSignals, type AssessedInsight } from "./snapshot-fact";
 
 /** A complete assessment snapshot plus its insights — the instant-read payload. */
 export interface LatestAssessment {
   assessment: PlantAssessment;
-  insights: PlantInsight[];
+  insights: AssessedInsight[];
 }
 
 /**
@@ -71,7 +83,16 @@ export async function getLatestAssessment(
     .where(eq(plantInsights.assessmentId, assessment.id))
     .orderBy(plantInsights.rank);
 
-  return { assessment, insights };
+  return {
+    assessment,
+    // Every surface that renders a citation hangs off this one read, so the
+    // attestation → signal resolution happens here rather than per-surface:
+    // the Focus insight card and the CSF scorecard hold no snapshot of their
+    // own and could not do it (see {@link AssessedInsight}).
+    insights: insights.map((insight) =>
+      withCitedFactSignals(insight, assessment.factSnapshot)
+    ),
+  };
 }
 
 /**
@@ -346,6 +367,27 @@ export function csfStandingUrgency(standing: CsfStanding): number {
   return STANDING_URGENCY[standing] ?? STANDING_URGENCY.not_raised;
 }
 
+/**
+ * Most urgent first, then the judge's own rank as the tiebreak — so the leading
+ * insight of any group is the one that set the group's standing.
+ *
+ * ONE comparator for both projections of an assessment: the CSF tiles here and
+ * the exit criteria in `exit-criteria.ts`, which imports it rather than keeping
+ * a second copy. Two copies would let the scorecard and the criteria list
+ * disagree about which finding is the headline for the same insight set, which
+ * is the kind of drift a reader has no way to spot. Not re-exported from the
+ * barrel: it is an internal agreement between the two projections.
+ */
+export function compareInsightUrgency(
+  a: PlantInsight,
+  b: PlantInsight
+): number {
+  const byUrgency =
+    csfStandingUrgency(standingForSeverity(a.severity)) -
+    csfStandingUrgency(standingForSeverity(b.severity));
+  return byUrgency !== 0 ? byUrgency : a.rank - b.rank;
+}
+
 /** One factor's row on the scorecard. */
 export interface CsfFactorStanding extends CsfDefinition {
   standing: CsfStanding;
@@ -353,8 +395,12 @@ export interface CsfFactorStanding extends CsfDefinition {
    * The persisted insights behind the standing, most urgent first. These are
    * the exact `plant_insights` rows from the assessment — the trace from a
    * standing back to the judgement that produced it. Empty iff `not_raised`.
+   *
+   * Each carries `citedFactSignals`, resolved against this assessment's own
+   * snapshot, so the tile's "Based on …" line reads an attestation in the same
+   * words the exit-criteria drill-down does (ruled 2026-08-12 on #319).
    */
-  insights: PlantInsight[];
+  insights: AssessedInsight[];
 }
 
 /**
@@ -394,7 +440,9 @@ export function buildCsfScorecard(
 ): CsfScorecard | null {
   if (!latest) return null;
 
-  const byCategory = new Map<CsfCategory, PlantInsight[]>();
+  const snapshot = latest.assessment.factSnapshot;
+
+  const byCategory = new Map<CsfCategory, AssessedInsight[]>();
   for (const insight of latest.insights) {
     if (insight.audience !== audience) continue;
     if (!isCsfCategory(insight.category)) continue;
@@ -405,15 +453,14 @@ export function buildCsfScorecard(
 
   const factors = CSF_DEFINITIONS.map((definition) => {
     // Most urgent first, then the judge's own rank within a severity, so the
-    // leading insight the tile shows is the one that set the standing.
-    const insights = [...(byCategory.get(definition.category) ?? [])].sort(
-      (a, b) => {
-        const byUrgency =
-          csfStandingUrgency(standingForSeverity(a.severity)) -
-          csfStandingUrgency(standingForSeverity(b.severity));
-        return byUrgency !== 0 ? byUrgency : a.rank - b.rank;
-      }
-    );
+    // leading insight the tile shows is the one that set the standing. Each is
+    // resolved against this assessment's snapshot here rather than trusted to
+    // arrive resolved: `getLatestAssessment` already did it, but a caller
+    // handing in a privacy-gated payload it assembled itself has not, and the
+    // scorecard's voice must not depend on which door its rows came through.
+    const insights = [...(byCategory.get(definition.category) ?? [])]
+      .sort(compareInsightUrgency)
+      .map((insight) => withCitedFactSignals(insight, snapshot));
 
     return {
       ...definition,
@@ -439,6 +486,23 @@ export function buildCsfScorecard(
  * The PLANTER's CSF scorecard for a church, read from its latest COMPLETE
  * assessment (PE-023). Zero LLM calls — one snapshot read plus a pure
  * projection.
+ *
+ * WHY IT HAS NO CALLER IN `src/`, AND WHY IT MUST STAY EXPORTED. Grepping for
+ * call sites finds none, because this is a DEVELOPER entry point rather than a
+ * runtime one. It is the documented regeneration step for the landing page's
+ * frozen scorecard fixture,
+ * `src/app/(marketing)/_components/vignettes/csf-fixture.ts`: that file's
+ * header instructs whoever refreshes the marketing embed to re-run
+ * `getCsfScorecard(churchId)` against the source church, then paste the result
+ * back over the exported constant. The marketing page renders the constant, so
+ * it issues no assessment read of its own and never calls this — which is
+ * exactly why the symbol looks dead and has already been proposed for deletion
+ * once (#155, resolved: keep and document).
+ *
+ * Deleting it therefore does not remove dead code; it breaks a documented
+ * procedure and leaves the fixture unreproducible. Keep it exported from
+ * `./index.ts` as well — the fixture imports its types from that barrel, so the
+ * barrel is where the note's reader will look for the function too.
  *
  * Deliberately has no `audience` parameter. This is the only function in this
  * section that touches the DB, and `getLatestAssessment` returns every insight
