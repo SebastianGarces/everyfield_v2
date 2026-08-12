@@ -2,7 +2,14 @@
 // TeamCardView — the ministry-team card's markup, with nothing that has to run.
 //
 // Every pixel of a team tile lives here: the icon chip, the name row with its
-// health dot, the leader line, the staffing bar and the two footer badges.
+// staffing dot, the leader line, the staffing bar and the two footer badges.
+//
+// THE DOT IS A STAFFING SIGNAL, NOT "HEALTH" (ruling 409-5B, 2026-08-12). It
+// derives from staffing percent alone (red < 40, yellow < 60); the health
+// dashboard's alertLevel (lib/ministry-teams/health.ts) also weighs meeting
+// attendance, so the same team can legitimately read green here and yellow on
+// /teams/health. The two are different signals and are labelled differently
+// on purpose — /teams/health keeps the word "health"; this card says staffing.
 // What does NOT live here is anything that needs a browser — no "use client",
 // no state, no handlers. The card's one interaction (the whole tile is a link
 // to the team) is a destination, so it stays as a prop with the app's route as
@@ -66,7 +73,7 @@ export interface TeamCardViewProps {
 }
 
 /**
- * `data-slot="team-card"`, `data-status` and `data-health` are stable,
+ * `data-slot="team-card"`, `data-status` and `data-staffing` are stable,
  * zero-visual hooks, in the same spirit as shadcn's `data-slot`s and the CSF
  * tile's `data-standing` (components/phase-engine/csf-scorecard.tsx): they name
  * the tile and its standing for anything styling or animating this card from
@@ -77,7 +84,8 @@ export function TeamCardView({ team, href, linkStatic }: TeamCardViewProps) {
   const Icon = TEAM_ICONS[team.icon ?? ""] ?? Users;
   const staffing = staffingPercent(team.filledRoles, team.totalRoles);
 
-  const alertLevel = staffing < 40 ? "red" : staffing < 60 ? "yellow" : "green";
+  const staffingLevel =
+    staffing < 40 ? "red" : staffing < 60 ? "yellow" : "green";
 
   const card = (
     <Card className="flex h-full cursor-pointer flex-col gap-0 py-0 shadow-sm transition-all duration-200 hover:shadow-md">
@@ -100,11 +108,11 @@ export function TeamCardView({ team, href, linkStatic }: TeamCardViewProps) {
             <span
               className={cn(
                 "inline-block h-2.5 w-2.5 shrink-0 rounded-full",
-                alertLevel === "red" && "bg-red-500",
-                alertLevel === "yellow" && "bg-yellow-500",
-                alertLevel === "green" && "bg-green-500"
+                staffingLevel === "red" && "bg-red-500",
+                staffingLevel === "yellow" && "bg-yellow-500",
+                staffingLevel === "green" && "bg-green-500"
               )}
-              title={`Health: ${alertLevel}`}
+              title={`Staffing: ${staffingLevel}`}
             />
           </div>
           <p className="text-muted-foreground mt-1 truncate text-xs">
@@ -167,7 +175,7 @@ export function TeamCardView({ team, href, linkStatic }: TeamCardViewProps) {
   const hooks = {
     "data-slot": "team-card",
     "data-status": team.status,
-    "data-health": alertLevel,
+    "data-staffing": staffingLevel,
   } as const;
 
   return linkStatic ? (
