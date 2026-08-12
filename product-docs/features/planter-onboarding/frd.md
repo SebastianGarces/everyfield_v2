@@ -48,7 +48,7 @@ One flow, four steps. Step 1 creates the church; steps 2–4 update it.
 
 ### Step 1 — Church basics *(only required step)*
 
-- Church plant name (required, ≤255 chars — existing validation)
+- Church plant name (required, ≤255 chars — the same name validation church settings applies)
 - Location: city, state/region, country (each optional)
 
 ### Step 2 — Leadership
@@ -61,20 +61,20 @@ One flow, four steps. Step 1 creates the church; steps 2–4 update it.
 
 - Target launch date: a date, or an explicit "no date yet."
 - Journey stage: a picker of the seven phases described in plain language (from the Product Brief's phase table — "Discovery: discerning the calling…" through "Post-Launch"), not raw phase numbers. Includes "not sure — start me at the beginning" (→ phase 0).
-- The floating wiki Guide is wired for this step via the existing contextual guide config, surfacing phase-discernment articles so a planter unsure of their stage can read before picking.
+- The floating wiki Guide is wired for this step via the same contextual guide config the wiki owns, surfacing phase-discernment articles so a planter unsure of their stage can read before picking.
 - Selecting a stage sets the church's current phase **as an initial declaration**: recorded in phase history as a declaration, distinguishable from a real transition, with no intermediate transitions synthesized.
 - **The declaration is one-shot:** if a stage is already recorded, a second submit is refused with a message naming the recorded stage and where to change it — and confirming that the launch date (the durable half of the form) did save. A declaration is never silently overwritten and never half-applies.
 
 ### Step 4 — Bring your people
 
-- Entry point to the existing CSV import wizard (template download, preview, duplicate detection) and to quick-add for one-at-a-time entry.
+- Entry point to the same CSV import wizard People/CRM owns (template download, preview, duplicate detection) — one implementation, not a second copy — and to quick-add for one-at-a-time entry.
 - Copy explains what import unlocks (pipeline, meetings attendance, follow-ups).
 - Skippable; the People page remains the permanent home of import.
 
 ### Finish
 
-- Lands on the dashboard with `?churchCreated=true` (existing confetti preserved).
-- **When the declared stage is phase 2 or later**, the finish screen offers one card: set up the standard ministry teams and roles from the existing templates — one click, one confirmation, reusing the Ministry Teams template-initialization rather than duplicating it. No roster assignment or role editing here; staffing and customization stay on the teams surface. Phase 0–1 declarations never see the offer.
+- Lands on the dashboard with `?churchCreated=true`, which triggers the dashboard's church-created confetti.
+- **When the declared stage is phase 2 or later**, the finish screen offers one card: set up the standard ministry teams and roles from the Ministry Teams role templates — one click, one confirmation, running the same template initialization Ministry Teams owns: one implementation, not a second copy. No roster assignment or role editing here; staffing and customization stay on the teams surface. Phase 0–1 declarations never see the offer.
 - The plant is marked dirty for the phase engine so the first assessment happens promptly rather than waiting up to 24h for the daily cron.
 
 ---
@@ -90,10 +90,10 @@ One flow, four steps. Step 1 creates the church; steps 2–4 update it.
 | OB-003 | Capture target launch date or an explicit "no date yet"; the date is scheduled through the Launch feature, which owns it, and from there feeds the launch countdown and document merge fields. |
 | OB-004 | Pastor confirmation with default Yes; Yes records the creating account as the church's planter; No leaves the church in an explicit no-planter state with a persistent dashboard nudge. |
 | OB-005 | Journey-stage declaration sets `current_phase` directly, recorded as an initial declaration distinct from a transition; no fabricated history. |
-| OB-006 | Step 4 surfaces the existing CSV import wizard and quick-add without duplicating them. |
+| OB-006 | Step 4 opens the same CSV import wizard and quick-add People/CRM owns — one implementation, not a second copy. |
 | OB-007 | Every step after step 1 is skippable; the flow is resumable at the first incomplete step. |
 | OB-008 | Everything captured is editable later in church settings (settings surface is a separate feature; this FRD only requires that no onboarding answer is permanent). |
-| OB-014 | The contextual wiki Guide is configured for the onboarding steps — at minimum the journey-stage step, whose entry surfaces phase-discernment articles (config-only: entries in the existing route-pattern → slugs guide config). |
+| OB-014 | The contextual wiki Guide is configured for the onboarding steps — at minimum the journey-stage step, whose entry surfaces phase-discernment articles (config-only: entries in the same route-pattern → slugs guide config the wiki owns). |
 
 ### Should Have
 
@@ -102,7 +102,7 @@ One flow, four steps. Step 1 creates the church; steps 2–4 update it.
 | OB-009 | Completing onboarding marks the plant for prompt first assessment (dirty flag), so `/phase` is not cold for a day. |
 | OB-010 | A church with no planter assigned that predates this flow gets a one-time, dismissible pastor-confirmation prompt. |
 | OB-011 | An incomplete-onboarding indicator on the dashboard (dismissible) listing skipped steps, linking back into the flow. |
-| OB-015 | Stage-gated team-template offer on the finish screen: declared phase ≥ 2 offers one-click initialization of the standard ministry teams and their role templates; accepting runs the existing template initialization, declining does nothing, phase 0–1 never sees it. |
+| OB-015 | Stage-gated team-template offer on the finish screen: declared phase ≥ 2 offers one-click initialization of the standard ministry teams and their role templates; accepting runs the same team/role template initialization Ministry Teams owns, declining does nothing, phase 0–1 never sees it. |
 
 ### Nice to Have (Future — no board issues; spec only)
 
@@ -118,7 +118,7 @@ One flow, four steps. Step 1 creates the church; steps 2–4 update it.
 1. A new planter completing all four steps ends with a church carrying name, location, launch date, a declared phase, and themselves as planter — and the dashboard header, wiki filter, and phase page all reflect the declared phase with zero manual phase transitions performed.
 2. A planter who skips everything after step 1 gets a named church at phase 0 with no launch date, plus the incomplete-onboarding indicator.
 3. Declaring phase 3 at onboarding produces **no** transition records for phases 1–2, and phase history visibly distinguishes "declared at setup" from later real transitions.
-4. Answering "No" to the pastor question: meetings can still be finalized (existing no-planter behavior), and the dashboard shows the no-planter nudge until resolved.
+4. Answering "No" to the pastor question: meetings can still be finalized (the no-planter path), and the dashboard shows the no-planter nudge until resolved.
 5. Abandoning after step 2 and returning resumes at step 3, with steps 1–2 answers intact.
 6. The launch-countdown surface shows the declared date immediately after onboarding; documents generated afterward merge the real launch date instead of a blank.
 7. All flow controls are keyboard-accessible and every clickable element has `cursor-pointer`.
@@ -132,8 +132,8 @@ One flow, four steps. Step 1 creates the church; steps 2–4 update it.
 Church is a shared entity (System Architecture); fields below are additive and nullable.
 
 - **Church**: + `city`, `state_region`, `country` (nullable text). + a way to know onboarding completion state (e.g. `onboarding_completed_at` nullable timestamp; step resumption may be derived from which facts are null rather than stored per-step).
-- **Planter assignment**: recorded with the existing mechanism (`users.church_id` + role); OB-004 adds no new entity but makes the assignment explicit and queryable ("does this church have a planter?").
-- **Phase history**: the initial declaration must be distinguishable from transitions (e.g. a distinguished transition kind or reason constant on the existing phase-transition record). No new table expected.
+- **Planter assignment**: recorded with the same mechanism registration uses (`users.church_id` + role); OB-004 adds no new entity but makes the assignment explicit and queryable ("does this church have a planter?").
+- **Phase history**: the initial declaration must be distinguishable from transitions (e.g. a distinguished transition kind or reason constant on the phase-transition record). No new table expected.
 
 Schema changes ⇒ requirement issues carrying them are `risk:high` per board convention.
 
@@ -142,12 +142,12 @@ Schema changes ⇒ requirement issues carrying them are `risk:high` per board co
 ## Integration Points
 
 - **Phase engine**: initial declaration sets the phase the judge scores against; completion marks the plant dirty for prompt first assessment. Declaration must not distort transition-history-based analytics.
-- **People/CRM**: step 4 links to the existing import wizard and quick-add; no duplication.
-- **Wiki Guide**: OB-014 adds entries to the existing contextual guide config (route pattern → article slugs); no new mechanism. Which discernment articles the entries point at is a content choice at build time.
-- **Ministry Teams**: OB-015 invokes the existing team/role template initialization; onboarding owns only the offer, not the templates.
+- **People/CRM**: step 4 links to the same import wizard and quick-add People/CRM owns — one implementation, not a second copy.
+- **Wiki Guide**: OB-014 adds entries to the same contextual guide config the wiki owns (route pattern → article slugs); no new mechanism. Which discernment articles the entries point at is a content choice at build time.
+- **Ministry Teams**: OB-015 invokes the same team/role template initialization Ministry Teams owns; onboarding owns only the offer, not the templates.
 - **Launch**: the launch-date step schedules the launch through the Launch feature's rail rather than writing a date on the church row — the launch entity is the only owner of the launch date. Onboarding owns the question, not the storage.
 - **Documents & countdown surfaces**: read the launch date from the launch entity.
-- **Oversight**: declared phase appears wherever current phase already appears; no new oversight surface.
+- **Oversight**: declared phase appears wherever current phase appears; no new oversight surface.
 - **Church settings** (separate feature): the permanent edit surface for everything captured here.
 
 ---
@@ -173,4 +173,4 @@ Schema changes ⇒ requirement issues carrying them are `risk:high` per board co
 
 1. **Location granularity** — is city/state/country enough for alpha, or does SEND reporting want anything more (region groupings)? (Timezone is deliberately excluded: it is its own decision.)
 2. **"No" to pastor, long-term** — once user invitations exist, should the No path immediately offer "invite the pastor"? (Alpha ships the nudge only.)
-3. **Should OB-010's one-time prompt also cover churches whose planter exists but was never explicitly confirmed?** Current assumption: no — implicit assignment via existing `users.church_id` + role is treated as confirmed.
+3. **Should OB-010's one-time prompt also cover churches whose planter exists but was never explicitly confirmed?** Current assumption: no — implicit assignment via `users.church_id` + role is treated as confirmed.
