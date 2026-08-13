@@ -122,7 +122,11 @@ a recipe that fans out (candidates, internal improve loops) logs what it spent t
 agents against the concurrency cap; dispatch sizes its workstreams at ~3× the budget-table row.
 `adversarial-implement` carries the same weight for a different reason — its agents are sequential,
 so the 3 funds the whole implementer→adversary→fix loop out of one attempt's reserve rather than
-three simultaneous agents.
+three simultaneous agents. `repro-first` runs three agents and still weighs **1**: it REORDERS one
+attempt's work rather than fanning it out — the repro agent writes the failing test the implementer
+would have written anyway, and the confirmation runs one command and transcribes the output — so
+nothing runs twice and nothing runs at once. Agent COUNT is not the weight; what one attempt spends
+is.
 
 This weighting is **enforced in the loop, not just documented**: the `RECIPE_AGENT_COST` literal
 in `build-until-done.js` weights the concurrency chunking (`boundedParallel` closes a chunk when
@@ -152,6 +156,7 @@ sets `hold: true` on any track that touches one, and it never auto-merges.
 | `implement-straight` | One implementer agent, prompt semantics preserved from the pre-#399 inline call. The default. | landed (#399 WS2) |
 | `generate-and-filter` | 3 candidate diffs in throwaway worktrees → opus judge picks exactly one → ff-only land. The proof that the seam supports a genuinely different shape. | landed (#399 WS3) |
 | `adversarial-implement` | Implementer → adversary attacks the diff in-worktree → implementer fixes, looping until a round finds nothing new (cap 3). The default for `risk:high` units. | landed (#413 WS1) |
+| `repro-first` | Repro agent writes the failing test and RUNS it (must go red) → implementer fixes the code without touching it → a third agent re-runs the same command (must go green). The default for `bug` units. | landed (#413 WS1) |
 
 Out of scope: `loop-until-dry` (runs INSIDE one attempt as an internal improve loop — it must not
 hide attempts from parent accounting; deferred until sweeps recur as a track shape),
@@ -214,6 +219,76 @@ the agent the parent's `retryBlock` was handed. The adversary rounds report thro
 `recipe: adversarial-implement`; the journal must show ≥1 adversary round and the track's
 integration verify must pass with no security-attributed FAIL. That is a POST-MERGE obligation of
 #413, deliberately outside the track's own acceptance criteria — the same pattern as #399's canary.
+
+## `repro-first`
+
+**Strategy.** Red → green, in that order, with the ORDER MECHANISED rather than requested. Three
+sequential agents in the parent-provided worktree:
+
+1. **repro** — reproduces the defect, writes the smallest failing test for it, **executes it**, and
+   transcribes the failing output verbatim before committing it. Writes no fix.
+2. **implementer** — fixes the CODE, given that transcript verbatim, and is told explicitly not to
+   edit, weaken, skip or delete the repro. Otherwise its brief is `implement-straight`'s.
+3. **confirmation** — a different agent re-runs the SAME command, transcribes what it printed, and
+   diffs the repro file against the commit that introduced it.
+
+**What it is for.** `bug`-labeled units, and anything whose acceptance criteria describe an observed
+misbehaviour rather than a new capability. #307 and #315 each shipped a confident fix for a defect
+nobody had reproduced; each cost a full verify + review cycle to learn that the "regression test"
+had been written after the fix and had therefore never had a chance to fail. A test written after
+the fix proves the code compiles.
+
+**Why the order needs a machine.** Every implementer prompt in this factory already asks for tests,
+and asking for the failing one first is a request that costs nothing to skip and cannot be checked
+afterwards — a green test tells you nothing about when it was written. So the recipe spends the
+order structurally:
+
+- **A repro that never goes red REFUSES the attempt** — `commits: []` and a warning, before an
+  implementer is spent. That is not a failure mode, it is the recipe working: a test that passes
+  against the unfixed code means the bug is not where the issue says it is, or the test is not
+  testing it, and both are worth knowing before a fix is written for the wrong thing. The same
+  refusal covers a red claim with no command, with no transcribed output, or with nothing committed
+  — each is a red state nobody can re-run, which makes the whole recipe unfalsifiable. Anything the
+  repro agent did commit stays on the branch, so the next attempt starts from it rather than from
+  nothing.
+- **The implementer never marks its own homework.** "The repro passes now" is exactly the claim a
+  green-washed fix makes about itself, so a third agent runs the command. Green is TRACKED, never
+  inferred: only a confirmation that ran, ran the command it was GIVEN (normalised, then compared —
+  a narrower command answers a different question), and reported a pass with output to show for it
+  may set it. A dead confirmer, a substituted command, a still-red repro and a pass with no
+  transcript each get their own warning and their own words in `summary`.
+- **The repro is diffed against the commit that made it red**, with the anchor derived from
+  `git log --reverse base..branch -- <repro paths>` and the self-reported sha as a cross-check the
+  log wins — the same doctrine as `adversarial-implement`'s range. A non-empty diff is not
+  automatically wrong (a rename, a second case), but weakening the assertion until it passes is the
+  one move that turns this recipe back into `implement-straight`, so it is reported either way.
+- **A dead implementer refuses too**, rather than returning the repro's own commits: that diff is a
+  known-failing test and nothing else, and sending it to a verifier buys a confident FAIL for the
+  price of a full gate run. A LIVE implementer that reports no commits does NOT refuse — it is
+  warned about and the confirmation still runs, because an implementer that fixed the bug and
+  mis-transcribed its shas is the common case of that shape, and refusing would leave the next
+  attempt's repro agent looking at a repro that now passes, which it must refuse in turn. The
+  confirmation run answers what the shas cannot.
+
+**Cost and weight.** `RECIPE_AGENT_COST` = **1**, the same as `implement-straight`, and the agent
+count is not the reason — see the Budget section. Weighting it 3 for having three agents would
+refuse ordinary bug attempts on budgets that fund the identical work under `implement-straight`,
+which is how a discipline gets switched off for being expensive.
+
+**Scratch state.** None. Every agent works in the parent-provided worktree on `branch`; the recipe
+cuts no `recipe/*` branches and no candidate trees.
+
+**Retry contract.** `rootCause` / `rootCauseAddressed` come from the IMPLEMENTER verbatim — it is
+the agent the parent's `retryBlock` was handed. The repro agent gets the block too, prepended
+verbatim with one added line: on a retry, a failure the verifier NAMED is the repro to write first.
+The confirmation reports through `summary` and `warnings` only, and never rewrites the implementer's
+answer to the named cause.
+
+**Canary.** Required and still outstanding: the next `bug` dispatch (e.g. #398) runs with
+`recipe: repro-first`; the journal must show the repro going red BEFORE the implementer's commits
+and the confirmation reporting it green after. That is a POST-MERGE obligation of #413, deliberately
+outside the track's own acceptance criteria — the same pattern as #399's canary and
+`adversarial-implement`'s.
 
 ## Adding a recipe
 

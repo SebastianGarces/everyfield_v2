@@ -3169,6 +3169,405 @@ test("a recipe that committed nothing still says WHY — its warnings ride the r
 });
 
 // ---------------------------------------------------------------------------
+// The repro-first recipe (#413 WS1): repro agent writes the failing test and
+// RUNS it (must go red) → implementer fixes the code without touching it → a
+// third agent re-runs the SAME command (must go green).
+//
+// Every property worth having here is an ORDER or a REFUSAL, and neither is
+// visible from runBuild — the parent keeps only `commits` and
+// `rootCauseAddressed` out of a recipe's return. So these evaluate the recipe
+// file directly through `runRecipe`, exactly as the adversarial-implement tests
+// above do, and the two runBuild tests at the end cover the seam.
+// ---------------------------------------------------------------------------
+
+const REPRO_SHA = `9e${"0".repeat(38)}`;
+const REPRO_COMMAND = "pnpm test src/alpha.test.ts";
+const RED_OUTPUT =
+  "FAIL src/alpha.test.ts\n  x scopes the read by church_id\n  AssertionError: expected 2 rows, got 5";
+const GREEN_OUTPUT = "PASS src/alpha.test.ts (1 test, 1 passed)";
+
+/**
+ * The three-agent happy path, with each knob a test needs to break out on its
+ * own. `null` for any of the three phases makes that agent die.
+ */
+const reproReply =
+  ({
+    wentRed = true,
+    reproCommand = REPRO_COMMAND,
+    redOutput = RED_OUTPUT,
+    redIsTheBug = "the assertion is the defect — the query is unscoped",
+    reproCommits = [REPRO_SHA],
+    deviations = "",
+    implCommits = [IMPL_SHA],
+    implDead = false,
+    confirmDead = false,
+    ran = true,
+    confirmCommand = REPRO_COMMAND,
+    confirmOutput = GREEN_OUTPUT,
+    passed = true,
+    reproChanged = false,
+  } = {}) =>
+  (prompt, opts) => {
+    const l = opts.label || "";
+    if (l.startsWith("repro:"))
+      return {
+        wentRed,
+        reproCommand,
+        reproPaths: ["src/alpha.test.ts"],
+        redOutput,
+        redIsTheBug,
+        committed: reproCommits.length > 0,
+        commits: reproCommits,
+        deviations,
+        summary: "wrote the failing test and watched it fail",
+      };
+    if (l.startsWith("impl:"))
+      return implDead
+        ? null
+        : {
+            committed: true,
+            filesChanged: ["src/alpha.ts"],
+            summary: "fixed the query",
+            selfCheckPassed: true,
+            commits: implCommits,
+            rootCause: "the named ReferenceError",
+            rootCauseAddressed: "moved the import; `pnpm test` is green",
+          };
+    if (l.startsWith("green:"))
+      return confirmDead
+        ? null
+        : {
+            ran,
+            command: confirmCommand,
+            output: confirmOutput,
+            passed,
+            reproChanged,
+          };
+    return {};
+  };
+
+const order = (calls, re) => calls.findIndex((c) => re.test(c.label || ""));
+
+test("the repro runs FIRST, and the fix only ever follows a red run", async () => {
+  const { result, calls } = await runRecipe(
+    "repro-first",
+    recipeArgs(),
+    reproReply()
+  );
+  const [repro, impl, green] = [/^repro:/, /^impl:/, /^green:/].map((re) =>
+    order(calls, re)
+  );
+  assert.ok(repro !== -1 && impl !== -1 && green !== -1, "all three ran");
+  assert.ok(
+    repro < impl && impl < green,
+    "a test written after the fix has never had the chance to fail — the order IS the recipe"
+  );
+  assert.deepEqual(
+    result.commits,
+    [IMPL_SHA, REPRO_SHA],
+    "`git log --format=%H` is newest-first, so the fix leads and the repro commit still rides along"
+  );
+  assert.deepEqual(result.warnings, []);
+  assert.match(result.summary, /red→green confirmed/);
+});
+
+test("a repro that never goes red refuses the attempt — no implementer is spent", async () => {
+  const { result, calls } = await runRecipe(
+    "repro-first",
+    recipeArgs(),
+    reproReply({
+      wentRed: false,
+      deviations: "touched src/other.ts to read the failing path",
+    })
+  );
+  assert.deepEqual(
+    result.commits,
+    [],
+    "commits: [] is what the parent's empty-commits gate reads — the attempt fails before a verifier is spent"
+  );
+  assert.equal(
+    order(calls, /^impl:/),
+    -1,
+    "a green repro means the bug is not where the issue says it is; sending an implementer in behind it fixes the wrong thing"
+  );
+  assert.equal(order(calls, /^green:/), -1);
+  assert.ok(
+    result.warnings.some((w) => /never went red|did not fail/.test(w)),
+    "the refusal has to SAY what could not be shown, or the next attempt repeats it"
+  );
+  assert.ok(
+    result.warnings.some((w) => /still on feature\/alpha/.test(w)),
+    "and say that the repro commit survives, so the retry starts from it rather than from nothing"
+  );
+  assert.ok(
+    result.warnings.some((w) => /touched src\/other\.ts/.test(w)),
+    "a refusal still reports what the repro agent did outside its declared files — the refusal is not a reason to drop the other channel"
+  );
+});
+
+test("a red claim nobody can re-run is refused exactly like a green one", async () => {
+  // "Red" is a claim with three parts. Missing any one of them and the
+  // confirmation cannot happen at all, which makes the whole recipe
+  // unfalsifiable — so each is refused, and each says which part was missing.
+  for (const [over, why] of [
+    [{ reproCommand: "" }, /named no command/],
+    [{ redOutput: "" }, /transcribed no failing output/],
+    [{ reproCommits: [] }, /committed nothing/],
+  ]) {
+    const { result, calls } = await runRecipe(
+      "repro-first",
+      recipeArgs(),
+      reproReply(over)
+    );
+    assert.deepEqual(result.commits, [], `refused: ${why}`);
+    assert.equal(order(calls, /^impl:/), -1);
+    assert.ok(
+      result.warnings.some((w) => why.test(w)),
+      `the warning names the missing half: ${why}`
+    );
+  }
+});
+
+test("the red transcript reaches the implementer VERBATIM, and it is told to leave the repro alone", async () => {
+  const { calls } = await runRecipe("repro-first", recipeArgs(), reproReply());
+  const impl = labelled(calls, /^impl:/)[0];
+  assert.ok(
+    impl.prompt.includes(RED_OUTPUT),
+    "a paraphrased stack trace is where a defect turns back into a hunch"
+  );
+  assert.ok(impl.prompt.includes(REPRO_COMMAND));
+  assert.match(
+    impl.prompt,
+    /Do NOT edit, weaken, skip or delete the repro/,
+    "editing the assertion until it passes is the one move this recipe exists to prevent"
+  );
+  assert.match(impl.prompt, /Do NOT push/);
+});
+
+test("the implementer never certifies its own fix — a different agent re-runs the repro", async () => {
+  const { calls } = await runRecipe("repro-first", recipeArgs(), reproReply());
+  const green = labelled(calls, /^green:/)[0];
+  assert.equal(
+    green.agentType,
+    "code-reviewer",
+    "'the repro passes now' is exactly the claim a green-washed fix makes about itself"
+  );
+  assert.ok(green.prompt.includes(REPRO_COMMAND), "the SAME command, verbatim");
+  assert.ok(
+    green.prompt.includes(RED_OUTPUT),
+    "with the before-picture, so 'it passes' can be told from 'it no longer runs'"
+  );
+  assert.match(green.prompt, /MUST NOT write code, edit any file, commit/);
+});
+
+test("the confirmation finds the repro commit from the LOG, not from the reported sha", async () => {
+  const { calls } = await runRecipe("repro-first", recipeArgs(), reproReply());
+  const green = labelled(calls, /^green:/)[0];
+  assert.match(
+    green.prompt,
+    /log --oneline --reverse origin\/main\.\.feature\/alpha -- src\/alpha\.test\.ts/,
+    "the anchor is ref-derived — a mis-transcribed sha points the edit check at the wrong commit and nobody can tell"
+  );
+  assert.match(green.prompt, /THE LOG WINS/);
+});
+
+test("a dead confirmer NEVER reports green — an unproven fix is not a proven one", async () => {
+  const { result } = await runRecipe(
+    "repro-first",
+    recipeArgs(),
+    reproReply({ confirmDead: true })
+  );
+  assert.deepEqual(
+    result.commits,
+    [IMPL_SHA, REPRO_SHA],
+    "the work is real, so the gates still get it"
+  );
+  assert.doesNotMatch(
+    result.summary,
+    /red→green confirmed/,
+    "byte-identical to a confirmed run is exactly the failure the third agent exists to prevent"
+  );
+  assert.match(result.summary, /unconfirmed/);
+  assert.ok(result.warnings.some((w) => /confirming agent died/.test(w)));
+});
+
+test("a confirmation that ran a DIFFERENT command is not a green run", async () => {
+  const { result } = await runRecipe(
+    "repro-first",
+    recipeArgs(),
+    reproReply({ confirmCommand: "pnpm test src/unrelated.test.ts" })
+  );
+  assert.doesNotMatch(result.summary, /red→green confirmed/);
+  assert.match(result.summary, /different command/);
+  assert.ok(
+    result.warnings.some((w) => /instead of the repro command/.test(w)),
+    "a narrower command answers a different question, and passing it off as the repro is the cheap way to green"
+  );
+});
+
+test("a repro still red after the fix keeps its commits and says so out loud", async () => {
+  const { result } = await runRecipe(
+    "repro-first",
+    recipeArgs(),
+    reproReply({ passed: false, confirmOutput: RED_OUTPUT })
+  );
+  assert.deepEqual(
+    result.commits,
+    [IMPL_SHA, REPRO_SHA],
+    "the diff is real work; discarding it on a failing repro would throw away the next attempt's starting point"
+  );
+  assert.match(result.summary, /STILL RED after the fix/);
+  assert.ok(
+    result.warnings.some((w) => /STILL RED/.test(w)),
+    "the warning is what reaches the journal and the scoped verifier's prompt"
+  );
+});
+
+test("a repro edited after it went red is reported even when the run is green", async () => {
+  const { result } = await runRecipe(
+    "repro-first",
+    recipeArgs(),
+    reproReply({
+      reproChanged: true,
+      confirmDead: false,
+    })
+  );
+  assert.ok(
+    result.warnings.some((w) =>
+      /EDITED after the commit that made it red/.test(w)
+    ),
+    "weakening the assertion is how a red repro is made green without a fix — green is not the end of the question"
+  );
+  assert.match(result.summary, /edited after it went red/);
+});
+
+test("a dead implementer refuses rather than shipping a known-failing test as the attempt", async () => {
+  const { result, calls } = await runRecipe(
+    "repro-first",
+    recipeArgs(),
+    reproReply({ implDead: true })
+  );
+  assert.deepEqual(
+    result.commits,
+    [],
+    "that diff is a failing test and nothing else — sending it to a verifier buys a confident FAIL for the price of a full gate run"
+  );
+  assert.equal(order(calls, /^green:/), -1, "there is nothing to confirm");
+  assert.ok(
+    result.warnings.some((w) => /still failing/.test(w)),
+    "and the branch state is named, because the next attempt inherits it"
+  );
+});
+
+test("a LIVE implementer that reports no commits is warned about, and the repro is still re-run", async () => {
+  // The opposite of the dead-implementer path, on purpose: an implementer that
+  // fixed the bug and mis-transcribed its shas is the common case of this
+  // shape. Refusing here would leave the next attempt's repro agent looking at
+  // a repro that now PASSES — which it must refuse in turn, dead-ending a track
+  // over a transcription slip. The confirmation run answers what the shas
+  // cannot.
+  const { result, calls } = await runRecipe(
+    "repro-first",
+    recipeArgs(),
+    reproReply({ implCommits: [] })
+  );
+  assert.ok(
+    order(calls, /^green:/) !== -1,
+    "the run that can tell a mis-transcribed sha from a missing fix must still happen"
+  );
+  assert.deepEqual(result.commits, [REPRO_SHA]);
+  assert.ok(
+    result.warnings.some((w) => /reported no commits of its own/.test(w)),
+    "and the ambiguity is named rather than resolved by guessing"
+  );
+  assert.match(result.summary, /red→green confirmed/);
+});
+
+test("a retry hands the retryBlock to BOTH the repro agent and the implementer, verbatim", async () => {
+  const { result, calls } = await runRecipe(
+    "repro-first",
+    recipeArgs({
+      priorReport: { verdict: "FAIL", failingGate: "G2-subset" },
+      retryBlock: `THE ROOT CAUSE IS BELOW\n${CRASH}`,
+    }),
+    reproReply()
+  );
+  assert.ok(
+    labelled(calls, /^repro:/)[0].prompt.startsWith("THE ROOT CAUSE IS BELOW"),
+    "on a retry the failure the verifier NAMED is the repro to write first"
+  );
+  assert.ok(
+    labelled(calls, /^impl:/)[0].prompt.startsWith("THE ROOT CAUSE IS BELOW"),
+    "mod 2: the parent-rendered retryBlock is prepended VERBATIM to the implementer prompt"
+  );
+  assert.equal(result.rootCause, "the named ReferenceError");
+  assert.equal(
+    result.rootCauseAddressed,
+    "moved the import; `pnpm test` is green",
+    "the parent's refusal gate reads this — the repro and the confirmation never rewrite it"
+  );
+});
+
+/** replyShip knows nothing about repro-first's two extra phases. */
+const replyShipRepro = (verifyReport) => (prompt, opts) => {
+  const l = opts.label || "";
+  if (l.startsWith("repro:") || l.startsWith("green:"))
+    return reproReply({ implCommits: [] })(prompt, opts);
+  return replyShip(verifyReport)(prompt, opts);
+};
+
+test("a repro-first unit runs the recipe child and ships", async () => {
+  const { result, calls } = await runBuild(
+    [{ ...buildUnit("alpha", 101), recipe: "repro-first" }],
+    replyShipRepro(passing([]))
+  );
+  assert.ok(
+    calls.some(
+      (c) =>
+        c.kind === "workflow" && c.scriptPath.includes("recipes/repro-first.js")
+    ),
+    "the recipe named on the unit is the child that runs"
+  );
+  assert.ok(
+    calls.some((c) => /^repro:/.test(c.label || "")),
+    "the repro runs inside the attempt, before the implementer"
+  );
+  assert.equal(
+    scopedVerify(calls).length,
+    1,
+    "a proven fix proceeds to the scoped verifier like any attempt"
+  );
+  assert.equal(result.shipped.length, 1);
+});
+
+test("repro-first weighs 1: the budget that refuses adversarial-implement funds it", async () => {
+  // Three agents, weight 1 — deliberately. The recipe REORDERS one attempt's
+  // work rather than fanning it out, and weighting it by agent count would
+  // refuse ordinary bug attempts on budgets that fund the identical work under
+  // implement-straight. That is how a discipline gets switched off for costing
+  // too much.
+  const tight = {
+    total: 1_000_000,
+    spent: () => 700_000,
+    remaining: () => 300_000,
+  };
+  const { result, calls } = await runBuild(
+    [{ ...buildUnit("alpha", 101), recipe: "repro-first" }],
+    replyShipRepro(passing([])),
+    { budgetImpl: tight }
+  );
+  assert.ok(
+    calls.some(
+      (c) =>
+        c.kind === "workflow" && c.scriptPath.includes("recipes/repro-first.js")
+    ),
+    "the same 300k that refuses a weight-3 recipe outright funds this one"
+  );
+  assert.equal(result.blocked.length, 0);
+  assert.equal(result.shipped.length, 1);
+});
+
+// ---------------------------------------------------------------------------
 // The two file-level mechanisms: the parent idiom and the format hook.
 //
 // Neither is exercised by a stubbed run — one is a doctrine about which command
@@ -3214,6 +3613,7 @@ test("every workflow script parses under the harness wrapper (AC1)", () => {
     "recipes/implement-straight.js",
     "recipes/generate-and-filter.js",
     "recipes/adversarial-implement.js",
+    "recipes/repro-first.js",
   ])
     assert.ok(
       WORKFLOW_FILES.includes(`.claude/workflows/${name}`),
@@ -3264,6 +3664,30 @@ test("adversarial-implement is registered in all four places, and the risk:high 
   assert.match(
     read("ops/agent-os/recipes.md"),
     /^## `adversarial-implement`$/m,
+    "recipes.md carries a section per the 'Adding a recipe' checklist"
+  );
+});
+
+test("repro-first is registered in all four places, and the bug default is stated", () => {
+  const loop = read(".claude/workflows/build-until-done.js");
+  assert.match(
+    loop,
+    /"repro-first"/,
+    "KNOWN_RECIPES is the parse-time registry — an unlisted recipe throws on selection"
+  );
+  assert.match(
+    loop,
+    /"repro-first":\s*1/,
+    "weight 1 despite three agents: the recipe reorders one attempt's work rather than fanning it out"
+  );
+  assert.match(
+    read(".claude/skills/dispatch/SKILL.md"),
+    /`repro-first`[^\n]*bug/,
+    "dispatch's selection table is authoritative for which task shapes get which recipe"
+  );
+  assert.match(
+    read("ops/agent-os/recipes.md"),
+    /^## `repro-first`$/m,
     "recipes.md carries a section per the 'Adding a recipe' checklist"
   );
 });

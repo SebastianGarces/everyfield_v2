@@ -53,6 +53,7 @@ const KNOWN_RECIPES = [
   "implement-straight",
   "generate-and-filter",
   "adversarial-implement",
+  "repro-first",
 ];
 const recipeOf = (u) => u.recipe || "implement-straight";
 for (const u of units)
@@ -76,11 +77,21 @@ for (const u of units)
 // fund its adversary rounds would stop mid-loop and ship the unattacked diff,
 // which is the one outcome the recipe exists to prevent. The weight is one
 // number for both checks, so the cap is conservative here by construction.
+//
+// repro-first weighs 1 — the same as implement-straight — even though it runs
+// three agents, and the reason is that it REORDERS one attempt's work rather
+// than fanning it out: the repro agent writes the failing test the implementer
+// would have written anyway, and the confirmation runs one command and
+// transcribes what it printed. Nothing runs twice and nothing runs at once.
+// Weighting it 3 would refuse ordinary bug attempts on budgets that fund the
+// identical work under implement-straight, which is how a discipline gets
+// switched off for being expensive.
 // ---------------------------------------------------------------------------
 const RECIPE_AGENT_COST = {
   "implement-straight": 1,
   "generate-and-filter": 3,
   "adversarial-implement": 3,
+  "repro-first": 1,
 };
 const agentCostOf = (ws) => RECIPE_AGENT_COST[ws.recipe] || 1;
 // Risk-tiered default (dod.md "EXHAUSTED"): 2 attempts; 3 only when the wave
