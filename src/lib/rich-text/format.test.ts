@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   escapeMergeValues,
+  highlightUnresolvedMergeTokens,
   isHtmlFragment,
   isRichTextEmpty,
   plainTextToHtml,
@@ -253,4 +254,57 @@ test("a legacy plain-text body converts once and then holds still", () => {
   const once = toRichTextHtml("Bob & Sue <3\n\nSee you Sunday.");
   assert.equal(toRichTextHtml(once), once, once);
   assert.equal(richTextToPlainText(once), "Bob & Sue <3\n\nSee you Sunday.");
+});
+
+// ----------------------------------------------------------------------------
+// The COM-015 preview's red pill is drawn over MARKUP, so it has to know where
+// the text nodes are. A blind string replace wrote the span into `href` values
+// — `sanitizeUrl` allows a token in a path whose scheme is already fixed — and
+// a browser then closed the attribute at the span's own quote: a broken link,
+// and no warning on the one token the pill exists to catch.
+// ----------------------------------------------------------------------------
+
+test("an unresolved token in TEXT is highlighted", () => {
+  const html = highlightUnresolvedMergeTokens(
+    "<p>Hi <strong>{{nope}}</strong></p>"
+  );
+
+  assert.ok(html.includes("#dc2626"), html);
+  assert.ok(html.includes(">{{nope}}</span>"), html);
+  // The formatting around it is untouched.
+  assert.ok(html.startsWith("<p>Hi <strong><span "), html);
+  assert.ok(html.endsWith("</span></strong></p>"), html);
+});
+
+test("an unresolved token inside an ATTRIBUTE is left exactly as it is", () => {
+  const href = `<p><a href="https://everyfield.app/x/{{ticket_id}}" target="_blank" rel="noopener noreferrer">ticket</a></p>`;
+
+  assert.equal(highlightUnresolvedMergeTokens(href), href);
+});
+
+test("a token in an href and a token in text are decided separately", () => {
+  const html = highlightUnresolvedMergeTokens(
+    `<p><a href="https://everyfield.app/x/{{ticket_id}}">{{ticket_id}}</a></p>`
+  );
+
+  // One pill, and it is the one between the tags.
+  assert.equal((html.match(/#dc2626/g) ?? []).length, 1, html);
+  assert.ok(
+    html.includes(`href="https://everyfield.app/x/{{ticket_id}}"`),
+    html
+  );
+  assert.ok(html.includes(`>{{ticket_id}}</span>`), html);
+});
+
+test("a subject, which arrives escaped and tagless, still highlights", () => {
+  const html = highlightUnresolvedMergeTokens("Reminder for {{nope}} &lt;3");
+
+  assert.ok(html.includes("#dc2626"), html);
+  assert.ok(html.includes("&lt;3"), html);
+});
+
+test("a body with no leftover token comes back unchanged", () => {
+  const html = `<p>Hi <strong>Sarah</strong>, see you Sunday.</p>`;
+
+  assert.equal(highlightUnresolvedMergeTokens(html), html);
 });

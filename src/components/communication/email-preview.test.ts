@@ -59,6 +59,37 @@ test("an unresolved token is still called out, inside formatting", () => {
   assert.ok(html.includes("#dc2626"), html);
 });
 
+test("a token inside an href is left in the href, not wrapped in the pill", () => {
+  // `sanitizeUrl` allows a token in a path whose scheme is already fixed, so an
+  // unresolved one can sit in an `href`. The highlight used to be a blind string
+  // replace, which put the span INSIDE the attribute value: the browser closed
+  // the href at the span's own quote, `background-color:` became an attribute
+  // name, and the planter saw a garbled link with no warning at all.
+  const html = preview({
+    body: `<p>Your <a href="https://everyfield.app/x/{{ticket_id}}">ticket</a> is ready.</p>`,
+  });
+
+  assert.ok(
+    html.includes(`href="https://everyfield.app/x/{{ticket_id}}"`),
+    html
+  );
+  assert.ok(!/href="[^"]*<span/.test(html), html);
+  assert.ok(html.includes(">ticket</a>"), html);
+});
+
+test("the pill still fires on the same token in body TEXT", () => {
+  const html = preview({
+    body: `<p><a href="https://everyfield.app/x/{{ticket_id}}">Ticket {{ticket_id}}</a></p>`,
+  });
+
+  // Exactly one pill: the one between the tags, never the one in the href.
+  assert.equal((html.match(/#dc2626/g) ?? []).length, 1, html);
+  assert.ok(
+    html.includes(`href="https://everyfield.app/x/{{ticket_id}}"`),
+    html
+  );
+});
+
 test("a hostile body cannot reach the preview's inner HTML", () => {
   const html = preview({
     body: `<p>hello</p><script>alert(1)</script><img src=x onerror="alert(2)">`,

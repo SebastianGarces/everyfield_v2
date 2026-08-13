@@ -3,6 +3,7 @@
 import { renderTemplate, getSampleData } from "@/lib/communication/merge";
 import {
   escapeMergeValues,
+  highlightUnresolvedMergeTokens,
   isRichTextEmpty,
   toRichTextHtml,
 } from "@/lib/rich-text/format";
@@ -79,22 +80,21 @@ export function EmailPreview({ subject, body, mergeData }: EmailPreviewProps) {
     escapeMergeValues(data)
   );
 
-  // Highlight unresolved merge fields
-  const highlightUnresolved = (text: string) => {
-    return text.replace(
-      /\{\{(\w+)\}\}/g,
-      '<span style="background-color: #fee2e2; color: #dc2626; padding: 1px 4px; border-radius: 3px; font-family: monospace; font-size: 0.85em;">{{$1}}</span>'
-    );
-  };
-
   // The subject is plain text going into innerHTML, so it is escaped first —
   // the body arrives already sanitised, the subject never was.
-  const displaySubject = highlightUnresolved(escapeHtml(renderedSubject));
+  const displaySubject = highlightUnresolvedMergeTokens(
+    escapeHtml(renderedSubject)
+  );
 
   // Highlight unresolved fields, then cut the body where the RSVP buttons go —
   // the same cut the delivered email makes, so the preview cannot lay the call
-  // to action out differently from the message that is sent.
-  const bodySegments = parseRichEmailBody(highlightUnresolved(renderedBody));
+  // to action out differently from the message that is sent. The highlight is
+  // text-node-aware (`format.ts`): a token an author put inside an `href` is
+  // left where it is, because a span inside an attribute value both breaks the
+  // link and hides the warning.
+  const bodySegments = parseRichEmailBody(
+    highlightUnresolvedMergeTokens(renderedBody)
+  );
 
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-lg border">

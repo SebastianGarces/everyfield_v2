@@ -210,6 +210,7 @@ Applies to `src/lib/communication/**` and the `/communication` surfaces. Ruled 2
 - The SERVER is the gate, never the editor — every compose/task action is a POSTable endpoint that never saw the toolbar — and there is ONE sanitiser, `sanitizeRichText` (`sanitize.ts`), allow-list only.
 - ONE door converts a stored value for reading or editing, `toRichTextHtml` (`format.ts`), and ONE read-only renderer draws it, `RichText`. Both are idempotent; a hand-rolled `dangerouslySetInnerHTML` is a second copy of both.
 - `sanitizeUrl` runs BEFORE merge substitution, so a `{{token}}` may decide NEITHER the SCHEME nor the AUTHORITY of an href — in either spelling, `/` or `\`, since every URL parser folds the two.
+- A body is MARKUP by the time a surface decorates it, so a decoration over it is TEXT-NODE-AWARE, never a string-wide `replace`: the COM-015 preview's unresolved-token pill is `highlightUnresolvedMergeTokens` (`format.ts`), which splits on tags and rewrites only the gaps. `sanitizeUrl` allows a token in a path whose scheme is already fixed, so a blind replace wrote the span inside an `href` — a broken link AND no warning, on exactly the token the pill exists to catch.
 
 ## Tasks, Subtasks & Recurrence
 

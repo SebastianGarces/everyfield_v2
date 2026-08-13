@@ -196,3 +196,49 @@ export function escapeMergeValues(
   }
   return escaped;
 }
+
+/** A token the merge engine left behind — `{{name}}` in the rendered output. */
+const UNRESOLVED_TOKEN = /\{\{(\w+)\}\}/g;
+
+/**
+ * `<[^>]*>` — a whole tag. The sanitiser escapes `>` inside an attribute value,
+ * so a tag cannot be cut short here, the same assumption `parseRichEmailBody`
+ * makes with `TAG_PATTERN`.
+ */
+const TAG_SPLIT = /(<[^>]*>)/;
+
+/** The red pill the COM-015 preview draws around a token nothing resolved. */
+const UNRESOLVED_TOKEN_STYLE =
+  "background-color: #fee2e2; color: #dc2626; padding: 1px 4px; border-radius: 3px; font-family: monospace; font-size: 0.85em;";
+
+/**
+ * Wrap every leftover `{{token}}` in the preview's red pill — in TEXT ONLY.
+ *
+ * The body reaching the COM-015 preview is markup, so a blind
+ * `html.replace(TOKEN, "<span …>$1</span>")` also rewrites tokens sitting in
+ * ATTRIBUTE values, and `sanitizeUrl` deliberately allows one in a path whose
+ * scheme is already fixed (`https://everyfield.app/x/{{ticket_id}}`). The span
+ * then landed inside the `href`, whose value the browser closed at the span's
+ * own quote: a garbled link, `background-color:` read as an attribute name, and
+ * NO red pill — the preview lost exactly the warning it exists to give, on
+ * exactly the token (a typo, a custom field) it exists to catch.
+ *
+ * So the transform is text-node-aware: split on tags, rewrite only the gaps.
+ * A subject is escaped before it gets here, which leaves it with no `<` at all,
+ * so the same one rule serves both halves of the preview.
+ */
+export function highlightUnresolvedMergeTokens(html: string): string {
+  return html
+    .split(TAG_SPLIT)
+    .map((piece, index) =>
+      // `split` with one capturing group alternates gap, tag, gap, … — the odd
+      // indices are the tags, and they are passed through untouched.
+      index % 2 === 1
+        ? piece
+        : piece.replace(
+            UNRESOLVED_TOKEN,
+            `<span style="${UNRESOLVED_TOKEN_STYLE}">{{$1}}</span>`
+          )
+    )
+    .join("");
+}
