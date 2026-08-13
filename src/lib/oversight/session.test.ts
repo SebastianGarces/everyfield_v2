@@ -210,6 +210,9 @@ test("presentation.ts does not re-serve the import-free leaf", () => {
   // side-effect import, or `export … from`. The scan is the shared one, not the
   // `^import\s+(?!type\b)` this file used to carry: that pattern could not see
   // `export { db } from "@/db"`, which is the exact shape the rule forbids.
+  // Which shapes the shared scan sees is asserted once, where it lives
+  // (`src/lib/auth/server-action-surface.test.ts`); the leaf is what is local
+  // here.
   assert.deepEqual(
     staticValueSpecifiers(
       readCode(path.join(ROOT, "src", "lib", "oversight", "org-label.ts"))
@@ -221,37 +224,5 @@ test("presentation.ts does not re-serve the import-free leaf", () => {
   assert.equal(
     scopeLabelForRole("network_admin"),
     scopeLabelForOrgType("network")
-  );
-});
-
-test("the leaf guard sees a re-export, which is the shape it exists to forbid", () => {
-  // `register-path.ts` did not fail on an `import`; it failed on
-  // `export { INVITATION_REGISTER_PATH, invitationRegisterPath } from …`, which
-  // makes the heavy path type-check and work (memory/invariants.md →
-  // Multi-Tenancy). A leaf guard blind to that shape is a guard pointed away
-  // from its own failure.
-  for (const [shape, line] of [
-    [
-      "re-export",
-      'export { scopeLabelForRole } from "@/lib/oversight/presentation";',
-    ],
-    [
-      "indented import",
-      '  import { STATUS_LABELS } from "@/lib/people/status.shared";',
-    ],
-    ["side effect", 'import "@/db/schema";'],
-    ["single quotes", "import { db } from '@/db';"],
-  ] as const) {
-    assert.notDeepEqual(
-      staticValueSpecifiers(line),
-      [],
-      `the leaf guard cannot see a ${shape} — org-label.ts could gain one and still pass`
-    );
-  }
-
-  // A type import is erased and is what the leaf legitimately holds two of.
-  assert.deepEqual(
-    staticValueSpecifiers('import type { UserRole } from "@/db/schema";'),
-    []
   );
 });

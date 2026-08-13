@@ -9,7 +9,9 @@ import * as access from "./access";
 // The one comment stripper and the one static import scan, imported rather than
 // re-spelled. The copy this file used to carry (`^import\s+(?!type\b)`) could
 // not see `export … from`, so `roles.ts` could have re-served `@/db` from the
-// leaf and still passed the guard that exists to stop exactly that.
+// leaf and still passed the guard that exists to stop exactly that. What the
+// scan itself can see is asserted once, in `./server-action-surface.test.ts`;
+// what is local to this file is the LEAF, and that is all it asserts below.
 import { codeOf, staticValueSpecifiers } from "./server-action-surface";
 
 // ============================================================================
@@ -61,31 +63,6 @@ test("the leaf reaches no database, which is what lets both sites import it", ()
     ),
     [],
     "roles.ts gained a value import — it is no longer reachable from a no-database module"
-  );
-});
-
-test("the leaf guard sees a re-export, not only an import", () => {
-  // The hole the copied `^import\s+(?!type\b)` left open, and the one that has
-  // actually been shipped before: `register-path.ts` broke its own leaf rule
-  // with an `export … from`, not an import (memory/invariants.md →
-  // Multi-Tenancy). An indented import was invisible to it too.
-  for (const [shape, line] of [
-    ["re-export", 'export { db } from "@/db";'],
-    ["indented import", '  import { db } from "@/db";'],
-    ["side effect", 'import "@/db";'],
-    ["single quotes", "import { db } from '@/db';"],
-  ] as const) {
-    assert.deepEqual(
-      staticValueSpecifiers(line),
-      ["@/db"],
-      `the leaf guard cannot see a ${shape} — roles.ts could gain one and still pass`
-    );
-  }
-
-  // …while the two type imports the leaf legitimately holds stay invisible.
-  assert.deepEqual(
-    staticValueSpecifiers('import type { UserRole } from "@/db/schema";'),
-    []
   );
 });
 

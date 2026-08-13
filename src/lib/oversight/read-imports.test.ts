@@ -34,7 +34,11 @@ import {
 // ways to reach `@/db` at module scope: not a single-quoted specifier, not an
 // indented import, not `import "@/db"`, and not `export { db } from "@/db"` —
 // the re-export that is precisely the failure `register-path.ts` was written
-// about. `staticValueSpecifiers` closes all four, and the cases below pin them.
+// about. `staticValueSpecifiers` closes all four, and those four shapes are
+// pinned ONCE, in `src/lib/auth/server-action-surface.test.ts`, beside the
+// function itself — a re-spelling of the pattern breaks one function, so one
+// suite catching it is the point of sharing it. What is local to THIS file, and
+// all it asserts, is the seam: neither seam module reaches `@/db` statically.
 //
 // It is still a STATIC walk and says so: a specifier built at runtime, or a
 // re-export barrel it cannot resolve, is outside what it can see. It shares
@@ -71,37 +75,6 @@ test("no oversight read imports the database client at module scope", () => {
       }
     }
   }
-});
-
-test("the seam scan sees every static way to reach the database client", () => {
-  // The four the deleted copy could not see. Each line is a real module-scope
-  // edge to `@/db`: if the scan misses it, the seam is gone and this file
-  // passes anyway — which is what it did before the walker was shared.
-  const reaches = [
-    ["single quotes", "import { db } from '@/db';"],
-    ["indented", '  import { db } from "@/db";'],
-    ["side effect", 'import "@/db";'],
-    ["re-export", 'export { db } from "@/db";'],
-  ] as const;
-
-  for (const [shape, line] of reaches) {
-    assert.ok(
-      staticValueSpecifiers(line).includes("@/db"),
-      `the seam scan cannot see a ${shape} import of @/db`
-    );
-  }
-
-  // …and it still does NOT count the deferred form, which is the fix, not the
-  // fault. A scan that flagged this would fail `read.ts` for obeying the rule.
-  assert.deepEqual(
-    staticValueSpecifiers('const { db } = await import("@/db");'),
-    []
-  );
-
-  // A type-only import is erased and costs no connection.
-  assert.deepEqual(staticValueSpecifiers('import type { User } from "@/db";'), [
-    // nothing
-  ]);
 });
 
 test("the deferred import is still made, inside the read that needs it", () => {

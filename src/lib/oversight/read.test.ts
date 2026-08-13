@@ -500,6 +500,13 @@ test("the index page holds no data-layer import at all", () => {
   // The read moved out of the RSC, and this is what that bought: a page that
   // only renders. A `db`/`churches`/`inArray` import here is the read coming
   // back to a file where no test can see its WHERE clause.
+  //
+  // The scan is the shared one (`@/lib/auth/server-action-surface`), so the
+  // copy that used to stand here — `^import\s+[^;]*?from\s+"([^"]+)"`, blind to
+  // a single-quoted, indented, side-effect or re-exported specifier — is gone,
+  // and WHICH shapes it sees is asserted once beside the function itself in
+  // `src/lib/auth/server-action-surface.test.ts`. What is local to this file is
+  // the page.
   const specifiers = staticValueSpecifiers(
     readCode(
       path.join(ROOT, "src", "app", "(dashboard)", "oversight", "page.tsx")
@@ -510,25 +517,6 @@ test("the index page holds no data-layer import at all", () => {
     assert.ok(
       !specifiers.includes(specifier),
       `the oversight index imports ${specifier} — its read belongs in @/lib/oversight/read`
-    );
-  }
-});
-
-test("the page guard sees every static way the read could come back", () => {
-  // The copy that stood here read `^import\s+[^;]*?from\s+"([^"]+)"` and saw
-  // ONE of the five module-scope edges to `@/db`. Four ways to put the read
-  // back on the page passed it, which makes the guard above a comment with a
-  // test around it rather than a test.
-  for (const [shape, line] of [
-    ["single quotes", "import { db } from '@/db';"],
-    ["indented import", '  import { db } from "@/db";'],
-    ["side effect", 'import "@/db";'],
-    ["re-export", 'export { churches } from "@/db/schema";'],
-  ] as const) {
-    assert.notDeepEqual(
-      staticValueSpecifiers(line),
-      [],
-      `the page guard cannot see a ${shape} — the read could return to the RSC and still pass`
     );
   }
 });
