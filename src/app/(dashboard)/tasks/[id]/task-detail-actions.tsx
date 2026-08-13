@@ -119,7 +119,8 @@ export function TaskDetailActions({ task }: TaskDetailActionsProps) {
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDelete}
-              className="cursor-pointer bg-red-600 hover:bg-red-700"
+              variant="destructive"
+              className="cursor-pointer"
             >
               Delete
             </AlertDialogAction>
