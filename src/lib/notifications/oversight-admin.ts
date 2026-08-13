@@ -27,37 +27,17 @@ import type { AssociationOrgType, UserRole } from "@/db/schema";
  * probe's `recipientOrgOf`, `invitationRelationship` and `auditRelationship`
  * (`./oversight-relationship.ts`).
  *
- * WHAT A THIRD KIND OF OVERSIGHT ORG COSTS — what `pnpm typecheck` was OBSERVED
- * to print, not what would be nice. The probe: add a third member to
- * `associationOrgTypes` (`@/db/schema/association-event`) and change nothing
- * else. It fails in THIRTEEN places, and only these:
+ * WHAT A THIRD KIND OF OVERSIGHT ORG COSTS: the probe and its observed tsc
+ * output are recorded once, in memory/invariants/multi-tenancy.md.
  *
- *   * here — the `satisfies` (TS1360), the `OversightAdminPairing` lookup
- *     (TS2339), and `oversightOrgOfKind`'s `OVERSIGHT_ADMIN[kind]` (TS7053);
- *   * `recipientAdministersOrg`'s index (TS7053, `./enqueue.ts`);
- *   * `anchorType()` and `toAnchorColumns()` (`./anchor.ts`) — the STORED
- *     discriminator, which is a fact this table does not hold;
- *   * the two builders that index a TABLE by the row's `fk` and so need a
- *     column for the new kind: `invitationRelationship`
- *     (`./oversight-relationship.ts`) and `oversightAudienceCondition`
- *     (`./oversight.ts`);
- *   * the FOUR `Record<AssociationOrgType, string>` label maps —
- *     `src/app/(dashboard)/settings/association/leave-org-dialog.tsx`,
- *     `src/components/oversight/remove-plant-dialog.tsx`,
- *     `src/lib/invitations/audit.ts`, `./plant-association.ts`.
- *
- * Add the row and every reader that merely ENUMERATES the table compiles
- * unchanged — `recipientOrgOf`, `auditRelationship`, `noOversightOrg`,
- * `namesAnOversightOrg` — because no per-kind branch is left in them to forget.
- *
- * TWO THINGS DELIBERATELY DO NOT FAIL, and an earlier version of this comment
- * claimed both did. `orgAnchor()`'s return cannot: its discriminator IS
- * `AssociationOrgType`, so it widens by construction. `enqueueNotificationSchema`'s
- * `anchorOrg` cannot either, now that it reads `z.enum(associationOrgTypes)`
- * instead of two literals — the parse FOLLOWS the union, which is the point; it
- * was the hand-written list that made a widened union a runtime rejection with
- * the compile-time bill unpaid. Verify a claim like this by making the edit and
- * reading tsc's output before writing the sentence.
+ * The rule that keeps that list short is here, though, because it is about this
+ * table: a reader that merely ENUMERATES the rows compiles unchanged, and only
+ * a reader that INDEXES them by kind pays. The parse FOLLOWS the union for the
+ * same reason — `enqueueNotificationSchema.anchorOrg` reads
+ * `z.enum(associationOrgTypes)` and `orgAnchor()`'s discriminator IS
+ * `AssociationOrgType`, so neither restates the kinds and neither can turn a
+ * widened union into a runtime rejection with the compile-time bill unpaid
+ * (`enqueue.test.ts`).
  *
  * TYPE IMPORTS ONLY, DELIBERATELY. This is a leaf: asking "which role
  * administers a network?" must not cost a database connection, which is what

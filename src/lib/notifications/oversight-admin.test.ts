@@ -4,18 +4,19 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { OVERSIGHT_ROLES } from "@/lib/auth/access";
+import { sourceReader } from "@/lib/testing/source-span";
 
 import { OVERSIGHT_ADMIN } from "./oversight-admin";
 
 // ============================================================================
-// #411 — the pairing table's two structural obligations.
+// #411 — the pairing table's three structural obligations.
 //
 // The table itself (`./oversight-admin.ts`) is what stops the SQL audience, the
 // per-recipient gate and the recorded-relationship probe from answering "which
 // role administers which kind of oversight org?" three different ways; the drift
 // between them starved a plant of its daily digest. Its header says so once.
 //
-// Two things about the table are not visible to the compiler, so they are
+// Three things about the table are not visible to the compiler, so they are
 // asserted here:
 //
 //   1. THE ROLE SET IS NOT A SECOND OPINION. `@/lib/auth/access` owns
@@ -29,6 +30,11 @@ import { OVERSIGHT_ADMIN } from "./oversight-admin";
 //      `import { db } from "@/db"`, so hosting the pairing there made "which
 //      role administers a network?" cost a Neon connection and put a database
 //      client one import away from anything that wanted the answer.
+//
+//   3. EVERY READER GOES THROUGH IT. The table's largest obligation is about
+//      its readers, so it is asserted here rather than in the suite of any one
+//      of them: no reader in this domain spells an oversight FK column or an
+//      oversight role literal for itself.
 // ============================================================================
 
 test("§1 the pairing names exactly the roles OVERSIGHT_ROLES names", () => {
@@ -83,4 +89,100 @@ test("§2 the pairing table is a value-import-free leaf", () => {
 
   assert.doesNotMatch(code, /from\s+"@\/db"/);
   assert.doesNotMatch(code, /from\s+"@\/lib\/auth\/access"/);
+});
+
+test("§3 each oversight FK column is named ONCE, in the pairing table", () => {
+  // FIX 2's structural half. The role was hoisted into `OVERSIGHT_ADMIN` while
+  // the FK stayed spelled per site — three hand-written `kind === "…" ? fkA :
+  // fkB` switches whose else-branch absorbs a new org kind in silence, beside a
+  // table whose comment claimed "a compile error at every reader". Half a
+  // pairing is a pairing written per site.
+  //
+  // Now every reader indexes or enumerates the table, so the column names
+  // appear only in the table itself (and in the `OversightOrgIds` shape they are
+  // the derived KEYS of, which is a type, not a branch).
+  //
+  // THE PROBE FILE IS IN THIS SWEEP TOO, and its absence was the hole the #411
+  // re-review found: the pairing was hoisted for three readers while FOUR more
+  // hand-written pairings survived in `oversight-relationship.ts` and
+  // `oversight.ts` — `RecipientOrg`, `invitationRelationship`,
+  // `auditRelationship` (with two org-kind literals of its own) and
+  // `networkAudience` — beside a `memory/` paragraph claiming every site read
+  // the table. A sweep that names two of the three files is how that happens.
+  const noComments = (code: string) =>
+    code.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
+
+  const read = (relative: string) =>
+    noComments(readFileSync(path.join(process.cwd(), relative), "utf8"));
+
+  const audience = read("src/lib/notifications/oversight.ts");
+  const gate = read("src/lib/notifications/enqueue.ts");
+  const probe = read("src/lib/notifications/oversight-relationship.ts");
+
+  // No reader names an oversight FK column or an oversight role literal.
+  for (const [label, code] of [
+    ["oversight.ts", audience],
+    ["enqueue.ts", gate],
+    ["oversight-relationship.ts", probe],
+  ] as const) {
+    assert.doesNotMatch(
+      code,
+      /table\.sendingChurchId|table\.sendingNetworkId|recipient\.sendingChurchId|recipient\.sendingNetworkId|org\.sendingChurchId|org\.sendingNetworkId/,
+      `${label} reaches an oversight FK through the pairing table, not by name`
+    );
+    assert.doesNotMatch(
+      code,
+      /"sending_church_admin"|"network_admin"/,
+      `${label} names no oversight role literal`
+    );
+  }
+
+  // The recorded-relationship probe is the strictest of the three: it holds no
+  // `users` FK name and no org-kind literal ANYWHERE, because its audit arm
+  // reads the kind off the pairing row's key for `association_events.org_type`.
+  assert.doesNotMatch(
+    probe,
+    /sendingChurchId|sendingNetworkId|"sending_church"|"network"/,
+    "oversight-relationship.ts writes no oversight FK name and no org-kind literal"
+  );
+
+  // The audience CONSTRUCTORS are table-built too. `{ sendingChurchId: null,
+  // sendingNetworkId: id }` written by hand is the same half-pairing wearing a
+  // constructor: it names one FK, nulls the other by hand, and a third org kind
+  // leaves it silently returning an audience missing a key. `oversightOrgOfKind`
+  // takes the KIND and lets the table pick the column, so no `: null` for
+  // another kind's FK is written anywhere in the module.
+  assert.doesNotMatch(
+    audience,
+    /sendingChurchId: null|sendingNetworkId: null/,
+    "oversight.ts builds an org audience from the pairing table, not from a hand-nulled literal"
+  );
+  assert.match(audience, /oversightOrgOfKind\(/);
+  assert.match(audience, /noOversightOrg\(\)/);
+
+  // And the gate has no ORG-KIND ternary left — that else-branch WAS the silent
+  // absorber. Spanned through the reader rather than grepped module-wide: the
+  // module legitimately discriminates `anchor.type === "church"` elsewhere (a
+  // plant is not an org), and a moved anchor THROWS instead of quietly matching
+  // nothing (`src/lib/testing/source-span.ts`).
+  const administersOrg = sourceReader(gate, "enqueue.ts").span(
+    "export function recipientAdministersOrg(",
+    "export const dbEnqueueDeps"
+  );
+  assert.doesNotMatch(administersOrg, /anchor\.type === /);
+  assert.match(administersOrg, /OVERSIGHT_ADMIN\[anchor\.type\]/);
+
+  // The pairing itself still says which role goes with which FK, in one place.
+  assert.deepEqual(OVERSIGHT_ADMIN, {
+    sending_church: { role: "sending_church_admin", fk: "sendingChurchId" },
+    network: { role: "network_admin", fk: "sendingNetworkId" },
+  });
+
+  // The table's ORDER is load-bearing: the SQL arms render in it and the
+  // bound-parameter assertions in `anchor.test.ts` read them positionally.
+  assert.deepEqual(Object.keys(OVERSIGHT_ADMIN), ["sending_church", "network"]);
+
+  // The tie to `OVERSIGHT_ROLES` — the flat list `@/lib/auth/access` owns — is
+  // asserted in §1 above, in both directions.
+  assert.deepEqual(OVERSIGHT_ROLES, ["sending_church_admin", "network_admin"]);
 });

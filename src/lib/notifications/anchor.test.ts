@@ -3,15 +3,11 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import { and, eq, exists, sql as rawSql, type SQL } from "drizzle-orm";
-import { alias } from "drizzle-orm/pg-core";
-
 import { db } from "@/db";
-import { associationOrgTypes, churches, users, type User } from "@/db/schema";
-import { OVERSIGHT_ROLES } from "@/lib/auth/access";
+import { users, type User } from "@/db/schema";
+import { sourceReader } from "@/lib/testing/source-span";
 
 import { OVERSIGHT_ADMIN } from "./oversight-admin";
-import { sourceReader } from "@/lib/testing/source-span";
 
 import {
   anchorId,
@@ -21,9 +17,7 @@ import {
   toAnchorColumns,
 } from "./anchor";
 import { enqueueNotificationSchema, recipientAdministersOrg } from "./enqueue";
-import { plantsOwedDigestQuery } from "./oversight-digest";
 import { oversightAudienceCondition } from "./oversight";
-import { recipientOrgOf } from "./oversight-relationship";
 import {
   notificationFeedQuery,
   orgNotificationFeedQuery,
@@ -511,8 +505,9 @@ test("the fan-out asks the same question the per-recipient gate does", () => {
   // digest sweep's "who is still owed a row", and `recipientAdministersOrg`,
   // which vets each recipient at enqueue time. They must not answer
   // differently: an audience WIDER than the gate produces plants that are
-  // forever owed a digest nobody can be written (the starvation below), and one
-  // NARROWER produces notifications nobody was told about.
+  // forever owed a digest nobody can be written (the starvation, asserted as
+  // SQL in `oversight-digest.test.ts`), and one NARROWER produces notifications
+  // nobody was told about.
   //
   // Asserted on the RENDERED SQL rather than on the source text of the audience
   // function. The previous version of this test sliced `oversight.ts` with a
@@ -586,224 +581,6 @@ test("the fan-out asks the same question the per-recipient gate does", () => {
   }
 });
 
-test("naming no org matches nobody, never everybody", () => {
-  // The `undefined` return is the whole safety of the builder's empty case: an
-  // `and()` whose only arm is undefined collapses to "every row in `users`".
-  assert.equal(
-    oversightAudienceCondition(users, {
-      sendingChurchId: null,
-      sendingNetworkId: null,
-    }),
-    undefined
-  );
-
-  // THE FAIL-OPEN, RENDERED. What "the caller turns undefined into no
-  // recipients" is protecting against, shown rather than asserted in prose: hand
-  // that `undefined` to `and()` — as the digest's clause 4 did — and drizzle
-  // DROPS the arm, so the correlated `exists (…)` keeps only "the rest" and is
-  // satisfied by every row in `users`. Every plant is then owed a digest
-  // forever, which is a worse version of the starvation this builder fixes.
-  const collapsed = db
-    .select({ id: users.id })
-    .from(users)
-    .where(
-      and(
-        oversightAudienceCondition(users, {
-          sendingChurchId: null,
-          sendingNetworkId: null,
-        }),
-        eq(users.role, "planter")
-      )
-    )
-    .toSQL();
-
-  assert.doesNotMatch(collapsed.sql, /sending_church_id|sending_network_id/);
-});
-
-test("the non-nullable call is STATICALLY SQL, so the digest cannot re-open the fail-open", () => {
-  // The compiler carries this one. Both refs below are columns, never null, so
-  // the builder's first overload applies and the annotation below type-checks —
-  // exactly the call `plantsOwedDigestQuery` makes. Make either ref nullable and
-  // `tsc` fails HERE and at the digest, instead of `and()` silently swallowing
-  // the audience at run time. `pnpm typecheck` is the assertion; this runtime
-  // check only pins that the value really is a rendered predicate.
-  const owedDigestRecipient = alias(users, "owed_digest_recipient");
-  const audience: SQL = oversightAudienceCondition(owedDigestRecipient, {
-    sendingChurchId: churches.sendingChurchId,
-    sendingNetworkId: churches.sendingNetworkId,
-  });
-
-  const { sql } = db
-    .select({ id: churches.id })
-    .from(churches)
-    .where(
-      exists(
-        db
-          .select({ one: rawSql`1` })
-          .from(users)
-          .where(audience)
-      )
-    )
-    .toSQL();
-
-  assert.match(sql.replace(/"/g, ""), /owed_digest_recipient\.role = \$\d+/);
-});
-
-test("each oversight FK column is named ONCE, in the pairing table", () => {
-  // FIX 2's structural half. The role was hoisted into `OVERSIGHT_ADMIN` while
-  // the FK stayed spelled per site — three hand-written `kind === "…" ? fkA :
-  // fkB` switches whose else-branch absorbs a new org kind in silence, beside a
-  // table whose comment claimed "a compile error at every reader". Half a
-  // pairing is a pairing written per site.
-  //
-  // Now every reader indexes or enumerates the table, so the column names
-  // appear only in the table itself (and in the `OversightOrgIds` shape they are
-  // the derived KEYS of, which is a type, not a branch).
-  //
-  // THE PROBE FILE IS IN THIS SWEEP TOO, and its absence was the hole the #411
-  // re-review found: the pairing was hoisted for three readers while FOUR more
-  // hand-written pairings survived in `oversight-relationship.ts` and
-  // `oversight.ts` — `RecipientOrg`, `invitationRelationship`,
-  // `auditRelationship` (with two org-kind literals of its own) and
-  // `networkAudience` — beside a `memory/` paragraph claiming every site read
-  // the table. A sweep that names two of the three files is how that happens.
-  const noComments = (code: string) =>
-    code.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
-
-  const read = (relative: string) =>
-    noComments(readFileSync(path.join(process.cwd(), relative), "utf8"));
-
-  const audience = read("src/lib/notifications/oversight.ts");
-  const gate = read("src/lib/notifications/enqueue.ts");
-  const probe = read("src/lib/notifications/oversight-relationship.ts");
-
-  // No reader names an oversight FK column or an oversight role literal.
-  for (const [label, code] of [
-    ["oversight.ts", audience],
-    ["enqueue.ts", gate],
-    ["oversight-relationship.ts", probe],
-  ] as const) {
-    assert.doesNotMatch(
-      code,
-      /table\.sendingChurchId|table\.sendingNetworkId|recipient\.sendingChurchId|recipient\.sendingNetworkId|org\.sendingChurchId|org\.sendingNetworkId/,
-      `${label} reaches an oversight FK through the pairing table, not by name`
-    );
-    assert.doesNotMatch(
-      code,
-      /"sending_church_admin"|"network_admin"/,
-      `${label} names no oversight role literal`
-    );
-  }
-
-  // The recorded-relationship probe is the strictest of the three: it holds no
-  // `users` FK name and no org-kind literal ANYWHERE, because its audit arm
-  // reads the kind off the pairing row's key for `association_events.org_type`.
-  assert.doesNotMatch(
-    probe,
-    /sendingChurchId|sendingNetworkId|"sending_church"|"network"/,
-    "oversight-relationship.ts writes no oversight FK name and no org-kind literal"
-  );
-
-  // The audience CONSTRUCTORS are table-built too. `{ sendingChurchId: null,
-  // sendingNetworkId: id }` written by hand is the same half-pairing wearing a
-  // constructor: it names one FK, nulls the other by hand, and a third org kind
-  // leaves it silently returning an audience missing a key. `oversightOrgOfKind`
-  // takes the KIND and lets the table pick the column, so no `: null` for
-  // another kind's FK is written anywhere in the module.
-  assert.doesNotMatch(
-    audience,
-    /sendingChurchId: null|sendingNetworkId: null/,
-    "oversight.ts builds an org audience from the pairing table, not from a hand-nulled literal"
-  );
-  assert.match(audience, /oversightOrgOfKind\(/);
-  assert.match(audience, /noOversightOrg\(\)/);
-
-  // And the gate has no ORG-KIND ternary left — that else-branch WAS the silent
-  // absorber. Spanned through the reader rather than grepped module-wide: the
-  // module legitimately discriminates `anchor.type === "church"` elsewhere (a
-  // plant is not an org), and a moved anchor THROWS instead of quietly matching
-  // nothing (`src/lib/testing/source-span.ts`).
-  const administersOrg = sourceReader(gate, "enqueue.ts").span(
-    "export function recipientAdministersOrg(",
-    "export const dbEnqueueDeps"
-  );
-  assert.doesNotMatch(administersOrg, /anchor\.type === /);
-  assert.match(administersOrg, /OVERSIGHT_ADMIN\[anchor\.type\]/);
-
-  // The pairing itself still says which role goes with which FK, in one place.
-  assert.deepEqual(OVERSIGHT_ADMIN, {
-    sending_church: { role: "sending_church_admin", fk: "sendingChurchId" },
-    network: { role: "network_admin", fk: "sendingNetworkId" },
-  });
-
-  // The table's ORDER is load-bearing: the SQL arms render in it and the
-  // bound-parameter assertions above read them positionally.
-  assert.deepEqual(Object.keys(OVERSIGHT_ADMIN), ["sending_church", "network"]);
-
-  // The tie to `OVERSIGHT_ROLES` — the flat list `@/lib/auth/access` owns — is
-  // asserted in `oversight-admin.test.ts` §1, in both directions.
-  assert.deepEqual(OVERSIGHT_ROLES, ["sending_church_admin", "network_admin"]);
-});
-
-test("the inverse lookup gives a role exactly its own org, table-driven", () => {
-  // `recipientOrgOf` is the third reader. It used to spell both column names in
-  // two ternaries; it now scans the pairing rows. The property is unchanged and
-  // is what the recorded-relationship probe rests on: a role contributes ONLY
-  // its own kind of org, so a cross-paired admin cannot reach through the other
-  // FK.
-  const carriesBoth = {
-    sendingChurchId: SENDING_CHURCH,
-    sendingNetworkId: NETWORK,
-  };
-
-  assert.deepEqual(recipientOrgOf({ ...carriesBoth, role: "planter" }), {
-    sendingChurchId: null,
-    sendingNetworkId: null,
-  });
-  assert.deepEqual(
-    recipientOrgOf({ ...carriesBoth, role: "sending_church_admin" }),
-    { sendingChurchId: SENDING_CHURCH, sendingNetworkId: null }
-  );
-  assert.deepEqual(recipientOrgOf({ ...carriesBoth, role: "network_admin" }), {
-    sendingChurchId: null,
-    sendingNetworkId: NETWORK,
-  });
-});
-
-test("the digest sweep's owed set is the SAME audience — a plant it cannot serve is never offered", () => {
-  // THE STARVATION, as SQL. `selectPlantsOwedDigest` offers a plant while any
-  // oversight recipient of it is missing that day's digest row, and a plant
-  // leaves the owed set ONLY by having one written. So a recipient the audience
-  // admits but `enqueue` refuses is a plant that is owed forever: re-digested on
-  // every one of the day's ~96 ticks and, the ordering being stable by id,
-  // holding its place at the head of the owed set — which is exactly the
-  // head-of-line block `runOversightDigestSweep`'s header records as fixed.
-  //
-  // Clause 4's audience was `or(fk, fk) and role in OVERSIGHT_ROLES` while the
-  // per-recipient gate paired them, so a `network_admin` carrying a stray
-  // `sending_church_id` was one such recipient.
-  const { sql } = plantsOwedDigestQuery({
-    dayKey: "2026-08-12",
-    window: {
-      from: new Date("2026-08-12T00:00:00.000Z"),
-      to: new Date("2026-08-13T00:00:00.000Z"),
-    },
-    limit: 25,
-    afterChurchId: null,
-  }).toSQL();
-
-  const normalised = sql.replace(/"/g, "");
-
-  assert.match(
-    normalised,
-    /owed_digest_recipient\.role = \$\d+ and owed_digest_recipient\.sending_church_id = churches\.sending_church_id/
-  );
-  assert.match(
-    normalised,
-    /owed_digest_recipient\.role = \$\d+ and owed_digest_recipient\.sending_network_id = churches\.sending_network_id/
-  );
-});
-
 test("an org-anchored notification that is not consent-exempt is refused", () => {
   // Fail-closed floor. There is no plant whose `share_activity_with_oversight`
   // could be read for an org-anchored row, so a category that REQUIRES sharing
@@ -870,70 +647,4 @@ test("the dedupe key carries the ANCHOR's id, so the two spaces cannot collide",
     oversightCode,
     /dedupeKey: `\$\{oversightMilestoneType\(facts\.kind\)\}:\$\{anchorId\(facts\.anchor\)\}/
   );
-});
-
-test("the anchorOrg parse FOLLOWS AssociationOrgType, it does not restate it", () => {
-  // #411 re-review, finding 1's code half. `anchorOrg.type` was
-  // `z.enum(["sending_church", "network"])` — a standalone literal list that
-  // merely HAPPENED to hold the same two strings as the schema's union. So a
-  // third kind of oversight org widened `AssociationOrgType`, widened
-  // `OrgAnchor` with it, and left this parse rejecting the new kind at RUNTIME
-  // with no compile error anywhere, while a docblock promised the opposite.
-  //
-  // Sourced from the tuple, the parse and the anchor union cannot disagree.
-  const enqueueCode = readFileSync(
-    path.join(process.cwd(), "src/lib/notifications/enqueue.ts"),
-    "utf8"
-  );
-  assert.match(enqueueCode, /type: z\.enum\(associationOrgTypes\)/);
-  assert.doesNotMatch(
-    enqueueCode,
-    /z\.enum\(\["sending_church", "network"\]\)/
-  );
-
-  // And the parse admits EXACTLY the union's members, asked of the schema
-  // rather than of the source: every declared org kind parses, and a string
-  // that is not one is refused.
-  for (const type of associationOrgTypes) {
-    const parsed = enqueueNotificationSchema.safeParse({
-      anchorOrg: { type, orgId: NETWORK },
-      recipientUserId: USER,
-      category: "milestones",
-      type: "oversight.milestone.joined_network",
-      title: "t",
-      body: "b",
-    });
-    assert.equal(parsed.success, true, `${type} must parse`);
-  }
-
-  assert.equal(
-    enqueueNotificationSchema.safeParse({
-      anchorOrg: { type: "diocese", orgId: NETWORK },
-      recipientUserId: USER,
-      category: "milestones",
-      type: "oversight.milestone.joined_network",
-      title: "t",
-      body: "b",
-    }).success,
-    false,
-    "a kind the union does not name is still refused"
-  );
-});
-
-test("anchorOf takes the OrgAnchor union, not its two fields respelled", () => {
-  // The other half of the same defect: `anchorOf`'s parameter spelled
-  // `{ type: "sending_church" | "network"; orgId: string }`, so it narrowed the
-  // parse's own output back down behind the schema and would have had to be
-  // edited by hand for a third kind. Typed as `OrgAnchor`, it widens with the
-  // union.
-  const enqueueCode = readFileSync(
-    path.join(process.cwd(), "src/lib/notifications/enqueue.ts"),
-    "utf8"
-  );
-  const anchorOfSource = sourceReader(enqueueCode, "enqueue.ts").span(
-    "function anchorOf(parsed: {",
-    "/**\n * Cancel-by-entity input."
-  );
-  assert.match(anchorOfSource, /anchorOrg\?: OrgAnchor;/);
-  assert.doesNotMatch(anchorOfSource, /"sending_church" \| "network"/);
 });

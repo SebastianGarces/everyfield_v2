@@ -143,6 +143,31 @@ test("each role contributes exactly its own kind of org, over the whole domain",
   }
 });
 
+test("the inverse lookup gives a role exactly its own org, table-driven", () => {
+  // `recipientOrgOf` is the third reader. It used to spell both column names in
+  // two ternaries; it now scans the pairing rows. The property is unchanged and
+  // is what the recorded-relationship probe rests on: a role contributes ONLY
+  // its own kind of org, so a cross-paired admin cannot reach through the other
+  // FK.
+  const carriesBoth = {
+    sendingChurchId: SENDING_CHURCH,
+    sendingNetworkId: NETWORK,
+  };
+
+  assert.deepEqual(recipientOrgOf({ ...carriesBoth, role: "planter" }), {
+    sendingChurchId: null,
+    sendingNetworkId: null,
+  });
+  assert.deepEqual(
+    recipientOrgOf({ ...carriesBoth, role: "sending_church_admin" }),
+    { sendingChurchId: SENDING_CHURCH, sendingNetworkId: null }
+  );
+  assert.deepEqual(recipientOrgOf({ ...carriesBoth, role: "network_admin" }), {
+    sendingChurchId: null,
+    sendingNetworkId: NETWORK,
+  });
+});
+
 test("a network admin carrying a foreign sending_church_id reaches no sending church", async () => {
   // The exact shape round 7 named. The recipient IS a network admin, they DO
   // carry a `sending_church_id`, and the plant's only recorded relationship is
