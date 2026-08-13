@@ -383,7 +383,8 @@ export async function getTaskCounts(
 ): Promise<TaskCounts> {
   const baseConditions = taskCountConditions(churchId, userId);
 
-  const today = new Date().toISOString().split("T")[0];
+  // The domain's one spelling of "today, as a calendar day in APP_TIME_ZONE".
+  const today = toCalendarDate(new Date());
 
   const parents = alias(tasks, "checklist_parent");
 

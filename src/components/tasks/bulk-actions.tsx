@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { toCalendarDate } from "@/lib/tasks/recurrence";
 import type { BulkTaskFailure, BulkTaskResult } from "@/lib/tasks/service";
 import { MAX_BULK_TASKS } from "@/lib/tasks/types";
 import { cn } from "@/lib/utils";
@@ -321,18 +322,22 @@ function reportOutcome(result: BulkTaskResult, verb: string) {
   });
 }
 
-function toDateInputValue(date: Date): string {
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  const day = `${date.getDate()}`.padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
+/**
+ * `"Today"`, `"Tomorrow"` and `"Next week"` as `YYYY-MM-DD`, counted in
+ * `APP_TIME_ZONE` — not in the browser's.
+ *
+ * These fill a `type="date"` input whose value becomes `tasks.due_date`, and
+ * every surface that later reads that column says which day it is in the app's
+ * zone. Built from `getFullYear()`/`getMonth()`/`getDate()` — the runtime's
+ * calendar — a planter far enough east could press "Today" and watch the row
+ * come back as "Due tomorrow" (`memory/invariants.md` → Date & Time Rendering).
+ * The whole feature is a click, so this never runs during a render and there is
+ * no hydration question here; the mismatch was with the rest of the product.
+ */
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 function offsetFromToday(days: number): string {
-  const date = new Date();
-  date.setHours(0, 0, 0, 0);
-  date.setDate(date.getDate() + days);
-  return toDateInputValue(date);
+  return toCalendarDate(new Date(Date.now() + days * MS_PER_DAY));
 }
 
 /**

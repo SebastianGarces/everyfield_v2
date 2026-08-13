@@ -12,6 +12,10 @@ import { and, eq, isNull, ne } from "drizzle-orm";
 import { eventBus } from "@/lib/events/event-bus";
 import { churchHasNoPlanter } from "@/lib/onboarding/leadership";
 
+import { toCalendarDate } from "./recurrence";
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
 // ============================================================================
 // Event Types
 // ============================================================================
@@ -252,9 +256,12 @@ export async function handleMeetingAttendanceFinalized(
       attendees.map((a) => [a.id, `${a.firstName} ${a.lastName}`])
     );
 
-    const followUpDueDate = new Date(now);
-    followUpDueDate.setDate(followUpDueDate.getDate() + 2);
-    const followUpDueDateStr = followUpDueDate.toISOString().split("T")[0];
+    // Whole UTC days, through the domain's one calendar-day helper: the
+    // generated task's `due_date` is read back by surfaces pinned to
+    // APP_TIME_ZONE, so the day it names has to be measured in the same one.
+    const followUpDueDateStr = toCalendarDate(
+      new Date(now.getTime() + 2 * MS_PER_DAY)
+    );
 
     for (const personId of attendeeIds) {
       const personName = attendeeMap.get(personId) ?? "Unknown";
@@ -289,9 +296,7 @@ export async function handleMeetingAttendanceFinalized(
   const meetingInfo = meeting[0];
   const meetingLabel = meetingInfo?.title ?? `Vision Meeting`;
 
-  const evalDueDate = new Date(now);
-  evalDueDate.setDate(evalDueDate.getDate() + 1);
-  const evalDueDateStr = evalDueDate.toISOString().split("T")[0];
+  const evalDueDateStr = toCalendarDate(new Date(now.getTime() + MS_PER_DAY));
 
   tasksToCreate.push({
     churchId,
