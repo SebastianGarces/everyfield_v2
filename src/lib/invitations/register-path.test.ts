@@ -510,8 +510,20 @@ test("no module still documents the admin's copy of the link as the recovery", (
 // re-exports both names", "every existing importer" were the three sentences
 // that justified the two doors. A module may still say it does NOT re-export —
 // which is what every leaf-adjacent comment in this domain now says.
+//
+// THE VERB CARRIES EVERY TENSE, and that is the class rather than one of its
+// instances (widened 2026-08-13, #411 review round 1). The founding sentence —
+// `register-path.ts`'s old header, "belongs one layer up in `./email.ts`, which
+// re-exports both names" — walked straight past a `re-exports?` needle the
+// moment a next implementer wrote it as "which re-exported both names", because
+// the literal alternatives cover only two other spellings. The OBJECT is what
+// keeps this narrow: every historical narration in the domain today says
+// "re-exported FROM", "re-export WAS/HERE", "re-exporting THESE",
+// "re-exports ARE", "RE-EXPORTS NEITHER" — none of those objects is in the
+// alternation, so describing a deleted door stays legal and claiming a live one
+// does not.
 const CLAIMS_A_SECOND_DOOR =
-  /\bre-exports?\s+(?:both|it|them|the\s+(?:window|spelling|names))|re-exported so a reader|every existing importer/i;
+  /\bre-export(?:s|ed|ing)?\s+(?:both|it|them|the\s+(?:window|spelling|names))|re-exported so a reader|every existing importer/i;
 
 // EVERY MODULE IN THE DOMAIN, which is what the rule actually claims — the same
 // move `DOMAIN_LEAVES`'s completeness rule makes one section up, applied to this
