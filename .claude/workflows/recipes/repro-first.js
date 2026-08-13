@@ -27,7 +27,9 @@ export const meta = {
 //                output, commits it. If it does not go red the recipe stops
 //                HERE and returns commits: [] — a repro that passes on the
 //                unfixed code proves the bug is elsewhere or the test is not
-//                testing it, and either way there is nothing to fix yet.
+//                testing it, and either way there is nothing to fix yet. That
+//                refusal is for attempt 1 ONLY; on a RETRY it becomes a warning
+//                and the attempt goes on (see the carve-out below phase 1).
 //   2. FIX     — fixes the CODE, given the red transcript verbatim, and is
 //                told not to edit the repro. Editing the assertion is the one
 //                cheat that turns this recipe back into implement-straight.
@@ -293,46 +295,73 @@ const refuse = (verdict, why) => ({
   ],
 });
 
-if (!repro)
-  return refuse(
-    "the repro agent died",
-    "the repro agent returned nothing, so the defect was never reproduced."
-  );
-
-const reproCommand = String(repro.reproCommand || "").trim();
-const redOutput = String(repro.redOutput || "").trim();
-const reproPaths = (repro.reproPaths || []).filter(Boolean);
-const reproCommits = (repro.commits || []).filter(Boolean);
-if (repro.deviations) warnings.push(repro.deviations);
+const reproReport = repro || {};
+const reproCommand = String(reproReport.reproCommand || "").trim();
+const redOutput = String(reproReport.redOutput || "").trim();
+const reproPaths = (reproReport.reproPaths || []).filter(Boolean);
+const reproCommits = (reproReport.commits || []).filter(Boolean);
+if (reproReport.deviations) warnings.push(reproReport.deviations);
 
 log(
-  `🔴 ${workstream.id} attempt ${attempt}: repro-first — repro ${repro.wentRed === true ? "went RED" : "did NOT go red"}${reproCommand ? ` (\`${reproCommand}\`)` : ""}`
+  `🔴 ${workstream.id} attempt ${attempt}: repro-first — repro ${reproReport.wentRed === true ? "went RED" : "did NOT go red"}${reproCommand ? ` (\`${reproCommand}\`)` : ""}`
 );
 
 // "Red" is a claim with three parts, and a claim missing any of them cannot be
-// re-run by the confirm agent — which makes the whole recipe unfalsifiable. All
-// three are refused the same way and each says which part was missing.
-if (repro.wentRed !== true)
-  return refuse(
-    "the repro never went red",
-    `the repro reported \`wentRed: false\` — it did not fail against the unfixed code${repro.summary ? ` (${repro.summary})` : ""}.`
+// re-run by the confirm agent — which makes the whole recipe unfalsifiable. The
+// checks run in order and the FIRST one that fires decides; each says which
+// part was missing, because the sentence is what the next attempt reads.
+const phaseOneFailure = !repro
+  ? [
+      "the repro agent died",
+      "the repro agent returned nothing, so the defect was never reproduced.",
+    ]
+  : reproReport.wentRed !== true
+    ? [
+        "the repro never went red",
+        `the repro reported \`wentRed: false\` — it did not fail against the unfixed code${reproReport.summary ? ` (${reproReport.summary})` : ""}.`,
+      ]
+    : !reproCommand
+      ? [
+          "the repro named no command",
+          "the repro claimed to go red but named no command to re-run, so nobody can show it going green.",
+        ]
+      : !redOutput
+        ? [
+            "the repro transcribed no failure",
+            "the repro claimed to go red but transcribed no failing output, so the red state is a claim with no evidence behind it.",
+          ]
+        : !reproCommits.length
+          ? [
+              "the repro was never committed",
+              "the repro claimed to go red but committed nothing, so there is no commit that holds the failing test and no anchor to check it was not edited later.",
+            ]
+          : null;
+
+// THE RETRY CARVE-OUT. On attempt 1 an unprovable red IS the recipe working:
+// nothing is known yet, and an implementer sent in behind a green repro fixes
+// the wrong thing. On a RETRY the situation is inverted — the scoped verifier
+// has already NAMED the failure, and a named failure is frequently not
+// test-shaped at all (a G5 deviation, a lint error, a G0 mis-report, or the
+// previous attempt's own `wentRed: false`). There is then nothing that can be
+// made to go red, the repro agent correctly says so, and refusing here would
+// spend the LAST attempt (MAX_ATTEMPTS is 2 for any wave without a risk:high
+// unit, and the branch is not reset between attempts) on a refusal instead of
+// on the one-file fix the verifier asked for — a regression against both
+// implement-straight and adversarial-implement, neither of which can refuse a
+// retry before the implementer has seen the retryBlock. So the retry falls
+// through to phase 2 carrying the named finding as its evidence, says in a
+// warning exactly what could not be reproduced, and claims NO red→green: this
+// is the same forgiveness the live-implementer path below already applies, for
+// the same reason — a refusal here dead-ends the track.
+if (phaseOneFailure && !isRetry) return refuse(...phaseOneFailure);
+
+const reproProven = phaseOneFailure === null;
+if (phaseOneFailure)
+  warnings.push(
+    `${phaseOneFailure[1]} This is a RETRY, so the attempt does NOT stop here: the verifier's finding is not test-shaped, and this attempt fixes it without a new repro. The named finding is the evidence in the repro's place, nothing claims a red→green this attempt did not show, and anything the repro agent committed is still on ${branch}.`
   );
-if (!reproCommand)
-  return refuse(
-    "the repro named no command",
-    "the repro claimed to go red but named no command to re-run, so nobody can show it going green."
-  );
-if (!redOutput)
-  return refuse(
-    "the repro transcribed no failure",
-    "the repro claimed to go red but transcribed no failing output, so the red state is a claim with no evidence behind it."
-  );
-if (!reproCommits.length)
-  return refuse(
-    "the repro was never committed",
-    "the repro claimed to go red but committed nothing, so there is no commit that holds the failing test and no anchor to check it was not edited later."
-  );
-if (!String(repro.redIsTheBug || "").trim())
+
+if (reproProven && !String(reproReport.redIsTheBug || "").trim())
   warnings.push(
     `the repro did not say why its failure is the defect rather than a broken harness (\`redIsTheBug\` was empty) — a missing import and an unset env var are red too, so treat the red transcript as unattributed: ${redOutput.slice(0, 400)}`
   );
@@ -342,7 +371,38 @@ if (!String(repro.redIsTheBug || "").trim())
 // fixing a failure somebody else observed, and a paraphrase of a stack trace is
 // where a defect turns back into a hunch. Prompt semantics are otherwise
 // preserved from implement-straight, so a unit reads the same brief.
+//
+// Under the retry carve-out there is no transcript to hand over, and the brief
+// must not pretend there is one — an implementer told "the defect is already
+// reproduced" over an empty repro goes looking for a failure nobody observed.
+// It gets the retryBlock (already prepended below) and the plain truth instead.
 // ---------------------------------------------------------------------------
+const reproBriefing = reproProven
+  ? `THE DEFECT IS ALREADY REPRODUCED, and it is committed on ${branch}. Another agent wrote it, ran it, and watched it fail:
+
+  repro command: ${reproCommand}
+  repro file(s): ${reproPaths.join(", ") || "(none named)"}
+
+What it printed when it failed, VERBATIM:
+---
+${redOutput}
+---
+${reproReport.redIsTheBug ? `\nWhy that failure is the defect and not a broken harness: ${reproReport.redIsTheBug}\n` : ""}
+Fix the CODE so that command goes green.
+
+- Run \`${reproCommand}\` yourself before you change anything, so you have seen it fail too.
+- Do NOT edit, weaken, skip or delete the repro. Changing the assertion until it passes is the one move this recipe exists to prevent, and a third agent re-runs the same command and diffs the repro file afterwards. If you believe the repro is genuinely wrong, say so in \`summary\` and leave it failing rather than editing it quietly.
+- Add whatever OTHER tests the unit needs. New tests are welcome; the repro is the one that must stay as written.
+- Re-run \`${reproCommand}\` when you are done, plus \`pnpm typecheck\` and \`pnpm lint\` in ${worktree}, and fix what you can.`
+  : `THERE IS NO REPRO THIS ATTEMPT — ${phaseOneFailure[1]} This is a RETRY, so the report at the top of this prompt is your evidence in its place: it NAMES the failure, and not every failure a verifier names is test-shaped (a file touched outside the declared set, a lint error, a gate that failed for a reason no test can hold).
+
+Fix exactly what that report names.
+
+- Read it first and fix the thing it names, not the thing you would have fixed. If it names a failure you CAN reproduce, reproduce it before you change code, and say so in \`summary\`.
+- Do not invent a failing test to justify the change, and do not weaken an existing one to make a gate pass. Add whatever tests the fix genuinely needs.
+- Anything the repro agent committed is already on ${branch} — check \`git -C ${worktree} log --oneline ${base}..${branch}\` before you start, and do not leave a half-written test behind.
+- Run \`pnpm typecheck\` and \`pnpm lint\` in ${worktree} when you are done, plus the tests covering the files you touched, and fix what you can.`;
+
 const impl = await agent(
   `${retryBlock ? `${retryBlock}\n\n` : ""}You are a ${workstream.lane} engineer. ${conventions}
 
@@ -355,22 +415,7 @@ ${unitBlocksRendered}
 Your declared files — stay inside them:
 ${declaredFileList}
 
-THE DEFECT IS ALREADY REPRODUCED, and it is committed on ${branch}. Another agent wrote it, ran it, and watched it fail:
-
-  repro command: ${reproCommand}
-  repro file(s): ${reproPaths.join(", ") || "(none named)"}
-
-What it printed when it failed, VERBATIM:
----
-${redOutput}
----
-${repro.redIsTheBug ? `\nWhy that failure is the defect and not a broken harness: ${repro.redIsTheBug}\n` : ""}
-Fix the CODE so that command goes green.
-
-- Run \`${reproCommand}\` yourself before you change anything, so you have seen it fail too.
-- Do NOT edit, weaken, skip or delete the repro. Changing the assertion until it passes is the one move this recipe exists to prevent, and a third agent re-runs the same command and diffs the repro file afterwards. If you believe the repro is genuinely wrong, say so in \`summary\` and leave it failing rather than editing it quietly.
-- Add whatever OTHER tests the unit needs. New tests are welcome; the repro is the one that must stay as written.
-- Re-run \`${reproCommand}\` when you are done, plus \`pnpm typecheck\` and \`pnpm lint\` in ${worktree}, and fix what you can.
+${reproBriefing}
 
 Commit to ${branch} (conventional commits). Do NOT push, do NOT open a PR, and do NOT merge anything — the loop integrates the workstreams and ships the track. Report every commit you made in \`commits\`, transcribed from \`git log --format=%H -n <count>\`. Return strictly the schema.`,
   {
@@ -387,11 +432,15 @@ Commit to ${branch} (conventional commits). Do NOT push, do NOT open a PR, and d
 // for the price of a full gate run — so this refuses like the paths above.
 if (!impl)
   return {
-    summary: `${workstream.id}: repro-first reproduced the defect but the implementer died on attempt ${attempt} — the branch carries a failing repro and no fix`,
+    summary: reproProven
+      ? `${workstream.id}: repro-first reproduced the defect but the implementer died on attempt ${attempt} — the branch carries a failing repro and no fix`
+      : `${workstream.id}: repro-first had no repro to hand over and the implementer died on attempt ${attempt} — nothing was fixed`,
     commits: [],
     warnings: [
       ...warnings,
-      `the implementer agent died after the repro went red — \`${reproCommand}\` is committed on ${branch} and still failing, so the next attempt starts from a proven repro rather than from nothing.`,
+      reproProven
+        ? `the implementer agent died after the repro went red — \`${reproCommand}\` is committed on ${branch} and still failing, so the next attempt starts from a proven repro rather than from nothing.`
+        : `the implementer agent died, and this attempt had no repro to hand it — the verifier's named finding is still unaddressed and still the whole evidence for the next attempt.`,
     ],
   };
 
@@ -415,16 +464,24 @@ const commits = [...implCommits, ...reproCommits];
 // and the scoped verifier's own G2-subset both say so.
 if (!implCommits.length)
   warnings.push(
-    `the implementer reported no commits of its own on top of the repro — if \`${reproCommand}\` is green below, the shas were under-reported; if it is red, this attempt carries a failing repro and no fix.`
+    reproProven
+      ? `the implementer reported no commits of its own on top of the repro — if \`${reproCommand}\` is green below, the shas were under-reported; if it is red, this attempt carries a failing repro and no fix.`
+      : `the implementer reported no commits of its own — with no repro to re-run, nothing here can tell an under-reported sha from an attempt that changed nothing, so the scoped verifier's own gates are the only answer.`
   );
 
 // ---------------------------------------------------------------------------
 // Phase 3 — the confirmation. A different agent, because "the fix works" is
 // exactly the claim a green-washed fix makes about itself. It runs one command
 // and transcribes what it printed; it writes nothing.
+//
+// Skipped when there is no command to re-run, which only the retry carve-out
+// can produce: an agent sent to run nothing has nothing to report, and a
+// skipped phase 3 is not a failed one — `greenConfirmed` is already false.
 // ---------------------------------------------------------------------------
-const confirm = await agent(
-  `You are confirming ONE thing about a bug fix on branch ${branch} in the worktree ${worktree}: that the repro which failed BEFORE the fix passes AFTER it, and that it is still the same repro.
+const confirm = !reproCommand
+  ? null
+  : await agent(
+      `You are confirming ONE thing about a bug fix on branch ${branch} in the worktree ${worktree}: that the repro which failed BEFORE the fix passes AFTER it, and that it is still the same repro.
 
 Run exactly this command in ${worktree}, verbatim, and transcribe what it prints:
 
@@ -441,13 +498,13 @@ ${redOutput}
 ---
 
 You MUST NOT write code, edit any file, commit, push, merge, or touch labels or issues. If the command cannot run, report \`ran: false\` with the reason in \`notes\` — do not repair the harness, and do not report the implementer's result as your own. Return strictly the schema.`,
-  {
-    label: `green:${workstream.id}#${attempt}`,
-    phase: "Verify",
-    agentType: "code-reviewer",
-    schema: CONFIRM_SCHEMA,
-  }
-);
+      {
+        label: `green:${workstream.id}#${attempt}`,
+        phase: "Verify",
+        agentType: "code-reviewer",
+        schema: CONFIRM_SCHEMA,
+      }
+    );
 
 // Green is established in exactly ONE place: a confirmation that ran, ran the
 // command it was given, and reported a pass with something to show for it.
@@ -456,7 +513,11 @@ You MUST NOT write code, edit any file, commit, push, merge, or touch labels or 
 let greenConfirmed = false;
 let ranADifferentCommand = false;
 
-if (!confirm) {
+if (!reproCommand) {
+  // Phase 3 was SKIPPED, not failed — there was never a command. The carve-out
+  // warning above already said so, and adding "nobody re-ran it" here would
+  // read as a dead confirmer.
+} else if (!confirm) {
   warnings.push(
     `the confirming agent died — \`${reproCommand}\` was never re-run by anybody but the implementer, so the fix goes to the gates unproven.`
   );
@@ -483,6 +544,12 @@ if (!confirm) {
   greenConfirmed = true;
 }
 
+// …and a green run is only ever HALF of red→green. Under the retry carve-out
+// there was no red, so a passing command proves the command passes and nothing
+// more; the recipe's whole claim is the ORDER, and it may not be asserted from
+// one end of it.
+if (!reproProven) greenConfirmed = false;
+
 // Orthogonal to green, and reported whether or not it is: a repro that changed
 // after it went red is no longer the test that failed.
 if (confirm && confirm.reproChanged === true)
@@ -490,22 +557,24 @@ if (confirm && confirm.reproChanged === true)
     `the repro was EDITED after the commit that made it red${confirm.reproChangeDiff ? ` — ${String(confirm.reproChangeDiff).slice(0, 800)}` : ""}. Read that diff before trusting the green run: weakening the assertion is how a red repro is made to pass without a fix.`
   );
 
-const verdict = greenConfirmed
-  ? confirm.reproChanged === true
-    ? "red→green confirmed, but the repro was edited after it went red"
-    : "red→green confirmed"
-  : ranADifferentCommand
-    ? "no green run — the confirmation ran a different command"
-    : confirm && confirm.ran === true && confirm.passed !== true
-      ? "STILL RED after the fix"
-      : "unconfirmed — nobody re-ran the repro after the fix";
+const verdict = !reproProven
+  ? "unconfirmed — no repro went red this attempt, so there is no red→green to show"
+  : greenConfirmed
+    ? confirm.reproChanged === true
+      ? "red→green confirmed, but the repro was edited after it went red"
+      : "red→green confirmed"
+    : ranADifferentCommand
+      ? "no green run — the confirmation ran a different command"
+      : confirm && confirm.ran === true && confirm.passed !== true
+        ? "STILL RED after the fix"
+        : "unconfirmed — nobody re-ran the repro after the fix";
 
 log(`🟢 ${workstream.id} attempt ${attempt}: repro-first — ${verdict}`);
 
 return {
   summary:
     `${impl.summary || `${workstream.id} implemented`} — repro-first: ${verdict}` +
-    ` (repro: \`${reproCommand}\`)`,
+    (reproCommand ? ` (repro: \`${reproCommand}\`)` : ""),
   commits,
   warnings,
   ...(isRetry

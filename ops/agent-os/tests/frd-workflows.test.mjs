@@ -3305,6 +3305,77 @@ test("a repro that never goes red refuses the attempt — no implementer is spen
   );
 });
 
+test("…but on a RETRY the same un-reproducible finding is FIXED, not refused", async () => {
+  // The refusal above is right for attempt 1 and terminal on attempt 2:
+  // MAX_ATTEMPTS is 2 for any wave without a risk:high unit, the branch is not
+  // reset between attempts, and a verifier finding that is not test-shaped (a
+  // G5 deviation, a G0, a lint error) has nothing that can be made to go red.
+  // Refusing there spends the last attempt on a refusal and blocks the
+  // workstream over a fix that implement-straight would have made in one file —
+  // and neither implement-straight nor adversarial-implement can refuse a retry
+  // before the implementer has seen the retryBlock.
+  const { result, calls } = await runRecipe(
+    "repro-first",
+    recipeArgs({
+      priorReport: { verdict: "FAIL", failingGate: "G5" },
+      retryBlock: `THE ROOT CAUSE IS BELOW\nG5: src/other.ts is outside the declared file set`,
+    }),
+    reproReply({ wentRed: false })
+  );
+  assert.notEqual(
+    order(calls, /^impl:/),
+    -1,
+    "the implementer MUST be spawned on the attempt that was supposed to fix the named finding"
+  );
+  assert.ok(
+    labelled(calls, /^impl:/)[0].prompt.startsWith("THE ROOT CAUSE IS BELOW"),
+    "and it fixes what the verifier named, since that report is the evidence standing in for the repro"
+  );
+  assert.ok(
+    result.commits.length > 0,
+    "commits: [] would fail the parent's empty-commits gate and exhaust the last attempt"
+  );
+  assert.ok(
+    result.warnings.some((w) => /not test-shaped/.test(w)),
+    "the carve-out names what could not be reproduced — it is a fix without a repro, not a proven red→green"
+  );
+  assert.ok(
+    result.warnings.some((w) => /wentRed: false/.test(w)),
+    "and still says which half of the claim was missing"
+  );
+  assert.match(
+    result.summary,
+    /unconfirmed — no repro went red/,
+    "nothing may read as a red→green this attempt did not show"
+  );
+});
+
+test("a retry with no repro command skips the confirmation instead of faking one", async () => {
+  const { result, calls } = await runRecipe(
+    "repro-first",
+    recipeArgs({
+      priorReport: { verdict: "FAIL", failingGate: "lint" },
+      retryBlock: "THE ROOT CAUSE IS BELOW\nlint: unused import",
+    }),
+    reproReply({ wentRed: false, reproCommand: "", redOutput: "" })
+  );
+  assert.notEqual(order(calls, /^impl:/), -1, "the fix still happens");
+  assert.equal(
+    order(calls, /^green:/),
+    -1,
+    "there is no command to re-run, and an agent sent to run nothing has nothing to report"
+  );
+  assert.ok(
+    !result.warnings.some((w) => /confirming agent died/.test(w)),
+    "a SKIPPED phase 3 is not a dead confirmer"
+  );
+  assert.match(result.summary, /unconfirmed — no repro went red/);
+  assert.ok(
+    !/repro: ``/.test(result.summary),
+    "and the summary names no empty repro command"
+  );
+});
+
 test("a red claim nobody can re-run is refused exactly like a green one", async () => {
   // "Red" is a claim with three parts. Missing any one of them and the
   // confirmation cannot happen at all, which makes the whole recipe

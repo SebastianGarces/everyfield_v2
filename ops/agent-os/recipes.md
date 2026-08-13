@@ -251,6 +251,23 @@ order structurally:
   — each is a red state nobody can re-run, which makes the whole recipe unfalsifiable. Anything the
   repro agent did commit stays on the branch, so the next attempt starts from it rather than from
   nothing.
+- **…ON ATTEMPT 1 ONLY. A RETRY never refuses in phase 1** — it warns and goes on to the fix. The
+  refusal above is right exactly while nothing is known yet; on a retry the scoped verifier has
+  already NAMED the failure, and a named failure is frequently not test-shaped at all (a G5
+  deviation, a G0, a lint error, or the previous attempt's own `wentRed: false`). There is then
+  nothing that can be made to go red, the repro agent correctly says so — and refusing would spend
+  the LAST attempt on a refusal, because `MAX_ATTEMPTS` is 2 for any wave without a `risk:high`
+  unit and the branch is not reset between attempts. The workstream would block over a fix that
+  `implement-straight` makes in one file, with the implementer never spawned on the attempt that
+  was supposed to make it. Neither `implement-straight` nor `adversarial-implement` can refuse a
+  retry before the implementer has seen the `retryBlock`, and this recipe must not either. So a
+  retry pushes a warning naming what could not be reproduced, hands the implementer the
+  `retryBlock` as the evidence standing in for the repro (its brief says plainly that there is no
+  repro — never that the defect is already reproduced), skips phase 3 when there is no command to
+  re-run, and forces `greenConfirmed` false: `verdict` reads "unconfirmed — no repro went red this
+  attempt", so nothing claims a red→green it did not show. It is the same forgiveness the
+  live-implementer-with-no-commits path gets one paragraph down, for the same reason — a refusal
+  there dead-ends the track.
 - **The implementer never marks its own homework.** "The repro passes now" is exactly the claim a
   green-washed fix makes about itself, so a third agent runs the command. Green is TRACKED, never
   inferred: only a confirmation that ran, ran the command it was GIVEN (normalised, then compared —
