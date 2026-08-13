@@ -15,7 +15,8 @@ import { wikiHref } from "./href";
 //    (`components/phase-engine/focus-presentation.ts` → `buildArticleLinks`) —
 //    this config is trusted verbatim: the provider fetches `slugs[0]` and the
 //    panel renders "Article not found" when the read layer returns 404
-//    (`wiki-guide-panel.tsx`). `getArticleBySlug` filters `status = "published"`,
+//    (`wiki-guide-panel.tsx`). `getArticle` reads through `articleBySlugQuery`,
+//    which filters `status = "published"`,
 //    so an unpublished article fails exactly like a missing one.
 //
 //    The published set lives in the database, and this harness is pure — no
@@ -31,7 +32,7 @@ import { wikiHref } from "./href";
 
 /**
  * The Launch Sunday list, verified published against the wiki read layer on
- * 2026-08-08 (`getAllPublishedArticles`, `status = "published"`, global
+ * 2026-08-08 (`visibleArticlesQuery(null)`, `status = "published"`, global
  * articles). Order is the panel's: `slugs[0]` is what opens by default.
  *
  * If you change `/launch` in the config, re-run that check and update this

@@ -42,77 +42,19 @@ export const getPublishedArticleRefs = cache(
   }
 );
 
-/**
- * Get a single article by slug
- * For global articles, churchId should be null
- */
-export async function getArticleBySlug(
-  slug: string,
-  churchId: string | null = null
-): Promise<WikiArticle | null> {
-  const conditions = churchId
-    ? and(eq(wikiArticles.slug, slug), eq(wikiArticles.churchId, churchId))
-    : and(eq(wikiArticles.slug, slug), isNull(wikiArticles.churchId));
-
-  const result = await db
-    .select()
-    .from(wikiArticles)
-    .where(and(conditions, eq(wikiArticles.status, "published")))
-    .limit(1);
-
-  return result[0] ?? null;
-}
-
-/**
- * Get all published articles (navigation, section indexes, search)
- * Returns only global articles (churchId = null)
- */
-export async function getAllPublishedArticles(): Promise<WikiArticle[]> {
-  return db
-    .select()
-    .from(wikiArticles)
-    .where(
-      and(isNull(wikiArticles.churchId), eq(wikiArticles.status, "published"))
-    )
-    .orderBy(asc(wikiArticles.sortOrder));
-}
-
-/**
- * Get articles by section
- */
-export async function getArticlesBySection(
-  sectionId: string
-): Promise<WikiArticle[]> {
-  return db
-    .select()
-    .from(wikiArticles)
-    .where(
-      and(
-        eq(wikiArticles.sectionId, sectionId),
-        eq(wikiArticles.status, "published")
-      )
-    )
-    .orderBy(asc(wikiArticles.sortOrder));
-}
-
-/**
- * Get articles by phase
- */
-export async function getArticlesByPhase(
-  phase: number
-): Promise<WikiArticle[]> {
-  return db
-    .select()
-    .from(wikiArticles)
-    .where(
-      and(
-        eq(wikiArticles.phase, phase),
-        eq(wikiArticles.status, "published"),
-        isNull(wikiArticles.churchId)
-      )
-    )
-    .orderBy(asc(wikiArticles.sortOrder));
-}
+// Four more article reads used to live here — `getArticleBySlug`,
+// `getAllPublishedArticles`, `getArticlesBySection`, `getArticlesByPhase`.
+// All four were dead repo-wide, and none carried the reader-facing tenancy
+// pair (`visibleToChurch` + `notOverriddenByChurch`); `getArticlesBySection`
+// had no church predicate at all. Left in place they were a barrel export that
+// handed the next caller a cross-tenant read, and they sat outside the
+// `readerFacingReads()` list in `tenancy.test.ts` that is supposed to cover
+// EVERY reader-facing read — so the test's name was broader than its reach.
+// Deleted with #411 rather than predicated, because nothing wanted them.
+//
+// A reader-facing article read belongs in `get-articles.ts`, where the three
+// predicates that must travel together are declared, and it must be added to
+// `readerFacingReads()` so the tenancy loop asserts it.
 
 // ============================================================================
 // Article Mutations

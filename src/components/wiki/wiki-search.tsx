@@ -218,20 +218,26 @@ export function WikiSearch({ open, onOpenChange }: WikiSearchProps) {
           shouldFilter={false}
           className="[&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group]]:px-2 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3"
         >
+          {/* The dialog's ONE live region. Unconditional, so a change of
+              outcome is a text change inside a region that is already there —
+              which is the only thing a screen reader announces. It sits here,
+              beside the listbox rather than inside it: cmdk gives
+              `CommandList` `role="listbox"`, and a listbox may own only
+              options and groups, so a `role="status"` child is an
+              `aria-required-children` violation and is liable to be pruned by
+              the very AT it exists to talk to. `Command` lives exactly as long
+              as `CommandList`, so the region is no less permanent here. The
+              arms inside the list below are purely visual. */}
+          <div role="status" className="sr-only">
+            {announcementFor(view)}
+          </div>
+
           <CommandInput
             placeholder="Search articles..."
             value={query}
             onValueChange={handleQueryChange}
           />
           <CommandList className="h-[300px] max-h-[300px]">
-            {/* The dialog's ONE live region. Unconditional, so a change of
-                outcome is a text change inside a region that is already there —
-                which is the only thing a screen reader announces. The arms
-                below are purely visual. */}
-            <div role="status" className="sr-only">
-              {announcementFor(view)}
-            </div>
-
             {/* Loading state */}
             {view.kind === "searching" && (
               <div className="text-muted-foreground flex h-full items-center justify-center text-sm">

@@ -289,22 +289,40 @@ test("the dialog has ONE live region, and it outlives every arm (#411)", () => {
   // all, which left the dialog with no live region once rows rendered. The
   // refusal message this whole path exists to make legible could therefore
   // never be announced.
+  //
+  // The span is the whole `<Command>` tree, not the `<CommandList>` subtree:
+  // cmdk renders `CommandList` as `role="listbox"`, which may own only options
+  // and groups, so the region belongs BESIDE the list. Spanning the root is
+  // what makes "exactly one" still mean one region in the dialog wherever it
+  // is placed, instead of one region in the listbox.
   const code = codeOf(DIALOG);
-  const list = sourceReader(code, "wiki-search.tsx").span(
-    "<CommandList",
-    "</CommandList>"
+  const command = sourceReader(code, "wiki-search.tsx").span(
+    "<Command",
+    "</Command>"
   );
 
-  const regions = list.match(/role="status"/g) ?? [];
+  const regions = command.match(/role="status"/g) ?? [];
   assert.equal(
     regions.length,
     1,
     "the dialog must hold exactly one live region: a per-arm region is mounted and unmounted rather than updated, so nothing is ever announced"
   );
 
+  // And it must not be inside the listbox: `CommandList` is `role="listbox"`,
+  // whose only allowed owned children are options and groups.
+  const list = sourceReader(code, "wiki-search.tsx").span(
+    "<CommandList",
+    "</CommandList>"
+  );
+  assert.doesNotMatch(
+    list,
+    /role="status"/,
+    'the live region is inside `CommandList`, which cmdk renders as `role="listbox"` — a listbox may own only options and groups, so the announcement is an aria-required-children violation and is liable to be pruned (#411)'
+  );
+
   // And that one region must be UNCONDITIONAL — a region rendered behind a
   // guard is the same mount/unmount failure with a smaller blast radius.
-  const region = sourceReader(list, "wiki-search.tsx").span(
+  const region = sourceReader(command, "wiki-search.tsx").span(
     '<div role="status"',
     "</div>"
   );
