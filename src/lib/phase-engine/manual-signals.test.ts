@@ -19,32 +19,41 @@ import { MANUAL_SIGNALS, MANUAL_SIGNAL_KEYS } from "./manual-signals";
 // getting them out of step is silent: rename a key and its gate reads `unknown`
 // forever while the planter keeps answering the switch.
 //
-// The clause half is now a compile error (`satisfies Record<ManualSignalKey,
-// string>` in fact-phrases.ts). These tests pin the other two.
+// The clause is the fourth string a signal owns and now sits in the same object
+// literal as the other three, so "this signal has no wording" is not a state the
+// vocabulary can be in. These tests pin what is still reachable: the keys, the
+// gates that measure them, the card that renders them, and the one boundary that
+// WRITES them.
 // ----------------------------------------------------------------------------
 
-test("the keys are distinct and non-empty", () => {
+test("the keys are distinct and every signal carries its four strings", () => {
   assert.ok(MANUAL_SIGNALS.length > 0);
   assert.equal(new Set(MANUAL_SIGNAL_KEYS).size, MANUAL_SIGNAL_KEYS.length);
   for (const signal of MANUAL_SIGNALS) {
     assert.ok(signal.key.trim().length > 0, "a signal key is never blank");
     assert.ok(signal.label.trim().length > 0);
     assert.ok(signal.description.trim().length > 0);
+    assert.equal(signal.clause, signal.clause.trim());
+    assert.ok(signal.clause.length > 0);
+
+    // NOT the deleted "reads back as a written clause" test, which could no
+    // longer fail once the clause moved into this table. This one fails if
+    // `fact-phrases.ts` ever grows a second clause table beside the vocabulary
+    // again — the drift a `satisfies Record<ManualSignalKey, string>` one module
+    // away could never catch.
+    assert.equal(
+      manualSignalClause(signal.key),
+      signal.clause,
+      `${signal.key} reads back as wording this table does not hold`
+    );
   }
 });
 
-test("every signal reads back as a written clause, never as its raw key", () => {
-  for (const key of MANUAL_SIGNAL_KEYS) {
-    const clause = manualSignalClause(key);
-    assert.notEqual(
-      clause,
-      key,
-      `${key} has no clause — a citation of it would print the ledger key`
-    );
-    assert.equal(clause, clause.trim());
-    assert.ok(clause.length > 0);
-  }
-});
+// The WRITE boundary — `setManualSignalSchema` is a `z.enum` over
+// `MANUAL_SIGNAL_KEYS` — is pinned once, where the schema lives:
+// `signals/attestation-service.test.ts`, "rejects a signal key outside the
+// closed vocabulary". It drives off this table, so a fifth signal is covered by
+// existing.
 
 test("every attested exit criterion names a signal the planter can answer", () => {
   const attested: string[] = [];

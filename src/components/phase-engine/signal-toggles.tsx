@@ -30,7 +30,7 @@ import { Switch } from "@/components/ui/switch";
 // with nothing failing.
 import {
   MANUAL_SIGNALS,
-  type ManualSignalDefinition,
+  type ManualSignal,
 } from "@/lib/phase-engine/manual-signals";
 
 interface SignalTogglesProps {
@@ -79,7 +79,7 @@ function SignalToggle({
   signal,
   attested,
 }: {
-  signal: ManualSignalDefinition;
+  signal: ManualSignal;
   attested: boolean;
 }) {
   const [isPending, startTransition] = useTransition();

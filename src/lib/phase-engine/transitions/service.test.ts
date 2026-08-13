@@ -19,6 +19,7 @@ import {
   transitionPhaseSchema,
   TRANSITION_KIND,
 } from "./service";
+import { assertBatchedWrites } from "@/lib/testing/db-atomicity";
 import { sourceReader } from "@/lib/testing/source-span";
 import type { PlantFactSnapshot } from "@/lib/phase-engine/signals";
 
@@ -642,25 +643,12 @@ test("transitionPhase writes the audit row and the phase move in one db.batch", 
     "export function declareInitialPhaseStatement("
   );
 
-  assert.match(
-    body,
-    /await db\.batch\(\[/,
-    "the two writes must be one Neon batched transaction — neon-http has no db.transaction"
-  );
-  assert.equal(
-    /await db\.transaction\(/.test(body),
-    false,
-    "db.transaction() throws at runtime on neon-http"
-  );
-
-  // The point of the batch is that there is no SECOND awaited write between the
-  // insert and the update. `buildFactSnapshot` is a read and stays above it.
-  const writes = body.match(/await db\s*\n?\s*\.(insert|update|delete)\b/g);
-  assert.equal(
-    writes,
-    null,
-    `every write belongs to the batch; found ${writes?.join(", ")}`
-  );
+  // ONE implementation of the three assertions (src/lib/testing/db-atomicity.ts)
+  // — this file and `signals/attestation-service.test.ts` shipped the same
+  // regexes twice, and a regex widened in one copy leaves the other checking a
+  // narrower rule on the module it guards. `buildFactSnapshot` is a READ and
+  // stays above the batch, which the helper allows on purpose.
+  assertBatchedWrites(body, "transitionPhase");
 });
 
 // ---------------------------------------------------------------------------

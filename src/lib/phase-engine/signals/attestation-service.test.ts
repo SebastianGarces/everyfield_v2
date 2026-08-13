@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 
+import { MANUAL_SIGNAL_KEYS } from "@/lib/phase-engine/manual-signals";
+import { assertBatchedWrites } from "@/lib/testing/db-atomicity";
 import { sourceReader } from "@/lib/testing/source-span";
 
 import { setManualSignalSchema } from "./attestation-service";
@@ -28,12 +30,17 @@ test("accepts a boolean toggle attestation", () => {
 
 test("accepts string and numeric attestation values", () => {
   assert.equal(
-    setManualSignalSchema.safeParse({ signalKey: "k", value: "in_place" })
-      .success,
+    setManualSignalSchema.safeParse({
+      signalKey: "financial_base_established",
+      value: "in_place",
+    }).success,
     true
   );
   assert.equal(
-    setManualSignalSchema.safeParse({ signalKey: "k", value: 3 }).success,
+    setManualSignalSchema.safeParse({
+      signalKey: "financial_base_established",
+      value: 3,
+    }).success,
     true
   );
 });
@@ -53,18 +60,34 @@ test("rejects an empty signal key", () => {
   );
 });
 
-test("rejects a signal key over 100 chars", () => {
-  assert.equal(
-    setManualSignalSchema.safeParse({ signalKey: "x".repeat(101), value: true })
-      .success,
-    false
-  );
+// The whole point of the enum. `setManualSignalAction` is a public POST
+// endpoint, and a key outside the vocabulary used to be stored, folded into the
+// next snapshot as an attested fact, and read back to the planter de-camelised
+// ("you confirmed systems testd") with no phase gate behind it.
+test("rejects a signal key outside the closed vocabulary", () => {
+  for (const key of ["systems_testd", "x".repeat(101), "__proto__", ""]) {
+    assert.equal(
+      setManualSignalSchema.safeParse({ signalKey: key, value: true }).success,
+      false,
+      `${JSON.stringify(key)} is not a manual signal and must not be writable`
+    );
+  }
+
+  // Every key the toggle card renders IS writable — the gate is the vocabulary,
+  // not a hand-written list that can fall behind it.
+  for (const key of MANUAL_SIGNAL_KEYS) {
+    assert.equal(
+      setManualSignalSchema.safeParse({ signalKey: key, value: true }).success,
+      true,
+      `${key} is a curated toggle and must be writable`
+    );
+  }
 });
 
 test("rejects a non-scalar value", () => {
   assert.equal(
     setManualSignalSchema.safeParse({
-      signalKey: "k",
+      signalKey: "values_documented",
       value: { nested: true },
     }).success,
     false
@@ -93,14 +116,7 @@ test("upsertManualSignal batches the upsert with the dirty mark", () => {
     "export async function listManualSignals("
   );
 
-  assert.match(body, /await db\.batch\(\[/);
-  assert.equal(/await db\.transaction\(/.test(body), false);
-  const writes = body.match(/await db\s*\n?\s*\.(insert|update|delete)\b/g);
-  assert.equal(
-    writes,
-    null,
-    `every write belongs to the batch; found ${writes?.join(", ")}`
-  );
+  assertBatchedWrites(body, "upsertManualSignal");
 
   // ONE definition of what "dirty" is, spread rather than re-typed. The old
   // hand-written `{ lastMaterialEventAt: now }` silently dropped `updated_at`,

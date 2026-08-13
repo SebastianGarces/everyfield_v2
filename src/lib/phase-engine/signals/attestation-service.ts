@@ -7,6 +7,9 @@ import { churches, plantSignals, type PlantSignal } from "@/db/schema";
 // left `updated_at` behind, which is exactly the drift `plantDirtyColumns`'s own
 // docblock exists to prevent.
 import { plantDirtyColumns } from "@/lib/phase-engine/dirty-handler";
+// The ONE manual-signal vocabulary. Import-free by design, so naming it here
+// drags nothing into a browser chunk.
+import { MANUAL_SIGNAL_KEYS } from "@/lib/phase-engine/manual-signals";
 
 // ----------------------------------------------------------------------------
 // Validation
@@ -16,13 +19,22 @@ import { plantDirtyColumns } from "@/lib/phase-engine/dirty-handler";
  * Validates a manual signal attestation. A self-attestation value is a boolean
  * toggle, a short string, or a number — stored as JSON in `plant_signals.value`.
  * Kept here (not in the "use server" action) so it is unit-testable.
+ *
+ * THE KEY IS THE CLOSED VOCABULARY, not any short string. This schema is the
+ * only gate in front of the only writer of `plant_signals.signal_key`, and its
+ * caller `setManualSignalAction` is an export of a `"use server"` module — a
+ * public POST endpoint reachable with no UI. While the key was free-form, the
+ * compiler bound all three READERS to `ManualSignalKey` and nothing bound the
+ * WRITER: `{signalKey: "systems_testd", value: true}` stored a row, the fact
+ * snapshot folded it in as an attested fact of the plant, and its citation
+ * de-camelised straight back to the planter as "you confirmed systems testd"
+ * with no gate behind it. `z.enum` over `MANUAL_SIGNAL_KEYS` is what makes that
+ * unreachable by input, as `ManualSignalKey` already made it unreachable by a
+ * developer mistake. `.trim()` stays (a stored key is compared byte for byte);
+ * the old min/max messages are gone with the free-form string they described.
  */
 export const setManualSignalSchema = z.object({
-  signalKey: z
-    .string()
-    .trim()
-    .min(1, "Signal key is required")
-    .max(100, "Signal key is too long"),
+  signalKey: z.string().trim().pipe(z.enum(MANUAL_SIGNAL_KEYS)),
   value: z.union([z.boolean(), z.string().max(1000), z.number()]),
 });
 
