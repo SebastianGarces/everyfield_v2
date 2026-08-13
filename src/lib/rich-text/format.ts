@@ -42,14 +42,59 @@ export function plainTextToHtml(text: string): string {
 }
 
 /**
+ * Give a run of sanitised text the block it needs to survive the NEXT pass
+ * through this door.
+ *
+ * Sanitising can legitimately end with no tag left: an author who types without
+ * formatting leaves a bare text node in the contentEditable, and a rejected
+ * `<a href="javascript:…">` is unwrapped down to its words. Both come back as
+ * escaped text — `Q &amp; A` — and escaped text is what `isHtmlFragment` calls
+ * plain text, so the next pass would escape the escapes: `Q &amp;amp; A`, and
+ * an inbox that reads `Q &amp; A`. Wrapping here keeps every value this door
+ * emits on the markup branch forever after, which is what makes the door
+ * idempotent rather than only nearly so.
+ */
+function asBlock(html: string): string {
+  if (html === "") return "";
+  return isHtmlFragment(html) ? html : `<p>${html}</p>`;
+}
+
+/**
+ * What the editor emits — its `innerHTML`, sanitised and given its block.
+ *
+ * The editor cannot hand out a tag-free value, and this is where that is made
+ * true. A contentEditable an author has only TYPED into holds a bare text node,
+ * so the sanitiser's answer is escaped text with no tag in it: `Q &amp; A`.
+ * Handed on as a value, that is indistinguishable from a legacy plain-text row,
+ * and `toRichTextHtml` would escape its escapes — `Q &amp;amp; A`, delivered to
+ * an inbox as `Q &amp; A`.
+ *
+ * The door below cannot fix that for us: telling "text the sanitiser escaped"
+ * from "text a planter typed into a textarea in 2025" is not a decidable
+ * question, and the only wrong answer is silent. So the rule is a contract
+ * instead — everything this product WRITES is markup, and the plain-text branch
+ * of the door exists only for rows written before it did.
+ *
+ * Not used for paste: that inserts a fragment at the caret and must stay
+ * inline, or pasting two words would break the author's paragraph in half.
+ */
+export function sanitizeEditorHtml(innerHtml: string): string {
+  return asBlock(sanitizeRichText(innerHtml));
+}
+
+/**
  * The one door into rich text. Markup is sanitised; anything else is treated
- * as the legacy plain text it is and converted. Safe to call twice — sanitised
- * HTML sanitises to itself.
+ * as the legacy plain text it is and converted.
+ *
+ * Idempotent: what comes out of this door goes back through it unchanged, on
+ * every surface — the editor loads it, the send path stores it, the readers
+ * render it, and each of those calls this. `cross-surface.test.ts` holds both
+ * features to it together.
  */
 export function toRichTextHtml(value: string | null | undefined): string {
   if (!value) return "";
   return isHtmlFragment(value)
-    ? sanitizeRichText(value)
+    ? asBlock(sanitizeRichText(value))
     : plainTextToHtml(value);
 }
 

@@ -7,6 +7,7 @@ import {
   isRichTextEmpty,
   plainTextToHtml,
   richTextToPlainText,
+  sanitizeEditorHtml,
   toRichTextHtml,
 } from "./format";
 
@@ -139,6 +140,46 @@ test("toRichTextHtml is idempotent over an innerHTML round trip", () => {
   const once = toRichTextHtml(BROWSER_SERIALISED);
   assert.equal(toRichTextHtml(once), once, once);
   assert.equal(toRichTextHtml(toRichTextHtml(once)), once, once);
+});
+
+test("an unformatted body round trips too — the editor emits a block", () => {
+  // The fixtures above all keep a `<p>`, and that is why this one got through:
+  // a contentEditable an author has only TYPED into holds a bare text node, so
+  // the innerHTML is escaped text with no tag in it at all. Emitted as-is it
+  // reads as legacy plain text on the next pass, its escapes get escaped —
+  // `Q &amp;amp; A` — and the planter reads `Q &amp; A` in their own inbox.
+  const typedInnerHtml = "Q &amp; A tonight &lt;3";
+  const emitted = sanitizeEditorHtml(typedInnerHtml);
+
+  assert.equal(emitted, "<p>Q &amp; A tonight &lt;3</p>");
+  assert.equal(toRichTextHtml(emitted), emitted, emitted);
+  assert.equal(richTextToPlainText(emitted), "Q & A tonight <3");
+});
+
+test("what the editor emits for markup is what the door would store", () => {
+  // One value, whichever way it is reached: the editor's emission and the
+  // door's answer may not be two different strings, or a body would change the
+  // first time it was saved without being edited.
+  for (const innerHtml of [
+    "<p>Hi <strong>Sarah</strong></p>",
+    "<div><ul><li>one</li></ul></div>",
+    "Q &amp; A tonight",
+    "",
+  ]) {
+    const emitted = sanitizeEditorHtml(innerHtml);
+    assert.equal(toRichTextHtml(emitted), emitted, innerHtml);
+  }
+});
+
+test("a body sanitised down to bare words still comes back as a block", () => {
+  // A rejected link is unwrapped to its text, which can leave the whole body
+  // tag-free. Same trap, reached from the hostile side rather than the typing
+  // side.
+  const once = toRichTextHtml(`<a href="javascript:alert(1)">Bob & Sue</a>`);
+
+  assert.equal(once, "<p>Bob &amp; Sue</p>");
+  assert.equal(toRichTextHtml(once), once, once);
+  assert.equal(richTextToPlainText(once), "Bob & Sue");
 });
 
 test("the rendered text is the text that was typed, after any pass count", () => {

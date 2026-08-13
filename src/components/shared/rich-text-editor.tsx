@@ -40,7 +40,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { isRichTextEmpty, toRichTextHtml } from "@/lib/rich-text/format";
+import {
+  isRichTextEmpty,
+  sanitizeEditorHtml,
+  toRichTextHtml,
+} from "@/lib/rich-text/format";
 import {
   escapeHtml,
   sanitizeRichText,
@@ -150,7 +154,11 @@ export function RichTextEditor({
   const emitChange = useCallback(() => {
     const el = editorRef.current;
     if (!el) return;
-    const html = sanitizeRichText(el.innerHTML);
+    // Block-normalised, not just sanitised: an author who has typed without
+    // touching the toolbar leaves a bare text node here, and a tag-free value
+    // reads as legacy plain text to every consumer downstream — which escapes
+    // it a second time. `sanitizeEditorHtml` is where that stops.
+    const html = sanitizeEditorHtml(el.innerHTML);
     lastEmittedRef.current = html;
     onChange(html);
   }, [onChange]);
