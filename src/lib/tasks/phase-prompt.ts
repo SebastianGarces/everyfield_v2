@@ -799,12 +799,12 @@ export interface PhaseTemplateImportDecision {
    */
   receipt: PhaseTemplatePartialReceipt | null;
   /**
-   * The transition to write the cookie fast path against, or `null` when
-   * nothing was answered and the prompt must stay up.
+   * The transition this press answered, or `null` when nothing was answered and
+   * the prompt must stay up.
    *
-   * It doubles as "something changed": an answered transition is exactly the
-   * case where `/tasks` has to be re-read — the prompt comes down and the list
-   * gained tasks — so the caller's `refresh()` hangs off this and no separate
+   * It means "something changed": an answered transition is exactly the case
+   * where `/tasks` has to be re-read — the prompt comes down and the list gained
+   * tasks — so the caller's `refresh()` hangs off this and no separate
    * revalidation directive exists. There WAS one, `PhasePromptRevalidation`,
    * built to let the partial case re-read nothing so its receipt would survive.
    * It could not work: setting a cookie re-renders the route by itself
@@ -812,6 +812,29 @@ export interface PhaseTemplateImportDecision {
    * answer always sets one.
    */
   answeredTransitionId: string | null;
+  /**
+   * The transition to write the browser fast path against, or `null` when this
+   * press must not write one. NOT the same field as `answeredTransitionId`, and
+   * the difference is a rule (`memory/invariants.md` → Tasks).
+   *
+   * THE COOKIE MAY ONLY EVER SUPPRESS A PROMPT THE ROW SUPPRESSES TOO. It is
+   * read without the row in `buildPhaseTemplatePrompt`, it lives for a YEAR, and
+   * there is no un-answer path — so a cookie minted against a row that then goes
+   * away hides the planter's prompt for good, with nothing imported.
+   *
+   * A row can go away: `acceptPhaseTemplatePrompt` RELEASES a claim whose import
+   * wrote nothing. So `already_answered` — a press that found somebody else's
+   * claim and wrote no row of its own — mints nothing. Two presses in the same
+   * millisecond is exactly how that happens: the loser reports
+   * `already_answered` while the winner's import throws before its first task
+   * and hands the claim back. The prompt is then genuinely unanswered, and the
+   * row says so; only a cookie could have disagreed.
+   *
+   * `imported` and `partial` both own the row they claimed and both KEEP it, so
+   * they mint. Those are also the two that must, because the cookie write is
+   * what re-renders the route that draws the receipt.
+   */
+  fastPathTransitionId: string | null;
 }
 
 /**
@@ -835,6 +858,7 @@ export function decidePhaseTemplateImportOutcome(
       outcome: { status: "nothing" },
       receipt: null,
       answeredTransitionId: null,
+      fastPathTransitionId: null,
     };
   }
 
@@ -854,6 +878,8 @@ export function decidePhaseTemplateImportOutcome(
         templateNames: result.templateNames,
       },
       answeredTransitionId: result.transitionId,
+      // The claim is KEPT, so this press owns a row nothing will take away.
+      fastPathTransitionId: result.transitionId,
     };
   }
 
@@ -863,6 +889,12 @@ export function decidePhaseTemplateImportOutcome(
     outcome: { status: "idle" },
     receipt: null,
     answeredTransitionId: result.transitionId,
+    // …but only `imported` WROTE the row it is reporting. An
+    // `already_answered` press is standing on somebody else's claim, and a
+    // claim whose import writes nothing is released — see
+    // `fastPathTransitionId`. It re-reads the route and lets the row decide.
+    fastPathTransitionId:
+      result.status === "already_answered" ? null : result.transitionId,
   };
 }
 

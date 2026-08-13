@@ -999,6 +999,74 @@ test("a second press is a success that created nothing", () => {
   );
 });
 
+test("a second press writes NO browser fast path — the row it found is not its own", () => {
+  // `memory/invariants.md` → Tasks: `PHASE_TEMPLATE_PROMPT_COOKIE` "may only
+  // ever suppress a prompt the row suppresses too — never restore one". That
+  // rule has exactly one way to break, and this is it.
+  //
+  // Two presses land in the same millisecond. The winner claims the answer row;
+  // the loser's `ON CONFLICT DO NOTHING` returns nothing and it reports
+  // `already_answered`. Then the winner's very first `importTaskTemplate`
+  // throws — nothing was created — so `acceptPhaseTemplatePrompt` RELEASES the
+  // claim and the row is deleted, which is the whole point of releasing it: the
+  // prompt is honestly unanswered and must come back.
+  //
+  // It comes back from the row. It does not come back through a cookie, and the
+  // cookie lives for a YEAR with no un-answer path — so a fast path minted here
+  // would hide the planter's prompt permanently, in the one browser that
+  // pressed, with nothing imported. The loser therefore re-reads the route and
+  // lets the row answer.
+  const decision = decidePhaseTemplateImportOutcome({
+    status: "already_answered",
+    transitionId: TRANSITION_ID,
+  });
+
+  assert.equal(
+    decision.fastPathTransitionId,
+    null,
+    "a press that wrote no row minted a year-long cookie against somebody else's claim — which a released claim turns into a prompt suppressed with nothing behind it"
+  );
+  assert.equal(
+    decision.answeredTransitionId,
+    TRANSITION_ID,
+    "the route must still be re-read: if the row IS durable the prompt comes down from it"
+  );
+});
+
+test("only a press that KEEPS its claim mints the fast path", () => {
+  // The other side of the rule. `imported` and `partial` both hold the claim
+  // they wrote and neither is ever released, so the cookie they mint can only
+  // agree with the row. `partial` must mint one for a second reason: the cookie
+  // write is what re-renders the route that draws its receipt.
+  const imported = decidePhaseTemplateImportOutcome({
+    status: "imported",
+    transitionId: TRANSITION_ID,
+    importedOn: "2026-03-02",
+    createdCount: 22,
+    templateNames: ["Ministry Team Setup"],
+  });
+  assert.equal(imported.fastPathTransitionId, TRANSITION_ID);
+
+  const partial = decidePhaseTemplateImportOutcome({
+    status: "partial",
+    transitionId: TRANSITION_ID,
+    importedOn: "2026-03-02",
+    createdCount: 9,
+    templateNames: ["Ministry Team Setup"],
+  });
+  assert.equal(
+    partial.fastPathTransitionId,
+    TRANSITION_ID,
+    "a part-way import keeps its claim, and the cookie write is what re-renders the route its receipt is drawn on"
+  );
+
+  // Nothing answered, nothing minted.
+  assert.equal(
+    decidePhaseTemplateImportOutcome(null).fastPathTransitionId,
+    null
+  );
+});
+
 test("declining decides the same way, from a transition id or its absence", () => {
   const landed = decidePhaseTemplateDismissOutcome(TRANSITION_ID);
   assert.deepEqual(landed.outcome, { status: "idle" });
@@ -1028,12 +1096,28 @@ test("the action performs the decision rather than re-deciding it", () => {
   // is what triggers the re-render that reads the receipt.
   const receiptWrite = action.indexOf("markPartialImportReceipt(decision");
   const answerWrite = action.indexOf(
-    "markPromptAnswered(decision.answeredTransitionId)"
+    "markPromptAnswered(decision.fastPathTransitionId)"
   );
   assert.ok(receiptWrite > 0, "the partial receipt is never written anywhere");
   assert.ok(
+    answerWrite > 0,
+    "the import action no longer mints the fast path from `fastPathTransitionId` — if it went back to `answeredTransitionId`, `already_answered` mints a cookie against a claim that may be released"
+  );
+  assert.ok(
     receiptWrite < answerWrite,
     "the answer cookie is set before the receipt, so the re-render it causes can read a receipt that is not there yet"
+  );
+
+  // The two fields are not interchangeable, and the import action must not
+  // collapse them back: `refresh()` hangs off `answeredTransitionId` (the route
+  // changed), the cookie off `fastPathTransitionId` (this press owns the row).
+  assert.equal(
+    (
+      action.match(/markPromptAnswered\(decision\.answeredTransitionId\)/g) ??
+      []
+    ).length,
+    1,
+    "the import action is minting the fast path from the answered id again — only the dismiss action may, because a decline writes the row it reports"
   );
 
   // `revalidatePath` is for OTHER pages (`memory/contracts/data-patterns.md`).
@@ -1374,6 +1458,40 @@ test("the panel keeps its accessible name in BOTH of its bodies", () => {
   assert.ok(
     renderReceipt(9, ["Ministry Team Setup"]).includes(`id="${named}"`),
     "the receipt drops the id the section is named by, so the landmark loses its accessible name exactly when it replaces the body"
+  );
+});
+
+test("both bodies wear ONE panel chrome, written once", () => {
+  // The test above states a rule the two bodies must both obey. A rule that two
+  // copies of the same markup must stay identical is a rule one edit breaks
+  // silently, so the `<section>` — its `aria-labelledby`, its `data-testid` and
+  // its card styling — is written in a single wrapper and neither body owns it.
+  const opening = (html: string) => /<section[^>]*>/.exec(html)?.[0];
+
+  const asking = opening(render());
+  const reporting = opening(renderReceipt(9, ["Ministry Team Setup"]));
+
+  assert.ok(asking, "the asking body renders no section landmark");
+  assert.equal(
+    reporting,
+    asking,
+    "the two bodies' landmark chrome has drifted apart — they are copies again"
+  );
+
+  const source = readFileSync(
+    path.join(process.cwd(), "src/components/tasks/phase-template-prompt.tsx"),
+    "utf8"
+  );
+  // JSX openings only — the surrounding prose names the element too.
+  assert.equal(
+    (source.match(/^\s*<section\b/gm) ?? []).length,
+    1,
+    "the panel chrome is written more than once, which is how the two bodies drift"
+  );
+  assert.equal(
+    (source.match(/data-testid="phase-template-prompt"/g) ?? []).length,
+    1,
+    "the panel's test seam is declared in more than one place"
   );
 });
 

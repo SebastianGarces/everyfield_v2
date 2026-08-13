@@ -1,6 +1,7 @@
 import { refresh } from "next/cache";
 import { cookies } from "next/headers";
 import Link from "next/link";
+import type { ReactNode } from "react";
 
 import {
   ClearReceiptCookie,
@@ -116,6 +117,32 @@ import {
  * server. Nothing crosses that boundary now but the two action references.
  */
 export const PHASE_TEMPLATE_PROMPT_HEADING_ID = "phase-template-prompt-heading";
+
+/**
+ * The panel's landmark chrome, written ONCE for the two bodies that wear it.
+ *
+ * The comment above says the landmark has to keep its name in both bodies, and
+ * a rule that two copies must stay identical is a rule one edit can break. So
+ * the `<section>` — its `aria-labelledby`, its `data-testid` and its card
+ * styling — exists here and nowhere else; asking and reporting differ only in
+ * what they put inside it. `phase-template-prompt.test.ts` pins that: the file
+ * carries exactly one section opening and one `data-testid`, and the two bodies
+ * serialize the same opening tag.
+ *
+ * Not exported. Nothing outside this file renders the panel, and the two
+ * bodies that do are exported themselves.
+ */
+function PhaseTemplatePromptPanel({ children }: { children: ReactNode }) {
+  return (
+    <section
+      aria-labelledby={PHASE_TEMPLATE_PROMPT_HEADING_ID}
+      data-testid="phase-template-prompt"
+      className="border-border bg-card space-y-4 rounded-md border p-4 shadow-sm"
+    >
+      {children}
+    </section>
+  );
+}
 
 /** Said where the press happens: this creates work, and only what is ticked. */
 const PROMPT_NOTE =
@@ -289,8 +316,16 @@ async function importPhaseTemplatesAction(
       await markPartialImportReceipt(decision.receipt);
     }
 
+    // A SEPARATE TEST FROM `answeredTransitionId`, deliberately. The fast-path
+    // cookie may only ever suppress a prompt the ROW suppresses too
+    // (`memory/invariants.md` → Tasks), so only a press holding a claim it
+    // keeps writes one — `imported` and `partial`, never `already_answered`,
+    // whose row belongs to a concurrent press that may still release it.
+    if (decision.fastPathTransitionId) {
+      await markPromptAnswered(decision.fastPathTransitionId);
+    }
+
     if (decision.answeredTransitionId) {
-      await markPromptAnswered(decision.answeredTransitionId);
       // An answered transition is exactly the case where `/tasks` changed: the
       // prompt comes down and the list gained tasks. `refresh()` and nothing
       // else — the planter is ON the affected route, which is what
@@ -447,11 +482,7 @@ export function PhaseTemplatePartialReceiptView({
   receipt: PhaseTemplatePartialReceipt;
 }) {
   return (
-    <section
-      aria-labelledby={PHASE_TEMPLATE_PROMPT_HEADING_ID}
-      data-testid="phase-template-prompt"
-      className="border-border bg-card space-y-4 rounded-md border p-4 shadow-sm"
-    >
+    <PhaseTemplatePromptPanel>
       <div
         data-testid="prompt-partial"
         role="alert"
@@ -472,7 +503,7 @@ export function PhaseTemplatePartialReceiptView({
         </p>
       </div>
       <ClearReceiptCookie name={PHASE_TEMPLATE_RECEIPT_COOKIE} />
-    </section>
+    </PhaseTemplatePromptPanel>
   );
 }
 
@@ -504,11 +535,7 @@ export function PhaseTemplatePromptView({
   dismissAction,
 }: PhaseTemplatePromptViewProps) {
   return (
-    <section
-      aria-labelledby={PHASE_TEMPLATE_PROMPT_HEADING_ID}
-      data-testid="phase-template-prompt"
-      className="border-border bg-card space-y-4 rounded-md border p-4 shadow-sm"
-    >
+    <PhaseTemplatePromptPanel>
       {/*
         `data-testid` is a TEST SEAM, not styling. The structural tests assert
         that the lead stays two paragraphs and that both standing notes sit in
@@ -605,7 +632,7 @@ export function PhaseTemplatePromptView({
           <p>{DISMISS_NOTE}</p>
         </div>
       </PhaseTemplatePromptForm>
-    </section>
+    </PhaseTemplatePromptPanel>
   );
 }
 
