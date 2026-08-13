@@ -12,9 +12,11 @@ import {
   STATUS_BADGE_CONFIG,
   STATUS_DESCRIPTIONS,
 } from "@/lib/people/status-colors";
+import { PROTO_429_BADGE_CLASSES } from "@/lib/people/status-colors.proto429";
 import type { PersonStatus } from "@/lib/people/types";
 import { cn } from "@/lib/utils";
 import { Info, Rocket, Star } from "lucide-react";
+import { Proto429StatusDot } from "./proto-429-status-dot";
 
 interface PersonStatusCardProps {
   status: PersonStatus;
@@ -45,7 +47,11 @@ export function PersonStatusCard({ status }: PersonStatusCardProps) {
         </TooltipProvider>
       </CardHeader>
       <CardContent className="pt-2">
-        <Badge variant={config.variant} className={cn(config.className)}>
+        <Badge
+          variant={config.variant}
+          className={cn(config.className, PROTO_429_BADGE_CLASSES[status])}
+        >
+          <Proto429StatusDot status={status} />
           {config.icon && STATUS_ICONS[config.icon]}
           {config.label}
         </Badge>

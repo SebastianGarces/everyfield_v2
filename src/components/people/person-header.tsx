@@ -25,6 +25,7 @@ import {
 import type { Household } from "@/db/schema";
 import { formatDateWithoutWeekday } from "@/lib/datetime";
 import { STATUS_BADGE_CONFIG } from "@/lib/people/status-colors";
+import { PROTO_429_BADGE_CLASSES } from "@/lib/people/status-colors.proto429";
 import type { Person, PersonStatus } from "@/lib/people/types";
 import { cn } from "@/lib/utils";
 import {
@@ -37,6 +38,7 @@ import {
   Trash,
 } from "lucide-react";
 import { useState } from "react";
+import { Proto429StatusDot } from "./proto-429-status-dot";
 import { StatusChangeModal } from "./status-change-modal";
 
 interface PersonHeaderProps {
@@ -66,7 +68,14 @@ export function PersonHeader({
   const config = STATUS_BADGE_CONFIG[person.status as PersonStatus];
 
   const statusBadge = config ? (
-    <Badge variant={config.variant} className={cn(config.className)}>
+    <Badge
+      variant={config.variant}
+      className={cn(
+        config.className,
+        PROTO_429_BADGE_CLASSES[person.status as PersonStatus]
+      )}
+    >
+      <Proto429StatusDot status={person.status as PersonStatus} />
       {config.icon && STATUS_ICONS[config.icon]}
       {config.label}
     </Badge>

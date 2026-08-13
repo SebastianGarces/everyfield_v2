@@ -6,8 +6,10 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { formatDateWithoutWeekday } from "@/lib/datetime";
 import { STATUS_BADGE_CONFIG } from "@/lib/people/status-colors";
+import { PROTO_429_BADGE_CLASSES } from "@/lib/people/status-colors.proto429";
 import { Person, PersonStatus, Tag } from "@/lib/people/types";
 import { cn } from "@/lib/utils";
+import { Proto429StatusDot } from "./proto-429-status-dot";
 import { TagList } from "./tag-list";
 
 interface PersonCardProps {
@@ -53,8 +55,13 @@ export function PersonCard({ person, linkStatic }: PersonCardProps) {
             </h3>
             <Badge
               variant={config?.variant ?? "secondary"}
-              className={cn("shrink-0", config?.className)}
+              className={cn(
+                "shrink-0",
+                config?.className,
+                PROTO_429_BADGE_CLASSES[person.status as PersonStatus]
+              )}
             >
+              <Proto429StatusDot status={person.status as PersonStatus} />
               {config?.icon && STATUS_ICONS[config.icon]}
               {config?.label ?? person.status}
             </Badge>
