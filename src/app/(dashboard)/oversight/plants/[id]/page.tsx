@@ -15,15 +15,15 @@
 // ============================================================================
 
 import type { Metadata } from "next";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 
 import { HeaderBreadcrumbs } from "@/components/header";
 import { PlantDetail } from "@/components/oversight/plant-detail";
-import { getCurrentSession } from "@/lib/auth";
 import { oversightOrgOfUser } from "@/lib/invitations/core";
 import { getAssociationHistoryForOrg } from "@/lib/invitations/history";
-import { scopeLabelForRole } from "@/lib/oversight/presentation";
+import { scopeLabelForRole } from "@/lib/oversight/org-label";
 import { getOversightPlantDetail } from "@/lib/oversight/read";
+import { requireOversightUser } from "@/lib/oversight/session";
 
 export const metadata: Metadata = {
   // Static on purpose: a title generated from the plant's name would need a
@@ -39,15 +39,8 @@ interface OversightPlantPageProps {
 export default async function OversightPlantPage({
   params,
 }: OversightPlantPageProps) {
-  const { user } = await getCurrentSession();
-
-  if (!user) {
-    redirect("/login");
-  }
-
-  if (user.role !== "sending_church_admin" && user.role !== "network_admin") {
-    redirect("/dashboard");
-  }
+  // Oversight-only surface — one guard, shared by every /oversight route.
+  const user = await requireOversightUser();
 
   const { id } = await params;
   const detail = await getOversightPlantDetail(user, id);

@@ -52,19 +52,40 @@ function readCode(file: string): string {
 }
 
 /**
+ * Components in `src/components/oversight/` that the identity scan does NOT
+ * cover, each with the reason it is out.
+ *
+ * NAMED, not filtered by prefix. This used to be `name.startsWith("plant")`,
+ * which is a guess about what a file is called standing in for a statement
+ * about what it does — and it silently dropped `association-history.tsx` and
+ * `remove-plant-dialog.tsx`, both of which render on `/oversight/plants/[id]`,
+ * out of the aggregates-only scan the moment they were added. An exemption
+ * that is a naming convention is an exemption anybody can take by accident.
+ */
+const EXEMPT_COMPONENTS: Record<string, string> = {
+  // #23's surface, and it DOES render an email address — the one the admin
+  // typed into the invite form, which is the invitation's own subject and not a
+  // record from any plant's people pipeline.
+  "invitation-create-form.tsx": "renders the invitation's own invitee address",
+  "invitations-list.tsx": "renders the invitation's own invitee address",
+  // OV-009's surface, scanned by its own suite (`sending-churches.test.ts`)
+  // against a STRICTER list — it may not name an invitee address either.
+  "sending-churches-roster.tsx": "scanned by sending-churches.test.ts",
+};
+
+/**
  * Every file this unit owns.
  *
- * The two invitation components in `src/components/oversight/` are excluded
- * deliberately: they belong to #23 and they DO render an email address — the
- * one the admin typed into the invite form, which is the invitation's own
- * subject and not a record from any plant's people pipeline.
+ * The component directory is WALKED and then filtered by the named exemptions
+ * above, so a new component joins the scan by existing. The exempt set is
+ * asserted EXACTLY below, so it cannot become a hiding place.
  */
 function ownedFiles(): string[] {
   const lib = readdirSync(LIB_DIR)
     .filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts"))
     .map((name) => path.join(LIB_DIR, name));
   const components = readdirSync(COMPONENT_DIR)
-    .filter((name) => name.startsWith("plant"))
+    .filter((name) => !(name in EXEMPT_COMPONENTS))
     .map((name) => path.join(COMPONENT_DIR, name));
   const pages = [
     path.join(PAGE_DIR, "page.tsx"),
@@ -72,6 +93,27 @@ function ownedFiles(): string[] {
   ];
   return [...lib, ...components, ...pages];
 }
+
+test("the component exemptions are named, not inferred from a filename", () => {
+  const present = readdirSync(COMPONENT_DIR);
+  // Every exemption still refers to a file that exists — a stale entry silently
+  // exempts nothing and hides that the reason has gone.
+  for (const name of Object.keys(EXEMPT_COMPONENTS)) {
+    assert.ok(
+      present.includes(name),
+      `${name} is exempted but no longer exists — drop the exemption`
+    );
+  }
+  // …and every component that is NOT exempt is scanned. This is the half the
+  // old `startsWith("plant")` filter got wrong.
+  const scanned = ownedFiles().map((file) => path.basename(file));
+  for (const name of present) {
+    assert.ok(
+      name in EXEMPT_COMPONENTS || scanned.includes(name),
+      `${name} is neither scanned nor named in EXEMPT_COMPONENTS`
+    );
+  }
+});
 
 // ----------------------------------------------------------------------------
 // Aggregates only (memory/invariants.md → Hierarchical Access Control)
@@ -162,8 +204,14 @@ test("a plant id is checked against the caller's own list before any query", () 
 
   const body = source.slice(detailAt);
   const membershipAt = body.indexOf("accessibleIds.includes(churchId)");
-  const firstReadAt = body.indexOf("listOversightPlants(user, asOf)");
+  const firstReadAt = body.indexOf(
+    "buildPlantSummaries(user, [churchId], asOf)"
+  );
   assert.ok(membershipAt > 0, "the detail read does not check membership");
+  assert.ok(
+    firstReadAt > 0,
+    "the detail read no longer builds its summary the way this test expects"
+  );
   assert.ok(
     membershipAt < firstReadAt,
     "the plant id reaches a query before it is checked against the caller's list"
@@ -173,6 +221,35 @@ test("a plant id is checked against the caller's own list before any query", () 
     body,
     /accessibleIds\.includes\(churchId\)\)\s*return null;/,
     "a failed membership check must return null, not a partial plant"
+  );
+});
+
+test("one plant's page reads one plant, not the whole portfolio", () => {
+  // The header is built by the same code path as the directory row — that part
+  // is deliberate — but it used to get there by calling `listOversightPlants`
+  // and discarding every row but one, which is five queries over every plant in
+  // the org on every detail page load, growing with the org.
+  const source = read(path.join(LIB_DIR, "read.ts"));
+  const detailAt = source.indexOf(
+    "export async function getOversightPlantDetail"
+  );
+  assert.ok(detailAt > 0);
+  const body = source.slice(detailAt);
+
+  assert.ok(
+    !body.includes("listOversightPlants("),
+    "the detail read builds the org's entire roster to render one plant"
+  );
+  // The shared builder takes the ids it is given, so it cannot widen its own
+  // scope: the membership check above is what makes the one id safe.
+  assert.match(
+    source,
+    /async function buildPlantSummaries\(\s*user: User,\s*churchIds: string\[\],/,
+    "the shared summary builder no longer takes its church ids as an argument"
+  );
+  assert.ok(
+    !/export async function buildPlantSummaries/.test(source),
+    "the summary builder is exported — it is not an authority boundary and must stay private"
   );
 });
 
@@ -186,18 +263,31 @@ test("the detail page turns a refusal into a 404, not a message", () => {
 // ----------------------------------------------------------------------------
 
 test("both plants routes are oversight-only", () => {
+  // The rule itself lives in `@/lib/oversight/session` now — one copy for all
+  // six routes, with `session.test.ts` asserting that no page re-spells it and
+  // that both refusals (/login, /dashboard) are still distinct. What these two
+  // pages owe is that they go through it before anything else runs.
   for (const file of [
     path.join(PAGE_DIR, "page.tsx"),
     path.join(PAGE_DIR, "[id]", "page.tsx"),
   ]) {
-    const source = read(file);
-    assert.match(
-      source,
-      /user\.role !== "sending_church_admin" && user\.role !== "network_admin"/,
+    const source = readCode(file);
+    const guardAt = source.indexOf("await requireOversightUser()");
+    assert.ok(
+      guardAt > 0,
       `${path.relative(ROOT, file)} does not guard the oversight roles`
     );
-    assert.match(source, /redirect\("\/dashboard"\)/);
-    assert.match(source, /redirect\("\/login"\)/);
+    const firstReadAt = source.indexOf("await listOversightPlants");
+    const firstDetailAt = source.indexOf("await getOversightPlantDetail");
+    const readAt = Math.max(firstReadAt, firstDetailAt);
+    assert.ok(
+      readAt > 0,
+      `${path.relative(ROOT, file)} no longer reads what this test expects`
+    );
+    assert.ok(
+      guardAt < readAt,
+      `${path.relative(ROOT, file)} reads before it checks the caller's role`
+    );
   }
 });
 

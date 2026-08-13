@@ -15,28 +15,21 @@
 // session or a database.
 // ============================================================================
 
-import { redirect } from "next/navigation";
-
 import { HeaderBreadcrumbs } from "@/components/header";
 import { PlantHealthPortfolio } from "@/components/phase-engine/plant-health-portfolio";
-import { getCurrentSession } from "@/lib/auth";
+import { scopeLabelForRole } from "@/lib/oversight/org-label";
+import { requireOversightUser } from "@/lib/oversight/session";
 import { getOversightPlantHealth } from "@/lib/phase-engine/oversight/read";
 
 export default async function OversightHealthPage() {
-  const { user } = await getCurrentSession();
-
-  if (!user) {
-    redirect("/login");
-  }
-
-  // Oversight-only surface. Church-level roles never reach the privacy-gated read.
-  if (user.role !== "sending_church_admin" && user.role !== "network_admin") {
-    redirect("/dashboard");
-  }
+  // Oversight-only surface. Church-level roles never reach the privacy-gated
+  // read — one guard, shared by every /oversight route.
+  const user = await requireOversightUser();
 
   const plants = await getOversightPlantHealth(user);
-  const scopeLabel =
-    user.role === "network_admin" ? "network" : "sending church";
+  // `scopeLabelForRole` is the ONE spelling of these two words; this page used
+  // to re-derive them from the role inline.
+  const scopeLabel = scopeLabelForRole(user.role);
 
   return (
     <>

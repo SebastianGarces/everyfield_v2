@@ -76,9 +76,10 @@ import {
 } from "@/lib/oversight/presentation";
 // The ONE countdown implementation (#338): the oversight listing, the /launch
 // page and the phase-engine fact snapshot all read the same number from it, and
-// the copy this layer used to keep is gone.
+// the copy this layer used to keep is gone. `countdown.ts` is an import-free
+// leaf, so it costs this module nothing — unlike `@/lib/launch/queries`, which
+// reaches `@/db` and is therefore deferred with the rest of them (see below).
 import { daysUntilTarget } from "@/lib/launch/countdown";
-import { getLaunchDatesForChurches } from "@/lib/launch/queries";
 import type {
   MeetingsAggregate,
   MinistryTeamsAggregate,
@@ -91,10 +92,17 @@ import type {
   TasksAggregate,
 } from "@/lib/oversight/types";
 
-// The value imports below transitively load the DB client (`@/db`). They are
-// deferred to the call sites inside the async reads so this module can be
+// EVERY value import that transitively loads the DB client (`@/db`) is deferred
+// to the call site inside the async read that needs it, so this module can be
 // imported — and its contract asserted — without a DATABASE_URL, the same seam
 // `phase-engine/oversight/read.ts` uses.
+//
+// "EVERY" is the load-bearing word and it was not true: `getLaunchDatesForChurches`
+// (`@/lib/launch/queries`, which opens with `@/db`) sat at the top of this file
+// while this paragraph claimed the property, so `read.test.ts` needed a database
+// to assert a SQL predicate and a set of string labels — and the header a next
+// reader trusts described a seam that was already broken. `read-imports.test.ts`
+// now enforces it instead of describing it.
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
 
@@ -126,14 +134,41 @@ export async function listOversightPlants(
   user: User,
   asOf: Date = new Date()
 ): Promise<OversightPlantSummary[]> {
-  const { db } = await import("@/db");
   const { getAccessibleChurchIds } = await import("@/lib/auth/access");
-
-  const org = await resolveCallerOrg(user);
-  if (!org) return [];
 
   const churchIds = await getAccessibleChurchIds(user);
   if (churchIds.length === 0) return [];
+
+  return buildPlantSummaries(user, churchIds, asOf);
+}
+
+/**
+ * Directory rows for a KNOWN-ACCESSIBLE set of plants — the one definition of
+ * what a plant summary is.
+ *
+ * It takes the church ids rather than deriving them, and that is the whole
+ * point: `getOversightPlantDetail` hands it exactly ONE id, so the header on a
+ * plant page is built by the same code path as the row the admin clicked
+ * without paying for the org's entire portfolio to render one plant. Before
+ * this split the detail read called `listOversightPlants` and discarded all but
+ * one row — five queries over every plant in the org, on every detail page
+ * load, growing with the org.
+ *
+ * IT IS NOT AN AUTHORITY BOUNDARY and must never be called with an id that has
+ * not already been through `getAccessibleChurchIds`. It is private to this
+ * module for that reason: both callers above resolve the accessible list first,
+ * and the membership check is what makes the id safe to put in a WHERE clause.
+ */
+async function buildPlantSummaries(
+  user: User,
+  churchIds: string[],
+  asOf: Date
+): Promise<OversightPlantSummary[]> {
+  const { db } = await import("@/db");
+  const { getLaunchDatesForChurches } = await import("@/lib/launch/queries");
+
+  const org = await resolveCallerOrg(user);
+  if (!org) return [];
 
   const plants = await db
     .select({
@@ -233,10 +268,10 @@ export async function getOversightPlantDetail(
   // The header is built by the SAME code path as the directory row the admin
   // clicked, rather than by a second query shaped slightly differently — so the
   // countdown, the provenance and the planter cannot say one thing in the list
-  // and another on the page. The cost is one org-scoped roster read; the thing
-  // it buys is that there is only one definition of a plant's summary.
-  const plants = await listOversightPlants(user, asOf);
-  const plant = plants.find((candidate) => candidate.churchId === churchId);
+  // and another on the page. Scoped to the ONE plant: this used to call
+  // `listOversightPlants` and throw the rest away, which read the org's whole
+  // portfolio (five queries, all of it) to render a single header.
+  const [plant] = await buildPlantSummaries(user, [churchId], asOf);
   if (!plant) return null;
 
   const sections = await Promise.all(

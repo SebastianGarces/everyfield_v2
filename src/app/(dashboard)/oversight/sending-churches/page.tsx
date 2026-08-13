@@ -24,29 +24,22 @@
 // ============================================================================
 
 import type { Metadata } from "next";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 
 import { HeaderBreadcrumbs } from "@/components/header";
 import { SendingChurchesRoster } from "@/components/oversight/sending-churches-roster";
-import { getCurrentSession } from "@/lib/auth";
 import { listNetworkSendingChurches } from "@/lib/oversight/sending-churches";
+import { requireOversightUser } from "@/lib/oversight/session";
 
 export const metadata: Metadata = {
   title: "Sending churches",
 };
 
 export default async function OversightSendingChurchesPage() {
-  const { user } = await getCurrentSession();
-
-  if (!user) {
-    redirect("/login");
-  }
-
-  // Church-level roles are bounced to their own dashboard, the same as every
-  // other oversight route — they have a home to go to.
-  if (user.role !== "sending_church_admin" && user.role !== "network_admin") {
-    redirect("/dashboard");
-  }
+  // Church-level roles are bounced to their own dashboard by the shared guard,
+  // the same as every other oversight route — they have a home to go to. The
+  // network-only refusal below is this page's own rule and stays here.
+  const user = await requireOversightUser();
 
   // A sending-church admin is an oversight user with no business on this
   // surface. `listNetworkSendingChurches` refuses them a second time by
