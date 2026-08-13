@@ -337,10 +337,21 @@ export async function createMeeting(
     // display surfaces derive, from the same function — not a second
     // `Vision Meeting #${n}` literal, which would spell the old label for every
     // row written after the label is re-ruled and the new one for every render.
+    // The two nulls are FACTS about the row being written, not a partial
+    // projection: this arm runs only when the caller supplied no title, and
+    // branch 1 (a numbered vision meeting) outranks a team name anyway. Every
+    // `MeetingTitleFacts` field is required so that a caller reading an
+    // EXISTING row cannot omit a column and take a different branch by
+    // accident.
     title:
       data.title ??
       (meetingNumber
-        ? meetingDisplayTitle({ type: "vision_meeting", meetingNumber })
+        ? meetingDisplayTitle({
+            type: "vision_meeting",
+            meetingNumber,
+            title: null,
+            teamName: null,
+          })
         : null),
     datetime: data.datetime,
     locationId,

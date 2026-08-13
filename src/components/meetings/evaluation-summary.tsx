@@ -1,19 +1,20 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Star } from "lucide-react";
 import type { MeetingEvaluation } from "@/db/schema";
-// The evaluation heading names the same meeting the card and the header name,
-// through the same derivation — never a second `Vision Meeting #` literal.
-// See src/lib/meetings/labels.ts.
-import { meetingDisplayTitle } from "@/lib/meetings/labels";
 
 interface EvaluationSummaryProps {
   evaluation: MeetingEvaluation;
   /**
-   * Nullable, and passed through as-is. It used to arrive as
-   * `meeting.meetingNumber ?? 0`, and the heading interpolated it, so an
-   * unnumbered meeting was headed "Vision Meeting #0 Evaluation".
+   * The meeting's display name, ALREADY DERIVED by the server page.
+   *
+   * Not `meetingNumber`: this component used to build a meeting out of
+   * `{ type: "vision_meeting", meetingNumber }` and hand that to
+   * `meetingDisplayTitle`, which fabricated a fact — the route has no type
+   * gate, so an orientation or a team meeting reached by URL was headed
+   * "Vision Meeting Evaluation". The page holds the real row, so it derives
+   * the name once and this component only prints it.
    */
-  meetingNumber: number | null;
+  title: string;
 }
 
 const qualityFactors = [
@@ -44,15 +45,12 @@ function ScoreStars({ score }: { score: number }) {
 
 export function EvaluationSummary({
   evaluation,
-  meetingNumber,
+  title,
 }: EvaluationSummaryProps) {
   return (
     <div className="space-y-6">
       <div className="text-center">
-        <h2 className="text-xl font-bold">
-          {meetingDisplayTitle({ type: "vision_meeting", meetingNumber })}{" "}
-          Evaluation
-        </h2>
+        <h2 className="text-xl font-bold">{title} Evaluation</h2>
         <div className="mt-2">
           <span className="text-4xl font-bold">{evaluation.totalScore}</span>
           <span className="text-muted-foreground text-xl">/5.0</span>

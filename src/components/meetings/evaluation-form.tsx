@@ -10,19 +10,20 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { createEvaluationAction } from "@/app/(dashboard)/meetings/actions";
 import type { ActionResult } from "@/lib/meetings/types";
 import type { MeetingEvaluation } from "@/db/schema";
-// The evaluation heading names the same meeting the card and the header name,
-// through the same derivation — never a second `Vision Meeting #` literal.
-// See src/lib/meetings/labels.ts.
-import { meetingDisplayTitle } from "@/lib/meetings/labels";
 
 interface EvaluationFormProps {
   meetingId: string;
   /**
-   * Nullable, and passed through as-is. It used to arrive as
-   * `meeting.meetingNumber ?? 0`, and the heading interpolated it, so an
-   * unnumbered meeting read "Evaluate Vision Meeting #0".
+   * The meeting's display name, ALREADY DERIVED by the server page.
+   *
+   * Not `meetingNumber`: this component used to build a meeting out of
+   * `{ type: "vision_meeting", meetingNumber }` and hand that to
+   * `meetingDisplayTitle`, which fabricated a fact — the route has no type
+   * gate, so an orientation or a team meeting reached by URL was headed
+   * "Evaluate Vision Meeting". The page holds the real row, so it derives the
+   * name once and this component only prints it.
    */
-  meetingNumber: number | null;
+  title: string;
 }
 
 const qualityFactors = [
@@ -82,10 +83,7 @@ const FACTOR_COUNT = qualityFactors.length;
 /** The rating a star offers, low to high. */
 const RATINGS = [1, 2, 3, 4, 5] as const;
 
-export function EvaluationForm({
-  meetingId,
-  meetingNumber,
-}: EvaluationFormProps) {
+export function EvaluationForm({ meetingId, title }: EvaluationFormProps) {
   const [scores, setScores] = useState<Record<string, number>>({});
 
   const action = async (
@@ -110,10 +108,7 @@ export function EvaluationForm({
   return (
     <form action={formAction} className="space-y-6">
       <div>
-        <h2 className="text-xl font-bold">
-          Evaluate{" "}
-          {meetingDisplayTitle({ type: "vision_meeting", meetingNumber })}
-        </h2>
+        <h2 className="text-xl font-bold">Evaluate {title}</h2>
         <p className="text-muted-foreground mt-1 text-sm">
           Rate each quality factor from 1 (poor) to 5 (excellent).
         </p>

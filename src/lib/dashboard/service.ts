@@ -1,11 +1,34 @@
 import { db } from "@/db";
-import { churchMeetings, personActivities, persons, tasks } from "@/db/schema";
+import {
+  churchMeetings,
+  ministryTeams,
+  personActivities,
+  persons,
+  tasks,
+} from "@/db/schema";
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { getTaskCounts } from "@/lib/tasks/service";
 // The activity feed names a meeting the same way /meetings and /meetings/[id]
 // do. It carried its own copy of both the label table and the title branch.
 // See src/lib/meetings/labels.ts.
-import { meetingDisplayTitle } from "@/lib/meetings/labels";
+import {
+  meetingDisplayTitle,
+  type MeetingTitleFacts,
+} from "@/lib/meetings/labels";
+
+/**
+ * One completed meeting as the activity feed reads it.
+ *
+ * It EXTENDS `MeetingTitleFacts` rather than repeating its fields, and the
+ * query below is annotated with it, so dropping a joined column from the
+ * projection is a compile error here instead of a quietly different name in
+ * the feed. `labels.test.ts` names this type to pin the property with data.
+ */
+export type CompletedMeetingFeedRow = MeetingTitleFacts & {
+  id: string;
+  actualAttendance: number | null;
+  updatedAt: Date;
+};
 
 // ============================================================================
 // Types
@@ -162,16 +185,22 @@ export async function getRecentActivity(
   }
 
   // 2. Completed meetings
-  const completedMeetings = await db
+  const completedMeetings: CompletedMeetingFeedRow[] = await db
     .select({
       id: churchMeetings.id,
       type: churchMeetings.type,
       title: churchMeetings.title,
       meetingNumber: churchMeetings.meetingNumber,
+      // `meetingDisplayTitle` branches on the team name, so the feed must JOIN
+      // it. Without this the feed called an untitled team meeting "Team
+      // Meeting" while the card, header and breadcrumb called the same row
+      // "<Team> Meeting" — sharing the function is not sharing the name.
+      teamName: ministryTeams.name,
       actualAttendance: churchMeetings.actualAttendance,
       updatedAt: churchMeetings.updatedAt,
     })
     .from(churchMeetings)
+    .leftJoin(ministryTeams, eq(churchMeetings.teamId, ministryTeams.id))
     .where(
       and(
         eq(churchMeetings.churchId, churchId),

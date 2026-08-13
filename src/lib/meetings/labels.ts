@@ -153,20 +153,39 @@ export const MEETING_STATUS_BADGE_CLASSES: Record<MeetingStatus, string> = {
  *
  * A STRUCTURAL type, not `ChurchMeeting`: `MeetingWithCounts` lives in
  * `types.ts`, which value-imports `@/db/schema`, and this module may not follow
- * that edge. Every field is optional but `type`, so a caller holding a partial
- * row (the RSVP page's join, a dashboard projection) passes what it has.
+ * that edge.
+ *
+ * EVERY BRANCHED FIELD IS REQUIRED, and nullable rather than optional. Sharing
+ * the function is not the same as sharing the NAME: while `title`,
+ * `meetingNumber` and `teamName` were optional, a caller that simply did not
+ * SELECT a column type-checked and quietly took a different branch. Two of the
+ * six enumerated surfaces did exactly that — neither the dashboard activity
+ * feed nor the RSVP page projected `teamName` — so one untitled team meeting
+ * read "Worship Meeting" on the card and "Team Meeting" in the feed and to the
+ * invitee, while the docblock below, `memory/invariants.md` and two guards in
+ * `labels.test.ts` all asserted the six agreed. A missing column is invisible
+ * to a guard that greps for an identifier; required-nullable makes it a
+ * COMPILE ERROR at the projection. Never widen these back to optional, and
+ * never silence the compiler with `?? null` where the column is joinable.
  */
 export type MeetingTitleFacts = {
   type: MeetingType;
-  title?: string | null;
-  meetingNumber?: number | null;
-  teamName?: string | null;
+  title: string | null;
+  meetingNumber: number | null;
+  teamName: string | null;
 };
 
 /**
- * The name a meeting is shown under on the SIX surfaces that call it: the card,
- * the detail header, the breadcrumb, the Edit and Delete dialogs, the public
- * RSVP page and the dashboard activity feed.
+ * The name a meeting is shown under on the SEVEN surfaces that call it: the
+ * card, the detail header, the breadcrumb, the Edit and Delete dialogs, the
+ * public RSVP page, the dashboard activity feed and the evaluation heading.
+ * `labels.test.ts` walks that exact list — the enumeration is the test, not
+ * this sentence.
+ *
+ * Every caller passes a COMPLETE `MeetingTitleFacts`. Calling this function is
+ * not by itself enough to agree on the name: while the fields were optional,
+ * two of the surfaces below simply did not project `teamName` and quietly took
+ * a different branch. See the type above.
  *
  * Three branches, in this order:
  *
@@ -188,6 +207,12 @@ export type MeetingTitleFacts = {
  * "Meeting" on three surfaces a planter reaches in two clicks. The behaviour
  * kept is the meeting header's — the most complete of the four, and the one
  * rendered next to the meeting itself.
+ *
+ * The CALLER never synthesises a meeting to name one. The evaluation heading
+ * used to build `{ type: "vision_meeting", meetingNumber }` in a client
+ * component while its own server page held the real row, and the route has no
+ * type gate — so an orientation reached by URL was headed "Evaluate Vision
+ * Meeting". The page derives, the component prints.
  *
  * NOT yet every surface in the repo: `/communication/compose`,
  * `/communication/[id]` and the ministry-team meetings tab still derive a title

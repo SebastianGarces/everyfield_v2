@@ -12,7 +12,13 @@ import {
   MEETING_TYPE_OPTIONS,
   meetingDisplayTitle,
   meetingTypeLabel,
+  type MeetingTitleFacts,
 } from "@/lib/meetings/labels";
+// TYPE-ONLY, both of them: erased at runtime, so this unit test loads no
+// database module, while a column dropped from either projection still fails
+// `pnpm typecheck`. See the projections section below.
+import type { ConfirmationDetails } from "@/lib/communication/confirmation";
+import type { CompletedMeetingFeedRow } from "@/lib/dashboard/service";
 
 // ----------------------------------------------------------------------------
 // THE ONE MEETING DISPLAY VOCABULARY (#411, discharging #407 D4)
@@ -151,9 +157,28 @@ test("the module exports exactly one string-keyed accessor", () => {
 // The display title — one derivation, four surfaces
 // ============================================================================
 
+/**
+ * A complete `MeetingTitleFacts`, overridden field by field.
+ *
+ * Deliberate: `MeetingTitleFacts` requires every branched field, so a test
+ * that spelled only the field it cares about would not compile — and that is
+ * the point. A caller who omits a column takes a different branch, which is
+ * exactly how the feed and the RSVP page came to name an untitled team meeting
+ * "Team Meeting" while the card called it "<Team> Meeting".
+ */
+function facts(over: Partial<MeetingTitleFacts> = {}): MeetingTitleFacts {
+  return {
+    type: "vision_meeting",
+    title: null,
+    meetingNumber: null,
+    teamName: null,
+    ...over,
+  };
+}
+
 test("a numbered vision meeting is named by its number", () => {
   assert.equal(
-    meetingDisplayTitle({ type: "vision_meeting", meetingNumber: 7 }),
+    meetingDisplayTitle(facts({ type: "vision_meeting", meetingNumber: 7 })),
     "Vision Meeting #7"
   );
 });
@@ -163,57 +188,63 @@ test("the number outranks a stored title", () => {
   // a title on one is residue from an older row or another path, and the number
   // is what the planter counts by.
   assert.equal(
-    meetingDisplayTitle({
-      type: "vision_meeting",
-      meetingNumber: 3,
-      title: "Kickoff",
-    }),
+    meetingDisplayTitle(
+      facts({ type: "vision_meeting", meetingNumber: 3, title: "Kickoff" })
+    ),
     "Vision Meeting #3"
   );
 });
 
 test("an unnumbered vision meeting falls back to title, then to the label", () => {
   assert.equal(
-    meetingDisplayTitle({ type: "vision_meeting", title: "Kickoff" }),
+    meetingDisplayTitle(facts({ type: "vision_meeting", title: "Kickoff" })),
     "Kickoff"
   );
   assert.equal(
-    meetingDisplayTitle({ type: "vision_meeting", meetingNumber: null }),
+    meetingDisplayTitle(facts({ type: "vision_meeting", meetingNumber: null })),
     "Vision Meeting"
   );
 });
 
 test("a team meeting with a team is named by the team", () => {
   assert.equal(
-    meetingDisplayTitle({ type: "team_meeting", teamName: "Worship" }),
+    meetingDisplayTitle(facts({ type: "team_meeting", teamName: "Worship" })),
     "Worship Meeting"
   );
   assert.equal(
-    meetingDisplayTitle({
-      type: "team_meeting",
-      teamName: "Worship",
-      title: "Set list planning",
-    }),
+    meetingDisplayTitle(
+      facts({
+        type: "team_meeting",
+        teamName: "Worship",
+        title: "Set list planning",
+      })
+    ),
     "Set list planning"
   );
 });
 
 test("a team meeting with no team reads the type label, not an empty gap", () => {
-  assert.equal(meetingDisplayTitle({ type: "team_meeting" }), "Team Meeting");
+  assert.equal(
+    meetingDisplayTitle(facts({ type: "team_meeting" })),
+    "Team Meeting"
+  );
 });
 
 test("an untitled orientation is the type label on every surface", () => {
   // The single most visible drift this function deleted: this meeting used to
   // read "Orientation Meeting" (card), "Orientation" (breadcrumb and header)
   // and "Meeting" (its own Edit/Delete dialogs).
-  assert.equal(meetingDisplayTitle({ type: "orientation" }), "Orientation");
   assert.equal(
-    meetingDisplayTitle({ type: "orientation", title: "" }),
+    meetingDisplayTitle(facts({ type: "orientation" })),
+    "Orientation"
+  );
+  assert.equal(
+    meetingDisplayTitle(facts({ type: "orientation", title: "" })),
     "Orientation",
     "an empty title is not a title — `||`, not `??`"
   );
   assert.equal(
-    meetingDisplayTitle({ type: "orientation", title: null }),
+    meetingDisplayTitle(facts({ type: "orientation", title: null })),
     "Orientation"
   );
 });
@@ -222,11 +253,85 @@ test("the vision-meeting prefix comes from the label table", () => {
   // Not a hardcoded "Vision Meeting #" — otherwise a re-ruled label would leave
   // the numbered form spelling the old one.
   assert.ok(
-    meetingDisplayTitle({
-      type: "vision_meeting",
-      meetingNumber: 1,
-    }).startsWith(MEETING_TYPE_LABELS.vision_meeting)
+    meetingDisplayTitle(
+      facts({ type: "vision_meeting", meetingNumber: 1 })
+    ).startsWith(MEETING_TYPE_LABELS.vision_meeting)
   );
+});
+
+// ============================================================================
+// The projections: ONE untitled team meeting, named the same through each
+// ============================================================================
+
+// THE FAILURE THIS SECTION EXISTS FOR. `MeetingTitleFacts` used to make every
+// field but `type` OPTIONAL, so a surface could share the FUNCTION without
+// sharing the NAME: the dashboard feed never joined `ministry_teams`, and
+// `ConfirmationDetails` (the RSVP page) carried neither `teamName` nor
+// `meetingNumber`. One untitled team meeting therefore read "Worship Meeting"
+// on the card, the header, the breadcrumb and the two dialogs, and "Team
+// Meeting" in the activity feed and to the invitee — while the docblock,
+// memory/invariants.md and the two guards below all said the six agreed.
+//
+// The guards below cannot see this: they check that a FILE mentions
+// `meetingDisplayTitle` and carries no local `title ??`. A missing COLUMN is
+// invisible to both. So these two tests name the real projection TYPES and
+// pass real values through the real function — the type-only imports are
+// erased at runtime, so no database module is loaded, but a column dropped
+// from either projection is a compile error in `pnpm typecheck`.
+
+const UNTITLED_TEAM_MEETING = {
+  type: "team_meeting",
+  title: null,
+  meetingNumber: null,
+  teamName: "Worship",
+} as const;
+
+test("the dashboard activity feed names an untitled team meeting by its team", () => {
+  const row: CompletedMeetingFeedRow = {
+    ...UNTITLED_TEAM_MEETING,
+    id: "meeting-1",
+    actualAttendance: 12,
+    updatedAt: new Date("2026-08-13T12:00:00.000Z"),
+  };
+
+  assert.equal(meetingDisplayTitle(row), "Worship Meeting");
+});
+
+test("the RSVP page names an untitled team meeting by its team", () => {
+  const meeting: ConfirmationDetails["meeting"] = {
+    ...UNTITLED_TEAM_MEETING,
+    id: "meeting-1",
+    datetime: new Date("2026-08-13T12:00:00.000Z"),
+    locationName: null,
+    locationAddress: null,
+  };
+
+  assert.equal(meetingDisplayTitle(meeting), "Worship Meeting");
+});
+
+test("every projection of one untitled team meeting agrees on the name", () => {
+  // The in-app surfaces read `MeetingWithCounts`, which carries the joined
+  // team name as a REQUIRED field for the same reason. All three shapes, one
+  // name.
+  const inApp: MeetingTitleFacts = { ...UNTITLED_TEAM_MEETING };
+  const feed: CompletedMeetingFeedRow = {
+    ...UNTITLED_TEAM_MEETING,
+    id: "meeting-1",
+    actualAttendance: null,
+    updatedAt: new Date(0),
+  };
+  const rsvp: ConfirmationDetails["meeting"] = {
+    ...UNTITLED_TEAM_MEETING,
+    id: "meeting-1",
+    datetime: new Date(0),
+    locationName: null,
+    locationAddress: null,
+  };
+
+  const shapes: MeetingTitleFacts[] = [inApp, feed, rsvp];
+  const names = new Set(shapes.map((shape) => meetingDisplayTitle(shape)));
+
+  assert.deepEqual([...names], ["Worship Meeting"]);
 });
 
 // ============================================================================
@@ -234,12 +339,16 @@ test("the vision-meeting prefix comes from the label table", () => {
 // ============================================================================
 
 /**
- * The six surfaces that render a meeting's name, enumerated by path.
+ * The seven surfaces that render a meeting's name, enumerated by path.
  *
  * This list exists because a DOCBLOCK claiming "the RSVP page reads this" was
  * shipped while the RSVP page still read `meeting.title ?? meetingTypeLabel(…)`
  * — an attested claim that stayed green while the thing it described was false.
  * A comment cannot be false for long if a test spells out the same claim.
+ *
+ * It is NOT a sufficient guard on its own — it sees an IDENTIFIER, never a
+ * missing COLUMN. The projections section above is what pins the names being
+ * equal; this list pins that no surface stops calling the derivation.
  *
  * It is deliberately NOT every surface in the repo: `/communication/compose`,
  * `/communication/[id]` and `ministry-teams/meetings-tab.tsx` still derive a
@@ -260,6 +369,20 @@ const TITLE_SURFACES = [
   ),
   path.join("src", "app", "rsvp", "[token]", "page.tsx"),
   path.join("src", "lib", "dashboard", "service.ts"),
+  // The evaluation heading. It belongs to the PAGE, not to the two client
+  // components below it: those used to synthesise
+  // `{ type: "vision_meeting", meetingNumber }` and the route has no type
+  // gate, so an orientation reached by URL was headed "Evaluate Vision
+  // Meeting". They now take a derived `title` string and name nothing.
+  path.join(
+    "src",
+    "app",
+    "(dashboard)",
+    "meetings",
+    "[id]",
+    "evaluation",
+    "page.tsx"
+  ),
 ];
 
 test("every enumerated title surface calls meetingDisplayTitle", () => {
