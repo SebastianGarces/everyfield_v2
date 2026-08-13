@@ -1,15 +1,17 @@
-import { Plus } from "lucide-react";
+import { ListChecks, Plus } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { HeaderBreadcrumbs } from "@/components/header";
 import { TaskFilters, TaskList, TaskQuickAdd } from "@/components/tasks";
+import { PhaseTemplatePrompt } from "@/components/tasks/phase-template-prompt";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { TaskCategory, TaskPriority, TaskStatus } from "@/db/schema";
 import { verifySession } from "@/lib/auth/session";
 import { getLatestPersonNote } from "@/lib/people/service";
 import { getTaskCounts, listTasks } from "@/lib/tasks/service";
+import { TEMPLATES_LINK_LABEL, TEMPLATES_ROUTE } from "@/lib/tasks/templates";
 
 export const dynamic = "force-dynamic";
 
@@ -105,6 +107,19 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
             </div>
             <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
               <TaskQuickAdd />
+              {/*
+                T-011/T-012. The catalog's standing entrance. The phase prompt
+                below offers one stage's checklists at the moment the stage
+                changes and is then gone, so without this link a planter who
+                declined it — or who wants an earlier stage's list — has no way
+                back to the catalog at all.
+              */}
+              <Button asChild variant="outline" className="cursor-pointer">
+                <Link href={TEMPLATES_ROUTE}>
+                  <ListChecks className="mr-2 h-4 w-4" />
+                  {TEMPLATES_LINK_LABEL}
+                </Link>
+              </Button>
               <Button asChild className="cursor-pointer">
                 <Link href="/tasks/new">
                   <Plus className="mr-2 h-4 w-4" />
@@ -163,7 +178,15 @@ export default async function TasksPage({ searchParams }: TasksPageProps) {
         </div>
 
         {/* Task list */}
-        <div className="flex-1 overflow-auto p-6">
+        <div className="flex-1 space-y-6 overflow-auto p-6">
+          {/*
+            T-020. Renders nothing unless the plant has just changed stage and
+            the prompt has not been answered, so it costs an unprompted planter
+            one query and no pixels. It sits ABOVE the list because accepting
+            it changes that list.
+          */}
+          <PhaseTemplatePrompt />
+
           <TaskList
             tasks={result.tasks}
             total={result.total}

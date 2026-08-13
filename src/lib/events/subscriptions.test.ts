@@ -73,6 +73,19 @@ test("existing subscriptions remain intact", () => {
   }
 });
 
+test("phase.changed carries BOTH its handlers (T-020 + N-025)", () => {
+  // The oversight milestone and the task-template prompt are independent
+  // consumers of one event. Registering the second must not replace the first,
+  // which is the failure a single `bus.on` per event type would produce.
+  const bus = makeFakeBus();
+  registerSubscriptions(bus);
+
+  assert.ok(
+    bus.handlersFor("phase.changed").length >= 2,
+    "expected the oversight milestone AND the template prompt on phase.changed"
+  );
+});
+
 test("registerSubscriptions is idempotent when already initialized", () => {
   const bus = makeFakeBus();
   registerSubscriptions(bus);

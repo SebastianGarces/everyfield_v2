@@ -24,6 +24,7 @@ import {
   handleMeetingAttendanceFinalized,
   autoCompleteTasksByEvent,
 } from "@/lib/tasks/events";
+import { handlePhaseChangedForTemplatePrompt } from "@/lib/tasks/phase-prompt";
 
 // Handlers owned by F7 (Communication Hub)
 import { handleTaskCompletedForCommunicationLog } from "@/lib/communication/log";
@@ -180,6 +181,27 @@ export function registerSubscriptions(bus: EventBusLike): void {
   // is the gate, per recipient, and writes no row for a plant that is not
   // sharing.
   bus.on<PhaseChangedEvent>("phase.changed", handlePhaseChangedForOversight);
+
+  // --------------------------------------------------------------------------
+  // PE (Phase Engine) -> F5 (Task Management) — the phase template prompt
+  // --------------------------------------------------------------------------
+
+  // T-020: entering a stage makes that stage's checklists worth offering. The
+  // handler CREATES NOTHING — silently generating twenty tasks on a phase
+  // change is the surprise this feature exists to avoid — and the prompt on
+  // `/tasks` derives itself from the `phase_transitions` row this event
+  // accompanies. It is registered here so the FRD's `phase.changed`
+  // integration point is a real subscription rather than a comment, and so the
+  // place a future author would add auto-creation already carries the ruling
+  // against it (`src/lib/tasks/phase-prompt.ts`).
+  //
+  // This is the SECOND handler on `phase.changed` — the oversight milestone
+  // above is the first. The bus runs handlers through `Promise.allSettled`,
+  // and neither can cost the other its turn.
+  bus.on<PhaseChangedEvent>(
+    "phase.changed",
+    handlePhaseChangedForTemplatePrompt
+  );
 
   // --------------------------------------------------------------------------
   // F5 (Task Management) -> F7 (Communication Hub) — the task-driven log entry

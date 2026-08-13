@@ -71,3 +71,143 @@ Not carried: `completionEvent`. An auto-completion hook is installed by whatever
 ## Completion is written before its successor
 
 The reverse of the usual "durable marker last" rule, and deliberate, because the two failure modes are not symmetric. A successor with no completion leaves **two** open instances of one series, breaking the guarantee a planter relies on. A completion with no successor leaves a gap that reopening and re-completing repairs. We take the recoverable one, and `completeTask` swallows a recurrence failure rather than telling the planter their completed task failed to complete.
+
+## The catalog has two entrances, and the standing one is a route (T-011/T-012)
+
+**Source:** `src/app/(dashboard)/tasks/templates/page.tsx`, `src/app/(dashboard)/tasks/page.tsx`, `src/components/tasks/template-picker.tsx`, `src/app/(dashboard)/tasks/actions.ts`
+
+The phase prompt is the *timely* entrance — one stage's checklists, offered at the moment the stage changes, gone once answered. `/tasks/templates` is the *standing* one: every phase, always reachable, linked from the `/tasks` header. A planter who declined the prompt, or who wants an earlier stage's list, has no other way in, so the prompt may never be the only door.
+
+That route is also what makes `importTaskTemplateAction` legal where it lives. [`../invariants.md`](../invariants.md) → Authentication says a not-yet-wired write belongs in a sibling module with no `"use server"` directive; the action's auth shape was always right, but with the picker mounted nowhere it was still a POSTable endpoint no UI reached, and the first attempt at this track was rejected for exactly that. Unmounting the picker re-opens the finding — it does not merely lose a screen.
+
+Its mint is **above** the `try`, the shape [`../invariants.md`](../invariants.md) → Authentication requires of a NEW action, so a sessionless POST throws instead of being converted into a handled `{ success: false }` — and there is deliberately no `Unauthorized` branch in its catch, because that rejection can no longer arrive there. It is NOT on `TRY_WRAPPED_MINTS`, and it never should be: the repo-wide walk only follows exports containing `.safeParse(`, and this one takes a bare `string`, so nothing would have failed had it kept the old shape. The rule is the authority, not the walk.
+
+`/tasks/templates` is a **static segment beside `/tasks/[id]`**. Delete the directory and the URL does not 404; it resolves to a task whose id is the word "templates" and answers 500, which is why `template-picker.test.ts` asserts the route file renders the picker and the `/tasks` header links to it. Rendering the component in a test proves the markup, never that a browser can ask for it.
+
+## A phase change prompts; it never creates (T-020)
+
+**Source:** `src/lib/tasks/phase-prompt.ts`, `src/components/tasks/phase-template-prompt.tsx`, `src/components/tasks/phase-template-prompt-controls.tsx`, `src/lib/events/subscriptions.ts`, `src/lib/tasks/templates.ts`, `src/lib/tasks/import.ts`
+
+`phase.changed` has a task-side handler, and the handler writes nothing. That is not an unfinished wire — it is the rule. A planter who advances a stage and finds twenty tasks they did not ask for stops trusting the list with the ones they did, so the stage change makes the stage's checklists *visible*, with their real dates already worked out, and the planter presses or does not. `handlePhaseChangedForTemplatePrompt` is registered precisely so the place a future author would add auto-creation already carries the argument against it; `phase-prompt-live.test.ts` asserts a phase change leaves the tasks table empty.
+
+### The prompt is derived, the answer is stored
+
+The **prompt** is still derived and always will be. `phase_transitions` already records durably, append-only, that a plant moved and when, and the catalog is code — so `buildPhaseTemplatePrompt(latestTransition, answeredTransitionId)` is a pure function, the prompt cannot go stale, cannot be half-written by a failed handler, and needed nothing back-filled for plants that moved before it shipped. What IS stored is the **answer**, and only the answer.
+
+Four ways to get "prompt nothing", each a real case: no transition at all; a move that went nowhere (`toPhase === fromPhase`); the transition is already answered; the new phase has no templates. The last one is the guard for a phase the catalog has not caught up with — every phase 0–6 carries a template today.
+
+"Which templates belong to a phase" is ONE function and it lives with the catalog: `phaseTemplatesFor` in `src/lib/tasks/templates.ts`, which `taskTemplatesByPhase` and the prompt both call. It was written out twice — once here, once in `phase-prompt.ts` — and the copies could not disagree only because both filtered the same literal. The header of `templates.ts` says what happens next: the day church-authored templates arrive this module becomes the `is_system` half of a union and grows a second source, and the reader that missed it would have been the prompt, i.e. the surface that decides what a stage change offers.
+
+A `kind = 'initial_declaration'` row is filtered out, for the reason [`../invariants.md`](../invariants.md) → Phase History gives: nobody moved anywhere. Prompting a planter mid-onboarding with a checklist import is the same surprise from the other direction.
+
+A **backward** move still prompts. "Advance" is the oversight milestone's rule, because that one announces progress; a planter who moves 3 → 2 is doing phase-2 work and wants the phase-2 checklist.
+
+The only non-derivable fact is "this planter already answered", and it lives in `phase_prompt_answers` — one row per transition, unique on `transition_id` (migration 0037). That key is what makes the prompt re-arm on its own: the next move is a different id with no row against it.
+
+It shipped as an httpOnly **cookie** holding the answered transition's id, and that was ruled out on 2026-08-10 (PR #393). A cookie answers for a BROWSER: the same planter on a phone, in a private window, or after clearing cookies was prompted about the same transition, and accepting there imported a second full set of 22–26 tasks. The residual was written up around declining, which is the mild half — declining twice costs nothing, accepting twice costs a duplicated task list.
+
+The cookie is still written and still read, as a fast path and nothing more. The asymmetry is what makes keeping it safe: a cookie can only ever *suppress* a prompt, never restore one, so a stale or forged value costs its owner their own prompt and cannot argue away the row. `getLatestPhaseTransition` reads both in one LEFT JOIN — the answer is a fact about that transition, and fetching it separately would let the plant move in between and pair a new transition with an old answer.
+
+### Accepting is idempotent, and the claim goes first
+
+This is the half a durable record does not give you for free. Reading "has this been answered?" and then importing is a SELECT-then-INSERT, which [`../invariants.md`](../invariants.md) → Transactions names as *not* a concurrency guard: two presses in the same millisecond both pass the read, and neon-http has no interactive transaction to hold instead.
+
+So `acceptPhaseTemplatePrompt` **claims** the answer row — `ON CONFLICT (transition_id) DO NOTHING`, `.returning()` — and imports only if the claim came back with a row. The loser reports `already_answered`, which the caller treats as a success that created nothing: the transition IS answered, so the prompt comes down either way. The conflict target is the transition alone, matching the index, so a request supplying a different `churchId` for the same transition still loses.
+
+**The claim is the first write, which inverts the usual marker-last rule on purpose.** Marker-last is for redo-safe steps; importing a checklist is not one — T-012 creates a second copy by design and says so. A marker written afterwards is written after the damage. Claiming first carries the opposite failure, and it is the smaller one: a crash between the claim and the first INSERT leaves a transition answered with no tasks, which is visible, and every checklist stays reachable at `/tasks/templates`. The service narrows it further — a claim whose import wrote **nothing** is released, so the prompt returns; a claim whose import got **part-way** is kept, because re-offering checklists already in the list is how a planter imports them twice.
+
+Two orderings inside the accept matter and are easy to get wrong:
+
+- The claim happens **after** the requested keys are filtered against the live prompt. Claiming first would let a forged POST naming only bogus keys spend the planter's one answer and leave them with no prompt and no tasks.
+- The already-answered check happens **before** the prompt is built, not by reading the built prompt's `null`. `buildPhaseTemplatePrompt` returns `null` for four different reasons and the caller has to tell "answered" (a success, prompt comes down) from "nothing to offer" (leave it up).
+
+Both of the prompt's actions are non-exported inline `"use server"` closures, and they mint with `verifySession()` **above** the `try` — the shape [`../invariants.md`](../invariants.md) → Authentication requires of a NEW action — with only the church-less branch (a data condition) left inside it. No test can notice if they stop: `src/lib/auth/server-action-surface.test.ts` walks the EXPORTS of `"use server"` modules, and an inline closure is neither. The rule is the authority, not the walk; they are not on `TRY_WRAPPED_MINTS` and never can be.
+
+The button is disabled while the request runs, which is the belt over these braces — it does not make the repeat harmless, it stops the planter watching a second request they have no reason to think is a no-op. `useActionState` needs a client component, so the `<form>` and its two buttons live in `phase-template-prompt-controls.tsx` and the rest of the prompt stays a server component — the lead sits beside the island and the checklist rows and fine print are handed in as `children`, so all of it is still server markup and no row becomes client code. The decision the buttons render is the pure `phaseTemplatePromptControlState`, because `useActionState` reports `pending: false` under `renderToStaticMarkup` and could not otherwise be asserted.
+
+### The answer belongs to the plant, not to the planter (ruled 2026-08-12)
+
+`phase_prompt_answers` is unique on `transition_id` **alone**, and `/tasks` carries no role gate. So whoever reaches the page first answers that stage change for *everyone*: a `team_member` who presses "Not now" suppresses the prompt for the planter, on every device, permanently. Accepting is the same in the other direction — the checklists one person takes are the checklists the plant gets.
+
+This is a consequence of the 2026-08-10 ruling, kept on purpose rather than discovered. The prompt is about the PLANT's stage change, and the tasks it creates belong to the plant; an answer per person would mean the same 22–26 tasks created once per member who happened to visit. Before the ruling the answer was a cookie, so this blast radius is genuinely new — the earlier wording talked only about a planter following themselves across devices, and that is no longer the whole story.
+
+If per-person answers are ever wanted, the key has to widen (`(transition_id, user_id)`, or an answer per offer) and the idempotency argument above has to be re-made against the new key. That is a new ruling, not a refactor.
+
+### "Not now" has a staleness guard, because the answer cannot be taken back (#313)
+
+Because the answer belongs to the plant and there is no un-answer path, a decline aimed at the wrong transition is unrecoverable. And that is exactly what a stale panel produced: the planter renders `/tasks` with the prompt for transition X, the plant advances to Y (another member, the phase engine, an oversight action), the planter presses "Not now" on the panel still on screen — and `declinePhaseTemplatePrompt` re-read the latest transition and declined **Y**, a stage change with a different set of 22–26 tasks that nobody had been shown.
+
+So the panel posts the transition it was rendered for — a hidden `transitionId` input inside the island's `<form>`, fed from `PhaseTemplatePromptView` — and `declinePhaseTemplatePrompt` refuses any `expectedTransitionId` that is not the plant's current one: no row, `null` back. `decidePhaseTemplateDismissOutcome(null)` already maps that to `{status:'failed'}` with no revalidation, so the planter reads `DISMISS_FAILED_MESSAGE` and the next render shows the real, current prompt.
+
+**It is a guard, not an aim, and that distinction is the whole reason it is allowed.** The action's documented posture is that the request may not choose which transition is declined; a posted id that must *equal* the server's own latest transition chooses nothing — it can only match the row the function would have picked anyway. The single outcome a forged or stale value can force is a no-op. There is no opt-out: `expectedTransitionId` is a required `string`, and a POST with the field missing or empty is refused by the action itself (`{status:'failed'}`) instead of falling back to the old unguarded decline. The hidden input is server-rendered inside the form, so every real submit carries it — with JavaScript or without.
+
+Accept was never exposed this way. `acceptPhaseTemplatePrompt` re-filters the posted keys against a freshly derived prompt, so a stale key list for a phase Y does not offer collapses to `keys.length === 0 → null → {status:'nothing'}` and the prompt survives. This was disclosed as open limitation 2 in PR #393's body; #313 closed it.
+
+### An empty selection is refused, not swallowed (ruled 2026-08-12)
+
+Unticking every box and pressing Import used to do nothing at all: no answer row, no tasks, no message, and the form re-rendered with every box ticked again. It also made the round-2 copy *false* — the unticked checklists were offered again, immediately, which is the opposite of what the sentence promised.
+
+The fix is refusal, not explanation: `phaseTemplatePromptControlState` disables Import while `tickedCount === 0`, and the empty submit becomes impossible instead of silently pointless. "Not now" deliberately stays live — an empty selection IS a dismissal, and a panel with no enabled control is a trap. The disabled button is not left bare either; `NOTHING_TICKED_HINT` renders beside it in a `role="status"` line, because a disabled button is not focusable and its `aria-describedby` would never be read.
+
+The ticks are counted off the DOM rather than mirrored into React state. The boxes stay uncontrolled server markup, and there is no second source of truth for something the form already knows. One reader answers "how many are ticked" — `tickedTemplateCount(form)`, counting `input[name="templateKey"]:checked`, the same selector the server action reads.
+
+**But that count has TWO writers, not one, and the second one is React (#313).** The obvious writer is the bubbled `change`: a tick anywhere in the form reaches the one handler on the form. The other is invisible from the code — **React 19 restores an uncontrolled form to its `defaultChecked` state once a `<form action>` action settles, and it fires no `change` doing it.** Round 3 added three settled outcomes that leave this panel mounted (import `nothing`, import `failed`, dismiss `failed` — the three that answer nothing, so nothing takes the prompt down), so after any of them every box is ticked again while a count kept only by the `change` handler still holds its pre-submit value.
+
+Both halves of that desync were observed in a browser, and neither is cosmetic:
+
+- a **disabled Import above three visibly ticked boxes**, under a hint asking the planter to tick something — the exact trap the empty-selection refusal exists to prevent, arrived at from the other side;
+- a **retry that imported checklists the planter had unticked**, because the restored boxes are what the form submits.
+
+So a `useEffect` keyed on both outcomes re-reads `tickedTemplateCount(form)` after every settle. A settle is precisely what `useActionState` reports by handing back a new object, and the effect asks the DOM rather than branching on the status — what has to happen does not vary with which outcome it was. It is **not** the `useEffect`-for-data-synchronisation that [`../contracts/data-patterns.md`](../contracts/data-patterns.md) forbids: nothing here is server data and no state is mirrored from props. It is the DOM-subscription case that file names as legitimate — React mutated the checkboxes without telling us, and this reads them back. Deleting the effect restores a shipped defect.
+
+`acceptPhaseTemplatePrompt`'s own `keys.length === 0 → null` guard is untouched and must stay: the button stops the honest empty press, the guard stops a forged key list spending the planter's one answer.
+
+### Every outcome is said out loud (ruled 2026-08-12)
+
+Both actions used to return `void` and log failures to the console. On a press that writes 22–26 tasks that is not acceptable, and the partial import is the case with no second chance — the claim is kept, so the prompt is answered and will never render again to explain itself.
+
+So `acceptPhaseTemplatePrompt` **returns** `partial` rather than throwing once any task exists, and `importPhaseTemplatesAction` is shaped for `useActionState`: `(previous outcome, form) → next outcome`. Three outcomes are rendered by the island:
+
+- `failed` — `IMPORT_FAILED_MESSAGE`, the same treatment `template-picker.tsx` gives a failed catalog import. Nothing was created, so both buttons stay pressable.
+- `nothing` — a submit that named no live checklist. Unreachable from the buttons; reachable from a forged POST, or from a plant that moved stage between the render and the press.
+- a failed decline — reported for the same reason, though it creates nothing either way.
+
+What those three have in common is why they can be island state at all: each of them **answers nothing**, so the transition stays open, the next server render still contains the panel, and the island keeps its `useActionState` result through it.
+
+### The partial receipt is server markup, because the island cannot outlive the answer
+
+The fourth outcome is the opposite case, and it took two attempts and a browser to learn it.
+
+The first attempt called `revalidatePath("/tasks")` and not `refresh()`, on the theory that the next navigation would then be correct. The second removed both calls — a single `PhasePromptRevalidation` directive whose `"none"` meant "re-read nothing, so the island survives". **Neither could work, and the second was verified failing on a preview: 16 of 22 tasks created, `answer = 'accepted'` written, and no receipt in the DOM at any point** — a 25 ms sampler armed before the press recorded only `{section, lead}` → `{}`.
+
+The reason is one sentence of `.next-docs/01-app/03-api-reference/04-functions/cookies.mdx`: *"After you set or delete a cookie in a Server Action, Next.js re-renders the current page and its layouts on the server."* Answering the prompt always writes `PHASE_TEMPLATE_PROMPT_COOKIE`, so `/tasks` re-renders whatever the revalidation setting says — and a part-way import KEEPS its claim, so that render finds an answered transition, builds no prompt, and takes the island (receipt and all) out of the tree with it. No revalidation value can keep a component mounted that the server no longer renders.
+
+So the receipt travels a road that survives the press:
+
+1. `decidePhaseTemplateImportOutcome` returns a **`receipt`** — `{transitionId, createdCount, templateNames}` — beside the outcome, instead of a `partial` status for the island to draw.
+2. `importPhaseTemplatesAction` writes it to **`PHASE_TEMPLATE_RECEIPT_COOKIE`**, a flash cookie with a two-minute `maxAge`, **before** it writes the answer cookie — the answer cookie is what triggers the re-render that has to read the receipt.
+3. `PhaseTemplatePrompt` decodes that cookie in the branch where there is **no prompt** — the `return null` that shipped the silence — and renders `PhaseTemplatePartialReceiptView` — server markup, same `<section>`, same `aria-labelledby`, `role="alert"`, and the `/tasks/templates` link the remainder is behind. A live prompt still wins over a lingering receipt: the receipt is history, a prompt is a question that can still be answered.
+4. `ClearReceiptCookie` — a null-rendering client component holding one `document.cookie` write — spends the flash once it has been shown, so it cannot re-state "the remaining checklists were not created" after the planter has gone and imported them. `maxAge` is the no-JavaScript backstop, not the mechanism. The cookie is therefore NOT `httpOnly`, and the blast radius of forging it is one sentence in your own browser.
+5. `decodePartialImportReceipt` never throws. `/tasks` has no error boundary (see the header of `src/db/migrations/0037_phase_prompt_answers.sql`), and that cookie is the browser's: absent, truncated, re-encoded by a proxy or hand-written, every non-receipt returns `null` and renders nothing. Counts, names and the id are all re-checked on the way in.
+
+**The receipt names its own transition, and step 3 is why.** "A live prompt wins" and "the flash is spent by being shown" are each right on their own and together they leave a hole: a receipt beaten by a new prompt is never drawn, so `ClearReceiptCookie` never runs and the cookie survives *unspent*. Inside the two minutes that is a real sequence — a part-way import of transition A, then the plant moves again (another member, the phase engine, an oversight action), so the render shows a prompt for B and skips the receipt branch; the planter answers B *cleanly*; the render after that has no prompt, reaches the branch, and finds A's cookie still there. Drawn, it announces "the remaining checklists were not created, and this stage change is now answered" in a destructive `role="alert"` about a press where every clause is false. It cannot be fixed by clearing the cookie during the render — `cookies().set` is callable only from a Server Action or a Route Handler — so the identity travels **in the value**: `PhaseTemplatePartialReceipt.transitionId`, validated on decode as a non-empty string (a receipt with no id is refused outright, which also retires every pre-id cookie still in a browser), and matched against the render's own latest transition by `receiptForTransition`. A superseded receipt renders nothing and expires on its `maxAge`. The loader gets that id from `readPhaseTemplatePrompt`, which is the one composition of "read the latest transition, build the prompt" and returns both from a single query — reading the id separately would let the plant move in between and pair a receipt with the wrong stage change, the same trap `getLatestPhaseTransition` avoids by joining the answer rather than fetching it.
+
+Because the receipt no longer replaces the panel body from client state, the lead is plain server markup beside the island again rather than a `lead` prop passed into it, and the answer path follows the house rule after all: `refresh()` when — and only when — something was answered, `revalidatePath` never, because the planter is standing on the affected route and [`../contracts/data-patterns.md`](../contracts/data-patterns.md) reserves that call for other pages.
+
+**Where the decision lives.** `decidePhaseTemplateImportOutcome` in `src/lib/tasks/phase-prompt.ts` — a pure function returning `{ outcome, receipt, answeredTransitionId, fastPathTransitionId }`, with `decidePhaseTemplateDismissOutcome` beside it for "Not now" returning the same shape minus the receipt: `{ outcome, answeredTransitionId, fastPathTransitionId }`. Both were inline in their `"use server"` closures, which no test can call, and that is exactly how the partial branch acquired a `revalidatePath` nobody could see. The actions only perform what these decide.
+
+**The last two fields are two questions, and collapsing them is the bug.** `answeredTransitionId` means "the route changed" and drives `refresh()`; `fastPathTransitionId` means "this press owns a row nothing will take away" and is the ONLY thing allowed to mint `PHASE_TEMPLATE_PROMPT_COOKIE`. They differ on exactly one input, `already_answered`, and they differ on it for BOTH buttons. Import shipped the split first; "Not now" was minting off `answeredTransitionId` until 2026-08-12, because `declinePhaseTemplatePrompt` returned the transition id whether or not its `ON CONFLICT DO NOTHING` had written. The harm is the same on either path: a decline racing an Import claims nothing, the Import's first `importTaskTemplate` throws, `acceptPhaseTemplatePrompt` RELEASES the claim — and the declining browser is left holding a 365-day cookie that suppresses, before the row is ever read, a prompt the row says is unanswered. There is no un-answer path, so that browser never sees the stage change again. `declinePhaseTemplatePrompt` therefore returns `{status: 'declined' | 'already_answered', transitionId}` (or `null` for a stale/absent press): the status is the claim bit, and it exists for this one decision. A decline that DID write its row keeps it forever — nothing releases a decline — so that cookie can only agree with the row.
+
+**One live region, not one per failure.** The three failure messages render through a single `role="alert"` paragraph derived by `phaseTemplatePromptAlert`. Each `useActionState` hook keeps its last result forever, so three independent conditionals put TWO alerts on screen after a failed import followed by a failed dismiss — two announcements for one press, the older describing a press already moved on from. The island tracks `lastPress` (UI state, set by each button's `onClick`) so the region carries the press that was actually made. The `role="status"` empty-tick hint is rendered **unconditionally with its text toggled**: a polite live region inserted together with its first message is commonly never announced. It carries no `aria-describedby` from the Import button, which is disabled — and therefore unfocusable — for exactly as long as the hint has anything to say.
+
+The prompt also states the import policy now, in its own words rather than the catalog's: the two surfaces no longer behave the same. Importing from `/tasks/templates` again really does add a second copy; this prompt can be answered exactly once per stage change. Both halves are surprising on their own, so both are said.
+
+### Dates come from the transition, not from the press
+
+`acceptPhaseTemplatePrompt` hands `transition.createdAt` to the T-011 import path, so a planter who answers three days later gets the schedule they would have got by answering immediately. Counting from the press instead quietly punishes anyone who thought about it first, and it makes the dates the prompt *showed* different from the dates it *wrote*.
+
+It also re-derives the prompt from the database and filters the request's template keys against it. The keys come from a browser, so a forged one can name a checklist from a stage this plant has never reached; re-deriving turns that into a no-op instead of a private import path around the picker. It closes the other window too — if the plant moved again between render and press, the answer applies to the *current* transition and is dated from it, which is the only answer still true.
+
+### Two handlers on one event
+
+`phase.changed` now carries the oversight milestone (N-025) and this prompt. The bus runs handlers through `Promise.allSettled`, so neither can cost the other its turn, and `subscriptions.test.ts` asserts both are registered — a single `bus.on` per event type would have replaced the first silently.
