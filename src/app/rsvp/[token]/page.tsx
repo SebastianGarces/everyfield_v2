@@ -7,6 +7,9 @@ import { Card, CardContent } from "@/components/ui/card";
 // runtime's zone is. memory/invariants.md → Date & Time Rendering.
 import { formatDate, formatTime } from "@/lib/datetime";
 import { getConfirmationDetails } from "@/lib/communication/confirmation";
+// The invitee is told the same meeting-type name the planter sees, from the one
+// table. See src/lib/meetings/labels.ts.
+import { meetingTypeLabel } from "@/lib/meetings/labels";
 import { RsvpActions } from "./rsvp-actions";
 
 interface RsvpPageProps {
@@ -33,12 +36,6 @@ export default async function RsvpPage({
   const isExpired = tokenRecord.expiresAt < new Date();
   const hasResponded = tokenRecord.status !== "pending";
 
-  const meetingTypeLabels: Record<string, string> = {
-    vision_meeting: "Vision Meeting",
-    orientation: "Orientation",
-    team_meeting: "Team Meeting",
-  };
-
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50 p-4">
       <Card className="w-full max-w-lg">
@@ -49,7 +46,7 @@ export default async function RsvpPage({
               {church.name}
             </p>
             <h1 className="mt-2 text-2xl font-bold">
-              {meeting.title ?? meetingTypeLabels[meeting.type] ?? meeting.type}
+              {meeting.title ?? meetingTypeLabel(meeting.type)}
             </h1>
           </div>
 

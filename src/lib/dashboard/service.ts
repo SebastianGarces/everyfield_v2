@@ -2,6 +2,10 @@ import { db } from "@/db";
 import { churchMeetings, personActivities, persons, tasks } from "@/db/schema";
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { getTaskCounts } from "@/lib/tasks/service";
+// The activity feed names a meeting the same way /meetings and /meetings/[id]
+// do. It carried its own copy of both the label table and the title branch.
+// See src/lib/meetings/labels.ts.
+import { meetingDisplayTitle } from "@/lib/meetings/labels";
 
 // ============================================================================
 // Types
@@ -178,10 +182,7 @@ export async function getRecentActivity(
     .limit(limit);
 
   for (const meeting of completedMeetings) {
-    const label =
-      meeting.type === "vision_meeting" && meeting.meetingNumber != null
-        ? `Vision Meeting #${meeting.meetingNumber}`
-        : (meeting.title ?? formatMeetingType(meeting.type));
+    const label = meetingDisplayTitle(meeting);
     const attendance = meeting.actualAttendance;
     const description = attendance
       ? `${label} completed with ${attendance} attendees`
@@ -254,13 +255,4 @@ function formatStatus(status: string): string {
     leader: "Leader",
   };
   return map[status] ?? status.replace(/_/g, " ");
-}
-
-function formatMeetingType(type: string): string {
-  const map: Record<string, string> = {
-    vision_meeting: "Vision Meeting",
-    orientation: "Orientation",
-    team_meeting: "Team Meeting",
-  };
-  return map[type] ?? type.replace(/_/g, " ");
 }

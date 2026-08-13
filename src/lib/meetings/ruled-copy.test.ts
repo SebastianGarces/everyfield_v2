@@ -52,9 +52,10 @@ import {
 // ten schema tables and drizzle, so an import edge from a component that later
 // gains `"use client"` would drag that whole graph into the client bundle.
 // `copy.ts` cannot drag anything, and the last section of this file pins the
-// near half of that split over all FOUR db-free siblings: `copy.ts` and
-// `evaluation-comparison.ts` import nothing at all, `agenda.ts` and
-// `meeting-type-filter.ts` import one erased TYPE each and no value. The far
+// near half of that split over all FIVE db-free siblings: `copy.ts` and
+// `evaluation-comparison.ts` import nothing at all, `agenda.ts`,
+// `meeting-type-filter.ts` and `labels.ts` import one erased TYPE each and no
+// value. The far
 // half — that no client component REACHES service.ts, directly or through any
 // non-server-action module — is an architecture guard rather than a copy
 // ruling, and lives in `client-boundary.test.ts` beside it.
@@ -547,6 +548,12 @@ const DB_FREE_SIBLINGS: readonly {
     file: "evaluation-comparison.ts",
     allows: "nothing",
     holds: "the comparison window, shape and arithmetic",
+  },
+  {
+    file: "labels.ts",
+    allows: "type-only",
+    holds:
+      "the ONE meeting display vocabulary — type and status labels, badge tints, the display title",
   },
 ];
 

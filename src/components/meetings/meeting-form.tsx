@@ -28,6 +28,9 @@ import type {
   MeetingSubtype,
 } from "@/db/schema";
 import type { MinistryTeam } from "@/db/schema";
+// The offered types come from the one label table, so a type cannot be created
+// under a name no other surface shows it by. See src/lib/meetings/labels.ts.
+import { MEETING_TYPE_OPTIONS } from "@/lib/meetings/labels";
 
 interface MeetingFormProps {
   meeting?: ChurchMeeting;
@@ -38,12 +41,6 @@ interface MeetingFormProps {
   defaultTeamId?: string;
   onSuccess?: () => void;
 }
-
-const meetingTypeOptions: { value: MeetingType; label: string }[] = [
-  { value: "vision_meeting", label: "Vision Meeting" },
-  { value: "orientation", label: "Orientation" },
-  { value: "team_meeting", label: "Team Meeting" },
-];
 
 const subtypeOptions: { value: MeetingSubtype; label: string }[] = [
   { value: "regular", label: "Regular" },
@@ -115,7 +112,7 @@ export function MeetingForm({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {meetingTypeOptions.map((opt) => (
+              {MEETING_TYPE_OPTIONS.map((opt) => (
                 <SelectItem
                   key={opt.value}
                   value={opt.value}
