@@ -29,8 +29,8 @@ import {
 // ~120 ms), dialog CLOSED at t=21803 ms. The planter was left on a roles tab
 // silently showing somebody else in the seat, having never read why.
 //
-// WHY THE SEAM IS A PURE FUNCTION. The branch had no assertion above
-// `membershipConflictMessage` because there was nowhere to put one: the suite is
+// WHY THE SEAM IS A PURE FUNCTION. The branch had no assertion above the
+// server-side refusal because there was nowhere to put one: the suite is
 // `node:test` + tsx with no DOM, and importing the dialog pulls in
 // `@/app/(dashboard)/teams/actions`, which opens a database connection at import
 // time. `assignRefusalDelivery` is the decision — WHERE the refusal is shown —
@@ -136,8 +136,9 @@ test("§2 an ordinary failure stays inline, closes nothing and refreshes nothing
 
 test("§2b the person-level duplicate is NOT collapsed into the seat refusal", () => {
   // Two different sentences with two different next moves (#409 D1). They are
-  // produced by two different indexes and `membershipConflictMessage` keeps them
-  // apart; this is the same rule one layer up.
+  // NOT two indexes — `seatRefusalMessage` tells them apart by reading who holds
+  // the seat (#411 round 2) — and this is the same rule one layer up: whichever
+  // sentence arrives, the delivery must not blur them together.
   assert.notEqual(PERSON_ALREADY_ASSIGNED_MESSAGE, ROLE_ALREADY_FILLED_MESSAGE);
   assert.equal(
     assignRefusalDelivery(PERSON_ALREADY_ASSIGNED_MESSAGE).toast,

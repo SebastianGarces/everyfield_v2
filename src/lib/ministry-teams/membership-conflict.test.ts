@@ -7,43 +7,42 @@ import {
   TEAM_MEMBERSHIPS_ACTIVE_UNIQUE,
   TEAM_MEMBERSHIPS_ROLE_ACTIVE_UNIQUE,
 } from "@/db/schema/ministry-teams";
-import { membershipConflictMessage } from "@/lib/ministry-teams/membership-conflict";
+import { isSeatConflict } from "@/lib/ministry-teams/membership-conflict";
 import {
   PERSON_ALREADY_ASSIGNED_MESSAGE,
   ROLE_ALREADY_FILLED_MESSAGE,
 } from "@/lib/ministry-teams/membership-copy";
 
 // ----------------------------------------------------------------------------
-// #409 D1 — the translation from a driver unique-violation to user copy.
+// #409 D1 — RECOGNISING that the seat's guards refused a write.
 //
-// WHY THIS FILE EXISTS. `assignMember`'s reactivation path is an UPDATE, and an
-// UPDATE takes no `ON CONFLICT`, so it meets
-// `team_memberships_role_active_unique_idx` as a THROWN error.
-// `membershipConflictMessage` is the only thing between that throw and a raw
-// "duplicate key value violates unique constraint …" reaching a planter — the
-// exact 500 migration 0038's ON CONFLICT clauses exist to prevent — and it
-// decides by inspecting an error whose SHAPE it assumes. An assumption written
-// in a comment is not a guard: if the constraint name arrives somewhere the
-// predicate does not look, it returns null, the raw error rethrows, and nobody
-// finds out until a planter reads Postgres at them.
+// WHY THIS FILE EXISTS. Two of `assignMember`'s write outcomes arrive as a
+// THROWN driver error: the reactivation path is an UPDATE and takes no
+// `ON CONFLICT` at all, and a RACED insert raises on the index its `ON CONFLICT`
+// does NOT arbitrate on (§3). `isSeatConflict` is the only thing between those
+// throws and a raw "duplicate key value violates unique constraint …" reaching a
+// planter — the exact 500 migration 0038's ON CONFLICT clauses exist to prevent
+// — and it decides by inspecting an error whose SHAPE it assumes. An assumption
+// written in a comment is not a guard: if the constraint name arrives somewhere
+// the predicate does not look, it returns false, the raw error rethrows, and
+// nobody finds out until a planter reads Postgres at them.
 //
 // It is a pure function over an error object, so this suite needs no database
-// and runs on every `pnpm test`. That is the point: the only other test that
-// reaches this path ("REACTIVATING a past holder is refused too") is in the
-// opt-in live suite `role-seat-race.test.ts`.
+// and runs on every `pnpm test`. That is the point: the only other tests that
+// reach this path are in the opt-in live suite `role-seat-race.test.ts`.
 //
 // THE RECOGNITION ITSELF IS NOT THIS MODULE'S — it is `isUniqueViolation`
 // (`src/db/errors.ts`), the one copy every domain shares (#411 AC5). What this
-// file pins is that BOTH REAL SHAPES still reach the right sentence through it.
+// file pins is that BOTH REAL SHAPES, on BOTH INDEXES, are recognised through it.
 //
 // BOTH FIXTURES ARE REAL BYTES, and there are two of them because the driver
 // throws TWO shapes. Captured 2026-08-13 against Postgres 16 with migration
 // 0038 applied, reached through neon-http (the local Neon proxy the live suites
 // run on, via the `scripts/live-db-endpoint.ts` preload):
 //
-//   * a `db.batch([...])` — which is what the reactivation actually is — throws
-//     the driver's `NeonDbError` DIRECTLY, so the 23505 and the constraint are
-//     on the top-level error and `cause` is undefined: matched at DEPTH 0 (§1);
+//   * a `db.batch([...])` — which is what both write paths are — throws the
+//     driver's `NeonDbError` DIRECTLY, so the 23505 and the constraint are on
+//     the top-level error and `cause` is undefined: matched at DEPTH 0 (§1);
 //   * a single-statement write is wrapped by Drizzle in
 //     `Failed query: <sql>\nparams: <…>` with that `NeonDbError` hung on
 //     `cause`, and the wrapper carries neither the code nor the constraint:
@@ -70,49 +69,63 @@ function neonUniqueViolation(constraint: string): Error {
   );
 }
 
-test("§1 the batch shape — the constraint name in `message`, no cause (the reactivation path)", () => {
-  assert.equal(
-    membershipConflictMessage(neonUniqueViolation(ROLE_INDEX)),
-    ROLE_ALREADY_FILLED_MESSAGE
+/** Drizzle's wrapper: the driver error on `cause`, no constraint of its own. */
+function drizzleWrapped(constraint: string): Error {
+  return Object.assign(
+    new Error(
+      'Failed query: insert into "team_memberships" ("church_id", "team_id", ' +
+        '"person_id", "role_id", "status") values ($1, $2, $3, $4, $5) ' +
+        'on conflict ("role_id") where "team_memberships"."status" = \'active\' ' +
+        'do nothing returning "id"\nparams: …'
+    ),
+    { cause: neonUniqueViolation(constraint) }
   );
+}
+
+test("§1 the batch shape — the constraint name in `message`, no cause (the reactivation path)", () => {
+  assert.equal(isSeatConflict(neonUniqueViolation(ROLE_INDEX)), true);
 });
 
 test("§2 the wrapped shape — Drizzle's `Failed query:` with the driver error on `cause`", () => {
-  const wrapped = Object.assign(
-    new Error(
-      'Failed query: update "team_memberships" set "status" = $1, "updated_at" = $2 ' +
-        'where ("team_memberships"."church_id" = $3 and "team_memberships"."id" = $4) ' +
-        'returning "id", "church_id", "team_id", "person_id", "role_id"\nparams: active,…'
-    ),
-    { cause: neonUniqueViolation(ROLE_INDEX) }
-  );
+  const wrapped = drizzleWrapped(ROLE_INDEX);
 
   assert.doesNotMatch(
     wrapped.message,
-    new RegExp(ROLE_INDEX),
+    new RegExp(`"${ROLE_INDEX}"`),
     "the premise of this case: the wrapper names no constraint, so reading only `message` finds nothing"
   );
-  assert.equal(membershipConflictMessage(wrapped), ROLE_ALREADY_FILLED_MESSAGE);
+  assert.equal(isSeatConflict(wrapped), true);
 });
 
-test("§3 the SUBSUMED index is not a live guard, so it maps to no sentence at all", () => {
-  const wrapped = Object.assign(
-    new Error('Failed query: insert into "team_memberships" …\nparams: …'),
-    { cause: neonUniqueViolation(PERSON_INDEX) }
-  );
-
-  for (const shape of [wrapped, neonUniqueViolation(PERSON_INDEX)]) {
+test("§3 the SUBSUMED index raises too, because it is NOT the ON CONFLICT arbiter", () => {
+  // #411 round 2, correcting round 1. `team_memberships_active_unique`
+  // (team_id, person_id, role_id) IS strictly subsumed by the seat index on
+  // `role_id` alone — but subsumption only says a violation of it implies a
+  // violation of the seat index, never that Postgres reaches the seat index
+  // first. `ON CONFLICT (role_id) WHERE status = 'active' DO NOTHING`
+  // arbitrates on the seat index ALONE. Under a real race the arbiter pre-check
+  // does not yet see the winner's uncommitted tuple, the INSERT proceeds, and
+  // the tuple is indexed into this index first (lower OID) with no DO NOTHING
+  // covering it — so it blocks, then raises. Measured: with this branch missing,
+  // `role-seat-race.test.ts`'s same-person double-submit failed 2 runs in 3
+  // against a freshly migrated Postgres 16.
+  for (const shape of [
+    neonUniqueViolation(PERSON_INDEX),
+    drizzleWrapped(PERSON_INDEX),
+  ]) {
     assert.equal(
-      membershipConflictMessage(shape),
-      null,
-      "#411 round 1: `team_memberships_active_unique` (team, person, role) is strictly subsumed by the seat index on `role_id` alone — no write can violate it first, so a branch for it is unreachable code claiming to be a guard"
+      isSeatConflict(shape),
+      true,
+      "#411 round 2: a violation on the non-arbiter index is the seat refusing a raced write — leaving it unrecognised puts a raw NeonDbError in front of a planter"
     );
   }
 
-  // Where the double-submit sentence really comes from now: `assignMember`
-  // reads WHO holds the seat on the loser branch and names them. The sentence
-  // still exists and is still different from the seat one — the planter's next
-  // move differs — it simply is not produced by translating a driver error.
+  // ...and recognising it does NOT decide the wording. Both sentences still
+  // exist and still differ — the planter's next move differs — and which one is
+  // read comes from ONE place: `assignMember` reads who holds the seat, for the
+  // empty-`returning()` refusal and the thrown one alike. An index→sentence
+  // table would have to predict which index a race raises on, and that
+  // prediction is what round 1 got wrong.
   assert.notEqual(PERSON_ALREADY_ASSIGNED_MESSAGE, ROLE_ALREADY_FILLED_MESSAGE);
   const memberships = readFileSync(
     path.join(process.cwd(), "src/lib/ministry-teams/memberships.ts"),
@@ -121,19 +134,23 @@ test("§3 the SUBSUMED index is not a live guard, so it maps to no sentence at a
   assert.match(
     memberships,
     /holder\?\.personId === personId[\s\S]{0,80}PERSON_ALREADY_ASSIGNED_MESSAGE/,
-    "#411 round 1: the same-person refusal is decided by reading the seat's active holder, not by a dead branch over a subsumed index"
+    "#411 round 1: the same-person refusal is decided by reading the seat's active holder, not by a branch over an index name"
+  );
+  assert.equal(
+    memberships.match(/await seatRefusalMessage\(churchId, roleId, personId\)/g)
+      ?.length,
+    2,
+    "#411 round 2: BOTH refusal paths — the empty returning() and the recognised conflict — end in the one holder read"
   );
 });
 
-test("§4 anything else stays null, so assignMember rethrows real faults", () => {
-  assert.equal(membershipConflictMessage(new Error("connection reset")), null);
+test("§4 anything else stays false, so assignMember rethrows real faults", () => {
+  assert.equal(isSeatConflict(new Error("connection reset")), false);
   assert.equal(
-    membershipConflictMessage(
-      neonUniqueViolation("teams_church_predefined_unique_idx")
-    ),
-    null,
+    isSeatConflict(neonUniqueViolation("teams_church_predefined_unique_idx")),
+    false,
     "a violation on somebody else's index is not a seat refusal — swallowing it would report the wrong cause"
   );
-  assert.equal(membershipConflictMessage("not an error at all"), null);
-  assert.equal(membershipConflictMessage(undefined), null);
+  assert.equal(isSeatConflict("not an error at all"), false);
+  assert.equal(isSeatConflict(undefined), false);
 });

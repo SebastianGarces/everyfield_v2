@@ -241,13 +241,23 @@ test(
     if (!(await databaseReachable())) return t.skip(UNREACHABLE);
 
     // #411 round 1. Two tabs, or one double-clicked Confirm, assigning the SAME
-    // person to one free seat. `team_memberships_role_active_unique_idx` is
-    // keyed on `role_id` ALONE, so this loser is refused exactly as the
-    // two-people race's loser is — `INSERT 0 0`, no driver error, nothing to
-    // translate. The truthful sentence is nonetheless the OTHER one: this
-    // planter filled the seat, with the person they picked, so
-    // ROLE_ALREADY_FILLED_MESSAGE and its "Someone filled it while this page was
-    // open" description would both be false statements.
+    // person to one free seat.
+    //
+    // THIS IS THE CASE THAT CAUGHT ROUND 1'S WRONG BELIEF, and it is why the
+    // suite runs it RUNS times: the refusal arrives in a DIFFERENT SHAPE from
+    // one run to the next, timing-dependently. `ON CONFLICT (role_id) WHERE
+    // status = 'active' DO NOTHING` arbitrates on the seat index alone, so
+    // sometimes the loser is `INSERT 0 0` — but when the arbiter's pre-check
+    // has not yet seen the winner's uncommitted tuple, the insert proceeds and
+    // meets `team_memberships_active_unique` (team_id, person_id, role_id),
+    // which the DO NOTHING does not cover, and THAT index raises 23505. Both
+    // shapes must land on the same sentence, so a single green run proves
+    // nothing here.
+    //
+    // The truthful sentence is the OTHER one: this planter filled the seat,
+    // with the person they picked, so ROLE_ALREADY_FILLED_MESSAGE and its
+    // "Someone filled it while this page was open" description would both be
+    // false statements.
     await sweep();
 
     for (let run = 1; run <= RUNS; run++) {
@@ -390,7 +400,8 @@ test(
     // The reactivation path is an UPDATE and takes no `ON CONFLICT`, so it
     // meets the index as a violation. The whole `db.batch` aborts, which is
     // what keeps `markRoleFilled` from landing on its own — and the driver
-    // error is translated into the same sentence the insert path throws.
+    // error is recognised by `isSeatConflict`, after which the same holder read
+    // the insert path uses picks the sentence.
     await sweep();
     const seat = await createScratchSeat();
 

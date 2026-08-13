@@ -27,7 +27,7 @@ import { ROLE_ALREADY_FILLED_MESSAGE } from "@/lib/ministry-teams/membership-cop
 // action is unreachable from a test — this repo's suite is `node:test` + tsx
 // with no DOM, and the dialog's import of `@/app/(dashboard)/teams/actions`
 // opens a database connection at import time. That is precisely why this branch
-// shipped with no assertion above `membershipConflictMessage`. Pulled out here
+// shipped with no assertion above the server-side refusal. Pulled out here
 // it is a pure function over a string, with no imports but the copy leaf, and
 // `assign-refusal.test.ts` runs it on every `pnpm test`.
 // ============================================================================

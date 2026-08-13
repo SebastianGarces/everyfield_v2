@@ -283,10 +283,16 @@ test("§3c assignMember claims the seat with ON CONFLICT (#409 D1)", () => {
     /if \(!inserted\) \{[\s\S]{0,200}throw new ExpectedError\(\s*await seatRefusalMessage\(churchId, roleId, personId\)/,
     "#409 D1: an empty returning() is the loser of the race and must be reported, not returned as undefined"
   );
+  // #411 round 2 — the thrown half. The reactivation UPDATE takes no ON
+  // CONFLICT, and a RACED insert raises on the non-arbiter index, so this is a
+  // live refusal path and it must end in the SAME holder read as the empty
+  // `returning()` above. A branch that produced its own sentence here would be
+  // a second decider, and predicting which index raises is what round 1 got
+  // wrong.
   assert.match(
     assign,
-    /membershipConflictMessage\(error\)/,
-    "#409 D1: the reactivation UPDATE takes no ON CONFLICT, so its index violation must become the same user copy"
+    /if \(isSeatConflict\(error\)\) \{[\s\S]{0,200}throw new ExpectedError\(\s*await seatRefusalMessage\(churchId, roleId, personId\)/,
+    "#411 round 2: a recognised seat conflict must be refused with the sentence the holder read chooses, not one picked from the index name"
   );
 
   // #411 round 1 — the loser branch reads WHO holds the seat before choosing a
@@ -395,31 +401,33 @@ test("§4c the seat refusal is decided by the ONE unique-violation predicate, no
     /import \{ isUniqueViolation \} from "@\/db\/errors"/,
     "#411 AC5: the recognition is `src/db/errors.ts`'s, shared with every other domain"
   );
-  assert.match(
-    conflict,
-    /isUniqueViolation\(error, TEAM_MEMBERSHIPS_ROLE_ACTIVE_UNIQUE\)/,
-    "#409 D1: the index name must come from the schema that declares it, never be re-typed here"
-  );
-
-  // #411 round 1 — and it translates THAT index only. `role_id` alone strictly
-  // subsumes `team_memberships_active_unique` (team, person, role), so no write
-  // can violate the older index first and a branch for it is unreachable code
-  // wearing a guard's clothes. The double-submit sentence is decided by
-  // `assignMember` reading the seat's holder (§3c), which is a fact about the
-  // database rather than a snapshot pre-check.
-  assert.doesNotMatch(
-    conflict.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1"),
-    /isUniqueViolation\(error, TEAM_MEMBERSHIPS_ACTIVE_UNIQUE\)/,
-    "#411 round 1: the subsumed index cannot raise, so translating it is dead code — the schema constant's own docblock records why the index is kept"
-  );
+  // #411 round 2 — BOTH indexes, and both named through the schema's own
+  // constants. `ON CONFLICT (role_id) …` arbitrates on the seat index alone, so
+  // a RACED insert is indexed into the non-arbiter `team_memberships_active_unique`
+  // (lower OID, reached first), blocks on the winner's uncommitted tuple and
+  // raises there. Round 1 deleted that branch on a subsumption argument that
+  // describes only the SEQUENTIAL second submit — which `existing.status ===
+  // 'active'` intercepts before any write — and `role-seat-race.test.ts`'s
+  // same-person case went red 2 runs in 3. Recognition covers both; the SENTENCE
+  // is still decided in exactly one place, by the holder read (§3c).
+  for (const constant of [
+    "TEAM_MEMBERSHIPS_ROLE_ACTIVE_UNIQUE",
+    "TEAM_MEMBERSHIPS_ACTIVE_UNIQUE",
+  ]) {
+    assert.match(
+      conflict,
+      new RegExp(`isUniqueViolation\\(error, ${constant}\\)`),
+      `#411 round 2: a unique violation on ${constant} means the seat is taken and must be recognised — and the index name must come from the schema that declares it, never be re-typed here`
+    );
+  }
   const subsumption = sourceReader(
     read("src/db/schema/ministry-teams.ts"),
     "ministry-teams.ts"
   ).span("IT IS SUBSUMED", "export const TEAM_MEMBERSHIPS_ACTIVE_UNIQUE =");
   assert.match(
     subsumption,
-    /NOT A LIVE GUARD/,
-    "#411 round 1: the next reader must be told the older index is not a live guard, beside the constant itself"
+    /STILL A LIVE GUARD[\s\S]*not the arbiter/i,
+    "#411 round 2: the next reader must be told WHY the subsumed index raises — it is a live guard on the INSERT path precisely because it is NOT the ON CONFLICT arbiter — beside the constant itself"
   );
   // Comments stripped: this rule is documented by NAMING what it forbids, in
   // `membership-conflict.ts`'s own header (`register-path.test.ts`'s `code()`).
