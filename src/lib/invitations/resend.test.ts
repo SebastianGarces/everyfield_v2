@@ -22,7 +22,6 @@ import {
   type InvitationActor,
 } from "./core";
 import {
-  RESEND_DEDUPE_WINDOW_MS,
   invitationEmailIdempotencyKey,
   sendInvitationEmail,
   type InvitationEmailFacts,
@@ -36,13 +35,22 @@ import {
   resendInvitationEmailAs,
   resendRefusalMessage,
 } from "./resend";
+// The window comes from the LEAF, never from `./email` — which imported it and
+// re-exported it until the 2026-08-13 sweep (#411), making this suite the one
+// "existing importer" that justified a second door into the Resend SDK. See
+// `register-path.test.ts` §2.
 import {
+  RESEND_DEDUPE_WINDOW_MS,
   resendCooldownLabel,
   resendCooldownRemainingMs,
   resendCooldownSecondsLeft,
   resendDedupeWindowAt,
 } from "./resend-window";
-import { assertInOrder, sourceReader } from "@/lib/testing/source-span";
+import {
+  assertInOrder,
+  sourceReader,
+  stripComments,
+} from "@/lib/testing/source-span";
 
 // ============================================================================
 // "Resend email" on a pending invitation — RULED 2026-08-10 (Sebastian, on
@@ -205,13 +213,6 @@ const ACTIONS_CODE = readFileSync(
   "utf8"
 );
 
-/** Source minus comments — these files explain their rulings at length. */
-function code(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|[^:])\/\/.*$/gm, "$1");
-}
-
 /**
  * THE READERS, and the only way this file cuts a declaration out of a source
  * file. `span` / `after` throw when an anchor has moved (`@/lib/testing/source-span`).
@@ -227,7 +228,7 @@ function code(source: string): string {
 const LIST = sourceReader(LIST_CODE, "invitations-list.tsx");
 const ACTIONS = sourceReader(ACTIONS_CODE, "oversight/invitations/actions.ts");
 const ACTIONS_STRIPPED = sourceReader(
-  code(ACTIONS_CODE),
+  stripComments(ACTIONS_CODE),
   "oversight/invitations/actions.ts (comments stripped)"
 );
 
@@ -239,9 +240,10 @@ const ACTIONS_STRIPPED = sourceReader(
 function resendBody(): string {
   // It is the last declaration in its own module now, so the bound is the end
   // of the file rather than the next function's name.
-  return sourceReader(code(RESEND_CODE), "resend.ts (comments stripped)").after(
-    "export async function resendInvitationEmailAs"
-  );
+  return sourceReader(
+    stripComments(RESEND_CODE),
+    "resend.ts (comments stripped)"
+  ).after("export async function resendInvitationEmailAs");
 }
 
 // ----------------------------------------------------------------------------
@@ -643,26 +645,60 @@ test("the seams default to the real, org-scoped read", () => {
 
   assert.match(body, /deps\.loadInvitation \?\? loadOrgInvitation/);
   assert.match(body, /deps\.expire \?\? expireInvitation/);
-  assert.match(code(RESEND_CODE), /orgInvitationQuery\(actor, invitationId\)/);
   assert.match(
-    code(SERVICE_CODE),
+    stripComments(RESEND_CODE),
+    /orgInvitationQuery\(actor, invitationId\)/
+  );
+  assert.match(
+    stripComments(SERVICE_CODE),
     /resendInvitationEmailAs\(actor, invitationId\)/
   );
   // …and the query itself stays in the shared layer, so "ours" has exactly one
   // definition for the list, the revoke and this path (PR #392 warning (c)).
-  assert.match(code(CORE_CODE), /export function orgInvitationQuery\(/);
-  assert.doesNotMatch(
-    code(RESEND_CODE),
+  assert.match(
+    stripComments(CORE_CODE),
     /export function orgInvitationQuery\(/
   );
-  assert.match(code(RESEND_CODE), /from "\.\/core"/);
+  assert.doesNotMatch(
+    stripComments(RESEND_CODE),
+    /export function orgInvitationQuery\(/
+  );
+  assert.match(stripComments(RESEND_CODE), /from "\.\/core"/);
   // One direction only — a cycle would make the extraction cosmetic.
-  assert.doesNotMatch(code(CORE_CODE), /from "\.\/resend"/);
+  assert.doesNotMatch(stripComments(CORE_CODE), /from "\.\/resend"/);
   // The actor is minted from the session, never taken as an argument.
   assert.match(
-    code(SERVICE_CODE),
+    stripComments(SERVICE_CODE),
     /export async function resendInvitationEmail\(\s*invitationId: string\s*\)/
   );
+});
+
+test("the send's seams are forwarded key by key, never as a spread", () => {
+  // Swept 2026-08-13 (#411). `ResendInvitationDeps` extends `EmailInviteeDeps`
+  // with three seams of its own — `loadInvitation`, `expire`, `now` — and this
+  // call forwarded all six with `{ ...deps, occasion }`. Nothing was wrong at
+  // runtime, because `emailInviteeOutcome` reads only what it declares; the
+  // trap is the day `EmailInviteeDeps` gains a key this module already uses
+  // under the same name, at which point a seam meant for the expiry guard
+  // starts steering the send with no diff at either end.
+  //
+  // Same rule the domain already ships on the create path:
+  // `resolveInvitationForResolvedTarget` was rebuilt key by key by #304 ruling
+  // 4 fix 1 for exactly this reason. A spread is not a filter.
+  const body = resendBody();
+
+  assert.doesNotMatch(
+    body,
+    /emailInviteeOutcome\(\s*invitation,\s*\{\s*\.\.\.deps/,
+    "the resend spreads its whole deps bag into the send path — name the keys"
+  );
+  // …and the two keys it is entitled to forward really are forwarded, so the
+  // assertion above cannot be satisfied by dropping the seams altogether.
+  // Whitespace-tolerant on purpose: a Prettier re-wrap must not turn a rule
+  // about which keys travel into a rule about where the line breaks.
+  assert.match(body, /lookupOrgName:\s*deps\.lookupOrgName/);
+  assert.match(body, /send:\s*deps\.send/);
+  assert.match(body, /occasion:\s*\{\s*kind:\s*"resend",\s*at:\s*now\s*\}/);
 });
 
 // ----------------------------------------------------------------------------
@@ -674,10 +710,18 @@ test("the resend persists nothing about delivery", () => {
   // `sent` from a provider is acceptance, not a delivery receipt, so a stored
   // flag would assert something the product never observes.
   for (const forbidden of [/email_sent/, /emailSentAt/, /deliveredAt/]) {
-    assert.doesNotMatch(code(CORE_CODE), forbidden, String(forbidden));
-    assert.doesNotMatch(code(RESEND_CODE), forbidden, String(forbidden));
-    assert.doesNotMatch(code(LIST_CODE), forbidden, String(forbidden));
-    assert.doesNotMatch(code(ACTIONS_CODE), forbidden, String(forbidden));
+    assert.doesNotMatch(stripComments(CORE_CODE), forbidden, String(forbidden));
+    assert.doesNotMatch(
+      stripComments(RESEND_CODE),
+      forbidden,
+      String(forbidden)
+    );
+    assert.doesNotMatch(stripComments(LIST_CODE), forbidden, String(forbidden));
+    assert.doesNotMatch(
+      stripComments(ACTIONS_CODE),
+      forbidden,
+      String(forbidden)
+    );
   }
 
   // The one write the resend path may make is the auto-expire, and it is the
@@ -691,12 +735,14 @@ test("no resend path logs the token, the address or the link", () => {
   //
   // THIS TEST USED TO SCAN NOTHING, and the extraction is what exposed it. The
   // body was sliced out of `core.ts` between `indexOf("// Resend")` and
-  // `indexOf("// Respond")` — on source that `code()` had ALREADY STRIPPED THE
+  // `indexOf("// Respond")` — on source that `stripComments()` had ALREADY STRIPPED THE
   // COMMENTS FROM. Both needles were comments, so both `indexOf`s returned -1,
   // `slice(-1, -1)` returned `""`, the `matchAll` found zero calls and the loop
   // never ran. A bound that names a comment cannot survive a comment stripper;
   // the bound is now the module itself, which has nothing to keep in sync.
-  const calls = [...code(RESEND_CODE).matchAll(/console\.\w+\(([\s\S]*?)\);/g)]
+  const calls = [
+    ...stripComments(RESEND_CODE).matchAll(/console\.\w+\(([\s\S]*?)\);/g),
+  ]
     .map((match) => match[1])
     // A plain quoted string is a CONSTANT — `console.error("invitation resend
     // has no message …")` names the event and can leak nothing. What must not
@@ -730,7 +776,7 @@ test("the Resend button is rendered for pending rows and nothing else", () => {
   );
   // Offered to every admin who can see the row — the same rule as Revoke, and
   // the authority check stays in the read's WHERE clause.
-  assert.doesNotMatch(code(LIST_CODE), /canResend/);
+  assert.doesNotMatch(stripComments(LIST_CODE), /canResend/);
 });
 
 test("the Resend control is a button with cursor-pointer and an accessible name", () => {
@@ -810,7 +856,7 @@ test("a refusal survives long enough to be read — the refresh is on the succes
   // therefore destroyed the message before it could paint, which made
   // `resendRefusalMessage("not_pending")` and `INVITATION_EXPIRED_MESSAGE`
   // dead on screen: the admin saw nothing at all.
-  const body = code(
+  const body = stripComments(
     ACTIONS.span(
       "export async function resendInvitationEmailAction",
       "export async function revokeInvitationAction"
@@ -1022,23 +1068,12 @@ test("the countdown ends exactly when the provider will accept a new key", async
   assert.notEqual(afterWindow, opened, "the window elapsed — a real send");
 });
 
-test("resend-window.ts imports nothing", () => {
-  // The same rail as `register-path.ts`, for the same reason: the pending list
-  // is a `"use client"` module and holds this arithmetic, and one import here
-  // would drag `@/lib/email/client` — and the Resend SDK with it — into the
-  // browser bundle.
-  const source = code(
-    readFileSync(
-      path.join(process.cwd(), "src", "lib", "invitations", "resend-window.ts"),
-      "utf8"
-    )
-  );
-
-  assert.doesNotMatch(source, /^\s*import[\s{*]/m, "no static import");
-  assert.doesNotMatch(source, /\bimport\s*\(/, "no dynamic import either");
-  assert.doesNotMatch(source, /\brequire\s*\(/, "no require either");
-  assert.doesNotMatch(source, /"use server"|"server-only"/);
-});
+// "resend-window.ts imports nothing" USED TO LIVE HERE and now lives in
+// `register-path.test.ts` §2, off the `DOMAIN_LEAVES` table that also asserts
+// nothing else re-exports the leaf (swept 2026-08-13, #411). The split was the
+// bug: this file held rule 1 for this leaf, that file held rule 2 for the other
+// one, and so `email.ts` re-exported THIS leaf's three symbols for four months
+// with both suites green. One table, both properties, every leaf.
 
 // ----------------------------------------------------------------------------
 // 8. The surface refuses for the window, and says how long
@@ -1051,11 +1086,13 @@ test("resend-window.ts imports nothing", () => {
  * sentence about what it used to render.
  */
 function resendButtonSource(): string {
-  return code(LIST.span("type ResendCooldown", "const initialRevokeState"));
+  return stripComments(
+    LIST.span("type ResendCooldown", "const initialRevokeState")
+  );
 }
 
 test("the action hands the surface the server's window and invents nothing", () => {
-  const action = code(
+  const action = stripComments(
     ACTIONS.span(
       "export async function resendInvitationEmailAction",
       "export async function revokeInvitationAction"
@@ -1262,7 +1299,7 @@ test("no prototype scaffolding survives the ruling — repo-wide", () => {
 });
 
 test("the client counts the server's number down — it never re-derives the window", () => {
-  const list = code(LIST_CODE);
+  const list = stripComments(LIST_CODE);
 
   // What it counts down is the DURATION the server measured, and what it counts
   // with is elapsed time it measured itself. Neither is an instant: comparing a

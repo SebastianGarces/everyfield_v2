@@ -99,6 +99,29 @@ function reason(because: string | undefined): string {
 }
 
 /**
+ * Source with comments removed — for the assertions that are about CODE.
+ *
+ * The transform every source-shaped test applies before it matches: a module
+ * that documents the thing it forbids fails its own `doesNotMatch` otherwise,
+ * and an ordering anchored on a call site matches the paragraph explaining why
+ * the order is load-bearing. It belongs here for the same reason `span` and
+ * `assertInOrder` do — it names no domain, and five hand-written copies of it
+ * had already accumulated in `src/lib/invitations/` alone.
+ *
+ * TWO SPELLINGS OF THE LINE-COMMENT RULE WERE IN CIRCULATION and they did not
+ * agree: `(^|\s)` only strips a `//` that follows whitespace, so `foo(// gone`
+ * survived it, while `(^|[^:])` strips that too. This is the `(^|[^:])` one —
+ * the stricter of the two, and the `[^:]` is what keeps a `https://` URL out of
+ * the match. Chosen once, so the answer stops depending on which file a suite
+ * was pasted from.
+ */
+export function stripComments(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:])\/\/.*$/gm, "$1");
+}
+
+/**
  * The position of `needle`, or a throw naming both the file and the needle.
  *
  * The single place -1 is turned into a failure. Every span, every tail and

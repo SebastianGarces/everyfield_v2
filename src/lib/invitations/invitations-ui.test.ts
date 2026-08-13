@@ -16,7 +16,11 @@ import {
 } from "./core";
 import { invitationCreatedNotice } from "./create-notice";
 import { toInvitationListRow } from "./list-row";
-import { assertInOrder, sourceReader } from "@/lib/testing/source-span";
+import {
+  assertInOrder,
+  sourceReader,
+  stripComments,
+} from "@/lib/testing/source-span";
 import {
   describeInvitationForRegistration,
   hasValidInvitationBypass,
@@ -65,17 +69,6 @@ const ROOT = path.join(process.cwd(), "src");
 
 function read(...segments: string[]): string {
   return readFileSync(path.join(ROOT, ...segments), "utf8");
-}
-
-/**
- * The code, minus its comments. These files explain their rulings at length, so
- * an assertion that a name is GONE has to look at what runs — otherwise the
- * comment recording why it was removed is what fails the test.
- */
-function code(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|[^:])\/\/.*$/gm, "$1");
 }
 
 const CORE_CODE = read("lib", "invitations", "core.ts");
@@ -355,7 +348,8 @@ test("the post-resolution pass is the collapsed one, at the call site", () => {
   // the second pass through the collapsing wrapper. Reverting it to a bare
   // `resolveInvitationRequest(actor, {...resolvedTarget.target})` re-opens the
   // oracle without failing anything else, so the wiring is pinned here.
-  const calls = code(CREATE_PATH).match(/resolveInvitation\w*\(/g) ?? [];
+  const calls =
+    stripComments(CREATE_PATH).match(/resolveInvitation\w*\(/g) ?? [];
 
   assert.deepEqual(calls, [
     // 1. AUTHORITY, before any lookup — legible, and about the ACTOR.
@@ -671,9 +665,9 @@ test("the surface no longer decides revoke from the inviter's id", () => {
   // made a colleague's pending invitation unactionable. Any pending row the
   // org-scoped list can see is now revocable, and the check that matters stays
   // in the UPDATE.
-  assert.doesNotMatch(code(INVITATIONS_PAGE), /canRevoke/);
-  assert.doesNotMatch(code(INVITATIONS_LIST), /canRevoke/);
-  assert.doesNotMatch(code(INVITATIONS_PAGE), /inviterUserId/);
+  assert.doesNotMatch(stripComments(INVITATIONS_PAGE), /canRevoke/);
+  assert.doesNotMatch(stripComments(INVITATIONS_LIST), /canRevoke/);
+  assert.doesNotMatch(stripComments(INVITATIONS_PAGE), /inviterUserId/);
 
   // The Revoke button is rendered for a pending row, and for nothing else — a
   // revoke of an answered invitation is refused by the compare-and-set anyway,
@@ -927,8 +921,11 @@ test("no per-row message survives on the anonymous POST", () => {
     "const DUPLICATE_EMAIL_MESSAGE"
   );
 
-  assert.doesNotMatch(code(body), /invitationEmailMismatchMessage/);
-  assert.doesNotMatch(code(REGISTER_ACTIONS), /invitationEmailMismatchMessage/);
+  assert.doesNotMatch(stripComments(body), /invitationEmailMismatchMessage/);
+  assert.doesNotMatch(
+    stripComments(REGISTER_ACTIONS),
+    /invitationEmailMismatchMessage/
+  );
 
   // The decision is made ONCE, above the gate and above the insert, and every
   // later branch reads that one result. `invitationId` — the raw submitted
@@ -1049,7 +1046,7 @@ test("the mismatch message says which address the invitation is for", () => {
 // neutral message for both, and no register link on this surface.
 
 test("the create action returns one success shape, carrying no target signal", () => {
-  const action = code(INVITATIONS_ACTIONS);
+  const action = stripComments(INVITATIONS_ACTIONS);
 
   // The two columns that answer "does this address already have an account" are
   // the server's alone. Nothing derived from either may be composed into the
@@ -1072,7 +1069,7 @@ test("the create action returns one success shape, carrying no target signal", (
 });
 
 test("the create surface renders no register link and no target branch", () => {
-  const form = code(CREATE_FORM);
+  const form = stripComments(CREATE_FORM);
 
   // No branch on the TARGET shape: one message whatever kind was created. The
   // notice does branch on `emailSent` since OV-003b (#293), which is a fact
@@ -1135,8 +1132,8 @@ test("the create surface renders no register link and no target branch", () => {
 test("no copy on the create surface claims an account does or does not exist", () => {
   // Comments stripped, JSX text kept: the disclosure would be in a rendered
   // sentence, and the comment RECORDING the removed sentence must not be what
-  // fails the test (the same reason `code()` exists).
-  const rendered = code(CREATE_FORM).split(
+  // fails the test (the same reason `stripComments()` exists).
+  const rendered = stripComments(CREATE_FORM).split(
     "export function InvitationCreateForm"
   )[1];
 
@@ -1154,8 +1151,8 @@ test("the register token wire is untouched by the notice ruling", () => {
   // What item 5 removed is the ADMIN-FACING link, not the token. `/register`
   // still redeems an open invitation — it is what an invitation email will
   // carry — so the register surface's own binding must not have moved.
-  assert.match(code(REGISTER_ACTIONS), /invitation/i);
-  assert.match(code(REGISTER_FORM), /invitation/i);
+  assert.match(stripComments(REGISTER_ACTIONS), /invitation/i);
+  assert.match(stripComments(REGISTER_FORM), /invitation/i);
 });
 
 // ----------------------------------------------------------------------------
@@ -1291,8 +1288,8 @@ test("the rendered row is identical for an accountless address and for one with 
 });
 
 test("no row field on the invitations page is derived from a target column", () => {
-  const page = code(INVITATIONS_PAGE);
-  const listRow = code(LIST_ROW);
+  const page = stripComments(INVITATIONS_PAGE);
+  const listRow = stripComments(LIST_ROW);
 
   // The mapping that builds `InvitationListRow[]` — now `toInvitationListRow`,
   // with the page holding only the call. Neither target column may be read in
@@ -1308,12 +1305,12 @@ test("no row field on the invitations page is derived from a target column", () 
 
   // The row type is the contract, so a future edit has to change the type
   // rather than slip a field through it.
-  assert.doesNotMatch(code(INVITATIONS_LIST), /isOpen/);
-  assert.doesNotMatch(code(INVITATIONS_LIST), /kindLabel/);
+  assert.doesNotMatch(stripComments(INVITATIONS_LIST), /isOpen/);
+  assert.doesNotMatch(stripComments(INVITATIONS_LIST), /kindLabel/);
 });
 
 test("the pending list renders no register link and no per-row variation", () => {
-  const list = code(INVITATIONS_LIST);
+  const list = stripComments(INVITATIONS_LIST);
 
   // The control, its URL composition and the clipboard call are all gone.
   assert.doesNotMatch(list, /register\?invitation=/);
@@ -1459,11 +1456,14 @@ test("the register invitation shape carries no redeemable flag, and nothing bran
 
   // The second net, never the proof: no client-side branch on redeemability
   // survives in the form or in the action that redeems.
-  for (const source of [code(REGISTER_FORM), code(REGISTER_ACTIONS)]) {
+  for (const source of [
+    stripComments(REGISTER_FORM),
+    stripComments(REGISTER_ACTIONS),
+  ]) {
     assert.doesNotMatch(source, /redeemable/);
     assert.doesNotMatch(source, /const redeeming/);
   }
-  assert.doesNotMatch(code(REGISTER_BETA_GATE), /redeemable/);
+  assert.doesNotMatch(stripComments(REGISTER_BETA_GATE), /redeemable/);
 });
 
 // ----------------------------------------------------------------------------
@@ -1608,7 +1608,7 @@ test("ONE definition decides what /register may act on", async () => {
   // comparison appears in the module exactly where the predicate defines it. A
   // reader that grows its own copy — which is literally what round 11 removed —
   // fails here by count, before the two readers have had time to drift apart.
-  const gate = code(REGISTER_BETA_GATE);
+  const gate = stripComments(REGISTER_BETA_GATE);
   assert.equal(
     (gate.match(/targetChurchId === null/g) ?? []).length,
     1,
