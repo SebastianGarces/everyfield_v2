@@ -109,6 +109,17 @@ test("§3 each oversight FK column is named ONCE, in the pairing table", () => {
   // `auditRelationship` (with two org-kind literals of its own) and
   // `networkAudience` — beside a `memory/` paragraph claiming every site read
   // the table. A sweep that names two of the three files is how that happens.
+  //
+  // AND THE LIST STOPS AT THIS DIRECTORY, deliberately. The one hand-built
+  // `OversightOrgIds` left in the repo is outside it —
+  // `announceAssociationEndedFor` in `src/lib/invitations/core.ts` — and this
+  // sweep neither reaches it nor may edit it: that file belongs to another
+  // workstream. So do not read a green §3 as "no half-pairing exists"; it says
+  // "none exists in `src/lib/notifications/`". The residual is recorded on
+  // `OversightOrgIds` itself (`./oversight-admin.ts`), where the by-construction
+  // claim is now scoped to this directory, and it is compile-guarded rather than
+  // fail-open: a third `OVERSIGHT_ADMIN` row widens the type's keys and that
+  // literal stops compiling.
   const noComments = (code: string) =>
     code.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
 

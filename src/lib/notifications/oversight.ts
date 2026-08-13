@@ -111,21 +111,6 @@ export interface OversightRecipient {
   id: string;
 }
 
-/**
- * ONE oversight organisation, as the FK that reaches it.
- *
- * `OversightOrgIds` (`./oversight-admin.ts`) — keyed on the pairing table, not
- * re-declared here. This module used to spell the two FK names out in an
- * interface of its own while the probe in `./oversight-relationship.ts` spelled
- * the identical pair in a second one; that is the half-pairing-per-site the
- * table exists to remove, and it left a third org kind invisible to both.
- *
- * At most one field is non-null. A value of this type is a NARROWED reading of
- * an `organization_invitations` row, produced by `invitingOrgForInvitation`
- * below — never the row's two FK columns copied across.
- */
-export type { OversightOrgIds };
-
 /** The shape of an `organization_invitations` row this module reads. */
 export interface InvitingInvitation {
   type: OrganizationInvitationType;
@@ -156,6 +141,19 @@ export interface InvitingInvitation {
  * nobody rather than guessing. Its own three milestones are org-anchored and
  * name their network explicitly (`announceSendingChurch*`, #304 WS3) — they do
  * not come through this function, which reads a PLANT's invitation.
+ *
+ * WHAT IT RETURNS IS A NARROWED READING OF THE ROW — never the row's two FK
+ * columns copied across. `OversightOrgIds` (`./oversight-admin.ts`) is keyed on
+ * the pairing table rather than re-declared here: this module used to spell the
+ * two FK names out in an interface of its own while the probe in
+ * `./oversight-relationship.ts` spelled the identical pair in a second one, and
+ * that half-pairing-per-site is what left a third org kind invisible to both.
+ *
+ * At most one field of the result is non-null, and INSIDE
+ * `src/lib/notifications/` that holds by construction — `oversightOrgOfKind`
+ * and `noOversightOrg` are the only ways to make one from a kind. It is NOT a
+ * domain-wide guarantee; `./oversight-admin.ts` names the one constructor
+ * outside this directory.
  */
 export function invitingOrgForInvitation(
   invitation: InvitingInvitation

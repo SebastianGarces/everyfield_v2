@@ -39,13 +39,13 @@ import {
   oversightAudienceCondition,
   type InvitingInvitation,
   type OversightFanOutDeps,
-  type OversightOrgIds,
   type OversightOrgFanOutDeps,
   type OversightRecipient,
   announceSendingChurchDeclinedNetwork,
   announceSendingChurchJoinedNetwork,
   announceSendingChurchLeftNetwork,
 } from "./oversight";
+import type { OversightOrgIds } from "./oversight-admin";
 
 // ----------------------------------------------------------------------------
 // The oversight model, tested at the seam `enqueue` sits behind.

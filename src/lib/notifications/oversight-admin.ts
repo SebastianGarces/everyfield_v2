@@ -92,12 +92,25 @@ export const OVERSIGHT_ADMIN_ROWS = Object.entries(OVERSIGHT_ADMIN) as [
  * left all three quietly unchanged. Derived, a new row in the table adds a key
  * here and every builder below fails until it is filled in.
  *
- * AT MOST ONE FIELD IS NON-NULL, by construction rather than by convention:
- * {@link noOversightOrg} and {@link oversightOrgOfKind} are the only ways to
- * make one from a kind, and `recipientOrgOf` pairs role to FK before it fills
- * one in. A `users` row is NOT one of these — both FKs live on one row and
- * nothing stops a user carrying both, which is the hierarchy walk the audience
- * must not admit.
+ * AT MOST ONE FIELD IS NON-NULL, and INSIDE `src/lib/notifications/` that is by
+ * construction rather than by convention: {@link noOversightOrg} and
+ * {@link oversightOrgOfKind} are the only ways to make one from a kind, and
+ * `recipientOrgOf` pairs role to FK before it fills one in. A `users` row is NOT
+ * one of these — both FKs live on one row and nothing stops a user carrying
+ * both, which is the hierarchy walk the audience must not admit.
+ *
+ * OUTSIDE THIS DIRECTORY IT IS BY CONVENTION, and there is exactly one such site
+ * today: `announceAssociationEndedFor` in `src/lib/invitations/core.ts` builds
+ * the `org` argument of `announceAssociationEnded` by hand, as
+ * `{ sendingChurchId: kind === "sending_church" ? id : null, sendingNetworkId:
+ * kind === "network" ? id : null }` — the half-pairing per site this table
+ * exists to delete, written at the one call site the table cannot reach. It is
+ * not fail-open: a third row here widens this type's keys and that literal stops
+ * compiling (TS2741, a missing property). But nothing stops it filing an id
+ * under the wrong FK, so the guarantee this paragraph makes stops at the
+ * directory boundary. `oversightOrgOfKind(orgType, orgId)` is the one-line
+ * replacement; `src/lib/invitations/` belongs to another workstream, so it is
+ * recorded here rather than edited from this one.
  */
 export type OversightOrgIds = Record<
   OversightAdminPairing["fk"],
