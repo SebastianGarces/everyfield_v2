@@ -6,9 +6,25 @@ import { test } from "node:test";
 import { drizzle } from "drizzle-orm/pg-proxy";
 import { PgDialect } from "drizzle-orm/pg-core";
 
+// The repo's static reader — the one comment stripper and the one static import
+// scan. Both were copied into this file; the copies were weaker (the page guard
+// below saw 1 of 5 module-scope edges), and the module reaches only node
+// builtins, so importing it costs this suite's no-DATABASE_URL seam nothing.
+import {
+  codeOf,
+  staticValueSpecifiers,
+} from "@/lib/auth/server-action-surface";
+import {
+  CHURCH_LEVEL_ROLES,
+  OVERSIGHT_ROLES,
+  isOversightRole,
+} from "@/lib/auth/roles";
+import type { User, UserRole } from "@/db/schema";
+
 import { formatAssociationProvenance } from "./presentation";
 import {
   RECENT_MEETING_WINDOW,
+  getOversightPortfolio,
   portfolioPlantsStatement,
   sendingChurchesInNetwork,
 } from "./read";
@@ -46,15 +62,14 @@ function read(file: string): string {
  *
  * The identity scan below is about what the CODE reads, so the prose that
  * explains the rule ("no email, no phone, no id") must not trip it — otherwise
- * the cheapest way to pass the guard is to delete the explanation. None of
- * these files contains a `//` inside a string literal, which is the one case
- * this crude stripper would get wrong.
+ * the cheapest way to pass the guard is to delete the explanation.
+ *
+ * `codeOf` is the repo's one stripper (`@/lib/auth/server-action-surface`), and
+ * it is strictly stronger than the copy that stood here: it only strips `//`
+ * at a line start or after whitespace, so a `//` inside a string literal —
+ * the one case the copy got wrong — survives.
  */
-function readCode(file: string): string {
-  return read(file)
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/\/\/.*$/gm, "");
-}
+const readCode = codeOf;
 
 /**
  * Components in `src/components/oversight/` that the identity scan does NOT
@@ -384,6 +399,60 @@ function renderedPortfolio(churchIds: string[] = ["church-a", "church-b"]) {
   return portfolioPlantsStatement(offlineDb, churchIds).toSQL();
 }
 
+// ----------------------------------------------------------------------------
+// The index read refuses on its own
+// ----------------------------------------------------------------------------
+
+/** A session user of `role`, carrying every id a church-level role can hold. */
+function callerWithRole(role: UserRole): User {
+  return {
+    id: "user-1",
+    role,
+    // Real ids, deliberately: `getAccessibleChurchIds` turns `churchId` into a
+    // one-element accessible list for `planter` and `team_member`, so a caller
+    // with NO ids would pass this test for the wrong reason.
+    churchId: "church-mine",
+    sendingChurchId: "sending-church-1",
+    sendingNetworkId: "network-1",
+  } as unknown as User;
+}
+
+test("the index read refuses every church-level role itself", async () => {
+  // The docblock used to say `getAccessibleChurchIds` decided this. It does
+  // not: it returns `[user.churchId]` for a planter and a team member, and the
+  // coach's assignments for a coach — ids that would have reached the `in (...)`
+  // and rendered a portfolio for a caller with no oversight org.
+  //
+  // This case needs NO DATABASE. If the refusal is removed, the very next line
+  // is `await import("@/lib/auth/access")`, which opens `@/db`, so a regression
+  // fails here rather than quietly returning rows.
+  for (const role of CHURCH_LEVEL_ROLES) {
+    assert.deepEqual(
+      await getOversightPortfolio(callerWithRole(role)),
+      [],
+      `${role} reached the oversight index read — the route guard is not the only guard`
+    );
+  }
+});
+
+test("the refusal admits exactly the two oversight roles", () => {
+  // Pinned to the ONE declaration rather than to a copy of the pair, so a
+  // sixth role joins whichever list `@/lib/auth/roles` puts it in and this
+  // assertion follows it.
+  for (const role of CHURCH_LEVEL_ROLES)
+    assert.equal(isOversightRole(role), false);
+  for (const role of OVERSIGHT_ROLES) assert.equal(isOversightRole(role), true);
+
+  // …and the read states its gate in those terms, not in a role literal of its
+  // own: a hand-written `role !== "planter"` is the drift this pins.
+  const source = readCode(path.join(LIB_DIR, "read.ts"));
+  assert.match(
+    source,
+    /if \(!isOversightRole\(user\.role\)\) return \[\];/,
+    "getOversightPortfolio no longer refuses non-oversight roles before resolving ids"
+  );
+});
+
 test("the index selects exactly the three columns it renders", () => {
   const { sql } = renderedPortfolio();
 
@@ -431,17 +500,35 @@ test("the index page holds no data-layer import at all", () => {
   // The read moved out of the RSC, and this is what that bought: a page that
   // only renders. A `db`/`churches`/`inArray` import here is the read coming
   // back to a file where no test can see its WHERE clause.
-  const page = readCode(
-    path.join(ROOT, "src", "app", "(dashboard)", "oversight", "page.tsx")
+  const specifiers = staticValueSpecifiers(
+    readCode(
+      path.join(ROOT, "src", "app", "(dashboard)", "oversight", "page.tsx")
+    )
   );
-  const specifiers = [
-    ...page.matchAll(/^import\s+[^;]*?from\s+"([^"]+)"/gm),
-  ].map((match) => match[1]);
   assert.ok(specifiers.length > 0, "the import scan found nothing to check");
   for (const specifier of ["drizzle-orm", "@/db", "@/db/schema"]) {
     assert.ok(
       !specifiers.includes(specifier),
       `the oversight index imports ${specifier} — its read belongs in @/lib/oversight/read`
+    );
+  }
+});
+
+test("the page guard sees every static way the read could come back", () => {
+  // The copy that stood here read `^import\s+[^;]*?from\s+"([^"]+)"` and saw
+  // ONE of the five module-scope edges to `@/db`. Four ways to put the read
+  // back on the page passed it, which makes the guard above a comment with a
+  // test around it rather than a test.
+  for (const [shape, line] of [
+    ["single quotes", "import { db } from '@/db';"],
+    ["indented import", '  import { db } from "@/db";'],
+    ["side effect", 'import "@/db";'],
+    ["re-export", 'export { churches } from "@/db/schema";'],
+  ] as const) {
+    assert.notDeepEqual(
+      staticValueSpecifiers(line),
+      [],
+      `the page guard cannot see a ${shape} — the read could return to the RSC and still pass`
     );
   }
 });

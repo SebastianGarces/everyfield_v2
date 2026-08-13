@@ -281,3 +281,19 @@ A decline is the one milestone whose recipient never became associated with the 
 Expiry in this product is LAZY. `expireInvitationQuery` runs only when somebody tries to answer a row whose window has closed (`loadRespondableInvitation`), so a 40-day-old invitation still reads `pending` until then. Any list that offers an ANSWER must therefore carry `(expires_at is null or expires_at > now)` beside the status — `bindOpenInvitationTargetQuery` always did; `pendingInvitationsForPlantQuery` did not, and the dashboard reminder rendered expired invitations with live Accept/Decline buttons the server then refused.
 
 That was worse there than anywhere else, because the reminder is dismissible only by answering (OV-005): the planter had a banner they could neither answer nor remove. A declined or revoked invitation disappears from the same predicate on the next render, which is what makes "dismissed only by answering" a property of the data rather than of the component.
+
+## The second import-free leaf: `org-label.ts` (#411, 2026-08-13)
+
+**Source:** `src/lib/oversight/org-label.ts`, `src/lib/oversight/presentation.ts`, `src/components/oversight/remove-plant-dialog.tsx`
+
+The reader's word for each kind of oversight org — "network", "sending church" — had **three** declarations: a ternary in `presentation.ts`, the same ternary inline on `/oversight/health` and `/oversight/invitations`, and a private `Record<AssociationOrgType, string>` in `remove-plant-dialog.tsx`. The copy is always the one that misses the fix.
+
+It is now one table in `org-label.ts`, reached two ways because the surfaces ask two different questions: a page knows the caller's ROLE (`scopeLabelForRole`), a dialog rendered from association provenance knows the org's KIND (`scopeLabelForOrgType`).
+
+**It is a separate file and not a section of `presentation.ts`, for exactly the `register-path.ts` reason.** `remove-plant-dialog.tsx` is a `"use client"` component. `presentation.ts` imports `STATUS_LABELS` from `@/lib/people/status.shared`, which imports the VALUE `personStatuses` from `@/db/schema` — so one import edge from the dialog would ship the drizzle schema barrel into that page's browser chunk. `org-label.ts`'s two imports are `import type` and are erased at compile time.
+
+**And `presentation.ts` must never re-export it.** This is the failure that actually shipped once already: `email.ts` carried `export { INVITATION_REGISTER_PATH, invitationRegisterPath }` for callers that did not exist, which made the heavy path type-check, work, and put a 687 KB SDK one import from any client component. A leaf whose contents are also served from the trunk is not a leaf. `session.test.ts` asserts both halves — that `presentation.ts` mentions neither symbol, and that `org-label.ts` itself holds no value edge.
+
+**The scan is the shared one.** That second assertion used to read `[...leaf.matchAll(/^import\s+(?!type\b)/gm)]`, and `roles.test.ts` carried the same pattern for the other leaf. Measured, it was blind to `export … from` — the precise shape the rule exists to forbid — and to an indented import. The repo already owns the reader: `staticValueSpecifiers` in `src/lib/auth/server-action-surface.ts`, which anchors `^\s*`, accepts either quote, matches `(?:import|export)`, and catches a bare `import "@/db"`. It excludes `import()` deliberately, because deferring `@/db` into the call is what *satisfies* the seam rule, so counting the dynamic form would fail the fix. Both leaf guards, the oversight no-`DATABASE_URL` seam scan, and the "no data-layer import on the page" guard now call it, and each carries a case proving the closed hole.
+
+Write a source-shape guard by IMPORTING that module. A hand-rolled `^import` regex is a guard that passes while the property is false, which is the same class of mistake as the `targetChurchId` regexes above.

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
@@ -9,6 +9,15 @@ import type { UserRole } from "@/db/schema";
 // this costs the suite no database — which is precisely why the pair can live
 // in one place now (`@/lib/auth/access` opens with `@/db`).
 import { OVERSIGHT_ROLES, isOversightRole } from "@/lib/auth/roles";
+// The repo's static reader, imported rather than re-written: `codeOf` is the
+// comment stripper this file used to keep a copy of, and `staticValueSpecifiers`
+// is the import scan the leaf guard below used to spell as a bare
+// `^import\s+(?!type\b)` — a pattern blind to `export … from`, which is the one
+// shape the leaf rule exists to forbid. It reaches only node builtins.
+import {
+  codeOf,
+  staticValueSpecifiers,
+} from "@/lib/auth/server-action-surface";
 
 import { scopeLabelForOrgType, scopeLabelForRole } from "./org-label";
 
@@ -42,17 +51,9 @@ function oversightPages(dir: string = OVERSIGHT_ROUTES): string[] {
   return found;
 }
 
-function read(file: string): string {
-  return readFileSync(file, "utf8");
-}
-
 /** Source with comments removed — the prose explaining a rule must not satisfy
- *  it. (Same stripper, and same reasoning, as `read.test.ts`.) */
-function readCode(file: string): string {
-  return read(file)
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/\/\/.*$/gm, "");
-}
+ *  it. `codeOf` is the repo's one stripper; this file used to carry a copy. */
+const readCode = codeOf;
 
 // ----------------------------------------------------------------------------
 // The role list is one list
@@ -205,13 +206,14 @@ test("presentation.ts does not re-serve the import-free leaf", () => {
     );
   }
 
-  // …and the leaf really is one: no VALUE import at all.
-  const leaf = readCode(
-    path.join(ROOT, "src", "lib", "oversight", "org-label.ts")
-  );
-  const valueImports = [...leaf.matchAll(/^import\s+(?!type\b)/gm)];
+  // …and the leaf really is one: no static VALUE edge at all — import,
+  // side-effect import, or `export … from`. The scan is the shared one, not the
+  // `^import\s+(?!type\b)` this file used to carry: that pattern could not see
+  // `export { db } from "@/db"`, which is the exact shape the rule forbids.
   assert.deepEqual(
-    valueImports.map((match) => match[0]),
+    staticValueSpecifiers(
+      readCode(path.join(ROOT, "src", "lib", "oversight", "org-label.ts"))
+    ),
     [],
     "org-label.ts gained a value import — it is no longer safe in a client bundle"
   );
@@ -219,5 +221,37 @@ test("presentation.ts does not re-serve the import-free leaf", () => {
   assert.equal(
     scopeLabelForRole("network_admin"),
     scopeLabelForOrgType("network")
+  );
+});
+
+test("the leaf guard sees a re-export, which is the shape it exists to forbid", () => {
+  // `register-path.ts` did not fail on an `import`; it failed on
+  // `export { INVITATION_REGISTER_PATH, invitationRegisterPath } from …`, which
+  // makes the heavy path type-check and work (memory/invariants.md →
+  // Multi-Tenancy). A leaf guard blind to that shape is a guard pointed away
+  // from its own failure.
+  for (const [shape, line] of [
+    [
+      "re-export",
+      'export { scopeLabelForRole } from "@/lib/oversight/presentation";',
+    ],
+    [
+      "indented import",
+      '  import { STATUS_LABELS } from "@/lib/people/status.shared";',
+    ],
+    ["side effect", 'import "@/db/schema";'],
+    ["single quotes", "import { db } from '@/db';"],
+  ] as const) {
+    assert.notDeepEqual(
+      staticValueSpecifiers(line),
+      [],
+      `the leaf guard cannot see a ${shape} — org-label.ts could gain one and still pass`
+    );
+  }
+
+  // A type import is erased and is what the leaf legitimately holds two of.
+  assert.deepEqual(
+    staticValueSpecifiers('import type { UserRole } from "@/db/schema";'),
+    []
   );
 });

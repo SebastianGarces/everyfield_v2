@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
+
+import {
+  SRC,
+  codeOf,
+  resolveModule,
+  staticValueSpecifiers,
+} from "@/lib/auth/server-action-surface";
 
 // ============================================================================
 // The no-DATABASE_URL seam, enforced instead of described.
@@ -20,14 +26,22 @@ import { test } from "node:test";
 // convenient top-level import fails here rather than quietly costing the suite
 // its seam.
 //
-// It is a STATIC walk and says so: it reads `import ... from "..."` lines, so a
-// specifier built at runtime or a re-export barrel it cannot resolve is outside
-// what it can see. It shares that limitation with
-// `src/lib/meetings/client-boundary.test.ts`, which names it too.
+// THE WALKER IS IMPORTED, NOT WRITTEN AGAIN. `@/lib/auth/server-action-surface`
+// is the repo's static reader — a normal module, not a `.test.ts`, expressly so
+// a second caller imports it instead of copying it — and it reaches only node
+// builtins, so it costs this seam nothing. The copy that used to live here read
+// `^import\s+(?!type\b)[^;]*?from\s+"(@\/[^"]+)"`, which caught ONE of the five
+// ways to reach `@/db` at module scope: not a single-quoted specifier, not an
+// indented import, not `import "@/db"`, and not `export { db } from "@/db"` —
+// the re-export that is precisely the failure `register-path.ts` was written
+// about. `staticValueSpecifiers` closes all four, and the cases below pin them.
+//
+// It is still a STATIC walk and says so: a specifier built at runtime, or a
+// re-export barrel it cannot resolve, is outside what it can see. It shares
+// that limitation with `src/lib/meetings/client-boundary.test.ts`, which names
+// it too. `import()` is excluded on purpose — deferring `@/db` into the call is
+// what SATISFIES this rule, so counting the dynamic form would fail the fix.
 // ============================================================================
-
-const ROOT = process.cwd();
-const SRC = path.join(ROOT, "src");
 
 /** Modules whose header promises the seam. */
 const SEAM_MODULES = ["read.ts", "sending-churches.ts"] as const;
@@ -35,43 +49,10 @@ const SEAM_MODULES = ["read.ts", "sending-churches.ts"] as const;
 /** Specifiers that ARE the database client, or are known to open with it. */
 const DB_SPECIFIERS = new Set(["@/db"]);
 
-function read(file: string): string {
-  return readFileSync(file, "utf8");
-}
-
-/** Every `@/...` specifier statically imported for its VALUES. */
-function valueImports(source: string): string[] {
-  const withoutComments = source
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/\/\/.*$/gm, "");
-  return [
-    ...withoutComments.matchAll(
-      /^import\s+(?!type\b)[^;]*?from\s+"(@\/[^"]+)"/gm
-    ),
-  ].map((match) => match[1]);
-}
-
-function resolve(specifier: string): string | null {
-  const base = path.join(SRC, specifier.slice("@/".length));
-  for (const candidate of [
-    `${base}.ts`,
-    `${base}.tsx`,
-    path.join(base, "index.ts"),
-  ]) {
-    try {
-      readFileSync(candidate, "utf8");
-      return candidate;
-    } catch {
-      // Not this shape — try the next.
-    }
-  }
-  return null;
-}
-
 test("no oversight read imports the database client at module scope", () => {
   for (const name of SEAM_MODULES) {
     const file = path.join(SRC, "lib", "oversight", name);
-    const imports = valueImports(read(file));
+    const imports = staticValueSpecifiers(codeOf(file));
     assert.ok(imports.length > 0, `${name}: the import scan found nothing`);
 
     for (const specifier of imports) {
@@ -80,10 +61,9 @@ test("no oversight read imports the database client at module scope", () => {
         `${name} imports ${specifier} at module scope — defer it into the read`
       );
 
-      const resolved = resolve(specifier);
+      const resolved = resolveModule(file, specifier);
       if (!resolved) continue;
-      const reached = valueImports(read(resolved));
-      for (const hop of reached) {
+      for (const hop of staticValueSpecifiers(codeOf(resolved))) {
         assert.ok(
           !DB_SPECIFIERS.has(hop),
           `${name} imports ${specifier} at module scope, which opens with ${hop} — defer it into the read`
@@ -93,10 +73,41 @@ test("no oversight read imports the database client at module scope", () => {
   }
 });
 
+test("the seam scan sees every static way to reach the database client", () => {
+  // The four the deleted copy could not see. Each line is a real module-scope
+  // edge to `@/db`: if the scan misses it, the seam is gone and this file
+  // passes anyway — which is what it did before the walker was shared.
+  const reaches = [
+    ["single quotes", "import { db } from '@/db';"],
+    ["indented", '  import { db } from "@/db";'],
+    ["side effect", 'import "@/db";'],
+    ["re-export", 'export { db } from "@/db";'],
+  ] as const;
+
+  for (const [shape, line] of reaches) {
+    assert.ok(
+      staticValueSpecifiers(line).includes("@/db"),
+      `the seam scan cannot see a ${shape} import of @/db`
+    );
+  }
+
+  // …and it still does NOT count the deferred form, which is the fix, not the
+  // fault. A scan that flagged this would fail `read.ts` for obeying the rule.
+  assert.deepEqual(
+    staticValueSpecifiers('const { db } = await import("@/db");'),
+    []
+  );
+
+  // A type-only import is erased and costs no connection.
+  assert.deepEqual(staticValueSpecifiers('import type { User } from "@/db";'), [
+    // nothing
+  ]);
+});
+
 test("the deferred import is still made, inside the read that needs it", () => {
   // Deleting the top-level import without adding the dynamic one would pass the
   // scan above and fail at runtime, so both halves are asserted.
-  const source = read(path.join(SRC, "lib", "oversight", "read.ts"));
+  const source = codeOf(path.join(SRC, "lib", "oversight", "read.ts"));
   assert.match(
     source,
     /await import\("@\/lib\/launch\/queries"\)/,

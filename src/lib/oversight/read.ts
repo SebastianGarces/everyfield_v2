@@ -81,6 +81,11 @@ import {
 // leaf, so it costs this module nothing — unlike `@/lib/launch/queries`, which
 // reaches `@/db` and is therefore deferred with the rest of them (see below).
 import { daysUntilTarget } from "@/lib/launch/countdown";
+// The one declaration of the oversight role pair, from the import-free leaf.
+// It reaches no database (`import type` only, enforced by `roles.test.ts`), so
+// it does NOT belong with the deferred imports below — and it must not: the
+// refusal in `getOversightPortfolio` has to run before any `@/db` edge.
+import { isOversightRole } from "@/lib/auth/roles";
 import type {
   MeetingsAggregate,
   MinistryTeamsAggregate,
@@ -176,18 +181,38 @@ export function portfolioPlantsStatement(
  * source text, which could not see the `WHERE` clause at all. The page now
  * holds no data-layer import and only renders.
  *
- * `[]` for an empty accessible list, which is also the answer for every
- * non-oversight role: `getAccessibleChurchIds` is what decides, exactly as it
- * does for the directory read below.
+ * IT REFUSES A NON-OVERSIGHT ROLE ITSELF, and the docblock used to claim this
+ * was `getAccessibleChurchIds`'s job. It is not: that function answers "which
+ * churches may this user read", and for a `planter` or a `team_member` the
+ * answer is `[user.churchId]` and for a `coach` it is their assignments — real
+ * ids, which would have reached the `in (...)` below and rendered a one-plant
+ * "portfolio" for somebody with no oversight org at all. Every other exported
+ * read in this module has its own refusal (`listOversightPlants` and
+ * `getOversightPlantDetail` through `resolveCallerOrg`, which resolves no org
+ * for a church-level role; `listNetworkSendingChurches` by role directly), and
+ * `requireOversightUser` states the rule it is one half of: THE ROUTE GUARD IS
+ * NOT THE ONLY GUARD AND MUST NOT BECOME ONE. This was the one read that
+ * leaned on it.
+ *
+ * `isOversightRole` is a STATIC import on purpose: `@/lib/auth/roles` is the
+ * import-free leaf (`import type` only), so the refusal costs this module
+ * nothing and — unlike a check inside `@/lib/auth/access` — it runs before any
+ * `@/db` edge is taken. That is what lets `read.test.ts` assert the refusal
+ * with no DATABASE_URL at all, which is the difference between a rule that is
+ * tested and a rule that is described.
+ *
+ * `[]` for an empty accessible list too: an empty `in ()` can only return
+ * nothing, so the index costs a round trip only when there is something to
+ * read.
  */
 export async function getOversightPortfolio(
   user: User
 ): Promise<OversightPortfolioPlant[]> {
+  if (!isOversightRole(user.role)) return [];
+
   const { getAccessibleChurchIds } = await import("@/lib/auth/access");
 
   const churchIds = await getAccessibleChurchIds(user);
-  // An empty `in ()` is a query that can only return nothing — the guard is
-  // here so the index costs a round trip only when there is something to read.
   if (churchIds.length === 0) return [];
 
   const { db } = await import("@/db");
