@@ -1284,12 +1284,12 @@ test("no prototype scaffolding survives the ruling — repo-wide", () => {
   //
   // The guard's own claim is that the importer set is empty BETWEEN rulings.
   // One is in flight: #429, the /people status-badge colour scale, whose five
-  // candidates are mounted on `(dashboard)/people/layout.tsx` for Sebastian to
-  // operate on this branch's preview. The allowance is a single hardcoded path
-  // rather than a relaxed rule, so it cannot quietly cover the NEXT bench, and
-  // it is deleted in the same commit that deletes the scaffolding — which is
-  // the moment this test goes back to demanding an empty set.
-  const PROTO_429_BENCH = "src/app/(dashboard)/people/layout.tsx";
+  // candidates are mounted under `(dashboard)/people` for Sebastian to operate
+  // on this branch's preview. The allowance is a single hardcoded path rather
+  // than a relaxed rule, so it cannot quietly cover the NEXT bench, and it is
+  // deleted in the same commit that deletes the scaffolding — which is the
+  // moment this test goes back to demanding an empty set.
+  const PROTO_429_BENCH = "src/components/people/proto-429-bench.tsx";
 
   assert.deepEqual(
     importers
