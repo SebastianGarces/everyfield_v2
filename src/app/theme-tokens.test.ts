@@ -19,11 +19,13 @@ import {
   isSameColour,
   markupLines,
   oklchToSrgb,
+  readPaletteColour,
   readToken,
   readTokenOklch,
   themeBlock,
   themes,
 } from "@/lib/testing/theme-color";
+import { STATUS_BADGE_CONFIG } from "@/lib/people/status-colors";
 
 // ----------------------------------------------------------------------------
 // The token layer itself: identity (is a token still the colour the design
@@ -526,6 +528,152 @@ for (const theme of themes) {
     );
   });
 }
+
+// --- the person-status badges: off-token fills, measured (#411) -------------
+//
+// `STATUS_BADGE_CONFIG` paints seven badges with RAW Tailwind palette classes —
+// `bg-yellow-500`, `bg-emerald-600` — over the Badge variant's own label token.
+// That is the "per-component color override" the Design Tokens invariant
+// forbids, and no token value can fix it: the fills are not tokens, so the
+// three markup guards next door (destructive tints, attention inks, --ef-dark
+// grounds) cannot see them and neither can any assertion over globals.css.
+//
+// Four of them fail AA on the live preview, worst 1.91:1 (Following Up), which
+// Lighthouse reports as the single failing accessibility audit on /people.
+// WHICH colours the status scale uses is a design ruling, so the numbers are
+// RECORDED here rather than changed — the same treatment `bg-destructive/10`
+// got, with the same inverted assertion, so a new status or a palette bump
+// fails loudly instead of arriving unmeasured.
+//
+// The fills are read from Tailwind's own theme.css and the labels from
+// badge.tsx, so nothing here is a hex anyone typed.
+
+/** One `badgeVariants` variant's class list, read out of badge.tsx. */
+function badgeVariantClasses(variant: string): string[] {
+  const source = readFileSync(
+    path.join(SRC, "components", "ui", "badge.tsx"),
+    "utf8"
+  );
+  const match = new RegExp(`\\b${variant}:\\s*\\n?\\s*"([^"]+)"`).exec(source);
+  assert.ok(
+    match,
+    `badge.tsx no longer declares a \`${variant}:\` variant — STATUS_BADGE_CONFIG asks for it by name, so the badges have no label colour`
+  );
+  return match[1].split(/\s+/);
+}
+
+/** The unprefixed (no `hover:`, no `[a&]:`) utility with this prefix. */
+function baseUtility(classes: string[], prefix: string): string | undefined {
+  return classes.find((c) => !c.includes(":") && c.startsWith(prefix));
+}
+
+/**
+ * The colour a `bg-`/`text-` utility's suffix paints — a Tailwind palette
+ * entry (`yellow-500`), a bare keyword (`white`), or one of our own tokens.
+ */
+function utilityColour(theme: "light" | "dark", suffix: string): Rgb {
+  if (suffix === "white") return hexToSrgb("#ffffff");
+  if (suffix === "black") return hexToSrgb("#000000");
+  if (/^[a-z]+-\d{2,3}$/.test(suffix)) return readPaletteColour(suffix);
+  return readToken(theme, suffix);
+}
+
+/** Every status badge that paints its OWN fill, with the label over it. */
+function statusBadgePairs(
+  theme: "light" | "dark"
+): { status: string; fill: Rgb; label: Rgb; classes: string }[] {
+  return Object.entries(STATUS_BADGE_CONFIG).flatMap(
+    ([status, { className, variant }]) => {
+      const own = className.split(/\s+/).filter(Boolean);
+      const fillClass = baseUtility(own, "bg-");
+      // No fill of its own means the token-backed variant paints it, and the
+      // token layer's assertions above already cover that pair.
+      if (!fillClass) {
+        assert.ok(
+          !baseUtility(own, "text-"),
+          `${status} overrides the badge's label colour without overriding its fill — that pair is measured by nothing`
+        );
+        return [];
+      }
+
+      const labelClass =
+        baseUtility(own, "text-") ??
+        baseUtility(badgeVariantClasses(variant), "text-");
+      assert.ok(labelClass, `the badge \`${variant}\` variant paints no label`);
+
+      return [
+        {
+          status,
+          fill: utilityColour(theme, fillClass.slice("bg-".length)),
+          label: utilityColour(theme, labelClass.slice("text-".length)),
+          classes: `${fillClass} ${labelClass}`,
+        },
+      ];
+    }
+  );
+}
+
+/**
+ * The DECISION ledger: every status badge whose label does NOT clear AA on its
+ * own fill, and the number being accepted. Anything not listed MUST clear AA,
+ * so a new status, a palette bump or a variant change fails this file instead
+ * of passing quietly.
+ *
+ * The remedy is a design ruling, not a sweep's call: token-backed status
+ * colours, or darker fills chosen from the ruled palette.
+ */
+const DEFERRED_STATUS_BADGE_FILLS: Record<string, number> = {
+  "light following_up": 1.91,
+  "light leader": 2.05,
+  "light core_group": 3.51,
+  "light attendee": 3.6,
+  "light interviewed": 3.94,
+  "dark following_up": 1.91,
+  "dark launch_team": 3.41,
+  "dark interviewed": 4.35,
+};
+
+test("every person-status badge paints a measured label on its own fill", () => {
+  const measured: string[] = [];
+  const unexpectedlyPassing: string[] = [];
+
+  for (const theme of themes) {
+    for (const { status, fill, label, classes } of statusBadgePairs(theme)) {
+      const key = `${theme} ${status}`;
+      measured.push(key);
+      const ratio = contrastRatio(label, fill);
+      const deferred = DEFERRED_STATUS_BADGE_FILLS[key];
+
+      if (deferred === undefined) {
+        assert.ok(
+          ratio >= AA_BODY_TEXT,
+          `${key} (${classes}) is ${ratio.toFixed(2)}:1, below ${AA_BODY_TEXT}:1, and no DECISION covers it. Move the fill onto a token that clears AA, or record the number in DEFERRED_STATUS_BADGE_FILLS with a ruling behind it`
+        );
+        continue;
+      }
+
+      assert.ok(
+        Math.abs(ratio - deferred) < 0.02,
+        `${key} (${classes}) measures ${ratio.toFixed(2)}:1, not the recorded ${deferred}:1 — a fill, a label or the palette moved. Re-record the DECISION with the new number`
+      );
+      if (ratio >= AA_BODY_TEXT) unexpectedlyPassing.push(key);
+    }
+  }
+
+  assert.ok(
+    measured.length >= 12,
+    `only ${measured.length} status-badge pairs were measured; there are twelve (six own-fill statuses across two themes). The scan has gone vacuous — fix it before trusting a pass`
+  );
+
+  // The inverted half, as with DEFERRED_DESTRUCTIVE_TINTS: an entry that
+  // starts PASSING means the DECISION was resolved somewhere, and leaving it
+  // listed would hide the next one.
+  assert.deepEqual(
+    unexpectedlyPassing,
+    [],
+    "a status badge recorded as failing now clears AA. Good news — delete its entry from DEFERRED_STATUS_BADGE_FILLS so the ledger only holds what is genuinely still open"
+  );
+});
 
 // --- the attention scale: WCAG binds, APCA advises (#386 ruling, #411) -------
 //

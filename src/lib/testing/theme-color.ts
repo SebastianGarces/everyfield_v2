@@ -238,17 +238,23 @@ export function resolveVars(theme: "light" | "dark", name: string): string {
   assert.fail(`--${name} loops through var() in the ${theme} theme`);
 }
 
+/** `oklch(L C H)` -> its three numbers; `L` may be a percentage or a ratio. */
+function parseOklch(value: string): [number, number, number] | null {
+  const match = value.match(/^oklch\(\s*([\d.]+%?)\s+([\d.]+)\s+([\d.]+)\s*\)/);
+  if (!match) return null;
+  const rawL = match[1];
+  const L = rawL.endsWith("%") ? Number(rawL.slice(0, -1)) / 100 : Number(rawL);
+  return [L, Number(match[2]), Number(match[3])];
+}
+
 export function readTokenOklch(
   theme: "light" | "dark",
   name: string
 ): [number, number, number] {
   const value = resolveVars(theme, name);
-  const match = value.match(/^oklch\(\s*([\d.]+%?)\s+([\d.]+)\s+([\d.]+)\s*\)/);
-  assert.ok(match, `--${name} is not an oklch() value in the ${theme} theme`);
-
-  const rawL = match[1];
-  const L = rawL.endsWith("%") ? Number(rawL.slice(0, -1)) / 100 : Number(rawL);
-  return [L, Number(match[2]), Number(match[3])];
+  const parsed = parseOklch(value);
+  assert.ok(parsed, `--${name} is not an oklch() value in the ${theme} theme`);
+  return parsed;
 }
 
 /** `#rrggbb` -> gamma-encoded sRGB channels in 0..1, for DESIGN.md's spellings. */
@@ -268,6 +274,46 @@ export function readToken(theme: "light" | "dark", name: string): Rgb {
   const value = resolveVars(theme, name);
   if (/^#[0-9a-fA-F]{6}$/.test(value)) return hexToSrgb(value);
   return oklchToSrgb(...readTokenOklch(theme, name));
+}
+
+// --- Tailwind's own palette -------------------------------------------------
+
+/**
+ * `bg-yellow-500` is not a token this repo declares, so nothing in globals.css
+ * can say what it paints — and any guard over an off-token fill has to know.
+ *
+ * The answer is READ, never typed. A hex pasted into a test is the #357 defect
+ * one level up (a measurement re-derived by nothing: right on the day it is
+ * typed, authoritative-sounding forever after), and a palette bump in a
+ * Tailwind upgrade would move the pixels while the constant stayed still. The
+ * stylesheet the build compiles against is the same source the browser renders
+ * from, so the guard reads that file.
+ */
+export const TAILWIND_THEME_CSS = path.join(
+  process.cwd(),
+  "node_modules",
+  "tailwindcss",
+  "theme.css"
+);
+
+let tailwindTheme: string | null = null;
+
+/** The colour Tailwind's default palette gives `<name>`, e.g. `yellow-500`. */
+export function readPaletteColour(name: string): Rgb {
+  tailwindTheme ??= stripCssComments(readFileSync(TAILWIND_THEME_CSS, "utf8"));
+
+  const value = declaredValue(tailwindTheme, `color-${name}`);
+  assert.ok(
+    value,
+    `tailwindcss/theme.css declares no --color-${name}. Either the class name is wrong or the palette moved — do not fall back to a literal`
+  );
+
+  const parsed = parseOklch(value);
+  assert.ok(
+    parsed,
+    `--color-${name} is not an oklch() value in Tailwind's theme.css`
+  );
+  return oklchToSrgb(...parsed);
 }
 
 export const themes = ["light", "dark"] as const;

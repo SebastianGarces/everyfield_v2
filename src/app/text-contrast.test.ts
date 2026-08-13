@@ -75,27 +75,15 @@ test("every `*-foreground` colour utility in shipped markup names a token that e
 // one over the CALL SITE — the wrapper list is derived from the ui/ source, so
 // a new `asChild` Button wrapper is covered the day it is written.
 
-/** Components in `src/components/ui/` that wrap `<Button … asChild>`. */
-function asChildButtonWrappers(): string[] {
-  const names: string[] = [];
-  for (const file of tsxFiles(path.join(SRC, "components", "ui"))) {
-    const source = readFileSync(file, "utf8");
-    // Function blocks, so a `<Button asChild>` is attributed to its own
-    // component rather than to whatever was declared first in the file.
-    const starts = [...source.matchAll(/^function (\w+)\(/gm)];
-    for (const [index, start] of starts.entries()) {
-      const from = start.index!;
-      const to = starts[index + 1]?.index ?? source.length;
-      const body = source.slice(from, to);
-      for (const tag of body.matchAll(/<Button\b[^>]*>/g)) {
-        if (/\basChild\b/.test(tag[0])) names.push(start[1]);
-      }
-    }
-  }
-  return [...new Set(names)];
-}
-
-/** The opening tag of every `<Name …>` in `source`, attributes included. */
+/**
+ * The opening tag of every `<Name …>` in `source`, attributes included.
+ *
+ * Depth-aware, and that is the whole point: a JSX prop contains `>` all the
+ * time (`onClick={() => close()}`), so a tag matcher that stops at the first
+ * `>` truncates mid-attribute. This is the file's ONE answer to "where does an
+ * opening tag end" — the discovery step below uses it too, because a second,
+ * naive answer there silently dropped whole wrappers out of the guard.
+ */
 function openingTags(source: string, name: string): string[] {
   const tags: string[] = [];
   const opener = new RegExp(`<${name}(?=[\\s/>])`, "g");
@@ -114,9 +102,134 @@ function openingTags(source: string, name: string): string[] {
   return tags;
 }
 
+/** The components declared in `source` that wrap `<Button … asChild>`. */
+function asChildButtonWrappersIn(source: string): string[] {
+  const names: string[] = [];
+  // Function blocks, so a `<Button asChild>` is attributed to its own
+  // component rather than to whatever was declared first in the file.
+  const starts = [...source.matchAll(/^function (\w+)\(/gm)];
+  for (const [index, start] of starts.entries()) {
+    const from = start.index!;
+    const to = starts[index + 1]?.index ?? source.length;
+    for (const tag of openingTags(source.slice(from, to), "Button")) {
+      if (/\basChild\b/.test(tag)) names.push(start[1]);
+    }
+  }
+  return names;
+}
+
+/** Components in `src/components/ui/` that wrap `<Button … asChild>`. */
+function asChildButtonWrappers(): string[] {
+  const names = tsxFiles(path.join(SRC, "components", "ui")).flatMap((file) =>
+    asChildButtonWrappersIn(readFileSync(file, "utf8"))
+  );
+  return [...new Set(names)];
+}
+
+/**
+ * Every string and template literal inside a JSX expression, at any depth.
+ *
+ * `className={cn("bg-destructive", busy && "opacity-50")}` is the idiom this
+ * codebase reaches for by default, and a matcher that reads only `"…"` or
+ * `` {`…`} `` sees NOTHING in it — the call site then contributes nothing and
+ * passes. So the expression is walked: quoted strings, template literals, and
+ * the strings inside a template's `${…}` holes all come back.
+ */
+function expressionLiterals(expr: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < expr.length; i++) {
+    const quote = expr[i];
+    if (quote !== '"' && quote !== "'" && quote !== "`") continue;
+
+    let text = "";
+    let j = i + 1;
+    for (; j < expr.length && expr[j] !== quote; j++) {
+      if (expr[j] === "\\") {
+        j++;
+        continue;
+      }
+      if (quote === "`" && expr[j] === "$" && expr[j + 1] === "{") {
+        let depth = 0;
+        let k = j + 1;
+        for (; k < expr.length; k++) {
+          if (expr[k] === "{") depth++;
+          else if (expr[k] === "}" && --depth === 0) break;
+        }
+        out.push(...expressionLiterals(expr.slice(j + 2, k)));
+        j = k;
+        continue;
+      }
+      text += expr[j];
+    }
+    out.push(text);
+    i = j;
+  }
+  return out;
+}
+
+/** Every class-name string this opening tag can put on the element. */
+function classNameLiterals(tag: string): string[] {
+  const out: string[] = [];
+  for (const match of tag.matchAll(/\bclassName=/g)) {
+    const at = match.index! + match[0].length;
+    const char = tag[at];
+
+    if (char === '"' || char === "'") {
+      const end = tag.indexOf(char, at + 1);
+      out.push(tag.slice(at + 1, end === -1 ? tag.length : end));
+      continue;
+    }
+    if (char !== "{") continue;
+
+    // Balanced braces — the same depth technique `openingTags` uses.
+    let depth = 0;
+    let end = tag.length;
+    for (let i = at; i < tag.length; i++) {
+      if (tag[i] === "{") depth++;
+      else if (tag[i] === "}" && --depth === 0) {
+        end = i;
+        break;
+      }
+    }
+    out.push(...expressionLiterals(tag.slice(at + 1, end)));
+  }
+  return out;
+}
+
 // `text-` is the one prefix that is not always a colour.
 const NON_COLOUR_TEXT =
   /^(xs|sm|base|lg|xl|\d?xl|left|center|right|justify|start|end|balance|pretty|nowrap|wrap|clip|ellipsis|\[.*\])$/;
+
+function isColourUtility(raw: string): boolean {
+  const utility = raw.replace(/^.*:/, "");
+  return (
+    utility.startsWith("bg-") ||
+    (utility.startsWith("text-") &&
+      !NON_COLOUR_TEXT.test(utility.slice("text-".length)))
+  );
+}
+
+/** The hand-painted colours `wrappers`' call sites in one file declare. */
+function handPaintedColours(
+  source: string,
+  where: string,
+  wrappers: string[]
+): { offenders: string[]; scanned: number } {
+  const offenders: string[] = [];
+  let scanned = 0;
+  for (const wrapper of wrappers) {
+    for (const tag of openingTags(source, wrapper)) {
+      scanned++;
+      for (const literal of classNameLiterals(tag)) {
+        for (const raw of literal.split(/\s+/)) {
+          if (isColourUtility(raw))
+            offenders.push(`${where}: <${wrapper} className="…${raw}…">`);
+        }
+      }
+    }
+  }
+  return { offenders, scanned };
+}
 
 test("no `asChild` Button call site hand-paints its colour in className", () => {
   const wrappers = asChildButtonWrappers();
@@ -129,26 +242,13 @@ test("no `asChild` Button call site hand-paints its colour in className", () => 
   const offenders: string[] = [];
   let scanned = 0;
   for (const file of tsxFiles(SRC)) {
-    const source = readFileSync(file, "utf8");
-    const where = path.relative(process.cwd(), file);
-    for (const wrapper of wrappers) {
-      for (const tag of openingTags(source, wrapper)) {
-        scanned++;
-        for (const literal of tag.matchAll(
-          /className=(?:"([^"]*)"|\{`([^`]*)`\})/g
-        )) {
-          for (const raw of (literal[1] ?? literal[2]).split(/\s+/)) {
-            const utility = raw.replace(/^.*:/, "");
-            const colour =
-              utility.startsWith("bg-") ||
-              (utility.startsWith("text-") &&
-                !NON_COLOUR_TEXT.test(utility.slice("text-".length)));
-            if (colour)
-              offenders.push(`${where}: <${wrapper} className="…${raw}…">`);
-          }
-        }
-      }
-    }
+    const found = handPaintedColours(
+      readFileSync(file, "utf8"),
+      path.relative(process.cwd(), file),
+      wrappers
+    );
+    offenders.push(...found.offenders);
+    scanned += found.scanned;
   }
 
   assert.ok(
@@ -160,6 +260,67 @@ test("no `asChild` Button call site hand-paints its colour in className", () => 
     offenders,
     [],
     'an `asChild` Button call site paints a bg-*/text-* utility in className. That className lands on the Slot CHILD, so tailwind-merge never sees it against buttonVariants() — both colours reach the DOM and CSS source order picks the winner, which is how five Delete buttons shipped in the primary fill. Pass `variant="destructive"` (or the variant you want) instead'
+  );
+});
+
+// --- the guard's own two failure modes, mutated ------------------------------
+//
+// Both halves of the guard above USED to answer their question the easy way,
+// and both easy answers are silent: a wrapper that is never discovered takes
+// every one of its call sites out of the scan, and a className spelling that is
+// never read makes a call site contribute nothing. Neither shows up as a
+// failure — the suite just stops covering things. So both are mutated here.
+
+test("the wrapper scan reads a JSX tag by depth, not to the first `>`", () => {
+  // `onClick={() => close()}` puts a `>` inside the attribute list. A
+  // `/<Button\b[^>]*>/` matcher stops at the arrow, never sees `asChild`, and
+  // drops the whole component — and every call site of it — out of the guard.
+  const source = [
+    "function Zealot(props) {",
+    '  return <Button variant="ghost" onClick={() => close()} asChild {...props} />;',
+    "}",
+  ].join("\n");
+
+  assert.deepEqual(
+    asChildButtonWrappersIn(source),
+    ["Zealot"],
+    "an `asChild` Button wrapper whose tag contains a `>` inside a prop was not discovered — the discovery step has gone back to a naive tag regex"
+  );
+});
+
+test("the call-site guard reads every className spelling, `cn()` included", () => {
+  const fires = (markup: string) =>
+    handPaintedColours(markup, "synthetic.tsx", ["AlertDialogAction"]).offenders
+      .length;
+
+  // The spelling the five Delete buttons actually shipped.
+  assert.equal(
+    fires('<AlertDialogAction className="bg-destructive text-white" />'),
+    2,
+    "a plain string className no longer fires the guard"
+  );
+
+  // The same defect in the idiom this codebase reaches for by default.
+  assert.equal(
+    fires(
+      '<AlertDialogAction className={cn("bg-destructive", busy && "text-white")} />'
+    ),
+    2,
+    "a `cn()` className no longer fires the guard — the original #411 defect can be respelled straight past it"
+  );
+  assert.equal(
+    fires("<AlertDialogAction className={cn(`bg-destructive`, styles)} />"),
+    1,
+    "a template literal inside `cn()` no longer fires the guard"
+  );
+
+  // …and it is not simply always-on: non-colour utilities are legitimate.
+  assert.equal(
+    fires(
+      '<AlertDialogAction className={cn("w-full text-sm", busy && "p-2")} />'
+    ),
+    0,
+    "the guard now fires on non-colour utilities — every call site would have to strip its layout classes"
   );
 });
 
