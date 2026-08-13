@@ -46,8 +46,9 @@
  * the first sweep closed the slicing half and recorded the closure as total
  * while nine vacuous orderings sat in the same suites, so the rule is no longer
  * left to prose. `source-span.test.ts` reads every `*.test.ts` under each
- * directory in its `GUARDED` list — `src/lib/invitations/` and
- * `src/lib/email/templates/` — and fails on a bare `.indexOf(` outside a
+ * directory in its `GUARDED` list — `src/lib/invitations/`,
+ * `src/lib/email/templates/`, `src/lib/notifications/` and
+ * `src/components/notifications/` — and fails on a bare `.indexOf(` outside a
  * four-line allowlist of sites that HANDLE -1 in a branch right there. A bare
  * `indexOf` reaches neither a `slice` nor a `<`.
  *
@@ -66,11 +67,11 @@
  * but genuinely about auth, so it sits with the module that owns sessions.)
  *
  * The GUARD in `source-span.test.ts` is narrower than the helper on purpose. It
- * scans the directories that have actually been converted — today
- * `src/lib/invitations/` and `src/lib/email/templates/` — because the rest of
- * the repo still has bare `indexOf` anchors and converting them is separate
- * work. Widen the scan as a directory is converted, never before: a guard that
- * fails on unconverted code gets disabled, and a disabled guard checks nothing.
+ * scans the directories that have actually been converted — today the four
+ * above — because the rest of the repo still has bare `indexOf` anchors and
+ * converting them is separate work. Widen the scan as a directory is converted,
+ * never before: a guard that fails on unconverted code gets disabled, and a
+ * disabled guard checks nothing.
  *
  * But keep the scope at least as wide as the CONCERN. `src/lib/email/templates/`
  * is on the list because the sweep that wrote this module shipped, in the same
@@ -79,6 +80,15 @@
  * below the CTA has a border", and any bordered element added underneath would
  * have kept it green through a button that lost its own. A guard whose scope
  * stops one directory short of the work it polices catches nothing there.
+ *
+ * The two notifications directories joined for the same reason one round later
+ * (#411): that sweep deleted a tautological span from `anchor.test.ts`, called
+ * it the rot this module exists to prevent, and left five more standing in the
+ * same domain — including the guard that gate 1's recorded-relationship
+ * fallback cannot reach the consent gate, whose start anchor going missing made
+ * BOTH its `doesNotMatch` calls assertions about the empty string. Nothing went
+ * red, because nothing was scanning the directory. Fixing instances without
+ * widening the scan is how the class comes back.
  *
  * Nothing here is imported by application code — it is for tests and scripts.
  */

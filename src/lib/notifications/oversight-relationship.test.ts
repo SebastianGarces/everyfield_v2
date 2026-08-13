@@ -4,6 +4,7 @@ import path from "node:path";
 import { test } from "node:test";
 
 import type { User } from "@/db/schema";
+import { assertInOrder, sourceReader } from "@/lib/testing/source-span";
 
 import {
   OVERSIGHT_OWN_RELATIONSHIP_TYPES,
@@ -40,6 +41,30 @@ const ENQUEUE = readFileSync(
   path.join(process.cwd(), "src", "lib", "notifications", "enqueue.ts"),
   "utf8"
 );
+
+/**
+ * Every cut below goes through this, never a hand-sliced offset.
+ *
+ * A source-shaped guard that stops matching its own subject passes SILENTLY: a
+ * missing needle resolves to -1, `slice(-1, end)` hands back the empty string,
+ * and every `doesNotMatch` in this file is true of nothing. That is the shape
+ * `src/lib/testing/source-span.ts` exists to make impossible — a moved anchor
+ * throws, naming the file and the needle.
+ */
+const ENQUEUE_SOURCE = sourceReader(ENQUEUE, "enqueue.ts");
+
+/** Anchors shared by the three tests that read gate 1, declared once. */
+const GATE_START = "async recipientMayBeNotified(";
+const CONSENT_GATE = "if (isOversightUser(";
+const GATE_END = "async insertIfAbsent(";
+
+/** The label a failure inside the extracted gate should be grepped under. */
+const GATE_LABEL = "enqueue.ts recipientMayBeNotified";
+
+/** Gate 1's body, cut out of `enqueue.ts` — the subject of the three reads. */
+function gateSource(): string {
+  return ENQUEUE_SOURCE.span(GATE_START, GATE_END);
+}
 
 const CHURCH = "11111111-1111-4111-8111-111111111111";
 
@@ -271,37 +296,32 @@ test("exactly two types may rest on a recorded relationship", () => {
 // ----------------------------------------------------------------------------
 
 test("the fallback is asked only AFTER canAccessChurch has refused", () => {
-  const gate = ENQUEUE.slice(
-    ENQUEUE.indexOf("async recipientMayBeNotified("),
-    ENQUEUE.indexOf("async insertIfAbsent(")
-  );
+  const gate = gateSource();
 
-  const access = gate.indexOf("await canAccessChurch(recipient, churchId)");
-  const fallback = gate.indexOf("orgHasRecordedRelationshipWithChurch");
-
-  assert.ok(access >= 0, "the tenancy check is gone");
-  assert.ok(fallback >= 0, "the fallback is gone");
-  assert.ok(
-    access < fallback,
+  assertInOrder(
+    gate,
+    GATE_LABEL,
+    [
+      "await canAccessChurch(recipient, churchId)",
+      "orgHasRecordedRelationshipWithChurch",
+    ],
     "the fallback must never be able to answer the tenancy question first"
   );
 
   // And it sits INSIDE the refusal branch, so the ordinary path — every
   // notification in the product except two — never reaches it and never pays
   // for its two probes.
-  const branch = gate.slice(access, gate.indexOf("if (isOversightUser("));
+  const branch = sourceReader(gate, GATE_LABEL).span(
+    "await canAccessChurch(recipient, churchId)",
+    CONSENT_GATE
+  );
   assert.match(branch, /orgHasRecordedRelationshipWithChurch/);
 });
 
 test("all three conjuncts are required, and the refusal is unchanged", () => {
-  const gate = ENQUEUE.slice(
-    ENQUEUE.indexOf("async recipientMayBeNotified("),
-    ENQUEUE.indexOf("async insertIfAbsent(")
-  );
-
-  const fallback = gate.slice(
-    gate.indexOf("const mayRestOnRecord"),
-    gate.indexOf("if (isOversightUser(")
+  const fallback = sourceReader(gateSource(), GATE_LABEL).span(
+    "const mayRestOnRecord",
+    CONSENT_GATE
   );
 
   // Type, role, record — an `&&` chain, so dropping any one of them is a diff a
@@ -327,10 +347,12 @@ test("the fallback cannot reach the consent gate's decision", () => {
   // filed under, `oversightGateFor` is about consent. If the fallback were
   // consulted inside the oversight block it could relax the sharing question for
   // a plant it had never been given access to.
-  const gate = ENQUEUE.slice(
-    ENQUEUE.indexOf("if (isOversightUser("),
-    ENQUEUE.indexOf("async insertIfAbsent(")
-  );
+  //
+  // Read through the reader, not a bare `indexOf`: this is a `doesNotMatch`
+  // pair, so a start anchor that moved would slice the EMPTY STRING and both
+  // assertions would pass against nothing. The guard has to fail on its own
+  // subject or it is not a guard.
+  const gate = ENQUEUE_SOURCE.span(CONSENT_GATE, GATE_END);
 
   assert.doesNotMatch(gate, /orgHasRecordedRelationshipWithChurch/);
   assert.doesNotMatch(gate, /isOwnRelationshipType/);
