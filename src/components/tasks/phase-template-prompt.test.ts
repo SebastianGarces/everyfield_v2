@@ -9,12 +9,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   PHASE_TEMPLATE_RECEIPT_COOKIE,
   buildPhaseTemplatePrompt,
-  decidePhaseTemplateDismissOutcome,
-  decidePhaseTemplateImportOutcome,
-  decodePartialImportReceipt,
-  encodePartialImportReceipt,
-  receiptForTransition,
-  type AcceptPhaseTemplatePromptResult,
   type PhaseTemplatePrompt as PhaseTemplatePromptData,
 } from "@/lib/tasks/phase-prompt";
 import { phaseTemplatesFor } from "@/lib/tasks/templates";
@@ -898,187 +892,15 @@ test("no aria-describedby points at the hint, because it could never be read", (
 });
 
 // ----------------------------------------------------------------------------
-// The decision seam (ruled 2026-08-12, round 3)
+// The action performs the decision, it does not re-take it
 //
-// All of this used to live inside `importPhaseTemplatesAction`, a non-exported
-// `"use server"` closure that no test can call — so the branch that matters
-// most had no coverage at all, and shipped a `revalidatePath("/tasks")` that
-// unmounted the very receipt it was written to preserve.
+// The decision seam itself is pure and lives in `src/lib/tasks/phase-prompt.ts`,
+// asserted beside it in `phase-prompt.test.ts`. What belongs HERE is the wiring:
+// both `"use server"` closures in this component are non-exported, so no test
+// can call them and reading them is the only way to pin what they DO with a
+// decision. That is how the partial case acquired a `revalidatePath("/tasks")`
+// nobody could see, which unmounted the very receipt it was written to preserve.
 // ----------------------------------------------------------------------------
-
-test("nothing answered leaves the prompt up and re-reads nothing", () => {
-  // `null` is "no live prompt, or every requested key was forged" — and it is
-  // also the empty tick list, which the action never sends to the service.
-  const decision = decidePhaseTemplateImportOutcome(null);
-
-  assert.deepEqual(decision.outcome, { status: "nothing" });
-  assert.equal(decision.answeredTransitionId, null, "an unanswered prompt");
-  assert.equal(decision.receipt, null, "nothing landed, so nothing to report");
-});
-
-test("a PARTIAL import hands its receipt to the SERVER, not to the island", () => {
-  // THE REGRESSION THIS FILE EXISTS FOR, and the second attempt at it.
-  //
-  // The first fix returned `{status:"partial"}` for `useActionState` to render
-  // and asked for no revalidation, on the theory that re-reading nothing keeps
-  // the island alive. It cannot: the claim is KEPT on a part-way import, so the
-  // transition is answered — and the action writes the answered-cookie, which
-  // by itself re-renders the route ("after you set or delete a cookie in a
-  // Server Action, Next.js re-renders the current page and its layouts on the
-  // server", .next-docs/01-app/03-api-reference/04-functions/cookies.mdx). That
-  // render has no prompt in it, so the island and its receipt were gone before
-  // they could be seen: 16 of 22 tasks created, the stage change spent, and not
-  // one word on screen.
-  //
-  // So the decision carries a RECEIPT — a value for the next server render,
-  // written to a flash cookie — and the outcome it hands the doomed island is
-  // the resting one.
-  const result: AcceptPhaseTemplatePromptResult = {
-    status: "partial",
-    transitionId: TRANSITION_ID,
-    importedOn: "2026-03-02",
-    createdCount: 9,
-    templateNames: ["Ministry Team Setup"],
-  };
-
-  const decision = decidePhaseTemplateImportOutcome(result);
-
-  assert.deepEqual(
-    decision.receipt,
-    {
-      // The receipt names its own transition, so the render that draws it can
-      // check it is still the one being reported on.
-      transitionId: TRANSITION_ID,
-      createdCount: 9,
-      templateNames: ["Ministry Team Setup"],
-    },
-    "a part-way import reported nothing the next render could draw"
-  );
-  assert.deepEqual(decision.outcome, { status: "idle" });
-  assert.equal(
-    decision.answeredTransitionId,
-    TRANSITION_ID,
-    "the claim is kept, so the cookie fast path must be written too"
-  );
-});
-
-test("a clean import takes the prompt down and reports no receipt", () => {
-  const decision = decidePhaseTemplateImportOutcome({
-    status: "imported",
-    transitionId: TRANSITION_ID,
-    importedOn: "2026-03-02",
-    createdCount: 22,
-    templateNames: ["Ministry Team Setup", "Launch Prep"],
-  });
-
-  assert.deepEqual(decision.outcome, { status: "idle" });
-  assert.equal(
-    decision.receipt,
-    null,
-    "a clean import left a receipt for a failure that did not happen"
-  );
-  assert.equal(decision.answeredTransitionId, TRANSITION_ID);
-});
-
-test("a second press is a success that created nothing", () => {
-  const decision = decidePhaseTemplateImportOutcome({
-    status: "already_answered",
-    transitionId: TRANSITION_ID,
-  });
-
-  assert.deepEqual(
-    decision.outcome,
-    { status: "idle" },
-    "answering twice reported a failure the planter cannot act on"
-  );
-  assert.equal(decision.receipt, null);
-  assert.equal(
-    decision.answeredTransitionId,
-    TRANSITION_ID,
-    "the prompt is answered and must come down"
-  );
-});
-
-test("a second press writes NO browser fast path — the row it found is not its own", () => {
-  // `memory/invariants.md` → Tasks: `PHASE_TEMPLATE_PROMPT_COOKIE` "may only
-  // ever suppress a prompt the row suppresses too — never restore one". That
-  // rule has exactly one way to break, and this is it.
-  //
-  // Two presses land in the same millisecond. The winner claims the answer row;
-  // the loser's `ON CONFLICT DO NOTHING` returns nothing and it reports
-  // `already_answered`. Then the winner's very first `importTaskTemplate`
-  // throws — nothing was created — so `acceptPhaseTemplatePrompt` RELEASES the
-  // claim and the row is deleted, which is the whole point of releasing it: the
-  // prompt is honestly unanswered and must come back.
-  //
-  // It comes back from the row. It does not come back through a cookie, and the
-  // cookie lives for a YEAR with no un-answer path — so a fast path minted here
-  // would hide the planter's prompt permanently, in the one browser that
-  // pressed, with nothing imported. The loser therefore re-reads the route and
-  // lets the row answer.
-  const decision = decidePhaseTemplateImportOutcome({
-    status: "already_answered",
-    transitionId: TRANSITION_ID,
-  });
-
-  assert.equal(
-    decision.fastPathTransitionId,
-    null,
-    "a press that wrote no row minted a year-long cookie against somebody else's claim — which a released claim turns into a prompt suppressed with nothing behind it"
-  );
-  assert.equal(
-    decision.answeredTransitionId,
-    TRANSITION_ID,
-    "the route must still be re-read: if the row IS durable the prompt comes down from it"
-  );
-});
-
-test("only a press that KEEPS its claim mints the fast path", () => {
-  // The other side of the rule. `imported` and `partial` both hold the claim
-  // they wrote and neither is ever released, so the cookie they mint can only
-  // agree with the row. `partial` must mint one for a second reason: the cookie
-  // write is what re-renders the route that draws its receipt.
-  const imported = decidePhaseTemplateImportOutcome({
-    status: "imported",
-    transitionId: TRANSITION_ID,
-    importedOn: "2026-03-02",
-    createdCount: 22,
-    templateNames: ["Ministry Team Setup"],
-  });
-  assert.equal(imported.fastPathTransitionId, TRANSITION_ID);
-
-  const partial = decidePhaseTemplateImportOutcome({
-    status: "partial",
-    transitionId: TRANSITION_ID,
-    importedOn: "2026-03-02",
-    createdCount: 9,
-    templateNames: ["Ministry Team Setup"],
-  });
-  assert.equal(
-    partial.fastPathTransitionId,
-    TRANSITION_ID,
-    "a part-way import keeps its claim, and the cookie write is what re-renders the route its receipt is drawn on"
-  );
-
-  // Nothing answered, nothing minted.
-  assert.equal(
-    decidePhaseTemplateImportOutcome(null).fastPathTransitionId,
-    null
-  );
-});
-
-test("declining decides the same way, from a transition id or its absence", () => {
-  const landed = decidePhaseTemplateDismissOutcome(TRANSITION_ID);
-  assert.deepEqual(landed.outcome, { status: "idle" });
-  assert.equal(landed.answeredTransitionId, TRANSITION_ID);
-
-  // No transition to decline: the press changed nothing, which from the
-  // planter's side IS a failure — and nothing is answered, so nothing is
-  // re-read and the real prompt is still there on the next render.
-  const missed = decidePhaseTemplateDismissOutcome(null);
-  assert.deepEqual(missed.outcome, { status: "failed" });
-  assert.equal(missed.answeredTransitionId, null);
-});
 
 test("the action performs the decision rather than re-deciding it", () => {
   // The seam only helps if the action still routes through it. Both branches
@@ -1108,16 +930,28 @@ test("the action performs the decision rather than re-deciding it", () => {
     "the answer cookie is set before the receipt, so the re-render it causes can read a receipt that is not there yet"
   );
 
-  // The two fields are not interchangeable, and the import action must not
-  // collapse them back: `refresh()` hangs off `answeredTransitionId` (the route
-  // changed), the cookie off `fastPathTransitionId` (this press owns the row).
+  // The two fields are not interchangeable and NEITHER action may collapse them
+  // back: `refresh()` hangs off `answeredTransitionId` (the route changed), the
+  // cookie off `fastPathTransitionId` (this press owns the row nothing can take
+  // away). Both presses can find a claim that is not their own — Import reports
+  // `already_answered`, and so does a decline that lost the same race — and a
+  // year-long cookie minted against a claim that is later released hides a
+  // prompt the row says is unanswered (`memory/invariants.md` → Tasks).
   assert.equal(
     (
       action.match(/markPromptAnswered\(decision\.answeredTransitionId\)/g) ??
       []
     ).length,
-    1,
-    "the import action is minting the fast path from the answered id again — only the dismiss action may, because a decline writes the row it reports"
+    0,
+    "an action is minting the fast path from the answered id again — that id only says the route changed, and it is set for `already_answered` too"
+  );
+  assert.equal(
+    (
+      action.match(/markPromptAnswered\(decision\.fastPathTransitionId\)/g) ??
+      []
+    ).length,
+    2,
+    "both actions mint the fast path through the field that means `this press owns its row`"
   );
 
   // `revalidatePath` is for OTHER pages (`memory/contracts/data-patterns.md`).
@@ -1136,144 +970,12 @@ test("the action performs the decision rather than re-deciding it", () => {
 });
 
 // ----------------------------------------------------------------------------
-// The receipt's road: action → flash cookie → the NEXT server render
+// The receipt's road, where it passes through THIS file
 //
-// The value crosses a browser to get there, so the codec is the trust boundary:
-// `/tasks` has no error boundary (see the header of
-// `src/db/migrations/0037_phase_prompt_answers.sql`), and a `JSON.parse` throw
-// in the render of a cookie the browser controls is a 500 on the task list.
+// The codec and `receiptForTransition` are pure and are asserted in
+// `src/lib/tasks/phase-prompt.test.ts`. What is asserted here is the loader:
+// which branch looks for the flash, and which reader it asks for it.
 // ----------------------------------------------------------------------------
-
-test("a receipt survives the round trip through a cookie value", () => {
-  const receipt = {
-    transitionId: TRANSITION_ID,
-    createdCount: 16,
-    templateNames: ["Ministry Team Setup", "Launch Prep & Follow-up"],
-  };
-
-  const encoded = encodePartialImportReceipt(receipt);
-
-  assert.doesNotMatch(
-    encoded,
-    /[;,\s]/,
-    "the cookie value carries a character that ends a cookie"
-  );
-  assert.deepEqual(decodePartialImportReceipt(encoded), receipt);
-});
-
-test("no cookie a browser can send makes the task list throw", () => {
-  // Every one of these is reachable: no cookie at all, a cleared one, a proxy
-  // that mangled the encoding, a hand-written one, and a value shaped like a
-  // receipt that reports an import which cannot have happened.
-  const refused = [
-    undefined,
-    null,
-    "",
-    "%%%",
-    "not-json",
-    encodeURIComponent("[]"),
-    encodeURIComponent("null"),
-    encodeURIComponent('"16"'),
-    encodeURIComponent(
-      JSON.stringify({ transitionId: TRANSITION_ID, createdCount: 16 })
-    ),
-    encodeURIComponent(
-      JSON.stringify({ transitionId: TRANSITION_ID, templateNames: ["A"] })
-    ),
-    encodeURIComponent(
-      JSON.stringify({
-        transitionId: TRANSITION_ID,
-        createdCount: 0,
-        templateNames: ["A"],
-      })
-    ),
-    encodeURIComponent(
-      JSON.stringify({
-        transitionId: TRANSITION_ID,
-        createdCount: -3,
-        templateNames: ["A"],
-      })
-    ),
-    encodeURIComponent(
-      JSON.stringify({
-        transitionId: TRANSITION_ID,
-        createdCount: 1.5,
-        templateNames: ["A"],
-      })
-    ),
-    encodeURIComponent(
-      JSON.stringify({
-        transitionId: TRANSITION_ID,
-        createdCount: 4,
-        templateNames: "Launch Prep",
-      })
-    ),
-    encodeURIComponent(
-      JSON.stringify({
-        transitionId: TRANSITION_ID,
-        createdCount: 4,
-        templateNames: [{ name: "A" }],
-      })
-    ),
-    // …and a receipt that cannot say WHICH stage change it reports on. Nothing
-    // can match it, so it could only ever be drawn unconditionally — which is
-    // the stale-alarm bug. This arm also covers every receipt minted before the
-    // id existed, still sitting in a browser through its two-minute `maxAge`.
-    encodeURIComponent(
-      JSON.stringify({ createdCount: 4, templateNames: ["A"] })
-    ),
-    encodeURIComponent(
-      JSON.stringify({
-        transitionId: "",
-        createdCount: 4,
-        templateNames: ["A"],
-      })
-    ),
-    encodeURIComponent(
-      JSON.stringify({
-        transitionId: 42,
-        createdCount: 4,
-        templateNames: ["A"],
-      })
-    ),
-    encodeURIComponent(
-      JSON.stringify({
-        transitionId: "x".repeat(65),
-        createdCount: 4,
-        templateNames: ["A"],
-      })
-    ),
-  ];
-
-  for (const value of refused) {
-    assert.equal(
-      decodePartialImportReceipt(value),
-      null,
-      `a receipt was read out of ${JSON.stringify(value)}`
-    );
-  }
-});
-
-test("a forged receipt cannot grow the page it renders", () => {
-  // The cookie is not `httpOnly` — the browser clears it — so its content is
-  // whatever its owner wants. It buys them one sentence in their own browser,
-  // and it is clamped on the way back in.
-  const forged = encodeURIComponent(
-    JSON.stringify({
-      transitionId: TRANSITION_ID,
-      createdCount: 9,
-      templateNames: Array.from({ length: 40 }, () => "x".repeat(500)),
-    })
-  );
-
-  const receipt = decodePartialImportReceipt(forged);
-
-  assert.ok(receipt, "a well-formed oversized receipt was refused outright");
-  assert.ok(receipt.templateNames.length <= 8);
-  for (const name of receipt.templateNames) {
-    assert.ok(name.length <= 120);
-  }
-});
 
 test("no prompt is where the loader LOOKS for a receipt, not where it gives up", () => {
   // The loader's empty branch is the fix. A part-way import answers the
@@ -1299,53 +1001,6 @@ test("no prompt is where the loader LOOKS for a receipt, not where it gives up",
     /decodePartialImportReceipt\(/,
     "the loader decodes the flash without checking whose transition it is"
   );
-});
-
-test("a receipt minted for one transition is never drawn for another", () => {
-  // THE STALE ALARM. `PHASE_TEMPLATE_RECEIPT_COOKIE` is spent by being SHOWN
-  // (`ClearReceiptCookie`), and a live prompt beats a receipt — so a receipt
-  // that loses that race is never shown and never spent. Inside its two-minute
-  // `maxAge`:
-  //
-  //   1. a part-way import of transition A writes the flash;
-  //   2. the plant moves again before it is drawn (another member, the phase
-  //      engine, an oversight action), so the render finds a prompt for B and
-  //      skips the receipt branch entirely;
-  //   3. the planter answers B — cleanly, everything imported, or declines;
-  //   4. the next render has no prompt, reaches this branch, and the cookie for
-  //      A is still sitting there.
-  //
-  // Drawn, it would say "the remaining checklists were not created, and this
-  // stage change is now answered" in a `role="alert"` about a press where every
-  // clause is false. A render cannot clear a cookie, so the id in the value is
-  // the whole defence.
-  const transitionA = TRANSITION_ID;
-  const transitionB = "33333333-3333-4333-8333-333333333333";
-
-  const flash = encodePartialImportReceipt({
-    transitionId: transitionA,
-    createdCount: 16,
-    templateNames: ["Ministry Team Setup"],
-  });
-
-  // Step 4, with B answered: the receipt belongs to a superseded transition.
-  assert.equal(
-    receiptForTransition(flash, transitionB),
-    null,
-    "a receipt for a superseded transition is drawn over the answer the planter just gave"
-  );
-
-  // …and the ordinary case still draws, or the fix would have deleted the
-  // feature instead of scoping it.
-  assert.deepEqual(receiptForTransition(flash, transitionA), {
-    transitionId: transitionA,
-    createdCount: 16,
-    templateNames: ["Ministry Team Setup"],
-  });
-
-  // A plant with no transition at all has nothing a receipt could be about.
-  assert.equal(receiptForTransition(flash, null), null);
-  assert.equal(receiptForTransition(undefined, transitionA), null);
 });
 
 test("the receipt is server markup — the island cannot outlive the answer", () => {

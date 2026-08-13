@@ -372,14 +372,16 @@ test("declining leaves no tasks, and the prompt does not come back", async (t: T
     });
 
     // Decline writes nothing but the answer — and the answer is a ROW now, so
-    // it holds for the planter rather than for the browser that pressed.
-    assert.equal(
+    // it holds for the planter rather than for the browser that pressed. The
+    // status says this press WROTE that row, which is what entitles it to the
+    // browser fast path (`decidePhaseTemplateDismissOutcome`).
+    assert.deepEqual(
       await declinePhaseTemplatePrompt({
         churchId: fixture.churchId,
         userId: fixture.userId,
         expectedTransitionId: transitionId,
       }),
-      transitionId
+      { status: "declined", transitionId }
     );
     assert.deepEqual(await tasksOf(fixture.churchId), []);
     assert.deepEqual(await answersOf(fixture.churchId), [
@@ -598,8 +600,17 @@ test("declining twice records one answer and stays a decline", async (t: TestCon
       userId: fixture.userId,
       expectedTransitionId: transitionId,
     };
-    assert.equal(await declinePhaseTemplatePrompt(input), transitionId);
-    assert.equal(await declinePhaseTemplatePrompt(input), transitionId);
+    assert.deepEqual(await declinePhaseTemplatePrompt(input), {
+      status: "declined",
+      transitionId,
+    });
+    // The SECOND press wrote nothing — the row it found is the first press's.
+    // It is still a decline as far as the planter is concerned, and it is still
+    // not allowed to mint a year-long cookie against a row it does not own.
+    assert.deepEqual(await declinePhaseTemplatePrompt(input), {
+      status: "already_answered",
+      transitionId,
+    });
 
     assert.deepEqual(await answersOf(fixture.churchId), [
       { transitionId, answer: "declined" },
@@ -653,13 +664,13 @@ test("a decline naming a superseded transition writes nothing", async (t: TestCo
     assert.equal(prompt.toPhase, 3);
 
     // …and declining the one on screen still works.
-    assert.equal(
+    assert.deepEqual(
       await declinePhaseTemplatePrompt({
         churchId: fixture.churchId,
         userId: fixture.userId,
         expectedTransitionId: currentId,
       }),
-      currentId
+      { status: "declined", transitionId: currentId }
     );
     assert.deepEqual(await answersOf(fixture.churchId), [
       { transitionId: currentId, answer: "declined" },

@@ -355,7 +355,8 @@ async function importPhaseTemplatesAction(
  * and leaves the real, current prompt on the next render.
  *
  * The decline is written to `phase_prompt_answers`, so it holds on every
- * device — the cookie afterwards only saves this browser the join.
+ * device — the cookie afterwards only saves this browser the join, and only a
+ * press that WROTE that row is allowed to mint it.
  *
  * `null` from the service means there is no transition to decline, or the one
  * named is no longer current. Either way the press changed nothing, and from
@@ -384,16 +385,25 @@ async function dismissPhaseTemplatePromptAction(
       return { status: "failed" };
     }
 
-    const transitionId = await declinePhaseTemplatePrompt({
+    const result = await declinePhaseTemplatePrompt({
       churchId: user.churchId,
       userId: user.id,
       expectedTransitionId: posted,
     });
 
-    const decision = decidePhaseTemplateDismissOutcome(transitionId);
+    const decision = decidePhaseTemplateDismissOutcome(result);
+
+    // A SEPARATE TEST FROM `answeredTransitionId`, for the reason the import
+    // action splits them: the fast-path cookie may only ever suppress a prompt
+    // the ROW suppresses too (`memory/invariants.md` → Tasks). A decline that
+    // found an existing claim wrote no row of its own, and that claim may be an
+    // accept's — released when its import wrote nothing — so it mints nothing
+    // and lets the next render read the row.
+    if (decision.fastPathTransitionId) {
+      await markPromptAnswered(decision.fastPathTransitionId);
+    }
 
     if (decision.answeredTransitionId) {
-      await markPromptAnswered(decision.answeredTransitionId);
       refresh();
     }
 

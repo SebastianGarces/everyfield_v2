@@ -419,12 +419,33 @@ async function releasePhaseTemplatePromptAnswer(
 // ----------------------------------------------------------------------------
 
 /**
+ * What declining did, in the same two shapes accepting reports.
+ *
+ * `null` from the service is "there is nothing this press may answer". A press
+ * that DID answer says whether it wrote the row itself, and that distinction is
+ * a rule rather than a detail: `declined` means this press owns a row nothing
+ * can take away, so it may mint the year-long fast-path cookie;
+ * `already_answered` means it found somebody else's claim — possibly an
+ * accept's, which `acceptPhaseTemplatePrompt` RELEASES when its import wrote
+ * nothing — so it may mint no cookie at all (`memory/invariants.md` → Tasks).
+ *
+ * The prompt comes down either way, and from the planter's side both are a
+ * successful decline; only the cookie tells them apart.
+ */
+export type DeclinePhaseTemplatePromptResult = {
+  status: "declined" | "already_answered";
+  transitionId: string;
+};
+
+/**
  * Decline the prompt for the plant's current transition, durably.
  *
- * Returns the transition id that was answered (whether this call recorded the
- * answer or found one already there), or `null` when there is nothing this call
- * may answer. A decline that loses the race is still a decline — the prompt is
- * down either way — so those two are not distinguished.
+ * Returns the transition that was answered — with `status` naming whether THIS
+ * call recorded the answer or found one already there — or `null` when there is
+ * nothing this call may answer. A decline that loses the race is still a
+ * decline as far as the planter is concerned; the two are distinguished only
+ * because the loser must not mint a fast-path cookie against a row it does not
+ * own (see `DeclinePhaseTemplatePromptResult`).
  *
  * A STALE PRESS ANSWERS NOTHING (#313). `expectedTransitionId` is the id the
  * PANEL was showing, and it is REQUIRED: it must equal the plant's current
@@ -448,22 +469,32 @@ export async function declinePhaseTemplatePrompt(input: {
   /** The transition the prompt being answered was rendered for. A mismatch is
    *  refused rather than redirected. */
   expectedTransitionId: string;
-}): Promise<string | null> {
+}): Promise<DeclinePhaseTemplatePromptResult | null> {
   const transition = await getLatestPhaseTransition(input.churchId);
   if (!transition) return null;
 
   if (input.expectedTransitionId !== transition.id) return null;
 
-  if (!transition.answeredAt) {
-    await claimPhaseTemplatePromptAnswer({
-      churchId: input.churchId,
-      transitionId: transition.id,
-      userId: input.userId,
-      answer: "declined",
-    });
+  // Answered on some other device, or a moment ago in this one.
+  if (transition.answeredAt) {
+    return { status: "already_answered", transitionId: transition.id };
   }
 
-  return transition.id;
+  const claimId = await claimPhaseTemplatePromptAnswer({
+    churchId: input.churchId,
+    transitionId: transition.id,
+    userId: input.userId,
+    answer: "declined",
+  });
+
+  // The read above and this insert are not one operation, so a press that
+  // arrived between them wins the row. `ON CONFLICT DO NOTHING` is what decides
+  // it — not the read (`memory/invariants.md` → Transactions).
+  if (!claimId) {
+    return { status: "already_answered", transitionId: transition.id };
+  }
+
+  return { status: "declined", transitionId: transition.id };
 }
 
 /**
@@ -900,30 +931,55 @@ export function decidePhaseTemplateImportOutcome(
 
 export interface PhaseTemplateDismissDecision {
   outcome: PhaseTemplateDismissOutcome;
+  /** The transition this press answered, or `null` when the prompt must stay
+   *  up. As on the import side, it means "the route changed" and nothing more:
+   *  `refresh()` hangs off it. */
   answeredTransitionId: string | null;
+  /**
+   * The transition to write the browser fast path against, or `null` when this
+   * press must not write one — the SAME split, and the same rule, as
+   * `PhaseTemplateImportDecision.fastPathTransitionId`.
+   *
+   * A decline that found an existing claim wrote no row of its own, and the row
+   * it found may be an ACCEPT's: `acceptPhaseTemplatePrompt` releases a claim
+   * whose import wrote nothing, and then the transition is genuinely
+   * unanswered. `PHASE_TEMPLATE_PROMPT_COOKIE` lives for a year, is read
+   * without the row, and has no un-answer path — so a cookie minted here would
+   * hide, permanently and in that one browser, a prompt the database says is
+   * still open. `already_answered` therefore re-reads the route and lets the
+   * row decide.
+   *
+   * A decline that WROTE its row keeps it — nothing releases a decline — so
+   * that cookie can only ever agree with the row.
+   */
+  fastPathTransitionId: string | null;
 }
 
 /**
  * The same seam for "Not now", from what `declinePhaseTemplatePrompt` returned.
  *
- * `null` means there was no transition to decline, so the press changed nothing
- * — reported as a failure, because from the planter's side a press that changed
- * nothing IS one. A decline that landed takes the prompt down, so the route is
- * re-read.
+ * `null` means there was no transition to decline, or the one named is no
+ * longer current, so the press changed nothing — reported as a failure, because
+ * from the planter's side a press that changed nothing IS one. A decline that
+ * landed takes the prompt down, so the route is re-read; whether it may also
+ * mint the cookie is the `fastPathTransitionId` question, not this one.
  */
 export function decidePhaseTemplateDismissOutcome(
-  transitionId: string | null
+  result: DeclinePhaseTemplatePromptResult | null
 ): PhaseTemplateDismissDecision {
-  if (!transitionId) {
+  if (!result) {
     return {
       outcome: { status: "failed" },
       answeredTransitionId: null,
+      fastPathTransitionId: null,
     };
   }
 
   return {
     outcome: { status: "idle" },
-    answeredTransitionId: transitionId,
+    answeredTransitionId: result.transitionId,
+    fastPathTransitionId:
+      result.status === "already_answered" ? null : result.transitionId,
   };
 }
 
