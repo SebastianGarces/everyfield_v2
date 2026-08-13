@@ -292,12 +292,20 @@ export function functionBodies(
  * order assertion having never been looked at. The sibling test asserts this is
  * EMPTY for every `"use server"` module, which turns the parser's blind spot
  * into a loud failure at the moment somebody writes one.
+ *
+ * IT RETURNS THE WHOLE STATEMENT, braces included, because the second caller
+ * reads the NAMES in it: `auth/roles.test.ts` asks "does any module but the leaf
+ * export the role policy?", and a `.*$` pattern answers that question about the
+ * first LINE only — so a re-export prettier had wrapped over four lines would
+ * have been the one shape the guard could not see, which is the hole every
+ * hand-rolled copy of this reader left open.
  */
 export function valueExportStatements(code: string): string[] {
   return [
     /^export\s+(?:const|let|var)\s+\w+.*$/gm,
     /^export\s+default\b.*$/gm,
-    /^export\s*[*{].*$/gm,
+    /^export\s*\*.*$/gm,
+    /^export\s*\{[^}]*\}[^;\n]*;?/gm,
   ].flatMap((pattern) =>
     (code.match(pattern) ?? []).map((line) => line.trim())
   );

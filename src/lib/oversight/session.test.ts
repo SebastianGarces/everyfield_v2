@@ -68,9 +68,10 @@ test("the guard declares no role of its own", () => {
   // the copy, was the change that failed the guard.
   //
   // The pair is now declared once, in the import-free leaf `@/lib/auth/roles`,
-  // which BOTH sites import — `roles.test.ts` asserts that `access.ts` serves
-  // the leaf's own object rather than a copy of it, by identity. What this
-  // guard owes is that no third copy grows back here.
+  // which EVERY site imports — `roles.test.ts` asserts that no other module in
+  // `src/` exports either symbol, so there is one import path and no re-export
+  // to serve a second. What this guard owes is that no third copy grows back
+  // here.
   const guard = readCode(
     path.join(ROOT, "src", "lib", "oversight", "session.ts")
   );

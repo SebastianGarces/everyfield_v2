@@ -2,7 +2,7 @@ import { and, eq, inArray, or } from "drizzle-orm";
 
 import { db } from "@/db";
 import { churches, users, type OrganizationInvitationType } from "@/db/schema";
-import { OVERSIGHT_ROLES } from "@/lib/auth/access";
+import { OVERSIGHT_ROLES } from "@/lib/auth/roles";
 
 import {
   anchorId,

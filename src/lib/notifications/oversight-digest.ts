@@ -28,7 +28,7 @@ import {
   tasks,
   users,
 } from "@/db/schema";
-import { OVERSIGHT_ROLES } from "@/lib/auth/access";
+import { OVERSIGHT_ROLES } from "@/lib/auth/roles";
 import { APP_TIME_ZONE, formatDate } from "@/lib/datetime";
 
 import {

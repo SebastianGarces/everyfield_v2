@@ -293,6 +293,32 @@ test("an arrow-function export is not a function declaration", () => {
   ]);
 });
 
+test("a re-export statement is returned whole, however it is wrapped", () => {
+  // The second caller reads the NAMES in the statement: `auth/roles.test.ts`
+  // asks whether any module but the leaf exports the role policy, and the only
+  // shape that can answer is the whole statement. A `.*$` pattern returns
+  // `export {` for the wrapped form — no symbol, no specifier, and the guard
+  // goes green on the exact re-export it exists to catch.
+  assert.deepEqual(
+    valueExportStatements("export { CHURCH_LEVEL_ROLES, OVERSIGHT_ROLES };"),
+    ["export { CHURCH_LEVEL_ROLES, OVERSIGHT_ROLES };"]
+  );
+
+  const wrapped = [
+    "export {",
+    "  CHURCH_LEVEL_ROLES,",
+    "  OVERSIGHT_ROLES,",
+    '} from "@/lib/auth/roles";',
+  ].join("\n");
+
+  assert.deepEqual(valueExportStatements(wrapped), [wrapped]);
+  assert.deepEqual(staticValueSpecifiers(wrapped), ["@/lib/auth/roles"]);
+
+  assert.deepEqual(valueExportStatements('export * from "./roles";'), [
+    'export * from "./roles";',
+  ]);
+});
+
 test("a GENERIC declaration is still a function declaration", () => {
   // The blind spot that the 2026-08-12 debt sweep walked into. A domain's
   // shared session envelope is generic in its result type

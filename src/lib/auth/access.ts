@@ -8,24 +8,16 @@ import {
   type UserRole,
   type ChurchPrivacySettings,
 } from "@/db/schema";
+// Imported for this module's OWN rules below, never re-served: `@/lib/auth/roles`
+// is the one place either symbol comes from, and a re-export from here — whose
+// first statement is `import { db } from "@/db"` — would give one authority
+// policy two import paths, the failure `@/lib/invitations/register-path` and
+// `@/lib/oversight/org-label` are both written to avoid.
 import { CHURCH_LEVEL_ROLES, OVERSIGHT_ROLES } from "@/lib/auth/roles";
 
 // ============================================================================
 // Role Helpers
 // ============================================================================
-
-/**
- * The two role policies are DECLARED in `@/lib/auth/roles` — an import-free
- * leaf — and served from here so every existing consumer's import path is
- * unchanged.
- *
- * The declaration moved because this module's first line is `import { db } from
- * "@/db"`, so asking "which roles does an oversight rule name?" cost a database
- * connection. That is what produced a second copy of the oversight pair in
- * `@/lib/oversight/session`, reconciled by a regex over this file's source.
- * There is now one declaration, reached by import from both sites.
- */
-export { CHURCH_LEVEL_ROLES, OVERSIGHT_ROLES };
 
 /**
  * Check if a user has one of the specified roles.
