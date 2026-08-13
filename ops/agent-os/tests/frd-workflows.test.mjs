@@ -3891,6 +3891,11 @@ test("ruling 1 (PR #420): repro-first wins the risk:high + bug tiebreak", () => 
     /`repro-first` wins/,
     "recipes.md states the same tiebreak; a contract that disagrees with the selection table is the drift this ruling closed"
   );
+  assert.doesNotMatch(
+    recipes,
+    /\*\*`adversarial-implement` wins\*\*/,
+    "the contract may not carry the superseded tiebreak beside the new one"
+  );
   assert.match(
     recipeRow(recipes, "recipes.md", "repro-first"),
     /`risk:high`[^|]{0,40}\bincluded\b/i,
