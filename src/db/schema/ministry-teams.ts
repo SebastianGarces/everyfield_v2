@@ -210,34 +210,17 @@ export type NewTeamRole = typeof teamRoles.$inferInsert;
 export const TEAM_MEMBERSHIPS_ROLE_ACTIVE_UNIQUE =
   "team_memberships_role_active_unique_idx";
 
-// THE SEAT INDEX IS THE ONLY UNIQUE INDEX ON THIS TABLE, and that is the whole
-// design (#411 quality round 1, migration 0039). `team_memberships_active_unique`
-// — partial unique on (team_id, person_id, role_id) where `status = 'active'` —
-// stood here until then and was DROPPED. Never re-add it, under that name or
-// another.
+// THE SEAT INDEX IS THE ONLY UNIQUE INDEX ON THIS TABLE — keyed on `role_id`
+// where `status = 'active'`, and nothing else. `team_memberships_active_unique`
+// (team_id, person_id, role_id) stood beside it for one round; migration 0039
+// dropped it. Never re-add it, under that name or another: the seat key subsumes
+// every wider key containing `role_id`, so a second unique index forbids
+// nothing — and it is not the `ON CONFLICT` arbiter, so a raced INSERT meets it
+// first and RAISES a unique violation where the `DO NOTHING` cannot cover it.
 //
-// WHY IT WENT. `role_id` alone is the seat key, so the seat index STRICTLY
-// SUBSUMES the triple: at most one active row per role means at most one per any
-// triple containing that role, and `role_id` is NOT NULL, so there is no NULL
-// hole where the wider key would still bite. Every state the triple forbade is
-// already unreachable. It bought zero guarantees.
-//
-// WHY IT WAS NOT MERELY REDUNDANT. It CHANGED THE SHAPE OF A REFUSAL, badly.
-// `assignMember` inserts with `ON CONFLICT (role_id) WHERE status = 'active' DO
-// NOTHING`, which arbitrates on the SEAT index and no other. Under a real race
-// the arbiter's pre-check does not yet see the winner's uncommitted tuple, so
-// the INSERT proceeds and Postgres indexes the tuple into each unique index in
-// turn — and the triple (lower OID, reached first, NOT covered by the DO
-// NOTHING) blocked on the winner's tuple and RAISED a unique violation. A
-// same-person double submit therefore refused through a driver exception
-// roughly two runs in three instead of through the `INSERT 0 0` the clause is
-// written for, and the code had to recognise a second index name to keep that
-// exception off a planter's screen. With the triple gone the arbiter covers every INSERT conflict: the
-// loser is an empty `returning()`, once, deterministically.
-//
-// WHAT STILL THROWS, so `isSeatConflict` still exists: the REACTIVATION path is
-// an UPDATE and takes no `ON CONFLICT` at all, so it meets the seat index as a
-// violation. One index, one recognised name.
+// The reasoning in full lives in exactly two places: the 0039 migration header
+// and `memory/invariants.md` → Transactions. Enforced by `ruled-guards.test.ts`
+// §4d, asserted off the rendered table rather than this declaration.
 
 export const teamMemberships = pgTable(
   "team_memberships",

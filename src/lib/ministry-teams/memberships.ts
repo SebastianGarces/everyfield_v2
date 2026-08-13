@@ -125,22 +125,11 @@ async function seatRefusalMessage(
  *     proceeds into the index; an UPDATE takes no `ON CONFLICT` at all, so it
  *     meets the index as an exception and nothing can cover it.
  *
- * SO THE REACTIVATION PATH HAS BOTH SHAPES, and neither is optional. It was
- * documented as "a throw, ALWAYS" for one round while its UPDATE was keyed on
- * the row id alone — under which a same-person double submit onto a
- * previously-held seat had NO guard at all: two UPDATEs of one row raise
- * nothing, so both callers were told they had succeeded and every assignment
- * event fired twice (#411 quality round 1, measured).
- *
- * THE INSERT USED TO BE ABLE TO THROW TOO, and it no longer can (#411 quality
- * round 1). A second, strictly subsumed unique index —
- * `team_memberships_active_unique` on (team_id, person_id, role_id) — sat beside
- * the seat index; it was not the arbiter, so a raced insert that passed the
- * arbiter's pre-check met it first (lower OID) and raised a unique violation
- * where the DO NOTHING could not reach. Migration 0039 drops it: it forbade
- * nothing the seat index does not, and its only effect was to turn a designed
- * `INSERT 0 0` into a driver exception about two runs in three. One index, one
- * shape per path.
+ * SO THE REACTIVATION PATH HAS BOTH SHAPES, and neither is optional. The INSERT
+ * path has only the first, and keeps it only while the table carries ONE unique
+ * index — a second one is not the arbiter, so a raced INSERT raises past the
+ * `DO NOTHING`. Why that index was dropped: the migration 0039 header, and
+ * `memory/invariants.md` → Transactions.
  *
  * WHICH SENTENCE THE LOSER READS IS A SECOND QUESTION, IT NEEDS A SECOND READ,
  * AND THAT READ IS THE ONLY DECIDER FOR BOTH SHAPES. Neither shape can tell the
@@ -148,8 +137,8 @@ async function seatRefusalMessage(
  * seat key, and an index does not report intent — so `seatRefusalMessage` READS
  * THE HOLDER and names it: the same person is `PERSON_ALREADY_ASSIGNED_MESSAGE`,
  * anybody else is `ROLE_ALREADY_FILLED_MESSAGE`. Both refusal branches below end
- * in that one call, deliberately: a table mapping index names to sentences was
- * the earlier design, and it had to predict which index a race raises on. That
+ * in that one call, deliberately — never a table mapping index names to
+ * sentences, which has to predict which index a race raises on. That
  * distinction is not decoration — the seat sentence carries
  * `ROLE_ALREADY_FILLED_DESCRIPTION` ("Someone filled it while this page was
  * open"), which is a FALSE statement to a planter who filled it themselves,
@@ -163,10 +152,9 @@ async function seatRefusalMessage(
  * one. A SELECT-then-INSERT is not a concurrency guard (`memory/invariants.md`
  * → Transactions), so it can only ever be a third copy of a rule the index
  * already owns — and it costs a round trip on every assignment. It is also not
- * inert: while it was here it ran for BOTH paths, so a reactivation onto an
- * occupied seat was refused before the batch, the driver error never happened,
- * and `role-seat-race.test.ts`'s third case passed while the translation it
- * exists to prove was unreachable.
+ * inert: it runs for BOTH paths, so it refuses a reactivation onto an occupied
+ * seat before the batch and hides the thrown refusal `role-seat-race.test.ts`
+ * exists to prove.
  *
  * THE REACTIVATION UPDATE'S `status = 'inactive'` PREDICATE IS NOT THAT SELECT.
  * A pre-flight SELECT is a snapshot taken before the write, in a separate

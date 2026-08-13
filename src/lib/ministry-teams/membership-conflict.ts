@@ -41,28 +41,20 @@ import { isUniqueViolation } from "@/db/errors";
  * an active team membership. Anything else is false, so its caller rethrows real
  * faults untouched.
  *
- * ONE INDEX, ONE NAME (#411 quality round 1). There were two for one round:
- * `team_memberships_active_unique` (team_id, person_id, role_id) sat beside the
- * seat index, strictly subsumed by it — `role_id` is NOT NULL and one active row
- * per role implies one per any triple containing that role — and this predicate
- * OR-ed the two names. It had to, because the subsumed index still RAISED: `ON
- * CONFLICT (role_id) WHERE status = 'active' DO NOTHING` arbitrates on the seat
- * index alone, so under a real race the insert proceeded past the arbiter's
- * pre-check, met the non-arbiter triple first (lower OID), blocked and raised a
- * unique violation where the DO NOTHING could not cover it. That raise was an
- * artefact of keeping a redundant index, not a guarantee it bought. Migration
- * 0039 drops it, the arbiter now covers every INSERT conflict, and this
- * predicate names one constant. Do not re-add the index to "catch more" — it caught nothing the seat
- * index does not, and it converted a designed `INSERT 0 0` into an exception.
+ * ONE INDEX, ONE NAME. `team_memberships` carries exactly one unique index, so
+ * this predicate names exactly one constant; a second branch here means a second
+ * index came back, and with it the raced violation the second one caused. Why it
+ * was dropped and what re-adding it costs: the migration 0039 header, and
+ * `memory/invariants.md` → Transactions.
  *
  * WHY A RECOGNITION AND NOT A PRE-CHECK, and why one is still needed at all. The
  * reactivation path in `assignMember` is an UPDATE, and an UPDATE takes no
  * `ON CONFLICT` — so WHEN ANOTHER PERSON HOLDS THE SEAT it meets the seat index
- * as a throw. (Not always: since #411 quality round 1 that UPDATE also carries
- * `status = 'inactive'` in its own `WHERE`, so a SAME-PERSON double submit onto
- * a previously-held seat is refused by an empty `returning()` instead, exactly
- * as the INSERT path is. Both refusals end in `seatRefusalMessage`, so which
- * shape arrives changes nothing a planter reads.) A
+ * as a throw. (Not always: that UPDATE also carries `status = 'inactive'` in its
+ * own `WHERE`, so a SAME-PERSON double submit onto a previously-held seat is
+ * refused by an empty `returning()` instead, exactly as the INSERT path is. Both
+ * refusals end in `seatRefusalMessage`, so which shape arrives changes nothing a
+ * planter reads.) A
  * `WHERE NOT EXISTS (… active row …)` predicate would look like a guard and be
  * none: it is a snapshot read about rows other statements are writing, the trap
  * `memory/invariants.md` → Transactions describes. So the index and that
