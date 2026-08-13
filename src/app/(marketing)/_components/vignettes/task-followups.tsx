@@ -72,8 +72,19 @@ const MEETING_LABEL =
 const COMPACT_LABEL =
   "Two task rows: the follow-up with Dana Whitfield, a day overdue with the note it was created from, and an urgent location to find for Vision Night #5, due today.";
 
+/**
+ * ONE instant per render, handed to the fixture AND to the card.
+ *
+ * `TaskCardView` requires it (see `TaskCardViewProps.now`), and the fixture
+ * counts its due-date offsets from it, so the day a row NAMES and the day the
+ * card MEASURES cannot come from two different clock reads — or, as they did
+ * until #411's follow-up, from two different calendars. Taken inside the
+ * component rather than at module scope so a long-lived server process does not
+ * serve last week's "today".
+ */
 export function TaskFollowups() {
-  const tasks = tasksFixture();
+  const now = new Date();
+  const tasks = tasksFixture(now);
 
   return (
     <div className="vg-fs vg-fs-tasks">
@@ -96,6 +107,7 @@ export function TaskFollowups() {
                   task={task}
                   personNote={TASK_NOTES[task.id] ?? null}
                   checkboxSlot={CHECKBOX_STILL}
+                  now={now}
                   linkStatic
                 />
               ))}
@@ -117,7 +129,8 @@ export function TaskFollowups() {
 }
 
 export function TaskFollowupsCompact() {
-  const tasks = tasksFixtureCompact();
+  const now = new Date();
+  const tasks = tasksFixtureCompact(now);
 
   return (
     <div className="vg-fs-m vg-fs-tasks-m">
@@ -134,6 +147,7 @@ export function TaskFollowupsCompact() {
                 task={task}
                 personNote={TASK_NOTES[task.id] ?? null}
                 checkboxSlot={CHECKBOX_STILL}
+                now={now}
                 linkStatic
               />
             ))}

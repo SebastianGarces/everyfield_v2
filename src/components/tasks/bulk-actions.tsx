@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { toCalendarDate } from "@/lib/tasks/recurrence";
+import { addCalendarDays } from "@/lib/datetime";
 import type { BulkTaskFailure, BulkTaskResult } from "@/lib/tasks/service";
 import { MAX_BULK_TASKS } from "@/lib/tasks/types";
 import { cn } from "@/lib/utils";
@@ -333,11 +333,13 @@ function reportOutcome(result: BulkTaskResult, verb: string) {
  * come back as "Due tomorrow" (`memory/invariants.md` → Date & Time Rendering).
  * The whole feature is a click, so this never runs during a render and there is
  * no hydration question here; the mismatch was with the rest of the product.
+ *
+ * `addCalendarDays` comes from `@/lib/datetime`, which imports nothing and is
+ * therefore safe in this `"use client"` module — the app's day arithmetic lives
+ * with `APP_TIME_ZONE`, not in the tasks domain.
  */
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
-
 function offsetFromToday(days: number): string {
-  return toCalendarDate(new Date(Date.now() + days * MS_PER_DAY));
+  return addCalendarDays(new Date(), days);
 }
 
 /**

@@ -37,11 +37,11 @@ import {
 import type { ListTasksResult, TaskCounts, TaskWithAssignee } from "./types";
 import { MAX_BULK_TASKS } from "./types";
 import { emitTaskCompleted } from "./events";
+import { toCalendarDate } from "@/lib/datetime";
 import {
   nextRecurrenceDueDate,
   parseRecurrenceRule,
   seriesIdOf,
-  toCalendarDate,
   type TaskRecurrenceInput,
 } from "./recurrence";
 

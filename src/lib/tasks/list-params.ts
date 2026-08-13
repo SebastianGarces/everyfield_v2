@@ -30,6 +30,7 @@ import {
   taskPrioritySchema,
   taskStatusSchema,
 } from "@/lib/validations/tasks";
+import type { z } from "zod";
 
 /** What Next hands a page: one value, several, or none. */
 export type SearchParamValue = string | string[] | undefined;
@@ -50,18 +51,30 @@ export interface TaskListSearchParams {
  * Duplicates are collapsed so `?status=blocked&status=blocked` is one predicate,
  * and order follows the URL, which is the order a reader would expect the chips
  * to be in.
+ *
+ * THE SCHEMA SUPPLIES THE TYPE, and there is no cast anywhere in this module —
+ * which is the whole point of the module. It was written as a hand-rolled
+ * structural stand-in (`{ safeParse(value: unknown): { success: boolean;
+ * data?: unknown } }`) that threw the parsed type away, so the survivors had to
+ * be asserted `as T[]` and `T` came entirely from the call site: with the
+ * caller naming it, `parseEnumParam<TaskPriority>(params.status,
+ * taskStatusSchema)` compiled and silently mistyped the filter. Typing the
+ * parameter `z.ZodType<T>` and threading `safeParse`'s own output through means
+ * the schema and the element type cannot disagree — and every caller infers `T`
+ * rather than promising it.
  */
 function parseEnumParam<T extends string>(
   raw: SearchParamValue,
-  schema: { safeParse(value: unknown): { success: boolean; data?: unknown } }
+  schema: z.ZodType<T>
 ): T[] | undefined {
   if (raw === undefined) return undefined;
 
-  const values = [raw].flat().filter((value): value is string => {
-    return schema.safeParse(value).success;
+  const values = [raw].flat().flatMap((value) => {
+    const parsed = schema.safeParse(value);
+    return parsed.success ? [parsed.data] : [];
   });
 
-  return values.length > 0 ? ([...new Set(values)] as T[]) : undefined;
+  return values.length > 0 ? [...new Set(values)] : undefined;
 }
 
 /** Everything `/tasks` reads out of its URL, with nothing taken on trust. */
@@ -71,9 +84,9 @@ export function parseTaskListSearchParams(params: {
   return {
     view: params.view === "all" ? "all" : "my_tasks",
     showCompleted: params.completed === "true",
-    status: parseEnumParam<TaskStatus>(params.status, taskStatusSchema),
-    priority: parseEnumParam<TaskPriority>(params.priority, taskPrioritySchema),
-    category: parseEnumParam<TaskCategory>(params.category, taskCategorySchema),
+    status: parseEnumParam(params.status, taskStatusSchema),
+    priority: parseEnumParam(params.priority, taskPrioritySchema),
+    category: parseEnumParam(params.category, taskCategorySchema),
     cursor: typeof params.cursor === "string" ? params.cursor : undefined,
   };
 }

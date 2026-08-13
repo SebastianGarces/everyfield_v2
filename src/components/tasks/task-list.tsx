@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { toCalendarDate } from "@/lib/tasks/recurrence";
+import { addCalendarDays, toCalendarDate } from "@/lib/datetime";
 import type { TaskListRow } from "@/lib/tasks/service";
 import { ListChecks } from "lucide-react";
 import {
@@ -46,9 +46,7 @@ function topLevelOnly(tasks: TaskListRow[]): TaskListRow[] {
  */
 function groupTasksByDueDate(tasks: TaskListRow[], now: Date): TaskGroup[] {
   const todayStr = toCalendarDate(now);
-
-  const weekEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-  const weekEndStr = toCalendarDate(weekEnd);
+  const weekEndStr = addCalendarDays(now, 7);
 
   const overdue: TaskListRow[] = [];
   const dueToday: TaskListRow[] = [];

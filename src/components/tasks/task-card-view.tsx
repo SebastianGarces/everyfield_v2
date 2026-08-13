@@ -111,13 +111,21 @@ export const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
  *
  * Now the whole comparison happens in `APP_TIME_ZONE`, through
  * `relativeDayOffset`, and the caller passes ONE instant for the whole render —
- * the same shape the people timeline uses. It defaults to the clock so the
- * marketing vignettes, which render on the server and never hydrate, keep
- * working unchanged.
+ * the same shape the people timeline uses.
+ *
+ * `now` IS REQUIRED, with no clock default. A default would leave the whole
+ * hydration rule one omitted argument away in a component that hydrates, with
+ * nothing to catch it — and the exemption a default would buy ("a surface that
+ * never hydrates has no second render to disagree with") went stale inside the
+ * pass that wrote it: the marketing vignette's own fixture was still building
+ * its `YYYY-MM-DD` from LOCAL date parts, so reader and fixture were on two
+ * calendars while a comment claimed they were on one. Every caller now names
+ * its instant, and the vignette hands the same one to the fixture and to the
+ * card.
  */
 export function getDueDateInfo(
   dueDate: string | null,
-  now: Date = new Date()
+  now: Date
 ): {
   label: string;
   isOverdue: boolean;
@@ -220,10 +228,15 @@ interface TaskCardViewProps {
    * that built the list. The due-date line is the card's only clock read, and
    * this card is server-rendered and then hydrated — a `new Date()` taken again
    * in the browser is a different number of days and a React #418 mismatch.
-   * Optional, because a surface that never hydrates (the marketing vignettes)
-   * has no second render to disagree with.
+   *
+   * REQUIRED, so the rule is the compiler's rather than the convention it was:
+   * an optional prop makes "this card reads no clock of its own" true only for
+   * as long as nobody forgets it, in the one component where forgetting it is
+   * a hydration mismatch on every row. Presentational callers (the marketing
+   * vignettes) name an instant too and build their fixture dates from it, which
+   * is what keeps reader and fixture on one calendar.
    */
-  now?: Date;
+  now: Date;
 }
 
 /**
