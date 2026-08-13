@@ -492,19 +492,39 @@ if (!implCommits.length)
 // failed one — the carve-out warning above already says what could not be
 // shown, and `greenConfirmed` is already false.
 // ---------------------------------------------------------------------------
+
+// The edit-check is ANCHORED on the repro's own paths, or it is not run at all.
+// `reproPaths` is the one part of the red claim `phaseOneFailure` does not
+// check — a schema `required` array is satisfied by an empty one — so a proven
+// red can still arrive with no path named. Falling back to `-- .` there does
+// not widen the check, it fabricates it: the first commit of `base..branch` is
+// then the repro commit itself (or an earlier stage's), the diff against the
+// tip is the implementer's ENTIRE fix, non-empty by construction, and the
+// confirm agent asked "was the repro edited?" against it answers `true` every
+// single time. The recipe then reports an edit nobody observed, and that
+// warning is not inert — the parent logs it to the journal, renders it into the
+// scoped verifier's prompt as evidence, and appends it to the next attempt's
+// `fixInstructions`. That is exactly the fabricated red one function up wearing
+// a different hat, so with no path named the framing is dropped from the prompt
+// entirely and a warning names the real gap instead.
+const reproAnchored = reproPaths.length > 0;
+const editCheckBlock = reproAnchored
+  ? `Then check whether the repro itself was edited after it was written. Derive the anchor from the log rather than from anybody's report:
+  \`git -C ${worktree} log --oneline --reverse ${base}..${branch} -- ${reproPaths.join(" ")}\` — the FIRST of those commits is the one that introduced the repro
+  \`git -C ${worktree} diff <that sha> ${branch} -- ${reproPaths.join(" ")}\` — anything the fix did to it afterwards
+The repro agent reported ${reproCommits.length} commit(s) and the repro at ${reproPaths.join(", ")}; if the log disagrees, THE LOG WINS. An empty diff is the expected answer. A non-empty one is not automatically wrong — a rename or a second test case is legitimate — but a change that weakens what the repro ASSERTS is how a red test is made green without fixing anything, so report the diff and say which it is.`
+  : `The repro agent named NO file for the repro, so there is nothing to anchor an edit-check on. Do NOT go looking for one and do NOT widen the range to the whole branch — every commit on it would show up as a change to "the repro", which would be an answer to a question nobody asked. Return \`reproChanged: false\`, which is the honest value when no repro path exists to compare, and say in \`notes\` that no path was named. Your run of the command above is the whole of your job here.`;
+
 const confirm = !reproProven
   ? null
   : await agent(
-      `You are confirming ONE thing about a bug fix on branch ${branch} in the worktree ${worktree}: that the repro which failed BEFORE the fix passes AFTER it, and that it is still the same repro.
+      `You are confirming ONE thing about a bug fix on branch ${branch} in the worktree ${worktree}: that the repro which failed BEFORE the fix passes AFTER it${reproAnchored ? ", and that it is still the same repro" : ""}.
 
 Run exactly this command in ${worktree}, verbatim, and transcribe what it prints:
 
   ${reproCommand}
 
-Then check whether the repro itself was edited after it was written. Derive the anchor from the log rather than from anybody's report:
-  \`git -C ${worktree} log --oneline --reverse ${base}..${branch} -- ${reproPaths.join(" ") || "."}\` — the FIRST of those commits is the one that introduced the repro
-  \`git -C ${worktree} diff <that sha> ${branch} -- ${reproPaths.join(" ") || "."}\` — anything the fix did to it afterwards
-The repro agent reported ${reproCommits.length} commit(s) and the repro at ${reproPaths.join(", ") || "(no path named)"}; if the log disagrees, THE LOG WINS. An empty diff is the expected answer. A non-empty one is not automatically wrong — a rename or a second test case is legitimate — but a change that weakens what the repro ASSERTS is how a red test is made green without fixing anything, so report the diff and say which it is.
+${editCheckBlock}
 
 Here is what the same command printed BEFORE the fix, so you can tell "it passes" from "it no longer runs":
 ---
@@ -560,8 +580,15 @@ if (!reproProven) {
 }
 
 // Orthogonal to green, and reported whether or not it is: a repro that changed
-// after it went red is no longer the test that failed.
-if (confirm && confirm.reproChanged === true)
+// after it went red is no longer the test that failed. An unanchored check
+// cannot make that finding — `reproChanged` came back over no path at all — so
+// it reports the gap it really has instead of an edit it did not see.
+const reproEdited = reproAnchored && !!confirm && confirm.reproChanged === true;
+if (reproProven && !reproAnchored)
+  warnings.push(
+    `the repro named no file (\`reproPaths\` was empty), so the edit-check could not be anchored — nothing checked that the repro's assertion was not weakened after it went red. Read the run above as unguarded on that point; it is a missing check, not an observed edit.`
+  );
+else if (reproEdited)
   warnings.push(
     `the repro was EDITED after the commit that made it red${confirm.reproChangeDiff ? ` — ${String(confirm.reproChangeDiff).slice(0, 800)}` : ""}. Read that diff before trusting the green run: weakening the assertion is how a red repro is made to pass without a fix.`
   );
@@ -569,7 +596,7 @@ if (confirm && confirm.reproChanged === true)
 const verdict = !reproProven
   ? "unconfirmed — no repro went red this attempt, so there is no red→green to show"
   : greenConfirmed
-    ? confirm.reproChanged === true
+    ? reproEdited
       ? "red→green confirmed, but the repro was edited after it went red"
       : "red→green confirmed"
     : ranADifferentCommand

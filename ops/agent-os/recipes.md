@@ -286,6 +286,18 @@ order structurally:
   log wins — the same doctrine as `adversarial-implement`'s range. A non-empty diff is not
   automatically wrong (a rename, a second case), but weakening the assertion until it passes is the
   one move that turns this recipe back into `implement-straight`, so it is reported either way.
+- **…and that check is ANCHORED on named paths or it is not run at all.** `reproPaths` is the one
+  part of the red claim the phase-1 refusals do not check — a schema `required` array is satisfied
+  by an empty one — so a proven red can reach phase 3 with no path named. Ranging the check over
+  `-- .` there does not widen it, it fabricates it: the first commit of `base..branch` is then the
+  repro commit itself (or an earlier stage's), the diff to the tip is the implementer's ENTIRE fix,
+  non-empty by construction, and a confirmer asked "was the repro edited?" answers yes every time.
+  That is the fabricated red of the paragraph above wearing a different hat — a claim about a check
+  that never ran, riding the journal into the scoped verifier's prompt and the next attempt's
+  `fixInstructions`. So with no path named the `git log`/`git diff` instructions and the
+  `reproChanged` framing leave the confirm prompt entirely, the confirmer is told to return
+  `reproChanged: false`, no EDITED warning may be emitted, and a warning names the real gap instead:
+  the repro named no file, so nothing checked that its assertion was not weakened.
 - **A dead implementer refuses too**, rather than returning the repro's own commits: that diff is a
   known-failing test and nothing else, and sending it to a verifier buys a confident FAIL for the
   price of a full gate run. A LIVE implementer that reports no commits does NOT refuse — it is

@@ -3194,6 +3194,7 @@ const reproReply =
   ({
     wentRed = true,
     reproCommand = REPRO_COMMAND,
+    reproPaths = ["src/alpha.test.ts"],
     redOutput = RED_OUTPUT,
     redIsTheBug = "the assertion is the defect — the query is unscoped",
     reproCommits = [REPRO_SHA],
@@ -3213,7 +3214,7 @@ const reproReply =
       return {
         wentRed,
         reproCommand,
-        reproPaths: ["src/alpha.test.ts"],
+        reproPaths,
         redOutput,
         redIsTheBug,
         committed: reproCommits.length > 0,
@@ -3528,6 +3529,42 @@ test("a repro edited after it went red is reported even when the run is green", 
     "weakening the assertion is how a red repro is made green without a fix — green is not the end of the question"
   );
   assert.match(result.summary, /edited after it went red/);
+});
+
+test("a repro that named NO file gets the gap named, never a fabricated EDITED claim", async () => {
+  // `reproPaths` is the one part of the red claim phaseOneFailure never checks
+  // (an empty array satisfies a schema `required`), so a proven red can reach
+  // phase 3 with no path. Ranging the edit-check over `-- .` there diffs the
+  // implementer's WHOLE fix and comes back "the repro changed" every time — the
+  // fabricated red again, one function down, riding the journal into the next
+  // attempt's fixInstructions. So the confirm agent is told to answer `false`
+  // rather than asked a question it cannot answer.
+  const { result, calls } = await runRecipe(
+    "repro-first",
+    recipeArgs(),
+    reproReply({ reproPaths: [], reproChanged: true })
+  );
+  const green = labelled(calls, /^green:/)[0];
+  assert.ok(
+    !/ -- \.(\s|`|$)/.test(green.prompt),
+    "no whole-branch range: `-- .` is not a wider check, it is a check that always fires"
+  );
+  assert.doesNotMatch(
+    green.prompt,
+    /log --oneline --reverse/,
+    "with nothing to anchor on, the edit-check framing leaves the prompt entirely"
+  );
+  assert.match(green.prompt, /Return `reproChanged: false`/);
+  assert.ok(
+    !result.warnings.some((w) => /EDITED/.test(w)),
+    "the recipe may not report an edit no anchored check ever observed"
+  );
+  assert.ok(
+    result.warnings.some((w) => /could not be anchored/.test(w)),
+    "the truthful warning names the missing check instead — that is what the journal and the next attempt read"
+  );
+  assert.doesNotMatch(result.summary, /edited after it went red/);
+  assert.match(result.summary, /red→green confirmed/);
 });
 
 test("a dead implementer refuses rather than shipping a known-failing test as the attempt", async () => {
