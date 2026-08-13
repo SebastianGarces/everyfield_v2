@@ -146,6 +146,15 @@ validates every id against `KNOWN_RECIPES` **at parse time** — an unknown id t
 claim and before any worktree, never mid-build. Units that share one workstream (same stage +
 shared files) must agree on one recipe; a mixed set throws at plan time.
 
+**When the two label defaults collide — a `risk:high` bug — `repro-first` wins.** Ruled 2026-08-13
+on PR #420 (decision 1b), inverting the original call in favour of `adversarial-implement`. The
+reason is that the two disciplines are not equally recoverable: a `risk:high` track meets HR4's
+security lens at integration whatever recipe it ran, so a skipped adversary pass is backstopped,
+while enforced red→green has no backstop — and the old rule's compensation was a prose "start from
+a failing repro" in the unit summary, which is the unenforceable request this recipe exists to
+mechanise. The dispatch table (§"Recipe selection") states the same rule and stays authoritative.
+A composed repro → adversary recipe is deferred until the two canaries (#378, #398) have run.
+
 Recipe files live under `.claude/workflows/`, so **every recipe is a factory path**: dispatch
 sets `hold: true` on any track that touches one, and it never auto-merges.
 
@@ -155,8 +164,8 @@ sets `hold: true` on any track that touches one, and it never auto-merges.
 |----|----------|--------|
 | `implement-straight` | One implementer agent, prompt semantics preserved from the pre-#399 inline call. The default. | landed (#399 WS2) |
 | `generate-and-filter` | 3 candidate diffs in throwaway worktrees → opus judge picks exactly one → ff-only land. The proof that the seam supports a genuinely different shape. | landed (#399 WS3) |
-| `adversarial-implement` | Implementer → adversary attacks the diff in-worktree → implementer fixes, looping until a round finds nothing new (cap 3). The default for `risk:high` units. | landed (#413 WS1) |
-| `repro-first` | Repro agent writes the failing test and RUNS it (must go red) → implementer fixes the code without touching it → a third agent re-runs the same command (must go green). The default for `bug` units. | landed (#413 WS1) |
+| `adversarial-implement` | Implementer → adversary attacks the diff in-worktree → implementer fixes, looping until a round finds nothing new (cap 3). The default for `risk:high` units that are not also `bug`-labeled. | landed (#413 WS1) |
+| `repro-first` | Repro agent writes the failing test and RUNS it (must go red on attempt 1) → implementer fixes the code without touching it → a third agent re-runs the same command (must go green). The default for `bug` units, `risk:high` ones included. | landed (#413 WS2) |
 
 Out of scope: `loop-until-dry` (runs INSIDE one attempt as an internal improve loop — it must not
 hide attempts from parent accounting; deferred until sweeps recur as a track shape),
@@ -171,7 +180,8 @@ seam-v2 ruling). The last three were considered and rejected on 2026-08-12.
 must state as concrete attacks. The implementer fixes what it named. Repeat until a round reports
 **no new findings**, capped at **3 rounds**.
 
-**What it is for.** `risk:high` units, and anything touching auth, tenancy, a `"use server"` export
+**What it is for.** `risk:high` units that are not also `bug`-labeled (those go to `repro-first` by
+the collision ruling above), and anything touching auth, tenancy, a `"use server"` export
 or a public route handler. #304 spent ~8 integration rounds on holes a reader of the diff could have
 named in one pass; each of those rounds paid for a full verify + review cycle to re-learn it. This
 recipe moves HR4's **security lens** — the same axes, the same "you are the only one looking down
@@ -232,7 +242,8 @@ sequential agents in the parent-provided worktree:
 3. **confirmation** — a different agent re-runs the SAME command, transcribes what it printed, and
    diffs the repro file against the commit that introduced it.
 
-**What it is for.** `bug`-labeled units, and anything whose acceptance criteria describe an observed
+**What it is for.** `bug`-labeled units — `risk:high` ones included, by the collision ruling above —
+and anything whose acceptance criteria describe an observed
 misbehaviour rather than a new capability. #307 and #315 each shipped a confident fix for a defect
 nobody had reproduced; each cost a full verify + review cycle to learn that the "regression test"
 had been written after the fix and had therefore never had a chance to fail. A test written after

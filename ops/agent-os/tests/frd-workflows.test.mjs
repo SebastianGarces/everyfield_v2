@@ -3819,6 +3819,130 @@ test("repro-first is registered in all four places, and the bug default is state
 });
 
 // ---------------------------------------------------------------------------
+// The two PR #420 rulings (Sebastian, 2026-08-13). Both are DOC rulings over
+// code that already behaves the ruled way, so nothing a stubbed run can reach
+// proves them — the docs ARE the deliverable, and an un-pinned doc ruling is
+// how the drift these tests fix got in. `recipeRow` slices the one table row so
+// an assertion about repro-first can never be satisfied by adversarial's row
+// (or by the prose below the table) the way a whole-file `assert.match` can.
+// ---------------------------------------------------------------------------
+
+const recipeRow = (source, label, id) => {
+  const row = source
+    .split("\n")
+    .filter((line) => line.startsWith(`| \`${id}\``));
+  assert.equal(
+    row.length,
+    1,
+    `${label} must carry exactly one table row for \`${id}\` — found ${row.length}`
+  );
+  return row[0];
+};
+
+test("ruling 1 (PR #420): repro-first wins the risk:high + bug tiebreak", () => {
+  const dispatch = read(".claude/skills/dispatch/SKILL.md");
+  const recipes = read("ops/agent-os/recipes.md");
+
+  const reproRow = recipeRow(dispatch, "dispatch/SKILL.md", "repro-first");
+  assert.match(
+    reproRow,
+    /risk:high/,
+    "the selection row must say the bug default holds for risk:high units too — a reader who stops at the table is the reader this ruling is for"
+  );
+  const adversaryRow = recipeRow(
+    dispatch,
+    "dispatch/SKILL.md",
+    "adversarial-implement"
+  );
+  assert.match(
+    adversaryRow,
+    /not (also )?`bug`|bug`-labeled/,
+    "the risk:high default must state its exception, or the two rows both claim the same unit"
+  );
+
+  // The tiebreak itself, and the rationale it was ruled on.
+  assert.match(
+    dispatch,
+    /\*\*`repro-first` wins\*\*/,
+    "dispatch states the inverted tiebreak"
+  );
+  assert.doesNotMatch(
+    dispatch,
+    /\*\*`adversarial-implement` wins\*\*/,
+    "the superseded tiebreak must be gone, not merely contradicted further down"
+  );
+  assert.match(
+    dispatch,
+    /HR4[^\n]*integration[\s\S]{0,240}?backstop/,
+    "the row's rationale is the ruling's: HR4 backstops security at integration, enforced red→green has no backstop"
+  );
+
+  // recipes.md must AGREE — it is the contract dispatch's table points at.
+  assert.match(
+    recipes,
+    /`repro-first` wins/,
+    "recipes.md states the same tiebreak; a contract that disagrees with the selection table is the drift this ruling closed"
+  );
+  assert.match(
+    recipeRow(recipes, "recipes.md", "repro-first"),
+    /`risk:high`/,
+    "the recipe-library row says which units it takes, risk:high bugs included"
+  );
+});
+
+test("ruling 2 (PR #420): the never-red refusal is documented as attempt-1 only", () => {
+  const dispatch = read(".claude/skills/dispatch/SKILL.md");
+  const reproRow = recipeRow(dispatch, "dispatch/SKILL.md", "repro-first");
+
+  assert.match(
+    reproRow,
+    /attempt 1/,
+    "the refusal claim must be scoped to attempt 1 — stated unconditionally it contradicts `if (phaseOneFailure && !isRetry)` in recipes/repro-first.js"
+  );
+  assert.match(
+    reproRow,
+    /RETRY[\s\S]{0,200}?(warn|unconfirmed)/i,
+    "…and must say what a retry does instead: warn, proceed, report the repro unconfirmed"
+  );
+
+  // The narrowing is the CODE's behaviour; pin the doc to it rather than to a
+  // second description of it.
+  assert.match(
+    read(".claude/workflows/recipes/repro-first.js"),
+    /if \(phaseOneFailure && !isRetry\) return refuse\(/,
+    "the docs above describe this line — if it changes, they are wrong again"
+  );
+
+  assert.match(
+    recipeRow(read("ops/agent-os/recipes.md"), "recipes.md", "repro-first"),
+    /red on attempt 1/,
+    "the recipe-library row carries the same scoping as the selection table"
+  );
+});
+
+test("ruling 2 (PR #420): the recipe library credits repro-first to WS2", () => {
+  const row = recipeRow(
+    read("ops/agent-os/recipes.md"),
+    "recipes.md",
+    "repro-first"
+  );
+  assert.match(
+    row,
+    /landed \(#413 WS2\)/,
+    "repro-first landed in #413 WS2; WS1 is adversarial-implement's"
+  );
+  assert.match(
+    recipeRow(
+      read("ops/agent-os/recipes.md"),
+      "recipes.md",
+      "adversarial-implement"
+    ),
+    /landed \(#413 WS1\)/,
+    "…and adversarial-implement keeps WS1 — the fix must not swap the drift for its mirror image"
+  );
+});
+
+// ---------------------------------------------------------------------------
 // Twin blocks (#399): build-until-done.js and verify-and-ship.js each carry a
 // copy of the shared guards (the two-table pattern, like dispatch /
 // token-preflight). "Change one, change both" was prose until the review-fix
