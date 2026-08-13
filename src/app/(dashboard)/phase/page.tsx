@@ -209,7 +209,6 @@ export default async function PhasePage() {
 
         <div className="space-y-6">
           <PhaseControl
-            churchId={churchId}
             currentPhase={church.currentPhase}
             readiness={readiness}
           />

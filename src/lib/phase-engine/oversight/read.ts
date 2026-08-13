@@ -49,6 +49,14 @@ import type { PlantFactSnapshot } from "@/lib/phase-engine/signals";
  *   - `watch`      : at least one medium-urgency network observation.
  *   - `readiness`  : a high/critical network observation, OR launch is imminent
  *                    or past due — the plant warrants a readiness conversation.
+ *
+ * "Past due" is the SNAPSHOT's own `launch.isPastDue`, never a negative
+ * countdown re-derived here. The two are not the same: `buildLaunchSignals`
+ * excludes a COMPLETED launch from `isPastDue` on purpose ("a launch that
+ * HAPPENED is not overdue … otherwise every plant that launches successfully
+ * accrues an escalating warning for the rest of its life"), and reading the raw
+ * countdown instead brought that warning back on the one surface a sending
+ * church looks at.
  */
 export type PlantHealthClassification = "on-track" | "watch" | "readiness";
 
@@ -79,8 +87,16 @@ export function classifyPlantHealth(
   if (hasReadinessSeverity) return "readiness";
 
   // Imminent or past-due launch warrants a readiness conversation.
-  const days = snapshot?.launch.daysUntilLaunch ?? null;
-  if (days !== null && days <= READINESS_LAUNCH_WINDOW_DAYS) {
+  const launch = snapshot?.launch ?? null;
+  const days = launch?.daysUntilLaunch ?? null;
+  // AHEAD and inside the window. The lower bound is what stops a launch that
+  // happened two years ago (days = −730) from satisfying `days <= 30` forever.
+  const imminent =
+    days !== null && days >= 0 && days <= READINESS_LAUNCH_WINDOW_DAYS;
+  // BEHIND, and the snapshot says it was never recorded as held. One field, one
+  // decision — see the note above `PlantHealthClassification`.
+  const overdue = launch?.isPastDue === true;
+  if (imminent || overdue) {
     return "readiness";
   }
 
