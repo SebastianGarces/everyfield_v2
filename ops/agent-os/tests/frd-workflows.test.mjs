@@ -3314,18 +3314,36 @@ test("…but on a RETRY the same un-reproducible finding is FIXED, not refused",
   // workstream over a fix that implement-straight would have made in one file —
   // and neither implement-straight nor adversarial-implement can refuse a retry
   // before the implementer has seen the retryBlock.
+  //
+  // The carve-out's LIKELY shape keeps the command: REPRO_SCHEMA requires
+  // `reproCommand` and `redOutput`, and the brief asks for `wentRed: false`
+  // "with what you saw" — so the fixture keeps both, and phase 3 must still be
+  // skipped. Gating that skip on the string instead of on the observed red sent
+  // a confirm agent in holding a prompt that asserts a red that never happened,
+  // and its `passed: false` came back as "the repro is STILL RED after the fix"
+  // — a fabricated red, into the journal and into the next attempt's
+  // fixInstructions.
   const { result, calls } = await runRecipe(
     "repro-first",
     recipeArgs({
       priorReport: { verdict: "FAIL", failingGate: "G5" },
       retryBlock: `THE ROOT CAUSE IS BELOW\nG5: src/other.ts is outside the declared file set`,
     }),
-    reproReply({ wentRed: false })
+    reproReply({ wentRed: false, passed: false, confirmOutput: "boom" })
   );
   assert.notEqual(
     order(calls, /^impl:/),
     -1,
     "the implementer MUST be spawned on the attempt that was supposed to fix the named finding"
+  );
+  assert.equal(
+    order(calls, /^green:/),
+    -1,
+    "and NO confirm agent is spent on a repro that never went red, command or no command — phase 3 exists to show red→green, and there is no red to pair"
+  );
+  assert.ok(
+    !result.warnings.some((w) => /STILL RED/.test(w)),
+    "nothing may report a red this attempt never observed — that warning rides fixInstructions into the next attempt as the failure to reproduce"
   );
   assert.ok(
     labelled(calls, /^impl:/)[0].prompt.startsWith("THE ROOT CAUSE IS BELOW"),
@@ -3363,7 +3381,7 @@ test("a retry with no repro command skips the confirmation instead of faking one
   assert.equal(
     order(calls, /^green:/),
     -1,
-    "there is no command to re-run, and an agent sent to run nothing has nothing to report"
+    "no red was observed and there is not even a command to re-run — an agent sent to run nothing has nothing to report"
   );
   assert.ok(
     !result.warnings.some((w) => /confirming agent died/.test(w)),

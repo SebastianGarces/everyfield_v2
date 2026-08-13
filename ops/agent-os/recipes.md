@@ -263,9 +263,16 @@ order structurally:
   retry before the implementer has seen the `retryBlock`, and this recipe must not either. So a
   retry pushes a warning naming what could not be reproduced, hands the implementer the
   `retryBlock` as the evidence standing in for the repro (its brief says plainly that there is no
-  repro — never that the defect is already reproduced), skips phase 3 when there is no command to
-  re-run, and forces `greenConfirmed` false: `verdict` reads "unconfirmed — no repro went red this
-  attempt", so nothing claims a red→green it did not show. It is the same forgiveness the
+  repro — never that the defect is already reproduced), and **skips phase 3 outright**: `verdict`
+  reads "unconfirmed — no repro went red this attempt", so nothing claims a red→green it did not
+  show. The skip is gated on whether a red was OBSERVED, never on whether a repro command string is
+  non-empty — a `wentRed: false` report usually carries one, because the schema requires it and the
+  brief asks for the transcript of whatever did happen. Gating on the string spent a confirm agent
+  on a prompt that ASSERTS a red that never happened ("the repro which failed BEFORE the fix"), and
+  a failing run came back as the warning "the repro is STILL RED after the fix" — a fabricated red,
+  written into the journal and into the next attempt's `fixInstructions`. It could never have
+  established anything either: a green run is only half of red→green, so with no red on record
+  `greenConfirmed` stays false whatever the confirmer says. It is the same forgiveness the
   live-implementer-with-no-commits path gets one paragraph down, for the same reason — a refusal
   there dead-ends the track.
 - **The implementer never marks its own homework.** "The repro passes now" is exactly the claim a

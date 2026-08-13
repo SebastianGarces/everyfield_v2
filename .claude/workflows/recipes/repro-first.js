@@ -474,11 +474,25 @@ if (!implCommits.length)
 // exactly the claim a green-washed fix makes about itself. It runs one command
 // and transcribes what it printed; it writes nothing.
 //
-// Skipped when there is no command to re-run, which only the retry carve-out
-// can produce: an agent sent to run nothing has nothing to report, and a
-// skipped phase 3 is not a failed one — `greenConfirmed` is already false.
+// Skipped whenever no red was OBSERVED — gated on `reproProven`, NEVER on
+// `reproCommand`. The retry carve-out's most likely shape has a non-empty
+// command: REPRO_SCHEMA requires `reproCommand` and `redOutput`, and step 5 of
+// the repro brief asks for `wentRed: false` "with what you saw", so a real
+// not-test-shaped retry arrives with a command and a transcript attached to a
+// red that never happened. Gating on the string sent a confirm agent in behind
+// it, holding a prompt that ASSERTS the red — "the repro which failed BEFORE
+// the fix", "what the same command printed BEFORE the fix" — and a `passed:
+// false` came back as the warning "the repro is STILL RED after the fix": a
+// fabricated red that rides the journal into the scoped verifier's prompt and
+// into the next attempt's `fixInstructions`. The agent could not have earned
+// its keep there either, because a green run is only ever HALF of red→green:
+// with no red on record a passing command proves the command passes and
+// nothing more, so `greenConfirmed` was forced back to false anyway and the
+// run could produce warnings and nothing else. A skipped phase 3 is not a
+// failed one — the carve-out warning above already says what could not be
+// shown, and `greenConfirmed` is already false.
 // ---------------------------------------------------------------------------
-const confirm = !reproCommand
+const confirm = !reproProven
   ? null
   : await agent(
       `You are confirming ONE thing about a bug fix on branch ${branch} in the worktree ${worktree}: that the repro which failed BEFORE the fix passes AFTER it, and that it is still the same repro.
@@ -513,10 +527,11 @@ You MUST NOT write code, edit any file, commit, push, merge, or touch labels or 
 let greenConfirmed = false;
 let ranADifferentCommand = false;
 
-if (!reproCommand) {
-  // Phase 3 was SKIPPED, not failed — there was never a command. The carve-out
-  // warning above already said so, and adding "nobody re-ran it" here would
-  // read as a dead confirmer.
+if (!reproProven) {
+  // Phase 3 was SKIPPED, not failed — no red was observed, so there is nothing
+  // a re-run could confirm and nobody was sent to try. The carve-out warning
+  // above already said so, and adding "nobody re-ran it" here would read as a
+  // dead confirmer.
 } else if (!confirm) {
   warnings.push(
     `the confirming agent died — \`${reproCommand}\` was never re-run by anybody but the implementer, so the fix goes to the gates unproven.`
@@ -543,12 +558,6 @@ if (!reproCommand) {
 } else {
   greenConfirmed = true;
 }
-
-// …and a green run is only ever HALF of red→green. Under the retry carve-out
-// there was no red, so a passing command proves the command passes and nothing
-// more; the recipe's whole claim is the ORDER, and it may not be asserted from
-// one end of it.
-if (!reproProven) greenConfirmed = false;
 
 // Orthogonal to green, and reported whether or not it is: a repro that changed
 // after it went red is no longer the test that failed.
