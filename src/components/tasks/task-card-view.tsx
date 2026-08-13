@@ -25,6 +25,7 @@
 import type { ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import type { WithDescriptionPreview } from "@/lib/tasks/descriptions";
 import type { TaskWithAssignee } from "@/lib/tasks/types";
 import { cn } from "@/lib/utils";
 import {
@@ -162,7 +163,13 @@ export function getDueDateInfo(dueDate: string | null): {
 // ============================================================================
 
 interface TaskCardViewProps {
-  task: TaskWithAssignee;
+  /**
+   * The row. From a LIST query it is a `TaskListRow` and carries
+   * `descriptionPreview` — the readable text of the description, flattened by
+   * the service (T-021). A plain `TaskWithAssignee` (the marketing fixtures)
+   * carries none, and the summary line below simply does not render.
+   */
+  task: WithDescriptionPreview<TaskWithAssignee>;
   personNote?: string | null;
   /**
    * The complete/reopen control, rendered into the card's leading gutter.
@@ -253,6 +260,24 @@ export function TaskCardView({
             </Badge>
           )}
         </div>
+
+        {/*
+          Description summary (T-021).
+
+          `descriptionPreview` is READABLE TEXT, never markup: a description is
+          stored as HTML, and this card renders every field it is given as
+          text, so the raw value would print `<strong>` at the planter. The
+          service flattens it; the clamp is the card's own decision, because how
+          much fits is a question only the card can answer.
+        */}
+        {task.descriptionPreview && (
+          <p
+            data-slot="task-card-description"
+            className="text-muted-foreground line-clamp-2 text-xs"
+          >
+            {task.descriptionPreview}
+          </p>
+        )}
 
         {/* Metadata row */}
         <div className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">

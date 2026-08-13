@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { HeaderBreadcrumbs } from "@/components/header";
 import { TaskForm } from "@/components/tasks";
 import { SubtaskList } from "@/components/tasks/subtask-list";
+import { RichText } from "@/components/shared/rich-text";
 import { TaskDetailActions } from "./task-detail-actions";
 import { db } from "@/db";
 import { users } from "@/db/schema";
@@ -280,7 +281,15 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
               <CardTitle className="text-sm font-medium">Description</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-sm whitespace-pre-wrap">{task.description}</p>
+              {/*
+                Rendered as rich text, not printed as markup (T-021), by the
+                SAME reader the sent-message detail page mounts. This block was
+                a hand-rolled second copy of it — its own
+                `dangerouslySetInnerHTML` and its own prose classes, already
+                drifted from the message page's in spacing and link colour
+                before either shipped.
+              */}
+              <RichText body={task.description} />
             </CardContent>
           </Card>
         )}

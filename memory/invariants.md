@@ -203,6 +203,15 @@ Applies to `src/lib/communication/**` and the `/communication` surfaces. Ruled 2
 - ⚖ "Delivery rate" names exactly ONE figure: `delivered / attempted`, on the church-wide overview only. A single message's tiles report COUNTS with the denominator in the caption ("Delivered · 6 · of 10 recipients") and claim no rate — the tile once divided by all recipient rows and called that the delivery rate too, which is a different number under the same name.
 - A rate with a zero denominator is UNKNOWN (`toPercent` → `null`, rendered as `—`), never `0%`. "0% open rate" is a claim about a send that never arrived.
 
+## Rich Text — Stored HTML & the Sanitiser
+
+→ [rich-text](invariants/rich-text.md) — `src/lib/rich-text/**`, `src/components/shared/rich-text*`, every writer or reader of a rich-text body (COM-017 / T-021).
+
+- The SERVER is the gate, never the editor — every compose/task action is a POSTable endpoint that never saw the toolbar — and there is ONE sanitiser, `sanitizeRichText` (`sanitize.ts`), allow-list only.
+- ONE door converts a stored value for reading or editing, `toRichTextHtml` (`format.ts`), and ONE read-only renderer draws it, `RichText`. Both are idempotent; a hand-rolled `dangerouslySetInnerHTML` is a second copy of both.
+- `sanitizeUrl` runs BEFORE merge substitution, so a `{{token}}` may decide NEITHER the SCHEME nor the AUTHORITY of an href — in either spelling, `/` or `\`, since every URL parser folds the two.
+- A body is MARKUP by the time a surface decorates it, so a decoration over it is TEXT-NODE-AWARE, never a string-wide `replace`: the COM-015 preview's unresolved-token pill is `highlightUnresolvedMergeTokens` (`format.ts`), which splits on tags and rewrites only the gaps. `sanitizeUrl` allows a token in a path whose scheme is already fixed, so a blind replace wrote the span inside an `href` — a broken link AND no warning, on exactly the token the pill exists to catch.
+
 ## Tasks, Subtasks & Recurrence
 
 → [tasks](invariants/tasks.md) — `src/lib/tasks/**`, `src/app/(dashboard)/tasks/**`.
@@ -216,6 +225,8 @@ Applies to `src/lib/communication/**` and the `/communication` surfaces. Ruled 2
 - ⚖ Exactly ONE instance of a recurring series is open at a time, minted on completion — never by a cron. The guard runs BEFORE the successor insert, so a resurrected series gains neither a second open task nor a duplicate checklist.
 - `completionEvent` is never copied to a successor: `meeting.evaluation.completed` is backed by a partial unique index, so copying it aborts the second instance's insert. Recurrence mints plain work; hooks stay with the generator.
 - A completion is written FIRST and its successor second — the reverse of the usual durable-marker-last rule, deliberately. A successor with no completion leaves two open instances; a completion with no successor is repaired by reopening and re-completing.
+- A task description is rich text on the SAME editor and sanitiser as a message body (T-021) — `normalizeTaskDescription` (`src/lib/tasks/descriptions.ts`) is the one write gate, and all FOUR writers go through it: `createTask`, `updateTask`, `importTaskTemplate`, `seedLaunchMilestones`. Enumerate the writers, do not name a plausible one.
+- `description` means ONE thing on every row — the stored HTML — and a LIST row carries the readable summary BESIDE it, as `descriptionPreview`. Never one field with two meanings.
 - The checklist catalog has TWO entrances and the prompt is never the only one: `/tasks/templates` is the standing route, linked from the `/tasks` header. It is a static segment beside `/tasks/[id]` — remove it and the URL resolves to a task with id `"templates"` and 500s, and `importTaskTemplateAction` becomes the not-yet-wired `"use server"` write Authentication forbids.
 - ⚖ A phase change PROMPTS, it never creates (T-020). `handlePhaseChangedForTemplatePrompt` is registered on `phase.changed` and writes NOTHING; the absence is the ruling. Twenty tasks a planter did not ask for is the surprise the feature exists to avoid.
 - The prompt is DERIVED, never stored: the latest `phase_transitions` row with `kind = 'transition'` plus the code-defined catalog. A `kind = 'initial_declaration'` row is not a move and prompts nothing.

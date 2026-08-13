@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ResendNonOpeners } from "@/components/communication/resend-non-openers";
+import { RichText } from "@/components/shared/rich-text";
 import {
   summarizeMessageDelivery,
   type MessageTileKey,
@@ -122,7 +123,11 @@ export default async function MessageDetailPage({
   const resolvedSubject = comm.subject
     ? renderTemplate(comm.subject, mergeData)
     : "(No subject)";
-  const resolvedBody = renderTemplate(comm.body, mergeData);
+  // The body is NOT resolved here. `RichText` runs the same two steps, in
+  // the same order, as the send path and the compose preview — sanitise, then
+  // substitute merge values with those values escaped — and it runs them ONCE.
+  // Sanitising here as well was two passes over one body, which is how this
+  // page turned `Bob & Sue` into `Bob &amp;amp; Sue`.
 
   const tiles = summarizeMessageDelivery(comm.stats);
 
@@ -278,7 +283,20 @@ export default async function MessageDetailPage({
             </CardHeader>
             <CardContent>
               <div className="rounded-lg bg-gray-50 p-4">
-                <p className="text-sm whitespace-pre-wrap">{resolvedBody}</p>
+                {/* The body a planter composed is rich text (COM-017), so it
+                    is rendered, not printed — `RichText` sanitises, merges, and
+                    carries the plain-text bodies sent before it shipped. It is
+                    the same reader the task detail page mounts.
+
+                    `bodyHtml ?? body` is the one read expression for a stored
+                    body: the markup when the row has it, and the flattened
+                    plain text — which is what `body` holds, because search
+                    reads that column — for a row written before `body_html`
+                    did. `toRichTextHtml` inside `RichText` converts either. */}
+                <RichText
+                  body={comm.bodyHtml ?? comm.body}
+                  mergeData={mergeData}
+                />
               </div>
             </CardContent>
           </Card>

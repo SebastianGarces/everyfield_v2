@@ -3,6 +3,7 @@ import { tasks, type NewTask, type Task } from "@/db/schema";
 import type { TaskCategory, TaskPriority } from "@/db/schema/tasks";
 import type { PhaseNumber } from "@/lib/constants";
 
+import { normalizeTaskDescription } from "./descriptions";
 import { toCalendarDate } from "./recurrence";
 import {
   UNKNOWN_TEMPLATE_ERROR,
@@ -191,7 +192,13 @@ export async function importTaskTemplate(
     createdById: input.userId,
     assignedToId: input.userId,
     title: planned.title,
-    description: planned.description,
+    // Through the same write gate as `createTask`/`updateTask` (T-021). The
+    // catalog's strings are ours and are plain text today, so this converts
+    // rather than sanitises — but "every write path goes through
+    // `normalizeTaskDescription`" is the rule, and a description that reached
+    // storage un-normalised would be the one row the readers' idempotency
+    // argument does not cover.
+    description: normalizeTaskDescription(planned.description),
     status: "not_started",
     priority: planned.priority,
     category: planned.category,
