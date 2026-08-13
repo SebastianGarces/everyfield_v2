@@ -1,65 +1,167 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import { test } from "node:test";
 
+import * as writeQueries from "./write-queries";
+import {
+  bookmarkInsertQuery,
+  progressUpsertQuery,
+  recordViewUpsertQuery,
+} from "./write-queries";
+
 // ----------------------------------------------------------------------------
-// The wiki's two write paths, and the guard they cannot carry at runtime (#411)
+// The wiki's write paths (#411), asserted as SQL.
 //
-// `progress.ts` and `bookmarks.ts` are `"use server"` modules: every export is
-// a server action, so nothing here can be imported into a plain unit test and
-// nothing non-async may be exported from them to make one possible. Their races
-// are also invisible to a single-threaded test — the defect is two requests
-// arriving at once, which needs a database and concurrency to observe.
+// `progress.ts` and `bookmarks.ts` are `"use server"` modules, so their
+// statements cannot be imported here and nothing may be exported from them to
+// make that possible (`memory/invariants.md` → Authentication: the export list
+// IS the auth surface). The statements therefore live in `write-queries.ts`,
+// which carries no directive — the seam `visibleArticlesQuery` and
+// `searchArticlesQuery` already use for the read paths.
 //
-// So the SHAPE is pinned instead, which is the technique `tenancy.test.ts` and
-// `service.test.ts` already use for call-site facts no runtime surface exposes.
-// What it pins is a rule, not a comment: `memory/invariants.md` → Transactions /
-// Atomicity, "SELECT-then-INSERT is not a concurrency guard. Make duplicates
-// impossible with a (partial) unique index" — and both tables have one
-// (`wiki_progress_user_article_idx`, `wiki_bookmarks_user_article_idx`). Before
-// this, a first view saved from two tabs and a star pressed twice both raced a
-// bare INSERT into a unique-violation, which reaches the reader as a thrown
-// server action.
+// What that buys is the same thing `tenancy.test.ts` gets: each builder is
+// rendered with `.toSQL()` and the emitted SQL is inspected, so what is
+// asserted is what would reach the database. The previous version of this file
+// grepped the two modules' SOURCE TEXT for `.insert(` and `onConflict`, and a
+// regex over source is a guess about SQL — that one only recognised an INSERT
+// terminated by `.returning()`, so a bare `db.insert(wikiProgress).values({})`
+// passed it. `.toSQL()` has no such hole: an unguarded insert renders without
+// an `on conflict` clause and fails outright.
+//
+// The rule being pinned is `memory/invariants.md` → Transactions / Atomicity:
+// "SELECT-then-INSERT is not a concurrency guard. Make duplicates impossible
+// with a (partial) unique index, keeping that row in the SAME INSERT as the
+// rows it speaks for." Both tables have that index
+// (`wiki_progress_user_article_idx`, `wiki_bookmarks_user_article_idx`).
+//
+// `.toSQL()` renders; it does not connect. DATABASE_URL must be PRESENT
+// (importing `@/db` builds the Neon client at module load), which `pnpm test`
+// and CI both supply as a placeholder.
 // ----------------------------------------------------------------------------
 
-const SRC = path.join(process.cwd(), "src", "lib", "wiki");
+const USER = "11111111-1111-4111-8111-111111111111";
+const SLUG = "discovery/values";
+const NOW = new Date("2026-08-13T12:00:00.000Z");
 
-const read = (file: string) =>
-  readFileSync(path.join(SRC, file), "utf8")
-    // Comments name the shape they forbid, so they must not satisfy the guard.
-    .replace(/\/\/[^\n]*/g, "")
-    .replace(/\/\*[\s\S]*?\*\//g, "");
+/**
+ * Every write path the wiki has, with arguments to render it.
+ *
+ * `satisfies Record<keyof typeof writeQueries, …>` is what keeps this list
+ * complete: adding a builder to `write-queries.ts` without adding it here is a
+ * compile error, so a new write cannot join the module unguarded. Type-only
+ * exports do not appear in the module namespace and so are not listed.
+ */
+const WRITE_PATHS = {
+  progressUpsertQuery: () =>
+    progressUpsertQuery(USER, SLUG, { scrollPosition: 0.4 }, NOW),
+  recordViewUpsertQuery: () => recordViewUpsertQuery(USER, SLUG, NOW),
+  bookmarkInsertQuery: () => bookmarkInsertQuery(USER, SLUG),
+} satisfies Record<
+  keyof typeof writeQueries,
+  () => { toSQL(): { sql: string } }
+>;
 
-const PROGRESS = read("progress.ts");
-const BOOKMARKS = read("bookmarks.ts");
+/** `on conflict … do update` or `on conflict … do nothing` — either is a guard. */
+const CONFLICT_GUARDED = /on conflict[\s\S]*?do (update|nothing)/i;
 
-/** An INSERT with no conflict clause anywhere after it. */
-const UNGUARDED_INSERT = /\.insert\((?:(?!onConflict)[\s\S])*?\.returning\(\)/;
+test("every wiki write is one conflict-safe INSERT", () => {
+  // The list is checked at RUNTIME as well as by `satisfies`: a builder added
+  // to `write-queries.ts` and not rendered here would otherwise be a write this
+  // file never sees, which is how the previous source-regex guard went blind.
+  assert.deepEqual(
+    Object.keys(writeQueries).sort(),
+    Object.keys(WRITE_PATHS).sort(),
+    "a wiki write path exists that this test never renders"
+  );
 
-test("a progress save is one upsert, not a read followed by an insert", () => {
+  for (const [name, build] of Object.entries(WRITE_PATHS)) {
+    const { sql: text } = build().toSQL();
+
+    assert.match(
+      text,
+      /^insert into/i,
+      `${name} is not a single INSERT — a read followed by a write is not a concurrency guard`
+    );
+    assert.match(
+      text,
+      CONFLICT_GUARDED,
+      `${name} renders an INSERT with no ON CONFLICT clause: it dies on the unique index the moment two requests arrive together`
+    );
+  }
+});
+
+test("a progress save conflicts on (user_id, article_slug)", () => {
+  // The unique index is on the pair, so that pair is the conflict target: any
+  // other target (or none) leaves the duplicate possible.
+  const { sql: text } = WRITE_PATHS.progressUpsertQuery().toSQL();
+
+  assert.match(text, /on conflict \("user_id","article_slug"\) do update/i);
+});
+
+test("a progress save writes only the fields the caller passed", () => {
+  // An intermediate scroll save must not rewrite `status`, and completing an
+  // article must not reset the position it was read to.
+  const scroll = progressUpsertQuery(
+    USER,
+    SLUG,
+    { scrollPosition: 0.4 },
+    NOW
+  ).toSQL().sql;
+  const updateClause = scroll.slice(scroll.search(/do update/i));
+
+  assert.match(updateClause, /"scroll_position" =/);
+  assert.doesNotMatch(
+    updateClause,
+    /"status" =/,
+    "a scroll save must not rewrite the article's status"
+  );
+
+  const completed = progressUpsertQuery(
+    USER,
+    SLUG,
+    { status: "completed" },
+    NOW
+  ).toSQL().sql;
+  const completedClause = completed.slice(completed.search(/do update/i));
+
+  assert.match(completedClause, /"status" =/);
+  assert.match(completedClause, /"completed_at" =/);
+  assert.doesNotMatch(
+    completedClause,
+    /"scroll_position" =/,
+    "completing an article must not reset the scroll position it was read to"
+  );
+});
+
+test("recording a view cannot downgrade a completed article", () => {
+  // This used to be a JS branch over a row read one statement earlier, which a
+  // completion landing in the gap simply overwrote. The rule is now a CASE over
+  // the row Postgres holds at write time — inside DO UPDATE SET a
+  // table-qualified column is the EXISTING row, `excluded.*` the proposed one —
+  // so the comparison and the write cannot be interleaved.
+  const { sql: text } = recordViewUpsertQuery(USER, SLUG, NOW).toSQL();
+  const updateClause = text.slice(text.search(/do update/i));
+
+  assert.match(text, /on conflict \("user_id","article_slug"\) do update/i);
   assert.match(
-    PROGRESS,
-    /onConflictDoUpdate\(/,
-    "wiki_progress has a unique index on (user_id, article_slug): a racing first view must update, not throw"
+    updateClause,
+    /"status" = case when "wiki_progress"\."status" = 'completed' then "wiki_progress"\."status" else 'in_progress' end/i,
+    "the no-downgrade rule must live in the statement, not in a branch over an earlier read"
   );
   assert.doesNotMatch(
-    PROGRESS,
-    UNGUARDED_INSERT,
-    "an INSERT into wiki_progress with no ON CONFLICT clause dies on the unique index"
+    updateClause,
+    /excluded/i,
+    "the CASE must read the STORED row; `excluded` is the row being proposed, which is always in_progress"
+  );
+  assert.doesNotMatch(
+    updateClause,
+    /"completed_at" =|"scroll_position" =/,
+    "a view is not a reading position and must not erase when the reader finished"
   );
 });
 
 test("adding a bookmark twice is a no-op, not a unique violation", () => {
-  // `toggleBookmark` and `addBookmark` write the same row; both say the same
-  // thing about a duplicate, so pressing the star twice cannot throw.
-  const clauses = BOOKMARKS.match(/onConflictDoNothing\(\)/g) ?? [];
-  const inserts = BOOKMARKS.match(/\.insert\(wikiBookmarks\)/g) ?? [];
+  const { sql: text } = bookmarkInsertQuery(USER, SLUG).toSQL();
 
-  assert.equal(inserts.length, 2, "the bookmark write paths have moved");
-  assert.equal(
-    clauses.length,
-    inserts.length,
-    "every bookmark insert must tolerate the row already being there"
-  );
+  assert.match(text, /insert into "wiki_bookmarks"/i);
+  assert.match(text, /on conflict do nothing/i);
 });

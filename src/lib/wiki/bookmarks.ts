@@ -6,6 +6,7 @@ import { getCurrentSession } from "@/lib/auth";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getArticle } from "./get-article";
+import { bookmarkInsertQuery } from "./write-queries";
 
 /**
  * Check if an article is bookmarked by the current user
@@ -123,22 +124,12 @@ export async function toggleBookmark(slug: string): Promise<boolean> {
     revalidatePath("/wiki", "layout");
     return false;
   } else {
-    // Add bookmark.
-    //
-    // `wiki_bookmarks_user_article_idx` is unique on (user_id, article_slug),
-    // and the SELECT above is not a concurrency guard (`memory/invariants.md` →
-    // Transactions / Atomicity): two clicks of the star in the same instant both
-    // saw no row, and the second INSERT died on the unique index — a thrown
-    // server action for a button the reader pressed twice. Adding a bookmark
-    // that is already there is a no-op, which is what `addBookmark` below has
-    // always said with the same clause (#411).
-    await db
-      .insert(wikiBookmarks)
-      .values({
-        userId: session.user.id,
-        articleSlug: slug,
-      })
-      .onConflictDoNothing();
+    // Add the bookmark. The SELECT above chooses the DIRECTION of the toggle;
+    // it is not a concurrency guard, and the statement does not rely on it —
+    // `bookmarkInsertQuery` tolerates the row already being there, so two
+    // clicks of the star in the same instant cannot die on the unique index
+    // (#411).
+    await bookmarkInsertQuery(session.user.id, slug);
     revalidatePath("/wiki", "layout");
     return true;
   }
@@ -153,13 +144,7 @@ export async function addBookmark(slug: string): Promise<void> {
     throw new Error("Unauthorized");
   }
 
-  await db
-    .insert(wikiBookmarks)
-    .values({
-      userId: session.user.id,
-      articleSlug: slug,
-    })
-    .onConflictDoNothing();
+  await bookmarkInsertQuery(session.user.id, slug);
 
   revalidatePath("/wiki", "layout");
 }

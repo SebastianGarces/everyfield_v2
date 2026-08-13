@@ -6,6 +6,7 @@ import { getCurrentSession } from "@/lib/auth";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getArticle } from "./get-article";
+import { progressUpsertQuery, recordViewUpsertQuery } from "./write-queries";
 
 /**
  * Get progress for a single article
@@ -193,19 +194,9 @@ export async function getLastInProgress() {
 /**
  * Update progress for an article (upsert).
  *
- * ONE statement, not a read followed by a write. `wiki_progress_user_article_idx`
- * is unique on (user_id, article_slug), and a SELECT-then-INSERT is not a
- * concurrency guard (`memory/invariants.md` → Transactions / Atomicity): two
- * scroll saves racing on a first view — two tabs, a double-click, React's
- * development double-invoke — both saw no row and the second INSERT died on the
- * unique index, which surfaces as an unhandled server-action rejection in the
- * reader's tab (#411). `ON CONFLICT DO UPDATE` makes the duplicate impossible
- * instead of unlikely, and it costs one round trip rather than two.
- *
- * The conflicting write applies exactly the fields the caller passed, which is
- * what the UPDATE branch did before: an intermediate scroll save must not
- * rewrite `status`, and marking an article complete must not reset the scroll
- * position it was read to.
+ * ONE statement, not a read followed by a write — the statement itself is
+ * `progressUpsertQuery` in `write-queries.ts`, which is where every wiki write
+ * path is built and where the reason is written down.
  */
 export async function updateProgress(
   slug: string,
@@ -217,29 +208,12 @@ export async function updateProgress(
   const session = await getCurrentSession();
   if (!session?.user) return null;
 
-  const now = new Date();
-  const completedAt = data.status === "completed" ? { completedAt: now } : {};
-
-  const [saved] = await db
-    .insert(wikiProgress)
-    .values({
-      userId: session.user.id,
-      articleSlug: slug,
-      status: data.status ?? "in_progress",
-      scrollPosition: data.scrollPosition ?? 0,
-      lastViewedAt: now,
-      ...completedAt,
-    })
-    .onConflictDoUpdate({
-      target: [wikiProgress.userId, wikiProgress.articleSlug],
-      set: {
-        ...data,
-        lastViewedAt: now,
-        updatedAt: now,
-        ...completedAt,
-      },
-    })
-    .returning();
+  const [saved] = await progressUpsertQuery(
+    session.user.id,
+    slug,
+    data,
+    new Date()
+  );
 
   return saved ?? null;
 }
@@ -252,22 +226,26 @@ export async function markCompleted(slug: string) {
 }
 
 /**
- * Record a view (sets to in_progress if not already completed)
+ * Record a view (sets to in_progress unless the reader already finished it).
+ *
+ * The "don't downgrade a completed article" rule travels INSIDE the statement
+ * (`recordViewUpsertQuery`), not in a branch over a row read a moment earlier:
+ * a completion that landed between the read and the write was overwritten, so
+ * finishing an article in one tab while another reported the view reset it to
+ * in_progress (#411).
  */
 export async function recordView(slug: string) {
-  const existing = await getArticleProgress(slug);
+  const session = await getCurrentSession();
+  if (!session?.user) return null;
 
-  let result;
-  // Don't downgrade from completed to in_progress
-  if (existing?.status === "completed") {
-    // Just update lastViewedAt
-    result = await updateProgress(slug, {});
-  } else {
-    result = await updateProgress(slug, { status: "in_progress" });
-  }
+  const [saved] = await recordViewUpsertQuery(
+    session.user.id,
+    slug,
+    new Date()
+  );
 
   // Revalidate wiki layout to update "Recently Viewed" sidebar
   revalidatePath("/wiki", "layout");
 
-  return result;
+  return saved ?? null;
 }
