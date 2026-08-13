@@ -60,6 +60,42 @@ export interface PersonTeamAssignment {
 // ============================================================================
 
 /**
+ * WHICH sentence a refused INSERT means, read off the seat itself.
+ *
+ * The `ON CONFLICT (role_id) WHERE status = 'active' DO NOTHING` clause in
+ * `assignMember` answers "the seat is taken" and stops there: `role_id` alone is
+ * the key, so the two-people race and the same-person double-submit come back
+ * from the database identically, as `INSERT 0 0`. This is the one extra query
+ * that tells them apart, and it runs ONLY on the loser's cold path.
+ *
+ * It is a snapshot read, deliberately, and it decides nothing but wording — the
+ * write has already been refused by the index above it. If the holder has since
+ * been removed the read comes back empty and the seat sentence is used, which is
+ * the honest answer to "somebody was ahead of you and it was not you".
+ */
+async function seatRefusalMessage(
+  churchId: string,
+  roleId: string,
+  personId: string
+): Promise<string> {
+  const [holder] = await db
+    .select({ personId: teamMemberships.personId })
+    .from(teamMemberships)
+    .where(
+      and(
+        eq(teamMemberships.churchId, churchId),
+        eq(teamMemberships.roleId, roleId),
+        eq(teamMemberships.status, "active")
+      )
+    )
+    .limit(1);
+
+  return holder?.personId === personId
+    ? PERSON_ALREADY_ASSIGNED_MESSAGE
+    : ROLE_ALREADY_FILLED_MESSAGE;
+}
+
+/**
  * Assign a person to a team role.
  *
  * ONE PERSON PER ROLE, AND THE DATABASE IS WHAT SAYS SO (#409 D1, migration
@@ -68,12 +104,33 @@ export interface PersonTeamAssignment {
  * sentence the planter reads.
  *
  * "IS THE SEAT FREE" IS ASKED ONCE, BY THE INDEX, and it is asked by attempting
- * the write. There are exactly TWO refusals, one per write path, and both are
- * post-write: the INSERT path carries `ON CONFLICT … DO NOTHING`, so a taken
- * seat comes back with an empty `returning()` and that emptiness IS the
+ * the write. There are exactly TWO refusal paths, one per write path, and both
+ * are post-write: the INSERT path carries `ON CONFLICT … DO NOTHING`, so a
+ * taken seat comes back with an empty `returning()` and that emptiness IS the
  * refusal; the REACTIVATION path is an UPDATE, takes no `ON CONFLICT`, meets
  * the index as a driver violation, and `membershipConflictMessage` translates
- * that into the very same sentence. Both say `ROLE_ALREADY_FILLED_MESSAGE`.
+ * that into user copy.
+ *
+ * WHICH SENTENCE THE LOSER READS IS A SECOND QUESTION, AND IT NEEDS A SECOND
+ * READ. `team_memberships_role_active_unique_idx` is keyed on `role_id` ALONE,
+ * so it refuses the same-person double-submit and the two-people race with the
+ * identical empty `returning()` — the index cannot tell them apart, because
+ * telling them apart is not its job. Measured, not assumed (2026-08-13,
+ * Postgres 16 with 0038): re-inserting the SAME person onto a seat they already
+ * hold, with the exact `ON CONFLICT (role_id) WHERE status = 'active'` clause
+ * below, answers `INSERT 0 0` — it does NOT raise, and it does not raise on the
+ * older `team_memberships_active_unique` either, which `role_id` alone strictly
+ * subsumes (see the note beside that constant in `src/db/schema/ministry-teams.ts`).
+ * So the loser branch READS THE HOLDER and names it: the same person is
+ * `PERSON_ALREADY_ASSIGNED_MESSAGE`, anybody else is
+ * `ROLE_ALREADY_FILLED_MESSAGE`. That distinction is not decoration — the seat
+ * sentence carries `ROLE_ALREADY_FILLED_DESCRIPTION` ("Someone filled it while
+ * this page was open"), which is a FALSE statement to a planter who filled it
+ * themselves, twice.
+ *
+ * That read is NOT a guard and must never be turned into one. It runs AFTER the
+ * write has already been refused, on a cold path, and its only output is a
+ * string; the index remains the only thing that decides who gets the seat.
  *
  * THERE IS NO PRE-FLIGHT "is anybody on this seat?" SELECT, and never re-add
  * one. A SELECT-then-INSERT is not a concurrency guard (`memory/invariants.md`
@@ -86,7 +143,10 @@ export interface PersonTeamAssignment {
  *
  * The pre-check that STAYS is `existing.status === 'active'` below, and it is
  * load-bearing: reactivating an already-active row UPDATEs that same row, which
- * raises no violation at all, so nothing downstream would answer it.
+ * raises no violation at all, so nothing downstream would answer it. It is a
+ * snapshot read, so it is the LEGIBLE half of the double-submit refusal and
+ * never its backing — the loser branch below is what answers the two submits
+ * that pass it together.
  */
 export async function assignMember(
   churchId: string,
@@ -215,7 +275,11 @@ export async function assignMember(
       // that is right rather than tolerated: somebody holds the seat, so
       // `filled` is what the role is. The refusal below is about what this
       // caller is told, not about repairing a write.
-      if (!inserted) throw new ExpectedError(ROLE_ALREADY_FILLED_MESSAGE);
+      if (!inserted) {
+        throw new ExpectedError(
+          await seatRefusalMessage(churchId, roleId, personId)
+        );
+      }
       membership = inserted;
     }
   } catch (error) {

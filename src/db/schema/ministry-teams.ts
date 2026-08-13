@@ -209,8 +209,29 @@ export const TEAM_MEMBERSHIPS_ROLE_ACTIVE_UNIQUE =
   "team_memberships_role_active_unique_idx";
 
 /**
- * The partial unique index that keeps ONE ACTIVE ROW per (team, person, role) —
- * the double-submit guard, older than #409 D1 and a different refusal.
+ * The partial unique index on (team_id, person_id, role_id) where
+ * `status = 'active'`, older than #409 D1.
+ *
+ * IT IS SUBSUMED, AND IT IS KEPT ANYWAY. `TEAM_MEMBERSHIPS_ROLE_ACTIVE_UNIQUE`
+ * is keyed on `role_id` ALONE with the same predicate, so it strictly subsumes
+ * this one: at most one active row per role means at most one active row per any
+ * triple containing that role. Nothing can violate this index without violating
+ * the seat index first, which means NO WRITE PATH EVER RAISES ON IT — measured
+ * 2026-08-13 against Postgres 16 with 0038 applied: re-inserting the same person
+ * onto a seat they already hold, through `assignMember`'s
+ * `ON CONFLICT (role_id) WHERE status = 'active' DO NOTHING`, answers
+ * `INSERT 0 0` and raises nothing.
+ *
+ * SO IT IS NOT A LIVE GUARD, and no code translates its violation:
+ * `membershipConflictMessage` maps the seat index only, and the double-submit
+ * sentence is chosen by `assignMember` reading who holds the seat. Do not read
+ * this constant as the backing for `PERSON_ALREADY_ASSIGNED_MESSAGE`.
+ *
+ * It stays declared because migration 0038 has already been applied to the
+ * shared development database — dropping it is a new migration for no behaviour,
+ * and the schema must keep describing the database that exists. Drizzle compares
+ * the snapshot to this file, so deleting the declaration alone would make the
+ * next `db:generate` emit a DROP nobody asked for.
  */
 export const TEAM_MEMBERSHIPS_ACTIVE_UNIQUE = "team_memberships_active_unique";
 
@@ -250,6 +271,8 @@ export const teamMemberships = pgTable(
     index("team_memberships_role_id_idx").on(table.roleId),
     // Partial unique: only ACTIVE memberships are constrained, so a person can
     // be re-assigned to the same team/role after being set inactive (F8 fix).
+    // SUBSUMED by the seat index below and kept deliberately — see the
+    // constant's own note. Nothing raises on it, so nothing translates it.
     uniqueIndex(TEAM_MEMBERSHIPS_ACTIVE_UNIQUE)
       .on(table.teamId, table.personId, table.roleId)
       .where(sql`status = 'active'`),

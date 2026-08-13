@@ -63,7 +63,6 @@ import {
   trainingPrograms,
   users,
 } from "../src/db/schema";
-import { localNeonHttpEndpoint } from "../src/db/connection";
 import { hashPassword } from "../src/lib/auth/password";
 
 // ============================================================================
@@ -93,16 +92,15 @@ if (!connectionString) {
 }
 
 // This script builds its own client instead of importing `@/db` (see the
-// bootstrapping note above), so it needs the same endpoint rule — one
-// implementation of "where does neon-http send its SQL", in
-// `src/db/connection.ts`. Without it the fixture can only ever be regenerated
-// against a real Neon instance, and the guard this seed had to be taught about
-// (#409 D1) is checkable nowhere else.
-const localEndpoint = localNeonHttpEndpoint(
-  connectionString,
-  process.env.NEON_HTTP_PROXY_URL
-);
-if (localEndpoint) neonConfig.fetchEndpoint = localEndpoint;
+// bootstrapping note above), and neon-http cannot speak to a plain Postgres over
+// TCP. To seed a LOCAL database, run this with `NEON_HTTP_PROXY_URL` naming the
+// `local-neon-http-proxy` in front of it (`http://localhost:4444/sql`) — the
+// same move `pnpm test:live` makes through `scripts/live-db-endpoint.ts`.
+// Deliberate and explicit: the caller knows which database this is, so nothing
+// here guesses from the hostname. Unset is correct for a real Neon instance.
+if (process.env.NEON_HTTP_PROXY_URL) {
+  neonConfig.fetchEndpoint = process.env.NEON_HTTP_PROXY_URL;
+}
 
 const sql = neon(connectionString);
 const db = drizzle(sql);

@@ -4,9 +4,8 @@
 
 | Variable | Required | Purpose |
 |----------|----------|---------|
-| `DATABASE_URL` | Yes | PostgreSQL connection string (Neon). A LOCAL host (`localhost`, `127.0.0.1`, `db.localtest.me`, `host.docker.internal`) is not merely a different address: neon-http cannot speak to a plain Postgres, so `localNeonHttpEndpoint` (`src/db/connection.ts`) redirects the client to a Neon HTTP proxy on port 4444. That is what makes the `LIVE_DB_TESTS=1` suites runnable — see `memory/invariants/transactions-atomicity.md` |
-| `NEON_HTTP_PROXY_URL` | No | Overrides the endpoint above (default `http://<host>:4444/sql`), for a proxy on another port or in front of a remote database. Not in `.env.example`; unset is correct for both production and ordinary local dev against Neon |
-| `LIVE_DB_TESTS` | No | `1` opts the race suites in. They ALSO probe reachability, so a placeholder `DATABASE_URL` still skips them. CI runs them in the `Live DB Race Suites` job |
+| `DATABASE_URL` | Yes | PostgreSQL connection string (Neon). The app reads it in `src/db/index.ts` and nothing else interprets it — no hostname is inspected, no endpoint is rewritten |
+| `LIVE_DB_TESTS` | No | `1` opts the race suites in. They ALSO probe reachability, so a placeholder `DATABASE_URL` still skips them. CI runs them in the `Live DB Race Suites` job. Pointing them at a LOCAL Postgres also needs the proxy preload `pnpm test:live` loads — a TEST-ONLY switch, read by `scripts/live-db-endpoint.ts` and by no module the app imports; see `memory/invariants/transactions-atomicity.md` |
 | `NEXT_PUBLIC_APP_URL` | No | Base URL (default: localhost:3000) |
 | `REVALIDATION_SECRET` | For prod | Wiki cache revalidation auth. ⚠️ Still required by `src/app/api/wiki/revalidate/route.ts` but MISSING from `.env.example` |
 | `CRON_SECRET` | For prod | Cron auth (Bearer token) for BOTH scheduled routes: `/api/phase-engine/assess` and `/api/notifications/dispatch`. Both fail closed when unset. Lives in TWO places that must hold the same value: the Vercel production env (read by the routes) and this repo's Actions secrets (sent by BOTH schedules — `.github/workflows/notifications-dispatch.yml` every 15 min, `.github/workflows/phase-engine-assess.yml` at 07:00/19:00 UTC). Since #36 `vercel.json` carries no crons at all: Hobby caps Vercel crons at daily, which is too few for either job |

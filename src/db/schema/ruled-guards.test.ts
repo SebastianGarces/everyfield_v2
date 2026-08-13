@@ -280,13 +280,36 @@ test("§3c assignMember claims the seat with ON CONFLICT (#409 D1)", () => {
   );
   assert.match(
     assign,
-    /if \(!inserted\) throw new ExpectedError\(ROLE_ALREADY_FILLED_MESSAGE\)/,
+    /if \(!inserted\) \{[\s\S]{0,200}throw new ExpectedError\(\s*await seatRefusalMessage\(churchId, roleId, personId\)/,
     "#409 D1: an empty returning() is the loser of the race and must be reported, not returned as undefined"
   );
   assert.match(
     assign,
     /membershipConflictMessage\(error\)/,
     "#409 D1: the reactivation UPDATE takes no ON CONFLICT, so its index violation must become the same user copy"
+  );
+
+  // #411 round 1 — the loser branch reads WHO holds the seat before choosing a
+  // sentence. `team_memberships_role_active_unique_idx` is keyed on `role_id`
+  // alone, so the two-people race and the same-person double-submit both come
+  // back as `INSERT 0 0`; without this read the double-submit was told "Role is
+  // already filled" plus "Someone filled it while this page was open", which is
+  // false to the planter who filled it.
+  const refusal = sourceReader(source, "memberships.ts").span(
+    "async function seatRefusalMessage",
+    "Assign a person to a team role"
+  );
+  assertInOrder(
+    refusal,
+    "seatRefusalMessage",
+    [
+      "eq(teamMemberships.roleId, roleId)",
+      'eq(teamMemberships.status, "active")',
+      "holder?.personId === personId",
+      "PERSON_ALREADY_ASSIGNED_MESSAGE",
+      "ROLE_ALREADY_FILLED_MESSAGE",
+    ],
+    "#411 round 1: the seat's active holder decides the sentence — same person means the double-submit sentence, anybody else means the seat one"
   );
 });
 
@@ -372,16 +395,32 @@ test("§4c the seat refusal is decided by the ONE unique-violation predicate, no
     /import \{ isUniqueViolation \} from "@\/db\/errors"/,
     "#411 AC5: the recognition is `src/db/errors.ts`'s, shared with every other domain"
   );
-  for (const constant of [
-    "TEAM_MEMBERSHIPS_ROLE_ACTIVE_UNIQUE",
-    "TEAM_MEMBERSHIPS_ACTIVE_UNIQUE",
-  ]) {
-    assert.match(
-      conflict,
-      new RegExp(`isUniqueViolation\\(error, ${constant}\\)`),
-      `#409 D1: the index name must come from the schema that declares it, never be re-typed here`
-    );
-  }
+  assert.match(
+    conflict,
+    /isUniqueViolation\(error, TEAM_MEMBERSHIPS_ROLE_ACTIVE_UNIQUE\)/,
+    "#409 D1: the index name must come from the schema that declares it, never be re-typed here"
+  );
+
+  // #411 round 1 — and it translates THAT index only. `role_id` alone strictly
+  // subsumes `team_memberships_active_unique` (team, person, role), so no write
+  // can violate the older index first and a branch for it is unreachable code
+  // wearing a guard's clothes. The double-submit sentence is decided by
+  // `assignMember` reading the seat's holder (§3c), which is a fact about the
+  // database rather than a snapshot pre-check.
+  assert.doesNotMatch(
+    conflict.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1"),
+    /isUniqueViolation\(error, TEAM_MEMBERSHIPS_ACTIVE_UNIQUE\)/,
+    "#411 round 1: the subsumed index cannot raise, so translating it is dead code — the schema constant's own docblock records why the index is kept"
+  );
+  const subsumption = sourceReader(
+    read("src/db/schema/ministry-teams.ts"),
+    "ministry-teams.ts"
+  ).span("IT IS SUBSUMED", "export const TEAM_MEMBERSHIPS_ACTIVE_UNIQUE =");
+  assert.match(
+    subsumption,
+    /NOT A LIVE GUARD/,
+    "#411 round 1: the next reader must be told the older index is not a live guard, beside the constant itself"
+  );
   // Comments stripped: this rule is documented by NAMING what it forbids, in
   // `membership-conflict.ts`'s own header (`register-path.test.ts`'s `code()`).
   assert.doesNotMatch(

@@ -70,6 +70,15 @@ export interface AssignRefusalDelivery {
 export const ROLE_ALREADY_FILLED_DESCRIPTION =
   "Someone filled it while this page was open. The team now shows who holds it.";
 
+// THIS SENTENCE ASSERTS SOMEBODY ELSE, so it is only ever true if the service
+// reserves `ROLE_ALREADY_FILLED_MESSAGE` for a seat somebody else took. It does:
+// `assignMember`'s loser branch reads the seat's active holder and answers a
+// same-person double-submit with `PERSON_ALREADY_ASSIGNED_MESSAGE` instead
+// (#411 round 1). Before that read existed the double-submit landed here and
+// this description told a planter a stranger had taken the seat they had just
+// filled themselves. If the service ever stops naming the holder, delete this
+// description before restoring anything else.
+
 /** See `RefusalToast.durationMs`. Exported so the test can pin the floor. */
 export const ROLE_ALREADY_FILLED_TOAST_MS = 10_000;
 

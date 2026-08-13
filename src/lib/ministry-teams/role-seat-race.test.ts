@@ -12,8 +12,12 @@ import {
   teamRoles,
   users,
 } from "@/db/schema";
+import { assignRefusalDelivery } from "@/components/ministry-teams/assign-refusal";
 import { ExpectedError } from "@/lib/ministry-teams/expected-error";
-import { ROLE_ALREADY_FILLED_MESSAGE } from "@/lib/ministry-teams/membership-copy";
+import {
+  PERSON_ALREADY_ASSIGNED_MESSAGE,
+  ROLE_ALREADY_FILLED_MESSAGE,
+} from "@/lib/ministry-teams/membership-copy";
 import { assignMember, removeMember } from "@/lib/ministry-teams/memberships";
 
 // ----------------------------------------------------------------------------
@@ -224,6 +228,89 @@ test(
         `run ${run}: the loser got ${String(refusal)}, which the action shell would replace with its generic sentence`
       );
       assert.equal(refusal.message, ROLE_ALREADY_FILLED_MESSAGE);
+
+      await sweep();
+    }
+  }
+);
+
+test(
+  "the SAME person submitted twice leaves one row and reads the PERSON sentence",
+  { skip },
+  async (t: TestContext) => {
+    if (!(await databaseReachable())) return t.skip(UNREACHABLE);
+
+    // #411 round 1. Two tabs, or one double-clicked Confirm, assigning the SAME
+    // person to one free seat. `team_memberships_role_active_unique_idx` is
+    // keyed on `role_id` ALONE, so this loser is refused exactly as the
+    // two-people race's loser is — `INSERT 0 0`, no driver error, nothing to
+    // translate. The truthful sentence is nonetheless the OTHER one: this
+    // planter filled the seat, with the person they picked, so
+    // ROLE_ALREADY_FILLED_MESSAGE and its "Someone filled it while this page was
+    // open" description would both be false statements.
+    await sweep();
+
+    for (let run = 1; run <= RUNS; run++) {
+      const seat = await createScratchSeat();
+      const person = seat.personIds[0];
+
+      const results = await Promise.allSettled([
+        assignMember(
+          seat.churchId,
+          seat.teamId,
+          seat.roleId,
+          person,
+          seat.userId
+        ),
+        assignMember(
+          seat.churchId,
+          seat.teamId,
+          seat.roleId,
+          person,
+          seat.userId
+        ),
+      ]);
+
+      assert.deepEqual(
+        await activeOnSeat(seat.roleId),
+        [person],
+        `run ${run}: the double submit left more than one active row`
+      );
+
+      const rejected = results.filter((r) => r.status === "rejected");
+      assert.equal(
+        results.filter((r) => r.status === "fulfilled").length,
+        1,
+        `run ${run}: exactly one of the two submits assigned the person`
+      );
+      assert.equal(rejected.length, 1);
+
+      const refusal = (rejected[0] as PromiseRejectedResult).reason;
+      assert.ok(
+        refusal instanceof ExpectedError,
+        `run ${run}: the loser got ${String(refusal)}, which the action shell would replace with its generic sentence`
+      );
+      assert.equal(
+        refusal.message,
+        PERSON_ALREADY_ASSIGNED_MESSAGE,
+        `run ${run}: the double-submit loser must be told the person already holds this seat`
+      );
+      assert.notEqual(
+        refusal.message,
+        ROLE_ALREADY_FILLED_MESSAGE,
+        `run ${run}: the seat sentence belongs to the race this planter did not lose`
+      );
+
+      // ...and therefore the false description never reaches them: only the
+      // seat sentence carries ROLE_ALREADY_FILLED_DESCRIPTION, and only the seat
+      // sentence is toasted (`assign-refusal.ts`).
+      const delivery = assignRefusalDelivery(refusal.message);
+      assert.equal(
+        delivery.toast,
+        null,
+        `run ${run}: "Someone filled it while this page was open" is false here — nobody but this planter did`
+      );
+      assert.equal(delivery.inline, PERSON_ALREADY_ASSIGNED_MESSAGE);
 
       await sweep();
     }

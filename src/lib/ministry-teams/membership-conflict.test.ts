@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
 
 import {
@@ -36,8 +38,8 @@ import {
 //
 // BOTH FIXTURES ARE REAL BYTES, and there are two of them because the driver
 // throws TWO shapes. Captured 2026-08-13 against Postgres 16 with migration
-// 0038 applied, reached through neon-http (`localNeonHttpEndpoint` + the local
-// Neon proxy, the same seam the live suites run on):
+// 0038 applied, reached through neon-http (the local Neon proxy the live suites
+// run on, via the `scripts/live-db-endpoint.ts` preload):
 //
 //   * a `db.batch([...])` — which is what the reactivation actually is — throws
 //     the driver's `NeonDbError` DIRECTLY, so the 23505 and the constraint are
@@ -93,20 +95,33 @@ test("§2 the wrapped shape — Drizzle's `Failed query:` with the driver error 
   assert.equal(membershipConflictMessage(wrapped), ROLE_ALREADY_FILLED_MESSAGE);
 });
 
-test("§3 the person-level index maps to the other sentence, not the seat one", () => {
+test("§3 the SUBSUMED index is not a live guard, so it maps to no sentence at all", () => {
   const wrapped = Object.assign(
     new Error('Failed query: insert into "team_memberships" …\nparams: …'),
     { cause: neonUniqueViolation(PERSON_INDEX) }
   );
 
-  assert.equal(
-    membershipConflictMessage(wrapped),
-    PERSON_ALREADY_ASSIGNED_MESSAGE,
-    "#409 D1: the two refusals are different sentences and the planter's next move differs — never collapse them"
+  for (const shape of [wrapped, neonUniqueViolation(PERSON_INDEX)]) {
+    assert.equal(
+      membershipConflictMessage(shape),
+      null,
+      "#411 round 1: `team_memberships_active_unique` (team, person, role) is strictly subsumed by the seat index on `role_id` alone — no write can violate it first, so a branch for it is unreachable code claiming to be a guard"
+    );
+  }
+
+  // Where the double-submit sentence really comes from now: `assignMember`
+  // reads WHO holds the seat on the loser branch and names them. The sentence
+  // still exists and is still different from the seat one — the planter's next
+  // move differs — it simply is not produced by translating a driver error.
+  assert.notEqual(PERSON_ALREADY_ASSIGNED_MESSAGE, ROLE_ALREADY_FILLED_MESSAGE);
+  const memberships = readFileSync(
+    path.join(process.cwd(), "src/lib/ministry-teams/memberships.ts"),
+    "utf8"
   );
-  assert.equal(
-    membershipConflictMessage(neonUniqueViolation(PERSON_INDEX)),
-    PERSON_ALREADY_ASSIGNED_MESSAGE
+  assert.match(
+    memberships,
+    /holder\?\.personId === personId[\s\S]{0,80}PERSON_ALREADY_ASSIGNED_MESSAGE/,
+    "#411 round 1: the same-person refusal is decided by reading the seat's active holder, not by a dead branch over a subsumed index"
   );
 });
 

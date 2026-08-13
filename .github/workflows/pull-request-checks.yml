@@ -180,9 +180,12 @@ jobs:
   # path here is built on it (`memory/invariants.md` → Transactions). So the
   # driver stays and the ENDPOINT moves: `local-neon-http-proxy` serves Neon's
   # HTTP protocol in front of the Postgres service container, and
-  # `localNeonHttpEndpoint` (src/db/connection.ts) points the client at it
-  # whenever DATABASE_URL names a local host. Production is untouched — a real
-  # Neon host takes the driver's own endpoint.
+  # `scripts/live-db-endpoint.ts` — preloaded by `pnpm test:live` with
+  # `--import`, so it lands before any suite imports `@/db` — points the client
+  # at it. The switch belongs to the TEST RUNNER, which knows this is a live
+  # run; the application's request path has no such seam and no opinion about
+  # hostnames, so nothing about production can be redirected by an environment
+  # variable.
   #
   # THIS CHECK IS NOT YET REQUIRED BY THE `main protection` ruleset. It runs
   # and reports on every PR; making it blocking is a ruleset edit, which is
@@ -264,13 +267,15 @@ jobs:
       # on reachability alone and assert against the 90 published wiki
       # articles. This database is migrated but unseeded, so they would fail
       # here for a reason that has nothing to do with a race. Seeding the
-      # corpus is a different job; `src/db/connection.test.ts` §5 keeps the
-      # `test:live` list from drifting away from the suites that opt in.
+      # corpus is a different job; `src/db/live-suite-coverage.test.ts` keeps
+      # the `test:live` list from drifting away from the suites that opt in,
+      # and pins the `--import` preload the whole job depends on.
       - name: Run the live suites
         run: LIVE_DB_TESTS=1 pnpm test:live
         env:
-          # A local host, so `localNeonHttpEndpoint` routes the neon-http
-          # client to the proxy's default endpoint (http://localhost:4444/sql).
-          # Set NEON_HTTP_PROXY_URL to override that.
+          # The neon-http client's SQL goes to the proxy; drizzle-kit's own
+          # connection (the migrate step above) goes straight to Postgres over
+          # TCP. Both are named explicitly — no hostname is being interpreted.
+          NEON_HTTP_PROXY_URL: "http://localhost:4444/sql"
           DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/main"
           RESEND_API_KEY: "re_ci_placeholder"

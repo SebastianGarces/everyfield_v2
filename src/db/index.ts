@@ -1,18 +1,6 @@
-import { neon, neonConfig } from "@neondatabase/serverless";
+import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
-import { localNeonHttpEndpoint } from "./connection";
 import * as schema from "./schema";
-
-// A local Postgres does not speak Neon's HTTP protocol, so when DATABASE_URL
-// names one, the driver is pointed at the proxy that does. Real Neon hosts get
-// `null` and keep the driver's own endpoint — production is byte-identical to
-// what it was. The whole reason this line exists is `connection.ts`'s header:
-// it is what makes the `LIVE_DB_TESTS=1` suites runnable in CI at all.
-const localEndpoint = localNeonHttpEndpoint(
-  process.env.DATABASE_URL,
-  process.env.NEON_HTTP_PROXY_URL
-);
-if (localEndpoint) neonConfig.fetchEndpoint = localEndpoint;
 
 const sql = neon(process.env.DATABASE_URL!);
 export const db = drizzle(sql, { schema });
@@ -56,4 +44,11 @@ export type Database = typeof db;
 //      fail. `tasks_meeting_evaluation_unique_idx` is the reference example:
 //      the uniquely-indexed row shares one INSERT statement with the rows it
 //      speaks for, so the loser of a race writes nothing at all.
+//
+// THE LIVE RACE SUITES DO NOT CHANGE THIS MODULE. They need a real Postgres,
+// which neon-http cannot reach over TCP, so `pnpm test:live` preloads
+// `scripts/live-db-endpoint.ts` — it moves the driver's fetch endpoint to the
+// local Neon HTTP proxy before any suite imports this file. The switch belongs
+// to the test runner, which knows it is a live run; the request path stays two
+// lines and has no opinion about hostnames.
 // ============================================================================

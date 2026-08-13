@@ -1,13 +1,7 @@
-import {
-  TEAM_MEMBERSHIPS_ACTIVE_UNIQUE,
-  TEAM_MEMBERSHIPS_ROLE_ACTIVE_UNIQUE,
-} from "@/db/schema/ministry-teams";
+import { TEAM_MEMBERSHIPS_ROLE_ACTIVE_UNIQUE } from "@/db/schema/ministry-teams";
 import { isUniqueViolation } from "@/db/errors";
 
-import {
-  PERSON_ALREADY_ASSIGNED_MESSAGE,
-  ROLE_ALREADY_FILLED_MESSAGE,
-} from "./membership-copy";
+import { ROLE_ALREADY_FILLED_MESSAGE } from "./membership-copy";
 
 // ============================================================================
 // #409 D1 — the translation from a driver unique-violation to the seat copy.
@@ -35,9 +29,24 @@ import {
 // ============================================================================
 
 /**
- * Translate a unique-violation on either active-membership index into the user
- * copy it means. Returns `null` for anything else, so its caller rethrows real
- * faults untouched.
+ * Translate a unique-violation on the SEAT index into the user copy it means.
+ * Returns `null` for anything else, so its caller rethrows real faults
+ * untouched.
+ *
+ * WHY ONE INDEX AND NOT TWO. This function used to carry a second branch, for
+ * `team_memberships_active_unique` (team_id, person_id, role_id) → the
+ * double-submit sentence. That branch was unreachable and is gone:
+ * `team_memberships_role_active_unique_idx` is keyed on `role_id` ALONE, so it
+ * strictly subsumes the older triple — at most one active row per role means at
+ * most one per any triple containing the role — and the subsumed index can
+ * therefore never be the one a write violates first. The INSERT path never
+ * raises at all (its `ON CONFLICT` arbiter is the seat index, so a duplicate is
+ * `INSERT 0 0`), and the reactivation UPDATE meets the seat index. The
+ * double-submit sentence has a REAL source now, and it is not a driver error:
+ * `assignMember`'s loser branch reads who holds the seat and names them
+ * (`seatRefusalMessage`). Do not restore the branch to "cover" the subsumed
+ * index — see the note beside `TEAM_MEMBERSHIPS_ACTIVE_UNIQUE` in
+ * `src/db/schema/ministry-teams.ts` for why the index itself is KEPT anyway.
  *
  * WHY A TRANSLATION AND NOT A PRE-CHECK. The reactivation path in
  * `assignMember` is an UPDATE, and an UPDATE takes no `ON CONFLICT`. A
@@ -59,9 +68,6 @@ import {
 export function membershipConflictMessage(error: unknown): string | null {
   if (isUniqueViolation(error, TEAM_MEMBERSHIPS_ROLE_ACTIVE_UNIQUE)) {
     return ROLE_ALREADY_FILLED_MESSAGE;
-  }
-  if (isUniqueViolation(error, TEAM_MEMBERSHIPS_ACTIVE_UNIQUE)) {
-    return PERSON_ALREADY_ASSIGNED_MESSAGE;
   }
   return null;
 }
