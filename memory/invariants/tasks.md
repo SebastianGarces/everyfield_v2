@@ -72,6 +72,16 @@ Not carried: `completionEvent`. An auto-completion hook is installed by whatever
 
 The reverse of the usual "durable marker last" rule, and deliberate, because the two failure modes are not symmetric. A successor with no completion leaves **two** open instances of one series, breaking the guarantee a planter relies on. A completion with no successor leaves a gap that reopening and re-completing repairs. We take the recoverable one, and `completeTask` swallows a recurrence failure rather than telling the planter their completed task failed to complete.
 
+## A description is rich text, and there is one write gate (T-021)
+
+**Source:** `src/lib/tasks/descriptions.ts`, `src/lib/tasks/service.ts`, `src/lib/tasks/import.ts`, `src/lib/launch/milestones.ts`, `src/components/tasks/task-form.tsx`. The sanitiser, the door and the renderer are shared with messages — [`rich-text.md`](rich-text.md).
+
+A task description is rich text on the SAME editor and sanitiser as a message body (T-021, see [`rich-text.md`](rich-text.md)) — never a second editor. `normalizeTaskDescription` (`src/lib/tasks/descriptions.ts`) is the one write gate and EVERY write goes through it: `createTask`, `updateTask`, `importTaskTemplate` and `seedLaunchMilestones`. The claim used to credit the meeting follow-up generator too, which writes no description at all, while `importTaskTemplate` — the one path that really did write one un-gated — was unlisted. **Enumerate the writers, do not name a plausible one**, and enumerate them by looking: `grep -rn 'insert into tasks' src/` plus every Drizzle `insert(tasks)`. That is how the fourth was found — `seedLaunchMilestones` (`planSeedRows`, `src/lib/launch/milestones.ts`) copies the Launch Playbook's authored strings straight into `tasks.description` on every launch schedule, so it is a live path and not a dev seed, and it wrote past the gate on the very commit that demanded the writers be enumerated. `milestones.test.ts` now pins the planner's call. (Its sibling line, `launch_milestones.description`, is a different column on a different table, rendered as plain text by `milestone-board.tsx` — it does NOT take the task door.)
+
+The gate is in the SERVICE and not in the form, because the task actions are POSTable endpoints that never saw the toolbar. An emptied editor stores NULL, so "has a description" stays one question everywhere downstream.
+
+`description` means ONE thing on every row — the stored HTML — and a LIST row carries the readable summary BESIDE it, as `descriptionPreview` (`TaskListRow`, `service.ts`; the flattener is `withDescriptionPreviews` in `descriptions.ts`). It was one field with two meanings, HTML from `getTask` and plain text from `listTasks`, both typed `TaskWithAssignee`: which shape a caller held depended on which query produced it and nothing in the type said so. `TaskCardView` renders `descriptionPreview` and clamps it — the card renders every field it is given as TEXT, so markup there prints `<strong>` at the planter, and a preview with no reader is a transform nobody can prove.
+
 ## The catalog has two entrances, and the standing one is a route (T-011/T-012)
 
 **Source:** `src/app/(dashboard)/tasks/templates/page.tsx`, `src/app/(dashboard)/tasks/page.tsx`, `src/components/tasks/template-picker.tsx`, `src/app/(dashboard)/tasks/actions.ts`

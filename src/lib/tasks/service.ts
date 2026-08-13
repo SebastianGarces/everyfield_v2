@@ -26,6 +26,14 @@ import {
   type SQL,
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+// Task descriptions are rich text (T-021), sharing COM-017's editor and its
+// sanitiser. `descriptions.ts` owns both halves of that — the write gate and
+// the list surfaces' readable preview — and its header states the rules.
+import {
+  normalizeTaskDescription,
+  withDescriptionPreviews,
+  type WithDescriptionPreview,
+} from "./descriptions";
 import type { ListTasksResult, TaskCounts, TaskWithAssignee } from "./types";
 import { MAX_BULK_TASKS } from "./types";
 import { emitTaskCompleted } from "./events";
@@ -66,6 +74,24 @@ export interface ListTasksOptions {
   sortDir?: "asc" | "desc";
 }
 
+/**
+ * A task as a LIST query returns it: everything `getTask` returns, plus the
+ * readable summary of its description (T-021).
+ *
+ * A row type of its own rather than a second meaning for `description`. The
+ * list readers used to overwrite that field with plain text while `getTask`
+ * left it as HTML, both typed `TaskWithAssignee` — so which shape a caller was
+ * holding depended on which query had produced it, and nothing in the type said
+ * so. `description` is the stored markup on every row now; `descriptionPreview`
+ * is the summary, and it is the field the card renders.
+ */
+export type TaskListRow = WithDescriptionPreview<TaskWithAssignee>;
+
+/** `ListTasksResult` over the row type above. */
+export interface TaskListResult extends Omit<ListTasksResult, "tasks"> {
+  tasks: TaskListRow[];
+}
+
 // ============================================================================
 // Queries
 // ============================================================================
@@ -73,6 +99,10 @@ export interface ListTasksOptions {
 /**
  * Get a single task by ID with assignee info.
  * Returns null if not found or soft-deleted.
+ *
+ * `description` comes back as the stored rich text (T-021) — this is what the
+ * detail page renders and what the edit form loads. The list readers below hand
+ * back the plain-text preview instead; see the Descriptions section.
  */
 export async function getTask(
   churchId: string,
@@ -214,7 +244,7 @@ export function taskListConditions(
 export async function listTasks(
   churchId: string,
   options: ListTasksOptions = {}
-): Promise<ListTasksResult> {
+): Promise<TaskListResult> {
   const { cursor, limit = 50, sortBy = "due_date", sortDir = "asc" } = options;
 
   const safeLimit = Math.min(Math.max(1, limit), 100);
@@ -313,7 +343,9 @@ export async function listTasks(
     : null;
 
   return {
-    tasks: resultTasks as TaskWithAssignee[],
+    // Readable text, never markup (T-021): the card renders every field it is
+    // given as text, so an un-flattened description would print its own tags.
+    tasks: withDescriptionPreviews(resultTasks as TaskWithAssignee[]),
     total,
     nextCursor,
   };
@@ -542,7 +574,7 @@ async function assertSubtaskNesting(
 export async function listSubtasks(
   churchId: string,
   parentTaskId: string
-): Promise<TaskWithAssignee[]> {
+): Promise<TaskListRow[]> {
   const result = await db
     .select({
       id: tasks.id,
@@ -581,7 +613,8 @@ export async function listSubtasks(
     )
     .orderBy(asc(tasks.createdAt), asc(tasks.id));
 
-  return result as TaskWithAssignee[];
+  // A checklist is a list surface too — same rule as `listTasks`.
+  return withDescriptionPreviews(result as TaskWithAssignee[]);
 }
 
 // ============================================================================
@@ -646,7 +679,10 @@ export async function createTask(
       churchId,
       createdById: userId,
       title: data.title,
-      description: data.description,
+      // Sanitised HERE, not in the form (T-021). The action that calls this is
+      // a POSTable endpoint the editor never touched, and the meeting follow-up
+      // generator calls it with plain text — one door covers both.
+      description: normalizeTaskDescription(data.description),
       status: data.status,
       priority: data.priority,
       dueDate: data.dueDate ?? null,
@@ -711,8 +747,10 @@ export async function updateTask(
   );
 
   if (data.title !== undefined) updateData.title = data.title;
+  // Same gate as create — an edit is the second write path, and it is reachable
+  // with no session and no UI just like the first (T-021).
   if (data.description !== undefined)
-    updateData.description = data.description ?? null;
+    updateData.description = normalizeTaskDescription(data.description);
   if (data.status !== undefined) updateData.status = data.status;
   if (data.priority !== undefined) updateData.priority = data.priority;
   if (data.dueDate !== undefined) updateData.dueDate = data.dueDate ?? null;

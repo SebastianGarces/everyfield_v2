@@ -48,6 +48,7 @@ import {
   requireChurchAccess,
   requireRole,
 } from "@/lib/auth/access";
+import { normalizeTaskDescription } from "@/lib/tasks/descriptions";
 
 // ----------------------------------------------------------------------------
 // The template
@@ -271,6 +272,9 @@ function planSeedRows(
     templateKey: template.templateKey,
     area: template.area,
     title: template.title,
+    // NOT normalised: this is `launch_milestones.description`, a different
+    // column on a different table, rendered as plain text by
+    // `milestone-board.tsx`. Only the TASK rows below take the task door.
     description: template.description,
     // Display order across the whole list, from the template's own order — so
     // the page never has to know the area order separately.
@@ -278,7 +282,15 @@ function planSeedRows(
     tasks: template.tasks.map((task) => ({
       taskId: crypto.randomUUID(),
       title: task.title,
-      description: task.description,
+      // This is a writer of `tasks.description`, so it takes the same door as
+      // `createTask`, `updateTask` and `importTaskTemplate` (T-021). The seed's
+      // strings are first-party plain text today and `toRichTextHtml` converts
+      // legacy prose on read, so nothing renders differently — but a description
+      // that reaches the column without passing `normalizeTaskDescription` is a
+      // shape no reader is entitled to assume, and this is the only writer that
+      // did. `descriptions.ts` imports nothing but the rich-text door, so this
+      // pulls no database code into the module.
+      description: normalizeTaskDescription(task.description),
     })),
   }));
 }

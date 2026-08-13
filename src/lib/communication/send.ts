@@ -25,6 +25,7 @@ import { render } from "@react-email/components";
 import { resend, EMAIL_FROM } from "@/lib/email/client";
 import {
   CommunicationEmail,
+  CommunicationEmailText,
   CONFIRM_PLACEHOLDER,
   DECLINE_PLACEHOLDER,
 } from "@/lib/email/components/communication-email";
@@ -46,6 +47,11 @@ import {
   evaluateResendEligibility,
   resendBlockedMessage,
 } from "./resend-policy";
+import {
+  escapeMergeValues,
+  richTextToPlainText,
+  toRichTextHtml,
+} from "@/lib/rich-text/format";
 import type { ComposeMessageInput } from "@/lib/validations/communication";
 
 // ---------------------------------------------------------------------------
@@ -71,6 +77,19 @@ export async function sendCommunication(
   if (!church) throw new Error("Church not found");
 
   const churchMergeData = buildChurchMergeData(church);
+
+  // COM-017. The body is rich text, and THIS is the gate — not the editor.
+  // Every export of the compose action is a POSTable endpoint, so the markup
+  // arriving here has never been anywhere near the toolbar. It is sanitised
+  // once, before it is stored and before it is rendered, and the stored row is
+  // the sanitised form: nothing downstream re-derives it and gets it wrong.
+  // A legacy plain-text body (a system template, a resend of an older message)
+  // is converted rather than escaped into gibberish — `toRichTextHtml` decides.
+  const safeBodyHtml = toRichTextHtml(input.body);
+  // The text/plain half of the email is flattened from the SAME safe HTML, so
+  // the two halves can never say different things. It is also what is STORED in
+  // `communications.body` — see the insert below.
+  const safeBodyText = richTextToPlainText(safeBodyHtml);
 
   // 2. Load meeting if provided
   let meetingMergeData: Record<string, string> = {};
@@ -107,13 +126,23 @@ export async function sendCommunication(
     throw new Error("No valid recipients found");
   }
 
-  // 4. Create communication record
+  // 4. Create communication record.
+  //
+  // TWO COLUMNS, TWO SHAPES, and the schema already said which is which:
+  // `body` is the FLATTENED plain text and `body_html` is the sanitised markup.
+  // `body` is what message search reads (`ilike` in `filters.ts`), so storing
+  // markup there made a planter's search for "we are excited" miss a body that
+  // bolded a word in the middle of it, and a search for "p" match every
+  // formatted message in the church. No migration is needed for either column:
+  // a row written before COM-017 has `body_html` NULL and plain text in `body`,
+  // which is exactly what `bodyHtml ?? body` + `toRichTextHtml` already handle.
   const [comm] = await db
     .insert(communications)
     .values({
       churchId,
       subject: input.subject,
-      body: input.body,
+      body: safeBodyText,
+      bodyHtml: safeBodyHtml,
       channel: input.channel,
       templateId: input.templateId,
       meetingId: input.meetingId,
@@ -132,7 +161,8 @@ export async function sendCommunication(
     personId: string;
     email: string;
     subject: string;
-    body: string;
+    bodyHtml: string;
+    bodyText: string;
     confirmUrl?: string;
     declineUrl?: string;
   }> = [];
@@ -171,7 +201,11 @@ export async function sendCommunication(
       personId: person.id,
       email: person.email,
       subject: input.subject ? renderTemplate(input.subject, mergeData) : "",
-      body: renderTemplate(input.body, mergeData),
+      // Merge VALUES are escaped before they land in an HTML body — a person
+      // called `Bobby <script>` is a name, not markup. The token substitution
+      // itself is still `renderTemplate`, the one implementation of it.
+      bodyHtml: renderTemplate(safeBodyHtml, escapeMergeValues(mergeData)),
+      bodyText: renderTemplate(safeBodyText, mergeData),
       confirmUrl,
       declineUrl,
     });
@@ -185,7 +219,7 @@ export async function sendCommunication(
       ...p,
       html: await render(
         CommunicationEmail({
-          body: p.body,
+          bodyHtml: p.bodyHtml,
           confirmUrl: p.confirmUrl,
           declineUrl: p.declineUrl,
           churchName: church.name,
@@ -193,8 +227,8 @@ export async function sendCommunication(
         })
       ),
       text: await render(
-        CommunicationEmail({
-          body: p.body,
+        CommunicationEmailText({
+          body: p.bodyText,
           churchName: church.name,
         }),
         { plainText: true }
@@ -400,7 +434,10 @@ export async function resendToNonOpeners(
 
   return sendCommunication(churchId, userId, {
     subject: original.subject ?? "",
-    body: original.body,
+    // The ONE read expression for a stored body: the markup if the row has it,
+    // the plain text if it predates `body_html`. `toRichTextHtml` inside
+    // `sendCommunication` converts the second case; the first is idempotent.
+    body: original.bodyHtml ?? original.body,
     channel: original.channel,
     templateId: original.templateId ?? undefined,
     meetingId: original.meetingId ?? undefined,

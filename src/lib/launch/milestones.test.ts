@@ -5,6 +5,8 @@ import { test } from "node:test";
 
 import { PgDialect } from "drizzle-orm/pg-core";
 
+import { sourceReader } from "@/lib/testing/source-span";
+
 import { LAUNCH_MILESTONE_AREA_ORDER } from "./milestone-areas";
 import {
   completeLaunchMilestoneStatement,
@@ -266,6 +268,38 @@ test("milestone completion follows TASK rules, not the planter-only rule", () =>
     !/requireRole\(user, "planter"\)/.test(source),
     "milestone completion must not be planter-only (LS-007)"
   );
+});
+
+test("the seeded tasks take the one description door, like every other writer", () => {
+  // `seedLaunchMilestones` is the FOURTH writer of `tasks.description`, beside
+  // `createTask`, `updateTask` and `importTaskTemplate` — a live path, run on
+  // every launch schedule, not a dev seed. T-021 says every write goes through
+  // `normalizeTaskDescription` (memory/invariants/tasks.md), and this one wrote
+  // the template's raw string straight into the column. Read off the source
+  // because `planSeedRows` is private and the statement builder is handed rows
+  // the test itself made up — the gate lives in the planner, not in the SQL.
+  const read = sourceReader(
+    readFileSync(
+      path.join(process.cwd(), "src", "lib", "launch", "milestones.ts"),
+      "utf8"
+    ),
+    "milestones.ts"
+  );
+
+  assert.match(
+    read.code,
+    /import \{ normalizeTaskDescription \} from "@\/lib\/tasks\/descriptions"/
+  );
+
+  const planner = read.span("function planSeedRows", "* Seed the Playbook set");
+  assert.match(
+    planner,
+    /description: normalizeTaskDescription\(task\.description\)/,
+    "a seeded task's description must pass the T-021 write gate"
+  );
+  // The MILESTONE's own description is a different column on a different table,
+  // rendered as plain text — it must NOT be routed through the task door.
+  assert.match(planner, /^\s*description: template\.description,$/m);
 });
 
 test("the milestone history is a READ of the row, church-scoped, losing nobody", () => {
