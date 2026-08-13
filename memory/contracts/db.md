@@ -69,8 +69,10 @@ tenant scope; `created_at`/`updated_at` default now.
   be a wider key for the same rule and would let a forged church id claim a second answer.
   `acceptPhaseTemplatePrompt` writes it with `ON CONFLICT DO NOTHING` BEFORE the import it guards
   and gates the import on the claim's rowcount — see `../invariants.md` → Transactions for why
-  claim-first rather than marker-last. The `PHASE_TEMPLATE_PROMPT_COOKIE` beside it is a fast path
-  that can only suppress a prompt, never restore one.
+  claim-first rather than marker-last. This ROW is the only
+  record of the answer: the `PHASE_TEMPLATE_PROMPT_COOKIE` that used to sit beside it as a "fast
+  path" was deleted by #411 — it saved no query (the answer arrives on the same LEFT JOIN as the
+  transition) and was a year-long browser-held copy of an answer the plant owns.
 - **`church_id = null` means global content** (e.g. wiki articles visible to all tenants).
 - **`sessions.id`** is the SHA-256 of the token, not the token.
 - **Soft deletes:** `persons.deleted_at` — feature queries must filter it.

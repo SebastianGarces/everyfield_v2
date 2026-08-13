@@ -194,6 +194,51 @@ export function parseDateTimeLocalValue(value: string): Date | null {
 }
 
 /**
+ * One whole day, in milliseconds.
+ *
+ * Every "N days from here" in the app is this constant, and it lives beside
+ * `APP_TIME_ZONE` because it is only correct while that zone is UTC — whose
+ * days are exactly 24h and aligned to the epoch. A zone with DST would make day
+ * arithmetic calendar-aware and this constant wrong, so the assumption and the
+ * number belong in one file. Before #411 it was spelled five ways across the
+ * tasks domain (`24 * 60 * 60 * 1000` four times, `86_400_000` once), which is
+ * five places for a fix to miss.
+ */
+export const MS_PER_DAY = 86_400_000;
+
+/**
+ * The `APP_TIME_ZONE` calendar day of an instant, as `"YYYY-MM-DD"`.
+ *
+ * The app's one answer to "which day is this?" — `tasks.due_date` and
+ * `launches.target_date` are `date` columns, calendar days rather than
+ * instants, and every surface that renders one says which day it is in
+ * `APP_TIME_ZONE`. So the day a write NAMES has to be measured in the same
+ * zone the day is later read in (`memory/invariants.md` → Date & Time
+ * Rendering); `getFullYear()/getMonth()/getDate()` is the runtime's calendar
+ * and is how a planter far enough east pressed "Today" and got tomorrow.
+ *
+ * It lived in `lib/tasks/recurrence.ts` until #411 — a module about recurring
+ * task chains — while client components and three other domains imported it.
+ * It is a datetime primitive, so it lives with the datetime primitives, and
+ * this module imports nothing, so a `"use client"` component may reach it.
+ */
+export function toCalendarDate(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * The calendar day `days` whole days from `from`, as `"YYYY-MM-DD"`.
+ *
+ * `toCalendarDate(new Date(base.getTime() + n * MS_PER_DAY))` was written out
+ * at six call sites; this is that shape, once. Whole days in, whole days out —
+ * the hour of `from` never moves the answer by a day, because both ends are
+ * measured on the same UTC-aligned grid.
+ */
+export function addCalendarDays(from: Date, days: number): string {
+  return toCalendarDate(new Date(from.getTime() + days * MS_PER_DAY));
+}
+
+/**
  * Whole calendar days from `now` to `date`, counted in `APP_TIME_ZONE`.
  *
  * Calendar days, not 24-hour blocks: a meeting at 11:30 PM tonight is `0`
@@ -204,7 +249,6 @@ export function parseDateTimeLocalValue(value: string): Date | null {
  * components), since it reads the clock.
  */
 export function relativeDayOffset(date: Date, now: Date = new Date()): number {
-  const MS_PER_DAY = 86_400_000;
   // Valid because APP_TIME_ZONE is UTC, whose days are exactly 24h and aligned
   // to the epoch. A zone with DST would need a calendar-aware difference.
   const dayOf = (d: Date) => Math.floor(d.getTime() / MS_PER_DAY);

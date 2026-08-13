@@ -3,8 +3,9 @@ import { tasks, type NewTask, type Task } from "@/db/schema";
 import type { TaskCategory, TaskPriority } from "@/db/schema/tasks";
 import type { PhaseNumber } from "@/lib/constants";
 
+import { addCalendarDays, toCalendarDate } from "@/lib/datetime";
+
 import { normalizeTaskDescription } from "./descriptions";
-import { toCalendarDate } from "./recurrence";
 import {
   UNKNOWN_TEMPLATE_ERROR,
   findTaskTemplate,
@@ -22,12 +23,11 @@ import {
 // The offsets are the only thing that ships in the code; nothing about "when"
 // is ever stored in `templates.ts`.
 //
-// THE ARITHMETIC IS UTC, VIA `toCalendarDate`. `tasks.due_date` is a `date`
+// THE ARITHMETIC IS UTC, VIA `addCalendarDays`. `tasks.due_date` is a `date`
 // column — a calendar day, not an instant — and `APP_TIME_ZONE` is UTC
-// (`src/lib/datetime.ts`). `toCalendarDate` is the house helper recurrence
-// already steps dates with; reusing it is what stops a second, differently
-// rounded copy of "which day is this?" appearing (`memory/invariants.md` →
-// Date & Time Rendering).
+// (`src/lib/datetime.ts`), which is also where the app's day primitives live.
+// Reusing them is what stops a second, differently rounded copy of "which day
+// is this?" appearing (`memory/invariants.md` → Date & Time Rendering).
 //
 // IMPORTING TWICE CREATES TWO SETS, ON PURPOSE. There is no dedupe, and the
 // silence would be the bug — so the picker states it in words
@@ -91,8 +91,6 @@ export interface TemplateImportPlan {
   tasks: PlannedTemplateTask[];
 }
 
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
-
 /**
  * `importedOn` plus `offsetDays`, as a calendar day.
  *
@@ -104,8 +102,7 @@ export function templateDueDate(
   importedOn: string,
   offsetDays: number
 ): string {
-  const base = new Date(`${importedOn}T00:00:00Z`).getTime();
-  return toCalendarDate(new Date(base + offsetDays * MS_PER_DAY));
+  return addCalendarDays(new Date(`${importedOn}T00:00:00Z`), offsetDays);
 }
 
 /**

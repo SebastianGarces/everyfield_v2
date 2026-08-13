@@ -32,6 +32,7 @@
  * client bundle.
  */
 
+import { addCalendarDays } from "@/lib/datetime";
 import { isCalendarDate } from "@/lib/validations/tasks";
 import { z } from "zod";
 
@@ -141,6 +142,12 @@ export function describeRecurrence(rule: RecurrenceRule | null): string | null {
 // UTC, which is `APP_TIME_ZONE` (`src/lib/datetime.ts`) — so advancing a due
 // date is a pure function of the string and never depends on where the code
 // runs. No `Date` is ever formatted for a human here.
+//
+// The day primitives themselves live in `src/lib/datetime.ts`, beside
+// `APP_TIME_ZONE` and `MS_PER_DAY`: `toCalendarDate` and `addCalendarDays` are
+// the whole app's calendar-day arithmetic, not this module's, and until #411
+// they were declared here — a module about recurring task chains — with client
+// components and three other domains importing them through it.
 // ============================================================================
 
 const DAYS_BY_INTERVAL: Partial<Record<RecurrenceInterval, number>> = {
@@ -154,13 +161,6 @@ const MONTHS_BY_INTERVAL: Partial<Record<RecurrenceInterval, number>> = {
   quarterly: 3,
   yearly: 12,
 };
-
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
-
-/** The UTC calendar day of an instant, as "YYYY-MM-DD". */
-export function toCalendarDate(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
 
 /** How many days the given (0-indexed) month of the given year has. */
 function daysInMonth(year: number, monthIndex: number): number {
@@ -187,9 +187,7 @@ export function advanceDate(
   const days = DAYS_BY_INTERVAL[interval];
   if (days !== undefined) {
     // Fixed-length steps in UTC: no DST, no month-length surprises.
-    const advanced =
-      new Date(`${date}T00:00:00Z`).getTime() + days * MS_PER_DAY;
-    return toCalendarDate(new Date(advanced));
+    return addCalendarDays(new Date(`${date}T00:00:00Z`), days);
   }
 
   const months = MONTHS_BY_INTERVAL[interval];

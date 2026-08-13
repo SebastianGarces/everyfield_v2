@@ -37,11 +37,11 @@ import {
 import type { ListTasksResult, TaskCounts, TaskWithAssignee } from "./types";
 import { MAX_BULK_TASKS } from "./types";
 import { emitTaskCompleted } from "./events";
+import { toCalendarDate } from "@/lib/datetime";
 import {
   nextRecurrenceDueDate,
   parseRecurrenceRule,
   seriesIdOf,
-  toCalendarDate,
   type TaskRecurrenceInput,
 } from "./recurrence";
 
@@ -97,6 +97,49 @@ export interface TaskListResult extends Omit<ListTasksResult, "tasks"> {
 // ============================================================================
 
 /**
+ * THE ONE COLUMN LIST BEHIND EVERY `TaskWithAssignee` (#411).
+ *
+ * `getTask`, `listTasks` and `listSubtasks` each wrote out the same
+ * twenty-odd `tasks.*` columns plus the two joined `users` ones, and each
+ * finished with `as TaskWithAssignee`. Three hand-kept copies of one row shape,
+ * with a cast at the end telling the compiler not to check them — so they had
+ * already drifted: `listSubtasks` selected `completion_event` and the other two
+ * did not, which made `getTask(...).completionEvent` a field the type promised
+ * and the query never returned. Nothing read it yet, which is the only reason
+ * it was not a bug.
+ *
+ * Declared once, `satisfies` the row type, and the casts are gone: a column
+ * added to `tasks` is a compile error here until it is selected, and the three
+ * readers cannot disagree about what a task row is.
+ */
+const taskWithAssigneeColumns = {
+  id: tasks.id,
+  churchId: tasks.churchId,
+  title: tasks.title,
+  description: tasks.description,
+  status: tasks.status,
+  priority: tasks.priority,
+  dueDate: tasks.dueDate,
+  dueTime: tasks.dueTime,
+  assignedToId: tasks.assignedToId,
+  category: tasks.category,
+  relatedType: tasks.relatedType,
+  relatedId: tasks.relatedId,
+  parentTaskId: tasks.parentTaskId,
+  isRecurring: tasks.isRecurring,
+  recurrenceRule: tasks.recurrenceRule,
+  completionEvent: tasks.completionEvent,
+  completedAt: tasks.completedAt,
+  completedById: tasks.completedById,
+  createdById: tasks.createdById,
+  createdAt: tasks.createdAt,
+  updatedAt: tasks.updatedAt,
+  deletedAt: tasks.deletedAt,
+  assigneeName: users.name,
+  assigneeEmail: users.email,
+} satisfies Record<keyof TaskWithAssignee, unknown>;
+
+/**
  * Get a single task by ID with assignee info.
  * Returns null if not found or soft-deleted.
  *
@@ -109,31 +152,7 @@ export async function getTask(
   taskId: string
 ): Promise<TaskWithAssignee | null> {
   const result = await db
-    .select({
-      id: tasks.id,
-      churchId: tasks.churchId,
-      title: tasks.title,
-      description: tasks.description,
-      status: tasks.status,
-      priority: tasks.priority,
-      dueDate: tasks.dueDate,
-      dueTime: tasks.dueTime,
-      assignedToId: tasks.assignedToId,
-      category: tasks.category,
-      relatedType: tasks.relatedType,
-      relatedId: tasks.relatedId,
-      parentTaskId: tasks.parentTaskId,
-      isRecurring: tasks.isRecurring,
-      recurrenceRule: tasks.recurrenceRule,
-      completedAt: tasks.completedAt,
-      completedById: tasks.completedById,
-      createdById: tasks.createdById,
-      createdAt: tasks.createdAt,
-      updatedAt: tasks.updatedAt,
-      deletedAt: tasks.deletedAt,
-      assigneeName: users.name,
-      assigneeEmail: users.email,
-    })
+    .select(taskWithAssigneeColumns)
     .from(tasks)
     .leftJoin(users, eq(tasks.assignedToId, users.id))
     .where(
@@ -145,7 +164,7 @@ export async function getTask(
     )
     .limit(1);
 
-  return (result[0] as TaskWithAssignee) ?? null;
+  return result[0] ?? null;
 }
 
 /**
@@ -305,31 +324,7 @@ export async function listTasks(
 
   // Fetch tasks with assignee info
   const result = await db
-    .select({
-      id: tasks.id,
-      churchId: tasks.churchId,
-      title: tasks.title,
-      description: tasks.description,
-      status: tasks.status,
-      priority: tasks.priority,
-      dueDate: tasks.dueDate,
-      dueTime: tasks.dueTime,
-      assignedToId: tasks.assignedToId,
-      category: tasks.category,
-      relatedType: tasks.relatedType,
-      relatedId: tasks.relatedId,
-      parentTaskId: tasks.parentTaskId,
-      isRecurring: tasks.isRecurring,
-      recurrenceRule: tasks.recurrenceRule,
-      completedAt: tasks.completedAt,
-      completedById: tasks.completedById,
-      createdById: tasks.createdById,
-      createdAt: tasks.createdAt,
-      updatedAt: tasks.updatedAt,
-      deletedAt: tasks.deletedAt,
-      assigneeName: users.name,
-      assigneeEmail: users.email,
-    })
+    .select(taskWithAssigneeColumns)
     .from(tasks)
     .leftJoin(users, eq(tasks.assignedToId, users.id))
     .where(and(...queryConditions))
@@ -345,7 +340,7 @@ export async function listTasks(
   return {
     // Readable text, never markup (T-021): the card renders every field it is
     // given as text, so an un-flattened description would print its own tags.
-    tasks: withDescriptionPreviews(resultTasks as TaskWithAssignee[]),
+    tasks: withDescriptionPreviews(resultTasks),
     total,
     nextCursor,
   };
@@ -388,7 +383,8 @@ export async function getTaskCounts(
 ): Promise<TaskCounts> {
   const baseConditions = taskCountConditions(churchId, userId);
 
-  const today = new Date().toISOString().split("T")[0];
+  // The domain's one spelling of "today, as a calendar day in APP_TIME_ZONE".
+  const today = toCalendarDate(new Date());
 
   const parents = alias(tasks, "checklist_parent");
 
@@ -576,32 +572,7 @@ export async function listSubtasks(
   parentTaskId: string
 ): Promise<TaskListRow[]> {
   const result = await db
-    .select({
-      id: tasks.id,
-      churchId: tasks.churchId,
-      title: tasks.title,
-      description: tasks.description,
-      status: tasks.status,
-      priority: tasks.priority,
-      dueDate: tasks.dueDate,
-      dueTime: tasks.dueTime,
-      assignedToId: tasks.assignedToId,
-      category: tasks.category,
-      relatedType: tasks.relatedType,
-      relatedId: tasks.relatedId,
-      parentTaskId: tasks.parentTaskId,
-      isRecurring: tasks.isRecurring,
-      recurrenceRule: tasks.recurrenceRule,
-      completionEvent: tasks.completionEvent,
-      completedAt: tasks.completedAt,
-      completedById: tasks.completedById,
-      createdById: tasks.createdById,
-      createdAt: tasks.createdAt,
-      updatedAt: tasks.updatedAt,
-      deletedAt: tasks.deletedAt,
-      assigneeName: users.name,
-      assigneeEmail: users.email,
-    })
+    .select(taskWithAssigneeColumns)
     .from(tasks)
     .leftJoin(users, eq(tasks.assignedToId, users.id))
     .where(
@@ -614,7 +585,7 @@ export async function listSubtasks(
     .orderBy(asc(tasks.createdAt), asc(tasks.id));
 
   // A checklist is a list surface too — same rule as `listTasks`.
-  return withDescriptionPreviews(result as TaskWithAssignee[]);
+  return withDescriptionPreviews(result);
 }
 
 // ============================================================================

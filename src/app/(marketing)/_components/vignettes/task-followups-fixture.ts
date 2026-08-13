@@ -39,9 +39,17 @@
 // absolute dates behind it (2026-08-01, -08-03, -08-04, -08-14) are recorded
 // here instead.
 //
-// Built through the same local-midnight arithmetic `getDueDateInfo` uses, so
-// the two agree in any timezone. Server-rendered only — nothing here is ever
-// recomputed on the client, so there is no hydration mismatch to have.
+// Built through `addCalendarDays` — the SAME arithmetic `getDueDateInfo` now
+// measures with — so the fixture and the reader are on one calendar,
+// APP_TIME_ZONE, rather than two. They were briefly on two: `getDueDateInfo`
+// moved to APP_TIME_ZONE in #411 while this stayed on `getFullYear()` /
+// `getMonth()` / `getDate()`, the RUNTIME's calendar, under a comment claiming
+// they matched. Nothing broke, because `/` prerenders on a UTC builder, which
+// is exactly why nothing caught it either.
+//
+// The `now` these offsets are counted from is PASSED IN, by the same component
+// that passes it to `TaskCardView` — one instant for the whole render, so no
+// row can straddle a midnight the card is measuring from the other side of.
 //
 // This is the same move `snapshot-clock.ts` makes for the fixtures whose
 // components render relative *timestamps*, and it is deliberately not that
@@ -52,11 +60,13 @@
 // belongs next to `snapshotClock`.
 // ---------------------------------------------------------------------------
 //
-// import type only: `@/lib/tasks/types` and `@/lib/meetings/types` both
-// re-export from `@/db/schema`, and a value import would pull Drizzle into the
-// marketing bundle.
+// import type only for the row shapes: `@/lib/tasks/types` and
+// `@/lib/meetings/types` both re-export from `@/db/schema`, and a value import
+// would pull Drizzle into the marketing bundle. `@/lib/datetime` is a value
+// import and safe — it imports nothing at all.
 // ============================================================================
 
+import { addCalendarDays } from "@/lib/datetime";
 import type { MeetingWithCounts } from "@/lib/meetings/types";
 import type { TaskWithAssignee } from "@/lib/tasks/types";
 
@@ -67,15 +77,12 @@ const LOCATION_ID = "fixture-location";
 /** The day the rows below were snapshotted; every offset is counted from it. */
 export const SNAPSHOT_DAY = "2026-08-04";
 
-/** `YYYY-MM-DD`, `offset` days from today, built from local date parts because
- *  that is what `getDueDateInfo` compares against. */
-function dueDay(offset: number): string {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() + offset);
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${d.getFullYear()}-${month}-${day}`;
+/** `YYYY-MM-DD`, `offset` whole days from `now`, measured in APP_TIME_ZONE —
+ *  which is what `getDueDateInfo` compares against (it parses the due date as
+ *  `T00:00:00Z` and counts days through `relativeDayOffset`). One helper, one
+ *  calendar, for both halves. */
+function dueDay(now: Date, offset: number): string {
+  return addCalendarDays(now, offset);
 }
 
 const BLANK = {
@@ -99,9 +106,11 @@ const BLANK = {
  * The four rows, in the app's own due-date order.
  *
  * A function rather than a constant so the due dates are rebuilt on every
- * render rather than at module load — see the note above.
+ * render rather than at module load — see the note above. It takes the render's
+ * instant rather than reading the clock, so the day these rows NAME and the day
+ * `TaskCardView` MEASURES are the same day, taken once.
  */
-export function tasksFixture(): TaskWithAssignee[] {
+export function tasksFixture(now: Date): TaskWithAssignee[] {
   return [
     {
       ...BLANK,
@@ -111,7 +120,7 @@ export function tasksFixture(): TaskWithAssignee[] {
       description: null,
       status: "not_started",
       priority: "high",
-      dueDate: dueDay(-3),
+      dueDate: dueDay(now, -3),
       category: "vision_meeting",
       relatedType: "meeting",
       createdAt: new Date("2026-07-29T00:00:00.000Z"),
@@ -125,7 +134,7 @@ export function tasksFixture(): TaskWithAssignee[] {
       description: null,
       status: "not_started",
       priority: "high",
-      dueDate: dueDay(-1),
+      dueDate: dueDay(now, -1),
       category: "follow_up",
       relatedType: "person",
       createdAt: new Date("2026-07-31T00:00:00.000Z"),
@@ -139,7 +148,7 @@ export function tasksFixture(): TaskWithAssignee[] {
       description: null,
       status: "not_started",
       priority: "urgent",
-      dueDate: dueDay(0),
+      dueDate: dueDay(now, 0),
       category: "vision_meeting",
       relatedType: null,
       createdAt: new Date("2026-07-29T06:27:14.774Z"),
@@ -153,7 +162,7 @@ export function tasksFixture(): TaskWithAssignee[] {
       description: null,
       status: "in_progress",
       priority: "medium",
-      dueDate: dueDay(10),
+      dueDate: dueDay(now, 10),
       category: "promotion",
       relatedType: null,
       createdAt: new Date("2026-07-22T06:27:14.774Z"),
@@ -166,8 +175,8 @@ export function tasksFixture(): TaskWithAssignee[] {
  *  note, and the urgent one due today. Between them they still say what the
  *  four say — a task list that knows what is late, what is urgent, and why the
  *  follow-up exists — and two rows is the most a phone can show at full size. */
-export function tasksFixtureCompact(): TaskWithAssignee[] {
-  return tasksFixture().slice(1, 3);
+export function tasksFixtureCompact(now: Date): TaskWithAssignee[] {
+  return tasksFixture(now).slice(1, 3);
 }
 
 /** The follow-up note the app prints under a person task, keyed by task id.
