@@ -105,29 +105,75 @@ const css = readFileSync(GLOBALS_CSS, "utf8");
  * custom properties, so the last declaration inside the requested block wins —
  * the same rule the cascade applies.
  */
+function themeBlock(theme: "light" | "dark"): string {
+  const selector = theme === "light" ? ":root" : ".dark";
+  const blockStart = css.indexOf(`${selector} {`);
+  assert.notEqual(blockStart, -1, `${selector} block not found in globals.css`);
+  // Comments are stripped first: this file argues for its values in prose, and
+  // prose that names a token ("never --ef-dark: see the PR") reads as a
+  // declaration to any regex that does not.
+  return stripCssComments(
+    css.slice(blockStart, css.indexOf("\n}", blockStart))
+  );
+}
+
+/** The literal right-hand side of `--name`, before any `var()` is followed. */
+function declaredValue(block: string, name: string): string | null {
+  const match = block.match(new RegExp(`--${name}:\\s*([^;]+);`));
+  return match ? match[1].trim() : null;
+}
+
+/**
+ * Follow `var(--x)` the way the cascade does. A token that names another token
+ * is not a different colour — `--primary: var(--ink)` renders exactly what
+ * `--ink` renders — so a reader that stopped at the literal would report the
+ * ink as "missing" the moment the file stopped repeating it nine times.
+ */
+function resolveVars(theme: "light" | "dark", name: string): string {
+  const block = themeBlock(theme);
+  let current = name;
+  for (let hop = 0; hop < 8; hop += 1) {
+    const value = declaredValue(block, current);
+    assert.ok(
+      value !== null,
+      `--${current} is not declared in the ${theme} theme (following --${name})`
+    );
+    const indirection = value.match(/^var\(\s*--([\w-]+)\s*\)$/);
+    if (!indirection) return value;
+    current = indirection[1];
+  }
+  assert.fail(`--${name} loops through var() in the ${theme} theme`);
+}
+
 function readTokenOklch(
   theme: "light" | "dark",
   name: string
 ): [number, number, number] {
-  const selector = theme === "light" ? ":root" : ".dark";
-  const blockStart = css.indexOf(`${selector} {`);
-  assert.notEqual(blockStart, -1, `${selector} block not found in globals.css`);
-  const blockEnd = css.indexOf("\n}", blockStart);
-  const block = css.slice(blockStart, blockEnd);
-
-  const match = block.match(
-    new RegExp(
-      `--${name}:\\s*oklch\\(\\s*([\\d.]+%?)\\s+([\\d.]+)\\s+([\\d.]+)\\s*\\)`
-    )
-  );
-  assert.ok(match, `--${name} not found as an oklch() value in ${selector}`);
+  const value = resolveVars(theme, name);
+  const match = value.match(/^oklch\(\s*([\d.]+%?)\s+([\d.]+)\s+([\d.]+)\s*\)/);
+  assert.ok(match, `--${name} is not an oklch() value in the ${theme} theme`);
 
   const rawL = match[1];
   const L = rawL.endsWith("%") ? Number(rawL.slice(0, -1)) / 100 : Number(rawL);
   return [L, Number(match[2]), Number(match[3])];
 }
 
+/** `#rrggbb` -> gamma-encoded sRGB channels in 0..1, for DESIGN.md's spellings. */
+function hexToSrgb(hex: string): Rgb {
+  const digits = hex.replace("#", "");
+  return [0, 2, 4].map(
+    (i) => parseInt(digits.slice(i, i + 2), 16) / 255
+  ) as Rgb;
+}
+
+/**
+ * The colour a token resolves to, whichever way it is spelled. Most of the
+ * layer is oklch; the brand tokens are the hexes DESIGN.md publishes, and a
+ * brand token lands on a surface exactly like any other.
+ */
 function readToken(theme: "light" | "dark", name: string): Rgb {
+  const value = resolveVars(theme, name);
+  if (/^#[0-9a-fA-F]{6}$/.test(value)) return hexToSrgb(value);
   return oklchToSrgb(...readTokenOklch(theme, name));
 }
 
@@ -199,6 +245,240 @@ for (const theme of themes) {
       );
     });
   }
+}
+
+// --- the ink has ONE spelling (#411) ----------------------------------------
+//
+// The ink was written down twice — `--ef-dark: #181d19` and
+// `oklch(0.224 0.011 151.267)` on nine more tokens — for one colour with ten
+// owners and nothing in the file saying they were the same value. They are now
+// one declaration (`--ink`) that everything else points at. Two things have to
+// stay true for that to be worth anything: the alias must still BE the DESIGN.md
+// hex, and nobody may paste the literal back in beside it.
+
+/** DESIGN.md → Colors. The brand ink, and the app's only dark value. */
+const DESIGN_MD_INK = "#181D19";
+
+test("--ink is the DESIGN.md ink, and every ink-coloured token points at it", () => {
+  const ink = readToken("light", "ink");
+  assert.ok(
+    contrastRatio(ink, hexToSrgb(DESIGN_MD_INK)) < 1.01,
+    `--ink no longer resolves to DESIGN.md's ${DESIGN_MD_INK} — globals.css and the design authority have drifted apart`
+  );
+
+  // Every token the ink actually paints. Each is asserted through the resolver,
+  // so a literal pasted back over one of them fails the identity below.
+  const inkTokens = [
+    "foreground",
+    "card-foreground",
+    "popover-foreground",
+    "primary",
+    "secondary-foreground",
+    "accent-foreground",
+    "sidebar-foreground",
+    "sidebar-primary",
+    "sidebar-accent-foreground",
+    "ef-dark",
+  ];
+
+  const literals = inkTokens.filter(
+    (name) => declaredValue(themeBlock("light"), name) !== "var(--ink)"
+  );
+  assert.deepEqual(
+    literals,
+    [],
+    "an ink-coloured token spells the ink out again instead of pointing at --ink. One colour, one declaration: a second copy is a token that goes stale the next time the ink moves and says nothing when it does"
+  );
+
+  for (const name of inkTokens) {
+    assert.ok(
+      contrastRatio(readToken("light", name), ink) < 1.01,
+      `--${name} no longer resolves to the ink`
+    );
+  }
+});
+
+// --- --destructive is TEXT before it is a fill (#411) ------------------------
+//
+// 66 call sites, and most of them are `text-destructive` on a form error — the
+// sentences a user is most likely to be stuck on. shadcn's default landed here
+// unruled and failed AA on half the surfaces it paints (4.00:1 on --muted,
+// --secondary and --accent; 4.41:1 on --background): the #341 defect, one token
+// over. The value shipped now is DESIGN.md's ruled `danger`, which is what makes
+// the fix a token fix rather than a number that happens to pass.
+
+/** DESIGN.md → Colors. `danger` — "errors and 'don't' marks only". */
+const DESIGN_MD_DANGER = "#B4432F";
+
+test("--destructive is the danger colour DESIGN.md ruled, not a shadcn default", () => {
+  assert.ok(
+    contrastRatio(
+      readToken("light", "destructive"),
+      hexToSrgb(DESIGN_MD_DANGER)
+    ) < 1.01,
+    `--destructive is no longer DESIGN.md's ruled danger ${DESIGN_MD_DANGER}. If danger genuinely moved, move it in DESIGN.md first — the app "shares the palette" by the 2026-07-31 ruling`
+  );
+
+  // The dark theme lifts the SAME colour rather than carrying a second red.
+  const [, lightC, lightH] = readTokenOklch("light", "destructive");
+  const [, darkC, darkH] = readTokenOklch("dark", "destructive");
+  assert.ok(
+    Math.abs(lightC - darkC) < 0.001 && Math.abs(lightH - darkH) < 0.001,
+    `the two themes' danger reds have drifted apart (light C ${lightC} H ${lightH}, dark C ${darkC} H ${darkH}) — only L should differ`
+  );
+});
+
+for (const theme of themes) {
+  for (const surface of MUTED_FOREGROUND_SURFACES) {
+    test(`--destructive clears AA body text on --${surface} in the ${theme} theme`, () => {
+      const ratio = contrastRatio(
+        readToken(theme, "destructive"),
+        readToken(theme, surface)
+      );
+
+      assert.ok(
+        ratio >= AA_BODY_TEXT,
+        `text-destructive on --${surface} in ${theme} is ${ratio.toFixed(2)}:1, below ${AA_BODY_TEXT}:1 — form errors are the text this token exists for. Fix it in globals.css against DESIGN.md's danger, never with a per-component color override`
+      );
+    });
+  }
+}
+
+test("the pre-#411 --destructive genuinely failed, so adopting the ruled danger is not taste", () => {
+  // Records what shadcn's default measured, so a revert cannot be argued back
+  // in as "red is red". It passed on white, which is why it survived this long.
+  const PRE_411 = oklchToSrgb(0.577, 0.245, 27.325);
+
+  const onMuted = contrastRatio(PRE_411, readToken("light", "muted"));
+  const onBackground = contrastRatio(PRE_411, readToken("light", "background"));
+  const onCard = contrastRatio(PRE_411, readToken("light", "card"));
+
+  assert.ok(
+    Math.abs(onMuted - 4.0) < 0.02,
+    `expected the measured ~4.00:1 on --muted, got ${onMuted.toFixed(2)}:1 — the surface tokens moved and these numbers are stale`
+  );
+  assert.ok(
+    Math.abs(onBackground - 4.41) < 0.02,
+    `expected the measured ~4.41:1 on --background, got ${onBackground.toFixed(2)}:1`
+  );
+  assert.ok(onCard > AA_BODY_TEXT, "on white it passed — that was the trap");
+});
+
+// --- a foreground token that no longer exists is a colour that no longer
+//     renders (#411) -------------------------------------------------------
+//
+// `--destructive-foreground` was dropped from the token layer when the newer
+// shadcn button started hardcoding `text-white`, but four AlertDialogActions
+// still carried `bg-destructive text-destructive-foreground`. tailwind-merge
+// puts that in the same group as the variant's `text-primary-foreground` and
+// keeps the LAST one, so it deleted the class that worked and kept the class
+// that compiled to nothing — leaving the label at whatever it inherited: ink on
+// red, 3.59:1. Nothing failed loudly; an unknown utility is simply not emitted.
+
+test("every `*-foreground` colour utility in shipped markup names a token that exists", () => {
+  const theme = css.slice(css.indexOf("@theme inline {"));
+  const declared = new Set(
+    [...theme.matchAll(/--color-([\w-]+):/g)].map((match) => match[1])
+  );
+
+  const used = new Map<string, string>();
+  for (const file of tsxFiles(SRC)) {
+    const source = readFileSync(file, "utf8");
+    for (const match of source.matchAll(
+      /\b(?:text|bg|border|ring|fill|stroke)-([a-z][\w-]*-foreground)(?:\/\d+)?\b/g
+    )) {
+      if (!used.has(match[1]))
+        used.set(match[1], path.relative(process.cwd(), file));
+    }
+  }
+
+  const missing = [...used]
+    .filter(([token]) => !declared.has(token))
+    .map(([token, file]) => `${token} (${file})`);
+
+  assert.deepEqual(
+    missing,
+    [],
+    "shipped markup paints a `--color-*-foreground` the token layer does not define. Tailwind emits nothing for an unknown utility, so the element keeps whatever colour it inherited — and tailwind-merge will have dropped the class that WAS working, because it counts as the same utility group. Declare the token in globals.css"
+  );
+});
+
+for (const theme of themes) {
+  test(`the destructive button label clears AA on the fill it is painted on, in the ${theme} theme`, () => {
+    const label = readToken(theme, "destructive-foreground");
+    const fill = readToken(theme, "destructive");
+
+    // Light paints `bg-destructive`; dark paints `dark:bg-destructive/60` over
+    // the dialog surface, which is where these buttons actually live.
+    const ground =
+      theme === "light"
+        ? fill
+        : composite(fill, readToken(theme, "popover"), 0.6);
+
+    const ratio = contrastRatio(label, ground);
+    assert.ok(
+      ratio >= AA_BODY_TEXT,
+      `--destructive-foreground on the destructive fill in ${theme} is ${ratio.toFixed(2)}:1, below ${AA_BODY_TEXT}:1`
+    );
+  });
+}
+
+// --- the attention scale: WCAG binds, APCA advises (#386 ruling, #411) -------
+//
+// The inks are TEXT (`text-attention-high-ink` on the tile's label), and the
+// globals.css comment used to justify them with APCA alone — which the #386
+// ruling makes advisory. They clear AA comfortably, but nothing said so, which
+// is the same gap --muted-foreground sat in before #341: a token asserted by a
+// comment. The tint the tile paints under them is measured too, because that is
+// the ground they are actually read on.
+
+const ATTENTION_INKS = [
+  { ink: "attention-high-ink", tint: "attention-high", alpha: 0.12 },
+  { ink: "attention-medium-ink", tint: "attention-medium", alpha: 0.18 },
+] as const;
+
+for (const theme of themes) {
+  for (const { ink, tint, alpha } of ATTENTION_INKS) {
+    test(`--${ink} clears AA body text on every surface and on its own tint in the ${theme} theme`, () => {
+      for (const surface of MUTED_FOREGROUND_SURFACES) {
+        const ground = readToken(theme, surface);
+
+        const plain = contrastRatio(readToken(theme, ink), ground);
+        assert.ok(
+          plain >= AA_BODY_TEXT,
+          `--${ink} on --${surface} in ${theme} is ${plain.toFixed(2)}:1, below ${AA_BODY_TEXT}:1`
+        );
+
+        const tinted = composite(readToken(theme, tint), ground, alpha);
+        const onTint = contrastRatio(readToken(theme, ink), tinted);
+        assert.ok(
+          onTint >= AA_BODY_TEXT,
+          `--${ink} on bg-${tint}/${alpha * 100} over --${surface} in ${theme} is ${onTint.toFixed(2)}:1, below ${AA_BODY_TEXT}:1 — the tile tint is the ground this ink is read on`
+        );
+      }
+    });
+  }
+}
+
+// --- field green is an icon colour, so it owes SC 1.4.11 (#411) -------------
+//
+// `text-ef-field fill-current` paints the wiki bookmark, which is a STATE — the
+// only thing telling a bookmarked article from an un-bookmarked one. It had a
+// light value and no dark one, so on a dark ground it measured 2.79:1.
+
+for (const theme of themes) {
+  test(`--ef-field clears SC 1.4.11 on every surface in the ${theme} theme`, () => {
+    for (const surface of MUTED_FOREGROUND_SURFACES) {
+      const ratio = contrastRatio(
+        readToken(theme, "ef-field"),
+        readToken(theme, surface)
+      );
+      assert.ok(
+        ratio >= NON_TEXT_CONTRAST,
+        `--ef-field on --${surface} in ${theme} is ${ratio.toFixed(2)}:1, below ${NON_TEXT_CONTRAST}:1 — the bookmark icon is the only cue that an article is saved`
+      );
+    }
+  });
 }
 
 // --- the AA limit the globals.css comment names (#357) ----------------------

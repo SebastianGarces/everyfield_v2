@@ -16,10 +16,12 @@ body {
   --radius-3xl: calc(var(--radius) + 12px);
   --radius-4xl: calc(var(--radius) + 16px);
 
-  /* Brand colors */
+  /* Brand colors. `--ef-light` (a pre-sharp green wash, #d9f5d8) was declared
+     and exported here with zero users in the tree; DESIGN.md retired the green
+     washes in favour of the card surface, so it is gone rather than kept as a
+     colour a future screen could reach for. */
   --color-ef: var(--ef);
   --color-ef-dark: var(--ef-dark);
-  --color-ef-light: var(--ef-light);
   --color-ef-field: var(--ef-field);
 
   --color-background: var(--background);
@@ -37,6 +39,11 @@ body {
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  /* Restored (see :root). Four shipped `AlertDialogAction`s carry
+     `bg-destructive text-destructive-foreground`; while this line was missing,
+     `text-destructive-foreground` compiled to NOTHING and the label fell back
+     to the inherited ink at 3.59:1 on the red fill. */
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -78,20 +85,39 @@ body {
      grays by ruling (2026-07-31): cream is the marketing surface's ground,
      not the app's. Field green is green's text voice on light surfaces. */
   --ef: #1ce362;
-  --ef-dark: #181d19;
-  --ef-light: #d9f5d8;
+
+  /* THE INK, and the only place it is written down. DESIGN.md spells it
+     #181D19; this file needs it in oklch, and oklch(0.224 0.011 151.267) IS
+     that hex — both resolve to rgb(24, 29, 25), a 1.0000:1 "difference".
+     It used to be written TWICE (the hex on the brand token, the oklch on nine
+     more), which is one colour with two spellings and ten owners: darken the
+     ink and nine of them go stale silently, because nothing in the file said
+     they were the same value. Everything ink-coloured now points here, and
+     text-contrast.test.ts pins this token against the DESIGN.md hex so the two
+     documents cannot drift apart in silence either.
+     The brand alias below keeps its name because that is what the logo tile
+     asks for (`bg-ef text-ef-dark`) — it is the ink that reads on GREEN, which
+     is the same colour in both themes, so it is deliberately NOT theme-aware.
+     Page text must use --foreground; see the DECISION note on the PR about
+     src/components/people/status-timeline.tsx.
+     Deliberately NOT exported through `@theme inline`: this is the value behind
+     the role tokens, not a colour to paint with. There is no `text-ink`, and a
+     utility the theme does not declare emits nothing at all — the failure the
+     restored --destructive-foreground above is about. Paint with the role. */
+  --ink: oklch(0.224 0.011 151.267);
+  --ef-dark: var(--ink);
   --ef-field: #0b7a3f;
 
   --background: oklch(97.315% 0.00011 271.152);
-  --foreground: oklch(0.224 0.011 151.267); /* ink #181D19 */
+  --foreground: var(--ink);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.224 0.011 151.267);
+  --card-foreground: var(--ink);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.224 0.011 151.267);
-  --primary: oklch(0.224 0.011 151.267); /* ink */
+  --popover-foreground: var(--ink);
+  --primary: var(--ink);
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.94 0 0);
-  --secondary-foreground: oklch(0.224 0.011 151.267);
+  --secondary-foreground: var(--ink);
   --muted: oklch(0.94 0 0);
   /* Darkened from oklch(0.556) for WCAG AA (#341, #238). The shadcn default
      cleared 4.5:1 on white and nothing else: 4.38:1 on --background and only
@@ -119,8 +145,44 @@ body {
      it reaches a screen. */
   --muted-foreground: oklch(0.5 0 0);
   --accent: oklch(0.94 0 0);
-  --accent-foreground: oklch(0.224 0.011 151.267);
-  --destructive: oklch(0.577 0.245 27.325);
+  --accent-foreground: var(--ink);
+  /* The DANGER colour, and it is text far more often than it is a fill: 66
+     mentions across the tree, most of them `<p className="text-destructive
+     text-sm">` form errors — the product's highest-stakes sentences. It owes the
+     same AA 4.5:1 floor on every surface --muted-foreground owes it on, and it
+     did not clear it. shadcn's default oklch(0.577 0.245 27.325) shipped here
+     unruled and measured 4.41:1 on --background and 4.00:1 on --muted,
+     --secondary and --accent — the #341 defect exactly, one token over.
+     The value below is not a number picked to pass: it is #B4432F, the `danger`
+     role token DESIGN.md has ruled since 2026-07-30 (the app "shares the
+     palette", 2026-07-31). Adopting it is what fixes the contrast — 5.13:1 on
+     --background, 4.65:1 on --muted, the worst case — and it retires a shadcn
+     default that no ruling ever chose. Two consequences worth naming:
+       · The AA limit on --muted at this chroma and hue is L 0.5432 and the
+         ruled colour is L 0.5354, so the headroom is 0.008 of lightness — thin,
+         where --muted-foreground deliberately keeps a step. It is thin because
+         the colour is RULED, not chosen; buying a step means darkening below
+         DESIGN.md, which is a design ruling and not a sweep's call. Recorded as
+         a DECISION on the PR rather than decided here.
+       · `bg-destructive/10 text-destructive` (the six error banners) still
+         measures 4.07:1 at worst. That ground is made from THIS token, so the
+         ink and its backdrop darken together and no token value fixes it — the
+         remedy is the component's, and csf-scorecard.tsx already sets the
+         precedent (a tint changes what secondary text may be). Also a DECISION.
+     Kept inside the sRGB gamut on purpose: the shadcn default was outside it,
+     so what shipped was whatever the browser's gamut mapping produced and every
+     contrast number computed from the declaration was a guess. */
+  --destructive: oklch(0.5354 0.151 32.227); /* danger #B4432F */
+  /* Restored. shadcn's newer button variant hardcodes `text-white` and dropped
+     this token, but four AlertDialogAction call sites still say
+     `bg-destructive text-destructive-foreground` — and tailwind-merge treats
+     that as the same utility group as the variant's `text-primary-foreground`,
+     so it DELETES the class that worked and keeps the one the token layer no
+     longer defined. An undefined utility emits no CSS, so those four Delete
+     buttons painted inherited ink on red: 3.59:1 light, 2.77:1 dark. White is
+     what the Button variant already paints, so restoring the token makes the
+     four dialogs agree with it instead of diverging — 5.55:1 on the fill. */
+  --destructive-foreground: oklch(1 0 0);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   /* The focus indicator, darkened for WCAG 2.2 SC 1.4.11 (#385). The ring is
@@ -141,11 +203,11 @@ body {
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
   --sidebar: oklch(100% 0.00011 271.152);
-  --sidebar-foreground: oklch(0.224 0.011 151.267);
-  --sidebar-primary: oklch(0.224 0.011 151.267);
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: var(--ink);
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.224 0.011 151.267);
+  --sidebar-accent-foreground: var(--ink);
   --sidebar-border: oklch(0.922 0 0);
   /* Moves with --ring: the sidebar paints its focus ring at FULL strength
      (`ring-sidebar-ring focus-visible:ring-2`), where oklch(0.708) was 2.59:1
@@ -156,7 +218,19 @@ body {
   /* Attention scale. Red (28) vs amber (76) reads as an intensity ramp on its
      own. The inks stop short of the darkest passing value on purpose: pushed
      further they stop reading as red and amber at all and just look black,
-     which is what the first two attempts got wrong. Measured with APCA. */
+     which is what the first two attempts got wrong.
+     The standard that BINDS them is WCAG AA 4.5:1, not the APCA figures this
+     comment used to cite alone (ruled 2026-08-10, #386: APCA is advisory and is
+     never the reason a text token moves). Both inks clear it with room, on the
+     eight surfaces and on their own tints, and text-contrast.test.ts now says
+     so instead of this sentence: worst light 6.28:1 plain / 5.21:1 on the tile
+     tint, worst dark 9.07:1 / 7.06:1. APCA is what they were TUNED with, which
+     is why they sit where they sit; it is not what keeps them there.
+     The base colours are a different question and not a failure: at the /45
+     the tiles paint their borders with, they measure 1.45–2.52:1, under 3:1.
+     SC 1.4.11 is not engaged because the standing is never carried by that
+     border — the tile states it in a WORD with an icon beside it, and the tint
+     and border are the third and fourth redundant cues. Do not "fix" them. */
   --attention-high: oklch(0.55 0.21 28);
   --attention-high-ink: oklch(0.47 0.195 28);
   --attention-medium: oklch(0.7 0.155 76);
@@ -164,6 +238,22 @@ body {
 }
 
 .dark {
+  /* Field green is defined as "green's text voice on LIGHT surfaces", and the
+     light value was the only value it had — so on a dark ground the bookmark
+     icon it paints (`text-ef-field fill-current`, the one place it renders)
+     measured 2.79:1 on --muted, under the 3:1 SC 1.4.11 floor a state-carrying
+     icon owes. Same hue, lifted for the dark ground: 6.94:1 at worst.
+     --ef and --ef-dark deliberately have NO dark value. Green is the signal and
+     is one colour everywhere; the ink alias is the ink that reads on green, and
+     the green tile does not change between themes, so inverting it would break
+     the logo rather than fix anything. */
+  --ef-field: oklch(0.74 0.14 152.415);
+
+  /* No `--ink` twin here, and the ten copies of oklch(0.985 0 0) below stay
+     literal on purpose: the light block's alias exists because ONE colour was
+     written two ways (a brand hex and an oklch) with nothing saying they were
+     the same. These are shadcn neutrals with no second spelling and no design
+     authority to drift from, so an alias would buy indirection and no safety. */
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
@@ -182,7 +272,15 @@ body {
   --muted-foreground: oklch(0.708 0 0);
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
+  /* The same ruled danger, lifted for the dark ground rather than left as a
+     second, unrelated red: the light token now carries DESIGN.md's #B4432F, so
+     hue and chroma are held and only L moves — one danger colour, two grounds.
+     5.31:1 at worst as text (the old shadcn value gave 5.23:1, so nothing is
+     lost) and it is inside the sRGB gamut, which oklch(0.704 0.191 22.216) was
+     not. The Button variant paints `dark:bg-destructive/60` here, and white on
+     that composite is 5.90:1. */
+  --destructive: oklch(0.7 0.151 32.227);
+  --destructive-foreground: oklch(1 0 0);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   /* The same SC 1.4.11 fix, mirrored for the dark ground (#385). oklch(0.556)
