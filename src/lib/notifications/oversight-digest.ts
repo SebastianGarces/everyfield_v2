@@ -5,7 +5,6 @@ import {
   exists,
   gt,
   gte,
-  inArray,
   isNotNull,
   isNull,
   like,
@@ -28,7 +27,6 @@ import {
   tasks,
   users,
 } from "@/db/schema";
-import { OVERSIGHT_ROLES } from "@/lib/auth/access";
 import { APP_TIME_ZONE, formatDate } from "@/lib/datetime";
 
 import {
@@ -929,13 +927,16 @@ export function plantsOwedDigestQuery(query: OwedDigestPageQuery) {
         // stayed owed all day, and — ascending id being a stable order — it held
         // its place at the head of the owed set. That is the starvation the
         // sweep header above records as fixed, returning through the audience.
+        //
+        // The builder returns the WHOLE audience — each arm names its own role —
+        // so there is no `inArray(role, OVERSIGHT_ROLES)` beside it. One was
+        // here, and it could not have narrowed anything the arms admitted.
         exists(
           db
             .select({ one: sql`1` })
             .from(owedDigestRecipient)
             .where(
               and(
-                inArray(owedDigestRecipient.role, OVERSIGHT_ROLES),
                 oversightAudienceCondition(owedDigestRecipient, {
                   sendingChurchId: churches.sendingChurchId,
                   sendingNetworkId: churches.sendingNetworkId,

@@ -1,14 +1,9 @@
-import { and, eq, inArray, or, type SQL } from "drizzle-orm";
-import type { AnyColumn } from "drizzle-orm";
+import { and, eq, or, type SQL, type SQLWrapper } from "drizzle-orm";
+import type { alias } from "drizzle-orm/pg-core";
 
 import { db } from "@/db";
-import {
-  churches,
-  users,
-  type OrganizationInvitationType,
-  type UserRole,
-} from "@/db/schema";
-import { OVERSIGHT_ROLES } from "@/lib/auth/access";
+import { churches, users, type OrganizationInvitationType } from "@/db/schema";
+import { OVERSIGHT_ADMIN_ROLE } from "@/lib/auth/access";
 
 import {
   anchorId,
@@ -807,20 +802,30 @@ export function announceLaunchDateChanged(
 /**
  * A `users` table reference — the base table, or an `alias()` of it, so a
  * correlated subquery can name its own candidate recipient.
+ *
+ * BOTH ARMS ARE CONCRETE, deliberately. A structural `{ role: AnyColumn; … }`
+ * also accepts both, and reads as the more permissive, more honest type — but
+ * `AnyColumn` is drizzle's `any`-shaped column, so every `eq()` in the builder
+ * below loses BOTH of its operand checks: `eq(ref.role, "not_a_role")` and
+ * `eq(ref.sendingChurchId, 12345)` compile clean, on the one predicate in this
+ * domain that decides a multi-tenant audience. The union keeps drizzle's own
+ * typing, so the role literal is checked against the `user_role` enum and the
+ * org id against a uuid column, by the compiler rather than by a `satisfies`
+ * someone has to remember to write.
  */
-interface UsersRef {
-  role: AnyColumn;
-  sendingChurchId: AnyColumn;
-  sendingNetworkId: AnyColumn;
-}
+type UsersRef = typeof users | ReturnType<typeof alias<typeof users, string>>;
 
 /**
  * An org id to match against: a literal loaded by an earlier query, or a COLUMN
  * to correlate with (the sweep's `churches.sending_*_id` of the outer row). The
  * same idiom `ChurchIdRef` uses in `./oversight-digest.ts`, and for the same
  * reason: one definition of the audience, asked two ways.
+ *
+ * `SQLWrapper` rather than `AnyColumn` for the correlated half — a column IS
+ * one, and it leaves `eq()` free to reject a value that is not what a uuid
+ * column compares against.
  */
-type OrgIdRef = string | AnyColumn;
+type OrgIdRef = string | SQLWrapper;
 
 /**
  * WHO ADMINISTERS THESE ORGS — the ONE definition of an oversight audience, in
@@ -831,11 +836,23 @@ type OrgIdRef = string | AnyColumn;
  * the other, so `or(fk match) AND role in OVERSIGHT_ROLES` is not the audience —
  * it admits a `network_admin` who also carries a `sending_church_id` into that
  * SENDING CHURCH's audience, which is the hierarchy walk this repo forbids
- * arriving through the role instead of through the FK. `recipientAdministersOrg`
- * (`./enqueue.ts`) already pairs them per recipient at enqueue time; three SQL
- * sites now ask the question through this one builder, so the audience, the
- * gate and the digest sweep's "who is still owed a row" cannot answer it
- * differently.
+ * arriving through the role instead of through the FK.
+ *
+ * THE PAIRING ITSELF IS NOT WRITTEN HERE. It is `OVERSIGHT_ADMIN_ROLE`
+ * (`@/lib/auth/access`), which `recipientAdministersOrg` (`./enqueue.ts`) reads
+ * too — that gate runs against a loaded `User` and this builds SQL, so they
+ * cannot share a predicate, but they can and do share the DECISION. Four SQL
+ * and TypeScript sites now ask "which role administers this kind of org?" of one
+ * table, so the audience, the gate and the digest sweep's "who is still owed a
+ * row" cannot answer it differently.
+ *
+ * THE AUDIENCE IS WHAT THIS RETURNS — the whole of it. There is no
+ * `inArray(role, OVERSIGHT_ROLES)` floor to remember to AND on, and adding one
+ * back would be dead SQL: each arm names its role FROM the map `OVERSIGHT_ROLES`
+ * is derived from, so the floor can only ever admit exactly what the arms
+ * already admitted. It would not be a safety net either — an arm edited to a
+ * non-oversight role would be silently ANDed down to zero rows, which turns a
+ * visible bug into an empty audience.
  *
  * THE THIRD SITE IS WHY THIS IS SHARED RATHER THAN REPEATED. `listOversightAdminsOfOrg`
  * paired correctly and the other two did not, and for the sweep that was a
@@ -855,19 +872,16 @@ export function oversightAudienceCondition(
   table: UsersRef,
   org: { sendingChurchId: OrgIdRef | null; sendingNetworkId: OrgIdRef | null }
 ): SQL | undefined {
-  // `satisfies UserRole` because `UsersRef` types the columns loosely — the
-  // alias and the base table are different types to drizzle and only their
-  // column SHAPES can be shared. The literal stays pinned to the role union.
   const reaches = [
     org.sendingChurchId
       ? and(
-          eq(table.role, "sending_church_admin" satisfies UserRole),
+          eq(table.role, OVERSIGHT_ADMIN_ROLE.sending_church),
           eq(table.sendingChurchId, org.sendingChurchId)
         )
       : undefined,
     org.sendingNetworkId
       ? and(
-          eq(table.role, "network_admin" satisfies UserRole),
+          eq(table.role, OVERSIGHT_ADMIN_ROLE.network),
           eq(table.sendingNetworkId, org.sendingNetworkId)
         )
       : undefined,
@@ -915,13 +929,7 @@ export async function listOversightRecipientsForChurch(
   const audience = oversightAudienceCondition(users, plant);
   if (!audience) return [];
 
-  // `OVERSIGHT_ROLES` stays as a floor even though each arm already names its
-  // role: it is the statement that this query never returns a church-level
-  // account, and it survives an arm being edited.
-  const rows = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(and(audience, inArray(users.role, OVERSIGHT_ROLES)));
+  const rows = await db.select({ id: users.id }).from(users).where(audience);
 
   return rows;
 }
@@ -944,10 +952,10 @@ export async function listOversightRecipientsForChurch(
  * "any oversight role reachable by either FK", which is not the audience: a
  * `network_admin` row that also carries a `sending_church_id` came back as a
  * recipient of that SENDING CHURCH's own milestone. The role now sits inside
- * the arm that names the FK, so the sending-church arm returns sending-church
- * admins and the network arm returns network admins — the same predicate
- * `recipientAdministersOrg` applies per recipient at enqueue time. Two places
- * ask the question; they must not answer it differently.
+ * the arm that names the FK, and which role that is comes from
+ * `OVERSIGHT_ADMIN_ROLE` — the same table `recipientAdministersOrg` reads per
+ * recipient at enqueue time. Several places ask the question; they answer it
+ * from one row.
  */
 export async function listOversightAdminsOfOrg(
   org: OversightOrg
@@ -957,13 +965,7 @@ export async function listOversightAdminsOfOrg(
   // No org named — no recipients. Never "everyone".
   if (!audience) return [];
 
-  // `OVERSIGHT_ROLES` stays as a floor even though each arm already names its
-  // role: it is the statement that this query never returns a church-level
-  // account, and it survives an arm being edited.
-  return db
-    .select({ id: users.id })
-    .from(users)
-    .where(and(audience, inArray(users.role, OVERSIGHT_ROLES)));
+  return db.select({ id: users.id }).from(users).where(audience);
 }
 
 export const dbOversightFanOutDeps: OversightFanOutDeps &

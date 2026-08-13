@@ -15,6 +15,7 @@ import {
   canAccessChurch,
   canAccessFeatureData,
   isOversightUser,
+  OVERSIGHT_ADMIN_ROLE,
 } from "@/lib/auth/access";
 
 import {
@@ -516,10 +517,20 @@ const accessColumns = {
  * second FK was set once and never cleared — passed the sending-church arm and
  * received that sending church's own notifications. That is the hierarchy walk
  * the paragraph above says this is not, arriving through the role instead of
- * through the FK. So each anchor kind now names EXACTLY the role that
- * administers it: `sending_church` → `sending_church_admin`, `network` →
- * `network_admin`. `listOversightAdminsOfOrg` pairs them the same way, so the
- * fan-out and the per-recipient gate answer one question rather than two.
+ * through the FK. So each anchor kind names EXACTLY the role that administers
+ * it.
+ *
+ * WHICH ROLE THAT IS COMES FROM `OVERSIGHT_ADMIN_ROLE` (`@/lib/auth/access`),
+ * NOT FROM LITERALS HERE. This gate runs against a loaded `User` and
+ * `oversightAudienceCondition` (`./oversight.ts`) renders SQL, so the two cannot
+ * share a predicate — but the DECISION they encode is one decision, and while it
+ * was written out twice in two languages the SQL sites and this gate drifted
+ * apart and starved a plant of its digest. There is now one table to edit, and a
+ * third kind of oversight org is one row in it.
+ *
+ * The role test also subsumes `isOversightUser`: every value in that table is an
+ * oversight role, and `OVERSIGHT_ROLES` is derived from the same table, so a
+ * separate floor here could only re-admit what this line already required.
  *
  * Pure, and exported so it can be tested over the whole role × org domain.
  */
@@ -527,13 +538,11 @@ export function recipientAdministersOrg(
   recipient: User,
   anchor: OrgAnchor
 ): boolean {
-  if (!isOversightUser(recipient)) return false;
+  if (recipient.role !== OVERSIGHT_ADMIN_ROLE[anchor.type]) return false;
 
   return anchor.type === "sending_church"
-    ? recipient.role === "sending_church_admin" &&
-        recipient.sendingChurchId === anchor.orgId
-    : recipient.role === "network_admin" &&
-        recipient.sendingNetworkId === anchor.orgId;
+    ? recipient.sendingChurchId === anchor.orgId
+    : recipient.sendingNetworkId === anchor.orgId;
 }
 
 export const dbEnqueueDeps: EnqueueDeps = {

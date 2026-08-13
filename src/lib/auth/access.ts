@@ -4,6 +4,7 @@ import {
   churches,
   coachAssignments,
   churchPrivacySettings,
+  type AssociationOrgType,
   type User,
   type UserRole,
   type ChurchPrivacySettings,
@@ -20,11 +21,40 @@ export const CHURCH_LEVEL_ROLES: UserRole[] = [
   "team_member",
 ];
 
-/** Roles that have oversight access */
-export const OVERSIGHT_ROLES: UserRole[] = [
-  "sending_church_admin",
-  "network_admin",
-];
+/**
+ * WHICH ROLE ADMINISTERS WHICH KIND OF OVERSIGHT ORG — the ONE definition of
+ * that pairing, as data.
+ *
+ * It lives here rather than in the notifications layer because this file
+ * already owns the role → org-FK resolution (`getAccessibleChurchIds`), and
+ * because the notifications layer is the CONSUMER: a SQL audience builder
+ * (`oversightAudienceCondition`) and a TypeScript per-recipient gate
+ * (`recipientAdministersOrg`) both read it, and they may not answer the same
+ * question differently.
+ *
+ * They did. Both oversight FKs live on one `users` row and neither implies the
+ * other (`memory/invariants.md` → Multi-Tenancy), so an unpaired
+ * `or(fk, fk) AND role in (…)` admits a `network_admin` carrying a stray
+ * `sending_church_id` into that SENDING CHURCH's audience — the hierarchy walk
+ * this repo forbids, arriving through the role instead of through the FK. One
+ * decision written twice in two languages is how the SQL sites and the TS gate
+ * drifted apart, and the drift starved a plant of its digest.
+ *
+ * Keyed on `AssociationOrgType`, the same two-valued union `orgAnchor()` derives
+ * a notification's org anchor from, so a third kind of oversight org is one new
+ * row here and a compile error at every reader that does not handle it.
+ */
+export const OVERSIGHT_ADMIN_ROLE = {
+  sending_church: "sending_church_admin",
+  network: "network_admin",
+} as const satisfies Record<AssociationOrgType, UserRole>;
+
+/**
+ * Roles that have oversight access — DERIVED from the pairing above, never a
+ * second hand-written list. The set and the per-kind arms cannot name different
+ * roles if only one of them is written down.
+ */
+export const OVERSIGHT_ROLES: UserRole[] = Object.values(OVERSIGHT_ADMIN_ROLE);
 
 /**
  * Check if a user has one of the specified roles.

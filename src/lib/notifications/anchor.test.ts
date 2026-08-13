@@ -5,6 +5,7 @@ import { test } from "node:test";
 
 import { db } from "@/db";
 import { users, type User } from "@/db/schema";
+import { OVERSIGHT_ADMIN_ROLE } from "@/lib/auth/access";
 import { sourceReader } from "@/lib/testing/source-span";
 
 import {
@@ -539,22 +540,44 @@ test("the fan-out asks the same question the per-recipient gate does", () => {
     /users\.role = \$\d+ and users\.sending_network_id = \$\d+/
   );
 
-  const sendingChurchArm = normalised.slice(
-    0,
-    normalised.indexOf("sending_network_id")
-  );
-  assert.ok(
-    sendingChurchArm.includes("sending_network_id") === false,
-    "the two arms must not share a role predicate"
-  );
-
-  // The bound values say which role went with which FK.
+  // The bound values say which role went with which FK — and they are the whole
+  // parameter list, so an arm cannot carry a role predicate the pairing above
+  // did not pair.
   assert.deepEqual(params, [
     "sending_church_admin",
     SENDING_CHURCH,
     "network_admin",
     NETWORK,
   ]);
+
+  // …and BOTH encodings read that pairing off one table. The SQL arms bind
+  // whatever `OVERSIGHT_ADMIN_ROLE` says, and `recipientAdministersOrg` accepts
+  // exactly the role for the anchor's kind and no other — so the audience and
+  // the gate cannot drift, which is the drift that starved a plant.
+  assert.deepEqual(params, [
+    OVERSIGHT_ADMIN_ROLE.sending_church,
+    SENDING_CHURCH,
+    OVERSIGHT_ADMIN_ROLE.network,
+    NETWORK,
+  ]);
+
+  for (const [orgType, orgId] of [
+    ["sending_church", SENDING_CHURCH],
+    ["network", NETWORK],
+  ] as const) {
+    const admin = user({
+      role: OVERSIGHT_ADMIN_ROLE[orgType],
+      churchId: null,
+      sendingChurchId: SENDING_CHURCH,
+      sendingNetworkId: NETWORK,
+    });
+
+    assert.equal(
+      recipientAdministersOrg(admin, orgAnchor(orgType, orgId)),
+      true,
+      `${orgType}: the gate admits the role the audience binds`
+    );
+  }
 });
 
 test("naming no org matches nobody, never everybody", () => {
