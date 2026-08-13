@@ -2,7 +2,11 @@ import { TEAM_MEMBERSHIPS_ROLE_ACTIVE_UNIQUE } from "@/db/schema/ministry-teams"
 import { isUniqueViolation } from "@/db/errors";
 
 // ============================================================================
-// #409 D1 — RECOGNISING that the seat's guard refused a write.
+// #409 D1 — RECOGNISING that the seat's guard refused a write BY THROWING.
+// That is ONE of the shapes a refusal takes, not all of them: the INSERT path's
+// `ON CONFLICT … DO NOTHING`, and the reactivation UPDATE's own
+// `status = 'inactive'` predicate, both refuse with an empty `returning()` and
+// never reach this function.
 //
 // IT RECOGNISES, IT DOES NOT TRANSLATE (corrected #411 round 2). This module
 // used to return the user copy, which made it a second decider of "which
@@ -53,13 +57,19 @@ import { isUniqueViolation } from "@/db/errors";
  *
  * WHY A RECOGNITION AND NOT A PRE-CHECK, and why one is still needed at all. The
  * reactivation path in `assignMember` is an UPDATE, and an UPDATE takes no
- * `ON CONFLICT` — so it always meets the seat index as a throw. A
+ * `ON CONFLICT` — so WHEN ANOTHER PERSON HOLDS THE SEAT it meets the seat index
+ * as a throw. (Not always: since #411 quality round 1 that UPDATE also carries
+ * `status = 'inactive'` in its own `WHERE`, so a SAME-PERSON double submit onto
+ * a previously-held seat is refused by an empty `returning()` instead, exactly
+ * as the INSERT path is. Both refusals end in `seatRefusalMessage`, so which
+ * shape arrives changes nothing a planter reads.) A
  * `WHERE NOT EXISTS (… active row …)` predicate would look like a guard and be
  * none: it is a snapshot read about rows other statements are writing, the trap
- * `memory/invariants.md` → Transactions describes. So the index stays the only
- * guard on both paths and this function is purely about what the planter reads.
- * The write itself is already correct without it: the violation aborts the whole
- * `db.batch`, so a refused reactivation leaves the role's status alone too.
+ * `memory/invariants.md` → Transactions describes. So the index and that
+ * compare-and-set are the only guards, and this function is purely about what
+ * the planter reads. The write itself is already correct without it: the
+ * violation aborts the whole `db.batch`, so a refused reactivation leaves the
+ * role's status alone too.
  *
  * THE ERROR SHAPE, MEASURED RATHER THAN ASSUMED (2026-08-13, Postgres 16 over
  * neon-http). BOTH shapes reach here and `isUniqueViolation` matches both: a

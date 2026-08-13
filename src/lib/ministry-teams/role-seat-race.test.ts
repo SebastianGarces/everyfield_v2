@@ -396,6 +396,112 @@ test(
 );
 
 test(
+  "the SAME person re-assigned twice to a seat they used to hold leaves ONE row",
+  { skip },
+  async (t: TestContext) => {
+    if (!(await databaseReachable())) return t.skip(UNREACHABLE);
+
+    // #411 quality round 1, second pass — THE REACTIVATION BRANCH OF THE
+    // DOUBLE-SUBMIT, which is the one input none of the four cases above reach.
+    // Case 2 races the same person onto a FREE seat, so both callers INSERT and
+    // the arbiter refuses one; case 4 races a DIFFERENT person onto a HELD seat,
+    // so the reactivation UPDATE meets the index. Here the row already exists,
+    // inactive, and BOTH callers reactivate THAT SAME ROW.
+    //
+    // The index cannot see this at all: there is only ever one row, so two
+    // UPDATEs of it collide with nothing. Measured before the fix, this printed
+    // `fulfilled=2 rejected=0 activeRows=1` — two callers told they had
+    // succeeded, and every assignment event emitted twice for one seat, which F2
+    // subscribes to in order to advance person status. What refuses the loser is
+    // the UPDATE's own `status = 'inactive'` predicate, re-evaluated against the
+    // winner's committed row version under the row lock: an empty `returning()`,
+    // read exactly as the INSERT path reads its own.
+    //
+    // The truthful sentence is the PERSON one — this planter put this person
+    // back on the seat, so "Someone filled it while this page was open" would be
+    // false, the same reasoning as case 2.
+    await sweep();
+
+    for (let run = 1; run <= RUNS; run++) {
+      const seat = await createScratchSeat();
+      const person = seat.personIds[0];
+
+      // Serve, then leave — which is what leaves an `inactive` row behind.
+      await assignMember(
+        seat.churchId,
+        seat.teamId,
+        seat.roleId,
+        person,
+        seat.userId
+      );
+      const [held] = await db
+        .select({ id: teamMemberships.id })
+        .from(teamMemberships)
+        .where(eq(teamMemberships.roleId, seat.roleId));
+      await removeMember(seat.churchId, held.id, seat.userId);
+
+      const results = await Promise.allSettled([
+        assignMember(
+          seat.churchId,
+          seat.teamId,
+          seat.roleId,
+          person,
+          seat.userId
+        ),
+        assignMember(
+          seat.churchId,
+          seat.teamId,
+          seat.roleId,
+          person,
+          seat.userId
+        ),
+      ]);
+
+      assert.deepEqual(
+        await activeOnSeat(seat.roleId),
+        [person],
+        `run ${run}: the reactivation double submit left more than one active row`
+      );
+
+      const fulfilled = results.filter((r) => r.status === "fulfilled");
+      const rejected = results.filter((r) => r.status === "rejected");
+      assert.equal(
+        fulfilled.length,
+        1,
+        `run ${run}: ${fulfilled.length} callers were told they had succeeded, so the assignment events fired ${fulfilled.length} times for one seat`
+      );
+      assert.equal(rejected.length, 1);
+
+      const refusal = (rejected[0] as PromiseRejectedResult).reason;
+      assert.ok(
+        refusal instanceof ExpectedError,
+        `run ${run}: the loser got ${String(refusal)}, which the action shell would replace with its generic sentence`
+      );
+      assert.equal(
+        refusal.message,
+        PERSON_ALREADY_ASSIGNED_MESSAGE,
+        `run ${run}: the reactivation double-submit loser must be told the person already holds this seat`
+      );
+
+      // ...and only ONE row was ever written for this person and seat: the
+      // reactivation reused the row `removeMember` left, it did not insert a
+      // second one.
+      const [{ n }] = await db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(teamMemberships)
+        .where(eq(teamMemberships.roleId, seat.roleId));
+      assert.equal(
+        n,
+        1,
+        `run ${run}: the loser wrote a row of its own instead of being refused`
+      );
+
+      await sweep();
+    }
+  }
+);
+
+test(
   "REACTIVATING a past holder is refused too, and leaves the role alone",
   { skip },
   async (t: TestContext) => {

@@ -20,10 +20,13 @@
 //                   pass-through would put the database client one import away
 //                   from a browser chunk (same rule as
 //                   `src/lib/invitations/register-path.ts`).
-//   membership-conflict.ts which of those two sentences a driver
-//                   unique-violation means, decided by `isUniqueViolation`
-//                   (`@/db/errors`). Server-only, so it is a sibling of the
-//                   leaf rather than part of it — and also not re-exported.
+//   membership-conflict.ts whether a driver error IS the seat index's unique
+//                   violation — a BOOLEAN, via `isUniqueViolation`
+//                   (`@/db/errors`). WHICH sentence that means is
+//                   `seatRefusalMessage` in `memberships.ts`, the one decider
+//                   for every refusal path; never an index→sentence table.
+//                   Server-only, so it is a sibling of the leaf rather than
+//                   part of it — and also not re-exported.
 //
 // This barrel preserves the import path every caller already uses
 // (`@/lib/ministry-teams/service`) and its exact export surface. New callers

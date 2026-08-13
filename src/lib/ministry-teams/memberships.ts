@@ -10,6 +10,7 @@ import {
   type RoleStatus,
 } from "@/db/schema";
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { toCalendarDate } from "@/lib/datetime";
 import {
   emitTeamMemberAssigned,
   emitTeamLeaderAssigned,
@@ -106,17 +107,30 @@ async function seatRefusalMessage(
  * where `status = 'active'` — is the guard; everything here is about which
  * sentence the planter reads.
  *
- * "IS THE SEAT FREE" IS ASKED ONCE, BY THE INDEX, and it is asked by attempting
- * the write. Refusal arrives in one of TWO SHAPES, one per write path, and BOTH
- * are post-write:
+ * "IS THE SEAT FREE" IS ASKED BY ATTEMPTING THE WRITE, never by a read before
+ * it. Refusal arrives in one of TWO SHAPES, and BOTH are post-write:
  *
- *   * an EMPTY `returning()` — the INSERT path, always. It carries
+ *   * an EMPTY `returning()` — the INSERT path, always, and the REACTIVATION
+ *     path when the row this caller is reactivating is the one the winner just
+ *     took. The INSERT carries
  *     `ON CONFLICT (role_id) WHERE status = 'active' DO NOTHING` against the one
- *     unique index on the table, so every conflict it can meet is the arbiter's:
- *     the statement answers `INSERT 0 0` and that emptiness IS the refusal;
+ *     unique index on the table, so every conflict it can meet is the arbiter's
+ *     and the statement answers `INSERT 0 0`; the reactivation UPDATE carries
+ *     `status = 'inactive'` in its own `WHERE`, which Postgres re-evaluates
+ *     against the winner's committed row under the row lock, so the loser
+ *     matches nothing. Either way the emptiness IS the refusal;
  *   * a THROWN unique violation, recognised by `isSeatConflict` — the
- *     REACTIVATION path, always. An UPDATE takes no `ON CONFLICT` at all, so it
+ *     REACTIVATION path when ANOTHER PERSON holds the seat. That is a different
+ *     row, so the `status = 'inactive'` predicate is satisfied and the write
+ *     proceeds into the index; an UPDATE takes no `ON CONFLICT` at all, so it
  *     meets the index as an exception and nothing can cover it.
+ *
+ * SO THE REACTIVATION PATH HAS BOTH SHAPES, and neither is optional. It was
+ * documented as "a throw, ALWAYS" for one round while its UPDATE was keyed on
+ * the row id alone — under which a same-person double submit onto a
+ * previously-held seat had NO guard at all: two UPDATEs of one row raise
+ * nothing, so both callers were told they had succeeded and every assignment
+ * event fired twice (#411 quality round 1, measured).
  *
  * THE INSERT USED TO BE ABLE TO THROW TOO, and it no longer can (#411 quality
  * round 1). A second, strictly subsumed unique index —
@@ -154,12 +168,18 @@ async function seatRefusalMessage(
  * and `role-seat-race.test.ts`'s third case passed while the translation it
  * exists to prove was unreachable.
  *
- * The pre-check that STAYS is `existing.status === 'active'` below, and it is
- * load-bearing: reactivating an already-active row UPDATEs that same row, which
- * raises no violation at all, so nothing downstream would answer it. It is a
- * snapshot read, so it is the LEGIBLE half of the double-submit refusal and
- * never its backing — the loser branch below is what answers the two submits
- * that pass it together.
+ * THE REACTIVATION UPDATE'S `status = 'inactive'` PREDICATE IS NOT THAT SELECT.
+ * A pre-flight SELECT is a snapshot taken before the write, in a separate
+ * statement, about rows other writers are still touching. This predicate is part
+ * of the write itself, and Postgres re-checks it against the winner's committed
+ * row version under the row lock — a compare-and-set, which is the shape
+ * `memory/invariants.md` → Transactions prescribes, not the one it forbids.
+ *
+ * The pre-check that STAYS is `existing.status === 'active'` below, and it is a
+ * fast path, NOT a guard: it saves a batch for the ordinary "this person is
+ * already on this role" case and produces the same sentence the loser branch
+ * would. It is a snapshot read, so two submits can pass it together and it
+ * answers neither — what answers them is the conditional UPDATE below.
  */
 export async function assignMember(
   churchId: string,
@@ -228,8 +248,10 @@ export async function assignMember(
   // so they ship as ONE db.batch — a Neon batched transaction, all-or-nothing
   // (memory/invariants.md → Transactions). Two separate awaits could fail in
   // between and leave a role reading Filled with no active membership. That
-  // all-or-nothing is also what makes the REACTIVATION refusal safe: the index
-  // violation aborts the batch, so `markRoleFilled` never lands either.
+  // all-or-nothing is also what makes the THROWN reactivation refusal safe: the
+  // index violation aborts the batch, so `markRoleFilled` never lands either.
+  // The two EMPTY-`returning()` refusals are the other case and roll nothing
+  // back by design — somebody holds the seat, so `filled` is what the role is.
   const markRoleFilled = db
     .update(teamRoles)
     .set({ status: "filled" as RoleStatus, updatedAt: new Date() })
@@ -239,9 +261,25 @@ export async function assignMember(
   try {
     if (existing) {
       // Reactivate the inactive row: fresh startDate, cleared end fields.
-      // An UPDATE takes no `ON CONFLICT`, so this path always meets the seat
-      // index as a violation; the catch below recognises it and reads the
-      // holder for the sentence.
+      //
+      // `status = 'inactive'` IS THE GUARD ON THIS PATH, and it is the whole
+      // reason this UPDATE is conditional (#411 quality round 1). Without it
+      // the statement is keyed on `existing.id` alone, so a same-person double
+      // submit onto a seat this person USED to hold has nothing standing over
+      // it at all: both callers read the same inactive row, both pass the
+      // `existing.status === 'active'` pre-check (a snapshot, taken before
+      // either wrote), and both then UPDATE the SAME row. One row cannot
+      // collide with itself, so the seat index never raises, `isSeatConflict`
+      // is never reached, and BOTH callers are told they succeeded — which
+      // emits every assignment event twice for one seat.
+      //
+      // A conditional UPDATE is a real compare-and-set, not a re-added
+      // SELECT-then-INSERT: under a row lock Postgres re-evaluates this WHERE
+      // against the WINNER's committed row version (EvalPlanQual), and the
+      // winner has just written `status = 'active'`, so exactly one of two
+      // concurrent statements matches. The loser matches nothing, returns
+      // empty, and is refused below — the same shape, and the same refusal,
+      // the INSERT path's `INSERT 0 0` produces.
       const [[reactivated]] = await db.batch([
         db
           .update(teamMemberships)
@@ -254,12 +292,21 @@ export async function assignMember(
           .where(
             and(
               eq(teamMemberships.churchId, churchId),
-              eq(teamMemberships.id, existing.id)
+              eq(teamMemberships.id, existing.id),
+              eq(teamMemberships.status, "inactive")
             )
           )
           .returning(),
         markRoleFilled,
       ]);
+      // Same reading as the INSERT's empty `returning()` below: not an error,
+      // the loser of a race. `markRoleFilled` still ran, and that is right —
+      // somebody holds the seat.
+      if (!reactivated) {
+        throw new ExpectedError(
+          await seatRefusalMessage(churchId, roleId, personId)
+        );
+      }
       membership = reactivated;
     } else {
       const [[inserted]] = await db.batch([
@@ -365,7 +412,10 @@ export async function removeMember(
       .update(teamMemberships)
       .set({
         status: "inactive" as MembershipStatus,
-        endDate: new Date().toISOString().split("T")[0],
+        // The calendar-day primitive, never re-spelled: a `date` column names a
+        // day, and which day that is has to be measured in the zone the day is
+        // later read in (`memory/invariants.md` → Date & Time Rendering).
+        endDate: toCalendarDate(new Date()),
         updatedAt: new Date(),
       })
       .where(

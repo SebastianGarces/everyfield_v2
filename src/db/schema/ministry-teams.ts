@@ -192,8 +192,10 @@ export type NewTeamRole = typeof teamRoles.$inferInsert;
 //
 // The insert that speaks for this index carries `ON CONFLICT … DO NOTHING` with
 // the SAME predicate, and the reactivation UPDATE beside it — which cannot
-// carry one — maps the index's own violation to the same refusal. See
-// `assignMember` and `ROLE_ALREADY_FILLED_MESSAGE`.
+// carry one — maps the index's own violation to the same refusal. That UPDATE
+// also carries `status = 'inactive'` in its `WHERE`, because the index is NOT a
+// guard for it when the racers are the same person: two UPDATEs of ONE row
+// collide with nothing. See `assignMember` and `ROLE_ALREADY_FILLED_MESSAGE`.
 // ----------------------------------------------------------------------------
 
 /**

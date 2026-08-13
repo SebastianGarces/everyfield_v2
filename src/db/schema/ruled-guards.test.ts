@@ -301,6 +301,25 @@ test("§3c assignMember claims the seat with ON CONFLICT (#409 D1)", () => {
     /if \(!inserted\) \{[\s\S]{0,200}throw new ExpectedError\(\s*await seatRefusalMessage\(churchId, roleId, personId\)/,
     "#409 D1: an empty returning() is the loser of the race and must be reported, not returned as undefined"
   );
+  // #411 quality round 1, second pass — THE REACTIVATION PATH'S OWN GUARD.
+  // §4d proves the seat index is the only unique index on the table; it is not
+  // a guard for this path at all when the two racers are the SAME PERSON
+  // reactivating one inactive row, because two UPDATEs of ONE row collide with
+  // nothing. The `status = 'inactive'` predicate is what refuses the loser —
+  // a compare-and-set, re-evaluated against the winner's committed row version
+  // under the row lock — and its empty `returning()` must be read exactly as
+  // the INSERT's is. Without both halves the double submit returns TWO
+  // successes and emits every assignment event twice.
+  assert.match(
+    assign,
+    /\.update\(teamMemberships\)[\s\S]{0,600}eq\(teamMemberships\.status, "inactive"\)/,
+    "#411 quality round 1: the reactivation UPDATE must be conditional on the row still being inactive — keyed on the row id alone it has no guard at all"
+  );
+  assert.match(
+    assign,
+    /if \(!reactivated\) \{[\s\S]{0,200}throw new ExpectedError\(\s*await seatRefusalMessage\(churchId, roleId, personId\)/,
+    "#411 quality round 1: the conditional UPDATE's empty returning() is the loser of the race and must be refused, not returned as undefined"
+  );
   // #411 round 2 — the thrown half. The reactivation UPDATE takes no ON
   // CONFLICT, and a RACED insert raises on the non-arbiter index, so this is a
   // live refusal path and it must end in the SAME holder read as the empty

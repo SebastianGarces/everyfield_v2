@@ -15,7 +15,10 @@ import {
 //
 // WHY THIS FILE EXISTS. One of `assignMember`'s write outcomes arrives as a
 // THROWN driver error: the reactivation path is an UPDATE and takes no
-// `ON CONFLICT` at all, so it meets the seat index as a violation.
+// `ON CONFLICT` at all, so when ANOTHER PERSON holds the seat it meets the seat
+// index as a violation. (Its OTHER refusal — a same-person double submit, which
+// the UPDATE's own `status = 'inactive'` predicate refuses — is an empty
+// `returning()` and never reaches `isSeatConflict`.)
 // `isSeatConflict` is the only thing between that throw and a raw "duplicate key
 // value violates unique constraint …" reaching a planter — the exact 500
 // migration 0038's ON CONFLICT clauses exist to prevent — and it decides by
@@ -114,8 +117,8 @@ test("§3 recognising the seat refusal does NOT decide the wording — one read 
   assert.equal(
     memberships.match(/await seatRefusalMessage\(churchId, roleId, personId\)/g)
       ?.length,
-    2,
-    "#411 round 2: BOTH refusal paths — the empty returning() and the recognised conflict — end in the one holder read"
+    3,
+    "#411: EVERY refusal path ends in the one holder read — the INSERT's empty returning(), the conditional reactivation UPDATE's empty returning(), and the recognised conflict. A branch that composed its own sentence would be a second decider"
   );
 });
 
