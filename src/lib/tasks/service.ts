@@ -1153,6 +1153,15 @@ export async function reopenTask(
  * closed. One statement, so parent and children go together or not at all
  * (there are no interactive transactions here — `invariants/transactions-
  * atomicity.md`).
+ *
+ * THE SOFT DELETE IS STILL THIS FUNCTION'S JOB (#405 D5). Migration 0038 added
+ * `tasks_parent_task_id_tasks_id_fk … ON DELETE CASCADE`, but a cascade fires
+ * on a row being REMOVED and nothing here removes one — the statement below
+ * stamps `deleted_at`, which Postgres sees as an ordinary UPDATE. The FK covers
+ * the paths that delete outright (`planWipe()`'s seed sweep, hand-run repairs)
+ * and, more usefully day to day, makes a `parent_task_id` naming no task
+ * unrepresentable. Do not read the cascade as licence to drop the `or(...)`
+ * clause below.
  */
 export async function deleteTask(
   churchId: string,

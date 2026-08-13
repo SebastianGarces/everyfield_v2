@@ -16,6 +16,10 @@ import {
   emitTeamStaffingChanged,
 } from "./events";
 import { ExpectedError } from "./expected-error";
+import {
+  PERSON_ALREADY_ASSIGNED_MESSAGE,
+  ROLE_ALREADY_FILLED_MESSAGE,
+} from "./membership-copy";
 import { getTeamStaffingCounts } from "./shared";
 
 // ============================================================================
@@ -33,11 +37,66 @@ export interface PersonTeamAssignment {
 }
 
 // ============================================================================
+// Ruled copy (#409 D1)
+// ============================================================================
+//
+// Both sentences live in the import-free leaf `membership-copy.ts` and are
+// deliberately NOT re-exported from here — the assign dialog imports them too,
+// and this module opens with `@/db`.
+
+/**
+ * Translate a unique-violation on either active-membership index into the user
+ * copy it means.
+ *
+ * WHY A TRANSLATION AND NOT A PRE-CHECK. The reactivation path is an UPDATE, and
+ * an UPDATE takes no `ON CONFLICT`. A `WHERE NOT EXISTS (… active row …)`
+ * predicate would look like a guard and be none — it is a snapshot read about
+ * rows other statements are writing, the trap
+ * `memory/invariants.md` → Transactions describes — so the index stays the only
+ * guard on both paths and this function is purely about what the planter reads.
+ * The write itself is already correct without it: the violation aborts the whole
+ * `db.batch`, so a refused reactivation leaves the role's status alone too.
+ */
+function membershipConflictMessage(error: unknown): string | null {
+  const text = [
+    error instanceof Error ? error.message : String(error),
+    // Drizzle re-throws its own error and hangs the driver's on `cause`, so the
+    // constraint name is usually there and not in the message.
+    error instanceof Error && error.cause instanceof Error
+      ? error.cause.message
+      : "",
+  ].join(" ");
+
+  if (text.includes("team_memberships_role_active_unique_idx")) {
+    return ROLE_ALREADY_FILLED_MESSAGE;
+  }
+  if (text.includes("team_memberships_active_unique")) {
+    return PERSON_ALREADY_ASSIGNED_MESSAGE;
+  }
+  return null;
+}
+
+// ============================================================================
 // Membership Functions
 // ============================================================================
 
 /**
- * Assign a person to a team role
+ * Assign a person to a team role.
+ *
+ * ONE PERSON PER ROLE, AND THE DATABASE IS WHAT SAYS SO (#409 D1, migration
+ * 0038). `team_memberships_role_active_unique_idx` — partial, on `role_id`
+ * where `status = 'active'` — is the guard; everything here is about which
+ * sentence the planter reads.
+ *
+ * "IS THE SEAT FREE" IS ASKED TWICE, and the two are not interchangeable: once
+ * up front for a legible refusal in the ordinary case, and once by the index as
+ * the real guard (the same shape the invitation slot checks use,
+ * `memory/invariants.md` → Multi-Tenancy). The pre-check alone was what this
+ * function used to have — and worse, it only ever asked about THIS person, so
+ * two planters filling one open seat with two different people both succeeded.
+ * The loser's person ended up assigned, counted, absent from the roles tab and
+ * unremovable, because that tab renders one occupant per role and the Remove
+ * button belongs to whichever row the read picked.
  */
 export async function assignMember(
   churchId: string,
@@ -99,57 +158,97 @@ export async function assignMember(
     .limit(1);
 
   if (existing && existing.status === "active") {
-    throw new ExpectedError("Person is already assigned to this role");
+    throw new ExpectedError(PERSON_ALREADY_ASSIGNED_MESSAGE);
   }
+
+  // The legible half of "is the seat free". It reads about EVERYBODY, not just
+  // this person — that is the check the old code never had. It is not a
+  // concurrency guard and is not treated as one: the index below is.
+  const [occupant] = await db
+    .select({ id: teamMemberships.id })
+    .from(teamMemberships)
+    .where(
+      and(
+        eq(teamMemberships.churchId, churchId),
+        eq(teamMemberships.roleId, roleId),
+        eq(teamMemberships.status, "active")
+      )
+    )
+    .limit(1);
+
+  if (occupant) throw new ExpectedError(ROLE_ALREADY_FILLED_MESSAGE);
 
   // The membership write and the role's status flip are both known up front,
   // so they ship as ONE db.batch — a Neon batched transaction, all-or-nothing
   // (memory/invariants.md → Transactions). Two separate awaits could fail in
-  // between and leave a role reading Filled with no active membership.
+  // between and leave a role reading Filled with no active membership. That
+  // all-or-nothing is also what makes the REACTIVATION refusal safe: the index
+  // violation aborts the batch, so `markRoleFilled` never lands either.
   const markRoleFilled = db
     .update(teamRoles)
     .set({ status: "filled" as RoleStatus, updatedAt: new Date() })
     .where(and(eq(teamRoles.id, roleId), eq(teamRoles.churchId, churchId)));
 
   let membership: TeamMembership;
-  if (existing) {
-    // Reactivate the inactive row: fresh startDate, cleared end fields.
-    const [[reactivated]] = await db.batch([
-      db
-        .update(teamMemberships)
-        .set({
-          status: "active" as MembershipStatus,
-          startDate: startDate ?? null,
-          endDate: null,
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(teamMemberships.churchId, churchId),
-            eq(teamMemberships.id, existing.id)
+  try {
+    if (existing) {
+      // Reactivate the inactive row: fresh startDate, cleared end fields.
+      // An UPDATE takes no `ON CONFLICT`, so this path meets the index as a
+      // violation and `membershipConflictMessage` turns it into user copy.
+      const [[reactivated]] = await db.batch([
+        db
+          .update(teamMemberships)
+          .set({
+            status: "active" as MembershipStatus,
+            startDate: startDate ?? null,
+            endDate: null,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(teamMemberships.churchId, churchId),
+              eq(teamMemberships.id, existing.id)
+            )
           )
-        )
-        .returning(),
-      markRoleFilled,
-    ]);
-    membership = reactivated;
-  } else {
-    const [[inserted]] = await db.batch([
-      db
-        .insert(teamMemberships)
-        .values({
-          churchId,
-          teamId,
-          personId,
-          roleId,
-          startDate: startDate ?? null,
-          status: "active" as MembershipStatus,
-          createdBy: userId,
-        } satisfies NewTeamMembership)
-        .returning(),
-      markRoleFilled,
-    ]);
-    membership = inserted;
+          .returning(),
+        markRoleFilled,
+      ]);
+      membership = reactivated;
+    } else {
+      const [[inserted]] = await db.batch([
+        db
+          .insert(teamMemberships)
+          .values({
+            churchId,
+            teamId,
+            personId,
+            roleId,
+            startDate: startDate ?? null,
+            status: "active" as MembershipStatus,
+            createdBy: userId,
+          } satisfies NewTeamMembership)
+          .onConflictDoNothing({
+            target: teamMemberships.roleId,
+            // The index predicate, repeated byte for byte. A mismatch is
+            // "there is no unique or exclusion constraint matching the ON
+            // CONFLICT specification", on every assignment.
+            where: sql`${teamMemberships.status} = 'active'`,
+          })
+          .returning(),
+        markRoleFilled,
+      ]);
+      // An empty `returning()` is not an error — it is the loser of the race
+      // (memory/invariants.md → Transactions). `markRoleFilled` still ran, and
+      // that is right rather than tolerated: somebody holds the seat, so
+      // `filled` is what the role is. The refusal below is about what this
+      // caller is told, not about repairing a write.
+      if (!inserted) throw new ExpectedError(ROLE_ALREADY_FILLED_MESSAGE);
+      membership = inserted;
+    }
+  } catch (error) {
+    const message = membershipConflictMessage(error);
+    if (message) throw new ExpectedError(message);
+    throw error;
   }
 
   // Emit events

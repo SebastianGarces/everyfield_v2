@@ -12,6 +12,7 @@ import {
   uniqueIndex,
   uuid,
   varchar,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { churches } from "./church";
 import { phaseTransitions } from "./phase-engine";
@@ -103,7 +104,34 @@ export const tasks = pgTable(
       length: 20,
     }).$type<TaskRelatedType>(),
     relatedId: uuid("related_id"),
-    parentTaskId: uuid("parent_task_id"),
+    /**
+     * The task this one is a checklist item of — one level only
+     * (`memory/invariants.md` → Tasks), enforced in application code by
+     * `assertSubtaskNesting`.
+     *
+     * #405 D5 — the SELF-FK IS `ON DELETE CASCADE` (migration 0038), and it
+     * carries two guarantees the application code cannot:
+     *
+     * 1. A parent id that names no task is UNREPRESENTABLE. The column had no
+     *    FK at all, so `createTask`'s nesting check was the only thing between a
+     *    forged `parentTaskId` and a row nothing renders: a subtask is filtered
+     *    out of `listTasks` by `topLevelTasksOnly()` and reachable only through
+     *    its parent's detail view, so a dangling parent is live work no planter
+     *    can see or close, still counted by `getTaskCounts`.
+     * 2. A HARD delete of a parent takes its children with it. The product soft-
+     *    deletes (`deleteTask` stamps `deleted_at` on the parent and its
+     *    children in one statement), so this fires only for the paths that
+     *    delete rows outright — `planWipe()`'s seed sweep and hand-run repairs —
+     *    where the alternative is an FK violation or an orphan.
+     *
+     * CASCADE rather than `set null`: a checklist item promoted to a top-level
+     * task by a delete it had nothing to do with is a task the planter never
+     * created, appearing in the list the moment its parent left it.
+     */
+    parentTaskId: uuid("parent_task_id").references(
+      (): AnyPgColumn => tasks.id,
+      { onDelete: "cascade" }
+    ),
     isRecurring: boolean("is_recurring").default(false).notNull(),
     recurrenceRule: jsonb("recurrence_rule"),
     completionEvent: varchar("completion_event", { length: 100 }),

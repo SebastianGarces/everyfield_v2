@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Search, UserPlus, AlertTriangle } from "lucide-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -18,6 +19,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { assignMemberAction } from "@/app/(dashboard)/teams/actions";
+import { ROLE_ALREADY_FILLED_MESSAGE } from "@/lib/ministry-teams/membership-copy";
 import type { Person } from "@/db/schema";
 
 interface MemberAssignDialogProps {
@@ -41,6 +43,7 @@ export function MemberAssignDialog({
   people,
   teamCounts,
 }: MemberAssignDialogProps) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [selectedPerson, setSelectedPerson] = useState<Person | null>(null);
@@ -69,6 +72,17 @@ export function MemberAssignDialog({
         setSearch("");
       } else {
         setError(result.error);
+        // #409 D1. This one refusal means the page underneath is WRONG, not
+        // just that the write failed: this dialog is only rendered beside an
+        // Open seat, so being told the seat is filled means somebody took it
+        // since this page rendered. Refresh so the occupant is on screen when
+        // the planter reads the sentence — otherwise the roles tab still says
+        // Open and pressing Confirm again is the obvious next move.
+        //
+        // `router.refresh()` is legitimate here and is not the client-refresh
+        // this repo's data-sync invariant forbids: nothing was written, so
+        // there is no server action to call `refresh()` from next/cache in.
+        if (result.error === ROLE_ALREADY_FILLED_MESSAGE) router.refresh();
       }
     } finally {
       setLoading(false);

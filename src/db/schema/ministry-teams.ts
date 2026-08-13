@@ -163,6 +163,37 @@ export type NewTeamRole = typeof teamRoles.$inferInsert;
 
 // ----------------------------------------------------------------------------
 // Team Memberships - Person-to-role assignments
+//
+// #409 D1 — ONE PERSON PER TEAM ROLE, and the DATABASE is what says so
+// (`team_memberships_role_active_unique_idx`, migration 0038).
+//
+// WHY. A `team_roles` row is a seat: `getTeam` resolves each role's occupant
+// with `memberships.find((m) => m.roleId === role.id)` and the roles tab renders
+// exactly one person beside it, with `Filled`/`Open` and a single Remove
+// control. Nothing above the database held that to one row. `assignMember`
+// asked only whether THIS person already held the role, so two planters
+// assigning two DIFFERENT people to one open seat both passed — and the loser's
+// person was assigned, counted in `getTeamCountsForPeople`, invisible on the
+// roles tab (`find` returns the first row, in whatever order Postgres hands it
+// back) and unremovable, because the only Remove button belongs to whoever the
+// read happened to pick.
+//
+// WHY PARTIAL, ON `status = 'active'`. The seat is single only while it is
+// occupied. Every past holder stays on the table as an `inactive` row — that is
+// what `removeMember` writes and what `assignMember` reactivates on a
+// re-assignment (F8) — so an unqualified unique index would make a role
+// fillable exactly once in its life.
+//
+// WHY `(role_id)` ALONE and not `(church_id, role_id)`. A role belongs to one
+// church, so the pair is a wider key for the same rule; it would let a forged
+// church id claim a second active seat on one role. `church_id` is carried for
+// tenant-scoped reads, not for identity — the same reasoning as
+// `phase_prompt_answers_transition_unique_idx`.
+//
+// The insert that speaks for this index carries `ON CONFLICT … DO NOTHING` with
+// the SAME predicate, and the reactivation UPDATE beside it — which cannot
+// carry one — maps the index's own violation to the same refusal. See
+// `assignMember` and `ROLE_ALREADY_FILLED_MESSAGE`.
 // ----------------------------------------------------------------------------
 export const teamMemberships = pgTable(
   "team_memberships",
@@ -202,6 +233,11 @@ export const teamMemberships = pgTable(
     // be re-assigned to the same team/role after being set inactive (F8 fix).
     uniqueIndex("team_memberships_active_unique")
       .on(table.teamId, table.personId, table.roleId)
+      .where(sql`status = 'active'`),
+    // The rule: one person per team role (#409 D1). Partial for the same
+    // reason as the index above — only an ACTIVE membership occupies the seat.
+    uniqueIndex("team_memberships_role_active_unique_idx")
+      .on(table.roleId)
       .where(sql`status = 'active'`),
   ]
 );
