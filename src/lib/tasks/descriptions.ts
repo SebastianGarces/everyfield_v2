@@ -7,10 +7,16 @@
 // hold this together, and they are the reason these functions exist rather
 // than a `toRichTextHtml()` sprinkled at call sites:
 //
-//   1. The WRITE paths sanitise. `createTask` and `updateTask` are reached from
-//      `"use server"` actions — POSTable endpoints that never saw the toolbar —
-//      and `importTaskTemplate` writes the catalog's own authored strings.
-//      Every one of them goes through `normalizeTaskDescription`.
+//   1. The WRITE paths sanitise. There are FOUR, and all four go through
+//      `normalizeTaskDescription`: `createTask` and `updateTask` are reached
+//      from `"use server"` actions — POSTable endpoints that never saw the
+//      toolbar — `importTaskTemplate` writes the checklist catalog's own
+//      authored strings, and `seedLaunchMilestones` writes the Launch
+//      Playbook's on every launch schedule. Enumerate them by looking
+//      (`grep -rn 'insert into tasks' src/` plus every Drizzle `insert(tasks)`),
+//      never by naming the plausible ones: the fourth was raw SQL in
+//      `src/lib/launch/milestones.ts`, outside this directory, and it was the
+//      one this comment left out.
 //   2. The LIST surfaces carry plain text. `listTasks`/`listSubtasks` feed the
 //      task cards, which render their fields as text; handing them markup would
 //      print `<strong>` at the planter.

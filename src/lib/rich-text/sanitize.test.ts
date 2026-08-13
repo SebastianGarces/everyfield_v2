@@ -408,6 +408,45 @@ test("a merge token that could still decide the authority is refused", () => {
   assert.equal(sanitizeUrl("/&#123;&#123;first_name}}"), null);
 });
 
+test("a backslash is refused, because a browser reads it as a slash", () => {
+  // The WHATWG URL parser folds `\` into `/` for an http(s) base, so every rule
+  // above spelled with `/` has a backslash spelling that walked straight past
+  // it. Both halves, and both are the SAME hole:
+  //
+  //   new URL("\\\\evil.example", "https://good.example/a/b").href
+  //     === "https://evil.example/"
+  //
+  // (a) the protocol-relative refusal
+  assert.equal(sanitizeUrl("\\\\evil.example"), null);
+  assert.equal(sanitizeUrl("/\\evil.example"), null);
+  assert.equal(sanitizeUrl("\\/evil.example"), null);
+  // (b) the merge-token AUTHORITY rule — `/\{{first_name}}` with a value of
+  // `evil.example/phish` renders `/\evil.example/phish`, which is
+  // `//evil.example/phish` to the mail client: the merge value chose the host.
+  assert.equal(sanitizeUrl("/\\{{first_name}}"), null);
+  assert.equal(sanitizeUrl("\\{{first_name}}"), null);
+  assert.equal(sanitizeUrl("\\\\{{first_name}}"), null);
+  // And a backslash anywhere else in an href is refused too, rather than being
+  // folded — a real one is written `%5C`, which is untouched by this rule.
+  assert.equal(sanitizeUrl("https://example.com/a\\b"), null);
+  assert.equal(
+    sanitizeUrl("https://example.com/a%5Cb"),
+    "https://example.com/a%5Cb"
+  );
+});
+
+test("an anchor whose href is a backslash authority loses its anchor", () => {
+  const html = sanitizeRichText(
+    '<p>Hi <a href="/\\{{first_name}}">click</a></p>'
+  );
+
+  assert.ok(!html.includes("<a"), html);
+  assert.ok(!html.includes("{{first_name}}"), html);
+  assert.ok(!html.includes("\\"), html);
+  // A refused href costs the link, never the words.
+  assert.equal(html, "<p>Hi click</p>");
+});
+
 test("a merge token inside a URL whose scheme is already fixed is kept", () => {
   assert.equal(
     sanitizeUrl("https://example.com/{{email}}"),

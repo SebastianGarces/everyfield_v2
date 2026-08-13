@@ -5,13 +5,20 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { RICH_TEXT_CONTROLS } from "@/components/shared/rich-text-editor-controls";
+import {
+  namedButtons,
+  parseElements,
+  type RenderedElement,
+} from "@/lib/testing/rendered-markup";
+
 import { TaskDescriptionField } from "./task-form";
 
 // ----------------------------------------------------------------------------
 // The task description field (T-021), asserted against the markup the browser
-// actually receives — the same approach `rich-text-editor.test.ts` takes, and
-// for the same reason: a contract made entirely of attributes and class names
-// does not need a jsdom.
+// actually receives — the same approach `rich-text-editor.test.ts` takes, over
+// the same shared reader (`src/lib/testing/rendered-markup.ts`), and for the
+// same reason: a contract made entirely of attributes and class names does not
+// need a jsdom.
 //
 // `TaskForm` itself cannot be rendered here (it calls `useRouter`, which throws
 // outside a mounted app router), which is exactly why the description field is
@@ -24,38 +31,9 @@ import { TaskDescriptionField } from "./task-form";
 //     a paragraph of escaped tags
 // ----------------------------------------------------------------------------
 
-interface RenderedElement {
-  tag: string;
-  attrs: Record<string, string>;
-}
-
-function parseElements(html: string): RenderedElement[] {
-  const elements: RenderedElement[] = [];
-  const tagPattern = /<([a-zA-Z][\w-]*)((?:\s+[\w:.-]+="[^"]*")*)\s*\/?>/g;
-  const attrPattern = /([\w:.-]+)="([^"]*)"/g;
-
-  for (const match of html.matchAll(tagPattern)) {
-    const attrs: Record<string, string> = {};
-    for (const attr of (match[2] ?? "").matchAll(attrPattern)) {
-      // React's server renderer keeps the JSX casing (`contentEditable`); the
-      // browser lowercases it when it parses.
-      attrs[attr[1].toLowerCase()] = attr[2];
-    }
-    elements.push({ tag: match[1], attrs });
-  }
-
-  return elements;
-}
-
 function render(value = "") {
   return renderToStaticMarkup(
     createElement(TaskDescriptionField, { value, onChange: () => {} })
-  );
-}
-
-function toolbarButtons(html: string): RenderedElement[] {
-  return parseElements(html).filter(
-    (el) => el.tag === "button" && el.attrs["aria-label"] !== undefined
   );
 }
 
@@ -66,7 +44,7 @@ function hiddenDescriptionInput(html: string): RenderedElement | undefined {
 }
 
 test("every description control is a clickable that carries cursor-pointer", () => {
-  const buttons = toolbarButtons(render());
+  const buttons = namedButtons(render());
 
   assert.equal(buttons.length, RICH_TEXT_CONTROLS.length);
   for (const button of buttons) {
@@ -79,7 +57,7 @@ test("every description control is a clickable that carries cursor-pointer", () 
 });
 
 test("bold, italic, links and both lists are all reachable", () => {
-  const labels = toolbarButtons(render()).map((b) => b.attrs["aria-label"]);
+  const labels = namedButtons(render()).map((b) => b.attrs["aria-label"]);
 
   for (const required of [
     "Bold",

@@ -379,6 +379,46 @@ test("no substituted merge value can decide the host on any surface", async () =
   }
 });
 
+test("a backslash cannot spell the host past the authority rule, on any surface", async () => {
+  // The same rule, spelled the way a URL parser reads and a regex does not. `\`
+  // folds to `/` for an http(s) base, so `/\{{first_name}}` is `//{{…}}` to the
+  // mail client: the merge value picks the HOST. The value here does not even
+  // need a leading slash — the backslash supplies it.
+  const authored = `<p>Hi <a href="/\\{{first_name}}">click me</a></p>`;
+  const hostile = { first_name: "evil.example/phish" };
+
+  const stored = toRichTextHtml(authored);
+  const sent = renderTemplate(stored, escapeMergeValues(hostile));
+
+  const onDetailPage = renderToStaticMarkup(
+    createElement(RichText, { body: stored, mergeData: hostile })
+  );
+  const inPreview = renderToStaticMarkup(
+    createElement(EmailPreview, {
+      subject: "",
+      body: stored,
+      mergeData: hostile,
+    })
+  );
+  const delivered = await render(
+    CommunicationEmail({ bodyHtml: sent, churchName: "New Life" })
+  );
+
+  for (const [name, html] of [
+    ["the send path", sent],
+    ["the message detail page", onDetailPage],
+    ["the COM-015 preview", inPreview],
+    ["the delivered email", delivered],
+  ] as Array<[string, string]>) {
+    assert.ok(!/evil\.example/.test(html), `${name}: ${html}`);
+    // No backslash reaches any surface at all, so there is nothing left for a
+    // URL parser to fold into a slash.
+    assert.ok(!html.includes("\\"), `${name}: ${html}`);
+    // A refused href costs the link, never the words.
+    assert.ok(html.includes("click me"), `${name}: ${html}`);
+  }
+});
+
 test("a merge token inside a real URL still substitutes on every surface", () => {
   const authored = `<p><a href="https://everyfield.app/rsvp/{{email}}">RSVP</a></p>`;
   const data = { email: "sarah@example.com" };

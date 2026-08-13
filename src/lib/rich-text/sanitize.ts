@@ -344,6 +344,21 @@ export function sanitizeUrl(raw: string): string | null {
   const decoded = decodeHtmlEntities(raw).replace(URL_NOISE, "").trim();
 
   if (!decoded) return null;
+  // A BACKSLASH IS A SLASH, and it has to be refused before any of the three
+  // checks below read the string, because every one of them spells its rule
+  // with `/`. The WHATWG URL parser folds `\` into `/` for an http(s) base, so
+  // a browser reads `\\evil.example` as `//evil.example` (protocol-relative,
+  // refused a line below when it is spelled with slashes) and `/\{{token}}` as
+  // `//{{token}}` (the merge value deciding the AUTHORITY, refused further
+  // down). Neither refusal fires on the backslash spelling, and
+  // `escapeMergeValues` — which is `escapeHtml` — has nothing to say about the
+  // character. There is no legitimate unescaped role for `\` in an author-typed
+  // http/https/mailto/tel URL (a real one is `%5C`), so the whole href is
+  // refused rather than folded: a refusal costs the link and keeps the text,
+  // while folding would silently rewrite an author's URL. Refuse here, not in a
+  // fourth special case below — the point is that nothing downstream ever sees
+  // a slash it did not recognise as one.
+  if (decoded.includes("\\")) return null;
   // Protocol-relative (`//evil.example`) resolves against the host page, which
   // in an email is nothing useful. Rejected rather than guessed at.
   if (decoded.startsWith("//")) return null;
