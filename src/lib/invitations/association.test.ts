@@ -14,6 +14,7 @@ import {
   type InvitationActor,
 } from "./core";
 import { associationOrg } from "./audit";
+import type { OrganizationInvitationType } from "@/db/schema/organization-invitation";
 import { assertInOrder, sourceReader } from "@/lib/testing/source-span";
 
 // ============================================================================
@@ -462,6 +463,41 @@ test("a sending church joining a network audits with a SENDING CHURCH subject", 
       sendingNetworkId: null,
     }),
     null
+  );
+});
+
+test("a type outside the union audits NOTHING rather than undefined", () => {
+  // Swept 2026-08-13 (#411). `auditableAssociationOrg` was the one switch on
+  // `type` in `core.ts` with no `default:` — three cases, which TypeScript
+  // treats as exhaustive, so the function fell off the end and returned
+  // `undefined`. Its signature says `| null`, and `acceptInvitationAs` branches
+  // on truthiness, so the two read alike THERE — but `undefined` is not what the
+  // type promises, and the reason the promise matters is a FOURTH
+  // `OrganizationInvitationType`: with a `default:` carrying `never`, adding one
+  // stops the build here; without it, the new type would batch three statements
+  // instead of four and commit an association with no `association_events` row
+  // behind it, which is exactly what #274 / OV-008 forbids.
+  //
+  // The cast is the point of the test: the column is a bare `varchar(40)` with a
+  // TypeScript-only `$type<>` cast and `insertInvitation` validates nothing, so
+  // a value outside the union is a database state, not an impossibility.
+  const rogue = {
+    type: "CHURCH_TO_NETWORK" as OrganizationInvitationType,
+    targetChurchId: PLANT,
+    targetSendingChurchId: null,
+    sendingChurchId: SENDING_CHURCH,
+    sendingNetworkId: NETWORK,
+  };
+
+  const audited = auditableAssociationOrg(rogue);
+
+  assert.equal(audited, null);
+  // `deepEqual` would pass for `undefined` too — the whole defect — so the
+  // distinction is asserted directly.
+  assert.notEqual(
+    audited,
+    undefined,
+    "a rogue type must return the declared null, never fall off the end of the switch"
   );
 });
 

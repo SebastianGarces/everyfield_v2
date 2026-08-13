@@ -2225,6 +2225,23 @@ export async function disassociateSendingChurchFromNetwork(
  *
  * `null` still means "there is nothing honest to audit" — a row whose type-implied
  * ids are missing. It never means "this kind of association is not recorded".
+ *
+ * IT FAILS CLOSED LIKE EVERY OTHER SWITCH ON `type` IN THIS FILE, and until the
+ * 2026-08-13 sweep (#411) it was the one that did not. With three cases and no
+ * `default:`, TypeScript treats the switch as exhaustive and lets the function
+ * end — so a row carrying a `type` outside the union returned `undefined`, not
+ * the `null` the signature promises, and `acceptInvitationAs` reads a falsy
+ * result as "nothing to audit" and batches three statements instead of four.
+ * That is an association committed with no `association_events` row behind it,
+ * which is the one thing #274 / OV-008 forbids. The premise is real rather than
+ * theoretical: the column is a bare `varchar(40)` with a TypeScript-only
+ * `$type<>` cast and `insertInvitation` validates nothing (see
+ * `verifyInvitationAuthority`). Nothing reaches here today — `lockTargetRow`,
+ * `associationStatement` and `verifyInvitationAuthority` all throw on such a row
+ * first — but "unreachable because three other functions happen to run earlier"
+ * is not the guarantee this function should rest on, and a FOURTH
+ * `OrganizationInvitationType` would reach it with all three of those extended
+ * and this one silently unaudited. The `never` makes that a compile error.
  */
 export function auditableAssociationOrg(invitation: AssociationFacts): {
   subject: AssociationSubject;
@@ -2256,6 +2273,14 @@ export function auditableAssociationOrg(invitation: AssociationFacts): {
             orgId: invitation.sendingNetworkId,
           }
         : null;
+
+    default: {
+      const unknownType: never = invitation.type;
+      console.error("invitation type has no auditable association", {
+        type: unknownType,
+      });
+      return null;
+    }
   }
 }
 
@@ -2716,41 +2741,35 @@ export async function getInvitation(
   return invitation ?? null;
 }
 
-/**
- * Get pending invitations for a church plant (as target).
- */
-export async function getPendingInvitationsForChurch(
-  churchId: string
-): Promise<OrganizationInvitation[]> {
-  return db
-    .select()
-    .from(organizationInvitations)
-    .where(
-      and(
-        eq(organizationInvitations.targetChurchId, churchId),
-        eq(organizationInvitations.status, "pending")
-      )
-    )
-    .orderBy(desc(organizationInvitations.createdAt));
-}
-
-/**
- * Get pending invitations for a sending church (as target).
- */
-export async function getPendingInvitationsForSendingChurch(
-  sendingChurchId: string
-): Promise<OrganizationInvitation[]> {
-  return db
-    .select()
-    .from(organizationInvitations)
-    .where(
-      and(
-        eq(organizationInvitations.targetSendingChurchId, sendingChurchId),
-        eq(organizationInvitations.status, "pending")
-      )
-    )
-    .orderBy(desc(organizationInvitations.createdAt));
-}
+// THE TWO TARGET-SIDE PENDING LISTS ARE NOT HERE, and their absence is the rule
+// (swept 2026-08-13, #411).
+//
+// `getPendingInvitationsForChurch` and `getPendingInvitationsForSendingChurch`
+// lived here, uncalled, from #265 until this sweep. Both selected
+// `target_* = ? and status = 'pending'` and stopped there — and
+// `memory/invariants.md` → Multi-Tenancy says that shape is WRONG for a list
+// that offers an answer: expiry is LAZY in this product, a row is stamped
+// `expired` only when somebody tries to answer it (`expireInvitationQuery`), so
+// `pending` alone returns invitations whose window closed weeks ago. The
+// dashboard reminder OV-005 raises is dismissible only by ANSWERING, so a
+// lapsed row rendered from such a list is a banner the planter can neither
+// answer nor remove — the bug #304 HR4 fixed once, on the surface.
+//
+// The answering surfaces own the corrected pair, both carrying
+// `(expires_at is null or expires_at > now)` and both resolving the inviting
+// org's name: `getPendingInvitationsForPlant` and
+// `getPendingInvitationsForSendingChurch` in
+// `src/app/(dashboard)/settings/association/queries.ts`. The second one had the
+// SAME NAME as the copy that used to be here, which is what makes a dead copy
+// worse than no copy: the next implementer greps the name, finds this module
+// first because this module owns everything else about invitations, and ships
+// the version without the clause. A read that no caller has and that an
+// invariant forbids is not a starting point — it is a trap with a docstring.
+//
+// `getInvitationsSentByUser` went in the same pass, for the plainer reason: no
+// caller anywhere in `src/` or `scripts/`, and it scoped by INVITER rather than
+// by org, which is the scope the 2026-08-04 revoke ruling replaced everywhere
+// else (`invitingOrgOf`).
 
 /**
  * `sending_church_id = ?` or `sending_network_id = ?` — WHICH ORG issued the
@@ -2896,19 +2915,6 @@ export async function bindOpenInvitationTarget(
   );
 
   return updated ?? null;
-}
-
-/**
- * Get all invitations sent by a user (for tracking sent invitations).
- */
-export async function getInvitationsSentByUser(
-  userId: string
-): Promise<OrganizationInvitation[]> {
-  return db
-    .select()
-    .from(organizationInvitations)
-    .where(eq(organizationInvitations.inviterUserId, userId))
-    .orderBy(desc(organizationInvitations.createdAt));
 }
 
 // ============================================================================
