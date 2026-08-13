@@ -166,14 +166,27 @@ is fixed; the recipe is the only swappable part. Contract: `ops/agent-os/recipes
 Call the `build-until-done` workflow with the selected tracks:
 
 ```
-Workflow({ name: "build-until-done", args: { units: [...], base: "origin/main", maxAttempts: 3, autoMerge: true } })
+Workflow({ name: "build-until-done", args: { units: [...], base: "origin/main", autoMerge: true } })
 ```
 
 `base` is a **remote** ref. A bare `"main"` is normalised to `origin/main` rather than trusted, for
 the reason gate 3 exists; pass a sha or an explicit `origin/<branch>` when you mean something else.
 
 `maxAttempts` is **per workstream**, not per track. A workstream that passed is never re-implemented,
-so one failing AC no longer burns an attempt for every healthy unit beside it.
+so one failing AC no longer burns an attempt for every healthy unit beside it. **Omit it** — the
+factory defaults risk-tiered (2; 3 when the wave carries a `risk:high` track, per dod.md
+"EXHAUSTED"). Pass a number only when a specific track has earned an exception, and say why in the
+dispatch comment.
+
+**Amendment passes have two extra rules** (learned 2026-08-12, the 14.4M-token fix pass):
+
+- **The unit id must equal the PR's head branch name** (`U313-WS1`, never `U313-fix`) when the pass
+  amends an existing PR — the loop's track branch is `feature/<unitId>`, and any other id builds
+  validated commits on a branch no PR head carries, which every verifier then correctly fails as
+  unanchorable.
+- Check each unit against dod.md's **mechanical-amendment lane** and say in the unit summary when it
+  qualifies — the lane cuts scoped review to one pass, drops the independent verifier, restricts G3
+  to the changed surface, and caps attempts at 2.
 
 **`autoMerge: true` is what dispatch adds.** It is off by default so a direct `/deliver` call cannot
 merge to `main` by surprise; a dispatch pass opts in. Under it the loop merges a track only when all

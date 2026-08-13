@@ -68,7 +68,13 @@ for (const u of units)
 // ---------------------------------------------------------------------------
 const RECIPE_AGENT_COST = { "implement-straight": 1, "generate-and-filter": 3 };
 const agentCostOf = (ws) => RECIPE_AGENT_COST[ws.recipe] || 1;
-const MAX_ATTEMPTS = parsed?.maxAttempts || 3;
+// Risk-tiered default (dod.md "EXHAUSTED"): 2 attempts; 3 only when the wave
+// carries a risk:high track. Attempt 3 changed no outcome in the week of
+// 2026-08-10 while costing a full review+verify cycle each time. An explicit
+// maxAttempts arg still wins.
+const MAX_ATTEMPTS =
+  parsed?.maxAttempts ??
+  ((parsed?.units ?? []).some((u) => u.risk === "high") ? 3 : 2);
 // How many times a label write is re-attempted before the track is errored.
 // A label write is idempotent, so retrying is free; NOT retrying is what left
 // two tracks lying on 2026-07-26.
