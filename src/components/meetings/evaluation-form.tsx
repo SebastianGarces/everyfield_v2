@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useState } from "react";
 import { Loader2, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -59,6 +59,20 @@ const qualityFactors = [
   },
 ];
 
+/**
+ * How many factors a complete evaluation carries.
+ *
+ * DERIVED, never the literal `8`. That number was written out three times — the
+ * "is it complete" test, the divisor of the average and the submit button's
+ * disabled test — so a ninth factor added to the array above would have
+ * unlocked Save one factor early AND divided nine scores by eight, printing an
+ * average the planter can see is wrong under a heading that says /5.0.
+ */
+const FACTOR_COUNT = qualityFactors.length;
+
+/** The rating a star offers, low to high. */
+const RATINGS = [1, 2, 3, 4, 5] as const;
+
 export function EvaluationForm({
   meetingId,
   meetingNumber,
@@ -74,16 +88,15 @@ export function EvaluationForm({
 
   const [state, formAction, isPending] = useActionState(action, null);
 
-  useEffect(() => {
-    if (state?.success) {
-      // Server action already calls revalidatePath
-    }
-  }, [state]);
-
-  const totalScore =
-    Object.values(scores).length === 8
-      ? (Object.values(scores).reduce((a, b) => a + b, 0) / 8).toFixed(1)
-      : null;
+  // No effect on success: `createEvaluationAction` revalidates the route, so
+  // the server sends the next render. An effect that watched `state` and did
+  // nothing sat here instead, which reads as a missing implementation rather
+  // than as a deliberate absence.
+  const rated = Object.values(scores);
+  const isComplete = rated.length === FACTOR_COUNT;
+  const totalScore = isComplete
+    ? (rated.reduce((a, b) => a + b, 0) / FACTOR_COUNT).toFixed(1)
+    : null;
 
   return (
     <form action={formAction} className="space-y-6">
@@ -113,17 +126,32 @@ export function EvaluationForm({
                     {factor.description}
                   </p>
                 </div>
-                <div className="flex gap-1">
-                  {[1, 2, 3, 4, 5].map((score) => (
+                {/*
+                  A rating group, named by its factor. Each star used to be a
+                  <button> whose only child was an <svg>, so it had no
+                  accessible name at all: a screen reader announced forty
+                  unlabelled "button"s on this form and said nothing about which
+                  score was chosen. `aria-pressed` carries the state the yellow
+                  fill carries visually.
+                */}
+                <div
+                  role="group"
+                  aria-label={`${factor.label} rating`}
+                  className="flex gap-1"
+                >
+                  {RATINGS.map((score) => (
                     <button
                       key={score}
                       type="button"
+                      aria-label={`${score} out of ${RATINGS.length}`}
+                      aria-pressed={scores[factor.key] === score}
                       onClick={() =>
                         setScores((prev) => ({ ...prev, [factor.key]: score }))
                       }
                       className="cursor-pointer p-1 transition-colors"
                     >
                       <Star
+                        aria-hidden="true"
                         className={`h-6 w-6 ${
                           (scores[factor.key] ?? 0) >= score
                             ? "fill-yellow-400 text-yellow-400"
@@ -164,7 +192,7 @@ export function EvaluationForm({
       <div className="flex justify-end">
         <Button
           type="submit"
-          disabled={isPending || Object.keys(scores).length < 8}
+          disabled={isPending || !isComplete}
           className="cursor-pointer"
         >
           {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
