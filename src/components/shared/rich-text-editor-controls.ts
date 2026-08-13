@@ -75,3 +75,52 @@ export function richTextControlClass(isActive: boolean): string {
     isActive ? RICH_TEXT_CONTROL_ACTIVE_CLASS : RICH_TEXT_CONTROL_IDLE_CLASS
   }`;
 }
+
+// ---------------------------------------------------------------------------
+// Prose
+// ---------------------------------------------------------------------------
+//
+// The sanitiser emits nine elements, and SOMETHING has to say how they look.
+// Tailwind's own reset flattens `<ul>` and `<ol>`, so a body with no rules at
+// all renders a planter's bulleted list as unbulleted, unindented lines — on
+// the screen they typed it into.
+//
+// There are exactly TWO spellings below, one per MEDIUM, and the difference
+// between them is deliberate rather than drift. It used to be four copies in
+// four components, and they had already drifted: the editor and the message
+// reader said `mb-2` and `text-primary`, the COM-015 preview said `mb-3` and
+// `#0b7a3f`, and the task detail page's hand-rolled fourth copy said one of
+// each. Whichever spelling you need, take it from here.
+
+/**
+ * Rich text in the APP's voice — the editor's canvas, and every read-only
+ * surface that renders a stored body (`RichText` in `./rich-text.tsx`).
+ *
+ * Typography and colour are the product's own, because the reader is looking
+ * at EveryField.
+ */
+export const RICH_TEXT_PROSE_CLASS = [
+  "text-sm break-words",
+  "[&_p]:mb-2 [&_p:last-child]:mb-0",
+  "[&_ul]:mb-2 [&_ul]:list-disc [&_ul]:pl-6",
+  "[&_ol]:mb-2 [&_ol]:list-decimal [&_ol]:pl-6",
+  "[&_a]:text-primary [&_a]:underline [&_a]:underline-offset-2",
+].join(" ");
+
+/**
+ * Rich text in the EMAIL's voice — the COM-015 preview only.
+ *
+ * Not a drifted copy of the constant above: the preview's whole job is to show
+ * what the RECIPIENT will see, and the recipient sees `CommunicationEmail`'s
+ * inline styles in their own mail client, not this app's theme. The spacing and
+ * the link colour are that template's, spelled here in Tailwind so the preview
+ * can wear them. Change the email, change this; change the app, change the one
+ * above.
+ */
+export const EMAIL_RICH_TEXT_PROSE_CLASS = [
+  "leading-relaxed text-[#4b5563]",
+  "[&_p]:mb-3 [&_p:last-child]:mb-0",
+  "[&_ul]:mb-3 [&_ul]:list-disc [&_ul]:pl-6",
+  "[&_ol]:mb-3 [&_ol]:list-decimal [&_ol]:pl-6",
+  "[&_a]:text-[#0b7a3f] [&_a]:underline",
+].join(" ");

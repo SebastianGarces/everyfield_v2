@@ -27,14 +27,13 @@ import {
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 // Task descriptions are rich text (T-021), sharing COM-017's editor and its
-// sanitiser. `toRichTextHtml` is the one door in — it sanitises markup and
-// converts the plain-text descriptions written before this shipped, which is
-// what makes "no migration" true.
+// sanitiser. `descriptions.ts` owns both halves of that — the write gate and
+// the list surfaces' readable preview — and its header states the rules.
 import {
-  isRichTextEmpty,
-  richTextToPlainText,
-  toRichTextHtml,
-} from "@/lib/rich-text/format";
+  normalizeTaskDescription,
+  withDescriptionPreviews,
+  type WithDescriptionPreview,
+} from "./descriptions";
 import type { ListTasksResult, TaskCounts, TaskWithAssignee } from "./types";
 import { MAX_BULK_TASKS } from "./types";
 import { emitTaskCompleted } from "./events";
@@ -75,67 +74,22 @@ export interface ListTasksOptions {
   sortDir?: "asc" | "desc";
 }
 
-// ============================================================================
-// Descriptions (T-021)
-// ============================================================================
-//
-// A task description is stored as HTML, in exactly the shape COM-017's editor
-// produces, and it is sanitised by the same allow-list sanitiser. Two rules
-// hold this together, and they are the reason both functions below exist rather
-// than a `toRichTextHtml()` sprinkled at call sites:
-//
-//   1. The WRITE paths sanitise. `createTask` and `updateTask` are reached from
-//      `"use server"` actions — POSTable endpoints that never saw the toolbar —
-//      and from the meeting follow-up generator, which writes plain text. Every
-//      one of them goes through `normalizeTaskDescription`.
-//   2. The LIST surfaces carry plain text. `listTasks`/`listSubtasks` feed the
-//      task cards, which render their fields as text; handing them markup would
-//      print `<strong>` at the planter. The detail page and the edit form read
-//      through `getTask`, which keeps the HTML.
-//
-// So: `getTask` → markup (it is being edited or rendered as rich text),
-// `listTasks`/`listSubtasks` → readable text (it is being summarised).
-
 /**
- * The one door a description takes into storage.
+ * A task as a LIST query returns it: everything `getTask` returns, plus the
+ * readable summary of its description (T-021).
  *
- * Markup is sanitised; a legacy plain-text description is converted to the same
- * shape, which is what lets a row written before T-021 render and edit without
- * a migration. An editor emptied by hand leaves `<p><br></p>` behind — truthy,
- * and a `!value.trim()` guard waves it through — so emptiness is decided by
- * `isRichTextEmpty` and stored as NULL, keeping "has a description" a single
- * question everywhere downstream.
+ * A row type of its own rather than a second meaning for `description`. The
+ * list readers used to overwrite that field with plain text while `getTask`
+ * left it as HTML, both typed `TaskWithAssignee` — so which shape a caller was
+ * holding depended on which query had produced it, and nothing in the type said
+ * so. `description` is the stored markup on every row now; `descriptionPreview`
+ * is the summary, and it is the field the card renders.
  */
-export function normalizeTaskDescription(
-  value: string | null | undefined
-): string | null {
-  const html = toRichTextHtml(value);
-  return isRichTextEmpty(html) ? null : html;
-}
+export type TaskListRow = WithDescriptionPreview<TaskWithAssignee>;
 
-/**
- * The readable text of a description, for a surface that summarises rather than
- * renders — the task list above all.
- *
- * Not truncated here: how much fits is the card's question, and a service that
- * guesses at it hands the UI a string it cannot lengthen.
- */
-export function taskDescriptionPreview(
-  value: string | null | undefined
-): string | null {
-  if (!value) return null;
-  const text = richTextToPlainText(toRichTextHtml(value));
-  return text === "" ? null : text;
-}
-
-/** Swap each row's description for its readable preview, in place of the HTML. */
-function withDescriptionPreviews<T extends { description: string | null }>(
-  rows: T[]
-): T[] {
-  return rows.map((row) => ({
-    ...row,
-    description: taskDescriptionPreview(row.description),
-  }));
+/** `ListTasksResult` over the row type above. */
+export interface TaskListResult extends Omit<ListTasksResult, "tasks"> {
+  tasks: TaskListRow[];
 }
 
 // ============================================================================
@@ -290,7 +244,7 @@ export function taskListConditions(
 export async function listTasks(
   churchId: string,
   options: ListTasksOptions = {}
-): Promise<ListTasksResult> {
+): Promise<TaskListResult> {
   const { cursor, limit = 50, sortBy = "due_date", sortDir = "asc" } = options;
 
   const safeLimit = Math.min(Math.max(1, limit), 100);
@@ -391,7 +345,7 @@ export async function listTasks(
   return {
     // Readable text, never markup (T-021): the card renders every field it is
     // given as text, so an un-flattened description would print its own tags.
-    tasks: withDescriptionPreviews(resultTasks) as TaskWithAssignee[],
+    tasks: withDescriptionPreviews(resultTasks as TaskWithAssignee[]),
     total,
     nextCursor,
   };
@@ -620,7 +574,7 @@ async function assertSubtaskNesting(
 export async function listSubtasks(
   churchId: string,
   parentTaskId: string
-): Promise<TaskWithAssignee[]> {
+): Promise<TaskListRow[]> {
   const result = await db
     .select({
       id: tasks.id,
@@ -659,8 +613,8 @@ export async function listSubtasks(
     )
     .orderBy(asc(tasks.createdAt), asc(tasks.id));
 
-  // A checklist is a list surface too — plain text, same rule as `listTasks`.
-  return withDescriptionPreviews(result) as TaskWithAssignee[];
+  // A checklist is a list surface too — same rule as `listTasks`.
+  return withDescriptionPreviews(result as TaskWithAssignee[]);
 }
 
 // ============================================================================

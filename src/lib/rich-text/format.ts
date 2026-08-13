@@ -13,11 +13,53 @@
 // door shows a planter their own `<strong>` tags.
 // ============================================================================
 
-import { decodeHtmlEntities, escapeHtml, sanitizeRichText } from "./sanitize";
+import {
+  KNOWN_HTML_TAGS,
+  VOID_TAGS,
+  decodeHtmlEntities,
+  escapeHtml,
+  sanitizeRichText,
+} from "./sanitize";
 
-/** Does this value carry markup, or is it plain text with newlines? */
+/** `<name`, `</name`, or `<name attr="…">` — anything SHAPED like a tag. */
+const TAG_LIKE = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)(?:\s[^>]*?)?\/?>/g;
+
+/**
+ * Does this value carry markup, or is it plain text with newlines?
+ *
+ * The wrong answer here is not cosmetic, it DELETES: a value called markup goes
+ * to the sanitiser, which unwraps what it does not recognise and drops the
+ * text inside anything on `DROP_WITH_CONTENT`. "Bring the <signed lease> and
+ * the keys" once read back as "Bring the  and the keys", and "if a<b and c>d"
+ * as "if a<strong>d</strong>", because ANY `<word …>` counted as a tag. Legacy
+ * descriptions and message bodies are exactly the prose that contains such
+ * things, and they are the population this branch exists for.
+ *
+ * So the test is a parser's, not a shape's. A value is markup when it opens a
+ * tag whose name is a REAL HTML element and that tag is finished: either it is
+ * void (`<br>` closes nothing, so it stands on its own) or its `</name>` is
+ * somewhere later in the string. A lone `</name>` proves nothing — an opening
+ * tag with a match would have proved it already.
+ *
+ * Nothing this product writes is at risk of the plain-text branch: every value
+ * that leaves this module is block-wrapped by `asBlock`, so `<p>…</p>` is
+ * always there to be found.
+ */
 export function isHtmlFragment(value: string): boolean {
-  return /<\/?[a-zA-Z][a-zA-Z0-9]*(?:\s[^>]*)?\/?>/.test(value);
+  TAG_LIKE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = TAG_LIKE.exec(value)) !== null) {
+    if (match[1] === "/") continue;
+    const name = match[2].toLowerCase();
+    if (!KNOWN_HTML_TAGS.has(name)) continue;
+    if (VOID_TAGS.has(name)) return true;
+    // The name is `[a-zA-Z][a-zA-Z0-9]*`, so it carries no regex metacharacter.
+    const closing = new RegExp(`</\\s*${name}\\s*>`, "i");
+    if (closing.test(value.slice(match.index + match[0].length))) return true;
+  }
+
+  return false;
 }
 
 /**

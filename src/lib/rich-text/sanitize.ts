@@ -84,8 +84,14 @@ const DROP_WITH_CONTENT = new Set([
   "audio",
 ]);
 
-/** Elements that never carry a closing tag. */
-const VOID_TAGS = new Set([
+/**
+ * Elements that never carry a closing tag.
+ *
+ * Exported because `format.ts` asks the same question of a value it is deciding
+ * is markup or prose — a `<br>` is a tag with nothing to close, so it proves
+ * markup on its own where a `<b>` does not.
+ */
+export const VOID_TAGS = new Set([
   "area",
   "base",
   "br",
@@ -102,8 +108,114 @@ const VOID_TAGS = new Set([
   "wbr",
 ]);
 
+/**
+ * Every element name this file recognises, plus the rest of the standard HTML
+ * vocabulary.
+ *
+ * This is NOT an allow-list — `ALLOWED_TAGS` is, and it is nine names long.
+ * This set answers a different question, for `format.ts`: is `<x …>` a TAG at
+ * all, or is it a pair of angle brackets a planter typed? Everything here is
+ * dropped, unwrapped or kept by the rules above; nothing is trusted because it
+ * appears in this list.
+ */
+export const KNOWN_HTML_TAGS = new Set<string>([
+  ...ALLOWED_TAGS,
+  ...Object.keys(TAG_ALIASES),
+  ...VOID_TAGS,
+  ...DROP_WITH_CONTENT,
+  ...BLOCK_CHILD_TAGS,
+  "abbr",
+  "address",
+  "article",
+  "aside",
+  "bdi",
+  "bdo",
+  "big",
+  "body",
+  "button",
+  "caption",
+  "center",
+  "cite",
+  "code",
+  "colgroup",
+  "data",
+  "datalist",
+  "dd",
+  "del",
+  "details",
+  "dfn",
+  "dialog",
+  "dl",
+  "dt",
+  "fieldset",
+  "figcaption",
+  "figure",
+  "font",
+  "footer",
+  "form",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "header",
+  "hgroup",
+  "html",
+  "kbd",
+  "label",
+  "legend",
+  "main",
+  "map",
+  "mark",
+  "menu",
+  "meter",
+  "nav",
+  "nobr",
+  "optgroup",
+  "option",
+  "output",
+  "picture",
+  "pre",
+  "progress",
+  "q",
+  "rp",
+  "rt",
+  "ruby",
+  "s",
+  "samp",
+  "search",
+  "section",
+  "select",
+  "slot",
+  "small",
+  "span",
+  "strike",
+  "sub",
+  "summary",
+  "sup",
+  "table",
+  "tbody",
+  "td",
+  "tfoot",
+  "th",
+  "thead",
+  "time",
+  "tr",
+  "tt",
+  "var",
+]);
+
 /** The only URL schemes a link may carry. */
 const SAFE_URL_SCHEME = /^(?:https?|mailto|tel):/i;
+
+/**
+ * The opening of a merge token (`{{first_name}}`).
+ *
+ * A URL holding one is not a finished URL: `renderTemplate` substitutes
+ * arbitrary recipient text into it AFTER this file has vetted it.
+ */
+const MERGE_TOKEN_OPEN = "{{";
 
 /** Anything shaped like `scheme:` at the head of a URL. */
 const ANY_URL_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
@@ -222,6 +334,9 @@ export function decodeTextEntities(value: string): string {
  * A rejected href does not mean a rejected link: the caller unwraps the anchor
  * and keeps the text, so a hostile `href` costs the user their link and nothing
  * else.
+ *
+ * This vetting runs BEFORE merge substitution, which is why the token rule
+ * below exists — see it for the hole it closes.
  */
 export function sanitizeUrl(raw: string): string | null {
   // Entities are decoded and control characters stripped BEFORE the scheme
@@ -232,6 +347,23 @@ export function sanitizeUrl(raw: string): string | null {
   // Protocol-relative (`//evil.example`) resolves against the host page, which
   // in an email is nothing useful. Rejected rather than guessed at.
   if (decoded.startsWith("//")) return null;
+  // A merge token is replaced with arbitrary text AFTER this function has run,
+  // so a token that can still decide the SCHEME defeats every test below it:
+  // `<a href="{{first_name}}">` passes sanitising untouched and leaves
+  // `renderTemplate` reading `href="javascript:alert(1)"` on the message detail
+  // page, the COM-015 preview and the delivered email alike. A token is
+  // therefore allowed only where the scheme is ALREADY fixed by the characters
+  // in front of it — a spelled-out safe scheme, or an origin-relative path — so
+  // `https://example.com/{{email}}` and `/tasks/{{task_id}}` still work and
+  // `{{first_name}}` (or `x{{token}}`, which substitutes into `xjavascript:`)
+  // does not.
+  if (
+    decoded.includes(MERGE_TOKEN_OPEN) &&
+    !SAFE_URL_SCHEME.test(decoded) &&
+    !decoded.startsWith("/")
+  ) {
+    return null;
+  }
   if (ANY_URL_SCHEME.test(decoded)) {
     return SAFE_URL_SCHEME.test(decoded) ? decoded : null;
   }

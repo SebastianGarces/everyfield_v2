@@ -16,7 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ResendNonOpeners } from "@/components/communication/resend-non-openers";
-import { MessageBody } from "@/components/communication/message-body";
+import { RichText } from "@/components/shared/rich-text";
 import {
   summarizeMessageDelivery,
   type MessageTileKey,
@@ -123,7 +123,7 @@ export default async function MessageDetailPage({
   const resolvedSubject = comm.subject
     ? renderTemplate(comm.subject, mergeData)
     : "(No subject)";
-  // The body is NOT resolved here. `MessageBody` runs the same two steps, in
+  // The body is NOT resolved here. `RichText` runs the same two steps, in
   // the same order, as the send path and the compose preview — sanitise, then
   // substitute merge values with those values escaped — and it runs them ONCE.
   // Sanitising here as well was two passes over one body, which is how this
@@ -284,9 +284,10 @@ export default async function MessageDetailPage({
             <CardContent>
               <div className="rounded-lg bg-gray-50 p-4">
                 {/* The body a planter composed is rich text (COM-017), so it
-                    is rendered, not printed — `MessageBody` sanitises, merges,
-                    and carries the plain-text bodies sent before it shipped. */}
-                <MessageBody body={comm.body} mergeData={mergeData} />
+                    is rendered, not printed — `RichText` sanitises, merges, and
+                    carries the plain-text bodies sent before it shipped. It is
+                    the same reader the task detail page mounts. */}
+                <RichText body={comm.body} mergeData={mergeData} />
               </div>
             </CardContent>
           </Card>

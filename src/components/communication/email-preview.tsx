@@ -7,6 +7,7 @@ import {
   toRichTextHtml,
 } from "@/lib/rich-text/format";
 import { escapeHtml } from "@/lib/rich-text/sanitize";
+import { EMAIL_RICH_TEXT_PROSE_CLASS } from "@/components/shared/rich-text-editor-controls";
 
 import { parseRichEmailBody } from "./email-body-segments";
 
@@ -131,7 +132,7 @@ export function EmailPreview({ subject, body, mergeData }: EmailPreviewProps) {
           >
             {!isRichTextEmpty(body) ? (
               <div
-                className="leading-relaxed text-[#4b5563] [&_a]:text-[#0b7a3f] [&_a]:underline [&_ol]:mb-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_ul]:mb-3 [&_ul]:list-disc [&_ul]:pl-6"
+                className={EMAIL_RICH_TEXT_PROSE_CLASS}
                 style={{ fontSize: "16px" }}
               >
                 {bodySegments.map((segment, index) =>

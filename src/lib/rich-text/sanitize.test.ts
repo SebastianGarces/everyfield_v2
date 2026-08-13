@@ -382,3 +382,36 @@ test("decodeHtmlEntities handles the forms a browser accepts in an attribute", (
   assert.equal(decodeHtmlEntities("&amp;"), "&");
   assert.equal(decodeHtmlEntities("&notarealentity;"), "&notarealentity;");
 });
+
+// --- a merge token in an href ------------------------------------------------
+//
+// The hole these close: this file vets an href BEFORE `renderTemplate`
+// substitutes merge values into it, and `escapeMergeValues` is `escapeHtml`,
+// which has nothing to say about a URL scheme. So a token that IS the whole
+// href passed every check above and came out of the send path, the preview and
+// the message detail page reading `href="javascript:alert(1)"`.
+
+test("a merge token that could still decide the scheme is refused", () => {
+  assert.equal(sanitizeUrl("{{first_name}}"), null);
+  // Substitutes into `xjavascript:…`, which is a scheme too.
+  assert.equal(sanitizeUrl("x{{first_name}}"), null);
+  assert.equal(sanitizeUrl("&#123;&#123;first_name}}"), null);
+});
+
+test("a merge token inside a URL whose scheme is already fixed is kept", () => {
+  assert.equal(
+    sanitizeUrl("https://example.com/{{email}}"),
+    "https://example.com/{{email}}"
+  );
+  assert.equal(sanitizeUrl("mailto:{{email}}"), "mailto:{{email}}");
+  assert.equal(sanitizeUrl("/tasks/{{task_id}}"), "/tasks/{{task_id}}");
+});
+
+test("an anchor whose whole href is a merge token loses its anchor", () => {
+  const html = sanitizeRichText('<a href="{{first_name}}">click me</a>');
+
+  assert.ok(!html.includes("<a"), html);
+  assert.ok(!html.includes("{{first_name}}"), html);
+  // A refused href costs the link, never the words.
+  assert.equal(html, "click me");
+});

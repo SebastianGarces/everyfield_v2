@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { richTextToPlainText } from "@/lib/rich-text/format";
 import { ALLOWED_TAGS } from "@/lib/rich-text/sanitize";
-import { normalizeTaskDescription, taskDescriptionPreview } from "./service";
+import {
+  normalizeTaskDescription,
+  taskDescriptionPreview,
+} from "./descriptions";
 
 // ----------------------------------------------------------------------------
 // Task descriptions are rich text (T-021), on COM-017's editor and sanitiser.
@@ -77,6 +81,36 @@ test("a plain-text description carrying angle brackets is text, not markup", () 
   const html = normalizeTaskDescription("Budget < 500 & > 300");
 
   assert.equal(html, "<p>Budget &lt; 500 &amp; &gt; 300</p>");
+});
+
+test("a pre-T-021 description reads back with every word intact", () => {
+  // The seeded case: a planter typed this into a textarea before descriptions
+  // were rich text, and there is no migration — the door must carry it. It once
+  // read back as "Bring the  and the keys", because the markup-vs-prose test
+  // matched any `<word …>` and the sanitiser then deleted what it could not
+  // place. Bracketed prose is the shape a real description takes, so the loss
+  // was neither theoretical nor rare.
+  const seeded =
+    "Bring the <signed lease> and the keys.\n\n" +
+    "Ask <the landlord> whether a<b for the parking bays, then confirm.";
+
+  const html = normalizeTaskDescription(seeded);
+  assert.ok(html);
+
+  // Nothing was interpreted: the brackets are escaped text in paragraphs.
+  assertOnlyAllowedTags(html, seeded);
+  assert.match(html, /&lt;signed lease&gt;/);
+  assert.match(html, /&lt;the landlord&gt;/);
+  assert.match(html, /a&lt;b for the parking bays/);
+
+  // And it round-trips: what the planter typed is what the page shows, and
+  // what the list summarises.
+  assert.equal(richTextToPlainText(html), seeded);
+  assert.equal(taskDescriptionPreview(seeded), seeded);
+  assert.equal(taskDescriptionPreview(html), seeded);
+
+  // Idempotent, so a re-save does not start eating it either.
+  assert.equal(normalizeTaskDescription(html), html);
 });
 
 test("no script tag survives a write, however it is spelled", () => {

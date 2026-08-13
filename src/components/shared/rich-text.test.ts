@@ -6,9 +6,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { toRichTextHtml } from "@/lib/rich-text/format";
 
-import { MessageBody } from "./message-body";
+import { RichText } from "./rich-text";
 
 // ----------------------------------------------------------------------------
+// `RichText` is the ONE read-only renderer of a stored rich-text value — the
+// sent-message detail page and the task detail page both mount it.
+//
 // The message detail page is the last place a planter reads their own sent
 // message, and it used to be the WORST corrupted of the three surfaces: the
 // page sanitised the body and then handed it to this component, which sanitised
@@ -25,7 +28,7 @@ function body(props: {
   body: string | null | undefined;
   mergeData?: Record<string, string>;
 }) {
-  return renderToStaticMarkup(createElement(MessageBody, props));
+  return renderToStaticMarkup(createElement(RichText, props));
 }
 
 test("the formatting is rendered, not printed", () => {

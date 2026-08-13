@@ -27,6 +27,46 @@ test("isHtmlFragment tells markup from prose", () => {
   assert.equal(isHtmlFragment("Reply to <3 people"), false);
 });
 
+test("prose that LOOKS like a tag is still prose", () => {
+  // The regression this replaced: any `<word …>` counted, so ordinary prose was
+  // routed to the sanitiser, which unwrapped what it did not recognise and
+  // DELETED the words inside. Silent loss of pre-existing user text, on every
+  // read surface.
+  //
+  // The rule now: a real HTML element name, AND a finished tag — void, or
+  // closed later in the string.
+  assert.equal(isHtmlFragment("Bring the <signed lease> and the keys"), false);
+  assert.equal(isHtmlFragment("Call <see notes> before Friday"), false);
+  // `b` IS an element, but nothing closes it, so this is arithmetic.
+  assert.equal(isHtmlFragment("if a<b and c>d then stop"), false);
+  // A lone closing tag proves nothing — an opener with a match proves it first.
+  assert.equal(isHtmlFragment("scored 3</4 overall"), false);
+  // …and the real thing still reads as markup.
+  assert.equal(isHtmlFragment("a <b>bold</b> claim"), true);
+  assert.equal(isHtmlFragment("<ul><li>one</li></ul>"), true);
+  assert.equal(isHtmlFragment("line<br/>break"), true);
+});
+
+test("legacy prose that looks like a tag survives the door word for word", () => {
+  const cases: Array<[string, string]> = [
+    [
+      "Bring the <signed lease> and the keys",
+      "<p>Bring the &lt;signed lease&gt; and the keys</p>",
+    ],
+    [
+      "Call <see notes> before Friday",
+      "<p>Call &lt;see notes&gt; before Friday</p>",
+    ],
+    ["if a<b and c>d then stop", "<p>if a&lt;b and c&gt;d then stop</p>"],
+  ];
+
+  for (const [authored, expected] of cases) {
+    assert.equal(toRichTextHtml(authored), expected, authored);
+    // And it reads back as exactly what was typed.
+    assert.equal(richTextToPlainText(toRichTextHtml(authored)), authored);
+  }
+});
+
 test("plain text becomes one paragraph per blank-line block", () => {
   assert.equal(
     plainTextToHtml("Hi Sarah,\n\nSee you\nat seven."),

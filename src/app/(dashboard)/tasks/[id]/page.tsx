@@ -3,12 +3,12 @@ import { notFound, redirect } from "next/navigation";
 import { HeaderBreadcrumbs } from "@/components/header";
 import { TaskForm } from "@/components/tasks";
 import { SubtaskList } from "@/components/tasks/subtask-list";
+import { RichText } from "@/components/shared/rich-text";
 import { TaskDetailActions } from "./task-detail-actions";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { verifySession } from "@/lib/auth/session";
 import { getTask, listSubtasks } from "@/lib/tasks/service";
-import { toRichTextHtml } from "@/lib/rich-text/format";
 import { eq } from "drizzle-orm";
 import {
   Calendar,
@@ -282,19 +282,14 @@ export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
             </CardHeader>
             <CardContent>
               {/*
-                Rendered as rich text, not printed as markup (T-021).
-                `toRichTextHtml` sanitises on the way out — the write path
-                already sanitised, but a row can predate that, and a renderer
-                that trusts its input is one migration away from being wrong.
-                It also carries the plain-text descriptions written before this
-                shipped, which is what makes "no migration" true.
+                Rendered as rich text, not printed as markup (T-021), by the
+                SAME reader the sent-message detail page mounts. This block was
+                a hand-rolled second copy of it — its own
+                `dangerouslySetInnerHTML` and its own prose classes, already
+                drifted from the message page's in spacing and link colour
+                before either shipped.
               */}
-              <div
-                className="[&_a]:text-primary text-sm break-words [&_a]:underline [&_a]:underline-offset-2 [&_ol]:mb-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:mb-2 [&_p:last-child]:mb-0 [&_ul]:mb-2 [&_ul]:list-disc [&_ul]:pl-6"
-                dangerouslySetInnerHTML={{
-                  __html: toRichTextHtml(task.description),
-                }}
-              />
+              <RichText body={task.description} />
             </CardContent>
           </Card>
         )}

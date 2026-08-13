@@ -52,6 +52,7 @@ import {
 } from "@/lib/rich-text/sanitize";
 import {
   RICH_TEXT_CONTROLS,
+  RICH_TEXT_PROSE_CLASS,
   richTextControlClass,
   type RichTextCommand,
   type RichTextControlIcon,
@@ -468,11 +469,10 @@ export function RichTextEditor({
           onFocus={onFocus}
           data-empty={isEmpty ? "true" : "false"}
           className={cn(
-            "min-h-[240px] w-full overflow-auto px-3 py-3 text-sm break-words outline-none",
-            "[&_p]:mb-2 [&_p:last-child]:mb-0",
-            "[&_ul]:mb-2 [&_ul]:list-disc [&_ul]:pl-6",
-            "[&_ol]:mb-2 [&_ol]:list-decimal [&_ol]:pl-6",
-            "[&_a]:text-primary [&_a]:underline [&_a]:underline-offset-2",
+            "min-h-[240px] w-full overflow-auto px-3 py-3 outline-none",
+            // The canvas wears the same prose rules the read-only surfaces do,
+            // so what an author sees while typing is what a reader gets.
+            RICH_TEXT_PROSE_CLASS,
             editorClassName
           )}
         />

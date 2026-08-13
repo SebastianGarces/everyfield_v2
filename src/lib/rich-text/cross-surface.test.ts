@@ -5,19 +5,22 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { render } from "@react-email/components";
 
-import { MessageBody } from "@/components/communication/message-body";
+import { EmailPreview } from "@/components/communication/email-preview";
+import { RichText } from "@/components/shared/rich-text";
+import { renderTemplate } from "@/lib/communication/merge";
 import { CommunicationEmail } from "@/lib/email/components/communication-email";
 import {
   normalizeTaskDescription,
   taskDescriptionPreview,
-} from "@/lib/tasks/service";
+} from "@/lib/tasks/descriptions";
 
 import {
+  escapeMergeValues,
   richTextToPlainText,
   sanitizeEditorHtml,
   toRichTextHtml,
 } from "./format";
-import { ALLOWED_TAGS } from "./sanitize";
+import { ALLOWED_TAGS, escapeHtml } from "./sanitize";
 
 // ----------------------------------------------------------------------------
 // One editor, two consumers (COM-017 + T-021).
@@ -219,14 +222,15 @@ test("an emptied editor is empty on both sides, however it spells it", () => {
 test("the message surface and the task surface show the same markup", async () => {
   const stored = toRichTextHtml(FORMATTED_BODY);
 
-  // The task detail page renders `toRichTextHtml(task.description)` into a div;
-  // `MessageBody` sanitises the stored body and renders that. Same body, same
-  // markup on screen — a planter reading their own message and their own task
-  // sees one product, not two.
+  // Both detail pages now mount the SAME reader, so this asserts one reader
+  // renders one markup rather than two readers agreeing by coincidence — which
+  // is what it asserted while the task page hand-rolled its own copy.
   const onMessagePage = renderToStaticMarkup(
-    createElement(MessageBody, { body: stored })
+    createElement(RichText, { body: stored })
   );
-  const onTaskPage = toRichTextHtml(stored);
+  const onTaskPage = renderToStaticMarkup(
+    createElement(RichText, { body: stored })
+  );
 
   assert.ok(
     onMessagePage.includes(onTaskPage),
@@ -285,4 +289,105 @@ test("neither list surface nor inbox ever shows a tag", () => {
   // The list keeps the SHAPE of a list, so a bulleted description still reads
   // as one when it is flattened.
   assert.ok(preview.includes("- Arrive by 9"), preview);
+});
+
+// ============================================================================
+// A merge token cannot become a scheme
+// ============================================================================
+//
+// Every surface below runs the same two steps in the same order — sanitise,
+// then substitute ESCAPED merge values — and the substitution happens AFTER the
+// href was vetted. So `<a href="{{first_name}}">` is the one input where the
+// sanitiser's answer and the recipient's URL are different strings, and it has
+// to be caught on every one of them at once, not on whichever surface a test
+// happened to cover.
+
+test("a merge token cannot smuggle a javascript: href onto any surface", async () => {
+  const authored = `<p>Hi <a href="{{first_name}}">click me</a></p>`;
+  const hostile = { first_name: "javascript:alert(document.domain)" };
+
+  // The send path's two steps, stripped of their I/O exactly as the email
+  // suite strips them (`sendCommunication`: `toRichTextHtml` then
+  // `renderTemplate(html, escapeMergeValues(data))`).
+  const stored = toRichTextHtml(authored);
+  const sent = renderTemplate(stored, escapeMergeValues(hostile));
+
+  const onDetailPage = renderToStaticMarkup(
+    createElement(RichText, { body: stored, mergeData: hostile })
+  );
+  const inPreview = renderToStaticMarkup(
+    createElement(EmailPreview, {
+      subject: "",
+      body: stored,
+      mergeData: hostile,
+    })
+  );
+  const delivered = await render(
+    CommunicationEmail({ bodyHtml: sent, churchName: "New Life" })
+  );
+
+  const surfaces: Array<[string, string]> = [
+    ["the send path", sent],
+    ["the message detail page", onDetailPage],
+    ["the COM-015 preview", inPreview],
+    ["the delivered email", delivered],
+  ];
+
+  for (const [name, html] of surfaces) {
+    assert.ok(!/href\s*=\s*["']?javascript:/i.test(html), `${name}: ${html}`);
+    assert.ok(!/javascript:alert/i.test(html), `${name}: ${html}`);
+    // The refusal costs the link, never the words.
+    assert.ok(html.includes("click me"), `${name}: ${html}`);
+  }
+});
+
+test("a merge token inside a real URL still substitutes on every surface", () => {
+  const authored = `<p><a href="https://everyfield.app/rsvp/{{email}}">RSVP</a></p>`;
+  const data = { email: "sarah@example.com" };
+
+  const stored = toRichTextHtml(authored);
+  const sent = renderTemplate(stored, escapeMergeValues(data));
+  const onDetailPage = renderToStaticMarkup(
+    createElement(RichText, { body: stored, mergeData: data })
+  );
+
+  for (const [name, html] of [
+    ["the send path", sent],
+    ["the message detail page", onDetailPage],
+  ] as Array<[string, string]>) {
+    assert.ok(
+      html.includes("https://everyfield.app/rsvp/sarah@example.com"),
+      `${name}: ${html}`
+    );
+    assert.ok(!html.includes("{{email}}"), `${name}: ${html}`);
+  }
+});
+
+// ============================================================================
+// Legacy prose survives the door
+// ============================================================================
+
+test("a legacy body containing angle brackets keeps every word, both doors", () => {
+  // The regression: `isHtmlFragment` matched any `<word …>`, so this prose was
+  // routed to the sanitiser and came back as "Bring the  and the keys".
+  const legacy = [
+    "Bring the <signed lease> and the keys",
+    "Call <see notes> before Friday",
+    "if a<b and c>d then stop",
+    "Ask <the landlord> about parking, then email <someone at the council>",
+  ];
+
+  for (const authored of legacy) {
+    const { message, task } = throughBothDoors(authored);
+    for (const [door, html] of [
+      ["the message door", message],
+      ["the task door", task],
+    ] as Array<[string, string]>) {
+      const readBack = richTextToPlainText(html);
+      assert.equal(readBack, authored, `${door} lost text: ${html}`);
+      for (const word of authored.split(/\s+/)) {
+        assert.ok(html.includes(escapeHtml(word)), `${door} dropped ${word}`);
+      }
+    }
+  }
 });
