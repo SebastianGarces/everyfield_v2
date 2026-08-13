@@ -389,7 +389,10 @@ test("every task-row reader selects the shared column list", () => {
   // (`src/lib/testing/source-span.ts`) rather than silently measuring the file.
   const readers: [from: string, to: string][] = [
     ["export async function getTask(", "export function topLevelTasksOnly("],
-    ["export async function listTasks(", "export function taskCountConditions("],
+    [
+      "export async function listTasks(",
+      "export function taskCountConditions(",
+    ],
     ["export async function listSubtasks(", "// Mutations"],
   ];
 
