@@ -1,7 +1,13 @@
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray, or, type SQL } from "drizzle-orm";
+import type { AnyColumn } from "drizzle-orm";
 
 import { db } from "@/db";
-import { churches, users, type OrganizationInvitationType } from "@/db/schema";
+import {
+  churches,
+  users,
+  type OrganizationInvitationType,
+  type UserRole,
+} from "@/db/schema";
 import { OVERSIGHT_ROLES } from "@/lib/auth/access";
 
 import {
@@ -799,6 +805,80 @@ export function announceLaunchDateChanged(
 // ----------------------------------------------------------------------------
 
 /**
+ * A `users` table reference — the base table, or an `alias()` of it, so a
+ * correlated subquery can name its own candidate recipient.
+ */
+interface UsersRef {
+  role: AnyColumn;
+  sendingChurchId: AnyColumn;
+  sendingNetworkId: AnyColumn;
+}
+
+/**
+ * An org id to match against: a literal loaded by an earlier query, or a COLUMN
+ * to correlate with (the sweep's `churches.sending_*_id` of the outer row). The
+ * same idiom `ChurchIdRef` uses in `./oversight-digest.ts`, and for the same
+ * reason: one definition of the audience, asked two ways.
+ */
+type OrgIdRef = string | AnyColumn;
+
+/**
+ * WHO ADMINISTERS THESE ORGS — the ONE definition of an oversight audience, in
+ * SQL, with the role PAIRED to the org kind inside each arm.
+ *
+ * The pairing is the whole point and it is `memory/invariants.md` →
+ * Multi-Tenancy: both oversight FKs live on one `users` row and neither implies
+ * the other, so `or(fk match) AND role in OVERSIGHT_ROLES` is not the audience —
+ * it admits a `network_admin` who also carries a `sending_church_id` into that
+ * SENDING CHURCH's audience, which is the hierarchy walk this repo forbids
+ * arriving through the role instead of through the FK. `recipientAdministersOrg`
+ * (`./enqueue.ts`) already pairs them per recipient at enqueue time; three SQL
+ * sites now ask the question through this one builder, so the audience, the
+ * gate and the digest sweep's "who is still owed a row" cannot answer it
+ * differently.
+ *
+ * THE THIRD SITE IS WHY THIS IS SHARED RATHER THAN REPEATED. `listOversightAdminsOfOrg`
+ * paired correctly and the other two did not, and for the sweep that was a
+ * LIVENESS defect, not merely a lie in a report: `selectPlantsOwedDigest`
+ * offers a plant while any oversight recipient of it is missing that day's
+ * digest row, and a cross-paired admin can never be written one (`enqueue`'s
+ * `canAccessChurch` resolves a `network_admin` through `sending_network_id`
+ * alone). So the plant stayed permanently owed, was re-digested on every one of
+ * the day's ~96 ticks, and — the ordering being stable by id — held its place at
+ * the head of the owed set, which is exactly the starvation
+ * `runOversightDigestSweep`'s header records as fixed.
+ *
+ * Returns `undefined` when no org is named — the caller turns that into "no
+ * recipients", never into "everyone".
+ */
+export function oversightAudienceCondition(
+  table: UsersRef,
+  org: { sendingChurchId: OrgIdRef | null; sendingNetworkId: OrgIdRef | null }
+): SQL | undefined {
+  // `satisfies UserRole` because `UsersRef` types the columns loosely — the
+  // alias and the base table are different types to drizzle and only their
+  // column SHAPES can be shared. The literal stays pinned to the role union.
+  const reaches = [
+    org.sendingChurchId
+      ? and(
+          eq(table.role, "sending_church_admin" satisfies UserRole),
+          eq(table.sendingChurchId, org.sendingChurchId)
+        )
+      : undefined,
+    org.sendingNetworkId
+      ? and(
+          eq(table.role, "network_admin" satisfies UserRole),
+          eq(table.sendingNetworkId, org.sendingNetworkId)
+        )
+      : undefined,
+  ].filter((clause) => clause !== undefined);
+
+  if (reaches.length === 0) return undefined;
+
+  return or(...reaches);
+}
+
+/**
  * The oversight recipients of a plant: the admins of the sending church it
  * belongs to, and the admins of the network it belongs to.
  *
@@ -825,27 +905,23 @@ export async function listOversightRecipientsForChurch(
 
   if (!plant) return [];
 
-  const reaches = [
-    plant.sendingChurchId
-      ? eq(users.sendingChurchId, plant.sendingChurchId)
-      : undefined,
-    plant.sendingNetworkId
-      ? eq(users.sendingNetworkId, plant.sendingNetworkId)
-      : undefined,
-  ].filter((clause) => clause !== undefined);
+  // Each arm pairs the role with its own FK — see `oversightAudienceCondition`.
+  // A `team_member` carrying a `sending_church_id` is not oversight, and neither
+  // is a `network_admin` carrying one: `enqueue` would refuse both anyway (a
+  // role with no access to this plant fails `canAccessChurch`), but a fan-out
+  // that reports "considered 40" when 38 of them were never candidates is lying
+  // to whoever reads the report — and the digest sweep reads exactly this
+  // audience to decide who is still owed a row.
+  const audience = oversightAudienceCondition(users, plant);
+  if (!audience) return [];
 
-  if (reaches.length === 0) return [];
-
-  // One statement, and the role is IN it: `OVERSIGHT_ROLES` is the definition
-  // of "oversight", and a `team_member` who happens to carry a
-  // `sending_church_id` is not one. `enqueue` would refuse them anyway (a
-  // church-level role with no access to this plant fails `canAccessChurch`),
-  // but a fan-out that reports "considered 40" when 38 of them were never
-  // candidates is lying to whoever reads the report.
+  // `OVERSIGHT_ROLES` stays as a floor even though each arm already names its
+  // role: it is the statement that this query never returns a church-level
+  // account, and it survives an arm being edited.
   const rows = await db
     .select({ id: users.id })
     .from(users)
-    .where(and(or(...reaches), inArray(users.role, OVERSIGHT_ROLES)));
+    .where(and(audience, inArray(users.role, OVERSIGHT_ROLES)));
 
   return rows;
 }
@@ -876,23 +952,10 @@ export async function listOversightRecipientsForChurch(
 export async function listOversightAdminsOfOrg(
   org: OversightOrg
 ): Promise<OversightRecipient[]> {
-  const reaches = [
-    org.sendingChurchId
-      ? and(
-          eq(users.sendingChurchId, org.sendingChurchId),
-          eq(users.role, "sending_church_admin")
-        )
-      : undefined,
-    org.sendingNetworkId
-      ? and(
-          eq(users.sendingNetworkId, org.sendingNetworkId),
-          eq(users.role, "network_admin")
-        )
-      : undefined,
-  ].filter((clause) => clause !== undefined);
+  const audience = oversightAudienceCondition(users, org);
 
   // No org named — no recipients. Never "everyone".
-  if (reaches.length === 0) return [];
+  if (!audience) return [];
 
   // `OVERSIGHT_ROLES` stays as a floor even though each arm already names its
   // role: it is the statement that this query never returns a church-level
@@ -900,7 +963,7 @@ export async function listOversightAdminsOfOrg(
   return db
     .select({ id: users.id })
     .from(users)
-    .where(and(or(...reaches), inArray(users.role, OVERSIGHT_ROLES)));
+    .where(and(audience, inArray(users.role, OVERSIGHT_ROLES)));
 }
 
 export const dbOversightFanOutDeps: OversightFanOutDeps &

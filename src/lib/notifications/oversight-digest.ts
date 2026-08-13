@@ -40,6 +40,7 @@ import { phaseAdvanceCondition } from "./oversight-events";
 import {
   fanOutToOversight,
   listOversightRecipientsForChurch,
+  oversightAudienceCondition,
   type OversightFanOutReport,
   type OversightRecipient,
 } from "./oversight";
@@ -878,10 +879,18 @@ export async function runOversightDigestSweep(
  */
 const owedDigestRecipient = alias(users, "owed_digest_recipient");
 
-export async function selectPlantsOwedDigest(
-  query: OwedDigestPageQuery
-): Promise<string[]> {
-  const rows = await db
+/**
+ * The owed-set page, as a builder — exported so its SQL can be asserted with
+ * `.toSQL()` without a live Postgres, the same way `./queries.ts` exports every
+ * feed builder.
+ *
+ * It is a builder rather than an inlined statement because clause 4 is the one
+ * predicate in this module that decides LIVENESS: a plant it offers but that can
+ * never be written a digest row is offered again on every tick, forever. That
+ * property is a property of the rendered SQL, so it has to be readable as SQL.
+ */
+export function plantsOwedDigestQuery(query: OwedDigestPageQuery) {
+  return db
     .select({ id: churches.id })
     .from(churches)
     .where(
@@ -909,6 +918,17 @@ export async function selectPlantsOwedDigest(
         // 4 — at least one oversight recipient of this plant is still missing
         // this day's digest. `=` against a NULL FK yields NULL, so a plant with
         // only one of the two FKs matches recipients only on the one it has.
+        //
+        // THE AUDIENCE IS `oversightAudienceCondition` — the same builder
+        // `listOversightRecipientsForChurch` fans out to, so "who is owed a row"
+        // and "who will be written one" are one predicate. They were two, and
+        // the unpaired one here was a LIVENESS defect rather than a leak: a
+        // cross-paired admin (a `network_admin` carrying a stray
+        // `sending_church_id`) matched this clause but is refused by `enqueue`'s
+        // `canAccessChurch`, so no row could ever be written for them, the plant
+        // stayed owed all day, and — ascending id being a stable order — it held
+        // its place at the head of the owed set. That is the starvation the
+        // sweep header above records as fixed, returning through the audience.
         exists(
           db
             .select({ one: sql`1` })
@@ -916,16 +936,10 @@ export async function selectPlantsOwedDigest(
             .where(
               and(
                 inArray(owedDigestRecipient.role, OVERSIGHT_ROLES),
-                or(
-                  eq(
-                    owedDigestRecipient.sendingChurchId,
-                    churches.sendingChurchId
-                  ),
-                  eq(
-                    owedDigestRecipient.sendingNetworkId,
-                    churches.sendingNetworkId
-                  )
-                ),
+                oversightAudienceCondition(owedDigestRecipient, {
+                  sendingChurchId: churches.sendingChurchId,
+                  sendingNetworkId: churches.sendingNetworkId,
+                }),
                 notExists(
                   db
                     .select({ one: sql`1` })
@@ -952,7 +966,12 @@ export async function selectPlantsOwedDigest(
     )
     .orderBy(churches.id)
     .limit(query.limit);
+}
 
+export async function selectPlantsOwedDigest(
+  query: OwedDigestPageQuery
+): Promise<string[]> {
+  const rows = await plantsOwedDigestQuery(query);
   return rows.map((row) => row.id);
 }
 

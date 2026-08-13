@@ -3,7 +3,9 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import type { User } from "@/db/schema";
+import { db } from "@/db";
+import { users, type User } from "@/db/schema";
+import { sourceReader } from "@/lib/testing/source-span";
 
 import {
   anchorId,
@@ -13,11 +15,15 @@ import {
   toAnchorColumns,
 } from "./anchor";
 import { enqueueNotificationSchema, recipientAdministersOrg } from "./enqueue";
+import { plantsOwedDigestQuery } from "./oversight-digest";
+import { oversightAudienceCondition } from "./oversight";
 import {
+  notificationFeedQuery,
   orgNotificationFeedQuery,
   orgScopedWhere,
   orgUnreadCountQuery,
   scopedWhere,
+  unreadCountQuery,
 } from "./queries";
 
 // ============================================================================
@@ -296,6 +302,56 @@ test("neither scope is a coalesce over the two anchor columns", () => {
   assert.ok(orgWhere);
 });
 
+test("the two anchors' reads differ in the BOUNDARY and in nothing else", () => {
+  // The other half of "partition the table": the two spaces must not meet, AND
+  // the two reads must stay the same read. They were written out twice — same
+  // projection, same visibility rules, same keyset predicate, same ordering,
+  // same limit clamp, copied — which is how a fix to the church feed silently
+  // skips the org one (memory/invariants.md: "the copy is always the one that
+  // misses the fix"). They now share one builder, and this pins that: swap the
+  // boundary predicate and the two statements are byte-identical.
+  const now = new Date("2026-08-12T09:00:00.000Z");
+  const options = {
+    now,
+    unreadOnly: true,
+    categories: ["milestones"],
+  } as const;
+
+  const church = notificationFeedQuery(
+    { churchId: CHURCH, recipientUserId: USER },
+    options
+  ).toSQL();
+  const org = orgNotificationFeedQuery(
+    { orgId: NETWORK, recipientUserId: USER },
+    options
+  ).toSQL();
+
+  assert.equal(
+    church.sql.replace(
+      '"notifications"."church_id" = $1',
+      '"notifications"."anchor_org_id" = $1'
+    ),
+    org.sql
+  );
+
+  const churchCount = unreadCountQuery(
+    { churchId: CHURCH, recipientUserId: USER },
+    { now }
+  ).toSQL();
+  const orgCount = orgUnreadCountQuery(
+    { orgId: NETWORK, recipientUserId: USER },
+    { now }
+  ).toSQL();
+
+  assert.equal(
+    churchCount.sql.replace(
+      '"notifications"."church_id" = $1',
+      '"notifications"."anchor_org_id" = $1'
+    ),
+    orgCount.sql
+  );
+});
+
 // ----------------------------------------------------------------------------
 // 3. The org gate is its own gate
 // ----------------------------------------------------------------------------
@@ -443,27 +499,107 @@ test("each anchor kind admits exactly the role that administers it", () => {
 });
 
 test("the fan-out asks the same question the per-recipient gate does", () => {
-  // Two places decide who administers an org — `listOversightAdminsOfOrg`
-  // (which composes the audience) and `recipientAdministersOrg` (which vets
-  // each one). They must not answer differently: an audience that is wider
-  // than the gate produces silent drops, and one that is narrower produces
-  // notifications nobody was told about. The role now sits INSIDE each arm.
-  const oversightCode = readFileSync(
-    path.join(process.cwd(), "src/lib/notifications/oversight.ts"),
-    "utf8"
+  // Three places decide who administers an org — the audience
+  // (`listOversightAdminsOfOrg` / `listOversightRecipientsForChurch`), the
+  // digest sweep's "who is still owed a row", and `recipientAdministersOrg`,
+  // which vets each recipient at enqueue time. They must not answer
+  // differently: an audience WIDER than the gate produces plants that are
+  // forever owed a digest nobody can be written (the starvation below), and one
+  // NARROWER produces notifications nobody was told about.
+  //
+  // Asserted on the RENDERED SQL rather than on the source text of the audience
+  // function. The previous version of this test sliced `oversight.ts` with a
+  // bare `indexOf` on `if (reaches.length === 0)` — the exact rot
+  // `src/lib/testing/source-span.ts` documents, one refactor away from
+  // `slice(0, -1)` and a module-wide claim that passes by luck.
+  const { sql, params } = db
+    .select({ id: users.id })
+    .from(users)
+    .where(
+      oversightAudienceCondition(users, {
+        sendingChurchId: SENDING_CHURCH,
+        sendingNetworkId: NETWORK,
+      })
+    )
+    .toSQL();
+
+  const normalised = sql.replace(/"/g, "");
+
+  // Each arm pairs the role with ITS OWN FK. Both org FKs live on one `users`
+  // row and neither implies the other, so an unpaired `or(fk, fk) and role in
+  // (...)` admits a network admin carrying a stray `sending_church_id` into
+  // that sending church's audience — the hierarchy walk memory/invariants.md
+  // forbids, arriving through the role instead of through the FK.
+  assert.match(
+    normalised,
+    /users\.role = \$\d+ and users\.sending_church_id = \$\d+/
   );
-  const fn = oversightCode.slice(
-    oversightCode.indexOf("export async function listOversightAdminsOfOrg")
+  assert.match(
+    normalised,
+    /users\.role = \$\d+ and users\.sending_network_id = \$\d+/
   );
-  const reaches = fn.slice(0, fn.indexOf("if (reaches.length === 0)"));
+
+  const sendingChurchArm = normalised.slice(
+    0,
+    normalised.indexOf("sending_network_id")
+  );
+  assert.ok(
+    sendingChurchArm.includes("sending_network_id") === false,
+    "the two arms must not share a role predicate"
+  );
+
+  // The bound values say which role went with which FK.
+  assert.deepEqual(params, [
+    "sending_church_admin",
+    SENDING_CHURCH,
+    "network_admin",
+    NETWORK,
+  ]);
+});
+
+test("naming no org matches nobody, never everybody", () => {
+  // The `undefined` return is the whole safety of the builder's empty case: an
+  // `and()` whose only arm is undefined collapses to "every row in `users`".
+  assert.equal(
+    oversightAudienceCondition(users, {
+      sendingChurchId: null,
+      sendingNetworkId: null,
+    }),
+    undefined
+  );
+});
+
+test("the digest sweep's owed set is the SAME audience — a plant it cannot serve is never offered", () => {
+  // THE STARVATION, as SQL. `selectPlantsOwedDigest` offers a plant while any
+  // oversight recipient of it is missing that day's digest row, and a plant
+  // leaves the owed set ONLY by having one written. So a recipient the audience
+  // admits but `enqueue` refuses is a plant that is owed forever: re-digested on
+  // every one of the day's ~96 ticks and, the ordering being stable by id,
+  // holding its place at the head of the owed set — which is exactly the
+  // head-of-line block `runOversightDigestSweep`'s header records as fixed.
+  //
+  // Clause 4's audience was `or(fk, fk) and role in OVERSIGHT_ROLES` while the
+  // per-recipient gate paired them, so a `network_admin` carrying a stray
+  // `sending_church_id` was one such recipient.
+  const { sql } = plantsOwedDigestQuery({
+    dayKey: "2026-08-12",
+    window: {
+      from: new Date("2026-08-12T00:00:00.000Z"),
+      to: new Date("2026-08-13T00:00:00.000Z"),
+    },
+    limit: 25,
+    afterChurchId: null,
+  }).toSQL();
+
+  const normalised = sql.replace(/"/g, "");
 
   assert.match(
-    reaches,
-    /eq\(users\.sendingChurchId, org\.sendingChurchId\),\s*eq\(users\.role, "sending_church_admin"\)/
+    normalised,
+    /owed_digest_recipient\.role = \$\d+ and owed_digest_recipient\.sending_church_id = churches\.sending_church_id/
   );
   assert.match(
-    reaches,
-    /eq\(users\.sendingNetworkId, org\.sendingNetworkId\),\s*eq\(users\.role, "network_admin"\)/
+    normalised,
+    /owed_digest_recipient\.role = \$\d+ and owed_digest_recipient\.sending_network_id = churches\.sending_network_id/
   );
 });
 
@@ -478,9 +614,12 @@ test("an org-anchored notification that is not consent-exempt is refused", () =>
     path.join(process.cwd(), "src/lib/notifications/enqueue.ts"),
     "utf8"
   );
-  const orgArm = enqueueCode.slice(
-    enqueueCode.indexOf('if (anchor.type !== "church") {'),
-    enqueueCode.indexOf("const churchId = anchor.churchId;")
+  // Through the reader, not a bare `indexOf`: a moved anchor THROWS instead of
+  // returning -1 and turning the three `doesNotMatch` assertions below into
+  // claims about almost the whole module (`src/lib/testing/source-span.ts`).
+  const orgArm = sourceReader(enqueueCode, "enqueue.ts").span(
+    'if (anchor.type !== "church") {',
+    "const churchId = anchor.churchId;"
   );
 
   assert.match(orgArm, /recipientAdministersOrg\(recipient, anchor\)/);
