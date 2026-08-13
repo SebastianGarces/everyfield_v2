@@ -3843,11 +3843,19 @@ test("ruling 1 (PR #420): repro-first wins the risk:high + bug tiebreak", () => 
   const dispatch = read(".claude/skills/dispatch/SKILL.md");
   const recipes = read("ops/agent-os/recipes.md");
 
+  // Each row assertion must fail on a row stating the OPPOSITE ruling, so every
+  // one of them names the DIRECTION — a bare /risk:high/ is satisfied by "…
+  // `risk:high` ones EXCLUDED", which is the ruling inverted.
   const reproRow = recipeRow(dispatch, "dispatch/SKILL.md", "repro-first");
   assert.match(
     reproRow,
-    /risk:high/,
-    "the selection row must say the bug default holds for risk:high units too — a reader who stops at the table is the reader this ruling is for"
+    /`risk:high`[^|]{0,40}\bINCLUDED\b/i,
+    "the selection row must say the bug default HOLDS for risk:high units — a reader who stops at the table is the reader this ruling is for"
+  );
+  assert.doesNotMatch(
+    reproRow,
+    /`risk:high`[^|]{0,40}\b(EXCLUDED|NOT INCLUDED)\b/i,
+    "…and must not carve them back out in the same breath"
   );
   const adversaryRow = recipeRow(
     dispatch,
@@ -3856,8 +3864,8 @@ test("ruling 1 (PR #420): repro-first wins the risk:high + bug tiebreak", () => 
   );
   assert.match(
     adversaryRow,
-    /not (also )?`bug`|bug`-labeled/,
-    "the risk:high default must state its exception, or the two rows both claim the same unit"
+    /not\s+(also\s+)?`bug`-labeled/i,
+    "the risk:high default must state its exception — NEGATED, or the two rows both claim the same unit"
   );
 
   // The tiebreak itself, and the rationale it was ruled on.
@@ -3885,8 +3893,8 @@ test("ruling 1 (PR #420): repro-first wins the risk:high + bug tiebreak", () => 
   );
   assert.match(
     recipeRow(recipes, "recipes.md", "repro-first"),
-    /`risk:high`/,
-    "the recipe-library row says which units it takes, risk:high bugs included"
+    /`risk:high`[^|]{0,40}\bincluded\b/i,
+    "the recipe-library row says which units it takes, risk:high bugs INCLUDED — same direction as dispatch's row, not merely the same words"
   );
 });
 
