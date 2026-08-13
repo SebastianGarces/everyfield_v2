@@ -296,27 +296,52 @@ test("§3c assignMember claims the seat with ON CONFLICT (#409 D1)", () => {
 
 test("§4 the assign dialog reads the ruled sentence from the import-free leaf", () => {
   const dialog = read("src/components/ministry-teams/member-assign-dialog.tsx");
+  const delivery = read("src/components/ministry-teams/assign-refusal.ts");
 
+  // The sentence still comes from the leaf, one module further out than it used
+  // to. It moved because the DELIVERY moved: the dialog no longer decides where
+  // a refusal is shown — `assignRefusalDelivery` does, and it is the thing that
+  // imports the constant. `assign-refusal.test.ts` owns that contract in full;
+  // what §4 keeps is the property this file is about, that the ruled sentence
+  // has ONE source and it is the leaf.
   assert.match(
-    dialog,
+    delivery,
     /import \{ ROLE_ALREADY_FILLED_MESSAGE \} from "@\/lib\/ministry-teams\/membership-copy"/,
-    "#409 D1: the dialog must import the sentence, never re-type it"
-  );
-  assert.match(
-    dialog,
-    /setError\(result\.error\)/,
-    "#409 D1: the refusal is surfaced verbatim — the action shell already passes ExpectedError.message through"
-  );
-  assert.match(
-    dialog,
-    /result\.error === ROLE_ALREADY_FILLED_MESSAGE[\s\S]*router\.refresh\(\)/,
-    "#409 D1: this dialog only renders beside an OPEN seat, so being told it is filled means the page underneath is stale"
+    "#409 D1: the sentence is imported, never re-typed"
   );
   assert.doesNotMatch(
     dialog,
-    /from "@\/lib\/ministry-teams\/(service|memberships)"/,
-    "the barrel opens with @/db — importing it from a client component ships the database client to the browser"
+    /"Role is already filled"/,
+    "#409 D1: no second copy of the ruled sentence in the component"
   );
+
+  // The refusal is surfaced verbatim — the action shell already passes
+  // `ExpectedError.message` through — but NOT into the dialog's own subtree.
+  // `router.refresh()` flips the role card to its Filled arm and unmounts this
+  // component, so an inline `<Alert>` was measured living ~120 ms (preview
+  // 16e9cf5). The sentence goes to the root `<Toaster>` instead; the refresh is
+  // unchanged and is NOT delayed behind a dismissal.
+  assert.match(
+    dialog,
+    /import \{ toast \} from "sonner"/,
+    "#409 D1: the sentence has to outlive the refresh that fires with it"
+  );
+  assert.match(
+    dialog,
+    /assignRefusalDelivery\(result\.error\)[\s\S]*toast\.error\([\s\S]*router\.refresh\(\)/,
+    "#409 D1: this dialog only renders beside an OPEN seat, so being told it is filled means the page underneath is stale — raise the sentence clear of the subtree, then refresh"
+  );
+
+  for (const [label, source] of [
+    ["member-assign-dialog.tsx", dialog],
+    ["assign-refusal.ts", delivery],
+  ] as const) {
+    assert.doesNotMatch(
+      source,
+      /from "@\/lib\/ministry-teams\/(service|memberships)"/,
+      `${label}: the barrel opens with @/db — importing it from a client module ships the database client to the browser`
+    );
+  }
 });
 
 test("§4b the copy leaf is not also served from the trunk", () => {

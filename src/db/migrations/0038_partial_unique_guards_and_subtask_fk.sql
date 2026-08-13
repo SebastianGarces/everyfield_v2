@@ -70,6 +70,22 @@
 --
 --   shasum -a 256 src/db/migrations/0038_partial_unique_guards_and_subtask_fk.sql
 --
+-- ON A DATABASE THAT HAS ALREADY APPLIED 0038, DO NOT RECOMPUTE THAT HASH FROM
+-- THE CURRENT FILE. The ledger stores the sha256 of the bytes as they were WHEN
+-- IT RAN, and this header HAS been edited since the shared development database
+-- applied it — §2's blast-radius note below was added afterwards. A comment edit
+-- re-runs nothing (drizzle decides what to apply from the journal's `when`
+-- against `max(created_at)`, never from the hash — `drizzle-orm/neon-http/
+-- migrator.js`), but it does change what `shasum` prints. So read the row rather
+-- than recompute it:
+--
+--   SELECT id, hash, created_at FROM drizzle.__drizzle_migrations
+--   ORDER BY created_at DESC LIMIT 1;
+--
+-- On any database at this head that top row IS 0038. Delete it by its `id`, and
+-- keep the `WHERE hash = …` form only for a database migrated from the bytes in
+-- the deployed commit.
+--
 -- Rolling back also un-fixes three races, so the `ON CONFLICT` clauses in
 -- `forkTemplate`, `createConfirmationToken` and `assignMember` must be reverted
 -- with it.
@@ -153,6 +169,49 @@ CREATE UNIQUE INDEX "message_templates_church_fork_unique_idx" ON "message_templ
 -- holding an older email therefore gets "Invalid confirmation link" and has to
 -- use the newer one. That is the price of the constraint, it is one-time, and
 -- it is preferred to leaving a state the service can no longer produce.
+--
+-- THE BLAST RADIUS, AND WHY THIS SECTION ALONE CARRIES NO FIGURE. §1, §3 and §4
+-- each state a count measured against the shared development branch on
+-- 2026-08-13 (0 offending fork groups, 0 dangling parents, 8 roles / 34 of 44
+-- membership rows). §2 does not, and now cannot: this DELETE has ALREADY RUN
+-- against that database, and it left nothing behind to count. The rows are gone,
+-- `drizzle.__drizzle_migrations` records only a hash and a timestamp, and no
+-- audit row stands in for a deleted token. THE FIGURE FOR THE SHARED DEVELOPMENT
+-- DATABASE IS UNRECOVERABLE — it is not omitted, it is lost, and it is stated
+-- here rather than left as a gap somebody re-derives wrongly later.
+--
+-- IT IS ALSO THE ONLY ONE OF THE FOUR THAT MATTERS OUTSIDE THIS DATABASE. §1
+-- refuses rather than writes; §3 nulls a column and makes a row MORE visible;
+-- §4 rewrites rows the roles tab could not show anyway. §2 invalidates something
+-- A THIRD PARTY ALREADY HOLDS — a confirmation URL in an invitee's inbox, which
+-- this repository cannot see, cannot count after the fact and cannot re-send.
+-- The ROLLBACK block above does not undo it either: dropping
+-- `meeting_confirm_tokens_pending_unique_idx` restores the ability to hold two
+-- pending tokens, never the deleted token or the link that pointed at it.
+--
+-- SO MEASURE IT BEFORE ANY OTHER DATABASE APPLIES THIS FILE. Run this against
+-- the target FIRST, and record the answer in the deploy note — it is exactly the
+-- number of confirmation links that stop working, and the number of people
+-- holding one:
+--
+--   SELECT count(*)                                    AS tokens_to_delete,
+--          count(DISTINCT ("meeting_id", "person_id")) AS invitees_affected
+--   FROM (
+--     SELECT "meeting_id", "person_id",
+--            row_number() OVER (
+--              PARTITION BY "meeting_id", "person_id"
+--              ORDER BY "expires_at" DESC, "created_at" DESC, "id"
+--            ) AS rn
+--     FROM "meeting_confirmation_tokens"
+--     WHERE "status" = 'pending'
+--   ) t
+--   WHERE t.rn > 1;
+--
+-- It is the DELETE's own subquery, counted instead of executed, so the number it
+-- returns is the number of rows the statement below removes. A non-zero answer
+-- is not a reason to stop — the duplicates are a state the service can no longer
+-- produce, and the ruling is to collapse them — but it must be a number somebody
+-- KNEW before an invitee reads "Invalid confirmation link".
 DELETE FROM "meeting_confirmation_tokens" WHERE "id" IN (
 	SELECT t."id"
 	FROM (
