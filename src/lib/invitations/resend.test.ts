@@ -22,7 +22,6 @@ import {
   type InvitationActor,
 } from "./core";
 import {
-  RESEND_DEDUPE_WINDOW_MS,
   invitationEmailIdempotencyKey,
   sendInvitationEmail,
   type InvitationEmailFacts,
@@ -36,7 +35,12 @@ import {
   resendInvitationEmailAs,
   resendRefusalMessage,
 } from "./resend";
+// The window comes from the LEAF, never from `./email` — which imported it and
+// re-exported it until the 2026-08-13 sweep (#411), making this suite the one
+// "existing importer" that justified a second door into the Resend SDK. See
+// `register-path.test.ts` §2.
 import {
+  RESEND_DEDUPE_WINDOW_MS,
   resendCooldownLabel,
   resendCooldownRemainingMs,
   resendCooldownSecondsLeft,
@@ -665,6 +669,34 @@ test("the seams default to the real, org-scoped read", () => {
   );
 });
 
+test("the send's seams are forwarded key by key, never as a spread", () => {
+  // Swept 2026-08-13 (#411). `ResendInvitationDeps` extends `EmailInviteeDeps`
+  // with three seams of its own — `loadInvitation`, `expire`, `now` — and this
+  // call forwarded all six with `{ ...deps, occasion }`. Nothing was wrong at
+  // runtime, because `emailInviteeOutcome` reads only what it declares; the
+  // trap is the day `EmailInviteeDeps` gains a key this module already uses
+  // under the same name, at which point a seam meant for the expiry guard
+  // starts steering the send with no diff at either end.
+  //
+  // Same rule the domain already ships on the create path:
+  // `resolveInvitationForResolvedTarget` was rebuilt key by key by #304 ruling
+  // 4 fix 1 for exactly this reason. A spread is not a filter.
+  const body = resendBody();
+
+  assert.doesNotMatch(
+    body,
+    /emailInviteeOutcome\(\s*invitation,\s*\{\s*\.\.\.deps/,
+    "the resend spreads its whole deps bag into the send path — name the keys"
+  );
+  // …and the two keys it is entitled to forward really are forwarded, so the
+  // assertion above cannot be satisfied by dropping the seams altogether.
+  // Whitespace-tolerant on purpose: a Prettier re-wrap must not turn a rule
+  // about which keys travel into a rule about where the line breaks.
+  assert.match(body, /lookupOrgName:\s*deps\.lookupOrgName/);
+  assert.match(body, /send:\s*deps\.send/);
+  assert.match(body, /occasion:\s*\{\s*kind:\s*"resend",\s*at:\s*now\s*\}/);
+});
+
 // ----------------------------------------------------------------------------
 // 5. Nothing persisted, nothing logged
 // ----------------------------------------------------------------------------
@@ -1022,23 +1054,12 @@ test("the countdown ends exactly when the provider will accept a new key", async
   assert.notEqual(afterWindow, opened, "the window elapsed — a real send");
 });
 
-test("resend-window.ts imports nothing", () => {
-  // The same rail as `register-path.ts`, for the same reason: the pending list
-  // is a `"use client"` module and holds this arithmetic, and one import here
-  // would drag `@/lib/email/client` — and the Resend SDK with it — into the
-  // browser bundle.
-  const source = code(
-    readFileSync(
-      path.join(process.cwd(), "src", "lib", "invitations", "resend-window.ts"),
-      "utf8"
-    )
-  );
-
-  assert.doesNotMatch(source, /^\s*import[\s{*]/m, "no static import");
-  assert.doesNotMatch(source, /\bimport\s*\(/, "no dynamic import either");
-  assert.doesNotMatch(source, /\brequire\s*\(/, "no require either");
-  assert.doesNotMatch(source, /"use server"|"server-only"/);
-});
+// "resend-window.ts imports nothing" USED TO LIVE HERE and now lives in
+// `register-path.test.ts` §2, off the `DOMAIN_LEAVES` table that also asserts
+// nothing else re-exports the leaf (swept 2026-08-13, #411). The split was the
+// bug: this file held rule 1 for this leaf, that file held rule 2 for the other
+// one, and so `email.ts` re-exported THIS leaf's three symbols for four months
+// with both suites green. One table, both properties, every leaf.
 
 // ----------------------------------------------------------------------------
 // 8. The surface refuses for the window, and says how long

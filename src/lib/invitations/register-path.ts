@@ -29,11 +29,21 @@
 // surface use the spelling without dragging the SDK along.
 //
 // So: keep this file a leaf. Anything needing `appBaseUrl()`, a database or a
-// template belongs one layer up in `./email.ts`, which re-exports both names.
-// `./register-path.test.ts` fails if an import appears here, pins the literal
-// spelling against the one remaining call site, and — the item-5 half — fails
-// if the create action, the create form or the pending list composes the URL
-// again, by this helper or by hand.
+// template belongs one layer up in `./email.ts`, which IMPORTS both names and
+// RE-EXPORTS NEITHER — corrected 2026-08-13 (#411); this header claimed the
+// opposite for the three months after that re-export was deleted, describing
+// the exact move the guard fails on as the design. A leaf whose
+// contents are also served from the trunk is not a leaf: `email.ts` reaches
+// `@/lib/email/client`, which builds a Resend instance at module scope, so a
+// re-export here is a working import path from a browser chunk to ~687 KB of
+// SDK. There is ONE door, and it is this file.
+//
+// `./register-path.test.ts` §2 walks every import-free leaf in this domain
+// (`DOMAIN_LEAVES` — this file and `./resend-window.ts`) and fails if any of
+// them gains an import or if anything else exports its spelling; it also pins
+// the literal spelling against the one remaining call site, and — the item-5
+// half — fails if the create action, the create form or the pending list
+// composes the URL again, by this helper or by hand.
 // ============================================================================
 
 /**

@@ -114,26 +114,8 @@ test("the path is the shape register/page.tsx reads", () => {
 // 2. The leaf stays importable from a client component
 // ----------------------------------------------------------------------------
 
-test("register-path.ts imports nothing", () => {
-  const source = code(read("lib", "invitations", "register-path.ts"));
-
-  // Both spellings — a static `import` and a dynamic `import(...)` — because
-  // either one is enough to drag `@/lib/email/client` back in behind it.
-  assert.doesNotMatch(
-    source,
-    /^\s*import[\s{*]/m,
-    "register-path.ts must stay import-free: a client component holds this contract"
-  );
-  assert.doesNotMatch(source, /\bimport\s*\(/, "no dynamic import either");
-  assert.doesNotMatch(source, /\brequire\s*\(/, "no require either");
-
-  // And it must not be re-marked server-only, which would be the same failure
-  // wearing a different hat.
-  assert.doesNotMatch(source, /"use server"|"server-only"/);
-});
-
-// A LEAF WHOSE CONTENTS ARE ALSO SERVED FROM THE TRUNK IS NOT A LEAF. The two
-// tests below close the class the one above only closes an instance of.
+// A LEAF WHOSE CONTENTS ARE ALSO SERVED FROM THE TRUNK IS NOT A LEAF. The tests
+// below close the class the one above only closes an instance of.
 //
 // `email.ts` used to end its import block with
 // `export { INVITATION_REGISTER_PATH, invitationRegisterPath };`, justified as
@@ -144,52 +126,124 @@ test("register-path.ts imports nothing", () => {
 // `import { invitationRegisterPath } from "@/lib/invitations/email"`
 // type-checks, works, and ships ~687 KB of SDK into whatever chunk does it.
 // The guard below `invitations-list.tsx` only forbade that ONE file.
+//
+// AND IT WAS STILL HALF-APPLIED (swept 2026-08-13, #411). This domain has TWO
+// import-free leaves, both of them for the same bundling reason, and `email.ts`
+// imported and re-exported the second one — `RESEND_DEDUPE_WINDOW_MS`,
+// `resendDedupeWindowAt`, `ResendDedupeWindow` — eighty lines below the comment
+// explaining why it must never do that to the first. Same justification ("every
+// existing importer"), same zero importers, same open door, for four months. A
+// rule enforced against one symbol is a rule that will be broken by the next
+// one, so the guard is now a WALK OVER A TABLE OF LEAVES: add the leaf, get the
+// property. `sourceFilesUnder()` already skips suites, which is what lets a
+// suite name the export it forbids.
 
-const SPELLING = String.raw`(?:invitationRegisterPath|INVITATION_REGISTER_PATH)`;
+/**
+ * Every import-free module in this domain, with the symbols it alone may export.
+ *
+ * `file` locates the one door; `symbols` is its WHOLE public surface, which is
+ * both what a second door would be spelled with and what the leaf itself is
+ * asserted to still declare; `barrelPath` is the specifier fragment an
+ * `export * from` would carry. A leaf's whole value is that a `"use client"`
+ * module can hold it, so every entry here is also covered by rule 1 (no imports
+ * at all), which runs off this same table.
+ *
+ * ONE LIST, not a list plus a list of declarations to match it: the pair drifts,
+ * and a `declarations` array that had lost a symbol is precisely how a renamed
+ * export would make the door scan vacuously true. `declaresEverySymbol` derives
+ * what to look for from `symbols` itself.
+ */
+const DOMAIN_LEAVES = [
+  {
+    file: ["lib", "invitations", "register-path.ts"] as const,
+    specifier: "@/lib/invitations/register-path",
+    barrelPath: "register-path",
+    symbols: ["INVITATION_REGISTER_PATH", "invitationRegisterPath"],
+  },
+  {
+    file: ["lib", "invitations", "resend-window.ts"] as const,
+    specifier: "@/lib/invitations/resend-window",
+    barrelPath: "resend-window",
+    symbols: [
+      "RESEND_DEDUPE_WINDOW_MS",
+      "ResendDedupeWindow",
+      "resendDedupeWindowAt",
+      "ResendCooldownCount",
+      "resendCooldownRemainingMs",
+      "resendCooldownSecondsLeft",
+      "resendCooldownLabel",
+    ],
+  },
+] as const;
 
-/** `export const/function X`, `export { X }`, `export * from "./register-path"`. */
-const EXPORTS_THE_SPELLING = new RegExp(
-  [
-    String.raw`export\s+(?:async\s+)?(?:const|let|function)\s+${SPELLING}\b`,
-    String.raw`export\s*\{[^}]*\b${SPELLING}\b[^}]*\}`,
-    String.raw`export\s*\*(?:\s+as\s+\w+)?\s+from\s*["'][^"']*register-path["']`,
-  ].join("|")
-);
+function spellingOf(symbols: readonly string[]): string {
+  return `(?:${symbols.join("|")})`;
+}
 
-/** Any named import of either symbol, capturing the module it came from. */
-const IMPORTS_THE_SPELLING = new RegExp(
-  String.raw`import\s+(?:type\s+)?\{[^}]*\b${SPELLING}\b[^}]*\}\s*from\s*["']([^"']+)["']`,
-  "g"
-);
+/** `export const|let|function|interface|type X` — a DECLARED export of one name. */
+function declares(symbol: string): RegExp {
+  return new RegExp(
+    String.raw`export\s+(?:async\s+)?(?:const|let|function|interface|type)\s+${symbol}\b`
+  );
+}
 
-const THE_ONE_DOOR = path.join(ROOT, "lib", "invitations", "register-path.ts");
+/** `export const/function/interface X`, `export { X }`, `export * from "./<leaf>"`. */
+function exportsTheSpelling(leaf: (typeof DOMAIN_LEAVES)[number]): RegExp {
+  const spelling = spellingOf(leaf.symbols);
 
-test("register-path.ts is the ONLY module that exports the spelling", () => {
+  return new RegExp(
+    [
+      declares(spelling).source,
+      String.raw`export\s*\{[^}]*\b${spelling}\b[^}]*\}`,
+      String.raw`export\s*\*(?:\s+as\s+\w+)?\s+from\s*["'][^"']*${leaf.barrelPath}["']`,
+    ].join("|")
+  );
+}
+
+/** Any named import of one of the leaf's symbols, capturing the module it came from. */
+function importsTheSpelling(leaf: (typeof DOMAIN_LEAVES)[number]): RegExp {
+  return new RegExp(
+    String.raw`import\s+(?:type\s+)?\{[^}]*\b${spellingOf(leaf.symbols)}\b[^}]*\}\s*from\s*["']([^"']+)["']`,
+    "g"
+  );
+}
+
+test("each import-free leaf is the ONLY module that exports its spelling", () => {
   // Not "no module that transitively imports the Resend SDK", which is a
   // property nobody can grep: ONE definition, ONE export, everywhere in src.
   // Any alias is a door, and a door through a module with imports of its own is
   // the bundling bug wearing a re-export.
-  const doors = sourceFilesUnder()
-    .filter((file) => file !== THE_ONE_DOOR)
-    .filter((file) =>
-      EXPORTS_THE_SPELLING.test(code(readFileSync(file, "utf8")))
-    )
-    .map(rel);
+  for (const leaf of DOMAIN_LEAVES) {
+    const theOneDoor = path.join(ROOT, ...leaf.file);
+    const pattern = exportsTheSpelling(leaf);
 
-  assert.deepEqual(
-    doors,
-    [],
-    "the invite-link spelling is exported from somewhere other than the leaf — re-exporting it from a module with imports (`email.ts` pulls `@/lib/email/client`) puts the Resend SDK one import away from a client chunk"
-  );
+    const doors = sourceFilesUnder()
+      .filter((file) => file !== theOneDoor)
+      .filter((file) => pattern.test(code(readFileSync(file, "utf8"))))
+      .map(rel);
 
-  // …and the leaf really does still export both, so the check above is not
-  // vacuously true of a spelling that has been renamed out from under it.
-  const leaf = code(readFileSync(THE_ONE_DOOR, "utf8"));
-  assert.match(leaf, /export const INVITATION_REGISTER_PATH\b/);
-  assert.match(leaf, /export function invitationRegisterPath\b/);
+    assert.deepEqual(
+      doors,
+      [],
+      `${leaf.specifier} is exported from somewhere other than the leaf — re-exporting it from a module with imports (\`email.ts\` pulls \`@/lib/email/client\`) puts the Resend SDK one import away from a client chunk`
+    );
+
+    // …and the leaf really does still declare EVERY symbol the table names, so
+    // the scan above is not vacuously true of a spelling that has been renamed
+    // out from under it — and the table cannot quietly stop covering an export
+    // the leaf still has.
+    const source = code(readFileSync(theOneDoor, "utf8"));
+    for (const symbol of leaf.symbols) {
+      assert.match(
+        source,
+        declares(symbol),
+        `${leaf.specifier} no longer declares ${symbol} — update DOMAIN_LEAVES`
+      );
+    }
+  }
 });
 
-test("no page or component reaches the spelling through anything but the leaf", () => {
+test("no page or component reaches a leaf through anything but the leaf", () => {
   const offenders: string[] = [];
 
   for (const file of [
@@ -198,18 +252,48 @@ test("no page or component reaches the spelling through anything but the leaf", 
   ]) {
     const source = code(readFileSync(file, "utf8"));
 
-    for (const match of source.matchAll(IMPORTS_THE_SPELLING)) {
-      if (match[1] === "@/lib/invitations/register-path") continue;
+    for (const leaf of DOMAIN_LEAVES) {
+      for (const match of source.matchAll(importsTheSpelling(leaf))) {
+        if (match[1] === leaf.specifier) continue;
 
-      offenders.push(`${rel(file)} imports it from "${match[1]}"`);
+        offenders.push(
+          `${rel(file)} imports ${leaf.specifier} from "${match[1]}"`
+        );
+      }
     }
   }
 
   assert.deepEqual(
     offenders,
     [],
-    `a page or component must reach the invite-link spelling at "@/lib/invitations/register-path" and nowhere else — every other path drags an import graph with it:\n${offenders.join("\n")}`
+    `a page or component must reach an import-free leaf at its own specifier and nowhere else — every other path drags an import graph with it:\n${offenders.join("\n")}`
   );
+});
+
+test("every import-free leaf really imports nothing", () => {
+  // RULE 1, off the same table as rule 2 — one list, both properties, so a
+  // third leaf gets both by being added once. It used to be two hand-written
+  // tests in two files (`register-path.ts` here, `resend-window.ts` in
+  // `resend.test.ts` §7), which is how the second leaf ended up with rule 1 and
+  // without rule 2 for four months.
+  for (const leaf of DOMAIN_LEAVES) {
+    const where = leaf.file.join("/");
+    const source = code(read(...leaf.file));
+
+    // Both spellings — a static `import` and a dynamic `import(...)` — because
+    // either one is enough to drag `@/lib/email/client` back in behind it.
+    assert.doesNotMatch(
+      source,
+      /^\s*import[\s{*]/m,
+      `${where} must stay import-free: a client component holds this`
+    );
+    assert.doesNotMatch(source, /\bimport\s*\(/, `${where}: no dynamic import`);
+    assert.doesNotMatch(source, /\brequire\s*\(/, `${where}: no require`);
+
+    // And it must not be re-marked server-only, which would be the same failure
+    // wearing a different hat.
+    assert.doesNotMatch(source, /"use server"|"server-only"/, where);
+  }
 });
 
 // ----------------------------------------------------------------------------
@@ -311,6 +395,43 @@ test("no module still documents the admin's copy of the link as the recovery", (
       source,
       RETIRED_STOPGAP,
       `${where} still names the admin's copy of the invite link — the recovery is "Resend email" on the row (#304 ruling 4 item 5, #293)`
+    );
+  }
+});
+
+// …AND NO MODULE DESCRIBES THE SECOND DOOR AS THE DESIGN (swept 2026-08-13,
+// #411). The same failure shape, one rule over: `register-path.ts`'s own header
+// read "belongs one layer up in `./email.ts`, which re-exports both names" for
+// the three months AFTER that re-export was deleted and this suite started
+// failing on it. Nothing was wrong at runtime — the document a next implementer
+// reads first told them to make the change the guard rejects, and the
+// `resend-window` re-export eighty lines below is what that reader would have
+// found as precedent.
+//
+// The needle is the CLAIM, not the word: "re-exported so a reader", "which
+// re-exports both names", "every existing importer" were the three sentences
+// that justified the two doors. A module may still say it does NOT re-export —
+// which is what every leaf-adjacent comment in this domain now says.
+const CLAIMS_A_SECOND_DOOR =
+  /\bre-exports?\s+(?:both|it|them|the\s+(?:window|spelling|names))|re-exported so a reader|every existing importer/i;
+
+const LEAF_PROSE = [
+  ["lib", "invitations", "register-path.ts"],
+  ["lib", "invitations", "resend-window.ts"],
+  ["lib", "invitations", "email.ts"],
+  ["lib", "invitations", "resend.ts"],
+  ["lib", "invitations", "service.ts"],
+] as const;
+
+test("no module documents a leaf as reachable through the trunk", () => {
+  for (const segments of LEAF_PROSE) {
+    const source = read(...segments);
+    const where = segments.join("/");
+
+    assert.doesNotMatch(
+      source,
+      CLAIMS_A_SECOND_DOOR,
+      `${where} describes an import-free leaf as re-exported from a module with imports — there is ONE door per leaf, and it is the leaf (see DOMAIN_LEAVES above)`
     );
   }
 });

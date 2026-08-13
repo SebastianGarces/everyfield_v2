@@ -76,22 +76,39 @@ import { invitationRegisterPath } from "./register-path";
 // The dedupe bucket, from the other import-free leaf on this path. ONE piece of
 // arithmetic serves the provider key below and the button's countdown; see
 // `./resend-window` for why it is not written twice.
-import {
-  RESEND_DEDUPE_WINDOW_MS,
-  resendDedupeWindowAt,
-  type ResendDedupeWindow,
-} from "./resend-window";
+//
+// IMPORTED, NEVER RE-EXPORTED — the same rule as `./register-path` above, and
+// exactly one symbol, because that is the only one this module uses. See the
+// "The link" section below for the 687 KB reason.
+import { resendDedupeWindowAt } from "./resend-window";
 
 // ----------------------------------------------------------------------------
 // The link
 // ----------------------------------------------------------------------------
 
-// NOT re-exported. A leaf whose contents are also served from the trunk is not
-// a leaf: `export { invitationRegisterPath }` here would make
+// NOT re-exported, AND THAT IS TRUE OF EVERY LEAF THIS MODULE IMPORTS — the
+// property, not the instance (swept 2026-08-13, #411).
+//
+// A leaf whose contents are also served from the trunk is not a leaf:
+// `export { invitationRegisterPath }` here would make
 // `import … from "@/lib/invitations/email"` type-check and work, and take the
 // Resend SDK into whatever chunk did it — the exact 687 KB bug that split
 // `./register-path.ts` off in the first place. There is one door, and it is the
-// leaf. Pinned by `register-path.test.ts` §2.
+// leaf.
+//
+// `./resend-window` was the SECOND door, and it survived the fix that closed
+// the first one 80 lines above, in this same file: this module published that
+// leaf's three symbols — the window constant, the bucket function and its type
+// — on the stated grounds that callers already reached them here. None did.
+// `./resend`, `./service`, `resend.test.ts` and `invitations-list.tsx` (the
+// `"use client"` module the leaf exists FOR) all reach `./resend-window`
+// directly. So the cost was never dead code — it was a working import path from
+// the browser's own component to the Resend SDK, one edit away. Deleted; a fix
+// stated as a rule and enforced for one file is a fix half-applied.
+//
+// Pinned by `register-path.test.ts` §2, which now walks BOTH leaves from one
+// list — add the third leaf to `DOMAIN_LEAVES` there, not a fourth copy of this
+// comment.
 
 /**
  * The absolute, token-bound register URL — what the email actually links to.
@@ -162,20 +179,6 @@ export type InvitationEmailRefusal =
 export type InvitationSendOccasion =
   | { kind: "create" }
   | { kind: "resend"; at: Date };
-
-/**
- * The window itself lives in `./resend-window`, an import-free leaf, because the
- * PENDING LIST needs the same arithmetic: round 2 of the ruling (2026-08-10)
- * disables the button for the remainder of the bucket this key is built from and
- * counts it down, and this module cannot be imported by a client component
- * without shipping the Resend SDK to the browser. Re-exported so a reader — and
- * every existing importer — still finds the window where the key is.
- */
-export {
-  RESEND_DEDUPE_WINDOW_MS,
-  resendDedupeWindowAt,
-  type ResendDedupeWindow,
-};
 
 /**
  * The provider-side dedupe key. Always INVITATION-SCOPED, whatever the

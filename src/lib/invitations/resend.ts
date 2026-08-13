@@ -218,8 +218,18 @@ export async function resendInvitationEmailAs(
     throw new InvitationError(INVITATION_EXPIRED_MESSAGE);
   }
 
+  // KEY BY KEY, NEVER `...deps` (swept 2026-08-13, #411). `ResendInvitationDeps`
+  // extends `EmailInviteeDeps` with three seams of its own — `loadInvitation`,
+  // `expire`, `now` — and a spread forwarded all six into a function that
+  // declares three. Nothing was wrong today, because the send path ignores what
+  // it does not declare; the trap is the day `EmailInviteeDeps` gains a key this
+  // module already uses under the same name (`now` is the obvious one), at which
+  // point a seam meant for the expiry guard silently starts steering the send.
+  // Same rule, same reason, as `resolveInvitationForResolvedTarget` in `./core`,
+  // which #304 ruling 4 fix 1 rebuilt key by key: a spread is not a filter.
   const outcome = await emailInviteeOutcome(invitation, {
-    ...deps,
+    ...(deps.lookupOrgName ? { lookupOrgName: deps.lookupOrgName } : {}),
+    ...(deps.send ? { send: deps.send } : {}),
     // A DELIBERATE resend, which is what keeps the provider from deduping it
     // against the key the create already presented for this same invitation
     // (`./email` → `invitationEmailIdempotencyKey`).
