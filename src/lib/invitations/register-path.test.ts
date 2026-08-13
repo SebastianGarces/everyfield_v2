@@ -127,8 +127,8 @@ test("the path is the shape register/page.tsx reads", () => {
 // type-checks, works, and ships ~687 KB of SDK into whatever chunk does it.
 // The guard below `invitations-list.tsx` only forbade that ONE file.
 //
-// AND IT WAS STILL HALF-APPLIED (swept 2026-08-13, #411). This domain has TWO
-// import-free leaves, both of them for the same bundling reason, and `email.ts`
+// AND IT WAS STILL HALF-APPLIED (swept 2026-08-13, #411). This domain has THREE
+// import-free leaves, all of them for the same bundling reason, and `email.ts`
 // imported and re-exported the second one — `RESEND_DEDUPE_WINDOW_MS`,
 // `resendDedupeWindowAt`, `ResendDedupeWindow` — eighty lines below the comment
 // explaining why it must never do that to the first. Same justification ("every
@@ -137,6 +137,16 @@ test("the path is the shape register/page.tsx reads", () => {
 // one, so the guard is now a WALK OVER A TABLE OF LEAVES: add the leaf, get the
 // property. `sourceFilesUnder()` already skips suites, which is what lets a
 // suite name the export it forbids.
+//
+// AND THE TABLE IS DERIVED, NOT REMEMBERED (round 2, same day). The first cut of
+// that table enumerated two of the three — `create-notice.ts`, import-free by
+// its own header and held by the `"use client"` create form, had no row, so it
+// received none of the four rules while `memory/invariants.md` recorded the
+// guard at "every import-free leaf in `src/lib/invitations/`". That is this
+// section's own thesis failing one level up: the list was as wide as somebody's
+// memory of the domain. The completeness test below asks the DIRECTORY instead
+// and fails naming any import-free module with no row, so the fourth leaf
+// cannot be missed the way the third one was.
 
 /**
  * Every import-free module in this domain, with the symbols it alone may export.
@@ -154,6 +164,24 @@ test("the path is the shape register/page.tsx reads", () => {
  * what to look for from `symbols` itself.
  */
 const DOMAIN_LEAVES = [
+  {
+    // The create form's words. Import-free by its own header for the same
+    // reason as the other two — `invitation-create-form.tsx` is `"use client"`
+    // and holds it — and registered here 2026-08-13 (#411 round 2), which is
+    // when the table stopped being a list somebody maintained and started
+    // being one the completeness rule below derives from the directory. Nothing
+    // re-exports it today; that is exactly the state `resend-window` was in
+    // before somebody added the door this sweep closed.
+    file: ["lib", "invitations", "create-notice.ts"] as const,
+    specifier: "@/lib/invitations/create-notice",
+    barrelPath: "create-notice",
+    symbols: [
+      "INVITATION_EMAIL_FAILED_HEADLINE",
+      "InvitationNoticeState",
+      "InvitationCreatedNotice",
+      "invitationCreatedNotice",
+    ],
+  },
   {
     file: ["lib", "invitations", "register-path.ts"] as const,
     specifier: "@/lib/invitations/register-path",
@@ -175,6 +203,30 @@ const DOMAIN_LEAVES = [
     ],
   },
 ] as const;
+
+/**
+ * The three spellings of "this module reaches another module", with the reason
+ * each one is fatal to a leaf.
+ *
+ * ONE definition, because two consumers ask the same question for two different
+ * purposes: rule 1 asserts that every REGISTERED leaf still matches none of
+ * them, and the completeness rule below asks which UNREGISTERED modules match
+ * none of them — i.e. which files are leaves that nobody wrote a row for. Two
+ * hand-written copies of "is this import-free" is how the table and the
+ * directory would disagree about what a leaf is, which is the drift this whole
+ * section exists to prevent.
+ */
+const IMPORT_FORMS: readonly { pattern: RegExp; why: string }[] = [
+  // Both spellings — a static `import` and a dynamic `import(...)` — because
+  // either one is enough to drag `@/lib/email/client` back in behind it.
+  { pattern: /^\s*import[\s{*]/m, why: "a client component holds this" },
+  { pattern: /\bimport\s*\(/, why: "no dynamic import" },
+  { pattern: /\brequire\s*\(/, why: "no require" },
+];
+
+function importsNothing(source: string): boolean {
+  return IMPORT_FORMS.every(({ pattern }) => !pattern.test(source));
+}
 
 function spellingOf(symbols: readonly string[]): string {
   return `(?:${symbols.join("|")})`;
@@ -280,20 +332,49 @@ test("every import-free leaf really imports nothing", () => {
     const where = leaf.file.join("/");
     const source = code(read(...leaf.file));
 
-    // Both spellings — a static `import` and a dynamic `import(...)` — because
-    // either one is enough to drag `@/lib/email/client` back in behind it.
-    assert.doesNotMatch(
-      source,
-      /^\s*import[\s{*]/m,
-      `${where} must stay import-free: a client component holds this`
-    );
-    assert.doesNotMatch(source, /\bimport\s*\(/, `${where}: no dynamic import`);
-    assert.doesNotMatch(source, /\brequire\s*\(/, `${where}: no require`);
+    for (const { pattern, why } of IMPORT_FORMS) {
+      assert.doesNotMatch(
+        source,
+        pattern,
+        `${where} must stay import-free — ${why}`
+      );
+    }
 
     // And it must not be re-marked server-only, which would be the same failure
     // wearing a different hat.
     assert.doesNotMatch(source, /"use server"|"server-only"/, where);
   }
+});
+
+test("DOMAIN_LEAVES names EVERY import-free module in this domain", () => {
+  // THE TABLE IS DERIVED FROM THE DIRECTORY, not maintained beside it. Rules 1
+  // and 2 are only as wide as this list, so a leaf with no row gets none of
+  // them — which is not hypothetical: this table shipped enumerating TWO of the
+  // domain's THREE import-free modules (`create-notice.ts` was missing, and
+  // `register-path.ts`'s own header names it as following the same rule) while
+  // `memory/invariants.md` recorded the guard as running at EVERY import-free
+  // leaf. That is the same failure one level up: a rule enforced against the
+  // instances somebody remembered.
+  //
+  // So the question is asked of the FILESYSTEM. Any `.ts`/`.tsx` under
+  // `src/lib/invitations/` that imports nothing is a leaf by this section's own
+  // definition — a `"use client"` module can hold it, so it needs the four
+  // rules — and it must have a row. Adding the fourth leaf is adding the row;
+  // forgetting is a failure here, naming the file.
+  const registered = new Set(
+    DOMAIN_LEAVES.map((leaf) => path.join(ROOT, ...leaf.file))
+  );
+
+  const unregistered = sourceFilesUnder("lib", "invitations")
+    .filter((file) => importsNothing(code(readFileSync(file, "utf8"))))
+    .filter((file) => !registered.has(file))
+    .map(rel);
+
+  assert.deepEqual(
+    unregistered,
+    [],
+    `import-free module(s) in this domain with no row in DOMAIN_LEAVES — a leaf with no row gets none of the four rules:\n${unregistered.join("\n")}`
+  );
 });
 
 // ----------------------------------------------------------------------------

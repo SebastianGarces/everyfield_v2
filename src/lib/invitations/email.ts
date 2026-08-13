@@ -106,9 +106,12 @@ import { resendDedupeWindowAt } from "./resend-window";
 // the browser's own component to the Resend SDK, one edit away. Deleted; a fix
 // stated as a rule and enforced for one file is a fix half-applied.
 //
-// Pinned by `register-path.test.ts` §2, which now walks BOTH leaves from one
-// list — add the third leaf to `DOMAIN_LEAVES` there, not a fourth copy of this
-// comment.
+// Pinned by `register-path.test.ts` §2, which walks EVERY leaf from one list —
+// `DOMAIN_LEAVES`, today three rows (`./register-path`, `./resend-window`,
+// `./create-notice`). That list is no longer maintained by hand either: a
+// completeness rule reads this directory, computes which modules import
+// nothing, and fails naming any that has no row. A fourth leaf gets the rules
+// by being added there, not by a fourth copy of this comment.
 
 /**
  * The absolute, token-bound register URL — what the email actually links to.
