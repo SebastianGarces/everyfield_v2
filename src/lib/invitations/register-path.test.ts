@@ -449,33 +449,50 @@ test("no admin surface builds the invite link at all", () => {
 // twice.
 //
 // So this guard runs over the WHOLE FILE, comments and all — `code()` is
-// deliberately NOT applied — and over every module that has ever carried the
-// sentence. Patching the instances is not the fix; closing the class is.
+// deliberately NOT applied — and over EVERY module in the domain. Patching the
+// instances is not the fix; closing the class is, and a hand-written list of the
+// four modules that had carried the sentence was still the instances: sweep 3
+// listed `email.ts`, `service.ts`, `core.ts` and `create-notice.ts` while
+// `audit.ts`, `history.ts`, `list-row.ts` and `resend-window.ts` could say it
+// freely. The directory is the list (round 2 of the 2026-08-13 sweep, #411) —
+// the same move `DOMAIN_LEAVES`'s completeness rule makes one section up, and
+// `sourceFilesUnder()` already skips suites.
 //
-// `resend.ts` is deliberately NOT in the list. Its `INVITATION_SEND_FAILED_MESSAGE`
+// `resend.ts` is the ONE named exclusion. Its `INVITATION_SEND_FAILED_MESSAGE`
 // docblock QUOTES the retired sentence to record that it was removed and must
 // not come back, which is the opposite of describing it as the design — the
 // same thing `memory/` does. A module that quotes it to forbid it has to be
 // able to name it.
-const NO_ADMIN_LINK_PROSE = [
-  ["lib", "invitations", "email.ts"],
-  ["lib", "invitations", "service.ts"],
-  ["lib", "invitations", "core.ts"],
-  ["lib", "invitations", "create-notice.ts"],
-] as const;
+const QUOTES_THE_RETIRED_STOPGAP_TO_FORBID_IT = path.join(
+  ROOT,
+  "lib",
+  "invitations",
+  "resend.ts"
+);
+
+const NO_ADMIN_LINK_PROSE = sourceFilesUnder("lib", "invitations").filter(
+  (file) => file !== QUOTES_THE_RETIRED_STOPGAP_TO_FORBID_IT
+);
 
 const RETIRED_STOPGAP =
   /copy the link|the link as (the )?fallback|admin can also copy|hands the admin the link/i;
 
 test("no module still documents the admin's copy of the link as the recovery", () => {
-  for (const segments of NO_ADMIN_LINK_PROSE) {
-    const source = read(...segments);
-    const where = segments.join("/");
+  // The exclusion is asserted, not assumed: if `resend.ts` is renamed or moved,
+  // this filter would silently stop excluding anything and the guard would fail
+  // on a module that is allowed to quote the sentence.
+  assert.ok(
+    sourceFilesUnder("lib", "invitations").includes(
+      QUOTES_THE_RETIRED_STOPGAP_TO_FORBID_IT
+    ),
+    "resend.ts is excluded by name — update the exclusion if the module moved"
+  );
 
+  for (const file of NO_ADMIN_LINK_PROSE) {
     assert.doesNotMatch(
-      source,
+      readFileSync(file, "utf8"),
       RETIRED_STOPGAP,
-      `${where} still names the admin's copy of the invite link — the recovery is "Resend email" on the row (#304 ruling 4 item 5, #293)`
+      `${rel(file)} still names the admin's copy of the invite link — the recovery is "Resend email" on the row (#304 ruling 4 item 5, #293)`
     );
   }
 });
@@ -496,30 +513,26 @@ test("no module still documents the admin's copy of the link as the recovery", (
 const CLAIMS_A_SECOND_DOOR =
   /\bre-exports?\s+(?:both|it|them|the\s+(?:window|spelling|names))|re-exported so a reader|every existing importer/i;
 
-// ONE LIST for the leaf half too — the same rule `DOMAIN_LEAVES`'s own header
-// states, applied to this scan rather than restated beside it. A hand-written
-// copy of the leaf files here is exactly the list-plus-parallel-list that drifts:
-// a THIRD leaf added to the table would pick up rule 1 (imports nothing) and
-// rule 2 (nothing else exports its spelling) for free and silently miss this
-// one. The three TRUNK modules stay explicit, because they are not leaves and
-// have no row in the table — they are here as the modules whose PROSE has
-// described a leaf as re-exported.
-const LEAF_PROSE: readonly (readonly string[])[] = [
-  ...DOMAIN_LEAVES.map((leaf) => leaf.file),
-  ["lib", "invitations", "email.ts"],
-  ["lib", "invitations", "resend.ts"],
-  ["lib", "invitations", "service.ts"],
-];
+// EVERY MODULE IN THE DOMAIN, which is what the rule actually claims — the same
+// move `DOMAIN_LEAVES`'s completeness rule makes one section up, applied to this
+// scan rather than restated beside it.
+//
+// It shipped as a hand-written half-list and that was the very drift it names:
+// the leaf half derived itself from `DOMAIN_LEAVES` and then hand-listed three
+// trunk modules (`email.ts`, `resend.ts`, `service.ts`), so `audit.ts`,
+// `core.ts`, `history.ts` and `list-row.ts` — ten modules in the domain, four
+// invisible to the guard — could describe a leaf as re-exported and pass.
+// `core.ts` is the one a next implementer greps first. Any module can carry the
+// claim, so every module is scanned; raw, comments included, because the claim
+// lives in prose.
+const LEAF_PROSE = sourceFilesUnder("lib", "invitations");
 
 test("no module documents a leaf as reachable through the trunk", () => {
-  for (const segments of LEAF_PROSE) {
-    const source = read(...segments);
-    const where = segments.join("/");
-
+  for (const file of LEAF_PROSE) {
     assert.doesNotMatch(
-      source,
+      readFileSync(file, "utf8"),
       CLAIMS_A_SECOND_DOOR,
-      `${where} describes an import-free leaf as re-exported from a module with imports — there is ONE door per leaf, and it is the leaf (see DOMAIN_LEAVES above)`
+      `${rel(file)} describes an import-free leaf as re-exported from a module with imports — there is ONE door per leaf, and it is the leaf (see DOMAIN_LEAVES above)`
     );
   }
 });

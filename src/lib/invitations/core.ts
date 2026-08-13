@@ -1544,19 +1544,16 @@ export async function acceptInvitationAs(
   // `acceptedAssociationEventStatement`).
   //
   // ALL THREE INVITATION TYPES audit since #304 WS3 / migration 0036, the
-  // sending-church subject included. `null` now means only "this row's
-  // type-implied ids are missing", which the statements above would already have
-  // thrown on — not "this kind of association goes unrecorded". A `type` outside
-  // the union does not arrive here as `null` either: it THROWS inside
-  // `auditableAssociationOrg`, because this branch is on truthiness, so a
-  // falsy return would be the unaudited three-statement batch OV-008 forbids.
-  const auditedOrg = auditableAssociationOrg(invitation);
-  const audit = auditedOrg
-    ? acceptedAssociationEventStatement(actor, {
-        ...auditedOrg,
-        invitationId,
-      })
-    : null;
+  // sending-church subject included, and `auditableAssociationOrg` is TOTAL:
+  // it returns a subject or it throws. So there is exactly ONE batch shape here
+  // — four statements, always audited. The shorter batch is not conditional, it
+  // does not exist: an unaudited association is the state OV-008 forbids, so the
+  // spelling of it is absent from this file rather than guarded by a ternary a
+  // later edit could make reachable.
+  const audit = acceptedAssociationEventStatement(actor, {
+    ...auditableAssociationOrg(invitation),
+    invitationId,
+  });
 
   const claim = respondToInvitationQuery(
     actor,
@@ -1565,9 +1562,12 @@ export async function acceptInvitationAs(
     slotIsOurs
   );
 
-  const [, claimed, associated] = audit
-    ? await db.batch([lock, claim, association, audit])
-    : await db.batch([lock, claim, association]);
+  const [, claimed, associated] = await db.batch([
+    lock,
+    claim,
+    association,
+    audit,
+  ]);
 
   const [updated] = claimed;
 
@@ -2226,63 +2226,82 @@ export async function disassociateSendingChurchFromNetwork(
  * for, so the arm returns the real thing: the target SENDING CHURCH as subject,
  * the network as org.
  *
- * `null` still means "there is nothing honest to audit" — a row whose type-implied
- * ids are missing. It never means "this kind of association is not recorded",
- * and it never means "this row's type is not one we know".
+ * IT IS TOTAL: it returns a subject or it THROWS, and there is no third answer.
+ * Every arm fails closed the way every other switch on `type` in this file does
+ * — `InvitationError`, the same arm `insertInvitation`'s slot rule,
+ * `lockTargetRow`, `associationStatement`, the accept path and
+ * `verifyInvitationAuthority` all take.
  *
- * IT FAILS CLOSED LIKE EVERY OTHER SWITCH ON `type` IN THIS FILE — it THROWS
- * `InvitationError(NOT_AUTHORIZED_MESSAGE)`, the same arm `insertInvitation`'s
- * slot rule, `lockTargetRow`, `associationStatement`, the accept path and
- * `verifyInvitationAuthority` all take. Until the 2026-08-13 sweep (#411) it was
- * the one that did not. With three cases and no `default:`, TypeScript treats
- * the switch as exhaustive and lets the function end — so a row carrying a
- * `type` outside the union returned `undefined`, and `acceptInvitationAs` reads
- * a falsy result as "nothing to audit" and batches three statements instead of
- * four. That is an association committed with no `association_events` row behind
- * it, which is the one thing #274 / OV-008 forbids. Returning `null` from the
- * arm would leave that outcome exactly as it was, because the caller's branch is
- * on truthiness — so the arm throws, and the return value now says only "these
- * ids are missing", never "this type is unknown". The premise is real rather
- * than theoretical: the column is a bare `varchar(40)` with a TypeScript-only
- * `$type<>` cast and `insertInvitation` validates nothing (see
- * `verifyInvitationAuthority`). Nothing reaches here today — `lockTargetRow`,
- * `associationStatement` and `verifyInvitationAuthority` all throw on such a row
- * first — but "unreachable because three other functions happen to run earlier"
- * is not the guarantee this function should rest on, and a FOURTH
- * `OrganizationInvitationType` would reach it with all three of those extended
- * and this one silently unaudited. The `never` makes that a compile error, and
- * the throw makes the runtime arm refuse rather than half-apply.
+ * TWO ROUNDS OF THE 2026-08-13 SWEEP (#411) GOT IT THERE, and the second is the
+ * one worth remembering. Round 1 gave the switch a `default:` that throws: with
+ * three cases and no default TypeScript treats the switch as exhaustive and lets
+ * the function end, so a row carrying a `type` outside the union returned
+ * `undefined`. Round 2 removed the OTHER falsy answer — the `: null` each of the
+ * three arms returned when its type-implied ids were missing. Both were the same
+ * hole, because the caller branched on truthiness: a falsy result meant a batch
+ * of three statements instead of four, an association committed with no
+ * `association_events` row behind it, which is the one thing #274 / OV-008
+ * forbids. Documenting the nullable arm as "unreachable, because
+ * `associationStatement` throws on exactly these id pairs fifteen lines earlier"
+ * is the reasoning this function's own header rejects one paragraph down; the
+ * fix is to delete the branch, not to explain it. `acceptInvitationAs` now has
+ * ONE batch shape, four statements, always audited.
+ *
+ * The premise is real rather than theoretical: `organization_invitations.type`
+ * is a bare `varchar(40)` with a TypeScript-only `$type<>` cast, the FK columns
+ * are all nullable, and `insertInvitation` validates neither (see
+ * `verifyInvitationAuthority`). Nothing reaches the throwing arms today —
+ * `lockTargetRow`, `associationStatement` and `verifyInvitationAuthority` all
+ * refuse such a row first — but "unreachable because three other functions
+ * happen to run earlier" is not the guarantee this function should rest on, and
+ * a FOURTH `OrganizationInvitationType` would reach it with all three of those
+ * extended and this one silently unaudited. The `never` makes that a compile
+ * error, and the throws make every runtime arm refuse rather than half-apply.
  */
 export function auditableAssociationOrg(invitation: AssociationFacts): {
   subject: AssociationSubject;
   orgType: AssociationOrgType;
   orgId: string;
-} | null {
+} {
   switch (invitation.type) {
-    case "church_to_sending_church":
-      return invitation.targetChurchId && invitation.sendingChurchId
-        ? {
-            subject: churchSubject(invitation.targetChurchId),
-            orgType: "sending_church",
-            orgId: invitation.sendingChurchId,
-          }
-        : null;
-    case "church_to_network":
-      return invitation.targetChurchId && invitation.sendingNetworkId
-        ? {
-            subject: churchSubject(invitation.targetChurchId),
-            orgType: "network",
-            orgId: invitation.sendingNetworkId,
-          }
-        : null;
-    case "sending_church_to_network":
-      return invitation.targetSendingChurchId && invitation.sendingNetworkId
-        ? {
-            subject: sendingChurchSubject(invitation.targetSendingChurchId),
-            orgType: "network",
-            orgId: invitation.sendingNetworkId,
-          }
-        : null;
+    case "church_to_sending_church": {
+      if (!invitation.targetChurchId || !invitation.sendingChurchId) {
+        throw new InvitationError(
+          "Invalid invitation: missing church or sending church"
+        );
+      }
+      return {
+        subject: churchSubject(invitation.targetChurchId),
+        orgType: "sending_church",
+        orgId: invitation.sendingChurchId,
+      };
+    }
+
+    case "church_to_network": {
+      if (!invitation.targetChurchId || !invitation.sendingNetworkId) {
+        throw new InvitationError(
+          "Invalid invitation: missing church or network"
+        );
+      }
+      return {
+        subject: churchSubject(invitation.targetChurchId),
+        orgType: "network",
+        orgId: invitation.sendingNetworkId,
+      };
+    }
+
+    case "sending_church_to_network": {
+      if (!invitation.targetSendingChurchId || !invitation.sendingNetworkId) {
+        throw new InvitationError(
+          "Invalid invitation: missing sending church or network"
+        );
+      }
+      return {
+        subject: sendingChurchSubject(invitation.targetSendingChurchId),
+        orgType: "network",
+        orgId: invitation.sendingNetworkId,
+      };
+    }
 
     default: {
       const unknownType: never = invitation.type;

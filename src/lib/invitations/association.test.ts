@@ -308,11 +308,24 @@ test("the accept batches the audit rather than following it with a second call",
     "async function announceInvitationAcceptedForChurch"
   );
 
-  assert.match(accept, /db\.batch\(\[lock, claim, association, audit\]\)/);
-  // The audit-less batch survives only for a row whose type-implied ids are
-  // missing (`auditableAssociationOrg` → null). Since migration 0036 all THREE
-  // invitation types audit, the sending-church subject included.
-  assert.match(accept, /db\.batch\(\[lock, claim, association\]\)/);
+  assert.match(
+    accept,
+    /db\.batch\(\[\s*lock,\s*claim,\s*association,\s*audit,?\s*\]\)/
+  );
+  // …and there is exactly ONE batch here. The audit-less three-statement
+  // spelling is GUARDED AGAINST rather than guarded: it used to survive behind
+  // `audit ? … : …` for a row whose type-implied ids were missing, documented as
+  // unreachable because `associationStatement` throws on the same id pairs
+  // fifteen lines earlier. "Unreachable because another function happens to run
+  // first" is not a guarantee — it is one refactor away from being an
+  // association committed with no `association_events` row, which OV-008
+  // forbids. `auditableAssociationOrg` is total now, so the shorter batch has no
+  // spelling in the file for a later edit to reach.
+  assert.doesNotMatch(
+    accept,
+    /db\.batch\(\[\s*lock,\s*claim,\s*association,?\s*\]\)/
+  );
+  assert.equal(accept.match(/db\.batch\(\[/g)?.length, 1);
   assert.doesNotMatch(accept, /recordAssociationEvent/);
 });
 
@@ -440,30 +453,41 @@ test("a sending church joining a network audits with a SENDING CHURCH subject", 
     }
   );
 
-  // `null` now means only "this row's type-implied ids are missing" — never
-  // "this kind of association goes unrecorded".
-  assert.equal(
-    auditableAssociationOrg({
-      type: "sending_church_to_network",
-      targetChurchId: null,
-      targetSendingChurchId: SENDING_CHURCH,
-      sendingChurchId: null,
-      sendingNetworkId: null,
-    }),
-    null
+  // A row whose type-implied ids are missing REFUSES — it does not name half an
+  // org, and it does not answer falsy. Reachable, since nothing validates the
+  // row on the way in: the FK columns are all nullable and `insertInvitation`
+  // checks none of them.
+  //
+  // These two were `assert.equal(…, null)` until round 2 of the 2026-08-13 sweep
+  // (#411), and pinning that null was pinning the hole: `acceptInvitationAs`
+  // branched on truthiness, so every null here was a three-statement batch — an
+  // association committed with no `association_events` row, which #274 / OV-008
+  // forbids. Same fault as the rogue-type test below, same fix, so they now
+  // assert the same thing.
+  assert.throws(
+    () =>
+      auditableAssociationOrg({
+        type: "sending_church_to_network",
+        targetChurchId: null,
+        targetSendingChurchId: SENDING_CHURCH,
+        sendingChurchId: null,
+        sendingNetworkId: null,
+      }),
+    InvitationError,
+    "a sending-church row with no network id must refuse, not audit nothing"
   );
 
-  // And a row whose type-implied id is missing names no org rather than half of
-  // one — reachable, since nothing validates the row on the way in.
-  assert.equal(
-    auditableAssociationOrg({
-      type: "church_to_network",
-      targetChurchId: PLANT,
-      targetSendingChurchId: null,
-      sendingChurchId: SENDING_CHURCH,
-      sendingNetworkId: null,
-    }),
-    null
+  assert.throws(
+    () =>
+      auditableAssociationOrg({
+        type: "church_to_network",
+        targetChurchId: PLANT,
+        targetSendingChurchId: null,
+        sendingChurchId: SENDING_CHURCH,
+        sendingNetworkId: null,
+      }),
+    InvitationError,
+    "a church-to-network row with no network id must refuse, not audit nothing"
   );
 });
 
@@ -474,11 +498,13 @@ test("a type outside the union REFUSES rather than auditing nothing", () => {
   // `undefined`.
   //
   // A `default:` that returns `null` would NOT have fixed that, and this test
-  // exists to pin the difference: `acceptInvitationAs` branches on truthiness
-  // (`const audit = auditedOrg ? … : null`), so `undefined` and `null` reach the
-  // batch identically — three statements instead of four, an association
-  // committed with no `association_events` row behind it, which is exactly what
-  // #274 / OV-008 forbids. Only a THROW refuses, and it is the same arm every
+  // exists to pin the difference: while `acceptInvitationAs` branched on
+  // truthiness, `undefined` and `null` reached the batch identically — three
+  // statements instead of four, an association committed with no
+  // `association_events` row behind it, which is exactly what #274 / OV-008
+  // forbids. Round 2 of the sweep deleted the branch and the nullable return
+  // together, so no answer but a subject exists at all. Only a THROW refuses,
+  // and it is the same arm every
   // other mutation-guarding switch on `type` in that file already takes
   // (`insertInvitation`'s slot rule, `lockTargetRow`, `associationStatement`,
   // the accept path, `verifyInvitationAuthority`). The `never` assignment beside
