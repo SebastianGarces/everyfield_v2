@@ -27,6 +27,9 @@ import {
   themes,
 } from "@/lib/testing/theme-color";
 import { STATUS_BADGE_CONFIG } from "@/lib/people/status-colors";
+// The badge count is pinned against the domain's status map, never against the
+// config the scan itself walks — see the anti-vacuity note in the AA test.
+import { STATUS_LABELS } from "@/lib/people/status.shared";
 
 // ----------------------------------------------------------------------------
 // The token layer itself: identity (is a token still the colour the design
@@ -666,13 +669,27 @@ test("every person-status badge reads its label at AA, in both themes", () => {
     }
   }
 
-  // Anti-vacuity: seven statuses across two themes, Prospect included now that
-  // its neutral variant is resolved rather than skipped.
-  const expected = Object.keys(STATUS_BADGE_CONFIG).length * themes.length;
+  // Anti-vacuity, and it has to be pinned against something OTHER than the
+  // object the loop just walked: counting `STATUS_BADGE_CONFIG`'s own keys
+  // would be a tautology — `statusBadgePaint` is a total map over that object,
+  // so the equality would hold for seven statuses, three, or none, and report
+  // "0 of 0" as a pass. Both floors below are external to it:
+  //   · the ABSOLUTE fourteen — seven statuses across two themes, Prospect
+  //     included now that its neutral variant is resolved rather than skipped.
+  //     memory/invariants.md, memory/invariants/design-tokens.md and
+  //     product-docs/decisions.md all cite that number, so it is asserted here
+  //     rather than narrated there.
+  //   · `STATUS_LABELS` (`status.shared.ts`), the domain's one status map — so
+  //     a status that gains a label but no badge fails here too.
+  assert.ok(
+    measured.length >= 14,
+    `only ${measured.length} status/theme pairs were measured, short of the fourteen #429 ruled. The scan has gone vacuous — fix it before trusting a pass`
+  );
+  const expected = Object.keys(STATUS_LABELS).length * themes.length;
   assert.equal(
     measured.length,
     expected,
-    `only ${measured.length} of ${expected} status/theme pairs were measured. The scan has gone vacuous — fix it before trusting a pass`
+    `${measured.length} status/theme pairs were measured, not the ${expected} that STATUS_LABELS × ${themes.length} themes requires — every status in the domain owes a badge in both themes. The scan has gone vacuous — fix it before trusting a pass`
   );
 });
 

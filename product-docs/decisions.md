@@ -258,8 +258,17 @@ the product- and canon-shaping subset. Deferred implementations are pinned: migr
 ## 2026-08-13 — The /people status-badge colour scale (#429, prototypes on draft PR #431)
 
 Four directions were built as live prototypes behind the switcher and operated on a preview in
-both themes; Sebastian ruled from the bench rather than from prose. The bench never merges — the
-draft PR closes unmerged and `proto/429-status-badge-scale` is deleted with the implementation.
+both themes; Sebastian ruled from the bench rather than from prose.
+
+**The bench never merges, and its teardown is an OBLIGATION here, not a record.** As of this row
+draft PR #431 is still OPEN and `proto/429-status-badge-scale` still exists. When this
+implementation merges, that PR is closed UNMERGED, the branch is deleted (remote and local) and
+the `proto-429` worktree is removed. Until that happens the branch is not inert: it carries a
+commit that adds `proto-429-bench.tsx` to an exemption list inside
+`src/lib/invitations/resend.test.ts`, which disarms the repo-wide "no prototype scaffolding
+survives the ruling" guard for exactly the 609 lines of bench sitting next to it. Merging #431
+would land the scaffolding AND the guard that was supposed to catch it, so #431 is never merged —
+only closed.
 
 | # | Decision | Consequence |
 |---|----------|-------------|

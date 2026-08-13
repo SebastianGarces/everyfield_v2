@@ -79,7 +79,7 @@ What is not deferred is MEASURING it. `theme-tokens.test.ts` reads every shipped
 
 ## The status badges: the ruled scale, and why the ledger is gone (#429)
 
-Sebastian ruled **direction B, "tinted editorial"** on 2026-08-13, from four directions built as live prototypes and operated on a preview (draft PR #431, closed unmerged). Every status that carries colour paints ONE hue three ways — **pale ground, deep ink, hairline border** — and the dark theme **mirrors** it: deep ground, pale ink. Two parts of the ruling are named exceptions and are pinned as such:
+Sebastian ruled **direction B, "tinted editorial"** on 2026-08-13, from four directions built as live prototypes and operated on a preview (draft PR #431 — the bench never merges: that PR is closed UNMERGED and `proto/429-status-badge-scale` deleted when this implementation lands, and until then it is an open PR carrying a commit that exempts the bench from the repo-wide anti-scaffolding guard, so it is never merged). Every status that carries colour paints ONE hue three ways — **pale ground, deep ink, hairline border** — and the dark theme **mirrors** it: deep ground, pale ink. Two parts of the ruling are named exceptions and are pinned as such:
 
 - **Prospect stays neutral.** It is the pipeline's zero, so it keeps the token-backed `secondary` variant and declares no colour of its own.
 - **Attendee and Launch Team stay on ONE hue**, separated by tint LEVEL (blue 50/200 against 100/300, mirrored). The ruling was explicitly offered the hue split and declined it. Splitting them is a new ruling, not a commit.
