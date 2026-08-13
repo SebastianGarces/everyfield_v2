@@ -8,7 +8,9 @@ import { alias } from "drizzle-orm/pg-core";
 
 import { db } from "@/db";
 import { churches, users, type User } from "@/db/schema";
-import { OVERSIGHT_ADMIN, OVERSIGHT_ROLES } from "@/lib/auth/access";
+import { OVERSIGHT_ROLES } from "@/lib/auth/access";
+
+import { OVERSIGHT_ADMIN } from "./oversight-admin";
 import { sourceReader } from "@/lib/testing/source-span";
 
 import {
@@ -702,8 +704,12 @@ test("each oversight FK column is named ONCE, in the pairing table", () => {
     network: { role: "network_admin", fk: "sendingNetworkId" },
   });
 
-  // `OVERSIGHT_ROLES` stays DERIVED, and in the table's order — the SQL arms are
-  // rendered in that order and `anchor.test.ts` pins the bound-parameter list.
+  // The table's ORDER is load-bearing: the SQL arms render in it and the
+  // bound-parameter assertions above read them positionally.
+  assert.deepEqual(Object.keys(OVERSIGHT_ADMIN), ["sending_church", "network"]);
+
+  // The tie to `OVERSIGHT_ROLES` — the flat list `@/lib/auth/access` owns — is
+  // asserted in `oversight-admin.test.ts` §1, in both directions.
   assert.deepEqual(OVERSIGHT_ROLES, ["sending_church_admin", "network_admin"]);
 });
 

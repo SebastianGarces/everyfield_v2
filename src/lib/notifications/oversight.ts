@@ -3,8 +3,7 @@ import type { alias } from "drizzle-orm/pg-core";
 
 import { db } from "@/db";
 import { churches, users, type OrganizationInvitationType } from "@/db/schema";
-import { OVERSIGHT_ADMIN, type OversightAdminPairing } from "@/lib/auth/access";
-
+import { OVERSIGHT_ADMIN, type OversightAdminPairing } from "./oversight-admin";
 import {
   anchorId,
   churchAnchor,
@@ -831,65 +830,32 @@ type OrgIdRef = string | SQLWrapper;
  * WHO ADMINISTERS THESE ORGS — the ONE definition of an oversight audience, in
  * SQL, with the role PAIRED to the org kind inside each arm.
  *
- * The pairing is the whole point and it is `memory/invariants.md` →
- * Multi-Tenancy: both oversight FKs live on one `users` row and neither implies
- * the other, so `or(fk match) AND role in OVERSIGHT_ROLES` is not the audience —
- * it admits a `network_admin` who also carries a `sending_church_id` into that
- * SENDING CHURCH's audience, which is the hierarchy walk this repo forbids
- * arriving through the role instead of through the FK.
- *
- * THE PAIRING ITSELF IS NOT WRITTEN HERE. It is `OVERSIGHT_ADMIN`
- * (`@/lib/auth/access`), which `recipientAdministersOrg` (`./enqueue.ts`) reads
- * too — that gate runs against a loaded `User` and this builds SQL, so they
- * cannot share a predicate, but they can and do share the DECISION. Four SQL
- * and TypeScript sites now ask "which role administers this kind of org?" of one
- * table, so the audience, the gate and the digest sweep's "who is still owed a
- * row" cannot answer it differently.
- *
- * The ARMS ARE THE TABLE'S ROWS, one per row, in the table's order — the role
- * and the FK column both read off the row. Nothing here names
- * `sendingChurchId`, `sendingNetworkId`, `"sending_church_admin"` or
- * `"network_admin"`, so a kind cannot be half-added: an arm is a row or it does
- * not exist.
+ * THE ARMS ARE THE ROWS OF `OVERSIGHT_ADMIN` (`./oversight-admin.ts`), one arm
+ * per row, in the table's order — the role and the FK column both read off the
+ * row. Nothing here names `sendingChurchId`, `sendingNetworkId`,
+ * `"sending_church_admin"` or `"network_admin"`, so a kind cannot be
+ * half-added: an arm is a row or it does not exist. Why the pairing is a table
+ * at all, and why an unpaired `or(fk, fk) AND role in (…)` is not the audience,
+ * is written once in that file's header.
  *
  * THE AUDIENCE IS WHAT THIS RETURNS — the whole of it. There is no
- * `inArray(role, OVERSIGHT_ROLES)` floor to remember to AND on, and adding one
- * back would be dead SQL: each arm names its role FROM the map `OVERSIGHT_ROLES`
- * is derived from, so the floor can only ever admit exactly what the arms
- * already admitted. It would not be a safety net either — an arm edited to a
- * non-oversight role would be silently ANDed down to zero rows, which turns a
- * visible bug into an empty audience.
+ * `inArray(role, OVERSIGHT_ROLES)` floor to AND on, and adding one back would
+ * be dead SQL: each arm names its role from the same table, so the floor can
+ * only re-admit what the arms already admitted. Nor is it a safety net — an arm
+ * edited to a non-oversight role would be silently ANDed down to zero rows,
+ * turning a visible bug into an empty audience.
  *
- * THE THIRD SITE IS WHY THIS IS SHARED RATHER THAN REPEATED. `listOversightAdminsOfOrg`
- * paired correctly and the other two did not, and for the sweep that was a
- * LIVENESS defect, not merely a lie in a report: `selectPlantsOwedDigest`
- * offers a plant while any oversight recipient of it is missing that day's
- * digest row, and a cross-paired admin can never be written one (`enqueue`'s
- * `canAccessChurch` resolves a `network_admin` through `sending_network_id`
- * alone). So the plant stayed permanently owed, was re-digested on every one of
- * the day's ~96 ticks, and — the ordering being stable by id — held its place at
- * the head of the owed set, which is exactly the starvation
- * `runOversightDigestSweep`'s header records as fixed.
- *
- * NAMING NO ORG RETURNS `undefined`, AND THE COMPILER — NOT A COMMENT — MAKES
+ * NAMING NO ORG RETURNS `undefined`, AND THE OVERLOADS — NOT A COMMENT — MAKE
  * THE CALLER FACE IT. `undefined` here means "no recipients"; handed to
  * drizzle's `and()` it means the OPPOSITE, because `and()` DROPS undefined arms
- * and an `and()` with nothing left standing disappears from the statement. Two
- * of the three callers guarded and the third, `plantsOwedDigestQuery`
- * (`./oversight-digest.ts` clause 4), passed the result straight into `and()`.
- * Rendered, its `exists (…)` collapsed to `exists (select 1 from users
- * owed_digest_recipient where <the rest>)` — every user row matching, so every
- * plant is owed a digest forever: the same starvation this builder exists to
- * fix, worse. It never fired only because that call's two arguments are column
- * objects and therefore always truthy — an accident of the arguments, not a
- * check.
- *
- * So the OVERLOADS carry it. Name both orgs with non-nullable refs and the
- * return type is `SQL`, full stop; name them nullably and it is
- * `SQL | undefined` and the guard is not optional. That is why the arms test
- * `null`/`undefined` explicitly instead of truthiness: under the first overload
- * every row yields an arm, so the `SQL` promise is a property of the code rather
- * than of the values that happen to be passed.
+ * and an `and()` left with nothing disappears from the statement.
+ * `plantsOwedDigestQuery` (`./oversight-digest.ts` clause 4) did exactly that,
+ * and rendered, its `exists (…)` collapsed to one satisfied by every row in
+ * `users`. So: non-nullable refs in, `SQL` out; nullable refs in,
+ * `SQL | undefined` out and the guard is not optional. That is also why the
+ * arms test `null`/`undefined` explicitly rather than truthiness — under the
+ * first overload every row yields an arm, so the `SQL` promise is a property of
+ * the code rather than of the values that happen to be passed.
  */
 export function oversightAudienceCondition(
   table: UsersRef,
@@ -973,14 +939,9 @@ export async function listOversightRecipientsForChurch(
  * `listOversightRecipientsForChurch`: this answers "who", so `password_hash`
  * must not enter application memory.
  *
- * EACH ARM PAIRS THE FK WITH ITS OWN ROLE — #304 ruling 4, item 6 (HR4
- * 2026-08-09). A single `inArray(role, OVERSIGHT_ROLES)` outside the `or` meant
- * "any oversight role reachable by either FK", which is not the audience: a
- * `network_admin` row that also carries a `sending_church_id` came back as a
- * recipient of that SENDING CHURCH's own milestone. The role now sits inside
- * the arm that names the FK, and BOTH come from `OVERSIGHT_ADMIN` — the same
- * table `recipientAdministersOrg` reads per recipient at enqueue time. Several
- * places ask the question; they answer it from one row.
+ * The audience comes from `oversightAudienceCondition` above, so each arm pairs
+ * the FK with its own role (#304 ruling 4, item 6; HR4 2026-08-09) and this
+ * function writes no role literal of its own.
  *
  * `org` here is loaded ids, either of which may be null, so this call gets the
  * `SQL | undefined` overload and the guard below is not optional.

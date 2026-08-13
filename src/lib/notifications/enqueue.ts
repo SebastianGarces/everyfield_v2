@@ -15,8 +15,9 @@ import {
   canAccessChurch,
   canAccessFeatureData,
   isOversightUser,
-  OVERSIGHT_ADMIN,
 } from "@/lib/auth/access";
+
+import { OVERSIGHT_ADMIN } from "./oversight-admin";
 
 import {
   churchAnchor,
@@ -510,32 +511,13 @@ const accessColumns = {
  * notification is filed under the SENDING CHURCH and the network is a different
  * tenant (the same rule that keeps a plant's rows out of its network's feed).
  *
- * THE ROLE IS PAIRED WITH THE ANCHOR KIND — #304 ruling 4, item 6 (HR4
- * 2026-08-09). "An oversight role" was too coarse for this question. Both org
- * FKs live on the same `users` row, so a `network_admin` who also carries a
- * `sending_church_id` — a founder who administers both, or any row where the
- * second FK was set once and never cleared — passed the sending-church arm and
- * received that sending church's own notifications. That is the hierarchy walk
- * the paragraph above says this is not, arriving through the role instead of
- * through the FK. So each anchor kind names EXACTLY the role that administers
- * it.
- *
- * BOTH HALVES COME FROM `OVERSIGHT_ADMIN` (`@/lib/auth/access`), NOT FROM
- * LITERALS HERE — the role AND the `users` column that carries that kind of org.
- * This gate runs against a loaded `User` and `oversightAudienceCondition`
- * (`./oversight.ts`) renders SQL, so the two cannot share a predicate — but the
- * DECISION they encode is one decision, and while it was written out twice in
- * two languages the SQL sites and this gate drifted apart and starved a plant of
- * its digest.
- *
- * There is no `anchor.type === …` branch left. There was one, for the FK half,
- * and it was the residue of the same defect: its else-branch answered for the
- * `network` kind AND for any kind added later, silently. Indexing the table by
- * `anchor.type` means a new kind is a row in that table and nothing here.
- *
- * The role test also subsumes `isOversightUser`: every row in that table names
- * an oversight role, and `OVERSIGHT_ROLES` is derived from the same table, so a
- * separate floor here could only re-admit what this line already required.
+ * BOTH HALVES COME FROM `OVERSIGHT_ADMIN` (`./oversight-admin.ts`), NOT FROM
+ * LITERALS HERE — the role AND the `users` column that carries that kind of
+ * org. That file's header says why the pairing is one table; the consequence
+ * here is that there is no `anchor.type === …` branch left to forget, and that
+ * the role test subsumes `isOversightUser` (every row in the table names an
+ * oversight role, so a separate floor could only re-admit what this line
+ * already required).
  *
  * Pure, and exported so it can be tested over the whole role × org domain.
  */

@@ -6,7 +6,7 @@ import {
   organizationInvitations,
   type User,
 } from "@/db/schema";
-import { OVERSIGHT_ADMIN } from "@/lib/auth/access";
+import { OVERSIGHT_ADMIN } from "./oversight-admin";
 
 // ============================================================================
 // The recorded-relationship tenancy basis (#304, OV-006 / OV-007).
@@ -83,11 +83,10 @@ export type OversightRecipient = Pick<
  * everything (see the `false` returns below).
  *
  * WHICH ROLE GOES WITH WHICH KIND, AND WHICH FK THAT KIND LIVES IN, are both
- * read from `OVERSIGHT_ADMIN` (`@/lib/auth/access`), the same table
- * `recipientAdministersOrg` and `oversightAudienceCondition` read. This is the
- * inverse direction of that lookup — a role asking which org it speaks through,
- * rather than an org kind asking which role administers it — but it is the SAME
- * pairing, and while it was written out separately per site the sites drifted.
+ * read from `OVERSIGHT_ADMIN` (`./oversight-admin.ts`, whose header carries the
+ * rationale). This is the inverse direction of the other readers' lookup — a
+ * role asking which org it speaks through, rather than an org kind asking which
+ * role administers it — but it is the SAME pairing.
  *
  * The scan carries the whole answer, so no column name is written here: a role
  * that matches no row contributes nothing and the all-null base is returned

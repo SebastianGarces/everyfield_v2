@@ -42,8 +42,9 @@ export type ChurchAnchor = { type: "church"; churchId: string };
  * again. Spelled by hand it was a union that merely HAPPENED to hold the same
  * two strings, so a third oversight org kind widened `AssociationOrgType` and
  * left this type — and everything that switches on it — quietly unchanged.
- * Derived, a new kind reaches `OVERSIGHT_ADMIN` (`@/lib/auth/access`) and every
- * reader that indexes that table by `anchor.type` follows it with no edit.
+ * Derived, a new kind reaches `OVERSIGHT_ADMIN` (`./oversight-admin.ts`, whose
+ * header carries the whole rationale) and every reader that indexes that table
+ * by `anchor.type` follows it with no edit.
  */
 export type OrgAnchor = { type: AssociationOrgType; orgId: string };
 
