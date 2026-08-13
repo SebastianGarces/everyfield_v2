@@ -40,11 +40,13 @@ export const SC_1_4_1_NON_COLOUR_THRESHOLD = 3;
 export const NON_TEXT_CONTRAST = 3;
 
 /**
- * Two colours this close are the same colour written two ways — the tolerance
- * an identity check needs, because a hex and an oklch spelling of one value do
- * not round-trip to the same bytes.
+ * The tolerance an identity check needs, in 8-bit channel units. A hex and an
+ * oklch spelling of one colour do not round-trip to the same bytes, but they
+ * land within a fraction of one: the two pairs this module is used on measure
+ * 0.109 and 0.058 apart. One whole unit is therefore a wide margin over the
+ * round-trip noise and still far under any real colour difference.
  */
-export const SAME_COLOUR = 1.01;
+export const SAME_COLOUR_CHANNEL_DELTA = 1;
 
 // --- color math -------------------------------------------------------------
 
@@ -88,9 +90,6 @@ export function decodeSrgb(channel: number): number {
  * CSS composites a translucent color over its backdrop in gamma-encoded sRGB,
  * which is exactly why a foreground painted at half alpha looks lighter than
  * its nominal lightness suggests.
- *
- * (This module is shipped source, so the markup guards in text-contrast.test.ts
- * scan it like any other file — keep utility class names OUT of its prose.)
  */
 export function composite(fg: Rgb, bg: Rgb, alpha: number): Rgb {
   return fg.map((c, i) => c * alpha + bg[i] * (1 - alpha)) as Rgb;
@@ -107,6 +106,24 @@ export function contrastRatio(a: Rgb, b: Rgb): number {
   const lb = relativeLuminance(b);
   const [hi, lo] = la >= lb ? [la, lb] : [lb, la];
   return (hi + 0.05) / (lo + 0.05);
+}
+
+/**
+ * Is this the same colour written two ways? CHANNEL-WISE, deliberately.
+ *
+ * The obvious spelling — `contrastRatio(a, b) < 1.01` — is not an identity
+ * check at all. Contrast is relative luminance, so hue and chroma are thrown
+ * away before the comparison happens, and the guard then answers a question
+ * nobody asked: `oklch(0.5354 0.151 320)` is a MAGENTA and it sits 1.0058:1
+ * from DESIGN.md's danger red, so a luminance guard "proves" the ruled danger
+ * colour still ships while the app renders purple. At the ink's chroma every
+ * hue on the wheel passes. These are the only assertions holding globals.css
+ * to the design authority, so they compare what a screen actually emits.
+ */
+export function isSameColour(a: Rgb, b: Rgb): boolean {
+  return a.every(
+    (channel, i) => Math.abs(channel - b[i]) * 255 < SAME_COLOUR_CHANNEL_DELTA
+  );
 }
 
 // --- CSS structure ----------------------------------------------------------
@@ -157,10 +174,21 @@ export function themeBlock(theme: "light" | "dark"): string {
 
 // --- token reading ----------------------------------------------------------
 
-/** The literal right-hand side of `--name`, before any `var()` is followed. */
+/**
+ * The literal right-hand side of `--name`, before any `var()` is followed.
+ *
+ * The LAST declaration wins, which is what `themeBlock` above already claims
+ * the reader does and what the cascade actually does. Taking the first one
+ * instead is a guard that reads a value the browser never uses: re-declare a
+ * token lower in the same block — the ordinary way a value is overridden in
+ * place — and every assertion in the suite would go on measuring the line
+ * above it.
+ */
 export function declaredValue(block: string, name: string): string | null {
-  const match = block.match(new RegExp(`--${name}:\\s*([^;]+);`));
-  return match ? match[1].trim() : null;
+  const matches = [
+    ...block.matchAll(new RegExp(`--${name}:\\s*([^;]+);`, "g")),
+  ];
+  return matches.length ? matches[matches.length - 1][1].trim() : null;
 }
 
 /** Every `--name` this block declares, in source order. */
@@ -254,6 +282,17 @@ export const SURFACES = [
 
 // --- shipped markup ---------------------------------------------------------
 
+/**
+ * This module. It sits under `src/app/` but is test-only support code, so it is
+ * not markup and the walk below skips it — the same reason the walk skips the
+ * `.test.ts` files. Without the skip, the guards scan their OWN implementation
+ * and every class name this file has to NAME in order to describe a rule reads
+ * as a shipped use of it: the module would fail the tests it powers, and the
+ * only defence would be a comment asking future authors to write about the
+ * rules without naming them.
+ */
+const SELF = path.join(SRC, "app", "theme-color.ts");
+
 /** Every `.ts`/`.tsx` file under `dir` that ships (tests are not markup). */
 export function tsxFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -262,6 +301,7 @@ export function tsxFiles(dir: string): string[] {
     if (!entry.isFile()) return [];
     // Tests name the banned tokens on purpose; only shipped markup is scanned.
     if (/\.test\.tsx?$/.test(entry.name)) return [];
+    if (full === SELF) return [];
     return /\.tsx?$/.test(entry.name) ? [full] : [];
   });
 }

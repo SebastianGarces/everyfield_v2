@@ -16,10 +16,8 @@ body {
   --radius-3xl: calc(var(--radius) + 12px);
   --radius-4xl: calc(var(--radius) + 16px);
 
-  /* Brand colors. `--ef-light` (a pre-sharp green wash, #d9f5d8) was declared
-     and exported here with zero users in the tree; DESIGN.md retired the green
-     washes in favour of the card surface, so it is gone rather than kept as a
-     colour a future screen could reach for. */
+  /* Brand colors. `--ef-light`, a pre-sharp green wash, was retired with the
+     washes themselves (DESIGN.md) and had no users. */
   --color-ef: var(--ef);
   --color-ef-dark: var(--ef-dark);
   --color-ef-field: var(--ef-field);
@@ -39,12 +37,6 @@ body {
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
-  /* Declared and exported so the utility EXISTS (see :root). Nothing shipped
-     paints it today — the destructive Button variant hardcodes `text-white` —
-     but an undeclared `*-foreground` utility emits no CSS at all, which is a
-     silent failure rather than a loud one. text-contrast.test.ts fails any
-     shipped `*-foreground` utility whose token this block does not export. */
-  --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -62,60 +54,52 @@ body {
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
-  /* Attention scale — how much operator attention a thing warrants.
-     The base carries the hue across an AREA (tile tint, border), where hue is
-     easy to judge; the `-ink` is the same hue darkened enough to read as text.
-     Colour is never asked to do its work in a few pixels of type: a label is
-     too small to carry a hue reliably, so the tile around it does that job and
-     the label only has to be readable. Used with opacity modifiers for tints
-     and borders (`bg-attention-high/12`). */
+  /* Attention scale — how much operator attention a thing warrants. The base
+     carries the hue across an AREA (tile tint, border); the `-ink` is the same
+     hue darkened enough to read as text on it. Used with opacity modifiers. */
   --color-attention-high: var(--attention-high);
   --color-attention-high-ink: var(--attention-high-ink);
   --color-attention-medium: var(--attention-medium);
   --color-attention-medium-ink: var(--attention-medium-ink);
 }
 
+/* ---------------------------------------------------------------------------
+   The token layer.
+
+   What a token IS and what it is FOR is stated here. What it MEASURES is not:
+   every contrast figure lives in a test that re-derives it from these values
+   (`src/app/theme-tokens.test.ts`, `focus-ring.test.ts`, `text-contrast.test.ts`),
+   and the reasoning behind each rule lives in `memory/invariants/design-tokens.md`.
+   A number written into this file is a number nothing re-checks — which is the
+   #357 defect the file's own comments were added to prevent, so it is not
+   written here. The one exception is called out where it appears, and a test
+   requires it to be present and correct.
+   --------------------------------------------------------------------------- */
+
 :root {
   /* Sharp ruling (DESIGN.md, 2026-07-30): radius is 0 — edges are drawn, not
-     implied. The derived scale below goes negative and clamps to 0. */
+     implied. The derived scale above goes negative and clamps to 0. */
   --radius: 0rem;
 
-  /* Brand colors — sharp brings the app exactly two colors: green #1CE362
-     (the signal: active rails, the logo tile — never a button) and ink
-     #181D19 (text and primary). Surfaces and neutrals stay the pre-sharp
-     grays by ruling (2026-07-31): cream is the marketing surface's ground,
-     not the app's. Field green is green's text voice on light surfaces. */
+  /* Brand — sharp brings the app exactly two colours: green (the signal:
+     active rails, the logo tile, never a button) and ink (text and primary).
+     Surfaces and neutrals stay the pre-sharp grays by ruling (2026-07-31).
+     Field green is green's text voice on light surfaces. */
   --ef: #1ce362;
 
-  /* THE INK, and the only place it is written down. DESIGN.md spells it
-     #181D19; this file needs it in oklch, and oklch(0.224 0.011 151.267) IS
-     that hex — both resolve to rgb(24, 29, 25), a 1.0000:1 "difference".
-     It used to be written TWICE (the hex on the brand token, the oklch on nine
-     more), which is one colour with two spellings and ten owners: darken the
-     ink and nine of them go stale silently, because nothing in the file said
-     they were the same value. Everything ink-coloured now points here, and
-     theme-tokens.test.ts pins this token against the DESIGN.md hex so the two
-     documents cannot drift apart in silence either. That guard is DERIVED from
-     this block rather than run against a list of the tokens that point here
-     today, so pasting the literal onto a NEW token fails it too.
-     The brand alias below keeps its name because that is what the logo tile
-     asks for (`bg-ef text-ef-dark`) — it is the ink that reads on GREEN, which
-     is the same colour in both themes, so it is deliberately NOT theme-aware.
-     That makes the GROUND the rule: `.dark` inherits this declaration, so on
-     the green tile it is right in both themes (9.94:1), and on any other ground
-     the dark theme paints ink on near-black — 1.05:1 on --card, which is text
-     nobody can see. Page text must use --foreground. `people/status-timeline.tsx`
-     wrote exactly that line on its current-step label — LATENT, not shipped: the
-     component has no call sites, so no user ever met it. It is corrected anyway,
-     because an unmounted component is one import away from being mounted, and
-     theme-tokens.test.ts now fails any line in the tree that paints this token as
-     text without the green under it, mounted or not.
-     Deliberately NOT exported through `@theme inline`: this is the value behind
-     the role tokens, not a colour to paint with. There is no `text-ink`, and a
-     utility the theme does not declare emits nothing at all — which is why
-     --destructive-foreground below stays declared. Paint with the role. */
+  /* THE INK, and the ONLY place it is written down. DESIGN.md spells it
+     #181D19; this file needs oklch. Every ink-coloured token says
+     `var(--ink)` and nothing else — a second spelling is a second owner that
+     goes stale in silence. Not exported through `@theme inline` on purpose:
+     this is the value behind the role tokens, not a colour to paint with.
+     Paint with the role. */
   --ink: oklch(0.224 0.011 151.267);
+
+  /* The ink that reads on GREEN. One colour in both themes by design, so `.dark`
+     inherits it — which makes the GROUND the rule: paint it only where the green
+     tile is under it, never as page or card text. Page text is --foreground. */
   --ef-dark: var(--ink);
+
   --ef-field: #0b7a3f;
 
   --background: oklch(97.315% 0.00011 271.152);
@@ -129,108 +113,38 @@ body {
   --secondary: oklch(0.94 0 0);
   --secondary-foreground: var(--ink);
   --muted: oklch(0.94 0 0);
-  /* Darkened from oklch(0.556) for WCAG AA (#341, #238). The shadcn default
-     cleared 4.5:1 on white and nothing else: 4.38:1 on --background and only
-     3.97:1 on --muted, which is the avatar fallback (`bg-muted
-     text-muted-foreground`) and every secondary/accent tile. L 0.5 clears 4.5:1
-     on EVERY surface this token lands on with room to spare — 5.55:1 on
-     --background, 6.00:1 on --card, and 5.03:1 on --muted, the worst case.
-     --muted is the surface that binds, and its AA limit is L ≈ 0.526 — the
-     LIGHTEST L that still clears 4.5:1 there. Lightening is the failure
-     direction, so L 0.5 sits a real step under that limit, not a hair.
-     C and H are untouched (the token is neutral, so only L had to move).
-     Darkening buys AA headroom but SPENDS something that runs the other way:
-     as this token darkens it converges on --primary, so an inline link inside
-     muted prose loses its colour separation — 3.61:1 at the old L 0.556,
-     2.85:1 here, under the 3:1 WCAG SC 1.4.1 asks when colour is the ONLY
-     distinguisher. That cost is paid in CSS — inline links carry a permanent
-     underline — not by capping L, so this token stays free to move for AA.
-     The rule lives in the base layer at the bottom of this file, and once more
-     in `src/app/(marketing)/marketing.css`, because that sheet is unlayered
-     and unlayered declarations outrank `@layer base` at any specificity. Ruled
-     2026-08-10 (#386): WCAG AA is the standard that binds here; APCA is
-     advisory.
-     Pinned by src/app/theme-tokens.test.ts, which re-derives the 0.526 limit
-     instead of trusting this comment; raising L again breaks that test before
-     it reaches a screen. */
+  /* Darkened from the shadcn default for WCAG AA (#341, #238), which cleared
+     4.5:1 on white and on nothing else. --muted is the surface that BINDS it,
+     and the AA limit there is L ≈ 0.526 — the lightest L that still clears
+     4.5:1. Lightening is the failure direction, so L 0.5 sits a real step
+     under that limit rather than a hair. Only L moved; the token is neutral.
+     That limit is the one measurement this file states, because it is the
+     thing a future editor has to know before touching the value — and
+     theme-tokens.test.ts re-derives it and fails if this comment disagrees.
+     ⚖ WCAG AA binds here; APCA is advisory (2026-08-10, #386). Darkening
+     costs the inline-link separation SC 1.4.1 asks for, and that cost is paid
+     by the underline in @layer base below, never by capping L. */
   --muted-foreground: oklch(0.5 0 0);
   --accent: oklch(0.94 0 0);
   --accent-foreground: var(--ink);
-  /* The DANGER colour, and it is text far more often than it is a fill: 66
-     mentions across the tree, most of them `<p className="text-destructive
-     text-sm">` form errors — the product's highest-stakes sentences. It owes the
-     same AA 4.5:1 floor on every surface --muted-foreground owes it on, and it
-     did not clear it. shadcn's default oklch(0.577 0.245 27.325) shipped here
-     unruled and measured 4.41:1 on --background and 4.00:1 on --muted,
-     --secondary and --accent — the #341 defect exactly, one token over.
-     The value below is not a number picked to pass: it is #B4432F, the `danger`
-     role token DESIGN.md has ruled since 2026-07-30 (the app "shares the
-     palette", 2026-07-31). Adopting it is what fixes the contrast — 5.13:1 on
-     --background, 4.65:1 on --muted, the worst case — and it retires a shadcn
-     default that no ruling ever chose. Two consequences worth naming:
-       · The AA limit on --muted at this chroma and hue is L 0.5432 and the
-         ruled colour is L 0.5354, so the headroom is 0.008 of lightness — thin,
-         where --muted-foreground deliberately keeps a step. It is thin because
-         the colour is RULED, not chosen; buying a step means darkening below
-         DESIGN.md, which is a design ruling and not a sweep's call. Recorded as
-         a DECISION on the PR rather than decided here.
-       · `bg-destructive/10 text-destructive` still measures 4.07:1 at worst.
-         That pattern has TWELVE shipped call sites, not the six an earlier
-         count claimed: eleven error banners (the two auth forms, five
-         onboarding steps, three task pickers, the oversight invite form) plus
-         `ui/dropdown-menu.tsx`, whose destructive item focuses to
-         `bg-destructive/10` in light and `dark:bg-destructive/20` in dark —
-         3.89:1, the worst of the set. That ground is made from THIS token, so
-         the ink and its backdrop darken together and no token value fixes it —
-         the remedy is the component's (a solid ground; csf-scorecard.tsx sets
-         the precedent that a tint changes what secondary text may be) or a
-         darker text-on-tint role token. Both are design rulings, so this stays
-         a DECISION rather than a sweep's call. It is MEASURED regardless:
-         theme-tokens.test.ts reads every shipped tint out of the markup, checks
-         it on all eight surfaces, and holds the failing ones to their exact
-         number — a new call site, a new alpha or a token move fails the suite
-         instead of passing quietly.
-     Kept inside the sRGB gamut on purpose: the shadcn default was outside it,
-     so what shipped was whatever the browser's gamut mapping produced and every
-     contrast number computed from the declaration was a guess. */
+  /* ⚖ The DANGER colour, and it is TEXT far more often than a fill — most of
+     its call sites are form errors. It is DESIGN.md's ruled `danger` #B4432F
+     (2026-07-30; the app "shares the palette", 2026-07-31), not a red chosen
+     to clear 4.5:1: shadcn's unruled default failed AA on half the surfaces it
+     painted, and adopting the ruled colour is what fixed that. If danger has
+     to move it moves in DESIGN.md FIRST. Kept inside the sRGB gamut on
+     purpose — outside it the browser's gamut mapping decides what ships and
+     every number computed from the declaration is a guess. Pinned by
+     theme-tokens.test.ts, which also holds the deferred tint DECISION. */
   --destructive: oklch(0.5354 0.151 32.227); /* danger #B4432F */
-  /* shadcn's newer button variant hardcodes `text-white` and dropped this
-     token. It is declared anyway, at the white the variant paints, so that the
-     utility exists for a future call site instead of emitting nothing — but
-     NOTHING SHIPS IT, and it is not what makes a Delete button red.
-
-     What used to make them red, and why it did not: four AlertDialogActions
-     hand-painted `bg-destructive text-destructive-foreground` in `className`
-     (and a fifth painted `bg-red-600`).
-     AlertDialogAction wraps `Button` with `asChild`, so Radix's Slot CONCATENATES
-     buttonVariants() with the child's className and `cn(className)` inside
-     AlertDialogAction is handed only the caller's own classes. tailwind-merge
-     therefore never saw the two together and deleted nothing: the DOM carried
-     `bg-primary text-primary-foreground` AND `bg-destructive
-     text-destructive-foreground` at once, and CSS SOURCE ORDER — not class
-     order, not tailwind-merge — picked primary. Those buttons rendered the
-     neutral ink fill, #181d19 on #fafafa; restoring this token changed nothing
-     about what painted. A FIFTH site had the same defect in another spelling —
-     `tasks/[id]/task-detail-actions.tsx` painted raw `bg-red-600`, off-token and
-     off DESIGN.md, and lost to primary for the same reason. All five now pass
-     `variant="destructive"`, so one variant supplies the colour and no two
-     same-group utilities can reach the DOM at all. Guarded in
-     text-contrast.test.ts, over the CALL SITE — the guard that found the fifth
-     one, which no token assertion could have. */
-  --destructive-foreground: oklch(1 0 0);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
-  /* The focus indicator, darkened for WCAG 2.2 SC 1.4.11 (#385). The ring is
-     painted at 50% alpha almost everywhere (`focus-visible:ring-ring/50` in
-     button, input, select, textarea, tabs, checkbox, switch…), so the token has
-     to clear 3:1 AFTER compositing, not just on its own. The shadcn default
-     oklch(0.708) measured 2.40:1 on --background and 2.59:1 on --card at full
-     strength — and only ~1.50:1 as rendered, which is a ring nobody can see.
-     L 0.2 composites to 3.37:1 on --background, 3.43:1 on --card and 3.29:1 on
-     --muted, the darkest surface a ring lands on. The floor sits near L 0.258,
-     so this is a step past it, not a hair over it. Kept neutral (C and H are 0)
-     by the 2026-07-31 ruling that surfaces and neutrals stay the pre-sharp
-     grays; only L moved. Pinned by src/app/focus-ring.test.ts. */
+  /* The focus indicator, darkened for WCAG 2.2 SC 1.4.11 (#385). Almost
+     everything paints it at 50% alpha (`focus-visible:ring-ring/50`), so the
+     token owes 3:1 AFTER compositing, not on its own — which is how the shadcn
+     default shipped a ring nobody could see. Kept neutral (2026-07-31 ruling);
+     only L moved. Pinned by src/app/focus-ring.test.ts, at the alpha the
+     components actually paint. */
   --ring: oklch(0.2 0 0);
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
@@ -244,28 +158,21 @@ body {
   --sidebar-accent: oklch(0.97 0 0);
   --sidebar-accent-foreground: var(--ink);
   --sidebar-border: oklch(0.922 0 0);
-  /* Moves with --ring: the sidebar paints its focus ring at FULL strength
-     (`ring-sidebar-ring focus-visible:ring-2`), where oklch(0.708) was 2.59:1
-     on the sidebar's white ground — the same SC 1.4.11 failure without the
-     alpha to hide behind. */
+  /* Moves with --ring, and needs its own assertion for that reason: the
+     sidebar paints its ring at FULL strength (`focus-visible:ring-2`), so it
+     had the same SC 1.4.11 failure without the alpha to hide behind. */
   --sidebar-ring: oklch(0.2 0 0);
 
-  /* Attention scale. Red (28) vs amber (76) reads as an intensity ramp on its
-     own. The inks stop short of the darkest passing value on purpose: pushed
-     further they stop reading as red and amber at all and just look black,
-     which is what the first two attempts got wrong.
-     The standard that BINDS them is WCAG AA 4.5:1, not the APCA figures this
-     comment used to cite alone (ruled 2026-08-10, #386: APCA is advisory and is
-     never the reason a text token moves). Both inks clear it with room, on the
-     eight surfaces and on their own tints, and theme-tokens.test.ts now says
-     so instead of this sentence: worst light 6.28:1 plain / 5.21:1 on the tile
-     tint, worst dark 9.07:1 / 7.06:1. APCA is what they were TUNED with, which
-     is why they sit where they sit; it is not what keeps them there.
-     The base colours are a different question and not a failure: at the /45
-     the tiles paint their borders with, they measure 1.45–2.52:1, under 3:1.
-     SC 1.4.11 is not engaged because the standing is never carried by that
-     border — the tile states it in a WORD with an icon beside it, and the tint
-     and border are the third and fourth redundant cues. Do not "fix" them. */
+  /* Attention scale. Red vs amber reads as an intensity ramp on its own. The
+     inks stop short of the darkest passing value on purpose: pushed further
+     they stop reading as red and amber and just look black.
+     ⚖ WCAG AA binds them; APCA is advisory (2026-08-10, #386) — APCA is what
+     they were TUNED with, not what keeps them there. theme-tokens.test.ts
+     measures both inks on the eight surfaces AND on their own tile tint.
+     The BASE colours sit under 3:1 at the alpha the tiles paint their borders
+     with, and that is not a failure: standing is stated in a WORD with an icon
+     beside it, so tint and border are the third and fourth redundant cues and
+     SC 1.4.11 is not engaged. Do not "fix" them. */
   --attention-high: oklch(0.55 0.21 28);
   --attention-high-ink: oklch(0.47 0.195 28);
   --attention-medium: oklch(0.7 0.155 76);
@@ -273,22 +180,19 @@ body {
 }
 
 .dark {
-  /* Field green is defined as "green's text voice on LIGHT surfaces", and the
-     light value was the only value it had — so on a dark ground the bookmark
-     icon it paints (`text-ef-field fill-current`, the one place it renders)
-     measured 2.79:1 on --muted, under the 3:1 SC 1.4.11 floor a state-carrying
-     icon owes. Same hue, lifted for the dark ground: 6.94:1 at worst.
-     --ef and --ef-dark deliberately have NO dark value. Green is the signal and
-     is one colour everywhere; the ink alias is the ink that reads on green, and
-     the green tile does not change between themes, so inverting it would break
-     the logo rather than fix anything. */
+  /* Field green is "green's text voice on LIGHT surfaces" and the light value
+     was the only value it had, so the bookmark icon it paints failed the 3:1
+     SC 1.4.11 floor a STATE-carrying icon owes on a dark ground. Same hue,
+     lifted. Pinned by theme-tokens.test.ts on all eight surfaces.
+     --ef and --ef-dark deliberately have NO dark value: green is one colour
+     everywhere, so inverting the ink that reads on it would break the logo. */
   --ef-field: oklch(0.74 0.14 152.415);
 
-  /* No `--ink` twin here, and the ten copies of oklch(0.985 0 0) below stay
-     literal on purpose: the light block's alias exists because ONE colour was
-     written two ways (a brand hex and an oklch) with nothing saying they were
-     the same. These are shadcn neutrals with no second spelling and no design
-     authority to drift from, so an alias would buy indirection and no safety. */
+  /* No `--ink` twin here, and the repeated oklch(0.985 0 0) below stays literal
+     on purpose: the light block's alias exists because ONE ruled colour was
+     written two ways. These are shadcn neutrals with no second spelling and no
+     design authority to drift from — an alias would buy indirection, not
+     safety. */
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
@@ -300,30 +204,24 @@ body {
   --secondary: oklch(0.269 0 0);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.269 0 0);
-  /* Deliberately NOT moved with its light counterpart (#341): measured against
-     every dark surface it already clears AA — 7.63:1 on --background, 6.91:1 on
-     --card, 5.83:1 on --muted, its worst case. Lightening it to mirror the
-     light-theme step would only cost contrast on the dark ground. */
+  /* Deliberately NOT moved with its light counterpart (#341): it already clears
+     AA on every dark surface, and lightening it to mirror the light-theme step
+     would only cost contrast on the dark ground. */
   --muted-foreground: oklch(0.708 0 0);
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
-  /* The same ruled danger, lifted for the dark ground rather than left as a
-     second, unrelated red: the light token now carries DESIGN.md's #B4432F, so
-     hue and chroma are held and only L moves — one danger colour, two grounds.
-     5.31:1 at worst as text (the old shadcn value gave 5.23:1, so nothing is
-     lost) and it is inside the sRGB gamut, which oklch(0.704 0.191 22.216) was
-     not. The Button variant paints `dark:bg-destructive/60` here, and white on
-     that composite is 5.90:1. */
+  /* The SAME ruled danger, lifted for the dark ground rather than a second,
+     unrelated red: hue and chroma are held and only L moves — one danger
+     colour, two grounds — and theme-tokens.test.ts fails if the two drift
+     apart. Inside the sRGB gamut, which the shadcn dark value was not. */
   --destructive: oklch(0.7 0.151 32.227);
-  --destructive-foreground: oklch(1 0 0);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  /* The same SC 1.4.11 fix, mirrored for the dark ground (#385). oklch(0.556)
-     did clear 3:1 unaided — 4.18:1 on --background, 3.79:1 on --card — which is
-     exactly why the defect hid here: at the 50% alpha the components actually
-     paint it fell to ~1.87:1. L 0.85 composites to 3.76:1 on --background,
-     3.74:1 on --card and 3.51:1 on --muted. Lighter than that only adds glare;
-     the ring is 3px of near-white already. */
+  /* The same SC 1.4.11 fix mirrored for the dark ground (#385). The defect hid
+     here because the shadcn value cleared 3:1 UNAIDED and failed only once
+     composited at the alpha the components paint — an audit that measured the
+     token instead of the paint called this theme fine. Lighter than L 0.85 only
+     adds glare; the ring is 3px of near-white already. */
   --ring: oklch(0.85 0 0);
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
@@ -341,8 +239,7 @@ body {
 
   /* Lifted for the dark surface rather than mechanically inverted. The inks
      invert their relationship to the base here — on a dark tile the readable
-     version of a hue is lighter, not darker. Re-measured against
-     oklch(0.205 0 0) with APCA. */
+     version of a hue is lighter, not darker. */
   --attention-high: oklch(0.62 0.19 30);
   --attention-high-ink: oklch(0.87 0.12 38);
   --attention-medium: oklch(0.74 0.15 78);
@@ -363,29 +260,18 @@ body {
     cursor: pointer;
   }
 
-  /* WCAG SC 1.4.1 (Use of Color): a link sitting INSIDE a block of text has to
-     be tellable from that text by something other than colour. Ours was not —
-     --primary (ink) against --muted-foreground measures 2.85:1 in the light
-     theme and 2.06:1 in the dark one, both under the 3:1 the criterion asks —
-     and `hover:underline` is not a rest state, so a reader who never hovers
-     gets no cue at all. Lighthouse caught it as `link-in-text-block` on
-     /login's "Sign up".
-     Fixing it here rather than at the token is the whole point (ruled
-     2026-08-10, PR #387): a non-colour cue holds no matter where
-     --muted-foreground's lightness sits, so the token can keep being darkened
-     for AA without inline links quietly failing a second criterion.
-     Scoped to `p` deliberately. A paragraph IS a block of text; `li` is not —
-     it would underline every sidebar nav item, which is a list OF links rather
-     than prose containing one. Utilities outrank base, so a `no-underline`
-     class still wins where a link genuinely is not inline prose.
-     `@layer base` is the WEAKEST place this can live, and that is a real hole,
-     not a nuance: an UNLAYERED normal declaration beats it at any specificity.
-     `src/app/(marketing)/marketing.css` is such a sheet, and its
-     `.marketing a { text-decoration: none }` defeated this rule across the
-     whole marketing route group until the same underline was repeated there.
-     Any future unlayered stylesheet under src/app/ owes the same repeat —
-     src/app/text-contrast.test.ts fails the build if one strips and does not
-     restore. Do not "fix" that class of conflict with `!important` here. */
+  /* ⚖ WCAG SC 1.4.1 (Use of Color), ruled 2026-08-10 (PR #387): a link inside a
+     block of text must be tellable from that text by something other than
+     colour, and ours was not. The cue is PERMANENT — `hover:underline` is not a
+     rest state — and it lives here rather than at the token, so
+     --muted-foreground stays free to darken for AA.
+     Scoped to `p` deliberately: a paragraph IS a block of text, `li` is not (it
+     would underline every nav item, which is a list OF links).
+     `@layer base` is the WEAKEST place this can live — an UNLAYERED normal
+     declaration beats it at any specificity — so every unlayered sheet under
+     src/app/ that touches `text-decoration` on a bare `a` owes its own repeat
+     of this rule. text-contrast.test.ts fails the build if one strips and does
+     not restore. Never "fix" that conflict with `!important` here. */
   p a[href] {
     text-decoration-line: underline;
     text-underline-offset: 4px;

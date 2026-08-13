@@ -8,7 +8,6 @@ import {
   SURFACES,
   NON_TEXT_CONTRAST,
   type Rgb,
-  SAME_COLOUR,
   SC_1_4_1_NON_COLOUR_THRESHOLD,
   SRC,
   composite,
@@ -17,6 +16,7 @@ import {
   declaredTokens,
   declaredValue,
   hexToSrgb,
+  isSameColour,
   markupLines,
   oklchToSrgb,
   readToken,
@@ -113,10 +113,47 @@ for (const theme of themes) {
 /** DESIGN.md → Colors. The brand ink, and the app's only dark value. */
 const DESIGN_MD_INK = "#181D19";
 
+/** DESIGN.md → Colors. `danger` — "errors and 'don't' marks only". */
+const DESIGN_MD_DANGER = "#B4432F";
+
+test("the identity check reads hue and chroma, not only lightness", () => {
+  // The guard that guards the guards. Both DESIGN.md assertions below are the
+  // only thing tying globals.css to the design authority, and the first way
+  // they were written compared colours with `contrastRatio`, which is relative
+  // luminance alone. Under that spelling a MAGENTA passed as the ruled danger
+  // red and, at the ink's chroma, so did every hue on the wheel — the guard
+  // was load-bearing and inert at the same time.
+  const MAGENTA = oklchToSrgb(0.5354, 0.151, 320);
+  const WARM_INK = oklchToSrgb(0.224, 0.011, 30);
+
+  assert.ok(
+    contrastRatio(MAGENTA, hexToSrgb(DESIGN_MD_DANGER)) < 1.01,
+    "the magenta no longer sits within 1.01:1 of danger — this test's story is stale, pick another mutant"
+  );
+  assert.ok(
+    contrastRatio(WARM_INK, hexToSrgb(DESIGN_MD_INK)) < 1.01,
+    "the warm ink no longer sits within 1.01:1 of the ink — this test's story is stale"
+  );
+
+  assert.equal(
+    isSameColour(MAGENTA, hexToSrgb(DESIGN_MD_DANGER)),
+    false,
+    "a magenta passes as DESIGN.md's danger red — the identity check has gone back to comparing luminance"
+  );
+  assert.equal(
+    isSameColour(WARM_INK, hexToSrgb(DESIGN_MD_INK)),
+    false,
+    "an off-hue ink passes as DESIGN.md's ink — the identity check has gone back to comparing luminance"
+  );
+
+  // ...and it still accepts the two spellings it exists to accept.
+  assert.ok(isSameColour(hexToSrgb(DESIGN_MD_INK), hexToSrgb("#181d19")));
+});
+
 test("--ink is the DESIGN.md ink, and no other token respells it", () => {
   const ink = readToken("light", "ink");
   assert.ok(
-    contrastRatio(ink, hexToSrgb(DESIGN_MD_INK)) < SAME_COLOUR,
+    isSameColour(ink, hexToSrgb(DESIGN_MD_INK)),
     `--ink no longer resolves to DESIGN.md's ${DESIGN_MD_INK} — globals.css and the design authority have drifted apart`
   );
 
@@ -137,7 +174,7 @@ test("--ink is the DESIGN.md ink, and no other token respells it", () => {
     } catch {
       return false; // `--radius: 0rem` and friends are not colours at all.
     }
-    return contrastRatio(colour, ink) < SAME_COLOUR;
+    return isSameColour(colour, ink);
   });
 
   assert.deepEqual(
@@ -156,15 +193,12 @@ test("--ink is the DESIGN.md ink, and no other token respells it", () => {
 // over. The value shipped now is DESIGN.md's ruled `danger`, which is what makes
 // the fix a token fix rather than a number that happens to pass.
 
-/** DESIGN.md → Colors. `danger` — "errors and 'don't' marks only". */
-const DESIGN_MD_DANGER = "#B4432F";
-
 test("--destructive is the danger colour DESIGN.md ruled, not a shadcn default", () => {
   assert.ok(
-    contrastRatio(
+    isSameColour(
       readToken("light", "destructive"),
       hexToSrgb(DESIGN_MD_DANGER)
-    ) < SAME_COLOUR,
+    ),
     `--destructive is no longer DESIGN.md's ruled danger ${DESIGN_MD_DANGER}. If danger genuinely moved, move it in DESIGN.md first — the app "shares the palette" by the 2026-07-31 ruling`
   );
 
@@ -616,6 +650,38 @@ test("the AA limit documented in globals.css is the one the math actually gives"
     comment,
     /0\.5055/,
     "0.5055 is the wrong AA limit (#357) — it measures 4.91:1 on --muted, not 4.5:1"
+  );
+});
+
+// --- globals.css states intent; the tests state the numbers (#357, #411) ----
+//
+// #357 was one wrong figure in a comment whose whole job was to be right. The
+// answer to that is not "write the figures more carefully": a measurement in a
+// stylesheet is correct on the day it is typed, is re-checked by nothing, and
+// keeps sounding authoritative once the tokens under it have moved — the same
+// one-value-several-owners shape the `--ink` alias exists to end, moved from
+// the declarations into the prose. A pass that doubled the file's comments to
+// ~12 fresh measurements reproduced it exactly.
+//
+// So the rule is: globals.css says what a token IS and what it is FOR, and
+// every measured ratio lives in a test that re-derives it. The only ratios the
+// stylesheet may name are the STANDARD's own thresholds, which are constants
+// rather than measurements — and they are constants here too, so this guard is
+// derived from them rather than from a list.
+
+test("globals.css names no contrast ratio except the standard's thresholds", () => {
+  const THRESHOLDS = new Set(
+    [AA_BODY_TEXT, NON_TEXT_CONTRAST, SC_1_4_1_NON_COLOUR_THRESHOLD].map(String)
+  );
+
+  const named = [...css.matchAll(/(\d+(?:\.\d+)?)\s*:\s*1\b/g)]
+    .map((match) => match[1])
+    .filter((figure) => !THRESHOLDS.has(figure));
+
+  assert.deepEqual(
+    [...new Set(named)],
+    [],
+    "globals.css names a measured contrast ratio. Nothing re-derives it, so it is free to go stale while still reading as fact (#357). Put the number in the test that measures it and leave the intent here"
   );
 });
 

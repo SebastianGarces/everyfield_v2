@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
 
 import {
   NON_TEXT_CONTRAST,
+  SRC,
   SURFACES,
   composite,
   contrastRatio,
@@ -167,6 +170,45 @@ test("every destructive focus-ring override is visible too", () => {
         );
       }
     }
+  }
+});
+
+test("button.tsx's destructive-ring comment names the numbers the tokens give", () => {
+  // The comment argues that the danger ring is painted at FULL strength, and
+  // it argues from two measurements. A measurement written into a component
+  // and re-derived nowhere is the #357 defect: correct on the day it is typed
+  // and free to drift afterwards, with the prose still sounding authoritative.
+  // So the figures are read back OUT of the comment and re-computed here.
+  const source = readFileSync(
+    path.join(SRC, "components", "ui", "button.tsx"),
+    "utf8"
+  );
+  // Comment markers and line wrapping are noise; the sentence is the subject.
+  const prose = source.replace(/\/\//g, " ").replace(/\s+/g, " ");
+  const figures = /([\d.]+):1 light and ([\d.]+):1 dark/.exec(prose);
+  assert.ok(
+    figures,
+    "button.tsx's destructive variant no longer names its worst-case ring figures in the `N:1 light and N:1 dark` form this test reads. Keep the form or delete the figures — an unpinned number is the thing this test exists to prevent"
+  );
+
+  for (const [theme, claimedRatio] of [
+    ["light", Number(figures[1])],
+    ["dark", Number(figures[2])],
+  ] as const) {
+    const ring = readToken(theme, "destructive");
+    const worst = Math.min(
+      ...SURFACES.map((surface) =>
+        contrastRatio(ring, readToken(theme, surface))
+      )
+    );
+    assert.ok(
+      Math.abs(worst - claimedRatio) < 0.02,
+      `button.tsx says the destructive ring is ${claimedRatio}:1 at worst in ${theme}; the tokens give ${worst.toFixed(2)}:1. Update the comment and re-read whether the ring still clears SC 1.4.11`
+    );
+    assert.ok(
+      worst >= NON_TEXT_CONTRAST,
+      `the destructive ring is ${worst.toFixed(2)}:1 on its worst ground in ${theme}, below ${NON_TEXT_CONTRAST}:1`
+    );
   }
 });
 
