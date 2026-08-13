@@ -1,7 +1,7 @@
 import { and, asc, eq, isNull, or, type SQL } from "drizzle-orm";
 import { cache } from "react";
 import { db } from "@/db";
-import { wikiArticles, type WikiArticle } from "@/db/schema";
+import { wikiArticles } from "@/db/schema";
 import type {
   ArticleMeta,
   ArticleCategory,
@@ -95,11 +95,19 @@ export function articleBySlugQuery(slug: string, churchId: string | null) {
  * `wiki_articles_slug_church_idx` is unique on (slug, church_id), so a church
  * may hold its own version of a global slug; the church's copy wins (it is an
  * override, and two rows with one slug would otherwise duplicate the article
- * in lists, navigation and React keys). Insertion order — sort order — is
- * preserved.
+ * in lists, navigation and React keys). Insertion order — sort order, or search
+ * rank — is preserved.
+ *
+ * Generic over the ROW rather than fixed to `WikiArticle`, because the override
+ * rule is a property of the (slug, church_id) pair and not of the projection:
+ * the search read carries eight columns and a rank, and it needs the same rule
+ * (#411). One implementation, so the lists, the single-article read and search
+ * cannot disagree about which row wins.
  */
-export function preferChurchOverride(articles: WikiArticle[]): WikiArticle[] {
-  const bySlug = new Map<string, WikiArticle>();
+export function preferChurchOverride<
+  T extends { slug: string; churchId: string | null },
+>(articles: T[]): T[] {
+  const bySlug = new Map<string, T>();
 
   for (const article of articles) {
     const held = bySlug.get(article.slug);

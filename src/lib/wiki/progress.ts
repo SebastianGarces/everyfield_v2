@@ -191,7 +191,21 @@ export async function getLastInProgress() {
 }
 
 /**
- * Update progress for an article (upsert)
+ * Update progress for an article (upsert).
+ *
+ * ONE statement, not a read followed by a write. `wiki_progress_user_article_idx`
+ * is unique on (user_id, article_slug), and a SELECT-then-INSERT is not a
+ * concurrency guard (`memory/invariants.md` → Transactions / Atomicity): two
+ * scroll saves racing on a first view — two tabs, a double-click, React's
+ * development double-invoke — both saw no row and the second INSERT died on the
+ * unique index, which surfaces as an unhandled server-action rejection in the
+ * reader's tab (#411). `ON CONFLICT DO UPDATE` makes the duplicate impossible
+ * instead of unlikely, and it costs one round trip rather than two.
+ *
+ * The conflicting write applies exactly the fields the caller passed, which is
+ * what the UPDATE branch did before: an intermediate scroll save must not
+ * rewrite `status`, and marking an article complete must not reset the scroll
+ * position it was read to.
  */
 export async function updateProgress(
   slug: string,
@@ -204,40 +218,30 @@ export async function updateProgress(
   if (!session?.user) return null;
 
   const now = new Date();
+  const completedAt = data.status === "completed" ? { completedAt: now } : {};
 
-  // Check if progress exists
-  const existing = await getArticleProgress(slug);
-
-  if (existing) {
-    // Update existing
-    const [updated] = await db
-      .update(wikiProgress)
-      .set({
+  const [saved] = await db
+    .insert(wikiProgress)
+    .values({
+      userId: session.user.id,
+      articleSlug: slug,
+      status: data.status ?? "in_progress",
+      scrollPosition: data.scrollPosition ?? 0,
+      lastViewedAt: now,
+      ...completedAt,
+    })
+    .onConflictDoUpdate({
+      target: [wikiProgress.userId, wikiProgress.articleSlug],
+      set: {
         ...data,
         lastViewedAt: now,
         updatedAt: now,
-        ...(data.status === "completed" ? { completedAt: now } : {}),
-      })
-      .where(eq(wikiProgress.id, existing.id))
-      .returning();
+        ...completedAt,
+      },
+    })
+    .returning();
 
-    return updated;
-  } else {
-    // Insert new
-    const [created] = await db
-      .insert(wikiProgress)
-      .values({
-        userId: session.user.id,
-        articleSlug: slug,
-        status: data.status ?? "in_progress",
-        scrollPosition: data.scrollPosition ?? 0,
-        lastViewedAt: now,
-        ...(data.status === "completed" ? { completedAt: now } : {}),
-      })
-      .returning();
-
-    return created;
-  }
+  return saved ?? null;
 }
 
 /**

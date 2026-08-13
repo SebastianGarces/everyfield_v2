@@ -123,11 +123,22 @@ export async function toggleBookmark(slug: string): Promise<boolean> {
     revalidatePath("/wiki", "layout");
     return false;
   } else {
-    // Add bookmark
-    await db.insert(wikiBookmarks).values({
-      userId: session.user.id,
-      articleSlug: slug,
-    });
+    // Add bookmark.
+    //
+    // `wiki_bookmarks_user_article_idx` is unique on (user_id, article_slug),
+    // and the SELECT above is not a concurrency guard (`memory/invariants.md` →
+    // Transactions / Atomicity): two clicks of the star in the same instant both
+    // saw no row, and the second INSERT died on the unique index — a thrown
+    // server action for a button the reader pressed twice. Adding a bookmark
+    // that is already there is a no-op, which is what `addBookmark` below has
+    // always said with the same clause (#411).
+    await db
+      .insert(wikiBookmarks)
+      .values({
+        userId: session.user.id,
+        articleSlug: slug,
+      })
+      .onConflictDoNothing();
     revalidatePath("/wiki", "layout");
     return true;
   }

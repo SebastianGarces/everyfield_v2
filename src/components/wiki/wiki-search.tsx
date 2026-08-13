@@ -41,6 +41,17 @@ export function WikiSearch({ open, onOpenChange }: WikiSearchProps) {
   const [hasSearched, setHasSearched] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
+  /**
+   * Which search the reader is actually waiting for.
+   *
+   * The debounce times the REQUEST, not the response, so a slow search can land
+   * after a later, faster one: type "elder", pause, then finish "eldership" and
+   * the first query's rows overwrite the second's — a result list that does not
+   * answer the words in the box, and clicking one opens an article the reader
+   * did not search for. Each request takes a token and only the newest one is
+   * allowed to write state.
+   */
+  const latestRequestRef = useRef(0);
 
   // Handle query changes with debounced search
   const handleQueryChange = useCallback((value: string) => {
@@ -50,6 +61,10 @@ export function WikiSearch({ open, onOpenChange }: WikiSearchProps) {
     if (debounceRef.current) {
       clearTimeout(debounceRef.current);
     }
+
+    // Anything already in flight is stale the moment the query changes,
+    // including on the way back to an empty box.
+    const request = ++latestRequestRef.current;
 
     if (!value.trim()) {
       setResults([]);
@@ -64,18 +79,23 @@ export function WikiSearch({ open, onOpenChange }: WikiSearchProps) {
     // Debounce search
     debounceRef.current = setTimeout(async () => {
       const searchResults = await searchWikiArticles(value);
+      if (request !== latestRequestRef.current) return;
+
       setResults(searchResults);
       setHasSearched(true);
       setIsSearching(false);
     }, 300);
   }, []);
 
-  // Cleanup timeout on unmount
+  // Cleanup timeout on unmount, and retire whatever is already in flight — a
+  // response that arrives after the dialog closed has nothing left to write to.
   useEffect(() => {
+    const requests = latestRequestRef;
     return () => {
       if (debounceRef.current) {
         clearTimeout(debounceRef.current);
       }
+      requests.current += 1;
     };
   }, []);
 

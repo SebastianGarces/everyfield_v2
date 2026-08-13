@@ -10,6 +10,7 @@ import {
   preferChurchOverride,
   visibleArticlesQuery,
 } from "./get-articles";
+import { searchArticlesQuery } from "./search";
 
 // ----------------------------------------------------------------------------
 // The multi-tenant boundary on the wiki read path (#317, from #16) — the half
@@ -108,12 +109,39 @@ test("the single-article read with no church narrows to global", () => {
   assert.doesNotMatch(text, CHURCH_EQUALITY);
 });
 
-test("both reads still filter to published articles", () => {
+test("the search read carries the same boundary (#411)", () => {
+  // Search is a reader-facing article read and was the one that did not obey
+  // the predicate: it was hardcoded to `church_id IS NULL`, so a church's own
+  // article could be opened from the sidebar but never found by searching for
+  // it — and where a church overrides a global slug, the result row and the
+  // article the click opens were two different documents.
+  const { sql: text, params } = searchArticlesQuery("elders", CHURCH_A).toSQL();
+
+  assert.match(text, VISIBILITY);
+  assert.ok(
+    params.includes(CHURCH_A),
+    "the church being searched for is not bound to the query"
+  );
+  assert.ok(
+    !params.includes(CHURCH_B),
+    "another church's id reached the search read"
+  );
+});
+
+test("the search read with no church narrows to global", () => {
+  const { sql: text } = searchArticlesQuery("elders", null).toSQL();
+
+  assert.match(text, /"wiki_articles"\."church_id" is null/);
+  assert.doesNotMatch(text, CHURCH_EQUALITY);
+});
+
+test("every read still filters to published articles", () => {
   // Tenancy is not the only predicate on these paths, and an override that
   // dropped `status` would publish drafts to the church that wrote them.
   for (const query of [
     visibleArticlesQuery(CHURCH_A),
     articleBySlugQuery("discovery/x", CHURCH_A),
+    searchArticlesQuery("elders", CHURCH_A),
   ]) {
     const { sql: text, params } = query.toSQL();
     assert.match(text, /"wiki_articles"\."status" = \$\d/);
@@ -148,6 +176,24 @@ test("a church's copy of a slug wins over the global article of that name", () =
   ]);
   assert.equal(reversed.length, 1);
   assert.equal(reversed[0].title, "Ours");
+});
+
+test("a search result set collapses the same way, keeping rank order (#411)", () => {
+  // The override rule is a property of the (slug, church_id) pair, not of the
+  // projection — so search reuses the ONE implementation rather than growing a
+  // second that could disagree with the lists about which row wins. A search
+  // row carries a rank and no content, which is why the function is generic.
+  const results = preferChurchOverride([
+    { slug: "discovery/values", churchId: null, title: "Global", rank: 0.9 },
+    { slug: "discovery/values", churchId: CHURCH_A, title: "Ours", rank: 0.4 },
+    { slug: "discovery/calling", churchId: null, title: "Calling", rank: 0.3 },
+  ]);
+
+  assert.deepEqual(
+    results.map((result) => result.title),
+    ["Ours", "Calling"],
+    "the church's row must win, in the place its rank put the slug"
+  );
 });
 
 test("articles with no override pass through in sort order", () => {
@@ -192,10 +238,20 @@ const WIKI_READ_CALL_SITES = [
   "src/app/(dashboard)/wiki/page.tsx",
   "src/app/(dashboard)/wiki/progress/page.tsx",
   "src/app/(dashboard)/wiki/[...slug]/page.tsx",
+  "src/app/(dashboard)/wiki/actions.ts",
   "src/app/api/wiki/article/route.ts",
   "src/lib/wiki/bookmarks.ts",
   "src/lib/wiki/progress.ts",
 ];
+
+/**
+ * The search action invoked with the query alone: `searchArticles(q)`.
+ *
+ * Same failure shape as the reads above and the same reason the source is what
+ * catches it — the parameter defaults to `null`, so dropping it type-checks and
+ * silently searches the global corpus only (#411).
+ */
+const UNSCOPED_SEARCH = /\bsearchArticles\(\s*[^,)]*\)/;
 
 /** Reads a repo file; `pnpm test` always runs from the repo root. */
 function readRepoFile(relativePath: string): string {
@@ -222,4 +278,19 @@ test("no wiki read is called without a church", () => {
       `${file} never mentions churchId, so it cannot be passing the session's church (#317)`
     );
   }
+});
+
+test("the search action passes the session's church, never the query alone", () => {
+  const source = readRepoFile("src/app/(dashboard)/wiki/actions.ts");
+
+  assert.doesNotMatch(
+    source,
+    UNSCOPED_SEARCH,
+    "the search action searches without a church — a church's own articles become unfindable (#411)"
+  );
+  assert.match(
+    source,
+    /getCurrentSession\(\)/,
+    "the church a search is scoped to must be read off the session, not taken as an argument"
+  );
 });
