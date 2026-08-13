@@ -1,4 +1,4 @@
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { db } from "@/db";
 import {
   churches,
@@ -31,7 +31,7 @@ export const OVERSIGHT_ROLES: UserRole[] = [
  * @throws Error if the user does not have the required role.
  */
 export function requireRole(user: User, ...allowedRoles: UserRole[]): void {
-  if (!allowedRoles.includes(user.role as UserRole)) {
+  if (!hasRole(user, ...allowedRoles)) {
     throw new Error(
       `Forbidden: requires one of [${allowedRoles.join(", ")}], got "${user.role}"`
     );
@@ -42,7 +42,7 @@ export function requireRole(user: User, ...allowedRoles: UserRole[]): void {
  * Check if a user has a specific role (non-throwing).
  */
 export function hasRole(user: User, ...roles: UserRole[]): boolean {
-  return roles.includes(user.role as UserRole);
+  return roles.includes(user.role);
 }
 
 /**
@@ -94,8 +94,7 @@ export async function requireChurchAccess(
   user: User,
   churchId: string
 ): Promise<void> {
-  const accessibleIds = await getAccessibleChurchIds(user);
-  if (!accessibleIds.includes(churchId)) {
+  if (!(await canAccessChurch(user, churchId))) {
     throw new Error("Forbidden: no access to this church");
   }
 }
@@ -120,11 +119,21 @@ export async function canAccessChurch(
  *
  * The first six gate what an oversight user may PULL — a dashboard read.
  * `oversight_activity` gates what is PUSHED to them (F11 N-026): the daily
- * activity summary and two of the three milestones — the invitation-accepted
- * milestone is exempt, being the sending church's own event (ruled 2026-08-01,
- * `OVERSIGHT_SHARING_EXEMPT_TYPES`). It supersedes the per-category `phase` and
- * `digest` keys: under the 2026-07-27 ruling oversight has no per-category
- * notification eligibility left to gate.
+ * activity summary and two of the FIVE milestones (`oversightMilestoneKinds`) —
+ * a phase advance and a launch date, the two that are facts about the plant's
+ * own progress. The other THREE are exempt, each being the org's own
+ * relationship changing: an invitation accepted, an invitation declined, an
+ * association ended (`OVERSIGHT_SHARING_EXEMPT_TYPES` — ruled 2026-08-01 for
+ * the accept, extended to the other two by #304 / OV-006 + OV-007).
+ *
+ * It gates nothing at all in the other direction. `association.removed_by_org`
+ * (`src/lib/notifications/plant-association.ts`) tells a PLANTER that their
+ * oversight org removed them; it is addressed to a church-level role, so
+ * neither this key nor the oversight category allow-list is consulted for it.
+ *
+ * It supersedes the per-category `phase` and `digest` keys: under the
+ * 2026-07-27 ruling oversight has no per-category notification eligibility left
+ * to gate.
  *
  * Those two columns are still IN the database. Migration 0029 is expand-only —
  * it adds `share_activity_with_oversight` and drops nothing, because the Neon
@@ -142,11 +151,19 @@ export type PrivacyFeatureKey =
   | "facilities"
   | "oversight_activity";
 
+/**
+ * The names of the boolean toggle columns on church_privacy_settings — the
+ * mapped type rejects `id`, `churchId`, `updatedAt` etc. at compile time, so a
+ * mapped column is a boolean by construction and needs no runtime cast.
+ */
+type PrivacyColumn = {
+  [K in keyof ChurchPrivacySettings]: ChurchPrivacySettings[K] extends boolean
+    ? K
+    : never;
+}[keyof ChurchPrivacySettings];
+
 /** Maps feature keys to their corresponding column in church_privacy_settings */
-const PRIVACY_COLUMN_MAP: Record<
-  PrivacyFeatureKey,
-  keyof ChurchPrivacySettings
-> = {
+const PRIVACY_COLUMN_MAP: Record<PrivacyFeatureKey, PrivacyColumn> = {
   people: "sharePeople",
   meetings: "shareMeetings",
   tasks: "shareTasks",
@@ -199,26 +216,7 @@ export async function canAccessFeatureData(
   }
 
   const column = PRIVACY_COLUMN_MAP[feature];
-  return settings[column] as boolean;
-}
-
-/**
- * For a list of church IDs, filter down to only those where the given feature
- * is shared. Useful for oversight dashboards that aggregate across churches.
- */
-export async function filterChurchesByPrivacy(
-  churchIds: string[],
-  feature: PrivacyFeatureKey
-): Promise<string[]> {
-  if (churchIds.length === 0) return [];
-
-  const column = PRIVACY_COLUMN_MAP[feature];
-  const allSettings = await db
-    .select()
-    .from(churchPrivacySettings)
-    .where(inArray(churchPrivacySettings.churchId, churchIds));
-
-  return allSettings.filter((s) => s[column] === true).map((s) => s.churchId);
+  return settings[column];
 }
 
 // ============================================================================

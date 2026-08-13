@@ -67,6 +67,34 @@ validate). Running N builds and N preview cycles on one branch proves nothing th
 not. Amortising a single G1 + G3 + CI cycle across every workstream in the track is the entire
 throughput argument for staging.
 
+### The mechanical-amendment lane — small ruled changes skip the heavyweight path
+
+Measured 2026-08-12: a five-track pass applying already-ruled one-line copy and doc changes spent
+14.4M tokens, roughly 80% of it on review and verification. The full apparatus exists for changes
+that can be wrong in interesting ways; a two-line ruled amendment cannot, and paying the full price
+for it is how a week's budget disappears by Wednesday.
+
+A track qualifies for the lane when **all** of these hold:
+
+- every change implements an explicit ruling or a verifier's written fix instruction, quoted in the
+  unit;
+- the diff is small — as a guide, ≲50 changed lines across ≲3 source files (docs and PR-body edits
+  do not count);
+- it touches no schema, migration, auth, tenancy, or notification-delivery surface;
+- the track is not `risk:high`.
+
+What the lane earns:
+
+- **scoped review only** — the workstream reviewer's pass is the review; no separate integration G6
+  round;
+- **no independent workstream verifier** — the reviewer confirms the scoped gates from the evidence;
+- **G3 restricted to the changed surface**, and only when an AC names something a user sees;
+- **MAX_ATTEMPTS 2.**
+
+The lane is an optimisation, not an amnesty: anything discovered mid-lane that breaks a
+qualification — a "copy change" that turns out to touch a query — ejects the track to the full path
+with its attempt counter intact.
+
 **Aggregation is fail-closed, exactly like HR4.** Any workstream verifier reporting FAIL blocks the
 track, and a workstream verifier that **died counts as a NO** — missing evidence is a FAIL everywhere
 else in this document, and a dead verifier is missing evidence.
@@ -117,6 +145,12 @@ Two consequences for the gates as written below:
   A build that only succeeds against a live database will pass locally and fail in CI.
 - **Evidence:** the tail of each command + exit code — *and* the PR check, which is the anchor.
   Running these locally is how you avoid a red check; it is not what proves the gate.
+- **A green anchor IS the gate — do not re-derive beside it.** When the
+  `Format, Lint, Typecheck, Build` check has a green run at the exact sha under test (and that sha
+  is the PR head — the headRefOid rule below), that run satisfies G1 *and* G2, full stop.
+  Re-running the suite locally "because integration owns it" proves nothing the anchor has not
+  already proven and costs a full-suite cycle per verifier. Local re-derivation is the fallback for
+  a **missing** anchor, never a supplement to a green one.
 
 ### G2 — Tests
 *Scope: both. A workstream runs the **subset covering its changed files**; the full suite is an
@@ -126,7 +160,8 @@ integration gate. A green subset is not a green suite and may never be reported 
 - New/changed logic has tests (happy path + at least one failure/edge path).
 - No `.only`, no `.skip`, no commented-out tests.
 - **Anchored:** CI runs the suite too, so a number reported here that CI cannot reproduce fails the
-  PR. If a test only passes with your `.env.local`, it does not pass.
+  PR. If a test only passes with your `.env.local`, it does not pass. The converse also binds: a
+  green check at the sha under test satisfies this gate — see G1's "a green anchor IS the gate".
 - A pre-existing failure is not a free pass. Say which test, and prove it fails on `main` as well —
   otherwise you are shipping on the assumption that someone else broke it.
 - **Evidence:** test summary (counts) + exit code.
@@ -228,15 +263,47 @@ It is also the gate that catches what no workstream could see: two file-disjoint
 individually correct and jointly wrong.*
 
 - A **separate** `code-reviewer` agent (NOT the implementer) confirms G1–G5 **from the evidence,
-  adversarially** — default to reject when a gate's evidence is missing or unconvincing.
+  adversarially** — default to reject when a gate's evidence is missing or unconvincing. The
+  reviewer applies `.claude/agents/code-reviewer.md`; findings come back typed
+  `critical | structural | suggestion`.
 - The reviewer also answers two **structural** questions from the integrated diff
   (`ops/agent-os/delegation-rules.md` R2/R4): did the track add a second implementation of a
   decision that already has one (a predicate, a policy, a shared calculation)? And is new logic
   behind a testable seam (a pure core, a builder assertable via `.toSQL()`), or reachable only
-  through a browser? A duplicated decision implementation is a FAIL; a missing seam is at minimum
-  a warning carried into the PR body.
+  through a browser? A duplicated decision implementation is a **critical** finding; a missing
+  seam is a **structural** finding — both route to the review-fix loop and are fixed in this
+  pass, never carried into the PR body as debt.
 - Verdict ∈ `PASS` | `PASS_WITH_WARNINGS` | `FAIL`. Only `PASS` / `PASS_WITH_WARNINGS` may open a PR.
 - **Evidence:** reviewer verdict + findings.
+
+**The review-fix loop.** Critical and structural findings return to an implementer agent and are
+fixed **in the same pass**, at BOTH review sites — scoped (per workstream) and integration (G6) —
+with at most **2 quality rounds per site**. Rounds are not attempts, but a re-review verdict of
+FAIL is a real gate failure and spends an attempt. When any integration round lands commits, the
+functional gate (**G3) re-runs pinned to the re-pushed sha** before HR4/PR/merge — CI re-anchors
+G1/G2 at the final sha, and this re-anchors the one gate CI cannot: no sha ships whose functional
+gate never ran at that sha.
+
+> **"CI re-anchors G1/G2 at the final sha" holds only while the final sha is the PR head.** PR
+> Checks fires on `pull_request`, so it can name no other commit. A fix round that lands on a side
+> branch — `feature/X-fix` while the PR still points at `feature/X` — moves the tree but not the
+> ref, and then nothing anchors: `gh run list --commit <sha>` returns `[]`, and G1/G2 have no
+> evidence at the commit that would ship. #293 failed this way three times, each time with a green
+> local run and a green *older* CI run standing in for the sha under test.
+>
+> So the check is mechanical, and it comes first: `gh pr view <n> --json headRefOid` must equal the
+> sha you validated. If it does not, re-point the head (a fast-forward when the PR head is an
+> ancestor) and let PR Checks run there. To prove a sha green *before* moving a ref — or at a
+> commit no PR names — dispatch PR Checks at it (`gh workflow run "PR Checks" --ref <ref>`);
+> `workflow_dispatch` exists for exactly this. **Never** satisfy G1/G2 by citing a run at an
+> ancestor sha; a green run at the parent is the staleness this rule exists to catch.
+
+A fix round that cannot say what it did **per
+finding** is refused before a reviewer is spent on it — the #307 discipline, applied per finding.
+On exhaust the track **HOLDs with a DECISION comment** listing each unresolved finding, its fix
+history, and the options — merge as-is, direct a named fix, or take it manually — the same pattern
+as spec-question holds. Never `agent:blocked` (blocked means the DoD was not reached; here the
+gates passed). Never merged with findings. Suggestions never gate and never trigger a round.
 
 ---
 
@@ -281,12 +348,16 @@ WORKSTREAM DONE = G0 + G2-subset + G5 all PASS, in its own worktree
         (a verifier that died counts as a NO — it is not DONE)
   NOT DONE
         → feed the failing gate + evidence back to THAT workstream, retry (its attempt++)
-  EXHAUSTED (its MAX_ATTEMPTS, default 3)
+  EXHAUSTED (its MAX_ATTEMPTS — default 2; 3 only when the wave carries a risk:high track.
+             Attempt 3 changed the outcome zero times in the week of 2026-08-10, at full
+             review+verify cost each time)
         → the track cannot integrate; block as below
 
 TRACK DONE = every workstream DONE  AND  G1 + G2 (full) + G3 + G4 + G6 PASS
              (+ HR1..HR4 if high-risk)
         → open PR, attach evidence, label every issue the track closes `agent:in-review`
+        unresolved review findings after the fix loop → HOLD with a DECISION
+             (ships held; never merges, never blocks)
   NOT DONE
         → an integration failure that NAMES a workstream goes back to that workstream and
           consumes ITS attempt; an unattributable one consumes a track-level integration attempt
@@ -298,6 +369,16 @@ EXHAUSTED (max attempts or token reserve hit)
 **A workstream that passed is never re-implemented.** Attempt accounting is per workstream precisely
 because the flat `G0..G6` verdict this replaced re-ran the entire track over one failing AC and burned
 an attempt for every healthy unit in it.
+
+**A failure in GitHub state is not a failure in code, and it never burns a build attempt.** When the
+named cause of an integration FAIL is publish/anchor state — the PR head is not the validated sha, no
+CI run exists at that sha, the body pins a head the PR never carried — the remedy is a **ref
+operation**: push the sha to the PR's head ref, dispatch CI at it, correct the body, then re-check
+the anchor *alone*. Re-running implementation or full verification against an unchanged tree answers
+a question nobody asked. Measured 2026-08-12: three tracks each burned all three integration
+attempts re-verifying the same unanchorable state, and every one was closed afterwards by a single
+operator `git push`. A verifier that names a publish/anchor cause must say so in `failingGate` terms
+that the loop can route to a publish step instead of a fixer.
 
 ### What a retry must carry, and what it must answer
 

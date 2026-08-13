@@ -35,8 +35,11 @@ import { initializePredefinedTeams } from "@/lib/ministry-teams/service";
 
 const INDEX_NAME = "ministry_teams_predefined_name_unique_idx";
 
+// service.ts is a re-export barrel since the 2026-08 sweep (#403); the
+// initializer's source lives in teams.ts, where it is the LAST export so the
+// slice below can run to end-of-file.
 const SERVICE = readFileSync(
-  path.join(process.cwd(), "src", "lib", "ministry-teams", "service.ts"),
+  path.join(process.cwd(), "src", "lib", "ministry-teams", "teams.ts"),
   "utf8"
 );
 
@@ -53,8 +56,7 @@ const MIGRATION = readFileSync(
 
 /** The body of `initializePredefinedTeams`, comments and all. */
 const INITIALIZER = SERVICE.slice(
-  SERVICE.indexOf("export async function initializePredefinedTeams"),
-  SERVICE.indexOf("// Role Functions")
+  SERVICE.indexOf("export async function initializePredefinedTeams")
 );
 
 // ----------------------------------------------------------------------------

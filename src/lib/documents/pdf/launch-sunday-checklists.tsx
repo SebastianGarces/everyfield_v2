@@ -8,6 +8,7 @@
 
 import { Document, Page, Text, View } from "@react-pdf/renderer";
 
+import { churchNameOf, documentSubtitle } from "../render-text";
 import type { DocumentMergeValues } from "../types";
 import { styles } from "./styles";
 
@@ -93,10 +94,7 @@ export function LaunchSundayChecklistsDocument({
 }: {
   values: DocumentMergeValues;
 }) {
-  const churchName = values.church_name || "Our Church";
-  const subtitleBase = ["Launch Sunday Checklist", values.launch_date || null]
-    .filter(Boolean)
-    .join("  •  ");
+  const churchName = churchNameOf(values);
 
   return (
     <Document title="Launch Sunday Checklists">
@@ -104,9 +102,11 @@ export function LaunchSundayChecklistsDocument({
         <Page key={team} size="LETTER" style={styles.page}>
           <Text style={styles.h1}>{churchName}</Text>
           <Text style={styles.subtitle}>
-            {subtitleBase}
-            {"  •  "}
-            {team}
+            {documentSubtitle(
+              "Launch Sunday Checklist",
+              values.launch_date || null,
+              team
+            )}
           </Text>
 
           <Text style={styles.h2}>{team}</Text>

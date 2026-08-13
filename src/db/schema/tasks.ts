@@ -1,6 +1,7 @@
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import {
   boolean,
+  check,
   date,
   index,
   jsonb,
@@ -13,7 +14,13 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 import { churches } from "./church";
+import { phaseTransitions } from "./phase-engine";
 import { users } from "./user";
+
+/** `'a', 'b'` — the CHECK's value list, built from the tuple below so the two cannot drift. */
+function inList(values: readonly string[]): SQL {
+  return sql.raw(values.map((value) => `'${value}'`).join(", "));
+}
 
 // ============================================================================
 // Enums
@@ -51,6 +58,18 @@ export const taskRelatedTypes = [
   "facility",
 ] as const;
 export type TaskRelatedType = (typeof taskRelatedTypes)[number];
+
+/**
+ * How a planter answered ONE phase transition's checklist prompt (T-020).
+ *
+ * Both answers are recorded, and the distinction is deliberately kept: the
+ * prompt is suppressed by the row EXISTING, so `declined` alone would do — but
+ * "did anyone ever take the phase-2 checklists?" is a question worth being able
+ * to ask of the data, and it cannot be reconstructed from `tasks` (an imported
+ * task is an ordinary task and carries no template marker).
+ */
+export const phasePromptAnswerKinds = ["accepted", "declined"] as const;
+export type PhasePromptAnswerKind = (typeof phasePromptAnswerKinds)[number];
 
 // ============================================================================
 // Tables
@@ -129,3 +148,72 @@ export const tasks = pgTable(
 
 export type Task = typeof tasks.$inferSelect;
 export type NewTask = typeof tasks.$inferInsert;
+
+// ----------------------------------------------------------------------------
+// PhasePromptAnswer — "this plant answered THIS transition's checklist prompt"
+// (T-020, ruled 2026-08-10 on PR #393).
+//
+// THIS ROW IS THE IDEMPOTENCY KEY, NOT A LOG. The prompt itself is still
+// derived — `phase_transitions` plus the code catalog — and this table holds
+// the one fact that is not derivable: the planter already answered. It used to
+// be an httpOnly cookie, which made the answer per-BROWSER: the same planter on
+// a phone was prompted about the same transition and accepting there created a
+// second full set of 22–26 tasks. The ruling is a durable record keyed by
+// transition id, and accept idempotent per transition on any device.
+//
+// `phase_prompt_answers_transition_unique_idx` IS the rule. A SELECT-then-
+// INSERT ("has this been answered?" then import) is not a concurrency guard
+// (`memory/invariants.md` → Transactions) — two fast presses both pass it. The
+// unique index makes the second answer unrepresentable, and
+// `acceptPhaseTemplatePrompt` claims this row with `ON CONFLICT DO NOTHING`
+// BEFORE it imports anything, gating the import on the claim's own rowcount.
+// The claim goes first here rather than last (the usual marker-last rule)
+// precisely because the dependent write is NOT idempotent: importing a
+// checklist twice creates two sets by design, so a marker written afterwards
+// would be written after the damage.
+//
+// UNIQUE ON `transition_id` ALONE, not on (church_id, transition_id). A
+// transition belongs to exactly one church, so the pair would be a wider key
+// for the same rule and would let a forged church id claim a second answer for
+// one transition. `church_id` is carried for tenant-scoped reads and for the
+// seed wipe's FK walk, not for identity.
+//
+// CASCADE ON THE TRANSITION, NOT ON THE CHURCH. An answer about a transition
+// that no longer exists says nothing, so it goes with it; `church_id` follows
+// the house pattern (no cascade), and `planWipe()` derives the delete order
+// from `pg_constraint` rather than from a list anyone has to maintain.
+// ----------------------------------------------------------------------------
+export const phasePromptAnswers = pgTable(
+  "phase_prompt_answers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    churchId: uuid("church_id")
+      .references(() => churches.id)
+      .notNull(),
+    transitionId: uuid("transition_id")
+      .references(() => phaseTransitions.id, { onDelete: "cascade" })
+      .notNull(),
+    /** `accepted` or `declined` — see `phasePromptAnswerKinds`. */
+    answer: varchar("answer", { length: 20 })
+      .$type<PhasePromptAnswerKind>()
+      .notNull(),
+    answeredById: uuid("answered_by_id")
+      .references(() => users.id)
+      .notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    // The rule: one answer per transition, ever, on any device.
+    uniqueIndex("phase_prompt_answers_transition_unique_idx").on(
+      table.transitionId
+    ),
+    index("phase_prompt_answers_church_id_idx").on(table.churchId),
+    check(
+      "phase_prompt_answers_answer_check",
+      sql`${table.answer} in (${inList(phasePromptAnswerKinds)})`
+    ),
+  ]
+);
+
+export type PhasePromptAnswerRecord = typeof phasePromptAnswers.$inferSelect;
+export type NewPhasePromptAnswer = typeof phasePromptAnswers.$inferInsert;

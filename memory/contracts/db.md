@@ -59,6 +59,18 @@ tenant scope; `created_at`/`updated_at` default now.
   `isInitialDeclaration` / `hasInitialPhaseDeclaration`, never the `reason` text — the reserved
   sentence there is display copy that `transitionPhaseSchema` merely refuses to let a planter
   retype.
+- **`phase_prompt_answers` is an idempotency key, not a log** (`tasks.ts`, migration 0037,
+  ruled 2026-08-10 on #393). One row per phase transition, unique on `transition_id` — the row
+  EXISTING is what silences the T-020 checklist prompt and what makes a repeat accept a no-op, on
+  any device. `answer` (`accepted` | `declined`, CHECK-closed) is recorded because "did anyone
+  ever take the phase-2 checklists?" cannot be reconstructed from `tasks` — an imported task is an
+  ordinary task with no template marker — but nothing branches on it. Unique on `transition_id`
+  ALONE, not on the pair with `church_id`: a transition belongs to one church, so the pair would
+  be a wider key for the same rule and would let a forged church id claim a second answer.
+  `acceptPhaseTemplatePrompt` writes it with `ON CONFLICT DO NOTHING` BEFORE the import it guards
+  and gates the import on the claim's rowcount — see `../invariants.md` → Transactions for why
+  claim-first rather than marker-last. The `PHASE_TEMPLATE_PROMPT_COOKIE` beside it is a fast path
+  that can only suppress a prompt, never restore one.
 - **`church_id = null` means global content** (e.g. wiki articles visible to all tenants).
 - **`sessions.id`** is the SHA-256 of the token, not the token.
 - **Soft deletes:** `persons.deleted_at` — feature queries must filter it.
@@ -161,6 +173,26 @@ Rules: `../invariants.md` → Dev Seeds. Why they are not guessable from the sou
   `wiki_articles.church_id`. The honest answer to that FK is to stop and let a human re-point the
   rows, not to delete an article; stopping late (after the users are gone) would be the worst of
   both.
+- **Why `--oversight-orgs-only` writes credentials the way it does (#304, rounds 7–10).** The
+  mode's only job is to leave a usable oversight fixture behind, and four separate versions of it
+  failed in ways the code alone does not explain:
+  - *Round 7* — it deleted nothing, so three comments called it "the safe mode". It minted a real
+    `sending_church_admin` login whose password was a constant in this repository, on whatever
+    database it last ran against. The account it created on the shared development branch was
+    neutralised BY HAND on 2026-08-10; that is why an address there may already exist with a
+    password nobody holds. Additive is not a synonym for safe — writing a login needs the same
+    "which database is this" answer a DELETE does, which is why `decideSeedAccounts` exists.
+  - *Round 8* — dropping the in-repo constant was right and replaced it with nothing. The password
+    became whatever the last operator typed, recorded nowhere, so the fixture was reachable by
+    exactly one shell. Every interactive acceptance criterion of #304 then went unexercised for
+    want of a login, which is what `.env.local` (and `unrecordedPasswordNotice`) now prevent.
+  - *Round 9* — the write was `onConflictDoNothing`, so a second run with a different password
+    exited 0 announcing "the SEED_ADMIN_PASSWORD you passed" while the OLD password still opened
+    the account. A false success on a credential path: the announcement and the write disagreed.
+  - *Round 10* — the two halves of the fixture drifted apart. Only the sending-church admin was
+    written, so `admin@everyfield.app` kept a NULL `sending_network_id` and `/oversight/invitations`
+    rendered "Set up your network first" with no invitation sendable. Both halves are restored by
+    one command now, and `oversightAdminSeeds()` THROWS rather than restore half of them.
 - **Every script that inserts a `churches` row stamps `onboarding_completed_at`.** A null stamp
   means the onboarding wizard still owns that planter's dashboard (`shouldShowOnboarding`,
   `src/lib/onboarding/steps.ts`), so an unstamped fixture puts every seeded planter in the wizard.

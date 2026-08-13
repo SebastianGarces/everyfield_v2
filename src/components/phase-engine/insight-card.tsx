@@ -23,7 +23,8 @@
 
 import { InsightCardView } from "@/components/phase-engine/insight-card-view";
 import { InsightFeedback } from "@/components/phase-engine/insight-feedback";
-import type { InsightFeedbackRating, PlantInsight } from "@/db/schema";
+import type { InsightFeedbackRating } from "@/db/schema";
+import type { AssessedInsight } from "@/lib/phase-engine/assessment";
 import { getPublishedArticleRefs } from "@/lib/wiki/service";
 
 /** The current user's prior feedback for an insight, if any. */
@@ -33,7 +34,13 @@ export interface InsightFeedbackState {
 }
 
 interface InsightCardProps {
-  insight: PlantInsight;
+  /**
+   * `AssessedInsight` rather than `PlantInsight`: the row arrives from the read
+   * layer carrying the signal each of its citations resolved to, and the view
+   * reads an attestation in the drill-down's own words off that map (#319,
+   * ruled 2026-08-12). This component only passes it through.
+   */
+  insight: AssessedInsight;
   /** The current user's existing feedback for this insight, if any. */
   feedback?: InsightFeedbackState;
 }

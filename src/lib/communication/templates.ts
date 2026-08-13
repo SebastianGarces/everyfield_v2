@@ -66,9 +66,37 @@ export async function getTemplates(
 }
 
 /**
- * Get a single template by ID.
+ * Get a single template by ID, as one church may see it: a system template or
+ * the church's own. Tenant isolation is application-layer — this predicate IS
+ * the boundary, so another church's template resolves to `undefined`.
  */
 export async function getTemplate(
+  id: string,
+  churchId: string
+): Promise<MessageTemplate | undefined> {
+  const [template] = await db
+    .select()
+    .from(messageTemplates)
+    .where(
+      and(
+        eq(messageTemplates.id, id),
+        or(
+          eq(messageTemplates.isSystem, true),
+          eq(messageTemplates.churchId, churchId)
+        )
+      )
+    )
+    .limit(1);
+  return template;
+}
+
+/**
+ * Unscoped read by primary key, for the write paths below ONLY. They load any
+ * row so their ownership checks can refuse with the precise error ("Cannot
+ * edit another church's template") instead of a generic not-found. Never
+ * export this — an exported unscoped read is how a template leaks.
+ */
+async function findTemplateById(
   id: string
 ): Promise<MessageTemplate | undefined> {
   const [template] = await db
@@ -124,7 +152,7 @@ export async function forkTemplate(
   systemTemplateId: string,
   churchId: string
 ): Promise<MessageTemplate> {
-  const source = await getTemplate(systemTemplateId);
+  const source = await findTemplateById(systemTemplateId);
   if (!source) throw new Error("Source template not found");
   if (!source.isSystem) throw new Error("Can only fork system templates");
 
@@ -170,7 +198,7 @@ export async function updateTemplate(
   churchId: string,
   input: UpdateTemplateInput
 ): Promise<MessageTemplate> {
-  const existing = await getTemplate(id);
+  const existing = await findTemplateById(id);
   if (!existing) throw new Error("Template not found");
 
   // Copy-on-write: fork system templates before editing
@@ -213,7 +241,7 @@ export async function deleteTemplate(
   id: string,
   churchId: string
 ): Promise<void> {
-  const existing = await getTemplate(id);
+  const existing = await findTemplateById(id);
   if (!existing) throw new Error("Template not found");
   if (existing.isSystem) throw new Error("Cannot delete system templates");
   if (existing.churchId !== churchId) {

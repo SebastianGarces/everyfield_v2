@@ -21,9 +21,14 @@ export async function ActivityTimeline({
     limit: 10,
   });
 
+  // One instant for the whole feed render — formatRelativeTimestamp requires
+  // `now` as a parameter so SSR and hydration render the same string.
+  const now = new Date();
+
   return (
     <ActivityTimelineClient
       activities={activities}
+      now={now}
       nextCursor={nextCursor}
       personId={personId}
       currentUserId={user.id}

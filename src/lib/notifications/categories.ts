@@ -87,8 +87,9 @@ export type NotificationAudience = "church" | "oversight";
  * `share_activity_with_oversight`, which defaults to off. So an oversight
  * user's effective default is "nothing" whatever this table says, and FIVE of
  * these SEVEN rows — every granular category — are unreachable for them
- * however the plant decides. (Only the invitation-accepted milestone is exempt
- * from the second question; see `oversightGateFor`.)
+ * however the plant decides. (Three milestone types are exempt from the second
+ * question — the invitation accepted, the invitation declined, the association
+ * ended; see `OVERSIGHT_SHARING_EXEMPT_TYPES` and `oversightGateFor`.)
  *
  * The one CHANNEL default that differs by audience is `digest`/`in_app`, and it
  * is overridden below rather than restated — see
@@ -125,8 +126,16 @@ export const NOTIFICATION_CATEGORIES: Record<
   },
   milestones: {
     label: "Milestones",
+    // Both directions of the association live in this category and the
+    // description has to admit it (#304). An oversight admin's five kinds are
+    // `oversightMilestoneKinds` — an invitation accepted, an invitation
+    // declined, an association ended, a new stage, a launch date — and the
+    // planter's own `association.removed_by_org` (`./plant-association.ts`)
+    // rides the same category from the other side. An earlier version listed
+    // only "an invitation accepted, a new stage, a launch date", which named
+    // three of six and read as though ending a relationship were silent.
     description:
-      "The few moments worth an interruption: an invitation accepted, a new stage, a launch date.",
+      "The few moments worth an interruption: an invitation answered either way, an association starting or ending, a new stage, a launch date.",
     defaults: { email: true, in_app: true },
   },
   digest: {
@@ -274,17 +283,93 @@ export function ineligibleCategoriesForAudience(
   );
 }
 
+// ----------------------------------------------------------------------------
+// TYPE-keyed lists start here. Everything above is keyed on CATEGORY and answers
+// "may this audience ever be served this kind of message"; everything below is
+// keyed on the `type` discriminator of one specific message and relaxes a gate
+// for it. The boundary is worth keeping — a rule filed on the wrong side of it
+// either exempts a whole category or fails to exempt anything at all.
+// ----------------------------------------------------------------------------
+
+/**
+ * The two events that END an org's relationship with a plant (#304, OV-006 /
+ * OV-007) — and the ONLY types for which `enqueue`'s tenancy gate accepts a
+ * RECORDED RELATIONSHIP instead of current access.
+ *
+ * ----------------------------------------------------------------------------
+ * Why these two need their own list, when the consent exemption already covers
+ * them
+ * ----------------------------------------------------------------------------
+ *
+ * Consent and tenancy are different gates and only one of them is the problem
+ * here. `canAccessChurch` resolves an oversight admin's reach from the PLANT'S
+ * CURRENT FK (`getAccessibleChurchIds`), so for both of these events the answer
+ * is false at the moment they happen, and false for the same structural reason:
+ *
+ *   * a DECLINED invitation never set the FK at all, so the plant was never in
+ *     the org's scope;
+ *   * an association that ENDED nulled the FK in the write these announce, so
+ *     the plant left the org's scope in the very act being reported.
+ *
+ * Composed with the plant's `church_id` — the only tenant an event about a
+ * plant can be filed under — both would therefore be skipped `outside_church`
+ * and the org would never hear that its own relationship had changed. The
+ * consent exemption cannot help: it deliberately relaxes gate 3 and nothing
+ * above it.
+ *
+ * ----------------------------------------------------------------------------
+ * This is a tenancy BASIS, not a tenancy bypass
+ * ----------------------------------------------------------------------------
+ *
+ * What `enqueue` accepts for these types is not "no check". It is a different,
+ * narrower fact, verified server-side against the database:
+ * `orgHasRecordedRelationshipWithChurch` (`./oversight-relationship.ts`) — this
+ * org and this plant have an invitation or an `association_events` row between
+ * them. An org with no such record is refused exactly as before, and the
+ * fallback is unreachable for every other notification type in the product,
+ * including the two GATED milestones and the digest.
+ *
+ * The list is a subset of `OVERSIGHT_SHARING_EXEMPT_TYPES` below and both are
+ * spelled out rather than imported from `./oversight.ts` (which imports
+ * `./enqueue.ts`, which imports this file — the import would cycle).
+ * `oversight.test.ts` asserts each string is the one the emitters actually
+ * produce, so neither list can drift into an exemption that matches nothing.
+ */
+export const OVERSIGHT_OWN_RELATIONSHIP_TYPES = [
+  "oversight.milestone.invitation_declined",
+  "oversight.milestone.association_ended",
+] as const;
+
+/**
+ * Is this the kind of event whose tenancy basis is a RECORDED relationship
+ * rather than current access? Asked by `enqueue` only after `canAccessChurch`
+ * has already said no.
+ */
+export function isOwnRelationshipType(type: string): boolean {
+  return (OVERSIGHT_OWN_RELATIONSHIP_TYPES as readonly string[]).includes(type);
+}
+
 /**
  * The notification types an oversight recipient receives WHETHER OR NOT the
  * plant has turned sharing on (ruled 2026-08-01, amending N-026).
  *
- * Exactly one, and the reason is whose event it is. "Your invitation was
+ * Three, and the reason is whose event each one is. "Your invitation was
  * accepted" is the SENDING CHURCH'S OWN event: they composed the invitation,
  * they issued it, and the acceptance is the answer to a question they asked. It
  * discloses nothing about how the plant is doing — only that a handshake the
  * sending church initiated completed. A plant's consent governs what leaves the
  * plant ABOUT the plant; it was never a power to withhold from someone the
  * answer to their own question.
+ *
+ * #304 / OV-006 + OV-007 add the two events that CLOSE that same relationship,
+ * on exactly the same reasoning: an invitation DECLINED is the other answer to
+ * the org's own question, and an association ENDED is the org being told that a
+ * relationship it is a party to has stopped. Neither says anything about how the
+ * plant is doing, and both are facts the org can already see in its own
+ * invitations list and its own plants directory a moment later. Gating them
+ * would mean the org's own relationship changing under it in silence — which is
+ * the same "structurally unreachable control" the 2026-08-01 ruling rejected,
+ * only worse: a plant that leaves has, by definition, stopped sharing.
  *
  * It also un-breaks the ordinary sequence. The toggle defaults to off and a
  * planter decides about it AFTER joining, so at the moment of acceptance it was
@@ -305,6 +390,7 @@ export function ineligibleCategoriesForAudience(
  */
 export const OVERSIGHT_SHARING_EXEMPT_TYPES = [
   "oversight.milestone.invitation_accepted",
+  ...OVERSIGHT_OWN_RELATIONSHIP_TYPES,
 ] as const;
 
 /**
@@ -372,14 +458,24 @@ export const OVERSIGHT_SHARING_FEATURE: PrivacyFeatureKey =
  * The copy may only claim what this toggle actually governs
  * ----------------------------------------------------------------------------
  *
- * This toggle gates what is PUSHED: the digest and TWO of the three milestones,
- * via `enqueue`. The invitation-accepted milestone is exempt
- * (`OVERSIGHT_SHARING_EXEMPT_TYPES`) because it is the sending church's own
- * event, so the second and fifth bullets below say two milestones and name the
- * third as an exception rather than listing all three as governed. That is a
- * deliberate amendment of copy that was previously frozen: the ruling changed
- * the facts, and copy whose only virtue is that it has not changed is not
- * truthful copy.
+ * This toggle gates what is PUSHED: the digest and TWO of the five milestones,
+ * via `enqueue`. THREE are exempt (`OVERSIGHT_SHARING_EXEMPT_TYPES`) because
+ * each one is the org's OWN relationship changing — an invitation accepted, an
+ * invitation declined, an association ended — so the "two milestones" bullet
+ * below counts only the gated pair and the LAST bullet names all three
+ * exemptions as exceptions rather than listing them as governed (ruled
+ * 2026-08-10, round 5 of #304).
+ * That is a deliberate amendment of copy that was previously frozen: the ruling
+ * changed the facts, and copy whose only virtue is that it has not changed is
+ * not truthful copy.
+ *
+ * The exempt sentence is the LAST bullet and the reversibility sentence sits
+ * ABOVE it, deliberately. "Turn it off whenever you like. Sharing stops at the
+ * next update" is true of everything this toggle governs and false of the three
+ * exemptions, so a reader who meets it after them reads a promise the code does
+ * not keep. `oversight.test.ts` pins that order, and it pins the exempt phrases
+ * against `OVERSIGHT_SHARING_EXEMPT_TYPES` itself rather than a hand-written
+ * list, so a fourth exemption fails the suite until this copy names it.
  *
  * It does not gate what oversight may PULL either. `getOversightPlantHealth`
  * (`src/lib/phase-engine/oversight/read.ts`) already returns each accessible
@@ -391,12 +487,15 @@ export const OVERSIGHT_SHARING_FEATURE: PrivacyFeatureKey =
  * So an earlier draft of this screen ("they see nothing about this plant unless
  * you turn sharing on") was false the moment it shipped, and false about
  * precisely the two facts — current stage, launch date — the milestones below
- * mention. The fourth bullet exists to say that out loud. A consent control
- * whose promise overstates its own reach is worse than no promise: the planter
- * makes a decision about a guarantee the system does not offer.
+ * mention. The "Two things this setting does not cover" bullet exists to say
+ * that out loud. A consent control whose promise overstates its own reach is
+ * worse than no promise: the planter makes a decision about a guarantee the
+ * system does not offer.
  *
  * If a future ruling brings the portfolio's phase/launch exposure under this
- * toggle, that bullet comes out — and not before.
+ * toggle, that bullet comes out — and not before. (Bullets are named here, not
+ * numbered: round 5 reordered them and every ordinal in this comment went stale
+ * at once.)
  */
 export const OVERSIGHT_SHARING_TOGGLE = {
   label: "Share activity with your sending church or network",
@@ -411,11 +510,53 @@ export const OVERSIGHT_SHARING_TOGGLE = {
     "Once a day, on days something happened, they get counts: meetings held, people added, tasks finished, stages reached.",
     "They also hear about two milestones — you move to a new stage, you set or change a launch date.",
     "They never see names, notes, messages, giving, or a list of what you did. This is a summary, not an activity feed.",
-    "Two things this setting does not cover. Your plant is already listed on their dashboard with its name, current stage and launch date — this is about the updates they receive, not that listing.",
-    "And if they invited you, they were told the moment you accepted. That is their own invitation being answered, so it reaches them either way.",
     "Turn it off whenever you like. Sharing stops at the next update — nothing already sent is recalled.",
+    "Two things this setting does not cover. Your plant is already listed on their dashboard with its name, current stage and launch date — this is about the updates they receive, not that listing.",
+    "Three things reach them either way, because the relationship itself is theirs too: when you accept their invitation, when you decline one, and when your association with them ends.",
   ],
 } as const;
+
+/**
+ * The SAME consent promise, one sentence long, as `/settings` teases it.
+ *
+ * It lives here beside `OVERSIGHT_SHARING_TOGGLE` rather than inside
+ * `src/app/(dashboard)/settings/page.tsx` because that is precisely how it went
+ * stale. It was written in #258 when the exempt list held ONE type, and it read
+ * "apart from being told you accepted their invitation … no updates about this
+ * plant unless you turn sharing on". The list then grew to three, round 5 of
+ * #304 corrected the sharing screen's own copy, and this sentence went on
+ * telling a planter that a DECLINE and a DEPARTURE were covered by a switch
+ * that has never gated either. The drift guard could not see it: a test that
+ * inspects one constant while a sibling file hardcodes a competing sentence is
+ * the hand-written-list problem one level up. Consent copy that lives in a page
+ * is consent copy no guard can hold to the code.
+ *
+ * The clauses naming the exempt events are the ruled sentence's OWN words
+ * (ruled 2026-08-10, round 5 of #304), reused rather than re-written. The
+ * toggle's promise comes first and the exemptions have the last word, the same
+ * order `detail` uses and for the same reason — a reader who meets "unless you
+ * turn sharing on" AFTER the three exemptions reads it as covering them.
+ */
+export const OVERSIGHT_SHARING_TEASER =
+  "Your sending church and network get no updates about this plant unless you turn sharing on — except for three things that reach them either way: when you accept their invitation, when you decline one, and when your association with them ends.";
+
+/**
+ * EVERY surface that makes the planter this consent promise, keyed by the route
+ * they read it on.
+ *
+ * This record is the drift guard's subject. `oversight.test.ts` asserts each
+ * exempt phrase against ALL of it, so the question "did the copy fall behind
+ * the exempt list?" is asked once for every place the promise is made rather
+ * than once for the place someone remembered. A new consent surface joins the
+ * guard by being added here — which is the only way to add one, since the copy
+ * itself has to live in this module to be added at all.
+ */
+export const OVERSIGHT_CONSENT_SURFACES: Readonly<
+  Record<string, readonly string[]>
+> = {
+  "/settings/sharing": OVERSIGHT_SHARING_TOGGLE.detail,
+  "/settings": [OVERSIGHT_SHARING_TEASER],
+};
 
 // ----------------------------------------------------------------------------
 // Guards + lookups

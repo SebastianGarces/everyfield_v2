@@ -9,6 +9,7 @@ import {
   LAUNCH_DATE_CHOICES,
   ONBOARDING_STEPS,
   ONBOARDING_STEP_IDS,
+  addressableOnboardingStep,
   incompleteOnboardingSteps,
   isLaunchDateChoice,
   journeyStageForPhase,
@@ -20,6 +21,8 @@ import {
   onboardingStep,
   onboardingStepComplete,
   previousOnboardingStep,
+  resolveFinishedDashboardStepRequest,
+  resolveOnboardingStepRequest,
   resolveResumeStep,
   shouldShowOnboarding,
 } from "./steps";
@@ -251,6 +254,150 @@ test("a planter with every fact in lands on the last step, not back at 3", () =>
     LAST_ONBOARDING_STEP
   );
   assert.equal(LAST_ONBOARDING_STEP, "people");
+});
+
+test("step 1 is where a planter resumes if and only if there is no church", () => {
+  // This equivalence is not a curiosity — `addressableOnboardingStep` RESTS on
+  // it. The client cannot see the church row, so it reads "may step 1 still be
+  // opened?" off the step the server landed it on. If resumption ever returned
+  // step 1 for a planter who has a church, the flow would start honouring
+  // `?step=basics` again and the 2026-08-10 ruling would silently unwind.
+  assert.equal(resolveResumeStep({}), "basics");
+  assert.equal(resolveResumeStep({ churchId: null }), "basics");
+
+  for (const facts of [
+    {},
+    { leadershipStatus: "planter_confirmed" as const },
+    { journeyDeclared: true },
+    { leadershipStatus: "no_planter" as const, peopleAdded: true },
+  ]) {
+    assert.notEqual(
+      resolveResumeStep({ ...facts, churchId: CHURCH_ID }),
+      "basics",
+      "a church exists, so step 1 is answered and never resumed to"
+    );
+  }
+});
+
+// ----------------------------------------------------------------------------
+// #373 / ruling 2026-08-10 — which step a URL may open
+//
+// The guard used to live inline in an async server component, where the only
+// available test was a regex over the page's own source: enough to catch a
+// deletion, blind to a wrong ANSWER — which is exactly how the repeated-param
+// hole passed a green suite. It is a pure function now, so these are calls.
+// ----------------------------------------------------------------------------
+
+test("a request naming no step, or naming garbage, is left to the resume rule", () => {
+  assert.deepEqual(
+    resolveOnboardingStepRequest({ step: undefined, churchId: CHURCH_ID }),
+    { outcome: "none" }
+  );
+
+  // Refused as a step, but NOT redirected: the resume rule is a better answer
+  // than a navigation, and the flow's own stamp rewrites the URL afterwards.
+  for (const value of ["", "finish", "Journey", "journey "]) {
+    assert.deepEqual(
+      resolveOnboardingStepRequest({ step: value, churchId: CHURCH_ID }),
+      { outcome: "none" },
+      value
+    );
+  }
+});
+
+test("step 1 is addressable exactly while there is no church, later steps exactly once there is", () => {
+  assert.deepEqual(
+    resolveOnboardingStepRequest({ step: "basics", churchId: undefined }),
+    { outcome: "honour", step: "basics" }
+  );
+  assert.deepEqual(
+    resolveOnboardingStepRequest({ step: "basics", churchId: CHURCH_ID }),
+    { outcome: "none" }
+  );
+
+  assert.deepEqual(
+    resolveOnboardingStepRequest({ step: "journey", churchId: undefined }),
+    { outcome: "refuse" }
+  );
+  assert.deepEqual(
+    resolveOnboardingStepRequest({ step: "journey", churchId: CHURCH_ID }),
+    { outcome: "honour", step: "journey" }
+  );
+});
+
+test("a repeated `?step=` names no step and is refused", () => {
+  // Next hands `?step=a&step=b` back as an array. Typed as a plain string it
+  // satisfied neither branch of the old inline guard, so it bypassed it whole.
+  assert.deepEqual(
+    resolveOnboardingStepRequest({ step: ["journey"], churchId: CHURCH_ID }),
+    { outcome: "refuse" }
+  );
+  assert.deepEqual(
+    resolveOnboardingStepRequest({
+      step: ["journey", "journey"],
+      churchId: undefined,
+    }),
+    { outcome: "refuse" }
+  );
+});
+
+test("a finished dashboard honours no step, save the leadership re-entry", () => {
+  // #373 AC 3: nothing owns `?step=` past onboarding, so a value left in the
+  // address bar would put the wiki guide on a finished dashboard (#367 ruling).
+  assert.deepEqual(resolveFinishedDashboardStepRequest(undefined), {
+    outcome: "none",
+  });
+  assert.deepEqual(resolveFinishedDashboardStepRequest("leadership"), {
+    outcome: "leadership",
+  });
+
+  // Every other value goes, recognised or not — past this point there is no
+  // flow left to resume into. `journey` is the Back-button case: finishing
+  // from step 3 pushes `?churchCreated=true`, so Back lands on a finished
+  // `/dashboard?step=journey`.
+  for (const value of [
+    "journey",
+    "basics",
+    "people",
+    "",
+    "finish",
+    "Leadership",
+  ]) {
+    assert.deepEqual(
+      resolveFinishedDashboardStepRequest(value),
+      { outcome: "refuse" },
+      value
+    );
+  }
+});
+
+test("a repeated `?step=` is refused on a finished dashboard too", () => {
+  // An array equals no literal — including `?step=leadership&step=leadership`,
+  // which must not re-enter with the guide's own reader pointed elsewhere.
+  for (const value of [
+    ["leadership"],
+    ["leadership", "leadership"],
+    ["leadership", "journey"],
+  ]) {
+    assert.deepEqual(
+      resolveFinishedDashboardStepRequest(value),
+      { outcome: "refuse" },
+      JSON.stringify(value)
+    );
+  }
+});
+
+test("the client refuses a step the page would not resolve", () => {
+  // `addressableOnboardingStep` is the same rule on the other side, with
+  // `initialStep` standing in for the church row.
+  assert.equal(addressableOnboardingStep("journey", "leadership"), "journey");
+  assert.equal(addressableOnboardingStep("basics", "basics"), "basics");
+  assert.equal(addressableOnboardingStep("basics", "people"), null);
+
+  // Garbage names no step here either — the flow falls back to `initialStep`.
+  for (const value of [null, undefined, "", "finish", 3, ["journey"]]) {
+    assert.equal(addressableOnboardingStep(value, "journey"), null);
+  }
 });
 
 // ----------------------------------------------------------------------------

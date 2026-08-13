@@ -25,8 +25,8 @@ import { verifySession } from "@/lib/auth/session";
 import {
   getCommunication,
   getCommunicationRecipients,
-  getNonOpenerSummary,
 } from "@/lib/communication/service";
+import { getNonOpenerSummary } from "@/lib/communication/send";
 import { evaluateResendEligibility } from "@/lib/communication/resend-policy";
 import {
   renderTemplate,
@@ -34,11 +34,18 @@ import {
   buildMeetingMergeData,
   buildPersonMergeData,
 } from "@/lib/communication/merge";
+import {
+  recipientStatusBadgeClass,
+  recipientStatusLabel,
+} from "@/lib/communication/status-display";
 import { db } from "@/db";
 import { churches } from "@/db/schema/church";
 import { churchMeetings } from "@/db/schema/meetings";
 import { eq, and } from "drizzle-orm";
-import { format } from "date-fns";
+// Dates render through the pinned-zone formatter, never date-fns —
+// memory/invariants.md → Date & Time Rendering.
+import { formatDateTime } from "@/lib/datetime";
+import { meetingTypeLabel } from "@/lib/meetings/labels";
 
 export const dynamic = "force-dynamic";
 
@@ -46,42 +53,11 @@ interface MessageDetailPageProps {
   params: Promise<{ id: string }>;
 }
 
-const recipientStatusConfig: Record<
-  string,
-  { label: string; color: string; icon: string }
-> = {
-  pending: { label: "Pending", color: "bg-gray-100 text-gray-600", icon: "" },
-  sent: { label: "Sent", color: "bg-blue-100 text-blue-700", icon: "" },
-  delivered: {
-    label: "Delivered",
-    color: "bg-green-100 text-green-700",
-    icon: "",
-  },
-  opened: {
-    label: "Opened",
-    color: "bg-emerald-100 text-emerald-700",
-    icon: "",
-  },
-  clicked: {
-    label: "Clicked",
-    color: "bg-teal-100 text-teal-700",
-    icon: "",
-  },
-  bounced: { label: "Bounced", color: "bg-red-100 text-red-700", icon: "" },
-  failed: { label: "Failed", color: "bg-red-100 text-red-700", icon: "" },
-};
-
 const tileIcons: Record<MessageTileKey, LucideIcon> = {
   sent: Mail,
   delivered: CheckCheck,
   opened: Eye,
   issues: AlertTriangle,
-};
-
-const meetingTypeLabels: Record<string, string> = {
-  vision_meeting: "Vision Meeting",
-  orientation: "Orientation",
-  team_meeting: "Team Meeting",
 };
 
 export default async function MessageDetailPage({
@@ -93,7 +69,7 @@ export default async function MessageDetailPage({
   const { id } = await params;
   const [comm, recipients, nonOpeners] = await Promise.all([
     getCommunication(user.churchId, id),
-    getCommunicationRecipients(id),
+    getCommunicationRecipients(user.churchId, id),
     getNonOpenerSummary(user.churchId, id),
   ]);
 
@@ -190,10 +166,7 @@ export default async function MessageDetailPage({
           </h1>
           <div className="mt-1 flex items-center gap-4">
             <p className="text-muted-foreground">
-              Sent{" "}
-              {comm.sentAt
-                ? format(comm.sentAt, "MMMM d, yyyy 'at' h:mm a")
-                : "—"}
+              Sent {comm.sentAt ? formatDateTime(comm.sentAt, "long") : "—"}
             </p>
             {meeting && (
               <Link
@@ -201,9 +174,7 @@ export default async function MessageDetailPage({
                 className="bg-muted/50 text-foreground/70 hover:bg-muted hover:text-foreground inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors"
               >
                 <Calendar className="h-3.5 w-3.5" />
-                {meeting.title ||
-                  meetingTypeLabels[meeting.type] ||
-                  meeting.type}
+                {meeting.title || meetingTypeLabel(meeting.type)}
                 <ExternalLink className="h-3 w-3" />
               </Link>
             )}
@@ -266,9 +237,6 @@ export default async function MessageDetailPage({
                   </thead>
                   <tbody>
                     {recipients.map((r) => {
-                      const config =
-                        recipientStatusConfig[r.status] ??
-                        recipientStatusConfig.pending;
                       return (
                         <tr
                           key={r.id}
@@ -286,15 +254,18 @@ export default async function MessageDetailPage({
                             {r.email}
                           </td>
                           <td className="px-4 py-3 text-center">
-                            <Badge variant="secondary" className={config.color}>
-                              {config.label}
+                            <Badge
+                              variant="secondary"
+                              className={recipientStatusBadgeClass(r.status)}
+                            >
+                              {recipientStatusLabel(r.status)}
                             </Badge>
                           </td>
                           <td className="text-muted-foreground px-4 py-3 text-xs">
                             {r.deliveredAt &&
-                              `Delivered: ${format(r.deliveredAt, "MMM d, h:mm a")}`}
+                              `Delivered: ${formatDateTime(r.deliveredAt, "short")}`}
                             {r.openedAt &&
-                              ` · Opened: ${format(r.openedAt, "MMM d, h:mm a")}`}
+                              ` · Opened: ${formatDateTime(r.openedAt, "short")}`}
                           </td>
                         </tr>
                       );

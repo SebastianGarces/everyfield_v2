@@ -1,6 +1,20 @@
 import { z } from "zod";
 import { teamStatuses, timeCommitments } from "@/db/schema/ministry-teams";
 
+/**
+ * A checkbox in a FormData post: "true" when ticked, absent when not. The
+ * preprocess keeps the exact truthiness the actions used to hand-roll
+ * (`value === "true"` — any other string is false) while still accepting a
+ * real boolean from a non-form caller.
+ */
+const checkboxBoolean = z.preprocess(
+  (value) => (typeof value === "string" ? value === "true" : value),
+  z.boolean().optional()
+);
+
+/** A number posted as a string; an absent field stays undefined. */
+const formSortOrder = z.coerce.number().int().min(0).optional();
+
 // ============================================================================
 // Team Validations
 // ============================================================================
@@ -29,10 +43,10 @@ export type TeamUpdateInput = z.infer<typeof teamUpdateSchema>;
 export const roleCreateSchema = z.object({
   name: z.string().min(1, "Role name is required").max(255),
   description: z.string().max(2000).optional(),
-  isLeadershipRole: z.boolean().optional(),
+  isLeadershipRole: checkboxBoolean,
   timeCommitment: z.enum(timeCommitments).optional(),
   desiredSkills: z.string().max(1000).optional(),
-  sortOrder: z.number().int().min(0).optional(),
+  sortOrder: formSortOrder,
 });
 
 export type RoleCreateInput = z.infer<typeof roleCreateSchema>;
@@ -40,10 +54,10 @@ export type RoleCreateInput = z.infer<typeof roleCreateSchema>;
 export const roleUpdateSchema = z.object({
   name: z.string().min(1).max(255).optional(),
   description: z.string().max(2000).optional(),
-  isLeadershipRole: z.boolean().optional(),
+  isLeadershipRole: checkboxBoolean,
   timeCommitment: z.enum(timeCommitments).optional(),
   desiredSkills: z.string().max(1000).optional(),
-  sortOrder: z.number().int().min(0).optional(),
+  sortOrder: formSortOrder,
 });
 
 export type RoleUpdateInput = z.infer<typeof roleUpdateSchema>;
@@ -67,7 +81,7 @@ export const trainingProgramCreateSchema = z.object({
   name: z.string().min(1, "Program name is required").max(255),
   description: z.string().max(2000).optional(),
   teamId: z.string().uuid().optional(),
-  isRequired: z.boolean().optional(),
+  isRequired: checkboxBoolean,
 });
 
 export type TrainingProgramCreateInput = z.infer<

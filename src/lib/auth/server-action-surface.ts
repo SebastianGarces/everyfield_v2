@@ -1,0 +1,448 @@
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import path from "node:path";
+
+/**
+ * THE AUTH SURFACE, READ OFF THE SOURCE TREE.
+ *
+ * Every export of a `"use server"` module is a POSTable endpoint reachable with
+ * no session and no UI (`memory/invariants.md` → Authentication & Session), so
+ * "which functions are endpoints, and does each one mint an actor before it
+ * touches its argument?" is a question about the whole repository rather than
+ * about one domain. This module is the static reader that answers it: a file
+ * walk, a directive detector, a brace matcher, and a transitive "does this name
+ * reach the session cookie" resolver.
+ *
+ * It lives beside `src/lib/auth/session.ts` — the module that owns the rule —
+ * rather than inside whichever domain's test happened to need it first, and it
+ * is a normal module rather than a `.test.ts` so a second caller can IMPORT it
+ * instead of copying the walker. `src/lib/auth/server-action-surface.test.ts`
+ * is the repo-wide assertion built on it; `src/lib/invitations/service.test.ts`
+ * uses the same helpers for its domain-specific closure walks.
+ *
+ * Nothing here is imported by application code — it reads the filesystem and is
+ * for tests and scripts only.
+ */
+
+export const SRC = path.join(process.cwd(), "src");
+
+/** Every `.ts`/`.tsx` file under `src/`. */
+export const TS_FILES: string[] = (function collect(dir: string): string[] {
+  const found: string[] = [];
+  for (const entry of readdirSync(dir)) {
+    const full = path.join(dir, entry);
+    if (statSync(full).isDirectory()) {
+      found.push(...collect(full));
+    } else if (/\.tsx?$/.test(entry)) {
+      found.push(full);
+    }
+  }
+  return found;
+})(SRC);
+
+const CODE_CACHE = new Map<string, string>();
+
+/**
+ * A module with its comments removed. Every assertion built on this is about
+ * CODE: a file that explains a rule by naming the shape it forbids
+ * (`respondingUser`, `db.`, `"use server"`) would otherwise trip the test that
+ * enforces it.
+ */
+export function codeOf(file: string): string {
+  const cached = CODE_CACHE.get(file);
+  if (cached !== undefined) return cached;
+
+  const code = readFileSync(file, "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|\s)\/\/.*$/gm, "$1");
+  CODE_CACHE.set(file, code);
+  return code;
+}
+
+export const rel = (full: string): string => path.relative(process.cwd(), full);
+
+/** Specifiers whose module is actually emitted: value imports and `import()`. */
+export function valueSpecifiers(code: string): string[] {
+  const statement =
+    /^\s*(?:import|export)\s+(?!type\b)[^;]*?\bfrom\s*["']([^"']+)["']/gm;
+  const sideEffect = /^\s*import\s*["']([^"']+)["']/gm;
+  const dynamic = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
+
+  return [statement, sideEffect, dynamic].flatMap((pattern) =>
+    [...code.matchAll(pattern)].map(([, specifier]) => specifier)
+  );
+}
+
+/** The file a specifier names, or `null` for a bare package. */
+export function resolveModule(from: string, specifier: string): string | null {
+  const base = specifier.startsWith("@/")
+    ? path.join(SRC, specifier.slice(2))
+    : specifier.startsWith(".")
+      ? path.resolve(path.dirname(from), specifier)
+      : null;
+  if (base === null) return null;
+
+  for (const candidate of [
+    base,
+    `${base}.ts`,
+    `${base}.tsx`,
+    path.join(base, "index.ts"),
+    path.join(base, "index.tsx"),
+  ]) {
+    if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
+  }
+  return null;
+}
+
+/**
+ * A module's DIRECTIVE PROLOGUE: the run of string-literal statements at the top
+ * of the file, comments already stripped by `codeOf`.
+ *
+ * Every walk here turns on "is this a `"use server"` module", and getting that
+ * answer wrong is not a cosmetic failure — a `"use server"` module is where the
+ * endpoints are, and it is also the BOUNDARY the closure walks stop at. So a
+ * false NEGATIVE hides a live endpoint from the checks, and a false POSITIVE
+ * cuts the client-bundle walk short at a file that is not a boundary at all.
+ *
+ * The bug this replaces (#265 r2, HR4 evidence 2026-08-03): `/^["']use
+ * server["'];/m` required a SEMICOLON. `"use server"` without one is the same
+ * directive — ASI makes it an expression statement either way, and Next.js reads
+ * it — so a `"use server"` module written without the semicolon was invisible to
+ * both closure walks, and a live unauthenticated detach endpoint passed a 37/37
+ * green suite. Only `format:check` objected, and a formatter is not a security
+ * control.
+ *
+ * Anchoring on the PROLOGUE rather than on a line anywhere in the file is what
+ * keeps it precise: a directive is only a directive as the module's first
+ * statement, so `["use server"]` in an array or `/^["']use server["']/` in a
+ * regex further down cannot be mistaken for one.
+ */
+const PROLOGUE = /^(?:\s*(?:"[^"\n]*"|'[^'\n]*')\s*;?)*/;
+
+/**
+ * Does `code` open with this directive? Takes CODE, not a path, so the rule
+ * itself is unit-testable — see "a directive is a directive without its
+ * semicolon" in the sibling test.
+ */
+export function declaresDirective(code: string, directive: string): boolean {
+  const prologue = PROLOGUE.exec(code)?.[0] ?? "";
+  return new RegExp(`["']${directive}["']`).test(prologue);
+}
+
+const DIRECTIVE_CACHE = new Map<string, boolean>();
+
+/** `"use server"` / `'use server'`, semicolon or not, as the first statement. */
+export function isUseServerModule(full: string): boolean {
+  const cached = DIRECTIVE_CACHE.get(full);
+  if (cached !== undefined) return cached;
+
+  const declared = declaresDirective(codeOf(full), "use server");
+  DIRECTIVE_CACHE.set(full, declared);
+  return declared;
+}
+
+/** The same rule for the client half of the boundary. */
+export function isUseClientModule(full: string): boolean {
+  return declaresDirective(codeOf(full), "use client");
+}
+
+/**
+ * The body of every top-level function in `code`, by name, found by MATCHING
+ * BRACES rather than by looking for the next `\n}`.
+ *
+ * The round-6 version of the source assertion sliced at the first line-initial
+ * `}` it could find, which is the closing brace of whatever nested block came
+ * first — a `try`, an `if`, an object literal spread over lines. That is fine
+ * while the mint is at the very top and catastrophic the moment somebody moves
+ * it below one, because the scan then reads a body that stops before the
+ * statement it is judging. Counting braces reads the whole function or nothing.
+ *
+ * THE RETURN TYPE IS NOT THE BODY. Finding the opening brace is its own small
+ * problem, because a return type may CONTAIN braces:
+ *
+ *   async function currentViewer(): Promise<
+ *     { ok: true; viewer: NotificationViewer } | { ok: false; error: string }
+ *   > { … }
+ *
+ * — which is the real signature in `notifications/actions.ts`. A pattern that
+ * took the first `{` after the parameter list would open at `{ ok: true …` and
+ * read a "body" that is a type. So the scan walks forward from the closing
+ * parenthesis and takes the first brace at ANGLE DEPTH ZERO; `=>` inside a
+ * function type is not a closing angle bracket and is skipped.
+ *
+ * IT MATCHES `function` DECLARATIONS ONLY, which is a real limit and the reason
+ * `valueExportStatements` exists: `export const fooAction = async (input) => …`
+ * is just as POSTable and would be invisible here. Rather than grow a second
+ * parser for a form the product does not use, the sibling test BANS that form in
+ * `"use server"` modules and says so in the failure message, so the walk's blind
+ * spot is a failing test instead of a hiding place.
+ *
+ * A GENERIC declaration — `export async function withChurchSession<T>(…)` — is
+ * read like any other. That is not cosmetic: the people domain's shared
+ * session envelope is written that way (`people/action-context.ts`), and a
+ * header pattern that stopped at the `<` left the helper out of
+ * `mintingExportsOf`, which reported thirteen correctly-guarded endpoints as
+ * "parses an argument and never mints an actor". The walk under-approximates
+ * on purpose everywhere else; here it was simply blind, so it is fixed rather
+ * than exempted. `[^(]*` is what keeps the optional group from wandering into
+ * the parameter list of a NON-generic declaration.
+ *
+ * Strings and template literals are not tracked. They do not need to be for this
+ * corpus, and a mis-parse fails LOUD (an unbalanced count runs to end of file
+ * and the assertions still see the real body) rather than silently short.
+ */
+export function functionBodies(
+  code: string
+): { name: string; body: string; exported: boolean }[] {
+  const found: { name: string; body: string; exported: boolean }[] = [];
+  const header =
+    /(export\s+)?(?:async\s+)?function\s+(\w+)\s*(?:<[^(]*>\s*)?\(/g;
+
+  for (const match of code.matchAll(header)) {
+    let i = match.index + match[0].length;
+
+    // The parameter list, which nests: `(fn: (a: string) => void)`.
+    for (let parens = 1; i < code.length && parens > 0; i++) {
+      if (code[i] === "(") parens++;
+      else if (code[i] === ")") parens--;
+    }
+
+    // The return type, skipped to the first brace outside any `<…>`.
+    let angle = 0;
+    let open = -1;
+    for (; i < code.length; i++) {
+      const char = code[i];
+      if (char === "<") angle++;
+      else if (char === ">" && code[i - 1] !== "=")
+        angle = Math.max(0, angle - 1);
+      else if (char === "{" && angle === 0) {
+        open = i;
+        break;
+      } else if (char === ";" && angle === 0) break; // an overload signature
+    }
+    if (open < 0) continue;
+
+    let depth = 0;
+    let end = code.length;
+
+    for (let j = open; j < code.length; j++) {
+      if (code[j] === "{") depth++;
+      else if (code[j] === "}") {
+        depth--;
+        if (depth === 0) {
+          end = j;
+          break;
+        }
+      }
+    }
+
+    found.push({
+      name: match[2],
+      body: code.slice(open + 1, end),
+      exported: Boolean(match[1]),
+    });
+  }
+
+  return found;
+}
+
+/**
+ * Export statements whose endpoint `functionBodies` CANNOT read — a value
+ * binding (`export const fooAction = async (input) => {…}`), a default export,
+ * or a re-export.
+ *
+ * Each of these publishes a POSTable endpoint that the brace matcher above does
+ * not return, so an action written that way would sail through the repo-wide
+ * order assertion having never been looked at. The sibling test asserts this is
+ * EMPTY for every `"use server"` module, which turns the parser's blind spot
+ * into a loud failure at the moment somebody writes one.
+ */
+export function valueExportStatements(code: string): string[] {
+  return [
+    /^export\s+(?:const|let|var)\s+\w+.*$/gm,
+    /^export\s+default\b.*$/gm,
+    /^export\s*[*{].*$/gm,
+  ].flatMap((pattern) =>
+    (code.match(pattern) ?? []).map((line) => line.trim())
+  );
+}
+
+/**
+ * The two functions that READ THE SESSION COOKIE. Everything else that counts as
+ * a mint counts because it reaches one of these.
+ *
+ * `verifySession` is the throwing form every action uses; `getCurrentSession` is
+ * the nullable one it and the page guards are built on. Both live in
+ * `src/lib/auth/session.ts` and nothing else in the product opens that cookie.
+ */
+export const SESSION_READS = ["verifySession", "getCurrentSession"];
+
+/** `import { a, b as c } from "x"` → local name ⇒ { module, original }. */
+export function importedBindings(
+  file: string,
+  code: string
+): Map<string, { module: string; original: string }> {
+  const bindings = new Map<string, { module: string; original: string }>();
+
+  for (const match of code.matchAll(
+    /^\s*import\s+(?!type\b)\{([^}]*)\}\s*from\s*["']([^"']+)["']/gm
+  )) {
+    const target = resolveModule(file, match[2]);
+    if (target === null) continue;
+
+    for (const clause of match[1].split(",")) {
+      const parts = clause.trim().split(/\s+as\s+/);
+      const original = parts[0]?.trim();
+      const local = (parts[1] ?? parts[0])?.trim();
+      if (!original || !local || original === "type") continue;
+      bindings.set(local, { module: target, original });
+    }
+  }
+
+  return bindings;
+}
+
+const MINTING_EXPORTS = new Map<string, Set<string>>();
+
+/**
+ * The names that MINT an actor when called from `file`: the two session reads,
+ * any LOCAL function that reaches one transitively, and any IMPORTED binding
+ * whose own module mints.
+ *
+ * Derived rather than declared, because a module is allowed to name its mint and
+ * several do. `notifications/actions.ts` calls `currentViewer()`, a local helper
+ * whose first line awaits `verifySession()`; `admin/feedback/actions.ts` calls
+ * `requirePlatformAdmin()`, which is imported and reaches `getCurrentSession()`
+ * one module away; `launch/actions.ts` calls `requireChurchSession()`. A scan
+ * that only knew the literal string would have called those live, correctly-
+ * guarded endpoints unminted and forced hand-written exemptions for them — and
+ * an exemption list is exactly the thing that hid the invitations surface for a
+ * whole round.
+ *
+ * `stack` breaks import cycles: a module already being resolved contributes
+ * nothing rather than recursing, which under-approximates (a cyclic mint would
+ * be missed) and so fails CLOSED — the assertion complains rather than passing.
+ */
+export function mintingNames(
+  file: string,
+  code: string,
+  stack: ReadonlySet<string> = new Set()
+): Set<string> {
+  const mints = new Set(SESSION_READS);
+
+  for (const [local, { module, original }] of importedBindings(file, code)) {
+    if (stack.has(module)) continue;
+    if (mintingExportsOf(module, new Set([...stack, file])).has(original)) {
+      mints.add(local);
+    }
+  }
+
+  const bodies = functionBodies(code);
+
+  for (let pass = 0; pass <= bodies.length; pass++) {
+    let grew = false;
+    for (const fn of bodies) {
+      if (mints.has(fn.name)) continue;
+      for (const mint of mints) {
+        if (new RegExp(`\\b${mint}\\s*\\(`).test(fn.body)) {
+          mints.add(fn.name);
+          grew = true;
+          break;
+        }
+      }
+    }
+    if (!grew) break;
+  }
+
+  return mints;
+}
+
+/** Which of `file`'s exported functions mint, for an importer to consult. */
+export function mintingExportsOf(
+  file: string,
+  stack: ReadonlySet<string>
+): Set<string> {
+  const cached = MINTING_EXPORTS.get(file);
+  if (cached !== undefined) return cached;
+
+  const code = codeOf(file);
+  const mints = mintingNames(file, code, stack);
+  const exported = new Set(
+    functionBodies(code)
+      .filter((fn) => fn.exported && mints.has(fn.name))
+      .map((fn) => fn.name)
+  );
+
+  // `verifySession` and `getCurrentSession` are exported from session.ts as the
+  // base case; they mint by definition rather than by reaching anything.
+  for (const name of SESSION_READS) {
+    if (
+      new RegExp(
+        `export\\s+(?:async\\s+)?(?:function|const)\\s+${name}\\b`
+      ).test(code)
+    ) {
+      exported.add(name);
+    }
+  }
+
+  if (stack.size === 0) MINTING_EXPORTS.set(file, exported);
+  return exported;
+}
+
+/**
+ * One exported endpoint of one `"use server"` module, with the three offsets the
+ * SESSION-FIRST rule is stated in terms of: where the actor is minted, where the
+ * argument is first parsed, and where the enclosing `try` (if any) opens.
+ */
+export type ServerActionExport = {
+  file: string;
+  name: string;
+  mint: number;
+  parse: number;
+  try: number;
+  /** `src/app/(auth)/… → login` — the form every assertion reports in. */
+  label: string;
+};
+
+/**
+ * Every exported function of every `"use server"` module under `src/` THAT
+ * PARSES AN ARGUMENT, with its offsets. An export that parses nothing is not
+ * returned: it has no oracle to leak and no ordering to get wrong, which is what
+ * keeps the scan honest about the rule rather than inventing a stricter one.
+ */
+export function parsingServerActionExports(): ServerActionExport[] {
+  const found: ServerActionExport[] = [];
+
+  for (const file of TS_FILES.filter(isUseServerModule)) {
+    const code = codeOf(file);
+    const mints = mintingNames(file, code);
+    const mintPattern = new RegExp(`\\b(?:${[...mints].join("|")})\\s*\\(`);
+
+    for (const fn of functionBodies(code)) {
+      if (!fn.exported) continue;
+
+      const parse = fn.body.indexOf(".safeParse(");
+      if (parse < 0) continue;
+
+      found.push({
+        file,
+        name: fn.name,
+        mint: fn.body.search(mintPattern),
+        parse,
+        try: fn.body.search(/\btry\s*\{/),
+        label: `${rel(file)} → ${fn.name}`,
+      });
+    }
+  }
+
+  return found;
+}
+
+/**
+ * The `(auth)` and `(marketing)` route groups: the product's two public groups
+ * (`memory/entrypoints.md`), whose endpoints are unauthenticated by
+ * construction. Everything else in `src/app` sits behind the `(dashboard)`
+ * layout's guard and is inside the SESSION-FIRST claim.
+ */
+export function isPublicRouteGroup(file: string): boolean {
+  return /\/app\/\((?:auth|marketing)\)\//.test(file);
+}

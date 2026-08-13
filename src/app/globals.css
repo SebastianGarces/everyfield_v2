@@ -98,18 +98,43 @@ body {
      3.97:1 on --muted, which is the avatar fallback (`bg-muted
      text-muted-foreground`) and every secondary/accent tile. L 0.5 clears 4.5:1
      on EVERY surface this token lands on with room to spare — 5.55:1 on
-     --background, 6.00:1 on --card, and 5.03:1 on --muted, the worst case. The
-     floor sits near L 0.5055, so this is one step past it, not a hair over it.
+     --background, 6.00:1 on --card, and 5.03:1 on --muted, the worst case.
+     --muted is the surface that binds, and its AA limit is L ≈ 0.526 — the
+     LIGHTEST L that still clears 4.5:1 there. Lightening is the failure
+     direction, so L 0.5 sits a real step under that limit, not a hair.
      C and H are untouched (the token is neutral, so only L had to move).
-     Pinned by src/app/text-contrast.test.ts; raising L again breaks that test
-     before it reaches a screen. */
+     Darkening buys AA headroom but SPENDS something that runs the other way:
+     as this token darkens it converges on --primary, so an inline link inside
+     muted prose loses its colour separation — 3.61:1 at the old L 0.556,
+     2.85:1 here, under the 3:1 WCAG SC 1.4.1 asks when colour is the ONLY
+     distinguisher. That cost is paid in CSS — inline links carry a permanent
+     underline — not by capping L, so this token stays free to move for AA.
+     The rule lives in the base layer at the bottom of this file, and once more
+     in `src/app/(marketing)/marketing.css`, because that sheet is unlayered
+     and unlayered declarations outrank `@layer base` at any specificity. Ruled
+     2026-08-10 (#386): WCAG AA is the standard that binds here; APCA is
+     advisory.
+     Pinned by src/app/text-contrast.test.ts, which re-derives the 0.526 limit
+     instead of trusting this comment; raising L again breaks that test before
+     it reaches a screen. */
   --muted-foreground: oklch(0.5 0 0);
   --accent: oklch(0.94 0 0);
   --accent-foreground: oklch(0.224 0.011 151.267);
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  /* The focus indicator, darkened for WCAG 2.2 SC 1.4.11 (#385). The ring is
+     painted at 50% alpha almost everywhere (`focus-visible:ring-ring/50` in
+     button, input, select, textarea, tabs, checkbox, switch…), so the token has
+     to clear 3:1 AFTER compositing, not just on its own. The shadcn default
+     oklch(0.708) measured 2.40:1 on --background and 2.59:1 on --card at full
+     strength — and only ~1.50:1 as rendered, which is a ring nobody can see.
+     L 0.2 composites to 3.37:1 on --background, 3.43:1 on --card and 3.29:1 on
+     --muted, the darkest surface a ring lands on. The floor sits near L 0.258,
+     so this is a step past it, not a hair over it. Kept neutral (C and H are 0)
+     by the 2026-07-31 ruling that surfaces and neutrals stay the pre-sharp
+     grays; only L moved. Pinned by src/app/text-contrast.test.ts. */
+  --ring: oklch(0.2 0 0);
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
@@ -122,7 +147,11 @@ body {
   --sidebar-accent: oklch(0.97 0 0);
   --sidebar-accent-foreground: oklch(0.224 0.011 151.267);
   --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  /* Moves with --ring: the sidebar paints its focus ring at FULL strength
+     (`ring-sidebar-ring focus-visible:ring-2`), where oklch(0.708) was 2.59:1
+     on the sidebar's white ground — the same SC 1.4.11 failure without the
+     alpha to hide behind. */
+  --sidebar-ring: oklch(0.2 0 0);
 
   /* Attention scale. Red (28) vs amber (76) reads as an intensity ramp on its
      own. The inks stop short of the darkest passing value on purpose: pushed
@@ -156,7 +185,13 @@ body {
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  /* The same SC 1.4.11 fix, mirrored for the dark ground (#385). oklch(0.556)
+     did clear 3:1 unaided — 4.18:1 on --background, 3.79:1 on --card — which is
+     exactly why the defect hid here: at the 50% alpha the components actually
+     paint it fell to ~1.87:1. L 0.85 composites to 3.76:1 on --background,
+     3.74:1 on --card and 3.51:1 on --muted. Lighter than that only adds glare;
+     the ring is 3px of near-white already. */
+  --ring: oklch(0.85 0 0);
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
@@ -169,7 +204,7 @@ body {
   --sidebar-accent: oklch(0.269 0 0);
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar-ring: oklch(0.85 0 0);
 
   /* Lifted for the dark surface rather than mechanically inverted. The inks
      invert their relationship to the base here — on a dark tile the readable
@@ -193,5 +228,174 @@ body {
   a[href],
   [tabindex="0"] {
     cursor: pointer;
+  }
+
+  /* WCAG SC 1.4.1 (Use of Color): a link sitting INSIDE a block of text has to
+     be tellable from that text by something other than colour. Ours was not —
+     --primary (ink) against --muted-foreground measures 2.85:1 in the light
+     theme and 2.06:1 in the dark one, both under the 3:1 the criterion asks —
+     and `hover:underline` is not a rest state, so a reader who never hovers
+     gets no cue at all. Lighthouse caught it as `link-in-text-block` on
+     /login's "Sign up".
+     Fixing it here rather than at the token is the whole point (ruled
+     2026-08-10, PR #387): a non-colour cue holds no matter where
+     --muted-foreground's lightness sits, so the token can keep being darkened
+     for AA without inline links quietly failing a second criterion.
+     Scoped to `p` deliberately. A paragraph IS a block of text; `li` is not —
+     it would underline every sidebar nav item, which is a list OF links rather
+     than prose containing one. Utilities outrank base, so a `no-underline`
+     class still wins where a link genuinely is not inline prose.
+     `@layer base` is the WEAKEST place this can live, and that is a real hole,
+     not a nuance: an UNLAYERED normal declaration beats it at any specificity.
+     `src/app/(marketing)/marketing.css` is such a sheet, and its
+     `.marketing a { text-decoration: none }` defeated this rule across the
+     whole marketing route group until the same underline was repeated there.
+     Any future unlayered stylesheet under src/app/ owes the same repeat —
+     src/app/text-contrast.test.ts fails the build if one strips and does not
+     restore. Do not "fix" that class of conflict with `!important` here. */
+  p a[href] {
+    text-decoration-line: underline;
+    text-underline-offset: 4px;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Print (W-020)
+
+   A printed article is the prose and nothing else. The whole block is INERT
+   unless the page marks a print root (`[data-print-root]`, set on the wiki
+   article's `<article>`), so printing any other screen is unchanged — every
+   selector below is gated on that marker being present.
+
+   Two rules carry it:
+
+   1. KEEP THE PATH. Everything in the body that is neither the print root, nor
+      inside it, nor an ancestor of it, is chrome and goes. Saying "keep the
+      article" instead of listing the chrome is what makes it hold: a header, a
+      floating guide button or a toast added tomorrow leaves the printed page
+      on the day it ships, with nobody remembering this file.
+   2. UNWIND THE ANCESTORS. The dashboard shell nests the article inside
+      fixed-height `overflow-*` scroll containers. On paper those clip it to a
+      single screenful, so every ancestor is flattened to a plain, auto-height,
+      visible-overflow block.
+
+   Colour is forced to ink on white rather than left to the theme: the printer
+   drops backgrounds, so a dark-theme reader would otherwise print near-white
+   text onto white paper and get an empty sheet.
+   --------------------------------------------------------------------------- */
+@media print {
+  @page {
+    margin: 18mm 16mm;
+  }
+
+  /* 1. Keep the path to the article; everything else is chrome. */
+  body:has([data-print-root])
+    :not(:has([data-print-root])):not([data-print-root]):not(
+      [data-print-root] *
+    ) {
+    display: none !important;
+  }
+
+  /* 2. Unwind the shell so nothing clips the article. */
+  html:has([data-print-root]),
+  body:has([data-print-root]),
+  body:has([data-print-root]) :has([data-print-root]),
+  [data-print-root] {
+    display: block !important;
+    position: static !important;
+    overflow: visible !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    background: #fff !important;
+  }
+
+  /* 3. Ink, hairlines, and no scroll containers inside the article. */
+  [data-print-root],
+  [data-print-root] * {
+    color: #000 !important;
+    background: transparent !important;
+    border-color: #999 !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+    max-height: none !important;
+  }
+  [data-print-root] .text-muted-foreground {
+    color: #3f3f3f !important;
+  }
+
+  /* 4. Furniture inside the article that is not prose: the breadcrumb, these
+        controls, the related lists and the pager are all navigation. */
+  [data-print-hide] {
+    display: none !important;
+  }
+
+  /* 5. Set the prose for paper. */
+  [data-print-root] {
+    font-size: 11pt;
+    line-height: 1.55;
+  }
+  [data-print-root] h1 {
+    font-size: 20pt;
+  }
+  [data-print-root] h2 {
+    font-size: 15pt;
+  }
+  [data-print-root] h3 {
+    font-size: 13pt;
+  }
+  [data-print-root] h4 {
+    font-size: 12pt;
+  }
+  [data-print-root] :is(h1, h2, h3, h4, h5, h6) {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+  [data-print-root] :is(p, li, blockquote) {
+    orphans: 3;
+    widows: 3;
+  }
+  [data-print-root] :is(pre, blockquote, table, img, figure) {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  /* A code block scrolls sideways on screen. On paper there is nowhere to
+     scroll, so it wraps instead of losing the end of every long line. */
+  [data-print-root] pre {
+    white-space: pre-wrap !important;
+    word-break: break-word;
+    border: 1pt solid #999 !important;
+    padding: 8pt !important;
+  }
+  [data-print-root] img {
+    max-width: 100% !important;
+    height: auto !important;
+  }
+  [data-print-root] table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+  [data-print-root] :is(th, td) {
+    border: 0.5pt solid #999 !important;
+    padding: 4pt 6pt !important;
+  }
+
+  /* 6. A link's destination survives the paper — colour and an underline carry
+        no URL. Same-page anchors name nothing off the page and stay bare. */
+  [data-print-root] a[href]::after {
+    content: " (" attr(href) ")";
+    font-size: 0.85em;
+    word-break: break-all;
+  }
+  [data-print-root] a[href^="#"]::after,
+  [data-print-root] a[href=""]::after {
+    content: "";
   }
 }

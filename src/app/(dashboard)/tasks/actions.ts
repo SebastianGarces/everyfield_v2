@@ -18,6 +18,8 @@ import {
   type BulkTaskResult,
 } from "@/lib/tasks/service";
 import { parseRecurrenceForm } from "@/lib/tasks/recurrence";
+import { UNKNOWN_TEMPLATE_ERROR, importTaskTemplate } from "@/lib/tasks/import";
+import { findTaskTemplate } from "@/lib/tasks/templates";
 import type { ActionResult } from "@/lib/tasks/types";
 import {
   bulkRescheduleSchema,
@@ -45,6 +47,7 @@ const USER_FACING_SERVICE_ERRORS = new Set<string>([
   SUBTASK_SELF_ERROR,
   SUBTASK_DEPTH_ERROR,
   SUBTASK_HAS_CHILDREN_ERROR,
+  UNKNOWN_TEMPLATE_ERROR,
 ]);
 
 function userFacingError(error: unknown): string | null {
@@ -644,6 +647,110 @@ export async function bulkRescheduleTasksAction(
     return {
       success: false,
       error: "Failed to reschedule the selected tasks. Please try again.",
+    };
+  }
+}
+
+// ============================================================================
+// Template Import (T-011 / T-012)
+// ============================================================================
+
+/** What the picker reports after a successful import. */
+export interface TemplateImportSummary {
+  templateKey: string;
+  templateName: string;
+  /** How many tasks were created. */
+  created: number;
+  /** The day the due dates were measured from, `YYYY-MM-DD`. */
+  importedOn: string;
+  /** The last due date in the imported set, `YYYY-MM-DD`. */
+  lastDueDate: string | null;
+}
+
+/**
+ * Import a checklist template as tasks for the caller's church.
+ *
+ * The ONLY argument is the template key. The church and the actor are minted
+ * from the session, never accepted (`memory/invariants.md` → Authentication) —
+ * this export is a POSTable endpoint with no UI in front of it, so a supplied
+ * church id would be a way to write tasks into someone else's plant.
+ *
+ * The key is checked against the catalog before anything is written, so an
+ * unknown key is a refusal rather than an empty import that reports success.
+ *
+ * THE MINT IS ABOVE THE `try`, not merely first inside it, which is the shape
+ * `memory/invariants.md` → Authentication requires of a NEW action. Inside the
+ * `try` the catch converts a sessionless POST into a handled
+ * `{ success: false }`; above it the rejection escapes, which is what an
+ * anonymous caller is owed. The 45 older try-wrapped mints are a closed,
+ * pinned residual (`TRY_WRAPPED_MINTS` in
+ * `src/lib/auth/server-action-surface.test.ts`) and this export is not one of
+ * them — it also takes a bare `string` and parses nothing, so the repo-wide
+ * walk, which only follows exports containing `.safeParse(`, would never have
+ * seen it. The rule is the authority here, not the walk.
+ *
+ * The only caller, `template-picker.tsx`, already wraps the call in
+ * `try`/`catch` and renders `IMPORT_FAILED_MESSAGE` on an outright rejection.
+ */
+export async function importTaskTemplateAction(
+  templateKey: string
+): Promise<ActionResult<TemplateImportSummary>> {
+  const { user } = await verifySession();
+
+  try {
+    // Not part of the auth check: a session with no church is a signed-in user
+    // with nothing to import INTO, which is a data condition and gets a
+    // sentence.
+    if (!user.churchId) {
+      return {
+        success: false,
+        error: "You must be associated with a church to import a checklist",
+      };
+    }
+
+    if (typeof templateKey !== "string" || !findTaskTemplate(templateKey)) {
+      return { success: false, error: UNKNOWN_TEMPLATE_ERROR };
+    }
+
+    const result = await importTaskTemplate({
+      churchId: user.churchId,
+      userId: user.id,
+      templateKey,
+    });
+
+    const dueDates = result.created
+      .map((task) => task.dueDate)
+      .filter((dueDate): dueDate is string => dueDate !== null)
+      .sort();
+
+    // The picker lives on /tasks, so the list under it reconciles through
+    // `refresh()`; `revalidatePath` covers the same page for anyone who
+    // reaches the import from elsewhere (`memory/contracts/data-patterns.md`).
+    refresh();
+    revalidatePath("/tasks");
+
+    return {
+      success: true,
+      data: {
+        templateKey: result.templateKey,
+        templateName: result.templateName,
+        created: result.created.length,
+        importedOn: result.importedOn,
+        lastDueDate: dueDates.at(-1) ?? null,
+      },
+    };
+  } catch (error) {
+    console.error("importTaskTemplateAction error:", error);
+
+    // No `Unauthorized` branch here, and there must not be one: the mint is
+    // above this `try`, so that rejection never reaches this catch. Re-adding
+    // it would be the first half of moving the mint back down.
+    const known = userFacingError(error);
+    if (known) return { success: false, error: known };
+
+    return {
+      success: false,
+      error: "Failed to import the checklist. Please try again.",
     };
   }
 }

@@ -151,6 +151,13 @@ themselves are older; each row carries its original date.
 | 309 | **Notification cadence is not pinned by defaults** (2026-08-09): stop writing cadence defaults at preference-create; the inert oversight cadence control is retired rather than shipped disabled; failed preference saves surface to the user. | Shipped in PR #369. |
 | seed&nbsp;guard | **The dev-seed wipe refuses to run against a database holding an alpha-cohort sentinel account** unless `--allow-protected-db` is passed (2026-08-09). Detection is positive (sentinel rows), never connection-string heuristics, which fail open. | `src/lib/dev-seed/protected-database.ts`; wipe order derived from `pg_constraint`; wiki corpus protected and never walked through. |
 
+### Resolved 2026-08-10 — which contrast standard binds `--muted-foreground` (#386), and what darkening it costs (PR #387)
+
+| # | Decision | Consequence |
+|---|----------|-------------|
+| 386 | **WCAG AA (4.5:1) binds `--muted-foreground`; APCA is advisory.** The token measures APCA Lc 68.2 on `--muted`, under the Lc 75 body-text guidance, and ships anyway: AA is the conformance target the product commits to, and APCA is still a draft that no obligation points at. Advisory means it may inform a future token move — never justify lightening one that clears AA. | #386 closed. Enforcement line in `memory/invariants.md` (Design Tokens — Contrast), tagged ⚖; `src/app/text-contrast.test.ts` continues to assert AA on all eight surfaces in both themes and nothing asserts an APCA floor. |
+| PR&nbsp;387 | **The SC 1.4.1 cost of darkening is paid in CSS, not by capping the token — on every surface the product ships, marketing included.** Darkening `--muted-foreground` converges it on `--primary`, so an inline link in muted prose fell to 2.85:1 (light) / 2.06:1 (dark) against its surrounding text — under the 3:1 WCAG SC 1.4.1 asks when colour is the only distinguisher, and `hover:underline` is not a rest state. Ruled: give inline links a **permanent underline** rather than bound how far the token may darken. A non-colour cue holds at any lightness, so the two criteria stop competing. Options (b) "cap the darkening at the 1.4.1 boundary" and (c) "rule 1.4.1 out of scope" were both rejected. **The rule is not surface-specific**, ruled in round 2 on the PR thread ([comment 5244357976](https://github.com/SebastianGarces/everyfield_v2/pull/387#issuecomment-5244357976), 2026-08-10): *"the underline CSS stays everywhere, including the SHARP marketing pages — the 1.36:1 colour-only links were a real SC 1.4.1 failure."* `/terms` and `/privacy` had shipped four colour-only prose links at **1.36:1** (field green `#0b7a3f` on marketing body text `#4e584f`) — a worse violation than the `/login` case this ruling was written to fix, on pages every visitor sees. Exempting the marketing surface was rejected: SHARP (`DESIGN.md`) rules link *colour*, not decoration, and only prose links change — nav, CTA and card links keep the flat treatment. | `p a[href]` underlines in the base layer of `src/app/globals.css` (scoped to `p`, since `li` is nav), and `.marketing p a[href]` underlines in `src/app/(marketing)/marketing.css` itself — on the sheet that caused the conflict rather than via `!important` in `globals.css`. Why two: `@layer base` is the weakest place in the cascade, and an unlayered normal declaration beats a layered one at any specificity, so the unlayered `.marketing a { text-decoration: none }` had deleted the cue across the whole marketing route group. Lighthouse's `link-in-text-block` finding on `/login` clears. Enforcement lines in `memory/invariants.md` name link separation as the cost darkening carries, forbid deleting the rule or adding `no-underline` to prose links, and record that the underline is owed by every unlayered stylesheet under `src/app/` that touches `text-decoration` on a bare `a` — never "paid once". `src/app/text-contrast.test.ts` fails the build when a sheet strips it without restoring. |
+
 ### Recorded 2026-08-10 — phase-engine technical decisions (June 2026)
 
 Moved out of the phase-engine FRD §10 when the ledger became the single home for decisions. The
@@ -173,3 +180,77 @@ surfaces what to do; the agent does it). It is captured in
 `product-docs/features/church-plant-agent/vision.md`, which is where the agent-framework decision
 (AI SDK agent primitives vs. LangGraph vs. Vercel Workflow DevKit) is framed. The Plant Intelligence
 judge itself needs none of those.
+
+### Ruled 2026-08-10 — the onboarding flow's `?step=` URL (#373, PR 390)
+
+Two spec-questions raised on PR 390 and ruled by Sebastian on the thread the same day. The comment,
+verbatim:
+
+> **RULINGS (2026-08-10, Sebastian):** (1) **Suppress the Guide button on the OB-015 finish screen**
+> without giving it its own ?step= value — honors the #367 option-C intent; no reopenable URL.
+> (2) **replaceState off step 1** once the church exists, so browser Back skips the non-re-enterable
+> step; the same ruling covers the deep-link /dashboard?step=basics. Both fixes in this PR before merge.
+
+| # | Decision | Consequence |
+|---|----------|-------------|
+| PR&nbsp;390 (a) | **The contextual wiki guide is suppressed on the OB-015 finish screen by REMOVING `?step=`, not by giving the screen a URL of its own.** Chosen over accepting the guide there (PR #367 scoped it to *the one step that raises the question*, and the finish screen does not raise it) and over inventing a fifth `?step=` value — which was rejected because it would hand a planter a shareable, bookmarkable URL that reopens an offer whose gate they already answered. | The finish screen is `/dashboard` with the param removed, so it matches no guide entry and no second "is the guide on?" mechanism is added. Reloading it resumes the flow rather than reopening the offer. Enforcement line in `memory/invariants.md` (Onboarding). |
+| PR&nbsp;390 (b) | **Step 1 is not in the browser history.** Once the church exists the 1→2 transition `replaceState`s instead of pushing, and the same rule declines the deep link `/dashboard?step=basics` — "step 1 is not re-enterable" becomes true everywhere instead of only in-app, where `backTarget` already said so. Option C (a read-only done state for step 1) was rejected as the largest change for a state only ever seen travelling backwards. | **Accepted cost, in the ruling's own terms: browser Back from step 2 now leaves the flow** — the behaviour issue #373's AC 5 was originally written to stop. AC 5 is amended on the issue so the next reader does not file it as a regression. The rule lives in `resolveOnboardingStepRequest` (server) and `addressableOnboardingStep` (client mirror); enforcement line in `memory/invariants.md` (Onboarding). |
+
+### Ruled 2026-08-10 / 2026-08-12 — how a manual attestation may be cited (#319, PR 394)
+
+The fact snapshot writes every manual attestation TWICE — `manual.byKey.<signal>` and
+`manual.attestations[]` — and the judge's citable ledger is the whole flattened snapshot, so both
+spellings are legal citations of one fact. Ruled by Sebastian on the PR thread across three rounds.
+The round-2 comment, verbatim:
+
+> **RULING round 2 (2026-08-10, Sebastian):** unify the drill-down wording — the formatter resolves
+> the signalKey (as the normalizer already does), so byKey and attestations-array citations read the
+> same specific sentence. The raw citation path (data-path) stays verbatim. Also land the owed
+> bookkeeping the PR names: the citation-normalisation ruling into product-docs/decisions.md.
+> Amend this PR.
+
+Round 2 unified the drill-down and stopped there, which left the other two surfaces on the same
+page speaking differently about the same citation. The round-3 comment, verbatim:
+
+> **RULING (2026-08-12, Sebastian): Option A — extend the unification to both surfaces, mixed
+> signals collapse to a count.** Resolve `signalKey` where the insight-card and CSF-scorecard
+> projections are built, carry it to the components, and pass it through a context-aware plural
+> formatter. One resolved signal reads the same specific sentence the drill-down reads; MIXED
+> signals collapse to a count ("3 things you confirmed") — the counting path stays a counter, never
+> a lister. All three surfaces on /phase then read one voice for one citation. The raw citation path
+> (data-path) stays verbatim, per the round-2 ruling. Confirm the owed decisions.md bookkeeping row
+> from round 2 actually landed; if not, it lands in this amendment.
+
+| # | Decision | Consequence |
+|---|----------|-------------|
+| PR&nbsp;394 (a) | **A citation is normalised onto its signal at parse time, by resolving the row.** `manual.attestations.N.…` is rewritten to `manual.byKey.<signal>` for ATTRIBUTION, reading entry N's `signalKey` out of the assessment's own snapshot — so which of two equally legal spellings the model happened to emit cannot decide whether a gate reads "Not addressed". Widening the three attested criteria to the bare `manual` prefix was rejected: each measures ONE signal, so a prefix rule would tell a planter the engine addressed their financial base because it mentioned an unrelated one. An unresolvable row (out-of-range index, non-numeric index, no `signalKey`) attributes to NOTHING rather than guessing a gate. | `normalizeManualCitation` in `src/lib/phase-engine/assessment/exit-criteria.ts`, applied by `citedPathsOf`, over `attestationSignalKey` in `assessment/snapshot-fact.ts`. The criteria keep declaring only the keyed spelling. `buildEvidence` is deliberately untouched, so the drill-down still shows the citation as the judge wrote it. |
+| PR&nbsp;394 (b) | **Having landed on the same gate, both spellings must also READ the same** (round 2). The formatter resolves the signal the same way the normaliser does and phrases the array spelling with the `MANUAL_SIGNAL_CLAUSES` sentence the keyed one uses — "you confirmed your financial base is in place", not "something you confirmed" beside it. Same evidence told twice, once vaguely, is what makes a planter doubt the specific telling. The RAW citation path is unchanged: `data-path` stays verbatim, and an unresolved row keeps the generic self-report phrasing rather than borrowing a signal. | The resolved signal rides on `CitedFactEvidence.signalKey` and reaches `formatCitedFact(fact, { signalKey })` (`src/lib/phase-engine/fact-format.ts`); nothing rewrites `path`. Pinned by `fact-format.test.ts` (the two spellings render the identical sentence) and `exit-criteria.test.ts` (the rendered `data-path` is still the judge's own). |
+| PR&nbsp;394 (c) | **The unification reaches ALL THREE surfaces, and it is a READ-LAYER fix** (round 3, option A). The insight card and the CSF scorecard fold a whole `cited_facts` column and hold no snapshot, so the projection that feeds them resolves each citation's signal and carries it; the components pass it to a context-aware plural formatter. Option (b), accepting the divergence, was rejected because all three cards sit on `/phase` at once — a planter could read one attestation named by the drill-down and called "something you confirmed" by the card above it, in one screenful. Widening the formatter's own guesswork was rejected for the same reason the prefix rule was in (a): resolving a row is a read of the snapshot, not a syntax rule. | **The counting path stays a counter.** One resolved signal in a group reads the drill-down's sentence; MIXED signals — two different attestations, or one resolved beside one that is not — collapse back to "3 things you confirmed" rather than listing them. **The fold is keyed on the resolved SIGNAL, never on the rendered phrase**, which is what makes the rule spelling-independent at every N: two attestations count the same whether the model cited them by key or by row, and one attestation cited both ways is one thing, never a named sentence beside a count that already included it. That takes TWO keys, and round 4 had to add the second: a group's IDENTITY is an explicit `attestationGroupKey` (template plus value-class — `attestation:value:true`, `attestation:signalKey`, `attestation:attestedAt`), and its MEMBERS are the distinct resolved signals. Keying the group on the rendered phrase looked signal-independent and was not — two of the four attestation templates bake the signal or the date into the phrase, so at N=2 the `signalKey` and `attestedAt` leaves put every attestation in a group of its own and the counter printed each one's sentence. The counter had become a lister on three of the four leaves, and a valueless array `signalKey` fell out of the templates entirely and printed the ledger's own label. `resolveCitedFactSignals` + `AssessedInsight.citedFactSignals` (`assessment/snapshot-fact.ts`), read by `formatCitedFacts(citedFacts, signals)` (`fact-format.ts`). `data-path` is still verbatim. Pinned by `fact-format.test.ts`, `assessment/exit-criteria.test.ts` (the real projections) and `components/phase-engine/citation-voice.test.ts`, which renders all three components from ONE assessment and asserts they say the same sentence. |
+
+## 2026-08-12 — Debt-sweep rulings (#403, PRs #404–#410)
+
+Sebastian ruled all 34 sweep DECISIONs in one session (recommendation ledger adopted in full).
+The structural/code-only choices live in the PR bodies as "Rulings applied"; the rows below are
+the product- and canon-shaping subset. Deferred implementations are pinned: migrations → #411,
+`template_key` → #378 WS1, assign-dialog search → #320.
+
+| # | Decision | Consequence |
+|---|----------|-------------|
+| 404-2 | **`src/components/ui` is vendored shadcn CLI output.** The contract is "matches what the CLI generates": defects are fixed in place; unused registry surface is never hand-pruned. | `pnpm dlx shadcn add` stays non-destructive; readers treat the folder as vendor code, not product code. |
+| 405-1 | **Client IP is read from platform-written `x-real-ip`, falling back to the LAST hop of `x-forwarded-for`.** The first hop is client input and nothing may branch on it. | Both IP-based rate limits become spoof-resistant. Enforcement line joins the Authentication invariant. |
+| 405-2 | **Session freshness is deliberately unwired until the first sensitive operation ships.** The column stays; the helpers and the invariant line claiming a live control are removed. | Documentation stops describing a control that does not run. Re-adding freshness is the first AC of whichever flow needs it (password change, association accept). |
+| 405-4 | **A successful login clears that identifier's failure window.** | The fail-4-times-succeed-then-lock trap is gone; lockout counts only consecutive failures. |
+| 406-1 | **Template catalog wiki links point at the published corpus; response-card and sign-in-sheet map to `running-the-meeting`.** A guard test pins every `relatedWikiSlug` to a resolvable article. | Seven dead links become live; a future slug rename fails the suite instead of the user. |
+| 407-3 | **Relative timestamps standardize on `formatRelativeTimestamp`** ("12m ago" / "3d ago", absolute past a week) everywhere date-fns wording survived. | One formatter authority; the hub and history match the notifications feed. |
+| 408-2 | **A signed-in user with no church and no oversight role sees an explicit "not attached to a plant yet" state on /dashboard** — never a silently empty dashboard. | The undesigned state is designed; the null-scoped reads and `!` assertions behind it are gone. |
+| 408-3 | **`?step=leadership` is never scrubbed, even when it cannot be honoured.** An inert param is harmless; scrubbing would cost a permission read on every dashboard render. | The #373/#367 scrub rule keeps its one deliberate exception, now recorded. |
+| 409-Δ | **The five #409 behavior deltas are accepted as fixes** — most notably: client-supplied foreign keys are proven against the caller's church, so a forged POST that used to write a row now throws. | Tenant isolation holds at the service layer (V2). The remaining deltas: wider revalidation, `ON CONFLICT` duplicate guard, no zero-row staffing event, schema-level coercion. |
+| 409-1 | **A team role holds one active member.** Partial unique index on active `(role_id)` + `ON CONFLICT` (#411). | The invisible-second-assignee state becomes impossible at the DB (V4: a role is a slot). |
+| 409-2 | **A predefined team's identity is `template_key`, never its display name.** Lands as #378 WS1 schema work, before the "Leadership" rename. | Renaming a template team becomes a pure display change; the org-chart root and responsibilities lookups stop keying on copy. |
+| 409-4 | **Team attendance rate counts only active team members in the numerator.** | The figure can no longer exceed 100% (V5). Existing dashboards read lower and truer. |
+| 409-5 | **The team-card dot is a STAFFING signal; /teams/health is the HEALTH signal.** Two named signals, not one signal computed two ways. | Same team may legitimately show green staffing and yellow health; each surface says which question it answers (V5). |
+| 409-6 | **Error copy policy: a service throws typed `ExpectedError` for messages a planter should read; everything else surfaces as the generic sentence.** | One action shell; "Role is already filled" stays useful, internals stop leaking into user copy. |
+| 410-1 | **People search matches full names** ("Jane Smith"), on the live list path. | The only implementation of full-name search stops being dead code by becoming the product. |
+| 410-2 | **Every person-creation path writes the `person_created` activity**, via the service. | Timelines agree regardless of which door a contact came in through. |
+| 410-3 | **The import preview never ships matched contacts' full records to the browser** — matches are `{id, displayName}` only. | PII of existing contacts stops round-tripping through client state (V2). |
+| 410-4 | **Creating a household with a head is one atomic action.** | The orphaned-empty-household state (second call fails) becomes impossible. |

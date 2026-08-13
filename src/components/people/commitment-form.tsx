@@ -1,6 +1,6 @@
 "use client";
 
-import { createCommitmentAction } from "@/app/(dashboard)/people/actions";
+import { createCommitmentAction } from "@/app/(dashboard)/people/assessment-actions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

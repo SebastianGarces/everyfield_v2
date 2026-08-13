@@ -113,9 +113,9 @@ export function AnalyticsCharts({ trend, stats }: AnalyticsChartsProps) {
                     type="monotone"
                     dataKey="total"
                     name="Total"
-                    stroke="hsl(var(--primary))"
+                    stroke="var(--primary)"
                     strokeWidth={2}
-                    dot={{ fill: "hsl(var(--primary))" }}
+                    dot={{ fill: "var(--primary)" }}
                   />
                 </LineChart>
               </ResponsiveContainer>

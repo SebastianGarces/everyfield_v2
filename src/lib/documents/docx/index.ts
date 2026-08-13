@@ -25,9 +25,8 @@ const DOCX_BUILDERS: Record<string, DocxBuilder> = {
   "board-meeting-agenda": buildBoardMeetingAgenda,
 };
 
-export function hasDocxRenderer(templateId: string): boolean {
-  return templateId in DOCX_BUILDERS;
-}
+/** Registered template ids — `render.ts` folds these into its format registry. */
+export const DOCX_TEMPLATE_IDS: readonly string[] = Object.keys(DOCX_BUILDERS);
 
 /**
  * Render a template to a .docx Buffer. Throws if the template id has no builder.

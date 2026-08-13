@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Search, UserPlus, AlertTriangle } from "lucide-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -17,10 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import {
-  assignMemberAction,
-  getPersonTeamCountAction,
-} from "@/app/(dashboard)/teams/actions";
+import { assignMemberAction } from "@/app/(dashboard)/teams/actions";
 import type { Person } from "@/db/schema";
 
 interface MemberAssignDialogProps {
@@ -28,6 +25,13 @@ interface MemberAssignDialogProps {
   roleId: string;
   roleName: string;
   people: Person[];
+  /**
+   * Active team count per person id, resolved by the server component next to
+   * the people list. Server data arrives as props, never through a client-side
+   * fetch into state (memory/invariants.md → Client/Server Data
+   * Synchronization); the only state here is UI state.
+   */
+  teamCounts: Record<string, number>;
 }
 
 export function MemberAssignDialog({
@@ -35,26 +39,20 @@ export function MemberAssignDialog({
   roleId,
   roleName,
   people,
+  teamCounts,
 }: MemberAssignDialogProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [selectedPerson, setSelectedPerson] = useState<Person | null>(null);
-  const [teamCount, setTeamCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const teamCount = selectedPerson ? (teamCounts[selectedPerson.id] ?? 0) : 0;
 
   const filteredPeople = people.filter((p) => {
     const fullName = `${p.firstName} ${p.lastName}`.toLowerCase();
     return fullName.includes(search.toLowerCase());
   });
-
-  useEffect(() => {
-    if (selectedPerson) {
-      getPersonTeamCountAction(selectedPerson.id).then((result) => {
-        if (result.success) setTeamCount(result.data);
-      });
-    }
-  }, [selectedPerson]);
 
   async function handleAssign() {
     if (!selectedPerson) return;

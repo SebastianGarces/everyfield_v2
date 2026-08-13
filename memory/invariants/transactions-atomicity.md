@@ -2,7 +2,7 @@
 
 Why and how, for the Transactions / Atomicity rules in [`../invariants.md`](../invariants.md).
 
-**Source:** `src/db/index.ts`, `src/lib/invitations/core.ts`, `src/lib/onboarding/create-church.ts`, `src/app/(dashboard)/dashboard/confirm-leadership.ts`, `src/lib/meetings/service.ts`, `src/lib/tasks/events.ts`, `src/lib/phase-engine/transitions/service.ts`
+**Source:** `src/db/index.ts`, `src/lib/invitations/core.ts`, `src/lib/onboarding/create-church.ts`, `src/app/(dashboard)/dashboard/confirm-leadership.ts`, `src/lib/meetings/service.ts`, `src/lib/tasks/events.ts`, `src/lib/phase-engine/transitions/service.ts`, `src/lib/people/household.ts`
 
 ## The model
 
@@ -46,6 +46,16 @@ The one path left unguarded is an answer from whoever already holds the seat: on
 ## The snapshot CTE must be a dependency of the write (#305, WS2)
 
 A plain CTE evaluates lazily. In `with current as (select … for update), updated as (update …), journal as (insert … from updated join current …)` nothing pulls `current` until the journal — *after* the UPDATE. `FOR UPDATE` then skips the row the current command just wrote, `current` comes back empty, the join matches nothing, and the journal row is silently absent. Fix structurally: the UPDATE reads the snapshot (`update launches l … from current c where l.id = c.id`) and returns the old values itself. Reference: `recordLaunchOutcomeStatement` (`src/lib/launch/outcome.ts`), pinned by `outcome.test.ts`; `setLaunchDateStatement`'s `inserted` CTE forces `current` first via its `not exists` predicate — deleting that predicate breaks its journal the same silent way.
+
+## `insert … select` as the existence check (`createHouseholdWithHead`, PR #410 ruling 410-4B)
+
+`createHouseholdWithHead` (`src/lib/people/household.ts`) batches two statements: the household INSERT and the person UPDATE that makes that person its head. The INSERT is an `insert … select` whose row source is the person row itself, filtered by the full person predicate (`church_id`, `id`, `deleted_at is null`). That makes the existence check structural: a bad `personId` — wrong tenant, soft-deleted, forged — selects zero rows, so no household is written and there is no pre-flight SELECT for a concurrent delete to slip behind. Do not "improve" it by adding a SELECT before the batch; the SELECT reintroduces exactly the window the shape removed.
+
+The order cannot be reversed: `persons.household_id` FKs `households.id`, so the person UPDATE referencing the freshly minted household id needs the household row to exist first — and each batch statement sees the previous one's writes, which is what makes household-first work in one round trip. The id is minted in JS (`crypto.randomUUID()`) so both statements can carry it.
+
+With `usePersonAddress`, the select feeds the person's address columns into the household's (`nullif(col, '')`, `coalesce(country, 'US')`); without it, the address slots are literal nulls. Drizzle's insert-from-select emits the FULL insertable column list in table-definition order, so the select must supply every `households` column in that exact order — pinned by `src/lib/people/household.test.ts`.
+
+**Accepted residual:** the two statements take separate READ COMMITTED snapshots inside the batch, so a person soft-deleted *between* them yields inserted-household + zero-row-update, and the batch COMMITs both. The JS `throw new Error("Person not found")` on the empty `returning()` fires after COMMIT and rolls nothing back (the empty-`returning()` rule above), leaving an orphan household. Carried deliberately: the window is two statements wide in one round trip, and the orphan is inert (memberless households are listable and deletable).
 
 ## Marker-last (`finalizeAttendance`)
 

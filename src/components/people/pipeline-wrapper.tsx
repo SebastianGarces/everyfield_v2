@@ -1,9 +1,7 @@
 "use client";
 
-import {
-  changeStatusWithReasonAction,
-  reorderPipelineAction,
-} from "@/app/(dashboard)/people/actions";
+import { changeStatusWithReasonAction } from "@/app/(dashboard)/people/actions";
+import { reorderPipelineAction } from "@/app/(dashboard)/people/pipeline-actions";
 import type { PersonStatus, PipelineData } from "@/lib/people/types";
 import { useRouter } from "next/navigation";
 import { PipelineView } from "./pipeline-view";

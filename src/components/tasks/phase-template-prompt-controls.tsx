@@ -1,0 +1,500 @@
+"use client";
+
+import {
+  useActionState,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
+
+import { Button } from "@/components/ui/button";
+import type {
+  PhaseTemplateDismissOutcome,
+  PhaseTemplateImportOutcome,
+} from "@/lib/tasks/phase-prompt";
+
+// ============================================================================
+// T-020 — the prompt's form, its two buttons, and the only client code the
+// prompt has.
+//
+// WHY THIS IS A SEPARATE FILE. `phase-template-prompt.tsx` is a server
+// component: it reads the session, queries the transition and DEFINES the two
+// server actions. `useActionState` is a client hook, and a module is either
+// `"use client"` or it is not — so the form moves out and everything else stays
+// where the auth surface can be reasoned about. The checklist rows and the fine
+// print are handed in as `children`, so they are still SERVER-rendered markup;
+// nothing but two server-action references crosses the boundary.
+//
+// WHY THE FORM LIVES HERE AND NOT IN THE SERVER COMPONENT (ruled 2026-08-12,
+// round 3 on PR #393). Both actions used to return `void` and swallow every
+// failure into `console.error`. A press that creates 22–26 tasks is the last
+// place a planter should have to guess, so each action now RETURNS an outcome
+// and `useActionState` renders it. `useActionState` puts its action on the
+// `<form>`, which is why the form element is in this island.
+//
+// WHAT THIS ISLAND MAY REPORT, AND WHAT IT MAY NOT. Only outcomes that leave
+// the prompt STANDING: a failed import, a failed decline, a submit that named
+// no live checklist. Every one of those leaves the transition unanswered, so the
+// next server render still contains this panel and this island keeps its state
+// through it. The PARTIAL import is the opposite case and it was shipped here
+// by mistake — it answers the transition, so `PhaseTemplatePrompt` renders the
+// receipt state instead of the prompt and this island is removed from the tree
+// before a single pixel of its receipt could be painted. That is not a
+// revalidation setting to tune: per
+// `.next-docs/01-app/03-api-reference/04-functions/cookies.mdx`, setting a
+// cookie in a Server Action re-renders the route on its own, and answering
+// always sets one. The receipt is server markup in
+// `phase-template-prompt.tsx`; this island's only part in it is
+// `ClearReceiptCookie`, which spends the flash once it has been read.
+//
+// WHY THE IMPORT BUTTON DISABLES WHEN NOTHING IS TICKED (ruled 2026-08-12,
+// round 3). Unticking every box and pressing Import used to be a completely
+// silent no-op: no answer, no tasks, no message, and every box ticked again on
+// the next render. That also made the round-2 copy false — the unticked
+// checklists WERE offered again, immediately. Making the empty submit
+// impossible is what makes the sentence true. "Not now" stays live, because
+// dismissing everything is exactly what an empty selection means, and a screen
+// with no enabled control is a trap.
+//
+// ONE LIVE REGION FOR THE FAILURES, AND ONE FOR THE REFUSAL. Each failure used
+// to render its own `role="alert"`, independently — so a failed import followed
+// by a failed dismiss announced twice, the older of the two describing a press
+// the planter had already moved past. Both hooks keep their last result forever
+// and neither knows which ran more recently, so the buttons record `lastPress`
+// and `phaseTemplatePromptAlert` derives the single sentence from it. The
+// separate `role="status"` hint is mounted from the first paint with its text
+// toggled: a polite region inserted together with its first message is commonly
+// not announced at all.
+//
+// TICK COUNTING IS A DOM READ, NOT A MIRROR OF THE CHECKBOXES. The boxes stay
+// uncontrolled server markup; `change` bubbles to the form, and the handler
+// counts what is checked right then. Holding a copy of the tick state in React
+// would be a second source of truth for something the DOM already knows
+// (`memory/contracts/data-patterns.md` — this is UI state, and the least of
+// it).
+//
+// …AND A SETTLED ACTION IS THE SECOND MOMENT THE DOM CHANGES BEHIND THE COUNT.
+// `change` is not the only writer of those checkboxes: REACT 19 RESETS AN
+// UNCONTROLLED FORM AFTER A `<form action>` ACTION SETTLES, restoring every box
+// to its `defaultChecked` — and it fires NO change event doing it. Round 3 added
+// three settled outcomes that leave this panel mounted (import `nothing`, import
+// `failed`, dismiss `failed` — the three that answer nothing, so nothing takes
+// the prompt down), so after any of them the boxes are all ticked again while a
+// count kept only by `countTicks` still holds its pre-submit value. That desync was shipped and caught in the browser: three
+// visibly ticked boxes above a DISABLED Import, under a hint asking the planter
+// to tick something — the exact trap this design exists to prevent — and, worse,
+// a retry that imported 15 tasks from two checklists the planter had unticked.
+// So the count is RE-READ FROM THE DOM whenever an action settles — one effect
+// in the island, keyed on the two outcomes, calling the same
+// `tickedTemplateCount` the `change` handler calls. It is not `useEffect` for
+// data synchronisation,
+// which `memory/contracts/data-patterns.md` forbids: nothing here is server data
+// and no state is mirrored from props. It is the DOM-subscription case that file
+// names as the legitimate one — React mutated the checkboxes without telling us,
+// and this reads them back.
+// ============================================================================
+
+// ----------------------------------------------------------------------------
+// Outcomes — what the two actions report back
+// ----------------------------------------------------------------------------
+
+/**
+ * The outcome shapes are DEFINED IN `@/lib/tasks/phase-prompt`, next to the pure
+ * function that decides them, and re-exported here for the components and tests
+ * that only ever draw them. `import type` is erased, so this island still pulls
+ * nothing server-side into the browser bundle.
+ */
+export type { PhaseTemplateDismissOutcome, PhaseTemplateImportOutcome };
+
+export const PHASE_TEMPLATE_IMPORT_IDLE: PhaseTemplateImportOutcome = {
+  status: "idle",
+};
+
+export const PHASE_TEMPLATE_DISMISS_IDLE: PhaseTemplateDismissOutcome = {
+  status: "idle",
+};
+
+// ----------------------------------------------------------------------------
+// Copy
+// ----------------------------------------------------------------------------
+
+/** The request itself failed and nothing was created — the catalog's wording
+ *  (`template-picker.tsx` → `IMPORT_FAILED_MESSAGE`), in the plural, because
+ *  this surface imports several checklists at once. */
+export const IMPORT_FAILED_MESSAGE =
+  "We could not import those checklists just now. Nothing was created — try again.";
+
+/** Declining failed. It creates nothing either way, so the only thing owed is
+ *  "that press did not land". */
+export const DISMISS_FAILED_MESSAGE =
+  "We could not dismiss this just now. Nothing was changed — try again.";
+
+/** A submit that named no checklist still on offer. Unreachable from the
+ *  buttons; reachable from a forged POST, or from a plant that moved stage
+ *  between the render and the press. */
+export const NOTHING_IMPORTED_MESSAGE =
+  "Nothing was imported — no checklist on offer was ticked. Tick one, or press Not now to dismiss this stage's checklists.";
+
+/** Why Import refuses. A disabled button with no reason beside it is the same
+ *  dead end the silent no-op was, so the sentence renders whenever the button
+ *  is refusing, and names the control that IS live. */
+export const NOTHING_TICKED_HINT =
+  "Tick at least one checklist to import. Press Not now to dismiss them all.";
+
+// ----------------------------------------------------------------------------
+// The one live region
+// ----------------------------------------------------------------------------
+
+/**
+ * Which button was pressed last. UI state, and the only thing that can tell two
+ * independent `useActionState` hooks apart in time.
+ */
+export type PhaseTemplatePromptPress = "import" | "dismiss";
+
+export interface PhaseTemplatePromptAlertInput {
+  lastPress: PhaseTemplatePromptPress;
+  importOutcome: PhaseTemplateImportOutcome;
+  dismissOutcome: PhaseTemplateDismissOutcome;
+}
+
+/**
+ * The ONE sentence the prompt announces, or `null` for silence.
+ *
+ * There used to be three `role="alert"` paragraphs, one per failure, each
+ * rendered independently. A failed import followed by a failed dismiss put TWO
+ * live regions on the page at once — two announcements for one press, and the
+ * older of them describing a press the planter had already moved on from. A
+ * live region is a channel, not a list, so there is one, and it carries the
+ * outcome of the press that was actually made.
+ *
+ * `lastPress` is what makes that possible. Each hook keeps its own last result
+ * forever, so "import failed" survives every later dismiss and vice versa;
+ * neither hook knows which ran more recently. The buttons record it.
+ */
+export function phaseTemplatePromptAlert(
+  input: PhaseTemplatePromptAlertInput
+): string | null {
+  if (input.lastPress === "dismiss") {
+    return input.dismissOutcome.status === "failed"
+      ? DISMISS_FAILED_MESSAGE
+      : null;
+  }
+
+  if (input.importOutcome.status === "failed") return IMPORT_FAILED_MESSAGE;
+  if (input.importOutcome.status === "nothing") return NOTHING_IMPORTED_MESSAGE;
+
+  return null;
+}
+
+// ----------------------------------------------------------------------------
+// The outcome surface, and the receipt's one client-side chore
+//
+// WHY THE ALERT IS ITS OWN COMPONENT. It is a pure function of its data and
+// holds no hooks, and while it was inline in `PhaseTemplatePromptForm` the only
+// way a test could reach it was to seed `useActionState` — which
+// `renderToStaticMarkup` cannot drive, so the form grew three `initial*` props
+// whose comment said "Production never passes these." Test scaffolding in a
+// production component's public shape is a cost paid on every read of that
+// shape; extracted, the markup is renderable directly and the seams delete
+// themselves. What the FORM still owns is the CHOICE of message, and that half
+// was already pure and separately tested (`phaseTemplatePromptAlert`).
+// ----------------------------------------------------------------------------
+
+/**
+ * Spend the partial-import receipt's flash cookie, now that it has been read.
+ *
+ * RENDERS NOTHING AND EXISTS FOR ONE SIDE EFFECT. The receipt is server markup
+ * carried by a short-lived cookie, because the answer that produced it unmounts
+ * the island that used to hold it. A cookie is not a message, though: left in
+ * place it re-states "the remaining checklists were not created" on every
+ * `/tasks` render until it expires — including the render AFTER the planter has
+ * followed the link and imported the remainder, when the sentence is no longer
+ * true. So the browser deletes it the moment the receipt is on screen: shown
+ * once, gone.
+ *
+ * The cookie's name is a PROP, not an import. This module is `"use client"`, so
+ * every export of it is a client reference on the server — a server component
+ * that imported the constant from here would interpolate a reference object,
+ * not a string. Props cross that boundary; module constants do not.
+ *
+ * `useEffect` for a `document.cookie` write is not the data synchronisation
+ * `memory/contracts/data-patterns.md` forbids — nothing here is server data and
+ * no state is mirrored. It is the browser-API side effect that file reserves the
+ * hook for, and it is why `maxAge` is the backstop rather than the mechanism:
+ * with JavaScript off the receipt simply expires on its own.
+ */
+export function ClearReceiptCookie({ name }: { name: string }) {
+  useEffect(() => {
+    document.cookie = `${name}=; Path=/; Max-Age=0; SameSite=Lax`;
+  }, [name]);
+
+  return null;
+}
+
+/**
+ * The prompt's ONE live region — `role="alert"`, the catalog's own treatment.
+ *
+ * It takes a message rather than the two outcomes on purpose: WHICH sentence is
+ * `phaseTemplatePromptAlert`'s decision, and rendering it is this component's.
+ * Keeping them apart is what stops a second live region being added beside this
+ * one the next time a failure gets its own branch.
+ */
+export function PhaseTemplatePromptAlert({ message }: { message: string }) {
+  return (
+    <p
+      role="alert"
+      data-testid="prompt-alert"
+      className="bg-destructive/10 text-destructive rounded-md p-2 text-sm"
+    >
+      {message}
+    </p>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// The button state
+// ----------------------------------------------------------------------------
+
+export interface PhaseTemplatePromptControlInput {
+  importPending: boolean;
+  dismissPending: boolean;
+  /** How many checklists are ticked right now. Zero refuses the import. */
+  tickedCount: number;
+}
+
+export interface PhaseTemplatePromptControlState {
+  importDisabled: boolean;
+  /** Declining is never refused for an empty selection — it IS the empty
+   *  selection's answer. It only goes inert while a request is in flight. */
+  dismissDisabled: boolean;
+  importing: boolean;
+  dismissing: boolean;
+  importLabel: string;
+  /** The sentence shown beside a refusing Import button, or `null`. */
+  emptyHint: string | null;
+}
+
+/**
+ * How many of the prompt's checklists are ticked in this form, right now.
+ *
+ * ONE reader for BOTH writers — the bubbled `change` and the post-settle resync
+ * — so "how many are ticked" cannot come to mean two different things. The
+ * selector is the same one the server action reads (`templateKey`), which is
+ * what makes the count and the submitted payload the same set.
+ */
+export function tickedTemplateCount(form: HTMLFormElement): number {
+  return form.querySelectorAll('input[name="templateKey"]:checked').length;
+}
+
+/**
+ * What the two buttons say and whether they accept a press.
+ *
+ * Pulled out of the component because neither pending flag can be driven from a
+ * test — `useActionState` reports `pending: false` under `renderToStaticMarkup`
+ * no matter what — and "the submit button is disabled while the request runs"
+ * and "Import refuses an empty selection" are both acceptance criteria. As a
+ * pure function of (in flight?, which action?, how many ticks?) it is assertable
+ * at every combination, and the browser gate proves the wiring.
+ *
+ * Both buttons go inert together while ANY request is in flight: one form, one
+ * answer.
+ */
+export function phaseTemplatePromptControlState(
+  input: PhaseTemplatePromptControlInput
+): PhaseTemplatePromptControlState {
+  const busy = input.importPending || input.dismissPending;
+  const empty = input.tickedCount === 0;
+
+  return {
+    importDisabled: busy || empty,
+    dismissDisabled: busy,
+    importing: input.importPending,
+    dismissing: input.dismissPending,
+    importLabel: input.importPending ? "Importing…" : "Import checklists",
+    emptyHint: empty && !busy ? NOTHING_TICKED_HINT : null,
+  };
+}
+
+// ----------------------------------------------------------------------------
+// The island
+// ----------------------------------------------------------------------------
+
+export interface PhaseTemplatePromptFormProps {
+  /**
+   * The transition this prompt is asking about, posted back with the answer.
+   *
+   * "Not now" reads it (see the hidden input below) so a press on a STALE panel
+   * cannot decline a stage change the planter never saw. It is not an aiming
+   * device: the server refuses any id that is not its own latest transition, so
+   * the only outcome a forged value can force is a no-op.
+   */
+  transitionId: string;
+  /** How many boxes arrive ticked — every offer does, so this is the resting
+   *  tick count and the value the server and the client both start from. */
+  offerCount: number;
+  /** The checklist rows and the fine print — server markup, never client. */
+  children: ReactNode;
+  importAction: (
+    state: PhaseTemplateImportOutcome,
+    formData: FormData
+  ) => Promise<PhaseTemplateImportOutcome>;
+  dismissAction: (
+    state: PhaseTemplateDismissOutcome,
+    formData: FormData
+  ) => Promise<PhaseTemplateDismissOutcome>;
+}
+
+export function PhaseTemplatePromptForm({
+  transitionId,
+  offerCount,
+  children,
+  importAction,
+  dismissAction,
+}: PhaseTemplatePromptFormProps) {
+  const [importOutcome, importFormAction, importPending] = useActionState(
+    importAction,
+    PHASE_TEMPLATE_IMPORT_IDLE
+  );
+  const [dismissOutcome, dismissFormAction, dismissPending] = useActionState(
+    dismissAction,
+    PHASE_TEMPLATE_DISMISS_IDLE
+  );
+  const [tickedCount, setTickedCount] = useState(offerCount);
+  const [lastPress, setLastPress] =
+    useState<PhaseTemplatePromptPress>("import");
+  const formRef = useRef<HTMLFormElement>(null);
+
+  /**
+   * RE-READ THE BOXES EVERY TIME AN ACTION SETTLES.
+   *
+   * React 19 restores an uncontrolled form to its defaults once a `<form
+   * action>` action finishes, and it fires no `change` doing it — so `countTicks`
+   * never hears about it, and every outcome that leaves this panel mounted used
+   * to leave the count describing the ticks the planter had BEFORE the press.
+   * Both halves of that are dangerous and both were seen live: the buttons stop
+   * matching the boxes (a disabled Import above three ticked checklists), and a
+   * retry submits the restored ticks rather than the visible ones.
+   *
+   * The two outcomes are the dependency because a settle is exactly what
+   * `useActionState` reports by handing back a new object; whether it says
+   * `nothing`, `failed` or anything else does not change what has to happen, so
+   * the effect asks the DOM instead of branching on the status. `formRef` is
+   * null in the receipt state, which has no form and no boxes.
+   */
+  useEffect(() => {
+    const form = formRef.current;
+    if (!form) return;
+
+    setTickedCount(tickedTemplateCount(form));
+  }, [importOutcome, dismissOutcome]);
+
+  const {
+    importDisabled,
+    dismissDisabled,
+    importing,
+    dismissing,
+    importLabel,
+    emptyHint,
+  } = phaseTemplatePromptControlState({
+    importPending,
+    dismissPending,
+    tickedCount,
+  });
+
+  const alertMessage = phaseTemplatePromptAlert({
+    lastPress,
+    importOutcome,
+    dismissOutcome,
+  });
+
+  /** `change` bubbles from the checkboxes to the form, so one handler on the
+   *  form counts them all — and no row has to become a client component. It is
+   *  one of TWO writers: see the resync above for the other. */
+  function countTicks(event: FormEvent<HTMLFormElement>) {
+    setTickedCount(tickedTemplateCount(event.currentTarget));
+  }
+
+  return (
+    <form
+      ref={formRef}
+      action={importFormAction}
+      onChange={countTicks}
+      className="space-y-4"
+    >
+      {/*
+          WHICH stage change this panel is answering. "Not now" still reads
+          nothing ELSE from the form — the church comes from the session and the
+          transition is re-read from the database — but the id the planter was
+          LOOKING AT has to travel with the press, or a panel left open while
+          the plant moved on declines the new stage change instead. The server
+          compares it with its own latest transition and refuses a mismatch, so
+          this input cannot aim the dismissal anywhere; the worst a forged value
+          buys is a press that does nothing and says so.
+        */}
+      <input type="hidden" name="transitionId" value={transitionId} />
+
+      {children}
+
+      {/*
+          ONE live region, whichever press failed. Nothing here ends up in the
+          console alone, and nothing here ever announces twice: the sentence is
+          chosen by `phaseTemplatePromptAlert` and drawn by one component.
+        */}
+      {alertMessage && <PhaseTemplatePromptAlert message={alertMessage} />}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          type="submit"
+          size="sm"
+          className="cursor-pointer"
+          disabled={importDisabled}
+          aria-busy={importing}
+          onClick={() => setLastPress("import")}
+        >
+          {importLabel}
+        </Button>
+        {/*
+            A second action on the same form rather than a nested one — a form
+            may not contain a form, and the two answers belong to one control
+            group. `formAction` is how React routes a submit to the other
+            action, `useActionState`'s wrapper included.
+          */}
+        <Button
+          type="submit"
+          size="sm"
+          variant="ghost"
+          formAction={dismissFormAction}
+          className="cursor-pointer"
+          disabled={dismissDisabled}
+          aria-busy={dismissing}
+          onClick={() => setLastPress("dismiss")}
+        >
+          Not now
+        </Button>
+      </div>
+
+      {/*
+          ALWAYS RENDERED, TEXT TOGGLED. `role="status"` is a polite live region,
+          and a polite region that is inserted into the DOM together with its
+          first message is commonly not announced at all — the assistive tech has
+          nothing to compare against. Mounted empty from the first paint, the
+          hint appearing IS a change, which is the event that gets read.
+
+          There is no `aria-describedby` pointing here, and there was: it was
+          dead. It sat on the Import button, which is DISABLED for exactly as
+          long as this hint has anything to say, and a disabled button is not
+          focusable — so the description could never be reached. This region is
+          how a screen-reader user learns why Import stopped accepting the press.
+        */}
+      <p
+        role="status"
+        data-testid="prompt-empty-hint"
+        className="text-muted-foreground text-xs"
+      >
+        {emptyHint ?? ""}
+      </p>
+    </form>
+  );
+}
