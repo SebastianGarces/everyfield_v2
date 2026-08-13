@@ -13,8 +13,10 @@ import path from "node:path";
 //
 // This module exists because several different KINDS of test need it and none
 // should own it: `theme-tokens.test.ts` does colour math over globals.css,
-// `focus-ring.test.ts` measures the focus indicator against SC 1.4.11, and
-// `text-contrast.test.ts` scans shipped markup and the other stylesheets. They
+// `focus-ring.test.ts` measures the focus indicator against SC 1.4.11,
+// `text-contrast.test.ts` scans shipped markup and the other stylesheets, and
+// `status-badge-scale.test.ts` measures the #429 person-status scale, whose
+// colours come from Tailwind's own palette rather than from a token. They
 // share only these helpers, and a second copy of a contrast formula is the
 // fastest way to get two files that disagree about whether the app passes.
 //
