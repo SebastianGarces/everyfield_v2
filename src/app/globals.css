@@ -98,11 +98,25 @@ body {
      3.97:1 on --muted, which is the avatar fallback (`bg-muted
      text-muted-foreground`) and every secondary/accent tile. L 0.5 clears 4.5:1
      on EVERY surface this token lands on with room to spare — 5.55:1 on
-     --background, 6.00:1 on --card, and 5.03:1 on --muted, the worst case. The
-     floor sits near L 0.5055, so this is one step past it, not a hair over it.
+     --background, 6.00:1 on --card, and 5.03:1 on --muted, the worst case.
+     --muted is the surface that binds, and its AA limit is L ≈ 0.526 — the
+     LIGHTEST L that still clears 4.5:1 there. Lightening is the failure
+     direction, so L 0.5 sits a real step under that limit, not a hair.
      C and H are untouched (the token is neutral, so only L had to move).
-     Pinned by src/app/text-contrast.test.ts; raising L again breaks that test
-     before it reaches a screen. */
+     Darkening buys AA headroom but SPENDS something that runs the other way:
+     as this token darkens it converges on --primary, so an inline link inside
+     muted prose loses its colour separation — 3.61:1 at the old L 0.556,
+     2.85:1 here, under the 3:1 WCAG SC 1.4.1 asks when colour is the ONLY
+     distinguisher. That cost is paid in CSS — inline links carry a permanent
+     underline — not by capping L, so this token stays free to move for AA.
+     The rule lives in the base layer at the bottom of this file, and once more
+     in `src/app/(marketing)/marketing.css`, because that sheet is unlayered
+     and unlayered declarations outrank `@layer base` at any specificity. Ruled
+     2026-08-10 (#386): WCAG AA is the standard that binds here; APCA is
+     advisory.
+     Pinned by src/app/text-contrast.test.ts, which re-derives the 0.526 limit
+     instead of trusting this comment; raising L again breaks that test before
+     it reaches a screen. */
   --muted-foreground: oklch(0.5 0 0);
   --accent: oklch(0.94 0 0);
   --accent-foreground: oklch(0.224 0.011 151.267);
@@ -214,6 +228,34 @@ body {
   a[href],
   [tabindex="0"] {
     cursor: pointer;
+  }
+
+  /* WCAG SC 1.4.1 (Use of Color): a link sitting INSIDE a block of text has to
+     be tellable from that text by something other than colour. Ours was not —
+     --primary (ink) against --muted-foreground measures 2.85:1 in the light
+     theme and 2.06:1 in the dark one, both under the 3:1 the criterion asks —
+     and `hover:underline` is not a rest state, so a reader who never hovers
+     gets no cue at all. Lighthouse caught it as `link-in-text-block` on
+     /login's "Sign up".
+     Fixing it here rather than at the token is the whole point (ruled
+     2026-08-10, PR #387): a non-colour cue holds no matter where
+     --muted-foreground's lightness sits, so the token can keep being darkened
+     for AA without inline links quietly failing a second criterion.
+     Scoped to `p` deliberately. A paragraph IS a block of text; `li` is not —
+     it would underline every sidebar nav item, which is a list OF links rather
+     than prose containing one. Utilities outrank base, so a `no-underline`
+     class still wins where a link genuinely is not inline prose.
+     `@layer base` is the WEAKEST place this can live, and that is a real hole,
+     not a nuance: an UNLAYERED normal declaration beats it at any specificity.
+     `src/app/(marketing)/marketing.css` is such a sheet, and its
+     `.marketing a { text-decoration: none }` defeated this rule across the
+     whole marketing route group until the same underline was repeated there.
+     Any future unlayered stylesheet under src/app/ owes the same repeat —
+     src/app/text-contrast.test.ts fails the build if one strips and does not
+     restore. Do not "fix" that class of conflict with `!important` here. */
+  p a[href] {
+    text-decoration-line: underline;
+    text-underline-offset: 4px;
   }
 }
 

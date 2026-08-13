@@ -675,12 +675,15 @@ async function main() {
     // `target_church_id = plant.id`, the planter saw a real invitation from an
     // org they never heard of, and Accept enrolled the plant.
     const forgedAddress = address("forged-open");
-    const forged = await createInvitationAs(actorFor(otherNetAdmin), {
-      inviteeEmail: forgedAddress,
-      inviteAs: "church",
-      targetChurchId: plant.id,
-      targetSendingChurchId: sendingChurch.id,
-    } as InvitationRequest);
+    const { invitation: forged } = await createInvitationAs(
+      actorFor(otherNetAdmin),
+      {
+        inviteeEmail: forgedAddress,
+        inviteAs: "church",
+        targetChurchId: plant.id,
+        targetSendingChurchId: sendingChurch.id,
+      } as InvitationRequest
+    );
     createdInvitationIds.push(forged.id);
     id("forged-target invitation", forged.id);
 
@@ -704,10 +707,13 @@ async function main() {
     //
     // First, the duplicate check. One pending invitation aimed at the sending
     // church makes a second one — under the OTHER address — a duplicate.
-    const firstTargeted = await createInvitationAs(actorFor(otherNetAdmin), {
-      inviteeEmail: scAdmin.email,
-      inviteAs: "sending_church",
-    });
+    const { invitation: firstTargeted } = await createInvitationAs(
+      actorFor(otherNetAdmin),
+      {
+        inviteeEmail: scAdmin.email,
+        inviteAs: "sending_church",
+      }
+    );
     createdInvitationIds.push(firstTargeted.id);
     id("targeted invitation #1", firstTargeted.id);
     assert.equal(firstTargeted.targetSendingChurchId, sendingChurch.id);
@@ -730,18 +736,24 @@ async function main() {
     // has been used only once.
     await declineInvitationAs(actorFor(scAdmin), firstTargeted.id);
 
-    const secondTargeted = await createInvitationAs(actorFor(otherNetAdmin), {
-      inviteeEmail: scAdmin2.email,
-      inviteAs: "sending_church",
-    });
+    const { invitation: secondTargeted } = await createInvitationAs(
+      actorFor(otherNetAdmin),
+      {
+        inviteeEmail: scAdmin2.email,
+        inviteAs: "sending_church",
+      }
+    );
     createdInvitationIds.push(secondTargeted.id);
     id("targeted invitation #2", secondTargeted.id);
     await declineInvitationAs(actorFor(scAdmin2), secondTargeted.id);
 
-    const thirdTargeted = await createInvitationAs(actorFor(otherNetAdmin), {
-      inviteeEmail: scAdmin.email,
-      inviteAs: "sending_church",
-    });
+    const { invitation: thirdTargeted } = await createInvitationAs(
+      actorFor(otherNetAdmin),
+      {
+        inviteeEmail: scAdmin.email,
+        inviteAs: "sending_church",
+      }
+    );
     createdInvitationIds.push(thirdTargeted.id);
     id("targeted invitation #3", thirdTargeted.id);
     await declineInvitationAs(actorFor(scAdmin), thirdTargeted.id);
@@ -826,10 +838,13 @@ async function main() {
     // THE ACCEPTANCE CRITERION: the next invitation — the FIFTH this org has
     // aimed at this sending church inside the window, under an address whose
     // own allowance §9 also spent — is created rather than refused.
-    const reinvited = await createInvitationAs(actorFor(otherNetAdmin), {
-      inviteeEmail: scAdmin2.email,
-      inviteAs: "sending_church",
-    });
+    const { invitation: reinvited } = await createInvitationAs(
+      actorFor(otherNetAdmin),
+      {
+        inviteeEmail: scAdmin2.email,
+        inviteAs: "sending_church",
+      }
+    );
     createdInvitationIds.push(reinvited.id);
     id("invitation after the sever", reinvited.id);
     assert.equal(reinvited.targetSendingChurchId, sendingChurch.id);
@@ -841,10 +856,13 @@ async function main() {
     await declineInvitationAs(actorFor(scAdmin2), reinvited.id);
 
     for (const invitee of [scAdmin, scAdmin2]) {
-      const again = await createInvitationAs(actorFor(otherNetAdmin), {
-        inviteeEmail: invitee.email,
-        inviteAs: "sending_church",
-      });
+      const { invitation: again } = await createInvitationAs(
+        actorFor(otherNetAdmin),
+        {
+          inviteeEmail: invitee.email,
+          inviteAs: "sending_church",
+        }
+      );
       createdInvitationIds.push(again.id);
       await declineInvitationAs(actorFor(invitee), again.id);
     }

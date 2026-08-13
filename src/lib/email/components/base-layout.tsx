@@ -19,6 +19,17 @@ interface BaseLayoutProps {
 /**
  * Base email layout used by all EveryField emails.
  * Provides consistent branding, responsive container, and footer.
+ *
+ * Two details are load-bearing rather than cosmetic, both from
+ * `.agents/skills/react-email/SKILL.md`:
+ *
+ *   * `<Html lang>` — screen readers in mail clients read the document
+ *     language off the root element, and an unlabelled document is announced in
+ *     whatever voice the reader's system defaults to.
+ *   * `<Preview>` is the FIRST child of `<Body>`. It renders as a hidden block,
+ *     and clients take the preheader from the first text they find inside the
+ *     body — placed outside it, some clients fall back to the first visible
+ *     sentence instead and the preheader is wasted.
  */
 export function BaseLayout({
   preview,
@@ -26,10 +37,10 @@ export function BaseLayout({
   footerText = "EveryField",
 }: BaseLayoutProps) {
   return (
-    <Html>
+    <Html lang="en">
       <Head />
-      {preview && <Preview>{preview}</Preview>}
       <Body style={body}>
+        {preview && <Preview>{preview}</Preview>}
         <Container style={container}>
           <Section style={content}>{children}</Section>
           <Hr style={hr} />

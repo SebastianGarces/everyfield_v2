@@ -73,9 +73,20 @@ import { cn } from "@/lib/utils";
 //
 // A reserved status scale: these tokens mean good/attention here and nowhere
 // else in the app mean "series 3". `attention-*` and its `-ink` pairs come from
-// the app's attention scale; the strength step uses the same emerald the Focus
-// panel already uses for a positive delta, so "good" looks the same on both
+// the app's attention scale; the strength step reuses the emerald HUE the Focus
+// panel already uses for a positive delta, so "good" reads the same on both
 // halves of this page.
+//
+// The same hue, deliberately NOT the same class. The Focus panel's delta chip
+// sits on a neutral `bg-muted/50` surface and uses `text-emerald-600` in light
+// mode (focus-panel.tsx). The strength tile's ink sits on its own emerald tint
+// (`bg-emerald-500/10`), which lifts the surface under it, so it steps one
+// shade darker — `text-emerald-700` — to hold the ink/tint pair above AA.
+// That is the same correction constraint 2 forced on the `meta` inks, and the
+// measured table on `StandingStyle.meta` below shows why it is a light-mode-only
+// problem: the identical 10% emerald tint costs contrast in light mode and
+// barely moves it in dark. So the dark-mode value is shared verbatim —
+// `dark:text-emerald-400` on both — and only the light-mode step differs.
 // ----------------------------------------------------------------------------
 
 interface StandingStyle {
@@ -184,7 +195,12 @@ const MAX_TILE_FACTS = 2;
 export function FactorTile({ factor }: { factor: CsfFactorStanding }) {
   const style = STANDING_STYLES[factor.standing];
   const [lead, ...rest] = factor.insights;
-  const citedFacts = formatCitedFacts(lead?.citedFacts);
+  // The signals ride on the insight, resolved by the projection that built this
+  // scorecard against the assessment's own snapshot (ruled 2026-08-12 on #319):
+  // an attestation reads here in the same words the exit-criteria drill-down
+  // gives it, and two DIFFERENT attestations collapse to a count rather than
+  // turning this line into a second copy of that drill-down.
+  const citedFacts = formatCitedFacts(lead?.citedFacts, lead?.citedFactSignals);
   const shownFacts = citedFacts.slice(0, MAX_TILE_FACTS);
   const hiddenFactCount = citedFacts.length - shownFacts.length;
 

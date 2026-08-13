@@ -38,10 +38,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import type {
+  AssessedInsight,
   SnapshotDelta,
   SnapshotDeltaField,
 } from "@/lib/phase-engine/assessment";
-import type { PlantAssessment, PlantInsight } from "@/db/schema";
+import type { PlantAssessment } from "@/db/schema";
 
 // ----------------------------------------------------------------------------
 // What-changed presentation (PE-016).
@@ -124,8 +125,15 @@ const AS_OF_FORMAT = new Intl.DateTimeFormat("en-US", {
 
 interface FocusPanelProps {
   assessment: PlantAssessment | null;
-  /** Planter-audience insights, already ordered by rank. */
-  insights: PlantInsight[];
+  /**
+   * Planter-audience insights, already ordered by rank.
+   *
+   * `AssessedInsight`, not a bare `PlantInsight`, so each row's resolved
+   * `citedFactSignals` survive the trip to the card that renders them — a
+   * `PlantInsight` is still accepted (the field is optional, which is what keeps
+   * the marketing fixture valid), it just reads its attestations generically.
+   */
+  insights: AssessedInsight[];
   /** The what-changed delta carried on the stored snapshot (PE-016). */
   delta: SnapshotDelta | null;
   /** Prior feedback keyed by insight id, for the current user. */
