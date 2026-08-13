@@ -385,26 +385,37 @@ export async function transitionPhase(
   const factSnapshot = await buildFactSnapshot(churchId);
   const rubricVersion = ACTIVE_RUBRIC.version;
 
-  const [transition] = await db
-    .insert(phaseTransitions)
-    .values(
-      buildTransitionRow({
-        churchId,
-        fromPhase,
-        toPhase,
-        initiatedById,
-        reason,
-        factSnapshot,
-        rubricVersion,
-      })
-    )
-    .returning();
-
-  // Move the plant to the new phase.
-  await db
-    .update(churches)
-    .set({ currentPhase: toPhase })
-    .where(eq(churches.id, churchId));
+  // ONE `db.batch([...])`, never two awaits (memory/invariants.md → Atomicity,
+  // shape 1: every write is known up front and touches only our own tables).
+  // The audit row and the phase move are two halves of ONE fact. Written as two
+  // round trips, a failure between them left an IMMUTABLE `phase_transitions`
+  // row saying the plant moved while `churches.current_phase` said it had not —
+  // and `current_phase` is what /phase, the dashboard, the exit criteria and the
+  // task-template prompt all read. `phase_transitions` has no delete path, so
+  // that state is not repairable by retrying: the retry writes a SECOND row.
+  // Neither statement depends on the other's result, so the batch is available;
+  // `db.transaction` is not (neon-http throws).
+  const [[transition]] = await db.batch([
+    db
+      .insert(phaseTransitions)
+      .values(
+        buildTransitionRow({
+          churchId,
+          fromPhase,
+          toPhase,
+          initiatedById,
+          reason,
+          factSnapshot,
+          rubricVersion,
+        })
+      )
+      .returning(),
+    // Move the plant to the new phase.
+    db
+      .update(churches)
+      .set({ currentPhase: toPhase })
+      .where(eq(churches.id, churchId)),
+  ]);
 
   // Notify downstream consumers (PE-003). The event bus no-ops on zero handlers
   // until the PE-event-wiring unit registers them.

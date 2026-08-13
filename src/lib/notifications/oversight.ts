@@ -1,9 +1,15 @@
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, eq, or, type SQL, type SQLWrapper } from "drizzle-orm";
+import type { alias } from "drizzle-orm/pg-core";
 
 import { db } from "@/db";
 import { churches, users, type OrganizationInvitationType } from "@/db/schema";
-import { OVERSIGHT_ROLES } from "@/lib/auth/roles";
-
+import {
+  noOversightOrg,
+  OVERSIGHT_ADMIN_ROWS,
+  oversightOrgOfKind,
+  type OversightAdminPairing,
+  type OversightOrgIds,
+} from "./oversight-admin";
 import {
   anchorId,
   churchAnchor,
@@ -105,19 +111,6 @@ export interface OversightRecipient {
   id: string;
 }
 
-/**
- * ONE oversight organisation.
- *
- * At most one field is set. The type carries both because the
- * `organization_invitations` row does, but a value of this type is a NARROWED
- * reading of that row, produced by `invitingOrgForInvitation` below — never the
- * row's two FK columns copied across.
- */
-export interface OversightOrg {
-  sendingChurchId: string | null;
-  sendingNetworkId: string | null;
-}
-
 /** The shape of an `organization_invitations` row this module reads. */
 export interface InvitingInvitation {
   type: OrganizationInvitationType;
@@ -148,23 +141,34 @@ export interface InvitingInvitation {
  * nobody rather than guessing. Its own three milestones are org-anchored and
  * name their network explicitly (`announceSendingChurch*`, #304 WS3) — they do
  * not come through this function, which reads a PLANT's invitation.
+ *
+ * WHAT IT RETURNS IS A NARROWED READING OF THE ROW — never the row's two FK
+ * columns copied across. `OversightOrgIds` (`./oversight-admin.ts`) is keyed on
+ * the pairing table rather than re-declared here: this module used to spell the
+ * two FK names out in an interface of its own while the probe in
+ * `./oversight-relationship.ts` spelled the identical pair in a second one, and
+ * that half-pairing-per-site is what left a third org kind invisible to both.
+ *
+ * At most one field of the result is non-null, and INSIDE
+ * `src/lib/notifications/` that holds by construction — `oversightOrgOfKind`
+ * and `noOversightOrg` are the only ways to make one from a kind. It is NOT a
+ * domain-wide guarantee; `./oversight-admin.ts` names the one constructor
+ * outside this directory.
  */
 export function invitingOrgForInvitation(
   invitation: InvitingInvitation
-): OversightOrg {
+): OversightOrgIds {
+  // Each arm names the ORG KIND the invitation type means and hands over the
+  // column that type is allowed to read. `oversightOrgOfKind` files it under
+  // the FK the pairing row names and nulls the rest, so no arm here writes an
+  // oversight FK name or the other kind's `null`.
   switch (invitation.type) {
     case "church_to_sending_church":
-      return {
-        sendingChurchId: invitation.sendingChurchId,
-        sendingNetworkId: null,
-      };
+      return oversightOrgOfKind("sending_church", invitation.sendingChurchId);
     case "church_to_network":
-      return {
-        sendingChurchId: null,
-        sendingNetworkId: invitation.sendingNetworkId,
-      };
+      return oversightOrgOfKind("network", invitation.sendingNetworkId);
     case "sending_church_to_network":
-      return { sendingChurchId: null, sendingNetworkId: null };
+      return noOversightOrg();
   }
 }
 
@@ -211,7 +215,7 @@ export interface OversightFanOutDeps extends OversightEnqueueDep {
  * deps object happened to expose it.
  */
 export interface OversightOrgFanOutDeps extends OversightEnqueueDep {
-  listOversightAdminsOfOrg(org: OversightOrg): Promise<OversightRecipient[]>;
+  listOversightAdminsOfOrg(org: OversightOrgIds): Promise<OversightRecipient[]>;
 }
 
 /**
@@ -283,7 +287,7 @@ export async function fanOutToOversight(
  */
 export async function fanOutToOversightOrg(
   deps: OversightOrgFanOutDeps,
-  org: OversightOrg,
+  org: OversightOrgIds,
   compose: (recipientId: string) => EnqueueNotificationInput
 ): Promise<OversightFanOutReport> {
   return fanOutTo(deps, await deps.listOversightAdminsOfOrg(org), compose, {
@@ -553,7 +557,7 @@ export async function announceAssociationEnded(
     churchId: string;
     plantName: string;
     /** The org that was left — exactly one field set. */
-    org: OversightOrg;
+    org: OversightOrgIds;
     /**
      * What makes this event unique. The audit row's id: one sever, one
      * announcement, and a plant that leaves, rejoins and leaves again is three
@@ -600,9 +604,12 @@ export async function announceAssociationEnded(
 // same question per recipient (`recipientAdministersOrg`), so a widened audience
 // here would still write nothing for a stranger.
 
-/** The `OversightOrg` shape for one network — spelled out, never re-derived. */
-function networkAudience(sendingNetworkId: string): OversightOrg {
-  return { sendingChurchId: null, sendingNetworkId };
+/**
+ * The audience shape for one network — built from the pairing row for
+ * `network`, so the FK it fills in is the same one the SQL audience will read.
+ */
+function networkAudience(sendingNetworkId: string): OversightOrgIds {
+  return oversightOrgOfKind("network", sendingNetworkId);
 }
 
 /**
@@ -709,7 +716,7 @@ export async function announceSendingChurchLeftNetwork(
  */
 async function announceToOrg(
   deps: OversightOrgFanOutDeps,
-  org: OversightOrg,
+  org: OversightOrgIds,
   facts: MilestoneFacts,
   context: string
 ): Promise<OversightFanOutReport> {
@@ -799,6 +806,73 @@ export function announceLaunchDateChanged(
 // ----------------------------------------------------------------------------
 
 /**
+ * A `users` table reference — the base table, or an `alias()` of it, so a
+ * correlated subquery can name its own candidate recipient.
+ *
+ * BOTH ARMS ARE CONCRETE, deliberately. A structural `{ role: AnyColumn; … }`
+ * also accepts both, and reads as the more permissive, more honest type — but
+ * `AnyColumn` is drizzle's `any`-shaped column, so every `eq()` in the builder
+ * below loses BOTH of its operand checks: `eq(ref.role, "not_a_role")` and
+ * `eq(ref.sendingChurchId, 12345)` compile clean, on the one predicate in this
+ * domain that decides a multi-tenant audience. The union keeps drizzle's own
+ * typing, so the role literal is checked against the `user_role` enum and the
+ * org id against a uuid column, by the compiler rather than by a `satisfies`
+ * someone has to remember to write.
+ */
+type UsersRef = typeof users | ReturnType<typeof alias<typeof users, string>>;
+
+/**
+ * An org id to match against: a literal loaded by an earlier query, or a COLUMN
+ * to correlate with (the sweep's `churches.sending_*_id` of the outer row). The
+ * same idiom `ChurchIdRef` uses in `./oversight-digest.ts`, and for the same
+ * reason: one definition of the audience, asked two ways.
+ *
+ * `SQLWrapper` rather than `AnyColumn` for the correlated half — a column IS
+ * one, and it leaves `eq()` free to reject a value that is not what a uuid
+ * column compares against.
+ */
+type OrgIdRef = string | SQLWrapper;
+
+/**
+ * WHO ADMINISTERS THESE ORGS — the ONE definition of an oversight audience, in
+ * SQL. One arm per row of `OVERSIGHT_ADMIN` (`./oversight-admin.ts`), in the
+ * table's order, with the role and the FK both read off the row; why the
+ * pairing is a table and why the arms carry no `OVERSIGHT_ROLES` floor are in
+ * that header and in `memory/invariants/multi-tenancy.md`.
+ *
+ * NAMING NO ORG RETURNS `undefined` — "no recipients" — AND THE OVERLOADS, NOT
+ * A COMMENT, MAKE THE CALLER FACE IT: drizzle's `and()` reads it as the
+ * opposite (`memory/invariants.md` → Multi-Tenancy). Non-nullable refs in,
+ * `SQL` out; nullable refs in, `SQL | undefined` out and the guard is not
+ * optional. The arms test `null` explicitly rather than truthiness so the first
+ * overload's `SQL` promise is a property of the code, not of the values passed.
+ */
+export function oversightAudienceCondition(
+  table: UsersRef,
+  org: Record<OversightAdminPairing["fk"], OrgIdRef>
+): SQL;
+export function oversightAudienceCondition(
+  table: UsersRef,
+  org: Record<OversightAdminPairing["fk"], OrgIdRef | null>
+): SQL | undefined;
+export function oversightAudienceCondition(
+  table: UsersRef,
+  org: Record<OversightAdminPairing["fk"], OrgIdRef | null>
+): SQL | undefined {
+  const reaches = OVERSIGHT_ADMIN_ROWS.map(([, { role, fk }]) => {
+    const orgId = org[fk];
+
+    return orgId === null || orgId === undefined
+      ? undefined
+      : and(eq(table.role, role), eq(table[fk], orgId));
+  }).filter((clause) => clause !== undefined);
+
+  if (reaches.length === 0) return undefined;
+
+  return or(...reaches);
+}
+
+/**
  * The oversight recipients of a plant: the admins of the sending church it
  * belongs to, and the admins of the network it belongs to.
  *
@@ -825,27 +899,17 @@ export async function listOversightRecipientsForChurch(
 
   if (!plant) return [];
 
-  const reaches = [
-    plant.sendingChurchId
-      ? eq(users.sendingChurchId, plant.sendingChurchId)
-      : undefined,
-    plant.sendingNetworkId
-      ? eq(users.sendingNetworkId, plant.sendingNetworkId)
-      : undefined,
-  ].filter((clause) => clause !== undefined);
+  // Each arm pairs the role with its own FK — see `oversightAudienceCondition`.
+  // A `team_member` carrying a `sending_church_id` is not oversight, and neither
+  // is a `network_admin` carrying one: `enqueue` would refuse both anyway (a
+  // role with no access to this plant fails `canAccessChurch`), but a fan-out
+  // that reports "considered 40" when 38 of them were never candidates is lying
+  // to whoever reads the report — and the digest sweep reads exactly this
+  // audience to decide who is still owed a row.
+  const audience = oversightAudienceCondition(users, plant);
+  if (!audience) return [];
 
-  if (reaches.length === 0) return [];
-
-  // One statement, and the role is IN it: `OVERSIGHT_ROLES` is the definition
-  // of "oversight", and a `team_member` who happens to carry a
-  // `sending_church_id` is not one. `enqueue` would refuse them anyway (a
-  // church-level role with no access to this plant fails `canAccessChurch`),
-  // but a fan-out that reports "considered 40" when 38 of them were never
-  // candidates is lying to whoever reads the report.
-  const rows = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(and(or(...reaches), inArray(users.role, OVERSIGHT_ROLES)));
+  const rows = await db.select({ id: users.id }).from(users).where(audience);
 
   return rows;
 }
@@ -863,44 +927,22 @@ export async function listOversightRecipientsForChurch(
  * `listOversightRecipientsForChurch`: this answers "who", so `password_hash`
  * must not enter application memory.
  *
- * EACH ARM PAIRS THE FK WITH ITS OWN ROLE — #304 ruling 4, item 6 (HR4
- * 2026-08-09). A single `inArray(role, OVERSIGHT_ROLES)` outside the `or` meant
- * "any oversight role reachable by either FK", which is not the audience: a
- * `network_admin` row that also carries a `sending_church_id` came back as a
- * recipient of that SENDING CHURCH's own milestone. The role now sits inside
- * the arm that names the FK, so the sending-church arm returns sending-church
- * admins and the network arm returns network admins — the same predicate
- * `recipientAdministersOrg` applies per recipient at enqueue time. Two places
- * ask the question; they must not answer it differently.
+ * The audience comes from `oversightAudienceCondition` above, so each arm pairs
+ * the FK with its own role (#304 ruling 4, item 6; HR4 2026-08-09) and this
+ * function writes no role literal of its own.
+ *
+ * `org` here is loaded ids, either of which may be null, so this call gets the
+ * `SQL | undefined` overload and the guard below is not optional.
  */
 export async function listOversightAdminsOfOrg(
-  org: OversightOrg
+  org: OversightOrgIds
 ): Promise<OversightRecipient[]> {
-  const reaches = [
-    org.sendingChurchId
-      ? and(
-          eq(users.sendingChurchId, org.sendingChurchId),
-          eq(users.role, "sending_church_admin")
-        )
-      : undefined,
-    org.sendingNetworkId
-      ? and(
-          eq(users.sendingNetworkId, org.sendingNetworkId),
-          eq(users.role, "network_admin")
-        )
-      : undefined,
-  ].filter((clause) => clause !== undefined);
+  const audience = oversightAudienceCondition(users, org);
 
   // No org named — no recipients. Never "everyone".
-  if (reaches.length === 0) return [];
+  if (!audience) return [];
 
-  // `OVERSIGHT_ROLES` stays as a floor even though each arm already names its
-  // role: it is the statement that this query never returns a church-level
-  // account, and it survives an arm being edited.
-  return db
-    .select({ id: users.id })
-    .from(users)
-    .where(and(or(...reaches), inArray(users.role, OVERSIGHT_ROLES)));
+  return db.select({ id: users.id }).from(users).where(audience);
 }
 
 export const dbOversightFanOutDeps: OversightFanOutDeps &

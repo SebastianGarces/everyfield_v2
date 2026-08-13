@@ -95,7 +95,16 @@ function resolveSnapshotPath(
       continue;
     }
     const record = cursor as Record<string, unknown>;
-    if (!(segment in record)) return { found: false, value: undefined };
+    // `Object.hasOwn`, never `in` — A CITED PATH IS UNTRUSTED INPUT
+    // (memory/invariants.md → Phase Engine): the judge writes it, so a segment
+    // may be `constructor`, `valueOf`, `toString` or `__proto__`. `in` walks the
+    // prototype chain, so `coreGroup.constructor` resolved as `present: true`
+    // and the exit-criteria drill-down rendered a native function's slot as a
+    // verified reading of the snapshot. The same rule the two phrase
+    // vocabularies got as `Map`s, applied to the walk that feeds them.
+    if (!Object.hasOwn(record, segment)) {
+      return { found: false, value: undefined };
+    }
     cursor = record[segment];
   }
 
@@ -227,7 +236,10 @@ export function resolveCitedFactSignals(
   for (const raw of facts) {
     if (typeof raw !== "string" || raw.trim() === "") continue;
     const path = citedFactPath(raw);
-    if (path.length === 0 || path in signals) continue;
+    // `Object.hasOwn`, not `in`: `path` is the judge's own string, so `in`
+    // answers true for `toString`/`constructor` and would drop a citation that
+    // was never recorded. Same rule as `resolveSnapshotPath` above.
+    if (path.length === 0 || Object.hasOwn(signals, path)) continue;
     const key = attestationSignalKey(path, snapshot);
     if (key !== null) signals[path] = key;
   }

@@ -2,6 +2,7 @@ import { and, eq, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import {
+  associationOrgTypes,
   notificationCategories,
   notificationEntityTypes,
   notifications,
@@ -16,6 +17,8 @@ import {
   canAccessFeatureData,
   isOversightUser,
 } from "@/lib/auth/access";
+
+import { OVERSIGHT_ADMIN } from "./oversight-admin";
 
 import {
   churchAnchor,
@@ -122,10 +125,17 @@ export const enqueueNotificationSchema = z
      *
      * A nested object rather than two loose fields, so a caller cannot supply an
      * id without saying which kind of org it is.
+     *
+     * THE ENUM IS `associationOrgTypes`, NOT TWO LITERALS. Spelled by hand it
+     * was a standalone list that merely HAPPENED to hold the same two strings,
+     * so a third kind of oversight org widened `AssociationOrgType`, widened
+     * `OrgAnchor` with it, and left this parse silently rejecting the new kind
+     * at RUNTIME with no compile error anywhere. Sourced from the schema's own
+     * `as const` tuple, the parse and the anchor union cannot disagree.
      */
     anchorOrg: z
       .object({
-        type: z.enum(["sending_church", "network"]),
+        type: z.enum(associationOrgTypes),
         orgId: z.string().uuid(),
       })
       .optional(),
@@ -174,10 +184,14 @@ export type EnqueueNotificationInput = z.input<
 /**
  * The anchor a parsed input describes. Total by construction — the refinement
  * above has already rejected "neither" and "both".
+ *
+ * `anchorOrg` is typed as `OrgAnchor` rather than as its two fields respelled,
+ * so this signature widens with the union instead of narrowing the parse's
+ * output back down behind it.
  */
 function anchorOf(parsed: {
   churchId?: string;
-  anchorOrg?: { type: "sending_church" | "network"; orgId: string };
+  anchorOrg?: OrgAnchor;
 }): NotificationAnchor {
   if (parsed.churchId) return churchAnchor(parsed.churchId);
   if (parsed.anchorOrg) {
@@ -509,17 +523,13 @@ const accessColumns = {
  * notification is filed under the SENDING CHURCH and the network is a different
  * tenant (the same rule that keeps a plant's rows out of its network's feed).
  *
- * THE ROLE IS PAIRED WITH THE ANCHOR KIND — #304 ruling 4, item 6 (HR4
- * 2026-08-09). "An oversight role" was too coarse for this question. Both org
- * FKs live on the same `users` row, so a `network_admin` who also carries a
- * `sending_church_id` — a founder who administers both, or any row where the
- * second FK was set once and never cleared — passed the sending-church arm and
- * received that sending church's own notifications. That is the hierarchy walk
- * the paragraph above says this is not, arriving through the role instead of
- * through the FK. So each anchor kind now names EXACTLY the role that
- * administers it: `sending_church` → `sending_church_admin`, `network` →
- * `network_admin`. `listOversightAdminsOfOrg` pairs them the same way, so the
- * fan-out and the per-recipient gate answer one question rather than two.
+ * BOTH HALVES COME FROM `OVERSIGHT_ADMIN` (`./oversight-admin.ts`), NOT FROM
+ * LITERALS HERE — the role AND the `users` column that carries that kind of
+ * org. That file's header says why the pairing is one table; the consequence
+ * here is that there is no `anchor.type === …` branch left to forget, and that
+ * the role test subsumes `isOversightUser` (every row in the table names an
+ * oversight role, so a separate floor could only re-admit what this line
+ * already required).
  *
  * Pure, and exported so it can be tested over the whole role × org domain.
  */
@@ -527,13 +537,9 @@ export function recipientAdministersOrg(
   recipient: User,
   anchor: OrgAnchor
 ): boolean {
-  if (!isOversightUser(recipient)) return false;
+  const { role, fk } = OVERSIGHT_ADMIN[anchor.type];
 
-  return anchor.type === "sending_church"
-    ? recipient.role === "sending_church_admin" &&
-        recipient.sendingChurchId === anchor.orgId
-    : recipient.role === "network_admin" &&
-        recipient.sendingNetworkId === anchor.orgId;
+  return recipient.role === role && recipient[fk] === anchor.orgId;
 }
 
 export const dbEnqueueDeps: EnqueueDeps = {

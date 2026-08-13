@@ -12,7 +12,7 @@
 // server failure.
 // ============================================================================
 
-import { useState, useTransition } from "react";
+import { useOptimistic, useTransition } from "react";
 import { toast } from "sonner";
 
 import { setManualSignalAction } from "@/app/(dashboard)/phase/signals-actions";
@@ -25,41 +25,13 @@ import {
 } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-
-/** A single self-attestation the planter can toggle. */
-interface SignalDefinition {
-  key: string;
-  label: string;
-  description: string;
-}
-
-/**
- * The curated self-attestations surfaced in the UI. These mirror the
- * manual-attestation signals the rubric references (values documented,
- * financial base, systems tested) — facts the system cannot observe.
- */
-const SIGNAL_DEFINITIONS: SignalDefinition[] = [
-  {
-    key: "values_documented",
-    label: "Core values documented",
-    description: "Your plant's vision and values are written down and shared.",
-  },
-  {
-    key: "financial_base_established",
-    label: "Financial base in place",
-    description: "Initial funding and a giving plan are established.",
-  },
-  {
-    key: "prayer_leader_assigned",
-    label: "Prayer leader assigned",
-    description: "Someone owns the prayer covering for the plant.",
-  },
-  {
-    key: "systems_tested",
-    label: "Launch systems tested",
-    description: "Check-in, giving, and gathering logistics have a dry run.",
-  },
-];
+// The ONE declaration of the manual-signal vocabulary. This card used to hold a
+// second copy of the keys, which is how a toggle and its phase gate drift apart
+// with nothing failing.
+import {
+  MANUAL_SIGNALS,
+  type ManualSignal,
+} from "@/lib/phase-engine/manual-signals";
 
 interface SignalTogglesProps {
   /** Current attested boolean values keyed by signal key (server-provided). */
@@ -77,11 +49,11 @@ export function SignalToggles({ initialValues = {} }: SignalTogglesProps) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {SIGNAL_DEFINITIONS.map((signal) => (
+        {MANUAL_SIGNALS.map((signal) => (
           <SignalToggle
             key={signal.key}
             signal={signal}
-            initialChecked={initialValues[signal.key] ?? false}
+            attested={initialValues[signal.key] ?? false}
           />
         ))}
       </CardContent>
@@ -89,29 +61,42 @@ export function SignalToggles({ initialValues = {} }: SignalTogglesProps) {
   );
 }
 
+/**
+ * ONE switch, whose state is `useOptimistic` OVER THE SERVER PROP — never
+ * `useState` seeded from it (memory/invariants.md → Client/Server Data
+ * Synchronization; the reference shape is
+ * `components/settings/oversight-sharing-switch.tsx`).
+ *
+ * The old `useState(initialChecked)` was server data in local state, and it went
+ * stale in the way that state always does: `setManualSignalAction` calls
+ * `revalidatePath("/phase")`, so a second tab, a re-run assessment, or the
+ * planter's own reload re-rendered this card with a NEW `initialValues` that the
+ * mounted `useState` ignored. It also carried a hand-rolled rollback — remember
+ * the previous value, put it back on failure — which `useOptimistic` gets for
+ * free by falling back to server truth when the transition settles.
+ */
 function SignalToggle({
   signal,
-  initialChecked,
+  attested,
 }: {
-  signal: SignalDefinition;
-  initialChecked: boolean;
+  signal: ManualSignal;
+  attested: boolean;
 }) {
-  const [checked, setChecked] = useState(initialChecked);
   const [isPending, startTransition] = useTransition();
+  const [checked, setOptimisticChecked] = useOptimistic(attested);
 
   function handleChange(next: boolean) {
-    const previous = checked;
-    // Optimistic flip.
-    setChecked(next);
-
     startTransition(async () => {
+      setOptimisticChecked(next);
+
       const result = await setManualSignalAction({
         signalKey: signal.key,
         value: next,
       });
 
       if (!result.success) {
-        setChecked(previous);
+        // No rollback to write: the optimistic value reverts to `attested` when
+        // this transition settles, and the server never changed.
         toast.error(result.error);
         return;
       }

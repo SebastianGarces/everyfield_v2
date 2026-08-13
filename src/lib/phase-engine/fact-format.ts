@@ -246,6 +246,23 @@ export interface CitedFactContext {
  */
 export type CitedFactSignals = Readonly<Record<string, string | null>>;
 
+/**
+ * Look one citation's resolved signal up in that map.
+ *
+ * `Object.hasOwn`, never a bare index: the key is `citedFactPath(fact)`, which
+ * is derived from the judge's own string, and a plain-object index reaches
+ * `Object.prototype` — `signals["toString"]` hands a native function to the
+ * dispatcher where a signal key is expected. Same rule as `FACT_PHRASES` being a
+ * `Map` (rule 2 in this file's header, and memory/invariants.md → Phase Engine).
+ */
+function signalFor(
+  signals: CitedFactSignals | undefined,
+  path: string
+): string | null | undefined {
+  if (!signals || !Object.hasOwn(signals, path)) return undefined;
+  return signals[path];
+}
+
 /** Everything one citation renders as — the ONE decision both surfaces read. */
 interface CitationRendering {
   /**
@@ -447,7 +464,10 @@ export function formatCitedFacts(
     // The same decision the drill-down reads, taken once (`citationRendering`).
     // All this path adds is WHERE the resolved signal comes from: a column has
     // one map for all of its citations, a drill-down one context per citation.
-    const rendering = citationRendering(fact, signals?.[citedFactPath(fact)]);
+    const rendering = citationRendering(
+      fact,
+      signalFor(signals, citedFactPath(fact))
+    );
     if (rendering === null) continue;
 
     // Group on the identity the dispatcher decided — for an attestation an
