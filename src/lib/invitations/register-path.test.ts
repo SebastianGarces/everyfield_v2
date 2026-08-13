@@ -7,6 +7,7 @@ import {
   INVITATION_REGISTER_PATH,
   invitationRegisterPath,
 } from "./register-path";
+import { stripComments } from "@/lib/testing/source-span";
 
 // ============================================================================
 // OV-003b (#293) — ONE spelling of `?invitation=`, reachable from every surface.
@@ -79,13 +80,6 @@ function sourceFilesUnder(...segments: string[]): string[] {
 
 function rel(file: string): string {
   return path.relative(path.dirname(ROOT), file);
-}
-
-/** Source with comments stripped — the rules below are documented by naming what they forbid. */
-function code(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|\s)\/\/.*$/gm, "$1");
 }
 
 // ----------------------------------------------------------------------------
@@ -205,8 +199,8 @@ const DOMAIN_LEAVES = [
 ] as const;
 
 /**
- * The three spellings of "this module reaches another module", with the reason
- * each one is fatal to a leaf.
+ * The spellings of "this module reaches another module", with the reason each
+ * one is fatal to a leaf.
  *
  * ONE definition, because two consumers ask the same question for two different
  * purposes: rule 1 asserts that every REGISTERED leaf still matches none of
@@ -215,6 +209,18 @@ const DOMAIN_LEAVES = [
  * hand-written copies of "is this import-free" is how the table and the
  * directory would disagree about what a leaf is, which is the drift this whole
  * section exists to prevent.
+ *
+ * AND THE LIST IS AS WIDE AS THE SYNTAX, NOT AS WIDE AS SOMEBODY'S MEMORY OF IT
+ * (widened 2026-08-13, #411 review round 1). It held the three `import`
+ * spellings and nothing else, so a RE-EXPORT — `export * from "./x"`,
+ * `export { a } from "./x"` — matched none of them while being an edge a bundler
+ * follows identically. Both consumers were blind to it together: appending
+ * `export * from "@/lib/email/client";` to `register-path.ts` left all ten
+ * guards green, with a working path from the leaf a `"use client"` module holds
+ * to the module that constructs a Resend instance at module scope — the 687 KB
+ * bug this whole section exists to prevent, through the one door nobody had
+ * enumerated. This is the same failure the completeness rule below names, one
+ * level down.
  */
 const IMPORT_FORMS: readonly { pattern: RegExp; why: string }[] = [
   // Both spellings — a static `import` and a dynamic `import(...)` — because
@@ -222,6 +228,10 @@ const IMPORT_FORMS: readonly { pattern: RegExp; why: string }[] = [
   { pattern: /^\s*import[\s{*]/m, why: "a client component holds this" },
   { pattern: /\bimport\s*\(/, why: "no dynamic import" },
   { pattern: /\brequire\s*\(/, why: "no require" },
+  {
+    pattern: /\bexport\b[^;]*\bfrom\s*["']/,
+    why: "a re-export is an import edge a bundler follows",
+  },
 ];
 
 function importsNothing(source: string): boolean {
@@ -271,7 +281,7 @@ test("each import-free leaf is the ONLY module that exports its spelling", () =>
 
     const doors = sourceFilesUnder()
       .filter((file) => file !== theOneDoor)
-      .filter((file) => pattern.test(code(readFileSync(file, "utf8"))))
+      .filter((file) => pattern.test(stripComments(readFileSync(file, "utf8"))))
       .map(rel);
 
     assert.deepEqual(
@@ -284,7 +294,7 @@ test("each import-free leaf is the ONLY module that exports its spelling", () =>
     // the scan above is not vacuously true of a spelling that has been renamed
     // out from under it — and the table cannot quietly stop covering an export
     // the leaf still has.
-    const source = code(readFileSync(theOneDoor, "utf8"));
+    const source = stripComments(readFileSync(theOneDoor, "utf8"));
     for (const symbol of leaf.symbols) {
       assert.match(
         source,
@@ -302,7 +312,7 @@ test("no page or component reaches a leaf through anything but the leaf", () => 
     ...sourceFilesUnder("app"),
     ...sourceFilesUnder("components"),
   ]) {
-    const source = code(readFileSync(file, "utf8"));
+    const source = stripComments(readFileSync(file, "utf8"));
 
     for (const leaf of DOMAIN_LEAVES) {
       for (const match of source.matchAll(importsTheSpelling(leaf))) {
@@ -330,7 +340,7 @@ test("every import-free leaf really imports nothing", () => {
   // without rule 2 for four months.
   for (const leaf of DOMAIN_LEAVES) {
     const where = leaf.file.join("/");
-    const source = code(read(...leaf.file));
+    const source = stripComments(read(...leaf.file));
 
     for (const { pattern, why } of IMPORT_FORMS) {
       assert.doesNotMatch(
@@ -366,7 +376,7 @@ test("DOMAIN_LEAVES names EVERY import-free module in this domain", () => {
   );
 
   const unregistered = sourceFilesUnder("lib", "invitations")
-    .filter((file) => importsNothing(code(readFileSync(file, "utf8"))))
+    .filter((file) => importsNothing(stripComments(readFileSync(file, "utf8"))))
     .filter((file) => !registered.has(file))
     .map(rel);
 
@@ -401,7 +411,7 @@ const FORBIDDEN_SITES = [
 
 test("every builder of the invite link calls the helper", () => {
   for (const segments of CALL_SITES) {
-    const source = code(read(...segments));
+    const source = stripComments(read(...segments));
     const where = segments.join("/");
 
     assert.match(
@@ -422,7 +432,7 @@ test("no admin surface builds the invite link at all", () => {
   // surface that must not show the link must not compose it either, by the
   // helper or by hand.
   for (const segments of FORBIDDEN_SITES) {
-    const source = code(read(...segments));
+    const source = stripComments(read(...segments));
     const where = segments.join("/");
 
     assert.doesNotMatch(
@@ -448,7 +458,7 @@ test("no admin surface builds the invite link at all", () => {
 // stopgap as the design, on a page where reintroducing it has been ruled out
 // twice.
 //
-// So this guard runs over the WHOLE FILE, comments and all — `code()` is
+// So this guard runs over the WHOLE FILE, comments and all — `stripComments()` is
 // deliberately NOT applied — and over EVERY module in the domain. Patching the
 // instances is not the fix; closing the class is, and a hand-written list of the
 // four modules that had carried the sentence was still the instances: sweep 3
@@ -556,7 +566,9 @@ test("the client surface reaches leaves only, never the send path", () => {
   // (item 5 took its Copy-link button) but it does need `resend-window`, the
   // other import-free leaf, for the cooldown countdown — so the rule is about
   // leaves generally, not about one file.
-  const list = code(read("components", "oversight", "invitations-list.tsx"));
+  const list = stripComments(
+    read("components", "oversight", "invitations-list.tsx")
+  );
 
   assert.match(list, /from "@\/lib\/invitations\/resend-window"/);
   assert.doesNotMatch(

@@ -1544,10 +1544,16 @@ export async function acceptInvitationAs(
   // reading order, so the sweep that made the function total left it one refactor
   // from being false: hoist the audit above these two and a defective row reaches
   // it with nothing having refused it, changing which refusal the planter reads.
-  // `association.test.ts` §2 pins BOTH halves — the ORDER, read off this
-  // function's own source, and the PREMISE the order rests on, by calling all
-  // three builders over the 64-shape cross-product of `type` × the four nullable
-  // FK columns. Reorder these lines and that suite goes red.
+  // `association.test.ts` §2 pins the ORDER, read off this function's own source.
+  // Reorder these lines and that suite goes red.
+  //
+  // The PREMISE the order rests on — that the audit refuses no row the two
+  // builders above have not already refused — is no longer a test at all. All
+  // three ask ONE resolver, `requireAssociationPair`, so the subset relation is
+  // a property of the call graph rather than of three switches that happen to be
+  // spelled alike. `association.test.ts` §2b tests the resolver and the
+  // delegation; it used to enumerate 64 rows because there was nothing else to
+  // rest on.
   const lock = lockTargetRow(invitation);
   const association = associationStatement(invitation, invitationId);
   const slotIsOurs = unboundTargetSlot(invitation);
@@ -1922,6 +1928,121 @@ function freeOrHolds(column: AnyPgColumn, value: string): SQL {
 }
 
 /**
+ * An invitation whose type-implied ID PAIR is present, narrowed to the two
+ * columns that type actually means. The output of `requireAssociationPair`, and
+ * the only shape the three pair consumers below ever see.
+ *
+ * The fields are named after the COLUMNS they come from rather than the roles
+ * they play, so a consumer reads the same identifier before and after the
+ * narrowing. That is deliberate: `sendingChurchId` is the INVITING org in
+ * `church_to_sending_church` and the TARGET in `sending_church_to_network`, so a
+ * role-shaped pair (`{ churchId, sendingChurchId }`) is one careless arm away
+ * from binding a plant to itself.
+ */
+export type AssociationPair =
+  | {
+      type: "church_to_sending_church";
+      targetChurchId: string;
+      sendingChurchId: string;
+    }
+  | {
+      type: "church_to_network";
+      targetChurchId: string;
+      sendingNetworkId: string;
+    }
+  | {
+      type: "sending_church_to_network";
+      targetSendingChurchId: string;
+      sendingNetworkId: string;
+    };
+
+/**
+ * WHICH TWO IDS A TYPE IMPLIES — decided ONCE, for every consumer that needs the
+ * pair.
+ *
+ * `organization_invitations` constrains none of this: `type` is a bare
+ * `varchar(40)` with a TypeScript-only `$type<>` cast, all four FK columns are
+ * nullable, and `insertInvitation` validates neither (see
+ * `verifyInvitationAuthority`). So "a `church_to_network` row means
+ * `targetChurchId` AND `sendingNetworkId`, and a row missing either is refused"
+ * is a real decision that somebody has to make, and the same decision every time.
+ *
+ * IT WAS MADE THREE TIMES (swept 2026-08-13, #411 review round 1).
+ * `unboundTargetSlot`, `auditableAssociationOrg` and `associationStatement` each
+ * carried their own switch over `type`, their own pair of `if (!invitation.<fk>)`
+ * guards per arm, their own literal copy of the three "Invalid invitation:
+ * missing …" messages and their own fail-closed `default:` — character-identical
+ * in three places, agreeing only because they had been pasted on the same day.
+ * The tell was the test that had to be written to make that safe: a 4 types × 16
+ * nullable-FK-mask cross-product calling all three builders on 64 rows, to
+ * establish by enumeration that one function's guards were a superset of
+ * another's. That relation is now true BY CONSTRUCTION — there is one set of
+ * guards — so the property needs no cross-product to hold it up.
+ *
+ * IT IS TOTAL: it returns a narrowed pair or it THROWS, and there is no third
+ * answer. The `never` makes a FOURTH `OrganizationInvitationType` a compile error
+ * here rather than a silent arm in three places; the throw is what refuses the
+ * row that is already in the table.
+ *
+ * `lockTargetRow` deliberately does NOT come through here. Statement one of the
+ * accept batch locks the TARGET only, so its guard is narrower on purpose, and
+ * routing it through the pair would change which message an accept throws for a
+ * row whose inviting-org id is the missing one.
+ */
+export function requireAssociationPair(
+  invitation: AssociationFacts
+): AssociationPair {
+  switch (invitation.type) {
+    case "church_to_sending_church": {
+      if (!invitation.targetChurchId || !invitation.sendingChurchId) {
+        throw new InvitationError(
+          "Invalid invitation: missing church or sending church"
+        );
+      }
+      return {
+        type: invitation.type,
+        targetChurchId: invitation.targetChurchId,
+        sendingChurchId: invitation.sendingChurchId,
+      };
+    }
+
+    case "church_to_network": {
+      if (!invitation.targetChurchId || !invitation.sendingNetworkId) {
+        throw new InvitationError(
+          "Invalid invitation: missing church or network"
+        );
+      }
+      return {
+        type: invitation.type,
+        targetChurchId: invitation.targetChurchId,
+        sendingNetworkId: invitation.sendingNetworkId,
+      };
+    }
+
+    case "sending_church_to_network": {
+      if (!invitation.targetSendingChurchId || !invitation.sendingNetworkId) {
+        throw new InvitationError(
+          "Invalid invitation: missing sending church or network"
+        );
+      }
+      return {
+        type: invitation.type,
+        targetSendingChurchId: invitation.targetSendingChurchId,
+        sendingNetworkId: invitation.sendingNetworkId,
+      };
+    }
+
+    default: {
+      const unknownType: never = invitation.type;
+      console.error("invitation type has no association rule", {
+        type: unknownType,
+      });
+      throw new InvitationError(NOT_AUTHORIZED_MESSAGE);
+    }
+  }
+}
+
+/**
  * `SELECT id FROM <target> WHERE id = ? FOR UPDATE` — statement ONE of the accept
  * batch, and the only thing that makes the slot rule hold under concurrency.
  *
@@ -1939,6 +2060,13 @@ function freeOrHolds(column: AnyPgColumn, value: string): SQL {
  * Same two rules as `associationStatement` and `unboundTargetSlot`: throws on a
  * row whose FKs contradict its `type`, and fails CLOSED on a `type` no arm knows,
  * so an accept can never proceed with nothing locked.
+ *
+ * IT DOES NOT GO THROUGH `requireAssociationPair`, and that is deliberate. This
+ * statement locks the TARGET row and nothing else, so it has no business
+ * refusing a row for a missing INVITING-org id — routing it through the pair
+ * would widen its guard and change which message an accept throws. Its arms are
+ * therefore narrower than the pair's by design, not by omission: they refuse a
+ * strict SUBSET of what the three pair consumers refuse.
  */
 export function lockTargetRow(invitation: AssociationFacts) {
   switch (invitation.type) {
@@ -1991,81 +2119,58 @@ export function lockTargetRow(invitation: AssociationFacts) {
  * against a CONCURRENT one is `lockTargetRow` running first in the same batch —
  * see `acceptInvitationAs`.
  *
- * Throws on a row whose FK columns contradict its `type`, and fails CLOSED on a
- * `type` no arm knows — the same two rules as `associationStatement`, for the
- * same reason.
+ * A row whose FK columns contradict its `type`, and a `type` no arm knows, are
+ * both refused by `requireAssociationPair` before this function chooses a table
+ * — the same one decision `associationStatement` and `auditableAssociationOrg`
+ * ask, so the three cannot disagree about which pair a type implies.
  */
 export function unboundTargetSlot(invitation: AssociationFacts): SQL {
-  switch (invitation.type) {
+  const pair = requireAssociationPair(invitation);
+
+  switch (pair.type) {
     case "church_to_sending_church": {
-      if (!invitation.targetChurchId || !invitation.sendingChurchId) {
-        throw new InvitationError(
-          "Invalid invitation: missing church or sending church"
-        );
-      }
       return exists(
         db
           .select({ id: churches.id })
           .from(churches)
           .where(
             and(
-              eq(churches.id, invitation.targetChurchId),
-              freeOrHolds(churches.sendingChurchId, invitation.sendingChurchId)
+              eq(churches.id, pair.targetChurchId),
+              freeOrHolds(churches.sendingChurchId, pair.sendingChurchId)
             )
           )
       );
     }
 
     case "church_to_network": {
-      if (!invitation.targetChurchId || !invitation.sendingNetworkId) {
-        throw new InvitationError(
-          "Invalid invitation: missing church or network"
-        );
-      }
       return exists(
         db
           .select({ id: churches.id })
           .from(churches)
           .where(
             and(
-              eq(churches.id, invitation.targetChurchId),
-              freeOrHolds(
-                churches.sendingNetworkId,
-                invitation.sendingNetworkId
-              )
+              eq(churches.id, pair.targetChurchId),
+              freeOrHolds(churches.sendingNetworkId, pair.sendingNetworkId)
             )
           )
       );
     }
 
     case "sending_church_to_network": {
-      if (!invitation.targetSendingChurchId || !invitation.sendingNetworkId) {
-        throw new InvitationError(
-          "Invalid invitation: missing sending church or network"
-        );
-      }
       return exists(
         db
           .select({ id: sendingChurches.id })
           .from(sendingChurches)
           .where(
             and(
-              eq(sendingChurches.id, invitation.targetSendingChurchId),
+              eq(sendingChurches.id, pair.targetSendingChurchId),
               freeOrHolds(
                 sendingChurches.sendingNetworkId,
-                invitation.sendingNetworkId
+                pair.sendingNetworkId
               )
             )
           )
       );
-    }
-
-    default: {
-      const unknownType: never = invitation.type;
-      console.error("invitation type has no association rule", {
-        type: unknownType,
-      });
-      throw new InvitationError(NOT_AUTHORIZED_MESSAGE);
     }
   }
 }
@@ -2241,88 +2346,76 @@ export async function disassociateSendingChurchFromNetwork(
  * the network as org.
  *
  * IT IS TOTAL: it returns a subject or it THROWS, and there is no third answer.
- * Every arm fails closed the way every other switch on `type` in this file does
- * — `InvitationError`, the same arm `insertInvitation`'s slot rule,
+ * It fails closed the way every other read of an invitation's `type` in this
+ * file does — `InvitationError`, the same arm `insertInvitation`'s slot rule,
  * `lockTargetRow`, `associationStatement`, the accept path and
- * `verifyInvitationAuthority` all take.
+ * `verifyInvitationAuthority` all take — and it gets there by asking
+ * `requireAssociationPair` first, so it can see neither a null id nor an unknown
+ * type at all.
  *
- * TWO ROUNDS OF THE 2026-08-13 SWEEP (#411) GOT IT THERE, and the second is the
- * one worth remembering. Round 1 gave the switch a `default:` that throws: with
- * three cases and no default TypeScript treats the switch as exhaustive and lets
- * the function end, so a row carrying a `type` outside the union returned
- * `undefined`. Round 2 removed the OTHER falsy answer — the `: null` each of the
- * three arms returned when its type-implied ids were missing. Both were the same
- * hole, because the caller branched on truthiness: a falsy result meant a batch
- * of three statements instead of four, an association committed with no
- * `association_events` row behind it, which is the one thing #274 / OV-008
- * forbids. Documenting the nullable arm as "unreachable, because
+ * THREE ROUNDS OF THE 2026-08-13 SWEEP (#411) GOT IT THERE, and the later two
+ * are the ones worth remembering. Round 1 gave the switch a `default:` that
+ * throws: with three cases and no default TypeScript treats the switch as
+ * exhaustive and lets the function end, so a row carrying a `type` outside the
+ * union returned `undefined`. Round 2 removed the OTHER falsy answer — the
+ * `: null` each of the three arms returned when its type-implied ids were
+ * missing. Both were the same hole, because the caller branched on truthiness: a
+ * falsy result meant a batch of three statements instead of four, an association
+ * committed with no `association_events` row behind it, which is the one thing
+ * #274 / OV-008 forbids. Documenting the nullable arm as "unreachable, because
  * `associationStatement` throws on exactly these id pairs fifteen lines earlier"
  * is the reasoning this function's own header rejects one paragraph down; the
  * fix is to delete the branch, not to explain it. `acceptInvitationAs` now has
  * ONE batch shape, four statements, always audited.
  *
+ * Round 3 fixed what rounds 1 and 2 had made WORSE: this function had become a
+ * fourth hand-written copy of "which two ids does this type imply", and the
+ * subset relation the accept's safety rests on — every row this refuses is
+ * refused a statement earlier — held only because four switches happened to be
+ * spelled alike. The guards, the messages and the `never` now live once, in
+ * `requireAssociationPair`, and the relation is true by construction.
+ *
  * The premise is real rather than theoretical: `organization_invitations.type`
  * is a bare `varchar(40)` with a TypeScript-only `$type<>` cast, the FK columns
  * are all nullable, and `insertInvitation` validates neither (see
- * `verifyInvitationAuthority`). Nothing reaches the throwing arms today —
+ * `verifyInvitationAuthority`). Nothing reaches the refusal today —
  * `lockTargetRow`, `associationStatement` and `verifyInvitationAuthority` all
  * refuse such a row first — but "unreachable because three other functions
  * happen to run earlier" is not the guarantee this function should rest on, and
  * a FOURTH `OrganizationInvitationType` would reach it with all three of those
  * extended and this one silently unaudited. The `never` makes that a compile
- * error, and the throws make every runtime arm refuse rather than half-apply.
+ * error, and the throw makes the runtime refuse rather than half-apply.
  */
 export function auditableAssociationOrg(invitation: AssociationFacts): {
   subject: AssociationSubject;
   orgType: AssociationOrgType;
   orgId: string;
 } {
-  switch (invitation.type) {
+  const pair = requireAssociationPair(invitation);
+
+  switch (pair.type) {
     case "church_to_sending_church": {
-      if (!invitation.targetChurchId || !invitation.sendingChurchId) {
-        throw new InvitationError(
-          "Invalid invitation: missing church or sending church"
-        );
-      }
       return {
-        subject: churchSubject(invitation.targetChurchId),
+        subject: churchSubject(pair.targetChurchId),
         orgType: "sending_church",
-        orgId: invitation.sendingChurchId,
+        orgId: pair.sendingChurchId,
       };
     }
 
     case "church_to_network": {
-      if (!invitation.targetChurchId || !invitation.sendingNetworkId) {
-        throw new InvitationError(
-          "Invalid invitation: missing church or network"
-        );
-      }
       return {
-        subject: churchSubject(invitation.targetChurchId),
+        subject: churchSubject(pair.targetChurchId),
         orgType: "network",
-        orgId: invitation.sendingNetworkId,
+        orgId: pair.sendingNetworkId,
       };
     }
 
     case "sending_church_to_network": {
-      if (!invitation.targetSendingChurchId || !invitation.sendingNetworkId) {
-        throw new InvitationError(
-          "Invalid invitation: missing sending church or network"
-        );
-      }
       return {
-        subject: sendingChurchSubject(invitation.targetSendingChurchId),
+        subject: sendingChurchSubject(pair.targetSendingChurchId),
         orgType: "network",
-        orgId: invitation.sendingNetworkId,
+        orgId: pair.sendingNetworkId,
       };
-    }
-
-    default: {
-      const unknownType: never = invitation.type;
-      console.error("invitation type has no auditable association", {
-        type: unknownType,
-      });
-      throw new InvitationError(NOT_AUTHORIZED_MESSAGE);
     }
   }
 }
@@ -3074,97 +3167,71 @@ async function loadRespondableInvitation(
  * tell "bound" from "matched nothing" — the association's own rowcount, not the
  * claim's, is what gates the oversight milestone.
  *
- * A row whose FK columns contradict its `type` throws here, before anything is
- * written.
+ * A row whose FK columns contradict its `type` throws before anything is
+ * written, and so does a `type` no arm knows — both in `requireAssociationPair`,
+ * which is where that decision lives for every consumer of the pair. Failing
+ * CLOSED on the unknown type is load-bearing rather than tidy: the switch this
+ * function grew out of fell through and wrote nothing, which reads as safe but
+ * was not — silence here is how an unknown type could still be marked `accepted`
+ * and still announce a milestone.
  */
 export function associationStatement(
   invitation: AssociationFacts,
   invitationId: string
 ) {
   const claimed = claimedInvitation(invitationId);
+  const pair = requireAssociationPair(invitation);
 
-  switch (invitation.type) {
+  switch (pair.type) {
     case "church_to_sending_church": {
-      if (!invitation.targetChurchId || !invitation.sendingChurchId) {
-        throw new InvitationError(
-          "Invalid invitation: missing church or sending church"
-        );
-      }
       return db
         .update(churches)
         .set({
-          sendingChurchId: invitation.sendingChurchId,
+          sendingChurchId: pair.sendingChurchId,
           updatedAt: new Date(),
         })
         .where(
           and(
-            eq(churches.id, invitation.targetChurchId),
+            eq(churches.id, pair.targetChurchId),
             claimed,
-            freeOrHolds(churches.sendingChurchId, invitation.sendingChurchId)
+            freeOrHolds(churches.sendingChurchId, pair.sendingChurchId)
           )
         )
         .returning({ id: churches.id });
     }
 
     case "church_to_network": {
-      if (!invitation.targetChurchId || !invitation.sendingNetworkId) {
-        throw new InvitationError(
-          "Invalid invitation: missing church or network"
-        );
-      }
       return db
         .update(churches)
         .set({
-          sendingNetworkId: invitation.sendingNetworkId,
+          sendingNetworkId: pair.sendingNetworkId,
           updatedAt: new Date(),
         })
         .where(
           and(
-            eq(churches.id, invitation.targetChurchId),
+            eq(churches.id, pair.targetChurchId),
             claimed,
-            freeOrHolds(churches.sendingNetworkId, invitation.sendingNetworkId)
+            freeOrHolds(churches.sendingNetworkId, pair.sendingNetworkId)
           )
         )
         .returning({ id: churches.id });
     }
 
     case "sending_church_to_network": {
-      if (!invitation.targetSendingChurchId || !invitation.sendingNetworkId) {
-        throw new InvitationError(
-          "Invalid invitation: missing sending church or network"
-        );
-      }
       return db
         .update(sendingChurches)
         .set({
-          sendingNetworkId: invitation.sendingNetworkId,
+          sendingNetworkId: pair.sendingNetworkId,
           updatedAt: new Date(),
         })
         .where(
           and(
-            eq(sendingChurches.id, invitation.targetSendingChurchId),
+            eq(sendingChurches.id, pair.targetSendingChurchId),
             claimed,
-            freeOrHolds(
-              sendingChurches.sendingNetworkId,
-              invitation.sendingNetworkId
-            )
+            freeOrHolds(sendingChurches.sendingNetworkId, pair.sendingNetworkId)
           )
         )
         .returning({ id: sendingChurches.id });
-    }
-
-    default: {
-      // Fail CLOSED on a `type` this switch does not know. The old switch fell
-      // through and wrote nothing, which reads as safe but was not: silence
-      // here is why an unknown type could still be marked `accepted` and still
-      // announce a milestone. The `never` makes a fourth
-      // `OrganizationInvitationType` a compile error rather than a silent arm.
-      const unknownType: never = invitation.type;
-      console.error("invitation type has no association rule", {
-        invitationId,
-        type: unknownType,
-      });
-      throw new InvitationError(NOT_AUTHORIZED_MESSAGE);
     }
   }
 }
