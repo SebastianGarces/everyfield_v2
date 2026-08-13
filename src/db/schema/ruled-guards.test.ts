@@ -4,6 +4,12 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
+import { PgDialect, getTableConfig } from "drizzle-orm/pg-core";
+
+import {
+  TEAM_MEMBERSHIPS_ROLE_ACTIVE_UNIQUE,
+  teamMemberships,
+} from "@/db/schema/ministry-teams";
 import { assertInOrder, sourceReader } from "@/lib/testing/source-span";
 
 // ----------------------------------------------------------------------------
@@ -506,5 +512,69 @@ test("§4c the seat refusal is decided by the ONE unique-violation predicate, no
     spellings,
     ["src/db/errors.ts"],
     "#411 AC5: `23505` is spelled in exactly one non-test module — a second one is a second implementation of the same decision"
+  );
+});
+
+test("§4d the seat index is the ONLY unique index on team_memberships — under that name or any other", () => {
+  // WHAT THIS ADDS THAT §4c CANNOT SEE. §4c bans the DROPPED INDEX'S NAME
+  // (`team_memberships_active_unique`) anywhere in `src/`. The rule the schema
+  // states beside the table is wider than that — "Never re-add it, under that
+  // name or another" — and the wider half is the half that matters, because
+  // nothing about the failure depended on the identifier. `assignMember`
+  // inserts with `ON CONFLICT (role_id) WHERE status = 'active' DO NOTHING`,
+  // which arbitrates on the SEAT index and no other; ANY second unique index on
+  // this table is a non-arbiter that a raced INSERT can meet first, block on the
+  // winner's uncommitted tuple, and raise 23505 through — where the DO NOTHING
+  // cannot cover it and `isSeatConflict` (one constant, by §4c) does not
+  // recognise it. That is a raw `NeonDbError` out of `assignMember`, which the
+  // action shell replaces with its generic sentence: the exact defect of #411's
+  // resume, measured at roughly two runs in three on Postgres 16, and the reason
+  // migration 0039 exists. A second index added under a NEW name reproduces it
+  // with every §4c assertion still green.
+  //
+  // ASSERTED OFF THE RENDERED TABLE, NEVER A REGEX OVER THE SOURCE — the
+  // `getTableConfig` idiom `predefined-teams-guard.test.ts` established, and the
+  // same reasoning `memory/invariants.md` records for `portfolioPlantsStatement`
+  // and for `invitations-ui.test.ts` §9b: a declaration reached through a helper,
+  // a spread or another module is invisible to a pattern and present in the
+  // config. It is the ARBITER'S UNIQUENESS being asserted, so the live suite's
+  // determinism (`role-seat-race.test.ts`, three runs) has a hermetic guard
+  // under it that runs on every `pnpm test`.
+  const { indexes } = getTableConfig(teamMemberships);
+  const unique = indexes.filter((index) => index.config.unique);
+
+  assert.deepEqual(
+    unique.map((index) => index.config.name),
+    [TEAM_MEMBERSHIPS_ROLE_ACTIVE_UNIQUE],
+    "#411 quality round 1 (migration 0039): exactly ONE unique index stands over team_memberships. A second one is not the arbiter, so a raced INSERT meets it first and raises 23505 past the DO NOTHING — the same-person double submit then reads the action shell's generic error instead of the person sentence"
+  );
+
+  // …and it is the SEAT key, whose subsumption is what made dropping the other
+  // one free: `role_id` ALONE, NOT NULL, so one active row per role implies one
+  // per any wider key containing it, with no NULL hole. Widened to
+  // (church_id, role_id) it would also let a forged church id claim a second
+  // active seat on one role.
+  const [seat] = unique;
+  assert.deepEqual(
+    seat.config.columns.map((column) =>
+      "name" in column ? column.name : String(column)
+    ),
+    ["role_id"],
+    "#409 D1: the seat key is `role_id` alone — a wider key is a different rule, and `church_id` is carried for tenant-scoped reads, not for identity"
+  );
+
+  // Partial, on the predicate the `ON CONFLICT` clause repeats byte for byte. A
+  // total index would make a role fillable exactly once in its life (every past
+  // holder stays as an `inactive` row), and a DRIFTED predicate is "there is no
+  // unique or exclusion constraint matching the ON CONFLICT specification" on
+  // every assignment, race or not.
+  assert.ok(
+    seat.config.where,
+    "#409 D1: the seat is single only while it is occupied, so the index must be PARTIAL"
+  );
+  assert.equal(
+    new PgDialect().sqlToQuery(seat.config.where).sql,
+    "status = 'active'",
+    "#409 D1: the index predicate is what `assignMember`'s ON CONFLICT clause repeats — the pairing IS the guard"
   );
 });
