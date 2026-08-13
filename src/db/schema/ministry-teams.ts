@@ -195,6 +195,25 @@ export type NewTeamRole = typeof teamRoles.$inferInsert;
 // carry one — maps the index's own violation to the same refusal. See
 // `assignMember` and `ROLE_ALREADY_FILLED_MESSAGE`.
 // ----------------------------------------------------------------------------
+
+/**
+ * The partial unique index that enforces ONE PERSON PER TEAM ROLE (#409 D1).
+ *
+ * Exported so the code that recognises its violation names the same string the
+ * declaration below does — the shape `TASKS_MEETING_EVALUATION_UNIQUE`
+ * (`src/lib/tasks/events.ts`) established. The NAME is what the schema owns;
+ * the PREDICATE that recognises a violation of it is `isUniqueViolation`
+ * (`src/db/errors.ts`), the one copy every domain shares.
+ */
+export const TEAM_MEMBERSHIPS_ROLE_ACTIVE_UNIQUE =
+  "team_memberships_role_active_unique_idx";
+
+/**
+ * The partial unique index that keeps ONE ACTIVE ROW per (team, person, role) —
+ * the double-submit guard, older than #409 D1 and a different refusal.
+ */
+export const TEAM_MEMBERSHIPS_ACTIVE_UNIQUE = "team_memberships_active_unique";
+
 export const teamMemberships = pgTable(
   "team_memberships",
   {
@@ -231,12 +250,12 @@ export const teamMemberships = pgTable(
     index("team_memberships_role_id_idx").on(table.roleId),
     // Partial unique: only ACTIVE memberships are constrained, so a person can
     // be re-assigned to the same team/role after being set inactive (F8 fix).
-    uniqueIndex("team_memberships_active_unique")
+    uniqueIndex(TEAM_MEMBERSHIPS_ACTIVE_UNIQUE)
       .on(table.teamId, table.personId, table.roleId)
       .where(sql`status = 'active'`),
     // The rule: one person per team role (#409 D1). Partial for the same
     // reason as the index above — only an ACTIVE membership occupies the seat.
-    uniqueIndex("team_memberships_role_active_unique_idx")
+    uniqueIndex(TEAM_MEMBERSHIPS_ROLE_ACTIVE_UNIQUE)
       .on(table.roleId)
       .where(sql`status = 'active'`),
   ]

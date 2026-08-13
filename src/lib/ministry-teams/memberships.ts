@@ -16,8 +16,8 @@ import {
   emitTeamStaffingChanged,
 } from "./events";
 import { ExpectedError } from "./expected-error";
+import { membershipConflictMessage } from "./membership-conflict";
 import {
-  membershipConflictMessage,
   PERSON_ALREADY_ASSIGNED_MESSAGE,
   ROLE_ALREADY_FILLED_MESSAGE,
 } from "./membership-copy";
@@ -46,12 +46,14 @@ export interface PersonTeamAssignment {
 // and this module opens with `@/db`.
 //
 // `membershipConflictMessage` — the translation from a unique-violation to one
-// of those two sentences — lives in the same leaf, for the same reason plus one
-// of its own: it is the only guard between a lost reactivation race and a raw
-// "duplicate key value violates unique constraint" reaching a planter, and it
-// decides that by string-matching a driver error. In the leaf it is testable
-// with no database at all (`membership-conflict.test.ts`, hermetic, every
-// `pnpm test`); here the only test that could reach it was the opt-in live one.
+// of those two sentences — lives BESIDE the leaf, in `membership-conflict.ts`,
+// and not IN it: it recognises the violation with `isUniqueViolation`
+// (`@/db/errors`), the one copy of that predicate every domain shares, so it
+// cannot sit in an import-free module. It is the only guard between a lost
+// reactivation race and a raw "duplicate key value violates unique constraint"
+// reaching a planter; over there it is still a pure function testable with no
+// database at all (`membership-conflict.test.ts`, hermetic, every `pnpm test`),
+// whereas here the only test that could reach it was the opt-in live one.
 
 // ============================================================================
 // Membership Functions

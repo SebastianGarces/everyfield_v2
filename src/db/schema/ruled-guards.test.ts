@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
@@ -336,4 +337,47 @@ test("§4b the copy leaf is not also served from the trunk", () => {
       `${trunk} re-exports the leaf's copy — a leaf whose contents are also served from the trunk is not a leaf, and the pass-through is one import away from a browser chunk`
     );
   }
+});
+
+test("§4c the seat refusal is decided by the ONE unique-violation predicate, not a second copy", () => {
+  const conflict = read("src/lib/ministry-teams/membership-conflict.ts");
+
+  assert.match(
+    conflict,
+    /import \{ isUniqueViolation \} from "@\/db\/errors"/,
+    "#411 AC5: the recognition is `src/db/errors.ts`'s, shared with every other domain"
+  );
+  for (const constant of [
+    "TEAM_MEMBERSHIPS_ROLE_ACTIVE_UNIQUE",
+    "TEAM_MEMBERSHIPS_ACTIVE_UNIQUE",
+  ]) {
+    assert.match(
+      conflict,
+      new RegExp(`isUniqueViolation\\(error, ${constant}\\)`),
+      `#409 D1: the index name must come from the schema that declares it, never be re-typed here`
+    );
+  }
+  // Comments stripped: this rule is documented by NAMING what it forbids, in
+  // `membership-conflict.ts`'s own header (`register-path.test.ts`'s `code()`).
+  assert.doesNotMatch(
+    conflict.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1"),
+    /\.includes\(/,
+    "#411: matching the constraint by substring was the hand-rolled second implementation — it drops the SQLSTATE check and walks one level of cause instead of five"
+  );
+
+  // The PROPERTY, not the instance: exactly one module under src/ spells the
+  // SQLSTATE, so no third domain can quietly grow a third copy either.
+  const spellings = execFileSync(
+    "git",
+    ["grep", "-l", "23505", "--", "src/**/*.ts", "src/**/*.tsx"],
+    { cwd: process.cwd(), encoding: "utf8" }
+  )
+    .split("\n")
+    .filter((line) => line.length > 0 && !line.endsWith(".test.ts"));
+
+  assert.deepEqual(
+    spellings,
+    ["src/db/errors.ts"],
+    "#411 AC5: `23505` is spelled in exactly one non-test module — a second one is a second implementation of the same decision"
+  );
 });

@@ -24,11 +24,27 @@
 -- the existing rows able to satisfy it. A build before the repair fails the
 -- whole migration on the first plant the old races had already reached.
 --
--- EXPAND-ONLY. Nothing is dropped and no column is rewritten. A build deployed
--- BEFORE this migration keeps working — its unguarded inserts start failing on
--- a duplicate instead of writing one, which is the safer of the two wrong
--- answers — and the build deployed AFTER it works against a database that has
--- not run the migration, minus the guarantee. Deploy in either order.
+-- EXPAND-ONLY, BUT NOT ORDER-FREE. Nothing is dropped and no column is
+-- rewritten, so the OLD build against the NEW database is fine: a build
+-- deployed BEFORE this migration keeps working, its unguarded inserts start
+-- failing on a duplicate instead of writing one, which is the safer of the two
+-- wrong answers.
+--
+-- THE OTHER DIRECTION IS NOT FINE, AND THIS MIGRATION MUST GO FIRST. Apply it
+-- BEFORE (or atomically with) the build that carries the `ON CONFLICT` clauses.
+-- `ON CONFLICT (…) WHERE …` against a database that lacks the arbiter index is
+-- not a no-op and not a lost guarantee — it is SQLSTATE 42P10, "there is no
+-- unique or exclusion constraint matching the ON CONFLICT specification", on
+-- EVERY call, exactly as the three per-guard comments below already say. The
+-- new build ahead of this file breaks three write paths outright: forking a
+-- message template, issuing a confirmation token to every recipient of every
+-- meeting invitation, and assigning any person to any team role.
+--
+-- NOTHING IN THIS REPOSITORY APPLIES MIGRATIONS ON DEPLOY — `package.json` has
+-- only `"build": "next build"` (no `postbuild`, no `prebuild`) and `vercel.json`
+-- is an empty schema stub. So code-first IS the default order unless an operator
+-- intervenes: `pnpm db:migrate` is an explicit step, and it runs BEFORE the
+-- deploy that carries this file's call-site changes.
 --
 -- ROLLBACK (HR1/HR2). Reversible in ONE psql session. The three repairs are NOT
 -- reversed: a nulled dangling parent, a deleted superseded token and a
