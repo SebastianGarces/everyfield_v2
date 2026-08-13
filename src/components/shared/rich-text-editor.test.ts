@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { RichTextEditor } from "./rich-text-editor";
+import { RichTextEditor, RichTextLinkEditor } from "./rich-text-editor";
 import { RICH_TEXT_CONTROLS } from "./rich-text-editor-controls";
 
 // ----------------------------------------------------------------------------
@@ -136,6 +136,69 @@ test("the placeholder shows only while there is nothing to read", () => {
       value: "<p>Hi Sarah</p>",
     }).includes("Write your message...")
   );
+});
+
+// --- the link box's refusal ------------------------------------------------
+//
+// `aria-invalid` says the address is wrong. It does not say why, and a message
+// rendered beside the field is a message a screen reader never reaches. So the
+// two have to be PAIRED — `aria-describedby` naming an id that some element
+// really carries — and an id that drifts from the one on the paragraph reads
+// exactly like no error at all, silently.
+
+function renderLinkEditor(error: string | null) {
+  return renderToStaticMarkup(
+    createElement(RichTextLinkEditor, {
+      url: "not a url",
+      error,
+      onUrlChange: () => {},
+      onApply: () => {},
+      onCancel: () => {},
+    })
+  );
+}
+
+test("the link error is associated with the field, not just placed near it", () => {
+  const html = renderLinkEditor("Enter a web address like example.com");
+  const elements = parseElements(html);
+
+  const input = elements.find(
+    (el) => el.attrs["aria-label"] === "Link address"
+  );
+  assert.ok(input, "no link address field");
+  assert.equal(input.attrs["aria-invalid"], "true");
+
+  const describedBy = input.attrs["aria-describedby"];
+  assert.ok(describedBy, "the invalid field describes itself with nothing");
+
+  // The id is not merely present — it names an element that exists.
+  const described = elements.find((el) => el.attrs["id"] === describedBy);
+  assert.ok(described, `aria-describedby="${describedBy}" names no element`);
+  assert.equal(described.tag, "p");
+  assert.ok(html.includes("Enter a web address like example.com"), html);
+});
+
+test("a link box with nothing wrong describes itself with nothing", () => {
+  const input = parseElements(renderLinkEditor(null)).find(
+    (el) => el.attrs["aria-label"] === "Link address"
+  );
+
+  assert.ok(input, "no link address field");
+  assert.equal(input.attrs["aria-invalid"], "false");
+  assert.equal(input.attrs["aria-describedby"], undefined);
+});
+
+test("both link controls are clickable and carry cursor-pointer", () => {
+  const html = renderLinkEditor(null);
+  for (const label of ["Add link", "Cancel"]) {
+    assert.ok(html.includes(`>${label}<`), `${label} is missing`);
+  }
+  const buttons = parseElements(html).filter((el) => el.tag === "button");
+  assert.equal(buttons.length, 2);
+  for (const button of buttons) {
+    assert.match(button.attrs["class"] ?? "", /\bcursor-pointer\b/);
+    assert.equal(button.attrs["type"], "button");
+  }
 });
 
 test("a disabled editor is not editable and its controls are disabled", () => {

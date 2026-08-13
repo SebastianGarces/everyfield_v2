@@ -149,6 +149,13 @@ export function richTextToPlainText(html: string | null | undefined): string {
 
   const withBreaks = html
     .replace(/<br\s*\/?>/gi, "\n")
+    // A block ENDS a line and it also STARTS one. Breaking only at the closing
+    // tag glues the shape the toolbar produces most often — a typed line, then
+    // a bulleted line, with no `</p>` between them — into "…and keys- Checklist"
+    // in the text/plain half of the email, in the `communications.body` column
+    // that message search reads, and on the task card. The `\n{3,}` collapse
+    // and the `trim()` below absorb the doubled breaks this adds elsewhere.
+    .replace(/<(?:p|div|ul|ol|blockquote)\b[^>]*>/gi, "\n\n")
     .replace(/<\/(?:p|div|ul|ol|blockquote)\s*>/gi, "\n\n")
     .replace(/<li\b[^>]*>/gi, "- ")
     .replace(/<\/li\s*>/gi, "\n");

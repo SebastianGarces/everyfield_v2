@@ -24,6 +24,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useImperativeHandle,
   useRef,
   useState,
@@ -118,6 +119,82 @@ function normalizeTypedUrl(raw: string): string | null {
       ? trimmed
       : `https://${trimmed}`;
   return sanitizeUrl(withScheme);
+}
+
+interface RichTextLinkEditorProps {
+  url: string;
+  /** The refusal to show, or `null` while the box is still unanswered. */
+  error: string | null;
+  onUrlChange: (url: string) => void;
+  onApply: () => void;
+  onCancel: () => void;
+}
+
+/**
+ * The link box: one address field, apply, cancel, and the refusal message.
+ *
+ * Exported, and separate from the editor, for the error text. It has to be
+ * ASSOCIATED with the field rather than merely rendered beside it — a screen
+ * reader that reaches an `aria-invalid` input with nothing describing it is
+ * told the address is wrong and never told why. That pairing is one static
+ * render to check, and it cannot be checked through `RichTextEditor`, whose
+ * link box does not exist until someone has clicked the toolbar.
+ */
+export function RichTextLinkEditor({
+  url,
+  error,
+  onUrlChange,
+  onApply,
+  onCancel,
+}: RichTextLinkEditorProps) {
+  const errorId = `${useId()}-link-error`;
+
+  return (
+    <div className="bg-muted/20 flex flex-wrap items-center gap-2 border-b px-2 py-2">
+      <Input
+        value={url}
+        onChange={(event) => onUrlChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            onApply();
+          }
+          if (event.key === "Escape") {
+            event.preventDefault();
+            onCancel();
+          }
+        }}
+        placeholder="https://example.com"
+        aria-label="Link address"
+        aria-invalid={error !== null}
+        aria-describedby={error ? errorId : undefined}
+        className="h-8 flex-1"
+        autoFocus
+      />
+      <Button
+        type="button"
+        size="sm"
+        className="cursor-pointer"
+        onClick={onApply}
+      >
+        Add link
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        className="cursor-pointer"
+        onClick={onCancel}
+      >
+        Cancel
+      </Button>
+      {error && (
+        <p id={errorId} className="text-destructive w-full text-xs">
+          {error}
+        </p>
+      )}
+    </div>
+  );
 }
 
 export function RichTextEditor({
@@ -300,7 +377,13 @@ export function RichTextEditor({
   const applyLink = useCallback(() => {
     const safe = normalizeTypedUrl(linkUrl);
     if (!safe) {
-      setLinkError("Enter a web address starting with http:// or https://");
+      // Name what `normalizeTypedUrl` actually takes. It accepts a bare domain
+      // (example.com), an http(s), mailto: or tel: address, and a path that
+      // starts with `/` — so a message about http:// alone reads as a refusal
+      // of four forms the box would have accepted.
+      setLinkError(
+        "Enter a web address like example.com, an https:// link, mailto: or tel: address, or a path starting with /"
+      );
       return;
     }
 
@@ -400,47 +483,13 @@ export function RichTextEditor({
       </div>
 
       {linkOpen && (
-        <div className="bg-muted/20 flex flex-wrap items-center gap-2 border-b px-2 py-2">
-          <Input
-            value={linkUrl}
-            onChange={(event) => setLinkUrl(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                applyLink();
-              }
-              if (event.key === "Escape") {
-                event.preventDefault();
-                setLinkOpen(false);
-              }
-            }}
-            placeholder="https://example.com"
-            aria-label="Link address"
-            aria-invalid={linkError !== null}
-            className="h-8 flex-1"
-            autoFocus
-          />
-          <Button
-            type="button"
-            size="sm"
-            className="cursor-pointer"
-            onClick={applyLink}
-          >
-            Add link
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="cursor-pointer"
-            onClick={() => setLinkOpen(false)}
-          >
-            Cancel
-          </Button>
-          {linkError && (
-            <p className="text-destructive w-full text-xs">{linkError}</p>
-          )}
-        </div>
+        <RichTextLinkEditor
+          url={linkUrl}
+          error={linkError}
+          onUrlChange={setLinkUrl}
+          onApply={applyLink}
+          onCancel={() => setLinkOpen(false)}
+        />
       )}
 
       <div className="relative">

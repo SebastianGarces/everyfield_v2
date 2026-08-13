@@ -137,6 +137,21 @@ test("a list flattens to one line per item", () => {
   );
 });
 
+test("a block that OPENS after text still starts a new line", () => {
+  // The shape the toolbar produces every time an author types a line and then
+  // clicks the bullet button: no closing block tag stands between the prose and
+  // the list, so breaking only at closing tags glued them into "keys- Checklist"
+  // in the text/plain half, the searchable `body` column and the task card.
+  assert.equal(richTextToPlainText("a<ul><li>b</li></ul>"), "a\n\n- b");
+  assert.equal(
+    richTextToPlainText(
+      "Bring the <strong>signed lease</strong> and <em>keys</em>" +
+        "<ul><li>Checklist</li></ul>"
+    ),
+    "Bring the signed lease and keys\n\n- Checklist"
+  );
+});
+
 test("entities are decoded on the way out, so the email reads as typed", () => {
   assert.equal(richTextToPlainText("<p>Tom &amp; Jo &lt;3</p>"), "Tom & Jo <3");
 });

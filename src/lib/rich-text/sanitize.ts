@@ -357,6 +357,15 @@ export function sanitizeUrl(raw: string): string | null {
   // `https://example.com/{{email}}` and `/tasks/{{task_id}}` still work and
   // `{{first_name}}` (or `x{{token}}`, which substitutes into `xjavascript:`)
   // does not.
+  //
+  // The AUTHORITY is the other half of the same rule, and a lone `/` fixes only
+  // the scheme: `/{{first_name}}` with a merge value of `/evil.example/phish`
+  // substitutes into `//evil.example/phish`, which is the protocol-relative
+  // form refused a few lines above when it is written literally. So a token
+  // may decide neither — a path may carry one only once the path itself has
+  // begun, which is why `/tasks/{{task_id}}` survives and `/{{token}}` does
+  // not.
+  if (/^\/\s*\{\{/.test(decoded)) return null;
   if (
     decoded.includes(MERGE_TOKEN_OPEN) &&
     !SAFE_URL_SCHEME.test(decoded) &&

@@ -398,6 +398,16 @@ test("a merge token that could still decide the scheme is refused", () => {
   assert.equal(sanitizeUrl("&#123;&#123;first_name}}"), null);
 });
 
+test("a merge token that could still decide the authority is refused", () => {
+  // A leading `/` fixes the SCHEME but not the HOST. `/{{first_name}}` with a
+  // merge value of `/evil.example/phish` substitutes into
+  // `//evil.example/phish` — the protocol-relative form this same function
+  // refuses when it is written literally.
+  assert.equal(sanitizeUrl("/{{first_name}}"), null);
+  assert.equal(sanitizeUrl("/ {{first_name}}"), null);
+  assert.equal(sanitizeUrl("/&#123;&#123;first_name}}"), null);
+});
+
 test("a merge token inside a URL whose scheme is already fixed is kept", () => {
   assert.equal(
     sanitizeUrl("https://example.com/{{email}}"),
@@ -405,6 +415,8 @@ test("a merge token inside a URL whose scheme is already fixed is kept", () => {
   );
   assert.equal(sanitizeUrl("mailto:{{email}}"), "mailto:{{email}}");
   assert.equal(sanitizeUrl("/tasks/{{task_id}}"), "/tasks/{{task_id}}");
+  // A path with no token at all is untouched by the token rules.
+  assert.equal(sanitizeUrl("/tasks/new"), "/tasks/new");
 });
 
 test("an anchor whose whole href is a merge token loses its anchor", () => {

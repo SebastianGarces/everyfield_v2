@@ -341,6 +341,44 @@ test("a merge token cannot smuggle a javascript: href onto any surface", async (
   }
 });
 
+test("no substituted merge value can decide the host on any surface", async () => {
+  // The other half of the same rule. `/{{first_name}}` fixes the scheme and
+  // leaves the AUTHORITY to the merge value, so a value beginning with `/`
+  // renders `//evil.example/phish` — protocol-relative, resolved against
+  // whatever host the mail client is on, and a phishing link in outbound mail.
+  const authored = `<p>Hi <a href="/{{first_name}}">click me</a></p>`;
+  const hostile = { first_name: "/evil.example/phish" };
+
+  const stored = toRichTextHtml(authored);
+  const sent = renderTemplate(stored, escapeMergeValues(hostile));
+
+  const onDetailPage = renderToStaticMarkup(
+    createElement(RichText, { body: stored, mergeData: hostile })
+  );
+  const inPreview = renderToStaticMarkup(
+    createElement(EmailPreview, {
+      subject: "",
+      body: stored,
+      mergeData: hostile,
+    })
+  );
+  const delivered = await render(
+    CommunicationEmail({ bodyHtml: sent, churchName: "New Life" })
+  );
+
+  for (const [name, html] of [
+    ["the send path", sent],
+    ["the message detail page", onDetailPage],
+    ["the COM-015 preview", inPreview],
+    ["the delivered email", delivered],
+  ] as Array<[string, string]>) {
+    assert.ok(!/href\s*=\s*["']?\/\//.test(html), `${name}: ${html}`);
+    assert.ok(!/evil\.example/.test(html), `${name}: ${html}`);
+    // A refused href costs the link, never the words.
+    assert.ok(html.includes("click me"), `${name}: ${html}`);
+  }
+});
+
 test("a merge token inside a real URL still substitutes on every surface", () => {
   const authored = `<p><a href="https://everyfield.app/rsvp/{{email}}">RSVP</a></p>`;
   const data = { email: "sarah@example.com" };
@@ -435,6 +473,24 @@ test("a formatted body stores no markup in the column search reads", () => {
     stored.bodyHtml,
     /<a[^>]+href="https:\/\/everyfield\.app\/rsvp"/
   );
+});
+
+test("a list that follows a typed line does not glue itself to it", () => {
+  // The exact body the toolbar produced during browser validation: an author
+  // types a line, then clicks the bullet button, so NO closing block tag stands
+  // between the prose and the list. Flattening at closing tags only stored
+  // "…and keys- Checklist" — one word for search to miss, in the same string
+  // the recipient reads as the text/plain half and the task card shows.
+  const stored = storedColumns(
+    "Bring the <strong>signed lease</strong> and <em>keys</em>" +
+      "<ul><li>Checklist</li></ul>"
+  );
+
+  assert.ok(stored.body.includes("and keys\n"), JSON.stringify(stored.body));
+  assert.ok(!stored.body.includes("keys- "), JSON.stringify(stored.body));
+  assert.ok(stored.body.includes("- Checklist"), JSON.stringify(stored.body));
+  // The task card reads the same body the same way.
+  assert.equal(taskDescriptionPreview(stored.bodyHtml), stored.body);
 });
 
 test("a search phrase that straddles a formatting boundary still matches", () => {
