@@ -3,22 +3,29 @@
 //
 // The portfolio at a glance: how many plants, how they split either side of
 // launch, and where they sit across the journey. It is deliberately NOT a second
-// `/oversight/plants`: the projection stays the three columns it renders (#241),
-// so adding a column here is a deliberate act rather than a `select()` dragging
-// the whole `churches` row across the wire.
+// `/oversight/plants`.
 //
-// THE ARITHMETIC IS NOT IN THIS FILE. The cards and the histogram used to count
-// phases inline — `Array.from({ length: 7 })` for the bars and a bare `< 5` for
-// the launch split — which was a second, hand-typed declaration of what
-// `PHASES` already says. `churches.current_phase` is an unconstrained `integer`,
-// so a value outside 0–6 was counted in the total, drawn in no bar, and
-// bucketed as "launched" by accident. `summarizePortfolioPhases`
+// THE READ IS NOT IN THIS FILE, and that was the half that mattered. This page
+// carried `db`, `churches` and `inArray` and ran its own tenant-scoped query,
+// which made it the only surface in the domain reading the database from an RSC.
+// Its tenancy and its #241 projection could then be pinned only by a regex over
+// this file's TEXT — a test that broke on a variable rename, lived in a suite
+// named for another module, and could not see the WHERE clause at all.
+// `getOversightPortfolio` (`@/lib/oversight/read`) owns both decisions now,
+// beside every other oversight read, and `read.test.ts` RENDERS the statement to
+// assert them. Nothing below imports a data layer; this file only renders.
+//
+// THE ARITHMETIC IS NOT IN THIS FILE EITHER. The cards and the histogram used
+// to count phases inline — `Array.from({ length: 7 })` for the bars and a bare
+// `< 5` for the launch split — which was a second, hand-typed declaration of
+// what `PHASES` already says. `churches.current_phase` is an unconstrained
+// `integer`, so a value outside 0–6 was counted in the total, drawn in no bar,
+// and bucketed as "launched" by accident. `summarizePortfolioPhases`
 // (`@/lib/oversight/presentation`) derives the sequence from `PHASES` and folds
 // any stray value in as its own row, so the bars always sum to the headline
 // figure — and it is pure, so that promise is unit-tested.
 // ============================================================================
 
-import { inArray } from "drizzle-orm";
 import Link from "next/link";
 
 import { HeaderBreadcrumbs } from "@/components/header";
@@ -30,9 +37,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { db } from "@/db";
-import { churches } from "@/db/schema";
-import { getAccessibleChurchIds } from "@/lib/auth/access";
 import { scopeLabelForRole } from "@/lib/oversight/org-label";
 import {
   LAUNCHED_CAPTION,
@@ -41,6 +45,7 @@ import {
   portfolioSpreadCaption,
   summarizePortfolioPhases,
 } from "@/lib/oversight/presentation";
+import { getOversightPortfolio } from "@/lib/oversight/read";
 import { requireOversightUser } from "@/lib/oversight/session";
 
 export default async function OversightDashboardPage() {
@@ -49,26 +54,11 @@ export default async function OversightDashboardPage() {
   // five.
   const user = await requireOversightUser();
 
-  const churchIds = await getAccessibleChurchIds(user);
-
-  // The projection is EXPLICIT (#241): this page renders three columns, and a
-  // bare `select()` pulled the whole `churches` row — mission statement,
-  // address, onboarding timestamps — across the wire on every load. That is
-  // wasted bytes on an oversight surface whose whole point is that it shows
-  // aggregates, and it is how a column nobody meant to expose ends up one
-  // careless `{...plant}` away from the client. Adding a column here is now a
-  // deliberate act.
-  const plants =
-    churchIds.length > 0
-      ? await db
-          .select({
-            id: churches.id,
-            name: churches.name,
-            currentPhase: churches.currentPhase,
-          })
-          .from(churches)
-          .where(inArray(churches.id, churchIds))
-      : [];
+  // Tenant scope and projection both belong to the read layer
+  // (`@/lib/oversight/read`), which is where every other oversight surface asks
+  // its question — and where the two decisions are assertable from a rendered
+  // statement instead of from this file's text.
+  const plants = await getOversightPortfolio(user);
 
   const portfolio = summarizePortfolioPhases(
     plants.map((plant) => plant.currentPhase)

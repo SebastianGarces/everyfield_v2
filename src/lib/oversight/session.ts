@@ -26,36 +26,28 @@
 //
 // The `@/lib/auth` import is DEFERRED into the call, the same seam `./read.ts`
 // uses: it transitively loads the DB client, and keeping this module importable
-// without a `DATABASE_URL` is what lets `session.test.ts` import the role list
-// and assert it against `OVERSIGHT_ROLES` instead of restating it.
+// without a `DATABASE_URL` is what lets `session.test.ts` assert this guard's
+// behaviour with no database at all.
+//
+// THE ROLE PAIR IS NOT DECLARED HERE. It used to be — a second `as const` tuple
+// beside `OVERSIGHT_ROLES` in `@/lib/auth/access`, reconciled by a regex that
+// parsed that module's source text. Two implementations of one authority policy,
+// with a drift guard pointed backwards: the change that removes the reason for
+// the copy (declaring `OVERSIGHT_ROLES` `as const`) was the change that failed
+// the guard. The declaration now lives in `@/lib/auth/roles`, an import-free
+// leaf that reaches no database, so this module imports it directly and
+// `isOversightRole` gets its type predicate from the one declaration.
 // ============================================================================
 
 import { redirect } from "next/navigation";
 
-import type { User, UserRole } from "@/db/schema";
-
-/**
- * The two roles an `/oversight` route serves.
- *
- * A `const` tuple rather than a reference to `OVERSIGHT_ROLES`
- * (`@/lib/auth/access`), which is typed `UserRole[]` and therefore narrows
- * nothing — the tuple is what makes `isOversightRole` a type predicate and what
- * gives every page a `user` whose role the compiler already knows. The two
- * lists are asserted equal in `session.test.ts`, so they cannot drift.
- */
-export const OVERSIGHT_ROLE_LIST = [
-  "sending_church_admin",
-  "network_admin",
-] as const;
-
-export type OversightRole = (typeof OVERSIGHT_ROLE_LIST)[number];
+import type { User } from "@/db/schema";
+// Imported, never re-served: `@/lib/auth/roles` is the one place either symbol
+// comes from, the same rule `@/lib/invitations/register-path` lives by.
+import { isOversightRole, type OversightRole } from "@/lib/auth/roles";
 
 /** A session user already known to hold one of the two oversight roles. */
 export type OversightUser = User & { role: OversightRole };
-
-export function isOversightRole(role: UserRole): role is OversightRole {
-  return (OVERSIGHT_ROLE_LIST as readonly UserRole[]).includes(role);
-}
 
 /**
  * The session behind every `/oversight` page, or a redirect.

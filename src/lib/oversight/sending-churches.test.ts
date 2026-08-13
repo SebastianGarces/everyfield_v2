@@ -251,33 +251,9 @@ test("every link on the roster carries cursor-pointer", () => {
   }
 });
 
-// ----------------------------------------------------------------------------
-// #241 — explicit projection on the oversight index
-// ----------------------------------------------------------------------------
-
-test("the oversight index selects only the columns it renders", () => {
-  const source = readCode(
-    path.join(ROOT, "src", "app", "(dashboard)", "oversight", "page.tsx")
-  );
-
-  assert.ok(
-    !/\.select\(\)/.test(source),
-    "the oversight index is back to a bare select() (#241)"
-  );
-  assert.match(source, /id: churches\.id/);
-  assert.match(source, /name: churches\.name/);
-  assert.match(source, /currentPhase: churches\.currentPhase/);
-  // The projection has to cover everything the page reads off a plant, or the
-  // narrowing is a runtime `undefined` rather than a saving. Both names the
-  // page uses for a row are scanned — `plant` in the list, `p` in the filters.
-  const rendered = [...source.matchAll(/\b(?:plant|p)\.(\w+)/g)].map(
-    (match) => match[1]
-  );
-  assert.ok(rendered.length > 0, "the property scan found nothing to check");
-  for (const property of new Set(rendered)) {
-    assert.ok(
-      ["id", "name", "currentPhase"].includes(property),
-      `the page reads plant.${property}, which the projection does not select`
-    );
-  }
-});
+// The oversight index's projection and tenancy used to be asserted HERE, by a
+// regex over `oversight/page.tsx`'s source text — a test that lived in a file
+// named for a different module, broke on a variable rename, and could not see
+// the WHERE clause at all. The read moved into `@/lib/oversight/read`
+// (`getOversightPortfolio`), and both decisions are now asserted off the
+// RENDERED statement in `read.test.ts`.

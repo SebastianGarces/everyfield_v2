@@ -4,8 +4,12 @@ import path from "node:path";
 import { test } from "node:test";
 
 import type { UserRole } from "@/db/schema";
+// The ONE declaration of the oversight role pair, imported rather than parsed
+// out of another module's source. `@/lib/auth/roles` is an import-free leaf, so
+// this costs the suite no database — which is precisely why the pair can live
+// in one place now (`@/lib/auth/access` opens with `@/db`).
+import { OVERSIGHT_ROLES, isOversightRole } from "@/lib/auth/roles";
 
-import { OVERSIGHT_ROLE_LIST, isOversightRole } from "./session";
 import { scopeLabelForOrgType, scopeLabelForRole } from "./org-label";
 
 // ============================================================================
@@ -54,27 +58,28 @@ function readCode(file: string): string {
 // The role list is one list
 // ----------------------------------------------------------------------------
 
-test("the guard's role tuple is exactly OVERSIGHT_ROLES", () => {
-  // The tuple exists only to give `isOversightRole` a type predicate —
-  // `OVERSIGHT_ROLES` (`@/lib/auth/access`) is typed `UserRole[]` and narrows
-  // nothing. Two lists of the same two roles is precisely the drift this
-  // asserts away.
+test("the guard declares no role of its own", () => {
+  // `session.ts` used to hold `OVERSIGHT_ROLE_LIST` — a second `as const` tuple
+  // of the same two roles as `OVERSIGHT_ROLES` (`@/lib/auth/access`),
+  // reconciled by a regex over THAT module's source text. Two implementations
+  // of one authority policy, with a drift guard pointed backwards: declaring
+  // `OVERSIGHT_ROLES` `as const`, the one change that removes the reason for
+  // the copy, was the change that failed the guard.
   //
-  // READ FROM SOURCE, not imported. `@/lib/auth/access` pulls in `@/db`, whose
-  // module scope calls `neon(process.env.DATABASE_URL!)` — importing it here
-  // would make this whole suite need a database to assert a two-element list,
-  // and the no-DATABASE_URL seam is the property every other file in this
-  // directory is built around.
-  const access = readCode(path.join(ROOT, "src", "lib", "auth", "access.ts"));
-  const declaration = /OVERSIGHT_ROLES: UserRole\[\] = \[([^\]]*)\]/.exec(
-    access
+  // The pair is now declared once, in the import-free leaf `@/lib/auth/roles`,
+  // which BOTH sites import — `roles.test.ts` asserts that `access.ts` serves
+  // the leaf's own object rather than a copy of it, by identity. What this
+  // guard owes is that no third copy grows back here.
+  const guard = readCode(
+    path.join(ROOT, "src", "lib", "oversight", "session.ts")
   );
-  assert.ok(declaration, "OVERSIGHT_ROLES is no longer declared as a literal");
-
-  const declared = [...declaration[1].matchAll(/"([^"]+)"/g)].map(
-    (match) => match[1]
-  );
-  assert.deepEqual(declared, [...OVERSIGHT_ROLE_LIST]);
+  for (const role of ["sending_church_admin", "network_admin"]) {
+    assert.ok(
+      !guard.includes(role),
+      `session.ts names "${role}" — the role pair belongs to @/lib/auth/roles`
+    );
+  }
+  assert.match(guard, /from "@\/lib\/auth\/roles"/);
 });
 
 test("every non-oversight role is refused, and both oversight roles pass", () => {
@@ -86,7 +91,8 @@ test("every non-oversight role is refused, and both oversight roles pass", () =>
     "network_admin",
   ];
   const admitted = roles.filter(isOversightRole);
-  assert.deepEqual(admitted, ["sending_church_admin", "network_admin"]);
+  // Compared against the DECLARATION, not against a third spelling of the pair.
+  assert.deepEqual(admitted, [...OVERSIGHT_ROLES]);
 });
 
 // ----------------------------------------------------------------------------

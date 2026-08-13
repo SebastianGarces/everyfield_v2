@@ -8,23 +8,24 @@ import {
   type UserRole,
   type ChurchPrivacySettings,
 } from "@/db/schema";
+import { CHURCH_LEVEL_ROLES, OVERSIGHT_ROLES } from "@/lib/auth/roles";
 
 // ============================================================================
 // Role Helpers
 // ============================================================================
 
-/** Roles that operate at the church-plant level */
-export const CHURCH_LEVEL_ROLES: UserRole[] = [
-  "planter",
-  "coach",
-  "team_member",
-];
-
-/** Roles that have oversight access */
-export const OVERSIGHT_ROLES: UserRole[] = [
-  "sending_church_admin",
-  "network_admin",
-];
+/**
+ * The two role policies are DECLARED in `@/lib/auth/roles` — an import-free
+ * leaf — and served from here so every existing consumer's import path is
+ * unchanged.
+ *
+ * The declaration moved because this module's first line is `import { db } from
+ * "@/db"`, so asking "which roles does an oversight rule name?" cost a database
+ * connection. That is what produced a second copy of the oversight pair in
+ * `@/lib/oversight/session`, reconciled by a regex over this file's source.
+ * There is now one declaration, reached by import from both sites.
+ */
+export { CHURCH_LEVEL_ROLES, OVERSIGHT_ROLES };
 
 /**
  * Check if a user has one of the specified roles.

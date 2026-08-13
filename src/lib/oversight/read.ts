@@ -43,6 +43,7 @@ import {
   lt,
   ne,
 } from "drizzle-orm";
+import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 
 import {
   churchMeetings,
@@ -87,6 +88,7 @@ import type {
   OversightOrgType,
   OversightPlantDetail,
   OversightPlantSummary,
+  OversightPortfolioPlant,
   OversightSectionResult,
   PeopleAggregate,
   TasksAggregate,
@@ -117,6 +119,81 @@ export const RECENT_MEETING_WINDOW = 12;
 
 /** Meeting statuses that count as still ahead of the plant. */
 const UPCOMING_MEETING_STATUSES = ["planning", "ready", "in_progress"] as const;
+
+// ----------------------------------------------------------------------------
+// Portfolio index (#241) — what `/oversight` renders.
+// ----------------------------------------------------------------------------
+
+/**
+ * The EXPLICIT projection the index reads (#241).
+ *
+ * A bare `select()` pulled the whole `churches` row — mission statement,
+ * address, onboarding timestamps — across the wire on every load of a surface
+ * whose entire point is that it shows aggregates, and it is how a column nobody
+ * meant to expose ends up one careless `{...plant}` away from the client.
+ * Declared as a value so the statement below is the only thing that can widen
+ * it, and so `read.test.ts` can render the statement rather than grep a page.
+ */
+const PORTFOLIO_COLUMNS = {
+  id: churches.id,
+  name: churches.name,
+  currentPhase: churches.currentPhase,
+} as const;
+
+/**
+ * The index's one statement: three columns, scoped to the ids the caller may
+ * reach.
+ *
+ * It takes the DATABASE rather than closing over the imported one, which is
+ * what makes both of its decisions testable: `read.test.ts` hands it a driverless
+ * `pg-proxy` instance and renders the statement with `.toSQL()`, asserting the
+ * projection AND the `in (...)` tenancy predicate off the statement itself —
+ * the seam `src/lib/communication/log.test.ts` and
+ * `src/lib/dev-seed/seed-account-writes.test.ts` already use. Typed as the
+ * `select` of any `PgDatabase`, so the test needs no connection string and this
+ * module still imports `@/db` nowhere.
+ *
+ * IT IS NOT AN AUTHORITY BOUNDARY — the same rule `buildPlantSummaries` states.
+ * The ids must already have come from `getAccessibleChurchIds`; the exported
+ * read below is the only caller, and it resolves them first.
+ */
+export function portfolioPlantsStatement(
+  database: Pick<PgDatabase<PgQueryResultHKT>, "select">,
+  churchIds: string[]
+) {
+  return database
+    .select(PORTFOLIO_COLUMNS)
+    .from(churches)
+    .where(inArray(churches.id, churchIds));
+}
+
+/**
+ * Every plant the caller's org may see, as the index renders it.
+ *
+ * This read used to sit INLINE in `src/app/(dashboard)/oversight/page.tsx` —
+ * the only surface in the domain that reached the database from an RSC — so its
+ * tenant scope and its #241 projection were pinned by a regex over the page's
+ * source text, which could not see the `WHERE` clause at all. The page now
+ * holds no data-layer import and only renders.
+ *
+ * `[]` for an empty accessible list, which is also the answer for every
+ * non-oversight role: `getAccessibleChurchIds` is what decides, exactly as it
+ * does for the directory read below.
+ */
+export async function getOversightPortfolio(
+  user: User
+): Promise<OversightPortfolioPlant[]> {
+  const { getAccessibleChurchIds } = await import("@/lib/auth/access");
+
+  const churchIds = await getAccessibleChurchIds(user);
+  // An empty `in ()` is a query that can only return nothing — the guard is
+  // here so the index costs a round trip only when there is something to read.
+  if (churchIds.length === 0) return [];
+
+  const { db } = await import("@/db");
+
+  return portfolioPlantsStatement(db, churchIds);
+}
 
 // ----------------------------------------------------------------------------
 // Directory (OV-001).

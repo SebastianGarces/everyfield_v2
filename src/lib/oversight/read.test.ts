@@ -3,10 +3,15 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
+import { drizzle } from "drizzle-orm/pg-proxy";
 import { PgDialect } from "drizzle-orm/pg-core";
 
 import { formatAssociationProvenance } from "./presentation";
-import { RECENT_MEETING_WINDOW, sendingChurchesInNetwork } from "./read";
+import {
+  RECENT_MEETING_WINDOW,
+  portfolioPlantsStatement,
+  sendingChurchesInNetwork,
+} from "./read";
 import { OVERSIGHT_SECTIONS } from "./sections";
 
 // ============================================================================
@@ -346,6 +351,99 @@ test("the network lookup is the only way a sending church name reaches provenanc
     /\.where\(sendingChurchesInNetwork\(org\.orgId, sendingChurchIds\)\)/,
     "the sending-church name lookup is not scoped to the caller's network"
   );
+});
+
+// ----------------------------------------------------------------------------
+// The index's projection and tenancy (#241) — asserted off the STATEMENT
+// ----------------------------------------------------------------------------
+//
+// Both decisions used to live inline in `src/app/(dashboard)/oversight/page.tsx`
+// — the one surface in this domain that read the database from an RSC — and
+// were pinned by a regex over that page's source in a suite named for another
+// module (`sending-churches.test.ts`). It matched `id: churches.id` and scanned
+// `\b(?:plant|p)\.(\w+)`, so a variable rename broke it, and it could not see
+// the WHERE clause at all: the tenancy predicate on a portfolio read had no
+// test that observed it.
+//
+// `portfolioPlantsStatement` takes the DATABASE, so the statement can be
+// RENDERED here and a regression that widens the projection or drops the scope
+// fails a test that executed the query builder rather than one that read a
+// string.
+//
+// The instance below is drizzle's `pg-proxy` driver over a callback that is
+// never called: `.toSQL()` renders, it does not connect, and no `DATABASE_URL`
+// is read — which is what keeps this suite's no-database seam
+// (`read-imports.test.ts`) intact while asserting the real statement.
+
+const offlineDb = drizzle(async () => {
+  throw new Error("the projection tests render SQL; they never execute it");
+});
+
+/** The rendered statement, for a caller whose accessible list is these ids. */
+function renderedPortfolio(churchIds: string[] = ["church-a", "church-b"]) {
+  return portfolioPlantsStatement(offlineDb, churchIds).toSQL();
+}
+
+test("the index selects exactly the three columns it renders", () => {
+  const { sql } = renderedPortfolio();
+
+  const projection = /^select (.+?) from "churches"/.exec(sql);
+  assert.ok(
+    projection,
+    `the statement is not the shape this test reads: ${sql}`
+  );
+  assert.deepEqual(
+    projection[1].split(", "),
+    ['"id"', '"name"', '"current_phase"'],
+    `the oversight index's projection changed — every added column ships on every load (#241). Rendered: ${sql}`
+  );
+  assert.doesNotMatch(
+    sql,
+    /select \*/,
+    "the index is back to a bare select(), which pulls the whole churches row (#241)"
+  );
+});
+
+test("the index reads only the churches the caller may reach", () => {
+  const { sql, params } = renderedPortfolio(["mine-1", "mine-2"]);
+
+  assert.match(
+    sql,
+    /where "churches"\."id" in \(\$1, \$2\)$/,
+    `the tenant scope is not an id list on the statement's WHERE. Rendered: ${sql}`
+  );
+  assert.deepEqual(
+    params,
+    ["mine-1", "mine-2"],
+    "the accessible-id list is not what the WHERE clause binds"
+  );
+
+  // …and the list is the ONLY predicate: a second clause would mean the scope
+  // is being decided somewhere this assertion cannot see.
+  const where = sql.slice(sql.indexOf("where "));
+  assert.ok(
+    !/\band\b|\bor\b/.test(where),
+    `the index's WHERE grew a clause beyond the accessible-id list: ${where}`
+  );
+});
+
+test("the index page holds no data-layer import at all", () => {
+  // The read moved out of the RSC, and this is what that bought: a page that
+  // only renders. A `db`/`churches`/`inArray` import here is the read coming
+  // back to a file where no test can see its WHERE clause.
+  const page = readCode(
+    path.join(ROOT, "src", "app", "(dashboard)", "oversight", "page.tsx")
+  );
+  const specifiers = [
+    ...page.matchAll(/^import\s+[^;]*?from\s+"([^"]+)"/gm),
+  ].map((match) => match[1]);
+  assert.ok(specifiers.length > 0, "the import scan found nothing to check");
+  for (const specifier of ["drizzle-orm", "@/db", "@/db/schema"]) {
+    assert.ok(
+      !specifiers.includes(specifier),
+      `the oversight index imports ${specifier} — its read belongs in @/lib/oversight/read`
+    );
+  }
 });
 
 // ----------------------------------------------------------------------------
