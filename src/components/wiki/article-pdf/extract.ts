@@ -297,6 +297,46 @@ function collectCallout(
 }
 
 /**
+ * Every `tr` this table owns — never one belonging to a table inside it.
+ *
+ * `querySelectorAll("tr")` is a DESCENDANT query, so a table nested in a cell
+ * handed its rows to the OUTER table as well: the same words arrived twice
+ * (once flattened into the cell, once as extra rows of their own) and the outer
+ * grid was padded out to the widest inner row. That is not what divergence 3
+ * promises — nesting FLATTENS, it does not duplicate — so the walk stops at a
+ * nested `TABLE` instead (#411).
+ *
+ * `thead`, `tbody` and `tfoot` are recursed through because the browser inserts
+ * a `tbody` whether or not the markup has one, so a table's rows are almost
+ * never its direct children.
+ *
+ * `data-print-hide` is honoured here as it is on the other two walks — this was
+ * the one place a marked element still reached the file, because the descendant
+ * query never looked at attributes. A hidden CELL is deliberately not dropped:
+ * removing one shifts every cell after it into the wrong column, and the
+ * printed page hides it in place.
+ */
+function ownRows(table: Element): Element[] {
+  const rows: Element[] = [];
+
+  const walk = (parent: Element): void => {
+    for (const child of Array.from(parent.children)) {
+      if (child.hasAttribute("data-print-hide")) continue;
+      if (child.tagName === "TR") {
+        rows.push(child);
+        continue;
+      }
+      // A nested table owns everything below it, including its own rows.
+      if (child.tagName === "TABLE") continue;
+      walk(child);
+    }
+  };
+
+  walk(table);
+  return rows;
+}
+
+/**
  * Collect a table as ONE block, with its rows intact.
  *
  * A header row is one whose cells are all `th` — which is how the MDX table
@@ -310,7 +350,7 @@ function collectCallout(
 function collectTable(table: Element, out: PrintBlock[]): void {
   const rows: PrintTableRow[] = [];
 
-  for (const row of Array.from(table.querySelectorAll("tr"))) {
+  for (const row of ownRows(table)) {
     const cellElements = Array.from(row.children);
     const cells = cellElements.map((cell) => inlineRuns(cell));
     if (!cells.some((cell) => runsText(cell).length > 0)) continue;
