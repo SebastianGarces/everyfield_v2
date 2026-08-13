@@ -22,7 +22,15 @@ That default is also why threading `churchId` reached further than the article r
 
 ### A church's copy of a slug overrides the global one
 
-`wiki_articles_slug_church_idx` is unique on `(slug, church_id)`, so a church may hold its own row for a global slug — and the predicate admits exactly two scopes, so **at most two rows** can ever match. `preferChurchOverride()` collapses them to the church's, preserving sort order. Without it the same slug appears twice in navigation, lists and React keys. `getArticle` runs the same function over a `LIMIT 2` so the single-article read and the lists cannot disagree about which row wins.
+`wiki_articles_slug_church_idx` is unique on `(slug, church_id)`, so a church may hold its own row for a global slug — and the visibility predicate admits exactly two scopes, so **at most two rows** can ever satisfy it. The church's published row wins; without that rule the same slug appears twice in navigation, lists and React keys.
+
+**One implementation, and it is a predicate** (#411 round 3). `notOverriddenByChurch(churchId)` sits beside `visibleToChurch` in `get-articles.ts` and returns `NOT EXISTS (this church's published row of this slug)` — `undefined` for a churchless read, since there is nothing to override. Every reader-facing builder carries it: `visibleArticlesQuery`, `articleBySlugQuery` (which therefore takes `LIMIT 1` — the statement returns the winner, so no caller is left to choose) and `searchArticlesQuery`.
+
+It used to have two implementations, and that is the part worth keeping. The lists and the single-article read collapsed the `(slug, church_id)` pair in JS afterwards (`preferChurchOverride`), which works only because they read the **whole** visible corpus; search suppressed the global row inside the statement. A JS collapse cannot answer for a **ranked** read at all: it only ever sees the rows that survived the `ts_rank` cut, and the church's copy need not be among them — a rewritten copy may not match the tsquery, or may rank below the cut — so the global row came back alone with nothing to collapse it against, and the result row and the article the click opened were two different documents. Reproduced against a real database (`tenancy-live.test.ts`), not reasoned about. So the SQL form is the survivor and the JS copy is deleted rather than kept in parallel; a SQL builder and a JS predicate could never share an *implementation*, and here they could not even share the *decision*.
+
+Two terms are load-bearing. The subquery's `published` must match the read's own `status` filter, or a church drafting its own copy deletes the global article from its lists and its search while the detail route still opens it — the same disagreement in the other direction. And the church's own rows are exempt (`church_id IS NOT NULL`, which under `visibleToChurch` can only be the reader's church), or the override suppresses itself and the slug vanishes entirely.
+
+`tenancy.test.ts` §2 pins the absence rather than the instance: it derives the wiki modules from the directory and fails if a second module declares the decision, or if a JS collapse of the pair comes back under any name.
 
 ### `getArticles` is request-cached, keyed on churchId
 
@@ -45,6 +53,16 @@ So the column is **derived-once**, not authored and not maintained: it was writt
 - **The wipe cannot reach the corpus either (#326).** `pnpm db:seed` deletes all users and all churches unscoped and derives everything else from the FK graph — which reaches `wiki_articles` from `churches` like any other dependent. `wiki_articles` and `wiki_sections` are therefore `PROTECTED_TABLES` in `seed-dev-db.ts`: never deleted **and never walked through**, so nothing downstream of them is dragged in either. And a church-scoped article is not an obstacle to route around — `assertProtectedTablesAreSafe()` aborts the whole seed *before its first DELETE* when `wiki_articles.church_id` is non-null anywhere, because the honest answer to that FK is to stop and let a human re-point the rows, not to delete content the migration alone can produce. Rules: [`../invariants.md`](../invariants.md) → Dev Seeds; mechanics: [`../contracts/db.md`](../contracts/db.md).
 
 The parser lives in `src/lib/wiki/related-sections.ts` rather than in the script, because its boundaries are the whole risk and needed unit tests: the section ends at the end of its **link list**, not at the next heading — it is the last heading in every article, so the obvious rule would have deleted the closing Callout with it — and the leading `---` goes with the section, or the two surviving rules end up adjacent. A list item that is not a plain markdown link aborts that article instead of half-stripping it.
+
+## Search refuses by rejecting, so the caller owns the outcome (#411)
+
+`searchWikiArticles` mints an actor with `verifySession()` above everything else — `src/proxy.ts` only redirects unauthenticated callers on `GET`, so a POST to that `"use server"` export reaches it with no session cookie and no UI in front of it. The refusal is therefore a **thrown** `Unauthorized`, deliberately: an empty array would be indistinguishable from "no article matches those words".
+
+The dialog awaited that promise bare, inside an async `setTimeout` callback. Two failures at once: an unhandled promise rejection, and a `Searching…` spinner that never settled — `setIsSearching(false)` sits *below* the `await`, so a rejection skipped every state transition and left the reader watching a spinner with no way to learn the search had refused.
+
+The fix is at the call, not in the action's return type. A second return shape would not have closed it: a dropped connection, a 500 out of the action and a deploy that invalidated the action id all reject too, and a server action rejection reaches the browser as an opaque digest, so the dialog cannot tell them apart anyway. `runWikiSearch(search, query)` (`src/lib/wiki/search-request.ts`) turns every request into `{ status: "results" }` or `{ status: "unavailable" }`, and the dialog renders the second as `SEARCH_UNAVAILABLE_MESSAGE` — "Reload the page and try again", because reloading is what returns an expired session to `/login`. "No articles found." stays reserved for a search that actually ran.
+
+The module takes the search function as an argument so the refusal path runs in a unit test (`search-request.test.ts`) rather than only in a browser, and it is deliberately **not** re-exported from `src/lib/wiki/index.ts` — a `"use client"` dialog imports it, and the barrel reaches `@/db` through every other wiki module.
 
 ## Slugs and paths: the two builders
 

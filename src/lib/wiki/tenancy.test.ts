@@ -1,16 +1,11 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import { type WikiArticle } from "@/db/schema";
 import { codeOf } from "@/lib/auth/server-action-surface";
 
-import {
-  articleBySlugQuery,
-  preferChurchOverride,
-  visibleArticlesQuery,
-} from "./get-articles";
+import { articleBySlugQuery, visibleArticlesQuery } from "./get-articles";
 import { searchArticlesQuery, type SearchResult } from "./search";
 
 // ----------------------------------------------------------------------------
@@ -136,50 +131,67 @@ test("the search read with no church narrows to global", () => {
   assert.doesNotMatch(text, CHURCH_EQUALITY);
 });
 
-test("search suppresses a global row this church overrides, IN THE STATEMENT (#411)", () => {
-  // The lists collapse (slug, church_id) pairs in JS because they read the
-  // whole visible corpus. A RANKED read does not: a JS collapse only sees the
-  // rows that survived the `ts_rank` cut, and the church's copy need not be
-  // among them — a rewritten copy may not match the tsquery at all. The global
-  // row then comes back alone with nothing to collapse it against, and the
+/** Every reader-facing read, as a name and a rendered statement. */
+function readerFacingReads(churchId: string | null) {
+  return [
+    ["the corpus read", visibleArticlesQuery(churchId)],
+    ["the single-article read", articleBySlugQuery("discovery/x", churchId)],
+    ["the search read", searchArticlesQuery("elders", churchId)],
+  ] as const;
+}
+
+test("EVERY reader-facing read suppresses a global row this church overrides, IN THE STATEMENT (#411)", () => {
+  // The override decision used to have two implementations: a JS collapse of
+  // (slug, church_id) pairs for the reads that fetch the whole corpus, and this
+  // predicate for search. A JS collapse is unusable on a RANKED read — it only
+  // sees the rows that survived the `ts_rank` cut, and the church's copy need
+  // not be among them (a rewritten copy may not match the tsquery at all), so
+  // the global row comes back alone with nothing to collapse it against and the
   // result row and the article the click opens are two different documents.
   // Observed against a real database; the absence is asserted in
-  // `tenancy-live.test.ts`. What is asserted HERE is that the suppression is
-  // part of the statement, so it applies BEFORE the limit rather than after.
-  const { sql: text, params } = searchArticlesQuery("elders", CHURCH_A).toSQL();
+  // `tenancy-live.test.ts`.
+  //
+  // So the SQL form is the survivor and it is now on EVERY reader-facing read,
+  // which is what makes the lists, the detail route and search unable to
+  // disagree about which row a reader gets.
+  for (const [name, query] of readerFacingReads(CHURCH_A)) {
+    const { sql: text, params } = query.toSQL();
 
-  assert.match(
-    text,
-    /not exists/i,
-    "search does not suppress the overridden global row in SQL — a JS collapse after the LIMIT cannot see a row the LIMIT dropped"
-  );
-  assert.match(
-    text,
-    /"override"\."church_id" = \$\d/,
-    "the suppressing subquery is not bound to a church"
-  );
-  assert.match(
-    text,
-    /"override"\."status" = \$\d/,
-    "the suppressing subquery must match `articleBySlugQuery` on status — a DRAFT church copy would otherwise hide a global article search can still open"
-  );
-  assert.ok(
-    params.includes(CHURCH_A),
-    "the reader's church is not bound to the suppressing subquery"
-  );
-  assert.ok(
-    !params.includes(CHURCH_B),
-    "another church's id reached the suppressing subquery"
-  );
+    assert.match(
+      text,
+      /not exists/i,
+      `${name} does not suppress the overridden global row in SQL — the church's copy and the global one both come back`
+    );
+    assert.match(
+      text,
+      /"override"\."church_id" = \$\d/,
+      `${name}'s suppressing subquery is not bound to a church`
+    );
+    assert.match(
+      text,
+      /"override"\."status" = \$\d/,
+      `${name}'s suppressing subquery must carry the same status term the read does — a DRAFT church copy would otherwise hide a global article the reader can still open`
+    );
+    assert.ok(
+      params.includes(CHURCH_A),
+      `the reader's church is not bound to ${name}'s suppressing subquery`
+    );
+    assert.ok(
+      !params.includes(CHURCH_B),
+      `another church's id reached ${name}'s suppressing subquery`
+    );
+  }
 });
 
-test("a churchless search has nothing to suppress (#411)", () => {
+test("a churchless read has nothing to suppress (#411)", () => {
   // With no church there is no override, and a stray `NOT EXISTS` would only be
   // a way to lose global rows.
-  const { sql: text } = searchArticlesQuery("elders", null).toSQL();
+  for (const [name, query] of readerFacingReads(null)) {
+    const { sql: text } = query.toSQL();
 
-  assert.doesNotMatch(text, /not exists/i);
-  assert.doesNotMatch(text, /"override"/);
+    assert.doesNotMatch(text, /not exists/i, name);
+    assert.doesNotMatch(text, /"override"/, name);
+  }
 });
 
 test("every read still filters to published articles", () => {
@@ -197,42 +209,67 @@ test("every read still filters to published articles", () => {
 });
 
 // ============================================================================
-// 2. The override rule
+// 2. The override rule — ONE implementation (#411 round 3)
+//
+// The decision "a church's published row of a slug replaces the global row of
+// that name" had two implementations: the SQL predicate above and a JS collapse
+// (`preferChurchOverride`) the lists and the detail route ran afterwards. A SQL
+// builder and a JS predicate cannot share an implementation — they can only
+// share a DECISION — and here they could not even do that, because the JS form
+// cannot answer for a ranked read at all. So the JS form is GONE rather than
+// kept in parallel, and what is asserted here is the absence: a second site
+// that decides the same thing is how the detail route and search drift apart
+// again.
 // ============================================================================
 
-function row(slug: string, churchId: string | null, title: string) {
-  return { slug, churchId, title } as WikiArticle;
+/** Wiki modules, derived from the directory rather than listed by hand. */
+function wikiSourceFiles(): string[] {
+  const dir = path.join(process.cwd(), "src", "lib", "wiki");
+
+  return readdirSync(dir)
+    .filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts"))
+    .map((name) => path.join(dir, name));
 }
 
-test("a church's copy of a slug wins over the global article of that name", () => {
-  // (slug, church_id) is unique, not slug alone, so both rows can exist and
-  // both satisfy the visibility predicate. Returning both would duplicate the
-  // article in every list, in the navigation and in React keys.
-  const both = preferChurchOverride([
-    row("discovery/values", null, "Global"),
-    row("discovery/values", CHURCH_A, "Ours"),
-  ]);
+test("exactly one module decides the church override (#411)", () => {
+  // Derived from the directory, not from a list of the modules that happen to
+  // have carried the rule: a hand-list is blind to the module a later change
+  // adds, which is the failure the collapse exists to end.
+  const declaring = wikiSourceFiles().filter((file) =>
+    /function notOverriddenByChurch\b/.test(codeOf(file))
+  );
 
-  assert.equal(both.length, 1);
-  assert.equal(both[0].title, "Ours");
-
-  // Order of arrival must not change the answer.
-  const reversed = preferChurchOverride([
-    row("discovery/values", CHURCH_A, "Ours"),
-    row("discovery/values", null, "Global"),
-  ]);
-  assert.equal(reversed.length, 1);
-  assert.equal(reversed[0].title, "Ours");
+  assert.deepEqual(
+    declaring.map((file) => path.basename(file)),
+    ["get-articles.ts"],
+    "the church-override decision must be declared exactly once, beside the visibility predicate it qualifies — every other read imports it"
+  );
 });
 
-test("search does not collapse in JS — it must not carry an owner column (#411)", () => {
-  // Round 1 of #411 gave search the SAME JS collapse the lists use. It is the
-  // wrong tool for a ranked read: the collapse runs after the `LIMIT`, so it
-  // only ever sees rows that survived the cut, and a church's copy that does
-  // not match the tsquery is never in that set. Search therefore suppresses the
-  // overridden row in the STATEMENT (asserted above), and the projection has no
-  // `church_id` in it — an owner column in a SEARCH RESULT exists only to feed
-  // a JS collapse, so its presence would mean the collapse came back.
+test("no wiki read collapses the override in JS (#411)", () => {
+  // The JS collapse ran AFTER the read, so on a ranked read it only ever saw
+  // the rows that survived the cut. Its shape is recognisable: a per-slug map
+  // that prefers a non-null `churchId`. Any return of it is a second decision
+  // site, whatever it is called.
+  for (const file of wikiSourceFiles()) {
+    const code = codeOf(file);
+
+    assert.doesNotMatch(
+      code,
+      /preferChurchOverride/,
+      `${path.basename(file)} still collapses the override in JS — the decision belongs to the statement (#411)`
+    );
+    assert.doesNotMatch(
+      code,
+      /churchId === null && \w+\.churchId !== null/,
+      `${path.basename(file)} re-implements the override rule as a JS comparison (#411)`
+    );
+  }
+});
+
+test("a search result carries no owner column (#411)", () => {
+  // An owner column in a SEARCH RESULT exists only to feed a JS collapse, so
+  // its presence would mean the second decision site came back.
   const { sql: text } = searchArticlesQuery("elders", CHURCH_A).toSQL();
   const projection = text.slice(0, text.search(/\bfrom\b/i));
 
@@ -259,16 +296,24 @@ test("search does not collapse in JS — it must not carry an owner column (#411
   );
 });
 
-test("articles with no override pass through in sort order", () => {
-  const articles = preferChurchOverride([
-    row("a", null, "A"),
-    row("b", CHURCH_A, "B"),
-    row("c", null, "C"),
-  ]);
+test("the single-article read returns the winner, not a pair to collapse (#411)", () => {
+  // While the override was decided in JS this read took `LIMIT 2` and handed
+  // both rows to the collapse. With the predicate in the statement at most one
+  // row can match, and the limit says so — a `LIMIT 2` here would mean a caller
+  // is expected to choose, which is the second decision site by another name.
+  const { sql: text, params } = articleBySlugQuery(
+    "discovery/x",
+    CHURCH_A
+  ).toSQL();
 
-  assert.deepEqual(
-    articles.map((article) => article.slug),
-    ["a", "b", "c"]
+  assert.match(text, /limit \$\d/i);
+  assert.ok(
+    !params.includes(2),
+    "the single-article read still takes a second row for a JS collapse to pick from"
+  );
+  assert.ok(
+    params.includes(1),
+    "the single-article read must take exactly the row the statement decided on"
   );
 });
 

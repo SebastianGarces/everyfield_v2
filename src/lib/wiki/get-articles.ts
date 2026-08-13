@@ -1,4 +1,15 @@
-import { and, asc, eq, isNull, or, type SQL } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  isNotNull,
+  isNull,
+  notExists,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { cache } from "react";
 import { db } from "@/db";
 import { wikiArticles } from "@/db/schema";
@@ -48,6 +59,71 @@ export function visibleToChurch(churchId: string | null): SQL {
   ) as SQL;
 }
 
+// ============================================================================
+// The church override — ONE decision, in the statement (#411 round 3)
+//
+// `wiki_articles_slug_church_idx` is unique on (slug, church_id), so a church
+// may hold its own row for a global slug, and the visibility predicate above
+// admits both scopes — so both rows come back and one of them has to win. The
+// church's row does: it is an override (`memory/invariants.md` → Wiki
+// Articles), and two rows under one slug otherwise duplicate the article in
+// lists, in navigation and in React keys.
+//
+// THAT DECISION HAD TWO IMPLEMENTATIONS AND NOW HAS ONE. The lists and the
+// single-article read collapsed the pair in JS afterwards
+// (`preferChurchOverride`), while search suppressed the global row inside the
+// statement — and the two could not be made to agree, because a JS collapse is
+// unusable on a RANKED read: it only ever sees the rows that survived the
+// `ts_rank` cut, and a rewritten church copy need not be among them (see
+// `search.ts`, and `tenancy-live.test.ts`, where that disagreement was
+// reproduced against a real database). Only the SQL form answers on both kinds
+// of read, so the SQL form is the survivor and the JS copy is gone rather than
+// kept in parallel: one implementation, so the lists, the detail route and
+// search cannot drift apart about which row a reader gets.
+//
+// Every reader-facing builder below therefore carries BOTH predicates —
+// `visibleToChurch` says what this reader may see, `notOverriddenByChurch` says
+// which of two visible rows survives.
+// ============================================================================
+
+/**
+ * Suppress a global row whose slug the reader's church has overridden.
+ *
+ * `undefined` for a churchless read — `and()` drops it — because there is no
+ * church to override anything and the global corpus is the whole corpus.
+ *
+ * The church's OWN rows are exempt (`church_id IS NOT NULL`, which under
+ * `visibleToChurch` can only be the reader's church): without that exemption
+ * the override would suppress itself and the slug would vanish entirely.
+ *
+ * The subquery's `published` term matches the `status` filter on every read it
+ * guards. A looser one would suppress a global article in favour of a DRAFT the
+ * reader cannot open — the same disagreement in the other direction.
+ */
+export function notOverriddenByChurch(
+  churchId: string | null
+): SQL | undefined {
+  if (!churchId) return undefined;
+
+  const override = alias(wikiArticles, "override");
+
+  return or(
+    isNotNull(wikiArticles.churchId),
+    notExists(
+      db
+        .select({ one: sql`1` })
+        .from(override)
+        .where(
+          and(
+            eq(override.slug, wikiArticles.slug),
+            eq(override.churchId, churchId),
+            eq(override.status, "published")
+          )
+        )
+    )
+  );
+}
+
 /**
  * Every published article visible to `churchId`, in navigation order.
  *
@@ -59,18 +135,27 @@ export function visibleArticlesQuery(churchId: string | null) {
   return db
     .select()
     .from(wikiArticles)
-    .where(and(visibleToChurch(churchId), eq(wikiArticles.status, "published")))
+    .where(
+      and(
+        visibleToChurch(churchId),
+        eq(wikiArticles.status, "published"),
+        notOverriddenByChurch(churchId)
+      )
+    )
     .orderBy(asc(wikiArticles.sortOrder));
 }
 
 /**
- * One slug, resolved against what `churchId` may see.
+ * One slug, resolved against what `churchId` may see — AT MOST ONE ROW.
  *
- * At most two rows can match: `wiki_articles_slug_church_idx` is unique on
- * (slug, church_id), and the predicate admits exactly two church scopes — the
- * global one and the caller's.
+ * Two rows can satisfy the visibility predicate alone
+ * (`wiki_articles_slug_church_idx` is unique on (slug, church_id) and the
+ * predicate admits exactly two church scopes), which is why this read used to
+ * take two and collapse them in JS. It carries the override predicate now, so
+ * the statement returns the winner and `LIMIT 1` states that: the church's row
+ * when it has a published one, the global row otherwise.
  *
- * This builder backs `getArticle` but lives here, next to the predicate it
+ * This builder backs `getArticle` but lives here, next to the predicates it
  * shares, because `get-article.ts` imports the MDX compiler and so cannot be
  * loaded by the test runner — the tenancy assertions in `tenancy.test.ts`
  * would have nothing to inspect.
@@ -83,40 +168,11 @@ export function articleBySlugQuery(slug: string, churchId: string | null) {
       and(
         eq(wikiArticles.slug, slug),
         visibleToChurch(churchId),
-        eq(wikiArticles.status, "published")
+        eq(wikiArticles.status, "published"),
+        notOverriddenByChurch(churchId)
       )
     )
-    .limit(2);
-}
-
-/**
- * Collapse a global article and a church's article of the SAME slug to one.
- *
- * `wiki_articles_slug_church_idx` is unique on (slug, church_id), so a church
- * may hold its own version of a global slug; the church's copy wins (it is an
- * override, and two rows with one slug would otherwise duplicate the article
- * in lists, navigation and React keys). Insertion order — sort order, or search
- * rank — is preserved.
- *
- * Generic over the ROW rather than fixed to `WikiArticle`, because the override
- * rule is a property of the (slug, church_id) pair and not of the projection:
- * the search read carries eight columns and a rank, and it needs the same rule
- * (#411). One implementation, so the lists, the single-article read and search
- * cannot disagree about which row wins.
- */
-export function preferChurchOverride<
-  T extends { slug: string; churchId: string | null },
->(articles: T[]): T[] {
-  const bySlug = new Map<string, T>();
-
-  for (const article of articles) {
-    const held = bySlug.get(article.slug);
-    if (!held || (held.churchId === null && article.churchId !== null)) {
-      bySlug.set(article.slug, article);
-    }
-  }
-
-  return Array.from(bySlug.values());
+    .limit(1);
 }
 
 /**
@@ -136,7 +192,7 @@ export function preferChurchOverride<
 export const getArticles = cache(async function getArticles(
   churchId: string | null = null
 ): Promise<ArticleMeta[]> {
-  const dbArticles = preferChurchOverride(await visibleArticlesQuery(churchId));
+  const dbArticles = await visibleArticlesQuery(churchId);
 
   return dbArticles.map((article) => {
     // Extract section from slug:

@@ -24,6 +24,16 @@ import { searchArticles, type SearchResult } from "@/lib/wiki";
  * a keystroke handler, so no render path — crawler or otherwise — needs a
  * sessionless answer. `verifySession()` throws `Unauthorized` above the `try`
  * so that throw is not converted into an empty result list.
+ *
+ * SO THIS EXPORT REFUSES BY REJECTING, AND EVERY CALLER MUST HANDLE THAT
+ * (#411 round 3). The dialog awaited it bare inside an async `setTimeout`: an
+ * unhandled rejection, and a "Searching…" spinner that never settled because
+ * the state transitions below the `await` never ran. The refusal shape is not
+ * what changed — an empty list would be indistinguishable from "no article
+ * matches", and a rejection is what a dropped connection produces anyway — so
+ * the call goes through `runWikiSearch` (`src/lib/wiki/search-request.ts`),
+ * which turns every request into an outcome the reader is shown. Call this
+ * from a new place and route it through there too.
  */
 export async function searchWikiArticles(
   query: string

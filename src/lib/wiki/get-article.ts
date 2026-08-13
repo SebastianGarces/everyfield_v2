@@ -3,7 +3,7 @@ import remarkGfm from "remark-gfm";
 import rehypeSlug from "rehype-slug";
 import type { Article } from "./types";
 import { toArticle } from "./types";
-import { articleBySlugQuery, preferChurchOverride } from "./get-articles";
+import { articleBySlugQuery } from "./get-articles";
 import { encodeWikiSlug, wikiHref } from "./href";
 import { mdxComponents } from "@/components/wiki/mdx-components";
 
@@ -34,11 +34,10 @@ export async function getArticle(
   slug: string,
   churchId: string | null = null
 ): Promise<ArticleWithRelated | null> {
-  // Same override rule as the lists, one implementation: the church's own copy
-  // of a slug wins over the global article of that name.
-  const [dbArticle] = preferChurchOverride(
-    await articleBySlugQuery(slug, churchId)
-  );
+  // Same override rule as the lists and as search, one implementation: the
+  // statement itself suppresses the global row of a slug this church has
+  // published its own copy of, so this read returns the winner (#411).
+  const [dbArticle] = await articleBySlugQuery(slug, churchId);
 
   if (!dbArticle) {
     return null;

@@ -12,7 +12,6 @@ import {
   getArticles,
   getArticlesByPrefix,
   getWikiNavigation,
-  preferChurchOverride,
 } from "./get-articles";
 import { searchArticles } from "./search";
 import type { ArticleNavItem, NavGroup } from "./types";
@@ -44,9 +43,10 @@ import type { ArticleNavItem, NavGroup } from "./types";
 //
 // `getArticle` itself cannot be imported here: `get-article.ts` pulls in
 // `next-mdx-remote/rsc`, whose dependency chain does not load under `tsx
-// --test`. That is why `articleBySlugQuery` and `preferChurchOverride` — the
-// two halves of what `getArticle` does before it maps to `Article` — live in
-// `get-articles.ts` and are exercised directly.
+// --test`. That is why `articleBySlugQuery` — everything `getArticle` does
+// before it maps to `Article`, the church override included since the decision
+// collapsed into the statement (#411 round 3) — lives in `get-articles.ts` and
+// is exercised directly.
 // ----------------------------------------------------------------------------
 
 async function databaseReachable(): Promise<boolean> {
@@ -213,7 +213,7 @@ test("a church-scoped article reaches its own church and no other", async (t: Te
 
     // --- the detail route -------------------------------------------------
     const detail = async (slug: string, churchId: string | null) =>
-      preferChurchOverride(await articleBySlugQuery(slug, churchId))[0] ?? null;
+      (await articleBySlugQuery(slug, churchId))[0] ?? null;
 
     assert.equal(
       (await detail(`${prefix}/a-only`, churchA.id))?.title,
@@ -251,13 +251,14 @@ test("a church-scoped article reaches its own church and no other", async (t: Te
 // ----------------------------------------------------------------------------
 // The override rule on the RANKED read (#411 round 2).
 //
-// The list reads above collapse (slug, church_id) pairs in JS because they read
-// the whole visible corpus. Search does not: it reads the top N by `ts_rank`,
-// so a JS collapse only ever sees rows that survived the cut, and the church's
-// copy of a slug is not guaranteed to be among them — a rewritten copy may not
-// match the tsquery at all. The failure that leaves is precisely the one #411
-// set out to close: the result row and the article the click opens are two
-// different documents.
+// The list reads used to collapse (slug, church_id) pairs in JS, which works
+// only because they read the whole visible corpus. Search does not: it reads
+// the top N by `ts_rank`, so a JS collapse only ever sees rows that survived
+// the cut, and the church's copy of a slug is not guaranteed to be among them —
+// a rewritten copy may not match the tsquery at all. The failure that leaves is
+// precisely the one #411 set out to close: the result row and the article the
+// click opens are two different documents. That is why the SQL predicate is the
+// one that survived the collapse to a single implementation (round 3).
 //
 // It cannot be observed with `.toSQL()` — the predicate SHAPE was right the
 // whole time — so it is asserted here, against rows. This test FAILED before
@@ -280,7 +281,7 @@ test("a search result is always the document the click opens (#411)", async (t: 
 
   /** What the wiki detail route resolves a slug to, for this reader. */
   const opens = async (slug: string) =>
-    preferChurchOverride(await articleBySlugQuery(slug, church.id))[0] ?? null;
+    (await articleBySlugQuery(slug, church.id))[0] ?? null;
 
   try {
     const rewritten = `${prefix}/rewritten`;
@@ -394,7 +395,7 @@ test("a DRAFT church copy does not suppress the global article it replaces (#411
       "an unpublished church copy hid the global article from search while the detail route still opened it"
     );
     assert.equal(
-      preferChurchOverride(await articleBySlugQuery(slug, church.id))[0]?.title,
+      (await articleBySlugQuery(slug, church.id))[0]?.title,
       `${prefix} Elders global`,
       "the detail route opens the global article while the church's copy is a draft"
     );

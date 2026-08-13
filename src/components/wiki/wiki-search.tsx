@@ -19,6 +19,10 @@ import { Kbd } from "@/components/ui/kbd";
 import type { SearchResult } from "@/lib/wiki";
 import { wikiHref } from "@/lib/wiki/href";
 import {
+  SEARCH_UNAVAILABLE_MESSAGE,
+  runWikiSearch,
+} from "@/lib/wiki/search-request";
+import {
   ArrowDown,
   ArrowUp,
   CornerDownLeft,
@@ -39,6 +43,18 @@ export function WikiSearch({ open, onOpenChange }: WikiSearchProps) {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+  /**
+   * The search could not answer — an expired session, or the request failing.
+   *
+   * `searchWikiArticles` refuses by throwing (it mints an actor above
+   * everything else), and the dialog used to await it with no rejection
+   * handling inside an async `setTimeout`: an unhandled rejection, and a
+   * "Searching…" spinner that never settled because every line below the
+   * `await` was skipped. `runWikiSearch` turns every request into an outcome,
+   * and this is the outcome the reader is shown (`src/lib/wiki/
+   * search-request.ts`).
+   */
+  const [isUnavailable, setIsUnavailable] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
   /**
@@ -66,6 +82,9 @@ export function WikiSearch({ open, onOpenChange }: WikiSearchProps) {
     // including on the way back to an empty box.
     const request = ++latestRequestRef.current;
 
+    // A new query retires the previous outcome, failure included.
+    setIsUnavailable(false);
+
     if (!value.trim()) {
       setResults([]);
       setHasSearched(false);
@@ -78,10 +97,11 @@ export function WikiSearch({ open, onOpenChange }: WikiSearchProps) {
 
     // Debounce search
     debounceRef.current = setTimeout(async () => {
-      const searchResults = await searchWikiArticles(value);
+      const outcome = await runWikiSearch(searchWikiArticles, value);
       if (request !== latestRequestRef.current) return;
 
-      setResults(searchResults);
+      setResults(outcome.status === "results" ? outcome.results : []);
+      setIsUnavailable(outcome.status === "unavailable");
       setHasSearched(true);
       setIsSearching(false);
     }, 300);
@@ -152,17 +172,37 @@ export function WikiSearch({ open, onOpenChange }: WikiSearchProps) {
           <CommandList className="h-[300px] max-h-[300px]">
             {/* Loading state */}
             {isSearching && (
-              <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
+              <div
+                role="status"
+                className="text-muted-foreground flex h-full items-center justify-center text-sm"
+              >
                 Searching...
               </div>
             )}
 
-            {/* Empty state - no results */}
-            {!isSearching && hasSearched && results.length === 0 && (
-              <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
-                No articles found.
+            {/* Refused or failed — the spinner settles here rather than
+                spinning forever on a rejected request. */}
+            {!isSearching && isUnavailable && (
+              <div
+                role="status"
+                className="text-muted-foreground flex h-full items-center justify-center px-6 text-center text-sm text-balance"
+              >
+                {SEARCH_UNAVAILABLE_MESSAGE}
               </div>
             )}
+
+            {/* Empty state - no results */}
+            {!isSearching &&
+              !isUnavailable &&
+              hasSearched &&
+              results.length === 0 && (
+                <div
+                  role="status"
+                  className="text-muted-foreground flex h-full items-center justify-center text-sm"
+                >
+                  No articles found.
+                </div>
+              )}
 
             {/* Initial state - no query */}
             {!isSearching && !hasSearched && !query.trim() && (

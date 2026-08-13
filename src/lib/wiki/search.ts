@@ -1,8 +1,7 @@
-import { sql, and, eq, isNotNull, notExists, or, type SQL } from "drizzle-orm";
-import { alias } from "drizzle-orm/pg-core";
+import { sql, and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { wikiArticles } from "@/db/schema";
-import { visibleToChurch } from "./get-articles";
+import { notOverriddenByChurch, visibleToChurch } from "./get-articles";
 
 // ============================================================================
 // Wiki search — the same corpus the reader can open (#317, #411)
@@ -17,13 +16,17 @@ import { visibleToChurch } from "./get-articles";
 // results listed the GLOBAL row — so the title in the result and the article
 // the click opened were two different documents.
 //
-// THE OVERRIDE RULE IS A PREDICATE HERE, NOT A COLLAPSE AFTERWARDS (#411 r2).
-// The lists collapse (slug, church_id) pairs in JS (`preferChurchOverride`)
-// because they read the WHOLE visible corpus — nothing can be missing from the
-// set being collapsed. A ranked search does not read the whole corpus: it reads
-// the top N by `ts_rank`, so a JS collapse only ever sees the rows that
-// survived the cut. Both halves of the pair have to be inside it for the
-// church's row to win, and neither is guaranteed —
+// THE OVERRIDE RULE IS A PREDICATE, NOT A COLLAPSE AFTERWARDS (#411 r2), AND
+// IT IS THE SAME PREDICATE EVERY OTHER READ USES (#411 r3) —
+// `notOverriddenByChurch`, declared beside `visibleToChurch` in
+// `get-articles.ts` and imported here.
+//
+// Search is why the decision has to live in the statement. The lists read the
+// WHOLE visible corpus, so a JS collapse afterwards sees both halves of a
+// (slug, church_id) pair and can pick the winner. A ranked search does not read
+// the whole corpus: it reads the top N by `ts_rank`, so a collapse only ever
+// sees rows that survived the cut, and the church's copy need not be among
+// them —
 //
 //   * the church's copy is a REWRITE, so the words the reader searched for may
 //     not be in it at all and it never matches the tsquery; or
@@ -34,13 +37,11 @@ import { visibleToChurch } from "./get-articles";
 // article the click opens being two different documents — survived. Reproduced
 // against a real database (`tenancy-live.test.ts`), not reasoned about.
 //
-// So the statement itself suppresses a global row the reader's church
-// overrides: `NOT EXISTS (church's published row of this slug)`. The church's
-// copy then competes on its own merits and the global one it replaces is not in
-// the corpus being ranked — which is also why there is no read-more-than-you-
-// need limit here any more. The `published` term matches `articleBySlugQuery`
-// exactly; a looser one would suppress a global row in favour of a DRAFT the
-// reader cannot open, which is the same disagreement in the other direction.
+// So the statement suppresses a global row the reader's church overrides:
+// `NOT EXISTS (church's published row of this slug)`. The church's copy then
+// competes on its own merits and the global one it replaces is not in the
+// corpus being ranked — which is also why there is no read-more-than-you-need
+// limit here.
 //
 // Like every other wiki read, `churchId` defaults to `null` — a call site that
 // forgets to thread the session under-fetches (global only) instead of leaking
@@ -64,39 +65,6 @@ export type SearchResult = {
 
 /** How many results a caller gets. */
 const SEARCH_LIMIT = 10;
-
-/**
- * Suppress a global row whose slug the reader's church has overridden.
- *
- * `undefined` for a churchless read — `and()` drops it — because there is no
- * church to override anything and the global corpus is the whole corpus.
- *
- * The church's OWN rows are exempt (`church_id IS NOT NULL`, which under
- * `visibleToChurch` can only be the reader's church): without that exemption
- * the override would suppress itself and the slug would vanish from search
- * entirely.
- */
-function notOverriddenByChurch(churchId: string | null): SQL | undefined {
-  if (!churchId) return undefined;
-
-  const override = alias(wikiArticles, "override");
-
-  return or(
-    isNotNull(wikiArticles.churchId),
-    notExists(
-      db
-        .select({ one: sql`1` })
-        .from(override)
-        .where(
-          and(
-            eq(override.slug, wikiArticles.slug),
-            eq(override.churchId, churchId),
-            eq(override.status, "published")
-          )
-        )
-    )
-  );
-}
 
 /**
  * The ranked, tenant-scoped search read, as a builder.
