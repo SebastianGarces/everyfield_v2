@@ -156,7 +156,7 @@ test("a transition surfaces the new phase's templates as a prompt", async (t: Te
 
   try {
     assert.equal(
-      await getPhaseTemplatePrompt(fixture.churchId, null),
+      await getPhaseTemplatePrompt(fixture.churchId),
       null,
       "a plant that has never moved must not be prompted"
     );
@@ -167,7 +167,7 @@ test("a transition surfaces the new phase's templates as a prompt", async (t: Te
       createdAt: new Date("2026-03-02T09:15:00.000Z"),
     });
 
-    const prompt = await getPhaseTemplatePrompt(fixture.churchId, null);
+    const prompt = await getPhaseTemplatePrompt(fixture.churchId);
     assert.ok(prompt);
     assert.equal(prompt.transitionId, transitionId);
     assert.equal(prompt.toPhase, TO_PHASE);
@@ -197,7 +197,7 @@ test("an onboarding declaration is not a move and prompts nothing", async (t: Te
     });
 
     assert.equal(await getLatestPhaseTransition(fixture.churchId), null);
-    assert.equal(await getPhaseTemplatePrompt(fixture.churchId, null), null);
+    assert.equal(await getPhaseTemplatePrompt(fixture.churchId), null);
   } finally {
     await cleanup(fixture);
   }
@@ -371,26 +371,28 @@ test("declining leaves no tasks, and the prompt does not come back", async (t: T
       createdAt: new Date("2026-03-02T09:15:00.000Z"),
     });
 
-    // Decline writes nothing but the answer — and the answer is a ROW now, so
-    // it holds for the planter rather than for the browser that pressed. The
-    // status says this press WROTE that row, which is what entitles it to the
-    // browser fast path (`decidePhaseTemplateDismissOutcome`).
+    // Decline writes nothing but the answer — and the answer is a ROW, so it
+    // holds for the plant rather than for the browser that pressed. The result
+    // is the transition that is now answered and nothing else: #411 deleted the
+    // browser fast path, and with it the only reader of "did THIS press write
+    // the row".
     assert.deepEqual(
       await declinePhaseTemplatePrompt({
         churchId: fixture.churchId,
         userId: fixture.userId,
         expectedTransitionId: transitionId,
       }),
-      { status: "declined", transitionId }
+      { transitionId }
     );
     assert.deepEqual(await tasksOf(fixture.churchId), []);
     assert.deepEqual(await answersOf(fixture.churchId), [
       { transitionId, answer: "declined" },
     ]);
 
-    // A FRESH BROWSER — no cookie at all. This is the acceptance criterion the
-    // cookie could not meet: `null` where the answered transition id used to go.
-    assert.equal(await getPhaseTemplatePrompt(fixture.churchId, null), null);
+    // A FRESH BROWSER. There is no cookie to send any more, and there is
+    // nothing to send it to: the prompt reads one row, and that row says
+    // answered. This is the acceptance criterion the cookie could not meet.
+    assert.equal(await getPhaseTemplatePrompt(fixture.churchId), null);
     assert.deepEqual(await tasksOf(fixture.churchId), []);
 
     // And the NEXT move prompts again, unanswered.
@@ -400,7 +402,7 @@ test("declining leaves no tasks, and the prompt does not come back", async (t: T
       createdAt: new Date("2026-06-01T09:15:00.000Z"),
     });
 
-    const next = await getPhaseTemplatePrompt(fixture.churchId, transitionId);
+    const next = await getPhaseTemplatePrompt(fixture.churchId);
     assert.ok(next);
     assert.equal(next.toPhase, 3);
     assert.deepEqual(await tasksOf(fixture.churchId), []);
@@ -433,7 +435,7 @@ test("the phase.changed handler creates no tasks", async (t: TestContext) => {
 
     // "Prompt, do not auto-create", asserted against the table.
     assert.deepEqual(await tasksOf(fixture.churchId), []);
-    assert.ok(await getPhaseTemplatePrompt(fixture.churchId, null));
+    assert.ok(await getPhaseTemplatePrompt(fixture.churchId));
   } finally {
     await cleanup(fixture);
   }
@@ -477,8 +479,8 @@ test("accepting the same transition twice creates its tasks exactly once", async
     assert.equal(first.status, "imported");
     assert.equal((await tasksOf(fixture.churchId)).length, expectedCount);
 
-    // THE SECOND DEVICE. No cookie is involved anywhere in this call — the
-    // service is handed the same church, the same user and the same keys.
+    // THE SECOND DEVICE: the same church, the same user and the same keys, with
+    // nothing browser-held anywhere in the call.
     const second = await acceptPhaseTemplatePrompt({
       churchId: fixture.churchId,
       userId: fixture.userId,
@@ -600,17 +602,11 @@ test("declining twice records one answer and stays a decline", async (t: TestCon
       userId: fixture.userId,
       expectedTransitionId: transitionId,
     };
-    assert.deepEqual(await declinePhaseTemplatePrompt(input), {
-      status: "declined",
-      transitionId,
-    });
-    // The SECOND press wrote nothing — the row it found is the first press's.
-    // It is still a decline as far as the planter is concerned, and it is still
-    // not allowed to mint a year-long cookie against a row it does not own.
-    assert.deepEqual(await declinePhaseTemplatePrompt(input), {
-      status: "already_answered",
-      transitionId,
-    });
+    assert.deepEqual(await declinePhaseTemplatePrompt(input), { transitionId });
+    // The SECOND press wrote nothing — the row it found is the first press's —
+    // and it reports the same thing, because from the planter's side both are a
+    // decline that landed and nothing downstream tells them apart.
+    assert.deepEqual(await declinePhaseTemplatePrompt(input), { transitionId });
 
     assert.deepEqual(await answersOf(fixture.churchId), [
       { transitionId, answer: "declined" },
@@ -658,7 +654,7 @@ test("a decline naming a superseded transition writes nothing", async (t: TestCo
     );
 
     // The real prompt is untouched, and it is the CURRENT stage's.
-    const prompt = await getPhaseTemplatePrompt(fixture.churchId, null);
+    const prompt = await getPhaseTemplatePrompt(fixture.churchId);
     assert.ok(prompt, "the stale press took down the live prompt");
     assert.equal(prompt.transitionId, currentId);
     assert.equal(prompt.toPhase, 3);
@@ -670,7 +666,7 @@ test("a decline naming a superseded transition writes nothing", async (t: TestCo
         userId: fixture.userId,
         expectedTransitionId: currentId,
       }),
-      { status: "declined", transitionId: currentId }
+      { transitionId: currentId }
     );
     assert.deepEqual(await answersOf(fixture.churchId), [
       { transitionId: currentId, answer: "declined" },
@@ -705,7 +701,7 @@ test("a forged key list does not burn the planter's real prompt", async (t: Test
     assert.equal(result, null);
     assert.deepEqual(await answersOf(fixture.churchId), []);
     assert.ok(
-      await getPhaseTemplatePrompt(fixture.churchId, null),
+      await getPhaseTemplatePrompt(fixture.churchId),
       "the prompt must still be live after a forged answer"
     );
   } finally {
@@ -739,7 +735,7 @@ test("an answer belongs to the transition, so the next move is unanswered", asyn
     });
 
     // A fresh browser again: only the row can answer this.
-    const prompt = await getPhaseTemplatePrompt(fixture.churchId, null);
+    const prompt = await getPhaseTemplatePrompt(fixture.churchId);
     assert.ok(prompt);
     assert.equal(prompt.transitionId, second);
     assert.notEqual(second, first);

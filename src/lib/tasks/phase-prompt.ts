@@ -44,11 +44,20 @@ import { phaseTemplatesFor, taskTemplateSize } from "./templates";
 // The prompt still re-arms by itself, because the NEXT transition is a
 // different id with no row against it.
 //
-// THE COOKIE SURVIVES AS A FAST PATH ONLY. `PHASE_TEMPLATE_PROMPT_COOKIE` is
-// still written and still read, but it can only ever suppress a prompt the row
-// suppresses too; the row is authoritative, and the accept path does not
-// consult the cookie at all. See
-// `src/components/tasks/phase-template-prompt.tsx` for the writes.
+// AND THE ROW IS THE ONLY READER OF THAT ANSWER (#411, retiring the fast path
+// PR #393 parked). `PHASE_TEMPLATE_PROMPT_COOKIE` used to be written by both
+// buttons and consulted beside the row, described as a fast path that "costs
+// nothing and answers before the database does". It answered nothing sooner:
+// `getLatestPhaseTransition` reads the answer in the SAME LEFT JOIN as the
+// transition, so the query the cookie was meant to save is the query the prompt
+// cannot render without. It bought one Set-Cookie per answer, a year-long
+// browser-scoped copy of a fact the plant owns, and a whole second question at
+// every decision point — `fastPathTransitionId` beside `answeredTransitionId`,
+// with a rule (a cookie may only suppress a prompt the row suppresses too) that
+// took two rounds to get right on the two buttons and could only ever fail one
+// way: a browser permanently hiding a prompt the database says is unanswered.
+// The row is now the whole mechanism. Do not reintroduce a browser-scoped copy
+// of an answer that belongs to the plant.
 //
 // THE CLAIM IS THE FIRST WRITE, NOT THE LAST. `memory/invariants.md` →
 // Transactions normally says "write the durable marker LAST, every earlier step
@@ -58,19 +67,6 @@ import { phaseTemplatesFor, taskTemplateSize } from "./templates";
 // either. `acceptPhaseTemplatePrompt` therefore claims the answer row with
 // `ON CONFLICT DO NOTHING` and imports only if the claim returned a row.
 // ============================================================================
-
-/**
- * Fast path for "this browser already answered".
- *
- * Kept because it costs nothing and answers before the database does, but it is
- * no longer the record: `phase_prompt_answers` is, and a browser with no cookie
- * (or a forged one) is answered by the row.
- */
-export const PHASE_TEMPLATE_PROMPT_COOKIE = "ef_phase_template_prompt";
-
-/** A year. The prompt only ever asks about the LATEST transition, so a stale
- *  value simply stops matching — it never has to be cleaned up. */
-export const PHASE_TEMPLATE_PROMPT_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 
 /**
  * WHERE A PART-WAY IMPORT'S RECEIPT LIVES BETWEEN THE PRESS AND THE RE-RENDER
@@ -148,8 +144,8 @@ export interface PhaseTransitionRow {
   toPhase: number;
   createdAt: Date;
   /**
-   * When this transition's prompt was answered durably (`phase_prompt_answers`),
-   * or `null` for "never answered".
+   * When this transition's prompt was answered (`phase_prompt_answers`), or
+   * `null` for "never answered".
    *
    * Carried on the transition row rather than fetched separately because the
    * two are read by one LEFT JOIN — the answer is a fact ABOUT this transition,
@@ -170,30 +166,25 @@ export interface PhaseTransitionRow {
  *     prompted about;
  *   - the move went nowhere (`toPhase === fromPhase`) — a no-op correction is
  *     not a stage change;
- *   - the planter already answered THIS transition, durably (`answeredAt`) or
- *     in this browser (the cookie);
+ *   - the transition is already answered (`answeredAt`);
  *   - the new phase has no templates.
  *
- * THE ROW WINS AND THE COOKIE ONLY ADDS. `answeredAt` comes from
- * `phase_prompt_answers` and is the answer of record on every device; the
- * cookie is a second, weaker way to reach the same "already answered" and can
- * only suppress a prompt, never restore one. That asymmetry is why a forged or
- * stale cookie is harmless: the worst it costs its owner is their own prompt.
+ * THE ROW IS THE ONLY THING THAT ANSWERS. `answeredAt` comes from
+ * `phase_prompt_answers`, arrives on the same row as the transition, and is the
+ * answer of record on every device. There is deliberately no second, weaker
+ * source of "already answered" to disagree with it (#411 deleted the cookie
+ * that was one — see the header).
  *
  * A BACKWARD move still prompts. A planter who moves from 3 back to 2 is doing
  * phase-2 work and wants the phase-2 checklist; "advance" is the notification
  * milestone's rule (it announces progress), not this one.
  */
 export function buildPhaseTemplatePrompt(
-  transition: PhaseTransitionRow | null,
-  answeredTransitionId: string | null
+  transition: PhaseTransitionRow | null
 ): PhaseTemplatePrompt | null {
   if (!transition) return null;
   if (transition.toPhase === transition.fromPhase) return null;
   if (transition.answeredAt) return null;
-  if (answeredTransitionId && answeredTransitionId === transition.id) {
-    return null;
-  }
 
   const templates = phaseTemplatesFor(transition.toPhase);
   if (templates.length === 0) return null;
@@ -295,26 +286,21 @@ export interface PhaseTemplatePromptRead {
 
 /** The one composition of "read the transition, build the prompt". */
 export async function readPhaseTemplatePrompt(
-  churchId: string,
-  answeredTransitionId: string | null
+  churchId: string
 ): Promise<PhaseTemplatePromptRead> {
   const transition = await getLatestPhaseTransition(churchId);
 
   return {
     transitionId: transition?.id ?? null,
-    prompt: buildPhaseTemplatePrompt(transition, answeredTransitionId),
+    prompt: buildPhaseTemplatePrompt(transition),
   };
 }
 
 /** The prompt for a church, or `null` when there is nothing to prompt. */
 export async function getPhaseTemplatePrompt(
-  churchId: string,
-  answeredTransitionId: string | null
+  churchId: string
 ): Promise<PhaseTemplatePrompt | null> {
-  const { prompt } = await readPhaseTemplatePrompt(
-    churchId,
-    answeredTransitionId
-  );
+  const { prompt } = await readPhaseTemplatePrompt(churchId);
   return prompt;
 }
 
@@ -419,33 +405,28 @@ async function releasePhaseTemplatePromptAnswer(
 // ----------------------------------------------------------------------------
 
 /**
- * What declining did, in the same two shapes accepting reports.
+ * What declining did: the transition that is now answered.
  *
- * `null` from the service is "there is nothing this press may answer". A press
- * that DID answer says whether it wrote the row itself, and that distinction is
- * a rule rather than a detail: `declined` means this press owns a row nothing
- * can take away, so it may mint the year-long fast-path cookie;
- * `already_answered` means it found somebody else's claim — possibly an
- * accept's, which `acceptPhaseTemplatePrompt` RELEASES when its import wrote
- * nothing — so it may mint no cookie at all (`memory/invariants.md` → Tasks).
- *
- * The prompt comes down either way, and from the planter's side both are a
- * successful decline; only the cookie tells them apart.
+ * `null` from the service is "there is nothing this press may answer". Anything
+ * else is a successful decline, and there is deliberately no second field
+ * saying whether THIS press wrote the row or found one already there. There was
+ * one — `status: "declined" | "already_answered"` — and it existed for exactly
+ * one reader, the browser fast-path cookie, which had to be minted only by a
+ * press holding a claim nothing would release. #411 deleted the cookie, so the
+ * distinction has no consumer: the prompt comes down either way, and from the
+ * planter's side both are a decline that landed. Re-add it only with a reader.
  */
 export type DeclinePhaseTemplatePromptResult = {
-  status: "declined" | "already_answered";
   transitionId: string;
 };
 
 /**
  * Decline the prompt for the plant's current transition, durably.
  *
- * Returns the transition that was answered — with `status` naming whether THIS
- * call recorded the answer or found one already there — or `null` when there is
- * nothing this call may answer. A decline that loses the race is still a
- * decline as far as the planter is concerned; the two are distinguished only
- * because the loser must not mint a fast-path cookie against a row it does not
- * own (see `DeclinePhaseTemplatePromptResult`).
+ * Returns the transition that was answered, or `null` when there is nothing
+ * this call may answer. A decline that loses the race to a concurrent press is
+ * still a decline as far as the planter is concerned, and nothing downstream
+ * needs to tell the two apart (see `DeclinePhaseTemplatePromptResult`).
  *
  * A STALE PRESS ANSWERS NOTHING (#313). `expectedTransitionId` is the id the
  * PANEL was showing, and it is REQUIRED: it must equal the plant's current
@@ -477,24 +458,21 @@ export async function declinePhaseTemplatePrompt(input: {
 
   // Answered on some other device, or a moment ago in this one.
   if (transition.answeredAt) {
-    return { status: "already_answered", transitionId: transition.id };
+    return { transitionId: transition.id };
   }
 
-  const claimId = await claimPhaseTemplatePromptAnswer({
+  // The read above and this insert are not one operation, so a press that
+  // arrived between them wins the row. `ON CONFLICT DO NOTHING` is what decides
+  // it — not the read (`memory/invariants.md` → Transactions). Either way the
+  // transition ends up answered, which is all the caller acts on.
+  await claimPhaseTemplatePromptAnswer({
     churchId: input.churchId,
     transitionId: transition.id,
     userId: input.userId,
     answer: "declined",
   });
 
-  // The read above and this insert are not one operation, so a press that
-  // arrived between them wins the row. `ON CONFLICT DO NOTHING` is what decides
-  // it — not the read (`memory/invariants.md` → Transactions).
-  if (!claimId) {
-    return { status: "already_answered", transitionId: transition.id };
-  }
-
-  return { status: "declined", transitionId: transition.id };
+  return { transitionId: transition.id };
 }
 
 /**
@@ -550,7 +528,7 @@ export async function acceptPhaseTemplatePrompt(
     return { status: "already_answered", transitionId: transition.id };
   }
 
-  const prompt = buildPhaseTemplatePrompt(transition, null);
+  const prompt = buildPhaseTemplatePrompt(transition);
   if (!prompt) return null;
 
   const requested = new Set(input.templateKeys);
@@ -840,32 +818,16 @@ export interface PhaseTemplateImportDecision {
    * built to let the partial case re-read nothing so its receipt would survive.
    * It could not work: setting a cookie re-renders the route by itself
    * (`.next-docs/01-app/03-api-reference/04-functions/cookies.mdx`), and the
-   * answer always sets one.
+   * partial path always sets the receipt one.
+   *
+   * IT USED TO HAVE A TWIN, `fastPathTransitionId`, and the pair was a standing
+   * trap rather than a nuance: one field meant "the route changed", the other
+   * "this press owns a row nothing will take away", they differed on exactly one
+   * input, and the second existed only to decide whether to mint a browser
+   * cookie that could permanently hide an unanswered prompt. #411 deleted the
+   * cookie, and the twin with it. One field, one question.
    */
   answeredTransitionId: string | null;
-  /**
-   * The transition to write the browser fast path against, or `null` when this
-   * press must not write one. NOT the same field as `answeredTransitionId`, and
-   * the difference is a rule (`memory/invariants.md` → Tasks).
-   *
-   * THE COOKIE MAY ONLY EVER SUPPRESS A PROMPT THE ROW SUPPRESSES TOO. It is
-   * read without the row in `buildPhaseTemplatePrompt`, it lives for a YEAR, and
-   * there is no un-answer path — so a cookie minted against a row that then goes
-   * away hides the planter's prompt for good, with nothing imported.
-   *
-   * A row can go away: `acceptPhaseTemplatePrompt` RELEASES a claim whose import
-   * wrote nothing. So `already_answered` — a press that found somebody else's
-   * claim and wrote no row of its own — mints nothing. Two presses in the same
-   * millisecond is exactly how that happens: the loser reports
-   * `already_answered` while the winner's import throws before its first task
-   * and hands the claim back. The prompt is then genuinely unanswered, and the
-   * row says so; only a cookie could have disagreed.
-   *
-   * `imported` and `partial` both own the row they claimed and both KEEP it, so
-   * they mint. Those are also the two that must, because the cookie write is
-   * what re-renders the route that draws the receipt.
-   */
-  fastPathTransitionId: string | null;
 }
 
 /**
@@ -889,7 +851,6 @@ export function decidePhaseTemplateImportOutcome(
       outcome: { status: "nothing" },
       receipt: null,
       answeredTransitionId: null,
-      fastPathTransitionId: null,
     };
   }
 
@@ -909,8 +870,6 @@ export function decidePhaseTemplateImportOutcome(
         templateNames: result.templateNames,
       },
       answeredTransitionId: result.transitionId,
-      // The claim is KEPT, so this press owns a row nothing will take away.
-      fastPathTransitionId: result.transitionId,
     };
   }
 
@@ -920,12 +879,6 @@ export function decidePhaseTemplateImportOutcome(
     outcome: { status: "idle" },
     receipt: null,
     answeredTransitionId: result.transitionId,
-    // …but only `imported` WROTE the row it is reporting. An
-    // `already_answered` press is standing on somebody else's claim, and a
-    // claim whose import writes nothing is released — see
-    // `fastPathTransitionId`. It re-reads the route and lets the row decide.
-    fastPathTransitionId:
-      result.status === "already_answered" ? null : result.transitionId,
   };
 }
 
@@ -935,24 +888,6 @@ export interface PhaseTemplateDismissDecision {
    *  up. As on the import side, it means "the route changed" and nothing more:
    *  `refresh()` hangs off it. */
   answeredTransitionId: string | null;
-  /**
-   * The transition to write the browser fast path against, or `null` when this
-   * press must not write one — the SAME split, and the same rule, as
-   * `PhaseTemplateImportDecision.fastPathTransitionId`.
-   *
-   * A decline that found an existing claim wrote no row of its own, and the row
-   * it found may be an ACCEPT's: `acceptPhaseTemplatePrompt` releases a claim
-   * whose import wrote nothing, and then the transition is genuinely
-   * unanswered. `PHASE_TEMPLATE_PROMPT_COOKIE` lives for a year, is read
-   * without the row, and has no un-answer path — so a cookie minted here would
-   * hide, permanently and in that one browser, a prompt the database says is
-   * still open. `already_answered` therefore re-reads the route and lets the
-   * row decide.
-   *
-   * A decline that WROTE its row keeps it — nothing releases a decline — so
-   * that cookie can only ever agree with the row.
-   */
-  fastPathTransitionId: string | null;
 }
 
 /**
@@ -961,25 +896,18 @@ export interface PhaseTemplateDismissDecision {
  * `null` means there was no transition to decline, or the one named is no
  * longer current, so the press changed nothing — reported as a failure, because
  * from the planter's side a press that changed nothing IS one. A decline that
- * landed takes the prompt down, so the route is re-read; whether it may also
- * mint the cookie is the `fastPathTransitionId` question, not this one.
+ * landed takes the prompt down, so the route is re-read.
  */
 export function decidePhaseTemplateDismissOutcome(
   result: DeclinePhaseTemplatePromptResult | null
 ): PhaseTemplateDismissDecision {
   if (!result) {
-    return {
-      outcome: { status: "failed" },
-      answeredTransitionId: null,
-      fastPathTransitionId: null,
-    };
+    return { outcome: { status: "failed" }, answeredTransitionId: null };
   }
 
   return {
     outcome: { status: "idle" },
     answeredTransitionId: result.transitionId,
-    fastPathTransitionId:
-      result.status === "already_answered" ? null : result.transitionId,
   };
 }
 
