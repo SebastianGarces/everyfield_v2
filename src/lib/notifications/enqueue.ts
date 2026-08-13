@@ -2,6 +2,7 @@ import { and, eq, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import {
+  associationOrgTypes,
   notificationCategories,
   notificationEntityTypes,
   notifications,
@@ -124,10 +125,17 @@ export const enqueueNotificationSchema = z
      *
      * A nested object rather than two loose fields, so a caller cannot supply an
      * id without saying which kind of org it is.
+     *
+     * THE ENUM IS `associationOrgTypes`, NOT TWO LITERALS. Spelled by hand it
+     * was a standalone list that merely HAPPENED to hold the same two strings,
+     * so a third kind of oversight org widened `AssociationOrgType`, widened
+     * `OrgAnchor` with it, and left this parse silently rejecting the new kind
+     * at RUNTIME with no compile error anywhere. Sourced from the schema's own
+     * `as const` tuple, the parse and the anchor union cannot disagree.
      */
     anchorOrg: z
       .object({
-        type: z.enum(["sending_church", "network"]),
+        type: z.enum(associationOrgTypes),
         orgId: z.string().uuid(),
       })
       .optional(),
@@ -176,10 +184,14 @@ export type EnqueueNotificationInput = z.input<
 /**
  * The anchor a parsed input describes. Total by construction — the refinement
  * above has already rejected "neither" and "both".
+ *
+ * `anchorOrg` is typed as `OrgAnchor` rather than as its two fields respelled,
+ * so this signature widens with the union instead of narrowing the parse's
+ * output back down behind it.
  */
 function anchorOf(parsed: {
   churchId?: string;
-  anchorOrg?: { type: "sending_church" | "network"; orgId: string };
+  anchorOrg?: OrgAnchor;
 }): NotificationAnchor {
   if (parsed.churchId) return churchAnchor(parsed.churchId);
   if (parsed.anchorOrg) {

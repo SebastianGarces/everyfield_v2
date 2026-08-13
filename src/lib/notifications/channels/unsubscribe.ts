@@ -68,9 +68,10 @@ import {
 // Nothing behaves differently today (both readings resolve to `true`), which is
 // why this is a corrected comment and not a code change: which rule wins — #237's
 // "a row restating the default is inheritable" or the undo's "record the choice"
-// — is a product decision about consent, and it is on the PR as a DECISION
-// rather than settled here. A comment that vouches for a property the code does
-// not have is the failure this sweep exists to find; it is corrected in place so
+// — is a product decision about consent, so it is RECORDED AS A DECISION on
+// issue #411 (comment 5278189656, 2026-08-13) with its three options, and is
+// not settled here. A comment that vouches for a property the code does not
+// have is the failure this sweep exists to find; it is corrected in place so
 // the next reader is not told the guarantee already exists.
 //
 // ----------------------------------------------------------------------------

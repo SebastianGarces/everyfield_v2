@@ -3,7 +3,13 @@ import type { alias } from "drizzle-orm/pg-core";
 
 import { db } from "@/db";
 import { churches, users, type OrganizationInvitationType } from "@/db/schema";
-import { OVERSIGHT_ADMIN, type OversightAdminPairing } from "./oversight-admin";
+import {
+  noOversightOrg,
+  OVERSIGHT_ADMIN_ROWS,
+  oversightOrgOfKind,
+  type OversightAdminPairing,
+  type OversightOrgIds,
+} from "./oversight-admin";
 import {
   anchorId,
   churchAnchor,
@@ -106,17 +112,19 @@ export interface OversightRecipient {
 }
 
 /**
- * ONE oversight organisation.
+ * ONE oversight organisation, as the FK that reaches it.
  *
- * At most one field is set. The type carries both because the
- * `organization_invitations` row does, but a value of this type is a NARROWED
- * reading of that row, produced by `invitingOrgForInvitation` below — never the
- * row's two FK columns copied across.
+ * `OversightOrgIds` (`./oversight-admin.ts`) — keyed on the pairing table, not
+ * re-declared here. This module used to spell the two FK names out in an
+ * interface of its own while the probe in `./oversight-relationship.ts` spelled
+ * the identical pair in a second one; that is the half-pairing-per-site the
+ * table exists to remove, and it left a third org kind invisible to both.
+ *
+ * At most one field is non-null. A value of this type is a NARROWED reading of
+ * an `organization_invitations` row, produced by `invitingOrgForInvitation`
+ * below — never the row's two FK columns copied across.
  */
-export interface OversightOrg {
-  sendingChurchId: string | null;
-  sendingNetworkId: string | null;
-}
+export type { OversightOrgIds };
 
 /** The shape of an `organization_invitations` row this module reads. */
 export interface InvitingInvitation {
@@ -151,20 +159,18 @@ export interface InvitingInvitation {
  */
 export function invitingOrgForInvitation(
   invitation: InvitingInvitation
-): OversightOrg {
+): OversightOrgIds {
+  // Each arm names the ORG KIND the invitation type means and hands over the
+  // column that type is allowed to read. `oversightOrgOfKind` files it under
+  // the FK the pairing row names and nulls the rest, so no arm here writes an
+  // oversight FK name or the other kind's `null`.
   switch (invitation.type) {
     case "church_to_sending_church":
-      return {
-        sendingChurchId: invitation.sendingChurchId,
-        sendingNetworkId: null,
-      };
+      return oversightOrgOfKind("sending_church", invitation.sendingChurchId);
     case "church_to_network":
-      return {
-        sendingChurchId: null,
-        sendingNetworkId: invitation.sendingNetworkId,
-      };
+      return oversightOrgOfKind("network", invitation.sendingNetworkId);
     case "sending_church_to_network":
-      return { sendingChurchId: null, sendingNetworkId: null };
+      return noOversightOrg();
   }
 }
 
@@ -211,7 +217,7 @@ export interface OversightFanOutDeps extends OversightEnqueueDep {
  * deps object happened to expose it.
  */
 export interface OversightOrgFanOutDeps extends OversightEnqueueDep {
-  listOversightAdminsOfOrg(org: OversightOrg): Promise<OversightRecipient[]>;
+  listOversightAdminsOfOrg(org: OversightOrgIds): Promise<OversightRecipient[]>;
 }
 
 /**
@@ -283,7 +289,7 @@ export async function fanOutToOversight(
  */
 export async function fanOutToOversightOrg(
   deps: OversightOrgFanOutDeps,
-  org: OversightOrg,
+  org: OversightOrgIds,
   compose: (recipientId: string) => EnqueueNotificationInput
 ): Promise<OversightFanOutReport> {
   return fanOutTo(deps, await deps.listOversightAdminsOfOrg(org), compose, {
@@ -553,7 +559,7 @@ export async function announceAssociationEnded(
     churchId: string;
     plantName: string;
     /** The org that was left — exactly one field set. */
-    org: OversightOrg;
+    org: OversightOrgIds;
     /**
      * What makes this event unique. The audit row's id: one sever, one
      * announcement, and a plant that leaves, rejoins and leaves again is three
@@ -600,9 +606,12 @@ export async function announceAssociationEnded(
 // same question per recipient (`recipientAdministersOrg`), so a widened audience
 // here would still write nothing for a stranger.
 
-/** The `OversightOrg` shape for one network — spelled out, never re-derived. */
-function networkAudience(sendingNetworkId: string): OversightOrg {
-  return { sendingChurchId: null, sendingNetworkId };
+/**
+ * The audience shape for one network — built from the pairing row for
+ * `network`, so the FK it fills in is the same one the SQL audience will read.
+ */
+function networkAudience(sendingNetworkId: string): OversightOrgIds {
+  return oversightOrgOfKind("network", sendingNetworkId);
 }
 
 /**
@@ -709,7 +718,7 @@ export async function announceSendingChurchLeftNetwork(
  */
 async function announceToOrg(
   deps: OversightOrgFanOutDeps,
-  org: OversightOrg,
+  org: OversightOrgIds,
   facts: MilestoneFacts,
   context: string
 ): Promise<OversightFanOutReport> {
@@ -828,34 +837,17 @@ type OrgIdRef = string | SQLWrapper;
 
 /**
  * WHO ADMINISTERS THESE ORGS — the ONE definition of an oversight audience, in
- * SQL, with the role PAIRED to the org kind inside each arm.
+ * SQL. One arm per row of `OVERSIGHT_ADMIN` (`./oversight-admin.ts`), in the
+ * table's order, with the role and the FK both read off the row; why the
+ * pairing is a table and why the arms carry no `OVERSIGHT_ROLES` floor are in
+ * that header and in `memory/invariants/multi-tenancy.md`.
  *
- * THE ARMS ARE THE ROWS OF `OVERSIGHT_ADMIN` (`./oversight-admin.ts`), one arm
- * per row, in the table's order — the role and the FK column both read off the
- * row. Nothing here names `sendingChurchId`, `sendingNetworkId`,
- * `"sending_church_admin"` or `"network_admin"`, so a kind cannot be
- * half-added: an arm is a row or it does not exist. Why the pairing is a table
- * at all, and why an unpaired `or(fk, fk) AND role in (…)` is not the audience,
- * is written once in that file's header.
- *
- * THE AUDIENCE IS WHAT THIS RETURNS — the whole of it. There is no
- * `inArray(role, OVERSIGHT_ROLES)` floor to AND on, and adding one back would
- * be dead SQL: each arm names its role from the same table, so the floor can
- * only re-admit what the arms already admitted. Nor is it a safety net — an arm
- * edited to a non-oversight role would be silently ANDed down to zero rows,
- * turning a visible bug into an empty audience.
- *
- * NAMING NO ORG RETURNS `undefined`, AND THE OVERLOADS — NOT A COMMENT — MAKE
- * THE CALLER FACE IT. `undefined` here means "no recipients"; handed to
- * drizzle's `and()` it means the OPPOSITE, because `and()` DROPS undefined arms
- * and an `and()` left with nothing disappears from the statement.
- * `plantsOwedDigestQuery` (`./oversight-digest.ts` clause 4) did exactly that,
- * and rendered, its `exists (…)` collapsed to one satisfied by every row in
- * `users`. So: non-nullable refs in, `SQL` out; nullable refs in,
- * `SQL | undefined` out and the guard is not optional. That is also why the
- * arms test `null`/`undefined` explicitly rather than truthiness — under the
- * first overload every row yields an arm, so the `SQL` promise is a property of
- * the code rather than of the values that happen to be passed.
+ * NAMING NO ORG RETURNS `undefined` — "no recipients" — AND THE OVERLOADS, NOT
+ * A COMMENT, MAKE THE CALLER FACE IT: drizzle's `and()` reads it as the
+ * opposite (`memory/invariants.md` → Multi-Tenancy). Non-nullable refs in,
+ * `SQL` out; nullable refs in, `SQL | undefined` out and the guard is not
+ * optional. The arms test `null` explicitly rather than truthiness so the first
+ * overload's `SQL` promise is a property of the code, not of the values passed.
  */
 export function oversightAudienceCondition(
   table: UsersRef,
@@ -869,15 +861,13 @@ export function oversightAudienceCondition(
   table: UsersRef,
   org: Record<OversightAdminPairing["fk"], OrgIdRef | null>
 ): SQL | undefined {
-  const reaches = Object.values(OVERSIGHT_ADMIN)
-    .map(({ role, fk }) => {
-      const orgId = org[fk];
+  const reaches = OVERSIGHT_ADMIN_ROWS.map(([, { role, fk }]) => {
+    const orgId = org[fk];
 
-      return orgId === null || orgId === undefined
-        ? undefined
-        : and(eq(table.role, role), eq(table[fk], orgId));
-    })
-    .filter((clause) => clause !== undefined);
+    return orgId === null || orgId === undefined
+      ? undefined
+      : and(eq(table.role, role), eq(table[fk], orgId));
+  }).filter((clause) => clause !== undefined);
 
   if (reaches.length === 0) return undefined;
 
@@ -947,7 +937,7 @@ export async function listOversightRecipientsForChurch(
  * `SQL | undefined` overload and the guard below is not optional.
  */
 export async function listOversightAdminsOfOrg(
-  org: OversightOrg
+  org: OversightOrgIds
 ): Promise<OversightRecipient[]> {
   const audience = oversightAudienceCondition(users, org);
 

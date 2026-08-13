@@ -32,7 +32,7 @@ import {
   listOversightAdminsOfOrg,
   type InvitingInvitation,
   type OversightFanOutDeps,
-  type OversightOrg,
+  type OversightOrgIds,
   type OversightOrgFanOutDeps,
   type OversightRecipient,
   announceSendingChurchDeclinedNetwork,
@@ -65,7 +65,7 @@ const INVITATION: InvitingInvitation = {
   sendingNetworkId: null,
 };
 /** The org `INVITATION` names — what the fan-out must be asked for. */
-const INVITER: OversightOrg = {
+const INVITER: OversightOrgIds = {
   sendingChurchId: SENDING_CHURCH,
   sendingNetworkId: null,
 };
@@ -84,7 +84,7 @@ class FakeOversightEnqueue
   readonly written: EnqueueNotificationInput[] = [];
   readonly calls: EnqueueNotificationInput[] = [];
   /** Every org this fake was asked to resolve, in order. */
-  readonly orgsAsked: OversightOrg[] = [];
+  readonly orgsAsked: OversightOrgIds[] = [];
   sharing: boolean;
 
   constructor(
@@ -112,7 +112,7 @@ class FakeOversightEnqueue
    * for the same reason.
    */
   async listOversightAdminsOfOrg(
-    org: OversightOrg
+    org: OversightOrgIds
   ): Promise<OversightRecipient[]> {
     this.orgsAsked.push(org);
     if (this.adminsByOrg) {
