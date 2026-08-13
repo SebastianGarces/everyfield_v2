@@ -1097,6 +1097,7 @@ test("the recipe runs as a child workflow with the contract args", async () => {
     Object.keys(recipeCalls[0].args).sort(),
     [
       "attempt",
+      "base",
       "branch",
       "conventions",
       "implAgentType",
@@ -1112,6 +1113,11 @@ test("the recipe runs as a child workflow with the contract args", async () => {
   );
   assert.equal(recipeCalls[0].args.priorReport, null);
   assert.equal(recipeCalls[0].args.retryBlock, null);
+  assert.equal(
+    recipeCalls[0].args.base,
+    "origin/main",
+    "the merge base crosses as a REF: a recipe that needs the attempt's diff anchors on it instead of on a self-reported commit count"
+  );
 });
 
 test("a retry hands the recipe the STRUCTURED report and the parent-rendered retryBlock", async () => {
@@ -2708,6 +2714,7 @@ const recipeArgs = (over = {}) => ({
   },
   worktree: "/repo/.claude/worktrees/alpha",
   branch: "feature/alpha",
+  base: "origin/main",
   stageIndex: 0,
   attempt: 1,
   priorReport: null,
@@ -2911,6 +2918,75 @@ test("a dead adversary is a warning, and the attempt still carries its commits",
   );
 });
 
+// The summary is the recipe's most visible output and, for a reader skimming
+// the journal, often the only one. These two pin the property the recipe's own
+// header states: a loop that quietly gave up must not read like a loop that
+// converged. Both defects were real — an empty `seenFindings` was being taken
+// for "the adversary signed it off", and a populated one for "they were closed".
+test("a dead adversary NEVER reports 'no findings' — an unfinished attack is not a clean one", async () => {
+  const { result } = await runRecipe(
+    "adversarial-implement",
+    recipeArgs(),
+    (prompt, opts) =>
+      /^adv\d+:/.test(opts.label || "") ? null : advReply()(prompt, opts)
+  );
+  assert.doesNotMatch(
+    result.summary,
+    /no findings/,
+    "byte-identical to the clean run's summary is exactly the failure the cap exists to prevent"
+  );
+  assert.match(result.summary, /attack incomplete/);
+});
+
+test("a dead fixer NEVER reports findings 'closed' — nothing closed them", async () => {
+  const { result } = await runRecipe(
+    "adversarial-implement",
+    recipeArgs(),
+    (prompt, opts) =>
+      /^advfix\d+:/.test(opts.label || "")
+        ? null
+        : advReply({ findingRounds: 1 })(prompt, opts)
+  );
+  assert.doesNotMatch(
+    result.summary,
+    /finding\(s\) closed/,
+    "the fixer died with the finding open — reporting it closed is the lie"
+  );
+  assert.match(result.summary, /left open — the fix never landed/);
+  assert.ok(
+    result.warnings.some((w) => /fix agent died/.test(w)),
+    "and the warning names it too"
+  );
+});
+
+test("the adversary's diff range is anchored on a REF, never on the implementer's commit count", async () => {
+  const { calls } = await runRecipe(
+    "adversarial-implement",
+    // Three commits, so a count-derived range would render `~3` and be wrong
+    // the moment the implementer under-reports.
+    recipeArgs(),
+    advReply({
+      implCommits: [IMPL_SHA, `b${"1".repeat(39)}`, `c${"2".repeat(39)}`],
+    })
+  );
+  const adv = labelled(calls, /^adv1:/)[0];
+  assert.match(
+    adv.prompt,
+    /git -C \S+ diff origin\/main\.\.\.feature\/alpha/,
+    "the range comes from `base`, which no agent reported"
+  );
+  assert.doesNotMatch(
+    adv.prompt,
+    /diff \S+~\d+\.\./,
+    "a self-reported count that is short silently narrows what gets attacked, and the adversary cannot tell"
+  );
+  assert.match(
+    adv.prompt,
+    /THE LOG WINS/,
+    "the report is cross-checked against the log rather than trusted"
+  );
+});
+
 test("an implementer that committed nothing skips the adversary entirely", async () => {
   const { result, calls } = await runRecipe(
     "adversarial-implement",
@@ -2998,6 +3074,97 @@ test("the token reserve is recipe-weighted: adversarial-implement needs 3x befor
     result.blocked[0].reason,
     /450k/,
     "the refusal shows the weighted arithmetic (150k reserve x 3)"
+  );
+});
+
+// ---------------------------------------------------------------------------
+// The recipe `warnings` channel (the return contract, recipes.md).
+//
+// A loop-shaped recipe's cap, its dead agents and its unfixed findings all come
+// back as `warnings` and nowhere else. Until this was wired the parent read
+// only `commits` and `rootCauseAddressed`, so an attempt that gave up reached
+// the verifier carrying commits and nothing else — indistinguishable from a
+// converged one, while two files claimed the opposite. These pin BOTH halves of
+// the promise: the journal and the verifier's own prompt.
+// ---------------------------------------------------------------------------
+
+const RECIPE_WARNING =
+  "adversarial-implement hit its 3-round cap: 2 finding(s) are still open";
+
+test("a recipe's warnings reach the journal AND the scoped verifier's prompt", async () => {
+  const { calls } = await runBuild(
+    [{ ...buildUnit("alpha", 101), recipe: "adversarial-implement" }],
+    replyShip(passing([])),
+    {
+      workflowImpl: async () => ({
+        summary: "built it, but the loop never converged",
+        commits: ["c0ffee00000000000000000000000000000000aa"],
+        warnings: [RECIPE_WARNING, "  ", null],
+      }),
+    }
+  );
+  assert.ok(
+    calls.some((c) => c.kind === "log" && c.value.includes(RECIPE_WARNING)),
+    "the journal is where a human meets it"
+  );
+  assert.ok(
+    calls.some(
+      (c) => c.kind === "log" && /adversarial-implement/.test(c.value || "")
+    ),
+    "and the log line names the recipe that said it"
+  );
+  const verify = scopedVerify(calls);
+  assert.equal(verify.length, 1);
+  assert.ok(
+    verify[0].prompt.includes(RECIPE_WARNING),
+    "the verifier is the one agent that can act on it — a warning it never sees gates nothing"
+  );
+  assert.match(
+    verify[0].prompt,
+    /treat each as evidence, not as noise/,
+    "framed as evidence, not as an aside to skim past"
+  );
+  assert.doesNotMatch(
+    verify[0].prompt,
+    /^- \s*$/m,
+    "blank and null warnings are dropped rather than rendered as empty bullets"
+  );
+});
+
+test("a recipe that committed nothing still says WHY — its warnings ride the retry", async () => {
+  const { calls } = await runBuild(
+    [{ ...buildUnit("alpha", 101), recipe: "adversarial-implement" }],
+    replyShip(passing([])),
+    {
+      maxAttempts: 2,
+      workflowImpl: async (_spec, wfArgs) =>
+        wfArgs.attempt === 1
+          ? {
+              summary: "nothing built",
+              commits: [],
+              warnings: ["the implementer agent died — no commits were made"],
+            }
+          : {
+              summary: "built it",
+              commits: ["c0ffee00000000000000000000000000000000aa"],
+              warnings: [],
+            },
+    }
+  );
+  assert.ok(
+    calls.some(
+      (c) =>
+        c.kind === "log" && /the implementer agent died/.test(c.value || "")
+    ),
+    "logged before the empty-commits gate, or a dead implementer reads as a plain 'no commits'"
+  );
+  const retry = calls.find(
+    (c) => c.kind === "workflow" && c.args?.attempt === 2
+  );
+  assert.match(
+    retry.args.retryBlock,
+    /the implementer agent died/,
+    "the next attempt is told what the last one could not close"
   );
 });
 

@@ -1396,6 +1396,11 @@ async function runWorkstream(
         },
         worktree: wt,
         branch,
+        // The merge base this track is built against, as a REF. A recipe that
+        // needs the attempt's diff must anchor it on a ref — deriving a range
+        // from a self-reported commit COUNT narrows what gets read whenever
+        // the report is short, and the agent reading it cannot tell.
+        base: BASE,
         stageIndex,
         attempt,
         priorReport: report ?? null,
@@ -1430,17 +1435,45 @@ async function runWorkstream(
       continue;
     }
 
+    // -----------------------------------------------------------------------
+    // The recipe's `warnings` are the ONLY channel it has for "this attempt is
+    // not what it looks like": a loop that hit its cap with findings still
+    // open, an agent that died mid-strategy, a fix that committed nothing, a
+    // file touched outside the declared set. Nothing else in the parent reads
+    // them, so an attempt that quietly gave up would reach the verifier
+    // carrying commits and nothing else — indistinguishable from a converged
+    // one. Surface them in BOTH places the contract promises: the journal
+    // (below) and the scoped verifier's own prompt (as evidence, further down).
+    // Logged BEFORE the empty-commits gate, so a recipe whose implementer died
+    // still says why in the journal instead of only "no commits".
+    // -----------------------------------------------------------------------
+    const recipeWarnings = (impl?.warnings || [])
+      .map((w) => String(w ?? "").trim())
+      .filter(Boolean);
+    for (const w of recipeWarnings)
+      log(`⚠️  ${ws.id} attempt ${attempt}: recipe "${ws.recipe}" — ${w}`);
+
     if (!impl || !(impl.commits || []).length) {
+      const why = !impl
+        ? `the recipe returned nothing on attempt ${attempt}`
+        : `the recipe returned no commits on attempt ${attempt} — an attempt that committed nothing built nothing`;
       report = {
         verdict: "FAIL",
         failingGate: "recipe",
-        fixInstructions: !impl
-          ? `the recipe returned nothing on attempt ${attempt}`
-          : `the recipe returned no commits on attempt ${attempt} — an attempt that committed nothing built nothing`,
+        fixInstructions: recipeWarnings.length
+          ? `${why}\n\nThe recipe reported:\n${recipeWarnings.map((w) => `- ${w}`).join("\n")}`
+          : why,
         summary: `${ws.id}: recipe "${ws.recipe}" returned ${!impl ? "nothing" : "no commits"}`,
       };
       continue;
     }
+
+    // The verifier half of the same promise. A warning is not noise to be
+    // skimmed past: it names what the build itself could not close, so a gate
+    // that passes over one passes over a known hole.
+    const recipeWarningBlock = recipeWarnings.length
+      ? `\n\nWarnings the recipe "${ws.recipe}" returned for this attempt — treat each as evidence, not as noise. Each one names something the build could not close on its own (a capped internal loop, an agent that died, a fix that committed nothing, a file outside the declared set). Check each against the diff yourself, and say in \`findings\` what you found:\n${recipeWarnings.map((w) => `- ${w}`).join("\n")}`
+      : "";
 
     // The root cause is answered BEFORE anything else counts — including before
     // a verifier is spent on the attempt. A fix that cannot say what it did
@@ -1479,7 +1512,7 @@ Run ONLY these gates. The others (G1 hermetic build, G3 functional/preview, G4, 
   Declared files: ${ws.files.join(", ") || "(none declared)"}
 
 Acceptance criteria to prove:
-${allCriteria(ws)}
+${allCriteria(ws)}${recipeWarningBlock}
 
 FINALLY — report everything else you saw in \`findings\`, because it is FIXED IN THIS PASS (#399), never filed as debt. Map your review output onto \`severity\`: Critical → \`critical\`, structural Warnings → \`structural\`, Suggestions → \`suggestion\`. Critical and structural findings go to a fix agent and a re-review in this same pass; suggestions never gate and never trigger a round. State each finding so an implementer can act on it directly: exact files and lines, the defect, and \`remedy\` — what "fixed" looks like. Anything decidable from the codebase alone is a finding — do not soften it, and do not invent findings to seem thorough; an empty list is a real answer.
 

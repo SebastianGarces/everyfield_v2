@@ -36,7 +36,9 @@ runtime throws on all three).
 { track: { id, issues, branch: trackBranch },
   workstream: { id, lane, issues, files, summary, units },
   worktree: <absolute-ish path — the workstream worktree, parent-provided, already on `branch` with a test env>,
-  branch, stageIndex, attempt,
+  branch,
+  base: <the merge base as a REF, e.g. `origin/main` — the parent's own `BASE`>,
+  stageIndex, attempt,
   priorReport: <structured verifier report | null>,   // mod 1 — the report OBJECT, never a flattened string
   retryBlock:  <parent-rendered string | null>,       // mod 2 — recipes prepend it verbatim to their prompt
   conventions: <the CONVENTIONS block the parent assembles>,
@@ -61,6 +63,14 @@ Notes that bind:
 - **`retryBlock` carries the #307 root-cause protocol**, rendered by the parent (mod 2). When it
   is non-null, the recipe prepends it VERBATIM to its implementer prompt. No recipe file re-carries
   that lesson in its own words.
+- **`base` is a REF, and any range a recipe hands an agent must be anchored on one.** A recipe that
+  needs the attempt's diff derives it from `base..branch` / `base...branch`, never from
+  `branch~<n>` where `n` came from a self-reported commit count: an implementer that transcribed
+  1 of its 3 commits (or committed once more after transcribing) silently narrows the range, and
+  the agent reading it cannot tell it was shown the tail. A ref-anchored range on a later stage is
+  over-broad — it includes earlier stages already on the track branch — which is the safe
+  direction. `trackBranch..branch` is NOT an alternative: they are the same ref for a solo
+  workstream, so that range is empty.
 
 ## Return contract
 
@@ -71,6 +81,14 @@ Notes that bind:
 - **The parent's refusal gate applies to every recipe.** It reads `rootCauseAddressed` and refuses
   the attempt **before spending a verifier** when it is empty — the #307 discipline lives in the
   parent, once, not per recipe.
+- **`warnings` are OBSERVED, and that is what makes them worth returning.** Immediately after the
+  empty-commits gate the parent logs every one to the journal
+  (`⚠️  <ws> attempt <n>: recipe "<id>" — <warning>`) and renders them into the scoped verifier's
+  prompt as a labelled evidence block, so a warning about a capped loop, a dead agent or a fix that
+  committed nothing reaches the one agent that can act on it. On an attempt that committed nothing
+  they are appended to `fixInstructions` instead, where the next attempt meets them. Say in a
+  warning what could not be closed and name it — the string is read by a human and by a verifier,
+  not counted.
 
 ## Side-effect contract
 
@@ -164,9 +182,19 @@ commit instead of one integration round.
   implementer's blind spots; an attacker asked only "how do I get in" does not.
 - It is **capped and the cap is reported**. A loop that quietly gave up looks exactly like a loop
   that converged. Hitting round 3 with findings still open is recorded in the returned `warnings`,
-  so the journal and the verifier both meet it. A dead adversary, a dead fixer, a fix that committed
+  which the parent logs to the journal and renders into the scoped verifier's prompt (see the
+  return contract above) — so both meet it. A dead adversary, a dead fixer, a fix that committed
   nothing and a fix that answered fewer findings than were named are each a warning too — the
   recipe never reports a round closed that it cannot show closed.
+- **`summary` carries the same distinction, not just `warnings`.** Convergence is tracked, never
+  inferred from an empty finding list: only a completed round that returned an empty `newFindings`
+  sets it, so a dead adversary reads `attack incomplete — no round confirmed the diff clean`, a
+  dead fixer reads `N finding(s) left open — the fix never landed`, an interrupted loop whose
+  findings were fixed reads `N finding(s) fixed but never re-attacked`, and the cap keeps its own
+  wording. `no findings` / `N finding(s) closed` are reachable from exactly one code path.
+- **The adversary's range is ref-anchored** (`base...branch`), never `branch~<commits.length>`.
+  The one agent whose whole value is having read the diff must not have its view of the diff
+  defined by the implementer's own count — see the `base` note in the input contract.
 
 **Cost and weight.** `RECIPE_AGENT_COST` = **3**. Its agents run **sequentially**, so unlike
 `generate-and-filter` the weight is not about simultaneity — it is about the RESERVE. An attempt

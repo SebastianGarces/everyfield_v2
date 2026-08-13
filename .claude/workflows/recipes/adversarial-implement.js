@@ -30,8 +30,11 @@ export const meta = {
 //   - It is CAPPED and the cap is REPORTED. A loop that quietly gave up looks
 //     exactly like a loop that converged, and the difference is whether known
 //     findings are still open when the gates run — so hitting the cap with
-//     findings outstanding is recorded in the returned warnings, where the
-//     journal and the verifier both meet it.
+//     findings outstanding is recorded in the returned warnings, which the
+//     parent logs to the journal AND renders into the scoped verifier's prompt
+//     as evidence (build-until-done.js, right after the empty-commits gate).
+//     `summary` carries the same distinction: only a completed round that
+//     returned an empty `newFindings` may report the diff converged.
 // All work happens in the parent-provided worktree on `branch`: this recipe
 // cuts no scratch trees and no scratch branches, so there is nothing to sweep.
 // ---------------------------------------------------------------------------
@@ -39,7 +42,7 @@ const A = typeof args === "string" ? JSON.parse(args) : args;
 if (!A || !A.workstream || !A.worktree || !A.branch)
   throw new Error(
     "adversarial-implement is a child recipe of build-until-done and takes recipeArgs: " +
-      "{track, workstream, worktree, branch, stageIndex, attempt, priorReport, retryBlock, conventions, implAgentType, unitBlocksRendered}"
+      "{track, workstream, worktree, branch, base, stageIndex, attempt, priorReport, retryBlock, conventions, implAgentType, unitBlocksRendered}"
   );
 
 const workstream = A.workstream;
@@ -50,6 +53,11 @@ const retryBlock = A.retryBlock || null;
 const isRetry = A.priorReport != null;
 const conventions = A.conventions || "";
 const unitBlocksRendered = A.unitBlocksRendered || "";
+// The ref the track is built against. The adversary's range is anchored on it
+// rather than on the implementer's own commit count — see the range comment at
+// the attack prompt. `origin/main` is the parent's own default, restated here
+// only so the recipe still reads a REF if the field ever goes missing.
+const base = A.base || "origin/main";
 // The declared file set crosses the seam in exactly ONE form (recipes.md):
 // as workstream.files, never as a second top-level field.
 const declaredFiles = workstream.files || [];
@@ -282,6 +290,11 @@ const openFindings = [];
 let seenFindings = [];
 let rounds = 0;
 let cappedWithOpenFindings = false;
+// Convergence is TRACKED, never inferred from what the loop happens to hold
+// when it exits. An empty `seenFindings` means "no finding was ever named",
+// which is what a clean round AND a dead round both look like — so only the
+// clean-round break below may say the diff was signed off.
+let cleanRoundConfirmed = false;
 
 for (let round = 1; round <= ADVERSARY_ROUNDS; round++) {
   rounds = round;
@@ -295,7 +308,10 @@ ${seenFindings.map((f, i) => `--- already reported ${i + 1} [${f.severity}] ---\
   const adversary = await agent(
     `You are the ADVERSARY for a build attempt on workstream ${workstream.id} (issue(s) ${(workstream.issues || []).map((n) => `#${n}`).join(", ") || "(none)"}). This is round ${round} of at most ${ADVERSARY_ROUNDS}. An implementer has committed a diff to branch ${branch} in the worktree ${worktree}. Your job is to break it — not to review it, not to improve it, and not to fix it.
 
-Read the diff first: \`git -C ${worktree} diff ${branch}~${commits.length}..${branch}\` — and read the FULL files it touches, not just the hunks, because the hole is usually in what the diff assumed rather than in what it changed.
+Read the diff first, and DERIVE its range from refs — never from anybody's count of commits:
+  \`git -C ${worktree} log --oneline ${base}..${branch}\` — every commit on this branch that is not on ${base}
+  \`git -C ${worktree} diff ${base}...${branch}\` — the whole of that, as one diff
+The implementer reported ${commits.length} commit(s). If the log shows more, the report is wrong and THE LOG WINS: attack everything the diff shows you, not the tail a count would have cut it down to. On a later stage this range also covers earlier stages already merged onto the track branch — deliberate, and the safe direction: reading more than the attempt added costs you time, reading less is the hole you were sent to find. Read the FULL files it touches, not just the hunks, because the hole is usually in what the diff assumed rather than in what it changed.
 
 What was asked for:
 
@@ -331,7 +347,12 @@ You may run commands and read anything in ${worktree}. You MUST NOT write code, 
   const found = (adversary.newFindings || []).filter(
     (f) => f && String(f.summary || "").trim()
   );
-  if (!found.length) break;
+  // The ONE place convergence is established: a completed round that returned
+  // an empty `newFindings`. No other exit may claim it.
+  if (!found.length) {
+    cleanRoundConfirmed = true;
+    break;
+  }
 
   seenFindings = [...seenFindings, ...found];
 
@@ -403,11 +424,22 @@ Add or extend tests so each finding stays closed. Run \`pnpm typecheck\` and \`p
 }
 
 const roundWord = rounds === 1 ? "round" : "rounds";
-const verdict = cappedWithOpenFindings
-  ? "cap reached without a clean round"
-  : seenFindings.length
+// `summary` is the recipe's most visible output, so it must not be able to say
+// "converged" for a loop that stopped early. Every non-clean exit gets its own
+// words: the cap, a fix that never landed, and an attack that never finished
+// (a dead adversary) each read differently from a diff the adversary signed
+// off, and none of them may read as "no findings".
+const verdict = cleanRoundConfirmed
+  ? seenFindings.length
     ? `${seenFindings.length} finding(s) closed`
-    : "no findings";
+    : "no findings"
+  : cappedWithOpenFindings
+    ? "cap reached without a clean round"
+    : openFindings.length
+      ? `${openFindings.length} finding(s) left open — the fix never landed`
+      : seenFindings.length
+        ? `${seenFindings.length} finding(s) fixed but never re-attacked`
+        : "attack incomplete — no round confirmed the diff clean";
 
 return {
   summary:
