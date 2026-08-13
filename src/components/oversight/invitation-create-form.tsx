@@ -37,6 +37,9 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+// Pure copy, no imports of its own — safe to pull into a client bundle, and the
+// reason the sentence #293's AC names is executable rather than JSX.
+import { invitationCreatedNotice } from "@/lib/invitations/create-notice";
 import {
   Select,
   SelectContent,
@@ -197,24 +200,57 @@ export function InvitationCreateForm({
  * hand-forwarding that URL out of band, which was a stopgap for the missing
  * email and cost an account-existence disclosure on every successful invite.
  * Do not reintroduce a link here without a ruling that supersedes item 5.
+ *
+ * ----------------------------------------------------------------------------
+ * DELIVERY IS LIVE NOW, AND THE LINK STILL DOES NOT COME BACK (OV-003b / #293,
+ * reconciled 2026-08-12)
+ * ----------------------------------------------------------------------------
+ *
+ * The paragraph above named this week: the copy was written delivery-neutral so
+ * it would not need re-reading when #392 shipped, and the link it removed was
+ * "a stopgap for the missing email". #392 is that email, so the stopgap is
+ * simply not needed — a create whose send was refused is recovered with
+ * **Resend email** on the row itself, one section below, which needs no URL on
+ * screen and no account-existence disclosure to work.
+ *
+ * WHAT DOES BRANCH is whether the email went out, and only that. A single
+ * unbranched message would be wrong in both directions: on a successful send it
+ * would leave the admin doing a delivery that already happened, and on a failed
+ * send it would say nothing at all, so the two cases read identically. That is
+ * NOT the item-5 oracle — `emailSent` reports what the mail provider said,
+ * which is the same question for an address with an account and one without,
+ * and it is derived from neither target column.
+ *
+ * The three states and their words come from `invitationCreatedNotice`
+ * (`@/lib/invitations/create-notice`) rather than from JSX, so the sentence
+ * #293's acceptance criterion names is executable and asserted. This component
+ * decides only EMPHASIS.
  */
 function InviteCreatedNotice({
   created,
 }: {
   created: NonNullable<CreateInvitationState["created"]>;
 }) {
+  const notice = invitationCreatedNotice({
+    inviteeEmail: created.inviteeEmail,
+    emailSent: created.emailSent,
+  });
+  const failed = notice.state === "not_sent";
+
   return (
     <div
       role="status"
-      className="border-primary/30 bg-primary/5 space-y-1 rounded-md border p-3 text-sm"
+      className={
+        // Amber, not destructive: the invitation was CREATED. This is the
+        // repo's caution treatment (`status-confirmation-modal.tsx`) — "there
+        // is something left for you to do", not "this failed".
+        failed
+          ? "space-y-1 rounded-md border border-amber-500/50 bg-amber-50 p-3 text-sm dark:bg-amber-950/20"
+          : "border-primary/30 bg-primary/5 space-y-1 rounded-md border p-3 text-sm"
+      }
     >
-      <p className="font-medium">
-        Invitation created for {created.inviteeEmail}
-      </p>
-      <p className="text-muted-foreground">
-        Tell them directly that you have invited them. Until they answer, it
-        sits in the list below, where you can revoke it.
-      </p>
+      <p className="font-medium">{notice.headline}</p>
+      <p className="text-muted-foreground">{notice.detail}</p>
     </div>
   );
 }

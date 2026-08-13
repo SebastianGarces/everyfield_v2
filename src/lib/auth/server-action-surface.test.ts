@@ -92,6 +92,13 @@ const ROUND_7_ENDPOINTS = [
  * envelope call on line one and it is simply not a residual any more. That is
  * the shape the rest of this list retires into.
  *
+ * A DELETION shrinks it too, and has to be reflected here for the same reason:
+ * #312 removed the dead VM-017 invitation subtree, so
+ * `meetings/actions.ts → createInvitationAction` and
+ * `→ updateInvitationStatusAction` came off the list. An entry naming an export
+ * that no longer exists is not harmless — this list is asserted with
+ * `deepEqual`, so a stale name fails the suite until someone removes it.
+ *
  * Why it is written down HERE rather than left to prose: the invariant file
  * said "above the `try`" as a universal rule for a whole round while nothing
  * tested it, which is the third repetition of exactly that failure mode. This
@@ -107,13 +114,11 @@ const TRY_WRAPPED_MINTS = [
   "src/app/(dashboard)/launch/actions.ts → scheduleLaunchAction",
   "src/app/(dashboard)/meetings/actions.ts → addAttendeeAction",
   "src/app/(dashboard)/meetings/actions.ts → createEvaluationAction",
-  "src/app/(dashboard)/meetings/actions.ts → createInvitationAction",
   "src/app/(dashboard)/meetings/actions.ts → createLocationAction",
   "src/app/(dashboard)/meetings/actions.ts → createMeetingAction",
   "src/app/(dashboard)/meetings/actions.ts → quickAddAttendeeAction",
   "src/app/(dashboard)/meetings/actions.ts → recordAttendanceBatchAction",
   "src/app/(dashboard)/meetings/actions.ts → updateChecklistItemAction",
-  "src/app/(dashboard)/meetings/actions.ts → updateInvitationStatusAction",
   "src/app/(dashboard)/meetings/actions.ts → updateLocationAction",
   "src/app/(dashboard)/meetings/actions.ts → updateMeetingAction",
   "src/app/(dashboard)/meetings/actions.ts → updateMeetingStatusAction",

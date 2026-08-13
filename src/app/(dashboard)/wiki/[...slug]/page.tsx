@@ -23,6 +23,7 @@ import { BookmarkIndicator } from "@/components/wiki/bookmark-indicator";
 import { RelatedArticles } from "@/components/wiki/related-articles";
 import { RelatedTemplates } from "@/components/wiki/related-templates";
 import { ArticlePager } from "@/components/wiki/article-pager";
+import { ArticleActions } from "@/components/wiki/article-actions";
 import type { ArticleWithRelated } from "@/lib/wiki/get-article";
 import type { ArticleMeta } from "@/lib/wiki/types";
 import type { WikiProgressStatus } from "@/db/schema";
@@ -164,18 +165,34 @@ async function ArticleView({
   return (
     <ProgressTracker slug={article.slug}>
       <div className="flex flex-col gap-6 @min-[65rem]/wiki-content:flex-row @min-[65rem]/wiki-content:items-start @min-[65rem]/wiki-content:gap-8">
-        <article className="min-w-0 flex-1 space-y-6">
-          <WikiBreadcrumb items={breadcrumbs} />
+        {/*
+          `data-print-root` is the one thing the print stylesheet keeps
+          (W-020, `globals.css`). The dashboard shell, the wiki sidebar and the
+          table of contents all sit OUTSIDE this element, so they leave the
+          printed page without being named anywhere — and so does anything else
+          the shell grows later.
+        */}
+        <article data-print-root="" className="min-w-0 flex-1 space-y-6">
+          <div data-print-hide="">
+            <WikiBreadcrumb items={breadcrumbs} />
+          </div>
 
           <header className="space-y-4 border-b pb-6">
             <div className="flex items-start justify-between gap-4">
               <h1 className="text-3xl font-bold tracking-tight">
                 {article.title}
               </h1>
-              <BookmarkButton
-                slug={article.slug}
-                initialBookmarked={bookmarked}
-              />
+              <div data-print-hide="" className="flex items-center gap-1">
+                <ArticleActions
+                  slug={article.slug}
+                  title={article.title}
+                  description={article.description}
+                />
+                <BookmarkButton
+                  slug={article.slug}
+                  initialBookmarked={bookmarked}
+                />
+              </div>
             </div>
 
             {article.description && (
@@ -196,20 +213,38 @@ async function ArticleView({
             </div>
           </header>
 
-          <div className="prose prose-neutral dark:prose-invert max-w-none">
+          {/*
+            `data-print-body` is the PDF's source (W-018): `ArticleActions`
+            reads the RENDERED prose from here rather than re-parsing the MDX,
+            so an MDX component no parser was taught about still reaches the
+            file as text.
+          */}
+          <div
+            data-print-body=""
+            className="prose prose-neutral dark:prose-invert max-w-none"
+          >
             {content}
           </div>
 
-          <RelatedArticles articles={navigation.related} />
-
           {/*
-            The documents this article hands out (W-010). Resolved from the
-            code-defined F6 catalog, not the database, so it needs nothing from
-            the reads above and renders nothing when the article offers none.
-          */}
-          <RelatedTemplates articleSlug={article.slug} />
+            Everything below the prose is navigation or a control, so it is off
+            the printed page and out of the PDF.
 
-          <ArticlePager previous={navigation.previous} next={navigation.next} />
+            The documents block is W-010: the templates this article hands out,
+            resolved from the code-defined F6 catalog, not the database, so it
+            needs nothing from the reads above and renders nothing when the
+            article offers none.
+          */}
+          <div data-print-hide="" className="space-y-6">
+            <RelatedArticles articles={navigation.related} />
+
+            <RelatedTemplates articleSlug={article.slug} />
+
+            <ArticlePager
+              previous={navigation.previous}
+              next={navigation.next}
+            />
+          </div>
         </article>
 
         <TableOfContents headings={headings} />

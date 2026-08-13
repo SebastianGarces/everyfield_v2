@@ -14,7 +14,9 @@ import {
   slotRefusalMessage,
   type InvitationActor,
 } from "./core";
+import { invitationCreatedNotice } from "./create-notice";
 import { toInvitationListRow } from "./list-row";
+import { assertInOrder, sourceReader } from "@/lib/testing/source-span";
 import {
   describeInvitationForRegistration,
   hasValidInvitationBypass,
@@ -106,6 +108,39 @@ const REGISTER_ACTIONS = read("app", "(auth)", "register", "actions.ts");
 const REGISTER_FORM = read("app", "(auth)", "register", "register-form.tsx");
 const REGISTER_BETA_GATE = read("app", "(auth)", "register", "beta-gate.ts");
 
+/**
+ * The readers, and the ONLY way this file cuts a declaration out of a module.
+ *
+ * `span` / `after` throw naming the missing needle — see `@/lib/testing/source-span` for why
+ * that is load-bearing. This file is where the rule was learnt the hard way a
+ * third time: `async function createAccountEntities` was never `async`, so the
+ * needle was -1, the "no oversight FK is written at registration" span was the
+ * EMPTY STRING, and its `doesNotMatch` was a tautology; the same dead needle was
+ * the END anchor of the `register` body 400 lines later, which made every
+ * assertion about `register` an assertion about 93% of the module. Nothing below
+ * slices `.code` by hand.
+ */
+const CORE = sourceReader(CORE_CODE, "core.ts");
+const ACTIONS = sourceReader(
+  INVITATIONS_ACTIONS,
+  "oversight/invitations/actions.ts"
+);
+const REGISTER = sourceReader(REGISTER_ACTIONS, "register/actions.ts");
+
+/**
+ * `createInvitationAs`'s own body — the subject of every ordering assertion
+ * about the create path below.
+ *
+ * Bounded at the NEXT DECLARATION rather than at the `// Respond` banner it used
+ * to end on: a comment is prose, and this one sits 7,000 chars further down, so
+ * "exactly these three `resolveInvitation*` calls happen here" was really a
+ * claim about `emailInvitee` and `emailInviteeOutcome` as well.
+ */
+const CREATE_PATH = CORE.span(
+  "export async function createInvitationAs",
+  "export async function emailInvitee"
+);
+
 const SENDING_CHURCH = "22222222-2222-4222-8222-222222222222";
 const NETWORK = "33333333-3333-4333-8333-333333333333";
 const ADMIN_ID = "44444444-4444-4444-8444-444444444444";
@@ -154,10 +189,7 @@ test("the create form has no expiry field, and no way to grow one", () => {
 
   // And the action's schema has exactly two keys, so an expiry cannot arrive
   // in the POST body either.
-  const schema = INVITATIONS_ACTIONS.slice(
-    INVITATIONS_ACTIONS.indexOf("const createSchema"),
-    INVITATIONS_ACTIONS.indexOf("const revokeSchema")
-  );
+  const schema = ACTIONS.span("const createSchema", "const revokeSchema");
   assert.match(schema, /inviteeEmail:/);
   assert.match(schema, /inviteAs:/);
   assert.equal(schema.match(/^\s{2}\w+:/gm)?.length, 2, schema);
@@ -172,14 +204,13 @@ test("the occupied-slot refusal is inside createInvitationAs, not the form", () 
   // validation" — so the check has to sit on the path a FORGED direct call
   // takes. `createInvitation` (the only exported way in) calls
   // `createInvitationAs`, and the guard runs there, before the insert.
-  const body = CORE_CODE.slice(
-    CORE_CODE.indexOf("export async function createInvitationAs"),
-    CORE_CODE.indexOf("// Respond")
-  );
+  const body = CREATE_PATH;
 
   assert.match(body, /await assertTargetSlotFree\(resolved\.values\)/);
-  assert.ok(
-    body.indexOf("assertTargetSlotFree") < body.indexOf("insertInvitation"),
+  assertInOrder(
+    body,
+    "core.ts → createInvitationAs",
+    ["assertTargetSlotFree", "insertInvitation"],
     "the slot is checked BEFORE the row is written"
   );
 
@@ -188,9 +219,10 @@ test("the occupied-slot refusal is inside createInvitationAs, not the form", () 
   // which is an account-enumeration oracle: it must be unreachable to anyone
   // who may not invite at all. The authority call is pure and takes no target,
   // so it can run first without a lookup.
-  assert.ok(
-    body.indexOf("const authority = resolveInvitationRequest") <
-      body.indexOf("resolveInvitationTarget"),
+  assertInOrder(
+    body,
+    "core.ts → createInvitationAs",
+    ["const authority = resolveInvitationRequest", "resolveInvitationTarget"],
     "a non-oversight caller must be refused before any address is looked up"
   );
 
@@ -240,9 +272,9 @@ test("no second refusal message survives anywhere in the invitation logic", () =
 
   // `assertTargetSlotFree` has no message of its own: it asks
   // `slotRefusalMessage` and throws whatever it gets.
-  const guard = CORE_CODE.slice(
-    CORE_CODE.indexOf("export async function assertTargetSlotFree"),
-    CORE_CODE.indexOf("export function slotRefusalMessage")
+  const guard = CORE.span(
+    "export async function assertTargetSlotFree",
+    "export function slotRefusalMessage"
   );
   assert.match(guard, /const refusal = slotRefusalMessage\(held\)/);
   assert.match(guard, /throw new InvitationError\(refusal\)/);
@@ -323,11 +355,7 @@ test("the post-resolution pass is the collapsed one, at the call site", () => {
   // the second pass through the collapsing wrapper. Reverting it to a bare
   // `resolveInvitationRequest(actor, {...resolvedTarget.target})` re-opens the
   // oracle without failing anything else, so the wiring is pinned here.
-  const body = CORE_CODE.slice(
-    CORE_CODE.indexOf("export async function createInvitationAs"),
-    CORE_CODE.indexOf("// Respond")
-  );
-  const calls = code(body).match(/resolveInvitation\w*\(/g) ?? [];
+  const calls = code(CREATE_PATH).match(/resolveInvitation\w*\(/g) ?? [];
 
   assert.deepEqual(calls, [
     // 1. AUTHORITY, before any lookup — legible, and about the ACTOR.
@@ -348,9 +376,9 @@ test("a client cannot name a target; the address is resolved server-side", () =>
   // plants, so a form that accepted a `targetChurchId` would need a picker, and
   // a picker would have to list every plant in the product. The action's schema
   // has no key for one, and the create form renders no field for one.
-  const inputs = INVITATIONS_ACTIONS.slice(
-    INVITATIONS_ACTIONS.indexOf("const createSchema"),
-    INVITATIONS_ACTIONS.indexOf("const result = await createInvitation")
+  const inputs = ACTIONS.span(
+    "const createSchema",
+    "const result = await createInvitation"
   );
   assert.doesNotMatch(inputs, /targetChurchId|targetSendingChurchId/);
   assert.doesNotMatch(CREATE_FORM, /targetChurchId|targetSendingChurchId/);
@@ -431,7 +459,14 @@ test("binding an open invitation to a new org is a compare-and-set", () => {
     /"expires_at" is null or "organization_invitations"\."expires_at" > \$\d+/
   );
   assert.match(sql, /"status" = \$\d+/);
-  const setClause = sql.slice(sql.indexOf(" set "), sql.indexOf(" where "));
+  // Through the reader for the same reason the source spans are: a drizzle
+  // release that stopped emitting a lowercase " where " would make a bare
+  // `indexOf` pair return the empty string, and `doesNotMatch("", …)` is true of
+  // everything.
+  const setClause = sourceReader(
+    sql,
+    "the bindOpenInvitationTarget UPDATE"
+  ).span(" set ", " where ");
   assert.doesNotMatch(setClause, /"status"/, setClause);
   assert.ok(params.includes(INVITATION_ID));
   assert.ok(params.includes("pending"));
@@ -467,12 +502,11 @@ test("registration binds THEN accepts, never the other way round", () => {
   // and creating the church second would, on a crash, leave an invitation
   // reading `accepted` with no association behind it: the one state nothing in
   // the product can repair.
-  const body = REGISTER_ACTIONS.slice(
-    REGISTER_ACTIONS.indexOf("async function redeemRegistrationInvitation")
-  );
-  assert.ok(
-    body.indexOf("bindOpenInvitationTarget") <
-      body.indexOf("acceptInvitationAs"),
+  const body = REGISTER.after("async function redeemRegistrationInvitation");
+  assertInOrder(
+    body,
+    "register/actions.ts → redeemRegistrationInvitation",
+    ["bindOpenInvitationTarget", "acceptInvitationAs"],
     "the target must be bound before the invitation is accepted"
   );
 
@@ -482,9 +516,13 @@ test("registration binds THEN accepts, never the other way round", () => {
 
   // The association itself is never written here: `createAccountEntities` must
   // not set an oversight FK, or a plant could be bound with no acceptance.
-  const entities = REGISTER_ACTIONS.slice(
-    REGISTER_ACTIONS.indexOf("async function createAccountEntities"),
-    REGISTER_ACTIONS.indexOf("async function redeemRegistrationInvitation")
+  //
+  // The function is SYNCHRONOUS. Anchored on `async function` this span was -1
+  // to 17862 — the empty string — so the `doesNotMatch` below was a tautology
+  // and stayed green with `sendingChurchId: invitation` written into the body.
+  const entities = REGISTER.span(
+    "function createAccountEntities",
+    "async function redeemRegistrationInvitation"
   );
   assert.doesNotMatch(
     entities,
@@ -558,9 +596,9 @@ test("the account refusal is in the service, on the forged-call path", () => {
   // `createInvitation` takes, rather than in the form or the action's schema.
   // `resolveInvitationTarget` is where the address meets `users`, and it is
   // called before anything is written.
-  const target = CORE_CODE.slice(
-    CORE_CODE.indexOf("export async function resolveInvitationTarget"),
-    CORE_CODE.indexOf("export async function assertTargetSlotFree")
+  const target = CORE.span(
+    "export async function resolveInvitationTarget",
+    "export async function assertTargetSlotFree"
   );
   assert.match(target, /return inviteeAccountTarget\(existing\)/);
   // The projection is the three columns the pure mapper reads — and nothing
@@ -568,21 +606,20 @@ test("the account refusal is in the service, on the forged-call path", () => {
   // "which org is this".
   assert.doesNotMatch(target, /\.select\(\)/);
 
-  const create = CORE_CODE.slice(
-    CORE_CODE.indexOf("export async function createInvitationAs"),
-    CORE_CODE.indexOf("// Respond")
-  );
+  const create = CREATE_PATH;
   assert.match(create, /await resolveInvitationTarget\(inviteeEmail\)/);
-  assert.ok(
-    create.indexOf("resolveInvitationTarget") <
-      create.indexOf("insertInvitation"),
+  assertInOrder(
+    create,
+    "core.ts → createInvitationAs",
+    ["resolveInvitationTarget", "insertInvitation"],
     "the address is judged BEFORE the row is written"
   );
   // Authority still comes first: this refusal is itself an account-existence
   // oracle, so it must be unreachable to anyone who may not invite at all.
-  assert.ok(
-    create.indexOf("const authority = resolveInvitationRequest") <
-      create.indexOf("resolveInvitationTarget"),
+  assertInOrder(
+    create,
+    "core.ts → createInvitationAs",
+    ["const authority = resolveInvitationRequest", "resolveInvitationTarget"],
     "a non-oversight caller must be refused before any address is looked up"
   );
 });
@@ -881,9 +918,13 @@ test("no per-row message survives on the anonymous POST", () => {
   // its absence is not observable by calling anything. The behavioural half —
   // that all four ids answer identically — is the callable test above; this is
   // what stops the message being wired back in.
-  const body = REGISTER_ACTIONS.slice(
-    REGISTER_ACTIONS.indexOf("export async function register"),
-    REGISTER_ACTIONS.indexOf("async function createAccountEntities")
+  // `register`'s own body, bounded at the next declaration. The old end anchor
+  // was the dead `async function createAccountEntities` needle, so this span was
+  // 17,669 of the module's 18,951 chars and every assertion below was
+  // module-wide rather than about `register`.
+  const body = REGISTER.span(
+    "export async function register",
+    "const DUPLICATE_EMAIL_MESSAGE"
   );
 
   assert.doesNotMatch(code(body), /invitationEmailMismatchMessage/);
@@ -897,14 +938,16 @@ test("no per-row message survives on the anonymous POST", () => {
     body.includes(".insert(users)"),
     "the register action no longer inserts the account here — re-aim this check"
   );
-  assert.ok(
-    body.indexOf("invitationActedOnAtRegistration") <
-      body.indexOf("isBetaGateEnabled()"),
+  assertInOrder(
+    body,
+    "register/actions.ts → the register action",
+    ["invitationActedOnAtRegistration", "isBetaGateEnabled()"],
     "the invitation decision is made before the beta gate the token bypasses"
   );
-  assert.ok(
-    body.indexOf("invitationActedOnAtRegistration") <
-      body.indexOf(".insert(users)"),
+  assertInOrder(
+    body,
+    "register/actions.ts → the register action",
+    ["invitationActedOnAtRegistration", ".insert(users)"],
     "the invitation decision is made before an account is created"
   );
   assert.match(
@@ -1017,44 +1060,76 @@ test("the create action returns one success shape, carrying no target signal", (
 
   // …and the state type has no key for one to come back in, so a future edit
   // has to change the contract rather than slip a field through it.
-  assert.match(action, /created\?: \{ inviteeEmail: string \}/);
+  //
+  // `emailSent` joined it with OV-003b (#293) and is NOT a target signal: it
+  // reports what the mail provider said, which is the same question for an
+  // address with an account and one without. The exact shape is asserted so a
+  // third key cannot arrive unnoticed.
+  assert.match(
+    action,
+    /created\?: \{ inviteeEmail: string; emailSent\?: boolean \}/
+  );
 });
 
-test("the create surface renders no register link and no branch", () => {
+test("the create surface renders no register link and no target branch", () => {
   const form = code(CREATE_FORM);
 
-  // No branch on the created shape: one message for both kinds of invitation.
+  // No branch on the TARGET shape: one message whatever kind was created. The
+  // notice does branch on `emailSent` since OV-003b (#293), which is a fact
+  // about the mail provider and not about the address — see the create-action
+  // test above and `create-notice.ts`.
   assert.doesNotMatch(form, /inviteePath/);
   assert.doesNotMatch(form, /InviteLink/);
+  assert.doesNotMatch(form, /targetChurchId|targetSendingChurchId|isOpen/);
 
   // The link, its URL composition and the clipboard control are all gone from
   // this surface — `/register` is the invitee's own path, not something an
-  // admin is handed to forward.
+  // admin is handed to forward. #293 shipped the email the ruling called this
+  // link a stopgap for, so it does not come back with delivery.
   assert.doesNotMatch(form, /register\?invitation=/);
+  assert.doesNotMatch(form, /invitationRegisterPath/);
   assert.doesNotMatch(form, /clipboard/);
   assert.doesNotMatch(form, /location\.origin/);
+  assert.doesNotMatch(form, /Copy link/);
 
-  // The one message. It is true whether or not the address has an account, and
-  // it names neither.
-  assert.match(form, /Tell them directly that you have invited them\./);
+  // The words are no longer JSX — they come from `invitationCreatedNotice`, so
+  // the sentences #293's AC names are executable. The component renders them
+  // and composes none of its own.
+  assert.match(form, /invitationCreatedNotice\(/);
+  assert.match(form, /\{notice\.headline\}/);
+  assert.match(form, /\{notice\.detail\}/);
   assert.doesNotMatch(form, /already have an EveryField account/);
 
-  // DELIVERY-NEUTRAL (round 10, ruled 2026-08-11). The previous wording
-  // promised "you will hear as soon as they answer", which is false for an
-  // address with nobody inside the product to answer. The replacement says the
-  // two things that are true either way — tell them yourself, and it sits in
-  // the revocable list — and says nothing about HOW an invitation travels, so
-  // it does not need re-reading the week email delivery ships.
-  assert.match(form, /sits in the list below, where you can revoke it/);
-  for (const mechanic of [
-    /you will hear/i,
-    /email delivery/i,
-    /not live yet/i,
-    /we (will )?(send|email)/i,
-    /out of band/i,
-  ]) {
-    assert.doesNotMatch(form, mechanic, String(mechanic));
+  // The copy itself, asserted where it now lives. It is true whether or not the
+  // address has an account and it names neither, in all three states.
+  for (const emailSent of [true, false, undefined]) {
+    const { headline, detail } = invitationCreatedNotice({
+      inviteeEmail: "someone@example.com",
+      emailSent,
+    });
+    const copy = `${headline} ${detail}`;
+
+    assert.doesNotMatch(copy, /register\?invitation=|this link/i, copy);
+    assert.doesNotMatch(copy, /already have an EveryField account/i, copy);
+
+    // DELIVERY-NEUTRAL survives #293 (round 10, ruled 2026-08-11). The copy may
+    // now report whether THIS email went out — that is the branch above — but
+    // it still promises no answer nobody can give and describes no mechanics.
+    for (const mechanic of [
+      /you will hear/i,
+      /not live yet/i,
+      /out of band/i,
+    ]) {
+      assert.doesNotMatch(copy, mechanic, `${String(mechanic)} — ${copy}`);
+    }
   }
+
+  // …and the invitation still sits in the revocable list, said out loud on the
+  // one state where nothing was sent to point at instead.
+  assert.match(
+    invitationCreatedNotice({ inviteeEmail: "someone@example.com" }).detail,
+    /sits in the list below/
+  );
 });
 
 test("no copy on the create surface claims an account does or does not exist", () => {
@@ -1550,12 +1625,18 @@ test("ONE definition decides what /register may act on", async () => {
     "export async function describeInvitationForRegistration",
     "export async function hasValidInvitationBypass",
   ]) {
-    const body = gate.slice(gate.indexOf(reader));
-    assert.ok(
-      body.indexOf("isOpenRedeemableInvitation(") > -1 &&
-        body.indexOf("isOpenRedeemableInvitation(") <
-          body.indexOf("\n}\n", body.indexOf("{")),
-      `${reader} no longer calls the shared predicate`
+    const body = sourceReader(
+      gate,
+      "register/beta-gate.ts (comments stripped)"
+    ).after(reader);
+    // Inside its OWN body: the opening brace, the call, then the first
+    // top-level `}` — so a call that drifted into the next declaration fails
+    // here too.
+    assertInOrder(
+      body,
+      `register/beta-gate.ts → ${reader} (comments stripped)`,
+      ["{", "isOpenRedeemableInvitation(", "\n}\n"],
+      `${reader} no longer calls the shared predicate inside its own body`
     );
   }
 });

@@ -10,6 +10,7 @@ import {
   type InvitationActor,
   type InviteeTarget,
 } from "./core";
+import { assertInOrder, sourceReader } from "@/lib/testing/source-span";
 
 // ============================================================================
 // #304 ruling 4, fixes 1–3 (HR4 security block, 2026-08-09) — a caller cannot
@@ -52,6 +53,16 @@ import {
 const ROOT = path.join(process.cwd(), "src", "lib", "invitations");
 const CORE = readFileSync(path.join(ROOT, "core.ts"), "utf8");
 const SERVICE = readFileSync(path.join(ROOT, "service.ts"), "utf8");
+
+/**
+ * The readers, and the ONLY way this file cuts a declaration out of either
+ * module. `span` / `after` throw naming the missing needle (`@/lib/testing/source-span`) —
+ * a bare `indexOf` pair returns -1 for a moved anchor, and a `doesNotMatch`
+ * about one function then quietly becomes a claim about the whole file, or
+ * about the empty string. Both have happened in this domain.
+ */
+const CORE_SOURCE = sourceReader(CORE, "core.ts");
+const SERVICE_SOURCE = sourceReader(SERVICE, "service.ts");
 
 /** Ids that exist only in the attacker's request. Nothing resolves to them. */
 const FORGED_CHURCH = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -220,9 +231,9 @@ test("a refusal on a RESOLVED target is still the one message", () => {
 // ----------------------------------------------------------------------------
 
 test("the resolved request is built key by key, never spread from the caller's", () => {
-  const fn = CORE.slice(
-    CORE.indexOf("export function resolveInvitationForResolvedTarget"),
-    CORE.indexOf("export async function insertInvitation")
+  const fn = CORE_SOURCE.span(
+    "export function resolveInvitationForResolvedTarget",
+    "export async function insertInvitation"
   );
 
   // A spread is what the hole was. Any of them here means a key that nobody
@@ -238,11 +249,15 @@ test("the resolved request is built key by key, never spread from the caller's",
 test("createInvitationAs strips the caller's target keys at the call site", () => {
   // Defence in depth: `resolveInvitationForResolvedTarget` is exported, so the
   // live path must not depend on a future caller reading its comment.
-  const create = CORE.slice(
-    CORE.indexOf("export async function createInvitationAs")
+  // Bounded at the next declaration: unbounded, "no spread reaches this call
+  // site" ran to the end of a 3,000-line module and would have kept passing with
+  // the call moved into another function entirely.
+  const create = CORE_SOURCE.span(
+    "export async function createInvitationAs",
+    "export async function emailInvitee"
   );
-  const call = create.slice(
-    create.indexOf("resolveInvitationForResolvedTarget")
+  const call = sourceReader(create, "createInvitationAs").after(
+    "resolveInvitationForResolvedTarget"
   );
 
   assert.doesNotMatch(call.slice(0, 300), /\.\.\.request/);
@@ -282,11 +297,14 @@ test("createInvitation parses a strict schema before the logic layer", () => {
   // Session FIRST. `service.test.ts` executes the forged, sessionless call and
   // requires a throw from the first statement; a parse ahead of it would answer
   // an unauthenticated caller with a validation message instead.
-  const fn = SERVICE.slice(
-    SERVICE.indexOf("export async function createInvitation(")
+  const fn = SERVICE_SOURCE.span(
+    "export async function createInvitation(",
+    "export async function resendInvitationEmail("
   );
-  assert.ok(
-    fn.indexOf("verifySession") < fn.indexOf("safeParse"),
+  assertInOrder(
+    fn,
+    "invitations/service.ts → createInvitation",
+    ["verifySession", "safeParse"],
     "the session check must precede the parse"
   );
 });
