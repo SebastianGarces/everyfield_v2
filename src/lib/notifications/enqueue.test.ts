@@ -3,8 +3,13 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import type { NewNotification, Notification } from "@/db/schema";
+import {
+  associationOrgTypes,
+  type NewNotification,
+  type Notification,
+} from "@/db/schema";
 import { resend } from "@/lib/email/client";
+import { sourceReader } from "@/lib/testing/source-span";
 
 import {
   OVERSIGHT_ELIGIBLE_CATEGORIES,
@@ -1348,4 +1353,74 @@ test("a plant's own team is untouched by any of this", async () => {
   });
 
   assert.equal(result.status, "recorded");
+});
+
+// ----------------------------------------------------------------------------
+// The boundary FOLLOWS the org-kind union (#411)
+// ----------------------------------------------------------------------------
+
+test("the anchorOrg parse FOLLOWS AssociationOrgType, it does not restate it", () => {
+  // #411 re-review, finding 1's code half. `anchorOrg.type` was
+  // `z.enum(["sending_church", "network"])` — a standalone literal list that
+  // merely HAPPENED to hold the same two strings as the schema's union. So a
+  // third kind of oversight org widened `AssociationOrgType`, widened
+  // `OrgAnchor` with it, and left this parse rejecting the new kind at RUNTIME
+  // with no compile error anywhere, while a docblock promised the opposite.
+  //
+  // Sourced from the tuple, the parse and the anchor union cannot disagree.
+  const enqueueCode = readFileSync(
+    path.join(process.cwd(), "src/lib/notifications/enqueue.ts"),
+    "utf8"
+  );
+  assert.match(enqueueCode, /type: z\.enum\(associationOrgTypes\)/);
+  assert.doesNotMatch(
+    enqueueCode,
+    /z\.enum\(\["sending_church", "network"\]\)/
+  );
+
+  // And the parse admits EXACTLY the union's members, asked of the schema
+  // rather than of the source: every declared org kind parses, and a string
+  // that is not one is refused.
+  for (const type of associationOrgTypes) {
+    const parsed = enqueueNotificationSchema.safeParse({
+      anchorOrg: { type, orgId: NETWORK },
+      recipientUserId: USER,
+      category: "milestones",
+      type: "oversight.milestone.joined_network",
+      title: "t",
+      body: "b",
+    });
+    assert.equal(parsed.success, true, `${type} must parse`);
+  }
+
+  assert.equal(
+    enqueueNotificationSchema.safeParse({
+      anchorOrg: { type: "diocese", orgId: NETWORK },
+      recipientUserId: USER,
+      category: "milestones",
+      type: "oversight.milestone.joined_network",
+      title: "t",
+      body: "b",
+    }).success,
+    false,
+    "a kind the union does not name is still refused"
+  );
+});
+
+test("anchorOf takes the OrgAnchor union, not its two fields respelled", () => {
+  // The other half of the same defect: `anchorOf`'s parameter spelled
+  // `{ type: "sending_church" | "network"; orgId: string }`, so it narrowed the
+  // parse's own output back down behind the schema and would have had to be
+  // edited by hand for a third kind. Typed as `OrgAnchor`, it widens with the
+  // union.
+  const enqueueCode = readFileSync(
+    path.join(process.cwd(), "src/lib/notifications/enqueue.ts"),
+    "utf8"
+  );
+  const anchorOfSource = sourceReader(enqueueCode, "enqueue.ts").span(
+    "function anchorOf(parsed: {",
+    "/**\n * Cancel-by-entity input."
+  );
+  assert.match(anchorOfSource, /anchorOrg\?: OrgAnchor;/);
+  assert.doesNotMatch(anchorOfSource, /"sending_church" \| "network"/);
 });

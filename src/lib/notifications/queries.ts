@@ -328,23 +328,34 @@ function olderThan(cursor: FeedCursor): SQL {
   ) as SQL;
 }
 
-/** Newest-first feed for one recipient within one church (N-008). */
-export function notificationFeedQuery(
-  scope: NotificationScope,
-  options: FeedOptions = {}
-) {
-  const limit = Math.min(
-    Math.max(options.limit ?? DEFAULT_FEED_LIMIT, 1),
-    MAX_FEED_LIMIT
-  );
+/**
+ * A tenancy scope, as the ONE thing a read needs from it: "give me a WHERE that
+ * opens with your boundary predicates, then these".
+ *
+ * The church composer is `scopedWhere` and the org composer is `orgScopedWhere`,
+ * and this type is the only thing the builders below know about either. That is
+ * deliberate: a feed and its badge that were written out twice, once per anchor,
+ * are two implementations of one rule, and the copy is always the one that
+ * misses the fix (memory/invariants.md says this about `daysUntilTarget`,
+ * `peopleTextSearch` and `lookupInvitingOrgName` alike). Ordering, projection,
+ * the limit clamp, the keyset predicate and every visibility rule are now
+ * written once; only the boundary varies, which is the only thing that differs.
+ */
+type ScopedWhere = (...extra: (SQL | undefined)[]) => SQL;
 
+/** One page's row count, clamped so a caller can neither ask for 0 nor for 10,000. */
+function clampFeedLimit(limit?: number): number {
+  return Math.min(Math.max(limit ?? DEFAULT_FEED_LIMIT, 1), MAX_FEED_LIMIT);
+}
+
+/** Newest-first feed under whichever tenancy boundary `where` names. */
+function feedQueryWithin(where: ScopedWhere, options: FeedOptions) {
   return (
     db
       .select(feedColumns)
       .from(notifications)
       .where(
-        scopedWhere(
-          scope,
+        where(
           ...feedVisibility(options.now ?? new Date(), options.categories),
           options.before ? olderThan(options.before) : undefined,
           options.category
@@ -355,17 +366,39 @@ export function notificationFeedQuery(
       )
       // `id` is the tiebreaker, and it is in the cursor for the same reason.
       .orderBy(desc(notifications.createdAt), desc(notifications.id))
-      .limit(limit)
+      .limit(clampFeedLimit(options.limit))
   );
+}
+
+/** The unread count under whichever tenancy boundary `where` names. */
+function unreadCountWithin(where: ScopedWhere, options: VisibilityOptions) {
+  return db
+    .select({ value: count() })
+    .from(notifications)
+    .where(
+      where(
+        isNull(notifications.readAt),
+        ...feedVisibility(options.now ?? new Date(), options.categories)
+      )
+    );
+}
+
+/** Newest-first feed for one recipient within one church (N-008). */
+export function notificationFeedQuery(
+  scope: NotificationScope,
+  options: FeedOptions = {}
+) {
+  return feedQueryWithin((...extra) => scopedWhere(scope, ...extra), options);
 }
 
 /**
  * Newest-first feed for one recipient within one ORG (#304 WS3).
  *
- * The org-anchored twin of `notificationFeedQuery`, sharing its projection, its
- * visibility rules and its ordering — everything except which column carries the
- * tenant. It exists now, with the anchor, rather than being deferred with the
- * oversight feed surface itself (#225): the rows are being written from this
+ * The org-anchored twin of `notificationFeedQuery` — literally, now: both are
+ * `feedQueryWithin` under a different boundary, so the projection, the
+ * visibility rules, the keyset predicate and the ordering cannot drift between
+ * them. It exists at all, with the anchor, rather than being deferred with the
+ * oversight feed surface itself (#225): the rows are being written from that
  * change onward, and a write with no read is a queue that silently fills up.
  * What #225 still owns is the SCREEN — which orgs and plants one oversight
  * admin's feed spans, and how the two are presented together.
@@ -374,27 +407,10 @@ export function orgNotificationFeedQuery(
   scope: OrgNotificationScope,
   options: FeedOptions = {}
 ) {
-  const limit = Math.min(
-    Math.max(options.limit ?? DEFAULT_FEED_LIMIT, 1),
-    MAX_FEED_LIMIT
+  return feedQueryWithin(
+    (...extra) => orgScopedWhere(scope, ...extra),
+    options
   );
-
-  return db
-    .select(feedColumns)
-    .from(notifications)
-    .where(
-      orgScopedWhere(
-        scope,
-        ...feedVisibility(options.now ?? new Date(), options.categories),
-        options.before ? olderThan(options.before) : undefined,
-        options.category
-          ? eq(notifications.category, options.category)
-          : undefined,
-        options.unreadOnly ? isNull(notifications.readAt) : undefined
-      )
-    )
-    .orderBy(desc(notifications.createdAt), desc(notifications.id))
-    .limit(limit);
 }
 
 /** The org-anchored rows one admin has not read — the org half of the badge. */
@@ -402,16 +418,10 @@ export function orgUnreadCountQuery(
   scope: OrgNotificationScope,
   options: VisibilityOptions = {}
 ) {
-  return db
-    .select({ value: count() })
-    .from(notifications)
-    .where(
-      orgScopedWhere(
-        scope,
-        ...feedVisibility(options.now ?? new Date(), options.categories),
-        isNull(notifications.readAt)
-      )
-    );
+  return unreadCountWithin(
+    (...extra) => orgScopedWhere(scope, ...extra),
+    options
+  );
 }
 
 /**
@@ -422,16 +432,7 @@ export function unreadCountQuery(
   scope: NotificationScope,
   options: VisibilityOptions = {}
 ) {
-  return db
-    .select({ value: count() })
-    .from(notifications)
-    .where(
-      scopedWhere(
-        scope,
-        isNull(notifications.readAt),
-        ...feedVisibility(options.now ?? new Date(), options.categories)
-      )
-    );
+  return unreadCountWithin((...extra) => scopedWhere(scope, ...extra), options);
 }
 
 /**

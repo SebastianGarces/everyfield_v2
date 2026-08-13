@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
+import { sourceReader } from "@/lib/testing/source-span";
+
 // ============================================================================
 // The preferences matrix component (N-006), asserted from its source.
 //
@@ -95,7 +97,14 @@ test("the header comment claims only what the file does", () => {
   // The other half of #236: the comment already promised a toast on failure
   // while the actions were still throwing, so the file documented behaviour it
   // did not have. Whatever it claims must be traceable to the code below it.
-  const header = SOURCE.slice(0, SOURCE.indexOf("export interface"));
+  // The header is everything above the first declaration, cut through the
+  // reader: a file that stopped exporting an interface would otherwise slice
+  // the whole component in (making `doesNotMatch` a module-wide claim) and the
+  // comment guard would be checking the code instead of the comment.
+  const header = sourceReader(SOURCE, "preference-matrix.tsx").span(
+    '"use client"',
+    "export interface"
+  );
 
   // It explains WHY the toast works — the actions return their failures —
   // rather than merely asserting that it does.
