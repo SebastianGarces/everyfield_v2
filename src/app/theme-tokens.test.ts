@@ -22,6 +22,7 @@ import {
   readPaletteColour,
   readToken,
   readTokenOklch,
+  relativeLuminance,
   themeBlock,
   themes,
 } from "@/lib/testing/theme-color";
@@ -529,24 +530,26 @@ for (const theme of themes) {
   });
 }
 
-// --- the person-status badges: off-token fills, measured (#411) -------------
+// --- the person-status badges: the ruled tinted scale, measured (#429) ------
 //
-// `STATUS_BADGE_CONFIG` paints seven badges with RAW Tailwind palette classes —
-// `bg-yellow-500`, `bg-emerald-600` — over the Badge variant's own label token.
-// That is the "per-component color override" the Design Tokens invariant
-// forbids, and no token value can fix it: the fills are not tokens, so the
-// three markup guards next door (destructive tints, attention inks, --ef-dark
-// grounds) cannot see them and neither can any assertion over globals.css.
+// `STATUS_BADGE_CONFIG` paints the /people badges with RAW Tailwind palette
+// classes rather than tokens, so nothing in globals.css can say what they paint
+// and none of the three markup guards next door (destructive tints, attention
+// inks, --ef-dark grounds) can see them. That is exactly how the scale this one
+// replaced shipped a 1.91:1 label — `bg-yellow-500` under `text-white`, eight of
+// its twelve pairs below AA, found in a browser rather than by this suite.
 //
-// Four of them fail AA on the live preview, worst 1.91:1 (Following Up), which
-// Lighthouse reports as the single failing accessibility audit on /people.
-// WHICH colours the status scale uses is a design ruling, so the numbers are
-// RECORDED here rather than changed — the same treatment `bg-destructive/10`
-// got, with the same inverted assertion, so a new status or a palette bump
-// fails loudly instead of arriving unmeasured.
+// #429 ruled the replacement: direction B, "tinted editorial" — a pale ground,
+// deep ink and hairline border of ONE hue per status, mirrored in the dark
+// theme. The deferral ledger that carried the old numbers (
+// `DEFERRED_STATUS_BADGE_FILLS`) is GONE with the residual it recorded: every
+// status/theme pair now owes AA outright, and there is no list to add to. Do not
+// re-introduce one — a scale that cannot clear 4.5:1 is a ruling to reopen, not
+// an entry to write.
 //
-// The fills are read from Tailwind's own theme.css and the labels from
-// badge.tsx, so nothing here is a hex anyone typed.
+// Nothing below is a number anyone typed. The grounds, inks and borders are read
+// from Tailwind's own `theme.css`, the neutral fallback from `badge.tsx`'s own
+// variant, and the ratios are computed here.
 
 /** One `badgeVariants` variant's class list, read out of badge.tsx. */
 function badgeVariantClasses(variant: string): string[] {
@@ -562,14 +565,35 @@ function badgeVariantClasses(variant: string): string[] {
   return match[1].split(/\s+/);
 }
 
-/** The unprefixed (no `hover:`, no `[a&]:`) utility with this prefix. */
-function baseUtility(classes: string[], prefix: string): string | undefined {
-  return classes.find((c) => !c.includes(":") && c.startsWith(prefix));
+/**
+ * The utility with `prefix` that actually WINS in `theme` — `dark:bg-blue-950`
+ * in the dark theme, `bg-blue-50` in the light one, and the base class in the
+ * dark theme when no `dark:` twin exists (the cascade inherits it, which is the
+ * `--ef-dark` trap one layer out).
+ *
+ * Any other modifier is skipped rather than measured: `[a&]:hover:bg-primary/90`
+ * paints a state this badge never enters, and reading it as the resting fill
+ * would measure a pair nothing renders.
+ */
+function themedUtility(
+  classes: string[],
+  prefix: string,
+  theme: "light" | "dark"
+): string | undefined {
+  const base = classes.find((c) => !c.includes(":") && c.startsWith(prefix));
+  if (theme === "light") return base;
+
+  const darkTwin = classes.find(
+    (c) =>
+      c.startsWith(`dark:${prefix}`) && !c.slice("dark:".length).includes(":")
+  );
+  return darkTwin ? darkTwin.slice("dark:".length) : base;
 }
 
 /**
- * The colour a `bg-`/`text-` utility's suffix paints — a Tailwind palette
- * entry (`yellow-500`), a bare keyword (`white`), or one of our own tokens.
+ * The colour a `bg-`/`text-`/`border-` utility's suffix paints — a Tailwind
+ * palette entry (`yellow-500`), a bare keyword (`white`), or one of our own
+ * tokens.
  */
 function utilityColour(theme: "light" | "dark", suffix: string): Rgb {
   if (suffix === "white") return hexToSrgb("#ffffff");
@@ -578,101 +602,213 @@ function utilityColour(theme: "light" | "dark", suffix: string): Rgb {
   return readToken(theme, suffix);
 }
 
-/** Every status badge that paints its OWN fill, with the label over it. */
-function statusBadgePairs(
-  theme: "light" | "dark"
-): { status: string; fill: Rgb; label: Rgb; classes: string }[] {
-  return Object.entries(STATUS_BADGE_CONFIG).flatMap(
+type StatusBadgePaint = {
+  status: string;
+  ground: Rgb;
+  ink: Rgb;
+  border: Rgb | null;
+  classes: string;
+};
+
+/**
+ * What every status badge PAINTS in `theme`: its own classes first, and the
+ * Badge variant it names for anything it leaves to the token layer (Prospect,
+ * which the ruling keeps neutral, colours nothing itself).
+ */
+function statusBadgePaint(theme: "light" | "dark"): StatusBadgePaint[] {
+  return Object.entries(STATUS_BADGE_CONFIG).map(
     ([status, { className, variant }]) => {
       const own = className.split(/\s+/).filter(Boolean);
-      const fillClass = baseUtility(own, "bg-");
-      // No fill of its own means the token-backed variant paints it, and the
-      // token layer's assertions above already cover that pair.
-      if (!fillClass) {
-        assert.ok(
-          !baseUtility(own, "text-"),
-          `${status} overrides the badge's label colour without overriding its fill — that pair is measured by nothing`
-        );
-        return [];
-      }
+      const fromVariant = badgeVariantClasses(variant);
 
-      const labelClass =
-        baseUtility(own, "text-") ??
-        baseUtility(badgeVariantClasses(variant), "text-");
-      assert.ok(labelClass, `the badge \`${variant}\` variant paints no label`);
+      const groundClass =
+        themedUtility(own, "bg-", theme) ??
+        themedUtility(fromVariant, "bg-", theme);
+      const inkClass =
+        themedUtility(own, "text-", theme) ??
+        themedUtility(fromVariant, "text-", theme);
 
-      return [
-        {
-          status,
-          fill: utilityColour(theme, fillClass.slice("bg-".length)),
-          label: utilityColour(theme, labelClass.slice("text-".length)),
-          classes: `${fillClass} ${labelClass}`,
-        },
-      ];
+      assert.ok(
+        groundClass,
+        `${status} has no ground in the ${theme} theme — neither its own classes nor the \`${variant}\` badge variant paint a bg-, so its label is read on whatever is behind it`
+      );
+      assert.ok(
+        inkClass,
+        `${status} has no label colour in the ${theme} theme — neither its own classes nor the \`${variant}\` badge variant paint a text-`
+      );
+
+      const borderClass = themedUtility(own, "border-", theme);
+
+      return {
+        status,
+        ground: utilityColour(theme, groundClass.slice("bg-".length)),
+        ink: utilityColour(theme, inkClass.slice("text-".length)),
+        border: borderClass
+          ? utilityColour(theme, borderClass.slice("border-".length))
+          : null,
+        classes: [groundClass, inkClass, borderClass].filter(Boolean).join(" "),
+      };
     }
   );
 }
 
-/**
- * The DECISION ledger: every status badge whose label does NOT clear AA on its
- * own fill, and the number being accepted. Anything not listed MUST clear AA,
- * so a new status, a palette bump or a variant change fails this file instead
- * of passing quietly.
- *
- * The remedy is a design ruling, not a sweep's call: token-backed status
- * colours, or darker fills chosen from the ruled palette.
- */
-const DEFERRED_STATUS_BADGE_FILLS: Record<string, number> = {
-  "light following_up": 1.91,
-  "light leader": 2.05,
-  "light core_group": 3.51,
-  "light attendee": 3.6,
-  "light interviewed": 3.94,
-  "dark following_up": 1.91,
-  "dark launch_team": 3.41,
-  "dark interviewed": 4.35,
-};
-
-test("every person-status badge paints a measured label on its own fill", () => {
+test("every person-status badge reads its label at AA, in both themes", () => {
   const measured: string[] = [];
-  const unexpectedlyPassing: string[] = [];
 
   for (const theme of themes) {
-    for (const { status, fill, label, classes } of statusBadgePairs(theme)) {
-      const key = `${theme} ${status}`;
-      measured.push(key);
-      const ratio = contrastRatio(label, fill);
-      const deferred = DEFERRED_STATUS_BADGE_FILLS[key];
-
-      if (deferred === undefined) {
-        assert.ok(
-          ratio >= AA_BODY_TEXT,
-          `${key} (${classes}) is ${ratio.toFixed(2)}:1, below ${AA_BODY_TEXT}:1, and no DECISION covers it. Move the fill onto a token that clears AA, or record the number in DEFERRED_STATUS_BADGE_FILLS with a ruling behind it`
-        );
-        continue;
-      }
-
+    for (const { status, ground, ink, classes } of statusBadgePaint(theme)) {
+      measured.push(`${theme} ${status}`);
+      const ratio = contrastRatio(ink, ground);
       assert.ok(
-        Math.abs(ratio - deferred) < 0.02,
-        `${key} (${classes}) measures ${ratio.toFixed(2)}:1, not the recorded ${deferred}:1 — a fill, a label or the palette moved. Re-record the DECISION with the new number`
+        ratio >= AA_BODY_TEXT,
+        `${theme} ${status} (${classes}) is ${ratio.toFixed(2)}:1, below ${AA_BODY_TEXT}:1. #429 ruled a scale that clears AA on every pair — deepen the ink or lighten the ground on the SAME hue; do not re-open a deferral ledger`
       );
-      if (ratio >= AA_BODY_TEXT) unexpectedlyPassing.push(key);
     }
   }
 
+  // Anti-vacuity: seven statuses across two themes, Prospect included now that
+  // its neutral variant is resolved rather than skipped.
+  const expected = Object.keys(STATUS_BADGE_CONFIG).length * themes.length;
+  assert.equal(
+    measured.length,
+    expected,
+    `only ${measured.length} of ${expected} status/theme pairs were measured. The scan has gone vacuous — fix it before trusting a pass`
+  );
+});
+
+/** A `bg-blue-50` / `dark:text-amber-200` class split into its parts. */
+function paletteClass(utility: string): {
+  theme: "light" | "dark";
+  role: string;
+  family: string;
+  step: number;
+} {
+  const match =
+    /^(dark:)?(bg|text|border)-([a-z]+)-(\d{2,3})$/.exec(utility) ?? null;
   assert.ok(
-    measured.length >= 12,
-    `only ${measured.length} status-badge pairs were measured; there are twelve (six own-fill statuses across two themes). The scan has gone vacuous — fix it before trusting a pass`
+    match,
+    `\`${utility}\` is not a themed palette utility. #429's scale is spelled out one class per role per theme, because Tailwind scans source TEXT — a class assembled at runtime emits no CSS at all`
+  );
+  return {
+    theme: match[1] ? "dark" : "light",
+    role: match[2],
+    family: match[3],
+    step: Number(match[4]),
+  };
+}
+
+/** The statuses that carry a hue, i.e. everything the ruling did not keep neutral. */
+function tintedStatuses(): [string, string[]][] {
+  return Object.entries(STATUS_BADGE_CONFIG)
+    .map(
+      ([status, { className }]) =>
+        [status, className.split(/\s+/).filter(Boolean)] as [string, string[]]
+    )
+    .filter(([, classes]) => classes.length > 0);
+}
+
+test("each tinted status paints one hue three ways, mirrored in the dark theme", () => {
+  const tinted = tintedStatuses();
+  assert.ok(
+    tinted.length >= 6,
+    `only ${tinted.length} statuses carry a tint; #429's scale colours six of the seven. The scan has gone vacuous — fix it before trusting a pass`
   );
 
-  // The inverted half, as with DEFERRED_DESTRUCTIVE_TINTS: an entry that
-  // starts PASSING means the DECISION was resolved somewhere, and leaving it
-  // listed would hide the next one.
-  assert.deepEqual(
-    unexpectedlyPassing,
-    [],
-    "a status badge recorded as failing now clears AA. Good news — delete its entry from DEFERRED_STATUS_BADGE_FILLS so the ledger only holds what is genuinely still open"
+  for (const [status, classes] of tinted) {
+    const parts = classes.map(paletteClass);
+
+    // Six classes: ground, ink and border, once per theme. A missing dark twin
+    // inherits the light value, which is how ink lands on ink.
+    const declared = parts.map((p) => `${p.theme} ${p.role}`).sort();
+    assert.deepEqual(
+      declared,
+      [
+        "dark bg",
+        "dark border",
+        "dark text",
+        "light bg",
+        "light border",
+        "light text",
+      ],
+      `${status} does not spell all six of #429's classes (${classes.join(" ")}). Direction B is a ground, an ink AND a hairline border, stated in both themes`
+    );
+
+    const families = [...new Set(parts.map((p) => p.family))];
+    assert.deepEqual(
+      families.length,
+      1,
+      `${status} mixes hues (${families.join(", ")}). Direction B tints ONE hue three ways — the ground, the ink and the border are the same colour at different weights`
+    );
+
+    // The mirror, measured rather than asserted off the step numbers: pale
+    // ground under deep ink in the light theme, and the other way round in the
+    // dark one. A dark theme that forgot to invert is the failure that shipped
+    // `text-ef-dark` onto a dark card.
+    const paint = {
+      light: statusBadgePaint("light").find((p) => p.status === status)!,
+      dark: statusBadgePaint("dark").find((p) => p.status === status)!,
+    };
+    assert.ok(
+      relativeLuminance(paint.light.ground) >
+        relativeLuminance(paint.light.ink),
+      `${status} is not the ruled tint in the light theme: its ground is no lighter than its ink (${paint.light.classes})`
+    );
+    assert.ok(
+      relativeLuminance(paint.dark.ground) < relativeLuminance(paint.dark.ink),
+      `${status} does not mirror in the dark theme: its ground is no darker than its ink (${paint.dark.classes}). The dark theme inverts the pair, it does not re-use the light one`
+    );
+    assert.ok(
+      relativeLuminance(paint.light.ground) >
+        relativeLuminance(paint.dark.ground),
+      `${status} paints a dark ground that is no darker than its light one (${paint.light.classes} / ${paint.dark.classes})`
+    );
+
+    assert.ok(
+      paint.light.border && paint.dark.border,
+      `${status} loses its hairline border in one theme (${paint.light.classes} / ${paint.dark.classes})`
+    );
+  }
+});
+
+test("the #429 ruling's two named exceptions still hold", () => {
+  // Prospect stays neutral — ruled, not overlooked. It is the pipeline's zero,
+  // so it carries the token-backed variant and paints nothing of its own.
+  assert.equal(
+    STATUS_BADGE_CONFIG.prospect.className,
+    "",
+    "Prospect paints a colour of its own. #429 ruled it stays neutral — give it a tint and the scale loses the rung that means 'no colour yet'"
   );
+  assert.equal(
+    STATUS_BADGE_CONFIG.prospect.variant,
+    "secondary",
+    "Prospect no longer carries the `secondary` variant, so the one status the ruling keeps token-backed now paints something else"
+  );
+
+  // Attendee and Launch Team stay on ONE hue and separate by TINT LEVEL. The
+  // ruling was offered the hue split and declined it, so splitting them is a
+  // new ruling rather than a commit.
+  const hueOf = (status: "attendee" | "launch_team") => {
+    const families = STATUS_BADGE_CONFIG[status].className
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((c) => paletteClass(c).family);
+    return families[0];
+  };
+  assert.equal(
+    hueOf("attendee"),
+    hueOf("launch_team"),
+    "Attendee and Launch Team no longer share a hue. #429 considered splitting them and ruled they separate by TINT LEVEL instead — reopen the ruling, do not re-hue them here"
+  );
+
+  for (const theme of themes) {
+    const paint = statusBadgePaint(theme);
+    const attendee = paint.find((p) => p.status === "attendee")!;
+    const launchTeam = paint.find((p) => p.status === "launch_team")!;
+    assert.ok(
+      !isSameColour(attendee.ground, launchTeam.ground),
+      `Attendee and Launch Team paint the same ground in the ${theme} theme (${attendee.classes}). They share a hue by ruling, so the TINT LEVEL is the only thing telling them apart`
+    );
+  }
 });
 
 // --- the attention scale: WCAG binds, APCA advises (#386 ruling, #411) -------
