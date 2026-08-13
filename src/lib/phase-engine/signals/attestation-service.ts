@@ -2,6 +2,11 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { churches, plantSignals, type PlantSignal } from "@/db/schema";
+// WHAT "dirty" IS, as columns — one definition, spread rather than re-typed.
+// This module used to set `{ lastMaterialEventAt: now }` by hand and so quietly
+// left `updated_at` behind, which is exactly the drift `plantDirtyColumns`'s own
+// docblock exists to prevent.
+import { plantDirtyColumns } from "@/lib/phase-engine/dirty-handler";
 
 // ----------------------------------------------------------------------------
 // Validation
@@ -44,12 +49,14 @@ export type SetManualSignalInput = z.infer<typeof setManualSignalSchema>;
  * - Bumps `churches.last_material_event_at` so the plant is re-assessed next run
  *   (the attestation feeds the next assessment's fact snapshot — AC-PE-3).
  *
- * The two writes run sequentially: the neon-http driver does not support
- * interactive transactions. The upsert is the durable record; the dirty mark is
- * a monotonic timestamp bump, so a failure between them only risks a missed
- * re-assessment trigger (the next material event re-marks the plant), never a
- * lost attestation. The upsert runs first so the fact is persisted before the
- * trigger that will read it.
+ * BOTH WRITES ARE ONE `db.batch([...])`. They are known up front and touch only
+ * our own tables, which is shape 1 in `src/db/index.ts` — so the marker-last
+ * ordering the previous version reasoned about does not apply and is not needed
+ * (`db.transaction` remains unavailable: neon-http throws). The old shape left
+ * an attestation persisted with the plant unmarked, which is not merely "a
+ * missed trigger": the attestation is a fact the judge reads out of the NEXT
+ * snapshot, so until some unrelated material event landed, the planter's answer
+ * changed nothing they could see. All-or-nothing removes the window.
  *
  * @param churchId  Tenant scope. The caller must have verified access.
  * @param attestedById  User recording the attestation.
@@ -63,33 +70,36 @@ export async function upsertManualSignal(
 ): Promise<PlantSignal> {
   const now = new Date();
 
-  const [signal] = await db
-    .insert(plantSignals)
-    .values({
-      churchId,
-      signalKey: input.signalKey,
-      value: input.value,
-      attestedById,
-      attestedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: [plantSignals.churchId, plantSignals.signalKey],
-      set: {
+  const [[signal]] = await db.batch([
+    db
+      .insert(plantSignals)
+      .values({
+        churchId,
+        signalKey: input.signalKey,
         value: input.value,
         attestedById,
         attestedAt: now,
-        updatedAt: now,
-      },
-    })
-    .returning();
-
-  // Mark the plant dirty so the attestation is reflected in the next
-  // assessment's reasoning (AC-PE-3). A last_material_event_at newer than the
-  // latest assessment's generated_at is what the scheduler treats as dirty.
-  await db
-    .update(churches)
-    .set({ lastMaterialEventAt: now })
-    .where(eq(churches.id, churchId));
+      })
+      .onConflictDoUpdate({
+        target: [plantSignals.churchId, plantSignals.signalKey],
+        set: {
+          value: input.value,
+          attestedById,
+          attestedAt: now,
+          updatedAt: now,
+        },
+      })
+      .returning(),
+    // Mark the plant dirty so the attestation is reflected in the next
+    // assessment's reasoning (AC-PE-3). A last_material_event_at newer than the
+    // latest assessment's generated_at is what the scheduler treats as dirty.
+    // The SAME `now` the upsert stamps, through the one definition of the
+    // columns that mark a plant dirty.
+    db
+      .update(churches)
+      .set(plantDirtyColumns(now))
+      .where(eq(churches.id, churchId)),
+  ]);
 
   return signal;
 }
