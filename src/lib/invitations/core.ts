@@ -1534,6 +1534,20 @@ export async function acceptInvitationAs(
 
   // All of them built BEFORE anything is written, so an invitation whose FKs
   // contradict its `type` throws instead of half-applying.
+  //
+  // THE ORDER OF THESE LINES IS LOAD-BEARING, and it is ASSERTED rather than
+  // argued (ruled 2026-08-13 on PR #423, #411). `auditableAssociationOrg` below
+  // is TOTAL — it throws on a row whose type-implied ids are missing and on a
+  // `type` outside the union — and the only reason a planter never meets that
+  // throw is that `lockTargetRow` and `associationStatement` are built FIRST and
+  // refuse exactly the same rows a few lines earlier. That is an argument about
+  // reading order, so the sweep that made the function total left it one refactor
+  // from being false: hoist the audit above these two and a defective row reaches
+  // it with nothing having refused it, changing which refusal the planter reads.
+  // `association.test.ts` §2 pins BOTH halves — the ORDER, read off this
+  // function's own source, and the PREMISE the order rests on, by calling all
+  // three builders over the 64-shape cross-product of `type` × the four nullable
+  // FK columns. Reorder these lines and that suite goes red.
   const lock = lockTargetRow(invitation);
   const association = associationStatement(invitation, invitationId);
   const slotIsOurs = unboundTargetSlot(invitation);

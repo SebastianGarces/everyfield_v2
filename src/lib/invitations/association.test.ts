@@ -7,11 +7,14 @@ import {
   InvitationError,
   NOT_ASSOCIATED_MESSAGE,
   PLANTER_ONLY_SEVER_MESSAGE,
+  associationStatement,
   auditableAssociationOrg,
   isAssociationOrgType,
   leaveOversightOrgAs,
+  lockTargetRow,
   oversightOrgTypes,
   verifyInvitationAuthority,
+  type AssociationFacts,
   type InvitationActor,
 } from "./core";
 import { associationOrg } from "./audit";
@@ -75,10 +78,32 @@ const AUDIT = sourceReader(AUDIT_CODE, "audit.ts");
 const CORE = sourceReader(CORE_CODE, "core.ts");
 const ACTIONS = sourceReader(ACTIONS_CODE, "settings/association/actions.ts");
 
+/**
+ * A span with its comments removed — for the assertions that are about CODE.
+ *
+ * The ordering guard below anchors on call sites (`lockTargetRow(`), and
+ * `core.ts` names all three functions in the paragraph that explains why their
+ * order is load-bearing. Stripping first is what keeps the assertion about the
+ * statements rather than about the prose above them.
+ */
+function codeOnly(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|\s)\/\/.*$/gm, "$1");
+}
+
 const PLANT = "11111111-1111-4111-8111-111111111111";
 const SENDING_CHURCH = "22222222-2222-4222-8222-222222222222";
 const NETWORK = "33333333-3333-4333-8333-333333333333";
 const USER = "44444444-4444-4444-8444-444444444444";
+const INVITATION_ID = "55555555-5555-4555-8555-555555555555";
+
+/** The three legal `type` values — a rogue one is a database state, not a bug. */
+const KNOWN_TYPES = new Set<string>([
+  "church_to_sending_church",
+  "church_to_network",
+  "sending_church_to_network",
+]);
 
 function actor(overrides: Partial<InvitationActor> = {}): InvitationActor {
   return {
@@ -327,6 +352,155 @@ test("the accept batches the audit rather than following it with a second call",
   );
   assert.equal(accept.match(/db\.batch\(\[/g)?.length, 1);
   assert.doesNotMatch(accept, /recordAssociationEvent/);
+});
+
+test("the accept builds the lock and the association BEFORE the audit", () => {
+  // RULED 2026-08-13 (Sebastian, on PR #423, #411). Round 2 of the sweep made
+  // `auditableAssociationOrg` TOTAL — it throws where it used to answer `null` or
+  // `undefined` — and the case that this changes nothing a planter can reach
+  // rests entirely on two lines running earlier: `lockTargetRow` and
+  // `associationStatement` refuse the same rows before the audit is ever built.
+  //
+  // That was prose in a docblock and a paragraph in a PR body, which is to say it
+  // was an ARGUMENT about reading order. The ruling converts it into an
+  // assertion: a future edit that hoists the audit build above either of those
+  // two fails here, rather than silently turning a refusal a planter already met
+  // into a different one. Nothing else in the suite sees it — the four statements
+  // are asserted for their CONTENT one test up, and content is order-blind.
+  //
+  // Read off the source because there is no other place to read it: the three
+  // builders are pure and the ordering only exists inside `acceptInvitationAs`,
+  // whose first statement is a database read. Comments are stripped first, so the
+  // needles cannot match the paragraph in `core.ts` that explains the rule.
+  const accept = codeOnly(
+    CORE.span(
+      "export async function acceptInvitationAs",
+      "async function announceInvitationAcceptedForChurch"
+    )
+  );
+
+  assertInOrder(
+    accept,
+    "core.ts → acceptInvitationAs (comments stripped)",
+    [
+      "lockTargetRow(",
+      "associationStatement(",
+      "auditableAssociationOrg(",
+      "db.batch([",
+    ],
+    "the audit's throw is unreachable ONLY while both earlier builders refuse first — hoisting it changes which refusal a defective row produces, and `auditableAssociationOrg` logs no invitation id to diagnose it with"
+  );
+});
+
+test("every row the audit refuses is refused one statement earlier", () => {
+  // The PREMISE the ordering above rests on, proven by CALLS rather than by
+  // reading the three switches and agreeing they look alike. Without this the
+  // order test pins a sequence whose safety is still an argument; without the
+  // order test this pins a subset relation a reorder would make irrelevant. The
+  // pair is the ruling.
+  //
+  // The cross-product is the whole reachable input space of an
+  // `organization_invitations` row as far as these three functions can see it:
+  // `type` is a bare `varchar(40)` with a TypeScript-only `$type<>()` cast, all
+  // four FK columns are nullable, and `insertInvitation` validates none of them —
+  // so a rogue type and every combination of missing ids are database states, not
+  // impossibilities.
+  const ID_SLOTS = [
+    "targetChurchId",
+    "targetSendingChurchId",
+    "sendingChurchId",
+    "sendingNetworkId",
+  ] as const;
+
+  const ID_VALUES: Record<(typeof ID_SLOTS)[number], string> = {
+    targetChurchId: PLANT,
+    targetSendingChurchId: SENDING_CHURCH,
+    sendingChurchId: SENDING_CHURCH,
+    sendingNetworkId: NETWORK,
+  };
+
+  const TYPES: readonly OrganizationInvitationType[] = [
+    "church_to_sending_church",
+    "church_to_network",
+    "sending_church_to_network",
+    // Outside the union, and reachable for the reason above.
+    "CHURCH_TO_NETWORK" as OrganizationInvitationType,
+  ];
+
+  let audited = 0;
+  let refused = 0;
+
+  // The three fail-closed `default:` arms log before they throw, and 16 rogue
+  // shapes × 3 builders is 48 lines of expected noise in every `pnpm test` run.
+  // Captured rather than printed, and restored in `finally` so a genuine error
+  // from a later test is still visible.
+  const printed: unknown[][] = [];
+  const realConsoleError = console.error;
+  console.error = (...args: unknown[]) => {
+    printed.push(args);
+  };
+
+  try {
+    for (const type of TYPES) {
+      for (let mask = 0; mask < 1 << ID_SLOTS.length; mask += 1) {
+        const facts = { type } as AssociationFacts;
+        ID_SLOTS.forEach((slot, bit) => {
+          facts[slot] = mask & (1 << bit) ? ID_VALUES[slot] : null;
+        });
+
+        const shape = `${type} / ${ID_SLOTS.filter(
+          (_, bit) => mask & (1 << bit)
+        ).join("+")}`;
+
+        let auditRefused = false;
+        try {
+          auditableAssociationOrg(facts);
+          audited += 1;
+        } catch (error) {
+          auditRefused = true;
+          refused += 1;
+          assert.ok(error instanceof InvitationError, shape);
+        }
+
+        if (!auditRefused) continue;
+
+        // `associationStatement` is the STRONG half: its three arms carry the
+        // identical id guards and the identical failing-closed default, so it
+        // refuses every row the audit would, one line sooner. This is the
+        // assertion that makes the throw unreachable.
+        assert.throws(
+          () => associationStatement(facts, INVITATION_ID),
+          InvitationError,
+          `${shape}: the audit refuses this row, so the association statement must refuse it first`
+        );
+
+        // `lockTargetRow` is the NARROW half — statement ONE checks only the
+        // type-implied TARGET, so it refuses a subset. Asserted where it applies
+        // rather than left out, because it is the statement that would otherwise
+        // take a row lock for a row the audit is about to refuse.
+        const targetSlot =
+          type === "sending_church_to_network"
+            ? "targetSendingChurchId"
+            : "targetChurchId";
+        if (!facts[targetSlot] || !KNOWN_TYPES.has(type)) {
+          assert.throws(() => lockTargetRow(facts), InvitationError, shape);
+        }
+      }
+    }
+  } finally {
+    console.error = realConsoleError;
+  }
+
+  // NON-VACUITY, pinned by number. 4 types × 16 id combinations: the three real
+  // types audit only when BOTH their type-implied ids are present (4 masks each),
+  // and the rogue type never audits at all — 12 audited, 52 refused. A guard
+  // whose loop body stopped running would report 0 and 0 here.
+  assert.equal(audited, 12, "12 of the 64 shapes are auditable");
+  assert.equal(refused, 52, "the other 52 refuse — and refuse earlier");
+
+  // …and the fail-closed arms did log, once per builder per rogue shape. The
+  // capture above is a mute, not a licence to stop logging.
+  assert.equal(printed.length, 48, "16 rogue shapes × 3 fail-closed builders");
 });
 
 test("the sever announces AFTER the write, and the decline announces at all", () => {
