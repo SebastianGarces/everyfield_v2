@@ -109,12 +109,11 @@ export type ManualSignalKey = (typeof MANUAL_SIGNALS)[number]["key"];
 /**
  * The keys alone, for a caller that needs the vocabulary and not the copy.
  *
- * A NON-EMPTY TUPLE on purpose: `setManualSignalSchema` is a `z.enum` over it
+ * `setManualSignalSchema` consumes it as a `z.enum`
  * (`signals/attestation-service.ts`), which is what binds the WRITE side to the
- * same closed set the readers are typed against. `readonly ManualSignalKey[]`
- * does not satisfy `z.enum`, and the compile error it produced is what let the
- * schema stay a free-form string.
+ * same closed set the three readers are typed against — so a key outside this
+ * list is rejected at the boundary instead of being stored and read back to a
+ * planter as its own de-camelised spelling.
  */
-export const MANUAL_SIGNAL_KEYS = MANUAL_SIGNALS.map(
-  (signal) => signal.key
-) as [ManualSignalKey, ...ManualSignalKey[]];
+export const MANUAL_SIGNAL_KEYS: readonly ManualSignalKey[] =
+  MANUAL_SIGNALS.map((signal) => signal.key);
