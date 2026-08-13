@@ -5,9 +5,9 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { getSampleData, renderTemplate } from "@/lib/communication/merge";
+import { parseRichEmailBody } from "@/lib/rich-text/email-segments";
 import { escapeMergeValues, toRichTextHtml } from "@/lib/rich-text/format";
 
-import { parseRichEmailBody } from "./email-body-segments";
 import { EmailPreview } from "./email-preview";
 
 // ----------------------------------------------------------------------------

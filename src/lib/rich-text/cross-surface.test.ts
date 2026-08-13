@@ -391,3 +391,110 @@ test("a legacy body containing angle brackets keeps every word, both doors", () 
     }
   }
 });
+
+// ============================================================================
+// Two columns, two shapes: `body` is the plain text, `body_html` is the markup
+// ============================================================================
+//
+// `communications` has held BOTH columns since before COM-017, and they mean
+// different things: `body` is the flattened prose message search runs `ilike`
+// over (`src/lib/communication/filters.ts`), `body_html` is the sanitised
+// markup a reader renders. Storing the markup in `body` regressed search —
+// "we are excited" stopped matching `we <strong>are</strong> excited`, and "p"
+// started matching every formatted message in the church — so the send path
+// writes each shape to its own column, and every reader spells the read one
+// way: `bodyHtml ?? body`.
+//
+// No migration: a row written before COM-017 has `body_html` NULL and plain
+// text in `body`, which that same expression already handles.
+
+/** The two columns exactly as `sendCommunication` computes them. */
+function storedColumns(composed: string) {
+  const bodyHtml = toRichTextHtml(composed);
+  return { body: richTextToPlainText(bodyHtml), bodyHtml };
+}
+
+test("a formatted body stores no markup in the column search reads", () => {
+  const stored = storedColumns(FORMATTED_BODY);
+
+  // The property `ilike(communications.body, …)` depends on: a haystack with
+  // no tags in it. A `<` anywhere is a tag search can match or be split by.
+  assert.ok(!stored.body.includes("<"), stored.body);
+  assert.ok(!stored.body.includes(">"), stored.body);
+  // And it is still the words a planter would search for, across what was a
+  // formatting boundary.
+  assert.ok(stored.body.includes("Hi Sarah, this is important."), stored.body);
+  assert.ok(stored.body.includes("Bring a Bible"), stored.body);
+
+  // The markup is not lost — it is in the column built for it.
+  assert.ok(
+    stored.bodyHtml.includes("<strong>Sarah</strong>"),
+    stored.bodyHtml
+  );
+  assert.match(
+    stored.bodyHtml,
+    /<a[^>]+href="https:\/\/everyfield\.app\/rsvp"/
+  );
+});
+
+test("a search phrase that straddles a formatting boundary still matches", () => {
+  const stored = storedColumns("<p>we <strong>are</strong> excited</p>");
+
+  assert.ok(stored.body.includes("we are excited"), stored.body);
+  // The failure this pins: the markup in the haystack.
+  assert.ok(!stored.body.includes("strong"), stored.body);
+});
+
+test("`bodyHtml ?? body` reads a new row and a legacy row alike", () => {
+  const modern = storedColumns(FORMATTED_BODY);
+  // What a row sent before COM-017 holds: prose in `body`, nothing in the
+  // markup column.
+  const legacy = {
+    body: "Call Bob.\n\nHe prefers the morning.",
+    bodyHtml: null as string | null,
+  };
+
+  const readModern = toRichTextHtml(modern.bodyHtml ?? modern.body);
+  const readLegacy = toRichTextHtml(legacy.bodyHtml ?? legacy.body);
+
+  assert.equal(readModern, modern.bodyHtml);
+  assert.ok(readLegacy.includes("<p>Call Bob.</p>"), readLegacy);
+  assert.ok(readLegacy.includes("<p>He prefers the morning.</p>"), readLegacy);
+});
+
+test("the send path really writes each shape to its own column", async () => {
+  // The three tests above are about the two VALUES; this one is about the
+  // INSERT that stores them, which needs a database to execute. Anchored on
+  // declarations through the throw-on-missing reader, so a moved anchor fails
+  // loudly instead of asserting about the empty string
+  // (`memory/invariants.md` → Multi-Tenancy, the source-span rule).
+  const { readFile } = await import("node:fs/promises");
+  const { assertInOrder, sourceReader } =
+    await import("@/lib/testing/source-span");
+
+  const send = sourceReader(
+    await readFile(
+      new URL("../communication/send.ts", import.meta.url),
+      "utf8"
+    ),
+    "send.ts"
+  );
+
+  const insert = send.span(
+    "const [comm] = await db",
+    "// 5. Prepare one payload"
+  );
+  assert.match(insert, /body:\s*safeBodyText/, insert);
+  assert.match(insert, /bodyHtml:\s*safeBodyHtml/, insert);
+
+  // ...and the resend reads the pair back the one way.
+  assertInOrder(
+    send.code,
+    "send.ts",
+    [
+      "export async function resendToNonOpeners",
+      "body: original.bodyHtml ?? original.body",
+    ],
+    "the resend must read the stored body through the same expression every other reader uses"
+  );
+});

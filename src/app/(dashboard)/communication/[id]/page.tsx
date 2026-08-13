@@ -286,8 +286,17 @@ export default async function MessageDetailPage({
                 {/* The body a planter composed is rich text (COM-017), so it
                     is rendered, not printed — `RichText` sanitises, merges, and
                     carries the plain-text bodies sent before it shipped. It is
-                    the same reader the task detail page mounts. */}
-                <RichText body={comm.body} mergeData={mergeData} />
+                    the same reader the task detail page mounts.
+
+                    `bodyHtml ?? body` is the one read expression for a stored
+                    body: the markup when the row has it, and the flattened
+                    plain text — which is what `body` holds, because search
+                    reads that column — for a row written before `body_html`
+                    did. `toRichTextHtml` inside `RichText` converts either. */}
+                <RichText
+                  body={comm.bodyHtml ?? comm.body}
+                  mergeData={mergeData}
+                />
               </div>
             </CardContent>
           </Card>

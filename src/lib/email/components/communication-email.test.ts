@@ -14,7 +14,10 @@ import {
   DECLINE_PLACEHOLDER,
 } from "@/lib/email/rsvp-placeholders";
 
-import { CommunicationEmail } from "./communication-email";
+import {
+  CommunicationEmail,
+  CommunicationEmailText,
+} from "./communication-email";
 
 // ----------------------------------------------------------------------------
 // COM-017's first acceptance criterion is about the DELIVERED email, not the
@@ -145,7 +148,7 @@ test("the plain-text half says the same thing, without the tags", async () => {
   );
 
   const text = await render(
-    CommunicationEmail({ body: body.text, churchName: "New Life" }),
+    CommunicationEmailText({ body: body.text, churchName: "New Life" }),
     { plainText: true }
   );
 
@@ -200,7 +203,7 @@ test("the text/plain half says the same words as the HTML half", async () => {
   const body = renderedBody(BROWSER_SERIALISED);
 
   const text = await render(
-    CommunicationEmail({ body: body.text, churchName: "New Life" }),
+    CommunicationEmailText({ body: body.text, churchName: "New Life" }),
     { plainText: true }
   );
 
@@ -291,7 +294,7 @@ test("an RSVP field inside a list item never leaks the token to text/plain", asy
   const body = renderedBody(LIST_BODY, RSVP_DATA);
 
   const text = await render(
-    CommunicationEmail({ body: body.text, churchName: "New Life" }),
+    CommunicationEmailText({ body: body.text, churchName: "New Life" }),
     { plainText: true }
   );
 
@@ -311,7 +314,7 @@ test("a bulleted RSVP still renders the buttons in the text/plain half", async (
   );
 
   const text = await render(
-    CommunicationEmail({
+    CommunicationEmailText({
       body: body.text,
       confirmUrl: "https://everyfield.app/rsvp/token",
       declineUrl: "https://everyfield.app/rsvp/token?action=decline",

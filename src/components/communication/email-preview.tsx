@@ -6,10 +6,9 @@ import {
   isRichTextEmpty,
   toRichTextHtml,
 } from "@/lib/rich-text/format";
+import { parseRichEmailBody } from "@/lib/rich-text/email-segments";
 import { escapeHtml } from "@/lib/rich-text/sanitize";
 import { EMAIL_RICH_TEXT_PROSE_CLASS } from "@/components/shared/rich-text-editor-controls";
-
-import { parseRichEmailBody } from "./email-body-segments";
 
 interface EmailPreviewProps {
   subject: string;

@@ -1,13 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { toRichTextHtml } from "@/lib/rich-text/format";
 import { renderTemplate } from "@/lib/communication/merge";
 
-import {
-  parseRichEmailBody,
-  type RichEmailSegment,
-} from "./email-body-segments";
+import { toRichTextHtml } from "./format";
+import { parseRichEmailBody, type RichEmailSegment } from "./email-segments";
 
 const CONFIRM = "__EF_CONFIRM__";
 const DECLINE = "__EF_DECLINE__";

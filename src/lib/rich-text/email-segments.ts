@@ -15,7 +15,12 @@
 // the next segment. A token inside `<ul><li>…</li></ul>` therefore closes the
 // list before the buttons and starts a fresh one after them.
 //
-// Two consequences, both pinned by `email-body-segments.test.ts`:
+// It lives HERE, beside the sanitiser and the door, because it is a string
+// operation over rich text and holds no JSX: `src/lib/email/components/` and
+// `src/components/communication/` both import it, and a splitter parked under
+// `components/` made `lib` depend on `components` to reach it.
+//
+// Two consequences, both pinned by `email-segments.test.ts`:
 //  - every `html` segment is balanced on its own, so each is renderable on its
 //    own, whatever element the token was sitting inside;
 //  - the concatenation of the segments is balanced too, so the assembled email
@@ -33,6 +38,14 @@ import {
   CONFIRM_PLACEHOLDER,
   DECLINE_PLACEHOLDER,
 } from "@/lib/email/rsvp-placeholders";
+// "Which elements are void" and "is there anything here a recipient would see"
+// are each ONE decision with one home, and both homes are in this directory:
+// `sanitize.ts` (which imports nothing, so there is no cycle) and `format.ts`.
+// This module carried a second copy of each — a 14-name `VOID_TAGS` set that
+// matched `sanitize.ts` character for character, and a `hasVisibleContent` that
+// asked `isRichTextEmpty`'s question forty lines away from it.
+import { VOID_TAGS } from "./sanitize";
+import { isRichTextEmpty } from "./format";
 
 export type RichEmailSegment =
   | { type: "html"; html: string }
@@ -45,24 +58,6 @@ const PLACEHOLDER_PATTERN = new RegExp(
 
 /** Any tag, open or close. Attribute values never contain `>` after sanitising. */
 const TAG_PATTERN = /<\/?[a-zA-Z][^>]*>/g;
-
-/** Elements that never carry a closing tag, so they never enter the stack. */
-const VOID_TAGS = new Set([
-  "br",
-  "hr",
-  "img",
-  "input",
-  "wbr",
-  "area",
-  "base",
-  "col",
-  "embed",
-  "link",
-  "meta",
-  "param",
-  "source",
-  "track",
-]);
 
 /** A block (or anchor) holding nothing a recipient would see. */
 const EMPTY_BLOCK_PATTERN =
@@ -101,16 +96,6 @@ function dropEmptyBlocks(html: string): string {
     if (next === current) return current;
     current = next;
   }
-}
-
-/** Is there anything in here a recipient would see? */
-function hasVisibleContent(html: string): boolean {
-  return (
-    html
-      .replace(/<[^>]*>/g, "")
-      .replace(/&nbsp;/gi, " ")
-      .trim() !== ""
-  );
 }
 
 /**
@@ -170,7 +155,11 @@ export function parseRichEmailBody(html: string): RichEmailSegment[] {
     const assembled = dropEmptyBlocks(
       buffer.map((piece) => piece.value).join("") + closers.join("")
     );
-    if (hasVisibleContent(assembled)) {
+    // "Would a recipient see anything in this?" is `isRichTextEmpty`'s
+    // question, and it is asked with `isRichTextEmpty` — the same predicate the
+    // compose preview and the send gate use, so a segment that survives the cut
+    // and a body that is allowed to be sent agree by construction.
+    if (!isRichTextEmpty(assembled)) {
       segments.push({ type: "html", html: assembled });
     }
   };
