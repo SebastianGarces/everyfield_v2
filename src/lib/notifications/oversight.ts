@@ -3,7 +3,7 @@ import type { alias } from "drizzle-orm/pg-core";
 
 import { db } from "@/db";
 import { churches, users, type OrganizationInvitationType } from "@/db/schema";
-import { OVERSIGHT_ADMIN_ROLE } from "@/lib/auth/access";
+import { OVERSIGHT_ADMIN, type OversightAdminPairing } from "@/lib/auth/access";
 
 import {
   anchorId,
@@ -838,13 +838,19 @@ type OrgIdRef = string | SQLWrapper;
  * SENDING CHURCH's audience, which is the hierarchy walk this repo forbids
  * arriving through the role instead of through the FK.
  *
- * THE PAIRING ITSELF IS NOT WRITTEN HERE. It is `OVERSIGHT_ADMIN_ROLE`
+ * THE PAIRING ITSELF IS NOT WRITTEN HERE. It is `OVERSIGHT_ADMIN`
  * (`@/lib/auth/access`), which `recipientAdministersOrg` (`./enqueue.ts`) reads
  * too — that gate runs against a loaded `User` and this builds SQL, so they
  * cannot share a predicate, but they can and do share the DECISION. Four SQL
  * and TypeScript sites now ask "which role administers this kind of org?" of one
  * table, so the audience, the gate and the digest sweep's "who is still owed a
  * row" cannot answer it differently.
+ *
+ * The ARMS ARE THE TABLE'S ROWS, one per row, in the table's order — the role
+ * and the FK column both read off the row. Nothing here names
+ * `sendingChurchId`, `sendingNetworkId`, `"sending_church_admin"` or
+ * `"network_admin"`, so a kind cannot be half-added: an arm is a row or it does
+ * not exist.
  *
  * THE AUDIENCE IS WHAT THIS RETURNS — the whole of it. There is no
  * `inArray(role, OVERSIGHT_ROLES)` floor to remember to AND on, and adding one
@@ -865,27 +871,47 @@ type OrgIdRef = string | SQLWrapper;
  * the head of the owed set, which is exactly the starvation
  * `runOversightDigestSweep`'s header records as fixed.
  *
- * Returns `undefined` when no org is named — the caller turns that into "no
- * recipients", never into "everyone".
+ * NAMING NO ORG RETURNS `undefined`, AND THE COMPILER — NOT A COMMENT — MAKES
+ * THE CALLER FACE IT. `undefined` here means "no recipients"; handed to
+ * drizzle's `and()` it means the OPPOSITE, because `and()` DROPS undefined arms
+ * and an `and()` with nothing left standing disappears from the statement. Two
+ * of the three callers guarded and the third, `plantsOwedDigestQuery`
+ * (`./oversight-digest.ts` clause 4), passed the result straight into `and()`.
+ * Rendered, its `exists (…)` collapsed to `exists (select 1 from users
+ * owed_digest_recipient where <the rest>)` — every user row matching, so every
+ * plant is owed a digest forever: the same starvation this builder exists to
+ * fix, worse. It never fired only because that call's two arguments are column
+ * objects and therefore always truthy — an accident of the arguments, not a
+ * check.
+ *
+ * So the OVERLOADS carry it. Name both orgs with non-nullable refs and the
+ * return type is `SQL`, full stop; name them nullably and it is
+ * `SQL | undefined` and the guard is not optional. That is why the arms test
+ * `null`/`undefined` explicitly instead of truthiness: under the first overload
+ * every row yields an arm, so the `SQL` promise is a property of the code rather
+ * than of the values that happen to be passed.
  */
 export function oversightAudienceCondition(
   table: UsersRef,
-  org: { sendingChurchId: OrgIdRef | null; sendingNetworkId: OrgIdRef | null }
+  org: Record<OversightAdminPairing["fk"], OrgIdRef>
+): SQL;
+export function oversightAudienceCondition(
+  table: UsersRef,
+  org: Record<OversightAdminPairing["fk"], OrgIdRef | null>
+): SQL | undefined;
+export function oversightAudienceCondition(
+  table: UsersRef,
+  org: Record<OversightAdminPairing["fk"], OrgIdRef | null>
 ): SQL | undefined {
-  const reaches = [
-    org.sendingChurchId
-      ? and(
-          eq(table.role, OVERSIGHT_ADMIN_ROLE.sending_church),
-          eq(table.sendingChurchId, org.sendingChurchId)
-        )
-      : undefined,
-    org.sendingNetworkId
-      ? and(
-          eq(table.role, OVERSIGHT_ADMIN_ROLE.network),
-          eq(table.sendingNetworkId, org.sendingNetworkId)
-        )
-      : undefined,
-  ].filter((clause) => clause !== undefined);
+  const reaches = Object.values(OVERSIGHT_ADMIN)
+    .map(({ role, fk }) => {
+      const orgId = org[fk];
+
+      return orgId === null || orgId === undefined
+        ? undefined
+        : and(eq(table.role, role), eq(table[fk], orgId));
+    })
+    .filter((clause) => clause !== undefined);
 
   if (reaches.length === 0) return undefined;
 
@@ -952,10 +978,12 @@ export async function listOversightRecipientsForChurch(
  * "any oversight role reachable by either FK", which is not the audience: a
  * `network_admin` row that also carries a `sending_church_id` came back as a
  * recipient of that SENDING CHURCH's own milestone. The role now sits inside
- * the arm that names the FK, and which role that is comes from
- * `OVERSIGHT_ADMIN_ROLE` — the same table `recipientAdministersOrg` reads per
- * recipient at enqueue time. Several places ask the question; they answer it
- * from one row.
+ * the arm that names the FK, and BOTH come from `OVERSIGHT_ADMIN` — the same
+ * table `recipientAdministersOrg` reads per recipient at enqueue time. Several
+ * places ask the question; they answer it from one row.
+ *
+ * `org` here is loaded ids, either of which may be null, so this call gets the
+ * `SQL | undefined` overload and the guard below is not optional.
  */
 export async function listOversightAdminsOfOrg(
   org: OversightOrg

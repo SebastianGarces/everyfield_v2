@@ -6,7 +6,7 @@ import {
   organizationInvitations,
   type User,
 } from "@/db/schema";
-import { OVERSIGHT_ADMIN_ROLE } from "@/lib/auth/access";
+import { OVERSIGHT_ADMIN } from "@/lib/auth/access";
 
 // ============================================================================
 // The recorded-relationship tenancy basis (#304, OV-006 / OV-007).
@@ -82,26 +82,29 @@ export type OversightRecipient = Pick<
  * every other role → neither, which matches nothing at all rather than
  * everything (see the `false` returns below).
  *
- * WHICH ROLE GOES WITH WHICH KIND is read from `OVERSIGHT_ADMIN_ROLE`
- * (`@/lib/auth/access`), the same table `recipientAdministersOrg` and
- * `oversightAudienceCondition` read. This is the inverse direction of that
- * lookup — a role asking which org it speaks through, rather than an org kind
- * asking which role administers it — but it is the SAME pairing, and while it
- * was written out separately per site the sites drifted.
+ * WHICH ROLE GOES WITH WHICH KIND, AND WHICH FK THAT KIND LIVES IN, are both
+ * read from `OVERSIGHT_ADMIN` (`@/lib/auth/access`), the same table
+ * `recipientAdministersOrg` and `oversightAudienceCondition` read. This is the
+ * inverse direction of that lookup — a role asking which org it speaks through,
+ * rather than an org kind asking which role administers it — but it is the SAME
+ * pairing, and while it was written out separately per site the sites drifted.
+ *
+ * The scan carries the whole answer, so no column name is written here: a role
+ * that matches no row contributes nothing and the all-null base is returned
+ * unchanged, which matches NOTHING at all rather than everything (see the
+ * `false` returns below). Adding a kind is a row in that table; this function
+ * does not change.
  *
  * Pure, and exported so it can be tested over the whole role × org-FK domain.
  */
 export function recipientOrgOf(recipient: OversightRecipient): RecipientOrg {
-  return {
-    sendingChurchId:
-      recipient.role === OVERSIGHT_ADMIN_ROLE.sending_church
-        ? recipient.sendingChurchId
-        : null,
-    sendingNetworkId:
-      recipient.role === OVERSIGHT_ADMIN_ROLE.network
-        ? recipient.sendingNetworkId
-        : null,
-  };
+  const org: RecipientOrg = { sendingChurchId: null, sendingNetworkId: null };
+
+  for (const { role, fk } of Object.values(OVERSIGHT_ADMIN)) {
+    if (recipient.role === role) org[fk] = recipient[fk];
+  }
+
+  return org;
 }
 
 /**

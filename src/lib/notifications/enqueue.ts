@@ -15,7 +15,7 @@ import {
   canAccessChurch,
   canAccessFeatureData,
   isOversightUser,
-  OVERSIGHT_ADMIN_ROLE,
+  OVERSIGHT_ADMIN,
 } from "@/lib/auth/access";
 
 import {
@@ -520,16 +520,21 @@ const accessColumns = {
  * through the FK. So each anchor kind names EXACTLY the role that administers
  * it.
  *
- * WHICH ROLE THAT IS COMES FROM `OVERSIGHT_ADMIN_ROLE` (`@/lib/auth/access`),
- * NOT FROM LITERALS HERE. This gate runs against a loaded `User` and
- * `oversightAudienceCondition` (`./oversight.ts`) renders SQL, so the two cannot
- * share a predicate — but the DECISION they encode is one decision, and while it
- * was written out twice in two languages the SQL sites and this gate drifted
- * apart and starved a plant of its digest. There is now one table to edit, and a
- * third kind of oversight org is one row in it.
+ * BOTH HALVES COME FROM `OVERSIGHT_ADMIN` (`@/lib/auth/access`), NOT FROM
+ * LITERALS HERE — the role AND the `users` column that carries that kind of org.
+ * This gate runs against a loaded `User` and `oversightAudienceCondition`
+ * (`./oversight.ts`) renders SQL, so the two cannot share a predicate — but the
+ * DECISION they encode is one decision, and while it was written out twice in
+ * two languages the SQL sites and this gate drifted apart and starved a plant of
+ * its digest.
  *
- * The role test also subsumes `isOversightUser`: every value in that table is an
- * oversight role, and `OVERSIGHT_ROLES` is derived from the same table, so a
+ * There is no `anchor.type === …` branch left. There was one, for the FK half,
+ * and it was the residue of the same defect: its else-branch answered for the
+ * `network` kind AND for any kind added later, silently. Indexing the table by
+ * `anchor.type` means a new kind is a row in that table and nothing here.
+ *
+ * The role test also subsumes `isOversightUser`: every row in that table names
+ * an oversight role, and `OVERSIGHT_ROLES` is derived from the same table, so a
  * separate floor here could only re-admit what this line already required.
  *
  * Pure, and exported so it can be tested over the whole role × org domain.
@@ -538,11 +543,9 @@ export function recipientAdministersOrg(
   recipient: User,
   anchor: OrgAnchor
 ): boolean {
-  if (recipient.role !== OVERSIGHT_ADMIN_ROLE[anchor.type]) return false;
+  const { role, fk } = OVERSIGHT_ADMIN[anchor.type];
 
-  return anchor.type === "sending_church"
-    ? recipient.sendingChurchId === anchor.orgId
-    : recipient.sendingNetworkId === anchor.orgId;
+  return recipient.role === role && recipient[fk] === anchor.orgId;
 }
 
 export const dbEnqueueDeps: EnqueueDeps = {

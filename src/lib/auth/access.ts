@@ -22,8 +22,8 @@ export const CHURCH_LEVEL_ROLES: UserRole[] = [
 ];
 
 /**
- * WHICH ROLE ADMINISTERS WHICH KIND OF OVERSIGHT ORG — the ONE definition of
- * that pairing, as data.
+ * WHICH ROLE ADMINISTERS WHICH KIND OF OVERSIGHT ORG, AND WHICH `users` COLUMN
+ * CARRIES THAT ORG — the ONE definition of that pairing, as data.
  *
  * It lives here rather than in the notifications layer because this file
  * already owns the role → org-FK resolution (`getAccessibleChurchIds`), and
@@ -40,21 +40,56 @@ export const CHURCH_LEVEL_ROLES: UserRole[] = [
  * decision written twice in two languages is how the SQL sites and the TS gate
  * drifted apart, and the drift starved a plant of its digest.
  *
+ * THE ROW CARRIES THE COLUMN NAME TOO, and that is deliberate rather than
+ * decorative. The first version of this table held the ROLE alone, so every
+ * reader still had to write its own `kind === "sending_church" ? …fk… : …fk…`
+ * — three hand-written kind switches beside a table that claimed to be the one
+ * definition. Half a pairing is still a pairing spelled per site, and the
+ * docblock that sat here claimed "a compile error at every reader" for a
+ * guarantee none of the readers had (the switches' else-branches absorbed a new
+ * kind in silence). With the FK in the row, all three readers INDEX this table
+ * by org kind and none of them names a column: `oversightAudienceCondition`
+ * (`src/lib/notifications/oversight.ts`) builds one `or` arm per row,
+ * `recipientAdministersOrg` (`src/lib/notifications/enqueue.ts`) reads one row,
+ * and `recipientOrgOf` (`src/lib/notifications/oversight-relationship.ts`)
+ * scans the rows for the recipient's role.
+ *
+ * WHAT A THIRD KIND OF OVERSIGHT ORG COSTS, stated as what the compiler was
+ * OBSERVED to do rather than as a promise. Widen `AssociationOrgType` without
+ * touching this table and tsc fails at the `satisfies` here, at
+ * `recipientAdministersOrg`'s lookup (TS7053), at `orgAnchor`'s return, at the
+ * enqueue input schema's `anchorOrg` and at the three
+ * `Record<AssociationOrgType, string>` label maps. Add the row and the three
+ * readers above compile UNCHANGED — there is no per-kind branch left in them to
+ * forget — while the anchor enum, the anchor Zod schema and the label maps still
+ * fail until each is given the new kind, which is the correct bill: those three
+ * hold facts this table does not (a stored discriminator, a parse, a human
+ * name). No comment here vouches for a compile error the readers do not raise.
+ *
  * Keyed on `AssociationOrgType`, the same two-valued union `orgAnchor()` derives
- * a notification's org anchor from, so a third kind of oversight org is one new
- * row here and a compile error at every reader that does not handle it.
+ * a notification's org anchor from, so the anchor kinds and the rows here are
+ * the same set by construction.
  */
-export const OVERSIGHT_ADMIN_ROLE = {
-  sending_church: "sending_church_admin",
-  network: "network_admin",
-} as const satisfies Record<AssociationOrgType, UserRole>;
+export const OVERSIGHT_ADMIN = {
+  sending_church: { role: "sending_church_admin", fk: "sendingChurchId" },
+  network: { role: "network_admin", fk: "sendingNetworkId" },
+} as const satisfies Record<
+  AssociationOrgType,
+  { role: UserRole; fk: "sendingChurchId" | "sendingNetworkId" }
+>;
+
+/** One row of {@link OVERSIGHT_ADMIN} — a role paired with the FK it reaches through. */
+export type OversightAdminPairing =
+  (typeof OVERSIGHT_ADMIN)[AssociationOrgType];
 
 /**
  * Roles that have oversight access — DERIVED from the pairing above, never a
  * second hand-written list. The set and the per-kind arms cannot name different
  * roles if only one of them is written down.
  */
-export const OVERSIGHT_ROLES: UserRole[] = Object.values(OVERSIGHT_ADMIN_ROLE);
+export const OVERSIGHT_ROLES: UserRole[] = Object.values(OVERSIGHT_ADMIN).map(
+  (pairing) => pairing.role
+);
 
 /**
  * Check if a user has one of the specified roles.

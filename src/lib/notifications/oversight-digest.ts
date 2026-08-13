@@ -878,6 +878,33 @@ export async function runOversightDigestSweep(
 const owedDigestRecipient = alias(users, "owed_digest_recipient");
 
 /**
+ * Clause 4's audience, CORRELATED with the outer `churches` row — the same
+ * builder `listOversightRecipientsForChurch` fans out to, so "who is owed a row"
+ * and "who will be written one" are one predicate.
+ *
+ * ANNOTATED `SQL`, AND THAT ANNOTATION IS THE GUARD. The builder's other two
+ * callers pass ids that may be `null` and get back `SQL | undefined`, which they
+ * turn into "no recipients". This call cannot: it is going into an `and()`, and
+ * `and()` DROPS an undefined arm — clause 4's `exists (…)` would collapse to
+ * `exists (select 1 from users owed_digest_recipient where <the rest>)`, matched
+ * by every user row, so every plant is owed a digest forever. That is the
+ * starvation this sweep fixes, returning with the audience removed instead of
+ * merely widened.
+ *
+ * The correlated refs are columns and therefore never null, so the builder's
+ * non-nullable overload applies and this is `SQL` by construction. Writing the
+ * type down is what makes a later edit to a nullable ref fail HERE, at compile
+ * time, rather than silently in the rendered statement.
+ */
+const owedDigestAudience: SQL = oversightAudienceCondition(
+  owedDigestRecipient,
+  {
+    sendingChurchId: churches.sendingChurchId,
+    sendingNetworkId: churches.sendingNetworkId,
+  }
+);
+
+/**
  * The owed-set page, as a builder — exported so its SQL can be asserted with
  * `.toSQL()` without a live Postgres, the same way `./queries.ts` exports every
  * feed builder.
@@ -931,16 +958,17 @@ export function plantsOwedDigestQuery(query: OwedDigestPageQuery) {
         // The builder returns the WHOLE audience — each arm names its own role —
         // so there is no `inArray(role, OVERSIGHT_ROLES)` beside it. One was
         // here, and it could not have narrowed anything the arms admitted.
+        //
+        // `owedDigestAudience` is `SQL`, never `SQL | undefined`: see its own
+        // docblock for why an undefined arm reaching this `and()` is the whole
+        // starvation again, and why the type says so rather than a comment.
         exists(
           db
             .select({ one: sql`1` })
             .from(owedDigestRecipient)
             .where(
               and(
-                oversightAudienceCondition(owedDigestRecipient, {
-                  sendingChurchId: churches.sendingChurchId,
-                  sendingNetworkId: churches.sendingNetworkId,
-                }),
+                owedDigestAudience,
                 notExists(
                   db
                     .select({ one: sql`1` })
