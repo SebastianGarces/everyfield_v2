@@ -944,24 +944,9 @@ export function plantsOwedDigestQuery(query: OwedDigestPageQuery) {
         // this day's digest. `=` against a NULL FK yields NULL, so a plant with
         // only one of the two FKs matches recipients only on the one it has.
         //
-        // THE AUDIENCE IS `oversightAudienceCondition` — the same builder
-        // `listOversightRecipientsForChurch` fans out to, so "who is owed a row"
-        // and "who will be written one" are one predicate. They were two, and
-        // the unpaired one here was a LIVENESS defect rather than a leak: a
-        // cross-paired admin (a `network_admin` carrying a stray
-        // `sending_church_id`) matched this clause but is refused by `enqueue`'s
-        // `canAccessChurch`, so no row could ever be written for them, the plant
-        // stayed owed all day, and — ascending id being a stable order — it held
-        // its place at the head of the owed set. That is the starvation the
-        // sweep header above records as fixed, returning through the audience.
-        //
-        // The builder returns the WHOLE audience — each arm names its own role —
-        // so there is no `inArray(role, OVERSIGHT_ROLES)` beside it. One was
-        // here, and it could not have narrowed anything the arms admitted.
-        //
-        // `owedDigestAudience` is `SQL`, never `SQL | undefined`: see its own
-        // docblock for why an undefined arm reaching this `and()` is the whole
-        // starvation again, and why the type says so rather than a comment.
+        // The audience is `owedDigestAudience` — see its docblock above for why
+        // it is the fan-out's own builder, why it is annotated `SQL`, and why
+        // no `inArray(role, OVERSIGHT_ROLES)` floor sits beside it.
         exists(
           db
             .select({ one: sql`1` })
