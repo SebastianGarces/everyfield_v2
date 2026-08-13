@@ -1,0 +1,76 @@
+-- ONE STATEMENT — drop `team_memberships_active_unique`, the partial unique
+-- index on (team_id, person_id, role_id) where `status = 'active'`, leaving
+-- `team_memberships_role_active_unique_idx` (0038) as the ONE guard over a team
+-- seat (#411, quality round 1).
+--
+-- WHY IT FORBIDS NOTHING. The seat index is keyed on `role_id` ALONE with the
+-- same `status = 'active'` predicate, so it STRICTLY SUBSUMES this one: at most
+-- one active row per role implies at most one per any triple containing that
+-- role. `team_memberships.role_id` is NOT NULL, so there is no NULL hole where
+-- the wider key would still bite (NULLs never collide in a btree unique index,
+-- which is the usual reason a wider partial index survives a narrower one).
+-- Every state this index refused is already unreachable without it.
+--
+-- WHY IT WAS NOT MERELY REDUNDANT — IT CHANGED THE SHAPE OF A REFUSAL.
+-- `assignMember` inserts with `ON CONFLICT (role_id) WHERE status = 'active' DO
+-- NOTHING`, which arbitrates on the SEAT index and no other. Under a real race
+-- the arbiter's pre-check does not yet see the winner's uncommitted tuple, so
+-- the INSERT proceeds and Postgres indexes the tuple into each unique index in
+-- turn; this one had the lower OID, was reached first, and was NOT covered by
+-- the DO NOTHING — so it blocked on the winner's tuple and raised 23505.
+-- Measured on Postgres 16 over neon-http: a same-person double submit refused
+-- through a driver exception roughly two runs in three instead of through the
+-- `INSERT 0 0` the clause is written for, and `isSeatConflict` had to recognise
+-- a second index name to keep that exception off a planter's screen. With this
+-- index gone the arbiter covers every conflict the INSERT can meet, and the
+-- loser of a race is an empty `returning()`, deterministically. The refusal the
+-- planter reads is unchanged either way — `seatRefusalMessage` reads the seat's
+-- holder and both paths end in it — so this drops a shape, never a sentence.
+--
+-- THE REACTIVATION PATH STILL THROWS, and that is unrelated to this file: it is
+-- an UPDATE, an UPDATE takes no `ON CONFLICT`, so it meets the seat index as an
+-- exception. `isSeatConflict` survives with exactly one constant.
+--
+-- WHY NO REPLACEMENT INDEX. `assignMember`'s `existing` lookup reads
+-- (church_id, team_id, role_id, person_id), which this index also served — but
+-- `team_memberships_role_id_idx` covers it: a role is a SEAT, so its membership
+-- rows are one active holder plus that seat's history, which is the smallest
+-- selective set on the table. A composite (team_id, person_id, role_id) index
+-- would be a third object for the same read.
+--
+-- DESTRUCTIVE? NO ROWS. `DROP INDEX` removes no data and rewrites no column, and
+-- the surviving index already enforces the superset rule, so this migration
+-- cannot fail on existing data and needs no repair statement ahead of it — the
+-- one thing 0038's four guards all needed.
+--
+-- DEPLOY ORDER, AND WHY THIS ONE IS FREE (contrast 0038, which was NOT —
+-- `memory/invariants.md` → Transactions). An index this build no longer names
+-- can be dropped before or after the build ships: the OLD build against the NEW
+-- database keeps working, because it only ever ARBITRATED on the seat index and
+-- its extra `isSeatConflict` branch simply stops matching; the NEW build against
+-- the OLD database also keeps working, because a raise on the dropped index
+-- would be an unrecognised throw — the state 0038 shipped with for one round.
+-- Preferred order is still migration first.
+--
+-- ROLLBACK (HR1/HR2). Reversible in ONE psql session, with no data loss either
+-- way:
+--
+--   CREATE UNIQUE INDEX "team_memberships_active_unique"
+--     ON "team_memberships" USING btree ("team_id","person_id","role_id")
+--     WHERE status = 'active';
+--   DELETE FROM drizzle.__drizzle_migrations WHERE id = <this row's id>;
+--
+--   *** DO NOT EDIT src/db/migrations/meta/_journal.json. ***
+--
+-- Same reasoning as 0023/0024/0031/0032/0033/0034/0038: the journal is the
+-- repository's list of migrations, `drizzle.__drizzle_migrations` is the
+-- database's record of what ran, and only the ledger row is deleted. Read the
+-- row rather than recompute its hash — a comment edit to this header changes
+-- what `shasum` prints and re-runs nothing:
+--
+--   SELECT id, hash, created_at FROM drizzle.__drizzle_migrations
+--   ORDER BY created_at DESC LIMIT 1;
+--
+-- Recreating the index also re-creates the raced 23505 described above, so
+-- `isSeatConflict` must regain its second branch with it.
+DROP INDEX IF EXISTS "team_memberships_active_unique";

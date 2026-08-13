@@ -1,18 +1,14 @@
-import {
-  TEAM_MEMBERSHIPS_ACTIVE_UNIQUE,
-  TEAM_MEMBERSHIPS_ROLE_ACTIVE_UNIQUE,
-} from "@/db/schema/ministry-teams";
+import { TEAM_MEMBERSHIPS_ROLE_ACTIVE_UNIQUE } from "@/db/schema/ministry-teams";
 import { isUniqueViolation } from "@/db/errors";
 
 // ============================================================================
-// #409 D1 — RECOGNISING that the seat's guards refused a write.
+// #409 D1 — RECOGNISING that the seat's guard refused a write.
 //
 // IT RECOGNISES, IT DOES NOT TRANSLATE (corrected #411 round 2). This module
 // used to return the user copy, which made it a second decider of "which
 // sentence" beside `assignMember`'s `seatRefusalMessage` — and an index→sentence
-// table is exactly the thing that drifts, because it has to predict WHICH index
-// a race will raise on. It now answers one boolean; the caller reads the seat
-// and names the holder, for both refusal paths.
+// table is exactly the thing that drifts. It now answers one boolean; the caller
+// reads the seat and names the holder, for both refusal paths.
 //
 // WHY IT IS NOT IN `membership-copy.ts`. That module is an IMPORT-FREE leaf
 // because a `"use client"` dialog imports the two SENTENCES from it; this
@@ -37,58 +33,42 @@ import { isUniqueViolation } from "@/db/errors";
 // ============================================================================
 
 /**
- * True when `error` is a unique violation raised by ONE OF THE TWO INDEXES that
- * stand over an active team membership. Anything else is false, so its caller
- * rethrows real faults untouched.
+ * True when `error` is a unique violation raised by THE index that stands over
+ * an active team membership. Anything else is false, so its caller rethrows real
+ * faults untouched.
  *
- * WHY BOTH INDEXES, AND WHY THE SUBSUMPTION ARGUMENT IS WRONG (#411 round 2,
- * measured on a freshly migrated Postgres 16 — `role-seat-race.test.ts`'s
- * same-person case failed 2 runs in 3 without this).
- * `team_memberships_role_active_unique_idx` is keyed on `role_id` alone, so it
- * is true that it SUBSUMES `team_memberships_active_unique`
- * (team_id, person_id, role_id): one active row per role implies one per any
- * triple containing that role. It does NOT follow that the older index can
- * never raise first, because ON CONFLICT does not consult every index — it
- * arbitrates on the one named as its target.
+ * ONE INDEX, ONE NAME (#411 quality round 1). There were two for one round:
+ * `team_memberships_active_unique` (team_id, person_id, role_id) sat beside the
+ * seat index, strictly subsumed by it — `role_id` is NOT NULL and one active row
+ * per role implies one per any triple containing that role — and this predicate
+ * OR-ed the two names. It had to, because the subsumed index still RAISED: `ON
+ * CONFLICT (role_id) WHERE status = 'active' DO NOTHING` arbitrates on the seat
+ * index alone, so under a real race the insert proceeded past the arbiter's
+ * pre-check, met the non-arbiter triple first (lower OID), blocked and raised a
+ * unique violation where the DO NOTHING could not cover it. That raise was an
+ * artefact of keeping a redundant index, not a guarantee it bought. Migration
+ * 0039 drops it, the arbiter now covers every INSERT conflict, and this
+ * predicate names one constant. Do not re-add the index to "catch more" — it caught nothing the seat
+ * index does not, and it converted a designed `INSERT 0 0` into an exception.
  *
- * `ON CONFLICT (role_id) WHERE status = 'active' DO NOTHING` asks the SEAT index
- * alone. Under a real race the arbiter's pre-check does not yet see the winner's
- * uncommitted tuple, so the INSERT proceeds and Postgres inserts the tuple into
- * every unique index in turn. `team_memberships_active_unique` has the lower OID
- * and is reached first; it is NOT the arbiter, so DO NOTHING does not cover it,
- * and it blocks on the winner's tuple and then raises. That is a live guard on
- * the INSERT path precisely BECAUSE it is not the ON CONFLICT arbiter.
- *
- * The subsumption argument holds only for the SEQUENTIAL second submit, which
- * `assignMember`'s `existing.status === 'active'` check intercepts before any
- * write. So it was never the case that describes production.
- *
- * Do not "fix" the raise by dropping the older index (0038 is already applied),
- * by widening the ON CONFLICT target, or by adding a pre-flight SELECT — the
- * last two are the SELECT-then-INSERT shape `memory/invariants.md` →
- * Transactions refuses by name. Recognising both indexes costs one predicate
- * call and is the whole remedy.
- *
- * WHY A RECOGNITION AND NOT A PRE-CHECK. The reactivation path in `assignMember`
- * is an UPDATE, and an UPDATE takes no `ON CONFLICT`. A
+ * WHY A RECOGNITION AND NOT A PRE-CHECK, and why one is still needed at all. The
+ * reactivation path in `assignMember` is an UPDATE, and an UPDATE takes no
+ * `ON CONFLICT` — so it always meets the seat index as a throw. A
  * `WHERE NOT EXISTS (… active row …)` predicate would look like a guard and be
- * none — it is a snapshot read about rows other statements are writing, the trap
- * `memory/invariants.md` → Transactions describes — so the indexes stay the only
- * guards on both paths and this function is purely about what the planter reads.
+ * none: it is a snapshot read about rows other statements are writing, the trap
+ * `memory/invariants.md` → Transactions describes. So the index stays the only
+ * guard on both paths and this function is purely about what the planter reads.
  * The write itself is already correct without it: the violation aborts the whole
  * `db.batch`, so a refused reactivation leaves the role's status alone too.
  *
- * THE ERROR SHAPE, MEASURED RATHER THAN ASSUMED (2026-08-13, Postgres 16 with
- * migration 0038, over neon-http). BOTH shapes reach here and `isUniqueViolation`
- * matches both: a `db.batch([...])` — which is what both write paths are — throws
- * the driver's `NeonDbError` DIRECTLY (the match is at depth 0), while a
- * single-statement write is wrapped in Drizzle's `Failed query: <sql>` with that
- * error on `cause` and names no constraint itself (the match is at depth 1).
- * `membership-conflict.test.ts` pins both shapes for both indexes, hermetically.
+ * THE ERROR SHAPE, MEASURED RATHER THAN ASSUMED (2026-08-13, Postgres 16 over
+ * neon-http). BOTH shapes reach here and `isUniqueViolation` matches both: a
+ * `db.batch([...])` — which is what both write paths are — throws the driver's
+ * `NeonDbError` DIRECTLY (the match is at depth 0), while a single-statement
+ * write is wrapped in Drizzle's `Failed query: <sql>` with that error on `cause`
+ * and names no constraint itself (the match is at depth 1).
+ * `membership-conflict.test.ts` pins both shapes, hermetically.
  */
 export function isSeatConflict(error: unknown): boolean {
-  return (
-    isUniqueViolation(error, TEAM_MEMBERSHIPS_ROLE_ACTIVE_UNIQUE) ||
-    isUniqueViolation(error, TEAM_MEMBERSHIPS_ACTIVE_UNIQUE)
-  );
+  return isUniqueViolation(error, TEAM_MEMBERSHIPS_ROLE_ACTIVE_UNIQUE);
 }

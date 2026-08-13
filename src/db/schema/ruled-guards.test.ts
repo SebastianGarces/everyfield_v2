@@ -44,6 +44,18 @@ function read(relative: string): string {
   return readFileSync(path.join(process.cwd(), ...relative.split("/")), "utf8");
 }
 
+/**
+ * Source with comments stripped — the same helper `register-path.test.ts`
+ * carries, for the same reason: several rules here are documented by NAMING the
+ * thing they forbid, so a ban asserted over raw source would be tripped by the
+ * sentence explaining it.
+ */
+function code(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|\s)\/\/.*$/gm, "$1");
+}
+
 const MIGRATION_PATH =
   "src/db/migrations/0038_partial_unique_guards_and_subtask_fk.sql";
 const migration = read(MIGRATION_PATH);
@@ -401,38 +413,81 @@ test("§4c the seat refusal is decided by the ONE unique-violation predicate, no
     /import \{ isUniqueViolation \} from "@\/db\/errors"/,
     "#411 AC5: the recognition is `src/db/errors.ts`'s, shared with every other domain"
   );
-  // #411 round 2 — BOTH indexes, and both named through the schema's own
-  // constants. `ON CONFLICT (role_id) …` arbitrates on the seat index alone, so
-  // a RACED insert is indexed into the non-arbiter `team_memberships_active_unique`
-  // (lower OID, reached first), blocks on the winner's uncommitted tuple and
-  // raises there. Round 1 deleted that branch on a subsumption argument that
-  // describes only the SEQUENTIAL second submit — which `existing.status ===
-  // 'active'` intercepts before any write — and `role-seat-race.test.ts`'s
-  // same-person case went red 2 runs in 3. Recognition covers both; the SENTENCE
-  // is still decided in exactly one place, by the holder read (§3c).
-  for (const constant of [
-    "TEAM_MEMBERSHIPS_ROLE_ACTIVE_UNIQUE",
-    "TEAM_MEMBERSHIPS_ACTIVE_UNIQUE",
-  ]) {
-    assert.match(
-      conflict,
-      new RegExp(`isUniqueViolation\\(error, ${constant}\\)`),
-      `#411 round 2: a unique violation on ${constant} means the seat is taken and must be recognised — and the index name must come from the schema that declares it, never be re-typed here`
+  // ONE INDEX, ONE NAME (#411 quality round 1, migration 0039). The seat index
+  // is keyed on `role_id` ALONE, and `role_id` is NOT NULL, so it strictly
+  // subsumes the (team_id, person_id, role_id) index that used to sit beside it
+  // — which was therefore dropped. Keeping it was not free: it was not the
+  // `ON CONFLICT` arbiter, so a raced INSERT met it first (lower OID) and raised
+  // 23505 where the DO NOTHING could not cover it, and this predicate had to
+  // OR in a second name to keep that exception off a planter's screen. With one
+  // unique index the arbiter covers every INSERT conflict and the recognition
+  // has one constant.
+  assert.match(
+    conflict,
+    /isUniqueViolation\(error, TEAM_MEMBERSHIPS_ROLE_ACTIVE_UNIQUE\)/,
+    "#409 D1: the seat's violation is recognised, and the index name comes from the schema that declares it, never re-typed here"
+  );
+  assert.equal(
+    conflict.match(/isUniqueViolation\(/g)?.length,
+    1,
+    "#411 quality round 1: ONE unique index stands over an active membership, so ONE name is recognised — a second branch means a second index came back, and with it the raced 23505 that 0039 removed"
+  );
+
+  // THE PROPERTY, not the instance: the dropped index may not be re-declared,
+  // re-exported or re-named anywhere in `src/`. The name is assembled here so
+  // this assertion is not itself the hit it is looking for.
+  const droppedIndex = ["team", "memberships", "active", "unique"].join("_");
+  // `git grep -l` EXITS 1 WHEN IT FINDS NOTHING, which is the passing case here
+  // — unlike the 23505 sweep below, whose answer is never empty. An unguarded
+  // `execFileSync` would throw that exit code as a test ERROR the day the
+  // property finally holds, so no-match is read as the empty list.
+  let candidates: string[] = [];
+  try {
+    candidates = execFileSync(
+      "git",
+      ["grep", "-l", droppedIndex, "--", "src/**/*.ts", "src/**/*.tsx"],
+      { cwd: process.cwd(), encoding: "utf8" }
+    )
+      .split("\n")
+      .filter((line) => line.length > 0 && !line.endsWith(".test.ts"));
+  } catch (error) {
+    assert.equal(
+      (error as { status?: number }).status,
+      1,
+      `git grep failed for a reason other than "no matches": ${String(error)}`
     );
   }
-  const subsumption = sourceReader(
+  // COMMENTS DO NOT COUNT, and that is deliberate rather than a loophole: three
+  // modules NAME this index in order to forbid it — the same move
+  // `register-path.test.ts` allows `resend.ts` for, and the same one `memory/`
+  // makes. What is banned is the identifier in CODE: a `uniqueIndex(...)`
+  // declaration, an exported constant, a second `isUniqueViolation` branch. So
+  // the grep only picks candidates and the assertion reads them stripped.
+  const revivals = candidates.filter((file) =>
+    code(read(file)).includes(droppedIndex)
+  );
+  assert.deepEqual(
+    revivals,
+    [],
+    `#411 quality round 1: ${droppedIndex} was dropped by migration 0039 because the seat index strictly subsumes it — re-adding it re-adds the non-arbiter raise it caused`
+  );
+
+  const seatIndexNote = sourceReader(
     read("src/db/schema/ministry-teams.ts"),
     "ministry-teams.ts"
-  ).span("IT IS SUBSUMED", "export const TEAM_MEMBERSHIPS_ACTIVE_UNIQUE =");
+  ).span(
+    "THE SEAT INDEX IS THE ONLY UNIQUE INDEX",
+    "export const teamMemberships"
+  );
   assert.match(
-    subsumption,
-    /STILL A LIVE GUARD[\s\S]*not the arbiter/i,
-    "#411 round 2: the next reader must be told WHY the subsumed index raises — it is a live guard on the INSERT path precisely because it is NOT the ON CONFLICT arbiter — beside the constant itself"
+    seatIndexNote,
+    /Never re-add it[\s\S]*subsumes/i,
+    "#411 quality round 1: the next reader must be told the older index was dropped and why re-adding it is wrong, beside the table that no longer declares it"
   );
   // Comments stripped: this rule is documented by NAMING what it forbids, in
   // `membership-conflict.ts`'s own header (`register-path.test.ts`'s `code()`).
   assert.doesNotMatch(
-    conflict.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1"),
+    code(conflict),
     /\.includes\(/,
     "#411: matching the constraint by substring was the hand-rolled second implementation — it drops the SQLSTATE check and walks one level of cause instead of five"
   );

@@ -208,47 +208,34 @@ export type NewTeamRole = typeof teamRoles.$inferInsert;
 export const TEAM_MEMBERSHIPS_ROLE_ACTIVE_UNIQUE =
   "team_memberships_role_active_unique_idx";
 
-/**
- * The partial unique index on (team_id, person_id, role_id) where
- * `status = 'active'`, older than #409 D1.
- *
- * IT IS SUBSUMED, AND IT IS STILL A LIVE GUARD — the two are not in conflict
- * (corrected #411 round 2, 2026-08-13). `TEAM_MEMBERSHIPS_ROLE_ACTIVE_UNIQUE` is
- * keyed on `role_id` ALONE with the same predicate, so it does strictly subsume
- * this one: at most one active row per role means at most one per any triple
- * containing that role. Round 1 concluded from that "so this index can never be
- * the one a write violates first", deleted the branch that recognised it, and
- * was WRONG — the conclusion needs every index to be consulted in the same
- * order, and `ON CONFLICT` breaks exactly that.
- *
- * WHY IT RAISES, PRECISELY BECAUSE IT IS NOT THE ARBITER. `assignMember` inserts
- * with `ON CONFLICT (role_id) WHERE status = 'active' DO NOTHING`, which
- * arbitrates on the SEAT index and no other. Under a real race the arbiter's
- * pre-check does not yet see the winner's uncommitted tuple, so the INSERT
- * proceeds and Postgres indexes the new tuple into each unique index in turn.
- * This index has the lower OID and is reached first; DO NOTHING does not cover
- * it, so it blocks on the winner's tuple and then raises a unique violation on
- * `team_memberships_active_unique`. Measured: `role-seat-race.test.ts`'s
- * same-person double-submit failed 2 runs in 3 on a freshly migrated Postgres 16
- * while nothing recognised this name. The `INSERT 0 0` round 1 measured is the
- * SEQUENTIAL second submit, which `assignMember`'s `existing.status === 'active'`
- * check intercepts before any write reaches the database at all.
- *
- * SO ITS VIOLATION IS RECOGNISED: `isSeatConflict`
- * (`src/lib/ministry-teams/membership-conflict.ts`) is true for a unique
- * violation on EITHER index, because both mean the same event — somebody is
- * already on this seat. It maps to no sentence of its own; which sentence the
- * planter reads is decided once, by `assignMember` reading who holds the seat.
- * Do not read this constant as the backing for `PERSON_ALREADY_ASSIGNED_MESSAGE`.
- *
- * It stays declared for a second, independent reason: migration 0038 has already
- * been applied to the shared development database — dropping it is a new
- * migration for no behaviour, and the schema must keep describing the database
- * that exists. Drizzle compares the snapshot to this file, so deleting the
- * declaration alone would make the next `db:generate` emit a DROP nobody asked
- * for.
- */
-export const TEAM_MEMBERSHIPS_ACTIVE_UNIQUE = "team_memberships_active_unique";
+// THE SEAT INDEX IS THE ONLY UNIQUE INDEX ON THIS TABLE, and that is the whole
+// design (#411 quality round 1, migration 0039). `team_memberships_active_unique`
+// — partial unique on (team_id, person_id, role_id) where `status = 'active'` —
+// stood here until then and was DROPPED. Never re-add it, under that name or
+// another.
+//
+// WHY IT WENT. `role_id` alone is the seat key, so the seat index STRICTLY
+// SUBSUMES the triple: at most one active row per role means at most one per any
+// triple containing that role, and `role_id` is NOT NULL, so there is no NULL
+// hole where the wider key would still bite. Every state the triple forbade is
+// already unreachable. It bought zero guarantees.
+//
+// WHY IT WAS NOT MERELY REDUNDANT. It CHANGED THE SHAPE OF A REFUSAL, badly.
+// `assignMember` inserts with `ON CONFLICT (role_id) WHERE status = 'active' DO
+// NOTHING`, which arbitrates on the SEAT index and no other. Under a real race
+// the arbiter's pre-check does not yet see the winner's uncommitted tuple, so
+// the INSERT proceeds and Postgres indexes the tuple into each unique index in
+// turn — and the triple (lower OID, reached first, NOT covered by the DO
+// NOTHING) blocked on the winner's tuple and RAISED a unique violation. A
+// same-person double submit therefore refused through a driver exception
+// roughly two runs in three instead of through the `INSERT 0 0` the clause is
+// written for, and the code had to recognise a second index name to keep that
+// exception off a planter's screen. With the triple gone the arbiter covers every INSERT conflict: the
+// loser is an empty `returning()`, once, deterministically.
+//
+// WHAT STILL THROWS, so `isSeatConflict` still exists: the REACTIVATION path is
+// an UPDATE and takes no `ON CONFLICT` at all, so it meets the seat index as a
+// violation. One index, one recognised name.
 
 export const teamMemberships = pgTable(
   "team_memberships",
@@ -284,16 +271,10 @@ export const teamMemberships = pgTable(
     index("team_memberships_team_id_idx").on(table.teamId),
     index("team_memberships_person_id_idx").on(table.personId),
     index("team_memberships_role_id_idx").on(table.roleId),
-    // Partial unique: only ACTIVE memberships are constrained, so a person can
-    // be re-assigned to the same team/role after being set inactive (F8 fix).
-    // SUBSUMED by the seat index below and kept deliberately — and still a LIVE
-    // guard, because the seat index is the ON CONFLICT arbiter and this one is
-    // not, so a raced INSERT raises here. See the constant's own note.
-    uniqueIndex(TEAM_MEMBERSHIPS_ACTIVE_UNIQUE)
-      .on(table.teamId, table.personId, table.roleId)
-      .where(sql`status = 'active'`),
-    // The rule: one person per team role (#409 D1). Partial for the same
-    // reason as the index above — only an ACTIVE membership occupies the seat.
+    // The rule, and the ONLY unique index here: one person per team role
+    // (#409 D1). Partial on `status = 'active'` because the seat is single only
+    // while occupied — a past holder stays as an `inactive` row, so an
+    // unqualified index would make a role fillable once in its life (F8).
     uniqueIndex(TEAM_MEMBERSHIPS_ROLE_ACTIVE_UNIQUE)
       .on(table.roleId)
       .where(sql`status = 'active'`),

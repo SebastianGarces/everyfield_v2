@@ -45,8 +45,8 @@ export interface PersonTeamAssignment {
 // deliberately NOT re-exported from here — the assign dialog imports them too,
 // and this module opens with `@/db`.
 //
-// `isSeatConflict` — "did one of the two active-membership indexes refuse this
-// write?" — lives BESIDE the leaf, in `membership-conflict.ts`, and not IN it:
+// `isSeatConflict` — "did the seat index refuse this write?" — lives BESIDE the
+// leaf, in `membership-conflict.ts`, and not IN it:
 // it recognises the violation with `isUniqueViolation` (`@/db/errors`), the one
 // copy of that predicate every domain shares, so it cannot sit in an
 // import-free module. It is the only thing between a lost race and a raw
@@ -106,24 +106,27 @@ async function seatRefusalMessage(
  * where `status = 'active'` — is the guard; everything here is about which
  * sentence the planter reads.
  *
- * "IS THE SEAT FREE" IS ASKED ONCE, BY THE INDEXES, and it is asked by
- * attempting the write. Refusal arrives in one of TWO SHAPES, and BOTH are
- * post-write:
+ * "IS THE SEAT FREE" IS ASKED ONCE, BY THE INDEX, and it is asked by attempting
+ * the write. Refusal arrives in one of TWO SHAPES, one per write path, and BOTH
+ * are post-write:
  *
- *   * an EMPTY `returning()`. The INSERT carries
- *     `ON CONFLICT (role_id) WHERE status = 'active' DO NOTHING`, so when the
- *     arbiter sees the occupant the statement answers `INSERT 0 0` and that
- *     emptiness IS the refusal;
- *   * a THROWN unique violation, recognised by `isSeatConflict`. The
- *     REACTIVATION path is an UPDATE and takes no `ON CONFLICT` at all, so it
- *     always arrives this way — and, under a real race, so does the INSERT:
- *     `ON CONFLICT` arbitrates on the SEAT index only, the arbiter's pre-check
- *     does not see the winner's uncommitted tuple, and the insert then meets
- *     the non-arbiter `team_memberships_active_unique` (lower OID, reached
- *     first), which blocks and raises. #411 round 2 measured that; the earlier
- *     claim that the subsumed index "can never raise" described only the
- *     SEQUENTIAL second submit, which `existing.status === 'active'` below
- *     intercepts before any write happens.
+ *   * an EMPTY `returning()` — the INSERT path, always. It carries
+ *     `ON CONFLICT (role_id) WHERE status = 'active' DO NOTHING` against the one
+ *     unique index on the table, so every conflict it can meet is the arbiter's:
+ *     the statement answers `INSERT 0 0` and that emptiness IS the refusal;
+ *   * a THROWN unique violation, recognised by `isSeatConflict` — the
+ *     REACTIVATION path, always. An UPDATE takes no `ON CONFLICT` at all, so it
+ *     meets the index as an exception and nothing can cover it.
+ *
+ * THE INSERT USED TO BE ABLE TO THROW TOO, and it no longer can (#411 quality
+ * round 1). A second, strictly subsumed unique index —
+ * `team_memberships_active_unique` on (team_id, person_id, role_id) — sat beside
+ * the seat index; it was not the arbiter, so a raced insert that passed the
+ * arbiter's pre-check met it first (lower OID) and raised a unique violation
+ * where the DO NOTHING could not reach. Migration 0039 drops it: it forbade
+ * nothing the seat index does not, and its only effect was to turn a designed
+ * `INSERT 0 0` into a driver exception about two runs in three. One index, one
+ * shape per path.
  *
  * WHICH SENTENCE THE LOSER READS IS A SECOND QUESTION, IT NEEDS A SECOND READ,
  * AND THAT READ IS THE ONLY DECIDER FOR BOTH SHAPES. Neither shape can tell the
@@ -131,11 +134,11 @@ async function seatRefusalMessage(
  * seat key, and an index does not report intent — so `seatRefusalMessage` READS
  * THE HOLDER and names it: the same person is `PERSON_ALREADY_ASSIGNED_MESSAGE`,
  * anybody else is `ROLE_ALREADY_FILLED_MESSAGE`. Both refusal branches below end
- * in that one call, deliberately: a table mapping index names to sentences would
- * have to predict which index a race raises on, and predicting that is what
- * round 1 got wrong. That distinction is not decoration — the seat sentence
- * carries `ROLE_ALREADY_FILLED_DESCRIPTION` ("Someone filled it while this page
- * was open"), which is a FALSE statement to a planter who filled it themselves,
+ * in that one call, deliberately: a table mapping index names to sentences was
+ * the earlier design, and it had to predict which index a race raises on. That
+ * distinction is not decoration — the seat sentence carries
+ * `ROLE_ALREADY_FILLED_DESCRIPTION` ("Someone filled it while this page was
+ * open"), which is a FALSE statement to a planter who filled it themselves,
  * twice.
  *
  * That read is NOT a guard and must never be turned into one. It runs AFTER the
@@ -277,10 +280,9 @@ export async function assignMember(
             // "there is no unique or exclusion constraint matching the ON
             // CONFLICT specification", on every assignment.
             //
-            // It names the SEAT index, and only the seat index arbitrates.
-            // Under a race this statement can therefore still RAISE — on the
-            // other active-membership index, which is not the arbiter — so the
-            // catch below is a second live refusal path, not a fallback.
+            // It names the SEAT index, which since migration 0039 is the ONLY
+            // unique index on this table — so every conflict this statement can
+            // meet is the arbiter's and the refusal is always `INSERT 0 0`.
             where: sql`${teamMemberships.status} = 'active'`,
           })
           .returning(),
@@ -299,11 +301,11 @@ export async function assignMember(
       membership = inserted;
     }
   } catch (error) {
-    // The OTHER refusal path, and it ends in the SAME read. Whichever of the
-    // two active-membership indexes raised, what happened is "somebody is
-    // already on this seat" — so who that is, and therefore which sentence,
-    // is answered exactly once, below and above. `ExpectedError` from the
-    // branch above passes through untouched: it is no unique violation.
+    // The OTHER refusal path — the reactivation UPDATE — and it ends in the
+    // SAME read. The seat index raised, so what happened is "somebody is
+    // already on this seat"; who that is, and therefore which sentence, is
+    // answered exactly once, below and above. `ExpectedError` from the branch
+    // above passes through untouched: it is no unique violation.
     if (isSeatConflict(error)) {
       throw new ExpectedError(
         await seatRefusalMessage(churchId, roleId, personId)

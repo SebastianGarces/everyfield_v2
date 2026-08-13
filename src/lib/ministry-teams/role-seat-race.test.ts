@@ -243,16 +243,20 @@ test(
     // #411 round 1. Two tabs, or one double-clicked Confirm, assigning the SAME
     // person to one free seat.
     //
-    // THIS IS THE CASE THAT CAUGHT ROUND 1'S WRONG BELIEF, and it is why the
-    // suite runs it RUNS times: the refusal arrives in a DIFFERENT SHAPE from
-    // one run to the next, timing-dependently. `ON CONFLICT (role_id) WHERE
-    // status = 'active' DO NOTHING` arbitrates on the seat index alone, so
-    // sometimes the loser is `INSERT 0 0` — but when the arbiter's pre-check
-    // has not yet seen the winner's uncommitted tuple, the insert proceeds and
-    // meets `team_memberships_active_unique` (team_id, person_id, role_id),
-    // which the DO NOTHING does not cover, and THAT index raises 23505. Both
-    // shapes must land on the same sentence, so a single green run proves
-    // nothing here.
+    // THIS IS THE CASE THAT PROVES THE HOLDER READ, and it runs RUNS times
+    // because a race's outcome is timing-dependent and one green run of a
+    // concurrency assertion is close to no evidence. `existing.status ===
+    // 'active'` cannot answer it: both submits take their snapshot before either
+    // writes, so both pass it and the database is what refuses the second.
+    //
+    // The refusal reaches this caller as an empty `returning()` — `ON CONFLICT
+    // (role_id) WHERE status = 'active' DO NOTHING` arbitrates on the ONLY
+    // unique index on the table, so every conflict the INSERT can meet is the
+    // arbiter's. It was not always: while the subsumed
+    // (team_id, person_id, role_id) index still existed, a raced insert that
+    // passed the arbiter's pre-check met that one first (lower OID, not covered
+    // by the DO NOTHING) and raised 23505 instead, about two runs in three.
+    // Migration 0039 dropped it, which is why one shape now describes this path.
     //
     // The truthful sentence is the OTHER one: this planter filled the seat,
     // with the person they picked, so ROLE_ALREADY_FILLED_MESSAGE and its
