@@ -56,8 +56,6 @@ import {
 } from "./action-shell";
 import type { ActionResult } from "./action-shell";
 
-export type { ActionResult };
-
 // ============================================================================
 // Team Actions
 // ============================================================================
