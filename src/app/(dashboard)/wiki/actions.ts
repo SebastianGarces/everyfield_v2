@@ -34,6 +34,17 @@ import { searchArticles, type SearchResult } from "@/lib/wiki";
  * the call goes through `runWikiSearch` (`src/lib/wiki/search-request.ts`),
  * which turns every request into an outcome the reader is shown. Call this
  * from a new place and route it through there too.
+ *
+ * A FAILED READ REJECTS TOO, AND THAT IS THE SAME RULE (#411 round 4). The
+ * catch below logged the error and returned `[]`, so a dropped Neon
+ * connection, a statement timeout or a Postgres error out of
+ * `websearch_to_tsquery` resolved as an EMPTY RESULT LIST — `runWikiSearch`
+ * classified it `{status:"results", results: []}` and the reader was told "No
+ * articles found." about a search that never ran. That is the one outcome the
+ * whole refusal path exists to avoid, arriving through the failure that is by
+ * far the most likely. The catch stays, because the server-side log is worth
+ * keeping and it is the only place with the real error, but it RETHROWS: this
+ * export has exactly one shape for "could not answer", and it is a rejection.
  */
 export async function searchWikiArticles(
   query: string
@@ -56,6 +67,8 @@ export async function searchWikiArticles(
     return await searchArticles(sanitizedQuery, user.churchId ?? null);
   } catch (error) {
     console.error("Wiki search error:", error);
-    return [];
+    // Never `return []` here: see the docblock. An empty list is the answer to
+    // "nothing matches those words", not to "the read failed".
+    throw error;
   }
 }

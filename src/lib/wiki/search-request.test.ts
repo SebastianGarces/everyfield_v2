@@ -50,6 +50,15 @@ const DIALOG = path.join(
   "wiki-search.tsx"
 );
 
+const ACTIONS = path.join(
+  process.cwd(),
+  "src",
+  "app",
+  "(dashboard)",
+  "wiki",
+  "actions.ts"
+);
+
 function result(slug: string): SearchResult {
   return {
     id: slug,
@@ -150,6 +159,27 @@ test("the dialog routes every search through the outcome boundary (#411)", () =>
   );
 });
 
+test("a failed read rejects — the action never swallows one into `[]` (#411)", () => {
+  // The refusal path had a second decision site, and it was the likelier one:
+  // the action's own catch logged the error and returned `[]`, so a dropped
+  // connection or a statement timeout resolved as `{status:"results",
+  // results: []}` and the reader was told "No articles found." about a search
+  // that never ran. Asserted on the source because the action reaches `@/db`
+  // and cannot be imported under `tsx --test`.
+  const code = codeOf(ACTIONS);
+
+  assert.doesNotMatch(
+    code,
+    /catch\s*\([^)]*\)\s*\{[^}]*return\s*\[\]/,
+    'the search action swallows a failed read into an empty list — the reader is then shown "No articles found." about a search that never ran, and `runWikiSearch` can never classify it unavailable (#411)'
+  );
+  assert.match(
+    code,
+    /catch\s*\([^)]*\)\s*\{[\s\S]*?throw\s+\w+;/,
+    "the search action must log the failed read server-side and RETHROW, so the one shape for `could not answer` stays a rejection"
+  );
+});
+
 test("the debounced request has exactly one await, and it cannot reject (#411)", () => {
   // The stuck spinner was structural, not a missing `finally`: the callback's
   // only `await` rejected, so `setIsSearching(false)` below it never ran. What
@@ -169,10 +199,10 @@ test("the debounced request has exactly one await, and it cannot reject (#411)",
 });
 
 test("the spinner settles on both outcomes (#411)", () => {
-  // Read inside the debounced callback, not over the module: `setIsSearching(
-  // false)` also appears in the empty-query branch above it, and an ordering
-  // anchored on the module's FIRST occurrence would be an assertion about that
-  // branch instead of about the request.
+  // Read inside the debounced callback, not over the module: the searching
+  // state is also entered above it, and an ordering anchored on the module's
+  // FIRST occurrence would be an assertion about that line instead of about
+  // the request.
   const body = sourceReader(codeOf(DIALOG), "wiki-search.tsx").span(
     "debounceRef.current = setTimeout",
     "}, 300);"
@@ -181,12 +211,43 @@ test("the spinner settles on both outcomes (#411)", () => {
   assertInOrder(
     body,
     "wiki-search.tsx (the debounced request)",
-    [
-      "await runWikiSearch(",
-      "setIsUnavailable(outcome.status",
-      "setIsSearching(false)",
-    ],
-    "the outcome is recorded and the searching state is cleared after the one await, so every request ends in a state the reader can read"
+    ["await runWikiSearch(", "setView(", 'outcome.status === "results"'],
+    "the outcome is recorded after the one await, so every request ends in a state the reader can read"
+  );
+  assert.doesNotMatch(
+    body,
+    /kind:\s*"searching"/,
+    "the debounced callback re-enters the searching state — settling the request is ONE assignment, so neither outcome can leave the spinner up"
+  );
+});
+
+test("the dialog holds the outcome as one state, not a fan-out of flags (#411)", () => {
+  // `WikiSearchOutcome` already models the answer as a union. Decomposing it
+  // into independent booleans made only four of sixteen combinations legal and
+  // forced every render guard to re-establish mutual exclusion by hand — one
+  // of them ("unavailable implies no results") maintained at a single call
+  // site with nothing enforcing it.
+  const code = codeOf(DIALOG);
+
+  for (const flag of ["isUnavailable", "hasSearched", "isSearching"]) {
+    assert.doesNotMatch(
+      code,
+      new RegExp(`\\b${flag}\\b`),
+      `\`${flag}\` is back — the search outcome is one state (\`view\`), not a set of booleans a render guard has to recombine (#411)`
+    );
+  }
+
+  const list = sourceReader(code, "wiki-search.tsx").span(
+    "<CommandList",
+    "</CommandList>"
+  );
+  // No NEGATION anywhere in the list, in either position: `X && !Y` and
+  // `!X && Y` are the same failure, and the five old guards used both. An arm
+  // that has to say what it is NOT is an arm the union should have excluded.
+  assert.doesNotMatch(
+    list,
+    /!\s*[A-Za-z_$(]/,
+    "a render guard negates another arm's state, so the list arms are mutually exclusive by hand rather than by construction (#411)"
   );
 });
 
@@ -200,21 +261,22 @@ test("the dialog renders the unavailable outcome (#411)", () => {
   );
   assert.match(
     code,
-    /!isSearching &&\s+isUnavailable/,
-    "the unavailable message must be shown only once the spinner has stopped"
+    /view\.kind === "unavailable"/,
+    "the unavailable message must be its own arm of the view union, not a combination of flags"
   );
 
-  // The three list states are mutually exclusive, and the one that matters is
-  // that a REFUSED search never renders "No articles found." — that sentence
-  // says the corpus was read and holds nothing, which is a different (and
-  // false) statement about a search that never ran.
+  // The list arms are mutually exclusive, and the one that matters is that a
+  // REFUSED search never renders "No articles found." — that sentence says the
+  // corpus was read and holds nothing, which is a different (and false)
+  // statement about a search that never ran. It is now a property of the
+  // `"results"` arm rather than a negation the empty-state guard must repeat.
   const emptyState = sourceReader(code, "wiki-search.tsx").span(
     "{SEARCH_UNAVAILABLE_MESSAGE}",
     "No articles found."
   );
   assert.match(
     emptyState,
-    /!isUnavailable/,
-    '"No articles found." must not be shown for a search that never ran'
+    /view\.kind === "results" &&\s*view\.rows\.length === 0/,
+    '"No articles found." must belong to the arm where a search actually ran'
   );
 });

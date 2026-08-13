@@ -50,11 +50,19 @@ export type WikiSearch = (query: string) => Promise<SearchResult[]>;
 /**
  * Run one search and resolve, whatever happens.
  *
- * The caught error is NOT logged here. The two things that reach this branch
- * are already recorded where they happen — the action logs a failed read and
- * Next logs the `Unauthorized` throw, both server-side — so a client log would
- * only add noise to the console the browser proof reads, for an outcome the
- * reader is now told about on screen.
+ * THIS is what turns a rejection into an outcome — the action itself has one
+ * shape for "could not answer" and it is a throw. A failed read is logged
+ * server-side by the action's catch and then RETHROWN (it must never be
+ * converted into `[]`, which would arrive here as `{status:"results"}` and put
+ * "No articles found." on screen for a search that never ran); an expired
+ * session throws out of `verifySession()`; a dropped connection or a stale
+ * action id rejects in the browser. All four land in the catch below.
+ *
+ * The caught error is NOT logged here. Everything that reaches this branch is
+ * either already recorded server-side, where the real error is, or is a
+ * transport failure the browser reports itself — so a client log would only add
+ * noise to the console the browser proof reads, for an outcome the reader is
+ * now told about on screen.
  */
 export async function runWikiSearch(
   search: WikiSearch,

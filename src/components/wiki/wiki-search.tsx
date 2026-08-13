@@ -37,24 +37,36 @@ interface WikiSearchProps {
   onOpenChange: (open: boolean) => void;
 }
 
+/**
+ * What the list is showing — ONE state, not four booleans (#411 round 4).
+ *
+ * `WikiSearchOutcome` already models the answer as a union, and this component
+ * used to decompose it back into four independent flags (`results`,
+ * `isSearching`, `hasSearched`, `isUnavailable`), of which only four of the
+ * sixteen combinations were legal. The cost landed in the render: five guards
+ * that each had to repeat every earlier guard's negation, and one of them
+ * (the results list) that did not — correct only because two setters happened
+ * to sit in the same React batch. Holding the union makes the illegal states
+ * unrepresentable and the arms mutually exclusive by construction.
+ *
+ * `searchWikiArticles` refuses by throwing (it mints an actor above everything
+ * else, and a failed read rethrows too), and the dialog used to await it with
+ * no rejection handling inside an async `setTimeout`: an unhandled rejection,
+ * and a "Searching…" spinner that never settled because every line below the
+ * `await` was skipped. `runWikiSearch` turns every request into an outcome,
+ * and `"unavailable"` is that outcome as the reader sees it
+ * (`src/lib/wiki/search-request.ts`).
+ */
+type View =
+  | { kind: "idle" }
+  | { kind: "searching" }
+  | { kind: "unavailable" }
+  | { kind: "results"; rows: SearchResult[] };
+
 export function WikiSearch({ open, onOpenChange }: WikiSearchProps) {
   const router = useRouter();
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SearchResult[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [hasSearched, setHasSearched] = useState(false);
-  /**
-   * The search could not answer — an expired session, or the request failing.
-   *
-   * `searchWikiArticles` refuses by throwing (it mints an actor above
-   * everything else), and the dialog used to await it with no rejection
-   * handling inside an async `setTimeout`: an unhandled rejection, and a
-   * "Searching…" spinner that never settled because every line below the
-   * `await` was skipped. `runWikiSearch` turns every request into an outcome,
-   * and this is the outcome the reader is shown (`src/lib/wiki/
-   * search-request.ts`).
-   */
-  const [isUnavailable, setIsUnavailable] = useState(false);
+  const [view, setView] = useState<View>({ kind: "idle" });
   const [isNavigating, setIsNavigating] = useState(false);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
   /**
@@ -82,28 +94,27 @@ export function WikiSearch({ open, onOpenChange }: WikiSearchProps) {
     // including on the way back to an empty box.
     const request = ++latestRequestRef.current;
 
-    // A new query retires the previous outcome, failure included.
-    setIsUnavailable(false);
-
+    // An empty box retires the previous outcome, failure included.
     if (!value.trim()) {
-      setResults([]);
-      setHasSearched(false);
-      setIsSearching(false);
+      setView({ kind: "idle" });
       return;
     }
 
     // Show searching state immediately
-    setIsSearching(true);
+    setView({ kind: "searching" });
 
-    // Debounce search
+    // Debounce search. One assignment settles the request, so the searching
+    // state cannot survive either outcome and no two states can be held at
+    // once.
     debounceRef.current = setTimeout(async () => {
       const outcome = await runWikiSearch(searchWikiArticles, value);
       if (request !== latestRequestRef.current) return;
 
-      setResults(outcome.status === "results" ? outcome.results : []);
-      setIsUnavailable(outcome.status === "unavailable");
-      setHasSearched(true);
-      setIsSearching(false);
+      setView(
+        outcome.status === "results"
+          ? { kind: "results", rows: outcome.results }
+          : { kind: "unavailable" }
+      );
     }, 300);
   }, []);
 
@@ -171,7 +182,7 @@ export function WikiSearch({ open, onOpenChange }: WikiSearchProps) {
           />
           <CommandList className="h-[300px] max-h-[300px]">
             {/* Loading state */}
-            {isSearching && (
+            {view.kind === "searching" && (
               <div
                 role="status"
                 className="text-muted-foreground flex h-full items-center justify-center text-sm"
@@ -182,7 +193,7 @@ export function WikiSearch({ open, onOpenChange }: WikiSearchProps) {
 
             {/* Refused or failed — the spinner settles here rather than
                 spinning forever on a rejected request. */}
-            {!isSearching && isUnavailable && (
+            {view.kind === "unavailable" && (
               <div
                 role="status"
                 className="text-muted-foreground flex h-full items-center justify-center px-6 text-center text-sm text-balance"
@@ -191,30 +202,28 @@ export function WikiSearch({ open, onOpenChange }: WikiSearchProps) {
               </div>
             )}
 
-            {/* Empty state - no results */}
-            {!isSearching &&
-              !isUnavailable &&
-              hasSearched &&
-              results.length === 0 && (
-                <div
-                  role="status"
-                  className="text-muted-foreground flex h-full items-center justify-center text-sm"
-                >
-                  No articles found.
-                </div>
-              )}
+            {/* Empty state — a search that RAN and matched nothing, which is a
+                different statement from the one above it. */}
+            {view.kind === "results" && view.rows.length === 0 && (
+              <div
+                role="status"
+                className="text-muted-foreground flex h-full items-center justify-center text-sm"
+              >
+                No articles found.
+              </div>
+            )}
 
             {/* Initial state - no query */}
-            {!isSearching && !hasSearched && !query.trim() && (
+            {view.kind === "idle" && (
               <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
                 Start typing to search articles...
               </div>
             )}
 
             {/* Results */}
-            {!isSearching && results.length > 0 && (
-              <CommandGroup heading={`Results (${results.length})`}>
-                {results.map((result) => (
+            {view.kind === "results" && view.rows.length > 0 && (
+              <CommandGroup heading={`Results (${view.rows.length})`}>
+                {view.rows.map((result) => (
                   <CommandItem
                     key={result.id}
                     value={result.slug}

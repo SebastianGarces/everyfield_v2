@@ -64,6 +64,39 @@ The fix is at the call, not in the action's return type. A second return shape w
 
 The module takes the search function as an argument so the refusal path runs in a unit test (`search-request.test.ts`) rather than only in a browser, and it is deliberately **not** re-exported from `src/lib/wiki/index.ts` — a `"use client"` dialog imports it, and the barrel reaches `@/db` through every other wiki module.
 
+### The action had a second decision site, and it was the likelier one (round 4)
+
+Round 3 wrote the sentence above while the action's own `catch` still did this:
+
+```ts
+} catch (error) {
+  console.error("Wiki search error:", error);
+  return [];          // ← a failed read, told to the reader as "No articles found."
+}
+```
+
+Only the `verifySession()` throw sat above that `try`. Everything the READ can fail on — a dropped Neon connection, a statement timeout, a Postgres error out of `websearch_to_tsquery`/`ts_rank` — was converted into an empty array, which `runWikiSearch` then classified `{status:"results", results: []}`. So `{status:"unavailable"}`, the branch the whole change exists to produce, was reachable only from an expired session or a browser transport failure — never from the server-side failure that is by far the most likely cause of a search not answering. Two decision sites for one question ("what is the reader told when search cannot answer"), which is the same duplication this workstream collapsed for the church-override rule one section up.
+
+The catch stays: it holds the only server-side log with the real error, and `tenancy.test.ts` asserts the mint precedes a `try`. It **rethrows**. The action now has exactly one shape for "could not answer", and it is a rejection.
+
+Pinned by ABSENCE, on the source: `search-request.test.ts` §2 asserts the action's module contains no `return []` inside a `catch`. It cannot be pinned by running the action — that module reaches `@/db` — and the suite's own tests inject a throwing `search`, so they exercise `runWikiSearch`'s catch and never the action's.
+
+### The dialog holds the union (round 4)
+
+`WikiSearchOutcome` models the answer correctly. The dialog then threw that modelling away: four independent `useState` flags — `results`, `isSearching`, `hasSearched`, `isUnavailable` — of which only four of the sixteen combinations were legal, so five render guards had to re-establish mutual exclusion by hand, each repeating every earlier guard's negation. The results guard was the tell: it alone omitted `!isUnavailable`, and it was correct only because `setResults([])` and `setIsUnavailable(true)` happened to sit in the same React batch. "unavailable implies no results" was an invariant maintained by hand at exactly one call site.
+
+It is one state now:
+
+```ts
+type View =
+  | { kind: "idle" }
+  | { kind: "searching" }
+  | { kind: "unavailable" }
+  | { kind: "results"; rows: SearchResult[] };
+```
+
+Four mutually exclusive arms, no guard repeating another's negation, and settling a request is ONE `setView` — so neither outcome can leave the spinner up, and "No articles found." is a property of the `"results"` arm rather than a negation a future guard has to remember. The round-3 tests reached for source-text regexes (`/!isSearching &&\s+isUnavailable/`, and a span between two literal strings) to assert what is now a type-level fact; what remains on the source is the arm shape and the one-assignment settle.
+
 ## Slugs and paths: the two builders
 
 `wikiHref(slug)` builds every path that will be *parsed as a URL or compared against one*. `wikiRevalidationPath(slug)` builds the argument to `revalidatePath()` — and only that.
