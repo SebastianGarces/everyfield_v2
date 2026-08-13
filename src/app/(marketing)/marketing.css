@@ -47,6 +47,22 @@ html:has(.marketing) {
 .marketing a:hover {
   text-decoration: underline;
 }
+/* WCAG SC 1.4.1 (Use of Color) — the marketing half of the rule globals.css
+   states in `@layer base` for `p a[href]`. It has to be repeated HERE because
+   this whole stylesheet is UNLAYERED, and an unlayered normal declaration beats
+   every layered one no matter the specificity: `.marketing a` above defeats the
+   base-layer underline across the entire route group. Field green (#0b7a3f)
+   against marketing body text (#4e584f) is 1.36:1 — colour alone tells a reader
+   nothing, and `:hover` is not a rest state.
+   Scoped to `p` for the same reason globals.css is: a paragraph is a block of
+   text, while nav and card links are lists OF links and keep the flat SHARP
+   treatment (DESIGN.md). Do not resolve a future conflict here with
+   `!important` in globals.css — keep the fix on the sheet that caused it.
+   Pinned by src/app/text-contrast.test.ts. */
+.marketing p a[href] {
+  text-decoration-line: underline;
+  text-underline-offset: 4px;
+}
 .marketing :focus-visible {
   outline: 2px solid var(--field);
   outline-offset: 2px;
