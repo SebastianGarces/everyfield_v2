@@ -21,7 +21,7 @@
  *    and failed AA on eight of its twelve status/theme pairs — worst 1.91:1
  *    (`bg-yellow-500 text-white`), which Lighthouse flagged on `/people`. Every
  *    pair here clears 4.5:1 by a wide margin. The numbers are not written down
- *    anywhere: `src/app/theme-tokens.test.ts` re-derives all fourteen from
+ *    anywhere: `src/app/status-badge-scale.test.ts` re-derives all fourteen from
  *    Tailwind's own `theme.css` and requires AA of every one, with no deferral
  *    list left to add to.
  *  - **Prospect stays neutral**, part of the ruling rather than an omission: it

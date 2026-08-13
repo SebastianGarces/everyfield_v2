@@ -4,7 +4,7 @@ Why and how, for the Design Tokens rules in [`../invariants.md`](../invariants.m
 
 **Applies to:** `src/app/globals.css` (the token layer), `src/lib/testing/theme-color.ts` (the shared colour math and token reader), `DESIGN.md` (the design authority the identity guards read), and every stylesheet under `src/app/`.
 
-**Pinned by:** three suites, one subject each — `src/app/theme-tokens.test.ts` (token identity, token-on-surface contrast), `src/app/focus-ring.test.ts` (the focus indicator, SC 1.4.11 rather than AA), `src/app/text-contrast.test.ts` (what SHIPS: `.tsx` markup and the other stylesheets).
+**Pinned by:** four suites, one subject each — `src/app/theme-tokens.test.ts` (token identity, token-on-surface contrast), `src/app/focus-ring.test.ts` (the focus indicator, SC 1.4.11 rather than AA), `src/app/text-contrast.test.ts` (what SHIPS: `.tsx` markup and the other stylesheets), `src/app/status-badge-scale.test.ts` (the #429 person-status badge scale, whose colours come from Tailwind's own palette and `badge.tsx` rather than from any token — the one suite of the four that reads the people domain).
 
 ## Where a number is allowed to live
 
@@ -85,6 +85,8 @@ Sebastian ruled **direction B, "tinted editorial"** on 2026-08-13, from four dir
 - **Attendee and Launch Team stay on ONE hue**, separated by tint LEVEL (blue 50/200 against 100/300, mirrored). The ruling was explicitly offered the hue split and declined it. Splitting them is a new ruling, not a commit.
 
 The badges carry `variant="outline"` — the variant whose only colours are `border-border` and `text-foreground`, both overridden here, so exactly one ground, one ink and one border reach the DOM through `cn()`. There is no hover fill: a badge is not a control, and a tint that darkens under the pointer claims it is.
+
+**The guard is its own suite: `src/app/status-badge-scale.test.ts`.** It is the fourth sibling in the "one subject each" set at the top of this file, and it is separate for the reason the other three are: a different subject with a different source of truth. The other three resolve every colour from `globals.css` and DESIGN.md; this one resolves them from Tailwind's own palette and from `badge.tsx`, and it is the only one that reads the people domain (`STATUS_BADGE_CONFIG`, `STATUS_LABELS`) — an import a TOKEN suite has no business carrying, and one that needed a comment explaining itself for as long as it lived there.
 
 **`DEFERRED_STATUS_BADGE_FILLS` is deleted, not emptied.** The ledger existed because the remedy was a ruling nobody had made; the ruling is made, so the suite requires AA of ALL FOURTEEN status/theme pairs — Prospect included, its neutral variant now RESOLVED rather than skipped. Do not re-introduce the list. A scale that cannot clear 4.5:1 is a ruling to reopen, and a deferral list is exactly what turns "this fails AA" into a line somebody adds instead of a decision somebody makes.
 
