@@ -13,7 +13,7 @@ import {
   oklchToSrgb,
   readToken,
   themes,
-} from "./theme-color";
+} from "@/lib/testing/theme-color";
 
 // ----------------------------------------------------------------------------
 // The focus indicator, and only it. Split out of theme-tokens.test.ts because

@@ -17,6 +17,16 @@ import path from "node:path";
 // `text-contrast.test.ts` scans shipped markup and the other stylesheets. They
 // share only these helpers, and a second copy of a contrast formula is the
 // fastest way to get two files that disagree about whether the app passes.
+//
+// WHERE THIS LIVES. `src/lib/testing/` is the repo's home for test-only
+// infrastructure (`source-span.ts`, `rendered-markup.ts` — see the second's
+// header for the same argument). It used to sit in `src/app/`, which is the
+// ROUTING layer and is also the tree `tsxFiles()` below walks as shipped
+// markup, so the walk had to skip one hard-coded absolute path to stop the
+// module from failing the guards it powers. That skip was an equality on a
+// filename: rename or move the file and it silently stopped matching. The
+// directory rule that replaced it covers this module AND its two neighbours,
+// which had exactly the same hole open.
 // ----------------------------------------------------------------------------
 
 export const SRC = path.join(process.cwd(), "src");
@@ -283,25 +293,35 @@ export const SURFACES = [
 // --- shipped markup ---------------------------------------------------------
 
 /**
- * This module. It sits under `src/app/` but is test-only support code, so it is
- * not markup and the walk below skips it — the same reason the walk skips the
- * `.test.ts` files. Without the skip, the guards scan their OWN implementation
- * and every class name this file has to NAME in order to describe a rule reads
- * as a shipped use of it: the module would fail the tests it powers, and the
- * only defence would be a comment asking future authors to write about the
- * rules without naming them.
+ * The repo's home for test-only support code, and therefore not markup: the
+ * walk below skips the whole directory, for the same reason it skips the
+ * `.test.tsx?` files.
+ *
+ * Without the skip the guards scan their OWN implementation, and every class
+ * name a module here has to NAME in order to describe a rule reads as a shipped
+ * USE of it — the module fails the tests it powers, and the only defence left is
+ * a comment asking future authors to describe the rules without naming them.
+ *
+ * A DIRECTORY, not a filename. The rule used to be `full === <one absolute
+ * path>`, which covered this module only: rename it and the skip stopped
+ * matching in silence, while `rendered-markup.ts` and `source-span.ts` — test
+ * support in this same directory — were scanned as shipped markup the whole
+ * time, and would have failed a guard the first time one of them had to write
+ * `text-ef-dark` or `bg-destructive/10` to describe the rule it enforces. One
+ * rule now covers every module here and survives any rename inside it.
  */
-const SELF = path.join(SRC, "app", "theme-color.ts");
+export const TEST_SUPPORT_DIR = path.join(SRC, "lib", "testing");
 
 /** Every `.ts`/`.tsx` file under `dir` that ships (tests are not markup). */
 export function tsxFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) return tsxFiles(full);
+    if (entry.isDirectory()) {
+      return full === TEST_SUPPORT_DIR ? [] : tsxFiles(full);
+    }
     if (!entry.isFile()) return [];
     // Tests name the banned tokens on purpose; only shipped markup is scanned.
     if (/\.test\.tsx?$/.test(entry.name)) return [];
-    if (full === SELF) return [];
     return /\.tsx?$/.test(entry.name) ? [full] : [];
   });
 }

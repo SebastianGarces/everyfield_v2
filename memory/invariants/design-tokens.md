@@ -2,7 +2,7 @@
 
 Why and how, for the Design Tokens rules in [`../invariants.md`](../invariants.md).
 
-**Applies to:** `src/app/globals.css` (the token layer), `src/app/theme-color.ts` (the shared colour math and token reader), and every stylesheet under `src/app/`.
+**Applies to:** `src/app/globals.css` (the token layer), `src/lib/testing/theme-color.ts` (the shared colour math and token reader), `DESIGN.md` (the design authority the identity guards read), and every stylesheet under `src/app/`.
 
 **Pinned by:** three suites, one subject each — `src/app/theme-tokens.test.ts` (token identity, token-on-surface contrast), `src/app/focus-ring.test.ts` (the focus indicator, SC 1.4.11 rather than AA), `src/app/text-contrast.test.ts` (what SHIPS: `.tsx` markup and the other stylesheets).
 
@@ -28,7 +28,19 @@ Two assertions tie `globals.css` to DESIGN.md: `--ink` is the ruled ink, and `--
 - `oklch(0.5354 0.151 320)` is a **magenta**, and it sits 1.0058:1 from `#B4432F`. A luminance guard "proves" the ruled danger red still ships while every error message renders purple.
 - At the ink's chroma, **every** hue on the wheel passes.
 
-`isSameColour` (`src/app/theme-color.ts`) therefore compares gamma-encoded sRGB channel by channel, with a one-unit-in-255 tolerance. That is wide over the round-trip noise between a hex and an oklch spelling of one colour (the two real pairs measure 0.109 and 0.058 apart) and far under any real colour difference. `theme-tokens.test.ts` mutates both tokens off-hue and asserts the guard now fails, so the guard cannot quietly go back to luminance.
+`isSameColour` (`src/lib/testing/theme-color.ts`) therefore compares gamma-encoded sRGB channel by channel, with a one-unit-in-255 tolerance. That is wide over the round-trip noise between a hex and an oklch spelling of one colour (the two real pairs measure 0.109 and 0.058 apart) and far under any real colour difference. `theme-tokens.test.ts` mutates both tokens off-hue and asserts the guard now fails, so the guard cannot quietly go back to luminance.
+
+### …and the OTHER side of the comparison is read from DESIGN.md
+
+Comparing the right way is half of it. The two guards are assertions ABOUT DESIGN.md — the rule they carry is "if danger has to move it moves in DESIGN.md FIRST" — so what they compare against has to BE DESIGN.md, not a copy of it.
+
+They were first written with the hexes typed into the test (`const DESIGN_MD_DANGER = "#B4432F"`). That is the section above's own principle failing one level up: a value re-derived by nothing is correct on the day it is typed. Follow the rule literally — edit `danger:` in DESIGN.md and stop there, which is exactly what the rule instructs — and the suite stayed green while DESIGN.md and `globals.css` now disagreed. One colour, three owners; the same shape `--ink` was introduced to end.
+
+`theme-tokens.test.ts` therefore parses `ink` and `danger` out of DESIGN.md at test time:
+
+- **Bounded to the `colors:` block**, ended by the next top-level YAML key. DESIGN.md publishes the palette a second time in a prose table further down, and a whole-file match would answer from whichever copy came first — a second owner arriving by another route.
+- **The parse is asserted before it is used**, the same anti-vacuity assertion the rest of the suite uses ("the scan has gone vacuous — fix it before trusting a pass"): a missing block, a near-empty one, or a renamed key fails loudly instead of degrading the guard to a no-op.
+- **No literal survives** — not even as a canary, which would put the third owner straight back. The mutation check is the behaviour: change `danger:` in DESIGN.md alone and `--destructive is no longer DESIGN.md's ruled danger #…` fails.
 
 ## One colour, one owner
 
@@ -63,8 +75,15 @@ Both are recorded rather than decided, because both are design rulings and not a
 
 What is not deferred is MEASURING it. `theme-tokens.test.ts` reads every shipped tint out of the markup, checks it on all eight surfaces, and holds the failing ones to their exact number in `DEFERRED_DESTRUCTIVE_TINTS` — with an INVERTED assertion, so a deferred entry that starts passing fails the suite too and the ledger only holds what is genuinely still open. A new call site, a new alpha or a token move fails loudly instead of passing quietly.
 
-## Why `theme-color.ts` is not scanned by its own walk
+## Why `src/lib/testing/` is not scanned by the markup walk
 
-`markupLines()` and `tsxFiles()` scan shipped `.ts`/`.tsx` under `src/`. `theme-color.ts` sits under `src/app/` but is test-only support code, so the walk skips it, exactly as it skips `.test.ts`.
+`markupLines()` and `tsxFiles()` scan shipped `.ts`/`.tsx` under `src/`. Test-only support code is not markup, so the walk skips the whole of `src/lib/testing/`, exactly as it skips `.test.tsx?`.
 
-Without the skip the guards scan their own implementation, and every utility class the module has to NAME in order to describe a rule reads as a shipped USE of it — the module fails the tests it powers. The only defence then available is a comment asking future authors to describe the rules without naming them, which is a hazard held off by good manners.
+Without the skip the guards scan their own implementation, and every utility class a module there has to NAME in order to describe a rule reads as a shipped USE of it — the module fails the tests it powers. The only defence then available is a comment asking future authors to describe the rules without naming them, which is a hazard held off by good manners.
+
+The skip is a **directory**, and the earlier shape is worth keeping because it was two bugs at once. `theme-color.ts` originally sat in `src/app/` — the routing layer, and the very tree its own `tsxFiles()` walks — so the walk carried `if (full === path.join(SRC, "app", "theme-color.ts")) return [];`:
+
+- an absolute-path EQUALITY on one file, so a rename or a move stopped the skip matching in silence and the module began failing the guards it powers;
+- and a special case for one file while the identical hole stayed open for its two neighbours. `rendered-markup.ts` and `source-span.ts` are test support too, and `tsxFiles(SRC)` was scanning them as shipped markup — passing only because neither happened to spell a banned utility, and one guard away from failing for *describing* a rule.
+
+`theme-color.ts` now lives beside them (`src/lib/testing/theme-color.ts`, imported as `@/lib/testing/theme-color`), and one directory rule covers all three, needs no per-file constant, and survives any rename inside it.

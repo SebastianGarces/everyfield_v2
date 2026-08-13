@@ -11,7 +11,7 @@ import {
   matchingBrace,
   stripCssComments,
   tsxFiles,
-} from "./theme-color";
+} from "@/lib/testing/theme-color";
 
 // ----------------------------------------------------------------------------
 // The guards that read what SHIPS rather than what the token layer declares:

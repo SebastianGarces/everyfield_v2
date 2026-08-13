@@ -23,7 +23,7 @@ import {
   readTokenOklch,
   themeBlock,
   themes,
-} from "./theme-color";
+} from "@/lib/testing/theme-color";
 
 // ----------------------------------------------------------------------------
 // The token layer itself: identity (is a token still the colour the design
@@ -110,11 +110,81 @@ for (const theme of themes) {
 // by hand every time a role token is added, so it goes stale in silence: the
 // same defect as the two spellings, moved out of the CSS and into the test.
 
+// --- the design authority, READ from DESIGN.md ------------------------------
+//
+// The two assertions below are the only mechanism stopping the palette and the
+// app from separating, and they are assertions ABOUT DESIGN.md: globals.css
+// says so ("If danger has to move it moves in DESIGN.md FIRST"), memory says so
+// twice. So they read DESIGN.md.
+//
+// They used to compare globals.css against two hexes typed into this file, which
+// is the #357 defect one level up — a value re-derived by nothing is correct on
+// the day it is typed. Edit `danger:` in DESIGN.md and stop there, exactly as
+// the instruction says to, and the whole suite stayed green while the design
+// authority and the app now disagreed. Three owners for one colour, again.
+//
+// The parse is asserted before it is used, the way every scan in this suite is:
+// a DESIGN.md reformat fails loudly here rather than degrading these two guards
+// into no-ops.
+
+const DESIGN_MD = path.join(process.cwd(), "DESIGN.md");
+
+/**
+ * DESIGN.md's `colors:` block, as `name -> #rrggbb`.
+ *
+ * Bounded to that block on purpose. The document repeats the palette lower down
+ * in a prose table, and a reader that matched the whole file would answer from
+ * whichever copy came first — which is a second owner arriving by another route,
+ * the thing this reader exists to prevent. The block ends at the next
+ * top-level key (`typography:`), so the bound is the YAML's own structure.
+ *
+ * Non-hex entries (the `rgba(...)` hairlines) are simply not colours this
+ * comparison can make, and are skipped.
+ */
+function designMdColours(): Map<string, string> {
+  const source = readFileSync(DESIGN_MD, "utf8");
+
+  const heading = source.search(/^colors:$/m);
+  assert.notEqual(
+    heading,
+    -1,
+    `DESIGN.md has no top-level \`colors:\` block — the design-authority reader has gone vacuous, fix it before trusting a pass (${DESIGN_MD})`
+  );
+
+  const body = source.slice(source.indexOf("\n", heading) + 1);
+  const nextTopLevelKey = body.search(/^\S/m);
+  const block = nextTopLevelKey === -1 ? body : body.slice(0, nextTopLevelKey);
+
+  const colours = new Map(
+    [...block.matchAll(/^\s+([\w-]+):\s*"(#[0-9a-fA-F]{6})"/gm)].map(
+      (match) => [match[1], match[2].toUpperCase()] as const
+    )
+  );
+
+  assert.ok(
+    colours.size > 10,
+    `only ${colours.size} hex colours were read out of DESIGN.md's colors block — the reader has gone vacuous, fix it before trusting a pass`
+  );
+  return colours;
+}
+
+const DESIGN_MD_COLOURS = designMdColours();
+
+/** One published colour, or a loud failure naming the key that vanished. */
+function designMdColour(name: string): string {
+  const colour = DESIGN_MD_COLOURS.get(name);
+  assert.ok(
+    colour,
+    `DESIGN.md's colors block no longer publishes a hex \`${name}\`. These guards hold globals.css to DESIGN.md, so a renamed key must be renamed here too — never dropped, which would silently unhook the app from the palette`
+  );
+  return colour;
+}
+
 /** DESIGN.md → Colors. The brand ink, and the app's only dark value. */
-const DESIGN_MD_INK = "#181D19";
+const DESIGN_MD_INK = designMdColour("ink");
 
 /** DESIGN.md → Colors. `danger` — "errors and 'don't' marks only". */
-const DESIGN_MD_DANGER = "#B4432F";
+const DESIGN_MD_DANGER = designMdColour("danger");
 
 test("the identity check reads hue and chroma, not only lightness", () => {
   // The guard that guards the guards. Both DESIGN.md assertions below are the
@@ -146,8 +216,31 @@ test("the identity check reads hue and chroma, not only lightness", () => {
     "an off-hue ink passes as DESIGN.md's ink — the identity check has gone back to comparing luminance"
   );
 
-  // ...and it still accepts the two spellings it exists to accept.
-  assert.ok(isSameColour(hexToSrgb(DESIGN_MD_INK), hexToSrgb("#181d19")));
+  // ...and it still accepts the two spellings it exists to accept. Derived from
+  // the parsed ink rather than typed, so this stays a claim about SPELLING and
+  // never becomes a third place the ink's value is written down.
+  assert.ok(
+    isSameColour(
+      hexToSrgb(DESIGN_MD_INK),
+      hexToSrgb(DESIGN_MD_INK.toLowerCase())
+    )
+  );
+});
+
+test("the DESIGN.md reader found real colours, not an empty parse", () => {
+  // The anti-vacuity check, stated as a test as well as at the read, because
+  // every assertion tying globals.css to the design authority is downstream of
+  // this parse. `designMdColours()` already throws on a missing block or a
+  // near-empty one; this says the two keys those guards name are the two keys
+  // that came back, and that they are distinct colours rather than one value
+  // read twice.
+  assert.match(DESIGN_MD_INK, /^#[0-9A-F]{6}$/);
+  assert.match(DESIGN_MD_DANGER, /^#[0-9A-F]{6}$/);
+  assert.notEqual(
+    DESIGN_MD_INK,
+    DESIGN_MD_DANGER,
+    "the ink and the danger red read back as the same value — the DESIGN.md reader is matching one entry for both keys"
+  );
 });
 
 test("--ink is the DESIGN.md ink, and no other token respells it", () => {
