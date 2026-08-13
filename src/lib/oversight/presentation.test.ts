@@ -4,7 +4,11 @@ import path from "node:path";
 import { test } from "node:test";
 
 import {
+  LAUNCHED_CAPTION,
+  LAUNCH_PHASE,
   NOT_RECORDED,
+  PHASE_SEQUENCE,
+  PRE_LAUNCH_CAPTION,
   formatAssociationProvenance,
   formatLaunchCountdown,
   formatPhase,
@@ -12,10 +16,16 @@ import {
   meetingsStats,
   ministryTeamsStats,
   peopleStats,
-  scopeLabelForRole,
+  portfolioSpreadCaption,
+  summarizePortfolioPhases,
   summarizeSendingChurchRoster,
   tasksStats,
 } from "./presentation";
+// The two scope-label words come from the IMPORT-FREE LEAF, never from
+// `presentation.ts`, and this import is part of what pins that: a re-export
+// there would make the heavy module reachable from `remove-plant-dialog.tsx`,
+// a `"use client"` component (`org-label.test.ts` asserts the property).
+import { scopeLabelForOrgType, scopeLabelForRole } from "./org-label";
 // The countdown oversight renders is the CANON, not a local copy: this module
 // used to carry a byte-for-byte duplicate of it (PR #339), which is how #338
 // shipped twice. These cases stay here because they pin what the oversight
@@ -201,6 +211,112 @@ test("the scope label matches the caller's kind of org", () => {
 test("an out-of-range phase does not blow up the row", () => {
   assert.equal(formatPhase(0), "Phase 0: Discovery");
   assert.equal(formatPhase(99), "Phase 99");
+});
+
+test("the two scope-label spellings are one table, reached two ways", () => {
+  // The page knows a ROLE, the remove dialog knows an ORG KIND, and both must
+  // produce the same word — three private copies of this pair is what the leaf
+  // replaced.
+  assert.equal(
+    scopeLabelForOrgType("network"),
+    scopeLabelForRole("network_admin")
+  );
+  assert.equal(
+    scopeLabelForOrgType("sending_church"),
+    scopeLabelForRole("sending_church_admin")
+  );
+});
+
+// ----------------------------------------------------------------------------
+// Portfolio phase distribution — the oversight index (`/oversight`)
+//
+// The index used to count these inline off `Array.from({ length: 7 })` and a
+// bare `< 5`. `churches.current_phase` is an unconstrained integer, so both
+// were claims the column could falsify.
+// ----------------------------------------------------------------------------
+
+test("the phase sequence is derived from PHASES, not counted out by hand", () => {
+  // Every declared phase, ascending, with no gaps invented and none dropped.
+  assert.deepEqual([...PHASE_SEQUENCE], [0, 1, 2, 3, 4, 5, 6]);
+  for (const phase of PHASE_SEQUENCE) {
+    assert.notEqual(
+      formatPhase(phase),
+      `Phase ${phase}`,
+      `phase ${phase} is in the sequence but has no label in PHASES`
+    );
+  }
+});
+
+test("every declared phase gets a bar, including the ones nobody is in", () => {
+  const summary = summarizePortfolioPhases([0, 0, 5]);
+
+  assert.equal(summary.distribution.length, PHASE_SEQUENCE.length);
+  assert.deepEqual(
+    summary.distribution.map((row) => row.count),
+    [2, 0, 0, 0, 0, 1, 0]
+  );
+  // A zero is a real answer ("nobody is at Phase 3"), and it renders as 0% —
+  // the bar used to draw `Math.max(percentage, 2)` and show a sliver there.
+  assert.equal(summary.distribution[3].count, 0);
+  assert.equal(summary.distribution[3].percentage, 0);
+});
+
+test("the bars always sum to the headline total, whatever the column holds", () => {
+  // An out-of-range phase used to be counted in the total, drawn in no bar, and
+  // bucketed as "launched" by accident — three figures on one card disagreeing.
+  const summary = summarizePortfolioPhases([0, 3, 9]);
+
+  assert.equal(summary.total, 3);
+  assert.equal(
+    summary.distribution.reduce((sum, row) => sum + row.count, 0),
+    summary.total
+  );
+
+  const stray = summary.distribution.find((row) => row.phase === 9);
+  assert.ok(stray, "an undeclared phase is present in the data but has no row");
+  assert.equal(stray.count, 1);
+  // …and it is LABELLED rather than blank: the raw `PHASES[...]` lookup the
+  // index used rendered `undefined` here.
+  assert.equal(stray.label, "Phase 9");
+});
+
+test("the launch split is decided by LAUNCH_PHASE and covers every plant", () => {
+  const phases = [0, 4, 5, 6, 9];
+  const summary = summarizePortfolioPhases(phases);
+
+  assert.equal(summary.preLaunch, 2);
+  assert.equal(summary.launched, 3);
+  assert.equal(summary.preLaunch + summary.launched, summary.total);
+  // The boundary the captions name is the boundary the figures use.
+  assert.ok(PRE_LAUNCH_CAPTION.includes(String(LAUNCH_PHASE)));
+  assert.ok(LAUNCHED_CAPTION.includes(String(LAUNCH_PHASE)));
+  // …and neither caption enumerates the phases either side of it, which is the
+  // second declaration of the phase list that went stale ("phases 5-6").
+  assert.ok(!/\d\s*-\s*\d/.test(PRE_LAUNCH_CAPTION), PRE_LAUNCH_CAPTION);
+  assert.ok(!/\d\s*-\s*\d/.test(LAUNCHED_CAPTION), LAUNCHED_CAPTION);
+});
+
+test("an empty portfolio divides by nothing and claims no spread", () => {
+  const summary = summarizePortfolioPhases([]);
+
+  assert.equal(summary.total, 0);
+  assert.equal(summary.preLaunch, 0);
+  assert.equal(summary.launched, 0);
+  assert.equal(summary.occupiedPhases, 0);
+  for (const row of summary.distribution) {
+    assert.equal(row.percentage, 0, `${row.label} divided by zero`);
+  }
+});
+
+test("the spread caption counts occupied phases and pluralises", () => {
+  assert.equal(
+    portfolioSpreadCaption(summarizePortfolioPhases([2, 2, 2])),
+    "Across 1 phase"
+  );
+  assert.equal(
+    portfolioSpreadCaption(summarizePortfolioPhases([0, 2, 5])),
+    "Across 3 phases"
+  );
 });
 
 // ----------------------------------------------------------------------------

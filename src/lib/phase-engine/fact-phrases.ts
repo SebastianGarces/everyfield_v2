@@ -22,6 +22,11 @@
 // ============================================================================
 
 import { formatDate } from "@/lib/datetime";
+// The ONE manual-signal vocabulary — key, copy and the clause a citation of the
+// signal reads back as. A VALUE import, and it introduces no new edge:
+// `manual-signals.ts` is import-free on purpose (a `"use client"` island renders
+// its labels).
+import { MANUAL_SIGNALS } from "@/lib/phase-engine/manual-signals";
 import { MINISTRY_ROLE_KEYS } from "@/lib/phase-engine/signals/types";
 
 // ----------------------------------------------------------------------------
@@ -136,22 +141,24 @@ const TOTAL_MINISTRY_ROLES = MINISTRY_ROLE_KEYS.length;
 
 /**
  * What each curated self-attestation asserts, as a clause that completes
- * "you confirmed …". Wording tracks the toggle labels the planter answered
- * (components/phase-engine/signal-toggles.tsx) so the evidence uses the same
- * words as the control that produced it.
+ * "you confirmed …".
+ *
+ * NOT A SECOND DECLARATION: the clauses are the fourth string every signal owns
+ * and they live with the other three, in `manual-signals.ts` — the one module
+ * the toggle card, the phase gate and the write schema all read. Wording has to
+ * track the label the planter answered, and a `satisfies Record<ManualSignalKey,
+ * string>` in a second file catches a MISSING clause while catching nothing at
+ * all about a drifted one, which is the only property the pair exists for.
  *
  * A `Map`, not an object — see {@link FACT_PHRASES}: the key is a path segment
  * out of an LLM-authored citation, so `manual.byKey.toString` indexed an object
  * straight into `Object.prototype` and read "you confirmed function
- * toString() { [native code] }" to a planter.
+ * toString() { [native code] }" to a planter. It is keyed by plain `string`,
+ * because what is LOOKED UP is a segment of an LLM-written citation and may be
+ * anything at all.
  */
 const MANUAL_SIGNAL_CLAUSES: ReadonlyMap<string, string> = new Map(
-  Object.entries({
-    values_documented: "your core values are documented",
-    financial_base_established: "your financial base is in place",
-    prayer_leader_assigned: "a prayer leader is assigned",
-    systems_tested: "your launch systems have been tested",
-  })
+  MANUAL_SIGNALS.map((signal) => [signal.key, signal.clause])
 );
 
 /** The clause one manual signal reads as; an unknown key de-camelises. */

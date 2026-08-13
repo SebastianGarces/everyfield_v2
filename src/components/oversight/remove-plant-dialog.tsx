@@ -17,6 +17,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+// An import-free leaf, and imported for that reason: this dialog is a
+// `"use client"` component, and `@/lib/oversight/presentation` reaches
+// `@/db/schema` through `STATUS_LABELS`. The leaf carries only the two words,
+// so the browser gets them and no schema barrel.
+import { scopeLabelForOrgType } from "@/lib/oversight/org-label";
 import type { AssociationOrgType } from "@/db/schema";
 
 // ============================================================================
@@ -51,11 +56,6 @@ import type { AssociationOrgType } from "@/db/schema";
 // removal took effect.
 // ============================================================================
 
-const ORG_NOUN: Record<AssociationOrgType, string> = {
-  sending_church: "sending church",
-  network: "network",
-};
-
 export function RemovePlantDialog({
   churchId,
   plantName,
@@ -75,7 +75,9 @@ export function RemovePlantDialog({
   const [pending, startTransition] = useTransition();
   const inputId = useId();
 
-  const noun = ORG_NOUN[orgType];
+  // The ONE spelling of "network" / "sending church" — this dialog used to keep
+  // a third private copy of the table `/oversight/*` already shares.
+  const noun = scopeLabelForOrgType(orgType);
   const confirmed =
     confirmation.trim().toLowerCase() === plantName.trim().toLowerCase();
 

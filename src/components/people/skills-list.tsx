@@ -214,7 +214,7 @@ export function SkillsList({ personId, skills }: SkillsListProps) {
             <AlertDialogAction
               onClick={confirmDelete}
               disabled={isPending}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              variant="destructive"
             >
               {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Remove

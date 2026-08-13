@@ -4,6 +4,7 @@ import path from "node:path";
 import { test } from "node:test";
 
 import type { NotificationPreference, UserRole } from "@/db/schema";
+import { sourceReader } from "@/lib/testing/source-span";
 
 import {
   DEFAULT_DIGEST_CADENCE,
@@ -280,9 +281,20 @@ const OWNER_ID = "55555555-5555-4555-8555-555555555555";
  */
 const OWNER = preferenceOwnerFromSession({ user: { id: OWNER_ID } });
 
-/** The `do update set ...` clause alone — `returning` names every column. */
+/**
+ * The `do update set ...` clause alone — `returning` names every column.
+ *
+ * Both anchors are REQUIRED here, which is why this is a `span` and not a pair
+ * of `indexOf` calls: an upsert that lost its conflict clause, or a builder
+ * that stopped rendering ` returning `, would otherwise be sliced into the
+ * whole statement or the empty string and the "does not clobber" assertions
+ * below would go quiet instead of red.
+ */
 function updateClause(sql: string): string {
-  return sql.slice(sql.indexOf("do update set"), sql.indexOf(" returning "));
+  return sourceReader(sql, "setPreferenceQuery SQL").span(
+    "do update set",
+    " returning "
+  );
 }
 
 test("setPreference parses its input rather than trusting the caller", () => {

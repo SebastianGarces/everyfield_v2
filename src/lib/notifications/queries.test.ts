@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { NotificationCategory } from "@/db/schema";
+import { sourceReader } from "@/lib/testing/source-span";
 
 import {
   DEFAULT_FEED_LIMIT,
@@ -45,6 +46,19 @@ const SCOPE = { churchId: CHURCH_A, recipientUserId: USER };
 
 const CHURCH_PREDICATE = /"notifications"\."church_id" = \$\d/;
 const RECIPIENT_PREDICATE = /"notifications"\."recipient_user_id" = \$\d/;
+
+/**
+ * The select list of a rendered statement — everything before its ` from `.
+ *
+ * Through `sourceReader` rather than a bare `indexOf`, for the same reason the
+ * source-shaped suites use it: a builder that stopped rendering ` from ` (or
+ * `select `) would hand `slice` a -1 and turn every `!projection.includes(…)`
+ * below into a claim about the whole statement or about nothing at all. Here
+ * the missing anchor throws and names the query instead.
+ */
+function projectionOf(sql: string, label: string): string {
+  return sourceReader(sql, label).span("select ", " from ");
+}
 
 /**
  * Timestamps are bound as driver-formatted strings, not `Date`s, so compare by
@@ -127,7 +141,7 @@ test("the feed carries no queue internals off the server", () => {
   // embeds entity ids by convention, so it — and the rest of the queue's
   // bookkeeping — is projected out rather than trusted to a later unit to strip.
   const { sql } = notificationFeedQuery(SCOPE).toSQL();
-  const projection = sql.slice(0, sql.indexOf(" from "));
+  const projection = projectionOf(sql, "notificationFeedQuery");
 
   assert.ok(!projection.includes("dedupe_key"), projection);
   assert.ok(!projection.includes("updated_at"), projection);
@@ -332,7 +346,7 @@ test("the cold-start probe carries no notification content", () => {
   // It answers "is there anything?", so it has no business selecting a title or
   // a body — the answer is a row's existence, not its contents.
   const { sql } = hasAnyNotificationsQuery(SCOPE).toSQL();
-  const projection = sql.slice(0, sql.indexOf(" from "));
+  const projection = projectionOf(sql, "hasAnyNotificationsQuery");
 
   assert.ok(!projection.includes("title"), projection);
   assert.ok(!projection.includes("body"), projection);

@@ -148,10 +148,7 @@ export function PersonHeader({
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                   <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction
-                    onClick={onDelete}
-                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                  >
+                  <AlertDialogAction onClick={onDelete} variant="destructive">
                     Delete
                   </AlertDialogAction>
                 </AlertDialogFooter>

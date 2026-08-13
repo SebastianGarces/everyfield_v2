@@ -14,7 +14,9 @@ import {
   mintingNames,
   parsingServerActionExports,
   rel,
+  staticValueSpecifiers,
   valueExportStatements,
+  valueSpecifiers,
 } from "./server-action-surface";
 
 // ============================================================================
@@ -285,6 +287,32 @@ test("an arrow-function export is not a function declaration", () => {
   ]);
 });
 
+test("a re-export statement is returned whole, however it is wrapped", () => {
+  // The second caller reads the NAMES in the statement: `auth/roles.test.ts`
+  // asks whether any module but the leaf exports the role policy, and the only
+  // shape that can answer is the whole statement. A `.*$` pattern returns
+  // `export {` for the wrapped form — no symbol, no specifier, and the guard
+  // goes green on the exact re-export it exists to catch.
+  assert.deepEqual(
+    valueExportStatements("export { CHURCH_LEVEL_ROLES, OVERSIGHT_ROLES };"),
+    ["export { CHURCH_LEVEL_ROLES, OVERSIGHT_ROLES };"]
+  );
+
+  const wrapped = [
+    "export {",
+    "  CHURCH_LEVEL_ROLES,",
+    "  OVERSIGHT_ROLES,",
+    '} from "@/lib/auth/roles";',
+  ].join("\n");
+
+  assert.deepEqual(valueExportStatements(wrapped), [wrapped]);
+  assert.deepEqual(staticValueSpecifiers(wrapped), ["@/lib/auth/roles"]);
+
+  assert.deepEqual(valueExportStatements('export * from "./roles";'), [
+    'export * from "./roles";',
+  ]);
+});
+
 test("a GENERIC declaration is still a function declaration", () => {
   // The blind spot that the 2026-08-12 debt sweep walked into. A domain's
   // shared session envelope is generic in its result type
@@ -385,4 +413,69 @@ test("a directive is a directive without its semicolon", () => {
   assert.ok(declaresDirective('"use client"\n', "use client"));
   assert.ok(TS_FILES.some(isUseClientModule), "no client entries found");
   assert.ok(TS_FILES.some(isUseServerModule), "no action modules found");
+});
+
+// ----------------------------------------------------------------------------
+// The import scan, asserted where it lives
+// ----------------------------------------------------------------------------
+
+test("the static scan sees every module-scope edge, and only those", () => {
+  // THE ONE PLACE IN THE REPO THAT ENUMERATES THE IMPORT SHAPES.
+  //
+  // `staticValueSpecifiers` is the predicate four guards are written in terms
+  // of — the oversight no-DATABASE_URL seam (`oversight/read-imports.test.ts`),
+  // the two import-free-leaf guards (`auth/roles.test.ts`,
+  // `oversight/session.test.ts`) and the "no data-layer import on the index
+  // page" guard (`oversight/read.test.ts`). Each of those four had grown its
+  // own copy of this table, which is the same duplication the shared function
+  // was extracted to end: one property, four spellings, and three different
+  // assertion strengths already drifting apart. A re-spelling of the pattern
+  // breaks ONE function, so ONE suite catching it is both sufficient and the
+  // point — the four call sites now assert only what is local to them (their
+  // own module holds no value edge, or holds none reaching `@/db`).
+  //
+  // The four positives are the four holes the copies left open. The
+  // `export … from` one is not hypothetical: `register-path.ts` broke its own
+  // leaf rule with a re-export, not an import (`memory/invariants.md` →
+  // Multi-Tenancy), and put a 687 KB SDK one import from a client component.
+  for (const [shape, line] of [
+    ["single-quoted specifier", "import { db } from '@/db';"],
+    ["indented import", '  import { db } from "@/db";'],
+    ["side-effect import", 'import "@/db";'],
+    ["value re-export", 'export { db } from "@/db";'],
+  ] as const) {
+    assert.deepEqual(
+      staticValueSpecifiers(line),
+      ["@/db"],
+      `the static scan cannot see a ${shape} — every guard built on it has that hole`
+    );
+  }
+
+  // The two it must NOT see, each for its own reason.
+  //
+  // `import()` is excluded BY DESIGN: deferring `@/db` into the call is what
+  // SATISFIES the seam rule, so a scan that counted the dynamic form would fail
+  // the very code that obeys it. `valueSpecifiers` — the client-bundle scan,
+  // which does want that edge because the module is still emitted — is the same
+  // list plus it, and the contrast is asserted here so neither half can drift
+  // into the other.
+  assert.deepEqual(
+    staticValueSpecifiers('const { db } = await import("@/db");'),
+    []
+  );
+  assert.deepEqual(valueSpecifiers('const { db } = await import("@/db");'), [
+    "@/db",
+  ]);
+
+  // A type-only import is erased at compile time: no connection, no bundle
+  // edge. Flagging it would fail the leaves for the imports they legitimately
+  // hold.
+  assert.deepEqual(
+    staticValueSpecifiers('import type { UserRole } from "@/db/schema";'),
+    []
+  );
+  assert.deepEqual(
+    valueSpecifiers('import type { UserRole } from "@/db/schema";'),
+    []
+  );
 });

@@ -8,23 +8,16 @@ import {
   type UserRole,
   type ChurchPrivacySettings,
 } from "@/db/schema";
+// Imported for this module's OWN rules below, never re-served: `@/lib/auth/roles`
+// is the one place either symbol comes from, and a re-export from here — whose
+// first statement is `import { db } from "@/db"` — would give one authority
+// policy two import paths, the failure `@/lib/invitations/register-path` and
+// `@/lib/oversight/org-label` are both written to avoid.
+import { CHURCH_LEVEL_ROLES, OVERSIGHT_ROLES } from "@/lib/auth/roles";
 
 // ============================================================================
 // Role Helpers
 // ============================================================================
-
-/** Roles that operate at the church-plant level */
-export const CHURCH_LEVEL_ROLES: UserRole[] = [
-  "planter",
-  "coach",
-  "team_member",
-];
-
-/** Roles that have oversight access */
-export const OVERSIGHT_ROLES: UserRole[] = [
-  "sending_church_admin",
-  "network_admin",
-];
 
 /**
  * Check if a user has one of the specified roles.

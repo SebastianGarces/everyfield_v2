@@ -145,7 +145,8 @@ export function MeetingDetails({ meeting, locations }: MeetingDetailsProps) {
                 <AlertDialogAction
                   onClick={handleDelete}
                   disabled={isDeleting}
-                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90 cursor-pointer"
+                  variant="destructive"
+                  className="cursor-pointer"
                 >
                   {isDeleting ? "Deleting..." : "Delete Meeting"}
                 </AlertDialogAction>
