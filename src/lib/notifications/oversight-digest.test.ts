@@ -7,6 +7,7 @@ import {
   composeDigestBody,
   dayKeyInAppZone,
   digestDayKey,
+  plantsOwedDigestQuery,
   previousCompleteDayWindow,
   runOversightDigest,
   runOversightDigestSweep,
@@ -951,4 +952,47 @@ test("a selection query that throws is not the dispatcher's problem either", asy
   const summary = await runOversightDigestSweep(deps, { at: TICKS[0] });
   assert.equal(summary.failed, 1);
   assert.equal(summary.digested, 0);
+});
+
+// ----------------------------------------------------------------------------
+// The owed set IS the audience (#411)
+//
+// The sweep's liveness property, and it is asserted on the SQL `selectPlants
+// OwedDigest` issues rather than on the fake above: the fake answers with a
+// list, so it cannot see a clause that offers a plant no recipient can be
+// written for.
+// ----------------------------------------------------------------------------
+
+test("the digest sweep's owed set is the SAME audience — a plant it cannot serve is never offered", () => {
+  // THE STARVATION, as SQL. `selectPlantsOwedDigest` offers a plant while any
+  // oversight recipient of it is missing that day's digest row, and a plant
+  // leaves the owed set ONLY by having one written. So a recipient the audience
+  // admits but `enqueue` refuses is a plant that is owed forever: re-digested on
+  // every one of the day's ~96 ticks and, the ordering being stable by id,
+  // holding its place at the head of the owed set — which is exactly the
+  // head-of-line block `runOversightDigestSweep`'s header records as fixed.
+  //
+  // Clause 4's audience was `or(fk, fk) and role in OVERSIGHT_ROLES` while the
+  // per-recipient gate paired them, so a `network_admin` carrying a stray
+  // `sending_church_id` was one such recipient.
+  const { sql } = plantsOwedDigestQuery({
+    dayKey: "2026-08-12",
+    window: {
+      from: new Date("2026-08-12T00:00:00.000Z"),
+      to: new Date("2026-08-13T00:00:00.000Z"),
+    },
+    limit: 25,
+    afterChurchId: null,
+  }).toSQL();
+
+  const normalised = sql.replace(/"/g, "");
+
+  assert.match(
+    normalised,
+    /owed_digest_recipient\.role = \$\d+ and owed_digest_recipient\.sending_church_id = churches\.sending_church_id/
+  );
+  assert.match(
+    normalised,
+    /owed_digest_recipient\.role = \$\d+ and owed_digest_recipient\.sending_network_id = churches\.sending_network_id/
+  );
 });

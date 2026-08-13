@@ -60,16 +60,53 @@ export function codeOf(file: string): string {
 
 export const rel = (full: string): string => path.relative(process.cwd(), full);
 
-/** Specifiers whose module is actually emitted: value imports and `import()`. */
-export function valueSpecifiers(code: string): string[] {
-  const statement =
-    /^\s*(?:import|export)\s+(?!type\b)[^;]*?\bfrom\s*["']([^"']+)["']/gm;
-  const sideEffect = /^\s*import\s*["']([^"']+)["']/gm;
-  const dynamic = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
-
-  return [statement, sideEffect, dynamic].flatMap((pattern) =>
+function specifiersMatching(code: string, patterns: RegExp[]): string[] {
+  return patterns.flatMap((pattern) =>
     [...code.matchAll(pattern)].map(([, specifier]) => specifier)
   );
+}
+
+/**
+ * Specifiers a module names in its STATIC import graph: value imports, value
+ * re-exports (`export … from`) and side-effect imports. `import()` is excluded
+ * BY DESIGN, which is the whole reason this is a separate export.
+ *
+ * It is the predicate every no-DATABASE_URL seam guard is written in terms of —
+ * `src/lib/oversight/read-imports.test.ts`, the two import-free-leaf guards
+ * (`@/lib/auth/roles`, `@/lib/oversight/org-label`) and the "no data-layer
+ * import on the page" guard. Those modules keep their contract by DEFERRING
+ * `@/db` into the call (`await import("@/db")`), so a scan that counted dynamic
+ * specifiers would fail on the very code that satisfies the rule, while a scan
+ * that missed the static forms would pass on the code that breaks it.
+ *
+ * IT EXISTS BECAUSE FOUR TESTS HAD WRITTEN THEIR OWN, each weaker than this one
+ * and weaker in a different place. Measured, the copies caught:
+ *
+ *   - `^import\s+(?!type\b)[^;]*?from\s+"(@\/[^"]+)"` — 1 of the 5 ways to
+ *     reach `@/db` at module scope. Double quotes only, unindented only, no
+ *     side-effect import, no `export … from`.
+ *   - `^import\s+(?!type\b)` (the two leaf guards) — missed `export … from`,
+ *     which is EXACTLY the failure they exist to prevent (`register-path.ts`,
+ *     `memory/invariants.md` → Multi-Tenancy), and missed an indented import.
+ *   - `^import\s+[^;]*?from\s+"([^"]+)"` (the page guard) — the same four holes.
+ *
+ * The three anchors that close them: `^\s*` for indentation, `["']` for either
+ * quote, `(?:import|export)` for the re-export, and the side-effect pattern for
+ * a bare `import "@/db"`.
+ */
+export function staticValueSpecifiers(code: string): string[] {
+  return specifiersMatching(code, [
+    /^\s*(?:import|export)\s+(?!type\b)[^;]*?\bfrom\s*["']([^"']+)["']/gm,
+    /^\s*import\s*["']([^"']+)["']/gm,
+  ]);
+}
+
+/** Specifiers whose module is actually emitted: value imports and `import()`. */
+export function valueSpecifiers(code: string): string[] {
+  return [
+    ...staticValueSpecifiers(code),
+    ...specifiersMatching(code, [/\bimport\(\s*["']([^"']+)["']\s*\)/g]),
+  ];
 }
 
 /** The file a specifier names, or `null` for a bare package. */
@@ -255,12 +292,20 @@ export function functionBodies(
  * order assertion having never been looked at. The sibling test asserts this is
  * EMPTY for every `"use server"` module, which turns the parser's blind spot
  * into a loud failure at the moment somebody writes one.
+ *
+ * IT RETURNS THE WHOLE STATEMENT, braces included, because the second caller
+ * reads the NAMES in it: `auth/roles.test.ts` asks "does any module but the leaf
+ * export the role policy?", and a `.*$` pattern answers that question about the
+ * first LINE only — so a re-export prettier had wrapped over four lines would
+ * have been the one shape the guard could not see, which is the hole every
+ * hand-rolled copy of this reader left open.
  */
 export function valueExportStatements(code: string): string[] {
   return [
     /^export\s+(?:const|let|var)\s+\w+.*$/gm,
     /^export\s+default\b.*$/gm,
-    /^export\s*[*{].*$/gm,
+    /^export\s*\*.*$/gm,
+    /^export\s*\{[^}]*\}[^;\n]*;?/gm,
   ].flatMap((pattern) =>
     (code.match(pattern) ?? []).map((line) => line.trim())
   );

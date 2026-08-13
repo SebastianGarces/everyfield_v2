@@ -13,7 +13,7 @@ import {
   type User,
   type UserRole,
 } from "@/db/schema";
-import { OVERSIGHT_ROLES } from "@/lib/auth/access";
+import { OVERSIGHT_ROLES } from "@/lib/auth/roles";
 
 import {
   audienceMayReceiveCategory,

@@ -5,7 +5,6 @@ import {
   exists,
   gt,
   gte,
-  inArray,
   isNotNull,
   isNull,
   like,
@@ -28,7 +27,6 @@ import {
   tasks,
   users,
 } from "@/db/schema";
-import { OVERSIGHT_ROLES } from "@/lib/auth/access";
 import { APP_TIME_ZONE, formatDate } from "@/lib/datetime";
 
 import {
@@ -40,6 +38,7 @@ import { phaseAdvanceCondition } from "./oversight-events";
 import {
   fanOutToOversight,
   listOversightRecipientsForChurch,
+  oversightAudienceCondition,
   type OversightFanOutReport,
   type OversightRecipient,
 } from "./oversight";
@@ -820,68 +819,56 @@ export async function runOversightDigestSweep(
 }
 
 /**
- * One keyset page of the plants that still owe a digest for `dayKey`.
- *
- * "Owed" means WILL PRODUCE A DIGEST, not merely "has not got one yet" — the
- * distinction the starvation fix turns on (see the header above). Four
- * conditions:
- *
- *   1. The plant has OVERSIGHT at all — a `sending_church_id` or a
- *      `sending_network_id`. Both FKs are nullable (memory/invariants.md →
- *      Multi-Tenancy).
- *   2. The plant is SHARING. A narrowing, not the gate — `enqueue` still
- *      decides per recipient at the moment of writing, and is the only thing
- *      that can refuse. Since sharing off is the default for every plant, this
- *      is also the clause that removes the dominant permanently-owed
- *      population. A toggle flipped at 09:00 is honoured by the 09:15 tick
- *      (and by the 09:01 enqueue on the milestone path, which is untouched).
- *   3. Something HAPPENED in the window — `hasActivityCondition`, built from
- *      the same four conditions `summarizeChurchActivity` counts with, so this
- *      cannot drift from what the digest would have said. The window is over,
- *      so this answer is final for the day.
- *   4. At least one OVERSIGHT RECIPIENT of this plant still has no digest row
- *      for this day.
- *
- * ----------------------------------------------------------------------------
- * Why clause 4 is per RECIPIENT, and why it absorbed the old "has any admin"
- * ----------------------------------------------------------------------------
- *
- * It used to ask whether ANY digest row existed for (church, day). But the
- * digest fans out one `enqueue` per recipient and `fanOutTo` swallows a
- * per-recipient throw so the others still get theirs — so a plant with two
- * oversight admins where the first insert succeeded and the second threw wrote
- * a row, left the plant "not owed", and that second admin never received that
- * day's digest on any later tick. `summary.digested` counted the plant as
- * served. A transient failure became a permanent one, silently.
- *
- * Asking per recipient makes the owed set mean what the sweep needs it to mean:
- * the plant is re-offered while anyone is still missing, the retry re-enqueues
- * for everyone, and the recipient who already has their row gets a dedupe hit
- * rather than a second copy — the partial unique index on
- * (church_id, recipient_user_id, dedupe_key) decides that, not this query.
- *
- * It also SUBSUMES the old clause 2 ("somebody is actually there to receive
- * it"): an org with no oversight admins yet has no recipient to be missing a
- * row, so the EXISTS is false and the plant is not offered. One correlated
- * probe now does both jobs, which is why the clause count went down while the
- * property got stronger.
- *
- * The day match is a suffix `LIKE` on a key this module builds (`YYYY-MM-DD`,
- * no wildcard characters), narrowed by `church_id`, `recipient_user_id` and
- * `type` first — it reads the day out of the key rather than concatenating a
- * uuid column into SQL.
- */
-/**
  * `users` under a second name, so clause 4's correlated probe can name the
  * candidate recipient in its own inner `NOT EXISTS` without colliding with any
  * other reference to the table in the same statement.
  */
 const owedDigestRecipient = alias(users, "owed_digest_recipient");
 
-export async function selectPlantsOwedDigest(
-  query: OwedDigestPageQuery
-): Promise<string[]> {
-  const rows = await db
+/**
+ * Clause 4's audience, CORRELATED with the outer `churches` row — the same
+ * builder `listOversightRecipientsForChurch` fans out to, so "who is owed a row"
+ * and "who will be written one" are one predicate.
+ *
+ * THE `SQL` ANNOTATION IS THE GUARD, not decoration: an `SQL | undefined`
+ * audience reaching the `and()` below deletes itself from the statement and
+ * every plant is owed a digest forever (`memory/invariants.md` → Multi-Tenancy;
+ * `oversightAudienceCondition`'s header for the overloads). The correlated refs
+ * are columns and never null, so the non-nullable overload applies and the
+ * annotation makes a later edit to a nullable ref fail HERE.
+ *
+ * The two `churches` columns ARE written out: this is the one correspondence
+ * `OVERSIGHT_ADMIN` does not hold — which column of the PLANT stands for each
+ * `users` FK — so a third org kind must fail here until somebody names it.
+ */
+const owedDigestAudience: SQL = oversightAudienceCondition(
+  owedDigestRecipient,
+  {
+    sendingChurchId: churches.sendingChurchId,
+    sendingNetworkId: churches.sendingNetworkId,
+  }
+);
+
+/**
+ * One keyset page of the plants that still owe a digest for `dayKey`.
+ *
+ * "Owed" means WILL PRODUCE A DIGEST, not merely "has not got one yet" — the
+ * distinction the starvation fix turns on (see the module header). The four
+ * conditions are numbered in the body; each carries its own note, and clause 4
+ * carries the two that are not local: it is per RECIPIENT because the fan-out
+ * swallows a per-recipient throw, so a plant with a partially-written day used
+ * to be marked served forever; and asking per recipient SUBSUMES the old "has
+ * any admin" clause, since an org with no admins has nobody to be missing a row.
+ *
+ * A builder rather than an inlined statement because clause 4 is the one
+ * predicate in this module that decides LIVENESS — a plant it offers but that
+ * can never be written a digest row is offered again on every tick, forever.
+ * That property lives in the rendered SQL, so it has to be readable as SQL, and
+ * `.toSQL()` asserts it without a live Postgres (the same way `./queries.ts`
+ * exports every feed builder).
+ */
+export function plantsOwedDigestQuery(query: OwedDigestPageQuery) {
+  return db
     .select({ id: churches.id })
     .from(churches)
     .where(
@@ -909,23 +896,22 @@ export async function selectPlantsOwedDigest(
         // 4 — at least one oversight recipient of this plant is still missing
         // this day's digest. `=` against a NULL FK yields NULL, so a plant with
         // only one of the two FKs matches recipients only on the one it has.
+        //
+        // The audience is `owedDigestAudience` — see its docblock above for why
+        // it is the fan-out's own builder, why it is annotated `SQL`, and why
+        // no `inArray(role, OVERSIGHT_ROLES)` floor sits beside it.
+        //
+        // The day match is a suffix `LIKE` on a key this module builds
+        // (`YYYY-MM-DD`, no wildcard characters), narrowed by `church_id`,
+        // `recipient_user_id` and `type` first — it reads the day out of the
+        // key rather than concatenating a uuid column into SQL.
         exists(
           db
             .select({ one: sql`1` })
             .from(owedDigestRecipient)
             .where(
               and(
-                inArray(owedDigestRecipient.role, OVERSIGHT_ROLES),
-                or(
-                  eq(
-                    owedDigestRecipient.sendingChurchId,
-                    churches.sendingChurchId
-                  ),
-                  eq(
-                    owedDigestRecipient.sendingNetworkId,
-                    churches.sendingNetworkId
-                  )
-                ),
+                owedDigestAudience,
                 notExists(
                   db
                     .select({ one: sql`1` })
@@ -952,7 +938,12 @@ export async function selectPlantsOwedDigest(
     )
     .orderBy(churches.id)
     .limit(query.limit);
+}
 
+export async function selectPlantsOwedDigest(
+  query: OwedDigestPageQuery
+): Promise<string[]> {
+  const rows = await plantsOwedDigestQuery(query);
   return rows.map((row) => row.id);
 }
 

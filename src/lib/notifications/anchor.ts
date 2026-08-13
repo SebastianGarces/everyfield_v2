@@ -34,13 +34,19 @@ export type NotificationAnchor = ChurchAnchor | OrgAnchor;
 export type ChurchAnchor = { type: "church"; churchId: string };
 
 /**
- * The two ORG arms, named for the same reason: `recipientAdministersOrg` and
- * the org reads are about these and only these, and a signature that took the
- * whole union would have to re-check the discriminator inside.
+ * The ORG arm, named for the same reason: `recipientAdministersOrg` and the org
+ * reads are about this and only this, and a signature that took the whole union
+ * would have to re-check the discriminator inside.
+ *
+ * ITS DISCRIMINATOR IS `AssociationOrgType` ITSELF, not two literals written out
+ * again. Spelled by hand it was a union that merely HAPPENED to hold the same
+ * two strings, so a third oversight org kind widened `AssociationOrgType` and
+ * left this type — and everything that switches on it — quietly unchanged.
+ * Derived, a new kind reaches `OVERSIGHT_ADMIN` (`./oversight-admin.ts`, whose
+ * header carries the whole rationale) and every reader that indexes that table
+ * by `anchor.type` follows it with no edit.
  */
-export type OrgAnchor =
-  | { type: "sending_church"; orgId: string }
-  | { type: "network"; orgId: string };
+export type OrgAnchor = { type: AssociationOrgType; orgId: string };
 
 /** The plant anchor — the overwhelmingly common case, named so it reads. */
 export function churchAnchor(churchId: string): ChurchAnchor {
@@ -57,9 +63,7 @@ export function orgAnchor(
   orgType: AssociationOrgType,
   orgId: string
 ): OrgAnchor {
-  return orgType === "sending_church"
-    ? { type: "sending_church", orgId }
-    : { type: "network", orgId };
+  return { type: orgType, orgId };
 }
 
 /**

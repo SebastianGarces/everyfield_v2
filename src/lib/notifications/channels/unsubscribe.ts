@@ -49,11 +49,30 @@ import {
 //    exists here. The `reason` is carried for logs and is deliberately not
 //    something the page renders.
 //
-// The UNDO writes `enabled: true` explicitly rather than deleting the row and
-// falling back to the coded default. Both are "on" today, but only the explicit
-// write is guaranteed to be: a category whose default was later reconsidered
-// would make a delete-based undo silently do nothing. The user pressed a button
-// that says "keep sending these", and that is a choice worth recording.
+// The UNDO writes `enabled: true` rather than deleting the row, because a
+// delete would race the resolver's absence rule for no gain and there is no
+// delete path here at all.
+//
+// WHAT IT DOES NOT BUY — corrected in the #411 sweep, because the sentence that
+// used to sit here claimed the opposite and had been false since #237. It read:
+// "only the explicit write is guaranteed to be [on]: a category whose default
+// was later reconsidered would make a delete-based undo silently do nothing."
+// `preferenceValueIsInheritable` (`../preferences.ts`) resolves a stored value
+// that EQUALS the coded default as `source: "default"` — the whole point of
+// #237 being that such a row says nothing — and every category's `email`
+// default is `true`. So the undo's explicit `true` resolves EXACTLY as an
+// absent row does, and the scenario the old sentence named is precisely the one
+// it does not survive: flip that coded default to `false` and the user who
+// pressed "keep sending these" silently stops receiving them.
+//
+// Nothing behaves differently today (both readings resolve to `true`), which is
+// why this is a corrected comment and not a code change: which rule wins — #237's
+// "a row restating the default is inheritable" or the undo's "record the choice"
+// — is a product decision about consent, so it is RECORDED AS A DECISION on
+// issue #411 (comment 5278189656, 2026-08-13) with its three options, and is
+// not settled here. A comment that vouches for a property the code does not
+// have is the failure this sweep exists to find; it is corrected in place so
+// the next reader is not told the guarantee already exists.
 //
 // ----------------------------------------------------------------------------
 // Why storage is injected

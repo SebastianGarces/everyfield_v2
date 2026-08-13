@@ -2,6 +2,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
+import { and, eq, exists, sql as rawSql, type SQL } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
+
+import { db } from "@/db";
+import { churches, users } from "@/db/schema";
+
 import {
   NOTIFICATION_CATEGORIES,
   OVERSIGHT_CONSENT_SURFACES,
@@ -30,15 +36,16 @@ import {
   fanOutToOversightOrg,
   invitingOrgForInvitation,
   listOversightAdminsOfOrg,
+  oversightAudienceCondition,
   type InvitingInvitation,
   type OversightFanOutDeps,
-  type OversightOrg,
   type OversightOrgFanOutDeps,
   type OversightRecipient,
   announceSendingChurchDeclinedNetwork,
   announceSendingChurchJoinedNetwork,
   announceSendingChurchLeftNetwork,
 } from "./oversight";
+import type { OversightOrgIds } from "./oversight-admin";
 
 // ----------------------------------------------------------------------------
 // The oversight model, tested at the seam `enqueue` sits behind.
@@ -65,7 +72,7 @@ const INVITATION: InvitingInvitation = {
   sendingNetworkId: null,
 };
 /** The org `INVITATION` names — what the fan-out must be asked for. */
-const INVITER: OversightOrg = {
+const INVITER: OversightOrgIds = {
   sendingChurchId: SENDING_CHURCH,
   sendingNetworkId: null,
 };
@@ -84,7 +91,7 @@ class FakeOversightEnqueue
   readonly written: EnqueueNotificationInput[] = [];
   readonly calls: EnqueueNotificationInput[] = [];
   /** Every org this fake was asked to resolve, in order. */
-  readonly orgsAsked: OversightOrg[] = [];
+  readonly orgsAsked: OversightOrgIds[] = [];
   sharing: boolean;
 
   constructor(
@@ -112,7 +119,7 @@ class FakeOversightEnqueue
    * for the same reason.
    */
   async listOversightAdminsOfOrg(
-    org: OversightOrg
+    org: OversightOrgIds
   ): Promise<OversightRecipient[]> {
     this.orgsAsked.push(org);
     if (this.adminsByOrg) {
@@ -1478,4 +1485,71 @@ test("a plant-wide milestone composed with an org anchor writes nothing", () => 
     anchor: orgAnchor("network", NETWORK),
   };
   assert.equal(orgFacts.anchor.type, "network");
+});
+
+// ----------------------------------------------------------------------------
+// `oversightAudienceCondition` itself — the fail-open it must not have (#411)
+// ----------------------------------------------------------------------------
+
+test("naming no org matches nobody, never everybody", () => {
+  // The `undefined` return is the whole safety of the builder's empty case: an
+  // `and()` whose only arm is undefined collapses to "every row in `users`".
+  assert.equal(
+    oversightAudienceCondition(users, {
+      sendingChurchId: null,
+      sendingNetworkId: null,
+    }),
+    undefined
+  );
+
+  // THE FAIL-OPEN, RENDERED. What "the caller turns undefined into no
+  // recipients" is protecting against, shown rather than asserted in prose: hand
+  // that `undefined` to `and()` — as the digest's clause 4 did — and drizzle
+  // DROPS the arm, so the correlated `exists (…)` keeps only "the rest" and is
+  // satisfied by every row in `users`. Every plant is then owed a digest
+  // forever, which is a worse version of the starvation this builder fixes.
+  const collapsed = db
+    .select({ id: users.id })
+    .from(users)
+    .where(
+      and(
+        oversightAudienceCondition(users, {
+          sendingChurchId: null,
+          sendingNetworkId: null,
+        }),
+        eq(users.role, "planter")
+      )
+    )
+    .toSQL();
+
+  assert.doesNotMatch(collapsed.sql, /sending_church_id|sending_network_id/);
+});
+
+test("the non-nullable call is STATICALLY SQL, so the digest cannot re-open the fail-open", () => {
+  // The compiler carries this one. Both refs below are columns, never null, so
+  // the builder's first overload applies and the annotation below type-checks —
+  // exactly the call `plantsOwedDigestQuery` makes. Make either ref nullable and
+  // `tsc` fails HERE and at the digest, instead of `and()` silently swallowing
+  // the audience at run time. `pnpm typecheck` is the assertion; this runtime
+  // check only pins that the value really is a rendered predicate.
+  const owedDigestRecipient = alias(users, "owed_digest_recipient");
+  const audience: SQL = oversightAudienceCondition(owedDigestRecipient, {
+    sendingChurchId: churches.sendingChurchId,
+    sendingNetworkId: churches.sendingNetworkId,
+  });
+
+  const { sql } = db
+    .select({ id: churches.id })
+    .from(churches)
+    .where(
+      exists(
+        db
+          .select({ one: rawSql`1` })
+          .from(users)
+          .where(audience)
+      )
+    )
+    .toSQL();
+
+  assert.match(sql.replace(/"/g, ""), /owed_digest_recipient\.role = \$\d+/);
 });

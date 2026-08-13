@@ -4,17 +4,28 @@ import path from "node:path";
 import { test } from "node:test";
 
 import {
+  InvitationError,
   NOT_ASSOCIATED_MESSAGE,
   PLANTER_ONLY_SEVER_MESSAGE,
+  associationStatement,
   auditableAssociationOrg,
   isAssociationOrgType,
   leaveOversightOrgAs,
+  lockTargetRow,
   oversightOrgTypes,
+  requireAssociationPair,
+  unboundTargetSlot,
   verifyInvitationAuthority,
+  type AssociationFacts,
   type InvitationActor,
 } from "./core";
 import { associationOrg } from "./audit";
-import { assertInOrder, sourceReader } from "@/lib/testing/source-span";
+import type { OrganizationInvitationType } from "@/db/schema/organization-invitation";
+import {
+  assertInOrder,
+  sourceReader,
+  stripComments,
+} from "@/lib/testing/source-span";
 
 // ============================================================================
 // #304 / OV-007a + OV-008 — the planter's sever, and the audit that has to
@@ -77,6 +88,7 @@ const PLANT = "11111111-1111-4111-8111-111111111111";
 const SENDING_CHURCH = "22222222-2222-4222-8222-222222222222";
 const NETWORK = "33333333-3333-4333-8333-333333333333";
 const USER = "44444444-4444-4444-8444-444444444444";
+const INVITATION_ID = "55555555-5555-4555-8555-555555555555";
 
 function actor(overrides: Partial<InvitationActor> = {}): InvitationActor {
   return {
@@ -306,12 +318,367 @@ test("the accept batches the audit rather than following it with a second call",
     "async function announceInvitationAcceptedForChurch"
   );
 
-  assert.match(accept, /db\.batch\(\[lock, claim, association, audit\]\)/);
-  // The audit-less batch survives only for a row whose type-implied ids are
-  // missing (`auditableAssociationOrg` → null). Since migration 0036 all THREE
-  // invitation types audit, the sending-church subject included.
-  assert.match(accept, /db\.batch\(\[lock, claim, association\]\)/);
+  assert.match(
+    accept,
+    /db\.batch\(\[\s*lock,\s*claim,\s*association,\s*audit,?\s*\]\)/
+  );
+  // …and there is exactly ONE batch here. The audit-less three-statement
+  // spelling is GUARDED AGAINST rather than guarded: it used to survive behind
+  // `audit ? … : …` for a row whose type-implied ids were missing, documented as
+  // unreachable because `associationStatement` throws on the same id pairs
+  // fifteen lines earlier. "Unreachable because another function happens to run
+  // first" is not a guarantee — it is one refactor away from being an
+  // association committed with no `association_events` row, which OV-008
+  // forbids. `auditableAssociationOrg` is total now, so the shorter batch has no
+  // spelling in the file for a later edit to reach.
+  assert.doesNotMatch(
+    accept,
+    /db\.batch\(\[\s*lock,\s*claim,\s*association,?\s*\]\)/
+  );
+  assert.equal(accept.match(/db\.batch\(\[/g)?.length, 1);
   assert.doesNotMatch(accept, /recordAssociationEvent/);
+});
+
+test("the accept builds the lock and the association BEFORE the audit", () => {
+  // RULED 2026-08-13 (Sebastian, on PR #423, #411). Round 2 of the sweep made
+  // `auditableAssociationOrg` TOTAL — it throws where it used to answer `null` or
+  // `undefined` — and the case that this changes nothing a planter can reach
+  // rests entirely on two lines running earlier: `lockTargetRow` and
+  // `associationStatement` refuse the same rows before the audit is ever built.
+  //
+  // That was prose in a docblock and a paragraph in a PR body, which is to say it
+  // was an ARGUMENT about reading order. The ruling converts it into an
+  // assertion: a future edit that hoists the audit build above either of those
+  // two fails here, rather than silently turning a refusal a planter already met
+  // into a different one. Nothing else in the suite sees it — the four statements
+  // are asserted for their CONTENT one test up, and content is order-blind.
+  //
+  // Read off the source because there is no other place to read it: the three
+  // builders are pure and the ordering only exists inside `acceptInvitationAs`,
+  // whose first statement is a database read. Comments are stripped first, so the
+  // needles cannot match the paragraph in `core.ts` that explains the rule.
+  const accept = stripComments(
+    CORE.span(
+      "export async function acceptInvitationAs",
+      "async function announceInvitationAcceptedForChurch"
+    )
+  );
+
+  assertInOrder(
+    accept,
+    "core.ts → acceptInvitationAs (comments stripped)",
+    [
+      "lockTargetRow(",
+      "associationStatement(",
+      "auditableAssociationOrg(",
+      "db.batch([",
+    ],
+    "the audit's throw is unreachable ONLY while both earlier builders refuse first — hoisting it changes which refusal a defective row produces, and `auditableAssociationOrg` logs no invitation id to diagnose it with"
+  );
+});
+
+// ----------------------------------------------------------------------------
+// 2b. WHICH TWO IDS A TYPE IMPLIES — one decision, three consumers
+// ----------------------------------------------------------------------------
+//
+// The PREMISE the ordering above rests on: every row the audit refuses is
+// refused a statement earlier. That used to be proven by enumeration — 4 types ×
+// 16 nullable-FK masks × 3 builders — because the guards, the messages and the
+// fail-closed `default:` existed as FOUR hand-written copies in `core.ts`, and 64
+// rows were the price of not knowing whether they still agreed.
+//
+// They are one function now (`requireAssociationPair`, #411 review round 1), so
+// the subset relation is true BY CONSTRUCTION and the cross-product has nothing
+// left to discover. What is worth testing is what the extraction actually
+// promises: the resolver decides correctly, and every pair consumer asks IT
+// rather than keeping a copy. `lockTargetRow` stays out of both — its guard is
+// deliberately narrower (the target only), which is a strict subset.
+
+/** Run `body` with `console.error` captured — the fail-closed arm logs. */
+function withCapturedErrors(body: () => void): unknown[][] {
+  const printed: unknown[][] = [];
+  const realConsoleError = console.error;
+  console.error = (...args: unknown[]) => {
+    printed.push(args);
+  };
+
+  try {
+    body();
+  } finally {
+    console.error = realConsoleError;
+  }
+
+  return printed;
+}
+
+test("the resolver names the pair its type implies, and ignores every other id", () => {
+  // A row can carry all four FKs — `insertInvitation` validates none — so the
+  // fixtures below are deliberately over-populated: the answer must come from
+  // `type`, never from whichever column happens to be set.
+  const everything = {
+    targetChurchId: PLANT,
+    targetSendingChurchId: SENDING_CHURCH,
+    sendingChurchId: SENDING_CHURCH,
+    sendingNetworkId: NETWORK,
+  };
+
+  assert.deepEqual(
+    requireAssociationPair({ type: "church_to_sending_church", ...everything }),
+    {
+      type: "church_to_sending_church",
+      targetChurchId: PLANT,
+      sendingChurchId: SENDING_CHURCH,
+    }
+  );
+
+  assert.deepEqual(
+    requireAssociationPair({ type: "church_to_network", ...everything }),
+    {
+      type: "church_to_network",
+      targetChurchId: PLANT,
+      sendingNetworkId: NETWORK,
+    }
+  );
+
+  assert.deepEqual(
+    requireAssociationPair({
+      type: "sending_church_to_network",
+      ...everything,
+    }),
+    {
+      type: "sending_church_to_network",
+      targetSendingChurchId: SENDING_CHURCH,
+      sendingNetworkId: NETWORK,
+    }
+  );
+});
+
+test("the resolver refuses a row missing EITHER half of its pair, or a rogue type", () => {
+  const empty = {
+    targetChurchId: null,
+    targetSendingChurchId: null,
+    sendingChurchId: null,
+    sendingNetworkId: null,
+  };
+
+  // Both halves of all three pairs — six rows, each holding exactly one of the
+  // two ids its type needs. This is the whole of what the 64-shape enumeration
+  // was establishing, now that one function owns the decision.
+  const HALF_A_PAIR: readonly [AssociationFacts, string][] = [
+    [
+      { ...empty, type: "church_to_sending_church", targetChurchId: PLANT },
+      "church_to_sending_church with no sending church",
+    ],
+    [
+      {
+        ...empty,
+        type: "church_to_sending_church",
+        sendingChurchId: SENDING_CHURCH,
+      },
+      "church_to_sending_church with no church",
+    ],
+    [
+      { ...empty, type: "church_to_network", targetChurchId: PLANT },
+      "church_to_network with no network",
+    ],
+    [
+      { ...empty, type: "church_to_network", sendingNetworkId: NETWORK },
+      "church_to_network with no church",
+    ],
+    [
+      {
+        ...empty,
+        type: "sending_church_to_network",
+        targetSendingChurchId: SENDING_CHURCH,
+      },
+      "sending_church_to_network with no network",
+    ],
+    [
+      {
+        ...empty,
+        type: "sending_church_to_network",
+        sendingNetworkId: NETWORK,
+      },
+      "sending_church_to_network with no sending church",
+    ],
+  ];
+
+  for (const [facts, shape] of HALF_A_PAIR) {
+    assert.throws(() => requireAssociationPair(facts), InvitationError, shape);
+  }
+
+  // …and a `type` outside the union. Reachable rather than theoretical: the
+  // column is a bare `varchar(40)` with a TypeScript-only `$type<>()` cast, so a
+  // rogue value is a database state. It logs before it throws, once.
+  const rogue = {
+    ...empty,
+    type: "CHURCH_TO_NETWORK" as OrganizationInvitationType,
+    targetChurchId: PLANT,
+    sendingNetworkId: NETWORK,
+  };
+
+  const printed = withCapturedErrors(() => {
+    assert.throws(
+      () => requireAssociationPair(rogue),
+      InvitationError,
+      "a rogue type must refuse — a fourth type reaching a silent arm is an unaudited association"
+    );
+  });
+
+  assert.equal(printed.length, 1, "the fail-closed arm logs before it throws");
+  assert.match(String(printed[0]?.[0]), /no association rule/);
+});
+
+test("every pair consumer asks the resolver and keeps no copy of the decision", () => {
+  // The delegation is the whole property. A consumer that re-derived the pair
+  // for itself would put the subset relation back on the agreement of two
+  // hand-written switches, which is what the 64-shape test existed to police.
+  //
+  // Source-shaped because that is where the property lives: the three builders
+  // are pure and their agreement is now structural rather than observable.
+  const CONSUMERS: readonly [string, string][] = [
+    [
+      "export function unboundTargetSlot",
+      "export function revokeInvitationQuery",
+    ],
+    [
+      "export function auditableAssociationOrg",
+      "export const oversightOrgTypes",
+    ],
+    [
+      "export function associationStatement",
+      "export function verifyInvitationAuthority",
+    ],
+  ];
+
+  for (const [from, to] of CONSUMERS) {
+    const body = stripComments(CORE.span(from, to));
+    const where = from.replace("export function ", "");
+
+    assert.match(
+      body,
+      /requireAssociationPair\(invitation\)/,
+      `${where} must resolve the pair through the one resolver`
+    );
+    assert.doesNotMatch(
+      body,
+      /if \(!invitation\./,
+      `${where} keeps an id guard of its own — the decision lives in requireAssociationPair`
+    );
+    assert.doesNotMatch(
+      body,
+      /Invalid invitation/,
+      `${where} spells a refusal message of its own`
+    );
+    assert.doesNotMatch(
+      body,
+      /:\s*never/,
+      `${where} keeps its own fail-closed arm — the resolver's switch is total, so this one cannot see an unknown type`
+    );
+  }
+
+  // ONE copy of each message in the module, which is the mechanical form of the
+  // same claim: three of the four copies are gone, and the survivor is the
+  // resolver's.
+  for (const message of [
+    "Invalid invitation: missing church or sending church",
+    "Invalid invitation: missing church or network",
+    "Invalid invitation: missing sending church or network",
+  ]) {
+    assert.equal(
+      CORE_CODE.split(message).length - 1,
+      1,
+      `"${message}" is spelled more than once in core.ts`
+    );
+  }
+});
+
+test("a defective row is refused by every consumer, and by the lock where it applies", () => {
+  // The runtime half, kept because the guards being ONE function is a claim
+  // about `core.ts`'s source and this is a claim about what an accept does.
+  // Three rows, each defective in a different way.
+  const DEFECTIVE: readonly [AssociationFacts, boolean, string][] = [
+    [
+      {
+        type: "church_to_sending_church",
+        targetChurchId: PLANT,
+        targetSendingChurchId: null,
+        sendingChurchId: null,
+        sendingNetworkId: null,
+      },
+      // The target is present, so statement one has a row to lock: this is the
+      // subset `lockTargetRow` deliberately does NOT refuse.
+      false,
+      "church_to_sending_church with no inviting org",
+    ],
+    [
+      {
+        type: "church_to_network",
+        targetChurchId: null,
+        targetSendingChurchId: null,
+        sendingChurchId: null,
+        sendingNetworkId: NETWORK,
+      },
+      true,
+      "church_to_network with no target",
+    ],
+    [
+      {
+        type: "CHURCH_TO_NETWORK" as OrganizationInvitationType,
+        targetChurchId: PLANT,
+        targetSendingChurchId: null,
+        sendingChurchId: SENDING_CHURCH,
+        sendingNetworkId: NETWORK,
+      },
+      true,
+      "a type outside the union",
+    ],
+  ];
+
+  withCapturedErrors(() => {
+    for (const [facts, lockRefuses, shape] of DEFECTIVE) {
+      assert.throws(() => unboundTargetSlot(facts), InvitationError, shape);
+      assert.throws(
+        () => associationStatement(facts, INVITATION_ID),
+        InvitationError,
+        shape
+      );
+      assert.throws(
+        () => auditableAssociationOrg(facts),
+        InvitationError,
+        shape
+      );
+
+      assert.equal(
+        (() => {
+          try {
+            lockTargetRow(facts);
+            return false;
+          } catch {
+            return true;
+          }
+        })(),
+        lockRefuses,
+        `${shape}: lockTargetRow guards the TARGET only — narrower on purpose`
+      );
+    }
+  });
+
+  // The three real types with BOTH their ids present are accepted by all three,
+  // so the refusals above are the guard firing rather than the fixtures being
+  // unbuildable.
+  const whole: AssociationFacts = {
+    type: "church_to_sending_church",
+    targetChurchId: PLANT,
+    targetSendingChurchId: null,
+    sendingChurchId: SENDING_CHURCH,
+    sendingNetworkId: null,
+  };
+
+  unboundTargetSlot(whole);
+  associationStatement(whole, INVITATION_ID);
+  lockTargetRow(whole);
+  assert.equal(auditableAssociationOrg(whole).orgId, SENDING_CHURCH);
 });
 
 test("the sever announces AFTER the write, and the decline announces at all", () => {
@@ -438,30 +805,79 @@ test("a sending church joining a network audits with a SENDING CHURCH subject", 
     }
   );
 
-  // `null` now means only "this row's type-implied ids are missing" — never
-  // "this kind of association goes unrecorded".
-  assert.equal(
-    auditableAssociationOrg({
-      type: "sending_church_to_network",
-      targetChurchId: null,
-      targetSendingChurchId: SENDING_CHURCH,
-      sendingChurchId: null,
-      sendingNetworkId: null,
-    }),
-    null
+  // A row whose type-implied ids are missing REFUSES — it does not name half an
+  // org, and it does not answer falsy. Reachable, since nothing validates the
+  // row on the way in: the FK columns are all nullable and `insertInvitation`
+  // checks none of them.
+  //
+  // These two were `assert.equal(…, null)` until round 2 of the 2026-08-13 sweep
+  // (#411), and pinning that null was pinning the hole: `acceptInvitationAs`
+  // branched on truthiness, so every null here was a three-statement batch — an
+  // association committed with no `association_events` row, which #274 / OV-008
+  // forbids. Same fault as the rogue-type test below, same fix, so they now
+  // assert the same thing.
+  assert.throws(
+    () =>
+      auditableAssociationOrg({
+        type: "sending_church_to_network",
+        targetChurchId: null,
+        targetSendingChurchId: SENDING_CHURCH,
+        sendingChurchId: null,
+        sendingNetworkId: null,
+      }),
+    InvitationError,
+    "a sending-church row with no network id must refuse, not audit nothing"
   );
 
-  // And a row whose type-implied id is missing names no org rather than half of
-  // one — reachable, since nothing validates the row on the way in.
-  assert.equal(
-    auditableAssociationOrg({
-      type: "church_to_network",
-      targetChurchId: PLANT,
-      targetSendingChurchId: null,
-      sendingChurchId: SENDING_CHURCH,
-      sendingNetworkId: null,
-    }),
-    null
+  assert.throws(
+    () =>
+      auditableAssociationOrg({
+        type: "church_to_network",
+        targetChurchId: PLANT,
+        targetSendingChurchId: null,
+        sendingChurchId: SENDING_CHURCH,
+        sendingNetworkId: null,
+      }),
+    InvitationError,
+    "a church-to-network row with no network id must refuse, not audit nothing"
+  );
+});
+
+test("a type outside the union REFUSES rather than auditing nothing", () => {
+  // Swept 2026-08-13 (#411). `auditableAssociationOrg` was the one switch on
+  // `type` in `core.ts` with no `default:` — three cases, which TypeScript
+  // treats as exhaustive, so the function fell off the end and returned
+  // `undefined`.
+  //
+  // A `default:` that returns `null` would NOT have fixed that, and this test
+  // exists to pin the difference: while `acceptInvitationAs` branched on
+  // truthiness, `undefined` and `null` reached the batch identically — three
+  // statements instead of four, an association committed with no
+  // `association_events` row behind it, which is exactly what #274 / OV-008
+  // forbids. Round 2 of the sweep deleted the branch and the nullable return
+  // together, so no answer but a subject exists at all. Only a THROW refuses,
+  // and it is the same arm every
+  // other mutation-guarding switch on `type` in that file already takes
+  // (`insertInvitation`'s slot rule, `lockTargetRow`, `associationStatement`,
+  // the accept path, `verifyInvitationAuthority`). The `never` assignment beside
+  // it makes a FOURTH `OrganizationInvitationType` a compile error here; the
+  // throw is what covers the row that is already in the table.
+  //
+  // The cast is the point of the test: the column is a bare `varchar(40)` with a
+  // TypeScript-only `$type<>` cast and `insertInvitation` validates nothing, so
+  // a value outside the union is a database state, not an impossibility.
+  const rogue = {
+    type: "CHURCH_TO_NETWORK" as OrganizationInvitationType,
+    targetChurchId: PLANT,
+    targetSendingChurchId: null,
+    sendingChurchId: SENDING_CHURCH,
+    sendingNetworkId: NETWORK,
+  };
+
+  assert.throws(
+    () => auditableAssociationOrg(rogue),
+    InvitationError,
+    "a rogue type must refuse — returning null is the same three-statement batch as falling off the end of the switch"
   );
 });
 

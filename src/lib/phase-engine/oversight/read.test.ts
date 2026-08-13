@@ -24,10 +24,29 @@ function insight(severity: Sev): Pick<PlantInsight, "severity"> {
   return { severity };
 }
 
-function snapshotWithLaunch(daysUntilLaunch: number | null): PlantFactSnapshot {
-  // Only `launch.daysUntilLaunch` is read by the classifier; cast a minimal shape.
+/**
+ * A snapshot's launch block, built the way `buildLaunchSignals` builds it.
+ *
+ * `isPastDue` is DERIVED here rather than passed, because that is the whole
+ * point of the field: a launch recorded as `completed` is never past due,
+ * however long ago the day was. A fixture that set only `daysUntilLaunch` is
+ * what let the classifier read a negative countdown as "overdue" for the life of
+ * every plant that launched successfully.
+ */
+function snapshotWithLaunch(
+  daysUntilLaunch: number | null,
+  status: "planning" | "scheduled" | "postponed" | "completed" = "scheduled"
+): PlantFactSnapshot {
   return {
-    launch: { daysUntilLaunch },
+    launch: {
+      daysUntilLaunch,
+      status,
+      isCompleted: status === "completed",
+      isPastDue:
+        daysUntilLaunch !== null &&
+        daysUntilLaunch < 0 &&
+        status !== "completed",
+    },
   } as unknown as PlantFactSnapshot;
 }
 
@@ -78,6 +97,50 @@ test("readiness when launch is within the window even with no insights", () => {
 
 test("readiness when launch is past due", () => {
   assert.equal(classifyPlantHealth([], snapshotWithLaunch(-5)), "readiness");
+});
+
+test("a COMPLETED launch is not past due, however long ago it was", () => {
+  // The bug this pins: the classifier thresholded `daysUntilLaunch <= 30` with
+  // no lower bound, so a plant that launched successfully sat in `readiness` on
+  // the oversight portfolio forever — the exact failure `buildLaunchSignals`
+  // excludes completed launches from `isPastDue` to prevent.
+  assert.equal(
+    classifyPlantHealth([], snapshotWithLaunch(-5, "completed")),
+    "on-track"
+  );
+  assert.equal(
+    classifyPlantHealth([], snapshotWithLaunch(-730, "completed")),
+    "on-track"
+  );
+});
+
+test("a completed launch still escalates on the judge's own severities", () => {
+  // The launch fact goes quiet; nothing else does. A high-severity network
+  // observation about a launched plant is still a readiness conversation.
+  assert.equal(
+    classifyPlantHealth(
+      [insight("high")],
+      snapshotWithLaunch(-30, "completed")
+    ),
+    "readiness"
+  );
+  assert.equal(
+    classifyPlantHealth(
+      [insight("medium")],
+      snapshotWithLaunch(-30, "completed")
+    ),
+    "watch"
+  );
+});
+
+test("a snapshot too old to carry isPastDue does not fabricate one", () => {
+  // `launch.isPastDue` is the ONE field consulted for "behind us". A stored
+  // snapshot that predates it reports no overdue launch rather than having one
+  // re-derived from the countdown, which is how the bug above was written.
+  const legacy = {
+    launch: { daysUntilLaunch: -5 },
+  } as unknown as PlantFactSnapshot;
+  assert.equal(classifyPlantHealth([], legacy), "on-track");
 });
 
 test("launch just outside the window does not force readiness", () => {
