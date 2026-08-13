@@ -14,6 +14,7 @@ import {
   getWikiNavigation,
   preferChurchOverride,
 } from "./get-articles";
+import { searchArticles } from "./search";
 import type { ArticleNavItem, NavGroup } from "./types";
 
 // ----------------------------------------------------------------------------
@@ -244,5 +245,161 @@ test("a church-scoped article reaches its own church and no other", async (t: Te
     await db
       .delete(churches)
       .where(inArray(churches.id, [churchA.id, churchB.id]));
+  }
+});
+
+// ----------------------------------------------------------------------------
+// The override rule on the RANKED read (#411 round 2).
+//
+// The list reads above collapse (slug, church_id) pairs in JS because they read
+// the whole visible corpus. Search does not: it reads the top N by `ts_rank`,
+// so a JS collapse only ever sees rows that survived the cut, and the church's
+// copy of a slug is not guaranteed to be among them — a rewritten copy may not
+// match the tsquery at all. The failure that leaves is precisely the one #411
+// set out to close: the result row and the article the click opens are two
+// different documents.
+//
+// It cannot be observed with `.toSQL()` — the predicate SHAPE was right the
+// whole time — so it is asserted here, against rows. This test FAILED before
+// the override moved into the statement (observed 2026-08-13: the search row
+// read "Elders and Deacons", the opened article read "Our Leadership Team").
+// ----------------------------------------------------------------------------
+
+test("a search result is always the document the click opens (#411)", async (t: TestContext) => {
+  if (!(await databaseReachable())) {
+    return t.skip(
+      "SKIPPED — the live search-override assertions did NOT run. No reachable DATABASE_URL (this is the case on CI). Run in a worktree with .env.local linked: scripts/worktree-env.sh"
+    );
+  }
+
+  const prefix = `__t411-${randomUUID().slice(0, 8)}`;
+  const [church] = await db
+    .insert(churches)
+    .values([{ name: `${prefix} A` }])
+    .returning();
+
+  /** What the wiki detail route resolves a slug to, for this reader. */
+  const opens = async (slug: string) =>
+    preferChurchOverride(await articleBySlugQuery(slug, church.id))[0] ?? null;
+
+  try {
+    const rewritten = `${prefix}/rewritten`;
+    const kept = `${prefix}/kept`;
+
+    await db.insert(wikiArticles).values([
+      {
+        // The church REWROTE this one, so its copy does not contain the word
+        // the reader searches for and never matches the tsquery.
+        ...seedArticle(rewritten, null, `${prefix} Elders and Deacons`),
+        content: `${prefix} elders elders deacons qualifications`,
+      },
+      {
+        ...seedArticle(rewritten, church.id, `${prefix} Our Leadership Team`),
+        content: `${prefix} our leadership team shepherds the flock`,
+      },
+      {
+        // This one the church kept close to the original, so BOTH rows match.
+        ...seedArticle(kept, null, `${prefix} Elders global`),
+        content: `${prefix} elders global text`,
+      },
+      {
+        ...seedArticle(kept, church.id, `${prefix} Elders ours`),
+        content: `${prefix} elders our own text`,
+      },
+    ]);
+
+    const results = await searchArticles(`${prefix} elders`, church.id);
+    const rows = results.filter((result) =>
+      result.slug.startsWith(`${prefix}/`)
+    );
+
+    // 1. The overridden-and-rewritten slug: the global row must NOT be offered.
+    //    Showing it is the two-documents bug — its title advertises an article
+    //    that no click can reach.
+    assert.deepEqual(
+      rows.filter((row) => row.slug === rewritten).map((row) => row.title),
+      [],
+      "search offered the GLOBAL row of a slug this church overrides — the click opens the church's rewrite instead"
+    );
+    assert.equal(
+      (await opens(rewritten))?.title,
+      `${prefix} Our Leadership Team`,
+      "the church's copy is what that slug opens"
+    );
+
+    // 2. The overridden-and-still-matching slug: exactly one row, the church's.
+    const keptRows = rows.filter((row) => row.slug === kept);
+    assert.equal(keptRows.length, 1, "one slug must produce one result row");
+    assert.equal(keptRows[0].title, `${prefix} Elders ours`);
+    assert.equal(
+      keptRows[0].title,
+      (await opens(kept))?.title,
+      "the result row and the article the click opens must be one document"
+    );
+
+    // 3. The same corpus with no church is the global one, unsuppressed.
+    const globalRows = (await searchArticles(`${prefix} elders`, null))
+      .filter((result) => result.slug.startsWith(`${prefix}/`))
+      .map((result) => result.title)
+      .sort();
+    assert.deepEqual(
+      globalRows,
+      [`${prefix} Elders and Deacons`, `${prefix} Elders global`].sort(),
+      "a churchless reader searches the global corpus, where nothing is overridden"
+    );
+  } finally {
+    await db.delete(wikiArticles).where(like(wikiArticles.slug, `${prefix}/%`));
+    await db.delete(churches).where(inArray(churches.id, [church.id]));
+  }
+});
+
+test("a DRAFT church copy does not suppress the global article it replaces (#411)", async (t: TestContext) => {
+  if (!(await databaseReachable())) {
+    return t.skip(
+      "SKIPPED — the live search-override assertions did NOT run. No reachable DATABASE_URL (this is the case on CI). Run in a worktree with .env.local linked: scripts/worktree-env.sh"
+    );
+  }
+
+  // The suppressing subquery carries `status = 'published'` for the same reason
+  // `articleBySlugQuery` does. Without that term a church drafting its own copy
+  // would delete the global article from its own search results while the
+  // detail route still opened it — the same disagreement, other direction.
+  const prefix = `__t411d-${randomUUID().slice(0, 8)}`;
+  const [church] = await db
+    .insert(churches)
+    .values([{ name: `${prefix} A` }])
+    .returning();
+
+  try {
+    const slug = `${prefix}/drafting`;
+    await db.insert(wikiArticles).values([
+      {
+        ...seedArticle(slug, null, `${prefix} Elders global`),
+        content: `${prefix} elders global text`,
+      },
+      {
+        ...seedArticle(slug, church.id, `${prefix} Elders draft`),
+        content: `${prefix} elders draft text`,
+        status: "draft" as const,
+      },
+    ]);
+
+    const titles = (await searchArticles(`${prefix} elders`, church.id))
+      .filter((result) => result.slug === slug)
+      .map((result) => result.title);
+
+    assert.deepEqual(
+      titles,
+      [`${prefix} Elders global`],
+      "an unpublished church copy hid the global article from search while the detail route still opened it"
+    );
+    assert.equal(
+      preferChurchOverride(await articleBySlugQuery(slug, church.id))[0]?.title,
+      `${prefix} Elders global`,
+      "the detail route opens the global article while the church's copy is a draft"
+    );
+  } finally {
+    await db.delete(wikiArticles).where(like(wikiArticles.slug, `${prefix}/%`));
+    await db.delete(churches).where(inArray(churches.id, [church.id]));
   }
 });

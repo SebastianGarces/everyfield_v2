@@ -4,13 +4,14 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { type WikiArticle } from "@/db/schema";
+import { codeOf } from "@/lib/auth/server-action-surface";
 
 import {
   articleBySlugQuery,
   preferChurchOverride,
   visibleArticlesQuery,
 } from "./get-articles";
-import { searchArticlesQuery } from "./search";
+import { searchArticlesQuery, type SearchResult } from "./search";
 
 // ----------------------------------------------------------------------------
 // The multi-tenant boundary on the wiki read path (#317, from #16) — the half
@@ -135,6 +136,52 @@ test("the search read with no church narrows to global", () => {
   assert.doesNotMatch(text, CHURCH_EQUALITY);
 });
 
+test("search suppresses a global row this church overrides, IN THE STATEMENT (#411)", () => {
+  // The lists collapse (slug, church_id) pairs in JS because they read the
+  // whole visible corpus. A RANKED read does not: a JS collapse only sees the
+  // rows that survived the `ts_rank` cut, and the church's copy need not be
+  // among them — a rewritten copy may not match the tsquery at all. The global
+  // row then comes back alone with nothing to collapse it against, and the
+  // result row and the article the click opens are two different documents.
+  // Observed against a real database; the absence is asserted in
+  // `tenancy-live.test.ts`. What is asserted HERE is that the suppression is
+  // part of the statement, so it applies BEFORE the limit rather than after.
+  const { sql: text, params } = searchArticlesQuery("elders", CHURCH_A).toSQL();
+
+  assert.match(
+    text,
+    /not exists/i,
+    "search does not suppress the overridden global row in SQL — a JS collapse after the LIMIT cannot see a row the LIMIT dropped"
+  );
+  assert.match(
+    text,
+    /"override"\."church_id" = \$\d/,
+    "the suppressing subquery is not bound to a church"
+  );
+  assert.match(
+    text,
+    /"override"\."status" = \$\d/,
+    "the suppressing subquery must match `articleBySlugQuery` on status — a DRAFT church copy would otherwise hide a global article search can still open"
+  );
+  assert.ok(
+    params.includes(CHURCH_A),
+    "the reader's church is not bound to the suppressing subquery"
+  );
+  assert.ok(
+    !params.includes(CHURCH_B),
+    "another church's id reached the suppressing subquery"
+  );
+});
+
+test("a churchless search has nothing to suppress (#411)", () => {
+  // With no church there is no override, and a stray `NOT EXISTS` would only be
+  // a way to lose global rows.
+  const { sql: text } = searchArticlesQuery("elders", null).toSQL();
+
+  assert.doesNotMatch(text, /not exists/i);
+  assert.doesNotMatch(text, /"override"/);
+});
+
 test("every read still filters to published articles", () => {
   // Tenancy is not the only predicate on these paths, and an override that
   // dropped `status` would publish drafts to the church that wrote them.
@@ -178,21 +225,37 @@ test("a church's copy of a slug wins over the global article of that name", () =
   assert.equal(reversed[0].title, "Ours");
 });
 
-test("a search result set collapses the same way, keeping rank order (#411)", () => {
-  // The override rule is a property of the (slug, church_id) pair, not of the
-  // projection — so search reuses the ONE implementation rather than growing a
-  // second that could disagree with the lists about which row wins. A search
-  // row carries a rank and no content, which is why the function is generic.
-  const results = preferChurchOverride([
-    { slug: "discovery/values", churchId: null, title: "Global", rank: 0.9 },
-    { slug: "discovery/values", churchId: CHURCH_A, title: "Ours", rank: 0.4 },
-    { slug: "discovery/calling", churchId: null, title: "Calling", rank: 0.3 },
-  ]);
+test("search does not collapse in JS — it must not carry an owner column (#411)", () => {
+  // Round 1 of #411 gave search the SAME JS collapse the lists use. It is the
+  // wrong tool for a ranked read: the collapse runs after the `LIMIT`, so it
+  // only ever sees rows that survived the cut, and a church's copy that does
+  // not match the tsquery is never in that set. Search therefore suppresses the
+  // overridden row in the STATEMENT (asserted above), and the projection has no
+  // `church_id` in it — an owner column in a SEARCH RESULT exists only to feed
+  // a JS collapse, so its presence would mean the collapse came back.
+  const { sql: text } = searchArticlesQuery("elders", CHURCH_A).toSQL();
+  const projection = text.slice(0, text.search(/\bfrom\b/i));
 
-  assert.deepEqual(
-    results.map((result) => result.title),
-    ["Ours", "Calling"],
-    "the church's row must win, in the place its rank put the slug"
+  assert.doesNotMatch(
+    projection,
+    /"church_id"/,
+    "the search projection carries an owner column, which only a JS collapse needs"
+  );
+
+  const shape: SearchResult = {
+    id: "",
+    slug: "",
+    title: "",
+    excerpt: null,
+    phase: null,
+    contentType: "reference",
+    sectionId: null,
+    readTimeMinutes: null,
+    rank: 0,
+  };
+  assert.ok(
+    !("churchId" in shape),
+    "which church owns a result is not part of the result"
   );
 });
 
@@ -281,16 +344,44 @@ test("no wiki read is called without a church", () => {
 });
 
 test("the search action passes the session's church, never the query alone", () => {
-  const source = readRepoFile("src/app/(dashboard)/wiki/actions.ts");
+  // CODE, not source: the module explains the rule by naming the shape it
+  // forbids, and `codeOf` is the repo's comment stripper — the same one
+  // `server-action-surface.test.ts` walks every action module with.
+  const code = codeOf(
+    path.join(process.cwd(), "src/app/(dashboard)/wiki/actions.ts")
+  );
 
   assert.doesNotMatch(
-    source,
+    code,
     UNSCOPED_SEARCH,
     "the search action searches without a church — a church's own articles become unfindable (#411)"
   );
   assert.match(
-    source,
-    /getCurrentSession\(\)/,
+    code,
+    /const \{ user \} = await verifySession\(\);/,
     "the church a search is scoped to must be read off the session, not taken as an argument"
+  );
+
+  // SESSION FIRST, and above the `try` (`memory/invariants.md` →
+  // Authentication). `src/proxy.ts` redirects unauthenticated callers on GET
+  // only, so this export is POST-reachable with no session cookie; minting
+  // inside the `try` would hand an anonymous caller the global corpus, and
+  // minting below the guards would answer a malformed argument differently
+  // from a well-formed one (#411).
+  const body = code.slice(code.indexOf("export async function"));
+  const mint = body.indexOf("await verifySession()");
+  assert.ok(mint !== -1, "the search action never mints an actor");
+  assert.ok(
+    mint < body.indexOf("try {"),
+    "the mint sits inside the try, so a sessionless POST is answered with results instead of a throw"
+  );
+  assert.ok(
+    mint < body.indexOf("if ("),
+    "a guard runs before the mint, so an anonymous caller can tell argument shapes apart"
+  );
+  assert.doesNotMatch(
+    code,
+    /getCurrentSession\(\)/,
+    "getCurrentSession() tolerates no session — the search endpoint requires one"
   );
 });

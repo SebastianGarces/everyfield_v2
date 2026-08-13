@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
@@ -19,13 +19,20 @@ import {
 // (`write-paths.test.ts`), which is what turns these rules into something a test
 // can see rather than something a regex over the source can guess at.
 //
-// The rule all three carry is one line of `memory/invariants.md` → Transactions
-// / Atomicity: "SELECT-then-INSERT is not a concurrency guard. Make duplicates
-// impossible with a (partial) unique index, keeping that row in the SAME INSERT
-// as the rows it speaks for." Both tables have that index —
+// The rule the INSERTs carry is one line of `memory/invariants.md` →
+// Transactions / Atomicity: "SELECT-then-INSERT is not a concurrency guard. Make
+// duplicates impossible with a (partial) unique index, keeping that row in the
+// SAME INSERT as the rows it speaks for." Both tables have that index —
 // `wiki_progress_user_article_idx` and `wiki_bookmarks_user_article_idx` — so
-// every statement below is ONE conflict-safe INSERT and never a read followed
+// every insert below is ONE conflict-safe statement and never a read followed
 // by a write.
+//
+// EVERY write means every write, DELETEs included (#411 round 2). The module and
+// its test both said "every wiki write path" while the bookmark DELETEs sat
+// outside in `bookmarks.ts`, so the completeness assertion enforced less than it
+// claimed — and one of those deletes was the reason `toggleBookmark` still
+// opened with a SELECT. `bookmarkDeleteQuery` RETURNS the rows it removed, so
+// the toggle's direction comes from the write itself and the read is gone.
 // ============================================================================
 
 /** The fields a progress save may carry. Absent means "leave it alone". */
@@ -127,4 +134,26 @@ export function bookmarkInsertQuery(userId: string, slug: string) {
       articleSlug: slug,
     })
     .onConflictDoNothing();
+}
+
+/**
+ * Removing a bookmark: one delete, keyed the way the unique index is.
+ *
+ * It RETURNS the ids it removed, which is what lets `toggleBookmark` decide the
+ * toggle's direction from the write instead of from a SELECT one statement
+ * earlier: an empty return means there was no bookmark, so the press is an add.
+ * Two presses in the same instant then resolve as delete-then-insert rather than
+ * both reading "bookmarked" and both deleting.
+ *
+ * Keyed on (user_id, article_slug) rather than on an id read elsewhere — the
+ * same pair `wiki_bookmarks_user_article_idx` is unique on, so at most one row
+ * can match and the statement needs nothing to have been read first.
+ */
+export function bookmarkDeleteQuery(userId: string, slug: string) {
+  return db
+    .delete(wikiBookmarks)
+    .where(
+      and(eq(wikiBookmarks.userId, userId), eq(wikiBookmarks.articleSlug, slug))
+    )
+    .returning({ id: wikiBookmarks.id });
 }

@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import { test } from "node:test";
+
+import { codeOf } from "@/lib/auth/server-action-surface";
 
 import * as writeQueries from "./write-queries";
 import {
+  bookmarkDeleteQuery,
   bookmarkInsertQuery,
   progressUpsertQuery,
   recordViewUpsertQuery,
@@ -55,6 +59,7 @@ const WRITE_PATHS = {
     progressUpsertQuery(USER, SLUG, { scrollPosition: 0.4 }, NOW),
   recordViewUpsertQuery: () => recordViewUpsertQuery(USER, SLUG, NOW),
   bookmarkInsertQuery: () => bookmarkInsertQuery(USER, SLUG),
+  bookmarkDeleteQuery: () => bookmarkDeleteQuery(USER, SLUG),
 } satisfies Record<
   keyof typeof writeQueries,
   () => { toSQL(): { sql: string } }
@@ -63,7 +68,7 @@ const WRITE_PATHS = {
 /** `on conflict … do update` or `on conflict … do nothing` — either is a guard. */
 const CONFLICT_GUARDED = /on conflict[\s\S]*?do (update|nothing)/i;
 
-test("every wiki write is one conflict-safe INSERT", () => {
+test("every wiki write is ONE statement, and every INSERT is conflict-safe", () => {
   // The list is checked at RUNTIME as well as by `satisfies`: a builder added
   // to `write-queries.ts` and not rendered here would otherwise be a write this
   // file never sees, which is how the previous source-regex guard went blind.
@@ -76,15 +81,54 @@ test("every wiki write is one conflict-safe INSERT", () => {
   for (const [name, build] of Object.entries(WRITE_PATHS)) {
     const { sql: text } = build().toSQL();
 
+    // A DELETE is a write too (#411 r2). What the rule is about is that ONE
+    // statement does the work — `^insert into` alone said so by accident, and
+    // said it by excluding the two bookmark deletes from the module rather than
+    // by proving anything about them.
     assert.match(
       text,
-      /^insert into/i,
-      `${name} is not a single INSERT — a read followed by a write is not a concurrency guard`
+      /^(insert into|delete from)/i,
+      `${name} is not a single statement — a read followed by a write is not a concurrency guard`
     );
-    assert.match(
-      text,
-      CONFLICT_GUARDED,
-      `${name} renders an INSERT with no ON CONFLICT clause: it dies on the unique index the moment two requests arrive together`
+
+    // ON CONFLICT is an INSERT's guard and only an INSERT's: a DELETE keyed on
+    // the unique pair cannot collide with itself, and requiring the clause of
+    // it would only invite one to be written that Postgres rejects.
+    if (/^insert into/i.test(text)) {
+      assert.match(
+        text,
+        CONFLICT_GUARDED,
+        `${name} renders an INSERT with no ON CONFLICT clause: it dies on the unique index the moment two requests arrive together`
+      );
+    }
+  }
+});
+
+/**
+ * The `"use server"` modules whose writes must all live in the seam.
+ *
+ * This is the assertion the previous version of this file could not make. The
+ * `satisfies` above only proves that everything IN `write-queries.ts` is
+ * rendered here; it says nothing about a statement written somewhere else, and
+ * for one round that was exactly the hole — `write-queries.ts` and this test
+ * both claimed "every wiki write path" while `bookmarks.ts` held two DELETEs of
+ * its own, one of them the reason `toggleBookmark` still opened with a SELECT.
+ *
+ * `codeOf` strips comments (the repo's own stripper, from
+ * `server-action-surface.ts`) so a module that NAMES the shape it forbids does
+ * not trip the check that forbids it.
+ */
+const WRITE_MODULES = ["src/lib/wiki/progress.ts", "src/lib/wiki/bookmarks.ts"];
+
+/** A statement built inline: `db.insert(`, `db.update(`, `db.delete(`. */
+const INLINE_WRITE = /db\s*\.\s*(insert|update|delete)\s*\(/;
+
+test("no wiki write is built outside the seam", () => {
+  for (const file of WRITE_MODULES) {
+    assert.doesNotMatch(
+      codeOf(path.join(process.cwd(), file)),
+      INLINE_WRITE,
+      `${file} builds a write statement inline, so it is a wiki write path this file never renders and never asserts (#411)`
     );
   }
 });
@@ -164,4 +208,24 @@ test("adding a bookmark twice is a no-op, not a unique violation", () => {
 
   assert.match(text, /insert into "wiki_bookmarks"/i);
   assert.match(text, /on conflict do nothing/i);
+});
+
+test("removing a bookmark is keyed on the pair and reports what it removed", () => {
+  // `toggleBookmark` branches on the RETURNING rows, which is what let its
+  // leading SELECT go: the direction of the toggle is decided by the write. A
+  // delete keyed on an id read a statement earlier would put that read back.
+  const { sql: text, params } = bookmarkDeleteQuery(USER, SLUG).toSQL();
+
+  assert.match(text, /^delete from "wiki_bookmarks"/i);
+  assert.match(
+    text,
+    /"user_id" = \$\d and "wiki_bookmarks"\."article_slug" = \$\d/i,
+    "the delete must be keyed on (user_id, article_slug) — the pair the unique index covers — not on an id read elsewhere"
+  );
+  assert.match(
+    text,
+    /returning "id"/i,
+    "without RETURNING, the toggle has to read before it writes to know which way it went"
+  );
+  assert.deepEqual(params, [USER, SLUG]);
 });

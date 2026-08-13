@@ -1,6 +1,6 @@
 "use server";
 
-import { getCurrentSession } from "@/lib/auth";
+import { verifySession } from "@/lib/auth";
 import { searchArticles, type SearchResult } from "@/lib/wiki";
 
 /**
@@ -11,12 +11,25 @@ import { searchArticles, type SearchResult } from "@/lib/wiki";
  * Authentication), and every export of a `"use server"` module is a public POST
  * endpoint — a caller-supplied church here would be a cross-tenant read.
  *
- * A reader with no session (or no church) searches the global corpus, which is
- * what `searchArticles` does with `null` (#411).
+ * IT MINTS FIRST, ABOVE THE GUARDS AND ABOVE THE `try` (#411 round 2). An
+ * earlier version read the session with `getCurrentSession()` INSIDE the try
+ * and served a sessionless caller the global corpus, on the reasoning that the
+ * global wiki is not secret. Two things make that the wrong call and neither is
+ * about the content: `src/proxy.ts` only redirects unauthenticated callers when
+ * `request.method === "GET"`, so a POST to /wiki with no session cookie reached
+ * this export directly — an anonymous, un-rate-limited full-text query endpoint
+ * over the corpus, with no UI in front of it. And the crawler allowance buys
+ * "the unauthenticated shell, never a session and never per-user data"; the
+ * shell renders `WikiSearchTrigger`, a client dialog that calls this only from
+ * a keystroke handler, so no render path — crawler or otherwise — needs a
+ * sessionless answer. `verifySession()` throws `Unauthorized` above the `try`
+ * so that throw is not converted into an empty result list.
  */
 export async function searchWikiArticles(
   query: string
 ): Promise<SearchResult[]> {
+  const { user } = await verifySession();
+
   // Basic input validation
   if (!query || typeof query !== "string") {
     return [];
@@ -30,8 +43,7 @@ export async function searchWikiArticles(
   }
 
   try {
-    const { user } = await getCurrentSession();
-    return await searchArticles(sanitizedQuery, user?.churchId ?? null);
+    return await searchArticles(sanitizedQuery, user.churchId ?? null);
   } catch (error) {
     console.error("Wiki search error:", error);
     return [];

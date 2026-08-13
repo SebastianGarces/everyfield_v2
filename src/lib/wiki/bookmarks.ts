@@ -6,7 +6,7 @@ import { getCurrentSession } from "@/lib/auth";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getArticle } from "./get-article";
-import { bookmarkInsertQuery } from "./write-queries";
+import { bookmarkDeleteQuery, bookmarkInsertQuery } from "./write-queries";
 
 /**
  * Check if an article is bookmarked by the current user
@@ -99,6 +99,13 @@ export async function getBookmarks(limit: number = 10) {
 /**
  * Toggle bookmark for an article
  * Returns the new bookmarked state
+ *
+ * The DIRECTION comes from the write, not from a read (#411): the delete runs
+ * first and reports the rows it removed, so "there was a bookmark" is something
+ * Postgres decided at write time. The previous shape opened with a SELECT and
+ * branched on it, which meant two presses in the same instant could both read
+ * "bookmarked" and both delete — the star ended up off after an even number of
+ * presses that should have left it on.
  */
 export async function toggleBookmark(slug: string): Promise<boolean> {
   const session = await getCurrentSession();
@@ -106,33 +113,19 @@ export async function toggleBookmark(slug: string): Promise<boolean> {
     throw new Error("Unauthorized");
   }
 
-  // Check if already bookmarked
-  const [existing] = await db
-    .select({ id: wikiBookmarks.id })
-    .from(wikiBookmarks)
-    .where(
-      and(
-        eq(wikiBookmarks.userId, session.user.id),
-        eq(wikiBookmarks.articleSlug, slug)
-      )
-    )
-    .limit(1);
+  const removed = await bookmarkDeleteQuery(session.user.id, slug);
 
-  if (existing) {
-    // Remove bookmark
-    await db.delete(wikiBookmarks).where(eq(wikiBookmarks.id, existing.id));
+  if (removed.length > 0) {
     revalidatePath("/wiki", "layout");
     return false;
-  } else {
-    // Add the bookmark. The SELECT above chooses the DIRECTION of the toggle;
-    // it is not a concurrency guard, and the statement does not rely on it —
-    // `bookmarkInsertQuery` tolerates the row already being there, so two
-    // clicks of the star in the same instant cannot die on the unique index
-    // (#411).
-    await bookmarkInsertQuery(session.user.id, slug);
-    revalidatePath("/wiki", "layout");
-    return true;
   }
+
+  // Nothing to remove, so the press adds. `bookmarkInsertQuery` tolerates the
+  // row already being there, so a press that raced another press's insert is a
+  // no-op rather than a unique-index violation thrown at the reader.
+  await bookmarkInsertQuery(session.user.id, slug);
+  revalidatePath("/wiki", "layout");
+  return true;
 }
 
 /**
@@ -158,14 +151,7 @@ export async function removeBookmark(slug: string): Promise<void> {
     throw new Error("Unauthorized");
   }
 
-  await db
-    .delete(wikiBookmarks)
-    .where(
-      and(
-        eq(wikiBookmarks.userId, session.user.id),
-        eq(wikiBookmarks.articleSlug, slug)
-      )
-    );
+  await bookmarkDeleteQuery(session.user.id, slug);
 
   revalidatePath("/wiki", "layout");
 }
