@@ -59,16 +59,16 @@ function phaseLabel(phase: number): string {
 }
 
 interface PhaseControlProps {
-  churchId: string;
   currentPhase: number;
   readiness: PhaseReadiness;
 }
 
-export function PhaseControl({
-  churchId,
-  currentPhase,
-  readiness,
-}: PhaseControlProps) {
+/**
+ * No `churchId` prop, and that is the point: the action mints the plant from the
+ * session (memory/invariants.md → Authentication), so this island cannot name a
+ * plant at all.
+ */
+export function PhaseControl({ currentPhase, readiness }: PhaseControlProps) {
   const [targetPhase, setTargetPhase] = useState<number>(currentPhase);
   const [reason, setReason] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -90,7 +90,6 @@ export function PhaseControl({
 
     startTransition(async () => {
       const result = await transitionPhaseAction({
-        churchId,
         toPhase: targetPhase,
         reason: reason.trim(),
       });

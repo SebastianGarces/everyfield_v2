@@ -250,12 +250,14 @@ test("ineligibility is stated in the matrix's own order", () => {
   // order would make a row-by-row comparison in review harder than it needs to
   // be, and would make "the first ineligible row" mean two different things.
   const ineligible = ineligibleCategoriesForAudience("oversight");
-  const positions = ineligible.map((category) =>
-    notificationCategories.indexOf(category)
-  );
+
+  // Compared against the matrix's own order rather than against a sorted copy
+  // of positions: this says WHICH order is meant, and it needs no `indexOf` —
+  // a category the matrix no longer holds drops out of the filter and fails
+  // here, where a position of -1 would have sorted to the front and passed.
   assert.deepEqual(
-    positions,
-    [...positions].sort((a, b) => a - b)
+    ineligible,
+    notificationCategories.filter((category) => ineligible.includes(category))
   );
 });
 

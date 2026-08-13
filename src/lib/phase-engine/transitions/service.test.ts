@@ -19,6 +19,8 @@ import {
   transitionPhaseSchema,
   TRANSITION_KIND,
 } from "./service";
+import { assertBatchedWrites } from "@/lib/testing/db-atomicity";
+import { sourceReader } from "@/lib/testing/source-span";
 import type { PlantFactSnapshot } from "@/lib/phase-engine/signals";
 
 // ----------------------------------------------------------------------------
@@ -620,4 +622,77 @@ test("a declared stage must be a real phase", () => {
       false
     );
   }
+});
+
+// ---------------------------------------------------------------------------
+// Atomicity — the audit row and the phase move are ONE batched transaction.
+//
+// Source-shaped, because the subject is a DB write this process cannot execute.
+// Anchored on DECLARATIONS through `sourceReader`, so a moved anchor throws
+// instead of silently widening the span to the whole module
+// (memory/invariants.md → Multi-Tenancy, the source-span rule).
+// ---------------------------------------------------------------------------
+
+test("transitionPhase writes the audit row and the phase move in one db.batch", () => {
+  const source = readFileSync(
+    join(process.cwd(), "src/lib/phase-engine/transitions/service.ts"),
+    "utf8"
+  );
+  const body = sourceReader(source, "transitions/service.ts").span(
+    "export async function transitionPhase(",
+    "export function declareInitialPhaseStatement("
+  );
+
+  // ONE implementation of the three assertions (src/lib/testing/db-atomicity.ts)
+  // — this file and `signals/attestation-service.test.ts` shipped the same
+  // regexes twice, and a regex widened in one copy leaves the other checking a
+  // narrower rule on the module it guards. `buildFactSnapshot` is a READ and
+  // stays above the batch, which the helper allows on purpose.
+  assertBatchedWrites(body, "transitionPhase");
+});
+
+// ---------------------------------------------------------------------------
+// The "use server" surface — the plant is the SESSION's, never an argument.
+//
+// Every export of a `"use server"` module is a public POST endpoint, and an
+// entity implied by the actor is not an argument (memory/invariants.md →
+// Authentication). `/phase`'s action module therefore exposes exactly ONE
+// endpoint — the write the UI makes — and that endpoint names no church.
+// ---------------------------------------------------------------------------
+
+test("the /phase action module exposes one endpoint and it takes no churchId", () => {
+  const source = readFileSync(
+    join(process.cwd(), "src/app/(dashboard)/phase/actions.ts"),
+    "utf8"
+  );
+
+  const exportedFunctions = [
+    ...source.matchAll(/export async function (\w+)/g),
+  ].map((match) => match[1]);
+  assert.deepEqual(
+    exportedFunctions,
+    ["transitionPhaseAction"],
+    "a new export here is a new public POST endpoint — a read belongs in a sibling module with no directive"
+  );
+
+  const body = sourceReader(source, "phase/actions.ts").after(
+    "export async function transitionPhaseAction("
+  );
+  assert.match(
+    body,
+    /const churchId = user\.churchId;/,
+    "the plant is minted from the session"
+  );
+  assert.equal(
+    /input\.churchId/.test(body),
+    false,
+    "the caller must not be able to name the plant"
+  );
+
+  // The input shape itself carries no plant.
+  const input = sourceReader(source, "phase/actions.ts").span(
+    "export interface TransitionPhaseActionInput {",
+    "export async function transitionPhaseAction("
+  );
+  assert.equal(/churchId/.test(input), false);
 });

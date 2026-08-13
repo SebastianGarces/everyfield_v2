@@ -4,7 +4,10 @@ import { test } from "node:test";
 import type { NotificationPreference } from "@/db/schema";
 
 import type { NotificationCategory } from "../categories";
-import { preferenceOwnerFromUnsubscribeToken } from "../preferences";
+import {
+  preferenceOwnerFromUnsubscribeToken,
+  resolvePreference,
+} from "../preferences";
 import {
   applyEmailOptIn,
   applyEmailOptOut,
@@ -561,4 +564,40 @@ test("an unconfigured environment refuses the token instead of throwing at the p
     assert.ok(result.status === "rejected");
     assert.equal(result.reason, "malformed");
   }
+});
+
+test("the undo records a value the resolver treats as INHERITED, not as a choice", () => {
+  // The corrected claim from this module's header (#411 sweep). The undo writes
+  // `enabled: true`, which EQUALS the coded default for every category's email
+  // channel — and `preferenceValueIsInheritable` (#237) resolves such a row as
+  // `source: "default"`, because a row that restates the default says nothing.
+  //
+  // So the header's old promise — "only the explicit write is guaranteed to be
+  // [on]; a category whose default was later reconsidered would make a
+  // delete-based undo silently do nothing" — is false of the explicit write
+  // too. Pinned as it BEHAVES, so a ruling that changes which rule wins fails
+  // here and forces the comment to move with it.
+  const resolved = resolvePreference(
+    [preferenceRow("tasks", true)],
+    "tasks",
+    "email"
+  );
+
+  assert.equal(resolved.enabled, true);
+  assert.equal(
+    resolved.source,
+    "default",
+    "an undo that agrees with the coded default is inherited, not explicit"
+  );
+
+  // The opt-OUT is the asymmetric half and is genuinely explicit — it disagrees
+  // with the default, so it is honoured as the choice it is and is never
+  // re-defaulted back on. That half of the module's promise is intact.
+  const optedOut = resolvePreference(
+    [preferenceRow("tasks", false)],
+    "tasks",
+    "email"
+  );
+  assert.equal(optedOut.enabled, false);
+  assert.equal(optedOut.source, "explicit");
 });

@@ -11,7 +11,7 @@
 // ============================================================================
 
 import { Loader2, MessageSquare, ThumbsDown, ThumbsUp } from "lucide-react";
-import { useState, useTransition } from "react";
+import { useOptimistic, useState, useTransition } from "react";
 import { toast } from "sonner";
 
 import { submitInsightFeedbackAction } from "@/app/(dashboard)/phase/feedback-actions";
@@ -33,19 +33,23 @@ export function InsightFeedback({
   initialRating = null,
   initialComment = null,
 }: InsightFeedbackProps) {
-  const [rating, setRating] = useState<InsightFeedbackRating | null>(
-    initialRating
-  );
+  // The RATING is server data, so it is `useOptimistic` over the prop rather
+  // than `useState` seeded from it (memory/invariants.md → Client/Server Data
+  // Synchronization). The action calls `revalidatePath("/phase")`; with local
+  // state this component ignored the value that came back, and it carried a
+  // hand-rolled rollback that `useOptimistic` gives for free.
+  const [rating, setOptimisticRating] = useOptimistic(initialRating);
+  // The COMMENT is different and legitimately stays local: it is a DRAFT the
+  // planter is typing, not a mirror of a server field. `initialComment` seeds it
+  // once, exactly as any edit form seeds an input.
   const [comment, setComment] = useState(initialComment ?? "");
   const [showComment, setShowComment] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   function submit(nextRating: InsightFeedbackRating, nextComment: string) {
-    const previousRating = rating;
-    // Optimistic: reflect the choice immediately.
-    setRating(nextRating);
-
     startTransition(async () => {
+      setOptimisticRating(nextRating);
+
       const result = await submitInsightFeedbackAction({
         insightId,
         rating: nextRating,
@@ -53,7 +57,8 @@ export function InsightFeedback({
       });
 
       if (!result.success) {
-        setRating(previousRating);
+        // Nothing to roll back — the optimistic rating reverts to the prop when
+        // this transition settles.
         toast.error(result.error);
         return;
       }

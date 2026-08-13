@@ -5,30 +5,42 @@ import { revalidatePath } from "next/cache";
 import { requireChurchAccess, requireRole } from "@/lib/auth/access";
 import { verifySession } from "@/lib/auth/session";
 import {
-  getPhaseReadiness,
   transitionPhase,
   transitionPhaseSchema,
-  type PhaseReadiness,
   type TransitionResult,
 } from "@/lib/phase-engine/transitions";
 import type { ActionResult } from "@/lib/people/types";
 
 // ============================================================================
-// Phase control server actions (PE-001/002/003/015).
+// Phase control server actions (PE-001/002/003).
 //
-// The "use server" boundary for soft-gated phase control. Every action:
+// THIS MODULE'S EXPORT LIST IS ITS AUTH SURFACE — every export is a public POST
+// endpoint reachable with no session and no UI (memory/invariants.md →
+// Authentication). It therefore holds exactly ONE export, the write the UI
+// makes. Readiness (PE-015) is a READ with no caller here: `/phase` calls
+// `getPhaseReadiness` directly from the server component, so it needs no
+// endpoint of its own and no longer has one.
+//
+// The one action:
 //   - verifies the session (throws → "Unauthorized"),
 //   - enforces the PLANTER role (only the planter controls their plant's phase),
+//   - takes the PLANT FROM THE SESSION, never from the caller,
 //   - enforces church_id scope via `requireChurchAccess`.
 //
 // The transition itself is never blocked on readiness (PE-001) — readiness is
-// surfaced separately, advisory only, via `getPhaseReadinessAction`.
+// surfaced separately, advisory only, on `/phase`.
 // ============================================================================
 
-/** Input for a phase transition from the UI. */
+/**
+ * Input for a phase transition from the UI.
+ *
+ * NO `churchId`. A planter's plant is implied by the actor, and an entity
+ * implied by the actor is not an argument (memory/invariants.md →
+ * Authentication). It used to be one, defended by `requireChurchAccess`, which
+ * made "can this caller move another plant?" a question about a downstream
+ * check rather than a shape the endpoint cannot express.
+ */
 export interface TransitionPhaseActionInput {
-  /** The plant whose phase is changing. */
-  churchId: string;
   /** Target phase (0–6). Forward, backward, or skip — all allowed. */
   toPhase: number;
   /** Required free-text justification for the change (PE-002). */
@@ -51,8 +63,20 @@ export async function transitionPhaseAction(
     // Only the planter controls their plant's phase.
     requireRole(user, "planter");
 
-    // Tenant scope: the planter must have access to the target church.
-    await requireChurchAccess(user, input.churchId);
+    // The plant is the session's, not the caller's. A planter with no church
+    // has nothing to move.
+    const churchId = user.churchId;
+    if (!churchId) {
+      return {
+        success: false,
+        error: "You must be associated with a church plant to change the phase",
+      };
+    }
+
+    // Kept even though the id is now session-minted: `requireChurchAccess` is
+    // the one place the role→church rule lives, and asking it here means this
+    // endpoint does not carry a second, private copy of it.
+    await requireChurchAccess(user, churchId);
 
     const parsed = transitionPhaseSchema.safeParse({
       toPhase: input.toPhase,
@@ -70,7 +94,7 @@ export async function transitionPhaseAction(
       };
     }
 
-    const result = await transitionPhase(input.churchId, user.id, parsed.data);
+    const result = await transitionPhase(churchId, user.id, parsed.data);
 
     // Refresh any phase-aware surfaces.
     revalidatePath("/phase");
@@ -98,47 +122,6 @@ export async function transitionPhaseAction(
     return {
       success: false,
       error: "An unexpected error occurred while changing the phase",
-    };
-  }
-}
-
-/**
- * Read the advisory readiness state for a plant's current phase (PE-015).
- * Enforces planter role + church_id scope. Derived from the latest assessment;
- * never an LLM call. Surfaced in the phase-control UI.
- */
-export async function getPhaseReadinessAction(
-  churchId: string
-): Promise<ActionResult<PhaseReadiness>> {
-  try {
-    const { user } = await verifySession();
-
-    requireRole(user, "planter");
-    await requireChurchAccess(user, churchId);
-
-    const readiness = await getPhaseReadiness(churchId);
-    return { success: true, data: readiness };
-  } catch (error) {
-    console.error("getPhaseReadinessAction error:", error);
-
-    if (error instanceof Error) {
-      if (error.message === "Unauthorized") {
-        return {
-          success: false,
-          error: "You must be logged in to view phase readiness",
-        };
-      }
-      if (error.message.startsWith("Forbidden")) {
-        return {
-          success: false,
-          error: "You do not have permission to view this plant's readiness",
-        };
-      }
-    }
-
-    return {
-      success: false,
-      error: "An unexpected error occurred while reading phase readiness",
     };
   }
 }
