@@ -67,15 +67,26 @@ export interface PersonTeamAssignment {
  * where `status = 'active'` — is the guard; everything here is about which
  * sentence the planter reads.
  *
- * "IS THE SEAT FREE" IS ASKED TWICE, and the two are not interchangeable: once
- * up front for a legible refusal in the ordinary case, and once by the index as
- * the real guard (the same shape the invitation slot checks use,
- * `memory/invariants.md` → Multi-Tenancy). The pre-check alone was what this
- * function used to have — and worse, it only ever asked about THIS person, so
- * two planters filling one open seat with two different people both succeeded.
- * The loser's person ended up assigned, counted, absent from the roles tab and
- * unremovable, because that tab renders one occupant per role and the Remove
- * button belongs to whichever row the read picked.
+ * "IS THE SEAT FREE" IS ASKED ONCE, BY THE INDEX, and it is asked by attempting
+ * the write. There are exactly TWO refusals, one per write path, and both are
+ * post-write: the INSERT path carries `ON CONFLICT … DO NOTHING`, so a taken
+ * seat comes back with an empty `returning()` and that emptiness IS the
+ * refusal; the REACTIVATION path is an UPDATE, takes no `ON CONFLICT`, meets
+ * the index as a driver violation, and `membershipConflictMessage` translates
+ * that into the very same sentence. Both say `ROLE_ALREADY_FILLED_MESSAGE`.
+ *
+ * THERE IS NO PRE-FLIGHT "is anybody on this seat?" SELECT, and never re-add
+ * one. A SELECT-then-INSERT is not a concurrency guard (`memory/invariants.md`
+ * → Transactions), so it can only ever be a third copy of a rule the index
+ * already owns — and it costs a round trip on every assignment. It is also not
+ * inert: while it was here it ran for BOTH paths, so a reactivation onto an
+ * occupied seat was refused before the batch, the driver error never happened,
+ * and `role-seat-race.test.ts`'s third case passed while the translation it
+ * exists to prove was unreachable.
+ *
+ * The pre-check that STAYS is `existing.status === 'active'` below, and it is
+ * load-bearing: reactivating an already-active row UPDATEs that same row, which
+ * raises no violation at all, so nothing downstream would answer it.
  */
 export async function assignMember(
   churchId: string,
@@ -139,23 +150,6 @@ export async function assignMember(
   if (existing && existing.status === "active") {
     throw new ExpectedError(PERSON_ALREADY_ASSIGNED_MESSAGE);
   }
-
-  // The legible half of "is the seat free". It reads about EVERYBODY, not just
-  // this person — that is the check the old code never had. It is not a
-  // concurrency guard and is not treated as one: the index below is.
-  const [occupant] = await db
-    .select({ id: teamMemberships.id })
-    .from(teamMemberships)
-    .where(
-      and(
-        eq(teamMemberships.churchId, churchId),
-        eq(teamMemberships.roleId, roleId),
-        eq(teamMemberships.status, "active")
-      )
-    )
-    .limit(1);
-
-  if (occupant) throw new ExpectedError(ROLE_ALREADY_FILLED_MESSAGE);
 
   // The membership write and the role's status flip are both known up front,
   // so they ship as ONE db.batch — a Neon batched transaction, all-or-nothing
