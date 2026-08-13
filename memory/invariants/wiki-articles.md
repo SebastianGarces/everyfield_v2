@@ -97,6 +97,41 @@ type View =
 
 Four mutually exclusive arms, no guard repeating another's negation, and settling a request is ONE `setView` — so neither outcome can leave the spinner up, and "No articles found." is a property of the `"results"` arm rather than a negation a future guard has to remember. The round-3 tests reached for source-text regexes (`/!isSearching &&\s+isUnavailable/`, and a span between two literal strings) to assert what is now a type-level fact; what remains on the source is the arm shape and the one-assignment settle.
 
+### One live region, because a mounted-per-arm region announces nothing (round 5)
+
+Holding the union fixed the render and left one thing half-done: the round-4 dialog put `role="status"` on three of the arms themselves. A live region is announced only when text changes **inside a region the assistive technology was already observing**; the arms are mutually exclusive, so every transition detached one region and mounted another — a mount, never an update — and the results arm carried no region at all, which left the dialog with no live region whatsoever once rows rendered. Proven on the preview: `sameNodeBeforeDuring: false` across the idle→searching transition, and `[role="status"]` counting 0 with no other `aria-live` anywhere in the dialog once results landed.
+
+So the message the whole round-3/4 chain exists to produce — "Search is unavailable" — could never be announced to a screen-reader user. The fix is the same reframing one level down: **one region, mounted for the life of `CommandList`, whose TEXT is a function of `view`** (`announcementFor`, exhaustive over the union), and the arms below it are purely presentational. What varies with the state is the sentence, not whether a region exists. `search-request.test.ts` counts `role="status"` inside the list (exactly one), asserts that region's body names no `view.kind`, and asserts it renders `announcementFor(view)`.
+
+## Writes: named columns only, because the patch is a POST body (#411 round 5)
+
+`progress.ts` and `bookmarks.ts` are `"use server"` modules, so `updateProgress(slug, data)` is a public POST endpoint and `data` is whatever the request body held — a TypeScript parameter type constrains a forged body not at all (`../invariants.md` → Multi-Tenancy states this rule for invitations; it is the same rule here).
+
+`progressUpsertQuery` spread that object into its `onConflictDoUpdate` SET:
+
+```ts
+set: { ...patch, lastViewedAt: now, updatedAt: now, ...completedAt }
+```
+
+Rendered with a hostile patch, that is mass assignment, not a hypothetical one:
+
+```
+progressUpsertQuery("<me>", "discovery/values", { userId: "<victim>" }, now).toSQL()
+→ … on conflict ("user_id","article_slug") do update set "user_id" = $6, … 
+  params: [ …, "<victim>", … ]
+```
+
+`user_id` is the row's owner. Any column of `wiki_progress` was reachable the same way. The SET is now built field by field from the two the caller is entitled to set:
+
+```ts
+const changes = {
+  ...(patch.status !== undefined && { status: patch.status }),
+  ...(patch.scrollPosition !== undefined && { scrollPosition: patch.scrollPosition }),
+};
+```
+
+Which keeps the original property — "the conflicting write applies exactly the fields the caller passed", so a scroll save does not rewrite `status` — while making every other column unreachable **by construction** rather than by what a caller happens to send. `write-paths.test.ts` renders a patch carrying `userId` and `articleSlug` and asserts the DO UPDATE SET contains neither column. The seam is what made this findable at all: the statement lives in `write-queries.ts` with no directive, so `.toSQL()` shows what would reach the database.
+
 ## Slugs and paths: the two builders
 
 `wikiHref(slug)` builds every path that will be *parsed as a URL or compared against one*. `wikiRevalidationPath(slug)` builds the argument to `revalidatePath()` — and only that.

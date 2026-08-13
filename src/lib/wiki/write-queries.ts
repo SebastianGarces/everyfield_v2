@@ -48,6 +48,18 @@ export type ProgressPatch = {
  * what a SELECT-then-UPDATE did before: an intermediate scroll save must not
  * rewrite `status`, and marking an article complete must not reset the scroll
  * position it was read to.
+ *
+ * "Exactly the fields the caller passed" is built FIELD BY FIELD, never by
+ * spreading `patch` (#411 round 5). `patch` arrives from `updateProgress`, an
+ * export of the `"use server"` module `progress.ts` — a public POST endpoint,
+ * where a TypeScript parameter type constrains a forged body not at all
+ * (`memory/invariants.md` → Multi-Tenancy: "a TypeScript parameter constrains a
+ * forged body not at all"). While the SET was `{ ...patch, … }`, a body of
+ * `{ userId: "<victim>" }` rendered `do update set "user_id" = $6` with the
+ * caller's uuid bound to it: mass assignment that hands the row's owner column
+ * to whoever POSTs it. Naming the two writable columns makes every other column
+ * unreachable by construction rather than by what a caller happens to send, and
+ * `write-paths.test.ts` renders a hostile patch to keep it that way.
  */
 export function progressUpsertQuery(
   userId: string,
@@ -56,6 +68,13 @@ export function progressUpsertQuery(
   now: Date
 ) {
   const completedAt = patch.status === "completed" ? { completedAt: now } : {};
+
+  const changes = {
+    ...(patch.status !== undefined && { status: patch.status }),
+    ...(patch.scrollPosition !== undefined && {
+      scrollPosition: patch.scrollPosition,
+    }),
+  };
 
   return db
     .insert(wikiProgress)
@@ -70,7 +89,7 @@ export function progressUpsertQuery(
     .onConflictDoUpdate({
       target: [wikiProgress.userId, wikiProgress.articleSlug],
       set: {
-        ...patch,
+        ...changes,
         lastViewedAt: now,
         updatedAt: now,
         ...completedAt,

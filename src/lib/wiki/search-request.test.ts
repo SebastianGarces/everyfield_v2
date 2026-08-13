@@ -272,11 +272,63 @@ test("the dialog renders the unavailable outcome (#411)", () => {
   // `"results"` arm rather than a negation the empty-state guard must repeat.
   const emptyState = sourceReader(code, "wiki-search.tsx").span(
     "{SEARCH_UNAVAILABLE_MESSAGE}",
-    "No articles found."
+    "{NO_RESULTS_MESSAGE}"
   );
   assert.match(
     emptyState,
     /view\.kind === "results" &&\s*view\.rows\.length === 0/,
     '"No articles found." must belong to the arm where a search actually ran'
   );
+});
+
+test("the dialog has ONE live region, and it outlives every arm (#411)", () => {
+  // A live region is announced only when text changes INSIDE a region that was
+  // already in the DOM. The three `role="status"` arms this dialog used to
+  // carry were mutually exclusive, so every transition DETACHED one region and
+  // mounted another — never an update — and the results arm carried none at
+  // all, which left the dialog with no live region once rows rendered. The
+  // refusal message this whole path exists to make legible could therefore
+  // never be announced.
+  const code = codeOf(DIALOG);
+  const list = sourceReader(code, "wiki-search.tsx").span(
+    "<CommandList",
+    "</CommandList>"
+  );
+
+  const regions = list.match(/role="status"/g) ?? [];
+  assert.equal(
+    regions.length,
+    1,
+    "the dialog must hold exactly one live region: a per-arm region is mounted and unmounted rather than updated, so nothing is ever announced"
+  );
+
+  // And that one region must be UNCONDITIONAL — a region rendered behind a
+  // guard is the same mount/unmount failure with a smaller blast radius.
+  const region = sourceReader(list, "wiki-search.tsx").span(
+    '<div role="status"',
+    "</div>"
+  );
+  assert.doesNotMatch(
+    region,
+    /view\.kind/,
+    "the live region is rendered per-arm again; its TEXT is what varies with `view`, not whether it exists"
+  );
+  assert.match(
+    region,
+    /announcementFor\(view\)/,
+    "the live region must derive its sentence from the view union, so every outcome has one"
+  );
+
+  // Every arm of the union answers, so no outcome is silent. `announcementFor`
+  // is exhaustive by `switch` over the union; this pins the two that a reader
+  // can otherwise miss entirely.
+  const announcer = sourceReader(code, "wiki-search.tsx").span(
+    "function announcementFor",
+    "export function WikiSearch"
+  );
+  assert.match(
+    announcer,
+    /case "unavailable":\s*return SEARCH_UNAVAILABLE_MESSAGE;/
+  );
+  assert.match(announcer, /case "results":/);
 });

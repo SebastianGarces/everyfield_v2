@@ -141,6 +141,39 @@ test("a progress save conflicts on (user_id, article_slug)", () => {
   assert.match(text, /on conflict \("user_id","article_slug"\) do update/i);
 });
 
+test("a progress save cannot be made to write a column the caller named", () => {
+  // `updateProgress` (`progress.ts`) is an export of a `"use server"` module —
+  // a public POST endpoint — and it hands its `data` parameter straight to this
+  // builder. A TypeScript parameter type constrains a forged body not at all
+  // (`memory/invariants.md` → Multi-Tenancy), so a SET built by spreading that
+  // object is mass assignment: while it was `set: { ...patch, … }` this exact
+  // call rendered `do update set "user_id" = $6` with the hostile uuid bound to
+  // it, which rewrites who owns the progress row.
+  const hostile = {
+    userId: "99999999-9999-4999-8999-999999999999",
+    articleSlug: "someone/elses-article",
+    scrollPosition: 0.4,
+  } as unknown as Parameters<typeof progressUpsertQuery>[2];
+
+  const { sql: text } = progressUpsertQuery(USER, SLUG, hostile, NOW).toSQL();
+  const updateClause = text.slice(text.search(/do update/i));
+
+  assert.doesNotMatch(
+    updateClause,
+    /"user_id" =/,
+    "a caller-supplied field reached the DO UPDATE SET: a forged body can rewrite the row's owner"
+  );
+  assert.doesNotMatch(
+    updateClause,
+    /"article_slug" =/,
+    "a caller-supplied field reached the DO UPDATE SET: a forged body can re-point the row at another article"
+  );
+
+  // The fields that ARE the caller's to set still land, so this is a narrowing
+  // of the SET and not a disabling of it.
+  assert.match(updateClause, /"scroll_position" =/);
+});
+
 test("a progress save writes only the fields the caller passed", () => {
   // An intermediate scroll save must not rewrite `status`, and completing an
   // article must not reset the position it was read to.
