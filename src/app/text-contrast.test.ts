@@ -28,13 +28,10 @@ import {
 // --- a foreground token that no longer exists is a colour that no longer
 //     renders (#411) -------------------------------------------------------
 //
-// `--destructive-foreground` was dropped from the token layer when the newer
-// shadcn button started hardcoding `text-white`, but four AlertDialogActions
-// still carried `bg-destructive text-destructive-foreground`. tailwind-merge
-// puts that in the same group as the variant's `text-primary-foreground` and
-// keeps the LAST one, so it deleted the class that worked and kept the class
-// that compiled to nothing — leaving the label at whatever it inherited: ink on
-// red, 3.59:1. Nothing failed loudly; an unknown utility is simply not emitted.
+// An undeclared `*-foreground` utility emits NO CSS, so the element keeps
+// whatever it inherited and nothing fails loudly. This is the cheap half of the
+// #411 defect: necessary, but it proves only that a token is DECLARED. What
+// actually paints is guarded below.
 
 test("every `*-foreground` colour utility in shipped markup names a token that exists", () => {
   const theme = css.slice(css.indexOf("@theme inline {"));
@@ -58,7 +55,111 @@ test("every `*-foreground` colour utility in shipped markup names a token that e
   assert.deepEqual(
     missing,
     [],
-    "shipped markup paints a `--color-*-foreground` the token layer does not define. Tailwind emits nothing for an unknown utility, so the element keeps whatever colour it inherited — and tailwind-merge will have dropped the class that WAS working, because it counts as the same utility group. Declare the token in globals.css"
+    "shipped markup paints a `--color-*-foreground` the token layer does not define. Tailwind emits nothing for an unknown utility, so the element keeps whatever colour it inherited. Declare the token in globals.css"
+  );
+});
+
+// --- what PAINTS, not what is declared: `asChild` Button wrappers (#411) ----
+//
+// The real #411 defect was never a missing token. `AlertDialogAction` wraps
+// `Button` with `asChild`; Radix's Slot CONCATENATES buttonVariants() with the
+// child's className, and the `cn(className)` inside the wrapper is handed only
+// the CALLER's classes — it never sees the variant's. So a call site that
+// hand-paints `bg-destructive text-destructive-foreground` ships BOTH that and
+// the default variant's `bg-primary text-primary-foreground` to the DOM, and
+// CSS source order decides. Five Delete buttons rendered the neutral ink fill
+// (#181d19 on #fafafa) in both themes while every token assertion passed.
+//
+// Colour math cannot see this and neither can a token check: both classes are
+// declared and both are correct in isolation. The only guard that sees it is
+// one over the CALL SITE — the wrapper list is derived from the ui/ source, so
+// a new `asChild` Button wrapper is covered the day it is written.
+
+/** Components in `src/components/ui/` that wrap `<Button … asChild>`. */
+function asChildButtonWrappers(): string[] {
+  const names: string[] = [];
+  for (const file of tsxFiles(path.join(SRC, "components", "ui"))) {
+    const source = readFileSync(file, "utf8");
+    // Function blocks, so a `<Button asChild>` is attributed to its own
+    // component rather than to whatever was declared first in the file.
+    const starts = [...source.matchAll(/^function (\w+)\(/gm)];
+    for (const [index, start] of starts.entries()) {
+      const from = start.index!;
+      const to = starts[index + 1]?.index ?? source.length;
+      const body = source.slice(from, to);
+      for (const tag of body.matchAll(/<Button\b[^>]*>/g)) {
+        if (/\basChild\b/.test(tag[0])) names.push(start[1]);
+      }
+    }
+  }
+  return [...new Set(names)];
+}
+
+/** The opening tag of every `<Name …>` in `source`, attributes included. */
+function openingTags(source: string, name: string): string[] {
+  const tags: string[] = [];
+  const opener = new RegExp(`<${name}(?=[\\s/>])`, "g");
+  for (const match of source.matchAll(opener)) {
+    let depth = 0;
+    for (let i = match.index! + match[0].length; i < source.length; i++) {
+      const char = source[i];
+      if (char === "{") depth++;
+      else if (char === "}") depth--;
+      else if (char === ">" && depth === 0) {
+        tags.push(source.slice(match.index!, i + 1));
+        break;
+      }
+    }
+  }
+  return tags;
+}
+
+// `text-` is the one prefix that is not always a colour.
+const NON_COLOUR_TEXT =
+  /^(xs|sm|base|lg|xl|\d?xl|left|center|right|justify|start|end|balance|pretty|nowrap|wrap|clip|ellipsis|\[.*\])$/;
+
+test("no `asChild` Button call site hand-paints its colour in className", () => {
+  const wrappers = asChildButtonWrappers();
+  assert.ok(
+    wrappers.includes("AlertDialogAction") &&
+      wrappers.includes("AlertDialogCancel"),
+    `the asChild-Button wrapper scan found ${JSON.stringify(wrappers)} — it has gone vacuous. Fix the scan before trusting a pass`
+  );
+
+  const offenders: string[] = [];
+  let scanned = 0;
+  for (const file of tsxFiles(SRC)) {
+    const source = readFileSync(file, "utf8");
+    const where = path.relative(process.cwd(), file);
+    for (const wrapper of wrappers) {
+      for (const tag of openingTags(source, wrapper)) {
+        scanned++;
+        for (const literal of tag.matchAll(
+          /className=(?:"([^"]*)"|\{`([^`]*)`\})/g
+        )) {
+          for (const raw of (literal[1] ?? literal[2]).split(/\s+/)) {
+            const utility = raw.replace(/^.*:/, "");
+            const colour =
+              utility.startsWith("bg-") ||
+              (utility.startsWith("text-") &&
+                !NON_COLOUR_TEXT.test(utility.slice("text-".length)));
+            if (colour)
+              offenders.push(`${where}: <${wrapper} className="…${raw}…">`);
+          }
+        }
+      }
+    }
+  }
+
+  assert.ok(
+    scanned >= 20,
+    `only ${scanned} asChild-Button call sites were found; there are twenty-two. The scan has gone vacuous`
+  );
+
+  assert.deepEqual(
+    offenders,
+    [],
+    'an `asChild` Button call site paints a bg-*/text-* utility in className. That className lands on the Slot CHILD, so tailwind-merge never sees it against buttonVariants() — both colours reach the DOM and CSS source order picks the winner, which is how five Delete buttons shipped in the primary fill. Pass `variant="destructive"` (or the variant you want) instead'
   );
 });
 

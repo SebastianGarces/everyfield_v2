@@ -39,10 +39,11 @@ body {
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
-  /* Restored (see :root). Four shipped `AlertDialogAction`s carry
-     `bg-destructive text-destructive-foreground`; while this line was missing,
-     `text-destructive-foreground` compiled to NOTHING and the label fell back
-     to the inherited ink at 3.59:1 on the red fill. */
+  /* Declared and exported so the utility EXISTS (see :root). Nothing shipped
+     paints it today — the destructive Button variant hardcodes `text-white` —
+     but an undeclared `*-foreground` utility emits no CSS at all, which is a
+     silent failure rather than a loud one. text-contrast.test.ts fails any
+     shipped `*-foreground` utility whose token this block does not export. */
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
@@ -103,14 +104,16 @@ body {
      That makes the GROUND the rule: `.dark` inherits this declaration, so on
      the green tile it is right in both themes (9.94:1), and on any other ground
      the dark theme paints ink on near-black — 1.05:1 on --card, which is text
-     nobody can see. Page text must use --foreground. status-timeline.tsx had
-     exactly that bug on its current-step label and is fixed; theme-tokens.test.ts
-     now fails any shipped line that paints this token as text without the green
-     under it.
+     nobody can see. Page text must use --foreground. `people/status-timeline.tsx`
+     wrote exactly that line on its current-step label — LATENT, not shipped: the
+     component has no call sites, so no user ever met it. It is corrected anyway,
+     because an unmounted component is one import away from being mounted, and
+     theme-tokens.test.ts now fails any line in the tree that paints this token as
+     text without the green under it, mounted or not.
      Deliberately NOT exported through `@theme inline`: this is the value behind
      the role tokens, not a colour to paint with. There is no `text-ink`, and a
-     utility the theme does not declare emits nothing at all — the failure the
-     restored --destructive-foreground above is about. Paint with the role. */
+     utility the theme does not declare emits nothing at all — which is why
+     --destructive-foreground below stays declared. Paint with the role. */
   --ink: oklch(0.224 0.011 151.267);
   --ef-dark: var(--ink);
   --ef-field: #0b7a3f;
@@ -191,15 +194,29 @@ body {
      so what shipped was whatever the browser's gamut mapping produced and every
      contrast number computed from the declaration was a guess. */
   --destructive: oklch(0.5354 0.151 32.227); /* danger #B4432F */
-  /* Restored. shadcn's newer button variant hardcodes `text-white` and dropped
-     this token, but four AlertDialogAction call sites still say
-     `bg-destructive text-destructive-foreground` — and tailwind-merge treats
-     that as the same utility group as the variant's `text-primary-foreground`,
-     so it DELETES the class that worked and keeps the one the token layer no
-     longer defined. An undefined utility emits no CSS, so those four Delete
-     buttons painted inherited ink on red: 3.59:1 light, 2.77:1 dark. White is
-     what the Button variant already paints, so restoring the token makes the
-     four dialogs agree with it instead of diverging — 5.55:1 on the fill. */
+  /* shadcn's newer button variant hardcodes `text-white` and dropped this
+     token. It is declared anyway, at the white the variant paints, so that the
+     utility exists for a future call site instead of emitting nothing — but
+     NOTHING SHIPS IT, and it is not what makes a Delete button red.
+
+     What used to make them red, and why it did not: four AlertDialogActions
+     hand-painted `bg-destructive text-destructive-foreground` in `className`
+     (and a fifth painted `bg-red-600`).
+     AlertDialogAction wraps `Button` with `asChild`, so Radix's Slot CONCATENATES
+     buttonVariants() with the child's className and `cn(className)` inside
+     AlertDialogAction is handed only the caller's own classes. tailwind-merge
+     therefore never saw the two together and deleted nothing: the DOM carried
+     `bg-primary text-primary-foreground` AND `bg-destructive
+     text-destructive-foreground` at once, and CSS SOURCE ORDER — not class
+     order, not tailwind-merge — picked primary. Those buttons rendered the
+     neutral ink fill, #181d19 on #fafafa; restoring this token changed nothing
+     about what painted. A FIFTH site had the same defect in another spelling —
+     `tasks/[id]/task-detail-actions.tsx` painted raw `bg-red-600`, off-token and
+     off DESIGN.md, and lost to primary for the same reason. All five now pass
+     `variant="destructive"`, so one variant supplies the colour and no two
+     same-group utilities can reach the DOM at all. Guarded in
+     text-contrast.test.ts, over the CALL SITE — the guard that found the fifth
+     one, which no token assertion could have. */
   --destructive-foreground: oklch(1 0 0);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);

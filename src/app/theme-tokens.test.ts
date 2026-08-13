@@ -335,25 +335,67 @@ test("every shipped `bg-destructive` tint under `text-destructive` is measured",
   );
 });
 
-// --- a foreground token that no longer exists is a colour that no longer
-//     renders (#411) -------------------------------------------------------
+// --- the destructive button, measured as the PAIR IT RENDERS (#411) ---------
+//
+// The first version of this test read `--destructive-foreground` against
+// `--destructive` and passed — while every Delete button on the site rendered
+// `bg-primary text-primary-foreground`, because the call sites hand-painted
+// their colour past the variant (see text-contrast.test.ts). Measuring two
+// tokens that appear together in a comment proves nothing about a pixel.
+//
+// So the pair is DERIVED from button.tsx's `destructive` variant, which is the
+// only thing that colours a destructive button now that the call sites pass
+// `variant`. Change the variant's label or fill and this test changes with it;
+// delete the variant and it fails loudly rather than quietly measuring a pair
+// nothing paints.
+
+/** The `destructive` variant's class list, read out of button.tsx. */
+function destructiveVariantClasses(): string[] {
+  const source = readFileSync(
+    path.join(SRC, "components", "ui", "button.tsx"),
+    "utf8"
+  );
+  const match = /destructive:\s*\n?\s*"([^"]+)"/.exec(source);
+  assert.ok(
+    match,
+    'button.tsx no longer declares a `destructive:` variant — the destructive dialogs pass `variant="destructive"` and now have no colour'
+  );
+  return match[1].split(/\s+/);
+}
 
 for (const theme of themes) {
-  test(`the destructive button label clears AA on the fill it is painted on, in the ${theme} theme`, () => {
-    const label = readToken(theme, "destructive-foreground");
-    const fill = readToken(theme, "destructive");
+  test(`the destructive button paints an AA label on its own fill, in the ${theme} theme`, () => {
+    const classes = destructiveVariantClasses();
 
-    // Light paints `bg-destructive`; dark paints `dark:bg-destructive/60` over
-    // the dialog surface, which is where these buttons actually live.
+    // The label. `text-white` is a literal, not a token — read it as one so a
+    // move back to `text-destructive-foreground` is measured, not assumed.
+    const labelClass = classes.find((c) => /^text-[a-z]/.test(c));
+    assert.ok(labelClass, "the destructive variant paints no text colour");
+    const label =
+      labelClass === "text-white"
+        ? hexToSrgb("#ffffff")
+        : readToken(theme, labelClass.replace(/^text-/, ""));
+
+    // The fill. Light paints `bg-destructive` solid; dark overrides it with
+    // `dark:bg-destructive/60`, which composites over the dialog surface these
+    // buttons actually live on.
+    const fill = readToken(theme, "destructive");
+    const darkAlpha = classes
+      .map((c) => /^dark:bg-destructive\/(\d+)$/.exec(c))
+      .find(Boolean);
     const ground =
-      theme === "light"
-        ? fill
-        : composite(fill, readToken(theme, "popover"), 0.6);
+      theme === "dark" && darkAlpha
+        ? composite(
+            fill,
+            readToken(theme, "popover"),
+            Number(darkAlpha[1]) / 100
+          )
+        : fill;
 
     const ratio = contrastRatio(label, ground);
     assert.ok(
       ratio >= AA_BODY_TEXT,
-      `--destructive-foreground on the destructive fill in ${theme} is ${ratio.toFixed(2)}:1, below ${AA_BODY_TEXT}:1`
+      `the destructive button's ${labelClass} on its fill in ${theme} is ${ratio.toFixed(2)}:1, below ${AA_BODY_TEXT}:1`
     );
   });
 }
@@ -367,10 +409,53 @@ for (const theme of themes) {
 // comment. The tint the tile paints under them is measured too, because that is
 // the ground they are actually read on.
 
-const ATTENTION_INKS = [
-  { ink: "attention-high-ink", tint: "attention-high", alpha: 0.12 },
-  { ink: "attention-medium-ink", tint: "attention-medium", alpha: 0.18 },
-] as const;
+/**
+ * Every `text-attention-*-ink` in shipped markup, paired with the tint alphas
+ * shipped under the same scale — read out of the tree the way
+ * `shippedDestructiveTints()` and `paintedRingAlphas()` are. A hardcoded roll
+ * cannot see a THIRD step of the scale, or an existing step gaining a heavier
+ * tint, which is the failure mode a list always has.
+ */
+function shippedAttentionInks(): {
+  ink: string;
+  tint: string;
+  alpha: number;
+}[] {
+  const inks = new Set<string>();
+  const alphas = new Map<string, Set<number>>();
+
+  for (const { line } of markupLines()) {
+    for (const match of line.matchAll(/\btext-(attention-[a-z]+-ink)\b/g)) {
+      inks.add(match[1]);
+    }
+    for (const match of line.matchAll(
+      /\b(?:dark:)?bg-(attention-[a-z]+)\/(\d+)\b/g
+    )) {
+      const found = alphas.get(match[1]) ?? new Set<number>();
+      found.add(Number(match[2]) / 100);
+      alphas.set(match[1], found);
+    }
+  }
+
+  return [...inks].flatMap((ink) => {
+    const tint = ink.replace(/-ink$/, "");
+    return [...(alphas.get(tint) ?? new Set([1]))].map((alpha) => ({
+      ink,
+      tint,
+      alpha,
+    }));
+  });
+}
+
+const ATTENTION_INKS = shippedAttentionInks();
+
+test("the attention-ink scan finds the scale it is meant to guard", () => {
+  assert.ok(
+    ATTENTION_INKS.length >= 2 &&
+      new Set(ATTENTION_INKS.map((entry) => entry.ink)).size >= 2,
+    `only ${ATTENTION_INKS.length} attention ink/tint pairs were found across ${new Set(ATTENTION_INKS.map((e) => e.ink)).size} inks; the scale ships at least two of each. The scan has gone vacuous — fix it before trusting a pass`
+  );
+});
 
 for (const theme of themes) {
   for (const { ink, tint, alpha } of ATTENTION_INKS) {
@@ -423,8 +508,11 @@ for (const theme of themes) {
 // does not invert. The cascade therefore hands the dark theme the LIGHT value,
 // which is correct on the green tile and catastrophic anywhere else — ink on
 // `--card` measures 1.05:1 in the dark theme, which is text nobody can see.
-// That is not hypothetical: `people/status-timeline.tsx` painted the current
-// step's LABEL with it, on the card ground rather than on the tile.
+// The tree had exactly that line: `people/status-timeline.tsx` painted the
+// current step's LABEL with it, on the card ground rather than on the tile. It
+// was LATENT rather than shipped — the component has no call sites — but the
+// guard is deliberately over the whole tree and not over what is mounted,
+// because "nothing renders it today" is not a property anyone maintains.
 //
 // So the rule is a rule about GROUND, not about a number, and both halves are
 // pinned: the tile passes in both themes, every other ground fails, and shipped
