@@ -75,8 +75,13 @@ export function StatusTimeline({ currentStatus }: StatusTimelineProps) {
                   <span
                     className={cn(
                       "absolute top-10 text-[10px] font-medium whitespace-nowrap",
+                      // --color-ef-dark is the ink that reads on the GREEN
+                      // tile; it has no dark-theme value by design, so on the
+                      // card ground it paints ink on near-black (1.05:1).
+                      // Page text is --foreground. Pinned by
+                      // src/app/theme-tokens.test.ts.
                       state === "current"
-                        ? "font-semibold text-[var(--color-ef-dark)]"
+                        ? "text-foreground font-semibold"
                         : state === "completed"
                           ? "text-muted-foreground"
                           : "text-muted-foreground/60"

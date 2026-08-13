@@ -93,13 +93,20 @@ body {
      more), which is one colour with two spellings and ten owners: darken the
      ink and nine of them go stale silently, because nothing in the file said
      they were the same value. Everything ink-coloured now points here, and
-     text-contrast.test.ts pins this token against the DESIGN.md hex so the two
-     documents cannot drift apart in silence either.
+     theme-tokens.test.ts pins this token against the DESIGN.md hex so the two
+     documents cannot drift apart in silence either. That guard is DERIVED from
+     this block rather than run against a list of the tokens that point here
+     today, so pasting the literal onto a NEW token fails it too.
      The brand alias below keeps its name because that is what the logo tile
      asks for (`bg-ef text-ef-dark`) — it is the ink that reads on GREEN, which
      is the same colour in both themes, so it is deliberately NOT theme-aware.
-     Page text must use --foreground; see the DECISION note on the PR about
-     src/components/people/status-timeline.tsx.
+     That makes the GROUND the rule: `.dark` inherits this declaration, so on
+     the green tile it is right in both themes (9.94:1), and on any other ground
+     the dark theme paints ink on near-black — 1.05:1 on --card, which is text
+     nobody can see. Page text must use --foreground. status-timeline.tsx had
+     exactly that bug on its current-step label and is fixed; theme-tokens.test.ts
+     now fails any shipped line that paints this token as text without the green
+     under it.
      Deliberately NOT exported through `@theme inline`: this is the value behind
      the role tokens, not a colour to paint with. There is no `text-ink`, and a
      utility the theme does not declare emits nothing at all — the failure the
@@ -140,7 +147,7 @@ body {
      and unlayered declarations outrank `@layer base` at any specificity. Ruled
      2026-08-10 (#386): WCAG AA is the standard that binds here; APCA is
      advisory.
-     Pinned by src/app/text-contrast.test.ts, which re-derives the 0.526 limit
+     Pinned by src/app/theme-tokens.test.ts, which re-derives the 0.526 limit
      instead of trusting this comment; raising L again breaks that test before
      it reaches a screen. */
   --muted-foreground: oklch(0.5 0 0);
@@ -164,11 +171,22 @@ body {
          the colour is RULED, not chosen; buying a step means darkening below
          DESIGN.md, which is a design ruling and not a sweep's call. Recorded as
          a DECISION on the PR rather than decided here.
-       · `bg-destructive/10 text-destructive` (the six error banners) still
-         measures 4.07:1 at worst. That ground is made from THIS token, so the
-         ink and its backdrop darken together and no token value fixes it — the
-         remedy is the component's, and csf-scorecard.tsx already sets the
-         precedent (a tint changes what secondary text may be). Also a DECISION.
+       · `bg-destructive/10 text-destructive` still measures 4.07:1 at worst.
+         That pattern has TWELVE shipped call sites, not the six an earlier
+         count claimed: eleven error banners (the two auth forms, five
+         onboarding steps, three task pickers, the oversight invite form) plus
+         `ui/dropdown-menu.tsx`, whose destructive item focuses to
+         `bg-destructive/10` in light and `dark:bg-destructive/20` in dark —
+         3.89:1, the worst of the set. That ground is made from THIS token, so
+         the ink and its backdrop darken together and no token value fixes it —
+         the remedy is the component's (a solid ground; csf-scorecard.tsx sets
+         the precedent that a tint changes what secondary text may be) or a
+         darker text-on-tint role token. Both are design rulings, so this stays
+         a DECISION rather than a sweep's call. It is MEASURED regardless:
+         theme-tokens.test.ts reads every shipped tint out of the markup, checks
+         it on all eight surfaces, and holds the failing ones to their exact
+         number — a new call site, a new alpha or a token move fails the suite
+         instead of passing quietly.
      Kept inside the sRGB gamut on purpose: the shadcn default was outside it,
      so what shipped was whatever the browser's gamut mapping produced and every
      contrast number computed from the declaration was a guess. */
@@ -195,7 +213,7 @@ body {
      --muted, the darkest surface a ring lands on. The floor sits near L 0.258,
      so this is a step past it, not a hair over it. Kept neutral (C and H are 0)
      by the 2026-07-31 ruling that surfaces and neutrals stay the pre-sharp
-     grays; only L moved. Pinned by src/app/text-contrast.test.ts. */
+     grays; only L moved. Pinned by src/app/focus-ring.test.ts. */
   --ring: oklch(0.2 0 0);
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
@@ -222,7 +240,7 @@ body {
      The standard that BINDS them is WCAG AA 4.5:1, not the APCA figures this
      comment used to cite alone (ruled 2026-08-10, #386: APCA is advisory and is
      never the reason a text token moves). Both inks clear it with room, on the
-     eight surfaces and on their own tints, and text-contrast.test.ts now says
+     eight surfaces and on their own tints, and theme-tokens.test.ts now says
      so instead of this sentence: worst light 6.28:1 plain / 5.21:1 on the tile
      tint, worst dark 9.07:1 / 7.06:1. APCA is what they were TUNED with, which
      is why they sit where they sit; it is not what keeps them there.
