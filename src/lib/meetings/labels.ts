@@ -32,29 +32,6 @@
 
 import type { MeetingStatus, MeetingType } from "@/db/schema/meetings";
 
-/**
- * Read a table with a key that may not be one of its own.
- *
- * `Object.hasOwn`-gated, never a bare `table[key]`. Every `*Label` /
- * `*BadgeClass` function below takes a `string` — the whole reason those
- * overloads exist is a value that arrived from an older row or from outside the
- * union — and a bare index reaches `Object.prototype`, so `"constructor"`
- * returns a native FUNCTION and `"toString"` returns another one. The `??`
- * fallback never fires for either, because a prototype member is a defined
- * value. A caller that renders the result then prints `[object Object]`, or a
- * function's source, in place of a label.
- *
- * Same rule and same reason as `attestationLeaf` in
- * `src/lib/phase-engine/attestation-citation.ts` — see memory/invariants.md →
- * Phase Engine, "A CITED PATH IS UNTRUSTED INPUT".
- */
-function lookup<K extends string>(
-  table: Record<K, string>,
-  key: string
-): string | undefined {
-  return Object.hasOwn(table, key) ? table[key as K] : undefined;
-}
-
 // ---------------------------------------------------------------------------
 // Meeting type
 // ---------------------------------------------------------------------------
@@ -80,9 +57,33 @@ export const MEETING_TYPE_LABELS: Record<MeetingType, string> = {
   team_meeting: "Team Meeting",
 };
 
-/** Label for a type that may have arrived from an older row. */
+/**
+ * Label for a type that may NOT be one of the three — the only accessor in this
+ * module, because it is the only table read with something other than a
+ * column-typed key. `merge.ts` resolves `{{meeting_type}}` for a merge-field
+ * preview, and the communication surfaces render a joined row; the rest of the
+ * repo indexes the tables above directly with a `MeetingType`.
+ *
+ * `Object.hasOwn`-gated, never a bare `MEETING_TYPE_LABELS[type]`: a bare index
+ * reaches `Object.prototype`, so `"constructor"` returns a native FUNCTION and
+ * `"toString"` returns another one, and the `??` fallback never fires for
+ * either because a prototype member is a defined value. A caller that renders
+ * the result then prints a function's source in place of a label.
+ *
+ * Same rule and same reason as `attestationLeaf` in
+ * `src/lib/phase-engine/attestation-citation.ts` — see memory/invariants.md →
+ * Phase Engine, "A CITED PATH IS UNTRUSTED INPUT".
+ *
+ * An unrecognised type degrades to the RAW token (`"prayer_walk"`), not to a
+ * prettified one (`"prayer walk"`): the prettified form is a guess at a label
+ * that reads like a real one, and the raw token is legible enough to be
+ * reported while being obviously not a label. It replaced a
+ * `type.replace(/_/g, " ")` in the dashboard feed.
+ */
 export function meetingTypeLabel(type: string): string {
-  return lookup(MEETING_TYPE_LABELS, type) ?? type;
+  return Object.hasOwn(MEETING_TYPE_LABELS, type)
+    ? MEETING_TYPE_LABELS[type as MeetingType]
+    : type;
 }
 
 /**
@@ -102,7 +103,14 @@ export const MEETING_TYPE_OPTIONS: readonly {
   label: MEETING_TYPE_LABELS[value],
 }));
 
-/** Badge tint per meeting type. */
+/**
+ * Badge tint per meeting type.
+ *
+ * Read by INDEX at both call sites (`meeting-card.tsx`, `meeting-header.tsx`),
+ * because `churchMeetings.type` is a pg enum column typed `$type<MeetingType>()`
+ * — there is no `meetingTypeBadgeClass(string)` accessor and there was no
+ * caller for one. The same goes for the two status tables below.
+ */
 export const MEETING_TYPE_BADGE_CLASSES: Record<MeetingType, string> = {
   vision_meeting:
     "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400",
@@ -111,11 +119,6 @@ export const MEETING_TYPE_BADGE_CLASSES: Record<MeetingType, string> = {
   team_meeting:
     "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
 };
-
-/** Badge classes for a type that may have arrived from an older row. */
-export function meetingTypeBadgeClass(type: string): string {
-  return lookup(MEETING_TYPE_BADGE_CLASSES, type) ?? "";
-}
 
 // ---------------------------------------------------------------------------
 // Meeting status
@@ -141,16 +144,6 @@ export const MEETING_STATUS_BADGE_CLASSES: Record<MeetingStatus, string> = {
   cancelled: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
 };
 
-/** Label for a status that may have arrived from an older row. */
-export function meetingStatusLabel(status: string): string {
-  return lookup(MEETING_STATUS_LABELS, status) ?? status;
-}
-
-/** Badge classes for a status that may have arrived from an older row. */
-export function meetingStatusBadgeClass(status: string): string {
-  return lookup(MEETING_STATUS_BADGE_CLASSES, status) ?? "";
-}
-
 // ---------------------------------------------------------------------------
 // The display title
 // ---------------------------------------------------------------------------
@@ -171,23 +164,35 @@ export type MeetingTitleFacts = {
 };
 
 /**
- * The ONE name a meeting is shown under — card, header, breadcrumb, dialogs,
- * RSVP page and the dashboard feed.
+ * The name a meeting is shown under on the SIX surfaces that call it: the card,
+ * the detail header, the breadcrumb, the Edit and Delete dialogs, the public
+ * RSVP page and the dashboard activity feed.
  *
  * Three branches, in this order:
  *
  * 1. A NUMBERED vision meeting is "Vision Meeting #7". The number is the thing
  *    the planter counts by, so it outranks a title even when one is set — and
  *    the create form does not offer a title field for vision meetings at all.
+ *    The test is TRUTHINESS, so `meetingNumber` 0 falls through to branch 3
+ *    rather than producing "Vision Meeting #0": the sequence `nextMeetingNumber`
+ *    hands out starts at 1, so a 0 is a bad row, and naming a meeting after it
+ *    prints the bad row to the planter as if it were a fact.
  * 2. A team meeting with a team falls back to "<Team> Meeting", because "Team
  *    Meeting" alone is the least useful true sentence about it.
- * 3. Everything else is the planter's own title, then the type label.
+ * 3. Everything else is the planter's own title, then the type label — `||`,
+ *    not `??`, so a saved-but-empty title is not a title. `??` is what the RSVP
+ *    page carried, and it rendered an empty <h1> to the invitee.
  *
  * The four copies this replaces disagreed at branch 2 and branch 3, so one
  * untitled orientation could read "Orientation Meeting", "Orientation" and
  * "Meeting" on three surfaces a planter reaches in two clicks. The behaviour
  * kept is the meeting header's — the most complete of the four, and the one
  * rendered next to the meeting itself.
+ *
+ * NOT yet every surface in the repo: `/communication/compose`,
+ * `/communication/[id]` and the ministry-team meetings tab still derive a title
+ * inline. They sit outside the meetings domain this pass owns and are recorded
+ * as DECISION 411-D1 rather than claimed here — see memory/invariants.md.
  */
 export function meetingDisplayTitle(meeting: MeetingTitleFacts): string {
   if (meeting.type === "vision_meeting" && meeting.meetingNumber) {

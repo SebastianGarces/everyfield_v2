@@ -10,10 +10,19 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { createEvaluationAction } from "@/app/(dashboard)/meetings/actions";
 import type { ActionResult } from "@/lib/meetings/types";
 import type { MeetingEvaluation } from "@/db/schema";
+// The evaluation heading names the same meeting the card and the header name,
+// through the same derivation — never a second `Vision Meeting #` literal.
+// See src/lib/meetings/labels.ts.
+import { meetingDisplayTitle } from "@/lib/meetings/labels";
 
 interface EvaluationFormProps {
   meetingId: string;
-  meetingNumber: number;
+  /**
+   * Nullable, and passed through as-is. It used to arrive as
+   * `meeting.meetingNumber ?? 0`, and the heading interpolated it, so an
+   * unnumbered meeting read "Evaluate Vision Meeting #0".
+   */
+  meetingNumber: number | null;
 }
 
 const qualityFactors = [
@@ -102,7 +111,8 @@ export function EvaluationForm({
     <form action={formAction} className="space-y-6">
       <div>
         <h2 className="text-xl font-bold">
-          Evaluate Vision Meeting #{meetingNumber}
+          Evaluate{" "}
+          {meetingDisplayTitle({ type: "vision_meeting", meetingNumber })}
         </h2>
         <p className="text-muted-foreground mt-1 text-sm">
           Rate each quality factor from 1 (poor) to 5 (excellent).

@@ -68,7 +68,7 @@ export default async function EvaluationPage({ params }: EvaluationPageProps) {
         <>
           <EvaluationSummary
             evaluation={evaluation}
-            meetingNumber={meeting.meetingNumber ?? 0}
+            meetingNumber={meeting.meetingNumber}
           />
           <EvaluationComparisonCard comparison={comparison} />
           {/* Show attendee notes after evaluation is saved */}
@@ -82,7 +82,7 @@ export default async function EvaluationPage({ params }: EvaluationPageProps) {
         <>
           <EvaluationForm
             meetingId={meeting.id}
-            meetingNumber={meeting.meetingNumber ?? 0}
+            meetingNumber={meeting.meetingNumber}
           />
           {/* Show attendee notes alongside form as well */}
           <AttendeeNotes

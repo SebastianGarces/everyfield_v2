@@ -32,6 +32,9 @@ import {
   type AgendaSection,
 } from "./agenda";
 import type { EvaluationTrendPoint } from "./evaluation-comparison";
+// Imported, never RE-EXPORTED: a pass-through would rebuild the coupling the
+// db-free split exists to remove. See memory/invariants.md → Meetings.
+import { meetingDisplayTitle } from "./labels";
 import {
   emitAttendanceRecorded,
   emitAttendanceFinalized,
@@ -330,8 +333,15 @@ export async function createMeeting(
     churchId,
     createdBy: userId,
     type: data.type,
+    // The STORED title for a numbered vision meeting is the same string the six
+    // display surfaces derive, from the same function — not a second
+    // `Vision Meeting #${n}` literal, which would spell the old label for every
+    // row written after the label is re-ruled and the new one for every render.
     title:
-      data.title ?? (meetingNumber ? `Vision Meeting #${meetingNumber}` : null),
+      data.title ??
+      (meetingNumber
+        ? meetingDisplayTitle({ type: "vision_meeting", meetingNumber })
+        : null),
     datetime: data.datetime,
     locationId,
     locationName,

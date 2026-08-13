@@ -7,9 +7,13 @@ import { Card, CardContent } from "@/components/ui/card";
 // runtime's zone is. memory/invariants.md → Date & Time Rendering.
 import { formatDate, formatTime } from "@/lib/datetime";
 import { getConfirmationDetails } from "@/lib/communication/confirmation";
-// The invitee is told the same meeting-type name the planter sees, from the one
-// table. See src/lib/meetings/labels.ts.
-import { meetingTypeLabel } from "@/lib/meetings/labels";
+// The invitee is told the same NAME the planter sees, from the one derivation —
+// not a local `title ?? typeLabel`, which rendered an empty <h1> for a meeting
+// saved with an empty title. `getConfirmationDetails` projects a narrow row
+// (no meetingNumber, no teamName); `MeetingTitleFacts` is structural and all
+// but `type` optional exactly so this caller may pass what it has.
+// See src/lib/meetings/labels.ts.
+import { meetingDisplayTitle } from "@/lib/meetings/labels";
 import { RsvpActions } from "./rsvp-actions";
 
 interface RsvpPageProps {
@@ -46,7 +50,7 @@ export default async function RsvpPage({
               {church.name}
             </p>
             <h1 className="mt-2 text-2xl font-bold">
-              {meeting.title ?? meetingTypeLabel(meeting.type)}
+              {meetingDisplayTitle(meeting)}
             </h1>
           </div>
 

@@ -19,7 +19,7 @@ import {
   type MeetingConfirmationToken,
 } from "@/db/schema/communication";
 import { invitations, meetingAttendance } from "@/db/schema/meetings";
-import { churchMeetings } from "@/db/schema/meetings";
+import { churchMeetings, type MeetingType } from "@/db/schema/meetings";
 import { persons } from "@/db/schema/people";
 import { churches } from "@/db/schema/church";
 import { RECIPIENT_STATUS_RANK, isUnreachableStatus } from "./queries";
@@ -33,7 +33,13 @@ export interface ConfirmationDetails {
   meeting: {
     id: string;
     title: string | null;
-    type: string;
+    // `MeetingType`, not `string`. The value is copied straight off
+    // `churchMeetings.type` — a pg enum column already typed
+    // `$type<MeetingType>()` — so widening it here could only ever hide a
+    // change, and it forced the RSVP page to hand a `string` to the meetings
+    // vocabulary. Same species as the three `as MeetingStatus` casts #411
+    // deleted from the meeting components.
+    type: MeetingType;
     datetime: Date;
     locationName: string | null;
     locationAddress: string | null;

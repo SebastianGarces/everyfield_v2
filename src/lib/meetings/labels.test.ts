@@ -11,9 +11,6 @@ import {
   MEETING_TYPE_LABELS,
   MEETING_TYPE_OPTIONS,
   meetingDisplayTitle,
-  meetingStatusBadgeClass,
-  meetingStatusLabel,
-  meetingTypeBadgeClass,
   meetingTypeLabel,
 } from "@/lib/meetings/labels";
 
@@ -107,28 +104,47 @@ test("the create form's options are the label table, not a second copy", () => {
 // The fallbacks — a value that arrived from an older row
 // ============================================================================
 
-test("an unknown type or status degrades to itself, never to a crash", () => {
+test("an unknown type degrades to the RAW token, never to a crash", () => {
   assert.equal(meetingTypeLabel("vision_meeting"), "Vision Meeting");
-  assert.equal(meetingTypeLabel("prayer_walk"), "prayer_walk");
-  assert.equal(meetingStatusLabel("completed"), "Completed");
-  assert.equal(meetingStatusLabel("archived"), "archived");
-
-  assert.equal(meetingTypeBadgeClass("prayer_walk"), "");
-  assert.equal(meetingStatusBadgeClass("archived"), "");
+  assert.equal(
+    meetingTypeLabel("prayer_walk"),
+    "prayer_walk",
+    "the raw token, not a prettified `prayer walk` — a guess that reads like a real label is worse than one that does not"
+  );
 });
 
 test("a prototype key is not a label", () => {
-  // The lookups are `Record` reads on a caller-supplied string. `constructor`
-  // and `toString` reach `Object.prototype` and hand a native FUNCTION to a
-  // caller expecting a string — the same species of bug the phase engine's
-  // cited-fact vocabularies were converted to `Map`s for. Here the `??` sees a
-  // defined value, so the guard is that the fallback still returns the input.
+  // `meetingTypeLabel` is a `Record` read on a caller-supplied string.
+  // `constructor` and `toString` reach `Object.prototype` and hand a native
+  // FUNCTION to a caller expecting a string — the same species of bug the phase
+  // engine's cited-fact vocabularies were converted to `Map`s for. A `??`
+  // fallback does not catch it, because a prototype member is a defined value;
+  // the `Object.hasOwn` gate does.
   for (const forged of ["constructor", "toString", "__proto__", "valueOf"]) {
     assert.equal(typeof meetingTypeLabel(forged), "string", forged);
-    assert.equal(typeof meetingStatusLabel(forged), "string", forged);
-    assert.equal(typeof meetingTypeBadgeClass(forged), "string", forged);
-    assert.equal(typeof meetingStatusBadgeClass(forged), "string", forged);
+    assert.equal(meetingTypeLabel(forged), forged, forged);
   }
+});
+
+test("the module exports exactly one string-keyed accessor", () => {
+  // The three siblings this one kept — `meetingTypeBadgeClass`,
+  // `meetingStatusLabel`, `meetingStatusBadgeClass` — had ZERO production
+  // callers and were deleted. Both status tables and the type-tint table are
+  // read by INDEX with a column-typed key, so a `(status: string)` overload
+  // invited a caller to widen a key the pg enum already narrows. If a real
+  // caller for one appears, add it back with the same `Object.hasOwn` gate and
+  // update this count.
+  const file = TS_FILES.find(
+    (candidate) =>
+      rel(candidate) === path.join("src", "lib", "meetings", "labels.ts")
+  );
+  assert.ok(file, "the walk did not find labels.ts");
+
+  const accessors = codeOf(file).match(/^export function meeting\w+\(/gm) ?? [];
+  assert.deepEqual(accessors.sort(), [
+    "export function meetingDisplayTitle(",
+    "export function meetingTypeLabel(",
+  ]);
 });
 
 // ============================================================================
@@ -211,6 +227,66 @@ test("the vision-meeting prefix comes from the label table", () => {
       meetingNumber: 1,
     }).startsWith(MEETING_TYPE_LABELS.vision_meeting)
   );
+});
+
+// ============================================================================
+// The guard: the surfaces that NAME a meeting call the derivation
+// ============================================================================
+
+/**
+ * The six surfaces that render a meeting's name, enumerated by path.
+ *
+ * This list exists because a DOCBLOCK claiming "the RSVP page reads this" was
+ * shipped while the RSVP page still read `meeting.title ?? meetingTypeLabel(…)`
+ * — an attested claim that stayed green while the thing it described was false.
+ * A comment cannot be false for long if a test spells out the same claim.
+ *
+ * It is deliberately NOT every surface in the repo: `/communication/compose`,
+ * `/communication/[id]` and `ministry-teams/meetings-tab.tsx` still derive a
+ * title inline. They belong to other domains and are DECISION 411-D1, so they
+ * are absent from this list rather than silently covered by it.
+ */
+const TITLE_SURFACES = [
+  path.join("src", "components", "meetings", "meeting-card.tsx"),
+  path.join("src", "components", "meetings", "meeting-header.tsx"),
+  path.join("src", "app", "(dashboard)", "meetings", "[id]", "layout.tsx"),
+  path.join(
+    "src",
+    "app",
+    "(dashboard)",
+    "meetings",
+    "[id]",
+    "meeting-details-client.tsx"
+  ),
+  path.join("src", "app", "rsvp", "[token]", "page.tsx"),
+  path.join("src", "lib", "dashboard", "service.ts"),
+];
+
+test("every enumerated title surface calls meetingDisplayTitle", () => {
+  const missing = TITLE_SURFACES.filter((relative) => {
+    const file = TS_FILES.find((candidate) => rel(candidate) === relative);
+    return !file || !codeOf(file).includes("meetingDisplayTitle");
+  });
+
+  assert.deepEqual(
+    missing,
+    [],
+    `these surfaces name a meeting without the one derivation:\n  ${missing.join("\n  ")}`
+  );
+});
+
+test("no enumerated title surface derives a title of its own", () => {
+  // The exact shape that made the RSVP page's <h1> empty for a meeting saved
+  // with an empty title: `??` treats "" as a title, `||` does not. Any local
+  // `title ?? …` / `title || …` on these surfaces is a second derivation, and a
+  // second derivation is how the four this pass deleted disagreed.
+  const offenders = TITLE_SURFACES.flatMap((relative) => {
+    const file = TS_FILES.find((candidate) => rel(candidate) === relative);
+    if (!file) return [];
+    return /\btitle\s*(\?\?|\|\|)/.test(codeOf(file)) ? [relative] : [];
+  });
+
+  assert.deepEqual(offenders, [], offenders.join("\n  "));
 });
 
 // ============================================================================
