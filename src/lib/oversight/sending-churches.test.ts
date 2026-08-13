@@ -83,19 +83,26 @@ test("the read refuses every role but network_admin before it queries", () => {
 test("the route 404s a sending-church admin and never redirects them onward", () => {
   const source = readCode(PAGE_FILE);
 
-  assert.match(
-    source,
-    /user\.role !== "sending_church_admin" && user\.role !== "network_admin"/,
-    "the page does not bounce church-level roles"
-  );
-  assert.match(source, /redirect\("\/dashboard"\)/);
-  assert.match(source, /redirect\("\/login"\)/);
+  // Church-level roles are bounced by the guard every /oversight route shares
+  // (`@/lib/oversight/session`; `session.test.ts` pins that no page re-spells
+  // the role pair and that /login and /dashboard stay distinct refusals).
+  const guardAt = source.indexOf("await requireOversightUser()");
+  assert.ok(guardAt > 0, "the page does not bounce church-level roles");
 
-  // The oversight-but-wrong-org refusal is a 404: "this page exists but is not
-  // for you" is itself information about the network's surfaces.
+  // The oversight-but-wrong-org refusal is this page's OWN rule and stays here:
+  // a 404, because "this page exists but is not for you" is itself information
+  // about the network's surfaces.
   const notFoundAt = source.indexOf("notFound();");
   const readAt = source.indexOf("listNetworkSendingChurches(user)");
   assert.ok(notFoundAt > 0, "a sending-church admin is not refused at all");
+  assert.ok(
+    readAt > 0,
+    "the page no longer reads the roster this test expects"
+  );
+  assert.ok(
+    guardAt < notFoundAt,
+    "the network-only refusal runs before the caller is known to be an oversight user"
+  );
   assert.ok(
     notFoundAt < readAt,
     "the roster is read before the network-only guard runs"
@@ -244,33 +251,9 @@ test("every link on the roster carries cursor-pointer", () => {
   }
 });
 
-// ----------------------------------------------------------------------------
-// #241 — explicit projection on the oversight index
-// ----------------------------------------------------------------------------
-
-test("the oversight index selects only the columns it renders", () => {
-  const source = readCode(
-    path.join(ROOT, "src", "app", "(dashboard)", "oversight", "page.tsx")
-  );
-
-  assert.ok(
-    !/\.select\(\)/.test(source),
-    "the oversight index is back to a bare select() (#241)"
-  );
-  assert.match(source, /id: churches\.id/);
-  assert.match(source, /name: churches\.name/);
-  assert.match(source, /currentPhase: churches\.currentPhase/);
-  // The projection has to cover everything the page reads off a plant, or the
-  // narrowing is a runtime `undefined` rather than a saving. Both names the
-  // page uses for a row are scanned — `plant` in the list, `p` in the filters.
-  const rendered = [...source.matchAll(/\b(?:plant|p)\.(\w+)/g)].map(
-    (match) => match[1]
-  );
-  assert.ok(rendered.length > 0, "the property scan found nothing to check");
-  for (const property of new Set(rendered)) {
-    assert.ok(
-      ["id", "name", "currentPhase"].includes(property),
-      `the page reads plant.${property}, which the projection does not select`
-    );
-  }
-});
+// The oversight index's projection and tenancy used to be asserted HERE, by a
+// regex over `oversight/page.tsx`'s source text — a test that lived in a file
+// named for a different module, broke on a variable rename, and could not see
+// the WHERE clause at all. The read moved into `@/lib/oversight/read`
+// (`getOversightPortfolio`), and both decisions are now asserted off the
+// RENDERED statement in `read.test.ts`.

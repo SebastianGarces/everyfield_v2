@@ -68,7 +68,7 @@ import {
 } from "@/lib/launch/milestones";
 import { canEditOutcome, canRecordOutcome } from "@/lib/launch/outcome";
 import { getLaunchForChurch } from "@/lib/launch/queries";
-import { CHURCH_LEVEL_ROLES } from "@/lib/auth/access";
+import { CHURCH_LEVEL_ROLES } from "@/lib/auth/roles";
 import type { UserRole } from "@/db/schema";
 
 export const dynamic = "force-dynamic";
@@ -84,7 +84,15 @@ export default async function LaunchPage() {
 
   // Oversight users have their own surfaces; a plant's launch page is the
   // plant's. Anyone without a church has no launch to show.
-  if (!CHURCH_LEVEL_ROLES.includes(user.role as UserRole) || !user.churchId) {
+  // The widening cast, not a cast on `user.role`: `CHURCH_LEVEL_ROLES` is
+  // declared `as const` in `@/lib/auth/roles` — the one place it comes from —
+  // so the list narrows to its three members and `includes` needs the wider
+  // element type. The same shape `src/lib/notifications/preferences.ts` uses
+  // for `OVERSIGHT_ROLES`.
+  if (
+    !(CHURCH_LEVEL_ROLES as readonly UserRole[]).includes(user.role) ||
+    !user.churchId
+  ) {
     redirect("/dashboard");
   }
 

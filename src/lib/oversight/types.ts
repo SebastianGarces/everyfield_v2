@@ -51,6 +51,25 @@ export interface OversightAssociationProvenance {
 }
 
 // ----------------------------------------------------------------------------
+// Portfolio index row (#241) — `/oversight`.
+// ----------------------------------------------------------------------------
+
+/**
+ * One plant on the oversight INDEX: a link target, a name, a phase.
+ *
+ * Three fields, and the type is the projection's contract: the index reads the
+ * three columns it renders and no more, so a field added here is a column added
+ * to the statement in `./read.ts` — a deliberate act, not a `select()` dragging
+ * the whole `churches` row across the wire. `read.test.ts` renders that
+ * statement and asserts the two agree.
+ */
+export interface OversightPortfolioPlant {
+  id: string;
+  name: string;
+  currentPhase: number;
+}
+
+// ----------------------------------------------------------------------------
 // Directory row (OV-001).
 // ----------------------------------------------------------------------------
 

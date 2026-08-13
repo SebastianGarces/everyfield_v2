@@ -43,6 +43,7 @@ import {
   lt,
   ne,
 } from "drizzle-orm";
+import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 
 import {
   churchMeetings,
@@ -76,9 +77,15 @@ import {
 } from "@/lib/oversight/presentation";
 // The ONE countdown implementation (#338): the oversight listing, the /launch
 // page and the phase-engine fact snapshot all read the same number from it, and
-// the copy this layer used to keep is gone.
+// the copy this layer used to keep is gone. `countdown.ts` is an import-free
+// leaf, so it costs this module nothing — unlike `@/lib/launch/queries`, which
+// reaches `@/db` and is therefore deferred with the rest of them (see below).
 import { daysUntilTarget } from "@/lib/launch/countdown";
-import { getLaunchDatesForChurches } from "@/lib/launch/queries";
+// The one declaration of the oversight role pair, from the import-free leaf.
+// It reaches no database (`import type` only, enforced by `roles.test.ts`), so
+// it does NOT belong with the deferred imports below — and it must not: the
+// refusal in `getOversightPortfolio` has to run before any `@/db` edge.
+import { isOversightRole } from "@/lib/auth/roles";
 import type {
   MeetingsAggregate,
   MinistryTeamsAggregate,
@@ -86,15 +93,23 @@ import type {
   OversightOrgType,
   OversightPlantDetail,
   OversightPlantSummary,
+  OversightPortfolioPlant,
   OversightSectionResult,
   PeopleAggregate,
   TasksAggregate,
 } from "@/lib/oversight/types";
 
-// The value imports below transitively load the DB client (`@/db`). They are
-// deferred to the call sites inside the async reads so this module can be
+// EVERY value import that transitively loads the DB client (`@/db`) is deferred
+// to the call site inside the async read that needs it, so this module can be
 // imported — and its contract asserted — without a DATABASE_URL, the same seam
 // `phase-engine/oversight/read.ts` uses.
+//
+// "EVERY" is the load-bearing word and it was not true: `getLaunchDatesForChurches`
+// (`@/lib/launch/queries`, which opens with `@/db`) sat at the top of this file
+// while this paragraph claimed the property, so `read.test.ts` needed a database
+// to assert a SQL predicate and a set of string labels — and the header a next
+// reader trusts described a seam that was already broken. `read-imports.test.ts`
+// now enforces it instead of describing it.
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
 
@@ -109,6 +124,101 @@ export const RECENT_MEETING_WINDOW = 12;
 
 /** Meeting statuses that count as still ahead of the plant. */
 const UPCOMING_MEETING_STATUSES = ["planning", "ready", "in_progress"] as const;
+
+// ----------------------------------------------------------------------------
+// Portfolio index (#241) — what `/oversight` renders.
+// ----------------------------------------------------------------------------
+
+/**
+ * The EXPLICIT projection the index reads (#241).
+ *
+ * A bare `select()` pulled the whole `churches` row — mission statement,
+ * address, onboarding timestamps — across the wire on every load of a surface
+ * whose entire point is that it shows aggregates, and it is how a column nobody
+ * meant to expose ends up one careless `{...plant}` away from the client.
+ * Declared as a value so the statement below is the only thing that can widen
+ * it, and so `read.test.ts` can render the statement rather than grep a page.
+ */
+const PORTFOLIO_COLUMNS = {
+  id: churches.id,
+  name: churches.name,
+  currentPhase: churches.currentPhase,
+} as const;
+
+/**
+ * The index's one statement: three columns, scoped to the ids the caller may
+ * reach.
+ *
+ * It takes the DATABASE rather than closing over the imported one, which is
+ * what makes both of its decisions testable: `read.test.ts` hands it a driverless
+ * `pg-proxy` instance and renders the statement with `.toSQL()`, asserting the
+ * projection AND the `in (...)` tenancy predicate off the statement itself —
+ * the seam `src/lib/communication/log.test.ts` and
+ * `src/lib/dev-seed/seed-account-writes.test.ts` already use. Typed as the
+ * `select` of any `PgDatabase`, so the test needs no connection string and this
+ * module still imports `@/db` nowhere.
+ *
+ * IT IS NOT AN AUTHORITY BOUNDARY — the same rule `buildPlantSummaries` states.
+ * The ids must already have come from `getAccessibleChurchIds`; the exported
+ * read below is the only caller, and it resolves them first.
+ */
+export function portfolioPlantsStatement(
+  database: Pick<PgDatabase<PgQueryResultHKT>, "select">,
+  churchIds: string[]
+) {
+  return database
+    .select(PORTFOLIO_COLUMNS)
+    .from(churches)
+    .where(inArray(churches.id, churchIds));
+}
+
+/**
+ * Every plant the caller's org may see, as the index renders it.
+ *
+ * This read used to sit INLINE in `src/app/(dashboard)/oversight/page.tsx` —
+ * the only surface in the domain that reached the database from an RSC — so its
+ * tenant scope and its #241 projection were pinned by a regex over the page's
+ * source text, which could not see the `WHERE` clause at all. The page now
+ * holds no data-layer import and only renders.
+ *
+ * IT REFUSES A NON-OVERSIGHT ROLE ITSELF, and the docblock used to claim this
+ * was `getAccessibleChurchIds`'s job. It is not: that function answers "which
+ * churches may this user read", and for a `planter` or a `team_member` the
+ * answer is `[user.churchId]` and for a `coach` it is their assignments — real
+ * ids, which would have reached the `in (...)` below and rendered a one-plant
+ * "portfolio" for somebody with no oversight org at all. Every other exported
+ * read in this module has its own refusal (`listOversightPlants` and
+ * `getOversightPlantDetail` through `resolveCallerOrg`, which resolves no org
+ * for a church-level role; `listNetworkSendingChurches` by role directly), and
+ * `requireOversightUser` states the rule it is one half of: THE ROUTE GUARD IS
+ * NOT THE ONLY GUARD AND MUST NOT BECOME ONE. This was the one read that
+ * leaned on it.
+ *
+ * `isOversightRole` is a STATIC import on purpose: `@/lib/auth/roles` is the
+ * import-free leaf (`import type` only), so the refusal costs this module
+ * nothing and — unlike a check inside `@/lib/auth/access` — it runs before any
+ * `@/db` edge is taken. That is what lets `read.test.ts` assert the refusal
+ * with no DATABASE_URL at all, which is the difference between a rule that is
+ * tested and a rule that is described.
+ *
+ * `[]` for an empty accessible list too: an empty `in ()` can only return
+ * nothing, so the index costs a round trip only when there is something to
+ * read.
+ */
+export async function getOversightPortfolio(
+  user: User
+): Promise<OversightPortfolioPlant[]> {
+  if (!isOversightRole(user.role)) return [];
+
+  const { getAccessibleChurchIds } = await import("@/lib/auth/access");
+
+  const churchIds = await getAccessibleChurchIds(user);
+  if (churchIds.length === 0) return [];
+
+  const { db } = await import("@/db");
+
+  return portfolioPlantsStatement(db, churchIds);
+}
 
 // ----------------------------------------------------------------------------
 // Directory (OV-001).
@@ -126,14 +236,41 @@ export async function listOversightPlants(
   user: User,
   asOf: Date = new Date()
 ): Promise<OversightPlantSummary[]> {
-  const { db } = await import("@/db");
   const { getAccessibleChurchIds } = await import("@/lib/auth/access");
-
-  const org = await resolveCallerOrg(user);
-  if (!org) return [];
 
   const churchIds = await getAccessibleChurchIds(user);
   if (churchIds.length === 0) return [];
+
+  return buildPlantSummaries(user, churchIds, asOf);
+}
+
+/**
+ * Directory rows for a KNOWN-ACCESSIBLE set of plants — the one definition of
+ * what a plant summary is.
+ *
+ * It takes the church ids rather than deriving them, and that is the whole
+ * point: `getOversightPlantDetail` hands it exactly ONE id, so the header on a
+ * plant page is built by the same code path as the row the admin clicked
+ * without paying for the org's entire portfolio to render one plant. Before
+ * this split the detail read called `listOversightPlants` and discarded all but
+ * one row — five queries over every plant in the org, on every detail page
+ * load, growing with the org.
+ *
+ * IT IS NOT AN AUTHORITY BOUNDARY and must never be called with an id that has
+ * not already been through `getAccessibleChurchIds`. It is private to this
+ * module for that reason: both callers above resolve the accessible list first,
+ * and the membership check is what makes the id safe to put in a WHERE clause.
+ */
+async function buildPlantSummaries(
+  user: User,
+  churchIds: string[],
+  asOf: Date
+): Promise<OversightPlantSummary[]> {
+  const { db } = await import("@/db");
+  const { getLaunchDatesForChurches } = await import("@/lib/launch/queries");
+
+  const org = await resolveCallerOrg(user);
+  if (!org) return [];
 
   const plants = await db
     .select({
@@ -233,10 +370,10 @@ export async function getOversightPlantDetail(
   // The header is built by the SAME code path as the directory row the admin
   // clicked, rather than by a second query shaped slightly differently — so the
   // countdown, the provenance and the planter cannot say one thing in the list
-  // and another on the page. The cost is one org-scoped roster read; the thing
-  // it buys is that there is only one definition of a plant's summary.
-  const plants = await listOversightPlants(user, asOf);
-  const plant = plants.find((candidate) => candidate.churchId === churchId);
+  // and another on the page. Scoped to the ONE plant: this used to call
+  // `listOversightPlants` and throw the rest away, which read the org's whole
+  // portfolio (five queries, all of it) to render a single header.
+  const [plant] = await buildPlantSummaries(user, [churchId], asOf);
   if (!plant) return null;
 
   const sections = await Promise.all(

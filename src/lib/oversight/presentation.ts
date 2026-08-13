@@ -29,7 +29,6 @@ import type {
   PeopleAggregate,
   TasksAggregate,
 } from "@/lib/oversight/types";
-import type { UserRole } from "@/db/schema";
 
 /** Shown wherever a number was never recorded, rather than an empty cell. */
 export const NOT_RECORDED = "Not recorded";
@@ -38,14 +37,13 @@ export const NOT_RECORDED = "Not recorded";
 // Plant header facts.
 // ----------------------------------------------------------------------------
 
-/**
- * The caller's own org in the reader's words. Used in the explain-why copy, so
- * an admin is told who the plant declined to share with in the same words the
- * rest of the oversight surface uses.
- */
-export function scopeLabelForRole(role: UserRole): string {
-  return role === "network_admin" ? "network" : "sending church";
-}
+// THE SCOPE LABEL IS NOT HERE, and is deliberately NOT re-exported from here.
+// "network" / "sending church" live in the import-free leaf
+// `@/lib/oversight/org-label`, because `remove-plant-dialog.tsx` is a
+// `"use client"` component and this module reaches `@/db/schema` through
+// `STATUS_LABELS`. Re-exporting them would make the heavy path type-check and
+// work, which is exactly how a leaf stops being one (memory/invariants.md →
+// Multi-Tenancy, the `register-path.ts` rule).
 
 /**
  * "Austin, Texas, US" from whichever location parts the plant filled in.
@@ -70,6 +68,110 @@ export function formatPlantLocation(
 export function formatPhase(phase: number): string {
   return PHASES[phase as keyof typeof PHASES] ?? `Phase ${phase}`;
 }
+
+// ----------------------------------------------------------------------------
+// Portfolio phase distribution — the oversight index (`/oversight`).
+//
+// THE PHASE LIST IS DERIVED, NEVER COUNTED OUT BY HAND. The index used to walk
+// `Array.from({ length: 7 })` and split "pre-launch" from "launched" on a bare
+// `< 5`, while `PHASES` (`@/lib/constants`) is the declaration of what the
+// phases ARE. `churches.current_phase` is an unconstrained `integer` column, so
+// a value outside 0–6 is a value the database can hold: it was counted in the
+// total, dropped from every bar — leaving the histogram silently not summing to
+// the number above it — and bucketed as "launched" by accident. Deriving the
+// sequence from `PHASES` and folding any out-of-range value in as its own row
+// makes both halves add up whatever the column holds, and makes a seventh phase
+// a one-line change in `constants.ts` rather than a hunt.
+// ----------------------------------------------------------------------------
+
+/**
+ * The first phase at which a plant counts as launched (Phase 5: Launch Sunday).
+ *
+ * Named once because two figures on the index depend on it AND their captions
+ * describe it — three places that must not be able to disagree.
+ */
+export const LAUNCH_PHASE = 5;
+
+/** Every declared phase, ascending. Derived from `PHASES`, never re-typed. */
+export const PHASE_SEQUENCE: readonly number[] = Object.keys(PHASES)
+  .map(Number)
+  .sort((a, b) => a - b);
+
+/** One bar on the index's phase histogram. */
+export interface PortfolioPhaseRow {
+  phase: number;
+  label: string;
+  count: number;
+  /** Whole percent of the portfolio, and 0 means 0 — never a token sliver. */
+  percentage: number;
+}
+
+/** Everything the oversight index reads off its roster of plants. */
+export interface PortfolioPhaseSummary {
+  total: number;
+  preLaunch: number;
+  launched: number;
+  /** How many distinct phases the portfolio actually occupies. */
+  occupiedPhases: number;
+  distribution: PortfolioPhaseRow[];
+}
+
+/**
+ * The index's three cards and its histogram, from the phase column alone.
+ *
+ * Pure, so the arithmetic an admin's read of their whole portfolio rests on is
+ * unit-tested rather than assembled inline in JSX — the same reason
+ * `summarizeSendingChurchRoster` lives here.
+ *
+ * `distribution` covers every DECLARED phase plus any undeclared value present
+ * in the data, so `distribution.reduce(count)` always equals `total`. A phase
+ * nobody is in still gets a row: "nobody is at Phase 3" is an answer, and a
+ * missing row reads as a rendering failure.
+ */
+export function summarizePortfolioPhases(
+  phases: number[]
+): PortfolioPhaseSummary {
+  const counts = new Map<number, number>(
+    PHASE_SEQUENCE.map((phase) => [phase, 0])
+  );
+  for (const phase of phases) {
+    counts.set(phase, (counts.get(phase) ?? 0) + 1);
+  }
+
+  const total = phases.length;
+  const distribution = [...counts.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([phase, count]) => ({
+      phase,
+      label: formatPhase(phase),
+      count,
+      percentage: total > 0 ? Math.round((count / total) * 100) : 0,
+    }));
+
+  return {
+    total,
+    preLaunch: phases.filter((phase) => phase < LAUNCH_PHASE).length,
+    launched: phases.filter((phase) => phase >= LAUNCH_PHASE).length,
+    occupiedPhases: distribution.filter((row) => row.count > 0).length,
+    distribution,
+  };
+}
+
+/** "Across 3 phases" — the caption under the portfolio's headline count. */
+export function portfolioSpreadCaption(summary: PortfolioPhaseSummary): string {
+  return `Across ${summary.occupiedPhases} ${plural(summary.occupiedPhases, "phase")}`;
+}
+
+/**
+ * The two launch-split captions, derived from `LAUNCH_PHASE`.
+ *
+ * They name the BOUNDARY rather than enumerating the phases either side of it.
+ * The enumerated form ("Plants in phases 5-6") was a second declaration of the
+ * phase list that went stale the moment `PHASES` grew, and it was already false
+ * for any value the unconstrained column can hold.
+ */
+export const PRE_LAUNCH_CAPTION = `Before phase ${LAUNCH_PHASE} — still preparing to launch`;
+export const LAUNCHED_CAPTION = `Phase ${LAUNCH_PHASE} and beyond — launched or past it`;
 
 // THE COUNTDOWN ITSELF IS NOT HERE. This module carried a byte-for-byte copy
 // of `daysUntilTarget` (`src/lib/launch/countdown.ts`) — written first, in PR

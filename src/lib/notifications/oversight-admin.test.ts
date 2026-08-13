@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import { OVERSIGHT_ROLES } from "@/lib/auth/access";
+import { OVERSIGHT_ROLES } from "@/lib/auth/roles";
 import { sourceReader } from "@/lib/testing/source-span";
 
 import { OVERSIGHT_ADMIN } from "./oversight-admin";
