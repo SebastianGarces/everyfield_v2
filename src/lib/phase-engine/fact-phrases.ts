@@ -22,6 +22,9 @@
 // ============================================================================
 
 import { formatDate } from "@/lib/datetime";
+// Type-only: the closed manual-signal vocabulary, so this table's coverage of it
+// is checked by the compiler and not by two lists agreeing.
+import type { ManualSignalKey } from "@/lib/phase-engine/manual-signals";
 import { MINISTRY_ROLE_KEYS } from "@/lib/phase-engine/signals/types";
 
 // ----------------------------------------------------------------------------
@@ -144,6 +147,13 @@ const TOTAL_MINISTRY_ROLES = MINISTRY_ROLE_KEYS.length;
  * out of an LLM-authored citation, so `manual.byKey.toString` indexed an object
  * straight into `Object.prototype` and read "you confirmed function
  * toString() { [native code] }" to a planter.
+ *
+ * The SOURCE object is typed `Record<ManualSignalKey, string>`, so the closed
+ * vocabulary in `manual-signals.ts` is what decides which clauses exist: adding
+ * a fifth toggle without wording it here does not compile, and a key renamed
+ * there cannot silently leave a clause behind for the old spelling. (The Map is
+ * still keyed by plain `string`, because what is LOOKED UP is a segment of an
+ * LLM-written citation and may be anything at all.)
  */
 const MANUAL_SIGNAL_CLAUSES: ReadonlyMap<string, string> = new Map(
   Object.entries({
@@ -151,7 +161,7 @@ const MANUAL_SIGNAL_CLAUSES: ReadonlyMap<string, string> = new Map(
     financial_base_established: "your financial base is in place",
     prayer_leader_assigned: "a prayer leader is assigned",
     systems_tested: "your launch systems have been tested",
-  })
+  } satisfies Record<ManualSignalKey, string>)
 );
 
 /** The clause one manual signal reads as; an unknown key de-camelises. */

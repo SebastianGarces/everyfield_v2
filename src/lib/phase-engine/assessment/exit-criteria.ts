@@ -83,6 +83,9 @@ import {
   MANUAL_ATTESTATIONS_PREFIX,
   MANUAL_BY_KEY_PREFIX,
 } from "@/lib/phase-engine/attestation-citation";
+// Type-only: the closed set of signals a planter can actually attest. A gate may
+// only be built on one of those — see `attested` below.
+import type { ManualSignalKey } from "@/lib/phase-engine/manual-signals";
 // The judge's severity, relabelled — the SAME relabelling and the SAME order the
 // CSF scorecard reads its tiles through, so the two projections of one
 // assessment cannot disagree about which finding is the headline.
@@ -204,7 +207,14 @@ const CORE_GROUP_GATE = 30;
 /** "3–4 weeks to launch" as the outer bound, in days (rubric-v0 Part B). */
 const LAUNCH_WINDOW_DAYS = 28;
 
-/** The keyed spelling of one manual signal — the path an attested gate lives on. */
+/**
+ * The keyed spelling of one manual signal — the path an attested gate lives on.
+ *
+ * Takes a plain `string`, deliberately: `normalizeManualCitation` also calls it
+ * with a signal READ OUT OF A STORED SNAPSHOT, which may name a key the current
+ * vocabulary no longer has. It is the GATE side that is narrowed — see
+ * {@link attested}.
+ */
 function manualSignalPath(signal: string): string {
   return `${MANUAL_BY_KEY_PREFIX}${signal}`;
 }
@@ -215,9 +225,13 @@ function manualSignalPath(signal: string): string {
  * Declares AND measures the one keyed path, from the signal named ONCE, so a
  * gate cannot drift between the path it claims citations on and the path it
  * reads. Both come from {@link manualSignalPath}; nobody spells the prefix.
+ *
+ * `signal` is a `ManualSignalKey`, not a string: the toggle card is what WRITES
+ * these keys, so a gate naming one the card does not offer would read `unknown`
+ * for the life of the product with nothing failing. It is now a compile error.
  */
 function attested(
-  signal: string,
+  signal: ManualSignalKey,
   phrases: { met: string; notMet: string; unknown: string }
 ): Pick<ExitCriterionDefinition, "factPaths" | "categories" | "measure"> {
   const path = manualSignalPath(signal);
